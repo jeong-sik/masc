@@ -114,7 +114,7 @@ let test_stats () =
   ignore (Dashboard_cache.get_or_compute "s1" ~ttl:10.0 (fun () -> `Null));
   ignore (Dashboard_cache.get_or_compute "s2" ~ttl:10.0 (fun () -> `Null));
   let stats = Dashboard_cache.stats () in
-  let fresh = Yojson.Safe.Util.(member "fresh" stats |> to_int) in
+  let fresh = Yojson.Safe.Util.(member "ready_fresh" stats |> to_int) in
   Alcotest.(check int) "2 fresh entries" 2 fresh
 
 (* -- 6. Stampede: N fibers, same key -> compute runs once ------------------- *)
@@ -297,6 +297,9 @@ let () =
   let clock = Eio.Stdenv.clock env in
   Eio_guard.enable ();
   Time_compat.set_clock clock;
+  Eio_context.set_clock clock;
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
   let open Alcotest in
   run ~and_exit:false "Dashboard_cache"
     [

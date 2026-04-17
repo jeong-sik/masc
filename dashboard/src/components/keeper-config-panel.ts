@@ -627,8 +627,12 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         ` : null}
       ` : html`
         <${ConfigRow} label="execution_scope" value=${c.execution_scope ?? 'workspace'} />
+        <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'legacy_local'} />
+        <${ConfigRow} label="network_mode" value=${c.network_mode ?? 'inherit'} />
+        <${ConfigRow} label="shared_memory_scope" value=${c.shared_memory_scope ?? 'disabled'} />
         <${ConfigRow} label="allowed_paths" value=${(c.allowed_paths ?? []).join(', ') || '(computed default)'} />
         <${ConfigRow} label="effective_paths" value=${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'} />
+        <${ConfigRow} label="private_workspace_root" value=${c.private_workspace_root || '--'} />
       `}
 
       <${SectionHeader} title="프로액티브" />

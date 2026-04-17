@@ -45,6 +45,25 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
   let allowed_paths =
     Option.value ~default:old.allowed_paths p.allowed_paths_opt
   in
+  let sandbox_profile =
+    Option.value ~default:old.sandbox_profile p.sandbox_profile_opt
+  in
+  let network_mode =
+    match p.network_mode_opt with
+    | Some mode -> mode
+    | None ->
+        if Option.is_some p.sandbox_profile_opt
+           && sandbox_profile <> old.sandbox_profile
+        then
+          (* Recompute the profile default on sandbox posture changes so
+             legacy egress does not silently carry into hardened mode. *)
+          default_network_mode_for_profile sandbox_profile
+        else
+          old.network_mode
+  in
+  let shared_memory_scope =
+    Option.value ~default:old.shared_memory_scope p.shared_memory_scope_opt
+  in
   let autoboot_enabled =
     Option.value ~default:old.autoboot_enabled p.autoboot_enabled_opt
   in
@@ -161,6 +180,9 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     allowed_paths;
     execution_scope =
       Option.value ~default:old.execution_scope p.execution_scope_opt;
+    sandbox_profile;
+    network_mode;
+    shared_memory_scope;
     tool_access;
     tool_denylist;
     autoboot_enabled;

@@ -70,6 +70,27 @@ let make_test_ctx () =
   let _ = Coord.init config ~agent_name:(Some "test-agent") in
   { Tool_misc.config; agent_name = "test-agent" }
 
+let write_team_memory_keeper_meta ~config ~name ~shared_memory_scope =
+  let agent_name = Printf.sprintf "keeper-%s-agent" name in
+  let meta_json =
+    `Assoc
+      [
+        ("name", `String name);
+        ("agent_name", `String agent_name);
+        ("trace_id", `String ("trace-" ^ name));
+        ("goal", `String "team memory fixture");
+        ("shared_memory_scope", `String shared_memory_scope);
+      ]
+  in
+  let meta =
+    match Keeper_types.meta_of_json meta_json with
+    | Ok meta -> meta
+    | Error err -> failwith ("meta_of_json failed: " ^ err)
+  in
+  match Keeper_types.write_meta ~force:true config meta with
+  | Ok () -> agent_name
+  | Error err -> failwith ("write_meta failed: " ^ err)
+
 (* Test dispatch returns None for unknown tool *)
 let () = test "dispatch_unknown_tool" (fun () ->
   let ctx = make_test_ctx () in
@@ -125,6 +146,53 @@ let () = test "dispatch_dashboard_current_scope" (fun () ->
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"
+)
+
+let () = test "dispatch_team_memory_write_and_read" (fun () ->
+  let ctx = make_test_ctx () in
+  let agent_name =
+    write_team_memory_keeper_meta ~config:ctx.config ~name:"room-alpha"
+      ~shared_memory_scope:"room"
+  in
+  let keeper_ctx : Tool_misc.context =
+    { config = ctx.config; agent_name }
+  in
+  let write_body =
+    match
+      Tool_misc.dispatch keeper_ctx ~name:"masc_team_memory_write"
+        ~args:
+          (`Assoc
+            [
+              ("room", `String "default");
+              ("key", `String "handoff/summary.md");
+              ("content", `String "shared summary");
+            ])
+    with
+    | Some (true, body) -> body
+    | Some (false, err) -> failwith err
+    | None -> failwith "dispatch returned None"
+  in
+  let write_json = parse_json write_body in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "write key" "handoff/summary.md"
+    (write_json |> member "key" |> to_string);
+  let read_body =
+    match
+      Tool_misc.dispatch keeper_ctx ~name:"masc_team_memory_read"
+        ~args:
+          (`Assoc
+            [
+              ("room", `String "default");
+              ("key", `String "handoff/summary.md");
+            ])
+    with
+    | Some (true, body) -> body
+    | Some (false, err) -> failwith err
+    | None -> failwith "dispatch returned None"
+  in
+  let read_json = parse_json read_body in
+  Alcotest.(check string) "read content" "shared summary"
+    (read_json |> member "content" |> to_string)
 )
 
 let () = test "dispatch_dashboard_invalid_scope" (fun () ->
@@ -668,6 +736,67 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
           | None -> failwith "dispatch returned None")
       | Some (false, err) -> failwith err
       | None -> failwith "keeper up dispatch returned None")
+)
+
+let () = test "keeper_up update recomputes network_mode for sandbox profile changes" (fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let ctx = make_test_ctx () in
+  let keeper_name = "sandbox-policy-keeper" in
+  let keeper_ctx : _ Tool_keeper.context =
+    {
+      config = ctx.config;
+      agent_name = "tester";
+      sw;
+      clock = Eio.Stdenv.clock env;
+      proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None;
+    }
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name)
+    (fun () ->
+      let () =
+        match
+          Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_up"
+            ~args:
+              (`Assoc
+                [
+                  ("name", `String keeper_name);
+                  ("goal", `String "Sandbox policy default test");
+                  ("proactive_enabled", `Bool false);
+                  ("autoboot_enabled", `Bool false);
+                ])
+        with
+        | Some (true, _) -> ()
+        | Some (false, err) -> failwith err
+        | None -> failwith "keeper up dispatch returned None"
+      in
+      match
+        Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("sandbox_profile", `String "docker_hardened");
+              ])
+      with
+      | Some (true, _) -> (
+          match Keeper_types.read_meta ctx.config keeper_name with
+          | Ok (Some meta) ->
+              Alcotest.(check string)
+                "sandbox profile updated"
+                "docker_hardened"
+                (Keeper_types.sandbox_profile_to_string meta.sandbox_profile);
+              Alcotest.(check string)
+                "network mode follows hardened default"
+                "none"
+                (Keeper_types.network_mode_to_string meta.network_mode)
+          | Ok None -> Alcotest.fail "keeper meta missing after update"
+          | Error err -> Alcotest.fail ("meta read failed: " ^ err))
+      | Some (false, err) -> failwith err
+      | None -> failwith "keeper up update dispatch returned None")
 )
 
 (* Test helper functions *)

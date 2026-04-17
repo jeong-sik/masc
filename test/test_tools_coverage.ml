@@ -416,6 +416,12 @@ let test_masc_keeper_up_schema () =
             (List.mem_assoc "mid_goal" props);
           Alcotest.(check bool) "has long_goal" true
             (List.mem_assoc "long_goal" props);
+          Alcotest.(check bool) "has sandbox_profile" true
+            (List.mem_assoc "sandbox_profile" props);
+          Alcotest.(check bool) "has network_mode" true
+            (List.mem_assoc "network_mode" props);
+          Alcotest.(check bool) "has shared_memory_scope" true
+            (List.mem_assoc "shared_memory_scope" props);
           Alcotest.(check bool) "omits social_model" false
             (List.mem_assoc "social_model" props);
           Alcotest.(check bool) "has autoboot_enabled" true
@@ -485,6 +491,44 @@ let test_masc_tool_admin_update_schema () =
           Alcotest.(check bool) "has section" true (List.mem_assoc "section" props);
           Alcotest.(check bool) "has policy" true (List.mem_assoc "policy" props)
       | None -> Alcotest.fail "masc_tool_admin_update missing properties"
+
+let test_masc_team_memory_read_schema () =
+  match find_tool "masc_team_memory_read" with
+  | None -> Alcotest.fail "masc_team_memory_read not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has room" true
+            (List.mem_assoc "room" props);
+          Alcotest.(check bool) "has key" true
+            (List.mem_assoc "key" props)
+      | None -> Alcotest.fail "masc_team_memory_read missing properties"
+
+let test_masc_team_memory_write_schema () =
+  match find_tool "masc_team_memory_write" with
+  | None -> Alcotest.fail "masc_team_memory_write not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has room" true
+            (List.mem_assoc "room" props);
+          Alcotest.(check bool) "has key" true
+            (List.mem_assoc "key" props);
+          Alcotest.(check bool) "has content" true
+            (List.mem_assoc "content" props)
+      | None -> Alcotest.fail "masc_team_memory_write missing properties"
+
+let test_masc_team_memory_search_schema () =
+  match find_tool "masc_team_memory_search" with
+  | None -> Alcotest.fail "masc_team_memory_search not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has room" true
+            (List.mem_assoc "room" props);
+          Alcotest.(check bool) "has query" true
+            (List.mem_assoc "query" props)
+      | None -> Alcotest.fail "masc_team_memory_search missing properties"
 
 (* ============================================================ *)
 (* 14. Handover Tool Tests                                       *)
@@ -708,6 +752,14 @@ let () =
         test_masc_tool_admin_snapshot_schema;
       Alcotest.test_case "tool-admin-update" `Quick
         test_masc_tool_admin_update_schema;
+    ];
+    "team_memory_tools", [
+      Alcotest.test_case "team-memory-read" `Quick
+        test_masc_team_memory_read_schema;
+      Alcotest.test_case "team-memory-write" `Quick
+        test_masc_team_memory_write_schema;
+      Alcotest.test_case "team-memory-search" `Quick
+        test_masc_team_memory_search_schema;
     ];
     (* runtime_verify_tools removed: masc_runtime_verify pruned *)
     "legacy_swarm_removed", [

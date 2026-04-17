@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
+import { useEffect } from 'preact/hooks'
 import { route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardLoading, serverStatus } from '../store'
@@ -19,6 +20,7 @@ import {
 import { RouteLink } from './common/route-link'
 import { ObservatoryFilterBar } from './common/observatory-filter-bar'
 import { ChevronRight, ChevronLeft } from 'lucide-preact'
+import { ScrollToTopButton } from './common/scroll-to-top'
 import { CopyIdButton } from './common/copy-id-button'
 import { formatElapsedCompact } from '../lib/format-time'
 
@@ -35,13 +37,43 @@ function lazyTabFallback(label: string) {
   return html`<${LoadingState}>${label} 불러오는 중...<//>`
 }
 
-function formatDisconnectDuration(): string {
-  const ts = lastDisconnectedAt.value
-  if (ts === 0) return ''
-  const sec = Math.round((Date.now() - ts) / 1000)
-  if (sec < 5) return ''
-  if (sec < 60) return ` (${sec}s)`
-  return ` (${Math.round(sec / 60)}m)`
+/** Pure: describe a "reconnecting" state as a user-facing label plus
+    tooltip. Reference UIs: Discord shows "Reconnecting... (5s · try 3)";
+    Slack shows "Trying to reconnect..." with timestamp on hover;
+    Linear flashes a subtle red dot + tooltip. Goal here: operator can
+    tell at a glance whether a flicker (sub-5s) is worth noticing and,
+    on hover, see when the last successful session ended + cumulative
+    reconnect count — so a reconnect loop is diagnosable without
+    opening devtools.
+
+    Inputs are all primitives so the helper is trivially testable. */
+export function describeReconnecting(args: {
+  disconnectedAt: number
+  now: number
+  reconnects: number
+}): { label: string; title: string } {
+  const { disconnectedAt, now, reconnects } = args
+  if (disconnectedAt === 0) {
+    return { label: '재연결 중...', title: '' }
+  }
+  const sec = Math.max(0, Math.round((now - disconnectedAt) / 1000))
+  const elapsed = sec < 5
+    ? ''
+    : sec < 60
+      ? ` · ${sec}s`
+      : ` · ${Math.round(sec / 60)}m`
+  const label = `재연결 중${elapsed}`
+  const titleParts: string[] = []
+  if (sec >= 5) {
+    const d = new Date(disconnectedAt)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const when = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    titleParts.push(`연결 끊김 ${when}`)
+  }
+  if (reconnects > 0) {
+    titleParts.push(`누적 재연결 ${reconnects}회`)
+  }
+  return { label, title: titleParts.join(' · ') }
 }
 
 export function ConnectionStatus() {
@@ -52,10 +84,24 @@ export function ConnectionStatus() {
 
   const statusLabel = isConnected
     ? reconn > 0 ? '재연결됨' : '연결됨'
-    : `재연결 중...${formatDisconnectDuration()}`
+    : describeReconnecting({
+        disconnectedAt: lastDisconnectedAt.value,
+        now: Date.now(),
+        reconnects: reconn,
+      }).label
+  const titleAttr = isConnected
+    ? reconn > 0 ? `누적 재연결 ${reconn}회` : ''
+    : describeReconnecting({
+        disconnectedAt: lastDisconnectedAt.value,
+        now: Date.now(),
+        reconnects: reconn,
+      }).title
 
   return html`
-    <div class="flex items-center gap-1.5 whitespace-nowrap text-[12px] ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}">
+    <div
+      class="flex items-center gap-1.5 whitespace-nowrap text-[12px] ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}"
+      title=${titleAttr || undefined}
+    >
       <span class="inline-block size-[8px] rounded-full ${isConnected ? 'bg-[var(--ok)] shadow-[0_0_7px_rgba(74,222,128,0.75)]' : 'bg-[var(--bad)]'}"></span>
       <span class="status-text">${statusLabel}</span>
       ${attentionCount > 0 ? html`
@@ -375,6 +421,64 @@ export function currentSectionShareUrl(): string {
   return window.location.href
 }
 
+/** Pure: derive the navigation trail rendered above the section title.
+    Each crumb is either a clickable ancestor (tab) or the terminal
+    leaf (current section label, non-navigable). Returns a flat array:
+    [] when both tab + section are absent (home / unknown),
+    [tab] when only tab is active (no section drilldown),
+    [tab, section] when the operator has drilled into a per-section view.
+
+    Why this exists: SurfaceLead previously rendered only the leaf
+    label (\"Discord\"). The parent tab (\"Connectors\") was implied by
+    the left nav but not surfaced in the content area — a newcomer
+    opening a deep link had to infer the hierarchy. Every modern web
+    app (GitHub / Linear / Notion / Vercel) renders the trail above
+    the page title for exactly this reason. */
+export interface BreadcrumbCrumb {
+  label: string
+  navigableTab: string | null
+}
+export function deriveBreadcrumbTrail(
+  tabLabel: string | null,
+  sectionLabel: string | null,
+  tabId: string | null,
+): BreadcrumbCrumb[] {
+  if (tabLabel === null && sectionLabel === null) return []
+  if (sectionLabel === null) {
+    return tabLabel !== null ? [{ label: tabLabel, navigableTab: null }] : []
+  }
+  if (tabLabel === null) {
+    return [{ label: sectionLabel, navigableTab: null }]
+  }
+  // Drilldown view — tab becomes a clickable parent crumb, section is
+  // the non-navigable leaf (you're already there, clicking it would
+  // be a no-op).
+  return [
+    { label: tabLabel, navigableTab: tabId },
+    { label: sectionLabel, navigableTab: null },
+  ]
+}
+
+
+/** Pure: compose the browser tab title from the current surface +
+    section. Reference: every polished SPA (GitHub / Linear / Notion /
+    Vercel) sets document.title so operators with multiple tabs open
+    can distinguish them from the browser's tab list. Without this,
+    4 dashboard tabs all say \"MASC Dashboard\" — users lose track.
+
+    Format: \"MASC · {section}\" when drilled into a section,
+            \"MASC · {tab}\" when on a tab default,
+            \"MASC Dashboard\" on home / unknown (original fallback). */
+export function composeDocumentTitle(
+  tabLabel: string | null,
+  sectionLabel: string | null,
+): string {
+  const leaf = sectionLabel ?? tabLabel
+  if (leaf === null || leaf.trim() === '') return 'MASC Dashboard'
+  return `MASC · ${leaf}`
+}
+
+
 function SurfaceLead() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
@@ -383,9 +487,46 @@ function SurfaceLead() {
   const description = currentSection?.description ?? currentView?.description ?? null
   const title = currentSection?.label ?? currentView?.label ?? '홈'
   const shareUrl = currentSectionShareUrl()
+  // Only surface a trail when the operator has drilled into a section —
+  // otherwise the crumb would be \"Connectors\" right above a \"Connectors\"
+  // title, pure duplication.
+  const trail = currentSection !== null
+    ? deriveBreadcrumbTrail(currentView?.label ?? null, currentSection.label, currentTab)
+    : []
+
+  // Sync document.title — syncing to an external system (the browser
+  // tab title) is a legitimate useEffect. Keyed on the two labels so
+  // the effect only re-runs on actual navigation, not every render.
+  useEffect(() => {
+    document.title = composeDocumentTitle(currentView?.label ?? null, currentSection?.label ?? null)
+  }, [currentView?.label, currentSection?.label])
 
   return html`
     <div class="mb-3 flex flex-col gap-1.5">
+      ${trail.length > 0
+        ? html`<nav
+            class="flex items-center gap-1 text-[11px] text-[var(--text-dim)]"
+            aria-label="페이지 경로"
+            data-surface-breadcrumb
+          >
+            ${trail.map((crumb, i) => {
+              const isLast = i === trail.length - 1
+              const sep = i > 0
+                ? html`<span aria-hidden="true" class="text-[var(--white-10)]">›</span>`
+                : null
+              const crumbEl = crumb.navigableTab !== null && !isLast
+                ? html`<${RouteLink}
+                    tab=${crumb.navigableTab}
+                    class="cursor-pointer rounded px-1 py-0.5 hover:bg-[var(--white-5)] hover:text-[var(--text-body)]"
+                  >${crumb.label}<//>`
+                : html`<span
+                    class="px-1 py-0.5 ${isLast ? 'text-[var(--text-body)]' : ''}"
+                    aria-current=${isLast ? 'page' : undefined}
+                  >${crumb.label}</span>`
+              return html`${sep}${crumbEl}`
+            })}
+          </nav>`
+        : null}
       <div class="flex items-center gap-2">
         <h2 class="text-[22px] font-bold tracking-tight text-[var(--text-strong)]">
           ${title}
@@ -430,5 +571,6 @@ export function DashboardMain() {
         <${TabContent} />
       </div>
     <//>
+    <${ScrollToTopButton} />
   `
 }

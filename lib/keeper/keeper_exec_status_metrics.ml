@@ -474,7 +474,9 @@ let action_source_opt_member json =
       | _ -> None)
 
 let has_tool_audit_evidence ~tools ~raw_tool_call_count ~action_source =
-  tools <> [] || Option.is_some raw_tool_call_count || Option.is_some action_source
+  tools <> []
+  || Option.fold ~none:false ~some:(fun count -> count > 0) raw_tool_call_count
+  || Option.is_some action_source
 
 let json_iso_opt json =
   match Safe_ops.json_string_opt "ts" json with

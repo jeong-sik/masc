@@ -4,6 +4,7 @@ import {
   githubCommitUrl,
   currentSectionShareUrl,
   formatUptimeSecondsHuman,
+  deriveBreadcrumbTrail,
 } from './dashboard-shell'
 
 describe('githubCommitUrl (pure)', () => {
@@ -139,5 +140,48 @@ describe('formatUptimeSecondsHuman (pure)', () => {
 
   it('zero seconds → "0s" (fresh boot, still valid)', () => {
     expect(formatUptimeSecondsHuman(0)).toBe('0s')
+  })
+})
+
+describe('deriveBreadcrumbTrail (pure)', () => {
+  it('both null → [] (home / unknown, no crumb)', () => {
+    expect(deriveBreadcrumbTrail(null, null, null)).toEqual([])
+  })
+
+  it('tab only, no section → single non-navigable crumb (standing on tab default)', () => {
+    // A newcomer on \"Connectors\" default view sees \"Connectors\" as
+    // the title already; duplicating it in a crumb above would be
+    // pure noise, so the SurfaceLead consumer hides the trail in
+    // this case — the pure helper still returns a single crumb so
+    // other callers (e.g. future titlebar) can render it.
+    expect(deriveBreadcrumbTrail('Connectors', null, 'connectors')).toEqual([
+      { label: 'Connectors', navigableTab: null },
+    ])
+  })
+
+  it('section only, no tab → single non-navigable crumb with section label', () => {
+    expect(deriveBreadcrumbTrail(null, 'Discord', null)).toEqual([
+      { label: 'Discord', navigableTab: null },
+    ])
+  })
+
+  it('drilldown: tab + section → parent crumb navigable, leaf not', () => {
+    // The parent tab is clickable so operator can bounce back up to
+    // the grid; the leaf is where we currently stand, so clicking it
+    // would be a no-op (marked non-navigable).
+    expect(deriveBreadcrumbTrail('Connectors', 'Discord', 'connectors')).toEqual([
+      { label: 'Connectors', navigableTab: 'connectors' },
+      { label: 'Discord', navigableTab: null },
+    ])
+  })
+
+  it('drilldown without tab id → parent crumb still rendered, but non-navigable', () => {
+    // Regression guard: a section-only route that somehow doesn't
+    // carry the parent tab id should still show the parent label,
+    // just without a clickable link. Never throws.
+    expect(deriveBreadcrumbTrail('Connectors', 'Discord', null)).toEqual([
+      { label: 'Connectors', navigableTab: null },
+      { label: 'Discord', navigableTab: null },
+    ])
   })
 })

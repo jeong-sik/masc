@@ -40,6 +40,34 @@ const DEFAULT_ACTIVITY_RANGE: TimeRangePreset = '1h'
 const actionFilter = signal<ActionTimelineFilter>('all')
 const showLifecycle = signal(false)
 const expandedActionGroups = signal<Set<string>>(new Set())
+const actionQuery = signal('')
+
+/**
+ * Pure filter for action timeline groups.
+ *
+ * Case-insensitive substring match on `title`, `summary`, `actor`, and
+ * `subjectId` so operators can locate an action group by partial title,
+ * summary content, actor name, or subject id.
+ *
+ * Empty/whitespace query returns the input reference unchanged (no
+ * new array allocation, preserves referential equality).
+ *
+ * Input is never mutated.
+ */
+export function filterActionGroups(
+  groups: readonly ActionTimelineGroup[],
+  query: string,
+): readonly ActionTimelineGroup[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return groups
+  return groups.filter(group => {
+    if (group.title.toLowerCase().includes(needle)) return true
+    if (group.summary.toLowerCase().includes(needle)) return true
+    if (group.actor && group.actor.toLowerCase().includes(needle)) return true
+    if (group.subjectId && group.subjectId.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
 
 export function visibleNamespaceLabel(namespaceId: string | null | undefined): string | null {
   const value = typeof namespaceId === 'string' ? namespaceId.trim() : ''
@@ -120,9 +148,12 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
   const rawCounts = buildRawCategoryCounts(data.kind_counts)
   const lifecycleHiddenCount = showLifecycle.value ? 0 : rawCounts.lifecycle
   const filter = actionFilter.value
-  const filteredGroups = visibleBaseGroups.filter(group =>
+  const categoryFilteredGroups = visibleBaseGroups.filter(group =>
     filter === 'all' ? true : group.category === filter,
   )
+  const query = actionQuery.value
+  const filteredGroups = filterActionGroups(categoryFilteredGroups, query)
+  const isFiltering = query.trim() !== ''
   const chips = [
     { key: 'all', label: '전체', count: visibleBaseGroups.length },
     { key: 'task', label: '작업', count: baseCounts.task },
@@ -145,12 +176,20 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
         <div class="flex flex-col gap-1">
           <div class="text-[14px] font-semibold text-[var(--text-strong)]">원본 실행 이벤트를 최근 액션 단위로 묶어 보여줍니다.</div>
           <div class="text-[12px] text-[var(--text-muted)]">
-            액션 ${filteredGroups.length}개 · 원본 타임라인 ${data.timeline.length}건 · 분석 범위 ${data.stats.event_count ?? data.timeline.length}건
+            액션 ${isFiltering ? `${filteredGroups.length}/${categoryFilteredGroups.length}` : filteredGroups.length}개 · 원본 타임라인 ${data.timeline.length}건 · 분석 범위 ${data.stats.event_count ?? data.timeline.length}건
             ${lifecycleHiddenCount > 0 ? ` · 생명주기 ${lifecycleHiddenCount}건 숨김` : ''}
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <${FilterChips} chips=${chips} active=${actionFilter} tone="accent" />
+          <input
+            type="search"
+            value=${query}
+            placeholder="액션 필터 (title, actor, subject...)"
+            aria-label="액션 타임라인 필터"
+            onInput=${(e: Event) => { actionQuery.value = (e.target as HTMLInputElement).value }}
+            class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          />
           <button
             type="button"
             class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-all duration-150 ${showLifecycle.value
@@ -165,7 +204,9 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
       </div>
 
       ${filteredGroups.length === 0
-        ? html`<${EmptyState} message="선택한 필터에 맞는 액션 그룹이 없습니다." compact />`
+        ? (isFiltering && categoryFilteredGroups.length > 0
+          ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${categoryFilteredGroups.length} items)</div>`
+          : html`<${EmptyState} message="선택한 필터에 맞는 액션 그룹이 없습니다." compact />`)
         : filteredGroups.map(group => {
             const expanded = expandedActionGroups.value.has(group.id)
             return html`

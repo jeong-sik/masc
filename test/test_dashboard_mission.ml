@@ -33,6 +33,20 @@ let contains str substr =
     true
   with Not_found -> false
 
+let with_test_env f =
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Time_compat.set_clock clock;
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env
+    ~net:(Eio.Stdenv.net env)
+    ~clock
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw
+    (fun () -> f ~clock ~sw)
+
 let write_pending_confirm config _session_id =
   let operator_dir = Filename.concat (Coord_utils.masc_dir config) "operator" in
   Coord_utils.mkdir_p operator_dir;
@@ -85,9 +99,7 @@ let test_dashboard_mission_projection () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       let session_id = "ts-mission-fixture-001" in
-      Eio_main.run @@ fun env ->
-      Eio_guard.enable ();
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_test_env @@ fun ~clock ~sw ->
       let config = Coord_utils.default_config dir in
       seed_room config session_id;
       Lib.A2a_tools.emit_heartbeat_task
@@ -130,69 +142,67 @@ let test_dashboard_mission_projection () =
         Filename.concat (Coord_utils.agents_dir config) "llama-local-delta.json"
       in
       if Sys.file_exists delta_path then Sys.remove delta_path;
-      Eio.Switch.run (fun sw ->
-        let json =
-          Lib.Dashboard_mission.json
-            ~actor:"test-dashboard-projection"
-            ~config
-            ~sw
-            ~clock:(Eio.Stdenv.clock env)
-            ~proc_mgr:None
-            ()
-        in
-        let open Yojson.Safe.Util in
-        let attention_queue = json |> member "attention_queue" |> to_list in
-        let summary = json |> member "summary" in
-        let agent_briefs = json |> member "agent_briefs" |> to_list in
-        let internal_signals = json |> member "internal_signals" |> to_list in
-        let alpha_brief =
-          agent_briefs
-          |> List.find (fun row ->
-                 row |> member "agent_name" |> to_string = "llama-local-alpha")
-        in
-        check bool "attention_queue present" true (attention_queue <> []);
-        (* Team_session_store removed — session-derived attention items
-           (spawn_failure_present, local64_role_gap, routing_escalation_present)
-           no longer appear. The top item is now pending_confirm_waiting. *)
-        check string "top attention kind" "pending_confirm_waiting"
-          (attention_queue |> List.hd |> member "kind" |> to_string);
-        check bool "mission summary trims paused" true
-          (summary |> member "paused" = `Null);
-        check bool "mission summary trims active_agents" true
-          (summary |> member "active_agents" = `Null);
-        check bool "mission summary namespace_id removed" true
-          (summary |> member "namespace_id" = `Null);
-        check bool "mission summary namespace removed" true
-          (summary |> member "namespace" = `Null);
-        check bool "mission summary namespace_mode removed" true
-          (summary |> member "namespace_mode" = `Null);
-        check bool "sessions removed from mission payload" true
-          (json |> member "sessions" = `Null);
-        let alpha_input = alpha_brief |> member "recent_input_preview" |> to_string in
-        check bool "recent input preserves exact alpha mention" true
-          (contains alpha_input "@llama-local-alpha");
-        check bool "recent input excludes unrelated beta mention" false
-          (contains alpha_input "@llama-local-beta");
-        check bool "agent brief omits old audit surface" true
-          (alpha_brief |> member "allowed_tool_names" = `Null);
-        check bool "agent brief omits social context fields" true
-          (alpha_brief |> member "where" = `Null);
-        check string "agent brief signal truth" "message"
-          (alpha_brief |> member "evidence_source" |> to_string);
-        check bool "internal signal includes pending confirm" true
-          (internal_signals
-           |> List.exists (fun row ->
-                contains (row |> member "summary" |> to_string) "pending confirmation"));
-        (* room broadcast actions require microarch signal tones "warn"/"bad",
-           which need non-empty command-plane operations. In a clean test
-           fixture all 9 signals default to "ok", so room_recommendations
-           returns []. Verify internal_signals carries the pending-confirm
-           incident instead — that is the reachable room-level signal. *)
-        check bool "internal signals are room-scoped" true
-          (internal_signals
-           |> List.for_all (fun row ->
-                row |> member "target_type" |> to_string = "root"));
-      ))
+      let json =
+        Lib.Dashboard_mission.json
+          ~actor:"test-dashboard-projection"
+          ~config
+          ~sw
+          ~clock
+          ~proc_mgr:None
+          ()
+      in
+      let open Yojson.Safe.Util in
+      let attention_queue = json |> member "attention_queue" |> to_list in
+      let summary = json |> member "summary" in
+      let agent_briefs = json |> member "agent_briefs" |> to_list in
+      let internal_signals = json |> member "internal_signals" |> to_list in
+      let alpha_brief =
+        agent_briefs
+        |> List.find (fun row ->
+               row |> member "agent_name" |> to_string = "llama-local-alpha")
+      in
+      check bool "attention_queue present" true (attention_queue <> []);
+      (* Team_session_store removed — session-derived attention items
+         (spawn_failure_present, local64_role_gap, routing_escalation_present)
+         no longer appear. The top item is now pending_confirm_waiting. *)
+      check string "top attention kind" "pending_confirm_waiting"
+        (attention_queue |> List.hd |> member "kind" |> to_string);
+      check bool "mission summary trims paused" true
+        (summary |> member "paused" = `Null);
+      check bool "mission summary trims active_agents" true
+        (summary |> member "active_agents" = `Null);
+      check bool "mission summary namespace_id removed" true
+        (summary |> member "namespace_id" = `Null);
+      check bool "mission summary namespace removed" true
+        (summary |> member "namespace" = `Null);
+      check bool "mission summary namespace_mode removed" true
+        (summary |> member "namespace_mode" = `Null);
+      check bool "sessions removed from mission payload" true
+        (json |> member "sessions" = `Null);
+      let alpha_input = alpha_brief |> member "recent_input_preview" |> to_string in
+      check bool "recent input preserves exact alpha mention" true
+        (contains alpha_input "@llama-local-alpha");
+      check bool "recent input excludes unrelated beta mention" false
+        (contains alpha_input "@llama-local-beta");
+      check bool "agent brief omits old audit surface" true
+        (alpha_brief |> member "allowed_tool_names" = `Null);
+      check bool "agent brief omits social context fields" true
+        (alpha_brief |> member "where" = `Null);
+      check string "agent brief signal truth" "message"
+        (alpha_brief |> member "evidence_source" |> to_string);
+      check bool "internal signal includes pending confirm" true
+        (internal_signals
+         |> List.exists (fun row ->
+              contains (row |> member "summary" |> to_string) "pending confirmation"));
+      (* room broadcast actions require microarch signal tones "warn"/"bad",
+         which need non-empty command-plane operations. In a clean test
+         fixture all 9 signals default to "ok", so room_recommendations
+         returns []. Verify internal_signals carries the pending-confirm
+         incident instead — that is the reachable room-level signal. *)
+      check bool "internal signals are room-scoped" true
+        (internal_signals
+         |> List.for_all (fun row ->
+              row |> member "target_type" |> to_string = "root")))
 
 let test_dashboard_mission_http_full_contract () =
   let dir = test_dir () in
@@ -200,9 +210,7 @@ let test_dashboard_mission_http_full_contract () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       let session_id = "ts-mission-http-fixture-001" in
-      Eio_main.run @@ fun env ->
-      Eio_guard.enable ();
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_test_env @@ fun ~clock ~sw ->
       let config = Coord_utils.default_config dir in
       seed_room config session_id;
       (* Clear stale cache entries from prior tests to avoid cross-test pollution.
@@ -210,57 +218,52 @@ let test_dashboard_mission_http_full_contract () =
       Lib.Dashboard_cache.invalidate_all ();
       Lib.Operator_control.invalidate_snapshot_cache ();
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      Eio.Switch.run (fun sw ->
-        let json =
-          Lib.Server_dashboard_http.dashboard_mission_http_json
-            ~state
-            ~sw
-            ~clock:(Eio.Stdenv.clock env)
-            (request "/api/v1/dashboard/mission?agent_name=test-dashboard-http")
-        in
-        let open Yojson.Safe.Util in
-        check bool "operator targets present in mission http payload" true
-          (json |> member "operator_targets" <> `Null);
-        check bool "internal signals retained in mission http payload" true
-          ((json |> member "internal_signals" |> to_list) <> []);
-        check bool "command focus retained in mission http payload" true
-          (json |> member "command_focus" <> `Null);
-      ))
+      let json =
+        Lib.Server_dashboard_http.dashboard_mission_http_json
+          ~state
+          ~sw
+          ~clock
+          (request "/api/v1/dashboard/mission?agent_name=test-dashboard-http")
+      in
+      let open Yojson.Safe.Util in
+      check bool "operator targets present in mission http payload" true
+        (json |> member "operator_targets" <> `Null);
+      check bool "internal signals retained in mission http payload" true
+        ((json |> member "internal_signals" |> to_list) <> []);
+      check bool "command focus retained in mission http payload" true
+        (json |> member "command_focus" <> `Null))
 
 let test_dashboard_mission_http_default_bootstraps_first_success () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_test_env @@ fun ~clock ~sw ->
       let config = Coord_utils.default_config dir in
       let session_id = "ts-mission-http-default-001" in
       seed_room config session_id;
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      Eio.Switch.run (fun sw ->
-        let json =
-          Lib.Server_dashboard_http.dashboard_mission_http_json
-            ~state
-            ~sw
-            ~clock:(Eio.Stdenv.clock env)
-            (request "/api/v1/dashboard/mission")
-        in
-        let open Yojson.Safe.Util in
-        check string "default mission cache becomes fresh" "fresh"
-          (json |> member "projection_diagnostics" |> member "cache_state"
-          |> to_string);
-        check bool "default mission records first success" true
-          (json |> member "projection_diagnostics" |> member "last_success_at"
-           <> `Null);
-        check bool "default mission leaves initializing placeholder" true
-          (json |> member "summary" |> member "room_health" |> to_string
-           <> "initializing");
-        check bool "mission summary namespace_id removed" true
-          (json |> member "summary" |> member "namespace_id" = `Null);
-        check bool "mission summary namespace removed" true
-          (json |> member "summary" |> member "namespace" = `Null);
-      ))
+      let json =
+        Lib.Server_dashboard_http.dashboard_mission_http_json
+          ~state
+          ~sw
+          ~clock
+          (request "/api/v1/dashboard/mission")
+      in
+      let open Yojson.Safe.Util in
+      check string "default mission cache becomes fresh" "fresh"
+        (json |> member "projection_diagnostics" |> member "cache_state"
+        |> to_string);
+      check bool "default mission records first success" true
+        (json |> member "projection_diagnostics" |> member "last_success_at"
+         <> `Null);
+      check bool "default mission leaves initializing placeholder" true
+        (json |> member "summary" |> member "room_health" |> to_string
+         <> "initializing");
+      check bool "mission summary namespace_id removed" true
+        (json |> member "summary" |> member "namespace_id" = `Null);
+      check bool "mission summary namespace removed" true
+        (json |> member "summary" |> member "namespace" = `Null))
 
 let test_dashboard_mission_keeper_tool_audit_fallback () =
   let dir = test_dir () in
@@ -268,37 +271,33 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       let session_id = "ts-mission-http-default-001" in
-      Eio_main.run @@ fun env ->
-      Eio_guard.enable ();
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_test_env @@ fun ~clock ~sw ->
       let config = Coord_utils.default_config dir in
       seed_room config session_id;
       Lib.Dashboard_cache.invalidate_all ();
       Lib.Operator_control.invalidate_snapshot_cache ();
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      Eio.Switch.run (fun sw ->
-        let json =
-          Lib.Server_dashboard_http.dashboard_mission_http_json
-            ~state
-            ~sw
-            ~clock:(Eio.Stdenv.clock env)
-            (request "/api/v1/dashboard/mission")
-        in
-        let open Yojson.Safe.Util in
-        check string "default mission cache becomes fresh" "fresh"
-          (json |> member "projection_diagnostics" |> member "cache_state"
-          |> to_string);
-        check bool "default mission records first success" true
-          (json |> member "projection_diagnostics" |> member "last_success_at"
-           <> `Null);
-        check bool "default mission leaves initializing placeholder" true
-          (json |> member "summary" |> member "room_health" |> to_string
-           <> "initializing");
-        check bool "mission summary namespace_id removed" true
-          (json |> member "summary" |> member "namespace_id" = `Null);
-        check bool "mission summary namespace removed" true
-          (json |> member "summary" |> member "namespace" = `Null);
-      ))
+      let json =
+        Lib.Server_dashboard_http.dashboard_mission_http_json
+          ~state
+          ~sw
+          ~clock
+          (request "/api/v1/dashboard/mission")
+      in
+      let open Yojson.Safe.Util in
+      check string "default mission cache becomes fresh" "fresh"
+        (json |> member "projection_diagnostics" |> member "cache_state"
+        |> to_string);
+      check bool "default mission records first success" true
+        (json |> member "projection_diagnostics" |> member "last_success_at"
+         <> `Null);
+      check bool "default mission leaves initializing placeholder" true
+        (json |> member "summary" |> member "room_health" |> to_string
+         <> "initializing");
+      check bool "mission summary namespace_id removed" true
+        (json |> member "summary" |> member "namespace_id" = `Null);
+      check bool "mission summary namespace removed" true
+        (json |> member "summary" |> member "namespace" = `Null))
 
 let test_dashboard_mission_http_cache_isolation () =
   let dir_a = test_dir () in
@@ -311,9 +310,7 @@ let test_dashboard_mission_http_cache_isolation () =
       let actor = "test-dashboard-cache-isolation" in
       let session_a = "ts-mission-cache-fixture-a" in
       let session_b = "ts-mission-cache-fixture-b" in
-      Eio_main.run @@ fun env ->
-      Eio_guard.enable ();
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_test_env @@ fun ~clock ~sw ->
       let config_a = Coord_utils.default_config dir_a in
       let config_b = Coord_utils.default_config dir_b in
       seed_room config_a session_a;
@@ -324,30 +321,28 @@ let test_dashboard_mission_http_cache_isolation () =
       let state_b =
         Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir_b ()
       in
-      Eio.Switch.run (fun sw ->
-        let request =
-          request ("/api/v1/dashboard/mission?agent_name=" ^ actor)
-        in
-        let json_a =
-          Lib.Server_dashboard_http.dashboard_mission_http_json
-            ~state:state_a
-            ~sw
-            ~clock:(Eio.Stdenv.clock env)
-            request
-        in
-        let json_b =
-          Lib.Server_dashboard_http.dashboard_mission_http_json
-            ~state:state_b
-            ~sw
-            ~clock:(Eio.Stdenv.clock env)
-            request
-        in
-        let open Yojson.Safe.Util in
-        check bool "first room namespace_id removed" true
-          (json_a |> member "summary" |> member "namespace_id" = `Null);
-        check bool "second room namespace_id removed" true
-          (json_b |> member "summary" |> member "namespace_id" = `Null);
-      ))
+      let request =
+        request ("/api/v1/dashboard/mission?agent_name=" ^ actor)
+      in
+      let json_a =
+        Lib.Server_dashboard_http.dashboard_mission_http_json
+          ~state:state_a
+          ~sw
+          ~clock
+          request
+      in
+      let json_b =
+        Lib.Server_dashboard_http.dashboard_mission_http_json
+          ~state:state_b
+          ~sw
+          ~clock
+          request
+      in
+      let open Yojson.Safe.Util in
+      check bool "first room namespace_id removed" true
+        (json_a |> member "summary" |> member "namespace_id" = `Null);
+      check bool "second room namespace_id removed" true
+        (json_b |> member "summary" |> member "namespace_id" = `Null))
 
 let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =
   let keeper_name = "audit-keeper-assembly-fixture" in
@@ -355,8 +350,7 @@ let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_test_env @@ fun ~clock:_ ~sw:_ ->
       let config = Coord_utils.default_config dir in
       Lib.A2a_tools.emit_heartbeat_task
         ~agent:keeper_name
@@ -401,8 +395,7 @@ let test_dashboard_mission_keeper_tool_audit_uses_decision_log () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_test_env @@ fun ~clock:_ ~sw:_ ->
       let config = Coord_utils.default_config dir in
       Coord_utils.mkdir_p
         (Filename.dirname (Lib.Keeper_types.keeper_decision_log_path config keeper_name));
@@ -474,8 +467,7 @@ let test_dashboard_mission_keeper_brief_registry_lookup_scoped_to_base_path () =
       Lib.Keeper_registry.clear ();
       cleanup_dir root_dir)
     (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_test_env @@ fun ~clock:_ ~sw:_ ->
       Unix.mkdir dir_a 0o755;
       Unix.mkdir dir_z 0o755;
       Masc_test_deps.init_keeper_tool_registry ();

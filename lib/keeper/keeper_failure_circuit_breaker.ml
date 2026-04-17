@@ -207,6 +207,15 @@ let display_state_to_string = function
   | Warning -> "warning"
   | Cooling -> "cooling"
 
+let display_state_of ~keeper_name =
+  with_states_ro (fun () ->
+    match Hashtbl.find_opt states keeper_name with
+    | None -> Clean
+    | Some s ->
+      derive_display_state
+        ~consecutive_count:s.consecutive_count
+        ~total_tripped:s.total_tripped)
+
 let classify_snapshot_json (json : Yojson.Safe.t)
   : ((string * display_state) list, string) result =
   match json with

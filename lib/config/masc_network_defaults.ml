@@ -74,6 +74,29 @@ let masc_http_default_port_s =
 (** Default host for the MASC HTTP server. *)
 let masc_http_default_host = "127.0.0.1"
 
+(** [is_loopback_host host] returns [true] when [host] resolves to any
+    IPv4/IPv6 loopback address (via {!Ipaddr}).  Treats the literal
+    "localhost" (after trim + lowercase) as loopback.  Malformed
+    addresses return [false] — unlike a plain string prefix match,
+    which would wrongly accept garbage like "127.invalid". *)
+let is_loopback_host host =
+  let normalized = String.trim host |> String.lowercase_ascii in
+  match normalized with
+  | "localhost" -> true
+  | _ -> (
+      match Ipaddr.of_string normalized with
+      | Ok ip -> (
+          match ip with
+          | Ipaddr.V4 addr -> Ipaddr.V4.compare addr Ipaddr.V4.localhost = 0
+          | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0)
+      | Error _ -> false)
+
+(** Convenience wrapper for [Uri.host]-style inputs.  Returns [false]
+    when the host is absent. *)
+let is_loopback_host_opt = function
+  | Some host -> is_loopback_host host
+  | None -> false
+
 (** Default port for SearXNG local search. *)
 let searxng_default_port = 8888
 

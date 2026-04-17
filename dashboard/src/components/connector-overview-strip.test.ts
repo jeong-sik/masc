@@ -13,6 +13,7 @@ import {
   detectRecentDrops,
   summarizeConnectorStrip,
   tilePrimaryActionView,
+  formatTileIdentityLine,
 } from './connector-overview-strip'
 import type { GateConnectorInfo } from '../api/gate'
 
@@ -430,5 +431,99 @@ describe('TilePrimaryAction component (rendered inside ConnectorOverviewStrip)',
       container,
     )
     expect(container.querySelectorAll('[data-tile-primary-action]').length).toBeGreaterThanOrEqual(4)
+  })
+})
+
+describe('formatTileIdentityLine (pure)', () => {
+  it('null connector → null (no row rendered)', () => {
+    expect(formatTileIdentityLine(null)).toBeNull()
+  })
+
+  it('bot only → \"as @bot\"', () => {
+    expect(formatTileIdentityLine(mkConnector({
+      bot_user_name: 'claude-bot',
+      guild_count: 0,
+    }))).toBe('as @claude-bot')
+  })
+
+  it('guilds only → \"N guilds\" (plural)', () => {
+    expect(formatTileIdentityLine(mkConnector({
+      bot_user_name: '',
+      guild_count: 3,
+    }))).toBe('3 guilds')
+  })
+
+  it('singular guild → \"1 guild\" (no plural suffix)', () => {
+    expect(formatTileIdentityLine(mkConnector({
+      bot_user_name: '',
+      guild_count: 1,
+    }))).toBe('1 guild')
+  })
+
+  it('bot + guilds → joined with bullet separator', () => {
+    expect(formatTileIdentityLine(mkConnector({
+      bot_user_name: 'claude-bot',
+      guild_count: 4,
+    }))).toBe('as @claude-bot · 4 guilds')
+  })
+
+  it('whitespace-only bot is ignored (no \"as @\" ghost)', () => {
+    expect(formatTileIdentityLine(mkConnector({
+      bot_user_name: '   ',
+      guild_count: 0,
+    }))).toBeNull()
+  })
+
+  it('both empty → null (no clutter row when nothing to show)', () => {
+    expect(formatTileIdentityLine(mkConnector({
+      bot_user_name: '',
+      guild_count: 0,
+    }))).toBeNull()
+  })
+})
+
+describe('Tile identity line (rendered inside ConnectorOverviewStrip)', () => {
+  let container: HTMLElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    _testResetBulkInflight()
+    _testResetStripMemory()
+  })
+  afterEach(() => {
+    render(null, container)
+    document.body.removeChild(container)
+  })
+
+  it('renders identity line when bot_user_name is set', () => {
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[mkConnector({
+          connector_id: 'discord',
+          bot_user_name: 'claude-bot',
+          guild_count: 2,
+        })]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    const line = container.querySelector('[data-tile-identity="discord"]')!
+    expect(line.textContent).toBe('as @claude-bot · 2 guilds')
+    expect(line.getAttribute('title')).toBe('as @claude-bot · 2 guilds')
+  })
+
+  it('omits identity line when both fields are empty', () => {
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[mkConnector({
+          connector_id: 'discord',
+          bot_user_name: '',
+          guild_count: 0,
+        })]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    expect(container.querySelector('[data-tile-identity="discord"]')).toBeNull()
   })
 })

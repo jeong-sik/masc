@@ -10,6 +10,10 @@ export type CompositeObservation = {
   decision: KeeperCompositeSnapshot['decision']['stage']
   cascade: KeeperCompositeSnapshot['cascade']['state']
   compaction: KeeperCompositeSnapshot['compaction']['stage']
+  // 6th axis (LT-16-KCB Phase 3). `'clean'` when the backend omits
+  // `circuit_breaker` — Phase 2 backends that have not yet picked up
+  // the schema still render a sensible cell rather than a blank.
+  breaker: 'clean' | 'warning' | 'cooling'
 }
 
 export type LaneKey = keyof Omit<CompositeObservation, 'ts'>
@@ -24,6 +28,7 @@ export function extractLaneValue(
     case 'decision': return snapshot.decision.stage
     case 'cascade': return snapshot.cascade.state
     case 'compaction': return snapshot.compaction.stage
+    case 'breaker': return snapshot.circuit_breaker?.state ?? 'clean'
   }
 }
 
@@ -113,6 +118,7 @@ export const TRANSITION_FIELDS: Array<{ field: string; key: LaneKey }> = [
   { field: 'KDP', key: 'decision' },
   { field: 'KCL', key: 'cascade' },
   { field: 'KMC', key: 'compaction' },
+  { field: 'KCB', key: 'breaker' },
 ]
 
 export const INVARIANT_LABELS: Record<keyof KeeperCompositeInvariants, string> = {
@@ -128,6 +134,7 @@ export const LANE_LABELS: Record<LaneKey, string> = {
   decision: '의사결정',
   cascade: '캐스케이드',
   compaction: '컨텍스트 압축',
+  breaker: '서킷 브레이커',
 }
 
 /** Korean display names for raw FSM state values.

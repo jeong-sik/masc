@@ -79,6 +79,16 @@ const KeeperCompositeCompactionStageSchema = fallback(
   'accumulating',
 )
 
+// LT-16-KCB Phase 3: 6th axis. KCB is counter-based, not a classical
+// Closed/Open/Half_open FSM — only three states are observable between
+// tool calls because `record_failure` resets `consecutive_count` to 0
+// inside the trip transition. See
+// `lib/keeper/keeper_failure_circuit_breaker.mli`.
+const KeeperCompositeCircuitBreakerStateSchema = fallback(
+  picklist(['clean', 'warning', 'cooling']),
+  'clean',
+)
+
 const KeeperCompositeAutoRulesSchema = object({
   reflect: boolean(),
   plan: boolean(),
@@ -118,6 +128,16 @@ export const KeeperCompositeSnapshotSchema = object({
   decision: object({ stage: KeeperCompositeDecisionStageSchema }),
   cascade: object({ state: KeeperCompositeCascadeStateSchema }),
   compaction: object({ stage: KeeperCompositeCompactionStageSchema }),
+  // `circuit_breaker` is `optional` during the Phase 2 → Phase 3
+  // rollout window: pinned backends that have not yet picked up
+  // PR #7801 emit snapshots without this key, and the dashboard must
+  // keep rendering instead of hard-failing the parse. Once the
+  // backend pin catches up everywhere, a follow-up can drop
+  // `optional` (promote the key to required with the `clean` fallback
+  // alone).
+  circuit_breaker: optional(
+    object({ state: KeeperCompositeCircuitBreakerStateSchema }),
+  ),
   measurement: KeeperCompositeMeasurementSchema,
   invariants: KeeperCompositeInvariantsSchema,
   is_live: boolean(),
@@ -133,6 +153,7 @@ export type KeeperCompositeTurnPhase = InferOutput<typeof KeeperCompositeTurnPha
 export type KeeperCompositeDecisionStage = InferOutput<typeof KeeperCompositeDecisionStageSchema>
 export type KeeperCompositeCascadeState = InferOutput<typeof KeeperCompositeCascadeStateSchema>
 export type KeeperCompositeCompactionStage = InferOutput<typeof KeeperCompositeCompactionStageSchema>
+export type KeeperCompositeCircuitBreakerState = InferOutput<typeof KeeperCompositeCircuitBreakerStateSchema>
 
 export class CompositeSchemaDriftError extends SchemaDriftError {
   constructor(issues: readonly BaseIssue<unknown>[]) {

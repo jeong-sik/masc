@@ -9,8 +9,8 @@ describe('buildCompositeFsmMermaid', () => {
     expect(src.startsWith('flowchart TB')).toBe(true)
   })
 
-  it('declares a subgraph per axis', () => {
-    for (const axis of ['KSM', 'KTC', 'KDP', 'KCL', 'KMC']) {
+  it('declares a subgraph per axis (6 including KCB)', () => {
+    for (const axis of ['KSM', 'KTC', 'KDP', 'KCL', 'KMC', 'KCB']) {
       // `subgraph KSM ["..."]` etc.
       expect(src).toMatch(new RegExp(`subgraph ${axis} `))
     }
@@ -55,5 +55,22 @@ describe('buildCompositeFsmMermaid', () => {
 
   it('tags KDP gate_rejected as an error state', () => {
     expect(src).toMatch(/class .*kdp_gate_rejected.*error/)
+  })
+
+  it('renders the 3 observable KCB states and omits tripped', () => {
+    // The unobservable-by-design "tripped" state must not appear as a
+    // node — the mutator resets consecutive_count before any snapshot
+    // can see it. See display_state.mli.
+    expect(src).toContain('kcb_clean["clean"]')
+    expect(src).toContain('kcb_warning["warning"]')
+    expect(src).toContain('kcb_cooling["cooling"]')
+    // Bracket-declaration check: no node named tripped at all.
+    expect(src).not.toMatch(/kcb_tripped\[/)
+  })
+
+  it('uses a dashed edge for warning → cooling (acknowledging the transient Trip)', () => {
+    // Dashed arrow is a visual note that the transition exists inside
+    // the mutator's read-modify-write but is not directly renderable.
+    expect(src).toMatch(/kcb_warning\s*-\.->\s*kcb_cooling/)
   })
 })

@@ -48,12 +48,18 @@ export const FLEET_HISTORY_LEN = 30
 // Keep it identical to TRANSITION_FIELDS so an operator scanning
 // left-to-right sees "lifecycle → turn → decision → cascade →
 // compaction" — the natural causal order of a turn.
+// 6 axes (LT-16-KCB Phase 3 added KCB). Causal order: lifecycle →
+// turn → decision → cascade → compaction → circuit-breaker. KCB sits
+// at the tail because its state is derived from the *outcome* of the
+// cascade's tool calls (failure streak counter), so it is temporally
+// downstream of the other five for any given turn.
 const AXES: Array<{ key: LaneKey; label: string; acronym: string }> = [
   { key: 'phase',      label: 'Lifecycle',   acronym: 'KSM' },
   { key: 'turn',       label: 'Turn',        acronym: 'KTC' },
   { key: 'decision',   label: 'Decision',    acronym: 'KDP' },
   { key: 'cascade',    label: 'Cascade',     acronym: 'KCL' },
   { key: 'compaction', label: 'Compaction',  acronym: 'KMC' },
+  { key: 'breaker',    label: 'Breaker',     acronym: 'KCB' },
 ]
 
 const INVARIANT_KEYS = Object.keys(INVARIANT_LABELS) as Array<
@@ -94,6 +100,15 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   exhausted:    'bg-red-900/50 text-red-200 border-red-700',
   // KMC
   accumulating: 'bg-zinc-800 text-zinc-400 border-zinc-700',
+  // KCB (LT-16-KCB Phase 3). Clean = baseline grey same as any other
+  // "nothing happening" state; warning = amber (partial failure
+  // streak); cooling = blue (at least one past trip, currently
+  // recovered). "tripped" is unobservable at snapshot time and has no
+  // chip colour by design — the mutator resets the count before any
+  // observer can see it.
+  clean:   'bg-zinc-800 text-zinc-400 border-zinc-700',
+  warning: 'bg-amber-900/50 text-amber-200 border-amber-700',
+  cooling: 'bg-sky-900/40 text-sky-200 border-sky-700',
 }
 
 const DEFAULT_CHIP = 'bg-zinc-800 text-zinc-300 border-zinc-700'
@@ -116,7 +131,7 @@ export function sparkClassFor(value: string): string {
 /** Per-axis observation ring keyed by keeper name. */
 export type KeeperFleetHistory = Record<string, Record<LaneKey, string[]>>
 
-const AXIS_KEYS: LaneKey[] = ['phase', 'turn', 'decision', 'cascade', 'compaction']
+const AXIS_KEYS: LaneKey[] = ['phase', 'turn', 'decision', 'cascade', 'compaction', 'breaker']
 
 /**
  * Fold an incoming batch of snapshots into the running history, capping
@@ -141,6 +156,7 @@ export function pushObservation(
       decision:   prev?.decision   ? prev.decision.slice()   : [],
       cascade:    prev?.cascade    ? prev.cascade.slice()    : [],
       compaction: prev?.compaction ? prev.compaction.slice() : [],
+      breaker:    prev?.breaker    ? prev.breaker.slice()    : [],
     }
     for (const axis of AXIS_KEYS) {
       perAxis[axis].push(extractLaneValue(snap, axis))

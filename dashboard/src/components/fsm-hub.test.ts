@@ -31,6 +31,7 @@ function observation(
     decision: 'undecided',
     cascade: 'idle',
     compaction: 'accumulating',
+    breaker: 'clean',
     ...overrides,
   }
 }

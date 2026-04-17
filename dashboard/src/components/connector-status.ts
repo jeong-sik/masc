@@ -498,9 +498,12 @@ function ConnectorLivePanel({
   const showSidecarOffEmpty =
     !showNoKeeperEmpty && configuredBindings.length === 0 && !connector?.available
 
+  const headerIcon = channelIcon(connector?.channel ?? connectorId)
+
   return html`
     <div class="mb-4 rounded-xl border border-[var(--white-8)] p-4" style=${connectorAccentStyle(connectorId)}>
       <div class="flex flex-wrap items-center gap-2 text-[12px]">
+        <span class="text-base leading-none" aria-hidden="true">${headerIcon}</span>
         <span class="text-sm font-semibold text-[var(--text-body)]">${connectorName}</span>
         ${connector?.bot_user_name
           ? html`<span class="text-[var(--text-dim)]">· ${connector.bot_user_name}</span>`

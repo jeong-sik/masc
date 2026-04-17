@@ -5,6 +5,24 @@
 
 let received_events : string list ref = ref []
 
+let run_domains_together count fn =
+  let ready = Atomic.make 0 in
+  let go = Atomic.make false in
+  let domains =
+    List.init count (fun index ->
+      Domain.spawn (fun () ->
+        ignore (Atomic.fetch_and_add ready 1);
+        while not (Atomic.get go) do
+          Domain.cpu_relax ()
+        done;
+        fn index))
+  in
+  while Atomic.get ready < count do
+    Domain.cpu_relax ()
+  done;
+  Atomic.set go true;
+  List.iter Domain.join domains
+
 let setup () =
   received_events := [];
   (* Clean up any leftover subscribers from previous tests *)
@@ -128,6 +146,32 @@ let test_reap_returns_zero_when_all_alive () =
     Alcotest.(check int) "nothing reaped" 0 reaped;
     Masc_mcp.Sse.unsubscribe_external "all-alive")
 
+let test_external_subscriber_count_linearized_under_domain_contention () =
+  setup ();
+  let worker_count = 24 in
+  let prefix = "ext-linearized-" ^ string_of_int (Random.int 1_000_000) ^ "-" in
+  let sub_id index = prefix ^ string_of_int index in
+  let count_before =
+    Masc_mcp.Sse.external_subscriber_count_with_prefix prefix
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      for index = 0 to worker_count - 1 do
+        Masc_mcp.Sse.unsubscribe_external (sub_id index)
+      done)
+    (fun () ->
+      run_domains_together worker_count (fun index ->
+        Masc_mcp.Sse.subscribe_external ~id:(sub_id index)
+          ~callback:(fun _ -> ()) ());
+      Alcotest.(check int) "count after concurrent subscribe"
+        (count_before + worker_count)
+        (Masc_mcp.Sse.external_subscriber_count_with_prefix prefix);
+      run_domains_together worker_count (fun index ->
+        Masc_mcp.Sse.unsubscribe_external (sub_id index));
+      Alcotest.(check int) "count restored after concurrent unsubscribe"
+        count_before
+        (Masc_mcp.Sse.external_subscriber_count_with_prefix prefix))
+
 let () =
   Alcotest.run "SSE External Subscribers" [
     ("lifecycle", [
@@ -151,5 +195,9 @@ let () =
         test_reap_dead_subscribers;
       Alcotest.test_case "reap returns zero when all alive" `Quick
         test_reap_returns_zero_when_all_alive;
+    ]);
+    ("concurrency", [
+      Alcotest.test_case "external subscriber count linearized" `Quick
+        test_external_subscriber_count_linearized_under_domain_contention;
     ]);
   ]

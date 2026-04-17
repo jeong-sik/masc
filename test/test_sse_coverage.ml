@@ -14,6 +14,24 @@ open Alcotest
 
 module Sse = Masc_mcp.Sse
 
+let run_domains_together count fn =
+  let ready = Atomic.make 0 in
+  let go = Atomic.make false in
+  let domains =
+    List.init count (fun index ->
+      Domain.spawn (fun () ->
+        ignore (Atomic.fetch_and_add ready 1);
+        while not (Atomic.get go) do
+          Domain.cpu_relax ()
+        done;
+        fn index))
+  in
+  while Atomic.get ready < count do
+    Domain.cpu_relax ()
+  done;
+  Atomic.set go true;
+  List.iter Domain.join domains
+
 (* ============================================================
    format_event Tests
    ============================================================ *)
@@ -101,6 +119,40 @@ let test_register_returns_unique_id () =
   Sse.unregister session1;
   Sse.unregister session2
 
+let test_register_uses_successful_commit_time_after_retry () =
+  let session_id = "register_retry_" ^ string_of_int (Random.int 10000) in
+  let push _ = () in
+  let original_hook = Atomic.get Sse.register_commit_test_hook in
+  let forced_retry = Atomic.make false in
+  let retry_barrier = ref 0.0 in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Sse.register_commit_test_hook original_hook;
+      Sse.unregister session_id)
+    (fun () ->
+      Atomic.set Sse.register_commit_test_hook
+        (Some (fun () ->
+           if Atomic.compare_and_set forced_retry false true then begin
+             ignore
+               (Sse.atomic_update_result Sse.clients (fun state ->
+                    {
+                      next_state = { state with count = state.count };
+                      result = ();
+                    }));
+             ignore (Unix.select [] [] [] 0.02);
+             retry_barrier := Unix.gettimeofday ()
+           end));
+      ignore (Sse.register session_id ~push ~last_event_id:0);
+      check bool "forced retry triggered" true (Atomic.get forced_retry);
+      match Sse.SMap.find_opt session_id (Atomic.get Sse.clients).entries with
+      | Some client ->
+          check bool "created_at captured after retry barrier" true
+            (client.created_at >= !retry_barrier);
+          check bool "last_seen_at captured after retry barrier" true
+            (Atomic.get client.last_seen_at >= !retry_barrier)
+      | None ->
+          fail "client should be installed")
+
 (* ============================================================
    client_count Tests
    ============================================================ *)
@@ -127,6 +179,39 @@ let test_buffer_event_and_retrieve () =
   let events = Sse.get_events_after (base_id + 999) in
   check bool "has event" true (List.length events >= 1)
 
+let test_buffer_event_timestamps_successful_commit_after_retry () =
+  let original_buffer = Atomic.get Sse.event_buffer in
+  let original_hook = Atomic.get Sse.buffer_commit_test_hook in
+  let forced_retry = Atomic.make false in
+  let retry_barrier = ref 0.0 in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Sse.buffer_commit_test_hook original_hook;
+      Atomic.set Sse.event_buffer original_buffer)
+    (fun () ->
+      Atomic.set Sse.event_buffer [ (777_000, "sentinel", Unix.gettimeofday ()) ];
+      Atomic.set Sse.buffer_commit_test_hook
+        (Some (fun () ->
+           if Atomic.compare_and_set forced_retry false true then begin
+             ignore
+               (Sse.atomic_update_result Sse.event_buffer (fun buffer ->
+                    {
+                      next_state = List.map (fun item -> item) buffer;
+                      result = ();
+                    }));
+             ignore (Unix.select [] [] [] 0.02);
+             retry_barrier := Unix.gettimeofday ()
+           end));
+      Sse.buffer_event 777_001 "fresh";
+      check bool "forced retry triggered" true (Atomic.get forced_retry);
+      match Atomic.get Sse.event_buffer with
+      | (event_id, _event, ts) :: _ ->
+          check int "new event inserted at head" 777_001 event_id;
+          check bool "timestamp captured after retry barrier" true
+            (ts >= !retry_barrier)
+      | [] ->
+          fail "buffer should contain the fresh event")
+
 let test_get_events_after_filters () =
   let base_id = Sse.current_id () in
   Sse.buffer_event (base_id + 2000) "event A";
@@ -138,6 +223,26 @@ let test_get_events_after_empty () =
   let future_id = Sse.current_id () + 100000 in
   let events = Sse.get_events_after future_id in
   check int "empty for future id" 0 (List.length events)
+
+let test_cleanup_expired_events_exact_under_domain_contention () =
+  let original_buffer = Atomic.get Sse.event_buffer in
+  let now = Unix.gettimeofday () in
+  let expired_count = 32 in
+  let expired_items =
+    List.init expired_count (fun index ->
+      (900_000 + index, Printf.sprintf "expired-%d" index,
+       now -. Sse.buffer_ttl_seconds -. 10.0))
+  in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Sse.event_buffer original_buffer)
+    (fun () ->
+      Atomic.set Sse.event_buffer expired_items;
+      let total_removed = Atomic.make 0 in
+      run_domains_together 2 (fun _index ->
+        ignore (Atomic.fetch_and_add total_removed (Sse.cleanup_expired_events ())));
+      check int "each expired event counted once" expired_count
+        (Atomic.get total_removed);
+      check int "buffer emptied once" 0 (List.length (Atomic.get Sse.event_buffer)))
 
 (* ============================================================
    client Type Tests
@@ -259,6 +364,8 @@ let () =
       test_case "unregister removes" `Quick test_unregister_removes_client;
       test_case "exists false for unknown" `Quick test_exists_false_for_unknown;
       test_case "unique ids" `Quick test_register_returns_unique_id;
+      test_case "retry uses successful commit time" `Quick
+        test_register_uses_successful_commit_time_after_retry;
     ];
     "unregister_if_current", [
       test_case "matches" `Quick test_unregister_if_current_matches;
@@ -275,8 +382,12 @@ let () =
     ];
     "event_buffer", [
       test_case "buffer and retrieve" `Quick test_buffer_event_and_retrieve;
+      test_case "buffer retry timestamps on successful commit" `Quick
+        test_buffer_event_timestamps_successful_commit_after_retry;
       test_case "filters" `Quick test_get_events_after_filters;
       test_case "empty for future" `Quick test_get_events_after_empty;
+      test_case "cleanup exact under domain contention" `Quick
+        test_cleanup_expired_events_exact_under_domain_contention;
     ];
     "broadcast", [
       test_case "sends to clients" `Quick test_broadcast_sends_to_clients;

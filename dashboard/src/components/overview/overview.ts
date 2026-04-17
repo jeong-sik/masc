@@ -4,6 +4,7 @@
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
 import { useMemo } from 'preact/hooks'
+import { ChevronRight } from 'lucide-preact'
 import { CountBadge } from '../common/badge'
 import { ActionButton } from '../common/button'
 import { TimeAgo } from '../common/time-ago'
@@ -913,8 +914,15 @@ export function Overview() {
 
       ${toolHealth ? html`<div class=${OVERVIEW_CARD}>${toolHealth}</div>` : null}
 
-      <details class=${OVERVIEW_CARD}>
-        <summary class="cursor-pointer text-xs font-semibold text-[var(--text-strong)] uppercase tracking-wider select-none list-none flex items-center gap-2">
+      <details class=${`group ${OVERVIEW_CARD}`}>
+        <summary
+          class="cursor-pointer text-xs font-semibold text-[var(--text-strong)] uppercase tracking-wider select-none list-none flex items-center gap-2"
+          data-testid="infra-status-disclosure"
+        >
+          <${ChevronRight}
+            size=${14}
+            class="shrink-0 text-[var(--text-muted)] transition-transform duration-150 group-open:rotate-90"
+          />
           인프라 상태
           <span class="text-[10px] font-normal normal-case tracking-normal text-[var(--text-muted)]">Transport · 성능</span>
         </summary>

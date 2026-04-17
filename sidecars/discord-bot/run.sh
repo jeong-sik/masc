@@ -64,8 +64,17 @@ case "$cmd" in
       cat "$STATUS_FILE"
     fi
     ;;
+  stop)
+    # Match by absolute script_dir path so we never hit another sidecar.
+    if pgrep -f "$(script_dir)/src" >/dev/null 2>&1; then
+      pkill -TERM -f "$(script_dir)/src"
+      echo "Sent SIGTERM to discord-bot processes." >&2
+    else
+      echo "discord-bot not running." >&2
+    fi
+    ;;
   *)
-    echo "Usage: $0 [start|tail|status]" >&2
+    echo "Usage: $0 [start|stop|tail|status]" >&2
     exit 2
     ;;
 esac

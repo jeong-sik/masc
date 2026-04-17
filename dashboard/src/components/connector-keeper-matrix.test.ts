@@ -149,6 +149,66 @@ describe('ConnectorKeeperMatrix', () => {
     expect(alphaChip.getAttribute('data-matrix-row-total-live')).toBe('2')
     expect(alphaChip.textContent).toContain('1/2')
   })
+
+  it('renders a per-column totals footer row (GitHub Actions matrix pattern)', () => {
+    // Two keepers × 4 known connectors. alpha bound to discord + slack,
+    // beta bound to discord only → discord column has 2 bound, slack
+    // column has 1 bound, imessage + telegram have 0 bound.
+    const connectors = [
+      mkConnector('discord', { available: true, configured_bindings: [
+        { channel_id: 'c1', keeper_name: 'alpha' },
+        { channel_id: 'c2', keeper_name: 'beta' },
+      ] as never }),
+      mkConnector('slack', { available: true, configured_bindings: [
+        { channel_id: 'c3', keeper_name: 'alpha' },
+      ] as never }),
+    ]
+    const keepers = [mkKeeper('alpha'), mkKeeper('beta')]
+    const matrix = deriveMatrix(connectors, keepers)
+    render(html`<${ConnectorKeeperMatrix} matrix=${matrix} />`, container)
+    // Footer label ("Totals →") is visible.
+    expect(container.querySelector('[data-matrix-column-totals-label]')).toBeTruthy()
+    // Divider is present (semantic break between rows + totals).
+    expect(container.querySelector('[data-matrix-column-totals-divider]')).toBeTruthy()
+    // Per-column totals cells — one per connector column.
+    const cells = container.querySelectorAll('[data-matrix-column-total-bound]')
+    expect(cells.length).toBe(4)
+    // Discord (col 0) = 2 bound.
+    expect(cells[0]!.getAttribute('data-matrix-column-total-bound')).toBe('2')
+    // Slack (col 2) = 1 bound.
+    expect(cells[2]!.getAttribute('data-matrix-column-total-bound')).toBe('1')
+    // Grand total chip = 3 bound.
+    const grand = container.querySelector('[data-matrix-grand-total]')
+    expect(grand?.getAttribute('data-matrix-grand-total-bound')).toBe('3')
+  })
+
+  it('column totals footer highlights amber when a column has unknowns (directory-mismatch guard)', () => {
+    const connectors = [
+      mkConnector('discord', { available: true, configured_bindings: [
+        { channel_id: 'c1', keeper_name: 'alpha' },
+        // gamma is NOT in the keeper directory → unknown cell in discord col
+        { channel_id: 'c2', keeper_name: 'gamma' },
+      ] as never }),
+    ]
+    const keepers = [mkKeeper('alpha')]
+    const matrix = deriveMatrix(connectors, keepers)
+    render(html`<${ConnectorKeeperMatrix} matrix=${matrix} />`, container)
+    const cells = container.querySelectorAll('[data-matrix-column-total-bound]')
+    const discordCell = cells[0] as HTMLElement
+    expect(discordCell.getAttribute('data-matrix-column-total-unknown')).toBe('1')
+    expect(discordCell.className).toContain('text-amber-200')
+  })
+
+  it('column totals footer dashes empty columns (no bound, no unbound, no unknown)', () => {
+    // imessage + telegram have 0 bindings and are offline → na cells only.
+    // The totals cell for those columns shows "—" not "0".
+    const matrix = deriveMatrix([mkConnector('discord', { available: true })], [mkKeeper('alpha')])
+    render(html`<${ConnectorKeeperMatrix} matrix=${matrix} />`, container)
+    const cells = container.querySelectorAll('[data-matrix-column-total-bound]')
+    // imessage is col 1 — offline, no bindings → all na → dashed.
+    const imessageCell = cells[1] as HTMLElement
+    expect(imessageCell.textContent).toContain('—')
+  })
 })
 
 describe('summarizeMatrixRow (pure)', () => {

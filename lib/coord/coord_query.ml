@@ -37,7 +37,7 @@ let update_priority config ~task_id ~priority =
           log_event config (Printf.sprintf
             "{\"type\":\"priority_change\",\"task\":\"%s\",\"old\":%d,\"new\":%d,\"ts\":\"%s\"}"
             task_id old_priority priority (now_iso ()));
-          !Coord_hooks.on_task_mutation_fn ();
+          (Atomic.get Coord_hooks.on_task_mutation_fn) ();
 
           Printf.sprintf "✅ Task %s priority: P%d → P%d" task_id old_priority priority
     with

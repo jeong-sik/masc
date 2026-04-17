@@ -31,6 +31,7 @@ import { ConnectorOnboardingGrid } from './connector-onboarding'
 import { SidecarLogToggle, SidecarLogViewer } from './sidecar-log-viewer'
 import { ConnectorConfigToggle, ConnectorConfigForm, openConnectorConfig } from './connector-config-form'
 import { ConnectorReadinessRail, deriveRail } from './connector-readiness-rail'
+import { ConnectorOverviewStrip } from './connector-overview-strip'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
 
@@ -548,7 +549,7 @@ function ConnectorLivePanel({
   const headerIcon = channelIcon(connector?.channel ?? connectorId)
 
   return html`
-    <div class="mb-4 rounded-xl border border-[var(--white-8)] p-4" style=${connectorAccentStyle(connectorId)}>
+    <div id=${`connector-card-${connectorId}`} class="mb-4 scroll-mt-4 rounded-xl border border-[var(--white-8)] p-4" style=${connectorAccentStyle(connectorId)}>
       <div class="flex flex-wrap items-center gap-2 text-[12px]">
         <span class="text-base leading-none" aria-hidden="true">${headerIcon}</span>
         <span class="text-sm font-semibold text-[var(--text-body)]">${connectorName}</span>
@@ -1133,6 +1134,10 @@ export function ConnectorStatusPanel() {
           <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : 'gate metrics unavailable'}</div>
         </div>
       </div>
+
+      ${!filterId
+        ? html`<${ConnectorOverviewStrip} connectors=${visibleConnectors} keeperCount=${snapshot.keepers.length} />`
+        : null}
 
       ${visibleConnectors.map(c => html`
         <${ConnectorLivePanel}

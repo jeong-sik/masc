@@ -29,7 +29,3 @@ export interface McpToolSchema {
   }
 }
 
-export interface McpToolsListResponse {
-  tools: McpToolSchema[]
-  nextCursor?: string
-}

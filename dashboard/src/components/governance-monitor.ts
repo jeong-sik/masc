@@ -7,6 +7,7 @@ import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatCell } from './common/stat-cell'
 import { StatusChip } from './common/status-chip'
 import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
+import { useSavedSignal } from '../lib/saved-signal'
 import { get, type GetOptions } from '../api/core'
 
 export interface ToolRejection {
@@ -107,7 +108,7 @@ export function GovernanceMonitor() {
   }
   const resource = resourceRef.current
   const windowMinutes = useSignal(60)
-  const query = useSignal('')
+  const [query] = useSavedSignal('dash:filter:governance-monitor:query', '')
 
   const load = () =>
     resource.load(async (signal) => fetchGovernanceToolEvents(windowMinutes.value, { signal }))

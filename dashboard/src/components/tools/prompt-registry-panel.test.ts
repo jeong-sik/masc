@@ -51,7 +51,108 @@ vi.mock('../../api', () => ({
   savePromptOverride: vi.fn(async () => ({ ok: true, message: 'override set' })),
 }))
 
-import { PromptRegistryPanel } from './prompt-registry-panel'
+import type { DashboardPromptItem } from '../../api'
+import { PromptRegistryPanel, filterPrompts, promptSourceCounts } from './prompt-registry-panel'
+
+function makePrompt(overrides: Partial<DashboardPromptItem>): DashboardPromptItem {
+  return {
+    key: 'keeper.system',
+    category: 'keeper',
+    description: 'Keeper system prompt',
+    current: '',
+    default: null,
+    effective: '',
+    file_value: null,
+    override_value: null,
+    file_path: null,
+    file_exists: true,
+    source: 'file',
+    has_override: false,
+    char_count: 0,
+    required_file: true,
+    template_variables: [],
+    ...overrides,
+  }
+}
+
+const HELPER_FIXTURES: DashboardPromptItem[] = [
+  makePrompt({ key: 'keeper.system', category: 'keeper', description: 'k1', source: 'file' }),
+  makePrompt({ key: 'keeper.turn', category: 'keeper', description: 'k2', source: 'override' }),
+  makePrompt({ key: 'planner.root', category: 'planner', description: 'p1', source: 'default' }),
+  makePrompt({ key: 'planner.step', category: 'planner', description: 'p2', source: 'missing' }),
+  makePrompt({
+    key: 'supervisor.brief',
+    category: 'supervisor',
+    description: 'supervisor briefing template',
+    source: 'file',
+  }),
+]
+
+describe('filterPrompts', () => {
+  it('returns all prompts when source is all and query is empty', () => {
+    expect(filterPrompts(HELPER_FIXTURES, 'all', '')).toHaveLength(5)
+  })
+
+  it('filters by source', () => {
+    const file = filterPrompts(HELPER_FIXTURES, 'file', '')
+    expect(file).toHaveLength(2)
+    expect(file.every(p => p.source === 'file')).toBe(true)
+    expect(filterPrompts(HELPER_FIXTURES, 'override', '')).toHaveLength(1)
+    expect(filterPrompts(HELPER_FIXTURES, 'missing', '')).toHaveLength(1)
+    expect(filterPrompts(HELPER_FIXTURES, 'default', '')).toHaveLength(1)
+  })
+
+  it('search matches key substring (case-insensitive)', () => {
+    const out = filterPrompts(HELPER_FIXTURES, 'all', 'KEEPER')
+    expect(out.map(p => p.key)).toEqual(['keeper.system', 'keeper.turn'])
+  })
+
+  it('search matches category', () => {
+    expect(filterPrompts(HELPER_FIXTURES, 'all', 'planner')).toHaveLength(2)
+  })
+
+  it('search matches description', () => {
+    const out = filterPrompts(HELPER_FIXTURES, 'all', 'briefing')
+    expect(out).toHaveLength(1)
+    expect(out[0]?.key).toBe('supervisor.brief')
+  })
+
+  it('source and query combine with AND', () => {
+    const out = filterPrompts(HELPER_FIXTURES, 'file', 'keeper')
+    expect(out).toHaveLength(1)
+    expect(out[0]?.key).toBe('keeper.system')
+  })
+
+  it('whitespace-only query is treated as empty', () => {
+    expect(filterPrompts(HELPER_FIXTURES, 'all', '   ')).toHaveLength(5)
+  })
+
+  it('returns empty when nothing matches', () => {
+    expect(filterPrompts(HELPER_FIXTURES, 'all', 'no-such-key')).toEqual([])
+  })
+})
+
+describe('promptSourceCounts', () => {
+  it('counts each source and total', () => {
+    expect(promptSourceCounts(HELPER_FIXTURES)).toEqual({
+      all: 5,
+      file: 2,
+      override: 1,
+      default: 1,
+      missing: 1,
+    })
+  })
+
+  it('returns zeros on empty input', () => {
+    expect(promptSourceCounts([])).toEqual({
+      all: 0,
+      file: 0,
+      override: 0,
+      default: 0,
+      missing: 0,
+    })
+  })
+})
 
 async function flush() {
   await new Promise(resolve => setTimeout(resolve, 0))

@@ -2,7 +2,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { ConnectorOverviewStrip, _testResetBulkInflight, countConnectedSidecars } from './connector-overview-strip'
+import {
+  ConnectorOverviewStrip,
+  _testResetBulkInflight,
+  countConnectedSidecars,
+  formatConnectorUptime,
+} from './connector-overview-strip'
 import type { GateConnectorInfo } from '../api/gate'
 
 const mkConnector = (overrides: Partial<GateConnectorInfo> = {}): GateConnectorInfo => ({
@@ -127,6 +132,81 @@ describe('ConnectorOverviewStrip', () => {
     const banner = container.querySelector('[data-celebration="all-connected"]')
     expect(banner).toBeTruthy()
     expect(banner?.textContent).toContain('4/4')
+  })
+
+  it('uptime chip renders inside tile when sidecar is up and last_ready_at is recent', () => {
+    _testResetBulkInflight()
+    const readyAt = new Date(Date.now() - 65 * 1000).toISOString()
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[mkConnector({ connector_id: 'discord', available: true, last_ready_at: readyAt })]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    const tile = container.querySelector('[data-overview-tile="discord"]')!
+    const chip = tile.querySelector('[data-uptime-chip]')
+    expect(chip).toBeTruthy()
+    expect(chip?.textContent).toMatch(/^up 1m/)
+  })
+
+  it('uptime chip absent when sidecar is down, even with a stale last_ready_at', () => {
+    _testResetBulkInflight()
+    const readyAt = new Date(Date.now() - 60 * 1000).toISOString()
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[mkConnector({ connector_id: 'discord', available: false, last_ready_at: readyAt })]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    const tile = container.querySelector('[data-overview-tile="discord"]')!
+    expect(tile.querySelector('[data-uptime-chip]')).toBeNull()
+  })
+
+  it('uptime chip absent when last_ready_at is missing/empty', () => {
+    _testResetBulkInflight()
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[mkConnector({ connector_id: 'discord', available: true, last_ready_at: '' })]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    const tile = container.querySelector('[data-overview-tile="discord"]')!
+    expect(tile.querySelector('[data-uptime-chip]')).toBeNull()
+  })
+})
+
+describe('formatConnectorUptime', () => {
+  const NOW = Date.UTC(2026, 3, 17, 12, 0, 0) // deterministic fixed "now"
+
+  it('returns null for null/undefined/empty input', () => {
+    expect(formatConnectorUptime(null, NOW)).toBeNull()
+    expect(formatConnectorUptime(undefined, NOW)).toBeNull()
+    expect(formatConnectorUptime('', NOW)).toBeNull()
+    expect(formatConnectorUptime('   ', NOW)).toBeNull()
+  })
+
+  it('returns null for unparseable date strings', () => {
+    expect(formatConnectorUptime('not-a-date', NOW)).toBeNull()
+    expect(formatConnectorUptime('garbage 🦖', NOW)).toBeNull()
+  })
+
+  it('returns null when last_ready_at is in the future (clock skew)', () => {
+    const future = new Date(NOW + 10 * 60 * 1000).toISOString()
+    expect(formatConnectorUptime(future, NOW)).toBeNull()
+  })
+
+  it('formats seconds, minutes+seconds, and hours+minutes', () => {
+    const sec30 = new Date(NOW - 30 * 1000).toISOString()
+    expect(formatConnectorUptime(sec30, NOW)).toBe('up 30s')
+
+    const min5 = new Date(NOW - (5 * 60 + 12) * 1000).toISOString()
+    expect(formatConnectorUptime(min5, NOW)).toBe('up 5m 12s')
+
+    const hr3 = new Date(NOW - (3 * 3600 + 22 * 60) * 1000).toISOString()
+    expect(formatConnectorUptime(hr3, NOW)).toBe('up 3h 22m')
   })
 })
 

@@ -14,8 +14,31 @@ import type { GateConnectorInfo } from '../api/gate'
 import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
 import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS, channelIcon, connectorAccentStyle, startSidecar, stopSidecar, type KnownConnectorId } from './connector-status'
 import { openConnectorConfig } from './connector-config-form'
+import { formatElapsedCompact } from '../lib/format-time'
 
 const bulkInflight = signal<{ start: boolean; stop: boolean }>({ start: false, stop: false })
+
+/** Pure: derive a compact "up X" string from the sidecar's last_ready_at
+    timestamp. Returns null when the timestamp is empty/invalid/in the
+    future — the tile then hides the chip rather than rendering NaN.
+
+    Home Assistant 2024 badge redesign informs the style: tiny, muted,
+    sits adjacent to the primary status text. Not a loud signal — the
+    existing glyph already tells the operator the sidecar is up; this
+    chip only adds the time axis (how long). */
+export function formatConnectorUptime(
+  readyAtIso: string | null | undefined,
+  now: number,
+): string | null {
+  if (readyAtIso === null || readyAtIso === undefined) return null
+  const trimmed = readyAtIso.trim()
+  if (trimmed === '') return null
+  const then = Date.parse(trimmed)
+  if (Number.isNaN(then)) return null
+  const elapsedSec = Math.floor((now - then) / 1000)
+  if (elapsedSec < 0) return null
+  return `up ${formatElapsedCompact(elapsedSec)}`
+}
 
 async function runBulk(
   kind: 'start' | 'stop',
@@ -58,6 +81,7 @@ function OverviewTile({ id, connector, keeperCount }: {
   keeperCount: number
 }) {
   const sidecarUp = connector?.available === true
+  const uptimeLabel = sidecarUp ? formatConnectorUptime(connector?.last_ready_at, Date.now()) : null
   const pills = deriveRail(
     {
       sidecarUp,
@@ -97,7 +121,18 @@ function OverviewTile({ id, connector, keeperCount }: {
         >${channelIcon(id)}</span>
         <span class="min-w-0 flex-1">
           <span class="block truncate text-[13px] font-semibold text-[var(--text-body)]">${displayName}</span>
-          <span class="block text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">${sidecarUp ? '🟢 connected' : '⊘ offline'}</span>
+          <span class="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">
+            <span>${sidecarUp ? '🟢 connected' : '⊘ offline'}</span>
+            ${uptimeLabel !== null
+              ? html`
+                  <span
+                    class="rounded-full border border-emerald-400/20 bg-emerald-500/5 px-1.5 py-[1px] text-[9px] font-normal normal-case tracking-normal text-emerald-200/80"
+                    data-uptime-chip
+                    title="last_ready_at 기준 경과 시간"
+                  >${uptimeLabel}</span>
+                `
+              : null}
+          </span>
         </span>
       </button>
       <${ConnectorReadinessRail} pills=${pills} />

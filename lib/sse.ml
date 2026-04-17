@@ -23,6 +23,14 @@
     best-effort lock-free execution since the process is shutting down. *)
 
 (** Classification of an SSE session's traffic role. *)
+module SMap = Map.Make(String)
+
+let rec atomic_update atomic f =
+  let old_val = Atomic.get atomic in
+  let new_val = f old_val in
+  if Atomic.compare_and_set atomic old_val new_val then ()
+  else atomic_update atomic f
+
 type session_kind =
   | Observer     (** Dashboard / read-only viewers *)
   | Coordinator  (** MCP agent connections *)
@@ -58,27 +66,10 @@ type client = {
 }
 
 (** Client registry - maps session_id to client *)
-let clients : (string, client) Hashtbl.t = Hashtbl.create 16
+let clients : client SMap.t Atomic.t = Atomic.make SMap.empty
 
-(** Registry mutex -- protects all [clients] Hashtbl mutations.
-    Pattern: mcp_agent_queue.ml, agent_identity.ml *)
-let registry_mutex = Eio.Mutex.create ()
-
-(** Atomic client count -- mirrors Hashtbl.length for signal-handler-safe reads.
-    Kept in sync inside [registry_mutex] critical sections. *)
+(** Atomic client count -- mirrors SMap.cardinal for signal-handler-safe reads. *)
 let client_count_atomic = Atomic.make 0
-
-(** Run [f] inside the registry mutex.
-    Falls back to lock-free [f ()] when Eio effects are unavailable
-    (e.g. POSIX signal handler context, module init, or test harness
-    running outside [Eio_main.run]).
-
-    Two exception classes to handle:
-    - [Effect.Unhandled _]: no Eio scheduler installed at all.
-    - [Eio.Mutex.Poisoned _]: mutex created but scheduler not running
-      (e.g. Alcotest without [Eio_main.run] wrapper). *)
-let with_registry_rw f = Eio_guard.with_mutex registry_mutex f
-let with_registry_ro f = Eio_guard.with_mutex_ro registry_mutex f
 
 type session_snapshot = {
   session_id : string;
@@ -103,10 +94,7 @@ let take n xs =
 
 let sync_transport_snapshot () =
   let now = Time_compat.now () in
-  let snapshot =
-    with_registry_ro (fun () ->
-      Hashtbl.fold (fun sid client acc -> (sid, client) :: acc) clients [])
-  in
+  let snapshot = SMap.fold (fun sid client acc -> (sid, client) :: acc) (Atomic.get clients) [] in
   let observer = ref 0 in
   let coordinator = ref 0 in
   let queue_sum = ref 0 in
@@ -182,43 +170,50 @@ let event_counter = Atomic.make 0
     and the buffer write does not need to wait for client snapshots. *)
 let max_buffer_size = 100
 let buffer_ttl_seconds = Env_config.InternalTimers.sse_buffer_ttl_sec
-let event_buffer : (int * string * float) Queue.t = Queue.create ()
-let event_buffer_mutex = Eio.Mutex.create ()
-
-let with_event_buffer_rw f = Eio_guard.with_mutex event_buffer_mutex f
-let with_event_buffer_ro f = Eio_guard.with_mutex_ro event_buffer_mutex f
+let event_buffer : (int * string * float) list Atomic.t = Atomic.make []
 
 (** Add event to buffer, maintaining max size *)
 let buffer_event event_id event_str =
-  with_event_buffer_rw (fun () ->
-    if Queue.length event_buffer >= max_buffer_size then
-      ignore (Queue.pop event_buffer);
-    Queue.push (event_id, event_str, Time_compat.now ()) event_buffer)
+  atomic_update event_buffer (fun lst ->
+    let next = (event_id, event_str, Time_compat.now ()) :: lst in
+    if List.length next > max_buffer_size then
+      let rec take n acc l =
+        match l with
+        | [] -> List.rev acc
+        | _ when n <= 0 -> List.rev acc
+        | x :: xs -> take (n - 1) (x :: acc) xs
+      in
+      take max_buffer_size [] next
+    else next
+  )
 
 (** Get events after given ID for replay (MCP spec MUST) *)
 let get_events_after last_id =
-  with_event_buffer_ro (fun () ->
-    Queue.fold (fun acc (id, ev, _ts) ->
-      if id > last_id then ev :: acc else acc
-    ) [] event_buffer
-    |> List.rev)
+  let lst = Atomic.get event_buffer in
+  List.fold_left (fun acc (id, ev, _ts) ->
+    if id > last_id then ev :: acc else acc
+  ) [] (List.rev lst)
+  |> List.rev
 
 (** Remove events older than [buffer_ttl_seconds] from the front of the buffer.
     Returns count of evicted events. *)
 let cleanup_expired_events () =
-  with_event_buffer_rw (fun () ->
-    let now = Time_compat.now () in
-    let count = ref 0 in
-    let keep_popping = ref true in
-    while !keep_popping && not (Queue.is_empty event_buffer) do
-      let (_id, _ev, ts) = Queue.peek event_buffer in
-      if now -. ts > buffer_ttl_seconds then begin
-        ignore (Queue.pop event_buffer);
-        incr count
-      end else
-        keep_popping := false
-    done;
-    !count)
+  let now = Time_compat.now () in
+  let count = ref 0 in
+  atomic_update event_buffer (fun lst ->
+    let rev_lst = List.rev lst in
+    let rec filter acc c = function
+      | [] -> acc
+      | ((_id, _ev, ts) as item) :: xs ->
+          if now -. ts > buffer_ttl_seconds then begin
+            incr c;
+            filter acc c xs
+          end else
+            filter (item :: acc) c xs
+    in
+    filter [] count rev_lst
+  );
+  !count
 
 (** Format SSE event with optional ID and event type.
 
@@ -268,24 +263,27 @@ let next_id () =
     capacity.  ID generation + add are atomic under [registry_mutex].
     [kind] defaults to [Coordinator] for backward compatibility. *)
 let register ?(kind = Coordinator) session_id ~push ~last_event_id =
-  let result =
-    with_registry_rw (fun () ->
-    (* Evict oldest if at capacity *)
+  let evicted_ref = ref None in
+  let client_ref = ref None in
+  atomic_update clients (fun map ->
     let evicted =
-      if Hashtbl.length clients >= max_clients then
-        let oldest = Hashtbl.fold (fun sid c acc ->
+      if SMap.cardinal map >= max_clients && not (SMap.mem session_id map) then
+        let oldest = SMap.fold (fun sid c acc ->
           match acc with
           | None -> Some (sid, c)
           | Some (_, c2) -> if c.created_at < c2.created_at then Some (sid, c) else acc
-        ) clients None in
+        ) map None in
         match oldest with
         | Some (sid, _) ->
             Log.Server.info "Evicting oldest client %s (at cap %d)" sid max_clients;
-            Hashtbl.remove clients sid;
-            Atomic.decr client_count_atomic;
             Some sid
         | None -> None
       else None
+    in
+    evicted_ref := evicted;
+    let map' = match evicted with
+      | Some sid -> SMap.remove sid map
+      | None -> map
     in
     let now = Time_compat.now () in
     let new_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
@@ -299,63 +297,62 @@ let register ?(kind = Coordinator) session_id ~push ~last_event_id =
       created_at = now;
       last_seen_at = now;
     } in
-    (* If session_id already exists, replace does not change count *)
-    let was_present = Hashtbl.mem clients session_id in
-    Hashtbl.replace clients session_id client;
-    if not was_present then Atomic.incr client_count_atomic;
-    (client.id, client.event_stream, evicted))
-  in
+    client_ref := Some client;
+    SMap.add session_id client map'
+  );
+  Atomic.set client_count_atomic (SMap.cardinal (Atomic.get clients));
   sync_transport_snapshot ();
-  result
+  let client = Option.get !client_ref in
+  (client.id, client.event_stream, !evicted_ref)
 
 (** Unregister an SSE client *)
 let unregister session_id =
-  let removed =
-    with_registry_rw (fun () ->
-    if Hashtbl.mem clients session_id then begin
-      Hashtbl.remove clients session_id;
-      Atomic.decr client_count_atomic;
-      true
-    end else
-      false)
-  in
-  if removed then sync_transport_snapshot ()
+  let removed = ref false in
+  atomic_update clients (fun map ->
+    if SMap.mem session_id map then begin
+      removed := true;
+      SMap.remove session_id map
+    end else map
+  );
+  if !removed then begin
+    Atomic.set client_count_atomic (SMap.cardinal (Atomic.get clients));
+    sync_transport_snapshot ()
+  end
 
 (** Unregister only if the current client matches the given client_id.
     Prevents an old connection's cleanup from unregistering a newer connection
     that re-used the same session_id. *)
 let unregister_if_current session_id client_id =
-  let removed =
-    with_registry_rw (fun () ->
-    match Hashtbl.find_opt clients session_id with
+  let removed = ref false in
+  atomic_update clients (fun map ->
+    match SMap.find_opt session_id map with
     | Some client when client.id = client_id ->
-        Hashtbl.remove clients session_id;
-        Atomic.decr client_count_atomic;
-        true
-    | _ -> false)
-  in
-  if removed then sync_transport_snapshot ()
+        removed := true;
+        SMap.remove session_id map
+    | _ -> map
+  );
+  if !removed then begin
+    Atomic.set client_count_atomic (SMap.cardinal (Atomic.get clients));
+    sync_transport_snapshot ()
+  end
 
 (** Check if client exists *)
 let exists session_id =
-  with_registry_ro (fun () ->
-    Hashtbl.mem clients session_id)
+  SMap.mem session_id (Atomic.get clients)
 
 (** Mark a client as recently active *)
 let touch session_id =
-  with_registry_rw (fun () ->
-    match Hashtbl.find_opt clients session_id with
-    | Some client -> mark_seen client
-    | None -> ())
+  match SMap.find_opt session_id (Atomic.get clients) with
+  | Some client -> mark_seen client
+  | None -> ()
 
 (** Update client's last event ID *)
 let update_last_event_id session_id event_id =
-  with_registry_rw (fun () ->
-    match Hashtbl.find_opt clients session_id with
-    | Some client ->
-        client.last_event_id <- event_id;
-        mark_seen client
-    | None -> ())
+  match SMap.find_opt session_id (Atomic.get clients) with
+  | Some client ->
+      client.last_event_id <- event_id;
+      mark_seen client
+  | None -> ()
 
 (** Eio clock ref for per-client push timeout.
     Set during startup via [set_clock]. Without a clock, push has no timeout. *)
@@ -390,21 +387,16 @@ type external_subscriber = {
       Called before each broadcast delivery. *)
 }
 
-let external_subscribers : (string, external_subscriber) Hashtbl.t = Hashtbl.create 8
-let ext_sub_mutex = Eio.Mutex.create ()
-
-let with_ext_sub_rw f = Eio_guard.with_mutex ext_sub_mutex f
-let with_ext_sub_ro f = Eio_guard.with_mutex_ro ext_sub_mutex f
+let external_subscribers : external_subscriber SMap.t Atomic.t = Atomic.make SMap.empty
 
 let current_external_subscriber_count () =
-  with_ext_sub_ro (fun () -> Hashtbl.length external_subscribers)
+  SMap.cardinal (Atomic.get external_subscribers)
 
 let current_external_subscriber_count_with_prefix prefix =
-  with_ext_sub_ro (fun () ->
-    Hashtbl.fold
-      (fun sub_id _ acc ->
-        if String.starts_with ~prefix sub_id then acc + 1 else acc)
-      external_subscribers 0)
+  SMap.fold
+    (fun sub_id _ acc ->
+      if String.starts_with ~prefix sub_id then acc + 1 else acc)
+    (Atomic.get external_subscribers) 0
 
 (** Register an external subscriber that receives formatted SSE events
     on every broadcast.  The [callback] must not block (use best-effort).
@@ -413,16 +405,15 @@ let current_external_subscriber_count_with_prefix prefix =
     automatic unsubscription, preventing resource leaks when the consumer
     disconnects without an explicit [unsubscribe_external] call. *)
 let subscribe_external ~id ~callback ?(is_alive = fun () -> true) () =
-  with_ext_sub_rw (fun () ->
-    if Hashtbl.mem external_subscribers id then
+  atomic_update external_subscribers (fun map ->
+    if SMap.mem id map then
       Log.Misc.warn "External subscriber %s replaced (duplicate ID)" id;
-    Hashtbl.replace external_subscribers id { sub_id = id; callback; is_alive });
+    SMap.add id { sub_id = id; callback; is_alive } map);
   Transport_metrics.set_sse_external_subscribers (current_external_subscriber_count ())
 
 (** Remove a previously registered external subscriber. *)
 let unsubscribe_external id =
-  with_ext_sub_rw (fun () ->
-    Hashtbl.remove external_subscribers id);
+  atomic_update external_subscribers (fun map -> SMap.remove id map);
   Transport_metrics.set_sse_external_subscribers (current_external_subscriber_count ())
 
 (** Number of external subscribers (for diagnostics). *)
@@ -436,10 +427,7 @@ let external_subscriber_count_with_prefix prefix =
     Dead subscribers (where [is_alive] returns [false]) are automatically
     removed during iteration, preventing resource leaks. *)
 let notify_external_subscribers event =
-  let snapshot =
-    with_ext_sub_ro (fun () ->
-      Hashtbl.fold (fun _ v acc -> v :: acc) external_subscribers [])
-  in
+  let snapshot = SMap.fold (fun _ v acc -> v :: acc) (Atomic.get external_subscribers) [] in
   let dead = ref [] in
   List.iter (fun (sub : external_subscriber) ->
     if not (sub.is_alive ()) then
@@ -455,10 +443,10 @@ let notify_external_subscribers event =
   ) snapshot;
   (* Remove dead subscribers *)
   if !dead <> [] then begin
-    List.iter (fun id ->
-      with_ext_sub_rw (fun () -> Hashtbl.remove external_subscribers id);
-      Log.Misc.info "Auto-removed dead external subscriber: %s" id
-    ) !dead;
+    atomic_update external_subscribers (fun map ->
+      List.fold_left (fun m id -> SMap.remove id m) map !dead
+    );
+    List.iter (fun id -> Log.Misc.info "Auto-removed dead external subscriber: %s" id) !dead;
     Transport_metrics.set_sse_external_subscribers (current_external_subscriber_count ())
   end
 
@@ -468,22 +456,19 @@ let notify_external_subscribers event =
     removes dead ones.  Call periodically from the background maintenance loop
     to prevent stale subscribers from accumulating when no broadcasts occur. *)
 let reap_dead_external_subscribers () =
-  let snapshot =
-    with_ext_sub_ro (fun () ->
-      Hashtbl.fold (fun _ v acc -> v :: acc) external_subscribers [])
-  in
+  let snapshot = SMap.fold (fun _ v acc -> v :: acc) (Atomic.get external_subscribers) [] in
   let dead = ref [] in
   List.iter (fun (sub : external_subscriber) ->
     if not (sub.is_alive ()) then
       dead := sub.sub_id :: !dead
   ) snapshot;
-  if !dead <> [] then
-    List.iter (fun id ->
-      with_ext_sub_rw (fun () -> Hashtbl.remove external_subscribers id);
-      Log.Misc.info "Reaped dead external subscriber: %s" id
-    ) !dead;
-  if !dead <> [] then
-    Transport_metrics.set_sse_external_subscribers (current_external_subscriber_count ());
+  if !dead <> [] then begin
+    atomic_update external_subscribers (fun map ->
+      List.fold_left (fun m id -> SMap.remove id m) map !dead
+    );
+    List.iter (fun id -> Log.Misc.info "Reaped dead external subscriber: %s" id) !dead;
+    Transport_metrics.set_sse_external_subscribers (current_external_subscriber_count ())
+  end;
   List.length !dead
 
 (** Internal broadcast implementation shared by [broadcast] and [broadcast_to].
@@ -509,8 +494,7 @@ let broadcast_impl target json =
   buffer_event current_event_id event;
   (* Snapshot under read-lock *)
   let clients_snapshot =
-    with_registry_ro (fun () ->
-      Hashtbl.fold (fun k v acc -> (k, v) :: acc) clients [])
+    SMap.fold (fun k v acc -> (k, v) :: acc) (Atomic.get clients) []
   in
   let failed = ref [] in
   List.iter (fun (session_id, client) ->
@@ -566,10 +550,7 @@ let send_to session_id json =
   let current_event_id = next_id () in
   let event = format_event ~id:current_event_id ~event_type:"message" data in
   buffer_event current_event_id event;
-  let client_opt =
-    with_registry_ro (fun () ->
-      Hashtbl.find_opt clients session_id)
-  in
+  let client_opt = SMap.find_opt session_id (Atomic.get clients) in
   match client_opt with
   | None -> ()
   | Some client ->
@@ -600,20 +581,14 @@ let send_to session_id json =
       drain ()
     ]} *)
 let pop session_id =
-  let client_opt =
-    with_registry_ro (fun () ->
-      Hashtbl.find_opt clients session_id)
-  in
+  let client_opt = SMap.find_opt session_id (Atomic.get clients) in
   match client_opt with
   | None -> None
   | Some client -> Some (Eio.Stream.take client.event_stream)
 
 (** Non-blocking pop. Returns [Some event] if one is queued, [None] otherwise. *)
 let try_pop session_id =
-  let client_opt =
-    with_registry_ro (fun () ->
-      Hashtbl.find_opt clients session_id)
-  in
+  let client_opt = SMap.find_opt session_id (Atomic.get clients) in
   match client_opt with
   | None -> None
   | Some client -> Eio.Stream.take_nonblocking client.event_stream
@@ -626,33 +601,29 @@ let client_count () =
 (** Return list of session_ids for all connected clients.
     Used by transport metrics to report session count by kind. *)
 let all_session_ids () =
-  with_registry_ro (fun () ->
-    Hashtbl.fold (fun sid _client acc -> sid :: acc) clients [])
+  SMap.fold (fun sid _client acc -> sid :: acc) (Atomic.get clients) []
 
 (** Close all SSE clients - for graceful shutdown.
     Returns the number of clients that were closed.
     Signal-handler safe via [with_registry_rw] fallback. *)
 let close_all_clients () =
-  let sessions =
-    with_registry_rw (fun () ->
-      let ss = Hashtbl.fold (fun sid _ acc -> sid :: acc) clients [] in
-      Hashtbl.clear clients;
-      Atomic.set client_count_atomic 0;
-      ss)
-  in
+  let sessions_ref = ref [] in
+  atomic_update clients (fun map ->
+    sessions_ref := SMap.fold (fun sid _ acc -> sid :: acc) map [];
+    SMap.empty
+  );
+  Atomic.set client_count_atomic 0;
   sync_transport_snapshot ();
-  List.length sessions
+  List.length !sessions_ref
 
 (** Remove clients idle longer than max_age_s (default 30 min).
     Returns list of evicted session_ids so caller can clean up writers. *)
 let cleanup_stale ?(max_age_s=1800.0) () =
   let now = Time_compat.now () in
-  (* Snapshot stale candidates under lock *)
   let stale =
-    with_registry_ro (fun () ->
-      Hashtbl.fold (fun sid c acc ->
-        if now -. c.last_seen_at > max_age_s then (sid, c.last_seen_at) :: acc else acc
-      ) clients [])
+    SMap.fold (fun sid c acc ->
+      if now -. c.last_seen_at > max_age_s then (sid, c.last_seen_at) :: acc else acc
+    ) (Atomic.get clients) []
   in
   (* Remove under lock, one by one *)
   List.iter (fun (sid, last_seen) ->

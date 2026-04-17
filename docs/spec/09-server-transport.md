@@ -845,7 +845,6 @@ sequenceDiagram
 | `server_mcp_transport_http_headers.ml` | 204 | HTTP 헤더 유틸리티 |
 | `server_mcp_transport_http_protocol.ml` | 135 | 프로토콜 버전/세션 유효성 |
 | `server_h2_gateway.ml` | 740 | HTTP/2 게이트웨이 (전체 라우팅) |
-| `server_h2_gateway_routes_cp.ml` | 579 | H2 Command Plane 라우트 |
 | `server_h2_gateway_routes_extra.ml` | 171 | H2 추가 라우트 |
 | `server_mcp_transport_ws.ml` | 160 | WebSocket 트랜스포트 |
 | `server_webrtc_transport.ml` | 183 | WebRTC signaling |

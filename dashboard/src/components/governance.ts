@@ -549,6 +549,76 @@ function KeeperApprovalAlertBanner() {
   `
 }
 
+function KeeperApprovalEmptyState() {
+  const ctx = keeperHitlEmptyContext()
+  const judge = governanceData.value?.judge
+  const meta = [judge?.keeper_name, judge?.model_used]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .join(' · ')
+  const chipClass = ctx.tone === 'warn'
+    ? 'border-warn/30 bg-warn/10 text-warn'
+    : ctx.tone === 'ok'
+      ? 'border-accent/20 bg-[var(--accent-10)] text-accent'
+      : 'border-white/10 bg-white/5 text-text-muted'
+  return html`
+    <div data-testid="keeper-hitl-empty">
+      <${EmptyState} message=${ctx.primary} compact />
+      ${ctx.secondary ? html`<div class="mt-0.5 text-center text-[11px] text-text-dim">${ctx.secondary}</div>` : null}
+      ${ctx.lastActivity || meta ? html`
+        <div class="mt-1.5 flex flex-wrap items-center justify-center gap-2 text-[11px] ${ctx.tone === 'warn' ? 'text-warn' : 'text-text-dim'}">
+          ${ctx.lastActivity ? html`<span class="inline-flex items-center rounded-md border ${chipClass} px-2 py-0.5 font-medium">
+            마지막 judge 활동 <${TimeAgo} timestamp=${ctx.lastActivity} />
+          </span>` : null}
+          ${meta ? html`<span class="font-mono opacity-75">${meta}</span>` : null}
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
+export function keeperHitlEmptyContext(): {
+  primary: string
+  secondary: string | null
+  lastActivity: string | null
+  tone: 'ok' | 'warn' | 'default'
+} {
+  const judge = governanceData.value?.judge
+  const summary = governanceData.value?.summary
+  const lastError = judge?.last_error?.trim()
+  if (lastError) {
+    return {
+      primary: `AI Judge 오류로 HITL 평가가 멈춰 있을 수 있습니다: ${lastError}`,
+      secondary: '거부/승인 대기열은 judge가 복구된 뒤에 채워집니다.',
+      lastActivity: judge?.generated_at ?? summary?.judge_last_seen_at ?? null,
+      tone: 'warn',
+    }
+  }
+  const judgeOnline = judge?.judge_online ?? summary?.judge_online
+  if (judgeOnline === false) {
+    return {
+      primary: 'AI Judge 오프라인 — HITL 판정 생성이 중단되었습니다.',
+      secondary: 'keeper 기동 여부를 먼저 확인하세요.',
+      lastActivity: judge?.generated_at ?? summary?.judge_last_seen_at ?? null,
+      tone: 'warn',
+    }
+  }
+  const lastActivity = judge?.generated_at ?? summary?.judge_last_seen_at ?? null
+  if (lastActivity) {
+    return {
+      primary: '위험도 threshold를 넘는 tool call이 없습니다 — 시스템이 정상 작동 중입니다.',
+      secondary: '새 HITL 요청이 들어오면 여기에 자동 표시됩니다.',
+      lastActivity,
+      tone: 'ok',
+    }
+  }
+  return {
+    primary: '현재 대시보드에서 처리할 keeper 승인 요청이 없습니다.',
+    secondary: 'AI Judge가 HITL 평가를 시작하면 이 목록이 채워집니다.',
+    lastActivity: null,
+    tone: 'default',
+  }
+}
+
 function KeeperApprovalQueueSection() {
   const items = governanceData.value?.approval_queue ?? []
   const actingId = governanceApprovalActing.value
@@ -571,7 +641,7 @@ function KeeperApprovalQueueSection() {
         </span>
       </div>
       ${items.length === 0
-        ? html`<${EmptyState} message="현재 대시보드에서 처리할 keeper 승인 요청이 없습니다." compact />`
+        ? html`<${KeeperApprovalEmptyState} />`
         : html`
             <div class="flex flex-col gap-3.5" data-testid="governance-approval-queue">
               ${items.map(item => {

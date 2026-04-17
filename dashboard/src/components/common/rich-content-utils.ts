@@ -4,7 +4,7 @@ const STANDALONE_URL_PATTERN = /^<?(https?:\/\/\S+)>?$/
 
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.avif']
 
-export function isImageUrl(url: string): boolean {
+function isImageUrl(url: string): boolean {
   const normalized = url.toLowerCase()
   return IMAGE_EXTENSIONS.some(ext => normalized.endsWith(ext))
 }

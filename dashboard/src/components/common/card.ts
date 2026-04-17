@@ -5,11 +5,11 @@ import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 import { SectionHeader } from './section-header'
 
-// ── Exported class constants for non-component usage ──
-export const CARD_BASE = 'card'
+// ── Class constants (CARD_STANDARD exported for inline section usage) ──
+const CARD_BASE = 'card'
 export const CARD_STANDARD = `${CARD_BASE}`
-export const CARD_LIGHT = `${CARD_BASE} !bg-transparent !backdrop-blur-none`
-export const CARD_COMPACT = `${CARD_BASE} !p-3.5 !shadow-[0_1px_2px_rgba(0,0,0,0.14)]`
+const CARD_LIGHT = `${CARD_BASE} !bg-transparent !backdrop-blur-none`
+const CARD_COMPACT = `${CARD_BASE} !p-3.5 !shadow-[0_1px_2px_rgba(0,0,0,0.14)]`
 
 type CardVariant = 'standard' | 'light' | 'compact'
 

@@ -1256,11 +1256,32 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
             else begin
               let new_tasks = List.map (fun t ->
                 if t.id = task_id then
-                  { t with task_status = Types.Cancelled {
-                    cancelled_by = agent_name;
-                    cancelled_at = now_iso ();
-                    reason = if reason = "" then None else Some reason
-                  }}
+                  let new_cycle = t.cycle_count + 1 in
+                  (* Auto-set do_not_reclaim_reason when the operator flags
+                     a hard stop in the cancel reason, or after 3 cycles. *)
+                  let auto_dnr =
+                    match t.do_not_reclaim_reason with
+                    | Some _ as existing -> existing
+                    | None ->
+                        let lower = String.lowercase_ascii reason in
+                        let flagged =
+                          String_util.contains_substring lower "do not reclaim"
+                          || String_util.contains_substring lower "scope mismatch"
+                        in
+                        if flagged && reason <> "" then Some reason
+                        else if new_cycle >= 3 then
+                          Some (Printf.sprintf "auto: %d cancellations" new_cycle)
+                        else None
+                  in
+                  { t with
+                    task_status = Types.Cancelled {
+                      cancelled_by = agent_name;
+                      cancelled_at = now_iso ();
+                      reason = if reason = "" then None else Some reason
+                    };
+                    cycle_count = new_cycle;
+                    do_not_reclaim_reason = auto_dnr;
+                  }
                 else t
               ) backlog.tasks in
               let new_backlog = {

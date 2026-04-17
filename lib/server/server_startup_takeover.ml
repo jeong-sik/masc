@@ -105,7 +105,7 @@ let read_status_line fd ~timeout_sec =
   loop ()
 
 let probe_liveness ?(timeout_sec = 3.0) ?(path = "/health/live") port =
-  try
+  Safe_ops.protect ~default:false (fun () ->
     let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
     Fun.protect
       ~finally:(fun () -> close_quietly socket)
@@ -121,16 +121,14 @@ let probe_liveness ?(timeout_sec = 3.0) ?(path = "/health/live") port =
         write_all socket request 0 (String.length request);
         match read_status_line socket ~timeout_sec with
         | Some line -> status_line_is_healthy line
-        | None -> false)
-  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> false
+        | None -> false))
 
 let read_pid_file path =
-  try
+  Safe_ops.protect ~default:None (fun () ->
     let ic = open_in path in
     Fun.protect
       ~finally:(fun () -> close_in_noerr ic)
-      (fun () -> Some (In_channel.input_all ic))
-  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+      (fun () -> Some (In_channel.input_all ic)))
 
 let parsed_pid path =
   match read_pid_file path with
@@ -143,7 +141,8 @@ let parsed_pid path =
 let register_pid_cleanup ~path ~pid =
   at_exit (fun () ->
       match parsed_pid path with
-      | Some current when current = pid -> (try Sys.remove path with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+      | Some current when current = pid ->
+          Safe_ops.protect ~default:() (fun () -> Sys.remove path)
       | _ -> ())
 
 let write_pid_file path pid =
@@ -187,14 +186,16 @@ let acquire_pid_lock
                 (Printf.sprintf
                    "[WARN] PID %d alive but unresponsive on port %d; sending SIGTERM to reclaim"
                    pid port);
-              (try Unix.kill pid Sys.sigterm with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+              Safe_ops.protect ~default:() (fun () ->
+                Unix.kill pid Sys.sigterm);
               if not (wait_for_pid_exit ~poll_interval_sec
                         ~timeout_sec:term_timeout_sec pid)
               then begin
                 Log.legacy_stderr ~level:Log.Warn ~module_name:"Server"
                   (Printf.sprintf
                      "[WARN] PID %d did not exit; sending SIGKILL" pid);
-                (try Unix.kill pid Sys.sigkill with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+                Safe_ops.protect ~default:() (fun () ->
+                  Unix.kill pid Sys.sigkill);
                 if not (wait_for_pid_exit ~poll_interval_sec
                           ~timeout_sec:kill_wait_sec pid)
                 then

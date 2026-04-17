@@ -624,6 +624,18 @@ let test_directive_resume () =
   | Some e -> check bool "resumed after directive" false e.meta.paused
   | None -> fail "expected dr1"
 
+let test_directive_keeper_name_alias () =
+  R.clear ();
+  let _entry = R.register ~base_path:bp "dra1" (make_meta "dra1") in
+  KK.process_directive ~agent_name:"dra1" "pause";
+  (match R.get ~base_path:bp "dra1" with
+   | Some e -> check bool "paused via keeper name alias" true e.meta.paused
+   | None -> fail "expected dra1");
+  KK.process_directive ~agent_name:"dra1" "resume";
+  match R.get ~base_path:bp "dra1" with
+  | Some e -> check bool "resumed via keeper name alias" false e.meta.paused
+  | None -> fail "expected dra1"
+
 let test_directive_claim () =
   R.clear ();
   let _entry = R.register ~base_path:bp "dc1" (make_meta "dc1") in
@@ -758,6 +770,7 @@ let () =
         [
           eio_test "pause directive" test_directive_pause;
           eio_test "resume directive" test_directive_resume;
+          eio_test "keeper-name directive alias" test_directive_keeper_name_alias;
           eio_test "claim directive" test_directive_claim;
           eio_test "unknown directive no crash" test_directive_unknown_no_crash;
           eio_test "nonexistent agent no crash" test_directive_nonexistent_agent;

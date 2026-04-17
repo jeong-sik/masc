@@ -49,7 +49,17 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     Option.value ~default:old.sandbox_profile p.sandbox_profile_opt
   in
   let network_mode =
-    Option.value ~default:old.network_mode p.network_mode_opt
+    match p.network_mode_opt with
+    | Some mode -> mode
+    | None ->
+        if Option.is_some p.sandbox_profile_opt
+           && sandbox_profile <> old.sandbox_profile
+        then
+          (* Recompute the profile default on sandbox posture changes so
+             legacy egress does not silently carry into hardened mode. *)
+          default_network_mode_for_profile sandbox_profile
+        else
+          old.network_mode
   in
   let shared_memory_scope =
     Option.value ~default:old.shared_memory_scope p.shared_memory_scope_opt

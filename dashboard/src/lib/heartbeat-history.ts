@@ -17,6 +17,13 @@ export const HEARTBEAT_MAX_SAMPLES = 45
 
 const history = signal<Record<string, HeartbeatState[]>>({})
 
+/** Epoch ms of the most recent recordHeartbeat() call across all
+    connectors. Exposed so a global "live polling" indicator can detect
+    when the sampler itself has frozen — distinct from per-connector
+    up/down state. Starts null so a fresh page reads as "never sampled"
+    instead of "sampled 1970". */
+export const lastHeartbeatTickMs = signal<number | null>(null)
+
 /** Record one sample for a connector. Ring-buffers at HEARTBEAT_MAX_SAMPLES. */
 export function recordHeartbeat(connectorId: string, state: HeartbeatState): void {
   const current = history.value[connectorId] ?? []
@@ -24,6 +31,7 @@ export function recordHeartbeat(connectorId: string, state: HeartbeatState): voi
     ? [...current.slice(current.length - HEARTBEAT_MAX_SAMPLES + 1), state]
     : [...current, state]
   history.value = { ...history.value, [connectorId]: next }
+  lastHeartbeatTickMs.value = Date.now()
 }
 
 /** Read the current history for a connector. Returns [] for unknown ids. */
@@ -42,6 +50,7 @@ export function useHeartbeatHistory(connectorId: string): HeartbeatState[] {
 /** Clear all recorded history. For tests + "reset fleet view" flows. */
 export function resetHeartbeatHistory(): void {
   history.value = {}
+  lastHeartbeatTickMs.value = null
 }
 
 /** Current state + how many contiguous trailing samples share it.

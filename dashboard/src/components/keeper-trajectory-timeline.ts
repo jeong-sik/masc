@@ -26,16 +26,18 @@ const TRAJECTORY_DEFAULT_LIMIT = 50
 // ── Filter state (per-keeper) ────────────────────────────
 
 export type TrajectoryTypeFilter = 'all' | 'tool' | 'thinking'
+export type TrajectoryOutcomeFilter = 'all' | 'error' | 'rejected' | 'completed'
 
 type TrajectoryFilterState = {
   type: TrajectoryTypeFilter
+  outcome: TrajectoryOutcomeFilter
   search: string
 }
 
 const trajectoryFilters = signal<Record<string, TrajectoryFilterState>>({})
 
 function getFilterState(name: string): TrajectoryFilterState {
-  return trajectoryFilters.value[name] ?? { type: 'all', search: '' }
+  return trajectoryFilters.value[name] ?? { type: 'all', outcome: 'all', search: '' }
 }
 
 function setFilterState(name: string, patch: Partial<TrajectoryFilterState>): void {
@@ -64,11 +66,33 @@ export function entryMatchesSearch(entry: TrajectoryEntry, search: string): bool
   return false
 }
 
+// Outcome-based filter for tool-call entries. Thinking entries are considered
+// outcome-neutral: when outcome != 'all' we only keep tool entries that match.
+export function entryMatchesOutcome(entry: TrajectoryEntry, outcome: TrajectoryOutcomeFilter): boolean {
+  if (outcome === 'all') return true
+  // Thinking entries have no outcome axis — exclude from narrow filters.
+  if (entry.type === 'thinking') return false
+  const rejected = entry.gate?.status === 'reject'
+  const hasError = entry.error != null && entry.error !== ''
+  switch (outcome) {
+    case 'error':
+      return hasError
+    case 'rejected':
+      return rejected
+    case 'completed':
+      return !hasError && !rejected
+  }
+}
+
 export function filterTrajectoryEntries(
   entries: TrajectoryEntry[],
   filter: TrajectoryFilterState,
 ): TrajectoryEntry[] {
-  return entries.filter(e => entryMatchesType(e, filter.type) && entryMatchesSearch(e, filter.search))
+  return entries.filter(e =>
+    entryMatchesType(e, filter.type)
+    && entryMatchesOutcome(e, filter.outcome)
+    && entryMatchesSearch(e, filter.search),
+  )
 }
 
 export function countByType(entries: TrajectoryEntry[]): { tool: number; thinking: number } {
@@ -78,6 +102,21 @@ export function countByType(entries: TrajectoryEntry[]): { tool: number; thinkin
     else tool += 1
   }
   return { tool, thinking }
+}
+
+export function countByOutcome(entries: TrajectoryEntry[]): {
+  error: number
+  rejected: number
+  completed: number
+} {
+  let error = 0, rejected = 0, completed = 0
+  for (const e of entries) {
+    if (e.type === 'thinking') continue
+    if (e.gate?.status === 'reject') { rejected += 1; continue }
+    if (e.error != null && e.error !== '') { error += 1; continue }
+    completed += 1
+  }
+  return { error, rejected, completed }
 }
 
 // ── State (per-keeper to avoid cross-keeper corruption) ──
@@ -351,11 +390,12 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
 
   const filter = getFilterState(keeperName)
   const typeCounts = useMemo(() => countByType(data.entries), [data.entries])
+  const outcomeCounts = useMemo(() => countByOutcome(data.entries), [data.entries])
   const filteredEntries = useMemo(
     () => filterTrajectoryEntries(data.entries, filter),
-    [data.entries, filter.type, filter.search],
+    [data.entries, filter.type, filter.outcome, filter.search],
   )
-  const filterActive = filter.type !== 'all' || filter.search !== ''
+  const filterActive = filter.type !== 'all' || filter.outcome !== 'all' || filter.search !== ''
 
   const { turns, allSummary, distinctTools } = useMemo(() => {
     const groups = groupByTurn(filteredEntries)
@@ -402,7 +442,7 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
         </span>
       </div>
 
-      ${'' /* Filter bar — type chips + search */}
+      ${'' /* Filter bar — type chips + outcome chips + search */}
       <div class="flex flex-wrap gap-2 items-center mb-2 px-1">
         <${FilterChips}
           chips=${[
@@ -412,6 +452,18 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
           ]}
           value=${filter.type}
           onChange=${(k: TrajectoryTypeFilter) => setFilterState(keeperName, { type: k })}
+          size="sm"
+          tone="accent"
+        />
+        <${FilterChips}
+          chips=${[
+            { key: 'all' as TrajectoryOutcomeFilter, label: '결과 전체' },
+            { key: 'error' as TrajectoryOutcomeFilter, label: '오류', count: outcomeCounts.error },
+            { key: 'rejected' as TrajectoryOutcomeFilter, label: '거부', count: outcomeCounts.rejected },
+            { key: 'completed' as TrajectoryOutcomeFilter, label: '완료', count: outcomeCounts.completed },
+          ]}
+          value=${filter.outcome}
+          onChange=${(k: TrajectoryOutcomeFilter) => setFilterState(keeperName, { outcome: k })}
           size="sm"
           tone="accent"
         />
@@ -449,7 +501,7 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
 
       ${'' /* Filtered empty state */}
       ${filterActive && filteredEntries.length === 0
-        ? html`<div class="py-4 text-center text-xs text-[var(--text-muted)]">조건에 맞는 기록이 없습니다.</div>`
+        ? html`<div class="py-4 text-center text-xs text-[var(--text-muted)]">필터 결과 없음 (${data.entries.length} items)</div>`
         : null}
 
       ${'' /* Turn groups */}

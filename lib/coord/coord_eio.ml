@@ -385,7 +385,7 @@ let register_agent config ~name ?(capabilities=[]) () =
       | Error msg -> Log.Coord.warn "join_agent: state update failed for %s: %s" name msg);
 
       (* Auto-subscribe to Messages for A2A communication (via hook) *)
-      !Coord_hooks.subscribe_messages_fn ~subscriber:name;
+      (Atomic.get Coord_hooks.subscribe_messages_fn) ~subscriber:name;
 
       (* Log join event only for new agents, skip for re-joins *)
       if not already_active then begin

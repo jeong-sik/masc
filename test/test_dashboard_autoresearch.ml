@@ -441,7 +441,7 @@ let test_delete_loop_json_removes_bundle_and_branch () =
   in
   Lib.Autoresearch.save_swarm_link ~base_path link;
   match
-    Lib.Dashboard_http_autoresearch.delete_loop_json ~base_path ~loop_id
+    Lib.Dashboard_http_autoresearch.delete_loop_json ~base_path ~loop_id ~requester_agent:None
   with
   | Error message -> failwith message
   | Ok json ->
@@ -473,7 +473,7 @@ let test_delete_loop_json_rejects_unsafe_loop_id () =
   with_temp_base @@ fun base_path ->
   match
     Lib.Dashboard_http_autoresearch.delete_loop_json
-      ~base_path ~loop_id:"../escape"
+      ~base_path ~loop_id:"../escape" ~requester_agent:None
   with
   | Ok _ -> failwith "expected invalid loop_id to fail"
   | Error message ->

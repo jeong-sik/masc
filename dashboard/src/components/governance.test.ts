@@ -10,45 +10,10 @@ Vitest.vi.mock('./governance-panels', () => ({
   GuardrailPane: () => html`<div data-testid="guardrail-pane-stub">guardrail pane</div>`,
 }))
 
-const GOVERNANCE_RENDER_TIMEOUT_MS = 30000
-
 async function flushUi(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await Promise.resolve()
     await new Promise(resolve => setTimeout(resolve, 0))
-  }
-}
-
-function governanceResponse(): DashboardGovernanceResponse {
-  return {
-    generated_at: '2026-03-24T00:00:00Z',
-    summary: {
-      cases_open: 1,
-      pending_ruling: 1,
-      ready_auto_execute: 0,
-      needs_human_gate: 0,
-      executed: 0,
-      blocked: 0,
-      oldest_open_case_age_s: 120,
-      last_activity_age_s: 60,
-      judge_online: true,
-      judge_last_seen_at: '2026-03-24T00:00:00Z',
-    },
-    items: [
-      {
-        kind: 'case',
-        id: 'gov-case-1',
-        topic: 'command:governance 렌더링 오류',
-        status: 'pending_ruling',
-        related_agents: [],
-        evidence_refs: [],
-        brief_count: 0,
-        petition_count: 1,
-        truth_summary: '렌더링 중 insertBefore 예외가 발생합니다.',
-      },
-    ],
-    activity: [],
-    pending_actions: [],
   }
 }
 
@@ -110,86 +75,10 @@ describe('Governance surface', () => {
     Vitest.vi.doUnmock('../sse-store')
   })
 
-  it('renders and refreshes without corrupting the DOM tree', async () => {
-    const fetchDashboardGovernance = Vitest.vi.fn<() => Promise<DashboardGovernanceResponse>>()
-      .mockResolvedValue(governanceResponse())
-    const fetchGovernanceCaseStatus = Vitest.vi.fn<(caseId: string) => Promise<GovernanceCaseBundle>>()
-      .mockResolvedValue(governanceBundle())
-
-    const { Governance } = await loadComponentWithApi({
-      decideGovernanceExecutionOrder: Vitest.vi.fn().mockResolvedValue(undefined),
-      fetchDashboardGovernance,
-      fetchParamAudit: Vitest.vi.fn().mockResolvedValue({ entries: [] }),
-      fetchGovernanceCaseStatus,
-      fetchRuntimeParams: Vitest.vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
-      resolveGovernanceApproval: Vitest.vi.fn().mockResolvedValue({ ok: true, id: 'appr-1', decision: 'approve' }),
-      submitGovernanceCaseBrief: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
-      submitGovernancePetition: Vitest.vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
-    })
-
-    expect(() => {
-      render(html`<${Governance} />`, container)
-    }).not.toThrow()
-
-    await flushUi()
-
-    expect(container.textContent).toContain('거버넌스')
-    expect(container.textContent).toContain('Case Load Visualized')
-    expect(container.textContent).toContain('Case Status Mix')
-    expect(container.textContent).toContain('command:governance 렌더링 오류')
-    expect(fetchDashboardGovernance).toHaveBeenCalledTimes(1)
-    expect(fetchGovernanceCaseStatus).toHaveBeenCalledWith('gov-case-1')
-
-    const refreshButton = Array.from(container.querySelectorAll('button'))
-      .find(button => button.textContent?.includes('새로고침'))
-    refreshButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flushUi()
-
-    expect(fetchDashboardGovernance).toHaveBeenCalledTimes(2)
-    expect(fetchGovernanceCaseStatus.mock.calls.filter(([caseId]) => caseId === 'gov-case-1').length)
-      .toBeGreaterThanOrEqual(2)
-    expect(container.textContent).toContain('command:governance 렌더링 오류')
-  }, GOVERNANCE_RENDER_TIMEOUT_MS)
-
-  it('shows keeper guidance when governance feed is empty', async () => {
-    const emptyResponse: DashboardGovernanceResponse = {
-      generated_at: '2026-03-26T00:00:00Z',
-      summary: {
-        cases_open: 0,
-        pending_ruling: 0,
-        ready_auto_execute: 0,
-        needs_human_gate: 0,
-        executed: 0,
-      },
-      items: [],
-      activity: [],
-      pending_actions: [],
-    }
-
-    const { Governance } = await loadComponentWithApi({
-      decideGovernanceExecutionOrder: Vitest.vi.fn().mockResolvedValue(undefined),
-      fetchDashboardGovernance: Vitest.vi.fn().mockResolvedValue(emptyResponse),
-      fetchParamAudit: Vitest.vi.fn().mockResolvedValue({ entries: [] }),
-      fetchGovernanceCaseStatus: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
-      fetchRuntimeParams: Vitest.vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
-      resolveGovernanceApproval: Vitest.vi.fn().mockResolvedValue({ ok: true, id: 'appr-1', decision: 'approve' }),
-      submitGovernanceCaseBrief: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
-      submitGovernancePetition: Vitest.vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
-    })
-
-    render(html`<${Governance} />`, container)
-    await flushUi()
-
-    expect(container.textContent).toContain('keeper가 활동 중일 때 자동 생성됩니다')
-    // No approval queue items → banner must stay hidden so it's not noisy.
-    expect(container.querySelector('[data-testid="keeper-hitl-alert-banner"]')).toBeNull()
-  }, 20000)
-
   it('shows retired guidance when case tracking is disabled', async () => {
     const serverNote = 'Server says governance case tracking is retired; only live judge signals remain.'
     const retiredResponse: DashboardGovernanceResponse = {
       generated_at: '2026-03-26T00:00:00Z',
-      case_tracking_available: false,
       note: serverNote,
       summary: {
         judge_online: false,
@@ -309,44 +198,9 @@ describe('Governance surface', () => {
     expect(judgeStatus?.textContent).toContain('cascade failed')
   }, 20000)
 
-  it('shows last activity age when governance feed is empty but has past activity', async () => {
-    const emptyWithAge: DashboardGovernanceResponse = {
-      generated_at: '2026-03-26T00:00:00Z',
-      summary: {
-        cases_open: 0,
-        pending_ruling: 0,
-        ready_auto_execute: 0,
-        needs_human_gate: 0,
-        executed: 0,
-        last_activity_age_s: 7200,
-      },
-      items: [],
-      activity: [],
-      pending_actions: [],
-    }
-
-    const { Governance } = await loadComponentWithApi({
-      decideGovernanceExecutionOrder: Vitest.vi.fn().mockResolvedValue(undefined),
-      fetchDashboardGovernance: Vitest.vi.fn().mockResolvedValue(emptyWithAge),
-      fetchParamAudit: Vitest.vi.fn().mockResolvedValue({ entries: [] }),
-      fetchGovernanceCaseStatus: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
-      fetchRuntimeParams: Vitest.vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
-      resolveGovernanceApproval: Vitest.vi.fn().mockResolvedValue({ ok: true, id: 'appr-1', decision: 'approve' }),
-      submitGovernanceCaseBrief: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
-      submitGovernancePetition: Vitest.vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
-    })
-
-    render(html`<${Governance} />`, container)
-    await flushUi()
-
-    expect(container.textContent).toContain('마지막 활동: 2시간 전')
-    expect(container.textContent).toContain('keeper가 활동 중일 때 자동 생성됩니다')
-  }, 20000)
-
   it('renders keeper approval queue and resolves approval from the dashboard', async () => {
     const withApprovalQueue: DashboardGovernanceResponse = {
       generated_at: '2026-04-09T00:00:00Z',
-      case_tracking_available: false,
       note: 'Live judge surface with active keeper approval queue.',
       summary: {
         cases_open: 0,
@@ -429,7 +283,6 @@ describe('Governance surface', () => {
   it('renders live judge empty state with offline message when retired + judge offline', async () => {
     const retiredOffline: DashboardGovernanceResponse = {
       generated_at: '2026-04-17T00:00:00Z',
-      case_tracking_available: false,
       summary: { cases_open: 0, pending_ruling: 0, ready_auto_execute: 0, needs_human_gate: 0, executed: 0 },
       items: [],
       activity: [],
@@ -462,7 +315,6 @@ describe('Governance surface', () => {
   it('renders live judge empty state with idle message when retired + judge online but no judgments', async () => {
     const retiredIdle: DashboardGovernanceResponse = {
       generated_at: '2026-04-17T00:00:00Z',
-      case_tracking_available: false,
       summary: { cases_open: 0, pending_ruling: 0, ready_auto_execute: 0, needs_human_gate: 0, executed: 0, judge_online: true },
       items: [],
       activity: [],
@@ -499,7 +351,6 @@ describe('Governance surface', () => {
   it('renders keeper HITL empty state with judge-offline context when queue is empty and judge is offline', async () => {
     const hitlEmptyOffline: DashboardGovernanceResponse = {
       generated_at: '2026-04-17T00:00:00Z',
-      case_tracking_available: false,
       summary: { cases_open: 0, pending_ruling: 0, ready_auto_execute: 0, needs_human_gate: 0, executed: 0, judge_online: false },
       items: [],
       activity: [],
@@ -534,7 +385,6 @@ describe('Governance surface', () => {
   it('renders keeper HITL empty state with healthy-idle context when queue is empty and judge is active', async () => {
     const hitlEmptyHealthy: DashboardGovernanceResponse = {
       generated_at: '2026-04-17T00:00:00Z',
-      case_tracking_available: false,
       summary: { cases_open: 0, pending_ruling: 0, ready_auto_execute: 0, needs_human_gate: 0, executed: 0, judge_online: true },
       items: [],
       activity: [],

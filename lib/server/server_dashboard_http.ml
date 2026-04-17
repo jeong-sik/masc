@@ -10,7 +10,7 @@ open Server_utils
 (* Wire task mutation hook: invalidate execution cache on any task
    add/transition so the dashboard serves fresh backlog data. *)
 let () =
-  Coord_hooks.on_task_mutation_fn := invalidate_execution_cache
+  Atomic.set Coord_hooks.on_task_mutation_fn invalidate_execution_cache
 
 
 let dashboard_namespace_truth_focus_json =

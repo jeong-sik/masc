@@ -7,7 +7,11 @@
     - [GET /api/v1/verification/requests] — operator view of pending /
       approved / rejected verification requests (see {!Dashboard_verification}).
     - [GET /api/v1/verification/specs] — TLA+ spec index with clean / buggy
-      cfg coverage (see {!Dashboard_tla_specs}). *)
+      cfg coverage (see {!Dashboard_tla_specs}).
+    - [POST /api/v1/verification/resolve] — dashboard-initiated approve/reject
+      for a pending verification request. Requires bearer token auth; the
+      verifier identity is derived from the request's actor hint and
+      namespaced under "operator:" to distinguish from peer-agent verdicts. *)
 
 open Server_auth
 
@@ -17,6 +21,18 @@ let trimmed_query_param req key =
   match Server_utils.query_param req key |> Option.map String.trim with
   | Some v when v <> "" -> Some v
   | _ -> None
+
+let verification_error_json msg : Yojson.Safe.t =
+  `Assoc [("ok", `Bool false); ("error", `String msg)]
+
+(* Compose the operator verifier identity. We always prefix with
+   "operator:" so attribution/audit can distinguish dashboard verdicts
+   from peer-agent verdicts. The actor hint is already sanitised by
+   [operator_actor_hint] (alnum + '_' + '-' only). *)
+let verifier_of_request request =
+  match Server_dashboard_http_core.operator_actor_hint request with
+  | Some hint -> "operator:" ^ hint
+  | None -> "operator:dashboard"
 
 let add_routes router =
   router
@@ -40,3 +56,30 @@ let add_routes router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.post "/api/v1/verification/resolve" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_operator_confirm"
+         (fun state req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             try
+               let args = Yojson.Safe.from_string body_str in
+               let verifier = verifier_of_request req in
+               let config = state.Mcp_server.room_config in
+               match
+                 Server_dashboard_http.dashboard_verification_resolve_http_json
+                   ~config ~verifier ~args
+               with
+               | Ok json ->
+                   respond_json_with_cors request reqd
+                     (Yojson.Safe.to_string json)
+               | Error message ->
+                   respond_json_with_cors
+                     ~status:`Bad_request request reqd
+                     (Yojson.Safe.to_string (verification_error_json message))
+             with Yojson.Json_error msg ->
+               respond_json_with_cors
+                 ~status:`Bad_request request reqd
+                 (Yojson.Safe.to_string
+                    (verification_error_json
+                       (Printf.sprintf "invalid json: %s" msg)))
+           )
+         ) request reqd)

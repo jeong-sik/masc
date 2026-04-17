@@ -137,7 +137,6 @@ Primary landing:
 
 Implementation anchors:
 
-- `lib/command_plane/cp_search_fabric.ml`
 - `lib/task_sandbox.ml`
 - `lib/tool_compact.ml`
 - `lib/context_compact_oas.ml`

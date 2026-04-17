@@ -43,6 +43,9 @@ let base_path () =
 let script_path id =
   Filename.concat (base_path ()) (Printf.sprintf "sidecars/%s-bot/run.sh" id)
 
+let sidecar_dir id =
+  Filename.concat (base_path ()) (Printf.sprintf "sidecars/%s-bot" id)
+
 let status_file id =
   Filename.concat (base_path ()) (Printf.sprintf ".gate/runtime/%s/status.json" id)
 
@@ -157,6 +160,72 @@ let handle_logs _state request reqd =
              ("lines", `List line_list);
            ])
 
+(** Per-process schema cache. The Pydantic [BotConfig.model_json_schema]
+    output only changes when sidecar source changes, which requires a
+    backend restart in practice (we don't hot-reload Python). So a
+    per-id cache keyed by id is safe for the lifetime of this process. *)
+let schema_cache : (string, string) Hashtbl.t = Hashtbl.create 8
+
+(** Reset the cache; only used by tests. *)
+let reset_schema_cache () = Hashtbl.reset schema_cache
+
+(** Pick a Python interpreter for a given sidecar id.
+
+    Discord-bot uses [uv] (project has pyproject.toml + uv.lock). The
+    other 3 ship a hand-managed [.venv/]. We prefer the venv path when
+    it exists because it sidesteps a [uv] dependency on the host running
+    the backend. *)
+let python_argv_for id =
+  let venv_python = Filename.concat (sidecar_dir id) ".venv/bin/python" in
+  if Sys.file_exists venv_python then
+    [ venv_python; "-m"; "src.schema_dump" ]
+  else
+    [ "uv"; "run"; "--directory"; sidecar_dir id; "python"; "-m"; "src.schema_dump" ]
+
+let fetch_schema id =
+  match Hashtbl.find_opt schema_cache id with
+  | Some cached -> Ok cached
+  | None ->
+      let argv = python_argv_for id in
+      let cwd = sidecar_dir id in
+      let (status, stdout) =
+        Process_eio.run_argv_with_status ~timeout_sec:10.0 ~cwd argv
+      in
+      (match status with
+       | Unix.WEXITED 0 ->
+           let trimmed = String.trim stdout in
+           Hashtbl.replace schema_cache id trimmed;
+           Ok trimmed
+       | _ ->
+           Error "schema_dump failed; ensure the sidecar's Python deps are installed (run `./run.sh start` once or `uv sync`)")
+
+let handle_schema _state request reqd =
+  match parse_name request with
+  | Error msg -> bad_request request reqd msg
+  | Ok id ->
+      (match fetch_schema id with
+       | Error msg ->
+           respond_json request reqd ~status:`Service_unavailable
+             (`Assoc [
+                ("ok", `Bool false);
+                ("error", `String msg);
+              ])
+       | Ok json_str ->
+           (match Yojson.Safe.from_string json_str with
+            | parsed ->
+                respond_json request reqd ~status:`OK
+                  (`Assoc [
+                     ("ok", `Bool true);
+                     ("id", `String id);
+                     ("schema", parsed);
+                   ])
+            | exception _ ->
+                respond_json request reqd ~status:`Internal_server_error
+                  (`Assoc [
+                     ("ok", `Bool false);
+                     ("error", `String "schema_dump returned invalid JSON");
+                   ])))
+
 let handle_start _state request reqd =
   match parse_name request with
   | Error msg -> bad_request request reqd msg
@@ -189,6 +258,14 @@ let add_routes ~sw:_ ~clock:_ router =
   |> Http.Router.get "/api/v1/sidecar/logs" (fun request reqd ->
        with_tool_auth ~tool_name:"sidecar" (fun state _req reqd ->
          handle_logs state request reqd
+       ) request reqd)
+
+  (* Schema is field-shape metadata, not values, so it's safe under
+     public_read — the dashboard form needs it during cold-start
+     onboarding (before any auth tokens are configured). *)
+  |> Http.Router.get "/api/v1/sidecar/schema" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         handle_schema state request reqd
        ) request reqd)
 
   |> Http.Router.post "/api/v1/sidecar/start" (fun request reqd ->

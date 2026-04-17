@@ -501,37 +501,6 @@ export interface OperatorReviewDecision {
   recommended_action_type?: string | null
 }
 
-export interface OperatorReviewItem {
-  id: string
-  kind: 'pending_confirm' | 'namespace_gate' | 'room_gate' | 'session_risk' | 'keeper_pressure' | string
-  target_type: 'root' | 'namespace' | 'room' | 'keeper' | string
-  target_id?: string | null
-  severity: string
-  urgency: 'now' | 'soon' | string
-  summary: string
-  why_now: string
-  source?: string
-  authoritative?: boolean
-  fingerprint: string
-  stale_sec?: number | null
-  confirm_required?: boolean
-  recommended_action?: OperatorRecommendedAction | null
-  truth_ref?: { target_type?: string | null; target_id?: string | null } | null
-  friction?: unknown
-  advice?: {
-    active_summary?: OperatorGuidanceSummary | null
-    active_guidance_layer?: string | null
-    authoritative_judgment_available?: boolean
-  } | null
-}
-
-export interface OperatorReviewSummary {
-  active_count: number
-  deferred_count: number
-  recent_count: number
-  top_item?: OperatorReviewItem | null
-}
-
 export interface OperatorDigest {
   trace_id?: string
   target_type: 'root' | 'namespace' | 'room' | string
@@ -551,9 +520,6 @@ export interface OperatorDigest {
   root?: OperatorNamespaceSnapshot
   attention_items: OperatorAttentionItem[]
   recommended_actions: OperatorRecommendedAction[]
-  review_queue: OperatorReviewItem[]
-  deferred_queue: OperatorReviewItem[]
-  review_summary?: OperatorReviewSummary | null
   recent_reviews: OperatorReviewDecision[]
   worker_cards: OperatorWorkerCard[]
 }

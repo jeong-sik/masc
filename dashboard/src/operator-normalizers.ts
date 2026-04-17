@@ -15,8 +15,6 @@ import type {
   OperatorKeeperSnapshot,
   OperatorLinkedAutoresearch,
   OperatorReviewDecision,
-  OperatorReviewItem,
-  OperatorReviewSummary,
   OperatorRecommendedAction,
   OperatorJudgeRuntime,
   OperatorSessionSnapshot,
@@ -148,61 +146,6 @@ function normalizeReviewDecision(raw: unknown): OperatorReviewDecision | null {
   }
 }
 
-function normalizeReviewItem(raw: unknown): OperatorReviewItem | null {
-  if (!isRecord(raw)) return null
-  const id = asString(raw.id)
-  const kind = asString(raw.kind)
-  const targetType = asString(raw.target_type)
-  const severity = asString(raw.severity)
-  const urgency = asString(raw.urgency)
-  const summary = asString(raw.summary)
-  const whyNow = asString(raw.why_now)
-  const fingerprint = asString(raw.fingerprint)
-  if (!id || !kind || !targetType || !severity || !urgency || !summary || !whyNow || !fingerprint) return null
-  const adviceRaw = isRecord(raw.advice) ? raw.advice : null
-  const truthRefRaw = isRecord(raw.truth_ref) ? raw.truth_ref : null
-  return {
-    id,
-    kind,
-    target_type: targetType,
-    target_id: asString(raw.target_id) ?? null,
-    severity,
-    urgency,
-    summary,
-    why_now: whyNow,
-    source: asString(raw.source),
-    authoritative: asBoolean(raw.authoritative),
-    fingerprint,
-    stale_sec: asNumber(raw.stale_sec) ?? null,
-    confirm_required: asBoolean(raw.confirm_required),
-    recommended_action: normalizeRecommendedAction(raw.recommended_action),
-    truth_ref: truthRefRaw
-      ? {
-          target_type: asString(truthRefRaw.target_type) ?? null,
-          target_id: asString(truthRefRaw.target_id) ?? null,
-        }
-      : null,
-    friction: raw.friction,
-    advice: adviceRaw
-      ? {
-          active_summary: normalizeGuidanceSummary(adviceRaw.active_summary),
-          active_guidance_layer: asString(adviceRaw.active_guidance_layer) ?? null,
-          authoritative_judgment_available: asBoolean(adviceRaw.authoritative_judgment_available),
-        }
-      : null,
-  }
-}
-
-function normalizeReviewSummary(raw: unknown): OperatorReviewSummary | null {
-  if (!isRecord(raw)) return null
-  return {
-    active_count: asNumber(raw.active_count) ?? 0,
-    deferred_count: asNumber(raw.deferred_count) ?? 0,
-    recent_count: asNumber(raw.recent_count) ?? 0,
-    top_item: normalizeReviewItem(raw.top_item),
-  }
-}
-
 function normalizeOperatorJudgment(raw: unknown): OperatorJudgment | null {
   if (!isRecord(raw)) return null
   return {
@@ -309,13 +252,6 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
     recommended_actions: extractArray(root.recommended_actions)
       .map(normalizeRecommendedAction)
       .filter((item): item is OperatorRecommendedAction => item !== null),
-    review_queue: extractArray(root.review_queue)
-      .map(normalizeReviewItem)
-      .filter((item): item is OperatorReviewItem => item !== null),
-    deferred_queue: extractArray(root.deferred_queue)
-      .map(normalizeReviewItem)
-      .filter((item): item is OperatorReviewItem => item !== null),
-    review_summary: normalizeReviewSummary(root.review_summary),
     recent_reviews: extractArray(root.recent_reviews)
       .map(normalizeReviewDecision)
       .filter((item): item is OperatorReviewDecision => item !== null),

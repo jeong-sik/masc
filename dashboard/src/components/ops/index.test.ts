@@ -80,13 +80,6 @@ describe('Ops surface', () => {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
-      review_queue: [],
-      deferred_queue: [],
-      review_summary: {
-        active_count: 0,
-        deferred_count: 1,
-        recent_count: 2,
-      },
       recent_reviews: [
         {
           item_id: 'review-newest',
@@ -171,24 +164,6 @@ describe('Ops surface', () => {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
-      review_queue: [
-        {
-          id: 'review-1',
-          kind: 'room_gate',
-          target_type: 'namespace',
-          severity: 'warn',
-          urgency: 'soon',
-          summary: '방 제어 상태를 재확인하세요',
-          why_now: 'pause 이후 후속 확인이 필요합니다.',
-          fingerprint: 'fp-review-1',
-        },
-      ],
-      deferred_queue: [],
-      review_summary: {
-        active_count: 1,
-        deferred_count: 0,
-        recent_count: 0,
-      },
       recent_reviews: [],
       worker_cards: [],
     } as unknown as OperatorDigest
@@ -201,8 +176,9 @@ describe('Ops surface', () => {
     expect(container.textContent).toContain('FlowControlPanel')
     expect(container.textContent).toContain('최근 운영 활동')
 
-    // The placeholder-heavy review queue panel no longer exists regardless of
-    // review_queue contents. review items surface via Governance / Live Judge.
+    // The placeholder-heavy review queue panel no longer exists, and the
+    // review_queue/deferred_queue/review_summary fields were dropped from
+    // OperatorDigest. review items surface via Governance / Live Judge.
     expect(container.textContent).not.toContain('방 제어 상태를 재확인하세요')
     expect(container.textContent).not.toContain('마찰 요인')
     expect(container.textContent).not.toContain('운영 판단')

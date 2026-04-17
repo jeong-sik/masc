@@ -238,7 +238,9 @@ describe('ConnectorStatusPanel', () => {
     expect(fetchGateStatus).toHaveBeenCalled()
     expect(fetchGateConnectors).toHaveBeenCalled()
     expect(fetchGateKeepers).toHaveBeenCalled()
-    expect(text).toContain('Channel Gate Connectors')
+    // Heading copy is now Korean ("커넥터" + intro line). Asserting on the
+    // intro substring keeps the test resilient to title tweaks.
+    expect(text).toContain('4종 채널 sidecar')
     expect(text).toContain('connected')
     expect(text).toContain('Discord')
     expect(text).toContain('sangsu')

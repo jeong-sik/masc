@@ -1022,9 +1022,11 @@ export function ConnectorStatusPanel() {
     <div>
       <div class="mb-3 flex items-center justify-between gap-3">
         <div>
-          <h3 class="text-sm font-semibold text-[var(--text-body)]">Channel Gate Connectors</h3>
+          <h3 class="text-sm font-semibold text-[var(--text-body)]">${filterId ? CONNECTOR_DISPLAY_NAMES[filterId as KnownConnectorId] ?? '커넥터' : '커넥터'}</h3>
           <div class="mt-1 text-[11px] text-[var(--text-dim)]">
-            Gate advertises connector descriptors; traffic health comes from gate metrics.
+            ${filterId
+              ? `${CONNECTOR_DISPLAY_NAMES[filterId as KnownConnectorId] ?? filterId} sidecar의 라이브 상태와 keeper 바인딩.`
+              : '4종 채널 sidecar(Discord, iMessage, Slack, Telegram)의 라이브 상태와 keeper 바인딩을 한 곳에서.'}
           </div>
         </div>
         <div class="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">

@@ -196,6 +196,34 @@ function OperationalHealth({ keeper }: { keeper: Keeper }) {
 }
 
 // ── KPI Grid ─────────────────────────────────────────────
+//
+// 4-section layout mirrors the keeper's 3-layer state model
+// (Events → Phase+Conditions → Counters) projected onto the four
+// questions an operator asks when opening the modal:
+//   1) "얼마나 오래 살았나?"       → identity      (세대/턴/인계)
+//   2) "지금 위험한가?"             → memory       (컨텍스트/토큰/압축 + 운영 건강도)
+//   3) "스스로 돌고 있나?"          → autonomy     (자율 턴/행동 비율)
+//   4) "무엇을 해냈고 실패했나?"   → outcomes     (backed by KeeperOutcomes)
+//
+// Each section is a rounded card with a ko-language question-header.
+// PR 5 will expand the outcomes section with the full Success/Failure
+// Ledger, Validator pass-rate grouping, and Resilience Profile.
+
+function KpiSection({ title, question, children }: {
+  title: string
+  question: string
+  children: unknown
+}) {
+  return html`
+    <section class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] p-3">
+      <header class="mb-2 flex items-baseline justify-between gap-2">
+        <h3 class="text-[11px] font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">${title}</h3>
+        <span class="text-[10px] text-[var(--text-dim)] truncate">${question}</span>
+      </header>
+      ${children}
+    </section>
+  `
+}
 
 export function KpiGrid({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
@@ -219,99 +247,153 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
   const modelEntries = Object.entries(modelCounts).sort((a, b) => b[1] - a[1])
   const totalCalls = modelEntries.reduce((s, [, c]) => s + c, 0)
 
+  const outcomes = keeper.outcomes
+  const verdictTotal = outcomes
+    ? outcomes.validation.oas_verdicts.pass + outcomes.validation.oas_verdicts.fail + outcomes.validation.oas_verdicts.unknown
+    : 0
+  const passRatePct = outcomes && verdictTotal > 0
+    ? Math.round((outcomes.validation.oas_verdicts.pass / verdictTotal) * 100)
+    : null
+  const passTone: KpiTone = passRatePct == null
+    ? 'default'
+    : passRatePct >= 90 ? 'ok'
+    : passRatePct >= 70 ? 'warn'
+    : 'bad'
+  const failTone: KpiTone = outcomes && outcomes.failures.turn_failed > 0 ? 'warn' : 'default'
+
   return html`
     <div class="flex flex-col gap-3 mb-5">
-      ${'' /* Primary KPIs — 3 cols (activityLevel removed) */}
-      <div class="grid grid-cols-3 gap-3">
-        <${KpiCard}
-          label="세대"
-          value=${keeper.generation ?? '-'}
-          hint="승계 횟수"
-        />
-        <${KpiCard}
-          label="턴"
-          value=${keeper.turn_count ?? '-'}
-          hint="총 루프 회차"
-        />
-        <${KpiCard}
-          label="컨텍스트"
-          value=${ctxPct != null ? `${ctxPct}%` : '-'}
-          hint=${ctxHint}
-          tone=${ctxTone}
-          progress=${ctxPct ?? undefined}
-        />
-      </div>
-      ${'' /* Model usage distribution */}
-      ${totalCalls > 0 ? html`
-        <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] p-3">
-          <div class="mb-2 text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">모델 호출 분포</div>
-          <div class="flex flex-col gap-1.5">
-            ${modelEntries.slice(0, 4).map(([model, count]) => {
-              const pct = Math.round((count / totalCalls) * 100)
-              return html`
-                <div class="flex items-center gap-2 text-xs">
-                  <span class="shrink-0 w-[140px] truncate font-mono text-[11px] text-[var(--accent)]" title=${model}>${model}</span>
-                  <div class="flex-1 h-1.5 bg-[var(--white-6)] rounded-full overflow-hidden">
-                    <div class="h-full rounded-full bg-[var(--accent)]" style="width:${pct}%"></div>
-                  </div>
-                  <span class="shrink-0 w-10 text-right text-[var(--text-muted)]">${count}회</span>
-                </div>
-              `
-            })}
+      <${KpiSection} title="정체성" question="얼마나 오래 살았나?">
+        <div class="grid grid-cols-3 gap-2">
+          <${KpiCard}
+            label="세대"
+            value=${keeper.generation ?? '-'}
+            hint="승계 횟수"
+          />
+          <${KpiCard}
+            label="턴"
+            value=${keeper.turn_count ?? '-'}
+            hint="총 루프 회차"
+          />
+          <${KpiCard}
+            label="인계"
+            value=${keeper.handoff_count_total ?? '-'}
+            hint=${(keeper.handoff_count_total ?? 0) === 0 ? '첫 인계 후 표시' : undefined}
+          />
+        </div>
+      </${KpiSection}>
+
+      <${KpiSection} title="메모리 압력" question="지금 위험한가?">
+        <div class="flex flex-col gap-3">
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <${KpiCard}
+              label="컨텍스트"
+              value=${ctxPct != null ? `${ctxPct}%` : '-'}
+              hint=${ctxHint}
+              tone=${ctxTone}
+              progress=${ctxPct ?? undefined}
+            />
+            <${KpiCard}
+              label="토큰"
+              value=${formatTokens(keeper.context_tokens)}
+              hint=${keeper.context_max ? `/ ${formatTokens(keeper.context_max)}` : undefined}
+            />
+            <${KpiCard}
+              label="압축"
+              value=${keeper.compaction_count ?? '-'}
+              hint=${(keeper.compaction_count ?? 0) === 0 ? '첫 압축 후 표시' : undefined}
+            />
+            ${latestCost
+              ? html`<${KpiCard} label="비용 (USD)" value=${latestCost} />`
+              : null}
           </div>
-          ${modelEntries.length > 4 ? html`
-            <div class="mt-1 text-[10px] text-[var(--text-muted)]">외 ${modelEntries.length - 4}개 모델</div>
+          <${OperationalHealth} keeper=${keeper} />
+          ${totalCalls > 0 ? html`
+            <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] p-3">
+              <div class="mb-2 text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">모델 호출 분포</div>
+              <div class="flex flex-col gap-1.5">
+                ${modelEntries.slice(0, 4).map(([model, count]) => {
+                  const pct = Math.round((count / totalCalls) * 100)
+                  return html`
+                    <div class="flex items-center gap-2 text-xs">
+                      <span class="shrink-0 w-[140px] truncate font-mono text-[11px] text-[var(--accent)]" title=${model}>${model}</span>
+                      <div class="flex-1 h-1.5 bg-[var(--white-6)] rounded-full overflow-hidden">
+                        <div class="h-full rounded-full bg-[var(--accent)]" style="width:${pct}%"></div>
+                      </div>
+                      <span class="shrink-0 w-10 text-right text-[var(--text-muted)]">${count}회</span>
+                    </div>
+                  `
+                })}
+              </div>
+              ${modelEntries.length > 4 ? html`
+                <div class="mt-1 text-[10px] text-[var(--text-muted)]">외 ${modelEntries.length - 4}개 모델</div>
+              ` : null}
+            </div>
           ` : null}
         </div>
-      ` : null}
-      ${'' /* Secondary KPIs — 3-4 cols, smaller feel */}
-      <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
-        <${KpiCard}
-          label="토큰"
-          value=${formatTokens(keeper.context_tokens)}
-          hint=${keeper.context_max ? `/ ${formatTokens(keeper.context_max)}` : undefined}
-        />
-        <${KpiCard}
-          label="인계"
-          value=${keeper.handoff_count_total ?? '-'}
-          hint=${(keeper.handoff_count_total ?? 0) === 0 ? '첫 인계 후 표시' : undefined}
-        />
-        <${KpiCard}
-          label="압축"
-          value=${keeper.compaction_count ?? '-'}
-          hint=${(keeper.compaction_count ?? 0) === 0 ? '첫 압축 후 표시' : undefined}
-        />
-        ${latestCost
-          ? html`<${KpiCard} label="비용 (USD)" value=${latestCost} />`
-          : null}
-      </div>
-      ${'' /* Operational Health — heartbeat + compaction quality */}
-      <${OperationalHealth} keeper=${keeper} />
-      ${'' /* Autonomy KPIs — always visible for keeper context */}
-      <div class="grid grid-cols-4 gap-2">
-        <${KpiCard}
-          label="자율 행동"
-          value=${keeper.autonomous_action_count ?? 0}
-          hint=${keeper.last_proactive_ago_s != null
-            ? `${formatDuration(keeper.last_proactive_ago_s)} 전${keeper.last_proactive_reason ? ' · ' + keeper.last_proactive_reason : ''}`
-            : autonomyHint(keeper.autonomous_action_count, keeper.proactive_enabled) ?? '행동 횟수'}
-        />
-        <${KpiCard}
-          label="자율 턴"
-          value=${keeper.autonomous_turn_count ?? 0}
-          hint=${keeper.autonomous_text_turn_count != null ? `텍스트 ${keeper.autonomous_text_turn_count} / 도구 ${keeper.autonomous_tool_turn_count ?? 0}` : autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled) ?? '미발동'}
-        />
-        <${KpiCard}
-          label="보드 반응"
-          value=${keeper.board_reactive_turn_count ?? 0}
-          hint="게시판 반응 턴"
-        />
-        <${KpiCard}
-          label="비활동"
-          value=${keeper.noop_turn_count ?? 0}
-          hint="아무 작업 없는 턴"
-        />
-      </div>
+      </${KpiSection}>
+
+      <${KpiSection} title="자율성 패턴" question="스스로 돌고 있나?">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <${KpiCard}
+            label="자율 턴"
+            value=${keeper.autonomous_turn_count ?? 0}
+            hint=${keeper.autonomous_text_turn_count != null ? `텍스트 ${keeper.autonomous_text_turn_count} / 도구 ${keeper.autonomous_tool_turn_count ?? 0}` : autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled) ?? '미발동'}
+          />
+          <${KpiCard}
+            label="자율 행동"
+            value=${keeper.autonomous_action_count ?? 0}
+            hint=${keeper.last_proactive_ago_s != null
+              ? `${formatDuration(keeper.last_proactive_ago_s)} 전${keeper.last_proactive_reason ? ' · ' + keeper.last_proactive_reason : ''}`
+              : autonomyHint(keeper.autonomous_action_count, keeper.proactive_enabled) ?? '행동 횟수'}
+          />
+          <${KpiCard}
+            label="보드 반응"
+            value=${keeper.board_reactive_turn_count ?? 0}
+            hint="게시판 반응 턴"
+          />
+          <${KpiCard}
+            label="비활동"
+            value=${keeper.noop_turn_count ?? 0}
+            hint="아무 작업 없는 턴"
+          />
+        </div>
+      </${KpiSection}>
+
+      <${KpiSection} title="결과" question="무엇을 해냈고 실패했고 검증을 통과했나?">
+        ${outcomes ? html`
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <${KpiCard}
+              label="성공 턴"
+              value=${outcomes.successes.substantive_turns}
+              hint=${`관찰 ${outcomes.observed_turns}턴`}
+              tone="ok"
+            />
+            <${KpiCard}
+              label="실패 턴"
+              value=${outcomes.failures.turn_failed}
+              hint=${outcomes.failures.consecutive_fail_current > 0 ? `연속 ${outcomes.failures.consecutive_fail_current}` : undefined}
+              tone=${failTone}
+            />
+            <${KpiCard}
+              label="검증 합격"
+              value=${passRatePct != null ? `${passRatePct}%` : '-'}
+              hint=${verdictTotal > 0 ? `${outcomes.validation.oas_verdicts.pass}/${verdictTotal}` : 'verdict 없음'}
+              tone=${passTone}
+            />
+            <${KpiCard}
+              label="회복력"
+              value=${`재시작 ${outcomes.failures.restarts}`}
+              hint=${`크래시 ${outcomes.failures.crashes}`}
+              tone=${outcomes.failures.crashes > 0 ? 'bad' : outcomes.failures.restarts > 0 ? 'warn' : 'default'}
+            />
+          </div>
+        ` : html`
+          <div class="text-[11px] text-[var(--text-dim)] leading-snug">
+            outcomes 집계를 불러오는 중이거나, 이 키퍼는 아직 관찰된 전이가 없습니다.
+          </div>
+        `}
+      </${KpiSection}>
     </div>
   `
 }

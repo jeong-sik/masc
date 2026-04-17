@@ -232,10 +232,8 @@ function handleKeeperLifecycle(event: { type: string; name?: string }): void {
   }
 }
 
-async function handleGovernance(): Promise<void> {
+function handleGovernance(): void {
   _refreshGovernanceFn?.()
-  const { loadRuntimeParams } = await import('./components/governance')
-  loadRuntimeParams()
 }
 
 async function refreshActiveRoute(): Promise<void> {

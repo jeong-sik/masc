@@ -3,8 +3,6 @@ import {
   decideGovernanceExecutionOrder,
   fetchDashboardGovernance,
   fetchGovernanceCaseStatus,
-  fetchParamAudit,
-  fetchRuntimeParams,
   resolveGovernanceApproval,
   submitGovernanceCaseBrief,
   submitGovernancePetition,
@@ -27,8 +25,6 @@ import {
   selectedDecisionKey,
   selectedCaseDetail,
   detailLoading,
-  runtimeParamsResource,
-  paramAuditResource,
 } from './governance-signals'
 
 async function loadDecisionDetail(item: GovernanceDecisionItem | null) {
@@ -142,20 +138,3 @@ export async function respondToKeeperApproval(id: string, decision: 'approve' | 
   }
 }
 
-export async function loadRuntimeParams() {
-  await runtimeParamsResource.load(async () => {
-    const data = await fetchRuntimeParams()
-    return { parameters: data.parameters ?? [], surfaces: data.surfaces ?? [] }
-  }).catch(err => {
-    console.debug('[governance] runtime params load failed (optional)', err instanceof Error ? err.message : err)
-  })
-}
-
-export async function loadParamAudit(limit = 50) {
-  await paramAuditResource.load(async () => {
-    const data = await fetchParamAudit(limit)
-    return data.entries ?? []
-  }).catch(err => {
-    console.debug('[governance] param audit load failed (optional)', err instanceof Error ? err.message : err)
-  })
-}

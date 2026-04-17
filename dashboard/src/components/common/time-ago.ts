@@ -65,6 +65,18 @@ export function toAccessibleLabel(ts: string | number): string {
   return `${formatTimeAgo(ts)} (${formatTimestampKo(toUnixSeconds(ts))})`
 }
 
+/** Pure: the hover-tooltip string for the <time> element. GitHub,
+    Linear, Notion — all render a HUMAN-readable timestamp on hover,
+    not the machine-readable ISO form. ISO stays on `datetime` attr
+    where crawlers / dev tools want it; `title` gets the ko-KR form
+    so a mouse user can read \"04. 17. 18:30\" without squinting at
+    \"2026-04-18T01:05:33.000Z\". Same shape as toAccessibleLabel —
+    relative + absolute together — so hovering confirms whatever
+    you'd hear with a screen reader. */
+export function toHumanTooltip(ts: string | number): string {
+  return `${formatTimeAgo(ts)} (${formatTimestampKo(toUnixSeconds(ts))})`
+}
+
 /** Pick the displayed text based on mode. */
 export function pickDisplayText(ts: string | number, mode: TimeAgoMode): string {
   const rel = formatTimeAgo(ts)
@@ -89,8 +101,9 @@ export function TimeAgo({ timestamp, mode = 'relative', class: cx }: TimeAgoProp
   const text = pickDisplayText(timestamp, mode)
   const iso = toIsoDatetime(timestamp)
   const label = toAccessibleLabel(timestamp)
+  const tooltip = toHumanTooltip(timestamp)
   const cls = cx ? `time-ago ${cx}` : 'time-ago'
-  return html`<time class=${cls} datetime=${iso} title=${iso} aria-label=${label}>${text}</time>`
+  return html`<time class=${cls} datetime=${iso} title=${tooltip} aria-label=${label}>${text}</time>`
 }
 
 export { formatTimeAgo }

@@ -30,8 +30,14 @@ import { openTaskDetail } from './task-detail-state'
 
 const deletingTaskId = signal<string | null>(null)
 const doneVisibleCount = signal(20)
+const searchDoneVisibleCount = signal(20)
 const DONE_PAGE_SIZE = 20
 const REPO_ISSUES_BASE = 'https://github.com/jeong-sik/masc-mcp/issues'
+
+export function resetTaskBacklogState() {
+  doneVisibleCount.value = DONE_PAGE_SIZE
+  searchDoneVisibleCount.value = DONE_PAGE_SIZE
+}
 
 function priorityToneClass(priority: number): string {
   switch (priority) {
@@ -209,19 +215,29 @@ export function TaskBacklog() {
   const sortedTodo = [...filteredTodo].sort(sortByPriority)
   const sortedInProgress = [...filteredInProgress].sort(sortByPriority)
   const sortedDone = [...filteredDone].sort(sortByTimeDesc)
-  const visibleDone = sortedDone.slice(0, doneVisibleCount.value)
-  const hasMoreDone = sortedDone.length > doneVisibleCount.value
-  const remainingDone = sortedDone.length - doneVisibleCount.value
+  const activeDoneVisibleCount = hasSearch ? searchDoneVisibleCount.value : doneVisibleCount.value
+  const effectiveDoneVisibleCount = Math.min(activeDoneVisibleCount, sortedDone.length)
+  const visibleDone = sortedDone.slice(0, effectiveDoneVisibleCount)
+  const hasMoreDone = sortedDone.length > effectiveDoneVisibleCount
+  const remainingDone = sortedDone.length - effectiveDoneVisibleCount
   const emptyColumnMessage = hasSearch ? '검색 결과 없음' : null
 
-  // Reset pagination when data (or filter) shrinks below current page
-  if (doneVisibleCount.value > sortedDone.length && doneVisibleCount.value > DONE_PAGE_SIZE) {
+  // Reset pagination only for the base done list when data shrinks.
+  if (!hasSearch && doneVisibleCount.value > sortedDone.length && doneVisibleCount.value > DONE_PAGE_SIZE) {
     doneVisibleCount.value = Math.max(DONE_PAGE_SIZE, sortedDone.length)
+  }
+
+  function setSearchQuery(nextQuery: string) {
+    const nextHasSearch = nextQuery.trim().length > 0
+    if (!nextHasSearch) {
+      searchDoneVisibleCount.value = DONE_PAGE_SIZE
+    }
+    taskSearchQuery.value = nextQuery
   }
 
   function handleSearchInput(e: Event) {
     const target = e.target as HTMLInputElement
-    taskSearchQuery.value = target.value
+    setSearchQuery(target.value)
   }
 
   const isLoading = executionLoading.value && !executionLoaded.value
@@ -265,7 +281,10 @@ export function TaskBacklog() {
           <button
             type="button"
             class="rounded-lg border border-card-border/70 bg-white/4 px-3 py-2 text-[12px] text-text-muted transition-colors hover:border-accent/35 hover:text-text-strong"
-            onClick=${() => resetTaskSearch()}
+            onClick=${() => {
+              resetTaskSearch()
+              searchDoneVisibleCount.value = DONE_PAGE_SIZE
+            }}
           >검색 초기화</button>
           <span class="text-[12px] text-text-muted">${filteredTotal}/${totalTasks}</span>
         ` : null}
@@ -304,7 +323,10 @@ export function TaskBacklog() {
             <button
               type="button"
               class="w-full rounded-lg border border-card-border/60 bg-white/3 px-3 py-2 text-[12px] font-medium text-text-muted transition-colors hover:border-accent/35 hover:text-text-strong"
-              onClick=${() => { doneVisibleCount.value += DONE_PAGE_SIZE }}
+              onClick=${() => {
+                if (hasSearch) searchDoneVisibleCount.value += DONE_PAGE_SIZE
+                else doneVisibleCount.value += DONE_PAGE_SIZE
+              }}
             >
               완료 태스크 ${remainingDone}개 더 보기
             </button>

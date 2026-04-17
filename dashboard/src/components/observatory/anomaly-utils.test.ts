@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { detectAnomalies, anomalySummary } from './anomaly-utils'
+import { detectAnomalies } from './anomaly-utils'
 import type { ToolQualityHourlyPoint } from '../../api/dashboard'
 
 function makePoint(success_rate: number, hour = '2026-04-17T00:00'): ToolQualityHourlyPoint {
@@ -67,46 +67,3 @@ describe('detectAnomalies', () => {
   })
 })
 
-// ================================================================
-// anomalySummary
-// ================================================================
-
-describe('anomalySummary', () => {
-  it('returns 0 count for empty results', () => {
-    expect(anomalySummary([])).toEqual({ count: 0, worstDrop: null })
-  })
-
-  it('counts anomalies', () => {
-    const results = [
-      { point: makePoint(0.9), ts: 0, zScore: -0.5, isAnomaly: false },
-      { point: makePoint(0.2), ts: 1, zScore: -3.0, isAnomaly: true },
-      { point: makePoint(0.95), ts: 2, zScore: 0.3, isAnomaly: false },
-    ]
-    expect(anomalySummary(results).count).toBe(1)
-  })
-
-  it('returns worst drop by zScore', () => {
-    const results = [
-      { point: makePoint(0.3), ts: 1, zScore: -2.5, isAnomaly: true },
-      { point: makePoint(0.1), ts: 2, zScore: -4.0, isAnomaly: true },
-    ]
-    const summary = anomalySummary(results)
-    expect(summary.worstDrop!.zScore).toBe(-4.0)
-    expect(summary.worstDrop!.point.success_rate).toBe(0.1)
-  })
-
-  it('returns null worstDrop when no drops', () => {
-    const results = [
-      { point: makePoint(0.95), ts: 0, zScore: 2.5, isAnomaly: true },
-    ]
-    expect(anomalySummary(results).worstDrop).toBeNull()
-  })
-
-  it('counts only anomalies', () => {
-    const results = [
-      { point: makePoint(0.9), ts: 0, zScore: -0.1, isAnomaly: false },
-      { point: makePoint(0.9), ts: 1, zScore: 0.2, isAnomaly: false },
-    ]
-    expect(anomalySummary(results).count).toBe(0)
-  })
-})

@@ -66,6 +66,8 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_policy_approve", CanBroadcast);
     ("masc_cleanup_zombies", CanBroadcast);
     ("masc_autoresearch_start", CanAdmin);
+    ("masc_autoresearch_swarm_start", CanAdmin);
+    ("masc_repo_synthesis_swarm_start", CanAdmin);
     ("masc_autoresearch_cycle", CanAdmin);
     ("masc_autoresearch_inject", CanAdmin);
     ("masc_autoresearch_stop", CanAdmin);

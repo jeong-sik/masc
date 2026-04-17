@@ -59,7 +59,7 @@ OAS  ──does not know──→ MASC
 | Dashboard runtime counts | Complete with truth split | dashboard `counts` means active runtimes; configured keeper inventory is exposed separately as `configured_keepers` |
 | Checkpoint integration | Partial complete | OAS checkpoint is used in shared worker/runtime paths, and the public OAS worker API now keeps the extra JSON as a neutral checkpoint sidecar. Keeper runtime still persists its own `working_context` / serialized checkpoint path in `lib/keeper/keeper_exec_context.ml` |
 | Memory bridge | Partial complete | long-term + procedural + institution episodic are bridged; broader memory unification is still separate |
-| Team-session swarm | Partial complete | OAS Swarm runner is active; current bridge uses `swarm_config` / `agent_entry` + worker metadata while intentionally omitting `collaboration_context`, so fidelity is still incomplete |
+| Team-session swarm | Removed | `lib/team_session/` module purged; MASC no longer owns a session orchestration surface. OAS Swarm Runner is the sole substrate; consumers drive swarm runs via OAS primitives directly. |
 | Provider selection ownership | Improved | MASC persists `cascade_name` only; provider allowlists remain OAS-owned and legacy `allowed_providers` inputs are ignored |
 
 ## Boundary Audit Snapshot
@@ -69,7 +69,6 @@ OAS  ──does not know──→ MASC
 | `lib/oas_worker*.ml`, `lib/worker_oas.ml`, `lib/verifier_oas.ml` | Correct | OAS is consumed as the runtime contract; MASC chooses prompts, tools, policy, and verification usage |
 | `lib/context_compact_oas.ml` | Acceptable but lossy | Runtime compaction delegates to OAS, but message-importance heuristics still depend on MASC text markers |
 | `lib/memory_oas_bridge.ml` | Acceptable | Consumer-side adapter; imperative seeding removed in RFC-MASC-004 Phase 2, hook-first injection is now the sole path |
-| `lib/team_session/team_session_oas_bridge.ml` | Acceptable but lossy | OAS Swarm is the substrate, while MASC semantics survive via metadata/projections with known fidelity loss |
 | `lib/keeper/keeper_agent_run.ml` + keeper checkpoint/context path | Boundary violation | Keeper still owns duplicate runtime state via `working_context` and relies on raw text markers such as `[STATE]` |
 
 ## Open Structural Gaps
@@ -77,14 +76,14 @@ OAS  ──does not know──→ MASC
 - keeper runtime still uses a MASC-owned `working_context` wrapper around OAS context/checkpoint primitives
 - keeper continuity still leaks domain semantics through raw message text (`[STATE]`, goal/memory markers)
 - `memory_oas_bridge.ml` imperative seeding fully removed (RFC-MASC-004 Phase 2-3); hook-first is the sole path
-- team-session bridge fidelity and runtime-health signaling are still incomplete
+- runtime-health signaling still relies on a narrow boolean `resource_check` callback instead of a structured probe
 - proof-store and `oas-runtime` filesystem layout must stay behind thin adapters instead of being reconstructed ad hoc
 
 ## Delivery-Contract Split
 
 - MASC owns the delivery contract itself: `contract_id`, acceptance checks, required artifacts, repair budget, evaluator role/cascade, proof/report surfaces.
 - OAS should stay generic and receive only reusable harness/runtime primitives.
-- Current local implementation keeps the contract in team-session state and feeds it into worker verification and proof artifacts without teaching OAS about MASC session semantics.
+- Current local implementation keeps the contract in MASC coordination state (board posts, keeper FSM, governance queues) and feeds it into worker verification and proof artifacts without teaching OAS about MASC session semantics.
 
 ## Candidate Upstream Work
 
@@ -106,8 +105,8 @@ These stay in MASC:
    - shrink the MASC-owned `working_context` role until OAS owns runtime context/checkpoint state
 2. **P2 — marker/text leakage**
    - reduce dependence on raw `[STATE]`, `[GOAL]`, and memory-summary markers in runtime-facing paths
-3. **P3 — team-session bridge fidelity**
-   - keep MASC semantics in metadata/projections while improving OAS Swarm parity
+3. **P3 — team-session bridge fidelity** — Resolved (2026-04, team_session module purged; OAS Swarm Runner is sole substrate)
+   - MASC team-session surface removed; coordination needs served via board posts + keeper FSM, swarm runs driven through OAS directly
 4. **P4 — memory bridge hardening** — Resolved (2026-04-13, PR #6795 Phase 1 + Phase 2)
    - imperative seed/flush replaced by hook-first injection via `Memory_hooks` (RFC-MASC-004)
 5. **P5 — doc truth alignment**
@@ -119,7 +118,7 @@ These stay in MASC:
 - “Event_bus bridge planned” is no longer true for the current dashboard/SSE path.
 - dashboard OAS runtime health should be read as **durable replay + live tail**, not as a live-only pulse.
 - dashboard runtime `counts` should be read as **active truth**, while keeper inventory belongs to `configured_keepers`.
-- “team_session pending migration” is no longer true; the correct description is **running on OAS Swarm with an incomplete bridge**.
+- “team_session pending migration” is no longer true; the `lib/team_session/` module has been **removed** — swarm runs go through OAS directly, coordination state lives in board posts and keeper FSM.
 
 ## Boundary Review Checklist
 
@@ -130,7 +129,7 @@ Use this checklist when reviewing boundary-touching PRs:
 2. **MASC core가 provider/model 세부를 새로 배우는가?**
    - model ID, vendor, token/cost detail은 OAS-facing adapter/bridge에 머물러야 한다.
 3. **문서 truth가 코드 truth와 일치하는가?**
-   - 특히 team-session, cascade labels, runtime-health semantics는 구현과 SSOT 문서가 함께 갱신되어야 한다.
+   - 특히 cascade labels, runtime-health semantics, boundary-audit snapshot은 구현과 SSOT 문서가 함께 갱신되어야 한다.
 4. **Checked-in cascade labels are explicit enough for stable review**
    - repository-default `config/cascade.json` entries should prefer explicit `provider:model_id` labels; runtime discovery/failsafe may still resolve local defaults elsewhere, but checked-in defaults should avoid ambiguous `provider:auto` labels.
 

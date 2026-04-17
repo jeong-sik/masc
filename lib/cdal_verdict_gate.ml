@@ -92,3 +92,40 @@ let gate_check ?(base_dir = default_base_path) ~task_id () : string option =
     match check_verdict verdict with
     | Allow -> None
     | Reject msg -> Some msg
+
+(* --- Attribution envelope conversion ---
+   Layer 1 of the attribution rollout. Lets emitters surface a typed
+   verdict envelope alongside the existing string-return gate_check. *)
+
+let blocking_gap_count (v : Cdal_types.contract_verdict) : int =
+  List.length
+    (List.filter
+       (fun (g : Cdal_types.completeness_gap) ->
+         g.impact = Cdal_types.Blocks_verdict)
+       v.completeness_gaps)
+
+let evidence_of_verdict (v : Cdal_types.contract_verdict) : Yojson.Safe.t =
+  `Assoc [
+    ("run_id", `String v.run_id);
+    ("contract_id", `String v.contract_id);
+    ("status", `String (Cdal_types.contract_status_to_string v.status));
+    ("findings_count", `Int (List.length v.findings));
+    ("gaps_count", `Int (List.length v.completeness_gaps));
+    ("blocking_gaps_count", `Int (blocking_gap_count v));
+  ]
+
+let to_attribution (v : Cdal_types.contract_verdict) : Attribution.t =
+  let evidence = evidence_of_verdict v in
+  match check_verdict v with
+  | Allow ->
+    Attribution.passed ~origin:Det ~gate:"cdal_verdict" ~evidence
+  | Reject reason ->
+    Attribution.policy_failed ~origin:Det ~gate:"cdal_verdict" ~evidence ~reason
+
+let attribution_for_missing_verdict ~task_id : Attribution.t =
+  let evidence = `Assoc [ ("task_id", `String task_id) ] in
+  Attribution.policy_failed ~origin:Det ~gate:"cdal_verdict" ~evidence
+    ~reason:
+      (Printf.sprintf
+         "No CDAL verdict found for task %s. Submit evidence before completing."
+         task_id)

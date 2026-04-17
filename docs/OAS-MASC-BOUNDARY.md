@@ -149,3 +149,56 @@ Use this checklist when reviewing boundary-touching PRs:
 2. If the problem is “room, board, governance, operator, workflow semantics”, keep it in MASC.
 3. If a bridge is lossy, fix the MASC-side adapter first before proposing OAS API expansion.
 4. Do not claim a subsystem is “migrated” if the runtime path works but key semantics are still dropped.
+
+## OAS API Surface Drift — Detection & Repair
+
+Two complementary mechanisms keep the OAS/MASC type boundary honest. Both are normal-path tools; neither requires remembering env vars for common usage.
+
+### Layer 1 — Fingerprint gate (`scripts/oas-drift-check.sh`)
+
+Dumps OAS public types at the pinned SHA (Event_bus variants / Http_client error variants / Metrics.t fields) and diffs against `scripts/oas-api-surface.json`. Runs automatically as a one-line summary inside `make doctor-oas-pin`:
+
+```
+OAS pin verified: main@92c3077a (base version v0.155.1)
+OAS API surface: ✓ matches fingerprint
+```
+
+Drift shows as `⚠ drift (added N, removed M) — run 'make doctor-oas-drift' for detail`. `make doctor-oas-drift` prints the section-grouped added/removed lists and the repair sequence.
+
+### Layer 2 — Type adapter (`lib/oas_compat/`)
+
+Consumer-side pattern matches against OAS variants and record literals against OAS records are consolidated in `lib/oas_compat/oas_compat.ml` (Http_client + Metrics so far; Event_bus pending). When OAS adds a variant or field, only this module fails to compile, not every consumer. Adding a new surface to the adapter requires both:
+
+1. Extend `oas_compat.mli` / `.ml` with the new projection
+2. Migrate call sites to use the adapter (one line each, usually)
+
+### Repair flow when drift is reported
+
+```bash
+# 1. Investigate: what actually changed upstream?
+make doctor-oas-drift                  # section-grouped added/removed
+
+# 2. Fix the consumer side (usually: update lib/oas_compat/oas_compat.ml
+#    so the adapter compiles against the new OAS; migrate any remaining
+#    call sites that match OAS types directly)
+
+# 3. Verify build is clean
+dune build @check
+
+# 4. Refresh the fingerprint and commit it together with the consumer change
+bash scripts/oas-drift-check.sh --regenerate
+git add scripts/oas-api-surface.json lib/
+git commit -m 'chore(oas): adopt <variant/field>, refresh surface fingerprint'
+```
+
+Regenerate-before-fix is an anti-pattern: the fingerprint must always describe a state where MASC consumers compile cleanly.
+
+### Source resolution (no manual config for common cases)
+
+`oas-drift-check.sh` auto-discovers the OAS checkout in this order:
+
+1. `$AGENT_SDK_LOCAL_REPO` (explicit override)
+2. `<masc-mcp-parent>/oas` (sibling checkout)
+3. `$HOME/me/workspace/yousleepwhen/oas` (workspace convention)
+
+Each candidate must be a git checkout at the pinned SHA. If none qualifies, the script falls back to `git fetch` into a temp bare clone from the upstream URL. Network is required only for that fallback.

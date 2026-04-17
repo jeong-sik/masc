@@ -16,6 +16,7 @@ import {
   formatTileIdentityLine,
   offlineConnectorNames,
   formatOfflineConnectorLabel,
+  deriveTileNotice,
 } from './connector-overview-strip'
 import type { GateConnectorInfo } from '../api/gate'
 
@@ -631,5 +632,134 @@ describe('StatusSummaryLine offline annotation (rendered inside ConnectorOvervie
     expect(annotation).toBeTruthy()
     expect(annotation.textContent).toContain('Slack offline')
     expect(annotation.className).toContain('rose')
+  })
+})
+
+describe('deriveTileNotice (pure)', () => {
+  it('null connector → null notice (empty grid cell, no ribbon)', () => {
+    expect(deriveTileNotice(null)).toBeNull()
+  })
+
+  it('clean connector (no error, not stale) → null', () => {
+    expect(deriveTileNotice(mkConnector({ error: '', stale: false }))).toBeNull()
+  })
+
+  it('non-empty error → rose notice with the error text', () => {
+    const notice = deriveTileNotice(mkConnector({
+      error: 'Discord gateway timeout',
+      stale: false,
+    }))
+    expect(notice).toEqual({
+      tone: 'error',
+      label: 'Error',
+      detail: 'Discord gateway timeout',
+    })
+  })
+
+  it('whitespace-only error is ignored (no false positives)', () => {
+    expect(deriveTileNotice(mkConnector({ error: '   ' }))).toBeNull()
+  })
+
+  it('stale without error → amber notice with threshold hint', () => {
+    const notice = deriveTileNotice(mkConnector({
+      error: '',
+      stale: true,
+      stale_after_sec: 60,
+    }))
+    expect(notice).toEqual({
+      tone: 'stale',
+      label: 'Stale',
+      detail: '데이터 오래됨 (60s threshold)',
+    })
+  })
+
+  it('stale without threshold → amber notice, no (Xs threshold) suffix', () => {
+    const notice = deriveTileNotice(mkConnector({
+      error: '',
+      stale: true,
+      stale_after_sec: 0,
+    }))
+    expect(notice?.detail).toBe('데이터 오래됨')
+  })
+
+  it('error beats stale when both truthy (explicit error is more diagnostic)', () => {
+    // Regression guard: an explicit error message is strictly more
+    // diagnostic than a generic \"data is old\" flag. If both fire, the
+    // operator sees the error first.
+    const notice = deriveTileNotice(mkConnector({
+      error: 'auth failed',
+      stale: true,
+    }))
+    expect(notice?.tone).toBe('error')
+    expect(notice?.detail).toBe('auth failed')
+  })
+})
+
+describe('TileErrorNotice component (rendered inside ConnectorOverviewStrip)', () => {
+  let container: HTMLElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    _testResetBulkInflight()
+    _testResetStripMemory()
+  })
+  afterEach(() => {
+    render(null, container)
+    document.body.removeChild(container)
+  })
+
+  it('renders a rose notice ribbon when the connector reports an error', () => {
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[mkConnector({
+          connector_id: 'discord',
+          available: true,
+          error: 'WebSocket closed 4004',
+        })]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    const notice = container.querySelector('[data-tile-notice="error"]') as HTMLElement
+    expect(notice).toBeTruthy()
+    expect(notice.textContent).toContain('Error')
+    expect(notice.textContent).toContain('WebSocket closed 4004')
+    expect(notice.className).toContain('rose')
+    expect(notice.getAttribute('role')).toBe('alert')
+  })
+
+  it('renders an amber notice ribbon when the connector is stale without error', () => {
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[mkConnector({
+          connector_id: 'discord',
+          available: true,
+          error: '',
+          stale: true,
+          stale_after_sec: 30,
+        })]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    const notice = container.querySelector('[data-tile-notice="stale"]') as HTMLElement
+    expect(notice.textContent).toContain('Stale')
+    expect(notice.className).toContain('amber')
+  })
+
+  it('renders nothing when connector is clean (no ribbon clutter)', () => {
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[mkConnector({
+          connector_id: 'discord',
+          available: true,
+          error: '',
+          stale: false,
+        })]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    expect(container.querySelector('[data-tile-notice]')).toBeNull()
   })
 })

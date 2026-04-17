@@ -8,6 +8,7 @@ export type SurfaceSectionId =
   | 'runtime'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
   | 'memory-subsystems'
+  | 'attribution'     // Layer 4 gate-chain observation (per-gate outcome + recent events)
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + governance + connectors + inspector
   // workspace
@@ -142,6 +143,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '기억 서브시스템',
       description: 'Hebbian 시냅스 그래프, 에피소드 기록, compaction 상태.',
       params: { section: 'memory-subsystems' },
+    },
+    {
+      id: 'attribution',
+      label: 'Attribution',
+      description: 'gate별 pass/fail 카운트와 최근 이벤트. 누가·어디서·뭘·왜 4축으로 본다.',
+      params: { section: 'attribution' },
     },
   ],
   command: [

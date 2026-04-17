@@ -1633,6 +1633,10 @@ let test_handle_request_tools_call_board_post_structured_content () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
+  (* board_dispatch auto-inits the board backend by forking under the
+     global Eio_context switch. Publish the local sw so the forked fiber
+     doesn't land on a finished switch from a prior test case. *)
+  Eio_context.set_switch sw;
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in

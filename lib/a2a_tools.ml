@@ -121,9 +121,13 @@ let max_buffered_events = Env_config_governance.Timeouts.event_buffer_size
 
 (** Generate stable UUIDv4 identifiers for subscriptions and delegated tasks.
     Mutex-protected for fiber safety (Random.State is mutable). *)
+let uuid_rng = Random.State.make_self_init ()
+let uuid_rng_mutex = Stdlib.Mutex.create ()
+
 let generate_uuid () =
-  let uuid = Uuidm.v4_gen (Random.get_state ()) () in
-  Uuidm.to_string uuid
+  Stdlib.Mutex.protect uuid_rng_mutex (fun () ->
+    let uuid = Uuidm.v4_gen uuid_rng () in
+    Uuidm.to_string uuid)
 
 (** Get current ISO8601 timestamp *)
 let now_iso8601 () : string =

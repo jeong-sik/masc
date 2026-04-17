@@ -7,6 +7,56 @@
 include Keeper_config
 let keeper_debug = Env_config.KeeperRuntime.debug
 
+type sandbox_profile =
+  | Legacy_local
+  | Docker_hardened
+
+type network_mode =
+  | Network_none
+  | Network_inherit
+
+type shared_memory_scope =
+  | Shared_memory_disabled
+  | Shared_memory_room
+
+let sandbox_profile_to_string = function
+  | Legacy_local -> "legacy_local"
+  | Docker_hardened -> "docker_hardened"
+
+let sandbox_profile_of_string raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "legacy_local" -> Some Legacy_local
+  | "docker_hardened" -> Some Docker_hardened
+  | _ -> None
+
+let network_mode_to_string = function
+  | Network_none -> "none"
+  | Network_inherit -> "inherit"
+
+let network_mode_of_string raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "none" -> Some Network_none
+  | "inherit" -> Some Network_inherit
+  | _ -> None
+
+let shared_memory_scope_to_string = function
+  | Shared_memory_disabled -> "disabled"
+  | Shared_memory_room -> "room"
+
+let shared_memory_scope_of_string raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "disabled" -> Some Shared_memory_disabled
+  | "room" -> Some Shared_memory_room
+  | _ -> None
+
+let default_sandbox_profile = Legacy_local
+
+let default_network_mode_for_profile = function
+  | Legacy_local -> Network_inherit
+  | Docker_hardened -> Network_none
+
+let default_shared_memory_scope = Shared_memory_disabled
+
 type 'a context = {
   config: Coord.config;
   agent_name: string;

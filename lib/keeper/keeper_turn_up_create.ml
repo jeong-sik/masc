@@ -260,6 +260,18 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         instructions;
         policy_voice_enabled;
         execution_scope;
+        sandbox_profile =
+          Option.value ~default:default_sandbox_profile p.sandbox_profile_opt;
+        network_mode =
+          Option.value
+            ~default:
+              (default_network_mode_for_profile
+                 (Option.value ~default:default_sandbox_profile
+                    p.sandbox_profile_opt))
+            p.network_mode_opt;
+        shared_memory_scope =
+          Option.value ~default:default_shared_memory_scope
+            p.shared_memory_scope_opt;
         allowed_paths;
         tool_access;
         tool_denylist;

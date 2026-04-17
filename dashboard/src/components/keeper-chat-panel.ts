@@ -11,12 +11,13 @@ import {
 } from '../api/keeper'
 import { asString, isRecord } from './common/normalize'
 import { showToast } from './common/toast'
+import { TextInput } from './common/input'
 import { ChatComposer, ChatTranscript } from './chat/primitives'
 import type { KeeperConversationEntry } from '../types'
 import { shellAuthSummary } from '../store'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 
-interface ChatMessage {
+export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   timestamp: number
@@ -28,6 +29,17 @@ const streaming = signal(false)
 const streamBuffer = signal('')
 const streamStartedAt = signal<number | null>(null)
 const chatError = signal('')
+const searchQuery = signal('')
+
+/**
+ * Pure filter: case-insensitive substring match over message content.
+ * Empty or whitespace-only queries return the input unchanged.
+ */
+export function filterChatMessages(messages: ChatMessage[], query: string): ChatMessage[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return messages
+  return messages.filter((m) => m.content.toLowerCase().includes(q))
+}
 
 let activeAbort: AbortController | null = null
 
@@ -139,6 +151,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
     streamStartedAt.value = null
     chatError.value = ''
     chatMessages.value = []
+    searchQuery.value = ''
     let stale = false
     void fetchKeeperChatHistory(name).then((history) => {
       if (stale) return
@@ -156,7 +169,10 @@ export function KeeperChatPanel({ name }: { name: string }) {
   const messages = chatMessages.value
   const buffer = streamBuffer.value
   const isStreaming = streaming.value
-  const entries = messages.map((msg, index) => toConversationEntry(name, msg, index))
+  const query = searchQuery.value
+  const hasQuery = query.trim().length > 0
+  const filteredMessages = filterChatMessages(messages, query)
+  const entries = filteredMessages.map((msg, index) => toConversationEntry(name, msg, index))
   const chatAccess = keeperDirectChatAccess(shellAuthSummary.value)
   const transcriptEntries =
     isStreaming && buffer
@@ -188,8 +204,17 @@ export function KeeperChatPanel({ name }: { name: string }) {
           </div>
         </div>
         <div class="flex items-center gap-2">
+          <${TextInput}
+            class="max-w-[220px]"
+            name="keeper_chat_search"
+            ariaLabel="대화 내용 검색"
+            autoComplete="off"
+            placeholder="대화 검색..."
+            value=${query}
+            onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
+          />
           <span class="inline-flex items-center rounded-full border border-[rgba(71,184,255,0.2)] bg-[var(--accent-10)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-strong)]">
-            ${entries.length}개 메시지
+            ${hasQuery ? `${filteredMessages.length} / ${messages.length}개 메시지` : `${messages.length}개 메시지`}
           </span>
         </div>
       </div>
@@ -200,7 +225,9 @@ export function KeeperChatPanel({ name }: { name: string }) {
           : null}
         <${ChatTranscript}
           entries=${transcriptEntries}
-          emptyText="직접 프롬프트를 보내 키퍼 대화를 시작하세요."
+          emptyText=${hasQuery && messages.length > 0
+            ? '검색어와 일치하는 메시지가 없습니다.'
+            : '직접 프롬프트를 보내 키퍼 대화를 시작하세요.'}
           showMetadata=${false}
         />
       </div>

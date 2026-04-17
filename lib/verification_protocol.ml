@@ -18,7 +18,7 @@ let on_submit_for_verification ~(config : Coord.config)
      | Some c -> c.verify_gate_evidence
      | None -> []) in
   let _req =
-    Verification.create_request ~base_path ~task_id:task.id
+    Verification.create_request ~base_path ~task_id:task.id ~request_id:verification_id
       ~output:(`Assoc [
         ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
         ("task_title", `String task.title);

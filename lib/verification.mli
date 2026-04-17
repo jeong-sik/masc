@@ -69,6 +69,7 @@ val create_request :
   criteria:criterion list ->
   worker:string ->
   ?verifier:string ->
+  ?request_id:string ->
   unit ->
   (verification_request, string) result
 

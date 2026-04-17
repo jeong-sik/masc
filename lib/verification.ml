@@ -309,8 +309,8 @@ let list_requests base_path =
 
 (** High-level API *)
 
-let create_request ~base_path ~task_id ~output ~criteria ~worker ?verifier () =
-  let id = generate_id () in
+let create_request ~base_path ~task_id ~output ~criteria ~worker ?verifier ?request_id () =
+  let id = match request_id with Some rid -> rid | None -> generate_id () in
   let req = {
     id;
     task_id;

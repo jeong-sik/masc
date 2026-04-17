@@ -219,6 +219,92 @@ let autoresearch_loops_json ~(base_path : string) : Yojson.Safe.t =
       ("total", `Int (List.length sorted));
     ]
 
+let escape_csv s =
+  let s = String.concat "\"\"" (String.split_on_char '"' s) in
+  "\"" ^ s ^ "\""
+
+let json_string_safe json key =
+  match Yojson.Safe.Util.member key json with
+  | `String s -> escape_csv s
+  | `Null -> ""
+  | _ -> ""
+
+let json_number_safe json key =
+  match Yojson.Safe.Util.member key json with
+  | `Int i -> string_of_int i
+  | `Float f -> Printf.sprintf "%.4f" f
+  | `Null -> ""
+  | _ -> ""
+
+let json_bool_safe json key =
+  match Yojson.Safe.Util.member key json with
+  | `Bool b -> string_of_bool b
+  | `Null -> ""
+  | _ -> ""
+
+let autoresearch_loops_csv ~(base_path : string) : string =
+  let active_entries =
+    Autoresearch.with_loops_ro (fun () ->
+      Hashtbl.fold
+        (fun _id (state : Autoresearch_types.loop_state) acc ->
+          match safe_active_entry_json ~base_path state with
+          | Some entry -> entry :: acc
+          | None -> acc)
+        Autoresearch.active_loops [])
+  in
+  let active_ids =
+    List.map (fun (id, _, _) -> id) active_entries
+  in
+  let persisted_ids =
+    Autoresearch.scan_persisted_loop_ids ~base_path
+    |> List.filter (fun id -> not (List.mem id active_ids))
+  in
+  let persisted_entries =
+    List.filter_map
+      (fun loop_id ->
+        match Autoresearch.load_state ~base_path loop_id with
+        | Some summary -> safe_persisted_entry_json ~base_path summary
+        | None -> None)
+      persisted_ids
+  in
+  let all = active_entries @ persisted_entries in
+  let sorted =
+    List.sort
+      (fun (_, a, _) (_, b, _) ->
+        let by_live = Int.compare a.live_rank b.live_rank in
+        if by_live <> 0 then by_live
+        else
+        let by_status = Int.compare a.status_rank b.status_rank in
+        if by_status <> 0 then by_status
+        else Float.compare a.neg_updated_at b.neg_updated_at)
+      all
+  in
+  let headers = "loop_id,author,goal,metric_fn,model_model,target_file,status,current_cycle,max_cycles,baseline,best_score,best_cycle,total_keeps,total_discards,elapsed_s,updated_at,live\n" in
+  let rows =
+    List.map (fun (_, _, json) ->
+      String.concat "," [
+        json_string_safe json "loop_id";
+        json_string_safe json "author";
+        json_string_safe json "goal";
+        json_string_safe json "metric_fn";
+        json_string_safe json "model_model";
+        json_string_safe json "target_file";
+        json_string_safe json "status";
+        json_number_safe json "current_cycle";
+        json_number_safe json "max_cycles";
+        json_number_safe json "baseline";
+        json_number_safe json "best_score";
+        json_number_safe json "best_cycle";
+        json_number_safe json "total_keeps";
+        json_number_safe json "total_discards";
+        json_number_safe json "elapsed_s";
+        json_number_safe json "updated_at";
+        json_bool_safe json "live";
+      ] ^ "\n"
+    ) sorted
+  in
+  headers ^ String.concat "" rows
+
 (** Build the loop detail JSON for GET /api/v1/autoresearch/loops/:loopId.
     Includes full cycle history. *)
 let autoresearch_loop_detail_json ~(base_path : string)

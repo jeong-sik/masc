@@ -627,6 +627,22 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, "/api/v1/autoresearch/loops/csv" ->
+          let state = get_server_state () in
+          let base_path = state.Mcp_server.room_config.base_path in
+          let csv = Dashboard_http_autoresearch.autoresearch_loops_csv ~base_path in
+          let headers =
+            H2.Headers.of_list
+              [
+                ("content-type", "text/csv; charset=utf-8");
+                ("content-disposition", "attachment; filename=\"autoresearch_loops.csv\"");
+              ]
+          in
+          let response = H2.Response.create ~headers `OK in
+          let body = H2.Reqd.respond_with_streaming h2_reqd response in
+          H2.Body.Writer.write_string body csv;
+          H2.Body.Writer.close body
+
       | `GET, p when String.length p > 27
                    && String.sub p 0 27 = "/api/v1/autoresearch/loops/" ->
           let state = get_server_state () in

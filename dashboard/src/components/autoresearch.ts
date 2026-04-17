@@ -510,6 +510,11 @@ export function Autoresearch() {
           <${StartFormButton}
             class="px-2.5 py-1 rounded text-[11px] text-accent border border-accent/40 hover:bg-[var(--accent-10)] transition-colors"
           />
+          <a href="/api/v1/autoresearch/loops/csv" download="autoresearch_loops.csv"
+            class="px-2.5 py-1 rounded text-[11px] text-[var(--text-muted)] border border-card-border hover:text-[var(--text-body)] hover:border-accent/40 transition-colors no-underline"
+          >
+            CSV 다운로드
+          </a>
           <button type="button"
             class="px-2.5 py-1 rounded text-[11px] text-[var(--text-muted)] border border-card-border hover:text-[var(--text-body)] hover:border-accent/40 transition-colors"
             onClick=${() => { void refreshAutoresearchSurface() }}

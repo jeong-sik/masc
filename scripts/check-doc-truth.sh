@@ -116,6 +116,22 @@ require_not_contains docs/spec/10-dashboard.md '| `/api/v1/keepers/:name/config`
 require_not_contains docs/spec/10-dashboard.md '| `/api/v1/command-plane` | GET |'
 require_not_contains docs/spec/10-dashboard.md 'command-plane.ts         -- Command plane types'
 
+# Regression locks for retired surfaces (team_session / chain purge).
+# Each lock pins an already-merged PR claim so future doc edits
+# cannot silently re-introduce the stale description.
+
+# PR #7773: Team Session glossary marked retired (module purged)
+require_contains docs/spec/00-glossary.md '## Team Session (retired)'
+require_contains docs/spec/00-glossary.md '**Team Session** (retired)'
+
+# PR #7779: OAS-MASC boundary marks team-session bridge as Removed
+require_contains docs/OAS-MASC-BOUNDARY.md '| Team-session swarm | Removed |'
+require_not_contains docs/OAS-MASC-BOUNDARY.md '| `lib/team_session/team_session_oas_bridge.ml` | Acceptable'
+
+# PR #7747: 04-chain-engine.md archived with explicit banner
+require_contains docs/spec/04-chain-engine.md '# Chain Engine — ARCHIVED'
+require_contains docs/spec/04-chain-engine.md '| Status | Archived |'
+
 docs_to_scan=(
   README.md
   ROADMAP.md

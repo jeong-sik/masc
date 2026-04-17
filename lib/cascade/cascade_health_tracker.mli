@@ -37,6 +37,32 @@ val record_success : t -> provider_key:string -> unit
     counter; triggers cooldown when threshold is reached. *)
 val record_failure : t -> provider_key:string -> unit
 
+(** Record a provider call where the response arrived but was rejected
+    by the cascade's [accept] predicate (e.g. empty body, schema gate).
+
+    Behaves like {!record_failure} for cooldown / weight purposes — a
+    provider whose outputs are consistently unusable should be skipped —
+    but is counted separately in [provider_info.rejected_in_window] so
+    the dashboard can distinguish "provider down" from "provider returns
+    garbage".
+
+    Prior to 0.160.0 this path called {!record_success} (the response
+    technically arrived), which silently masked gate drift: a provider
+    could rank 100% healthy while every call fell through to the next
+    cascade tier.
+
+    @since 0.160.0 *)
+val record_rejected : t -> provider_key:string -> unit
+
+(** Drop tracker entries whose rolling window is empty AND whose cooldown
+    has expired.  Intended as opportunistic maintenance — idle providers
+    carry no information but keep growing the hashtable (and pollute the
+    dashboard).
+
+    @return number of entries evicted.
+    @since 0.160.0 *)
+val evict_idle : t -> int
+
 (** Success rate in the rolling window (0.0 to 1.0).
     Returns 1.0 for unknown providers (optimistic default). *)
 val success_rate : t -> provider_key:string -> float
@@ -65,6 +91,7 @@ type provider_info = {
   in_cooldown : bool;
   cooldown_expires_at : float option; (** Unix timestamp, Some iff [in_cooldown] *)
   events_in_window : int;             (** Events retained in rolling window *)
+  rejected_in_window : int;           (** Subset of [events_in_window] whose outcome was [Rejected]. @since 0.160.0 *)
 }
 
 (** Structured info for a single provider. Returns [None] if untracked.

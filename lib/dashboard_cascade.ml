@@ -125,6 +125,11 @@ let provider_info_to_json (info : Health.provider_info) : Yojson.Safe.t =
      | Some t -> `Float t
      | None -> `Null);
     ("events_in_window", `Int info.events_in_window);
+    (* rejected_in_window ⊆ events_in_window: responses that arrived
+       but were rejected by the cascade's accept predicate.  Split out
+       so dashboards can distinguish "provider down" from "provider
+       returns unusable output". *)
+    ("rejected_in_window", `Int info.rejected_in_window);
   ]
 
 let health_json () =

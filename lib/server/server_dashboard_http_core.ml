@@ -41,18 +41,18 @@ include Dashboard_http_helpers
 include Dashboard_http_monitoring
 include Dashboard_http_keeper
 
-let _dashboard_request_timeout_s = 30.0
+let dashboard_request_timeout_s = 30.0
 
 (** Wrap a dashboard computation with a configurable timeout.
     Returns a partial-response JSON on timeout instead of hanging. *)
 let with_dashboard_timeout ~clock compute =
-  match Eio.Time.with_timeout clock _dashboard_request_timeout_s (fun () -> Ok (compute ())) with
+  match Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () -> Ok (compute ())) with
   | Ok v -> v
   | Error `Timeout ->
       `Assoc [
         ("error", `String "timeout");
         ("partial", `Bool true);
-        ("message", `String (Printf.sprintf "Dashboard computation timed out after %.0fs." _dashboard_request_timeout_s));
+        ("message", `String (Printf.sprintf "Dashboard computation timed out after %.0fs." dashboard_request_timeout_s));
         ("generated_at", `String (Types.now_iso ()));
       ]
 
@@ -62,10 +62,7 @@ let room_scoped_cache_key (config : Coord.config) prefix suffix =
   Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
     (room_scope_cache_segment config) suffix
 
-let _dashboard_mission_timeout_s = 25.0
-
-let _session_list_timeout_s =
-  dashboard_session_list_timeout_s ()
+let dashboard_mission_timeout_s = 25.0
 
 let attach_projection_diagnostics json diagnostics =
   match json with
@@ -414,7 +411,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
     let mode =
       if lightweight_summary then Inline_shared else Offloaded_readonly
     in
-    match Eio.Time.with_timeout clock _dashboard_request_timeout_s (fun () ->
+    match Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () ->
       Ok
         (run_dashboard_compute ~mode ?net ?mono_clock ~sw ~clock
            ~config:state.Mcp_server.room_config
@@ -481,7 +478,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
     let effective_target_type =
       Option.value ~default:"root" target_type
     in
-    match Eio.Time.with_timeout clock _dashboard_request_timeout_s (fun () ->
+    match Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () ->
       Ok
         (run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
            ~clock
@@ -611,7 +608,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
            bootstrap that success instead of staying "initializing" forever
            when proactive warm-up misses its first build window. *)
         cached_surface_or_first_success_json _mission_cache
-          ~cache_key:"mission:default" ~ttl:120.0 ~clock ~timeout_sec:_dashboard_mission_timeout_s
+          ~cache_key:"mission:default" ~ttl:120.0 ~clock ~timeout_sec:dashboard_mission_timeout_s
           (fun () -> compute ())
     | Some _ ->
       (* Actor-parameterized: on-demand with SWR cache. *)
@@ -620,7 +617,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
           (Option.value ~default:"" actor)
       in
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
-        ~clock ~timeout_sec:_dashboard_mission_timeout_s (compute ?actor)
+        ~clock ~timeout_sec:dashboard_mission_timeout_s (compute ?actor)
   in
   full_json
 
@@ -659,7 +656,7 @@ let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
         (Option.value ~default:"" actor)
     in
     Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:5.0
-      ~clock ~timeout_sec:_dashboard_mission_timeout_s compute
+      ~clock ~timeout_sec:dashboard_mission_timeout_s compute
 
 let dashboard_shell_status_json (config : Coord.config) : Yojson.Safe.t =
   let room_state = Coord.read_state config in

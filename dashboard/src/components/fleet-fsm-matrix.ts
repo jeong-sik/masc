@@ -10,17 +10,15 @@
  * Backend: #7723 (LT-16a) → GET /api/v1/keepers/composite.
  * Spec↔code drift: docs/observability/fsm-spec-code-drift.md (LT-15).
  *
- * Scope of this PR:
- *   - Static snapshot view (current state only).
- *   - Time-axis sparkline is deferred to LT-16c which adds a client-
- *     side observation ring so the poll history stays visible without
- *     a backend change.
- *   - Click-through to the existing FsmHub drill-down is deferred to
- *     LT-16c; exposed via the caller passing `onSelectKeeper`.
+ * LT-16c added a per-(keeper, axis) observation ring and a horizontal
+ * sparkline renderer so each cell now carries its last 30 poll ticks.
+ * The ring lives client-side; the backend remains stateless. A keeper
+ * that disappears from a fleet poll is pruned from history on the next
+ * tick (operators care about currently-registered keepers).
  */
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 
 import { fetchKeepersComposite } from '../api/keeper'
 import type {
@@ -36,6 +34,14 @@ import {
 } from './fsm-hub-types'
 
 const POLL_INTERVAL_MS = 10_000
+
+/**
+ * Time-axis window (LT-16c). 30 snapshots × 10s poll = 5-minute
+ * history per (keeper, axis). Matches MAX_OBSERVATIONS = 30 in
+ * fsm-hub-types.ts so the FsmHub drill-down and this matrix keep
+ * visually compatible timelines.
+ */
+export const FLEET_HISTORY_LEN = 30
 
 // Axis order is fixed by the TLA+ joint spec
 // (KeeperCompositeLifecycle.tla): KSM → KTC → KDP → KCL → KMC.
@@ -97,6 +103,57 @@ export function chipClassFor(value: string): string {
 }
 
 /**
+ * Reduce a chip class to a single `bg-...` Tailwind utility so the
+ * sparkline bars can be 2–3 px wide without losing their state
+ * encoding. Neutral grey on unknown values.
+ */
+export function sparkClassFor(value: string): string {
+  const full = chipClassFor(value)
+  const m = /\bbg-[a-z0-9/-]+/i.exec(full)
+  return m?.[0] ?? 'bg-zinc-700'
+}
+
+/** Per-axis observation ring keyed by keeper name. */
+export type KeeperFleetHistory = Record<string, Record<LaneKey, string[]>>
+
+const AXIS_KEYS: LaneKey[] = ['phase', 'turn', 'decision', 'cascade', 'compaction']
+
+/**
+ * Fold an incoming batch of snapshots into the running history, capping
+ * each axis series at [maxLen]. Returns a fresh top-level record so
+ * Preact's identity render path notices the change. Keepers that
+ * disappear from the latest snapshot are dropped — operators care
+ * about currently-registered keepers and a restart re-populates the
+ * name on the next poll.
+ */
+export function pushObservation(
+  history: KeeperFleetHistory,
+  snapshots: KeeperCompositeSnapshot[],
+  maxLen: number = FLEET_HISTORY_LEN,
+): KeeperFleetHistory {
+  const next: KeeperFleetHistory = {}
+  for (const snap of snapshots) {
+    const name = inferKeeperNameFrom(snap)
+    const prev = history[name]
+    const perAxis: Record<LaneKey, string[]> = {
+      phase:      prev?.phase      ? prev.phase.slice()      : [],
+      turn:       prev?.turn       ? prev.turn.slice()       : [],
+      decision:   prev?.decision   ? prev.decision.slice()   : [],
+      cascade:    prev?.cascade    ? prev.cascade.slice()    : [],
+      compaction: prev?.compaction ? prev.compaction.slice() : [],
+    }
+    for (const axis of AXIS_KEYS) {
+      perAxis[axis].push(extractLaneValue(snap, axis))
+      if (perAxis[axis].length > maxLen) {
+        perAxis[axis] = perAxis[axis].slice(-maxLen)
+      }
+    }
+    next[name] = perAxis
+  }
+  return next
+}
+
+/**
  * Sum invariant violations across the fleet. Value is the number of
  * keepers where the invariant is currently failing; matches the
  * denominator the operator cares about ("how many keepers are bad?"),
@@ -133,6 +190,10 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   const [data, setData] = useState<FleetCompositeSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
+  // Observation ring. Ref rather than state because pushObservation
+  // returns a fresh record per tick and we pair it with a setData call
+  // which triggers the re-render — avoids a redundant state subscription.
+  const historyRef = useRef<KeeperFleetHistory>({})
 
   useEffect(() => {
     let cancelled = false
@@ -141,6 +202,11 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
       try {
         const snap = await fetcher()
         if (!cancelled) {
+          historyRef.current = pushObservation(
+            historyRef.current,
+            snap.snapshots,
+            FLEET_HISTORY_LEN,
+          )
           setData(snap)
           setError(null)
           setLoading(false)
@@ -260,13 +326,31 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                   ${AXES.map(a => {
                     const raw = extractLaneValue(snap, a.key)
                     const cls = chipClassFor(raw)
+                    const series = historyRef.current[name]?.[a.key] ?? [raw]
                     return html`
-                      <td class="px-3 py-2">
-                        <span
-                          data-cell
-                          data-axis=${a.key}
-                          class="inline-block rounded border px-2 py-0.5 ${cls}"
-                        >${displayState(raw)}</span>
+                      <td class="px-3 py-2 align-top">
+                        <div class="flex flex-col gap-1">
+                          <span
+                            data-cell
+                            data-axis=${a.key}
+                            class="inline-block self-start rounded border px-2 py-0.5 ${cls}"
+                          >${displayState(raw)}</span>
+                          <div
+                            data-spark
+                            data-axis=${a.key}
+                            class="flex h-2 overflow-hidden rounded-sm border border-zinc-800 bg-zinc-950"
+                            title=${`last ${series.length}/${FLEET_HISTORY_LEN} ticks`}
+                          >
+                            ${series.map((v, i) => html`
+                              <span
+                                key=${i}
+                                data-spark-bar
+                                class="h-full w-0.5 ${sparkClassFor(v)}"
+                                title=${displayState(v)}
+                              ></span>
+                            `)}
+                          </div>
+                        </div>
                       </td>
                     `
                   })}

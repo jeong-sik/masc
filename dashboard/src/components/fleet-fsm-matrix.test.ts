@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 
 import {
   chipClassFor,
+  filterSnapshotsByName,
   FLEET_HISTORY_LEN,
   inferKeeperNameFrom,
   pushObservation,
@@ -173,5 +174,62 @@ describe('pushObservation', () => {
     const t1 = pushObservation({}, [warn])
     const t2 = pushObservation(t1, [cool])
     expect(t2.beta!.breaker).toEqual(['warning', 'cooling'])
+  })
+})
+
+describe('filterSnapshotsByName', () => {
+  const alpha = snapshot({ name: 'alpha-keeper' })
+  const beta = snapshot({ name: 'BetaRunner' })
+  const gamma = snapshot({ name: 'gen12-payroll' })
+  const all = [alpha, beta, gamma]
+
+  it('returns the input reference unchanged for an empty query', () => {
+    const out = filterSnapshotsByName(all, '')
+    expect(out).toBe(all)
+  })
+
+  it('returns the input reference unchanged for whitespace-only queries', () => {
+    const out = filterSnapshotsByName(all, '   \t\n')
+    expect(out).toBe(all)
+  })
+
+  it('matches by case-insensitive substring on the inferred keeper name', () => {
+    const out = filterSnapshotsByName(all, 'BETA')
+    expect(out).toEqual([beta])
+  })
+
+  it('trims leading/trailing whitespace before matching', () => {
+    const out = filterSnapshotsByName(all, '  alpha  ')
+    expect(out).toEqual([alpha])
+  })
+
+  it('matches on a partial-middle substring', () => {
+    // "payroll" is suffixy; "12-pay" is a true middle substring.
+    const out = filterSnapshotsByName(all, '12-pay')
+    expect(out).toEqual([gamma])
+  })
+
+  it('returns an empty array (not the input ref) when no name matches', () => {
+    const out = filterSnapshotsByName(all, 'zzz-nothing-matches')
+    expect(out).toEqual([])
+    expect(out).not.toBe(all)
+  })
+
+  it('matches multiple keepers when the substring is shared', () => {
+    const keepers = [
+      snapshot({ name: 'gen12-alpha' }),
+      snapshot({ name: 'gen12-beta' }),
+      snapshot({ name: 'other-keeper' }),
+    ]
+    const out = filterSnapshotsByName(keepers, 'gen12')
+    expect(out).toHaveLength(2)
+    expect(out.map(s => inferKeeperNameFrom(s))).toEqual(['gen12-alpha', 'gen12-beta'])
+  })
+
+  it('does not mutate the input array', () => {
+    const snapshots = [...all]
+    const before = [...snapshots]
+    filterSnapshotsByName(snapshots, 'alpha')
+    expect(snapshots).toEqual(before)
   })
 })

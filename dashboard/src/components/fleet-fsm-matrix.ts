@@ -18,6 +18,7 @@
  */
 
 import { html } from 'htm/preact'
+import { useSignal } from '@preact/signals'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 
 import { fetchKeepersComposite } from '../api/keeper'
@@ -25,6 +26,7 @@ import type {
   FleetCompositeSnapshot,
   KeeperCompositeSnapshot,
 } from '../api/keeper'
+import { TextInput } from './common/input'
 import {
   displayState,
   extractLaneValue,
@@ -210,6 +212,9 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   // returns a fresh record per tick and we pair it with a setData call
   // which triggers the re-render — avoids a redundant state subscription.
   const historyRef = useRef<KeeperFleetHistory>({})
+  // Component-scoped search query. useSignal auto-resets on unmount;
+  // no manual cleanup needed. Matches fleet-telemetry-panel pattern.
+  const query = useSignal('')
 
   useEffect(() => {
     let cancelled = false
@@ -283,6 +288,9 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     `
   }
 
+  const filtered = filterSnapshotsByName(data.snapshots, query.value)
+  const emptyColspan = 1 + AXES.length
+
   return html`
     <section
       data-testid="fleet-fsm-matrix"
@@ -315,6 +323,21 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
             `
           : null}
       </header>
+      <div class="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-3 py-2">
+        <${TextInput}
+          value=${query.value}
+          type="search"
+          ariaLabel="키퍼 이름 검색"
+          placeholder="keeper 이름"
+          class="min-w-[200px] flex-1 !py-1 !text-[11px]"
+          onInput=${(e: Event) => {
+            query.value = (e.target as HTMLInputElement).value
+          }}
+        />
+        <span data-testid="fleet-fsm-matrix-count" class="text-xs text-zinc-500">
+          ${filtered.length}/${data.snapshots.length}
+        </span>
+      </div>
       <div class="overflow-x-auto">
         <table class="min-w-full text-xs">
           <thead class="bg-zinc-900 text-zinc-300">
@@ -328,51 +351,63 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
             </tr>
           </thead>
           <tbody>
-            ${data.snapshots.map(snap => {
-              const anyViolated = INVARIANT_KEYS.some(k => !snap.invariants[k])
-              const rowTone = anyViolated ? 'border-l-2 border-red-500' : ''
-              const name = inferKeeperNameFrom(snap)
-              return html`
-                <tr
-                  data-keeper=${name}
-                  class="border-t border-zinc-800 hover:bg-zinc-900 ${rowTone}"
-                  onClick=${props.onSelectKeeper ? () => props.onSelectKeeper?.(name) : undefined}
-                >
-                  <td class="px-3 py-2 font-mono text-zinc-200">${name}</td>
-                  ${AXES.map(a => {
-                    const raw = extractLaneValue(snap, a.key)
-                    const cls = chipClassFor(raw)
-                    const series = historyRef.current[name]?.[a.key] ?? [raw]
-                    return html`
-                      <td class="px-3 py-2 align-top">
-                        <div class="flex flex-col gap-1">
-                          <span
-                            data-cell
-                            data-axis=${a.key}
-                            class="inline-block self-start rounded border px-2 py-0.5 ${cls}"
-                          >${displayState(raw)}</span>
-                          <div
-                            data-spark
-                            data-axis=${a.key}
-                            class="flex h-2 overflow-hidden rounded-sm border border-zinc-800 bg-zinc-950"
-                            title=${`last ${series.length}/${FLEET_HISTORY_LEN} ticks`}
-                          >
-                            ${series.map((v, i) => html`
+            ${filtered.length === 0
+              ? html`
+                  <tr data-testid="fleet-fsm-matrix-empty">
+                    <td
+                      colspan=${emptyColspan}
+                      class="px-3 py-4 text-center text-xs text-zinc-500"
+                    >
+                      검색 결과 없음
+                    </td>
+                  </tr>
+                `
+              : filtered.map(snap => {
+                  const anyViolated = INVARIANT_KEYS.some(k => !snap.invariants[k])
+                  const rowTone = anyViolated ? 'border-l-2 border-red-500' : ''
+                  const name = inferKeeperNameFrom(snap)
+                  return html`
+                    <tr
+                      key=${name}
+                      data-keeper=${name}
+                      class="border-t border-zinc-800 hover:bg-zinc-900 ${rowTone}"
+                      onClick=${props.onSelectKeeper ? () => props.onSelectKeeper?.(name) : undefined}
+                    >
+                      <td class="px-3 py-2 font-mono text-zinc-200">${name}</td>
+                      ${AXES.map(a => {
+                        const raw = extractLaneValue(snap, a.key)
+                        const cls = chipClassFor(raw)
+                        const series = historyRef.current[name]?.[a.key] ?? [raw]
+                        return html`
+                          <td class="px-3 py-2 align-top">
+                            <div class="flex flex-col gap-1">
                               <span
-                                key=${i}
-                                data-spark-bar
-                                class="h-full w-0.5 ${sparkClassFor(v)}"
-                                title=${displayState(v)}
-                              ></span>
-                            `)}
-                          </div>
-                        </div>
-                      </td>
-                    `
-                  })}
-                </tr>
-              `
-            })}
+                                data-cell
+                                data-axis=${a.key}
+                                class="inline-block self-start rounded border px-2 py-0.5 ${cls}"
+                              >${displayState(raw)}</span>
+                              <div
+                                data-spark
+                                data-axis=${a.key}
+                                class="flex h-2 overflow-hidden rounded-sm border border-zinc-800 bg-zinc-950"
+                                title=${`last ${series.length}/${FLEET_HISTORY_LEN} ticks`}
+                              >
+                                ${series.map((v, i) => html`
+                                  <span
+                                    key=${i}
+                                    data-spark-bar
+                                    class="h-full w-0.5 ${sparkClassFor(v)}"
+                                    title=${displayState(v)}
+                                  ></span>
+                                `)}
+                              </div>
+                            </div>
+                          </td>
+                        `
+                      })}
+                    </tr>
+                  `
+                })}
           </tbody>
         </table>
       </div>
@@ -389,6 +424,25 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
 export function inferKeeperNameFrom(snap: KeeperCompositeSnapshot): string {
   const m = /^keeper:([^:]+):/.exec(snap.correlation_id)
   return m?.[1] ?? snap.correlation_id
+}
+
+/**
+ * Pure filter for fleet snapshots by inferred keeper name.
+ *
+ * Case-insensitive substring match on `inferKeeperNameFrom(snap)`. Empty
+ * or whitespace-only queries return the input reference unchanged (no
+ * new array allocation, preserves referential equality for memoisation
+ * and for cheap re-render skips). Input is never mutated.
+ */
+export function filterSnapshotsByName(
+  snapshots: readonly KeeperCompositeSnapshot[],
+  query: string,
+): readonly KeeperCompositeSnapshot[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return snapshots
+  return snapshots.filter(snap =>
+    inferKeeperNameFrom(snap).toLowerCase().includes(needle),
+  )
 }
 
 // Re-exported helpers let tests target the pure slices without spinning

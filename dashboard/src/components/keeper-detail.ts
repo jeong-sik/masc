@@ -15,6 +15,7 @@ import {
   clearKeeper,
   deleteKeeperHistorySnapshots,
   fetchKeeperCheckpoints,
+  fetchKeeperTransitions,
   pauseKeeper,
   resumeKeeper,
   shutdownKeeper,
@@ -775,11 +776,33 @@ export function KeeperDetailOverlay() {
   const [preserveSystemPrompt, setPreserveSystemPrompt] = useState(true)
   const [clearPending, setClearPending] = useState(false)
   const [checkpointRefreshToken, setCheckpointRefreshToken] = useState(0)
+  // Latest transition's wall_clock_at_decision, in unix seconds.  Used by
+  // the header KeeperPhaseAndStage to render "현재 phase에 머문 시간" without
+  // requiring a new backend field — derivation is plan-approved trade-off.
+  const [phaseEnteredAtSec, setPhaseEnteredAtSec] = useState<number | null>(null)
   const prevKeeperRef = useRef(keeper.name)
   if (prevKeeperRef.current !== keeper.name) {
     prevKeeperRef.current = keeper.name
     setDiagOpen(shouldOpenDiagnostics)
+    setPhaseEnteredAtSec(null)
   }
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchKeeperTransitions(keeper.name, 1, { signal: controller.signal })
+      .then(res => {
+        if (controller.signal.aborted) return
+        const head = res.transitions?.[0]
+        setPhaseEnteredAtSec(
+          typeof head?.wall_clock_at_decision === 'number' ? head.wall_clock_at_decision : null,
+        )
+      })
+      .catch(() => {
+        // transient fetch failure — leave dwell hidden rather than showing stale
+        if (controller.signal.aborted) return
+        setPhaseEnteredAtSec(null)
+      })
+    return () => controller.abort()
+  }, [keeper.name, keeper.phase])
   useEffect(() => {
     setClearDialogOpen(false)
     setClearReason('')
@@ -834,7 +857,7 @@ export function KeeperDetailOverlay() {
             <div class="flex flex-col gap-0.5">
               <div class="flex items-center gap-2.5">
                 <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
-                <${KeeperPhaseAndStage} phase=${keeper.phase} pipelineStage=${keeper.pipeline_stage} />
+                <${KeeperPhaseAndStage} phase=${keeper.phase} pipelineStage=${keeper.pipeline_stage} phaseEnteredAtSec=${phaseEnteredAtSec} />
                 ${(() => {
                   const series = keeper.metrics_series ?? []
                   const lastUsed = series.length > 0 ? series[series.length - 1]?.model_used : null

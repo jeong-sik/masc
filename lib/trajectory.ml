@@ -133,8 +133,10 @@ let entry_to_json ?(result_max_len = default_result_truncation) (e : tool_call_e
       (match e.result with
        | None -> `Null
        | Some r ->
-           if result_max_len > 0 && String.length r > result_max_len then
-             `String (String.sub r 0 result_max_len ^ "...")
+           if result_max_len > 0 then
+             `String (String_util.utf8_safe
+                        ~max_bytes:(result_max_len + 3) ~suffix:"..." r
+                      |> String_util.to_string)
            else `String r));
     ("duration_ms", `Int e.duration_ms);
     ("error", Json_util.string_opt_to_json e.error);
@@ -145,8 +147,10 @@ let default_thinking_truncation = 2000
 
 let thinking_entry_to_json ?(content_max_len = default_thinking_truncation) (e : thinking_entry) : Yojson.Safe.t =
   let content =
-    if content_max_len > 0 && String.length e.content > content_max_len then
-      String.sub e.content 0 content_max_len ^ "..."
+    if content_max_len > 0 then
+      String_util.utf8_safe ~max_bytes:(content_max_len + 3) ~suffix:"..."
+        e.content
+      |> String_util.to_string
     else e.content
   in
   `Assoc [

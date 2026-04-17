@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 import { Markdown } from "../common/markdown"
 import { useEffect, useState } from 'preact/hooks'
 import {
@@ -11,7 +12,20 @@ import {
 import { Card } from '../common/card'
 import { ErrorState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
-import { TextArea } from '../common/input'
+import { TextArea, TextInput } from '../common/input'
+import { FilterChips } from '../common/filter-chips'
+
+export type PromptSourceFilter = 'all' | PromptSource
+
+const SOURCE_CHIP_ORDER: PromptSourceFilter[] = ['all', 'file', 'override', 'default', 'missing']
+
+const SOURCE_LABELS: Record<PromptSourceFilter, string> = {
+  all: '전체',
+  file: '파일',
+  override: '오버라이드',
+  default: '기본값',
+  missing: '누락',
+}
 
 function sourceBadgeClass(source: PromptSource): string {
   switch (source) {
@@ -31,6 +45,43 @@ function normalizeDraft(prompt: DashboardPromptItem | null): string {
   return prompt.override_value ?? prompt.effective
 }
 
+// Pure helper: filter by source + substring search (case-insensitive).
+// Exported for unit testing.
+export function filterPrompts(
+  prompts: DashboardPromptItem[],
+  source: PromptSourceFilter,
+  query: string,
+): DashboardPromptItem[] {
+  const q = query.trim().toLowerCase()
+  return prompts.filter(p => {
+    if (source !== 'all' && p.source !== source) return false
+    if (!q) return true
+    return (
+      p.key.toLowerCase().includes(q) ||
+      p.category.toLowerCase().includes(q) ||
+      p.description.toLowerCase().includes(q)
+    )
+  })
+}
+
+// Exported for unit testing.
+export function promptSourceCounts(
+  prompts: DashboardPromptItem[],
+): Record<PromptSourceFilter, number> {
+  const counts: Record<PromptSourceFilter, number> = {
+    all: prompts.length,
+    file: 0,
+    override: 0,
+    default: 0,
+    missing: 0,
+  }
+  for (const p of prompts) counts[p.source] += 1
+  return counts
+}
+
+const sourceFilter = signal<PromptSourceFilter>('all')
+const searchQuery = signal('')
+
 export function PromptRegistryPanel() {
   const [prompts, setPrompts] = useState<DashboardPromptItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -40,7 +91,9 @@ export function PromptRegistryPanel() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
 
+  const visiblePrompts = filterPrompts(prompts, sourceFilter.value, searchQuery.value)
   const selectedPrompt = prompts.find(prompt => prompt.key === selectedKey) ?? prompts[0] ?? null
+  const counts = promptSourceCounts(prompts)
 
   async function loadPrompts(preferredKey?: string | null) {
     setLoading(true)
@@ -123,13 +176,41 @@ export function PromptRegistryPanel() {
       <div class="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div class="min-h-[260px] rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] p-2">
           <div class="mb-2 flex items-center justify-between gap-2 px-2">
-            <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">등록된 프롬프트</div>
+            <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">
+              등록된 프롬프트
+              ${sourceFilter.value !== 'all' || searchQuery.value
+                ? html`<span class="ml-1 normal-case tracking-normal text-[var(--text-muted)]">${visiblePrompts.length} / ${prompts.length}</span>`
+                : null}
+            </div>
             <${ActionButton} variant="ghost" size="sm" disabled=${loading || saving} onClick=${() => { void loadPrompts(selectedPrompt?.key ?? null) }}>
               ${loading ? '새로고침 중' : '새로고침'}
             <//>
           </div>
+          <div class="mb-2 px-2">
+            <${FilterChips}
+              chips=${SOURCE_CHIP_ORDER.map(key => ({
+                key,
+                label: SOURCE_LABELS[key],
+                count: counts[key],
+              }))}
+              active=${sourceFilter}
+            />
+          </div>
+          <div class="mb-2 px-2">
+            <${TextInput}
+              placeholder="key / category / 설명 검색"
+              ariaLabel="프롬프트 검색"
+              value=${searchQuery.value}
+              onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
+            />
+          </div>
           <div class="flex max-h-[520px] flex-col gap-2 overflow-y-auto pr-1">
-            ${prompts.map(prompt => html`
+            ${visiblePrompts.length === 0 ? html`
+              <div class="rounded-lg border border-dashed border-[var(--card-border)] px-3 py-6 text-center text-[11px] text-[var(--text-muted)]">
+                조건에 맞는 프롬프트가 없습니다.
+              </div>
+            ` : null}
+            ${visiblePrompts.map(prompt => html`
               <button
                 type="button"
                 class="rounded-lg border px-3 py-2 text-left transition-colors ${selectedPrompt?.key === prompt.key

@@ -69,7 +69,7 @@ let handle_keeper_board_tool
     Log.Keeper.info
       "handle_tool result: ok=%b msg=%s"
       ok
-      (if String.length msg > 200 then String.sub msg 0 200 ^ "..." else msg);
+      (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." msg |> String_util.to_string);
     tool_result_or_error result
   | "keeper_board_list" -> dispatch "masc_board_list" args
   | "keeper_board_get" -> dispatch "masc_board_get" args

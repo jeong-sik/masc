@@ -4,12 +4,49 @@ import { ErrorState } from './common/feedback-state'
 // Displays tool usage statistics from Tool_unified.summary_report()
 
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { fetchToolMetrics, type ToolMetricsResponse, type ToolMetricsTopEntry } from '../api'
 import { createAsyncResource } from '../lib/async-state'
+import { FilterChips } from './common/filter-chips'
+import { TextInput } from './common/input'
 import { toolCategory } from './tool-call-shared'
 
 const metricsResource = createAsyncResource<ToolMetricsResponse>()
+
+// Filter state (module-scoped so filters survive re-renders / refreshes).
+const categoryFilter = signal<string>('all')
+const searchQuery = signal('')
+
+// Pure filter helpers — exported for isolated testing.
+export function toolMatchesSearch(
+  item: Pick<ToolMetricsTopEntry, 'name'>,
+  query: string,
+): boolean {
+  const q = query.trim().toLowerCase()
+  if (q === '') return true
+  return item.name.toLowerCase().includes(q)
+}
+
+export function toolMatchesCategory(
+  item: Pick<ToolMetricsTopEntry, 'name'>,
+  category: string,
+): boolean {
+  if (category === 'all') return true
+  return toolCategory(item.name).label === category
+}
+
+export function filterTools<T extends Pick<ToolMetricsTopEntry, 'name'>>(
+  items: T[],
+  query: string,
+  category: string,
+): T[] {
+  const q = query.trim().toLowerCase()
+  if (q === '' && category === 'all') return items
+  return items.filter(
+    (it) => toolMatchesSearch(it, q) && toolMatchesCategory(it, category),
+  )
+}
 
 function loadMetrics() {
   return metricsResource.load(() => fetchToolMetrics())
@@ -140,10 +177,54 @@ export function ToolMetrics() {
           </div>
           <div>
             <h4 class="text-[var(--text-muted)] text-[11px] uppercase tracking-[0.05em] mb-2.5 mt-0">상위 20 도구</h4>
-            <${BarChart}
-              items=${data.top_20}
-              maxCount=${data.top_20.length > 0 ? data.top_20[0]!.call_count : 0}
-            />
+            ${(() => {
+              // Build category chips from labels actually present in top_20.
+              const labelCounts = new Map<string, number>()
+              for (const it of data.top_20) {
+                const label = toolCategory(it.name).label
+                labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1)
+              }
+              const categoryChips: { key: string; label: string; count: number }[] = [
+                { key: 'all', label: '전체', count: data.top_20.length },
+                ...Array.from(labelCounts.entries())
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([label, count]) => ({ key: label, label, count })),
+              ]
+              const filtered = filterTools(data.top_20, searchQuery.value, categoryFilter.value)
+              const filterMaxCount = filtered.length > 0 ? filtered[0]!.call_count : 0
+              return html`
+                <div class="flex flex-col gap-2 mb-3 sm:flex-row sm:items-center sm:justify-between">
+                  <${FilterChips}
+                    chips=${categoryChips}
+                    active=${categoryFilter}
+                  />
+                  <${TextInput}
+                    class="sm:max-w-[240px]"
+                    name="tool_metrics_search"
+                    ariaLabel="도구 이름 검색"
+                    autoComplete="off"
+                    placeholder="도구 이름 검색..."
+                    value=${searchQuery.value}
+                    onInput=${(e: Event) => {
+                      searchQuery.value = (e.target as HTMLInputElement).value
+                    }}
+                  />
+                </div>
+                ${(categoryFilter.value !== 'all' || searchQuery.value.trim() !== '') ? html`
+                  <div class="mb-2 text-[11px] text-[var(--text-muted)]">
+                    ${filtered.length} / ${data.top_20.length}개 도구
+                  </div>
+                ` : null}
+                ${filtered.length === 0 ? html`
+                  <p class="muted">조건에 맞는 도구가 없습니다.</p>
+                ` : html`
+                  <${BarChart}
+                    items=${filtered}
+                    maxCount=${filterMaxCount}
+                  />
+                `}
+              `
+            })()}
           </div>
         </div>
       ` : !loading ? html`

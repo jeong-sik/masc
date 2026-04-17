@@ -327,21 +327,12 @@ let test_digest_room_exposes_pending_confirm_attention () =
       Alcotest.(check bool) "operator judge runtime present" true
         (Yojson.Safe.Util.member "operator_judge_runtime" digest <> `Null);
       let attention_items = Yojson.Safe.Util.(digest |> member "attention_items" |> to_list) in
-      let review_queue = Yojson.Safe.Util.(digest |> member "review_queue" |> to_list) in
       Alcotest.(check bool) "pending confirm attention present" true
         (List.exists
            (fun item ->
              Yojson.Safe.Util.(item |> member "kind" |> to_string)
              = "pending_confirm_waiting")
            attention_items);
-      Alcotest.(check bool) "review queue has pending confirm" true
-        (List.exists
-           (fun item ->
-             Yojson.Safe.Util.(item |> member "kind" |> to_string)
-             = "pending_confirm")
-           review_queue);
-      Alcotest.(check int) "review summary active count" 1
-        Yojson.Safe.Util.(digest |> member "review_summary" |> member "active_count" |> to_int);
       Alcotest.(check bool) "attention provenance present" true
         (List.for_all
            (fun item ->

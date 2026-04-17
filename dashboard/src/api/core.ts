@@ -7,6 +7,7 @@ import type {
   OperatorDigest,
   OperatorSnapshot,
 } from '../types'
+import { parseOperatorActionResult } from './schemas/operator-action'
 import { resolveDashboardActorName, sanitizeDashboardActorName } from '../lib/dashboard-actor'
 
 // --- Auth ---
@@ -92,7 +93,7 @@ export {
 } from '../config/constants'
 const RETRYABLE_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504])
 
-class ApiRequestError extends Error {
+export class ApiRequestError extends Error {
   method: string
   path: string
   status?: number
@@ -120,6 +121,28 @@ class ApiRequestError extends Error {
     this.statusText = opts.statusText
     this.timeout = timeout
   }
+}
+
+export interface ApiErrorSummary {
+  message: string
+  status: number | null
+  path: string | null
+  timeout: boolean
+}
+
+export function extractApiError(err: unknown, fallbackMessage: string): ApiErrorSummary {
+  if (err instanceof ApiRequestError) {
+    return {
+      message: err.message,
+      status: err.status ?? null,
+      path: err.path,
+      timeout: err.timeout,
+    }
+  }
+  if (err instanceof Error) {
+    return { message: err.message, status: null, path: null, timeout: false }
+  }
+  return { message: fallbackMessage, status: null, path: null, timeout: false }
 }
 
 export async function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -461,20 +484,27 @@ function operatorActionTimeoutMs(body: OperatorActionRequest): number {
   }
 }
 
-export function runOperatorAction(body: OperatorActionRequest): Promise<OperatorActionResult> {
-  return post('/api/v1/operator/action', body, undefined, operatorActionTimeoutMs(body))
+export async function runOperatorAction(body: OperatorActionRequest): Promise<OperatorActionResult> {
+  const raw = await post<unknown>(
+    '/api/v1/operator/action',
+    body,
+    undefined,
+    operatorActionTimeoutMs(body),
+  )
+  return parseOperatorActionResult(raw)
 }
 
-export function confirmOperatorAction(
+export async function confirmOperatorAction(
   actor: string,
   confirmToken: string,
   decision: 'confirm' | 'deny' = 'confirm',
 ): Promise<OperatorActionResult> {
-  return post('/api/v1/operator/confirm', {
+  const raw = await post<unknown>('/api/v1/operator/confirm', {
     actor,
     confirm_token: confirmToken,
     decision,
   })
+  return parseOperatorActionResult(raw)
 }
 
 export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {

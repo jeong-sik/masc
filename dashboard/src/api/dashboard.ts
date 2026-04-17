@@ -11,6 +11,16 @@ import {
   normalizePendingConfirmation,
 } from './board'
 import { get, post, patch, withRetries, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
+import {
+  parseAgentRelationsResponse,
+  type AgentRelationsResponse,
+} from './schemas/agent-relations'
+import {
+  parseAgentTimelineResponse,
+  type AgentTimelineEvent,
+  type AgentTimelineResponse,
+} from './schemas/agent-timeline'
+import { parseLogsResponse, type LogEntry, type LogsResponse } from './schemas/logs'
 import type {
   KeeperConfig,
   KeeperFeatureStatus,
@@ -51,55 +61,10 @@ export function fetchDashboardShell(opts?: AbortableRequestOptions): Promise<Das
 
 // --- System logs ---
 
-export interface LogEntry {
-  seq: number
-  ts: string
-  level: string
-  raw_level: string
-  normalized_level: string
-  source: string
-  legacy_classified: boolean
-  module: string
-  message: string
-  details?: Record<string, unknown> | null
-}
+export type { LogEntry, LogsResponse }
+export { LogsSchemaDriftError } from './schemas/logs'
 
-export interface LogsResponse {
-  total: number
-  entries: LogEntry[]
-}
-
-function decodeLogEntry(raw: unknown): LogEntry | null {
-  if (!isRecord(raw)) return null
-  const seq = asNumber(raw.seq)
-  const ts = asString(raw.ts)
-  const message = asString(raw.message)
-  if (seq === undefined || !ts || !message) return null
-  return {
-    seq,
-    ts,
-    level: asString(raw.level, 'INFO'),
-    raw_level: asString(raw.raw_level, asString(raw.level, 'INFO')),
-    normalized_level: asString(raw.normalized_level, asString(raw.level, 'INFO')),
-    source: asString(raw.source, 'structured'),
-    legacy_classified: asBoolean(raw.legacy_classified, false),
-    module: asString(raw.module, ''),
-    message,
-    details: isRecord(raw.details) ? raw.details : null,
-  }
-}
-
-function decodeLogsResponse(raw: unknown): LogsResponse | null {
-  if (!isRecord(raw)) return null
-  return {
-    total: asNumber(raw.total, 0),
-    entries: asRecordArray(raw.entries)
-      .map(decodeLogEntry)
-      .filter((entry): entry is LogEntry => entry !== null),
-  }
-}
-
-export function fetchLogs(opts?: {
+export async function fetchLogs(opts?: {
   limit?: number
   level?: string
   module?: string
@@ -113,12 +78,8 @@ export function fetchLogs(opts?: {
     params.set('since_seq', String(opts.since_seq))
   }
   const qs = params.toString()
-  return get<Record<string, unknown>>(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
-    .then((raw) => {
-      const decoded = decodeLogsResponse(raw)
-      if (!decoded) throw new Error('invalid logs payload')
-      return decoded
-    })
+  const raw = await get<unknown>(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
+  return parseLogsResponse(raw)
 }
 
 export interface ToolHostFailureReport {
@@ -140,57 +101,30 @@ export function reportToolHostFailure(
   return post('/api/v1/dashboard/logs/tool-host-failures', report, undefined, 3000)
 }
 
-export interface AgentTimelineEvent {
-  ts: string
-  type: string
-  detail: Record<string, unknown>
-}
+export type { AgentTimelineEvent, AgentTimelineResponse }
+export { AgentTimelineSchemaDriftError } from './schemas/agent-timeline'
 
-export interface AgentTimelineResponse {
-  agent: string
-  period: { from: string; to: string }
-  events: AgentTimelineEvent[]
-  summary: {
-    tasks_completed: number
-    tasks_claimed: number
-    messages_sent: number
-    tool_calls?: number
-    active_duration_minutes: number
-    total_events: number
-  }
-}
-
-export function fetchAgentTimeline(
+export async function fetchAgentTimeline(
   agentName: string,
   sinceHours = 4,
   limit = 20,
 ): Promise<AgentTimelineResponse> {
-  return get(`/api/v1/agent-timeline?agent_name=${encodeURIComponent(agentName)}&since_hours=${sinceHours}&limit=${limit}`)
+  const raw = await get<unknown>(
+    `/api/v1/agent-timeline?agent_name=${encodeURIComponent(agentName)}&since_hours=${sinceHours}&limit=${limit}`,
+  )
+  return parseAgentTimelineResponse(raw)
 }
 
-export type AgentCollaborator = {
-  name: string
-  collaborations: number
-  last_collab: string | null
-}
+export type {
+  AgentCollaborator,
+  AgentRelation,
+  AgentRelationsResponse,
+} from './schemas/agent-relations'
+export { AgentRelationsSchemaDriftError } from './schemas/agent-relations'
 
-export type AgentRelation = {
-  type: string
-  category: string | null
-  confidence: number | null
-  note: string | null
-  participants: { kind: string; display_name: string | null; role: string | null }[]
-}
-
-export type AgentRelationsResponse = {
-  agent_name: string
-  collaborators: AgentCollaborator[]
-  interests: string[]
-  relations: AgentRelation[]
-}
-
-export function fetchAgentRelations(agentName: string): Promise<AgentRelationsResponse> {
-  return get(`/api/v1/agent-relations?agent_name=${encodeURIComponent(agentName)}`)
+export async function fetchAgentRelations(agentName: string): Promise<AgentRelationsResponse> {
+  const raw = await get<unknown>(`/api/v1/agent-relations?agent_name=${encodeURIComponent(agentName)}`)
+  return parseAgentRelationsResponse(raw)
 }
 
 export interface ConfigEntry {

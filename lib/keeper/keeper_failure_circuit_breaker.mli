@@ -27,3 +27,65 @@ val maybe_enrich_error : keeper_name:string -> error_msg:string -> string
 
 (** JSON snapshot of all breaker states for diagnostics. *)
 val snapshot_json : unit -> Yojson.Safe.t
+
+(** {1 Observable display state (LT-16-KCB)}
+
+    The internal breaker advances through several micro-states during
+    [record_failure], but [tripped] is NOT observable — on trip, the
+    function immediately resets [consecutive_count] to 0 and only
+    [total_tripped] increments. Any snapshot taken between tool calls
+    therefore reports one of three stable states:
+
+    - ["clean"]   — never failed: [consecutive_count = 0] AND
+                    [total_tripped = 0].
+    - ["warning"] — partial failure streak: [consecutive_count > 0]
+                    (always below [threshold] because a trip resets it).
+    - ["cooling"] — recovered from at least one trip:
+                    [consecutive_count = 0] AND [total_tripped > 0].
+
+    Exposed so downstream observers (the composite-FSM matrix, test
+    harnesses) can classify a KCB snapshot without reaching into the
+    private mutable record.
+
+    @since v0.10.x — LT-16-KCB Phase 1. *)
+
+(** Display state derived from raw counter values. *)
+type display_state =
+  | Clean
+  | Warning
+  | Cooling
+
+(** Pure classifier: [derive_display_state ~consecutive_count ~total_tripped].
+    Does not care about [threshold] — [consecutive_count] above threshold
+    cannot occur in a well-formed record (the mutator resets on trip),
+    so any non-zero count is classified as [Warning]. *)
+val derive_display_state :
+  consecutive_count:int ->
+  total_tripped:int ->
+  display_state
+
+(** Lower-case string rendering ([clean | warning | cooling]). *)
+val display_state_to_string : display_state -> string
+
+(** Per-keeper display state lookup. Returns [Clean] for keepers that
+    have never entered the internal state table — matching the
+    "never failed" semantic. Safe to call from any fiber; acquires
+    the same read lock as {!snapshot_json}.
+
+    Single-keeper alternative to classifying a whole snapshot — used by
+    the composite observer so fleet snapshotting stays O(fleet). *)
+val display_state_of :
+  keeper_name:string ->
+  display_state
+
+(** Walk the JSON produced by {!snapshot_json} and return an association
+    list from [keeper_name] to its display state. Returns [Error msg] if
+    the JSON is not shaped as expected. Useful for composite observers
+    that need to fold KCB state into a fleet matrix row.
+
+    Unknown / missing fields on a per-entry basis are skipped silently
+    rather than failing the whole walk, so one malformed record does not
+    hide the rest. *)
+val classify_snapshot_json :
+  Yojson.Safe.t ->
+  ((string * display_state) list, string) result

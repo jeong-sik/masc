@@ -21,6 +21,7 @@ type status = Running | Completed | Stopped | Error
 
 type loop_state = {
   loop_id : string;
+  author : string option;
   goal : string;
   metric_fn : string;
   model_model : string;
@@ -64,6 +65,7 @@ type swarm_link = {
 
 type persisted_summary = {
   loop_id : string;
+  author : string option;
   status : status;
   current_cycle : int;
   baseline : float;

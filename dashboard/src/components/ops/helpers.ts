@@ -158,8 +158,8 @@ export function workflowTargetReady(
 }
 
 export async function executeAction(input: {
-  action_type: 'broadcast' | 'namespace_pause' | 'namespace_resume' | 'room_pause' | 'room_resume' | 'task_inject' | 'keeper_message' | 'keeper_probe' | 'keeper_recover' | 'review_resolve' | 'review_defer'
-  target_type: 'root' | 'namespace' | 'room' | 'keeper' | 'review_item'
+  action_type: 'broadcast' | 'namespace_pause' | 'namespace_resume' | 'room_pause' | 'room_resume' | 'task_inject' | 'keeper_message' | 'keeper_probe' | 'keeper_recover'
+  target_type: 'root' | 'namespace' | 'room' | 'keeper'
   target_id?: string
   payload: Record<string, unknown>
   successMessage: string

@@ -19,6 +19,7 @@
  */
 
 import {
+  array,
   boolean,
   fallback,
   nullable,
@@ -26,11 +27,12 @@ import {
   object,
   optional,
   picklist,
-  safeParse,
   string,
   type BaseIssue,
   type InferOutput,
 } from 'valibot'
+
+import { SchemaDriftError, parseOrThrow } from './drift-error'
 
 // The FSM enums below use `fallback` (not hard-rejection) because
 // Keeper state machines evolve asymmetrically: the OCaml backend
@@ -77,6 +79,16 @@ const KeeperCompositeCompactionStageSchema = fallback(
   'accumulating',
 )
 
+// LT-16-KCB Phase 3: 6th axis. KCB is counter-based, not a classical
+// Closed/Open/Half_open FSM — only three states are observable between
+// tool calls because `record_failure` resets `consecutive_count` to 0
+// inside the trip transition. See
+// `lib/keeper/keeper_failure_circuit_breaker.mli`.
+const KeeperCompositeCircuitBreakerStateSchema = fallback(
+  picklist(['clean', 'warning', 'cooling']),
+  'clean',
+)
+
 const KeeperCompositeAutoRulesSchema = object({
   reflect: boolean(),
   plan: boolean(),
@@ -116,6 +128,16 @@ export const KeeperCompositeSnapshotSchema = object({
   decision: object({ stage: KeeperCompositeDecisionStageSchema }),
   cascade: object({ state: KeeperCompositeCascadeStateSchema }),
   compaction: object({ stage: KeeperCompositeCompactionStageSchema }),
+  // `circuit_breaker` is `optional` during the Phase 2 → Phase 3
+  // rollout window: pinned backends that have not yet picked up
+  // PR #7801 emit snapshots without this key, and the dashboard must
+  // keep rendering instead of hard-failing the parse. Once the
+  // backend pin catches up everywhere, a follow-up can drop
+  // `optional` (promote the key to required with the `clean` fallback
+  // alone).
+  circuit_breaker: optional(
+    object({ state: KeeperCompositeCircuitBreakerStateSchema }),
+  ),
   measurement: KeeperCompositeMeasurementSchema,
   invariants: KeeperCompositeInvariantsSchema,
   is_live: boolean(),
@@ -131,27 +153,37 @@ export type KeeperCompositeTurnPhase = InferOutput<typeof KeeperCompositeTurnPha
 export type KeeperCompositeDecisionStage = InferOutput<typeof KeeperCompositeDecisionStageSchema>
 export type KeeperCompositeCascadeState = InferOutput<typeof KeeperCompositeCascadeStateSchema>
 export type KeeperCompositeCompactionStage = InferOutput<typeof KeeperCompositeCompactionStageSchema>
+export type KeeperCompositeCircuitBreakerState = InferOutput<typeof KeeperCompositeCircuitBreakerStateSchema>
 
-export class CompositeSchemaDriftError extends Error {
-  readonly issues: readonly BaseIssue<unknown>[]
+export class CompositeSchemaDriftError extends SchemaDriftError {
   constructor(issues: readonly BaseIssue<unknown>[]) {
-    const summary = issues
-      .slice(0, 3)
-      .map(issue => {
-        const path = issue.path?.map(p => String(p.key)).join('.') ?? '<root>'
-        return `${path}: ${issue.message}`
-      })
-      .join('; ')
-    super(`composite schema drift: ${summary}`)
-    this.name = 'CompositeSchemaDriftError'
-    this.issues = issues
+    super('composite', issues)
   }
 }
 
 export function parseKeeperCompositeSnapshot(data: unknown): KeeperCompositeSnapshot {
-  const result = safeParse(KeeperCompositeSnapshotSchema, data)
-  if (!result.success) {
-    throw new CompositeSchemaDriftError(result.issues)
-  }
-  return result.output
+  return parseOrThrow(CompositeSchemaDriftError, KeeperCompositeSnapshotSchema, data)
+}
+
+// ── Fleet composite (LT-16a) ─────────────────────────────
+//
+// Backend: GET /api/v1/keepers/composite returns every registered
+// keeper in one envelope. Reuses the per-keeper snapshot shape so the
+// matrix UI (LT-16b, dashboard/src/components/fleet-fsm-matrix.ts) can
+// share render logic between single-keeper detail and fleet views.
+//
+// Each poll bumps the masc_keeper_invariant_violations_total counter
+// for any violating keeper (documented poll-triggered behaviour,
+// docs/observability/cascade-metrics.md §masc_keeper_invariant_violations_total).
+
+export const FleetCompositeSnapshotSchema = object({
+  generated_at: number(),
+  count: number(),
+  snapshots: array(KeeperCompositeSnapshotSchema),
+})
+
+export type FleetCompositeSnapshot = InferOutput<typeof FleetCompositeSnapshotSchema>
+
+export function parseFleetCompositeSnapshot(data: unknown): FleetCompositeSnapshot {
+  return parseOrThrow(CompositeSchemaDriftError, FleetCompositeSnapshotSchema, data)
 }

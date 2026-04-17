@@ -111,6 +111,13 @@ type invariants_check = {
   event_priority_monotone : bool;
 }
 
+(** Increment [masc_keeper_invariant_violations_total\{keeper, invariant\}]
+    once per violated invariant. No-op when all invariants hold. Called
+    automatically from [observe]; exposed so unit tests can assert the
+    counter bump without going through the full snapshot pipeline. *)
+val bump_invariant_violations :
+  keeper_name:string -> invariants_check -> unit
+
 (** Frozen outcome of the most recently completed turn (RFC-0003
     Phase 2). Surfaces terminal data ([Done]/[Guard_ok]/...) without
     polluting the live sub-FSM fields. [None] until the first turn
@@ -132,6 +139,11 @@ type snapshot = {
   kdp_decision : decision_stage;
   kcl_cascade_state : cascade_state;
   kmc_compaction : compaction_stage;
+  kcb_state : Keeper_failure_circuit_breaker.display_state;
+      (** 6th axis (LT-16-KCB). Observable circuit-breaker state —
+          never [Tripped] because the mutator resets [consecutive_count]
+          before snapshots can see it. See
+          {!Keeper_failure_circuit_breaker.display_state}. *)
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
   invariants : invariants_check;
   is_live : bool;
@@ -159,6 +171,11 @@ val observe :
   ?now:float ->
   Keeper_registry.registry_entry ->
   snapshot
+
+(** Observe every registered keeper under [base_path] once. Used by
+    [GET /api/v1/keepers/composite] to render fleet-level matrices
+    (LT-16a). Preserves registry iteration order. *)
+val all_snapshots : base_path:string -> unit -> snapshot list
 
 (** Stringify [turn_phase] for JSON serialisation. Mirrors the lowercase
     edge labels used in KeeperTurnCycle.tla. *)

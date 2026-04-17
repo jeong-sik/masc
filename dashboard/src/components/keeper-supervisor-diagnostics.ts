@@ -3,8 +3,22 @@
 // Extracted from keeper-detail.ts to reduce file size.
 
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 import { formatTimeAgo } from '../lib/format-time'
+import { FilterChips } from './common/filter-chips'
+import {
+  groupCrashCohorts,
+  filterCrashLog,
+  CRASH_CATEGORY_KEYS,
+  type CrashCategory,
+} from './keeper-supervisor-helpers'
 import type { Keeper, KeeperSupervisorCrashLogEntry } from '../types'
+
+type CrashFilterKey = 'all' | CrashCategory
+
+// Module-level signals (per-keeper instance ok — panel only renders for active keeper).
+const crashCategoryFilter = signal<CrashFilterKey>('all')
+const crashShowAll = signal<boolean>(false)
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -33,37 +47,35 @@ function registryStateBadge(state: string | null) {
   return html`<span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-semibold ${c.bg} ${c.text}">${state}</span>`
 }
 
+const COHORT_COLORS: Record<CrashCategory, string> = {
+  heartbeat: '#f59e0b',
+  turn: '#ef4444',
+  fiber: '#8b5cf6',
+  exception: '#ec4899',
+  other: '#6b7280',
+}
+
 function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntry[] }) {
   if (!crash_log || crash_log.length === 0) return null
-  const cohorts: Record<string, number> = {}
-  for (const e of crash_log) {
-    const reason = e.reason ?? 'unknown'
-    const key = reason.startsWith('heartbeat') ? 'heartbeat'
-      : reason.startsWith('turn') ? 'turn'
-      : reason.startsWith('fiber') ? 'fiber'
-      : reason.startsWith('exception') ? 'exception'
-      : 'other'
-    cohorts[key] = (cohorts[key] ?? 0) + 1
-  }
+  const cohorts = groupCrashCohorts(crash_log)
   const total = crash_log.length
-  const colors: Record<string, string> = {
-    heartbeat: '#f59e0b', turn: '#ef4444', fiber: '#8b5cf6',
-    exception: '#ec4899', other: '#6b7280',
-  }
+  const entries = CRASH_CATEGORY_KEYS
+    .map((key) => [key, cohorts[key] ?? 0] as const)
+    .filter(([, count]) => count > 0)
   return html`
     <div>
       <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">장애 유형 분포</div>
       <div class="flex w-full h-3 rounded-full overflow-hidden bg-[var(--white-5)]">
-        ${Object.entries(cohorts).map(([key, count]) => html`
-          <div style="width: ${(count / total * 100).toFixed(1)}%; background: ${colors[key] ?? '#6b7280'}"
+        ${entries.map(([key, count]) => html`
+          <div style="width: ${(count / total * 100).toFixed(1)}%; background: ${COHORT_COLORS[key]}"
                title="${key}: ${count}건 (${(count / total * 100).toFixed(0)}%)"
                class="h-full"></div>
         `)}
       </div>
       <div class="flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
-        ${Object.entries(cohorts).map(([key, count]) => html`
+        ${entries.map(([key, count]) => html`
           <span class="text-[10px] text-[var(--text-muted)] flex items-center gap-1">
-            <span class="inline-block w-2 h-2 rounded-full" style="background: ${colors[key] ?? '#6b7280'}"></span>
+            <span class="inline-block w-2 h-2 rounded-full" style="background: ${COHORT_COLORS[key]}"></span>
             ${key} ${count}
           </span>
         `)}
@@ -154,19 +166,51 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
           </div>
         ` : null}
         <${CrashCohortBar} crash_log=${crash_log} />
-        ${crash_log && crash_log.length > 0 ? html`
-          <div>
-            <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">장애 이력</div>
-            <div class="space-y-1 max-h-32 overflow-y-auto">
-              ${crash_log.slice(0, 10).map((e: any) => html`
-                <div class="flex items-center justify-between py-1 px-2 rounded text-[11px] bg-[var(--white-3)]">
-                  <span class="font-mono text-[var(--text-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
-                  <span class="text-[#fb7185]">${e.reason ?? 'unknown'}</span>
-                </div>
-              `)}
+        ${crash_log && crash_log.length > 0 ? (() => {
+          const cohorts = groupCrashCohorts(crash_log)
+          const filtered = filterCrashLog(crash_log, crashCategoryFilter.value)
+          const visible = crashShowAll.value ? filtered : filtered.slice(0, 10)
+          const chips: { key: CrashFilterKey; label: string; count: number }[] = [
+            { key: 'all', label: '전체', count: crash_log.length },
+            ...CRASH_CATEGORY_KEYS
+              .filter((k) => (cohorts[k] ?? 0) > 0)
+              .map((k) => ({ key: k as CrashFilterKey, label: k, count: cohorts[k] ?? 0 })),
+          ]
+          return html`
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)]">장애 이력</div>
+                ${filtered.length > 10 ? html`
+                  <button type="button"
+                    class="text-[10px] font-medium px-2 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)] transition-colors"
+                    onClick=${() => { crashShowAll.value = !crashShowAll.value }}
+                    aria-pressed=${crashShowAll.value}>
+                    ${crashShowAll.value ? `최근 10건 보기` : `전체 ${filtered.length}건 보기`}
+                  </button>
+                ` : null}
+              </div>
+              ${chips.length > 1 ? html`
+                <${FilterChips}
+                  chips=${chips}
+                  active=${crashCategoryFilter}
+                  size="sm"
+                  tone="accent"
+                  class="mb-2"
+                />
+              ` : null}
+              <div class="space-y-1 ${crashShowAll.value ? 'max-h-64' : 'max-h-32'} overflow-y-auto">
+                ${visible.length === 0 ? html`
+                  <div class="py-2 px-2 text-[11px] text-[var(--text-muted)] italic">선택된 카테고리에 해당하는 장애가 없습니다.</div>
+                ` : visible.map((e) => html`
+                  <div class="flex items-center justify-between py-1 px-2 rounded text-[11px] bg-[var(--white-3)]">
+                    <span class="font-mono text-[var(--text-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
+                    <span class="text-[#fb7185]">${e.reason ?? 'unknown'}</span>
+                  </div>
+                `)}
+              </div>
             </div>
-          </div>
-        ` : null}
+          `
+        })() : null}
         <${SpEventsPanel} sp_events=${sp_events} />
       </div>
     <//>

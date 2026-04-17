@@ -1,14 +1,25 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/coord/
+  - lib/tool_task.ml
+  - lib/tool_agent.ml
+  - lib/tool_worktree.ml
+  - lib/tool_control.ml
+---
+
 # Room Coordination
 
 | 항목 | 값 |
 |------|-----|
 | Status | Draft |
 | Team | Room |
-| Maps to | `lib/room/` (sub-library, ~7.9K LOC) |
+| Maps to | `lib/coord/` (sub-library, ~7.6K LOC) |
 | Dependencies | 02-types-and-invariants |
-| Modules | 30 (.ml) + 5 (.mli) |
-| LOC | ~7,856 |
-| MCP Tools | `tool_room`, `tool_task`, `tool_agent`, `tool_heartbeat`, `tool_worktree`, `tool_control`, `tool_social` (vote) |
+| Modules | 20 (.ml) + 4 (.mli) |
+| LOC | ~7,653 |
+| MCP Tools | `tool_task`, `tool_agent`, `tool_worktree`, `tool_control` |
 
 ---
 

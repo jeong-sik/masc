@@ -34,11 +34,8 @@ type board_sse_event =
   | Post_voted of { post_id : string; voter : string; direction : Board.vote_direction }
   | Comment_voted of { comment_id : string; voter : string; direction : Board.vote_direction }
 
-let backend_state : backend_state ref = ref Uninitialized
+let backend_state : backend_state Atomic.t = Atomic.make Uninitialized
 
-let board_mu = Eio.Mutex.create ()
-let with_board_rw f = Eio_guard.with_mutex board_mu f
-let with_board_ro f = Eio_guard.with_mutex_ro board_mu f
 
 let keeper_board_signal_hook : (keeper_board_signal -> unit) option Atomic.t = Atomic.make None
 
@@ -61,22 +58,23 @@ let emit_board_sse_event event =
   | None -> ()
 
 let is_initialized () =
-  with_board_ro (fun () ->
-    match !backend_state with
-    | Active _ -> true
-    | Uninitialized -> false)
+  match Atomic.get backend_state with
+  | Active _ -> true
+  | Uninitialized -> false
 
 let init_jsonl () =
-  with_board_rw (fun () ->
-    if match !backend_state with Active _ -> true | Uninitialized -> false then
-      Log.BoardLog.warn "already initialized, ignoring init_jsonl"
-    else begin
-      backend_state := Active (Jsonl (Board.global ()));
+  if match Atomic.get backend_state with Active _ -> true | Uninitialized -> false then
+    Log.BoardLog.warn "already initialized, ignoring init_jsonl"
+  else begin
+    let backend = Active (Jsonl (Board.global ())) in
+    if Atomic.compare_and_set backend_state Uninitialized backend then
       Log.BoardLog.info "JSONL backend initialized"
-    end)
+    else
+      Log.BoardLog.warn "already initialized concurrently, ignoring init_jsonl"
+  end
 
 let reset_for_test () =
-  with_board_rw (fun () -> backend_state := Uninitialized)
+  Atomic.set backend_state Uninitialized
 
 let jsonl_forced () =
   match Env_config.Board.backend_opt () with
@@ -84,17 +82,16 @@ let jsonl_forced () =
   | Some (Env_config.Board.Pg | Env_config.Board.Unknown_backend _) | None -> false
 
 let backend () =
-  with_board_rw (fun () ->
-    match !backend_state with
-    | Active backend -> backend
-    | Uninitialized ->
-        Log.BoardLog.warn "backend() called before server init, auto-initializing JSONL";
-        backend_state := Active (Jsonl (Board.global ()));
-        Log.BoardLog.info "JSONL backend initialized";
-        match !backend_state with
-        | Active backend -> backend
-        | Uninitialized ->
-            raise (Failure "[Board_dispatch] auto-init failed to activate backend"))
+  match Atomic.get backend_state with
+  | Active backend -> backend
+  | Uninitialized ->
+      Log.BoardLog.warn "backend() called before server init, auto-initializing JSONL";
+      let b = Jsonl (Board.global ()) in
+      let backend_val = Active b in
+      let _ = Atomic.compare_and_set backend_state Uninitialized backend_val in
+      match Atomic.get backend_state with
+      | Active active_b -> active_b
+      | Uninitialized -> b
 
 let sort_posts_in_memory ~sort_by (posts : Board.post list) =
   match sort_by with
@@ -345,10 +342,9 @@ let search ~query ~limit =
       Board.search_posts store ~predicate ~limit
 
 let flush () =
-  with_board_ro (fun () ->
-    match !backend_state with
-    | Active (Jsonl store) -> Board.flush_dirty store
-    | Uninitialized -> ())
+  match Atomic.get backend_state with
+  | Active (Jsonl store) -> Board.flush_dirty store
+  | Uninitialized -> ()
 
 let sweep () =
   match backend () with
@@ -370,7 +366,6 @@ let reclassify_posts ?(limit = 5200) ?(dry_run = true) () =
   | Jsonl store -> Board.reclassify_posts store ~limit ~dry_run ()
 
 let backend_name () =
-  with_board_ro (fun () ->
-    match !backend_state with
-    | Active (Jsonl _) -> "jsonl"
-    | Uninitialized -> "uninitialized")
+  match Atomic.get backend_state with
+  | Active (Jsonl _) -> "jsonl"
+  | Uninitialized -> "uninitialized"

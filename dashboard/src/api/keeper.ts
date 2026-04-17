@@ -9,8 +9,19 @@ import type { KeeperConversationDetails } from '../types'
 import { currentDashboardActor, jsonHeaders, runOperatorAction, fetchWithTimeout, DEFAULT_GET_TIMEOUT_MS } from './core'
 import {
   parseKeeperCompositeSnapshot,
+  parseFleetCompositeSnapshot,
   type KeeperCompositeSnapshot,
+  type FleetCompositeSnapshot,
 } from './schemas/keeper-composite'
+import {
+  safeParseKeeperChatHistoryMessage,
+  type KeeperChatHistoryMessage,
+} from './schemas/keeper-chat-history'
+import {
+  parseKeeperTransitionsResponse,
+  type KeeperTransition,
+  type KeeperTransitionsResponse,
+} from './schemas/keeper-transitions'
 
 export type {
   KeeperCompositeSnapshot,
@@ -22,12 +33,22 @@ export type {
   KeeperCompositeDecisionStage,
   KeeperCompositeCascadeState,
   KeeperCompositeCompactionStage,
+  FleetCompositeSnapshot,
 } from './schemas/keeper-composite'
 export {
   KeeperCompositeSnapshotSchema,
+  FleetCompositeSnapshotSchema,
   parseKeeperCompositeSnapshot,
+  parseFleetCompositeSnapshot,
   CompositeSchemaDriftError,
 } from './schemas/keeper-composite'
+export type { KeeperChatHistoryMessage } from './schemas/keeper-chat-history'
+export {
+  KeeperChatHistoryMessageSchema,
+  safeParseKeeperChatHistoryMessage,
+} from './schemas/keeper-chat-history'
+export type { KeeperTransition, KeeperTransitionsResponse }
+export { KeeperTransitionsSchemaDriftError } from './schemas/keeper-transitions'
 
 // --- Types ---
 
@@ -206,12 +227,6 @@ export async function streamKeeperMessage(
 
 // --- Chat history ---
 
-export interface KeeperChatHistoryMessage {
-  role: string
-  content: string
-  ts: number
-}
-
 export async function fetchKeeperChatHistory(
   name: string,
 ): Promise<KeeperChatHistoryMessage[]> {
@@ -223,13 +238,12 @@ export async function fetchKeeperChatHistory(
     if (!resp.ok) return []
     const data: unknown = await resp.json()
     if (!Array.isArray(data)) return []
-    return data.filter(
-      (m): m is KeeperChatHistoryMessage =>
-        isRecord(m) &&
-        typeof m.role === 'string' &&
-        typeof m.content === 'string' &&
-        typeof m.ts === 'number',
-    )
+    // Per-item safeParse: drop invalid entries silently to match the prior
+    // hand-rolled type guard. Individual failures are non-fatal; operators
+    // keep seeing a clean transcript during backend drift windows.
+    return data
+      .map(safeParseKeeperChatHistoryMessage)
+      .filter((m): m is KeeperChatHistoryMessage => m !== null)
   } catch {
     return []
   }
@@ -502,21 +516,6 @@ export async function editKeeperTools(
 
 // --- Keeper observability API ---
 
-export interface KeeperTransition {
-  prev_phase: string
-  new_phase: string
-  selected_event: unknown
-  wall_clock_at_decision: number
-  transition_outcome: string
-}
-
-export interface KeeperTransitionsResponse {
-  keeper: string
-  current_phase: string | null
-  count: number
-  transitions: KeeperTransition[]
-}
-
 export interface MemoryKindUsageEntry {
   kind: string
   used: number
@@ -552,7 +551,7 @@ export async function fetchKeeperTransitions(
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`transitions fetch failed: ${resp.status}`)
-  return resp.json() as Promise<KeeperTransitionsResponse>
+  return parseKeeperTransitionsResponse(await resp.json())
 }
 
 export async function fetchKeeperStateDiagram(
@@ -579,6 +578,23 @@ export async function fetchKeeperComposite(
   )
   if (!resp.ok) throw new Error(`composite fetch failed: ${resp.status}`)
   return parseKeeperCompositeSnapshot(await resp.json())
+}
+
+/**
+ * LT-16a: fetch the fleet-wide composite snapshot in one envelope.
+ * Backend reuses the same per-snapshot shape as fetchKeeperComposite,
+ * wrapped in { generated_at, count, snapshots: [...] }.
+ */
+export async function fetchKeepersComposite(
+  opts?: { signal?: AbortSignal },
+): Promise<FleetCompositeSnapshot> {
+  const resp = await fetchWithTimeout(
+    `/api/v1/keepers/composite`,
+    { headers: jsonHeaders(), signal: opts?.signal },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!resp.ok) throw new Error(`fleet composite fetch failed: ${resp.status}`)
+  return parseFleetCompositeSnapshot(await resp.json())
 }
 
 // --- Eval Quality (RFC-MASC-005 Phase 3) ---

@@ -1,21 +1,12 @@
 import { post } from './core'
-import { isRecord, asString } from '../components/common/normalize'
+import { isRecord } from '../components/common/normalize'
+import {
+  safeParseLinkPreview,
+  type LinkPreview,
+  type LinkPreviewKind,
+} from './schemas/link-previews'
 
-export type LinkPreviewKind = 'link' | 'image'
-
-export interface LinkPreview {
-  url: string
-  kind: LinkPreviewKind
-  canonical_url?: string | null
-  title?: string | null
-  description?: string | null
-  site_name?: string | null
-  image_url?: string | null
-  favicon_url?: string | null
-  content_type?: string | null
-  fetched_at?: string | null
-  cache_state?: string | null
-}
+export type { LinkPreview, LinkPreviewKind }
 
 interface LinkPreviewResponse {
   previews?: Record<string, unknown>
@@ -30,26 +21,6 @@ interface CacheEntry {
 const LOCAL_PREVIEW_TTL_MS = 15 * 60 * 1000
 const LOCAL_ERROR_TTL_MS = 5 * 60 * 1000
 const previewCache = new Map<string, CacheEntry>()
-
-function normalizeLinkPreview(raw: unknown): LinkPreview | null {
-  if (!isRecord(raw)) return null
-  const url = asString(raw.url)
-  const kind = asString(raw.kind)
-  if (!url || (kind !== 'link' && kind !== 'image')) return null
-  return {
-    url,
-    kind,
-    canonical_url: asString(raw.canonical_url) ?? null,
-    title: asString(raw.title) ?? null,
-    description: asString(raw.description) ?? null,
-    site_name: asString(raw.site_name) ?? null,
-    image_url: asString(raw.image_url) ?? null,
-    favicon_url: asString(raw.favicon_url) ?? null,
-    content_type: asString(raw.content_type) ?? null,
-    fetched_at: asString(raw.fetched_at) ?? null,
-    cache_state: asString(raw.cache_state) ?? null,
-  }
-}
 
 function shouldUseCached(entry: CacheEntry | undefined): entry is CacheEntry {
   return Boolean(entry && entry.expiresAt > Date.now())
@@ -78,10 +49,10 @@ export async function fetchLinkPreviews(urls: string[]): Promise<Record<string, 
   const errors = isRecord(raw.errors) ? raw.errors : {}
 
   for (const url of missing) {
-    const preview = normalizeLinkPreview(previews[url])
-    if (preview) {
-      previewCache.set(url, { preview, expiresAt: Date.now() + LOCAL_PREVIEW_TTL_MS })
-      result[url] = preview
+    const parsed = safeParseLinkPreview(previews[url])
+    if (parsed.success) {
+      previewCache.set(url, { preview: parsed.output, expiresAt: Date.now() + LOCAL_PREVIEW_TTL_MS })
+      result[url] = parsed.output
       continue
     }
 

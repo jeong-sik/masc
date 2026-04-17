@@ -1715,7 +1715,7 @@ let run_grpc_heartbeat_stream
       recv
   =
   let rec tick () =
-    if Atomic.get stop || !close_ref
+    if Atomic.get stop || Atomic.get close_ref
     then ()
     else (
       (try
@@ -1727,7 +1727,7 @@ let run_grpc_heartbeat_stream
        | Eio.Cancel.Cancelled _ as e -> raise e
        | End_of_file -> raise End_of_file
        | exn -> Log.Keeper.error "gRPC heartbeat tick error: %s" (Printexc.to_string exn));
-      if not (Atomic.get stop || !close_ref)
+      if not (Atomic.get stop || Atomic.get close_ref)
       then (
         let no_wakeup = Atomic.make false in
         interruptible_sleep ~clock ~stop ~wakeup:no_wakeup interval_sec;
@@ -1778,11 +1778,11 @@ let run_grpc_heartbeat_fiber
     Log.Keeper.warn "gRPC heartbeat: Eio context or env not available";
     None
   | Some grpc_sw, Some env ->
-    let close_ref = ref false in
+    let close_ref = Atomic.make false in
     Eio.Fiber.fork ~sw (fun () ->
       (* Outer loop: reconnect on stream failure *)
       let rec connect_loop attempts =
-        if Atomic.get stop || !close_ref
+        if Atomic.get stop || Atomic.get close_ref
         then ()
         else if attempts >= max_reconnect_attempts
         then
@@ -1814,13 +1814,13 @@ let run_grpc_heartbeat_fiber
            | exn ->
              log_grpc_heartbeat_stream_failure ~agent_name ~attempts (`Error exn);
              close_stream ());
-          if not (Atomic.get stop || !close_ref)
+          if not (Atomic.get stop || Atomic.get close_ref)
           then (
             Eio.Time.sleep clock reconnect_backoff_sec;
             connect_loop (attempts + 1)))
       in
       connect_loop 0);
-    Some (fun () -> close_ref := true)
+    Some (fun () -> Atomic.set close_ref true)
 ;;
 
 let start_keeper_grpc_heartbeat

@@ -953,7 +953,6 @@ let snapshot_json ?actor ?view ?(include_messages = true)
          ("operator_judge_runtime", operator_judge_runtime_json config);
          ("judgment_owner", `String "fallback_read_model");
          ("authoritative_judgment_available", `Bool false);
-         ("provenance_summary", operator_surface_contract_json);
          ("root", room_json config);
        ]
       @ (
@@ -997,18 +996,7 @@ let snapshot_json ?actor ?view ?(include_messages = true)
            ("persistent_agents", !persistent_ref);
          ]
       )
-      (* Team sessions removed — aggregate metrics are always empty. *)
       @ [
-           ("role_census", `Assoc []);
-           ("runtime_pools", `Assoc []);
-           ("lane_census", `Assoc []);
-           ("controller_census", `Assoc []);
-           ("control_domains", `Assoc []);
-           ("task_profiles", `Assoc []);
-           ("escalation_count", `Int 0);
-         ]
-      @ [
-         ("local_runtime", `Null);
          ( "recent_messages",
            if initialized && include_messages && not lightweight_summary then
              recent_messages_json config

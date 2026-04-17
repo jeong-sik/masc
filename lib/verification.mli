@@ -94,3 +94,41 @@ val pending_for_agent :
   base_path:string ->
   agent:string ->
   verification_request list
+
+(** {1 Attribution envelope (Layer 1)}
+
+    Convert verification verdicts into the typed attribution envelope used
+    by SSE emitters. Verification is hybrid: rule-based criteria
+    ([Schema_match], [Contains], [Not_contains]) are [Det], while [Custom]
+    invokes an LLM judge and is [NonDet]. Origin is derived from the
+    criteria set. *)
+
+val origin_of_criteria : criterion list -> Attribution.origin
+(** [Det] when all criteria are rule-based, [NonDet] if any [Custom]
+    criterion is present. *)
+
+val criteria_counts : criterion list -> Yojson.Safe.t
+(** Count criteria by kind ({schema_match, contains, not_contains, custom}).
+    Used as compact evidence payload — signals the Det/NonDet mix without
+    dumping full criterion contents. *)
+
+val to_attribution :
+  origin:Attribution.origin ->
+  evidence:Yojson.Safe.t ->
+  verdict ->
+  Attribution.t
+(** Direct verdict → Attribution conversion. Caller supplies [origin]
+    (typically via [origin_of_criteria]) and [evidence]. Mapping:
+    - [Pass]                → [Attribution.Passed]
+    - [Fail reason]         → [Attribution.Policy_failed { reason }]
+    - [Partial (s, reason)] → [Attribution.Partial_pass { score = s;
+                                 rationale = reason }] *)
+
+val evidence_of_request : verification_request -> Yojson.Safe.t
+(** Standard evidence shape for a verification request:
+    [{ request_id, task_id, worker, verifier, criteria_counts }]. *)
+
+val attribution_of_request : verification_request -> Attribution.t option
+(** Returns [Some attribution] when the request carries a [Completed]
+    verdict (origin derived from criteria, standard evidence shape).
+    [None] for [Pending] / [Assigned] — there is no verdict yet. *)

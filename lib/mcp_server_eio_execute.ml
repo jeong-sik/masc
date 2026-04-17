@@ -239,8 +239,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     Tool_catalog.is_on_surface Tool_catalog.System_internal name
   in
   let preview ?(max_len = 240) text =
-    if String.length text <= max_len then text
-    else String.sub text 0 max_len ^ "..."
+    String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." text |> String_util.to_string
   in
   let argument_keys_json =
     match arguments with

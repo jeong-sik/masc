@@ -667,3 +667,39 @@ let accountability_risk_is_high config ~keeper_name ~agent_name =
       | Some (`String "high") -> true
       | _ -> false)
   | _ -> false
+
+(* --- Attribution envelope conversion (Layer 1) ---
+   All accountability verdicts are Det — [effective_status] is a pure
+   function of snapshot + time. The claim_snapshot type stays private to
+   this module; callers provide their own evidence payload. *)
+
+let attribution_from_status (status : claim_status) ~evidence
+    ?resolution_reason ?(evidence_refs_count = 0) () : Attribution.t option =
+  match status with
+  | Pending -> None
+  | Supported ->
+    Some (Attribution.passed ~origin:Det ~gate:"accountability" ~evidence)
+  | Unsupported ->
+    let reason = Option.value resolution_reason
+                   ~default:"claim not supported by evidence"
+    in
+    Some (Attribution.policy_failed ~origin:Det ~gate:"accountability"
+            ~evidence ~reason)
+  | Expired ->
+    let reason = Option.value resolution_reason
+                   ~default:"claim expired"
+    in
+    Some (Attribution.policy_failed ~origin:Det ~gate:"accountability"
+            ~evidence ~reason)
+  | Partial ->
+    (* Score from evidence_refs_count: heuristic 0.5 baseline, +0.1 per
+       evidence ref up to 1.0. No domain-specific normalization available
+       here — dashboard aggregates the raw count separately. *)
+    let score =
+      Float.min 1.0 (0.5 +. 0.1 *. Float.of_int evidence_refs_count)
+    in
+    let rationale = Option.value resolution_reason
+                      ~default:"claim partially supported"
+    in
+    Some (Attribution.partial_pass ~origin:Det ~gate:"accountability"
+            ~evidence ~score ~rationale)

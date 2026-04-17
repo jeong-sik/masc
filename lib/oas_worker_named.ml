@@ -402,7 +402,7 @@ let run_named
       let err_msg = match last_err with
         | Some (Llm_provider.Http_client.HttpError { code; body }) ->
           Printf.sprintf "HTTP %d: %s" code
-            (if String.length body > 200 then String.sub body 0 200 ^ "..." else body)
+            (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." body |> String_util.to_string)
         | Some (Llm_provider.Http_client.AcceptRejected { reason }) -> reason
         | Some (Llm_provider.Http_client.NetworkError { message }) -> message
         | None -> "no providers available"

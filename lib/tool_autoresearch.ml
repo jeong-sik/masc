@@ -168,6 +168,7 @@ let prepare_managed_target_file ~source_workdir ~managed_workdir target_file =
 let setup_running_loop (ctx : context) (params : start_params) =
   let state =
     Autoresearch.create_state ~goal:params.goal ~metric_fn:params.metric_fn
+      ?author:ctx.agent_name
       ~model_model:params.model_model ~target_file:params.target_file
       ?target_score:params.target_score
       ~cycle_timeout_s:params.cycle_timeout_s ~max_cycles:params.max_cycles

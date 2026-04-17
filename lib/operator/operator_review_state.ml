@@ -72,27 +72,6 @@ let write_review_decisions config entries =
 
 let read_review_decisions config = raw_review_decisions config
 
-let upsert_review_decision config entry =
-  let remaining =
-    read_review_decisions config
-    |> List.filter (fun existing ->
-           not
-             (String.equal existing.item_id entry.item_id
-             && String.equal existing.fingerprint entry.fingerprint
-             && String.equal existing.decision entry.decision))
-  in
-  write_review_decisions config (entry :: remaining)
-
-let matching_review_decision config ~item_id ~fingerprint =
-  read_review_decisions config
-  |> List.find_opt (fun entry ->
-         String.equal entry.item_id item_id
-         && String.equal entry.fingerprint fingerprint)
-
-let latest_review_decision config ~item_id =
-  read_review_decisions config
-  |> List.find_opt (fun entry -> String.equal entry.item_id item_id)
-
 let recent_review_decisions ?limit ?target_type ?target_id config =
   let matches_target (entry : review_decision) =
     let target_type_ok =

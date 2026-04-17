@@ -27,7 +27,7 @@
 ; Group 1: Pure synchronous tests
 ; ============================================================
 (tests
- (names test_room test_room_state_recovery test_types test_auth test_audit_log test_http_negotiation
+ (names test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_room test_room_state_recovery test_types test_auth test_audit_log test_http_negotiation
         test_sse test_cancellation test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_spawn
@@ -44,6 +44,7 @@
         test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
         test_post_verifier
         test_swarm_checkpoint test_swarm_goal_loop
+        test_keeper_cascade_profile
         test_keeper_memory
         test_keeper_accountability
         test_keeper_exec_status
@@ -69,6 +70,7 @@
         test_keeper_unified
         test_decision_pipeline
         test_decision_pipeline_observer
+        test_keeper_composite_observer
         test_keeper_telemetry_feedback
         test_keeper_toml
         test_keeper_runtime_toml
@@ -115,7 +117,7 @@
         test_warn_root_causes
         test_memory_hooks
         test_mid_turn_resume)
- (modules test_room test_room_state_recovery test_types test_auth test_audit_log test_http_negotiation
+ (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_room test_room_state_recovery test_types test_auth test_audit_log test_http_negotiation
           test_sse test_cancellation test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_spawn
@@ -132,6 +134,7 @@
           test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
           test_post_verifier
           test_swarm_checkpoint test_swarm_goal_loop
+          test_keeper_cascade_profile
           test_keeper_memory
           test_keeper_accountability
           test_keeper_exec_status
@@ -157,6 +160,7 @@
           test_keeper_unified
           test_decision_pipeline
           test_decision_pipeline_observer
+          test_keeper_composite_observer
           test_keeper_telemetry_feedback
           test_keeper_toml
           test_keeper_runtime_toml
@@ -384,6 +388,9 @@
         test_governance_yojson_roundtrip
         test_eval_calibration
         test_goal_janitor
+        test_goal_store
+        test_string_util
+        test_board_core_payload
         test_voice_config)
  (modules
         test_runtime_params
@@ -532,6 +539,9 @@
         test_governance_yojson_roundtrip
         test_eval_calibration
         test_goal_janitor
+        test_goal_store
+        test_string_util
+        test_board_core_payload
         test_voice_config)
  (libraries masc_test_deps)
  (deps ../bin/main_eio.exe))
@@ -727,6 +737,23 @@
 (test
  (name test_social_state_cap)
  (modules test_social_state_cap)
+ (libraries masc_test_deps))
+
+; Gen12 load-path guard: checkpoint JSON deserialization also
+; truncates narrative fields so pre-Gen8 snapshots do not
+; reintroduce unbounded strings into meta.runtime.
+(test
+ (name test_social_state_cap_on_load)
+ (modules test_social_state_cap_on_load)
+ (libraries masc_test_deps))
+
+; Gen13 second-model coverage: Magentic ledger v1 overlays the
+; narrative fields after Bdi returns; this test locks the cap
+; invariant at the emission point so both speech models honour the
+; same budget.
+(test
+ (name test_magentic_ledger_cap)
+ (modules test_magentic_ledger_cap)
  (libraries masc_test_deps))
 
 ; Keeper_checkpoint_store.is_not_found_detail classifier

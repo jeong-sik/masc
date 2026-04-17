@@ -1,3 +1,11 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/
+  - bin/
+---
+
 # MASC-MCP Architecture Complexity Analysis
 
 Date: 2026-03-16

@@ -373,3 +373,61 @@ let pending_for_agent ~base_path ~agent =
            | None -> not (String.equal req.worker agent))
       | Assigned v -> String.equal v agent
       | Completed _ -> false)
+
+(* --- Attribution envelope conversion (Layer 1) ---
+   Verification is hybrid: Schema_match / Contains / Not_contains are Det
+   (rule-based), Custom is NonDet (LLM judge). Origin is derived from
+   criteria. *)
+
+let is_custom_criterion = function
+  | Custom _ -> true
+  | Schema_match _ | Contains _ | Not_contains _ -> false
+
+let origin_of_criteria (criteria : criterion list) : Attribution.origin =
+  if List.exists is_custom_criterion criteria then NonDet else Det
+
+(* Count criteria by kind — keeps evidence compact while signalling the
+   Det/NonDet mix behind the verdict. *)
+let criteria_counts (criteria : criterion list) : Yojson.Safe.t =
+  let schema = ref 0 and contains = ref 0 and not_contains = ref 0 and custom = ref 0 in
+  List.iter (function
+    | Schema_match _ -> incr schema
+    | Contains _ -> incr contains
+    | Not_contains _ -> incr not_contains
+    | Custom _ -> incr custom
+  ) criteria;
+  `Assoc [
+    ("schema_match", `Int !schema);
+    ("contains", `Int !contains);
+    ("not_contains", `Int !not_contains);
+    ("custom", `Int !custom);
+  ]
+
+let to_attribution ~origin ~evidence (v : verdict) : Attribution.t =
+  match v with
+  | Pass ->
+    Attribution.passed ~origin ~gate:"verification" ~evidence
+  | Fail reason ->
+    Attribution.policy_failed ~origin ~gate:"verification" ~evidence ~reason
+  | Partial (score, rationale) ->
+    Attribution.partial_pass ~origin ~gate:"verification" ~evidence
+      ~score ~rationale
+
+let evidence_of_request (req : verification_request) : Yojson.Safe.t =
+  `Assoc [
+    ("request_id", `String req.id);
+    ("task_id", `String req.task_id);
+    ("worker", `String req.worker);
+    ("verifier", (match req.verifier with
+                  | Some v -> `String v
+                  | None -> `Null));
+    ("criteria_counts", criteria_counts req.criteria);
+  ]
+
+let attribution_of_request (req : verification_request) : Attribution.t option =
+  match req.status with
+  | Pending | Assigned _ -> None
+  | Completed verdict ->
+    let origin = origin_of_criteria req.criteria in
+    let evidence = evidence_of_request req in
+    Some (to_attribution ~origin ~evidence verdict)

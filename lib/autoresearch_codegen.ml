@@ -91,9 +91,7 @@ let parse_model_code_response response =
         |> String.concat " "
         |> String.trim
         |> fun normalized ->
-        if String.length normalized > 80
-        then String.sub normalized 0 80 ^ "..."
-        else normalized
+        String_util.utf8_safe ~max_bytes:83 ~suffix:"..." normalized |> String_util.to_string
       in
       Result.error (Printf.sprintf "MODEL response is not valid JSON after lenient recovery: %s" preview)
     | `Assoc _ as json ->

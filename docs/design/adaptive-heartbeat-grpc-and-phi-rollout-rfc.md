@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/heartbeat_smart.ml
+  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper/keeper_config.ml
+---
+
 # Adaptive Heartbeat gRPC and Phi Rollout RFC
 
 **Status**: Draft, follow-up production gate

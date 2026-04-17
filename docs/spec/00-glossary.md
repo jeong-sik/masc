@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/types/
+  - lib/tool_dispatch.ml
+  - lib/agent_identity.ml
+---
+
 # MASC Glossary
 
 > Version 2.0.0 | Supersedes: docs/GLOSSARY.md (v1.0.0)
@@ -242,22 +251,24 @@ OAS(OCaml Agent SDK)의 3계층 메모리: Scratchpad (현재 턴), Working (세
 
 ---
 
-## Team Session
+## Team Session (retired)
 
-**Team Session**
-장기 실행 협업 오케스트레이션 세션. goal, 참여 에이전트, 실행 범위, 오케스트레이션 모드, 통신 모드 등을 설정하여 다수 에이전트의 협업을 관리한다. `-> lib/team_session/team_session_types_enums.ml`
+> `lib/team_session/`는 제거되었습니다. 장기 실행 협업 오케스트레이션은 이제 board_posts.jsonl + keeper FSM + OAS Swarm Runner(Auto 모드 실행)의 조합으로 처리합니다. 이 섹션의 용어는 historical reference로만 보존합니다.
 
-**Session Status**
-Team Session의 상태: `Running`, `Paused`, `Completed`, `Interrupted`, `Failed`, `Cancelled`. `-> lib/team_session/team_session_types_enums.ml`
+**Team Session** (retired)
+장기 실행 협업 오케스트레이션 세션. goal, 참여 에이전트, 실행 범위, 오케스트레이션 모드, 통신 모드 등을 설정했다. 런타임은 제거되었고, 동등한 역할은 keeper FSM + board_posts 조합이 수행한다.
 
-**Orchestration Mode**
-Team Session의 에이전트 관리 방식: `Manual` (사람이 각 단계 승인), `Assist` (반자동), `Auto` (완전 자동). Auto 모드에서는 OAS Swarm Runner로 실행이 위임된다. `-> lib/team_session/team_session_types_enums.ml`
+**Session Status** (retired)
+이전 Team Session의 상태: `Running`, `Paused`, `Completed`, `Interrupted`, `Failed`, `Cancelled`. 현재는 keeper state machine의 phase(Spawned/Active/Paused/Compacting/HandingOff/…)가 대응한다.
 
-**Execution Scope**
-Team Session 에이전트의 실행 권한: `Observe_only` (관찰만), `Limited_code_change` (제한적 코드 수정), `Autonomous` (자율 실행). `-> lib/team_session/team_session_types_enums.ml`
+**Orchestration Mode** (retired)
+이전 Team Session의 에이전트 관리 방식: `Manual` (사람이 각 단계 승인), `Assist` (반자동), `Auto` (완전 자동). Auto 모드 실행은 OAS Swarm Runner로 계속 제공된다.
 
-**Worker Class**
-Team Session 내 에이전트의 역할 분류: `Worker_manager` (관리), `Worker_executor` (실행), `Worker_scout` (탐색), `Worker_librarian` (정보 수집), `Worker_metacog` (메타인지). `-> lib/team_session/team_session_types_enums.ml`
+**Execution Scope** (retired)
+이전 Team Session 에이전트의 실행 권한: `Observe_only` (관찰만), `Limited_code_change` (제한적 코드 수정), `Autonomous` (자율 실행). 권한 경계는 이제 keeper persona / tool policy / governance approval 계층이 대체한다.
+
+**Worker Class** (retired)
+이전 Team Session 내 에이전트의 역할 분류: `Worker_manager`, `Worker_executor`, `Worker_scout`, `Worker_librarian`, `Worker_metacog`. 역할 분류는 persona 기반으로 흡수되었다.
 
 ---
 

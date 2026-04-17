@@ -104,17 +104,8 @@ replace_generated_block() {
 }
 
 manual_doc="${REPO_ROOT}/docs/KEEPER-USER-MANUAL.md"
-audit_doc="${REPO_ROOT}/docs/OAS-UTILIZATION-AUDIT.md"
 
 printf -v manual_body '%s' \
   "OAS pin metadata is generated from \`scripts/oas-agent-sdk-pin.sh\`. Current dependency floor: \`agent_sdk >= ${OAS_AGENT_SDK_MIN_VERSION}\`, runtime pin: \`${OAS_AGENT_SDK_TRACK_REF}@${OAS_AGENT_SDK_SHA}\`, declared base version: \`${OAS_AGENT_SDK_BASE_VERSION}\`. 최신성 검증이 필요할 때는 문서에 적힌 숫자보다 \`dune-project\`와 pin script를 우선 truth source로 본다."
 
-printf -v audit_header_body '%s' \
-  "OAS Pin Snapshot: dependency floor \`${OAS_AGENT_SDK_MIN_VERSION}\`, runtime pin \`${OAS_AGENT_SDK_TRACK_REF}@${OAS_AGENT_SDK_SHA}\`, declared base version \`${OAS_AGENT_SDK_BASE_VERSION}\`"
-
-printf -v audit_policy_body '%s' \
-  "\`masc-mcp\` keeps the runtime pin ratcheted against upstream \`${OAS_AGENT_SDK_TRACK_REF}\`, while the dependency floor tracks the pinned SDK declaration in \`agent_sdk.opam\`. Generated snapshot: runtime pin \`${OAS_AGENT_SDK_TRACK_REF}@${OAS_AGENT_SDK_SHA}\`, declared base version \`${OAS_AGENT_SDK_BASE_VERSION}\`, dependency floor \`${OAS_AGENT_SDK_MIN_VERSION}\`."
-
 replace_generated_block "${manual_doc}" "oas-pin-manual" <<<"${manual_body}"
-replace_generated_block "${audit_doc}" "oas-pin-audit-header" <<<"${audit_header_body}"
-replace_generated_block "${audit_doc}" "oas-pin-audit-policy" <<<"${audit_policy_body}"

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { defaultBoardVoter, get, post } from './core'
+import { ApiRequestError, defaultBoardVoter, extractApiError, get, post } from './core'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -235,5 +235,43 @@ describe('get bootstrap warm-up mapping', () => {
 
     expect(data.status).toBe('ok')
     expect(data.agents).toBe(5)
+  })
+})
+
+describe('extractApiError', () => {
+  it('extracts status and path from an ApiRequestError with status', () => {
+    const err = new ApiRequestError({ method: 'GET', path: '/api/v1/operator', status: 404, statusText: 'Not Found' })
+    const summary = extractApiError(err, 'fallback')
+    expect(summary.status).toBe(404)
+    expect(summary.path).toBe('/api/v1/operator')
+    expect(summary.message).toContain('404')
+    expect(summary.timeout).toBe(false)
+  })
+
+  it('extracts timeout flag from an ApiRequestError with timeout', () => {
+    const err = new ApiRequestError({ method: 'POST', path: '/api/v1/operator/action', timeout: true, timeoutMs: 5000 })
+    const summary = extractApiError(err, 'fallback')
+    expect(summary.timeout).toBe(true)
+    expect(summary.status).toBeNull()
+    expect(summary.path).toBe('/api/v1/operator/action')
+  })
+
+  it('returns null status + path for plain Error', () => {
+    const summary = extractApiError(new Error('network down'), 'fallback')
+    expect(summary.message).toBe('network down')
+    expect(summary.status).toBeNull()
+    expect(summary.path).toBeNull()
+    expect(summary.timeout).toBe(false)
+  })
+
+  it('uses fallbackMessage for non-Error thrown values', () => {
+    const summary = extractApiError('string rejection', 'Failed to load')
+    expect(summary.message).toBe('Failed to load')
+    expect(summary.status).toBeNull()
+  })
+
+  it('uses fallbackMessage for undefined', () => {
+    const summary = extractApiError(undefined, 'Failed to load')
+    expect(summary.message).toBe('Failed to load')
   })
 })

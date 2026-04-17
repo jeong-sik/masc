@@ -63,6 +63,138 @@ let test_snapshot () =
   | `List entries -> check bool "has entries" true (List.length entries > 0)
   | _ -> Alcotest.fail "expected list"
 
+(* ── LT-16-KCB Phase 1: display_state classifier ─────────────── *)
+
+let display_state_str = function
+  | CB.Clean -> "clean"
+  | CB.Warning -> "warning"
+  | CB.Cooling -> "cooling"
+
+let test_display_state_clean () =
+  let s = CB.derive_display_state ~consecutive_count:0 ~total_tripped:0 in
+  check string "fresh state is clean" "clean" (display_state_str s);
+  check string "to_string agrees" "clean" (CB.display_state_to_string s)
+
+let test_display_state_warning () =
+  let s1 = CB.derive_display_state ~consecutive_count:1 ~total_tripped:0 in
+  let s2 = CB.derive_display_state ~consecutive_count:2 ~total_tripped:0 in
+  (* count > 0 dominates total_tripped: warning takes precedence over cooling *)
+  let s3 = CB.derive_display_state ~consecutive_count:1 ~total_tripped:5 in
+  check string "count=1 is warning" "warning" (display_state_str s1);
+  check string "count=2 is warning" "warning" (display_state_str s2);
+  check string "count>0 shadows trips" "warning" (display_state_str s3)
+
+let test_display_state_cooling () =
+  let s = CB.derive_display_state ~consecutive_count:0 ~total_tripped:1 in
+  check string "count=0 but trips>0 is cooling" "cooling" (display_state_str s);
+  let s2 = CB.derive_display_state ~consecutive_count:0 ~total_tripped:42 in
+  check string "many trips, count=0 is cooling" "cooling" (display_state_str s2)
+
+let test_classify_snapshot_json_happy () =
+  let json : Yojson.Safe.t = `List [
+    `Assoc [
+      "keeper", `String "alpha";
+      "consecutive_class", `String "path_not_found";
+      "consecutive_count", `Int 0;
+      "total_tripped", `Int 0;
+    ];
+    `Assoc [
+      "keeper", `String "beta";
+      "consecutive_class", `String "other";
+      "consecutive_count", `Int 2;
+      "total_tripped", `Int 0;
+    ];
+    `Assoc [
+      "keeper", `String "gamma";
+      "consecutive_class", `String "path_not_found";
+      "consecutive_count", `Int 0;
+      "total_tripped", `Int 3;
+    ];
+  ] in
+  match CB.classify_snapshot_json json with
+  | Error msg -> Alcotest.fail ("unexpected error: " ^ msg)
+  | Ok assoc ->
+    check int "three entries parsed" 3 (List.length assoc);
+    check string "alpha=clean" "clean"
+      (display_state_str (List.assoc "alpha" assoc));
+    check string "beta=warning" "warning"
+      (display_state_str (List.assoc "beta" assoc));
+    check string "gamma=cooling" "cooling"
+      (display_state_str (List.assoc "gamma" assoc))
+
+let test_classify_snapshot_skips_malformed () =
+  let json : Yojson.Safe.t = `List [
+    `Assoc [
+      "keeper", `String "good";
+      "consecutive_count", `Int 0;
+      "total_tripped", `Int 0;
+    ];
+    `Assoc [
+      "keeper", `String "bad-no-count";
+      "total_tripped", `Int 0;
+    ];
+    `String "completely malformed";
+  ] in
+  match CB.classify_snapshot_json json with
+  | Error msg -> Alcotest.fail ("unexpected error: " ^ msg)
+  | Ok assoc ->
+    check int "only 'good' survives" 1 (List.length assoc);
+    check bool "good is present" true (List.mem_assoc "good" assoc);
+    check bool "malformed is skipped" false (List.mem_assoc "bad-no-count" assoc)
+
+let test_classify_snapshot_not_a_list () =
+  match CB.classify_snapshot_json (`Assoc [("x", `Int 1)]) with
+  | Ok _ -> Alcotest.fail "should have errored"
+  | Error msg ->
+    check bool "error mentions expected shape" true
+      (contains msg "array")
+
+let test_classify_snapshot_round_trip () =
+  (* Force a keeper with count>0 into the real state, snapshot, classify. *)
+  CB.record_success ~keeper_name:"rt1";
+  ignore (CB.maybe_enrich_error
+            ~keeper_name:"rt1" ~error_msg:"path_not_found: /x");
+  let json = CB.snapshot_json () in
+  match CB.classify_snapshot_json json with
+  | Error msg -> Alcotest.fail ("round-trip failed: " ^ msg)
+  | Ok assoc ->
+    (* rt1 should be in warning (1 failure, 0 trips) *)
+    check bool "rt1 is present" true (List.mem_assoc "rt1" assoc);
+    check string "rt1=warning" "warning"
+      (display_state_str (List.assoc "rt1" assoc))
+
+(* ── LT-16-KCB Phase 2: per-keeper display_state_of ─────────── *)
+
+let test_display_state_of_unknown_is_clean () =
+  (* A keeper that has never been touched must classify as Clean,
+     not raise. The composite observer relies on this to render newly
+     spawned keepers before their first tool call. *)
+  let s = CB.display_state_of ~keeper_name:"never-seen-prefix-xyz" in
+  check string "unknown keeper = clean" "clean" (display_state_str s)
+
+let test_display_state_of_matches_snapshot () =
+  let name = "p2-alpha" in
+  CB.record_success ~keeper_name:name;
+  ignore (CB.maybe_enrich_error
+            ~keeper_name:name ~error_msg:"path_not_found: /a");
+  let direct = CB.display_state_of ~keeper_name:name in
+  check string "direct lookup = warning" "warning" (display_state_str direct);
+  let json = CB.snapshot_json () in
+  match CB.classify_snapshot_json json with
+  | Error msg -> Alcotest.fail ("json classify: " ^ msg)
+  | Ok assoc ->
+    check string "json-path agrees" "warning"
+      (display_state_str (List.assoc name assoc))
+
+let test_display_state_of_clears_after_success () =
+  let name = "p2-beta" in
+  CB.record_success ~keeper_name:name;
+  ignore (CB.maybe_enrich_error
+            ~keeper_name:name ~error_msg:"path_not_found: /a");
+  CB.record_success ~keeper_name:name;
+  let s = CB.display_state_of ~keeper_name:name in
+  check string "after success, back to clean" "clean" (display_state_str s)
+
 let () =
   run "Circuit_breaker" [
     "classify", [
@@ -78,5 +210,26 @@ let () =
     ];
     "diagnostics", [
       test_case "snapshot" `Quick test_snapshot;
+    ];
+    "display_state", [
+      test_case "clean" `Quick test_display_state_clean;
+      test_case "warning" `Quick test_display_state_warning;
+      test_case "cooling" `Quick test_display_state_cooling;
+      test_case "classify_snapshot_json happy path"
+        `Quick test_classify_snapshot_json_happy;
+      test_case "classify_snapshot_json skips malformed"
+        `Quick test_classify_snapshot_skips_malformed;
+      test_case "classify_snapshot_json rejects non-list"
+        `Quick test_classify_snapshot_not_a_list;
+      test_case "round-trip via snapshot_json"
+        `Quick test_classify_snapshot_round_trip;
+    ];
+    "display_state_of", [
+      test_case "unknown keeper = clean"
+        `Quick test_display_state_of_unknown_is_clean;
+      test_case "direct lookup matches json walk"
+        `Quick test_display_state_of_matches_snapshot;
+      test_case "success clears back to clean"
+        `Quick test_display_state_of_clears_after_success;
     ];
   ]

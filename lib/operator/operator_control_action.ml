@@ -121,23 +121,20 @@ let canonical_action_type action_type =
   | "keeper_message" -> "keeper_message"
   | "keeper_probe" -> "keeper_probe"
   | "keeper_recover" -> "keeper_recover"
-  | "review_resolve" -> "review_resolve"
-  | "review_defer" -> "review_defer"
   | other -> other
 
 let normalize_action_target_type target_type =
   let normalized = String.trim target_type |> String.lowercase_ascii in
   if Operator_digest_types.is_root_alias normalized then Ok "root"
   else match normalized with
-  | "keeper" | "review_item" as value -> Ok value
+  | "keeper" as value -> Ok value
   | "" -> Ok ""
-  | _ -> Error "target_type must be root, keeper, or review_item"
+  | _ -> Error "target_type must be root or keeper"
 
 let default_target_type_for action_type =
   match action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep" -> "root"
   | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
-  | "review_resolve" | "review_defer" -> "review_item"
   | _ -> ""
 
 let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
@@ -215,10 +212,7 @@ let delegated_tool_for action_type =
       Operator_pending_confirm.available_actions
   with
   | Some action -> action.tool_name
-  | None ->
-    (match action_type with
-     | "review_resolve" | "review_defer" -> "review_state"
-     | _ -> "unknown")
+  | None -> "unknown"
 
 let confirm_required = Operator_approval.confirm_required
 

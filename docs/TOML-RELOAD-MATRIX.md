@@ -1,3 +1,11 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - scripts/check-doc-truth.sh
+  - config/
+---
+
 # TOML Reload Matrix
 
 This document separates TOML-backed configuration by load point and reload

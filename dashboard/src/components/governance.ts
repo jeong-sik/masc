@@ -95,7 +95,7 @@ function GovernanceSummaryStrip() {
     <div class="mb-2.5 flex items-center justify-between px-0.5">
       <div class="flex items-center gap-3">
         <h2 class="text-lg font-bold text-text-strong tracking-wide">거버넌스</h2>
-        <span class="rounded-md border border-white/5 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-text-muted">
+        <span class="rounded-md border border-white/5 bg-[var(--white-3)] px-2 py-0.5 text-[11px] font-medium text-text-muted">
           ${caseTrackingRetired ? judgeOnlyLabel : `진행 중 ${itemCount}건 / 활동 ${activityCount}건`}
         </span>
       </div>
@@ -262,7 +262,7 @@ function GovernanceToolbar() {
             <${ActionButton}
               variant="ghost"
               size="lg"
-              class="rounded-xl border-transparent bg-white/5 px-3.5 py-2 text-[13px] font-semibold text-text-muted hover:bg-white/10 hover:text-text-strong"
+              class="rounded-xl border-transparent bg-[var(--white-3)] px-3.5 py-2 text-[13px] font-semibold text-text-muted hover:bg-white/10 hover:text-text-strong"
               onClick=${refreshGovernance}
               disabled=${governanceLoading.value}
             >
@@ -299,7 +299,7 @@ function LiveGovernanceToolbar() {
             <${ActionButton}
               variant="ghost"
               size="lg"
-              class="rounded-xl border-transparent bg-white/5 px-3.5 py-2 text-[13px] font-semibold text-text-muted hover:bg-white/10 hover:text-text-strong"
+              class="rounded-xl border-transparent bg-[var(--white-3)] px-3.5 py-2 text-[13px] font-semibold text-text-muted hover:bg-white/10 hover:text-text-strong"
               onClick=${refreshGovernance}
               disabled=${governanceLoading.value}
             >
@@ -370,9 +370,9 @@ function DecisionInbox() {
                         : null}
                     </div>
                     <div class="mt-3 flex flex-wrap gap-1.5">
-                      ${item.origin ? html`<span class="inline-flex items-center rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-text-muted">${item.origin}</span>` : null}
+                      ${item.origin ? html`<span class="inline-flex items-center rounded-md border border-white/10 bg-[var(--white-3)] px-2 py-0.5 text-[10px] font-medium text-text-muted">${item.origin}</span>` : null}
                       ${item.risk_class ? html`<span class="inline-flex items-center rounded-md border border-bad/20 bg-bad/10 px-2 py-0.5 text-[10px] font-medium text-bad">${item.risk_class}</span>` : null}
-                      ${item.provenance ? html`<span class="inline-flex items-center rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-text-muted">${item.provenance}</span>` : null}
+                      ${item.provenance ? html`<span class="inline-flex items-center rounded-md border border-white/10 bg-[var(--white-3)] px-2 py-0.5 text-[10px] font-medium text-text-muted">${item.provenance}</span>` : null}
                       ${item.status === 'needs_human_gate'
                         ? html`<span class="inline-flex items-center rounded-md border border-warn/30 bg-warn/20 px-2 py-0.5 text-[10px] font-bold text-warn animate-pulse">승인 대기</span>`
                         : null}
@@ -383,7 +383,7 @@ function DecisionInbox() {
                   </div>
                   <div class="flex flex-col items-end justify-between flex-shrink-0 pt-0.5">
                     <span class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${governanceToneClass(item.status)}">${caseStatusLabel(item.status)}</span>
-                    <span class="mt-auto rounded-md border border-white/5 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-text-dim">의견 ${item.brief_count ?? 0}</span>
+                    <span class="mt-auto rounded-md border border-white/5 bg-[var(--white-3)] px-2 py-0.5 text-[11px] font-medium text-text-dim">의견 ${item.brief_count ?? 0}</span>
                   </div>
                 </button>
               `
@@ -393,11 +393,57 @@ function DecisionInbox() {
   `
 }
 
+export function judgmentsEmptyStateMessage(): { message: string; tone: 'warn' | 'default' } {
+  const judge = governanceData.value?.judge
+  const summary = governanceData.value?.summary
+  const lastError = judge?.last_error?.trim()
+  if (lastError) {
+    return { message: `AI Judge 오류: ${lastError}`, tone: 'warn' }
+  }
+  const judgeOnline = judge?.judge_online ?? summary?.judge_online
+  if (judgeOnline === false) {
+    return { message: 'AI Judge 오프라인 — keeper 기동 여부를 확인하세요.', tone: 'warn' }
+  }
+  const lastSeen = judge?.generated_at ?? summary?.judge_last_seen_at
+  if (lastSeen) {
+    return { message: '최근 판단 이후 새 입력 대기 중입니다. keeper가 새 판단을 올리면 여기 표시됩니다.', tone: 'default' }
+  }
+  return { message: 'AI Judge가 판단을 생성하면 자동으로 여기 표시됩니다. 현재 수집된 판단이 없습니다.', tone: 'default' }
+}
+
 function JudgmentsSection() {
   const judgments = governanceData.value?.judgments ?? []
-  if (judgments.length === 0) return null
+  const isRetired = governanceCaseTrackingRetired()
+  const title = isRetired ? 'AI Judge 판단 (live)' : 'AI Judge 판단'
+
+  if (judgments.length === 0) {
+    if (!isRetired) return null
+    const { message, tone } = judgmentsEmptyStateMessage()
+    const judge = governanceData.value?.judge
+    const lastSeen = judge?.generated_at ?? governanceData.value?.summary?.judge_last_seen_at
+    const meta = [judge?.keeper_name, judge?.model_used].filter((value): value is string => typeof value === 'string' && value.length > 0).join(' · ')
+    const chipClass = tone === 'warn'
+      ? 'border-warn/30 bg-warn/10 text-warn'
+      : 'border-[var(--card-border)] bg-[var(--white-3)] text-text-muted'
+    return html`
+      <div data-testid="live-judge-empty">
+        <${Card} title=${title} class="section mb-5" variant="compact">
+          <${EmptyState} message=${message} compact />
+          ${lastSeen || meta ? html`
+            <div class="mt-1 flex flex-wrap items-center justify-center gap-2 text-[11px] ${tone === 'warn' ? 'text-warn' : 'text-text-dim'}">
+              ${lastSeen ? html`<span class="inline-flex items-center rounded-md border ${chipClass} px-2 py-0.5 font-medium">
+                마지막 판단 <${TimeAgo} timestamp=${lastSeen} />
+              </span>` : null}
+              ${meta ? html`<span class="font-mono opacity-75">${meta}</span>` : null}
+            </div>
+          ` : null}
+        <//>
+      </div>
+    `
+  }
+
   return html`
-    <${Card} title=${governanceCaseTrackingRetired() ? 'AI Judge 판단 (live)' : 'AI Judge 판단'} class="section mb-5" variant="compact">
+    <${Card} title=${title} class="section mb-5" variant="compact">
       <div class="flex flex-col gap-2.5">
         ${judgments.map(j => html`
           <div class="rounded-lg border border-card-border bg-card/34 p-3.5 text-[13px]" data-testid="judgment-item">
@@ -425,12 +471,12 @@ function JudgmentsSection() {
   `
 }
 
-function approvalRiskToneClass(riskLevel: string): string {
+export function approvalRiskToneClass(riskLevel: string): string {
   const normalized = riskLevel.trim().toLowerCase()
   if (normalized === 'critical') return 'border-bad/30 bg-bad/10 text-bad'
   if (normalized === 'high') return 'border-warn/30 bg-warn/10 text-warn'
   if (normalized === 'medium') return 'border-accent/30 bg-[var(--accent-10)] text-accent'
-  return 'border-white/10 bg-white/5 text-text-muted'
+  return 'border-white/10 bg-[var(--white-3)] text-text-muted'
 }
 
 const RISK_RANK: Record<string, number> = {
@@ -440,7 +486,7 @@ const RISK_RANK: Record<string, number> = {
   low: 1,
 }
 
-function maxApprovalRisk(items: readonly { risk_level?: string | null }[]): string | null {
+export function maxApprovalRisk(items: readonly { risk_level?: string | null }[]): string | null {
   let topRank = 0
   let topLabel: string | null = null
   for (const item of items) {
@@ -503,6 +549,76 @@ function KeeperApprovalAlertBanner() {
   `
 }
 
+function KeeperApprovalEmptyState() {
+  const ctx = keeperHitlEmptyContext()
+  const judge = governanceData.value?.judge
+  const meta = [judge?.keeper_name, judge?.model_used]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .join(' · ')
+  const chipClass = ctx.tone === 'warn'
+    ? 'border-warn/30 bg-warn/10 text-warn'
+    : ctx.tone === 'ok'
+      ? 'border-accent/20 bg-[var(--accent-10)] text-accent'
+      : 'border-white/10 bg-white/5 text-text-muted'
+  return html`
+    <div data-testid="keeper-hitl-empty">
+      <${EmptyState} message=${ctx.primary} compact />
+      ${ctx.secondary ? html`<div class="mt-0.5 text-center text-[11px] text-text-dim">${ctx.secondary}</div>` : null}
+      ${ctx.lastActivity || meta ? html`
+        <div class="mt-1.5 flex flex-wrap items-center justify-center gap-2 text-[11px] ${ctx.tone === 'warn' ? 'text-warn' : 'text-text-dim'}">
+          ${ctx.lastActivity ? html`<span class="inline-flex items-center rounded-md border ${chipClass} px-2 py-0.5 font-medium">
+            마지막 judge 활동 <${TimeAgo} timestamp=${ctx.lastActivity} />
+          </span>` : null}
+          ${meta ? html`<span class="font-mono opacity-75">${meta}</span>` : null}
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
+export function keeperHitlEmptyContext(): {
+  primary: string
+  secondary: string | null
+  lastActivity: string | null
+  tone: 'ok' | 'warn' | 'default'
+} {
+  const judge = governanceData.value?.judge
+  const summary = governanceData.value?.summary
+  const lastError = judge?.last_error?.trim()
+  if (lastError) {
+    return {
+      primary: `AI Judge 오류로 HITL 평가가 멈춰 있을 수 있습니다: ${lastError}`,
+      secondary: '거부/승인 대기열은 judge가 복구된 뒤에 채워집니다.',
+      lastActivity: judge?.generated_at ?? summary?.judge_last_seen_at ?? null,
+      tone: 'warn',
+    }
+  }
+  const judgeOnline = judge?.judge_online ?? summary?.judge_online
+  if (judgeOnline === false) {
+    return {
+      primary: 'AI Judge 오프라인 — HITL 판정 생성이 중단되었습니다.',
+      secondary: 'keeper 기동 여부를 먼저 확인하세요.',
+      lastActivity: judge?.generated_at ?? summary?.judge_last_seen_at ?? null,
+      tone: 'warn',
+    }
+  }
+  const lastActivity = judge?.generated_at ?? summary?.judge_last_seen_at ?? null
+  if (lastActivity) {
+    return {
+      primary: '위험도 threshold를 넘는 tool call이 없습니다 — 시스템이 정상 작동 중입니다.',
+      secondary: '새 HITL 요청이 들어오면 여기에 자동 표시됩니다.',
+      lastActivity,
+      tone: 'ok',
+    }
+  }
+  return {
+    primary: '현재 대시보드에서 처리할 keeper 승인 요청이 없습니다.',
+    secondary: 'AI Judge가 HITL 평가를 시작하면 이 목록이 채워집니다.',
+    lastActivity: null,
+    tone: 'default',
+  }
+}
+
 function KeeperApprovalQueueSection() {
   const items = governanceData.value?.approval_queue ?? []
   const actingId = governanceApprovalActing.value
@@ -512,7 +628,7 @@ function KeeperApprovalQueueSection() {
     ? (maxRisk === 'critical' || maxRisk === 'high'
         ? 'border-bad/40 bg-bad/15 text-bad text-[13px] px-3 py-1 font-extrabold'
         : 'border-warn/40 bg-warn/15 text-warn text-[13px] px-3 py-1 font-extrabold')
-    : 'border-white/10 bg-white/5 text-text-muted text-[11px] px-2 py-0.5 font-bold'
+    : 'border-white/10 bg-[var(--white-3)] text-text-muted text-[11px] px-2 py-0.5 font-bold'
   return html`
     <div id="keeper-hitl-approval" data-testid="keeper-hitl-approval">
     <${Card} title="Keeper HITL 승인 대기" class="section mb-5" variant="compact">
@@ -525,7 +641,7 @@ function KeeperApprovalQueueSection() {
         </span>
       </div>
       ${items.length === 0
-        ? html`<${EmptyState} message="현재 대시보드에서 처리할 keeper 승인 요청이 없습니다." compact />`
+        ? html`<${KeeperApprovalEmptyState} />`
         : html`
             <div class="flex flex-col gap-3.5" data-testid="governance-approval-queue">
               ${items.map(item => {
@@ -533,7 +649,7 @@ function KeeperApprovalQueueSection() {
                 return html`
                   <div class="rounded-xl border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-item">
                     <div class="flex flex-wrap items-start gap-2.5">
-                      <span class="inline-flex items-center rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-bold text-text-muted">
+                      <span class="inline-flex items-center rounded-md border border-white/10 bg-[var(--white-3)] px-2 py-0.5 text-[10px] font-bold text-text-muted">
                         keeper ${item.keeper_name}
                       </span>
                       <span class="inline-flex items-center rounded-md border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-[10px] font-bold text-accent">

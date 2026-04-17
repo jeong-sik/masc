@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/
+  - lib/keeper/keeper_agent_run.ml
+  - lib/proof_artifact_reader.ml
+---
+
 # External Agent Framework Patterns RFC
 
 Status: draft
@@ -137,7 +146,6 @@ Primary landing:
 
 Implementation anchors:
 
-- `lib/command_plane/cp_search_fabric.ml`
 - `lib/task_sandbox.ml`
 - `lib/tool_compact.ml`
 - `lib/context_compact_oas.ml`

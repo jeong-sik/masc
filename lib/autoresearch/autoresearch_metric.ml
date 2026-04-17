@@ -20,8 +20,7 @@ let dangerous_shell_chars =
 type quote_mode = Single | Double
 
 let clip text max_len =
-  if String.length text <= max_len then text
-  else String.sub text 0 max_len ^ "..."
+  String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." text |> String_util.to_string
 
 let is_blank = function
   | ' ' | '\t' -> true

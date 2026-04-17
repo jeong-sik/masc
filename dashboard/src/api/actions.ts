@@ -1,6 +1,12 @@
 import { post, fetchWithTimeout } from './core'
 import { ACTIVITY_TIMEOUT_MS } from '../config/constants'
 import { callMcpTool } from './mcp'
+import {
+  parseActivityGraphResponse,
+  parseSwimlaneResponse,
+  type ActivityGraphResponse,
+  type SwimlaneResponse,
+} from './schemas/actions-activity'
 
 // --- Control Dock ---
 
@@ -28,24 +34,24 @@ export async function fetchTaskHistory(taskId: string, limit = 20): Promise<stri
 
 // --- Activity Graph ---
 
-export async function fetchActivityGraph(since?: string): Promise<import('../types').ActivityGraphResponse | null> {
+export async function fetchActivityGraph(since?: string): Promise<ActivityGraphResponse | null> {
   try {
     const params = since ? `?since=${since}` : ''
     const resp = await fetchWithTimeout(`/api/v1/activity/graph${params}`, {}, ACTIVITY_TIMEOUT_MS)
     if (!resp.ok) return null
-    return (await resp.json()) as import('../types').ActivityGraphResponse
+    return parseActivityGraphResponse(await resp.json())
   } catch (err) {
     console.debug('[activity] graph fetch failed', err instanceof Error ? err.message : err)
     return null
   }
 }
 
-export async function fetchSwimlane(since?: string): Promise<import('../types').SwimlaneResponse | null> {
+export async function fetchSwimlane(since?: string): Promise<SwimlaneResponse | null> {
   try {
     const params = since ? `?since=${since}` : ''
     const resp = await fetchWithTimeout(`/api/v1/activity/swimlane${params}`, {}, ACTIVITY_TIMEOUT_MS)
     if (!resp.ok) return null
-    return (await resp.json()) as import('../types').SwimlaneResponse
+    return parseSwimlaneResponse(await resp.json())
   } catch (err) {
     console.debug('[activity] swimlane fetch failed', err instanceof Error ? err.message : err)
     return null

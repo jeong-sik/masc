@@ -124,8 +124,7 @@ let compact_text ?(max_len = 160) raw =
     |> String.trim
   in
   if normalized = "" then ""
-  else if String.length normalized <= max_len then normalized
-  else String.sub normalized 0 (max_len - 1) ^ "…"
+  else String_util.utf8_safe ~max_bytes:((max_len - 1) + 3) ~suffix:"…" normalized |> String_util.to_string
 
 let parse_iso_opt = Dashboard_utils.parse_iso_opt
 let string_list_of_json = Dashboard_utils.string_list_of_json

@@ -111,6 +111,7 @@ type snapshot = {
   kdp_decision : decision_stage;
   kcl_cascade_state : cascade_state;
   kmc_compaction : compaction_stage;
+  kcb_state : Keeper_failure_circuit_breaker.display_state;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
   invariants : invariants_check;
   is_live : bool;
@@ -336,6 +337,26 @@ let compute_invariants
     event_priority_monotone = check_event_priority_monotone entry;
   }
 
+(* Prometheus bump — one counter tick per violated invariant per snapshot.
+   Called from [observe]. PromQL rate/increase distinguishes transient
+   from steady-state violations. Labels bounded: keeper × invariant (4)
+   ≤ ~200 series on a 50-keeper host. Mirrors the naming pattern in
+   [Cascade_strategy_trace.bump_prometheus_counter]. *)
+let bump_invariant_violations ~(keeper_name : string) (inv : invariants_check) =
+  let bump key satisfied =
+    if not satisfied then
+      Prometheus.inc_counter "masc_keeper_invariant_violations_total"
+        ~labels:[
+          ("keeper", keeper_name);
+          ("invariant", invariant_key_to_string key);
+        ]
+        ()
+  in
+  bump Invariant_phase_turn_alignment inv.phase_turn_alignment;
+  bump Invariant_no_cascade_before_measurement inv.no_cascade_before_measurement;
+  bump Invariant_compaction_atomicity inv.compaction_atomicity;
+  bump Invariant_event_priority_monotone inv.event_priority_monotone
+
 (* Public API *)
 
 let stable_correlation_id (entry : Keeper_registry.registry_entry) : string =
@@ -381,6 +402,11 @@ let observe
       ~compaction_stage
       ~measurement_captured
   in
+  bump_invariant_violations ~keeper_name:entry.name invariants;
+  let kcb_state =
+    Keeper_failure_circuit_breaker.display_state_of
+      ~keeper_name:entry.name
+  in
   {
     correlation_id;
     run_id;
@@ -390,6 +416,7 @@ let observe
     kdp_decision = decision_stage;
     kcl_cascade_state = cascade_state;
     kmc_compaction = compaction_stage;
+    kcb_state;
     shared_measurement = measurement;
     invariants;
     is_live;
@@ -405,6 +432,15 @@ let observe
          }
        | None -> None);
   }
+
+(* Fleet fold — observe every currently-registered keeper under
+   [base_path] once. Preserves registry iteration order so downstream
+   matrix rendering stays stable across successive polls.
+
+   Used by GET /api/v1/keepers/composite (LT-16a). *)
+let all_snapshots ~(base_path : string) () : snapshot list =
+  Keeper_registry.all ~base_path ()
+  |> List.map (fun entry -> observe entry)
 
 (* JSON serialisation (RFC-0003 §7) *)
 
@@ -443,6 +479,12 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     ];
     "compaction", `Assoc [
       "stage", `String (compaction_stage_to_string s.kmc_compaction);
+    ];
+    "circuit_breaker", `Assoc [
+      "state",
+      `String
+        (Keeper_failure_circuit_breaker.display_state_to_string
+           s.kcb_state);
     ];
     "measurement", (match s.shared_measurement with
       | Some m -> `Assoc [

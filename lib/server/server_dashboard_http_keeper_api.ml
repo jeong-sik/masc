@@ -306,7 +306,9 @@ let truncate_text ~max_chars text =
   let len = String.length text in
   if len <= max_chars then text
   else if max_chars <= 1 then String.sub text 0 (max 0 max_chars)
-  else String.sub text 0 (max_chars - 1) ^ "…"
+  else
+    String_util.utf8_safe ~max_bytes:max_chars ~suffix:"…" text
+    |> String_util.to_string
 
 let latest_preview_of_messages (messages : Agent_sdk.Types.message list) =
   messages
@@ -1200,6 +1202,35 @@ let handle_keeper_get_subroutes state req request reqd =
       ] in
       Http.Response.json ~compress:true ~request:req
         (Yojson.Safe.to_string json) reqd
+  else if req_path = prefix ^ "composite" then
+    (* LT-16a: fleet-wide composite snapshot. Enumerates every
+       registered keeper via [Keeper_registry.all] and projects each
+       through [Keeper_composite_observer.observe]. Same purity
+       contract as the per-keeper route below.
+
+       Shape:
+         { "generated_at": 1234567890.1,
+           "count": 3,
+           "snapshots": [ <snapshot JSON>, ... ] }
+
+       Consumed by [dashboard/src/components/fleet-fsm-matrix.ts]
+       (LT-16b, upcoming). *)
+    let base_path = state.Mcp_server.room_config.base_path in
+    let snapshots =
+      Keeper_composite_observer.all_snapshots ~base_path ()
+    in
+    let json =
+      `Assoc [
+        "generated_at", `Float (Unix.gettimeofday ());
+        "count", `Int (List.length snapshots);
+        "snapshots",
+          `List
+            (List.map
+               Keeper_composite_observer.snapshot_to_json snapshots);
+      ]
+    in
+    Http.Response.json ~compress:true ~request:req
+      (Yojson.Safe.to_string json) reqd
   else if ends_with "/composite" then
     (* RFC-0003 §7: composite lifecycle snapshot derived from the
        registry entry via the [Keeper_composite_observer] pure

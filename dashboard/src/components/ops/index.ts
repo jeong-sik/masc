@@ -125,10 +125,33 @@ function timelineEntries(limit = 10): OpsActivityTimelineEntry[] {
     .slice(0, limit)
 }
 
+export function activityTimelineEmptyState(): { message: string; hint: string | null } {
+  const root = operatorSnapshot.value?.root
+  if (root?.paused) {
+    const reason = root.pause_reason?.trim()
+    const by = root.paused_by?.trim()
+    const parts = [reason, by ? `by ${by}` : null].filter(Boolean).join(' · ')
+    return {
+      message: 'namespace가 일시정지 상태입니다. 재개 전까지 새 운영 활동이 기록되지 않습니다.',
+      hint: parts || null,
+    }
+  }
+  return {
+    message: '최근 운영 활동이 없습니다. 개입이 실행되거나 검토가 처리되면 자동 기록됩니다.',
+    hint: null,
+  }
+}
+
 function renderActivityTimeline() {
   const entries = timelineEntries()
   if (entries.length === 0) {
-    return html`<${EmptyState} message="아직 기록된 운영 활동이 없습니다." compact />`
+    const { message, hint } = activityTimelineEmptyState()
+    return html`
+      <div data-testid="ops-activity-timeline-empty">
+        <${EmptyState} message=${message} compact />
+        ${hint ? html`<div class="mt-0.5 text-center text-[11px] text-text-dim">${hint}</div>` : null}
+      </div>
+    `
   }
 
   return html`

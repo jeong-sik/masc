@@ -1,3 +1,11 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/cascade/
+  - lib/cascade_inference.ml
+---
+
 # Cascade Observability Metrics
 
 How to read the cascade counters exposed by `/metrics` and the alerting rules that turn them into pages.
@@ -147,4 +155,48 @@ This is the spec → code → dashboard → metric consistency contract.
 - #7643 — Strategy decision trace (ring buffer, JSON)
 - #7645 — `masc_cascade_capacity_events_total` counter
 - #7649 — `masc_cascade_strategy_decisions_total` counter
-- (this) — alerting rules + doc
+- #7679 — SLO card (in-process burn-rate computation)
+- (LT-13) — `masc_keeper_invariant_violations_total` counter + alerts
+
+---
+
+## `masc_keeper_invariant_violations_total` (LT-13)
+
+| Label       | Values                                                                             |
+| ----------- | ---------------------------------------------------------------------------------- |
+| `keeper`    | Keeper name (bounded by keepers registered on host, typically < 50)                |
+| `invariant` | `PhaseTurnAlignment`, `NoCascadeBeforeMeasurement`, `CompactionAtomicity`, `EventPriorityMonotone` |
+
+Incremented from `Keeper_composite_observer.bump_invariant_violations`, invoked by `observe` on every snapshot. One counter tick **per violated invariant per snapshot**. A sustained rate means the FSM composition is wedged in an inconsistent cross-axis state.
+
+Label cardinality: `keepers × 4` (≤ 200 series in practice).
+
+### PromQL patterns
+
+```promql
+# Fleet-wide violation burst (5-minute window)
+sum by (invariant) (increase(masc_keeper_invariant_violations_total[5m]))
+
+# Which keeper is offending for a specific invariant
+topk(5, rate(masc_keeper_invariant_violations_total
+              {invariant="PhaseTurnAlignment"}[5m]))
+
+# Invariant health SLO (what fraction of snapshots satisfy all 4?)
+# Requires pairing with a snapshots_total counter in a follow-up; out of
+# scope for LT-13.
+```
+
+### Spec↔code↔counter contract
+
+Any renaming of the invariant constants must land in all **6 places** in the same PR — see `docs/observability/fsm-spec-code-drift.md` §4. Specifically:
+
+1. TLA+ invariant predicate in `specs/keeper-state-machine/KeeperCompositeLifecycle.tla`.
+2. OCaml `invariant_key` variant in `keeper_composite_observer.mli`.
+3. `invariant_key_to_string` (the Prometheus label source).
+4. `invariants_check` record field name (the OCaml result).
+5. Alert rule in `infrastructure/monitoring/cascade-alerts.yml`.
+6. Grafana panel (landing in LT-13b — follow-up).
+
+### Why one tick per snapshot instead of edge-triggered?
+
+A violated invariant that *persists* across multiple snapshots is a stronger signal than one that flips once — `rate()`/`increase()` reflect the persistence directly. Edge-triggering would require a prior-state cache on the observer, which conflicts with the observer's pure-projection contract (`keeper_composite_observer.mli:1-20`).

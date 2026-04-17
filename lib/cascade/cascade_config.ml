@@ -358,10 +358,15 @@ type cascade_source = Named | Default_fallback | Hardcoded_defaults
     3. Selected item becomes first; rest sorted by weight desc
 
     @since 0.137.0 *)
-let weighted_shuffle_rng = lazy (Random.State.make_self_init ())
+(* Shared weighted-shuffle RNG.  Protect draws with Stdlib.Mutex because
+   [Random.State.int] mutates the state and this path can be hit from
+   concurrent server fibers. *)
+let weighted_shuffle_rng = Random.State.make_self_init ()
+let weighted_shuffle_rng_mu = Mutex.create ()
 
 let weighted_random_int bound =
-  Random.State.int (Lazy.force weighted_shuffle_rng) bound
+  Mutex.protect weighted_shuffle_rng_mu (fun () ->
+    Random.State.int weighted_shuffle_rng bound)
 
 let weighted_shuffle
     ?(rand_int = weighted_random_int)

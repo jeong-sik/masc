@@ -149,7 +149,7 @@ let run_cli_agent ~agent_type ~prompt =
     in
     let preview =
       let s = String.trim output in
-      if String.length s > 200 then String.sub s 0 200 ^ "..." else s
+      String_util.utf8_safe ~max_bytes:203 ~suffix:"..." s |> String_util.to_string
     in
     debug_log (Printf.sprintf "SPAWN_DONE %s output=%s" status_s preview)
 
@@ -260,7 +260,7 @@ let extract_nickname (response_text : string) : string option =
 let call_model_and_broadcast ~sw ~agent_type ~prompt ~mention =
   let response = call_model_direct_sync ~agent_type ~prompt in
   debug_log (Printf.sprintf "MODEL_RESPONSE: %s"
-    (if String.length response > 100 then String.sub response 0 100 ^ "..." else response));
+    (String_util.utf8_safe ~max_bytes:103 ~suffix:"..." response |> String_util.to_string));
   if response = "" || response = "no response" then
     Log.AutoResponder.info "MODEL returned empty response"
   else begin
@@ -276,7 +276,7 @@ let call_model_and_broadcast ~sw ~agent_type ~prompt ~mention =
         Log.AutoResponder.error "Failed to join MASC (%s)" e
     | Ok join_resp -> (
         debug_log (Printf.sprintf "MASC_JOIN: %s"
-          (if String.length join_resp > 200 then String.sub join_resp 0 200 ^ "..." else join_resp));
+          (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." join_resp |> String_util.to_string));
         match extract_nickname join_resp with
         | None ->
             debug_log "MASC_JOIN_FAILED: Could not extract nickname";
@@ -293,7 +293,7 @@ let call_model_and_broadcast ~sw ~agent_type ~prompt ~mention =
              with
              | Eio.Cancel.Cancelled _ as e -> raise e
              | exn -> Log.AutoResponder.error "leave failed: %s" (Printexc.to_string exn));
-            let short_resp = if String.length response > 50 then String.sub response 0 50 ^ "..." else response in
+            let short_resp = String_util.utf8_safe ~max_bytes:53 ~suffix:"..." response |> String_util.to_string in
             Log.AutoResponder.info "%s: %s" nickname short_resp
       )
   end

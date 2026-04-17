@@ -232,8 +232,7 @@ let make_tools
                  ignore (Tool_dispatch.run_post_hooks tr));
                 let detail =
                   let s = String.trim result in
-                  if String.length s <= sse_error_preview_max_chars then s
-                  else String.sub s 0 sse_error_preview_max_chars ^ "..."
+                  String_util.utf8_safe ~max_bytes:(sse_error_preview_max_chars + 3) ~suffix:"..." s |> String_util.to_string
                 in
                 let ts = Time_compat.now () in
                 (try Sse.broadcast

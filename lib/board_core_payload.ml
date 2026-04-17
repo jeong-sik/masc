@@ -73,8 +73,12 @@ let derive_post_title (body : string) =
     |> List.find_opt (fun line -> line <> "")
     |> Option.value ~default:"Untitled post"
   in
-  if String.length first_line <= 80 then first_line
-  else String.sub first_line 0 77 ^ "..."
+  (* UTF-8-safe truncation: byte-based String.sub used to split multi-byte
+     characters, producing invalid UTF-8 lines in board_posts.jsonl
+     (Issue #7690). utf8_safe returns a variant so future callers can
+     observe/meter truncation events; here we just materialize. *)
+  String_util.utf8_safe ~max_bytes:80 ~suffix:"..." first_line
+  |> String_util.to_string
 
 let normalize_post_payload ~content ?title ?body ~post_kind ?meta_json () =
   let raw_body = Option.value body ~default:content in

@@ -343,6 +343,61 @@ let test_observer_snapshot_json_omits_retired_recovery_contract () =
       true (match YU.member "recovery" json with `Null -> true | _ -> false);
     check bool "recovery_two_store_sync omitted"
       true (match YU.member "recovery_two_store_sync" invariants with `Null -> true | _ -> false)
+
+(* ── LT-16-KCB Phase 2: 6th axis on composite observer ─────── *)
+
+module KCB = Masc_mcp.Keeper_failure_circuit_breaker
+
+let kcb_state_str = function
+  | KCB.Clean -> "clean"
+  | KCB.Warning -> "warning"
+  | KCB.Cooling -> "cooling"
+
+let test_observer_kcb_clean () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-kcb-clean" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check string "fresh keeper kcb_state = clean"
+      "clean" (kcb_state_str snap.kcb_state)
+
+let test_observer_kcb_warning () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-kcb-warn" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  (* Seed the circuit breaker with one failure — must push to Warning
+     without tripping the threshold (threshold = 3). *)
+  KCB.record_success ~keeper_name:name;
+  ignore (KCB.maybe_enrich_error
+            ~keeper_name:name ~error_msg:"path_not_found: /x");
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check string "failing keeper kcb_state = warning"
+      "warning" (kcb_state_str snap.kcb_state)
+
+let test_observer_kcb_json_payload () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-kcb-json" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing"
+  | Some entry ->
+    let json = Obs.snapshot_to_json (Obs.observe entry) in
+    let cb = YU.member "circuit_breaker" json in
+    check bool "circuit_breaker object present"
+      true (match cb with `Null -> false | _ -> true);
+    let state_str =
+      match YU.member "state" cb with
+      | `String s -> s
+      | _ -> Alcotest.fail "circuit_breaker.state missing or wrong type"
+    in
+    check string "circuit_breaker.state on fresh keeper = clean"
+      "clean" state_str
 (* ── Test Suite ──────────────────────────────────────── *)
 
 let () =
@@ -390,5 +445,13 @@ let () =
       test_case "last_outcome populated after turn" `Quick test_observer_last_outcome_populated_after_turn;
       test_case "last_outcome preserved across redundant finish" `Quick test_observer_last_outcome_preserved_across_finish_idempotent;
       test_case "snapshot json omits retired recovery contract" `Quick test_observer_snapshot_json_omits_retired_recovery_contract;
+    ];
+    "composite_observer_kcb_axis", [
+      test_case "fresh keeper kcb_state = Clean"
+        `Quick test_observer_kcb_clean;
+      test_case "failing keeper kcb_state = Warning"
+        `Quick test_observer_kcb_warning;
+      test_case "snapshot_to_json exposes circuit_breaker.state"
+        `Quick test_observer_kcb_json_payload;
     ];
   ]

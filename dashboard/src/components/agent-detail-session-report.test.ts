@@ -3,6 +3,8 @@ import {
   extractBroadcasts,
   extractTaskEvents,
   groupBroadcastsIntoReports,
+  filterReportsByQuery,
+  filterTaskEventsByQuery,
 } from './agent-detail-session-report'
 import type { AgentTimelineEvent } from '../api'
 
@@ -112,5 +114,86 @@ describe('groupBroadcastsIntoReports', () => {
     expect(result[0]!.content).toContain('Group1-A')
     expect(result[0]!.content).toContain('Group1-B')
     expect(result[1]!.content).toBe('Group2-A')
+  })
+})
+
+describe('filterReportsByQuery', () => {
+  const reports = [
+    { ts: '2026-03-30T10:00:00Z', content: 'Implemented CDAL gate feature' },
+    { ts: '2026-03-30T10:05:00Z', content: 'Reviewed PR comments carefully' },
+    { ts: '2026-03-30T10:10:00Z', content: 'Fixed type error in keeper module' },
+  ]
+
+  it('returns all reports for empty query', () => {
+    expect(filterReportsByQuery(reports, '')).toHaveLength(3)
+    expect(filterReportsByQuery(reports, '   ')).toHaveLength(3)
+  })
+
+  it('filters by case-insensitive substring', () => {
+    const result = filterReportsByQuery(reports, 'keeper')
+    expect(result).toHaveLength(1)
+    expect(result[0]!.content).toContain('keeper')
+  })
+
+  it('is case-insensitive', () => {
+    expect(filterReportsByQuery(reports, 'CDAL')).toHaveLength(1)
+    expect(filterReportsByQuery(reports, 'cdal')).toHaveLength(1)
+    expect(filterReportsByQuery(reports, 'CdAl')).toHaveLength(1)
+  })
+
+  it('returns empty array when no match', () => {
+    expect(filterReportsByQuery(reports, 'nonexistent-token-xyz')).toEqual([])
+  })
+
+  it('preserves original order of matching reports', () => {
+    const result = filterReportsByQuery(reports, 'e')
+    // All three contain 'e'
+    expect(result.map(r => r.ts)).toEqual(reports.map(r => r.ts))
+  })
+
+  it('returns empty for empty input', () => {
+    expect(filterReportsByQuery([], 'anything')).toEqual([])
+  })
+})
+
+describe('filterTaskEventsByQuery', () => {
+  const events: AgentTimelineEvent[] = [
+    { type: 'task_completed', detail: { title: 'Build dashboard', task_id: 'T-001' }, ts: '2026-03-30T10:00:00Z' },
+    { type: 'task_claimed', detail: { title: 'Fix keeper bug', task_id: 'T-002' }, ts: '2026-03-30T10:01:00Z' },
+    { type: 'task_cancelled', detail: { title: 'Refactor module', task_id: 'T-003' }, ts: '2026-03-30T10:02:00Z' },
+  ]
+
+  it('returns all events for empty query', () => {
+    expect(filterTaskEventsByQuery(events, '')).toHaveLength(3)
+  })
+
+  it('matches task title case-insensitively', () => {
+    const result = filterTaskEventsByQuery(events, 'KEEPER')
+    expect(result).toHaveLength(1)
+    expect(result[0]!.detail.title).toBe('Fix keeper bug')
+  })
+
+  it('matches by task_id', () => {
+    const result = filterTaskEventsByQuery(events, 't-002')
+    expect(result).toHaveLength(1)
+    expect(result[0]!.detail.task_id).toBe('T-002')
+  })
+
+  it('matches by event type', () => {
+    const result = filterTaskEventsByQuery(events, 'cancelled')
+    expect(result).toHaveLength(1)
+    expect(result[0]!.type).toBe('task_cancelled')
+  })
+
+  it('returns empty when no match', () => {
+    expect(filterTaskEventsByQuery(events, 'zzz-no-match')).toEqual([])
+  })
+
+  it('handles missing title and task_id gracefully', () => {
+    const sparse: AgentTimelineEvent[] = [
+      { type: 'task_started', detail: {}, ts: '2026-03-30T10:00:00Z' },
+    ]
+    expect(filterTaskEventsByQuery(sparse, 'started')).toHaveLength(1)
+    expect(filterTaskEventsByQuery(sparse, 'anything-else')).toEqual([])
   })
 })

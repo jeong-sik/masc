@@ -1,3 +1,12 @@
+---
+status: runbook
+last_verified: 2026-04-17
+code_refs:
+  - scripts/harness_keeper_campaign.sh
+  - scripts/harness_agent_swarm_live.sh
+  - test/
+---
+
 # Benchmark Runbook
 
 이 문서는 `single-agent baseline`과 managed-operation swarm lane을 같은 workload에 걸어 비교할 때 쓰는 운영 레시피다.

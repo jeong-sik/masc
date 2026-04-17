@@ -1,3 +1,10 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/handover_eio.ml
+---
+
 # Context Handoff Pattern
 
 **Legacy name**: Cellular Agent Pattern
@@ -159,5 +166,4 @@ This path comes from `lib/handover_eio.ml`.
 ## Related
 
 - `docs/KEEPER-USER-MANUAL.md` - current keeper handoff and continuity flow
-- `docs/INTERRUPT-DESIGN.md` - approval and pause patterns
 - `docs/GLOSSARY.md` - preferred terminology

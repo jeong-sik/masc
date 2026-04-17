@@ -1,3 +1,12 @@
+---
+status: runbook
+last_verified: 2026-04-17
+code_refs:
+  - lib/cdal/
+  - lib/keeper/
+  - lib/server/
+---
+
 # Contract-Driven Agent Loop Implementation Checklist
 
 **Status**: Pre-implementation gate

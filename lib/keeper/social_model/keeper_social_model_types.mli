@@ -64,6 +64,11 @@ val transition_reason_to_string : transition_reason -> string
 val default_belief_summary_max_chars : int
 val default_option_field_max_chars : int
 
+(** Truncate a string to [max_chars] characters; append "…" when the
+    limit bites. Shared by [cap_social_state] and the checkpoint load
+    path so both directions honour the same budget. Idempotent. *)
+val truncate_string : max_chars:int -> string -> string
+
 (** Bound the narrative fields of a [social_state] before it leaves the
     speech model. Caps [belief_summary] and each option field with an
     ellipsis marker when they exceed the budget. Other fields pass

@@ -337,6 +337,8 @@ let add_task ?contract ?required_preset config ~title ~priority ~description =
         stage = None;
         contract;
         handoff_context = None;
+        cycle_count = 0;
+        do_not_reclaim_reason = None;
       } in
 
       let new_backlog = {
@@ -398,6 +400,8 @@ let add_task_with_role ?contract config ~title ~priority ~description
         stage = None;
         contract;
         handoff_context = None;
+        cycle_count = 0;
+        do_not_reclaim_reason = None;
       } in
 
       let new_backlog = {
@@ -457,6 +461,8 @@ let batch_add_tasks_internal config tasks =
           stage = None;
           contract;
           handoff_context = None;
+          cycle_count = 0;
+          do_not_reclaim_reason = None;
         }
       ) tasks in
       let new_backlog = {
@@ -518,10 +524,16 @@ let claim_task config ~agent_name ~task_id =
       let backlog = read_backlog_or_raise config in
       let found = ref false in
       let already_claimed = ref None in
+      let blocked_reason = ref None in
       let new_tasks = List.map (fun task ->
         if task.id = task_id then begin
           found := true;
+          (* Cycle-prevention gate: see _r variant below for rationale. *)
+          (match task.do_not_reclaim_reason with
+           | Some r -> blocked_reason := Some r
+           | None -> ());
           match task.task_status with
+          | _ when !blocked_reason <> None -> task
           | Todo ->
               { task with task_status = Claimed { assignee = agent_name; claimed_at = now_iso () } }
           | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ }
@@ -532,7 +544,10 @@ let claim_task config ~agent_name ~task_id =
       ) backlog.tasks in
       if not !found then
         Printf.sprintf "❌ Task %s not found" task_id
-      else match !already_claimed with
+      else match !blocked_reason with
+        | Some r -> Printf.sprintf "🚫 Task %s blocked from re-claim: %s" task_id r
+        | None ->
+      (match !already_claimed with
         | Some other -> Printf.sprintf "⚠ Task %s is already claimed by %s" task_id other
         | None ->
             let new_backlog = {
@@ -564,7 +579,7 @@ let claim_task config ~agent_name ~task_id =
                      (Types.Claimed
                         { assignee = agent_name; claimed_at = now_iso () })
                    ());
-            Printf.sprintf "✅ %s claimed %s" agent_name task_id
+            Printf.sprintf "✅ %s claimed %s" agent_name task_id)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
@@ -613,6 +628,17 @@ let claim_task_r config ~agent_name ~task_id
             actual = Types_core.role_to_string agent_role;
           })
         else Ok ()
+      in
+      (* Cycle-prevention gate: refuse claim when do_not_reclaim_reason is set.
+         The reason is populated by the cancel hook (3+ cancels or hard-stop
+         keywords) or by the operator directly. See PRs #7794 (schema),
+         #7798 (cancel hook). *)
+      let* () =
+        match task.do_not_reclaim_reason with
+        | None -> Ok ()
+        | Some r ->
+            Error (Types.TaskInvalidState
+              (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r))
       in
       (* fold_left to find+transform in a single pass without mutable refs.
          Uses polymorphic variants for inline state tracking. *)
@@ -1250,11 +1276,32 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
             else begin
               let new_tasks = List.map (fun t ->
                 if t.id = task_id then
-                  { t with task_status = Types.Cancelled {
-                    cancelled_by = agent_name;
-                    cancelled_at = now_iso ();
-                    reason = if reason = "" then None else Some reason
-                  }}
+                  let new_cycle = t.cycle_count + 1 in
+                  (* Auto-set do_not_reclaim_reason when the operator flags
+                     a hard stop in the cancel reason, or after 3 cycles. *)
+                  let auto_dnr =
+                    match t.do_not_reclaim_reason with
+                    | Some _ as existing -> existing
+                    | None ->
+                        let lower = String.lowercase_ascii reason in
+                        let flagged =
+                          String_util.contains_substring lower "do not reclaim"
+                          || String_util.contains_substring lower "scope mismatch"
+                        in
+                        if flagged && reason <> "" then Some reason
+                        else if new_cycle >= 3 then
+                          Some (Printf.sprintf "auto: %d cancellations" new_cycle)
+                        else None
+                  in
+                  { t with
+                    task_status = Types.Cancelled {
+                      cancelled_by = agent_name;
+                      cancelled_at = now_iso ();
+                      reason = if reason = "" then None else Some reason
+                    };
+                    cycle_count = new_cycle;
+                    do_not_reclaim_reason = auto_dnr;
+                  }
                 else t
               ) backlog.tasks in
               let new_backlog = {

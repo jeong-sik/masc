@@ -10,11 +10,26 @@
 (* ================================================================ *)
 
 (* These values are read from tests and module-init code that can run before an
-   Eio scheduler exists, so they must stay on Stdlib.Lazy. *)
-let decision_layer_level_cached =
-  lazy (Env_config_core.get_int ~default:0 "MASC_DECISION_LAYER_LEVEL")
+   Eio scheduler exists, so they cannot depend on Eio.Lazy.  Use a
+   cross-context Atomic+Stdlib.Mutex memo rather than Stdlib.Lazy.force. *)
+let resolve_cached cache mu compute =
+  match Atomic.get cache with
+  | Some value -> value
+  | None ->
+      Mutex.protect mu (fun () ->
+        match Atomic.get cache with
+        | Some value -> value
+        | None ->
+            let value = compute () in
+            Atomic.set cache (Some value);
+            value)
 
-let decision_layer_level () = Lazy.force decision_layer_level_cached
+let decision_layer_level_cached : int option Atomic.t = Atomic.make None
+let decision_layer_level_mu = Mutex.create ()
+
+let decision_layer_level () =
+  resolve_cached decision_layer_level_cached decision_layer_level_mu
+    (fun () -> Env_config_core.get_int ~default:0 "MASC_DECISION_LAYER_LEVEL")
 
 let audit_enabled () = decision_layer_level () >= 1
 
@@ -78,10 +93,14 @@ let to_json (r : decision_record) : Yojson.Safe.t =
 (* Ring buffer                                                      *)
 (* ================================================================ *)
 
-let ring_capacity_cached =
-  lazy (Env_config_core.get_int ~default:50 "MASC_DECISION_AUDIT_RING_CAPACITY")
+let ring_capacity_cached : int option Atomic.t = Atomic.make None
+let ring_capacity_mu = Mutex.create ()
 
-let ring_capacity () = max 1 (Lazy.force ring_capacity_cached)
+let ring_capacity () =
+  max 1
+    (resolve_cached ring_capacity_cached ring_capacity_mu (fun () ->
+         Env_config_core.get_int ~default:50
+           "MASC_DECISION_AUDIT_RING_CAPACITY"))
 
 type ring = {
   buf : decision_record option array;

@@ -577,8 +577,7 @@ let format_for_welcome (inst : institution) : string =
   let mission = String.trim inst.identity.mission in
   let mission_short =
     if mission = "" then "(not defined)"
-    else if String.length mission > 80 then String.sub mission 0 77 ^ "..."
-    else mission
+    else String_util.utf8_safe ~max_bytes:80 ~suffix:"..." mission |> String_util.to_string
   in
   Buffer.add_string buf ("🏛️ Mission: " ^ mission_short ^ "\n");
 

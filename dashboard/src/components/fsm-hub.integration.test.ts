@@ -90,11 +90,11 @@ const REAL_COMPOSITE_PAYLOAD = {
 const REAL_GATE_KEEPERS_SHAPE: GateKeepersData = {
   count: 5,
   keepers: [
-    { name: 'analyst', status: 'busy' },
-    { name: 'ani1999', status: 'inactive' },
-    { name: 'cheolsu', status: 'active' },
-    { name: 'janitor', status: 'active' },
-    { name: 'masc-improver', status: 'active' },
+    { name: 'analyst', status: 'busy', last_turn_ago_s: null },
+    { name: 'ani1999', status: 'inactive', last_turn_ago_s: null },
+    { name: 'cheolsu', status: 'active', last_turn_ago_s: null },
+    { name: 'janitor', status: 'active', last_turn_ago_s: null },
+    { name: 'masc-improver', status: 'active', last_turn_ago_s: null },
   ],
 }
 
@@ -188,6 +188,7 @@ describe('FSM Hub integration — API response shape', () => {
       decision: snap.decision.stage,
       cascade: snap.cascade.state,
       compaction: snap.compaction.stage,
+      breaker: snap.circuit_breaker?.state ?? 'clean',
     })
 
     it('deriveStateEntries returns a structure when given real-shape data', () => {

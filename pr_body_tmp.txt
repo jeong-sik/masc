@@ -1,1 +1,0 @@
-Remove dead code mint from Tool_token. All test call sites use mint_with directly. Closes task-018.

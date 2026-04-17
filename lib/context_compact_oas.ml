@@ -67,7 +67,7 @@ let first_sentence (s : string) =
   in
   match cut_at with
   | Some pos when pos <= max_len -> String.sub s 0 pos
-  | _ -> if String.length s > max_len then String.sub s 0 max_len ^ "..." else s
+  | _ -> String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." s |> String_util.to_string
 
 let tool_names_by_id (msgs : Agent_sdk.Types.message list) : (string * string) list =
   let add_tool_name acc (m : Agent_sdk.Types.message) =

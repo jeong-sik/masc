@@ -6,6 +6,7 @@ import { useState } from 'preact/hooks'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { Markdown } from './common/markdown'
+import { TextInput } from './common/input'
 import {
   agentTimeline,
   selectedAgent,
@@ -75,6 +76,34 @@ export function groupBroadcastsIntoReports(
     ts: r.ts,
     content: r.parts.join('\n\n---\n\n'),
   }))
+}
+
+/** Case-insensitive substring match on report content. Empty query returns all. */
+export function filterReportsByQuery(
+  reports: { ts: string; content: string }[],
+  query: string,
+): { ts: string; content: string }[] {
+  const q = query.trim().toLowerCase()
+  if (q === '') return reports
+  return reports.filter(r => r.content.toLowerCase().includes(q))
+}
+
+/** Case-insensitive substring match on task event title/task_id. Empty query returns all. */
+export function filterTaskEventsByQuery(
+  events: AgentTimelineEvent[],
+  query: string,
+): AgentTimelineEvent[] {
+  const q = query.trim().toLowerCase()
+  if (q === '') return events
+  return events.filter(evt => {
+    const title = detailStr(evt.detail, 'title')
+    const taskId = detailStr(evt.detail, 'task_id')
+    return (
+      title.toLowerCase().includes(q)
+      || taskId.toLowerCase().includes(q)
+      || evt.type.toLowerCase().includes(q)
+    )
+  })
 }
 
 function taskEventIcon(type: string): string {
@@ -208,6 +237,8 @@ function BroadcastReport({ report, index }: { report: { ts: string; content: str
 // ── Main Export ───────────────────────────────────
 
 export function AgentSessionReport({ agentName }: { agentName: string }) {
+  const [query, setQuery] = useState('')
+
   const timeline = agentTimeline.value
   if (!timeline) return null
 
@@ -219,6 +250,13 @@ export function AgentSessionReport({ agentName }: { agentName: string }) {
 
   // Don't show this section if there's no meaningful content
   if (reports.length === 0 && taskEvents.length === 0) return null
+
+  const filteredReports = filterReportsByQuery(reports, query)
+  const filteredTaskEvents = filterTaskEventsByQuery(taskEvents, query)
+  const totalItems = reports.length + taskEvents.length
+  const filteredItems = filteredReports.length + filteredTaskEvents.length
+  const showSearch = totalItems >= 5
+  const hasQuery = query.trim() !== ''
 
   return html`
     <${Card} title="세션 활동 리포트" class="mb-5">
@@ -244,15 +282,38 @@ export function AgentSessionReport({ agentName }: { agentName: string }) {
         </div>
       ` : null}
 
-      ${reports.length > 0 ? html`
-        <div class="flex flex-col gap-3">
-          ${reports.map((report, idx) => html`
-            <${BroadcastReport} key=${report.ts} report=${report} index=${idx} />
-          `)}
+      ${showSearch ? html`
+        <div class="mb-4 flex items-center gap-2">
+          <${TextInput}
+            value=${query}
+            placeholder="리포트/태스크 검색..."
+            ariaLabel="세션 리포트 검색"
+            class="max-w-[360px]"
+            onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
+          />
+          ${hasQuery ? html`
+            <span class="text-[11px] text-text-muted whitespace-nowrap">
+              ${filteredItems} / ${totalItems}
+            </span>
+          ` : null}
         </div>
       ` : null}
 
-      <${TaskEventTimeline} events=${taskEvents} />
+      ${filteredReports.length > 0 ? html`
+        <div class="flex flex-col gap-3">
+          ${filteredReports.map((report, idx) => html`
+            <${BroadcastReport} key=${report.ts} report=${report} index=${idx} />
+          `)}
+        </div>
+      ` : hasQuery && reports.length > 0 ? html`
+        <div class="text-[12px] text-text-muted py-3">검색 결과 없음 (리포트)</div>
+      ` : null}
+
+      <${TaskEventTimeline} events=${filteredTaskEvents} />
+
+      ${hasQuery && filteredTaskEvents.length === 0 && taskEvents.length > 0 ? html`
+        <div class="text-[12px] text-text-muted py-2">검색 결과 없음 (태스크)</div>
+      ` : null}
     <//>
   `
 }

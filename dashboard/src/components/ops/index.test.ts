@@ -101,7 +101,6 @@ describe('Ops surface', () => {
           target_id: 'keeper-a',
         },
       ],
-      worker_cards: [],
     } as unknown as OperatorDigest
     operatorActionLog.value = [
       {
@@ -165,7 +164,6 @@ describe('Ops surface', () => {
       attention_items: [],
       recommended_actions: [],
       recent_reviews: [],
-      worker_cards: [],
     } as unknown as OperatorDigest
     operatorActionLog.value = []
 
@@ -184,4 +182,87 @@ describe('Ops surface', () => {
     expect(container.textContent).not.toContain('운영 판단')
     expect(container.textContent).not.toContain('매뉴얼 처리')
   }, 120000)
+
+  it('shows paused-namespace hint in activity timeline empty state when namespace is paused', async () => {
+    const {
+      Ops,
+      route,
+      operatorActionLog,
+      operatorDigestError,
+      operatorError,
+      operatorRoomDigest,
+      operatorSnapshot,
+      hydratedWorkflowId,
+    } = await loadOps()
+
+    route.value = { tab: 'command', params: { section: 'operations' }, postId: null } as RouteState
+    hydratedWorkflowId.value = null
+    operatorError.value = null
+    operatorDigestError.value = null
+    operatorSnapshot.value = {
+      root: { paused: true, namespace: 'default', pause_reason: '배포 윈도우', paused_by: 'vincent' },
+      sessions: [],
+      keepers: [],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+    operatorRoomDigest.value = {
+      target_type: 'namespace',
+      attention_items: [],
+      recommended_actions: [],
+      recent_reviews: [],
+    } as unknown as OperatorDigest
+    operatorActionLog.value = []
+
+    render(html`<${Ops} />`, container)
+    await flushUi()
+
+    const empty = container.querySelector('[data-testid="ops-activity-timeline-empty"]')
+    expect(empty).toBeTruthy()
+    expect(empty?.textContent).toContain('namespace가 일시정지')
+    expect(empty?.textContent).toContain('배포 윈도우')
+    expect(empty?.textContent).toContain('by vincent')
+  }, 60000)
+
+  it('shows standard empty message when running namespace has no recent activity', async () => {
+    const {
+      Ops,
+      route,
+      operatorActionLog,
+      operatorDigestError,
+      operatorError,
+      operatorRoomDigest,
+      operatorSnapshot,
+      hydratedWorkflowId,
+    } = await loadOps()
+
+    route.value = { tab: 'command', params: { section: 'operations' }, postId: null } as RouteState
+    hydratedWorkflowId.value = null
+    operatorError.value = null
+    operatorDigestError.value = null
+    operatorSnapshot.value = {
+      root: { paused: false, namespace: 'default' },
+      sessions: [],
+      keepers: [],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+    operatorRoomDigest.value = {
+      target_type: 'namespace',
+      attention_items: [],
+      recommended_actions: [],
+      recent_reviews: [],
+    } as unknown as OperatorDigest
+    operatorActionLog.value = []
+
+    render(html`<${Ops} />`, container)
+    await flushUi()
+
+    const empty = container.querySelector('[data-testid="ops-activity-timeline-empty"]')
+    expect(empty).toBeTruthy()
+    expect(empty?.textContent).toContain('최근 운영 활동이 없습니다')
+    expect(empty?.textContent).not.toContain('일시정지')
+  }, 60000)
 })

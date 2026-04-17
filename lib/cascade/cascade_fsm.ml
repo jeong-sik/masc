@@ -45,9 +45,10 @@ let format_exhausted_error last_err =
   let msg = match last_err with
     | Some (Llm_provider.Http_client.HttpError { code; body }) ->
       Printf.sprintf "HTTP %d: %s" code
-        (if String.length body > Llm_provider.Constants.Truncation.max_error_body_length
-         then String.sub body 0 Llm_provider.Constants.Truncation.max_error_body_length ^ "..."
-         else body)
+        (String_util.utf8_safe
+           ~max_bytes:(Llm_provider.Constants.Truncation.max_error_body_length + 3)
+           ~suffix:"..." body
+         |> String_util.to_string)
     | Some (Llm_provider.Http_client.AcceptRejected { reason }) -> reason
     | Some (Llm_provider.Http_client.NetworkError { message }) -> message
     | None -> "No providers available"

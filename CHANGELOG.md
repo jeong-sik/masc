@@ -1,6 +1,23 @@
 # Changelog
 
 
+## [0.9.9] - 2026-04-17
+
+### Changed
+
+- **README facts aligned with code (PR #7730).**
+  - OAS pin floor in badge + Tech Stack: `0.118.2` → `0.153.0` (matches `masc_mcp.opam` and `dune-project`).
+  - Keeper lifecycle diagram corrected from "11-state" to the actual **12 states** in `lib/keeper/keeper_state_machine.mli` (`Overflowed` was missing).
+  - WebRTC signaling endpoints made precise: `POST /webrtc/offer`, `POST /webrtc/answer`, gated by `Server_webrtc_transport.is_enabled`.
+  - Personal-project disclaimer added (Korean + English) at the top.
+  - "Production surface" framing replaced with surface-map vocabulary that doesn't imply external SLA.
+- **Root scratch removed (PR #7744).**
+  - `git rm` on 9 tracked one-off files: `pr-payload.json`, `pr6975.json`, `pr_body_tmp.txt`, `test-integration-{retry,verify}.txt`, `test_portal_lock_stress.ml` (no rg refs in `lib/bin/test/scripts`), `EIO_REFACTOR_ISSUES.md`, `AGENTS.md` (CLAUDE.md is the live SSOT), `session_tracker_qa_tests.md`.
+  - `.gitignore` extended with `pr-*.json`, `pr_body_*.txt`, `test-integration-*.txt` so future drops are ignored automatically.
+- **Audit tracker added (PR #7749).** `docs/_audit/2026-04-17-doc-classification.md` classifies all 145 markdown files in `docs/` into A·Live (81) / B·Historical (46) / C·Hype (7) / D·Duplicate (11), with grep evidence and disposition per file. Tracker only — actual delete / archive / merge / frontmatter PRs are sequenced separately.
+
+No code changes. Bump captures the documentation/hygiene cycle as a tagged release boundary.
+
 ## [0.9.8] - 2026-04-17
 
 ### Changed

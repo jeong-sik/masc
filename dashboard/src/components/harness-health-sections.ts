@@ -1,6 +1,8 @@
 // Harness health reusable section sub-components.
 
 import { html } from 'htm/preact'
+import { useMemo } from 'preact/hooks'
+import { useSignal } from '@preact/signals'
 import { navigate } from '../router'
 import { formatTimeAgo, formatTimestampKo } from '../lib/format-time'
 import { SurfaceCard } from './common/card'
@@ -13,6 +15,35 @@ import type {
   PreCompactEvent,
   HandoffEvent,
 } from './harness-health-state'
+
+/**
+ * Pure filter for recent verdict rows.
+ *
+ * Case-insensitive substring match on `task_title`, `task_id`, `agent_name`,
+ * `gate`, `evaluator_cascade`, and `verdict` so operators can locate a
+ * verdict by any visible identifier.
+ *
+ * Empty/whitespace query returns the input reference unchanged so
+ * `useMemo` keeps referential equality for the non-filtering path.
+ *
+ * Input is never mutated.
+ */
+export function filterVerdicts(
+  items: readonly HarnessVerdictItem[],
+  query: string,
+): readonly HarnessVerdictItem[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return items
+  return items.filter(item => {
+    if (item.task_title && item.task_title.toLowerCase().includes(needle)) return true
+    if (item.task_id && item.task_id.toLowerCase().includes(needle)) return true
+    if (item.agent_name && item.agent_name.toLowerCase().includes(needle)) return true
+    if (item.gate && item.gate.toLowerCase().includes(needle)) return true
+    if (item.evaluator_cascade && item.evaluator_cascade.toLowerCase().includes(needle)) return true
+    if (item.verdict && item.verdict.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
 
 // ── Helper functions ──
 
@@ -272,29 +303,48 @@ export function RailHeader({
 // ── Section components ──
 
 export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
+  const query = useSignal('')
+  const visibleItems = useMemo(
+    () => filterVerdicts(items, query.value),
+    [items, query.value],
+  )
+  const isFiltering = query.value.trim() !== ''
+
   if (items.length === 0) {
     return html`<${EmptySignal} text="최근 평가 판정이 없습니다." />`
   }
 
   return html`
     <div class="space-y-2">
-      ${items.map(item => html`
-        <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <div class="text-sm font-medium text-[var(--text-strong)]">${item.task_title || item.task_id}</div>
-              <div class="mt-1 text-xs text-[var(--text-muted)]">
-                ${item.agent_name || 'agent'} · ${item.gate || 'gate'} · ${item.evaluator_cascade || 'cascade'} · ${formatTimestamp(item.timestamp)}
+      <div class="flex justify-end">
+        <input
+          type="search"
+          value=${query.value}
+          placeholder="task / agent / gate / cascade 필터"
+          aria-label="판정 필터"
+          onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
+          class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+        />
+      </div>
+      ${isFiltering && visibleItems.length === 0
+        ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${items.length} items)</div>`
+        : visibleItems.map(item => html`
+          <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <div class="text-sm font-medium text-[var(--text-strong)]">${item.task_title || item.task_id}</div>
+                <div class="mt-1 text-xs text-[var(--text-muted)]">
+                  ${item.agent_name || 'agent'} · ${item.gate || 'gate'} · ${item.evaluator_cascade || 'cascade'} · ${formatTimestamp(item.timestamp)}
+                </div>
               </div>
+              <span class=${`inline-block h-2.5 w-2.5 rounded-full ${verdictTone(item.verdict)}`} />
             </div>
-            <span class=${`inline-block h-2.5 w-2.5 rounded-full ${verdictTone(item.verdict)}`} />
+            <div class="mt-2 text-sm text-[var(--text-body)]">${verdictSummary(item.verdict)}</div>
+            ${item.fallback_reason ? html`
+              <div class="mt-2 break-all text-xs text-[var(--warn)]">${item.fallback_reason}</div>
+            ` : null}
           </div>
-          <div class="mt-2 text-sm text-[var(--text-body)]">${verdictSummary(item.verdict)}</div>
-          ${item.fallback_reason ? html`
-            <div class="mt-2 break-all text-xs text-[var(--warn)]">${item.fallback_reason}</div>
-          ` : null}
-        </div>
-      `)}
+        `)}
     </div>
   `
 }

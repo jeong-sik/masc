@@ -30,14 +30,26 @@ let level_to_int = function
   | Warn -> 2
   | Error -> 3
 
-(** Parse level from string *)
+(** Parse level from string without a fallback.  Returns [None] when the
+    input does not match any known level — callers that originate from
+    user input (env vars, config files) should treat [None] as an error
+    rather than silently collapsing it to a default. *)
+let level_of_string_opt s =
+  match String.lowercase_ascii (String.trim s) with
+  | "debug" -> Some Debug
+  | "info" -> Some Info
+  | "warn" | "warning" -> Some Warn
+  | "error" -> Some Error
+  | _ -> None
+
+(** Parse level from string, defaulting to [Info] on unrecognised input.
+    Kept for backward compatibility with existing callers.  When the
+    input comes from a user (env var, config), prefer
+    [level_of_string_opt] and warn on [None] so typos surface. *)
 let level_of_string s =
-  match String.lowercase_ascii s with
-  | "debug" -> Debug
-  | "info" -> Info
-  | "warn" | "warning" -> Warn
-  | "error" -> Error
-  | _ -> Info  (* Default to Info *)
+  match level_of_string_opt s with
+  | Some lvl -> lvl
+  | None -> Info
 
 let source_to_string = function
   | Structured -> "structured"
@@ -75,9 +87,21 @@ let should_log level =
 let set_level level =
   Atomic.set current_level (level_to_int level)
 
-(** Set log level from string (e.g., from env var) *)
+(** Set log level from string (e.g., from env var).  Emits a stderr
+    warning when the input is not a recognised level, so operator
+    typos (e.g. [MASC_LOG_LEVEL=debg]) surface instead of silently
+    collapsing to [Info]. *)
 let set_level_from_string s =
-  Atomic.set current_level (level_to_int (level_of_string s))
+  let lvl =
+    match level_of_string_opt s with
+    | Some lvl -> lvl
+    | None ->
+      Printf.eprintf
+        "[masc_log] WARN: unrecognised log level %S, defaulting to Info\n%!"
+        s;
+      Info
+  in
+  Atomic.set current_level (level_to_int lvl)
 
 (** Initialize from MASC_LOG_LEVEL env var *)
 let init_from_env () =
@@ -429,8 +453,15 @@ module Make (M : sig val name : string end) = struct
     let env_key = Printf.sprintf "MASC_LOG_%s_LEVEL"
       (String.uppercase_ascii M.name) in
     match Sys.getenv_opt env_key with
-    | Some s -> Some (level_to_int (level_of_string s))
     | None -> None
+    | Some s ->
+      match level_of_string_opt s with
+      | Some lvl -> Some (level_to_int lvl)
+      | None ->
+        Printf.eprintf
+          "[masc_log] WARN: %s=%S is not a valid level; ignoring override\n%!"
+          env_key s;
+        None
 
   let should_log_module level =
     let threshold = match module_level with

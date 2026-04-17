@@ -200,6 +200,9 @@ val record_restart : base_path:string -> string -> unit
 (** Record an error message. *)
 val record_error : base_path:string -> string -> string -> unit
 
+(** Clear the last recorded error for a keeper. *)
+val clear_error : base_path:string -> string -> unit
+
 (** Set the structured failure reason for cohort detection. *)
 val set_failure_reason : base_path:string -> string -> failure_reason option -> unit
 

@@ -148,6 +148,8 @@ describe('fetchKeeperConfig', () => {
       sandbox_profile: 'docker_hardened',
       network_mode: 'none',
       shared_memory_scope: 'room',
+      sandbox_last_error: 'sandbox docker exec failed',
+      effective_sandbox_image: 'ubuntu:24.04@sha256:test',
       private_workspace_root: '.masc/playground/keeper-sangsu',
       allowed_paths: '/tmp/workspace',
       effective_allowed_paths: ['/tmp/workspace'],
@@ -282,6 +284,8 @@ describe('fetchKeeperConfig', () => {
     expect(result.sandbox_profile).toBe('docker_hardened')
     expect(result.network_mode).toBe('none')
     expect(result.shared_memory_scope).toBe('room')
+    expect(result.sandbox_last_error).toBe('sandbox docker exec failed')
+    expect(result.effective_sandbox_image).toBe('ubuntu:24.04@sha256:test')
     expect(result.private_workspace_root).toBe('.masc/playground/keeper-sangsu')
     expect(result.execution.models).toEqual(['llama:test-balanced'])
     expect(result.execution.verify).toBe(true)

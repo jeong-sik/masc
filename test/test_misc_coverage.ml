@@ -112,7 +112,11 @@ let test_log_level_of_string () =
   check bool "warn" true (Log.level_of_string "WARN" = Log.Warn);
   check bool "warning" true (Log.level_of_string "WARNING" = Log.Warn);
   check bool "error" true (Log.level_of_string "ERROR" = Log.Error);
-  check bool "unknown" true (Log.level_of_string "unknown" = Log.Info) (* default *)
+  check bool "unknown" true (Log.level_of_string "unknown" = Log.Info); (* default *)
+  (* partial variant — None on unrecognised, Some on valid *)
+  check bool "opt garbage is None" true (Log.level_of_string_opt "debg" = None);
+  check bool "opt valid is Some" true
+    (Log.level_of_string_opt " DEBUG " = Some Log.Debug)
 
 let test_log_level_of_string_lowercase () =
   check bool "debug lower" true (Log.level_of_string "debug" = Log.Debug);

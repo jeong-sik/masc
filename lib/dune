@@ -122,6 +122,7 @@
    server_routes_http_routes_verification
    server_routes_http_routes_attribution
    server_routes_http_routes_activity
+   server_routes_http_routes_artifacts
    server_routes_http_routes_channel_gate
    server_routes_http_routes_sidecar
    server_h2_gateway
@@ -446,6 +447,7 @@
    keeper_compact_audit
    keeper_rollover
    keeper_post_turn
+   keeper_artifact_hydrator
    keeper_exec_context
    keeper_tools_oas
    keeper_guards
@@ -801,6 +803,10 @@
    ;; Team session types removed (Epic #6107)
    ;; MCP tool schema cluster (extracted sub-library)
    masc_mcp.tool_schemas
+   ;; Content-addressed blob store for externalizing large tool outputs.
+   ;; Used by tool_bridge to keep ToolResult.content compact while moving
+   ;; bytes into a sha256-addressed filesystem store.
+   masc_mcp.masc_tool_blob_store
    ;; Activity graph event/model cluster (extracted sub-library)
    masc_mcp.activity_graph
    ;; Prompt registry and override storage (extracted sub-library)

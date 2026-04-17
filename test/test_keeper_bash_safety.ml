@@ -6,6 +6,13 @@
     3. Shell metacharacters (;, |, &, etc.) are rejected
     4. Empty commands are rejected *)
 
+module Coord = Masc_mcp.Coord
+module Config_boot_overrides = Config_boot_overrides
+module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
+module Keeper_registry = Masc_mcp.Keeper_registry
+module Keeper_types = Masc_mcp.Keeper_types
+module Json = Yojson.Safe.Util
+
 let validate = Masc_mcp.Worker_dev_tools.validate_command
 
 let is_ok = function Ok () -> true | Error _ -> false
@@ -265,6 +272,105 @@ let test_cleanup_dir_does_not_follow_symlinks () =
   Alcotest.(check bool) "cleanup removed base dir" false (Sys.file_exists base);
   Alcotest.(check bool) "outside target preserved" true (Sys.file_exists marker)
 
+let make_config () =
+  let tmp = temp_dir () in
+  ensure_dir (Filename.concat tmp ".masc");
+  (tmp, Coord.default_config tmp)
+
+let make_docker_hardened_meta name =
+  let json =
+    `Assoc
+      [
+        ("name", `String name);
+        ("agent_name", `String ("agent-" ^ name));
+        ("trace_id", `String ("trace-" ^ name));
+        ("goal", `String "sandbox test");
+        ("sandbox_profile", `String "docker_hardened");
+        ("network_mode", `String "none");
+      ]
+  in
+  match Keeper_types.meta_of_json json with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("make_docker_hardened_meta failed: " ^ err)
+
+let with_eio_fs f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  f ()
+
+let with_boot_override name value f =
+  let previous = Config_boot_overrides.get_opt name in
+  Config_boot_overrides.set name value;
+  Fun.protect ~finally:(fun () ->
+    match previous with
+    | Some v -> Config_boot_overrides.set name v
+    | None -> Config_boot_overrides.clear name) f
+
+let parse_error_field raw =
+  Yojson.Safe.from_string raw
+  |> Json.member "error"
+  |> Json.to_string_option
+
+let test_docker_hardened_blocks_nested_docker_command () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_hardened_meta "docker-nested" in
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~config ~meta
+      ~args:(`Assoc [ ("cmd", `String "docker run --rm alpine true") ])
+  in
+  match parse_error_field raw with
+  | Some err ->
+      Alcotest.(check bool) "mentions nested container block" true
+        (String_util.contains_substring err
+           "blocks nested container runtimes and host socket references")
+  | None ->
+      Alcotest.fail ("expected error json, got: " ^ raw)
+
+let test_docker_hardened_blocks_docker_socket_reference () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_hardened_meta "docker-sock" in
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~config ~meta
+      ~args:(`Assoc [ ("cmd", `String "cat /var/run/docker.sock") ])
+  in
+  match parse_error_field raw with
+  | Some err ->
+      Alcotest.(check bool) "mentions socket block" true
+        (String_util.contains_substring err
+           "blocks nested container runtimes and host socket references")
+  | None ->
+      Alcotest.fail ("expected error json, got: " ^ raw)
+
+let test_docker_hardened_missing_seccomp_profile_fails_closed () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_hardened_meta "missing-seccomp" in
+  with_boot_override "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
+    (Filename.concat base_path "missing-seccomp-profile.json")
+    (fun () ->
+      let raw =
+        Keeper_exec_shell.handle_keeper_bash
+          ~config ~meta
+          ~args:(`Assoc [ ("cmd", `String "pwd") ])
+      in
+      match parse_error_field raw with
+      | Some err ->
+          Alcotest.(check bool) "mentions missing seccomp profile" true
+            (String_util.contains_substring err
+               "sandbox seccomp profile not found")
+      | None ->
+          Alcotest.fail ("expected error json, got: " ^ raw))
+
 (** Path traversal: if cwd is canonicalized via realpath before the check,
     ../traversal resolves to the actual target. This test verifies that
     a canonicalized traversal path is correctly rejected.
@@ -328,6 +434,12 @@ let () =
     ]);
     ("edge", [
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;
+      Alcotest.test_case "docker_hardened blocks nested docker command" `Quick
+        test_docker_hardened_blocks_nested_docker_command;
+      Alcotest.test_case "docker_hardened blocks docker socket reference" `Quick
+        test_docker_hardened_blocks_docker_socket_reference;
+      Alcotest.test_case "docker_hardened missing seccomp fails closed" `Quick
+        test_docker_hardened_missing_seccomp_profile_fails_closed;
     ]);
     ("rg_exit_code", [
       Alcotest.test_case "rg exit semantics (0=ok, 1=ok, 2+=error)" `Quick test_rg_exit_code_semantics;

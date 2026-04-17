@@ -8,6 +8,7 @@ import {
   toIsoDatetime,
   toAccessibleLabel,
   pickDisplayText,
+  toHumanTooltip,
 } from './time-ago'
 
 const flushUi = async () => {
@@ -108,10 +109,17 @@ describe('TimeAgo component', () => {
     expect(label).toMatch(/\(.+\)/) // absolute part in parens
   })
 
-  it('title attr contains the ISO timestamp (hover tooltip)', () => {
+  it('title attr is human-readable (ko-KR form, NOT ISO — GitHub/Linear pattern)', () => {
+    // ISO stays on `datetime` for crawlers/dev tools; title gets the
+    // ko-KR form so mouse users can read the timestamp without
+    // parsing \"2024-11-14T22:13:20.000Z\" in their head.
     render(html`<${TimeAgo} timestamp=${1_700_000_000_000} />`, container)
     const el = container.querySelector('time')!
-    expect(el.getAttribute('title')).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    const title = el.getAttribute('title')
+    expect(title).not.toBeNull()
+    expect(title).not.toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    // datetime attr still carries the ISO form
+    expect(el.getAttribute('datetime')).toMatch(/^\d{4}-\d{2}-\d{2}T/)
   })
 
   it('mode="absolute" renders only the absolute fragment', () => {
@@ -173,5 +181,61 @@ describe('TimeAgo component', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('toHumanTooltip (pure)', () => {
+  it('matches the aria-label shape (relative + absolute) for hover/SR parity', () => {
+    // The tooltip and the aria-label must tell the same story — a
+    // mouse user hovering and a screen-reader user arrowing should
+    // both get \"2분 전 (04. 17. 18:30)\", not two different strings.
+    const t = '2026-04-18T00:01:00.000Z'
+    expect(toHumanTooltip(t)).toBe(toAccessibleLabel(t))
+  })
+
+  it('is NOT the raw ISO string (GitHub/Linear pattern: humans get ko-KR, dev tools get ISO via datetime attr)', () => {
+    // Regression guard: a well-meaning refactor might "simplify" by
+    // passing the ISO to both datetime= and title=, regressing the
+    // hover UX. Pin the difference.
+    const t = '2026-04-18T00:01:00.000Z'
+    const tooltip = toHumanTooltip(t)
+    expect(tooltip).not.toBe(toIsoDatetime(t))
+    expect(tooltip).not.toContain('T00:01:00')
+  })
+
+  it('accepts unix seconds and unix ms — same result (normalization is via toMs)', () => {
+    const sec = 1_745_000_000
+    const ms = sec * 1000
+    expect(toHumanTooltip(sec)).toBe(toHumanTooltip(ms))
+  })
+})
+
+describe('<TimeAgo/> title attribute (integration)', () => {
+  let container: HTMLElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+  afterEach(() => {
+    render(null, container)
+    document.body.removeChild(container)
+  })
+
+  it('renders human-readable title (not ISO) so hover users get ko-KR', async () => {
+    // Regression guard covering the 2026-04-18 chip that swapped
+    // title from iso → toHumanTooltip. Hovering over any \"2분 전\"
+    // in the dashboard must reveal a Korean-formatted timestamp.
+    const timestamp = '2026-04-18T00:00:00.000Z'
+    render(html`<${TimeAgo} timestamp=${timestamp} />`, container)
+    await flushUi()
+    const el = container.querySelector('time')
+    expect(el).toBeTruthy()
+    const title = el!.getAttribute('title')
+    expect(title).not.toBeNull()
+    // datetime still the ISO form (crawlers / dev tools)
+    expect(el!.getAttribute('datetime')).toBe(toIsoDatetime(timestamp))
+    // title is human-readable — equals toHumanTooltip
+    expect(title).toBe(toHumanTooltip(timestamp))
+    expect(title).not.toBe(toIsoDatetime(timestamp))
   })
 })

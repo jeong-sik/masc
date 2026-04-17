@@ -198,7 +198,7 @@ let resolve_keeper_shell_write_cwd
    The container-side root comes from
    [Env_config_keeper.DockerPlayground.container_playground_root] so the
    mount point is configurable (default "/home/keeper/playground"). *)
-let docker_playground_cwd ~(config : Coord.config) ~(meta : keeper_meta) host_cwd =
+let _docker_playground_cwd ~(config : Coord.config) ~(meta : keeper_meta) host_cwd =
   let root = Keeper_alerting_path.project_root_of_config config in
   let playground_prefix =
     Filename.concat root Playground_paths.all_playgrounds_prefix
@@ -336,6 +336,231 @@ let resolve_keeper_shell_read_path
     in
     resolve_with_autocorrect resolved_raw_path
 
+let keeper_sandbox_container_name (meta : keeper_meta) =
+  Printf.sprintf "masc-keeper-%s-%d-%d"
+    (Coord_utils.safe_filename meta.name)
+    (Unix.getpid ())
+    (int_of_float (Unix.gettimeofday () *. 1000.0))
+
+let keeper_private_container_root (meta : keeper_meta) =
+  Filename.concat
+    Env_config_keeper.DockerPlayground.container_playground_root
+    (Playground_paths.sanitize_keeper_name meta.name)
+
+let docker_private_workspace_cwd ~(config : Coord.config) ~(meta : keeper_meta)
+    host_cwd =
+  let normalize_path_for_containment path =
+    Keeper_alerting_path.normalize_path_for_check path
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let host_root =
+    Filename.concat
+      (Keeper_alerting_path.project_root_of_config config)
+      (Keeper_alerting_path.playground_path_of_keeper meta.name)
+    |> normalize_path_for_containment
+  in
+  let container_root = keeper_private_container_root meta in
+  let host_cwd = normalize_path_for_containment host_cwd in
+  if host_cwd = host_root then
+    container_root
+  else if String.starts_with ~prefix:(host_root ^ "/") host_cwd then
+    let suffix =
+      String.sub host_cwd (String.length host_root + 1)
+        (String.length host_cwd - String.length host_root - 1)
+    in
+    Filename.concat container_root suffix
+  else
+    container_root
+
+let effective_sandbox_profile ~(meta : keeper_meta) ~in_playground =
+  if meta.sandbox_profile = Legacy_local
+     && Env_config_keeper.DockerPlayground.enabled
+     && in_playground
+  then
+    (Docker_hardened, Network_inherit)
+  else
+    (meta.sandbox_profile, meta.network_mode)
+
+let nested_container_runtime_tokens =
+  [ "docker"; "podman"; "nerdctl"; "buildah" ]
+
+let sandbox_socket_markers =
+  [
+    "/var/run/docker.sock";
+    "/run/docker.sock";
+    "/run/podman/podman.sock";
+    "podman.sock";
+    "containerd.sock";
+    "buildkitd.sock";
+  ]
+
+let command_uses_nested_container_runtime cmd =
+  let lowered_words = lowercase_shell_words cmd in
+  let lowered_cmd = String.lowercase_ascii cmd in
+  List.exists (fun token -> List.mem token nested_container_runtime_tokens)
+    lowered_words
+  || List.exists (String_util.contains_substring lowered_cmd) sandbox_socket_markers
+
+let docker_info_security_options ~timeout_sec =
+  let st, out =
+    Process_eio.run_argv_with_status
+      ~cwd:(Sys.getcwd ())
+      ~timeout_sec
+      [ "docker"; "info"; "--format"; "{{json .SecurityOptions}}" ]
+  in
+  if st <> Unix.WEXITED 0 then
+    Error
+      (Printf.sprintf "docker info failed while validating sandbox runtime: %s"
+         (Worker_dev_tools.truncate_for_log out))
+  else
+    try
+      match Yojson.Safe.from_string (String.trim out) with
+      | `List items ->
+          Ok
+            (List.filter_map Yojson.Safe.Util.to_string_option items
+            |> List.map String.lowercase_ascii)
+      | `Null -> Ok []
+      | _ ->
+          Error
+            "docker info returned unexpected SecurityOptions payload while validating sandbox runtime"
+    with
+    | Yojson.Json_error err ->
+        Error
+          (Printf.sprintf
+             "failed to parse docker info SecurityOptions JSON: %s"
+             err)
+
+let ensure_keeper_sandbox_runtime ~timeout_sec =
+  let seccomp_profile =
+    String.trim (Env_config_keeper.KeeperSandbox.seccomp_profile ())
+  in
+  let require_rootless = Env_config_keeper.KeeperSandbox.require_rootless () in
+  let require_userns = Env_config_keeper.KeeperSandbox.require_userns () in
+  let seccomp_args =
+    if seccomp_profile = "" then
+      Ok []
+    else if Sys.file_exists seccomp_profile then
+      Ok [ "--security-opt"; "seccomp=" ^ seccomp_profile ]
+    else
+      Error
+        (Printf.sprintf
+           "sandbox seccomp profile not found: %s"
+           seccomp_profile)
+  in
+  match seccomp_args with
+  | Error _ as err -> err
+  | Ok seccomp_args ->
+      if not require_rootless && not require_userns then
+        Ok seccomp_args
+      else
+        match docker_info_security_options ~timeout_sec:(min 20.0 (max 5.0 timeout_sec)) with
+        | Error _ as err -> err
+        | Ok security_options ->
+            let has needle =
+              List.exists
+                (fun option_text -> String_util.contains_substring option_text needle)
+                security_options
+            in
+            if require_rootless && not (has "rootless") then
+              Error
+                "sandbox runtime requires Docker rootless mode (set MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS=false to disable this check)"
+            else if require_userns && not (has "userns") then
+              Error
+                "sandbox runtime requires Docker userns support (set MASC_KEEPER_SANDBOX_REQUIRE_USERNS=false to disable this check)"
+            else
+              Ok seccomp_args
+
+let run_docker_hardened_bash
+    ~(config : Coord.config)
+    ~(meta : keeper_meta)
+    ~(cwd : string)
+    ~(timeout_sec : float)
+    ~(cmd : string)
+    ~(network_mode : network_mode) =
+  let image = Env_config_keeper.KeeperSandbox.docker_image () in
+  let sandbox_error_json message =
+    Keeper_registry.record_error ~base_path:config.base_path meta.name message;
+    error_json message
+  in
+  if String.trim image = "" then
+    sandbox_error_json "keeper sandbox docker image is not configured"
+  else if command_uses_nested_container_runtime cmd then
+    sandbox_error_json
+      "docker_hardened blocks nested container runtimes and host socket references"
+  else
+    match ensure_keeper_sandbox_runtime ~timeout_sec with
+    | Error err -> sandbox_error_json err
+    | Ok seccomp_args ->
+    let host_root =
+      keeper_playground_root ~config ~meta
+      |> Keeper_alerting_path.normalize_path_for_check
+      |> Keeper_alerting_path.strip_trailing_slashes
+    in
+    let container_name = keeper_sandbox_container_name meta in
+    let container_root = keeper_private_container_root meta in
+    let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
+    let uid = Unix.getuid () in
+    let gid = Unix.getgid () in
+    let network_args =
+      match network_mode with
+      | Network_none -> [ "--network"; "none" ]
+      | Network_inherit -> []
+    in
+    let argv =
+      [
+        "docker";
+        "run";
+        "--rm";
+        "--name";
+        container_name;
+        "-i";
+        "--user";
+        Printf.sprintf "%d:%d" uid gid;
+        "--read-only";
+        "--tmpfs";
+        (Printf.sprintf "/tmp:rw,nosuid,nodev,noexec,size=%s"
+           (Env_config_keeper.KeeperSandbox.tmpfs_size ()));
+        "--cap-drop=ALL";
+        "--security-opt";
+        "no-new-privileges";
+      ]
+      @ seccomp_args
+      @ [
+        "--pids-limit";
+        string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ());
+        "--memory";
+        Env_config_keeper.KeeperSandbox.memory ();
+        "-v";
+        host_root ^ ":" ^ container_root ^ ":rw";
+        "--workdir";
+        container_cwd;
+      ]
+      @ network_args
+      @ [ image; "bash"; "-lc"; cmd ^ " 2>&1" ]
+    in
+    let st, out =
+      Process_eio.run_argv_with_status
+        ~cwd:(Sys.getcwd ()) ~timeout_sec argv
+    in
+    if st <> Unix.WEXITED 0 then
+      Keeper_registry.record_error ~base_path:config.base_path meta.name
+        (Printf.sprintf "sandbox docker exec failed (%s): %s"
+           image
+           (Worker_dev_tools.truncate_for_log out))
+    else
+      Keeper_registry.clear_error ~base_path:config.base_path meta.name;
+    Yojson.Safe.to_string
+      (`Assoc
+         [
+           ("ok", `Bool (st = Unix.WEXITED 0));
+           ("cwd", `String cwd);
+           ("sandbox_profile", `String "docker_hardened");
+           ("network_mode", `String (network_mode_to_string network_mode));
+           ("effective_sandbox_image", `String image);
+           ("status", Keeper_alerting_path.process_status_to_json st);
+           ("output", `String out);
+         ])
+
 let handle_keeper_bash
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -380,8 +605,8 @@ let handle_keeper_bash
       String.starts_with ~prefix:(playground_abs ^ "/") (cwd_canonical ^ "/")
       || String.equal playground_abs cwd_canonical
     in
-    let use_docker =
-      Env_config_keeper.DockerPlayground.enabled && in_playground
+    let sandbox_profile, sandbox_network_mode =
+      effective_sandbox_profile ~meta ~in_playground
     in
     (* Destructive guard: always active regardless of Docker or preset *)
     if Worker_dev_tools.is_destructive_bash_operation cmd
@@ -397,30 +622,13 @@ let handle_keeper_bash
            ~retryability:Exec_core.Operator_required
            ~extra:[ "cmd", `String cmd_for_log ]
            ()))
-    else if use_docker then (
-      (* Docker playground path: skip command whitelist and path validation.
-         The container provides isolation — chaining, pipes, tee are safe.
-         Only the destructive guard above is retained. *)
-      Log.Keeper.info "DOCKER_EXEC: keeper=%s cwd=%s cmd=%s"
-        meta.name cwd cmd_for_log;
-      let container = Env_config_keeper.DockerPlayground.container_name in
-      let container_cwd = docker_playground_cwd ~config ~meta cwd in
-      let st, out =
-        Process_eio.run_argv_with_status
-          ~cwd:(Sys.getcwd ()) ~timeout_sec
-          [ "docker"; "exec"; "-u"; "keeper";
-            "-w"; container_cwd;
-            container; "bash"; "-c"; cmd ^ " 2>&1" ]
-      in
-      Yojson.Safe.to_string
-        (Exec_core.process_result_json
-           ~base_path:root
-           ~keeper_name:meta.name
-           ~cmd
-           ~extra:[ "cwd", `String cwd ]
-           ~status:st
-           ~output:out
-           ()))
+    else if sandbox_profile = Docker_hardened then (
+      Log.Keeper.info
+        "DOCKER_HARDENED_EXEC: keeper=%s cwd=%s cmd=%s network=%s"
+        meta.name cwd cmd_for_log (network_mode_to_string sandbox_network_mode);
+      run_docker_hardened_bash
+        ~config ~meta ~cwd ~timeout_sec ~cmd
+        ~network_mode:sandbox_network_mode)
     else
       (* Local execution path: full validation applies *)
       let validate =

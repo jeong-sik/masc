@@ -7,12 +7,10 @@ const mocks = vi.hoisted(() => ({
   toolsData: { value: null as null | { generated_at?: string; tool_inventory: { tools: unknown[] }; tool_usage: { registered_count: number; distinct_tools_called: number; never_called_count: number } } },
   toolsLoading: { value: false },
   toolsError: { value: null as string | null },
-  showFullInventory: { value: false },
 }))
 
 vi.mock('./tool-state', () => ({
   loadTools: mocks.loadTools,
-  showFullInventory: mocks.showFullInventory,
   toolsData: mocks.toolsData,
   toolsError: mocks.toolsError,
   toolsLoading: mocks.toolsLoading,
@@ -29,10 +27,6 @@ vi.mock('../common/card', () => ({
 
 vi.mock('../tool-metrics', () => ({
   ToolMetrics: () => html`<div>ToolMetrics</div>`,
-}))
-
-vi.mock('./tool-summary-view', () => ({
-  ToolSummaryView: () => html`<div>ToolSummaryView</div>`,
 }))
 
 vi.mock('./tool-full-inventory', () => ({
@@ -70,7 +64,6 @@ describe('Tools', () => {
     mocks.toolsData.value = null
     mocks.toolsLoading.value = false
     mocks.toolsError.value = null
-    mocks.showFullInventory.value = false
   })
 
   afterEach(() => {
@@ -78,14 +71,14 @@ describe('Tools', () => {
     container.remove()
   })
 
-  it('loads tool data and keeps prompt registry inside the tools surface', async () => {
+  it('loads tool data and renders full inventory with prompt registry inside the tools surface', async () => {
     render(html`<${Tools} />`, container)
     await flush()
 
     expect(mocks.loadTools).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('ConfigResolutionPanel')
     expect(container.textContent).toContain('시스템 도구 목록')
-    expect(container.textContent).toContain('ToolSummaryView')
+    expect(container.textContent).toContain('FullInventoryView')
     expect(container.textContent).toContain('도구 사용 현황')
     expect(container.textContent).toContain('ToolMetrics')
     expect(container.textContent).toContain('PromptRegistryPanel')

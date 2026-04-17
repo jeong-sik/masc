@@ -342,6 +342,7 @@ let handle_keeper_bash
       ~(args : Yojson.Safe.t)
   =
   let cmd = Safe_ops.json_string ~default:"" "cmd" args |> String.trim in
+  let root = Keeper_alerting_path.project_root_of_config config in
   let cmd_for_log =
     cmd
     |> Worker_dev_tools.sanitize_command_for_log
@@ -372,7 +373,6 @@ let handle_keeper_bash
     let playground_rel =
       Keeper_alerting_path.playground_path_of_keeper meta.name
     in
-    let root = Keeper_alerting_path.project_root_of_config config in
     let playground_abs =
       normalize_path_for_containment (Filename.concat root playground_rel)
     in
@@ -388,15 +388,15 @@ let handle_keeper_bash
     then (
       Log.Keeper.warn "keeper_bash DESTRUCTIVE blocked: %s (keeper=%s)" cmd_for_log meta.name;
       Yojson.Safe.to_string
-        (`Assoc
-            [ "ok", `Bool false
-            ; "error", `String "destructive_operation_blocked"
-            ; ( "reason"
-              , `String
-                  "This command is destructive (force push, push to main, rm -rf, \
-                   etc.) and is blocked for all presets." )
-            ; "cmd", `String cmd_for_log
-            ]))
+        (Exec_core.blocked_result_json
+           ~cmd
+           ~error:"destructive_operation_blocked"
+           ~reason:
+             "This command is destructive (force push, push to main, rm -rf, \
+              etc.) and is blocked for all presets."
+           ~retryability:Exec_core.Operator_required
+           ~extra:[ "cmd", `String cmd_for_log ]
+           ()))
     else if use_docker then (
       (* Docker playground path: skip command whitelist and path validation.
          The container provides isolation — chaining, pipes, tee are safe.
@@ -413,12 +413,14 @@ let handle_keeper_bash
             container; "bash"; "-c"; cmd ^ " 2>&1" ]
       in
       Yojson.Safe.to_string
-        (`Assoc
-            [ "ok", `Bool (st = Unix.WEXITED 0)
-            ; "cwd", `String cwd
-            ; "status", Keeper_alerting_path.process_status_to_json st
-            ; "output", `String out
-            ]))
+        (Exec_core.process_result_json
+           ~base_path:root
+           ~keeper_name:meta.name
+           ~cmd
+           ~extra:[ "cwd", `String cwd ]
+           ~status:st
+           ~output:out
+           ()))
     else
       (* Local execution path: full validation applies *)
       let validate =
@@ -445,12 +447,12 @@ let handle_keeper_bash
             "Provide a non-empty command string."
         in
         Yojson.Safe.to_string
-          (`Assoc
-              [ "ok", `Bool false
-              ; "error", `String "command_blocked"
-              ; "reason", `String reason_str
-              ; "hint", `String hint
-              ])
+          (Exec_core.blocked_result_json
+             ~cmd
+             ~error:"command_blocked"
+             ~reason:reason_str
+             ~hint
+             ())
       | Ok () ->
         (* Branch-switch guard *)
         if Worker_dev_tools.is_git_branch_switch cmd
@@ -460,33 +462,33 @@ let handle_keeper_bash
             "keeper_bash branch-switch blocked: %s (keeper=%s, write_enabled=%b, playground=%b)"
             cmd_for_log meta.name write_enabled in_playground;
           Yojson.Safe.to_string
-            (`Assoc
-                [ "ok", `Bool false
-                ; "error", `String "branch_switch_blocked"
-                ; ( "reason"
-                  , `String
-                      "git checkout/switch/branch mutations require a write-enabled preset \
-                       (Coding/Delivery/Full) and a playground clone. \
-                       Clone into your playground first (keeper_shell op=git_clone), \
-                       then set cwd to the cloned repo path." )
-                ; "cmd", `String cmd_for_log
-                ; "hint", `String (Printf.sprintf "Use cwd=%srepos/REPO" (Playground_paths.bundle_root meta.name))
-                ]))
+            (Exec_core.blocked_result_json
+               ~cmd
+               ~error:"branch_switch_blocked"
+               ~reason:
+                 "git checkout/switch/branch mutations require a write-enabled preset \
+                  (Coding/Delivery/Full) and a playground clone. \
+                  Clone into your playground first (keeper_shell op=git_clone), \
+                  then set cwd to the cloned repo path."
+               ~hint:(Printf.sprintf "Use cwd=%srepos/REPO" (Playground_paths.bundle_root meta.name))
+               ~retryability:Exec_core.Operator_required
+               ~extra:[ "cmd", `String cmd_for_log ]
+               ()))
         (* Write gate — preset layer *)
         else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
         then (
           Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s, playground=%b)"
             cmd_for_log meta.name in_playground;
           Yojson.Safe.to_string
-            (`Assoc
-                [ "ok", `Bool false
-                ; "error", `String "write_operation_gated"
-                ; ( "reason"
-                  , `String
-                      "This command modifies state (git push/commit, make deploy, etc.). \
-                       A write-enabled preset (Coding/Delivery/Full) is required." )
-                ; "cmd", `String cmd_for_log
-                ]))
+            (Exec_core.blocked_result_json
+               ~cmd
+               ~error:"write_operation_gated"
+               ~reason:
+                 "This command modifies state (git push/commit, make deploy, etc.). \
+                  A write-enabled preset (Coding/Delivery/Full) is required."
+               ~retryability:Exec_core.Operator_required
+               ~extra:[ "cmd", `String cmd_for_log ]
+               ()))
         (* Write gate — playground containment layer (#6527 iter 3).
            A write-enabled keeper still must not mutate anything outside
            its own playground bundle. branch-switch already requires
@@ -503,22 +505,21 @@ let handle_keeper_bash
             "keeper_bash write-containment blocked: %s (keeper=%s, cwd=%s, playground=%b)"
             cmd_for_log meta.name cwd in_playground;
           Yojson.Safe.to_string
-            (`Assoc
-                [ "ok", `Bool false
-                ; "error", `String "write_outside_playground_blocked"
-                ; ( "reason"
-                  , `String
-                      (Printf.sprintf
-                         "Write operations (git push/commit, make deploy, etc.) \
-                          must run with cwd inside your playground \
-                          (%s). Open a worktree under \
-                          your playground clone first via masc_worktree_create, \
-                          then set cwd to the returned worktree path."
-                         (Playground_paths.bundle_root meta.name)) )
-                ; "cmd", `String cmd_for_log
-                ; "cwd", `String cwd
-                ; "hint", `String (Printf.sprintf "cwd must start with %s" (Playground_paths.bundle_root meta.name))
-                ]))
+            (Exec_core.blocked_result_json
+               ~cmd
+               ~error:"write_outside_playground_blocked"
+               ~reason:
+                 (Printf.sprintf
+                    "Write operations (git push/commit, make deploy, etc.) \
+                     must run with cwd inside your playground \
+                     (%s). Open a worktree under \
+                     your playground clone first via masc_worktree_create, \
+                     then set cwd to the returned worktree path."
+                    (Playground_paths.bundle_root meta.name))
+               ~hint:(Printf.sprintf "cwd must start with %s" (Playground_paths.bundle_root meta.name))
+               ~retryability:Exec_core.Operator_required
+               ~extra:[ "cmd", `String cmd_for_log; "cwd", `String cwd ]
+               ()))
         else (
             (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
              | Error e -> error_json e
@@ -532,12 +533,14 @@ let handle_keeper_bash
                    [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ]
                in
                Yojson.Safe.to_string
-                 (`Assoc
-                     [ "ok", `Bool (st = Unix.WEXITED 0)
-                     ; "cwd", `String cwd
-                     ; "status", Keeper_alerting_path.process_status_to_json st
-                     ; "output", `String out
-                     ])))
+                 (Exec_core.process_result_json
+                    ~base_path:root
+                    ~keeper_name:meta.name
+                    ~cmd
+                    ~extra:[ "cwd", `String cwd ]
+                    ~status:st
+                    ~output:out
+                    ())))
 ;;
 
 let handle_keeper_shell
@@ -575,17 +578,23 @@ let handle_keeper_shell
       Process_eio.run_argv_with_status ?cwd ~timeout_sec:io_timeout_sec argv
     in
     Yojson.Safe.to_string
-      (`Assoc
-          [ "ok", `Bool (st = Unix.WEXITED 0)
-          ; "op", `String op
-          ; "cmd", `String cmd
-          ; ( "cwd"
-            , match cwd with
-              | Some dir -> `String dir
-              | None -> `Null )
-          ; "status", Keeper_alerting_path.process_status_to_json st
-          ; "output", `String out
-          ])
+      (Exec_core.process_result_json
+         ~artifact_policy:Exec_core.Inline_only
+         ~base_path:root
+         ~keeper_name:meta.name
+         ~cmd
+         ~extra:
+           [
+             "op", `String op;
+             "cmd", `String cmd;
+             ( "cwd",
+               match cwd with
+               | Some dir -> `String dir
+               | None -> `Null );
+           ]
+         ~status:st
+         ~output:out
+         ())
   in
   match op with
   | "pwd" ->
@@ -895,14 +904,21 @@ let handle_keeper_shell
       | Some (pat, category) ->
         let hint = hint_of_category category in
         Yojson.Safe.to_string
-          (`Assoc
-              [ "ok", `Bool false
-              ; "op", `String op
-              ; "error", `String "command_blocked_readonly"
-              ; "blocked_pattern", `String pat
-              ; "category", `String category
-              ; "hint", `String hint
-              ])
+          (Exec_core.blocked_result_json
+             ~cmd:cmd_str
+             ~error:"command_blocked_readonly"
+             ~reason:
+               (Printf.sprintf
+                  "Readonly shell blocked pattern '%s' in category '%s'."
+                  pat category)
+             ~hint
+             ~extra:
+               [
+                 "op", `String op;
+                 "blocked_pattern", `String pat;
+                 "category", `String category;
+               ]
+             ())
       | None ->
         (match cwd_target () with
          | Error e -> path_error e
@@ -916,27 +932,38 @@ let handle_keeper_shell
               in
               if process_status_is_timeout st then
                 Yojson.Safe.to_string
-                  (`Assoc
-                      [ "ok", `Bool false
-                      ; "op", `String op
-                      ; "cwd", `String cwd
-                      ; "command", `String cmd_str
-                      ; "error", `String "command_timed_out"
-                      ; "timeout_sec", `Float timeout_sec
-                      ; "status", Keeper_alerting_path.process_status_to_json st
-                      ; "output", `String out
-                      ; "hint", `String "Narrow the scope or use structured ops like rg/find/ls instead of broad bash scans."
-                      ])
+                  (Exec_core.process_result_json
+                     ~artifact_policy:Exec_core.Inline_only
+                     ~base_path:root
+                     ~keeper_name:meta.name
+                     ~cmd:cmd_str
+                     ~extra:
+                       [
+                         "op", `String op;
+                         "cwd", `String cwd;
+                         "command", `String cmd_str;
+                         "error", `String "command_timed_out";
+                         "timeout_sec", `Float timeout_sec;
+                       ]
+                     ~status:st
+                     ~output:out
+                     ())
               else
                 Yojson.Safe.to_string
-                  (`Assoc
-                      [ "ok", `Bool (st = Unix.WEXITED 0)
-                      ; "op", `String op
-                      ; "cwd", `String cwd
-                      ; "command", `String cmd_str
-                      ; "status", Keeper_alerting_path.process_status_to_json st
-                      ; "output", `String out
-                      ]))))
+                  (Exec_core.process_result_json
+                     ~artifact_policy:Exec_core.Inline_only
+                     ~base_path:root
+                     ~keeper_name:meta.name
+                     ~cmd:cmd_str
+                     ~extra:
+                       [
+                         "op", `String op;
+                         "cwd", `String cwd;
+                         "command", `String cmd_str;
+                       ]
+                     ~status:st
+                     ~output:out
+                     ()))))
   | "git_clone" ->
     (* Clone a repo into this keeper's playground repos directory.
        Sandboxed: always targets .masc/playground/<keeper_name>/repos/<repo_name>.

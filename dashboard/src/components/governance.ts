@@ -1,6 +1,8 @@
 import { html } from 'htm/preact'
+import { useSignal } from '@preact/signals'
 import { AlertTriangle } from 'lucide-preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
+import type { KeeperApprovalQueueItem } from '../types'
 import { Card } from './common/card'
 import { KpiCard } from './common/stat-row'
 import { TimeAgo } from './common/time-ago'
@@ -471,6 +473,33 @@ function JudgmentsSection() {
   `
 }
 
+/**
+ * Pure filter for keeper HITL approval queue rows.
+ *
+ * Case-insensitive substring match on `keeper_name`, `tool_name`, and
+ * `risk_level` so operators can isolate one keeper, every pending call
+ * for a specific tool, or all rows at a given risk level (e.g. all
+ * `critical` approvals) from a long queue.
+ *
+ * Empty/whitespace query returns the input reference unchanged so
+ * `useMemo` keeps referential equality on the non-filtering path.
+ *
+ * Input is never mutated; `KeeperApprovalQueueItem` is treated as readonly.
+ */
+export function filterApprovalQueue(
+  items: readonly KeeperApprovalQueueItem[],
+  query: string,
+): readonly KeeperApprovalQueueItem[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return items
+  return items.filter(item => {
+    if (item.keeper_name && item.keeper_name.toLowerCase().includes(needle)) return true
+    if (item.tool_name && item.tool_name.toLowerCase().includes(needle)) return true
+    if (item.risk_level && item.risk_level.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
+
 export function approvalRiskToneClass(riskLevel: string): string {
   const normalized = riskLevel.trim().toLowerCase()
   if (normalized === 'critical') return 'border-bad/30 bg-bad/10 text-bad'
@@ -624,6 +653,12 @@ function KeeperApprovalQueueSection() {
   const actingId = governanceApprovalActing.value
   const maxRisk = maxApprovalRisk(items)
   const hasItems = items.length > 0
+  const query = useSignal('')
+  const visibleItems = useMemo(
+    () => filterApprovalQueue(items, query.value),
+    [items, query.value],
+  )
+  const isFiltering = query.value.trim() !== ''
   const countBadgeClass = hasItems
     ? (maxRisk === 'critical' || maxRisk === 'high'
         ? 'border-bad/40 bg-bad/15 text-bad text-[13px] px-3 py-1 font-extrabold'
@@ -640,11 +675,30 @@ function KeeperApprovalQueueSection() {
           ${items.length}건 대기
         </span>
       </div>
+      ${hasItems ? html`
+        <div class="mb-3 flex items-center gap-2">
+          <input
+            type="search"
+            value=${query.value}
+            placeholder="keeper / tool / 위험도 필터"
+            aria-label="Keeper HITL 승인 필터"
+            data-testid="keeper-hitl-approval-filter"
+            onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
+            class="min-w-[160px] max-w-[280px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          />
+        </div>
+      ` : null}
       ${items.length === 0
         ? html`<${KeeperApprovalEmptyState} />`
-        : html`
+        : isFiltering && visibleItems.length === 0
+          ? html`
+              <div class="py-4 text-center text-[11px] text-[var(--text-dim)]" data-testid="keeper-hitl-approval-empty-filter">
+                필터 결과 없음 (${items.length} items)
+              </div>
+            `
+          : html`
             <div class="flex flex-col gap-3.5" data-testid="governance-approval-queue">
-              ${items.map(item => {
+              ${visibleItems.map(item => {
                 const disabled = actingId === item.id
                 return html`
                   <div class="rounded-xl border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-item">

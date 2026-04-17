@@ -149,14 +149,47 @@ export function buildResolvedAllowlistGroups(
     .sort((left, right) => right.names.length - left.names.length || left.category.localeCompare(right.category))
 }
 
+/**
+ * Pure filter for resolved allowlist tool names.
+ *
+ * Case-insensitive substring match on the tool name itself and on its
+ * category (via `catMap`) so operators can locate a tool by partial
+ * name or by category (e.g. "board", "shell").
+ *
+ * Empty/whitespace query returns the input reference unchanged so
+ * useMemo keeps referential identity for the non-filtering path.
+ *
+ * Input is never mutated.
+ */
+export function filterResolvedTools(
+  tools: readonly string[],
+  catMap: Map<string, string>,
+  query: string,
+): readonly string[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return tools
+  return tools.filter(name => {
+    if (name.toLowerCase().includes(needle)) return true
+    const cat = catMap.get(name)
+    if (cat && cat.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
+
 export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Map<string, string> }) {
   const [expanded, setExpanded] = useState(false)
+  const [query, setQuery] = useState('')
   const firstTool = tools[0] ?? null
   const lastTool = tools.length > 0 ? tools[tools.length - 1] : null
 
   useEffect(() => {
     setExpanded(false)
   }, [tools.length, firstTool, lastTool])
+
+  const visibleTools = useMemo(
+    () => filterResolvedTools(tools, catMap, query),
+    [tools, catMap, query],
+  )
 
   if (tools.length === 0) {
     return html`
@@ -167,49 +200,64 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
     `
   }
 
-  const groups = buildResolvedAllowlistGroups(tools, catMap)
+  const isFiltering = query.trim() !== ''
+  const groups = buildResolvedAllowlistGroups([...visibleTools], catMap)
   const visibleGroups = expanded ? groups : groups.slice(0, RESOLVED_CATEGORY_PREVIEW_LIMIT)
   const hasHiddenContent = groups.length > RESOLVED_CATEGORY_PREVIEW_LIMIT
     || groups.some(group => group.names.length > RESOLVED_TOOLS_PER_CATEGORY_LIMIT)
 
   return html`
     <div class="flex flex-col gap-1">
-      <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-        resolved allowlist (${tools.length}개, ${groups.length} 카테고리)
-      </span>
-      <div class="flex flex-col gap-2">
-        ${visibleGroups.map(group => {
-          const visibleNames = expanded ? group.names : group.names.slice(0, RESOLVED_TOOLS_PER_CATEGORY_LIMIT)
-          const hiddenToolCount = Math.max(0, group.names.length - visibleNames.length)
-          return html`
-          <div class="flex flex-col gap-1">
-            <span class="text-[9px] font-bold uppercase tracking-widest text-[var(--text-muted)]">${group.category} (${group.names.length})</span>
-            <div class="flex flex-wrap gap-1">
-              ${visibleNames.map(name => html`<${ReadOnlyChip} name=${name} />`)}
-              ${!expanded && hiddenToolCount > 0
-                ? html`
-                    <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium border border-dashed border-[var(--card-border)] text-[var(--text-muted)]">
-                      +${hiddenToolCount}
-                    </span>
-                  `
-                : null}
-            </div>
-          </div>
-        `
-        })}
+      <div class="flex items-center justify-between gap-2">
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+          resolved allowlist (${tools.length}개, ${groups.length} 카테고리)
+        </span>
+        <input
+          type="search"
+          value=${query}
+          placeholder="도구/카테고리 필터"
+          aria-label="resolved allowlist 필터"
+          onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
+          class="min-w-[140px] max-w-[220px] flex-1 rounded-md border border-[var(--card-border)] bg-[var(--white-3)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
+        />
       </div>
-      ${hasHiddenContent
-        ? html`
-            <button type="button"
-              class="self-start text-[10px] text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
-              aria-expanded=${expanded}
-              aria-label=${expanded ? 'resolved allowlist 접기' : `resolved allowlist 전체 ${tools.length}개 보기`}
-              onClick=${() => setExpanded(value => !value)}
-            >
-              ${expanded ? '접기' : `전체 ${tools.length}개 보기`}
-            </button>
-          `
-        : null}
+      ${isFiltering && visibleTools.length === 0
+        ? html`<div class="py-3 text-center text-[11px] text-[var(--text-muted)]">필터 결과 없음 (${tools.length}개 도구)</div>`
+        : html`
+          <div class="flex flex-col gap-2">
+            ${visibleGroups.map(group => {
+              const visibleNames = expanded ? group.names : group.names.slice(0, RESOLVED_TOOLS_PER_CATEGORY_LIMIT)
+              const hiddenToolCount = Math.max(0, group.names.length - visibleNames.length)
+              return html`
+              <div class="flex flex-col gap-1">
+                <span class="text-[9px] font-bold uppercase tracking-widest text-[var(--text-muted)]">${group.category} (${group.names.length})</span>
+                <div class="flex flex-wrap gap-1">
+                  ${visibleNames.map(name => html`<${ReadOnlyChip} name=${name} />`)}
+                  ${!expanded && hiddenToolCount > 0
+                    ? html`
+                        <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium border border-dashed border-[var(--card-border)] text-[var(--text-muted)]">
+                          +${hiddenToolCount}
+                        </span>
+                      `
+                    : null}
+                </div>
+              </div>
+            `
+            })}
+          </div>
+          ${hasHiddenContent
+            ? html`
+                <button type="button"
+                  class="self-start text-[10px] text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
+                  aria-expanded=${expanded}
+                  aria-label=${expanded ? 'resolved allowlist 접기' : `resolved allowlist 전체 ${tools.length}개 보기`}
+                  onClick=${() => setExpanded(value => !value)}
+                >
+                  ${expanded ? '접기' : `전체 ${tools.length}개 보기`}
+                </button>
+              `
+            : null}
+        `}
     </div>
   `
 }

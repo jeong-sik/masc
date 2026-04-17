@@ -143,12 +143,16 @@ interface Props {
   windowMs?: number
   pollMs?: number
   maxEntries?: number
+  onSelectKeeper?: (name: string) => void
+  selectedKeeper?: string | null
 }
 
 export function HandoffTimeline({
   windowMs = 5 * 60 * 1000,
   pollMs = 5000,
   maxEntries = 500,
+  onSelectKeeper,
+  selectedKeeper = null,
 }: Props = {}) {
   const [entries, setEntries] = useState<TelemetryEntry[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -223,9 +227,22 @@ export function HandoffTimeline({
           ? html`<p class="text-[11px] text-text-dim">이 시간 범위에 A2A 이벤트 없음.</p>`
           : html`
               <div class="flex flex-col gap-1">
-                ${rows.map(row => html`
+                ${rows.map(row => {
+                  const isSelected = selectedKeeper === row.keeper
+                  const labelCls = isSelected
+                    ? 'text-text ring-1 ring-accent bg-accent/10'
+                    : 'text-text-muted hover:text-text hover:bg-bg-1/60'
+                  const clickable = typeof onSelectKeeper === 'function'
+                  const rowLabelCls =
+                    `w-32 shrink-0 truncate text-[11px] font-mono rounded px-1 ${labelCls}` +
+                    (clickable ? ' cursor-pointer' : '')
+                  return html`
                   <div class="flex items-center gap-3">
-                    <div class="w-32 shrink-0 truncate text-[11px] font-mono text-text-muted" title=${row.keeper}>
+                    <div
+                      class=${rowLabelCls}
+                      title=${row.keeper}
+                      onClick=${() => onSelectKeeper?.(row.keeper)}
+                    >
                       ${row.keeper}
                     </div>
                     <div class="relative flex-1 h-6 rounded-md bg-bg-1/40 border border-card-border/50">
@@ -244,7 +261,8 @@ export function HandoffTimeline({
                       })}
                     </div>
                   </div>
-                `)}
+                `
+                })}
               </div>
             `}
     </section>

@@ -126,7 +126,10 @@ function FleetAndFsmHubPanel() {
   return html`
     <div class="flex flex-col gap-4">
       <${FleetFsmMatrix} onSelectKeeper=${(name: string) => setPinned(name)} />
-      <${HandoffTimeline} />
+      <${HandoffTimeline}
+        onSelectKeeper=${(name: string) => setPinned(name)}
+        selectedKeeper=${pinned}
+      />
       <${CompositeFsmFlowchart} />
       <${FsmHub} selectedName=${pinned} />
     </div>

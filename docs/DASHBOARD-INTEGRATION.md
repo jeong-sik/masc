@@ -1,3 +1,11 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - dashboard/src/
+  - lib/
+---
+
 # Dashboard Integration Spec (Operator Console)
 
 ## Goal

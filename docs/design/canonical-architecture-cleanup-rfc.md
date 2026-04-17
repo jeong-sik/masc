@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/
+  - lib/a2a_tools.ml
+  - bin/
+---
+
 # Canonical Architecture Cleanup RFC
 
 **Status**: Draft

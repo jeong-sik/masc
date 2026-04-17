@@ -47,6 +47,32 @@ import {
 
 export { buildFleetRows }
 
+/**
+ * Pure filter for fleet rows.
+ *
+ * Case-insensitive substring match on `row.name`, `row.model`, and
+ * `row.runtime_blocker_class` so operators can locate a keeper by
+ * partial name, by the model it is running, or by its current blocker.
+ *
+ * Empty/whitespace query returns the input reference unchanged (no
+ * new array allocation, preserves referential equality for memoisation).
+ *
+ * Input is never mutated.
+ */
+export function filterFleetRows(
+  rows: readonly FleetRow[],
+  query: string,
+): readonly FleetRow[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return rows
+  return rows.filter(row => {
+    if (row.name.toLowerCase().includes(needle)) return true
+    if (row.model && row.model.toLowerCase().includes(needle)) return true
+    if (row.runtime_blocker_class && row.runtime_blocker_class.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
+
 // Whether "up" is bad for a given metric. context_ratio and latency going up = bad.
 function isUpBad(metric: MetricKey): boolean {
   return metric === 'context_ratio' || metric === 'last_latency_ms'
@@ -327,6 +353,7 @@ export function FleetTelemetryPanel() {
   const latestRequestId = useRef(0)
   const activeController = useRef<AbortController | null>(null)
   const state = useSignal<FleetTelemetryState>(emptyState())
+  const query = useSignal('')
 
   const loadFleetTelemetry = async () => {
     activeController.current?.abort()
@@ -419,6 +446,11 @@ export function FleetTelemetryPanel() {
 
   const value = state.value
   const counts = useMemo(() => summaryCounts(value.rows), [value.rows])
+  const visibleRows = useMemo(
+    () => filterFleetRows(value.rows, query.value),
+    [value.rows, query.value],
+  )
+  const isFiltering = query.value.trim() !== ''
   const liveTone: 'neutral' | 'ok' | 'warn' =
     value.rows.length === 0
       ? 'neutral'
@@ -524,8 +556,20 @@ export function FleetTelemetryPanel() {
       </div>
 
       <div>
-        <div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--text-dim)]">Keeper 비교</div>
-        <${FleetComparisonTable} rows=${value.rows} onReset=${handleReset} />
+        <div class="mb-1 flex items-center justify-between gap-2">
+          <div class="text-[10px] uppercase tracking-wider text-[var(--text-dim)]">Keeper 비교</div>
+          <input
+            type="search"
+            value=${query.value}
+            placeholder="name / model / blocker 필터"
+            aria-label="Keeper 필터"
+            onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
+            class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          />
+        </div>
+        ${isFiltering && visibleRows.length === 0 && value.rows.length > 0
+          ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${value.rows.length} keepers)</div>`
+          : html`<${FleetComparisonTable} rows=${visibleRows} onReset=${handleReset} />`}
       </div>
 
       <div>

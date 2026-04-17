@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/keeper_composite_observer.ml
+  - lib/keeper/keeper_unified_turn.ml
+  - lib/keeper/keeper_registry.ml
+---
+
 # RFC-0003 Phase 2: Turn-Scoped Observation Lifecycle
 
 **Status**: Draft

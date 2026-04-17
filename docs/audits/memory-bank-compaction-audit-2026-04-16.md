@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/keeper_memory_bank.ml
+  - lib/keeper/keeper_compact_policy.ml
+  - specs/bug-models/MemoryCompaction.tla
+---
+
 # Memory Bank Compaction FSM / TLA+ Audit (2026-04-16)
 
 **Status**: v1 — TLA+ spec enumerated end-to-end, OCaml implementation verified with direct reads (compaction algorithm, kind_caps, trigger, priorities). Buggy model re-verified with TLC; clean model deferred (state explosion, see §5).

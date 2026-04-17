@@ -1,3 +1,12 @@
+---
+status: live
+last_verified: 2026-04-17
+code_refs:
+  - lib/cdal/
+  - lib/keeper/
+  - lib/keeper/keeper_agent_run.ml
+---
+
 # CDAL Phase-1A Team Start Here
 
 **Audience**: An experienced implementation team joining with no prior CDAL context

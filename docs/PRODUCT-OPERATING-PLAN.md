@@ -1,3 +1,12 @@
+---
+status: live
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/
+  - lib/mcp_server.ml
+  - lib/keeper/keeper_supervisor.ml
+---
+
 # Product Operating Plan
 
 > Current package version: v0.9.9
@@ -32,7 +41,7 @@ The front-door promise is level 1. Levels 2-3 are supported surfaces. Retired co
 | Worktree and collision control | Done | Front door | README, room/tool coverage, live usage | onboarding clarity | keep in front-door docs |
 | Supervised execution + Supervisor | Working | Advanced | `docs/SWARM-DELIVERY-RUNBOOK.md`, `docs/SUPERVISOR-MODE.md` | still not the safest starting path | present as advanced flow |
 | Keeper continuity | Not done for product promise | Advanced | `docs/design/keeper-continuity-product-rfc.md`, `docs/KEEPER-CONTINUITY-VALIDATION.md` | checkpoint truth and bounded contract are not productized yet | ship as bounded same-trace continuity with explicit runbook |
-| Dashboard core read models | Working | Supporting | `docs/qa/REQUIREMENTS-REVERSE-ENGINEERED.md` | transport truth and config visibility gaps | harden read truth and config introspection |
+| Dashboard core read models | Working | Supporting | — | transport truth and config visibility gaps | harden read truth and config introspection |
 | Remote-safe operator | Working | Supporting | `docs/spec/09-server-transport.md`, `docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md` | auth and release posture still need tightening | keep surface reduced and explicit |
 | Multi-transport matrix | Working but not front-door | Experimental | implementation status appendix, live transport issues | reachable state and reported state can diverge | fix health truth before promotion |
 | Auth and API contract posture | Not done for product promise | Advanced / supporting | `docs/PRODUCT-REVIEW.md` | non-local default is still too weak, REST contract is not crisp | design + narrow hardening slices |

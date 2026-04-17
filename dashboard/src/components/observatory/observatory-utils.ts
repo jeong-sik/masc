@@ -25,7 +25,7 @@ export function isToolCall(entry: TelemetryEntry): boolean {
   return src === 'tool_call_io' || src === 'tool_usage'
 }
 
-export interface TelemetryMarkerBucket {
+interface TelemetryMarkerBucket {
   entry: TelemetryEntry
   ts: number
   count: number

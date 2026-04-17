@@ -4,7 +4,7 @@
 
 import { signal, type Signal } from '@preact/signals'
 
-export interface CursorPosition {
+interface CursorPosition {
   /** Cursor's time in ms since epoch. */
   ts: number
   /** Normalized x position within track (0.0 - 1.0). */

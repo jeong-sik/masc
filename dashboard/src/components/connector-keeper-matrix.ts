@@ -27,9 +27,9 @@ import {
 } from './connector-status'
 import { openConnectorConfig } from './connector-config-form'
 
-export type MatrixCellState = 'bound' | 'unbound' | 'na' | 'unknown'
+type MatrixCellState = 'bound' | 'unbound' | 'na' | 'unknown'
 
-export interface MatrixCell {
+interface MatrixCell {
   connectorId: KnownConnectorId
   keeperName: string
   state: MatrixCellState
@@ -57,7 +57,7 @@ export interface MatrixData {
     matrices render these as trailing chips so the operator can scan
     "this keeper's coverage" or "this connector's adoption" without
     counting cells. */
-export interface MatrixStateCounts {
+interface MatrixStateCounts {
   bound: number
   unbound: number
   na: number

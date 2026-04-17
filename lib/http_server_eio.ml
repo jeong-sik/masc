@@ -15,7 +15,10 @@ type config = {
 
 let default_config = {
   port = Env_config_core.masc_http_port_int ();
-  host = Env_config_core.get_string ~default:"127.0.0.1" "MASC_HTTP_HOST";
+  host =
+    Env_config_core.get_string
+      ~default:Masc_network_defaults.masc_http_default_host
+      "MASC_HTTP_HOST";
   max_connections = Env_config_core.get_int ~default:128 "MASC_HTTP_MAX_CONNECTIONS";
 }
 

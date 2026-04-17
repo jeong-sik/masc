@@ -26,6 +26,7 @@ import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { showToast } from './common/toast'
 import { CopyableCode } from './common/copyable-code'
+import { SetupGuideCard } from './setup-guide-card'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
 
@@ -595,6 +596,7 @@ function ConnectorLivePanel({
                   <${CopyableCode} label="status" command=${cmds.status} />
                   <${CopyableCode} label="stop" command=${cmds.stop} />
                 </div>
+                <${SetupGuideCard} connectorId=${connectorId} />
               </div>
             `
           })()

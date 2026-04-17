@@ -505,6 +505,7 @@ let resume_from_checkpoint
     yield_on_tool = config.yield_on_tool;
     context_compact_ratio = config.compact_ratio;
     priority = config.priority;
+    exit_condition = config.exit_condition;
   } in
   let tool_names =
     List.map (fun (t : Oas.Tool.t) -> t.schema.name) config.tools in
@@ -516,6 +517,13 @@ let resume_from_checkpoint
           if tool_names <> [] then Oas.Guardrails.AllowList tool_names
           else Oas.Guardrails.AllowAll }
   in
+  (* Parity with [build]: every Agent.options field that [build] threads
+     from [config] via the Builder must also be threaded here. Missing
+     fields cause silent behavioral drift on resume — e.g. dropping
+     [approval] makes OAS log "ApprovalRequired but no approval callback
+     — executing" on the first ApprovalRequired tool, dropping
+     [summarizer] leaks raw STATE blocks into compaction, dropping
+     [slot_id] desyncs admission queue accounting. *)
   let options : Oas.Agent.options = {
     Oas.Agent.default_options with
     provider = Some config.provider;
@@ -530,6 +538,10 @@ let resume_from_checkpoint
     tool_retry_policy = config.tool_retry_policy;
     allowed_paths = config.allowed_paths;
     description = config.description;
+    approval = config.approval;
+    slot_id = config.slot_id;
+    summarizer = config.summarizer;
+    priority = config.priority;
   } in
   match non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg with
   | Error _ as e -> e

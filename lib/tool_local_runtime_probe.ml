@@ -80,6 +80,9 @@ let truncate_text ?(max_len = 160) text =
   else
     String.sub text 0 max_len ^ "...[truncated]"
 
+let default_probe_timeout_sec = 6
+let default_ps_timeout_sec = 2
+
 let string_or_fallback candidates =
   let rec loop = function
     | [] -> None
@@ -370,6 +373,12 @@ let model_is_loaded model_id loaded_models =
       | None -> false)
     loaded_models
 
+let should_attempt_generate_probe ~before_status ~before_error =
+  match before_status, before_error with
+  | Some 200, _ -> true
+  | _, Some _ -> false
+  | _ -> true
+
 let request_body_json ~keep_alive ~model_id ~prompt ~max_tokens =
   let fields =
     [
@@ -424,8 +433,9 @@ let run_single_probe ~keep_alive ~server_url ~model_id ~prompt ~max_tokens ~time
               ~wall_clock_ms json
 
 let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
-    ?keep_alive ?(max_tokens = 16) ?(timeout_sec = 45) ?(ps_timeout_sec = 8)
-    () =
+    ?keep_alive ?(max_tokens = 16)
+    ?(timeout_sec = default_probe_timeout_sec)
+    ?(ps_timeout_sec = default_ps_timeout_sec) () =
   let server_url =
     Option.bind server_url trim_to_option
     |> Option.value ~default:Env_config_runtime.Ollama.server_url
@@ -445,6 +455,8 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
   let runs, run_errors =
     match effective_model with
     | None -> ([], [ "No Ollama model was requested, loaded, or configured via OLLAMA_DEFAULT_MODEL." ])
+    | Some _ when not (should_attempt_generate_probe ~before_status ~before_error) ->
+        ([], [])
     | Some model_id ->
         let completed_runs =
           List.init probe_runs (fun idx -> idx + 1)

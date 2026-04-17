@@ -123,6 +123,16 @@ let test_kv_cache_assessment_requires_two_successful_runs () =
   check string "insufficient data" "insufficient_data"
     (assessment |> member "signal" |> to_string)
 
+let test_generate_probe_is_skipped_after_failed_preflight () =
+  check bool "ps preflight error skips generate" false
+    (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
+       ~before_status:None
+       ~before_error:(Some "curl exit code 28"));
+  check bool "successful ps allows generate" true
+    (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
+       ~before_status:(Some 200)
+       ~before_error:None)
+
 let () =
   run "tool_local_runtime_probe"
     [
@@ -152,5 +162,7 @@ let () =
             test_kv_cache_assessment_detects_repeat_improvement;
           test_case "needs at least two successful runs" `Quick
             test_kv_cache_assessment_requires_two_successful_runs;
+          test_case "skips generate after failed ps preflight" `Quick
+            test_generate_probe_is_skipped_after_failed_preflight;
         ] );
     ]

@@ -62,6 +62,31 @@ if [[ "${pin_source}" == "${default_pin_source}" ]]; then
     if [[ "${OAS_AGENT_SDK_SHA}" != "${latest_main_sha}" ]]; then
       echo "::warning::OAS main drift: pinned ${OAS_AGENT_SDK_SHA}, upstream ${latest_main_sha} — update pin when API-compatible"
     fi
+
+    # Ref-reachability guard: the pin SHA must be an ancestor of
+    # OAS_AGENT_SDK_TRACK_REF on upstream. Orphan or diverged SHAs still
+    # exist as loose objects on GitHub for a grace period, but they are GC
+    # candidates and will silently break CI once collected. Checking
+    # ancestry here catches drift at review time instead of at incident time.
+    reachability_scratch="$(mktemp -d -t oas-pin-reachability.XXXXXX)"
+    if GIT_DIR="${reachability_scratch}" git init -q --bare \
+       && GIT_DIR="${reachability_scratch}" git fetch -q --no-tags \
+            "${OAS_AGENT_SDK_URL}" \
+            "+refs/heads/${OAS_AGENT_SDK_TRACK_REF}:refs/heads/${OAS_AGENT_SDK_TRACK_REF}" \
+            2>/dev/null; then
+      if ! GIT_DIR="${reachability_scratch}" git merge-base --is-ancestor \
+           "${OAS_AGENT_SDK_SHA}" \
+           "refs/heads/${OAS_AGENT_SDK_TRACK_REF}" 2>/dev/null; then
+        echo "OAS pin ${OAS_AGENT_SDK_SHA} is not reachable from ${OAS_AGENT_SDK_TRACK_REF} on ${OAS_AGENT_SDK_URL}" >&2
+        echo "  Orphan or diverged SHAs are GC candidates on GitHub and will silently break CI once collected." >&2
+        echo "  repair: bump OAS_AGENT_SDK_SHA in scripts/oas-agent-sdk-pin.sh to a commit on ${OAS_AGENT_SDK_TRACK_REF}" >&2
+        rm -rf "${reachability_scratch}"
+        exit 1
+      fi
+    else
+      echo "WARN: could not fetch ${OAS_AGENT_SDK_TRACK_REF} from ${OAS_AGENT_SDK_URL}; skipping ref-reachability check" >&2
+    fi
+    rm -rf "${reachability_scratch}"
   fi
 else
   echo "OAS pin override in use: ${pin_source}"

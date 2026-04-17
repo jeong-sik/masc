@@ -5,7 +5,6 @@ import {
   summarizeEntries,
   durationColor,
   formatArgs,
-  formatResult,
   prettyArgs,
 } from './tool-call-shared'
 
@@ -201,39 +200,6 @@ describe('formatArgs', () => {
 
   it('handles number values', () => {
     expect(formatArgs({ count: 42 })).toBe('{count: 42}')
-  })
-})
-
-// ================================================================
-// formatResult
-// ================================================================
-
-describe('formatResult', () => {
-  it('returns error prefixed', () => {
-    expect(formatResult(null, 'bad thing')).toBe('err: bad thing')
-  })
-
-  it('returns dash for null result and null error', () => {
-    expect(formatResult(null, null)).toBe('-')
-  })
-
-  it('returns result truncated', () => {
-    const long = 'a'.repeat(100)
-    const result = formatResult(long, null)
-    expect(result.length).toBeLessThanOrEqual(83)
-  })
-
-  it('returns result as-is when short', () => {
-    expect(formatResult('ok', null)).toBe('ok')
-  })
-
-  it('prioritizes error over result', () => {
-    expect(formatResult('ok', 'fail')).toBe('err: fail')
-  })
-
-  it('respects custom maxLen', () => {
-    const result = formatResult('a'.repeat(50), null, 20)
-    expect(result.length).toBeLessThanOrEqual(23)
   })
 })
 

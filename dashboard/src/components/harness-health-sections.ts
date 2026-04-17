@@ -7,6 +7,7 @@ import { navigate } from '../router'
 import { formatTimeAgo, formatTimestampKo } from '../lib/format-time'
 import { SurfaceCard } from './common/card'
 import { CopyIdButton } from './common/copy-id-button'
+import { StatusDot } from './common/status-dot'
 import type {
   RailStatus,
   GateDistribution,
@@ -384,7 +385,7 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
                   ${item.agent_name || 'agent'} · ${item.gate || 'gate'} · ${item.evaluator_cascade || 'cascade'} · ${formatTimestamp(item.timestamp)}
                 </div>
               </div>
-              <span class=${`inline-block h-2.5 w-2.5 rounded-full ${verdictTone(item.verdict)}`} />
+              <${StatusDot} size="md" class=${verdictTone(item.verdict)} />
             </div>
             <div class="mt-2 text-sm text-[var(--text-body)]">${verdictSummary(item.verdict)}</div>
             ${item.fallback_reason ? html`

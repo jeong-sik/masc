@@ -13,6 +13,7 @@ import {
 } from '../api/transport-health'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { TextInput } from './common/input'
+import { StatusDot } from './common/status-dot'
 import { CopyIdButton } from './common/copy-id-button'
 
 type StatusTone = 'ok' | 'warn' | 'bad'
@@ -281,7 +282,7 @@ function SectionCard({
     <div class="rounded-xl border border-card-border bg-bg-1/60 p-4">
       <div class="flex items-center justify-between gap-3 mb-3">
         <div class="flex items-center gap-2 min-w-0">
-          <span class=${`w-2 h-2 rounded-full shrink-0 ${statusDot(status)}`}></span>
+          <${StatusDot} size="sm" class=${statusDot(status)} />
           <span class="text-xs font-semibold text-text-strong uppercase tracking-wider truncate">${title}</span>
         </div>
         ${eyebrow ? html`<span class=${`text-[10px] uppercase tracking-wider ${toneClass(status)}`}>${eyebrow}</span>` : null}
@@ -391,11 +392,11 @@ export function TransportHealthPanel() {
         <summary class="flex items-center gap-3 px-4 py-3 cursor-pointer text-[13px] font-semibold text-text-strong bg-card/28 hover:bg-card/44 transition-colors">
           <span>트랜스포트 상세</span>
           <span class="ml-auto flex items-center gap-2 text-[11px] font-normal text-text-muted">
-            <span class="inline-flex items-center gap-1"><span class=${`w-1.5 h-1.5 rounded-full ${statusDot(sseStatus)}`}></span>SSE</span>
-            <span class="inline-flex items-center gap-1"><span class=${`w-1.5 h-1.5 rounded-full ${statusDot(grpcStatus)}`}></span>gRPC</span>
-            <span class="inline-flex items-center gap-1"><span class=${`w-1.5 h-1.5 rounded-full ${statusDot(wsStatus)}`}></span>WS</span>
-            <span class="inline-flex items-center gap-1"><span class=${`w-1.5 h-1.5 rounded-full ${statusDot(webrtcStatus)}`}></span>RTC</span>
-            <span class="inline-flex items-center gap-1"><span class=${`w-1.5 h-1.5 rounded-full ${statusDot(h2Status)}`}></span>HTTP</span>
+            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(sseStatus)} />SSE</span>
+            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(grpcStatus)} />gRPC</span>
+            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(wsStatus)} />WS</span>
+            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(webrtcStatus)} />RTC</span>
+            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(h2Status)} />HTTP</span>
           </span>
         </summary>
         <div class="p-4">

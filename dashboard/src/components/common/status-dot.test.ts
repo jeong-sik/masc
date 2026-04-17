@@ -1,0 +1,108 @@
+// @vitest-environment happy-dom
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { render } from 'preact'
+import { html } from 'htm/preact'
+import {
+  StatusDot,
+  statusDotClasses,
+  statusDotSizeClass,
+} from './status-dot'
+
+describe('statusDotSizeClass (pure)', () => {
+  it('default size is sm (8px — baseline row marker)', () => {
+    expect(statusDotSizeClass()).toBe('w-2 h-2')
+  })
+
+  it('produces the expected Tailwind pair for each named variant', () => {
+    expect(statusDotSizeClass('xs')).toBe('w-1.5 h-1.5')
+    expect(statusDotSizeClass('sm')).toBe('w-2 h-2')
+    expect(statusDotSizeClass('md')).toBe('w-2.5 h-2.5')
+    expect(statusDotSizeClass('lg')).toBe('w-3 h-3')
+  })
+})
+
+describe('statusDotClasses (pure)', () => {
+  it('always includes the invariant base (rounded-full + shrink-0 + inline-block)', () => {
+    const cls = statusDotClasses()
+    expect(cls).toContain('rounded-full')
+    expect(cls).toContain('shrink-0')
+    expect(cls).toContain('inline-block')
+  })
+
+  it('tone class is appended after size (caller controls color)', () => {
+    const cls = statusDotClasses('sm', 'bg-emerald-500')
+    expect(cls).toMatch(/w-2 h-2.*bg-emerald-500/)
+  })
+
+  it('empty / undefined tone does not leave trailing whitespace', () => {
+    expect(statusDotClasses('sm', '')).not.toMatch(/\s$/)
+    expect(statusDotClasses('sm', undefined)).not.toMatch(/\s$/)
+  })
+
+  it('extra class appended after tone (margin, ring, etc.)', () => {
+    expect(statusDotClasses('sm', 'bg-rose-500', 'ml-1'))
+      .toMatch(/bg-rose-500.*ml-1/)
+  })
+})
+
+describe('StatusDot component', () => {
+  let container: HTMLElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+  afterEach(() => {
+    render(null, container)
+    document.body.removeChild(container)
+  })
+
+  it('renders a span with data-status-dot + size attribute', () => {
+    render(html`<${StatusDot} />`, container)
+    const el = container.querySelector('[data-status-dot]') as HTMLElement
+    expect(el.tagName).toBe('SPAN')
+    expect(el.getAttribute('data-status-dot-size')).toBe('sm')
+  })
+
+  it('tone class (passed via `class`) ends up on the span', () => {
+    render(html`<${StatusDot} class="bg-emerald-500" />`, container)
+    expect(container.querySelector('[data-status-dot]')!.className).toContain('bg-emerald-500')
+  })
+
+  it('default (no ariaLabel) is decorative — aria-hidden=true, no role', () => {
+    // Regression guard: dot must NOT announce itself when paired with
+    // a text label, otherwise AT users hear "dot, running, dot, stopped"
+    // for every row. See governance / transport-health tables.
+    render(html`<${StatusDot} />`, container)
+    const el = container.querySelector('[data-status-dot]') as HTMLElement
+    expect(el.getAttribute('aria-hidden')).toBe('true')
+    expect(el.getAttribute('role')).toBeNull()
+  })
+
+  it('ariaLabel promotes to semantic mode: role=img, no aria-hidden', () => {
+    render(
+      html`<${StatusDot} ariaLabel="running" class="bg-emerald-500" />`,
+      container,
+    )
+    const el = container.querySelector('[data-status-dot]')!
+    expect(el.getAttribute('role')).toBe('img')
+    expect(el.getAttribute('aria-label')).toBe('running')
+    expect(el.getAttribute('aria-hidden')).toBeNull()
+  })
+
+  it('each size variant renders distinct Tailwind tokens', () => {
+    for (const size of ['xs', 'sm', 'md', 'lg'] as const) {
+      render(html`<${StatusDot} size=${size} />`, container)
+      const el = container.querySelector('[data-status-dot]') as HTMLElement
+      expect(el.getAttribute('data-status-dot-size')).toBe(size)
+      render(null, container)
+    }
+  })
+
+  it('testId renders as data-testid', () => {
+    render(
+      html`<${StatusDot} testId="transport-sse-dot" class="bg-emerald-500" />`,
+      container,
+    )
+    expect(container.querySelector('[data-testid="transport-sse-dot"]')).toBeTruthy()
+  })
+})

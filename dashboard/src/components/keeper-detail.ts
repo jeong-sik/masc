@@ -385,6 +385,34 @@ function formatCheckpointTime(timestamp: number): string {
   })
 }
 
+/**
+ * Pure filter for OAS snapshot history rows.
+ *
+ * Case-insensitive substring match on `snapshot_id`, `source_kind`,
+ * `latest_preview`, and `continuity_summary` so operators can locate a
+ * snapshot by partial id, by the preview/summary text that described the
+ * turn, or by its source kind (`oas_current` / `oas_history`).
+ *
+ * Empty/whitespace query returns the input reference unchanged (no new
+ * array allocation, preserves referential equality for memoisation).
+ *
+ * Input is never mutated. Treats `null` fields defensively.
+ */
+export function filterCheckpointHistory(
+  rows: readonly KeeperCheckpointSummary[],
+  query: string,
+): readonly KeeperCheckpointSummary[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return rows
+  return rows.filter(row => {
+    if (row.snapshot_id.toLowerCase().includes(needle)) return true
+    if (row.source_kind && row.source_kind.toLowerCase().includes(needle)) return true
+    if (row.latest_preview && row.latest_preview.toLowerCase().includes(needle)) return true
+    if (row.continuity_summary && row.continuity_summary.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
+
 function CheckpointSummaryCard({
   title,
   summary,
@@ -433,6 +461,7 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
   const [error, setError] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [deleting, setDeleting] = useState(false)
+  const [historyQuery, setHistoryQuery] = useState('')
 
   const loadInventory = () => {
     void (async () => {
@@ -548,14 +577,33 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
       />
 
       <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)]">
-        <div class="border-b border-[var(--card-border)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-          OAS Snapshot History
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--card-border)] px-3 py-2">
+          <div class="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+            OAS Snapshot History
+            ${inventory && inventory.history.length > 0 && historyQuery.trim() !== ''
+              ? html`<span class="ml-2 text-[10px] font-normal normal-case tracking-normal text-[var(--text-dim)]">${filterCheckpointHistory(inventory.history, historyQuery).length}/${inventory.history.length}</span>`
+              : null}
+          </div>
+          <input
+            type="search"
+            value=${historyQuery}
+            placeholder="snapshot id / preview / 요약 필터"
+            aria-label="OAS snapshot history 필터"
+            onInput=${(e: Event) => { setHistoryQuery((e.target as HTMLInputElement).value) }}
+            class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          />
         </div>
         ${!inventory || inventory.history.length === 0
           ? html`<div class="px-3 py-3 text-[12px] text-[var(--text-muted)]">저장된 OAS history snapshot이 아직 없습니다.</div>`
-          : html`
+          : (() => {
+              const visibleHistory = filterCheckpointHistory(inventory.history, historyQuery)
+              const isFiltering = historyQuery.trim() !== ''
+              if (isFiltering && visibleHistory.length === 0) {
+                return html`<div class="px-3 py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${inventory.history.length} items)</div>`
+              }
+              return html`
               <div class="flex flex-col">
-                ${inventory.history.map(item => html`
+                ${visibleHistory.map(item => html`
                   <label class="flex gap-3 border-b border-[var(--card-border)] px-3 py-3 text-[12px] last:border-b-0">
                     <input
                       type="checkbox"
@@ -590,7 +638,8 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
                   </label>
                 `)}
               </div>
-            `}
+            `
+            })()}
       </div>
     </div>
   `

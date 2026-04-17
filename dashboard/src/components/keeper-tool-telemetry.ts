@@ -3,7 +3,7 @@
 // cross-trace aggregation, and hourly timeline sparklines.
 
 import { html } from 'htm/preact'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { fetchKeeperToolStats } from '../api/dashboard'
 import type { ToolStat, HourlyBucket, ToolStatsResponse } from '../api/dashboard'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
@@ -16,6 +16,30 @@ interface TelemetryState {
   timeline: HourlyBucket[]
   totalEntries: number
   windowHours: number
+}
+
+/**
+ * Pure filter for tool-telemetry rows.
+ *
+ * - `query` is case-insensitive substring match on `stat.name` OR the
+ *   derived category label from `toolCategory(stat.name)` (e.g. "read",
+ *   "browser", "masc"). Query is trimmed.
+ * - Empty/whitespace-only query returns the input reference unchanged
+ *   (zero-allocation fast path).
+ * - Does not mutate the input array.
+ */
+export function filterToolStats(
+  rows: readonly ToolStat[],
+  query: string,
+): readonly ToolStat[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return rows
+  return rows.filter(stat => {
+    if (stat.name.toLowerCase().includes(needle)) return true
+    const label = toolCategory(stat.name).label
+    if (label.toLowerCase().includes(needle)) return true
+    return false
+  })
 }
 
 // ── Sparkline ─────────────────────────────────────────
@@ -109,6 +133,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
     })
   }
   const resource = resourceRef.current
+  const [query, setQuery] = useState('')
 
   useEffect(() => {
     void resource.load(async (signal) => {
@@ -145,6 +170,11 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
 
   // Find tools with highest p95
   const slowest = [...s.tools].sort((a, b) => b.p95_duration_ms - a.p95_duration_ms).slice(0, 3)
+
+  // Inline filter — s.tools is typically ≤ 50 rows so O(n) is fine and
+  // keeps all hooks above early-return paths.
+  const visibleTools = filterToolStats(s.tools, query)
+  const trimmedQuery = query.trim()
 
   return html`
     <div class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/30 hover:shadow-md">
@@ -184,8 +214,29 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
 
       ${'' /* Per-tool bar chart */}
       <div class="flex flex-col gap-1">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-dim)] mb-1">호출 빈도</div>
-        ${s.tools.slice(0, 15).map(stat => {
+        <div class="flex items-center justify-between gap-2 mb-1">
+          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-dim)]">호출 빈도</div>
+          <div class="flex items-center gap-2">
+            <input
+              type="search"
+              value=${query}
+              placeholder="도구 검색 (이름/카테고리)"
+              aria-label="도구 텔레메트리 검색"
+              onInput=${(e: Event) => { setQuery((e.target as HTMLInputElement).value) }}
+              class="min-w-[160px] rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            />
+            <span class="text-[10px] text-[var(--text-muted)] tabular-nums">
+              ${trimmedQuery
+                ? `${visibleTools.length} / ${s.tools.length}`
+                : `${s.tools.length}개`}
+            </span>
+          </div>
+        </div>
+        ${visibleTools.length === 0 ? html`
+          <div class="text-[11px] text-[var(--text-muted)] py-2 px-2">
+            필터 결과 없음 (${s.tools.length} items)
+          </div>
+        ` : visibleTools.slice(0, 15).map(stat => {
           const cat = toolCategory(stat.name)
           const barWidth = (stat.call_count / maxCount) * 100
           return html`

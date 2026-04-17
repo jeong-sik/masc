@@ -25,6 +25,9 @@ import {
   loopActionBusy,
   loopActionError,
   selectedLoop,
+  authorFilter,
+  filteredLoops,
+  availableAuthors,
   loadLoops,
   refreshAutoresearchSurface,
   selectLoop,
@@ -70,26 +73,45 @@ function liveLabel(loop: Pick<AutoresearchLoopSummary, 'live'>): string {
 // --- Sub-components ---
 
 function LoopSelector() {
-  const state = loopsResource.state.value
-  const loops = isLoaded(state) ? state.data.loops : []
-  if (loops.length === 0) return null
+  const loops = filteredLoops.value
+  const authors = availableAuthors.value
+
+  if (loops.length === 0 && authors.length === 0) return null
 
   return html`
-    <div class="flex flex-wrap gap-2">
-      ${loops.map(loop => {
-        const isSelected = loop.loop_id === selectedLoopId.value
-        const cls = isSelected
-          ? 'px-3 py-1.5 rounded-lg text-xs font-medium border border-accent/60 bg-[var(--accent-10)] text-[var(--text-strong)] cursor-pointer'
-          : 'px-3 py-1.5 rounded-lg text-xs font-medium border border-card-border bg-card/60 text-[var(--text-muted)] cursor-pointer hover:border-accent/30 transition-colors'
-        return html`
-          <button type="button" key=${loop.loop_id} class=${cls} onClick=${() => selectLoop(loop.loop_id)}>
-            <span class="${statusColor(loop.status)} mr-1">\u25CF</span>
-            ${loop.loop_id.slice(0, 8)}
-            <span class="ml-1 opacity-60">${statusLabel(loop.status)}</span>
-            <span class="ml-1 opacity-60">${liveLabel(loop)}</span>
-          </button>
-        `
-      })}
+    <div class="flex flex-col gap-3">
+      <div class="flex items-center gap-2">
+        <label class="text-[11px] text-[var(--text-muted)] font-medium">실행자 필터</label>
+        <select
+          class="bg-card border border-card-border text-[var(--text-body)] text-xs rounded px-2 py-1 outline-none focus:border-accent"
+          value=${authorFilter.value}
+          onChange=${(e: Event) => {
+            const target = e.target as HTMLSelectElement
+            authorFilter.value = target.value
+          }}
+        >
+          <option value="all">전체</option>
+          ${authors.map(author => html`<option value=${author}>${author}</option>`)}
+          <option value="unknown">알 수 없음</option>
+        </select>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        ${loops.map(loop => {
+          const isSelected = loop.loop_id === selectedLoopId.value
+          const cls = isSelected
+            ? 'px-3 py-1.5 rounded-lg text-xs font-medium border border-accent/60 bg-[var(--accent-10)] text-[var(--text-strong)] cursor-pointer'
+            : 'px-3 py-1.5 rounded-lg text-xs font-medium border border-card-border bg-card/60 text-[var(--text-muted)] cursor-pointer hover:border-accent/30 transition-colors'
+          return html`
+            <button type="button" key=${loop.loop_id} class=${cls} onClick=${() => selectLoop(loop.loop_id)}>
+              <span class="${statusColor(loop.status)} mr-1">\u25CF</span>
+              ${loop.loop_id.slice(0, 8)}
+              <span class="ml-1 opacity-60">${statusLabel(loop.status)}</span>
+              <span class="ml-1 opacity-60">${liveLabel(loop)}</span>
+            </button>
+          `
+        })}
+        ${loops.length === 0 ? html`<div class="text-[var(--text-muted)] text-xs py-1.5">선택된 실행자의 루프가 없습니다.</div>` : null}
+      </div>
     </div>
   `
 }

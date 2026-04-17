@@ -4,14 +4,41 @@
 ## [0.9.11] - 2026-04-17
 
 ### Changed
-- **Dashboard — Cascade Routing card merged (#7986).** Cascade Profiles and
-  Keeper Mapping collapsed into a single Cascade Routing card to reduce the
-  number of overlapping panels on the routing overview.
-- **Dashboard — visible toast cap (#7985).** At most 5 toasts are rendered
-  simultaneously; older toasts are dropped instead of stacking off-screen.
-  Test coverage 0 → 9.
+
+Post-0.9.10 bulk merge cycle (admin override). Corrects the four entries
+(#7981, #7982, #7985, #7986) that landed *after* the v0.9.10 tag commit
+(`9820decae`) and were incorrectly attributed to 0.9.10 in #7994 — they
+belong to this release.
+
+- **Dashboard UX.**
+  - Cascade Profiles + Keeper Mapping merged into one Cascade Routing card (#7986).
+  - Visible toast cap at 5 + test coverage 0 → 9 (#7985).
+  - Text filter on harness-health compaction/handoff lists (#7981).
+  - Text filter on agent-detail owned-tasks + histories (#7982).
+  - `CopyIdButton` wired into keeper-detail prompt fingerprint displays (#7989).
+  - `ActionButton` prop whitelist expanded (aria-busy/id/title/testId) + tests 0 → 16 (#7995).
+  - `TextInput` / `TextArea` now forward `id` — fixes orphan `<label for>` a11y regression (#7987).
+
+- **Keeper / cascade / server.**
+  - Raw `cascade_name` preserved on keeper side; canonicalization pushed to point-of-use (#7978).
+  - `Accept_rejected` split from success in cascade evaluator; added `evict_idle` + `rejected_in_window` metrics (#7996).
+
+- **Performance.**
+  - Autoresearch pagination: in-memory mtime cache removes O(N) file I/O bottleneck (#7988).
+
+- **Dead code / cleanup.**
+  - Dead `mission-cards` barrel removed (no importers, `SummaryStat` unreferenced) (#7991).
+
+- **Spec / docs / tooling.**
+  - RFC-0004: OCaml ↔ TS shared contract (SSE + gRPC-web) (#7999).
+  - Spec §7/§8/§10 type sections retired (checkpoint / context_budget / message_schema purged) (#7997).
+  - Capsule Execution Plan Slices A–C marked historical (team_session retired) (#7984).
+  - OAS pin bumped to `0.155.1` + compat fixes (#7993).
+  - CHANGELOG `[0.9.10]` TBD placeholders filled (#7994).
+  - `.tmp/` scratch directory added to `.gitignore` (#7998).
 
 ### Deprecated
+
 - **Capsule Execution Plan slices marked historical (#7984).**
   `docs/design/masc-capsule-execution-plan.md` Slices A–C targeted the retired
   `team_session` subsystem (9 dead `lib/team_session/*` and
@@ -33,12 +60,10 @@ Bulk merge cycle (2 `/loop` batches, admin override) covering dashboard UX, keep
   - Setup guide gains per-step completion checklist (#7974) and Vercel-style Start button on onboarding cards (#7963).
   - Copy affordance: new `CopyIdButton` on transport-health hot session ids (#7973) with inline "Copied" confirmation (#7980).
   - Live-ticking counter on startup-warning banner (#7967).
-  - Text filters added to mission worker-runs evidence list (#7975), harness-health compaction/handoff lists (#7981), agent-detail owned-tasks + histories (#7982), and runtime-monitor model-id/tool-name search (#7957).
+  - Text filters added to mission worker-runs evidence list (#7975) and runtime-monitor model-id/tool-name search (#7957).
   - Keyboard shortcuts for connector navigation (1–4, ?) (#7958).
   - Keeper modal KPIs regrouped into 4 question-led sections (#7946).
   - Live Judge promoted to page title; empty toolbar card purged (#7969).
-  - Cascade Profiles + Keeper Mapping merged into one Cascade Routing card (#7986).
-  - Toast module caps visible toasts at 5 with test coverage (#7985).
   - AA accessibility pass on connector readiness rail (#7960).
   - Zod parse boundary for SSE events (#7955).
   - Outcomes rollup added to keeper JSON response (#7941).

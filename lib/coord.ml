@@ -157,13 +157,11 @@ let observe_task_transition_event config ~agent_name ~task_id
   with Stdlib.Effect.Unhandled _ -> ())
 
 (* force_release_task — zombie cleanup needs task management logic *)
-let () = Coord_hooks.force_release_task_fn :=
-  (fun config ~agent_name ~task_id () ->
+let () = Atomic.set Coord_hooks.force_release_task_fn (fun config ~agent_name ~task_id () ->
     force_release_task_r config ~agent_name ~task_id ())
 
 (* Activity graph emit — wraps Activity_graph for room sub-modules *)
-let () = Coord_hooks.activity_emit_fn :=
-  (fun config ~actor ?subject ~kind ~payload ~tags () ->
+let () = Atomic.set Coord_hooks.activity_emit_fn (fun config ~actor ?subject ~kind ~payload ~tags () ->
     (try
       ignore (Activity_graph.emit config
         ~actor:(Activity_graph.entity ~kind:actor.Coord_hooks.kind actor.id)
@@ -175,31 +173,29 @@ let () = Coord_hooks.activity_emit_fn :=
      | exn -> Log.Coord.warn "activity_graph emit failed: %s" (Printexc.to_string exn)))
 
 (* Agent economy earn — wraps Agent_economy for task completion credits *)
-let () = Coord_hooks.agent_economy_earn_fn :=
-  (fun ~base_path ~agent_name ~reason ->
+let () = Atomic.set Coord_hooks.agent_economy_earn_fn (fun ~base_path ~agent_name ~reason ->
     match Agent_economy.earn ~base_path ~agent_name
       ~kind:Earn_task_done ~reason () with
     | Ok _bal -> ()
     | Error msg -> Log.Misc.error "task earn failed: %s" msg)
 
 (* Relation materializer — agent leave *)
-let () = Coord_hooks.relation_on_leave_fn := Relation_materializer.on_agent_leave
+let () = Atomic.set Coord_hooks.relation_on_leave_fn Relation_materializer.on_agent_leave
 
 (* Relation materializer — task done *)
-let () = Coord_hooks.relation_on_task_done_fn := Relation_materializer.on_task_done
+let () = Atomic.set Coord_hooks.relation_on_task_done_fn Relation_materializer.on_task_done
 
 (* Hebbian learning — strengthen on task completion.
    Also emits activity events so strengthens appear in the
    activity graph / telemetry surface alongside task events. *)
-let () = Coord_hooks.hebbian_on_task_done_fn :=
-  (fun config ~assignee ~active_agents ->
+let () = Atomic.set Coord_hooks.hebbian_on_task_done_fn (fun config ~assignee ~active_agents ->
     List.iter (fun peer ->
       if peer <> assignee then begin
         (try Hebbian_eio.strengthen config ~from_agent:assignee ~to_agent:peer ()
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Coord.warn "hebbian strengthen failed: %s" (Printexc.to_string exn));
         (try
-           !Coord_hooks.activity_emit_fn config
+           (Atomic.get Coord_hooks.activity_emit_fn) config
              ~actor:Coord_hooks.{ kind = "agent"; id = assignee }
              ~subject:Coord_hooks.{ kind = "agent"; id = peer }
              ~kind:"hebbian.strengthen"
@@ -214,15 +210,14 @@ let () = Coord_hooks.hebbian_on_task_done_fn :=
     ) active_agents)
 
 (* Hebbian learning — weaken on task cancellation. *)
-let () = Coord_hooks.hebbian_on_task_cancelled_fn :=
-  (fun config ~agent_name ~active_agents ->
+let () = Atomic.set Coord_hooks.hebbian_on_task_cancelled_fn (fun config ~agent_name ~active_agents ->
     List.iter (fun peer ->
       if peer <> agent_name then begin
         (try Hebbian_eio.weaken config ~from_agent:agent_name ~to_agent:peer ()
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Coord.warn "hebbian weaken failed: %s" (Printexc.to_string exn));
         (try
-           !Coord_hooks.activity_emit_fn config
+           (Atomic.get Coord_hooks.activity_emit_fn) config
              ~actor:Coord_hooks.{ kind = "agent"; id = agent_name }
              ~subject:Coord_hooks.{ kind = "agent"; id = peer }
              ~kind:"hebbian.weaken"
@@ -236,18 +231,16 @@ let () = Coord_hooks.hebbian_on_task_cancelled_fn :=
       end
     ) active_agents)
 
-let () = Coord_hooks.observe_agent_lifecycle_fn :=
-  (fun config ~agent_id ~event_kind ~details ->
+let () = Atomic.set Coord_hooks.observe_agent_lifecycle_fn (fun config ~agent_id ~event_kind ~details ->
     observe_agent_lifecycle config ~agent_id ~event_kind ~details)
 
-let () = Coord_hooks.observe_task_transition_fn :=
-  (fun config ~agent_name ~task_id ~transition ~details ->
-    !Coord_hooks.on_task_mutation_fn ();
+let () = Atomic.set Coord_hooks.observe_task_transition_fn (fun config ~agent_name ~task_id ~transition ~details ->
+    (Atomic.get Coord_hooks.on_task_mutation_fn) ();
     observe_task_transition_event config ~agent_name ~task_id
       ~transition ~details)
 
 (* Board artifact cleanup — wraps Board_dispatch for GC *)
-let () = Coord_hooks.cleanup_board_artifacts_fn := (fun () ->
+let () = Atomic.set Coord_hooks.cleanup_board_artifacts_fn (fun () ->
   let stale_system_daily_sec = 12.0 *. 3600.0 in
   let board_artifact_title title =
     let title = String.lowercase_ascii (String.trim title) in
@@ -277,7 +270,7 @@ let () = Coord_hooks.cleanup_board_artifacts_fn := (fun () ->
        0)
 
 (* Subscription auto-subscribe on join — wraps Subscriptions for room_eio *)
-let () = Coord_hooks.subscribe_messages_fn := (fun ~subscriber ->
+let () = Atomic.set Coord_hooks.subscribe_messages_fn (fun ~subscriber ->
   let _ = Subscriptions.SubscriptionStore.subscribe
     ~subscriber ~resource:Subscriptions.Messages () in ())
 

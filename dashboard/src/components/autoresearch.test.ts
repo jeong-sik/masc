@@ -7,6 +7,7 @@ import type {
   AutoresearchLoopSummary,
   AutoresearchLoopsResponse,
 } from '../api/autoresearch'
+import { filterCycles } from './autoresearch'
 
 void vi
 
@@ -449,5 +450,76 @@ describe('Autoresearch surface refresh', () => {
     const settledRetryButton = Array.from(container.querySelectorAll('button'))
       .find(button => button.textContent?.includes('재시도')) as HTMLButtonElement | undefined
     expect(settledRetryButton?.disabled).toBe(false)
+  })
+})
+
+describe('filterCycles', () => {
+  function makeCycle(overrides: Partial<AutoresearchCycleRecord> = {}): AutoresearchCycleRecord {
+    return {
+      cycle: 1,
+      hypothesis: 'increase learning rate',
+      score_before: 0.5,
+      score_after: 0.6,
+      delta: 0.1,
+      decision: 'keep',
+      commit_hash: null,
+      elapsed_ms: 10,
+      model_used: 'glm',
+      timestamp: 1_717_000_000,
+      ...overrides,
+    }
+  }
+
+  const cycles: AutoresearchCycleRecord[] = [
+    makeCycle({ cycle: 1, hypothesis: 'increase learning rate', decision: 'keep' }),
+    makeCycle({ cycle: 2, hypothesis: 'swap optimizer to AdamW', decision: 'discard' }),
+    makeCycle({ cycle: 12, hypothesis: 'prune dropout layers', decision: 'keep' }),
+  ]
+
+  it('returns the input reference when query is empty', () => {
+    expect(filterCycles(cycles, '')).toBe(cycles)
+  })
+
+  it('returns the input reference for whitespace-only query', () => {
+    expect(filterCycles(cycles, '   ')).toBe(cycles)
+  })
+
+  it('matches by hypothesis substring (case-insensitive)', () => {
+    const result = filterCycles(cycles, 'LEARNING')
+    expect(result.map(c => c.cycle)).toEqual([1])
+  })
+
+  it('matches by raw decision token', () => {
+    const result = filterCycles(cycles, 'discard')
+    expect(result.map(c => c.cycle)).toEqual([2])
+  })
+
+  it('matches by Korean decision label 유지', () => {
+    const result = filterCycles(cycles, '유지')
+    expect(result.map(c => c.cycle)).toEqual([1, 12])
+  })
+
+  it('matches by Korean decision label 삭제', () => {
+    const result = filterCycles(cycles, '삭제')
+    expect(result.map(c => c.cycle)).toEqual([2])
+  })
+
+  it('matches by cycle number coerced to string', () => {
+    const result = filterCycles(cycles, '12')
+    expect(result.map(c => c.cycle)).toEqual([12])
+  })
+
+  it('returns empty when no field matches', () => {
+    expect(filterCycles(cycles, 'nonexistent-token')).toHaveLength(0)
+  })
+
+  it('trims query before matching', () => {
+    expect(filterCycles(cycles, '  optimizer  ').map(c => c.cycle)).toEqual([2])
+  })
+
+  it('does not mutate the input array', () => {
+    const copy = cycles.slice()
+    filterCycles(cycles, 'keep')
+    expect(cycles).toEqual(copy)
   })
 })

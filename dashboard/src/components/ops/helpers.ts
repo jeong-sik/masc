@@ -55,10 +55,6 @@ export function actionTypeLabel(value?: string | null): string {
       return '키퍼 점검'
     case 'keeper_recover':
       return '키퍼 복구'
-    case 'review_resolve':
-      return '검토 해결'
-    case 'review_defer':
-      return '검토 보류'
     default:
       return value?.trim() || '액션'
   }
@@ -74,8 +70,6 @@ export function targetTypeLabel(value?: string | null): string {
       return '프로젝트 범위'
     case 'keeper':
       return '키퍼'
-    case 'review_item':
-      return '리뷰 항목'
     case 'swarm_run':
       return '스웜 실행'
     default:

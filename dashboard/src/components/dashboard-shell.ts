@@ -37,13 +37,43 @@ function lazyTabFallback(label: string) {
   return html`<${LoadingState}>${label} 불러오는 중...<//>`
 }
 
-function formatDisconnectDuration(): string {
-  const ts = lastDisconnectedAt.value
-  if (ts === 0) return ''
-  const sec = Math.round((Date.now() - ts) / 1000)
-  if (sec < 5) return ''
-  if (sec < 60) return ` (${sec}s)`
-  return ` (${Math.round(sec / 60)}m)`
+/** Pure: describe a "reconnecting" state as a user-facing label plus
+    tooltip. Reference UIs: Discord shows "Reconnecting... (5s · try 3)";
+    Slack shows "Trying to reconnect..." with timestamp on hover;
+    Linear flashes a subtle red dot + tooltip. Goal here: operator can
+    tell at a glance whether a flicker (sub-5s) is worth noticing and,
+    on hover, see when the last successful session ended + cumulative
+    reconnect count — so a reconnect loop is diagnosable without
+    opening devtools.
+
+    Inputs are all primitives so the helper is trivially testable. */
+export function describeReconnecting(args: {
+  disconnectedAt: number
+  now: number
+  reconnects: number
+}): { label: string; title: string } {
+  const { disconnectedAt, now, reconnects } = args
+  if (disconnectedAt === 0) {
+    return { label: '재연결 중...', title: '' }
+  }
+  const sec = Math.max(0, Math.round((now - disconnectedAt) / 1000))
+  const elapsed = sec < 5
+    ? ''
+    : sec < 60
+      ? ` · ${sec}s`
+      : ` · ${Math.round(sec / 60)}m`
+  const label = `재연결 중${elapsed}`
+  const titleParts: string[] = []
+  if (sec >= 5) {
+    const d = new Date(disconnectedAt)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const when = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    titleParts.push(`연결 끊김 ${when}`)
+  }
+  if (reconnects > 0) {
+    titleParts.push(`누적 재연결 ${reconnects}회`)
+  }
+  return { label, title: titleParts.join(' · ') }
 }
 
 export function ConnectionStatus() {
@@ -54,10 +84,24 @@ export function ConnectionStatus() {
 
   const statusLabel = isConnected
     ? reconn > 0 ? '재연결됨' : '연결됨'
-    : `재연결 중...${formatDisconnectDuration()}`
+    : describeReconnecting({
+        disconnectedAt: lastDisconnectedAt.value,
+        now: Date.now(),
+        reconnects: reconn,
+      }).label
+  const titleAttr = isConnected
+    ? reconn > 0 ? `누적 재연결 ${reconn}회` : ''
+    : describeReconnecting({
+        disconnectedAt: lastDisconnectedAt.value,
+        now: Date.now(),
+        reconnects: reconn,
+      }).title
 
   return html`
-    <div class="flex items-center gap-1.5 whitespace-nowrap text-[12px] ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}">
+    <div
+      class="flex items-center gap-1.5 whitespace-nowrap text-[12px] ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}"
+      title=${titleAttr || undefined}
+    >
       <span class="inline-block size-[8px] rounded-full ${isConnected ? 'bg-[var(--ok)] shadow-[0_0_7px_rgba(74,222,128,0.75)]' : 'bg-[var(--bad)]'}"></span>
       <span class="status-text">${statusLabel}</span>
       ${attentionCount > 0 ? html`

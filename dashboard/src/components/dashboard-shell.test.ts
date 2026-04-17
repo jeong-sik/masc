@@ -6,6 +6,7 @@ import {
   formatUptimeSecondsHuman,
   deriveBreadcrumbTrail,
   composeDocumentTitle,
+  describeReconnecting,
 } from './dashboard-shell'
 
 describe('githubCommitUrl (pure)', () => {
@@ -223,5 +224,77 @@ describe('composeDocumentTitle (pure)', () => {
       composeDocumentTitle(null, null),
     ]
     for (const t of titles) expect(t.startsWith('MASC')).toBe(true)
+  })
+})
+
+describe('describeReconnecting (pure)', () => {
+  it('disconnectedAt=0 → bare \"재연결 중...\" label, empty title', () => {
+    // Fresh page load / never disconnected state: nothing to show
+    // yet. Regression guard: no ghost \"0s\" suffix.
+    const r = describeReconnecting({ disconnectedAt: 0, now: 1_000_000, reconnects: 0 })
+    expect(r.label).toBe('재연결 중...')
+    expect(r.title).toBe('')
+  })
+
+  it('sub-5s disconnect → suppress elapsed (flicker noise floor)', () => {
+    // Discord / Slack both debounce reconnect UI — a 2-second blip
+    // shouldn't yank the operator's attention with a running timer.
+    const now = 10_000_000
+    const r = describeReconnecting({ disconnectedAt: now - 2_000, now, reconnects: 0 })
+    expect(r.label).toBe('재연결 중')
+    // Title also suppresses the \"연결 끊김\" timestamp below 5s since
+    // the elapsed reading itself isn't shown.
+    expect(r.title).toBe('')
+  })
+
+  it('5–59s disconnect → compact seconds suffix', () => {
+    const now = 10_000_000
+    const r = describeReconnecting({ disconnectedAt: now - 15_000, now, reconnects: 0 })
+    expect(r.label).toBe('재연결 중 · 15s')
+  })
+
+  it('≥60s disconnect → rounded minutes', () => {
+    const now = 10_000_000
+    const r = describeReconnecting({ disconnectedAt: now - 125_000, now, reconnects: 0 })
+    // 125s → 2m (Math.round)
+    expect(r.label).toBe('재연결 중 · 2m')
+  })
+
+  it('title includes disconnect timestamp + cumulative reconnect count', () => {
+    // Regression guard: operator diagnosing a reconnect loop needs
+    // both \"when did we lose it\" and \"how many times have we
+    // bounced so far\" — drop either and the badge loses its
+    // diagnostic value.
+    const now = 10_000_000
+    const r = describeReconnecting({
+      disconnectedAt: now - 30_000,
+      now,
+      reconnects: 3,
+    })
+    expect(r.title).toMatch(/연결 끊김 \d{2}:\d{2}:\d{2}/)
+    expect(r.title).toContain('누적 재연결 3회')
+  })
+
+  it('reconnects=0 suppresses the cumulative counter (no \"누적 재연결 0회\")', () => {
+    // \"Zero reconnects so far\" is the expected state for the first
+    // disconnect — printing it as \"0회\" is noise, not signal.
+    const now = 10_000_000
+    const r = describeReconnecting({ disconnectedAt: now - 30_000, now, reconnects: 0 })
+    expect(r.title).not.toContain('0회')
+    expect(r.title).not.toContain('누적 재연결')
+  })
+
+  it('clock skew (now < disconnectedAt) → floors elapsed to 0, no negative display', () => {
+    // Regression guard: system-clock drift between browser tab and
+    // NTP-resynced OS can briefly produce now < disconnectedAt.
+    // We must not render \"재연결 중 · -3s\".
+    const now = 10_000_000
+    const r = describeReconnecting({
+      disconnectedAt: now + 3_000,
+      now,
+      reconnects: 0,
+    })
+    expect(r.label).toBe('재연결 중')
+    expect(r.label).not.toContain('-')
   })
 })

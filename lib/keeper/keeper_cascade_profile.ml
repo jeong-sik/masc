@@ -12,6 +12,14 @@ type t =
   | Local_only
   | Local_recovery
   | Tool_rerank
+  | Nick0cave
+  | Capacity_queue_trio
+  | Vendor_mix_balanced
+  | Cost_tier_ladder
+  | Oauth_cli_rotate
+  | Quality_sticky_glm51
+  | Tool_use_strict
+  | Resilient_breaker
 
 let to_string = function
   | Default -> "default"
@@ -20,8 +28,19 @@ let to_string = function
   | Local_only -> "local_only"
   | Local_recovery -> "local_recovery"
   | Tool_rerank -> "tool_rerank"
+  | Nick0cave -> "nick0cave"
+  | Capacity_queue_trio -> "capacity_queue_trio"
+  | Vendor_mix_balanced -> "vendor_mix_balanced"
+  | Cost_tier_ladder -> "cost_tier_ladder"
+  | Oauth_cli_rotate -> "oauth_cli_rotate"
+  | Quality_sticky_glm51 -> "quality_sticky_glm51"
+  | Tool_use_strict -> "tool_use_strict"
+  | Resilient_breaker -> "resilient_breaker"
 
-let all = [ Default; Keeper_unified; Sangsu; Local_only; Local_recovery; Tool_rerank ]
+let all =
+  [ Default; Keeper_unified; Sangsu; Local_only; Local_recovery; Tool_rerank;
+    Nick0cave; Capacity_queue_trio; Vendor_mix_balanced; Cost_tier_ladder;
+    Oauth_cli_rotate; Quality_sticky_glm51; Tool_use_strict; Resilient_breaker ]
 
 (** All known cascade profile names, derived from the variant. Consumers
     that still operate on strings can use this list; new code should
@@ -47,6 +66,14 @@ let of_string_opt (raw : string) : t option =
   | "local_only" -> Some Local_only
   | "local_recovery" -> Some Local_recovery
   | "tool_rerank" -> Some Tool_rerank
+  | "nick0cave" -> Some Nick0cave
+  | "capacity_queue_trio" -> Some Capacity_queue_trio
+  | "vendor_mix_balanced" -> Some Vendor_mix_balanced
+  | "cost_tier_ladder" -> Some Cost_tier_ladder
+  | "oauth_cli_rotate" -> Some Oauth_cli_rotate
+  | "quality_sticky_glm51" -> Some Quality_sticky_glm51
+  | "tool_use_strict" -> Some Tool_use_strict
+  | "resilient_breaker" -> Some Resilient_breaker
   | _ -> None
 
 let canonical (raw : string) : t =

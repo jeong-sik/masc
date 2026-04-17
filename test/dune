@@ -44,6 +44,7 @@
         test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
         test_post_verifier
         test_swarm_checkpoint test_swarm_goal_loop
+        test_keeper_cascade_profile
         test_keeper_memory
         test_keeper_accountability
         test_keeper_exec_status
@@ -133,6 +134,7 @@
           test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
           test_post_verifier
           test_swarm_checkpoint test_swarm_goal_loop
+          test_keeper_cascade_profile
           test_keeper_memory
           test_keeper_accountability
           test_keeper_exec_status

@@ -1,3 +1,11 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/cascade/
+  - lib/cascade_inference.ml
+---
+
 # Cascade Observability Metrics
 
 How to read the cascade counters exposed by `/metrics` and the alerting rules that turn them into pages.

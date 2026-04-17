@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/keeper_social_model.ml
+  - lib/keeper/keeper_registry.ml
+  - lib/keeper/keeper_exec_status.ml
+---
+
 # Keeper Social Model Inventory
 
 Status: active implementations + research inventory

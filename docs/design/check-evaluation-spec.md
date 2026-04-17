@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/cdal/
+  - lib/keeper/keeper_accountability.ml
+  - lib/eval_gate.ml
+---
+
 # CDAL Check Evaluation Spec
 
 **Status**: Draft, pre-production scope

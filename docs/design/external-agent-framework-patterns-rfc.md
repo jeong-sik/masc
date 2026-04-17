@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/
+  - lib/keeper/keeper_agent_run.ml
+  - lib/proof_artifact_reader.ml
+---
+
 # External Agent Framework Patterns RFC
 
 Status: draft

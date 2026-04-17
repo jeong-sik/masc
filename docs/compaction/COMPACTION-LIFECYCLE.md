@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/keeper_compact_policy.ml
+  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper/keeper_context_core.ml
+---
+
 # Context Compaction Lifecycle
 
 > Developer reference for how context compaction works end-to-end in masc-mcp.

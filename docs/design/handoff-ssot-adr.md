@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/keeper_memory_policy.ml
+  - lib/keeper/keeper_agent_run.ml
+  - lib/drift_guard.ml
+---
+
 # ADR: Handoff SSOT (D-0)
 
 **Status**: Proposed

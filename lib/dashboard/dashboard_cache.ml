@@ -95,6 +95,15 @@ let bg_revalidate_backoff_factor = 2.0
 
 exception Compute_timeout of string * bool
 
+let timeout_json ~key ~timeout_sec ~timeout_kind =
+  `Assoc
+    [
+      ("error", `String "computation_timeout");
+      ("timeout_sec", `Float timeout_sec);
+      ("key", `String key);
+      ("timeout_kind", `String timeout_kind);
+    ]
+
 (** Maximum seconds a waiter will poll for a [Computing] slot before evicting
     it and recomputing.
 
@@ -272,9 +281,9 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
                       let cooldown = { value = s; expires_at = ts +. 5.0; stale_until = ts +. 10.0 } in
                       SMap.add key (Ready cooldown) map
                   | None ->
-                      let err_json = `Assoc [("error", `String "Compute timeout");
-                                             ("timeout_sec", `Float max_wait_sec);
-                                             ("key", `String key)] in
+                      let err_json =
+                        timeout_json ~key ~timeout_sec:max_wait_sec ~timeout_kind:"compute"
+                      in
                       fallback_val := Some err_json;
                       let cooldown = { value = err_json; expires_at = ts +. 5.0; stale_until = ts +. 5.0 } in
                       SMap.add key (Ready cooldown) map)

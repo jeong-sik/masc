@@ -163,19 +163,12 @@ let config_for_label
     ~(description : string option)
     () : (Oas_worker_exec.config, Oas.Error.sdk_error) result =
   let* provider =
-    Oas_worker_exec.resolve_provider_of_label model_label
+    Oas_worker_exec.resolve_provider_config_of_label model_label
     |> Result.map_error Oas_worker_exec.label_resolution_error_to_sdk_error
-  in
-  let model_id = match Cascade_runtime.provider_name_of_label model_label with
-    | Some _ ->
-      (match String.index_opt model_label ':' with
-       | Some idx -> String.sub model_label (idx + 1) (String.length model_label - idx - 1) |> String.trim
-       | None -> model_label)
-    | None -> model_label
   in
   Ok
     {
-      (Oas_worker_exec.default_config ~name ~provider ~model_id
+      (Oas_worker_exec.default_config ~name ~provider_cfg:provider
          ~system_prompt ~tools)
       with
       max_turns;
@@ -340,11 +333,8 @@ let run_named
      and the agent's checkpoint (if progress was made). try_cascade
      threads this checkpoint to the next provider without mutable state. *)
   let try_provider ?resume_checkpoint (provider_cfg : Llm_provider.Provider_config.t) =
-    let provider : Agent_sdk.Provider.config =
-      Agent_sdk.Provider.config_of_provider_config provider_cfg
-    in
     let config : Oas_worker_exec.config =
-      { (Oas_worker_exec.default_config ~name ~provider ~model_id:provider_cfg.model_id
+      { (Oas_worker_exec.default_config ~name ~provider_cfg
         ~system_prompt ~tools)
       with
         priority;

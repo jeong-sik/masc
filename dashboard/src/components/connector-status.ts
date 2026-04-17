@@ -29,7 +29,8 @@ import { CopyableCode } from './common/copyable-code'
 import { SetupGuideCard } from './setup-guide-card'
 import { ConnectorOnboardingGrid } from './connector-onboarding'
 import { SidecarLogToggle, SidecarLogViewer } from './sidecar-log-viewer'
-import { ConnectorConfigToggle, ConnectorConfigForm } from './connector-config-form'
+import { ConnectorConfigToggle, ConnectorConfigForm, openConnectorConfig } from './connector-config-form'
+import { ConnectorReadinessRail, deriveRail } from './connector-readiness-rail'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
 
@@ -592,6 +593,32 @@ function ConnectorLivePanel({
         </span>
       </div>
 
+      <${ConnectorReadinessRail}
+        pills=${deriveRail(
+          {
+            sidecarUp: connector?.available === true,
+            gateHealthy: connector?.gate_healthy ?? null,
+            bindingCount: configuredBindings.length,
+            keeperCount: keepers.length,
+          },
+          {
+            openConfig: () => openConnectorConfig(connectorId),
+            toggleProcess: () => {
+              if (connector?.available === true) {
+                void stopSidecar(connectorId)
+              } else {
+                void startSidecar(connectorId)
+              }
+            },
+            expandHeader: () => { headerExpanded.value = true },
+            scrollToBindings: () => {
+              const el = document.getElementById(`keepers-${connectorId}`)
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            },
+          },
+        )}
+      />
+
       ${headerExpanded.value
         ? html`
             <div class="mt-2 rounded-md border border-[var(--white-8)] bg-[var(--white-4)] p-3 text-[11px]">
@@ -677,7 +704,7 @@ function ConnectorLivePanel({
 
       ${knownGroups.length > 0
         ? html`
-            <div class="mt-3 space-y-2">
+            <div class="mt-3 space-y-2" id=${`keepers-${connectorId}`}>
               ${knownGroups.map(group => {
                 const keeper = group.keeper
                 const expanded = expandedKeeperFor.value === group.name

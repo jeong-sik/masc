@@ -466,6 +466,18 @@ export function resetConnectorConfigState() {
   formState.value = {}
 }
 
+/** Open the config form panel for [id], lazily fetching schema if not loaded.
+    Used by ConnectorReadinessRail when the operator clicks the Token pill. */
+export function openConnectorConfig(id: string) {
+  const entry = getEntry(id)
+  if (!entry.open) {
+    setEntry(id, { open: true })
+    if (entry.fields.length === 0 && !entry.loading) {
+      void fetchSchema(id)
+    }
+  }
+}
+
 export function _testParseSchema(payload: SchemaResponse): FieldShape[] {
   return parseSchema(payload)
 }

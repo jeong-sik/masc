@@ -80,7 +80,7 @@ export interface GovernanceDecisionItem {
   evidence_refs: string[]
 }
 
-export interface GovernancePetition {
+interface GovernancePetition {
   id: string
   case_id: string
   title: string
@@ -92,7 +92,7 @@ export interface GovernancePetition {
   created_at?: string | null
 }
 
-export interface GovernanceCaseBrief {
+interface GovernanceCaseBrief {
   id: string
   author: string
   stance: 'support' | 'oppose' | 'neutral' | string
@@ -101,7 +101,7 @@ export interface GovernanceCaseBrief {
   created_at?: string | null
 }
 
-export interface GovernanceExecutionOrder {
+interface GovernanceExecutionOrder {
   id: string
   case_id: string
   status: 'queued_auto' | 'needs_human_gate' | 'auto_executed' | 'done' | 'denied' | 'blocked' | string

@@ -11,7 +11,7 @@ interface OasAgentEventBase {
   timestamp: number
 }
 
-export interface OasAgentSelectedEvent extends OasAgentEventBase {
+interface OasAgentSelectedEvent extends OasAgentEventBase {
   type: 'selected'
   actor_kind: 'agent'
   trigger?: string
@@ -19,14 +19,14 @@ export interface OasAgentSelectedEvent extends OasAgentEventBase {
   final_score?: number
 }
 
-export interface OasAgentDecisionEvent extends OasAgentEventBase {
+interface OasAgentDecisionEvent extends OasAgentEventBase {
   type: 'decision'
   actor_kind: 'agent'
   action?: string
   trigger_reason?: string
 }
 
-export interface OasAgentActionExecutedEvent extends OasAgentEventBase {
+interface OasAgentActionExecutedEvent extends OasAgentEventBase {
   type: 'action_executed'
   actor_kind: 'agent'
   action?: string
@@ -42,14 +42,14 @@ export interface OasKeeperLifecycleEvent extends OasAgentEventBase {
   detail?: string
 }
 
-export interface OasTrustUpdatedEvent extends OasAgentEventBase {
+interface OasTrustUpdatedEvent extends OasAgentEventBase {
   type: 'trust_updated'
   actor_kind: 'agent'
   secondary_agent?: string
   trust_score?: number
 }
 
-export interface OasReputationChangedEvent extends OasAgentEventBase {
+interface OasReputationChangedEvent extends OasAgentEventBase {
   type: 'reputation_changed'
   actor_kind: 'agent'
   old_score?: number

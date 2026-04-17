@@ -25,7 +25,45 @@ import { StatCard } from './common/stat-card'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { showToast } from './common/toast'
+import { CopyableCode } from './common/copyable-code'
 import { createManagedAsyncResource } from '../lib/async-state'
+
+// Per-connector lifecycle hints. Discord ships a run.sh wrapper; the others
+// don't yet, so the start command falls through to direct module invocation.
+// Source of truth: docs/CONNECTOR-CONFIG-SCHEMA.md.
+interface SidecarCommands {
+  start: string
+  tail: string
+  status: string
+  stop: string
+  notes?: string
+}
+
+const SIDECAR_DIRS: Record<string, string> = {
+  discord: 'sidecars/discord-bot',
+  imessage: 'sidecars/imessage-bot',
+  slack: 'sidecars/slack-bot',
+  telegram: 'sidecars/telegram-bot',
+}
+
+function sidecarCommands(connectorId: string): SidecarCommands {
+  const dir = SIDECAR_DIRS[connectorId] ?? `sidecars/${connectorId}-bot`
+  if (connectorId === 'discord') {
+    return {
+      start: `cd ${dir} && ./run.sh`,
+      tail: `cd ${dir} && ./run.sh tail`,
+      status: `cd ${dir} && ./run.sh status`,
+      stop: `pkill -f 'python -m src' # discord-bot`,
+    }
+  }
+  return {
+    start: `cd ${dir} && python -m src`,
+    tail: `tail -F .masc/logs/${connectorId}-sidecar-$(date +%Y%m%d).log`,
+    status: `cat .gate/runtime/${connectorId}/status.json | jq .`,
+    stop: `pkill -f '${dir}/src' # ${connectorId}-bot`,
+    notes: 'No run.sh wrapper yet — direct python -m src invocation. Use a venv.',
+  }
+}
 
 const actionLoading = signal(false)
 const channelDraft = signal('')
@@ -516,14 +554,29 @@ function ConnectorLivePanel({
         : null}
 
       ${showSidecarOffEmpty
-        ? html`
-            <div class="mt-3 rounded-md border border-dashed border-[var(--white-8)] bg-[var(--white-4)] px-3 py-3 text-[12px]">
-              <div class="font-medium text-[var(--text-body)]">Sidecar not started</div>
-              <div class="mt-1 text-[11px] text-[var(--text-dim)]">
-                Start: <code class="rounded bg-[var(--white-8)] px-1">cd sidecars/${connectorId}-bot && ./run.sh</code>
+        ? (() => {
+            const cmds = sidecarCommands(connectorId)
+            return html`
+              <div class="mt-3 rounded-md border border-dashed border-[var(--white-8)] bg-[var(--white-4)] px-3 py-3 text-[12px]">
+                <div class="mb-1 flex items-center justify-between gap-2">
+                  <div class="font-medium text-[var(--text-body)]">Sidecar not started</div>
+                  <span class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">${connectorName}</span>
+                </div>
+                <div class="text-[11px] text-[var(--text-dim)]">
+                  Run from repo root in a separate terminal. Click ⧉ to copy.
+                </div>
+                <div class="mt-2 grid grid-cols-1 gap-1.5">
+                  <${CopyableCode} label="start" command=${cmds.start} />
+                  <${CopyableCode} label="tail logs" command=${cmds.tail} />
+                  <${CopyableCode} label="status" command=${cmds.status} />
+                  <${CopyableCode} label="stop" command=${cmds.stop} />
+                </div>
+                ${cmds.notes
+                  ? html`<div class="mt-2 text-[10px] italic text-[var(--text-dim)]">${cmds.notes}</div>`
+                  : null}
               </div>
-            </div>
-          `
+            `
+          })()
         : null}
 
       ${knownGroups.length > 0

@@ -89,7 +89,7 @@ interface Divergence {
   reason: string
 }
 
-export function computeDivergences(
+function computeDivergences(
   conditions: KeeperConditions,
   phase: KeeperPhase | null | undefined,
 ): Divergence[] {

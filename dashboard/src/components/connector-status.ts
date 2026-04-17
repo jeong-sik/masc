@@ -61,7 +61,7 @@ function activeConnectorFilter(): string | null {
 // Per-connector lifecycle hints. All four sidecars now ship a run.sh wrapper
 // (discord/imessage/slack/telegram) — see sidecars/<id>-bot/run.sh.
 // Source of truth: docs/CONNECTOR-CONFIG-SCHEMA.md.
-export interface SidecarCommands {
+interface SidecarCommands {
   start: string
   tail: string
   status: string

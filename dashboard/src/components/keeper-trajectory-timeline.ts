@@ -10,6 +10,8 @@ import type { TrajectoryEntry, TrajectoryResponse } from '../api/dashboard'
 import { truncate } from '../lib/truncate'
 import { TimeAgo } from './common/time-ago'
 import { toolCategory, durationColor, formatArgs, prettyArgs, formatDuration, summarizeEntries } from './tool-call-shared'
+import { FilterChips } from './common/filter-chips'
+import { TextInput } from './common/input'
 import { keeperHeartbeats } from '../store'
 import { isConnected } from '../sse'
 import { TRAJECTORY_HEARTBEAT_STALE_MS, LIVENESS_TICK_MS, CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN } from '../config/constants'
@@ -20,6 +22,63 @@ const STAT_PILL = 'text-[10px] py-0.5 px-2 rounded-full bg-[var(--white-4)] bord
 // ── Constants ────────────────────────────────────────────
 
 const TRAJECTORY_DEFAULT_LIMIT = 50
+
+// ── Filter state (per-keeper) ────────────────────────────
+
+export type TrajectoryTypeFilter = 'all' | 'tool' | 'thinking'
+
+type TrajectoryFilterState = {
+  type: TrajectoryTypeFilter
+  search: string
+}
+
+const trajectoryFilters = signal<Record<string, TrajectoryFilterState>>({})
+
+function getFilterState(name: string): TrajectoryFilterState {
+  return trajectoryFilters.value[name] ?? { type: 'all', search: '' }
+}
+
+function setFilterState(name: string, patch: Partial<TrajectoryFilterState>): void {
+  const prev = getFilterState(name)
+  trajectoryFilters.value = { ...trajectoryFilters.value, [name]: { ...prev, ...patch } }
+}
+
+// ── Pure filter (exported for tests) ─────────────────────
+
+export function entryMatchesType(entry: TrajectoryEntry, type: TrajectoryTypeFilter): boolean {
+  if (type === 'all') return true
+  if (type === 'thinking') return entry.type === 'thinking'
+  // 'tool' = anything that isn't a thinking block
+  return entry.type !== 'thinking'
+}
+
+export function entryMatchesSearch(entry: TrajectoryEntry, search: string): boolean {
+  if (!search) return true
+  const q = search.toLowerCase()
+  if (entry.tool_name && entry.tool_name.toLowerCase().includes(q)) return true
+  if (entry.content && entry.content.toLowerCase().includes(q)) return true
+  if (entry.args) {
+    const argsStr = typeof entry.args === 'string' ? entry.args : JSON.stringify(entry.args)
+    if (argsStr.toLowerCase().includes(q)) return true
+  }
+  return false
+}
+
+export function filterTrajectoryEntries(
+  entries: TrajectoryEntry[],
+  filter: TrajectoryFilterState,
+): TrajectoryEntry[] {
+  return entries.filter(e => entryMatchesType(e, filter.type) && entryMatchesSearch(e, filter.search))
+}
+
+export function countByType(entries: TrajectoryEntry[]): { tool: number; thinking: number } {
+  let tool = 0, thinking = 0
+  for (const e of entries) {
+    if (e.type === 'thinking') thinking += 1
+    else tool += 1
+  }
+  return { tool, thinking }
+}
 
 // ── State (per-keeper to avoid cross-keeper corruption) ──
 
@@ -243,7 +302,7 @@ function TrajectoryEmptyState({ keeper }: { keeper?: Keeper }) {
   `
 }
 
-function groupByTurn(entries: TrajectoryEntry[]): Map<number, TrajectoryEntry[]> {
+export function groupByTurn(entries: TrajectoryEntry[]): Map<number, TrajectoryEntry[]> {
   const groups = new Map<number, TrajectoryEntry[]>()
   for (const e of entries) {
     const existing = groups.get(e.turn)
@@ -290,13 +349,21 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
     return html`<${TrajectoryEmptyState} keeper=${keeper} />`
   }
 
+  const filter = getFilterState(keeperName)
+  const typeCounts = useMemo(() => countByType(data.entries), [data.entries])
+  const filteredEntries = useMemo(
+    () => filterTrajectoryEntries(data.entries, filter),
+    [data.entries, filter.type, filter.search],
+  )
+  const filterActive = filter.type !== 'all' || filter.search !== ''
+
   const { turns, allSummary, distinctTools } = useMemo(() => {
-    const groups = groupByTurn(data.entries)
+    const groups = groupByTurn(filteredEntries)
     const sorted = Array.from(groups.entries()).sort(([a], [b]) => b - a)
-    const summary = summarizeEntries(data.entries)
-    const distinct = new Set(data.entries.filter(e => e.tool_name).map(e => e.tool_name)).size
+    const summary = summarizeEntries(filteredEntries)
+    const distinct = new Set(filteredEntries.filter(e => e.tool_name).map(e => e.tool_name)).size
     return { turns: sorted, allSummary: summary, distinctTools: distinct }
-  }, [data.entries])
+  }, [filteredEntries])
   // Tick every LIVENESS_TICK_MS so isLive transitions from true→false
   // when heartbeat goes stale while the component is mounted.
   const now = useSignal(Date.now())
@@ -329,14 +396,40 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
             : null}
         </div>
         <span class="text-[10px] text-[var(--text-dim)]">
-          ${data.showing}/${data.total_entries} entries
+          ${filterActive
+            ? `${filteredEntries.length} / ${data.total_entries} entries`
+            : `${data.showing}/${data.total_entries} entries`}
         </span>
+      </div>
+
+      ${'' /* Filter bar — type chips + search */}
+      <div class="flex flex-wrap gap-2 items-center mb-2 px-1">
+        <${FilterChips}
+          chips=${[
+            { key: 'all' as TrajectoryTypeFilter, label: '전체', count: data.entries.length },
+            { key: 'tool' as TrajectoryTypeFilter, label: '도구', count: typeCounts.tool },
+            { key: 'thinking' as TrajectoryTypeFilter, label: '사고', count: typeCounts.thinking },
+          ]}
+          value=${filter.type}
+          onChange=${(k: TrajectoryTypeFilter) => setFilterState(keeperName, { type: k })}
+          size="sm"
+          tone="accent"
+        />
+        <${TextInput}
+          class="max-w-[200px]"
+          name="trajectory_search"
+          ariaLabel="도구/사고 내용 검색"
+          autoComplete="off"
+          placeholder="tool·args·content 검색..."
+          value=${filter.search}
+          onInput=${(e: Event) => setFilterState(keeperName, { search: (e.target as HTMLInputElement).value })}
+        />
       </div>
 
       ${'' /* Summary stats bar */}
       <div class="flex gap-3 flex-wrap mb-2 px-1">
         <span class="${STAT_PILL}">${turns.length} turns</span>
-        <span class="${STAT_PILL}">${data.entries.length} calls</span>
+        <span class="${STAT_PILL}">${filteredEntries.length} calls</span>
         <span class="${STAT_PILL}">${distinctTools} tools</span>
         <span class="${STAT_PILL} font-mono ${durationColor(allSummary.totalMs)}">${formatDuration(allSummary.totalMs)}</span>
         ${allSummary.errorCount > 0
@@ -353,6 +446,11 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
           <span class="text-[10px] text-[var(--text-dim)] font-mono">SSE</span>
         </div>
       ` : null}
+
+      ${'' /* Filtered empty state */}
+      ${filterActive && filteredEntries.length === 0
+        ? html`<div class="py-4 text-center text-xs text-[var(--text-muted)]">조건에 맞는 기록이 없습니다.</div>`
+        : null}
 
       ${'' /* Turn groups */}
       ${turns.map(([turnNum, entries]) => {

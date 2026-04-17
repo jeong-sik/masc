@@ -18,6 +18,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useLayoutEffect } from 'preact/hooks'
 import { KNOWN_CONNECTOR_IDS, type KnownConnectorId } from './connector-status'
+import { Kbd } from './common/kbd'
 
 const cheatsheetOpen = signal(false)
 
@@ -94,12 +95,12 @@ export function ConnectorKeyboardShortcuts() {
       <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-dim)]">Shortcuts</div>
       ${KNOWN_CONNECTOR_IDS.map((id, i) => html`
         <div class="flex items-center justify-between gap-4">
-          <kbd class="rounded border border-[var(--white-10)] bg-[var(--bg-0)] px-1.5 py-[1px] text-[10px] font-mono">${i + 1}</kbd>
+          <${Kbd}>${i + 1}<//>
           <span class="text-[var(--text-dim)]">→ ${id}</span>
         </div>
       `)}
       <div class="mt-1.5 flex items-center justify-between gap-4 border-t border-[var(--white-8)] pt-1.5">
-        <kbd class="rounded border border-[var(--white-10)] bg-[var(--bg-0)] px-1.5 py-[1px] text-[10px] font-mono">?</kbd>
+        <${Kbd}>?<//>
         <span class="text-[var(--text-dim)]">toggle</span>
       </div>
     </div>

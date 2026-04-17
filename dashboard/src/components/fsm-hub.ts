@@ -142,8 +142,22 @@ function reduceHubState(state: HubState, action: HubAction): HubState {
  *
  * Data source: `/api/v1/keepers/:name/composite` (RFC-0003 S7).
  */
-export function FsmHub() {
-  const [selected, setSelected] = useState<string | null>(null)
+export interface FsmHubProps {
+  /** Optional externally-driven selection — used by the fleet matrix
+   *  (LT-16d) to drive drill-through. When it changes, the hub
+   *  switches to the requested keeper on the next render. */
+  selectedName?: string | null
+}
+
+export function FsmHub(props: FsmHubProps = {}) {
+  const [selected, setSelected] = useState<string | null>(props.selectedName ?? null)
+  useEffect(() => {
+    if (props.selectedName !== undefined && props.selectedName !== selected) {
+      setSelected(props.selectedName)
+    }
+    // Only react to external changes; local selection stays internal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.selectedName])
   const [hub, dispatch] = useReducer(reduceHubState, initialHubState)
   const [pollTick, setPollTick] = useState(0)
   const [now, setNow] = useState(() => Date.now() / 1000)

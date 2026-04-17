@@ -348,6 +348,7 @@ let spawn_and_drain_both ~sw pm ~cwd ?env ?stdin_source argv stdout_buf
   | `Signaled n -> Unix.WSIGNALED n
 
 let run_argv ?(timeout_sec = 60.0) ?env (argv : string list) : string =
+  Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv ~argv ?env ();
   if not (is_initialized ()) then run_unix_argv_fallback ?env argv
   else
     match get_proc_mgr (), get_clock (), get_cwd_default () with
@@ -380,6 +381,7 @@ let run_argv ?(timeout_sec = 60.0) ?env (argv : string list) : string =
               process_error_output ~label ~reason:(reason_of_exn_for_output exn) ())
 
 let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (argv : string list) : string =
+  Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_stdin ~argv ?env ();
   if not (is_initialized ()) then
     run_unix_argv_with_stdin_fallback ?env ~stdin_content argv
   else
@@ -418,6 +420,7 @@ let run_argv_with_stdin_and_status
     ?env
     ~(stdin_content : string)
     (argv : string list) : Unix.process_status * string =
+  Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_stdin_and_status ~argv ?env ();
   if not (is_initialized ()) then
     run_unix_argv_with_stdin_and_status_fallback ?env ~stdin_content argv
   else
@@ -472,6 +475,7 @@ let run_argv_with_stdin_and_status
               , process_error_output ~label ~reason:(reason_of_exn_for_output exn) () ))
 
 let run_argv_with_status ?(timeout_sec = 60.0) ?env ?cwd (argv : string list) : Unix.process_status * string =
+  Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_status ~argv ?env ?cwd ();
   if not (is_initialized ()) then run_unix_argv_with_status_fallback ?env argv
   else
     match get_proc_mgr (), get_clock (), get_cwd_default () with

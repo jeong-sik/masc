@@ -62,9 +62,13 @@ let git_rev_parse_short path =
   | None -> None
   | Some dir when not (Sys.file_exists dir) -> None
   | Some dir ->
+      let argv = [ "git"; "-C"; dir; "rev-parse"; "--short"; "HEAD" ] in
+      Exec_tap.record
+        ~kind:Exec_tap.Unix_open_process_args_full
+        ~argv ~cwd:dir ();
       let channels =
         Unix.open_process_args_full "git"
-          [| "git"; "-C"; dir; "rev-parse"; "--short"; "HEAD" |]
+          (Array.of_list argv)
           (Unix.environment ())
       in
       let stdout, stdin, stderr = channels in

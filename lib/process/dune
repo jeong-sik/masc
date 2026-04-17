@@ -3,5 +3,5 @@
  (name masc_process)
  (public_name masc_mcp.masc_process)
  (wrapped false)
- (modules process_eio file_lock_eio)
- (libraries masc_core masc_log time_compat eio eio.unix unix))
+ (modules process_eio file_lock_eio exec_tap)
+ (libraries masc_core masc_log time_compat eio eio.unix unix threads))

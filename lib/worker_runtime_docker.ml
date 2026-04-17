@@ -90,6 +90,9 @@ let run_process_with_timeout ?stdin_content ~clock_opt ~timeout_sec ~prog ~argv 
           [ Unix.O_CREAT; Unix.O_TRUNC; Unix.O_WRONLY ] 0o600
       in
       stderr_fd_opt := Some stderr_fd;
+      Exec_tap.record
+        ~kind:Exec_tap.Unix_create_process_env
+        ~argv ~env ();
       let pid =
         Unix.create_process_env prog (Array.of_list argv) env stdin_fd stdout_fd
           stderr_fd

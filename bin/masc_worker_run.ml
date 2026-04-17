@@ -47,6 +47,7 @@ let main_result () =
           ~cwd_default:(Eio.Stdenv.fs env)
           ~proc_mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env);
+        Exec_tap.install_from_env ();
         Eio.Switch.run @@ fun sw ->
         Eio_context.with_test_env
           ~net:(Eio.Stdenv.net env)

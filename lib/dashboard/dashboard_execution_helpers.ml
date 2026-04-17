@@ -323,22 +323,19 @@ let load_persona_profile (persona_name : string) : agent_profile option =
     | Ok json ->
         let open Yojson.Safe.Util in
         let name_val =
-          (try Some (json |> member "name" |> to_string) with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
+          Safe_ops.json_string_opt "name" json
           |> Option.value ~default:persona_name
         in
         let keeper_json =
-          try Some (json |> member "keeper") with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+          Safe_ops.protect ~default:None (fun () ->
+            Some (json |> member "keeper"))
         in
         let model =
           match keeper_json with
-          | Some kj -> (
-              try Some (kj |> member "active_model" |> to_string)
-              with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
+          | Some kj -> Safe_ops.json_string_opt "active_model" kj
           | None -> None
         in
-        let trait =
-          try Some (json |> member "trait" |> to_string) with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
-        in
+        let trait = Safe_ops.json_string_opt "trait" json in
         let traits = match trait with Some t -> [t] | None -> [] in
         Some
           {
@@ -383,41 +380,27 @@ let populate_neo4j_identity_cache_locked () =
         List.iter
           (fun edge ->
             let node = edge |> member "node" in
-            let name =
-              try node |> member "name" |> to_string with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
-            in
+            let name = Safe_ops.json_string ~default:"" "name" node in
             if name <> "" then begin
               let emoji =
-                (try Some (node |> member "emoji" |> to_string)
-                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
+                Safe_ops.json_string_opt "emoji" node
                 |> Option.value ~default:"🤖"
               in
               let korean_name =
-                (try Some (node |> member "koreanName" |> to_string)
-                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
+                Safe_ops.json_string_opt "koreanName" node
                 |> Option.value ~default:name
               in
-              let model =
-                try Some (node |> member "model" |> to_string)
-                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
-              in
+              let model = Safe_ops.json_string_opt "model" node in
               let traits =
-                try node |> member "traits" |> to_list |> List.map to_string
-                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
+                Safe_ops.protect ~default:[] (fun () ->
+                  node |> member "traits" |> to_list |> List.map to_string)
               in
               let interests =
-                try
-                  node |> member "interests" |> to_list |> List.map to_string
-                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
+                Safe_ops.protect ~default:[] (fun () ->
+                  node |> member "interests" |> to_list |> List.map to_string)
               in
-              let activity_level =
-                try Some (node |> member "activityLevel" |> to_float)
-                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
-              in
-              let primary_value =
-                try Some (node |> member "primaryValue" |> to_string)
-                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
-              in
+              let activity_level = Safe_ops.json_float_opt "activityLevel" node in
+              let primary_value = Safe_ops.json_string_opt "primaryValue" node in
               Hashtbl.replace neo4j_identity_cache name
                 {
                   emoji;

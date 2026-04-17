@@ -59,12 +59,13 @@ let compute_health_score
     Conservation law (spec {!KeeperOutcomesConservation.tla}):
       successes.substantive_turns + failures.turn_failed + failures.gate_rejected
         = observed_turns
-    holds by construction: observed_turns is computed from the same ring pass.
-    [gate_rejected] is 0 until CDAL verdict gate (#7531) lands; this does not
-    break conservation because no event bucket routes to it yet. *)
+    holds by construction only for buckets backed by the transition ring pass.
+    Historical [gate_rejected] counts are not yet persisted in the same read
+    model, so the field remains 0 until a keeper-turn source is added. *)
 let compute_outcomes_rollup
     ~keeper_name
     ~agent_name
+    ~recent_crash_count
     ~(registry_entry : Keeper_registry.registry_entry option) : Yojson.Safe.t =
   let succ_turns = ref 0 in
   let succ_compactions = ref 0 in
@@ -86,17 +87,18 @@ let compute_outcomes_rollup
     | _ -> ()
   ) transitions;
   let observed_turns = !succ_turns + !fail_turn in
-  let crashes, restarts, consecutive_fail =
+  let restarts, consecutive_fail =
     match registry_entry with
     | Some (e : Keeper_registry.registry_entry) ->
-        List.length e.crash_log, e.restart_count, e.turn_consecutive_failures
-    | None -> 0, 0, 0
+        e.restart_count, e.turn_consecutive_failures
+    | None -> 0, 0
   in
   let keeper_verdicts =
     try
-      Dashboard_harness_health.read_recent_verdicts ~limit:50 ()
-      |> List.filter (fun (v : Dashboard_harness_health.harness_verdict_item) ->
-           v.agent_name = keeper_name || v.agent_name = agent_name)
+      Dashboard_harness_health.read_recent_verdicts_for_agents
+        ~limit:50
+        ~agent_names:[ keeper_name; agent_name ]
+        ()
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | _ -> []
@@ -106,18 +108,26 @@ let compute_outcomes_rollup
   let unknown_v = ref 0 in
   let fail_reasons = Hashtbl.create 8 in
   List.iter (fun (v : Dashboard_harness_health.harness_verdict_item) ->
-    match String.lowercase_ascii v.verdict with
-    | "pass" -> incr pass_v
-    | "fail" | "reject" ->
+    match Eval_calibration.verdict_of_string (String.lowercase_ascii v.verdict) with
+    | Some Anti_rationalization.Approve -> incr pass_v
+    | Some (Anti_rationalization.Reject reason) ->
         incr fail_v;
-        let r = Option.value v.fallback_reason ~default:"unspecified" in
+        let r =
+          match v.fallback_reason, String.trim reason with
+          | Some fallback_reason, _ -> fallback_reason
+          | None, "" -> "unspecified"
+          | None, parsed_reason -> parsed_reason
+        in
         let cur = try Hashtbl.find fail_reasons r with Not_found -> 0 in
         Hashtbl.replace fail_reasons r (cur + 1)
-    | _ -> incr unknown_v
+    | None -> incr unknown_v
   ) keeper_verdicts;
   let top_failure_reasons =
     Hashtbl.fold (fun k v acc -> (k, v) :: acc) fail_reasons []
-    |> List.sort (fun (_, a) (_, b) -> compare b a)
+    |> List.sort (fun (left_reason, left_count) (right_reason, right_count) ->
+         let count_cmp = compare right_count left_count in
+         if count_cmp <> 0 then count_cmp
+         else String.compare left_reason right_reason)
     |> List.filteri (fun i _ -> i < 3)
     |> List.map (fun (r, _) -> `String r)
   in
@@ -136,11 +146,11 @@ let compute_outcomes_rollup
     ]);
     ("failures", `Assoc [
       ("turn_failed", `Int !fail_turn);
-      (* gate_rejected reserved for CDAL verdict gate (#7531); 0 until merged. *)
+      (* Historical gate_rejected counts are not persisted yet. *)
       ("gate_rejected", `Int 0);
       ("compaction_failed", `Int !fail_compaction);
       ("handoff_failed", `Int !fail_handoff);
-      ("crashes", `Int crashes);
+      ("crashes", `Int recent_crash_count);
       ("restarts", `Int restarts);
       ("consecutive_fail_current", `Int consecutive_fail);
     ]);
@@ -441,17 +451,11 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 Keeper_state_machine.conditions_to_json entry.conditions
             | None -> `Null
           in
-          let outcomes_json =
-            compute_outcomes_rollup
-              ~keeper_name:m.name
-              ~agent_name:m.agent_name
-              ~registry_entry
-          in
           (* reconcile_status removed with manual_reconcile blocker system. *)
           let runtime_blocker_fields =
             runtime_blocker_fields_json config m
           in
-          let supervisor_diagnostics =
+          let supervisor_diagnostics, recent_crash_count =
             match registry_entry with
             | Some entry ->
                 let crash_log =
@@ -482,7 +486,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                   ~recent_crash_count:(List.length combined_log)
                   ~is_dead:(Option.is_some entry.dead_since_ts)
                   ~context_ratio:ctx_ratio in
-                `Assoc [
+                (`Assoc [
                   ("restart_count", `Int entry.restart_count);
                   ("max_restarts", `Int max_restarts);
                   ("crash_log", `List combined_log);
@@ -501,9 +505,9 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                       ~restart_count:entry.restart_count ~max_restarts with
                     | Some eta -> `Float eta
                     | None -> `Null);
-                ]
+                ], List.length combined_log)
             | None ->
-                `Assoc [
+                (`Assoc [
                   ("restart_count", `Int 0);
                   ("max_restarts", `Int max_restarts);
                   ("crash_log", `List []);
@@ -512,7 +516,14 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                   ("sp_events", `List []);
                   ("health_score", `Int 100);
                   ("dead_eta_sec", `Null);
-                ]
+                ], 0)
+          in
+          let outcomes_json =
+            compute_outcomes_rollup
+              ~keeper_name:m.name
+              ~agent_name:m.agent_name
+              ~recent_crash_count
+              ~registry_entry
           in
 
           let context =

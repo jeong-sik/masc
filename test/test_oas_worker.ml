@@ -10,6 +10,9 @@ open Masc_mcp
 
 module Oas = Agent_sdk
 
+let ctx_messages = Keeper_exec_context.messages_of_context
+let ctx_system_prompt = Keeper_exec_context.system_prompt_of_context
+
 (* ================================================================ *)
 (* Shared test infrastructure                                       *)
 (* ================================================================ *)
@@ -1246,11 +1249,11 @@ let test_keeper_checkpoint_prefers_oas_checkpoint () =
       match loaded_opt with
       | Some loaded ->
           Alcotest.(check string) "system prompt from OAS checkpoint"
-            "oas system" loaded.system_prompt;
+            "oas system" (ctx_system_prompt loaded);
           Alcotest.(check int) "max_tokens from live primary context" 1024
             loaded.max_tokens;
           Alcotest.(check string) "loaded OAS message" "oas"
-            (Agent_sdk.Types.text_of_message (List.hd loaded.messages))
+            (Agent_sdk.Types.text_of_message (List.hd (ctx_messages loaded)))
       | None -> Alcotest.fail "expected checkpoint context")
 
 let test_keeper_checkpoint_legacy_fallback () =
@@ -1277,9 +1280,9 @@ let test_keeper_checkpoint_legacy_fallback () =
       match loaded_opt with
       | Some loaded ->
           Alcotest.(check string) "legacy prompt restored" "legacy only"
-            loaded.system_prompt;
+            (ctx_system_prompt loaded);
           Alcotest.(check string) "legacy message restored" "legacy-only"
-            (Agent_sdk.Types.text_of_message (List.hd loaded.messages))
+            (Agent_sdk.Types.text_of_message (List.hd (ctx_messages loaded)))
       | None -> Alcotest.fail "expected legacy fallback context")
 
 let test_keeper_checkpoint_legacy_roundtrip_preserves_tool_pairs () =
@@ -1314,8 +1317,8 @@ let test_keeper_checkpoint_legacy_roundtrip_preserves_tool_pairs () =
       | None -> Alcotest.fail "expected legacy structured roundtrip context"
       | Some loaded ->
           Alcotest.(check int) "all messages restored" 4
-            (List.length loaded.messages);
-          (match List.nth loaded.messages 1 with
+            (List.length (ctx_messages loaded));
+          (match List.nth (ctx_messages loaded) 1 with
            | { Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
                content =
                  [ Agent_sdk.Types.ToolUse { id; name; input } ];
@@ -1327,7 +1330,7 @@ let test_keeper_checkpoint_legacy_roundtrip_preserves_tool_pairs () =
                  {|{"path":"README.md"}|}
                  (Yojson.Safe.to_string input)
            | _ -> Alcotest.fail "expected assistant tool_use after roundtrip");
-          (match List.nth loaded.messages 2 with
+          (match List.nth (ctx_messages loaded) 2 with
            | { Agent_sdk.Types.role = Agent_sdk.Types.Tool;
                content =
                  [ Agent_sdk.Types.ToolResult { tool_use_id; content; _ } ];
@@ -1389,9 +1392,9 @@ let test_keeper_checkpoint_prefers_newer_legacy_during_migration () =
       match loaded_opt with
       | Some loaded ->
           Alcotest.(check string) "newer legacy prompt restored" "new legacy"
-            loaded.system_prompt;
+            (ctx_system_prompt loaded);
           Alcotest.(check string) "newer legacy message restored" "new-legacy"
-            (Agent_sdk.Types.text_of_message (List.hd loaded.messages))
+            (Agent_sdk.Types.text_of_message (List.hd (ctx_messages loaded)))
       | None -> Alcotest.fail "expected migration fallback context")
 
 let test_keeper_oas_handoff_rollover_increments_generation () =
@@ -1715,7 +1718,7 @@ let test_same_trace_multi_turn_accumulation () =
       let ctx_turn2 = match loaded_opt with
         | Some ctx ->
             Alcotest.(check int) "turn 2 loaded 2 messages from turn 1" 2
-              (List.length ctx.messages);
+              (List.length (ctx_messages ctx));
             ctx
         | None -> Alcotest.fail "expected checkpoint after turn 1"
       in
@@ -1743,7 +1746,7 @@ let test_same_trace_multi_turn_accumulation () =
        | Some imm ->
            Alcotest.(check int)
              "second save persisted 4 messages (save correctness)" 4
-             (List.length imm.messages)
+             (List.length (ctx_messages imm))
        | None -> Alcotest.fail "second save produced no loadable checkpoint");
       (* Final verify: full roundtrip content check *)
       let (_session3, final_opt) =
@@ -1754,11 +1757,11 @@ let test_same_trace_multi_turn_accumulation () =
       | Some final ->
           Alcotest.(check int)
             "final checkpoint contains all 4 accumulated messages" 4
-            (List.length final.messages);
+            (List.length (ctx_messages final));
           Alcotest.(check string) "first message preserved" "turn 1 user"
-            (Agent_sdk.Types.text_of_message (List.nth final.messages 0));
+            (Agent_sdk.Types.text_of_message (List.nth (ctx_messages final) 0));
           Alcotest.(check string) "last message is turn 2 reply" "turn 2 reply"
-            (Agent_sdk.Types.text_of_message (List.nth final.messages 3))
+            (Agent_sdk.Types.text_of_message (List.nth (ctx_messages final) 3))
       | None -> Alcotest.fail "expected checkpoint after turn 2")
 
 (** Verify that checkpoint survives a simulated restart: fresh
@@ -1798,11 +1801,11 @@ let test_restart_continuity_load_oas_non_empty () =
       | Some loaded ->
           Alcotest.(check bool)
             "load_oas returns non-empty messages after restart" true
-            (List.length loaded.messages > 0);
+            (List.length (ctx_messages loaded) > 0);
           Alcotest.(check int) "all 3 messages restored" 3
-            (List.length loaded.messages);
+            (List.length (ctx_messages loaded));
           Alcotest.(check string) "system prompt restored" "restart test"
-            loaded.system_prompt
+            (ctx_system_prompt loaded)
       | None -> Alcotest.fail "checkpoint must survive restart")
 
 (* ================================================================ *)

@@ -88,11 +88,49 @@ let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) 
   let sys_tokens = Agent_sdk.Context_reducer.estimate_char_tokens system_prompt in
   List.fold_left (fun acc m -> acc + msg_tokens m) sys_tokens msgs
 
+let checkpoint_of_context (ctx : working_context) = ctx.checkpoint
+
+let system_prompt_of_context (ctx : working_context) =
+  Option.value ~default:"" ctx.checkpoint.system_prompt
+
+let messages_of_context (ctx : working_context) =
+  ctx.checkpoint.messages
+
+let empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens
+    ~(context : Agent_sdk.Context.t) : Agent_sdk.Checkpoint.t =
+  {
+    Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
+    session_id = "";
+    agent_name = "";
+    model = "";
+    system_prompt = Some system_prompt;
+    messages;
+    usage = Agent_sdk.Types.empty_usage;
+    turn_count = 0;
+    created_at = Time_compat.now ();
+    tools = [];
+    tool_choice = None;
+    disable_parallel_tool_use = false;
+    temperature = None;
+    top_p = None;
+    top_k = None;
+    min_p = None;
+    enable_thinking = None;
+    response_format_json = false;
+    thinking_budget = None;
+    cache_system_prompt = false;
+    max_input_tokens = None;
+    max_total_tokens = Some max_tokens;
+    context;
+    mcp_sessions = [];
+    working_context = None;
+  }
+
 let token_count (ctx : working_context) =
-  count_tokens ctx.system_prompt ctx.messages
+  count_tokens (system_prompt_of_context ctx) (messages_of_context ctx)
 
 let message_count (ctx : working_context) =
-  List.length ctx.messages
+  List.length (messages_of_context ctx)
 
 let context_ratio (ctx : working_context) : float =
   if ctx.max_tokens = 0 then 0.0
@@ -100,18 +138,30 @@ let context_ratio (ctx : working_context) : float =
 
 let create ~system_prompt ~max_tokens =
   let context = Agent_sdk.Context.create () in
-  { system_prompt; messages = []; max_tokens; context }
+  let checkpoint =
+    empty_runtime_checkpoint ~system_prompt ~messages:[] ~max_tokens ~context
+  in
+  { checkpoint; max_tokens; context }
 
 let set_system_prompt (ctx : working_context) ~system_prompt =
   let messages =
-    List.map (fun (m : Agent_sdk.Types.message) ->
-      if m.role = Agent_sdk.Types.System then { m with role = Agent_sdk.Types.Assistant } else m
-    ) ctx.messages
+    List.map
+      (fun (m : Agent_sdk.Types.message) ->
+        if m.role = Agent_sdk.Types.System
+        then { m with role = Agent_sdk.Types.Assistant }
+        else m)
+      (messages_of_context ctx)
   in
-  { ctx with system_prompt; messages }
+  let checkpoint =
+    { ctx.checkpoint with system_prompt = Some system_prompt; messages }
+  in
+  { ctx with checkpoint }
 
 let append ctx (msg : Agent_sdk.Types.message) =
-  { ctx with messages = ctx.messages @ [msg] }
+  let checkpoint =
+    { ctx.checkpoint with messages = messages_of_context ctx @ [ msg ] }
+  in
+  { ctx with checkpoint }
 
 let append_many ctx msgs =
   List.fold_left append ctx msgs
@@ -392,8 +442,10 @@ let repair_broken_tool_call_pairs
 
 let serialize_context (ctx : working_context) : string =
   let json = `Assoc [
-    ("system_prompt", `String (Inference_utils.sanitize_text_utf8 ctx.system_prompt));
-    ("messages", `List (List.map message_to_json ctx.messages));
+    ( "system_prompt",
+      `String
+        (Inference_utils.sanitize_text_utf8 (system_prompt_of_context ctx)) );
+    ("messages", `List (List.map message_to_json (messages_of_context ctx)));
     ("token_count", `Int (token_count ctx));
     ("max_tokens", `Int ctx.max_tokens);
   ] in
@@ -408,18 +460,19 @@ let deserialize_context (s : string) ~max_tokens : working_context =
     |> repair_broken_tool_call_pairs
   in
   let _legacy_token_count = json |> member "token_count" |> to_int_option in
+  let context = Agent_sdk.Context.create () in
+  let checkpoint =
+    empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens ~context
+  in
   sync_oas_context
-    {
-      system_prompt;
-      messages;
-      max_tokens;
-      context = Agent_sdk.Context.create ();
-    }
+    { checkpoint; max_tokens; context }
 
 let context_to_json (ctx : working_context) : Yojson.Safe.t =
   `Assoc [
-    ("system_prompt", `String (Inference_utils.sanitize_text_utf8 ctx.system_prompt));
-    ("messages", `List (List.map message_to_json ctx.messages));
+    ( "system_prompt",
+      `String
+        (Inference_utils.sanitize_text_utf8 (system_prompt_of_context ctx)) );
+    ("messages", `List (List.map message_to_json (messages_of_context ctx)));
     ("token_count", `Int (token_count ctx));
     ("max_tokens", `Int ctx.max_tokens);
   ]
@@ -1022,13 +1075,12 @@ let context_of_oas_checkpoint
     if repair_orphans then repair_broken_tool_call_pairs messages
     else messages
   in
+  let context = Agent_sdk.Context.copy cp.context in
+  let checkpoint =
+    { cp with system_prompt = Some system_prompt; messages; context }
+  in
   sync_oas_context
-    {
-      system_prompt;
-      messages;
-      max_tokens;
-      context = Agent_sdk.Context.copy cp.context;
-    }
+    { checkpoint; max_tokens; context }
 
 let context_of_legacy_checkpoint
     (ckpt : checkpoint)
@@ -1057,12 +1109,13 @@ let save_oas_checkpoint
   (* Truncate messages at save time to match the load-time cap.
      Without this, checkpoints grow unbounded between compaction cycles,
      causing multi-GB transient allocations when loaded by concurrent keepers. *)
+  let original_messages = messages_of_context ctx in
   let capped_messages =
-    trim_messages_preserving_pairs ctx.messages
+    trim_messages_preserving_pairs original_messages
       ~max_count:max_checkpoint_messages
   in
   let capped_messages_were_truncated =
-    List.length capped_messages < List.length ctx.messages
+    List.length capped_messages < List.length original_messages
   in
   (* Stub old tool results at save time: keep only the most recent turn's
      results in full. During Agent.run the reducer uses keep_recent:3, but
@@ -1079,29 +1132,19 @@ let save_oas_checkpoint
     then repair_broken_tool_call_pairs capped_messages
     else capped_messages
   in
-  let state =
-    {
-      Agent_sdk.Types.config =
-        {
-          Agent_sdk.Types.default_config with
-          name = agent_name;
-          model;
-          system_prompt = Some ctx.system_prompt;
-          max_total_tokens = Some ctx.max_tokens;
-        };
-      messages = capped_messages;
-      turn_count = 0;
-      usage = Agent_sdk.Types.empty_usage;
-    }
-  in
   let checkpoint =
-    Agent_sdk.Agent_checkpoint.build_checkpoint
-      ~session_id:session.session_id
-      ~state
-      ~tools:Agent_sdk.Tool_set.empty
-      ~context:checkpoint_context
-      ~mcp_clients:[]
-      ()
+    {
+      ctx.checkpoint with
+      version = Agent_sdk.Checkpoint.checkpoint_version;
+      session_id = session.session_id;
+      agent_name;
+      model;
+      system_prompt = Some (system_prompt_of_context ctx);
+      messages = capped_messages;
+      created_at = Time_compat.now ();
+      max_total_tokens = Some ctx.max_tokens;
+      context = checkpoint_context;
+    }
   in
   match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir checkpoint with
   | Ok () -> Ok checkpoint

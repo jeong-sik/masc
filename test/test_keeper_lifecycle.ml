@@ -6,6 +6,9 @@ module KT = Masc_mcp.Keeper_types
 module KR = Masc_mcp.Keeper_registry
 module KST = Masc_mcp.Keeper_state_machine
 
+let ctx_messages = KEC.messages_of_context
+let ctx_system_prompt = KEC.system_prompt_of_context
+
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in
   Unix.unlink dir;
@@ -253,7 +256,7 @@ let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
       let original_ctx =
         build_dense_context ~turns:24 ~max_tokens:320 ~state_reply
       in
-      let _original_message_count = List.length original_ctx.messages in
+      let _original_message_count = List.length (ctx_messages original_ctx) in
       let checkpoint = save_checkpoint ~base_dir ~meta ~ctx:original_ctx in
       let compaction_started = ref 0 in
       let lifecycle =
@@ -289,7 +292,7 @@ let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
       with
       | Some loaded ->
           check bool "compacted checkpoint persisted" true
-            (List.length loaded.messages < _original_message_count)
+            (List.length (ctx_messages loaded) < _original_message_count)
       | None -> fail "expected compacted checkpoint to be persisted")
 
 let test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips () =
@@ -325,7 +328,7 @@ let test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips () =
           ~state_reply:
             "done\n\n[STATE]\nGoal: keep checkpoint\nProgress: stable\n[/STATE]"
       in
-      let original_count = List.length original_ctx.messages in
+      let original_count = List.length (ctx_messages original_ctx) in
       let checkpoint = save_checkpoint ~base_dir ~meta ~ctx:original_ctx in
       let lifecycle =
         KEC.apply_post_turn_lifecycle
@@ -347,7 +350,7 @@ let test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips () =
       with
       | Some loaded ->
           check int "checkpoint messages preserved" original_count
-            (List.length loaded.messages)
+            (List.length (ctx_messages loaded))
       | None -> fail "expected original checkpoint to remain available")
 
 let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
@@ -429,7 +432,7 @@ let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
       with
       | Some loaded ->
           check bool "new trace checkpoint exists" true
-            (List.length loaded.messages > 0)
+            (List.length (ctx_messages loaded) > 0)
       | None -> fail "expected rollover checkpoint in new trace")
 
 let test_apply_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal ()
@@ -1274,9 +1277,9 @@ let test_load_context_repairs_orphaned_tool_result_after_cap () =
       | None -> fail "expected checkpoint context to load"
       | Some loaded ->
           check bool "load cap enforced with pair preservation"
-            true (List.length loaded.messages <= 2);
+            true (List.length (ctx_messages loaded) <= 2);
           check (option string) "loaded orphan tool result removed" None
-            (tool_result_content_for_id ~tool_use_id:tool_id loaded.messages))
+            (tool_result_content_for_id ~tool_use_id:tool_id (ctx_messages loaded)))
 
 let test_deserialize_context_repairs_orphan_tool_result () =
   let ctx =
@@ -1303,8 +1306,8 @@ let test_deserialize_context_repairs_orphan_tool_result () =
     KCC.deserialize_context (KEC.serialize_context ctx) ~max_tokens:4096
   in
   check (option string) "deserialized orphan tool result downgraded" None
-    (tool_result_content_for_id ~tool_use_id:"call-orphan-json" ctx.messages);
-  match List.hd ctx.messages with
+    (tool_result_content_for_id ~tool_use_id:"call-orphan-json" (ctx_messages ctx));
+  match List.hd (ctx_messages ctx) with
   | { Agent_sdk.Types.content = [ Agent_sdk.Types.Text text ]; _ } ->
       check string "deserialized orphan falls back to marker when payload metadata is absent"
         "[tool result call-orphan-json]" text
@@ -1328,7 +1331,7 @@ let test_deserialize_context_preserves_valid_tool_pair () =
   in
   check (option string) "paired tool result stays structured"
     (Some "paired output")
-    (tool_result_content_for_id ~tool_use_id:tool_id roundtrip.messages)
+    (tool_result_content_for_id ~tool_use_id:tool_id (ctx_messages roundtrip))
 
 let test_deserialize_context_repairs_dangling_tool_use () =
   let tool_id = "call-dangling-use-json" in
@@ -1346,8 +1349,8 @@ let test_deserialize_context_repairs_dangling_tool_use () =
     KCC.deserialize_context (KEC.serialize_context ctx) ~max_tokens:4096
   in
   check bool "dangling tool use removed on deserialize" false
-    (has_tool_use_id ~tool_use_id:tool_id roundtrip.messages);
-  match List.nth_opt roundtrip.messages 1 with
+    (has_tool_use_id ~tool_use_id:tool_id (ctx_messages roundtrip));
+  match List.nth_opt (ctx_messages roundtrip) 1 with
   | Some { Agent_sdk.Types.content = [ Agent_sdk.Types.Text text ]; _ } ->
       check bool "dangling tool use downgraded to text on deserialize" true
         (contains_substring text "tool use keeper_board_comment");
@@ -1392,8 +1395,8 @@ let test_load_context_repairs_dangling_tool_use_after_cap () =
       | None -> fail "expected checkpoint context to load"
       | Some loaded ->
           check bool "dangling tool use removed on load" false
-            (has_tool_use_id ~tool_use_id:tool_id loaded.messages);
-          match List.nth_opt loaded.messages 1 with
+            (has_tool_use_id ~tool_use_id:tool_id (ctx_messages loaded));
+          match List.nth_opt (ctx_messages loaded) 1 with
           | Some { Agent_sdk.Types.content = [ Agent_sdk.Types.Text text ]; _ } ->
               check bool "dangling tool use downgraded to text on load" true
                 (contains_substring text "tool use keeper_board_comment");
@@ -1541,7 +1544,7 @@ let test_load_context_migrates_ephemeral_world_state_checkpoint () =
       in
       let loaded_text =
         String.concat "\n"
-          (List.map Agent_sdk.Types.text_of_message loaded.messages)
+          (List.map Agent_sdk.Types.text_of_message (ctx_messages loaded))
       in
       check bool "loaded prompt preserved" true
         (contains_substring loaded_text "짧게 ping만 해봐");
@@ -1588,7 +1591,7 @@ let test_load_context_migrates_oversized_text_checkpoint () =
       in
       let loaded_text =
         String.concat "\n"
-          (List.map Agent_sdk.Types.text_of_message loaded.messages)
+          (List.map Agent_sdk.Types.text_of_message (ctx_messages loaded))
       in
       check bool "loaded prompt preserved" true
         (contains_substring loaded_text "짧게 요약해");
@@ -1639,7 +1642,7 @@ let test_load_context_migrates_summarized_world_state_checkpoint () =
       in
       let loaded_text =
         String.concat "\n"
-          (List.map Agent_sdk.Types.text_of_message loaded.messages)
+          (List.map Agent_sdk.Types.text_of_message (ctx_messages loaded))
       in
       check bool "loaded summary drops world state" false
         (contains_substring loaded_text "Current World State");

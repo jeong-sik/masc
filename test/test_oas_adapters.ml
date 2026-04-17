@@ -7,6 +7,9 @@
 
 open Masc_mcp
 
+let ctx_messages = Keeper_exec_context.messages_of_context
+let ctx_system_prompt = Keeper_exec_context.system_prompt_of_context
+
 (* ================================================================ *)
 (* Helper: create MASC messages with all 4 roles                    *)
 (* ================================================================ *)
@@ -79,9 +82,15 @@ let test_roundtrip_tool_msg () =
 let compact_ctx (ctx : Keeper_exec_context.working_context) strategies =
   let messages =
     Context_compact_oas.compact
-      ~system_prompt:ctx.system_prompt ~messages:ctx.messages ~strategies () in
+      ~system_prompt:(ctx_system_prompt ctx)
+      ~messages:(ctx_messages ctx)
+      ~strategies () in
   Keeper_exec_context.sync_oas_context
-    { ctx with messages }
+    {
+      ctx with
+      checkpoint =
+        { (Keeper_exec_context.checkpoint_of_context ctx) with messages };
+    }
 (* ================================================================ *)
 
 let test_compact_prune_tool_outputs () =
@@ -90,12 +99,13 @@ let test_compact_prune_tool_outputs () =
   let compacted = compact_ctx ctx [Context_compact_oas.PruneToolOutputs] in
   (* PruneToolOutputs on short tool output should not drop messages *)
   Alcotest.(check bool) "messages preserved"
-    true (List.length compacted.messages > 0);
+    true (List.length (ctx_messages compacted) > 0);
   Alcotest.(check bool) "token count positive"
     true (Keeper_exec_context.token_count compacted > 0);
   (* Short tool output (< 1500 chars) should not be truncated *)
   Alcotest.(check int) "message count unchanged for short tool output"
-    (List.length (make_test_messages ())) (List.length compacted.messages)
+    (List.length (make_test_messages ()))
+    (List.length (ctx_messages compacted))
 
 let test_compact_merge_contiguous () =
   let ctx = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000 in
@@ -108,7 +118,7 @@ let test_compact_merge_contiguous () =
   let compacted = compact_ctx ctx [Context_compact_oas.MergeContiguous] in
   (* MergeContiguous should merge the two consecutive user messages *)
   Alcotest.(check bool) "merged reduces count"
-    true (List.length compacted.messages <= List.length msgs)
+    true (List.length (ctx_messages compacted) <= List.length msgs)
 
 let test_compact_summarize_old () =
   (* Create enough messages to trigger keep-first-and-last behavior *)
@@ -123,7 +133,7 @@ let test_compact_summarize_old () =
   let compacted = compact_ctx ctx [Context_compact_oas.SummarizeOld] in
   (* SummarizeOld with keep-first-and-last should reduce message count *)
   Alcotest.(check bool) "summarize_old reduces messages"
-    true (List.length compacted.messages < List.length msgs);
+    true (List.length (ctx_messages compacted) < List.length msgs);
   Alcotest.(check bool) "token count positive"
     true (Keeper_exec_context.token_count compacted > 0)
 
@@ -137,7 +147,7 @@ let test_compact_small_list_unchanged () =
   let compacted = compact_ctx ctx [Context_compact_oas.SummarizeOld] in
   (* Small list (< first_n + last_n = 7) should be unchanged *)
   Alcotest.(check int) "small list unchanged"
-    (List.length msgs) (List.length compacted.messages)
+    (List.length msgs) (List.length (ctx_messages compacted))
 
 (* ================================================================ *)
 (* Restore messages (identity — types are shared)                  *)

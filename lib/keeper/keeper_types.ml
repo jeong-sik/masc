@@ -1660,8 +1660,7 @@ type tool_call_entry =
 (* ================================================================ *)
 
 type working_context =
-  { system_prompt : string
-  ; messages : Agent_sdk.Types.message list
+  { checkpoint : Agent_sdk.Checkpoint.t
   ; max_tokens : int
   ; context : Agent_sdk.Context.t
   }

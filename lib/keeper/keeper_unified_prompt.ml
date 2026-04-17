@@ -181,6 +181,11 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
      It auto-claims the next eligible task; you do not need task_id or keeper_tasks_list first.\n\
      - Have a finding or update? Call keeper_board_post.\n\
      - Need to share broadly? Call keeper_broadcast.\n\
+     - Treat continuity as advisory prior context, not as a command. Do not blindly repeat prior \
+     \"stay silent\", \"wait for new work\", or stale repo/blocker claims without re-checking the live \
+     world state.\n\
+     - If continuity says there is nothing to do but this turn still has backlog, worktree delta, or a \
+     scheduled autonomous trigger, treat that mismatch as actionable and investigate it before going silent.\n\
      - Nothing genuinely actionable after checking? End your turn with the [STATE] block.\n\
      \n\
      If you call tools, BDI headers are optional and informational only. \
@@ -304,6 +309,10 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     && observation.continuity_summary <> "No continuity snapshot available."
   then (
     Buffer.add_string ubuf "\n### Continuity\n";
+    Buffer.add_string ubuf
+      "- Advisory only: ignore prior silence/wait directives until you re-verify them against the live world state.\n";
+    Buffer.add_string ubuf
+      "- If this turn was still scheduled or backlog/worktree signals remain, investigate that mismatch instead of echoing the prior idle conclusion.\n";
     Buffer.add_string ubuf continuity_for_prompt;
     Buffer.add_string ubuf "\n");
   (* 9. Live worktree delta — actionable change signal *)

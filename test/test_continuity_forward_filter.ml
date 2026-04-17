@@ -17,6 +17,13 @@ Decisions: 119/119 unclaimed tasks deemed trap cycles; autoboot stable
 OpenQuestions: is Phase 2 needed?
 Constraints: MASC_STRUCTURED_STATE=true|}
 
+let inert_idle_summary =
+  {|Goal: structural quality improvement
+Next plan: stay silent until new actionable work appears
+Next: 대기 유지; all non-destructive actions exhausted
+OpenQuestions: none
+Constraints: repos/ empty|}
+
 let test_strips_backward () =
   let filtered =
     Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary full_summary
@@ -72,6 +79,20 @@ let test_preserves_line_order () =
   | _ ->
     Alcotest.fail "Expected Goal and Next plan lines to be present"
 
+let test_drops_inert_idle_directives () =
+  let filtered =
+    Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary
+      inert_idle_summary
+  in
+  Alcotest.(check bool) "idle next plan removed"
+    false (Astring.String.is_infix ~affix:"stay silent" filtered);
+  Alcotest.(check bool) "idle next removed"
+    false (Astring.String.is_infix ~affix:"대기 유지" filtered);
+  Alcotest.(check bool) "goal still kept"
+    true (Astring.String.is_infix ~affix:"Goal:" filtered);
+  Alcotest.(check bool) "constraints still kept"
+    true (Astring.String.is_infix ~affix:"Constraints:" filtered)
+
 let () =
   Alcotest.run "continuity forward filter"
     [ ( "filter_forward_looking_summary",
@@ -83,5 +104,7 @@ let () =
             test_empty_input;
           Alcotest.test_case "preserves relative line order" `Quick
             test_preserves_line_order;
+          Alcotest.test_case "drops inert idle directives" `Quick
+            test_drops_inert_idle_directives;
         ] );
     ]

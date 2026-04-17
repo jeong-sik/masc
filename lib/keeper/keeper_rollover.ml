@@ -162,8 +162,13 @@ let maybe_rollover_oas_handoff
           let save_ctx =
             {
               ctx with
-              messages =
-                repair_orphan_tool_result_messages ctx.messages;
+              checkpoint =
+                {
+                  (checkpoint_of_context ctx) with
+                  messages =
+                    repair_orphan_tool_result_messages
+                      (messages_of_context ctx);
+                };
             }
           in
           match save_oas_checkpoint

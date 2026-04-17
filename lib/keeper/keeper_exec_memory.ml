@@ -1,5 +1,6 @@
 open Keeper_types
 open Keeper_exec_shared
+open Keeper_exec_context
 
 module StringSet = Set.Make (String)
 
@@ -116,7 +117,8 @@ let search_history
            ~max_n:20)
   in
   let checkpoint_user_msgs =
-    Keeper_memory_recall.recent_user_messages ctx_work.messages ~max_n:100
+    Keeper_memory_recall.recent_user_messages
+      (messages_of_context ctx_work) ~max_n:100
   in
   let key_of s =
     let len = min 100 (String.length s) in
@@ -241,7 +243,10 @@ let keeper_memory_search_json
 ;;
 
 let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_context) =
-  let continuity = Keeper_memory_policy.latest_state_snapshot_from_messages ctx_work.messages in
+  let continuity =
+    Keeper_memory_policy.latest_state_snapshot_from_messages
+      (messages_of_context ctx_work)
+  in
   let continuity_summary =
     match continuity with
     | None ->
@@ -270,7 +275,7 @@ let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_contex
         ; "context_ratio", `Float ctx_ratio
         ; "context_tokens", `Int ctx_tokens
         ; "context_max", `Int ctx_work.max_tokens
-        ; "message_count", `Int (List.length ctx_work.messages)
+        ; "message_count", `Int (List.length (messages_of_context ctx_work))
         ; "last_model_used", `String meta.runtime.usage.last_model_used
         ; "playground_bundle", `String playground_bundle
         ; "playground_mind", `String playground_mind

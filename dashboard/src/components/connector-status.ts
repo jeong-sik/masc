@@ -28,15 +28,14 @@ import { showToast } from './common/toast'
 import { CopyableCode } from './common/copyable-code'
 import { createManagedAsyncResource } from '../lib/async-state'
 
-// Per-connector lifecycle hints. Discord ships a run.sh wrapper; the others
-// don't yet, so the start command falls through to direct module invocation.
+// Per-connector lifecycle hints. All four sidecars now ship a run.sh wrapper
+// (discord/imessage/slack/telegram) — see sidecars/<id>-bot/run.sh.
 // Source of truth: docs/CONNECTOR-CONFIG-SCHEMA.md.
 interface SidecarCommands {
   start: string
   tail: string
   status: string
   stop: string
-  notes?: string
 }
 
 const SIDECAR_DIRS: Record<string, string> = {
@@ -48,20 +47,11 @@ const SIDECAR_DIRS: Record<string, string> = {
 
 function sidecarCommands(connectorId: string): SidecarCommands {
   const dir = SIDECAR_DIRS[connectorId] ?? `sidecars/${connectorId}-bot`
-  if (connectorId === 'discord') {
-    return {
-      start: `cd ${dir} && ./run.sh`,
-      tail: `cd ${dir} && ./run.sh tail`,
-      status: `cd ${dir} && ./run.sh status`,
-      stop: `pkill -f 'python -m src' # discord-bot`,
-    }
-  }
   return {
-    start: `cd ${dir} && python -m src`,
-    tail: `tail -F .masc/logs/${connectorId}-sidecar-$(date +%Y%m%d).log`,
-    status: `cat .gate/runtime/${connectorId}/status.json | jq .`,
+    start: `cd ${dir} && ./run.sh`,
+    tail: `cd ${dir} && ./run.sh tail`,
+    status: `cd ${dir} && ./run.sh status`,
     stop: `pkill -f '${dir}/src' # ${connectorId}-bot`,
-    notes: 'No run.sh wrapper yet — direct python -m src invocation. Use a venv.',
   }
 }
 
@@ -571,9 +561,6 @@ function ConnectorLivePanel({
                   <${CopyableCode} label="status" command=${cmds.status} />
                   <${CopyableCode} label="stop" command=${cmds.stop} />
                 </div>
-                ${cmds.notes
-                  ? html`<div class="mt-2 text-[10px] italic text-[var(--text-dim)]">${cmds.notes}</div>`
-                  : null}
               </div>
             `
           })()

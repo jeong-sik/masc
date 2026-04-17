@@ -121,7 +121,7 @@ function JudgeStatusBar() {
   `
 }
 
-export function judgmentsEmptyStateMessage(): { message: string; tone: 'warn' | 'default' } {
+function judgmentsEmptyStateMessage(): { message: string; tone: 'warn' | 'default' } {
   const judge = governanceData.value?.judge
   const summary = governanceData.value?.summary
   const lastError = judge?.last_error?.trim()
@@ -329,7 +329,7 @@ function KeeperApprovalEmptyState() {
   `
 }
 
-export function keeperHitlEmptyContext(): {
+function keeperHitlEmptyContext(): {
   primary: string
   secondary: string | null
   lastActivity: string | null

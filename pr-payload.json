@@ -1,1 +1,0 @@
-{"title":"refactor(tool_prefilter): Hashtbl to StringMap/StringSet","body":"Replace all Hashtbl in tool_prefilter.ml with StringMap/StringSet","head":"keeper-masc-improver-agent/task-012","base":"main","draft":true}

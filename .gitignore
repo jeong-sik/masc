@@ -121,9 +121,13 @@ specs/**/*_TTrace_*.bin
 
 # Operator-local scratch (PR/CR dumps, temp edits)
 pr_*.json
+pr-*.json
+pr_body_*.txt
+pr*.json
 cr_*.txt
 comments_*.txt
 all_comments_*.txt
+test-integration-*.txt
 tmp_edit/
 
 # Runtime data directories (not source)

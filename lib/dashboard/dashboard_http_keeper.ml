@@ -46,6 +46,117 @@ let compute_health_score
     let raw = 100.0 -. budget_penalty -. crash_penalty -. context_penalty in
     Int.max 0 (Int.min 100 (Float.to_int raw))
 
+(** Outcomes rollup: aggregate successes / failures / validation for a keeper.
+
+    Data sources (all already in-process, zero new schema):
+    - [Keeper_transition_audit.recent_transitions] (50-entry ring) → turn,
+      compaction, handoff outcomes classified by [selected_event].
+    - [registry_entry] crash_log / restart_count / turn_consecutive_failures
+      → resilience counters.
+    - [Dashboard_harness_health.read_recent_verdicts] → OAS verdict pass/fail
+      scoped to this keeper by [agent_name].
+
+    Conservation law (spec {!KeeperOutcomesConservation.tla}):
+      successes.substantive_turns + failures.turn_failed + failures.gate_rejected
+        = observed_turns
+    holds by construction: observed_turns is computed from the same ring pass.
+    [gate_rejected] is 0 until CDAL verdict gate (#7531) lands; this does not
+    break conservation because no event bucket routes to it yet. *)
+let compute_outcomes_rollup
+    ~keeper_name
+    ~agent_name
+    ~(registry_entry : Keeper_registry.registry_entry option) : Yojson.Safe.t =
+  let succ_turns = ref 0 in
+  let succ_compactions = ref 0 in
+  let succ_handoffs = ref 0 in
+  let fail_turn = ref 0 in
+  let fail_compaction = ref 0 in
+  let fail_handoff = ref 0 in
+  let transitions =
+    Keeper_transition_audit.recent_transitions ~keeper_name ~limit:50
+  in
+  List.iter (fun (tr : Keeper_transition_audit.transition_record) ->
+    match tr.selected_event with
+    | Keeper_state_machine.Turn_succeeded -> incr succ_turns
+    | Turn_failed _ -> incr fail_turn
+    | Compaction_completed _ -> incr succ_compactions
+    | Compaction_failed _ -> incr fail_compaction
+    | Handoff_completed _ -> incr succ_handoffs
+    | Handoff_failed _ -> incr fail_handoff
+    | _ -> ()
+  ) transitions;
+  let observed_turns = !succ_turns + !fail_turn in
+  let crashes, restarts, consecutive_fail =
+    match registry_entry with
+    | Some (e : Keeper_registry.registry_entry) ->
+        List.length e.crash_log, e.restart_count, e.turn_consecutive_failures
+    | None -> 0, 0, 0
+  in
+  let keeper_verdicts =
+    try
+      Dashboard_harness_health.read_recent_verdicts ~limit:50 ()
+      |> List.filter (fun (v : Dashboard_harness_health.harness_verdict_item) ->
+           v.agent_name = keeper_name || v.agent_name = agent_name)
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | _ -> []
+  in
+  let pass_v = ref 0 in
+  let fail_v = ref 0 in
+  let unknown_v = ref 0 in
+  let fail_reasons = Hashtbl.create 8 in
+  List.iter (fun (v : Dashboard_harness_health.harness_verdict_item) ->
+    match String.lowercase_ascii v.verdict with
+    | "pass" -> incr pass_v
+    | "fail" | "reject" ->
+        incr fail_v;
+        let r = Option.value v.fallback_reason ~default:"unspecified" in
+        let cur = try Hashtbl.find fail_reasons r with Not_found -> 0 in
+        Hashtbl.replace fail_reasons r (cur + 1)
+    | _ -> incr unknown_v
+  ) keeper_verdicts;
+  let top_failure_reasons =
+    Hashtbl.fold (fun k v acc -> (k, v) :: acc) fail_reasons []
+    |> List.sort (fun (_, a) (_, b) -> compare b a)
+    |> List.filteri (fun i _ -> i < 3)
+    |> List.map (fun (r, _) -> `String r)
+  in
+  let last_verdict_at =
+    match keeper_verdicts with
+    | [] -> `Null
+    | v :: _ -> `Float v.timestamp
+  in
+  `Assoc [
+    ("window", `String "transition_ring_last_50");
+    ("observed_turns", `Int observed_turns);
+    ("successes", `Assoc [
+      ("substantive_turns", `Int !succ_turns);
+      ("compactions_ok", `Int !succ_compactions);
+      ("handoffs_ok", `Int !succ_handoffs);
+    ]);
+    ("failures", `Assoc [
+      ("turn_failed", `Int !fail_turn);
+      (* gate_rejected reserved for CDAL verdict gate (#7531); 0 until merged. *)
+      ("gate_rejected", `Int 0);
+      ("compaction_failed", `Int !fail_compaction);
+      ("handoff_failed", `Int !fail_handoff);
+      ("crashes", `Int crashes);
+      ("restarts", `Int restarts);
+      ("consecutive_fail_current", `Int consecutive_fail);
+    ]);
+    ("validation", `Assoc [
+      ("oas_verdicts", `Assoc [
+        ("pass", `Int !pass_v);
+        ("fail", `Int !fail_v);
+        ("unknown", `Int !unknown_v);
+        ("top_failure_reasons", `List top_failure_reasons);
+      ]);
+      (* cdal_gate: null until CDAL verdict gate (#7531) merges. *)
+      ("cdal_gate", `Null);
+      ("last_verdict_at", last_verdict_at);
+    ]);
+  ]
+
 (** Estimate seconds until Dead based on current restart_count and
     exponential backoff schedule. Returns None if already dead or
     restart_count >= max_restarts. *)
@@ -330,6 +441,12 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 Keeper_state_machine.conditions_to_json entry.conditions
             | None -> `Null
           in
+          let outcomes_json =
+            compute_outcomes_rollup
+              ~keeper_name:m.name
+              ~agent_name:m.agent_name
+              ~registry_entry
+          in
           (* reconcile_status removed with manual_reconcile blocker system. *)
           let runtime_blocker_fields =
             runtime_blocker_fields_json config m
@@ -557,6 +674,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 | Some p -> `String p
                 | None -> `Null);
               ("conditions", conditions_json);
+              ("outcomes", outcomes_json);
             ] @ runtime_blocker_fields @ [
               ("supervisor_diagnostics", supervisor_diagnostics);
               ("agent_name", `String m.agent_name);

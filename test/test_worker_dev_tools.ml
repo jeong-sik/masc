@@ -897,4 +897,68 @@ let () =
           None
           (Worker_dev_tools.structured_tool_hint_for_r2 "workflow disable x.yml"));
     ];
+    "attribution", [
+      Alcotest.test_case "Ok () → Passed with cmd in evidence" `Quick (fun () ->
+        let attr =
+          Worker_dev_tools.attribution_of_validation ~cmd:"ls -la" (Ok ())
+        in
+        Alcotest.(check string) "gate" "worker_dev_tools" attr.gate;
+        Alcotest.(check bool) "origin=Det" true
+          (attr.origin = Attribution.Det);
+        Alcotest.(check bool) "outcome=Passed" true
+          (match attr.outcome with Attribution.Passed -> true | _ -> false));
+      Alcotest.test_case "Empty_command → Policy_failed" `Quick (fun () ->
+        let attr =
+          Worker_dev_tools.attribution_of_validation ~cmd:""
+            (Error Worker_dev_tools.Empty_command)
+        in
+        match attr.outcome with
+        | Attribution.Policy_failed { reason } ->
+          Alcotest.(check bool) "reason mentions empty" true
+            (contains_substring reason "empty")
+        | _ -> Alcotest.fail "expected Policy_failed");
+      Alcotest.test_case "Command_not_allowed carries command_name in evidence"
+        `Quick (fun () ->
+        let attr =
+          Worker_dev_tools.attribution_of_validation
+            ~cmd:"rm -rf /"
+            (Error (Worker_dev_tools.Command_not_allowed "rm"))
+        in
+        match attr.evidence with
+        | `Assoc fields ->
+          Alcotest.(check (option string)) "command_name=rm"
+            (Some "rm")
+            (match List.assoc_opt "command_name" fields with
+             | Some (`String s) -> Some s
+             | _ -> None);
+          Alcotest.(check (option string)) "block_reason tag"
+            (Some "command_not_allowed")
+            (match List.assoc_opt "block_reason" fields with
+             | Some (`String s) -> Some s
+             | _ -> None)
+        | _ -> Alcotest.fail "evidence must be object");
+      Alcotest.test_case "all 7 block_reason variants → Policy_failed" `Quick
+        (fun () ->
+        let variants =
+          [
+            Worker_dev_tools.Empty_command;
+            Worker_dev_tools.Chain_or_redirect;
+            Worker_dev_tools.Injection;
+            Worker_dev_tools.Process_substitution;
+            Worker_dev_tools.Unsafe_redirect;
+            Worker_dev_tools.Pipes_not_allowed;
+            Worker_dev_tools.Command_not_allowed "foo";
+          ]
+        in
+        List.iter (fun br ->
+          let attr =
+            Worker_dev_tools.attribution_of_validation ~cmd:"test"
+              (Error br)
+          in
+          Alcotest.(check bool) "always Policy_failed" true
+            (match attr.outcome with
+             | Attribution.Policy_failed _ -> true
+             | _ -> false)
+        ) variants);
+    ];
   ]

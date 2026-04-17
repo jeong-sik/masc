@@ -129,7 +129,7 @@ export async function refreshHarnessSurface(): Promise<void> {
   await loadHarnessHealth()
 }
 
-function mergeRecent<T>(
+export function mergeRecent<T>(
   current: T[],
   nextItem: T,
   isSame: (left: T, right: T) => boolean,
@@ -147,7 +147,7 @@ function updateHarnessData(
   harness.state.value = loaded(update(s.data))
 }
 
-function decodeEventPayload(event: unknown): Record<string, unknown> | null {
+export function decodeEventPayload(event: unknown): Record<string, unknown> | null {
   if (!isRecord(event)) return null
   return isRecord(event.payload) ? event.payload : null
 }

@@ -583,82 +583,19 @@ MAGI 3인 체제(Melchior/Balthasar/Casper)에 Athena와 Generalist를 추가한
 
 ---
 
-## 7. Checkpoint Types
+## 7. Checkpoint Types (RETIRED)
 
-**소스**: `lib/checkpoint_types.ml`
+`lib/checkpoint_types.ml`는 Time-Travel checkpoint 실험을 지원하던 전용 타입 모듈이었고, 현재 repo에서 제거됐다. `checkpoint_status` 7-variant FSM(`Pending`/`InProgress`/`Interrupted`/`Completed`/`Rejected`/`Reverted`/`Branched`)과 `checkpoint_info` record는 더 이상 어떤 subsystem도 참조하지 않는다 (`grep -rn checkpoint_status lib/ test/` → 0 hits).
 
-### 7.1 Checkpoint Status
-
-```ocaml
-type checkpoint_status =
-  | Pending
-  | InProgress
-  | Interrupted
-  | Completed
-  | Rejected
-  | Reverted     (* Time Travel: 이전 체크포인트로 되돌림 *)
-  | Branched     (* 이 체크포인트에서 새 분기 생성 *)
-```
-
-7개 variant. 상태 전이는 `can_transition ~from ~to_`로 검증한다:
-
-| from | to | 허용 |
-|------|----|------|
-| Pending | InProgress | yes |
-| InProgress | Interrupted | yes |
-| InProgress | Completed | yes |
-| Interrupted | Completed | yes (approved) |
-| Interrupted | Rejected | yes (rejected) |
-| 그 외 | * | no |
-
-터미널 상태: `Completed`, `Rejected`, `Reverted`.
-
-### 7.2 Checkpoint Info
-
-```ocaml
-type checkpoint_info = {
-  id : string;
-  task_id : string;
-  step : int;
-  action : string;
-  agent : string;
-  status : checkpoint_status;
-  interrupt_message : string option;
-  created_at : float option;
-}
-```
+체크포인트 개념이 남아 있는 곳은 keeper turn lifecycle(`lib/keeper/keeper_turn_lifecycle.ml`)에 통합된 per-turn resume snapshot뿐이며, 별도 타입 모듈로는 더 이상 노출되지 않는다.
 
 ---
 
-## 8. Context Budget Types
+## 8. Context Budget Types (RETIRED)
 
-**소스**: `lib/context_budget_manager.mli`
+`lib/context_budget_manager.mli`는 MASC 레벨의 `compression_phase` 4-variant FSM(`None_phase`/`Compact_tools`/`Drop_low`/`Summarize`)과 `Budget_tracker` API(`record_tool_schemas`, `record_turn`, `usage_ratio`, `current_phase`)를 노출하던 모듈이었고, 현재 repo에서 제거됐다. `grep -rn compression_phase lib/ test/` → 0 hits.
 
-### 8.1 Compression Phase
-
-```ocaml
-type compression_phase =
-  | None_phase      (* 0-50%: 전체 설명, 압축 없음 *)
-  | Compact_tools   (* 50-70%: 도구 설명을 한 줄로 *)
-  | Drop_low        (* 70-85%: 중요도 낮은 메시지 제거 *)
-  | Summarize       (* 85%+: 오래된 턴 요약 *)
-```
-
-### 8.2 Budget Tracker
-
-```ocaml
-type t  (* abstract *)
-
-val create : ?max_budget:int -> unit -> t
-val record_tool_schemas : t -> count:int -> estimated_tokens:int -> unit
-val record_turn : t -> estimated_tokens:int -> unit
-val current_phase : t -> compression_phase
-val usage_ratio : t -> float
-val total_tokens : t -> int
-val max_budget : t -> int
-```
-
-기본 `max_budget`는 환경변수 `MASC_CONTEXT_BUDGET_MAX` (fallback: 100000).
+현재 기준은 `feedback_budget-belongs-in-oas.md` 메모리에 기록된 경계 원칙이다. Raw token 수/컨텍스트 한도 추적은 OAS(agent_sdk)가 소유하고, MASC는 OAS가 내보내는 추상 신호(ratio/status)만 소비한다. 환경변수 `MASC_CONTEXT_BUDGET_MAX` 역시 더 이상 active runtime에서 읽히지 않는다.
 
 ---
 
@@ -745,42 +682,11 @@ type rate_limit_error = {
 
 ---
 
-## 10. Structured Message Types
+## 10. Structured Message Types (RETIRED)
 
-**소스**: `lib/message_schema.mli`
+`lib/message_schema.mli`는 swarm 내부 메시지를 위한 `validation_mode` 3-variant, `structured_message` 5-variant(`TaskUpdate`/`StatusReport`/`Request`/`Response`/`Freeform`), `swarm_envelope` record를 노출하던 모듈이었고, Gen37에서 frontmatter code_refs 정리 시점에 #2848 dead-code sweep과 함께 제거된 것이 확인됐다. `grep -rn "validation_mode\|swarm_envelope" lib/ test/` → 0 hits.
 
-### 10.1 Validation Mode
-
-```ocaml
-type validation_mode = Strict | Warn | Permissive
-```
-
-### 10.2 Structured Message
-
-```ocaml
-type structured_message =
-  | TaskUpdate of { task_id: string; status: string; payload: Yojson.Safe.t option }
-  | StatusReport of { agent: string; progress: float; details: string }
-  | Request of { target: string; action: string; params: Yojson.Safe.t }
-  | Response of { request_id: string; success: bool; result: Yojson.Safe.t }
-  | Freeform of string
-```
-
-5개 variant. `Freeform`은 구조화되지 않은 메시지에 대한 하위호환 경로다.
-
-### 10.3 Swarm Envelope
-
-```ocaml
-type swarm_envelope = {
-  sender : string;
-  timestamp : float;
-  sequence : int;
-  channel : string;
-  message : structured_message;
-}
-```
-
-swarm 내부 메시지는 반드시 envelope로 감싸서 전송한다. `sequence`는 메시지 순서를 보장하고 중복 감지에 사용된다.
+현재 coordination 경로는 `board_posts` + keeper FSM으로 통합됐으며 별도 "structured message / envelope" 타입 레이어는 노출되지 않는다. Swarm 문맥에서 message delivery 의미론이 필요하면 `docs/spec/11-board.md`를 참조한다.
 
 ---
 

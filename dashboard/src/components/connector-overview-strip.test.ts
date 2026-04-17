@@ -14,6 +14,8 @@ import {
   summarizeConnectorStrip,
   tilePrimaryActionView,
   formatTileIdentityLine,
+  offlineConnectorNames,
+  formatOfflineConnectorLabel,
 } from './connector-overview-strip'
 import type { GateConnectorInfo } from '../api/gate'
 
@@ -525,5 +527,109 @@ describe('Tile identity line (rendered inside ConnectorOverviewStrip)', () => {
       container,
     )
     expect(container.querySelector('[data-tile-identity="discord"]')).toBeNull()
+  })
+})
+
+describe('offlineConnectorNames (pure)', () => {
+  it('empty connectors → []', () => {
+    expect(offlineConnectorNames([])).toEqual([])
+  })
+
+  it('all up → [] (no offline to annotate)', () => {
+    expect(offlineConnectorNames([
+      mkConnector({ connector_id: 'discord', available: true }),
+      mkConnector({ connector_id: 'slack', available: true }),
+    ])).toEqual([])
+  })
+
+  it('marks observed-but-offline connectors by display name', () => {
+    expect(offlineConnectorNames([
+      mkConnector({ connector_id: 'discord', available: true }),
+      mkConnector({ connector_id: 'slack', available: false }),
+    ])).toEqual(['Slack'])
+  })
+
+  it('multiple offline returned in canonical tile order (not input order)', () => {
+    // Input order: [slack, discord] (reversed from KNOWN_CONNECTOR_IDS).
+    // Expected output: canonical order [Discord, Slack] — matches the
+    // visual scan path below the summary line.
+    expect(offlineConnectorNames([
+      mkConnector({ connector_id: 'slack', available: false }),
+      mkConnector({ connector_id: 'discord', available: false }),
+    ])).toEqual(['Discord', 'Slack'])
+  })
+
+  it('connector not yet observed (absent from array) is not marked offline', () => {
+    // Regression guard: \"missing\" is ambiguous — could be bootstrapping.
+    // Only mark offline when we've actually seen available=false.
+    expect(offlineConnectorNames([])).toEqual([])
+  })
+})
+
+describe('formatOfflineConnectorLabel (pure)', () => {
+  it('empty → null (no annotation when all are up)', () => {
+    expect(formatOfflineConnectorLabel([])).toBeNull()
+  })
+
+  it('single → \"Name offline\"', () => {
+    expect(formatOfflineConnectorLabel(['Slack'])).toBe('Slack offline')
+  })
+
+  it('two → \"A · B offline\" (both listed)', () => {
+    expect(formatOfflineConnectorLabel(['Discord', 'Slack'])).toBe('Discord · Slack offline')
+  })
+
+  it('three+ → first two listed + \"+N offline\" overflow (Statuspage convention)', () => {
+    expect(formatOfflineConnectorLabel(['Discord', 'Slack', 'Telegram']))
+      .toBe('Discord · Slack · +1 offline')
+    expect(formatOfflineConnectorLabel(['Discord', 'Slack', 'Telegram', 'iMessage']))
+      .toBe('Discord · Slack · +2 offline')
+  })
+})
+
+describe('StatusSummaryLine offline annotation (rendered inside ConnectorOverviewStrip)', () => {
+  let container: HTMLElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    _testResetBulkInflight()
+    _testResetStripMemory()
+  })
+  afterEach(() => {
+    render(null, container)
+    document.body.removeChild(container)
+  })
+
+  it('omits the annotation when all connectors are up', () => {
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[
+          mkConnector({ connector_id: 'discord', available: true }),
+          mkConnector({ connector_id: 'slack', available: true }),
+          mkConnector({ connector_id: 'telegram', available: true }),
+          mkConnector({ connector_id: 'imessage', available: true }),
+        ]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    expect(container.querySelector('[data-strip-summary-offline-names]')).toBeNull()
+  })
+
+  it('annotates offline connector by name', () => {
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[
+          mkConnector({ connector_id: 'discord', available: true }),
+          mkConnector({ connector_id: 'slack', available: false }),
+        ]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    const annotation = container.querySelector('[data-strip-summary-offline-names]') as HTMLElement
+    expect(annotation).toBeTruthy()
+    expect(annotation.textContent).toContain('Slack offline')
+    expect(annotation.className).toContain('rose')
   })
 })

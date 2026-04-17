@@ -562,8 +562,6 @@ export type OperatorActionType =
   | 'keeper_message'
   | 'keeper_probe'
   | 'keeper_recover'
-  | 'review_resolve'
-  | 'review_defer'
 
 export type OperatorTargetType = 'root' | 'namespace' | 'room' | 'keeper' | 'review_item'
 

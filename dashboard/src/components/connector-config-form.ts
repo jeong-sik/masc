@@ -23,6 +23,7 @@ import { Eye, EyeOff } from 'lucide-preact'
 import { ActionButton } from './common/button'
 import { CopyableCode } from './common/copyable-code'
 import { LoadingState } from './common/feedback-state'
+import { showToast } from './common/toast'
 
 type FieldType = 'string' | 'integer' | 'number' | 'boolean' | 'unknown'
 
@@ -57,12 +58,23 @@ interface FormEntry {
   loading: boolean
   error: string | null
   open: boolean
+  saving: boolean
+  lastSavedAt: number | null
 }
 
 const formState = signal<Record<string, FormEntry>>({})
 
 function emptyEntry(): FormEntry {
-  return { fields: [], values: {}, reveal: {}, loading: false, error: null, open: false }
+  return {
+    fields: [],
+    values: {},
+    reveal: {},
+    loading: false,
+    error: null,
+    open: false,
+    saving: false,
+    lastSavedAt: null,
+  }
 }
 
 function getEntry(id: string): FormEntry {
@@ -131,6 +143,41 @@ async function fetchSchema(id: string) {
       loading: false,
       error: err instanceof Error ? err.message : 'schema fetch failed',
     })
+  }
+}
+
+function missingRequired(entry: FormEntry): string[] {
+  return entry.fields
+    .filter(f => f.required && (entry.values[f.name] ?? '').trim() === '')
+    .map(f => f.name)
+}
+
+async function saveConfig(id: string) {
+  const entry = getEntry(id)
+  const missing = missingRequired(entry)
+  if (missing.length > 0) {
+    showToast(`필수 필드 비어있음: ${missing.join(', ')}`, 'error')
+    return
+  }
+  setEntry(id, { saving: true })
+  try {
+    const res = await fetch(`/api/v1/sidecar/config?name=${encodeURIComponent(id)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(entry.values),
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ''}`)
+    }
+    setEntry(id, { saving: false, lastSavedAt: Date.now() })
+    showToast(`${id} config 저장됨 — sidecar 재시작 시 반영`, 'success', 2400)
+  } catch (err) {
+    setEntry(id, { saving: false })
+    showToast(err instanceof Error ? err.message : 'config save failed', 'error')
   }
 }
 
@@ -299,14 +346,20 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
       <div class="mb-2 flex items-center justify-between">
         <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">
           ${entry.fields.length} fields · ${entry.fields.filter(f => f.required).length} required
+          ${entry.lastSavedAt
+            ? html`<span class="ml-2 text-emerald-300">· 저장됨 ${new Date(entry.lastSavedAt).toLocaleTimeString()}</span>`
+            : null}
         </div>
         <${ActionButton}
           variant="ghost"
           size="sm"
-          disabled=${true}
-          title="저장 endpoint 준비 중 — 지금은 .env 복사 후 셸에서 적용"
+          disabled=${entry.saving || missingRequired(entry).length > 0}
+          title=${missingRequired(entry).length > 0
+            ? `필수 필드: ${missingRequired(entry).join(', ')}`
+            : 'POST /api/v1/sidecar/config — sidecar 재시작 시 반영'}
+          onClick=${() => { void saveConfig(connectorId) }}
         >
-          Save (TODO)
+          ${entry.saving ? '저장 중...' : 'Save'}
         <//>
       </div>
 

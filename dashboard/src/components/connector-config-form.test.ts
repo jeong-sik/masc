@@ -123,6 +123,85 @@ describe('ConnectorConfigForm', () => {
     expect(container.textContent?.trim()).toBe('')
   })
 
+  it('Save button stays disabled while a required field is empty', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          id: 'discord',
+          schema: {
+            properties: {
+              DISCORD_BOT_TOKEN: { type: 'string' },
+            },
+            required: ['DISCORD_BOT_TOKEN'],
+          },
+        }),
+        { status: 200 },
+      ),
+    )
+    render(html`
+      <div>
+        <${ConnectorConfigToggle} connectorId="discord" />
+        <${ConnectorConfigForm} connectorId="discord" />
+      </div>
+    `, container)
+    ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
+    await flushUi()
+    await flushUi()
+
+    const buttons = Array.from(container.querySelectorAll('button'))
+    const saveBtn = buttons.find(b => b.textContent?.trim() === 'Save') as HTMLButtonElement | undefined
+    expect(saveBtn).toBeTruthy()
+    expect(saveBtn?.disabled).toBe(true)
+    // Required field surfaces in the form (label) so operator can see what's missing.
+    expect(container.textContent).toContain('DISCORD_BOT_TOKEN')
+  })
+
+  it('Save button POSTs to /api/v1/sidecar/config when required field is filled', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            id: 'discord',
+            schema: {
+              properties: {
+                GATE_BASE_URL: { type: 'string', default: 'http://localhost:8935' },
+              },
+              required: [],
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, id: 'discord', written_fields: 1 }), { status: 200 }),
+      )
+
+    render(html`
+      <div>
+        <${ConnectorConfigToggle} connectorId="discord" />
+        <${ConnectorConfigForm} connectorId="discord" />
+      </div>
+    `, container)
+    ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
+    await flushUi()
+    await flushUi()
+
+    const saveBtn = Array.from(container.querySelectorAll('button'))
+      .find(b => b.textContent?.trim() === 'Save') as HTMLButtonElement
+    expect(saveBtn.disabled).toBe(false)
+    saveBtn.click()
+    await flushUi()
+    await flushUi()
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    const lastCall = fetchSpy.mock.calls[1]
+    expect(lastCall?.[0]).toContain('/api/v1/sidecar/config?name=discord')
+    expect(lastCall?.[1]?.method).toBe('POST')
+    expect(lastCall?.[1]?.body).toContain('GATE_BASE_URL')
+  })
+
   it('after toggle + fetch, renders required field marker and password input for token', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(

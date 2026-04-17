@@ -5,7 +5,6 @@ code_refs:
   - lib/types/
   - lib/tool_dispatch.ml
   - lib/agent_identity.ml
-  - lib/agent_ecosystem.ml
 ---
 
 # Types and Invariants
@@ -14,7 +13,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Foundation |
-| Maps to | `lib/types/`, `lib/message_schema.ml`, `lib/tool_dispatch.ml`, `lib/agent_identity.ml`, `lib/agent_ecosystem.ml` |
+| Maps to | `lib/types/`, `lib/tool_dispatch.ml`, `lib/agent_identity.ml` |
 | Dependencies | 00-glossary.md |
 
 ---
@@ -578,56 +577,9 @@ MAGI 3인 체제(Melchior/Balthasar/Casper)에 Athena와 Generalist를 추가한
 
 ---
 
-## 6. Agent Ecosystem Types
+## 6. Agent Ecosystem Types (RETIRED)
 
-**소스**: `lib/agent_ecosystem.mli`
-
-### 6.1 Agent Type (생명주기)
-
-```ocaml
-type agent_lifecycle =
-  | Keeper_long_lived  (* Keepalive 기반 장기 실행 *)
-  | Visitor            (* Session 기반 *)
-  | Ephemeral          (* Task 기반, 작업 완료 후 소멸 *)
-```
-
-### 6.2 Agent Profile
-
-```ocaml
-type agent_profile = {
-  name : string;
-  role : string;
-  traits : string list;
-  avatar : string option;
-}
-```
-
-### 6.3 Lineage (세대 추적)
-
-```ocaml
-type lineage = {
-  generation : int;
-  parent_hash : string option;
-  ancestors : string list;
-  mutations : string list;
-}
-```
-
-에이전트 간 계보를 추적한다. `spawn_child`로 새 세대를 생성하면 `generation`이 증가하고 부모 해시가 기록된다.
-
-### 6.4 Extended Identity
-
-```ocaml
-type extended = {
-  base : Agent_identity.t;
-  hash : string;
-  agent_type : agent_type;
-  profile : agent_profile;
-  lineage : lineage;
-}
-```
-
-`Agent_identity.t`를 확장하여 프로필, 생명주기 타입, 계보를 추가한다. `to_base_with_metadata`/`from_base_with_metadata`로 base identity와 상호 변환한다.
+`lib/agent_ecosystem.mli`와 `agent_lifecycle`, `agent_profile`, `lineage`, `extended` 타입은 dead code sweep (#2848)에서 `lib/anti_fake`, `lib/agent_neo4j`와 함께 제거됐다 (-1368 LOC). 현재 agent identity는 `lib/agent_identity.ml` 하나로 정리됐고, 생명주기 추적은 `lib/coord/coord_lifecycle.ml` + `observe_agent_lifecycle` hook이 담당한다.
 
 ---
 

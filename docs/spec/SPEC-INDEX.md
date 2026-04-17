@@ -4,7 +4,6 @@ last_verified: 2026-04-17
 code_refs:
   - docs/spec/
   - dune-project
-  - lib/sdk_version.ml
 ---
 
 # MASC Specification Index

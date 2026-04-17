@@ -19,19 +19,19 @@ import { refreshAutoresearchSurface } from './autoresearch-state'
 // --- Form signals ---
 
 export const showStartForm = signal(false)
-export const startFormBusy = signal(false)
-export const startFormError = signal<string | null>(null)
-export const formGoal = signal('')
-export const formMetricFn = signal('')
-export const formTargetFile = signal('')
-export const formShowAdvanced = signal(false)
-export const formWorkdir = signal('')
-export const formMaxCycles = signal(String(AUTORESEARCH_DEFAULT_MAX_CYCLES))
-export const formCycleTimeoutS = signal(String(AUTORESEARCH_DEFAULT_CYCLE_TIMEOUT_S))
-export const formModelModel = signal(AUTORESEARCH_DEFAULT_MODEL)
-export const formBaseline = signal('')
-export const formPatience = signal('')
-export const formBuildVerifyFn = signal('')
+const startFormBusy = signal(false)
+const startFormError = signal<string | null>(null)
+const formGoal = signal('')
+const formMetricFn = signal('')
+const formTargetFile = signal('')
+const formShowAdvanced = signal(false)
+const formWorkdir = signal('')
+const formMaxCycles = signal(String(AUTORESEARCH_DEFAULT_MAX_CYCLES))
+const formCycleTimeoutS = signal(String(AUTORESEARCH_DEFAULT_CYCLE_TIMEOUT_S))
+const formModelModel = signal(AUTORESEARCH_DEFAULT_MODEL)
+const formBaseline = signal('')
+const formPatience = signal('')
+const formBuildVerifyFn = signal('')
 
 // --- Form helpers ---
 
@@ -49,12 +49,12 @@ export function resetStartFormFields() {
   formBuildVerifyFn.value = ''
 }
 
-export function closeStartForm() {
+function closeStartForm() {
   showStartForm.value = false
   startFormError.value = null
 }
 
-export async function handleStartSubmit() {
+async function handleStartSubmit() {
   const goal = formGoal.value.trim()
   const metric_fn = formMetricFn.value.trim()
   const target_file = formTargetFile.value.trim()
@@ -94,7 +94,7 @@ export async function handleStartSubmit() {
   }
 }
 
-export function inputHandler(sig: { value: string }) {
+function inputHandler(sig: { value: string }) {
   return (e: Event) => { sig.value = (e.target as HTMLInputElement).value }
 }
 
@@ -111,7 +111,7 @@ export function StartFormButton({ class: cx }: { class?: string }) {
   `
 }
 
-export const canSubmit = computed(() =>
+const canSubmit = computed(() =>
   formGoal.value.trim() !== '' && formMetricFn.value.trim() !== '' && formTargetFile.value.trim() !== '' && !startFormBusy.value
 )
 

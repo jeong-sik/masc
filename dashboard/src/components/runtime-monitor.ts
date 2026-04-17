@@ -278,8 +278,21 @@ export function RuntimeMonitor() {
           : null}
         <div class="flex flex-col gap-3">
           ${(metrics?.models ?? []).length > 0
-            ? sortModelMetricsByUrgency(filterModelMetrics(metrics?.models ?? [], modelSearch.value)).map(metric => html`
-                <article key=${metric.model_id} class=${`p-4 rounded-xl border bg-card/40 backdrop-blur-md shadow-sm flex flex-col gap-2 ${(metric.error_count ?? 0) > 0 ? 'border-[var(--status-bad)]' : 'border-card-border'}`}>
+            ? sortModelMetricsByUrgency(filterModelMetrics(metrics?.models ?? [], modelSearch.value)).map(metric => {
+                const isFailing = (metric.error_count ?? 0) > 0
+                const articleClass = isFailing
+                  ? 'p-4 rounded-xl border border-[var(--status-bad)] bg-[var(--status-bad)]/5 backdrop-blur-md shadow-sm flex flex-col gap-2'
+                  : 'p-4 rounded-xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm flex flex-col gap-2'
+                const ariaLabel = isFailing
+                  ? `Provider failing: ${metric.model_id}, ${metric.error_count ?? 0} errors out of ${metric.entry_count ?? 0}`
+                  : undefined
+                return html`
+                <article
+                  key=${metric.model_id}
+                  class=${articleClass}
+                  role=${isFailing ? 'alert' : undefined}
+                  aria-label=${ariaLabel}
+                >
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
                       <strong class="text-[13px] text-text-strong">${metric.model_id}</strong>
@@ -375,7 +388,8 @@ export function RuntimeMonitor() {
                     `
                     : null}
                 </article>
-              `)
+              `
+              })
             : html`<${EmptyState} message="최근 model inference metrics가 없습니다." compact />`}
         </div>
       <//>

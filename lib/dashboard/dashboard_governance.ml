@@ -1,16 +1,8 @@
-(** Dashboard Governance — retired case tracking with live judge status. *)
+(** Dashboard Governance — live judge status surface (case tracking retired). *)
 
 type detail_status = [ `OK | `Not_found ]
 
 let option_to_yojson = Json_util.option_to_yojson
-
-let case_tracking_note =
-  "Governance case tracking is retired; dashboard surfaces only live judge status and recent judgments."
-
-let retired_case_tracking_fields =
-  [
-    ("note", `String case_tracking_note);
-  ]
 
 let string_option_json = option_to_yojson (fun value -> `String value)
 
@@ -51,46 +43,42 @@ let summary_json_of_runtime (runtime : Dashboard_governance_judge.runtime_snapsh
 
 let factual_snapshot_json ~base_path:_ =
   `Assoc
-    ([
-       ("generated_at", `String (Types.now_iso ()));
-       ("items", `List []);
-       ("activity", `List []);
-     ]
-    @ retired_case_tracking_fields)
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ("items", `List []);
+      ("activity", `List []);
+    ]
 
 let dashboard_json ~base_path ~limit ~offset:_ ~status_filter:_ =
   let runtime = Dashboard_governance_judge.runtime_status base_path in
   let judgments = Dashboard_governance_judge.fresh_judgments_json ~base_path ~limit in
   let approval_queue = Keeper_approval_queue.list_pending_dashboard_json () in
   `Assoc
-    ([
-       ("generated_at", `String (Types.now_iso ()));
-       ("summary", summary_json_of_runtime runtime);
-       ("items", `List []);
-       ("activity", `List []);
-       ("judge", judge_json_of_runtime runtime);
-       ("judgments", `List judgments);
-       ("pending_actions", `List []);
-       ("approval_queue", approval_queue);
-       ("cases", `List []);
-     ]
-    @ retired_case_tracking_fields)
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ("summary", summary_json_of_runtime runtime);
+      ("items", `List []);
+      ("activity", `List []);
+      ("judge", judge_json_of_runtime runtime);
+      ("judgments", `List judgments);
+      ("pending_actions", `List []);
+      ("approval_queue", approval_queue);
+      ("cases", `List []);
+    ]
 
 let cases_json ~base_path:_ ~limit ~offset ~status_filter:_ ~include_test:_ =
   `Assoc
-    ([
-       ("cases", `List []);
-       ("count", `Int 0);
-       ("limit", `Int limit);
-       ("offset", `Int offset);
-     ]
-    @ retired_case_tracking_fields)
+    [
+      ("cases", `List []);
+      ("count", `Int 0);
+      ("limit", `Int limit);
+      ("offset", `Int offset);
+    ]
 
 let case_detail_json ~base_path:_ ~case_id =
   ignore case_id;
   ( `Not_found,
     `Assoc
-      ([
-         ("error", `String "Governance case tracking unavailable");
-       ]
-      @ retired_case_tracking_fields) )
+      [
+        ("error", `String "Governance case tracking unavailable");
+      ] )

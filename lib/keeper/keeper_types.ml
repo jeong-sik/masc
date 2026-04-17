@@ -1127,14 +1127,25 @@ let parse_keeper_state
   let last_social_transition_reason =
     Safe_ops.json_string ~default:"" "last_social_transition_reason" json
   in
+  (* Gen12: cap narrative fields on load so pre-Gen8 checkpoints
+     (written before the write-side cap) cannot bleed unbounded
+     strings back into meta.runtime. Same budget as cap_social_state. *)
+  let cap_loaded =
+    Keeper_social_model_types.truncate_string
+      ~max_chars:Keeper_social_model_types.default_option_field_max_chars
+  in
   let last_active_desire =
-    Safe_ops.json_string ~default:"" "last_active_desire" json
+    cap_loaded (Safe_ops.json_string ~default:"" "last_active_desire" json)
   in
   let last_current_intention =
-    Safe_ops.json_string ~default:"" "last_current_intention" json
+    cap_loaded (Safe_ops.json_string ~default:"" "last_current_intention" json)
   in
-  let last_blocker = Safe_ops.json_string ~default:"" "last_blocker" json in
-  let last_need = Safe_ops.json_string ~default:"" "last_need" json in
+  let last_blocker =
+    cap_loaded (Safe_ops.json_string ~default:"" "last_blocker" json)
+  in
+  let last_need =
+    cap_loaded (Safe_ops.json_string ~default:"" "last_need" json)
+  in
   let ps_paused = Safe_ops.json_bool ~default:false "paused" json in
   let ps_autoboot_enabled =
     Safe_ops.json_bool ~default:true "autoboot_enabled" json

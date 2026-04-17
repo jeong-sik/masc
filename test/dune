@@ -729,6 +729,14 @@
  (modules test_social_state_cap)
  (libraries masc_test_deps))
 
+; Gen12 load-path guard: checkpoint JSON deserialization also
+; truncates narrative fields so pre-Gen8 snapshots do not
+; reintroduce unbounded strings into meta.runtime.
+(test
+ (name test_social_state_cap_on_load)
+ (modules test_social_state_cap_on_load)
+ (libraries masc_test_deps))
+
 ; Keeper_checkpoint_store.is_not_found_detail classifier
 ; regression (observed 334-retry loop on trace-1775487505102-6a347
 ; on 2026-04-12 — Eio.Io rendered form not recognized as Not_found)

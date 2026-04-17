@@ -60,7 +60,7 @@ Before writing code, confirm the producer side:
 - `oas/lib/mode_enforcer.ml` — runtime enforcement logic (producer side)
 - `oas/lib/proof_capture.ml` — proof artifact writer (producer side)
 - `oas/lib/proof_store.mli` — proof store read interface
-- `masc-mcp/lib/cdal_eval.ml` — current evaluator (anti-pattern reference, not implementation guide)
+- `masc-mcp/lib/cdal_eval_v1.ml` — current evaluator (anti-pattern reference, not implementation guide). The previous `cdal_eval.ml` was renamed to `cdal_eval_v1.ml` to mark it as the legacy path; `cdal_loader.ml`, `cdal_judge.ml`, `cdal_friction_projection.ml` (the Phase-1A deliverables listed in §1) now exist under `lib/` and are the canonical successors.
 
 These files tell you what exists today.
 The docs tell you what you are allowed to claim from those fields.
@@ -148,7 +148,7 @@ Unavailable means `None`, not inference.
 
 Legacy cleanup (after Phase-1A validation):
 
-- delete substring/ref-count logic from `cdal_eval.ml` only after the new evaluator passes replay tests on real bundles
+- delete substring/ref-count logic from `cdal_eval_v1.ml` only after the new evaluator passes replay tests on real bundles
 
 ## 10. Minimum Review Checklist
 

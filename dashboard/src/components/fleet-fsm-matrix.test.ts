@@ -49,6 +49,9 @@ describe('chipClassFor', () => {
     expect(chipClassFor('Failing')).toMatch(/red/)
     expect(chipClassFor('Compacting')).toMatch(/amber/)
     expect(chipClassFor('exhausted')).toMatch(/red/)
+    // KCB (LT-16-KCB Phase 3)
+    expect(chipClassFor('warning')).toMatch(/amber/)
+    expect(chipClassFor('cooling')).toMatch(/sky/)
   })
 
   it('falls back to the default chip for unknown states', () => {
@@ -154,5 +157,21 @@ describe('pushObservation', () => {
     const prior = {}
     const next = pushObservation(prior, [snapshot({ name: 'alpha' })])
     expect(next).not.toBe(prior)
+  })
+
+  it('includes the KCB breaker axis in a fresh seed (default=clean)', () => {
+    const next = pushObservation({}, [snapshot({ name: 'alpha' })])
+    // The snapshot helper omits `circuit_breaker`, mirroring a pinned
+    // backend that has not yet shipped LT-16-KCB Phase 2. The matrix
+    // must still seed a value instead of leaving the axis undefined.
+    expect(next.alpha!.breaker).toEqual(['clean'])
+  })
+
+  it('tracks KCB warning→cooling over successive polls', () => {
+    const warn = snapshot({ name: 'beta', circuit_breaker: { state: 'warning' } })
+    const cool = snapshot({ name: 'beta', circuit_breaker: { state: 'cooling' } })
+    const t1 = pushObservation({}, [warn])
+    const t2 = pushObservation(t1, [cool])
+    expect(t2.beta!.breaker).toEqual(['warning', 'cooling'])
   })
 })

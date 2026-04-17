@@ -63,7 +63,7 @@ code_refs:
 | `docs/DASHBOARD-INTEGRATION.md` | Historical | dashboard integration snapshot |
 | `docs/PRODUCT-REVIEW.md` | Historical | product/security review memo |
 | `docs/MASC-V2-DESIGN.md` | Historical | early v2 concept document |
-| `docs/MULTI-ROOM-DESIGN.md` | Historical | compatibility note only |
+| `docs/MULTI-ROOM-DESIGN.md` | Removed | deleted 2026-04-17 (historical, no code refs) |
 | `docs/COMMAND-PLANE-RUNBOOK.md` | Historical | retired command-plane contract and migration context |
 
 ## Archive and Experiment Stores
@@ -80,7 +80,7 @@ code_refs:
 
 | Path | Result | Notes |
 |------|--------|-------|
-| `docs/QUICKSTART.md` | Redirect Stub | old link target retained, content collapsed into `docs/QUICK-START.md` |
+| `docs/QUICKSTART.md` | Removed | 3-line redirect stub deleted; canonical entry is `docs/QUICK-START.md` |
 | `docs/SETUP.md` | Removed | install/run content merged into `README.md` and `docs/QUICK-START.md` |
 | `docs/INSTALL-CHECKLIST.md` | Removed | post-install checks merged into `docs/QUICK-START.md` |
 | `docs/RELEASE-ROADMAP.md` | Not present | use `docs/VERSIONED-ROADMAP.md` and `docs/archive/RELEASE-ROADMAP-v287.md` |

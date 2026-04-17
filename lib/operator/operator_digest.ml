@@ -133,7 +133,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           ("health", `String "ok");
           ("judgment_owner", `String "fallback_read_model");
           ("authoritative_judgment_available", `Bool false);
-          ("provenance_summary", operator_surface_contract_json);
           ("judgment", `Null);
           ("operator_judge_runtime", operator_judge_runtime_json config);
           ("attention_items", `List []);
@@ -148,7 +147,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           ("active_recommendation_summary", summary_of_recommendations ~actor:"dashboard" []);
           ("fallback_recommended_actions", `List []);
           ("recent_reviews", recent_reviews);
-          ("worker_cards", `List []);
         ])
   else
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
@@ -183,16 +181,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
               ("target_type", `String "root");
               ("target_id", `Null);
               ("health", `String (health_from_attention_items attention_items));
-              ("provenance_summary", operator_surface_contract_json);
               ("operator_judge_runtime", operator_judge_runtime_json config);
-              ("role_census", `Assoc []);
-              ("runtime_pools", `Assoc []);
-              ("lane_census", `Assoc []);
-              ("controller_census", `Assoc []);
-              ("control_domains", `Assoc []);
-              ("task_profiles", `Assoc []);
-              ("escalation_count", `Int 0);
-              ("local_runtime", `Null);
               ("attention_items", `List (List.map attention_item_to_yojson attention_items));
               ("attention_summary", summary_of_attention_items attention_items);
               ("pending_confirm_summary", pending_confirm_summary_json_of_scope confirm_scope);
@@ -202,7 +191,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
                      recommended_actions) );
               ("recommendation_summary", fallback_recommendation_summary);
               ("root", room_state_json);
-              ("worker_cards", `List []);
             ]
             @ [ ("recent_reviews", recent_reviews) ]
             @ active_guidance))

@@ -24,6 +24,7 @@ function obs(overrides: Partial<CompositeObservation> & { ts: number }): Composi
     decision: 'undecided',
     cascade: 'idle',
     compaction: 'accumulating',
+    breaker: 'clean',
     ...overrides,
   }
 }

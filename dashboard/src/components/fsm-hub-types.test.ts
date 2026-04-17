@@ -130,14 +130,14 @@ describe('fmtDuration', () => {
 })
 
 describe('constants', () => {
-  it('TRANSITION_FIELDS has 5 entries', () => {
-    expect(TRANSITION_FIELDS).toHaveLength(5)
-    expect(TRANSITION_FIELDS.map(f => f.field)).toEqual(['KSM', 'KTC', 'KDP', 'KCL', 'KMC'])
+  it('TRANSITION_FIELDS has 6 entries', () => {
+    expect(TRANSITION_FIELDS).toHaveLength(6)
+    expect(TRANSITION_FIELDS.map(f => f.field)).toEqual(['KSM', 'KTC', 'KDP', 'KCL', 'KMC', 'KCB'])
   })
 
-  it('LANE_LABELS has all 5 lanes', () => {
+  it('LANE_LABELS has all 6 lanes', () => {
     const keys = Object.keys(LANE_LABELS)
-    expect(keys).toEqual(['phase', 'turn', 'decision', 'cascade', 'compaction'])
+    expect(keys).toEqual(['phase', 'turn', 'decision', 'cascade', 'compaction', 'breaker'])
   })
 
   it('INVARIANT_LABELS has all 4 invariants', () => {

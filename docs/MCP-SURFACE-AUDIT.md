@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/mcp_server.ml
+  - lib/mcp_server_eio.ml
+  - lib/mcp_prompt_surface.ml
+---
+
 # MCP Surface Audit
 
 Current-state audit of `masc-mcp` MCP exposure, public design, and documentation boundaries.

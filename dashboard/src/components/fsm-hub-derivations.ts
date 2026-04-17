@@ -25,6 +25,10 @@ export function observeSnapshot(
     decision: snapshot.decision.stage,
     cascade: snapshot.cascade.state,
     compaction: snapshot.compaction.stage,
+    // LT-16-KCB Phase 3: default to 'clean' when the backend has not
+    // yet emitted circuit_breaker. Matches extractLaneValue's
+    // defaulting so history rings and lane derivations agree.
+    breaker: snapshot.circuit_breaker?.state ?? 'clean',
   }
 }
 

@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/keeper_composite_observer.ml
+  - lib/keeper/keeper_registry.ml
+  - lib/keeper/keeper_turn_lifecycle.ml
+---
+
 # RFC-0003: Keeper Composite Lifecycle Observer
 
 **Status**: Draft

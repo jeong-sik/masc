@@ -5,6 +5,82 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TelemetrySummaryResponse, ToolQualityResponse } from '../api/dashboard'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import type { DashboardExecutionResponse } from '../types'
+import { filterFleetRows } from './fleet-telemetry-panel'
+import type { FleetRow } from './fleet-telemetry-utils'
+
+function makeRow(overrides: Partial<FleetRow> = {}): FleetRow {
+  return {
+    name: 'keeper-x',
+    status: 'active',
+    keepalive_running: true,
+    context_ratio: 0.3,
+    turn_count: 0,
+    last_latency_ms: 0,
+    last_activity_ago_s: null,
+    model: '',
+    tool_calls: 0,
+    tool_success_pct: null,
+    tool_activity_known: false,
+    recent_tools: [],
+    runtime_blocker_class: null,
+    runtime_blocker_summary: null,
+    tool_audit_at: null,
+    budget_source: null,
+    ...overrides,
+  }
+}
+
+describe('filterFleetRows', () => {
+  const rows: FleetRow[] = [
+    makeRow({ name: 'keeper-alpha', model: 'gpt-5.4' }),
+    makeRow({ name: 'keeper-beta', model: 'claude-sonnet-4-6' }),
+    makeRow({ name: 'watcher-gamma', model: 'gpt-5.4', runtime_blocker_class: 'turn_timeout' }),
+  ]
+
+  it('returns the input reference when query is empty', () => {
+    expect(filterFleetRows(rows, '')).toBe(rows)
+  })
+
+  it('returns the input reference for whitespace-only query', () => {
+    expect(filterFleetRows(rows, '   ')).toBe(rows)
+  })
+
+  it('matches by name substring (case-insensitive)', () => {
+    const result = filterFleetRows(rows, 'KEEPER')
+    expect(result).toHaveLength(2)
+    expect(result.map(r => r.name)).toEqual(['keeper-alpha', 'keeper-beta'])
+  })
+
+  it('matches by model substring', () => {
+    const result = filterFleetRows(rows, 'claude')
+    expect(result.map(r => r.name)).toEqual(['keeper-beta'])
+  })
+
+  it('matches by runtime_blocker_class substring', () => {
+    const result = filterFleetRows(rows, 'turn_timeout')
+    expect(result.map(r => r.name)).toEqual(['watcher-gamma'])
+  })
+
+  it('returns empty when no field matches', () => {
+    expect(filterFleetRows(rows, 'nonexistent-token')).toHaveLength(0)
+  })
+
+  it('trims query before matching', () => {
+    expect(filterFleetRows(rows, '  alpha  ')).toHaveLength(1)
+  })
+
+  it('does not mutate the input array', () => {
+    const copy = rows.slice()
+    filterFleetRows(rows, 'alpha')
+    expect(rows).toEqual(copy)
+  })
+
+  it('handles rows with null model and null blocker safely', () => {
+    const input: FleetRow[] = [makeRow({ name: 'orphan', model: '', runtime_blocker_class: null })]
+    expect(filterFleetRows(input, 'orphan')).toHaveLength(1)
+    expect(filterFleetRows(input, 'anything-else')).toHaveLength(0)
+  })
+})
 
 const executionResponse = {
   generated_at: '2026-04-09T08:10:00Z',

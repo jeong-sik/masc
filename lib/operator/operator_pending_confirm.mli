@@ -14,7 +14,6 @@ val operator_dir : Coord.config -> string
 val pending_confirms_path : Coord.config -> string
 val trace_id : string -> string
 val normalized_actor : context_actor:string -> string option -> string
-val operator_surface_contract_json : Yojson.Safe.t
 val operator_judge_runtime_json : Coord.config -> Yojson.Safe.t
 
 type pending_confirm = {

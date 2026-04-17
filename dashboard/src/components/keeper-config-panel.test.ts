@@ -1,8 +1,82 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { KeeperHookSlot } from '../types'
+import { filterHookSlots, type HookSlotEntry } from './keeper-config-panel'
 
 void vi
+
+function makeSlot(overrides: Partial<KeeperHookSlot> = {}): KeeperHookSlot {
+  return {
+    active: true,
+    source: 'default',
+    ...overrides,
+  }
+}
+
+describe('filterHookSlots', () => {
+  const entries: HookSlotEntry[] = [
+    ['pre_tool_call', makeSlot({ source: 'builtin', gates: ['destructive_check', 'path_scope'] })],
+    ['post_turn', makeSlot({ source: 'override', effects: ['handoff_auto'] })],
+    ['compaction_watcher', makeSlot({ source: 'persona', features: ['ratio_gate'] })],
+    ['orphan', makeSlot({ source: 'builtin' })],
+  ]
+
+  it('returns the input reference when query is empty', () => {
+    expect(filterHookSlots(entries, '')).toBe(entries)
+  })
+
+  it('returns the input reference for whitespace-only query', () => {
+    expect(filterHookSlots(entries, '   ')).toBe(entries)
+  })
+
+  it('matches by slot name substring (case-insensitive)', () => {
+    const result = filterHookSlots(entries, 'POST')
+    expect(result.map(([name]) => name)).toEqual(['post_turn'])
+  })
+
+  it('matches by source substring', () => {
+    const result = filterHookSlots(entries, 'persona')
+    expect(result.map(([name]) => name)).toEqual(['compaction_watcher'])
+  })
+
+  it('matches by gates entry', () => {
+    const result = filterHookSlots(entries, 'destructive_check')
+    expect(result.map(([name]) => name)).toEqual(['pre_tool_call'])
+  })
+
+  it('matches by effects entry', () => {
+    const result = filterHookSlots(entries, 'handoff_auto')
+    expect(result.map(([name]) => name)).toEqual(['post_turn'])
+  })
+
+  it('matches by features entry', () => {
+    const result = filterHookSlots(entries, 'ratio_gate')
+    expect(result.map(([name]) => name)).toEqual(['compaction_watcher'])
+  })
+
+  it('returns empty when nothing matches', () => {
+    expect(filterHookSlots(entries, 'nonexistent-token')).toHaveLength(0)
+  })
+
+  it('trims query before matching', () => {
+    expect(filterHookSlots(entries, '  orphan  ')).toHaveLength(1)
+  })
+
+  it('does not mutate the input array', () => {
+    const copy = entries.slice()
+    filterHookSlots(entries, 'pre_tool')
+    expect(entries).toEqual(copy)
+  })
+
+  it('handles slots with missing gates/effects/features safely', () => {
+    const sparse: HookSlotEntry[] = [
+      ['bare', makeSlot({ source: '' })],
+    ]
+    expect(filterHookSlots(sparse, 'bare')).toHaveLength(1)
+    expect(filterHookSlots(sparse, 'anything-else')).toHaveLength(0)
+  })
+})
 
 const mocks = vi.hoisted(() => ({
   fetchKeeperConfig: vi.fn(async () => ({

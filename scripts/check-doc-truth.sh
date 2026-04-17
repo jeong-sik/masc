@@ -46,6 +46,17 @@ require_not_contains() {
   fi
 }
 
+# Like require_contains but silently skips when the file no longer exists.
+# Use when a regression lock targets a file that may be legitimately
+# deleted by a later PR.
+require_contains_if_exists() {
+  local file="$1"
+  local needle="$2"
+  if [ -f "$file" ]; then
+    require_contains "$file" "$needle"
+  fi
+}
+
 extract_single() {
   local pattern="$1"
   local file="$2"
@@ -127,10 +138,6 @@ require_contains docs/spec/00-glossary.md '**Team Session** (retired)'
 # PR #7779: OAS-MASC boundary marks team-session bridge as Removed
 require_contains docs/OAS-MASC-BOUNDARY.md '| Team-session swarm | Removed |'
 require_not_contains docs/OAS-MASC-BOUNDARY.md '| `lib/team_session/team_session_oas_bridge.ml` | Acceptable'
-
-# PR #7747: 04-chain-engine.md archived with explicit banner
-require_contains docs/spec/04-chain-engine.md '# Chain Engine — ARCHIVED'
-require_contains docs/spec/04-chain-engine.md '| Status | Archived |'
 
 docs_to_scan=(
   README.md

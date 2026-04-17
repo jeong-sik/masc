@@ -7,6 +7,7 @@ import {
   showActionToast,
   ToastContainer,
   MAX_VISIBLE_TOASTS,
+  defaultToastDuration,
   _testResetToasts,
   _testGetToasts,
 } from './toast'
@@ -123,5 +124,46 @@ describe('ToastContainer rendering', () => {
     const remaining = _testGetToasts()
     expect(remaining.length).toBe(1)
     expect(remaining[0]!.message).toBe('keep')
+  })
+})
+
+describe('defaultToastDuration (pure)', () => {
+  it('success dismisses quickly — fire-and-forget confirmation', () => {
+    expect(defaultToastDuration('success')).toBe(3000)
+  })
+
+  it('warning sits in the middle — attention-worthy but not critical', () => {
+    expect(defaultToastDuration('warning')).toBe(5000)
+  })
+
+  it('error lingers longest — operator needs time to read + copy', () => {
+    // Regression guard: errors are the ones operators actually want
+    // to copy (stack trace, id, retry token). Dismissing at 4s has
+    // burned users in the past. The explicit > ordering ensures the
+    // intent (error > warning > success) survives any future tweak.
+    expect(defaultToastDuration('error')).toBe(8000)
+    expect(defaultToastDuration('error')).toBeGreaterThan(defaultToastDuration('warning'))
+    expect(defaultToastDuration('warning')).toBeGreaterThan(defaultToastDuration('success'))
+  })
+})
+
+describe('showToast duration fallbacks', () => {
+  beforeEach(() => { _testResetToasts(); vi.useFakeTimers() })
+  afterEach(() => { _testResetToasts(); vi.useRealTimers() })
+
+  it('error toast defaults to 8000ms, longer than success 3000ms', () => {
+    showToast('you failed', 'error')
+    vi.advanceTimersByTime(3001) // past success default — error must still be around
+    expect(_testGetToasts().length).toBe(1)
+    vi.advanceTimersByTime(5000) // now past 8000 total
+    expect(_testGetToasts().length).toBe(0)
+  })
+
+  it('explicit durationMs still overrides the tiered default', () => {
+    // Regression guard: callers that pass durationMs (the existing API)
+    // must keep their exact behaviour — we only change the fallback.
+    showToast('quick', 'error', 500)
+    vi.advanceTimersByTime(501)
+    expect(_testGetToasts().length).toBe(0)
   })
 })

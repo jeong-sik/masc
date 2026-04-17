@@ -57,12 +57,29 @@ const ICON: Record<ToastType, () => ComponentChildren> = {
   error: () => html`<${XCircle} size=${14} />`
 }
 
-export function showToast(message: string, type: ToastType = 'success', durationMs = 4000) {
+/** Pure: default dismiss duration per toast type. Reference — Sentry
+    error banner lingers, GitHub success toast is quick. Error toasts
+    need more reading time AND often carry information the operator
+    wants to copy (stack, id, retry token); dismissing at 4s has
+    burned users. Warnings sit in the middle. Success confirms an
+    already-completed action, so short is fine.
+
+    Callers that pass an explicit \`durationMs\` still win. */
+export function defaultToastDuration(type: ToastType): number {
+  switch (type) {
+    case 'success': return 3000
+    case 'warning': return 5000
+    case 'error': return 8000
+  }
+}
+
+export function showToast(message: string, type: ToastType = 'success', durationMs?: number) {
   const id = ++_nextId
+  const dismissMs = durationMs ?? defaultToastDuration(type)
   enqueueToast({ id, message, type })
   setTimeout(() => {
     toasts.value = toasts.value.filter(t => t.id !== id)
-  }, durationMs)
+  }, dismissMs)
 }
 
 export function showActionToast(message: string, action: ToastAction, type: ToastType = 'error', durationMs = 12000) {

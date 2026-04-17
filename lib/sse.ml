@@ -25,17 +25,6 @@
 (** Classification of an SSE session's traffic role. *)
 module SMap = Map.Make(String)
 
-type ('state, 'result) atomic_commit = {
-  next_state : 'state;
-  result : 'result;
-}
-
-let rec atomic_update_result atomic f =
-  let old_state = Atomic.get atomic in
-  let { next_state; result } = f old_state in
-  if Atomic.compare_and_set atomic old_state next_state then result
-  else atomic_update_result atomic f
-
 (* Test-only hooks for forcing a CAS retry in white-box unit tests. *)
 let register_commit_test_hook : (unit -> unit) option Atomic.t = Atomic.make None
 let buffer_commit_test_hook : (unit -> unit) option Atomic.t = Atomic.make None
@@ -193,7 +182,7 @@ let event_buffer : (int * string * float) list Atomic.t = Atomic.make []
 
 (** Add event to buffer, maintaining max size *)
 let buffer_event event_id event_str =
-  atomic_update_result event_buffer (fun lst ->
+  Lockfree_atomic.update_with_commit event_buffer (fun lst ->
     run_test_hook buffer_commit_test_hook;
     let timestamp = Time_compat.now () in
     let next = (event_id, event_str, timestamp) :: lst in
@@ -215,7 +204,7 @@ let get_events_after last_id =
     Returns count of evicted events. *)
 let cleanup_expired_events () =
   let now = Time_compat.now () in
-  atomic_update_result event_buffer (fun lst ->
+  Lockfree_atomic.update_with_commit event_buffer (fun lst ->
     let remaining_oldest_first, evicted =
       List.fold_left
         (fun (kept, evicted) (((_id, _ev, ts) as item) : int * string * float) ->
@@ -292,7 +281,7 @@ let register ?(kind = Coordinator) session_id ~push ~last_event_id =
     last_seen_at = Atomic.make 0.0;
   } in
   let evicted =
-    atomic_update_result clients (fun state ->
+    Lockfree_atomic.update_with_commit clients (fun state ->
       run_test_hook register_commit_test_hook;
       let evicted =
         if state.count >= max_clients && not (SMap.mem session_id state.entries) then
@@ -342,7 +331,7 @@ let register ?(kind = Coordinator) session_id ~push ~last_event_id =
 (** Unregister an SSE client *)
 let unregister session_id =
   let removed =
-    atomic_update_result clients (fun state ->
+    Lockfree_atomic.update_with_commit clients (fun state ->
       if SMap.mem session_id state.entries then
         let next_entries = SMap.remove session_id state.entries in
         {
@@ -366,7 +355,7 @@ let unregister session_id =
     that re-used the same session_id. *)
 let unregister_if_current session_id client_id =
   let removed =
-    atomic_update_result clients (fun state ->
+    Lockfree_atomic.update_with_commit clients (fun state ->
       match SMap.find_opt session_id state.entries with
       | Some client when client.id = client_id ->
           let next_entries = SMap.remove session_id state.entries in
@@ -468,7 +457,7 @@ let current_external_subscriber_count_with_prefix prefix =
 let subscribe_external ~id ~callback ?(is_alive = fun () -> true) () =
   let subscriber = { sub_id = id; callback; is_alive } in
   let replaced, count =
-    atomic_update_result external_subscribers (fun state ->
+    Lockfree_atomic.update_with_commit external_subscribers (fun state ->
       let replaced = SMap.mem id state.subscribers in
       let next_subscribers = SMap.add id subscriber state.subscribers in
       let next_count = if replaced then state.count else state.count + 1 in
@@ -487,7 +476,7 @@ let subscribe_external ~id ~callback ?(is_alive = fun () -> true) () =
 (** Remove a previously registered external subscriber. *)
 let unsubscribe_external id =
   let removed, count =
-    atomic_update_result external_subscribers (fun state ->
+    Lockfree_atomic.update_with_commit external_subscribers (fun state ->
       if SMap.mem id state.subscribers then
         let next_subscribers = SMap.remove id state.subscribers in
         let next_count = state.count - 1 in
@@ -515,7 +504,7 @@ let external_subscriber_count_with_prefix prefix =
   current_external_subscriber_count_with_prefix prefix
 
 let remove_external_subscribers ids =
-  atomic_update_result external_subscribers (fun state ->
+  Lockfree_atomic.update_with_commit external_subscribers (fun state ->
     let removed_ids, next_subscribers =
       List.fold_left
         (fun (removed, acc) id ->
@@ -739,7 +728,7 @@ let all_session_ids () =
     Returns the number of clients that were closed. *)
 let close_all_clients () =
   let sessions =
-    atomic_update_result clients (fun state ->
+    Lockfree_atomic.update_with_commit clients (fun state ->
       let sessions = SMap.fold (fun sid _ acc -> sid :: acc) state.entries [] in
       {
         next_state = empty_client_registry_state;

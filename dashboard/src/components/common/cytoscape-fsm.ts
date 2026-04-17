@@ -4,6 +4,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type cytoscape from 'cytoscape'
+import { InlineSpinner } from './inline-spinner'
 
 // Types for graph spec (consumed by all 3 FSM builders)
 export interface FsmNode {
@@ -289,7 +290,7 @@ export function CytoscapeFsm({ spec, height = '280px', class: className = '' }: 
     <div class=${`relative rounded-xl border border-[var(--white-8)] bg-[rgba(9,12,20,0.7)] overflow-hidden ${className}`.trim()}>
       ${loading ? html`
         <div class="absolute inset-0 flex items-center justify-center text-[11px] text-[var(--text-dim)]">
-          <span class="inline-block h-3 w-3 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin mr-2" aria-hidden="true"></span>
+          <${InlineSpinner} class="mr-2" />
           그래프 로딩중
         </div>
       ` : null}

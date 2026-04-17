@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
+import { useEffect } from 'preact/hooks'
 import { route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardLoading, serverStatus } from '../store'
@@ -19,6 +20,9 @@ import {
 import { RouteLink } from './common/route-link'
 import { ObservatoryFilterBar } from './common/observatory-filter-bar'
 import { ChevronRight, ChevronLeft } from 'lucide-preact'
+import { ScrollToTopButton } from './common/scroll-to-top'
+import { CopyIdButton } from './common/copy-id-button'
+import { formatElapsedCompact } from '../lib/format-time'
 
 const buildIdentityOpen = signal(false)
 
@@ -72,6 +76,43 @@ function shortCommit(commit: string | null | undefined): string {
   return value.length > 10 ? value.slice(0, 10) : value
 }
 
+/** Canonical upstream repo. Used to resolve commit-hash text into a
+    clickable GitHub permalink. Hard-coded because this is the only
+    origin the dashboard is ever built from — a future fork would
+    override this via a build-time constant, not a runtime flag. */
+const UPSTREAM_REPO = 'jeong-sik/masc-mcp'
+
+/** Pure: turn a raw commit hash into a GitHub commit URL. Returns
+    null for empty / non-hex-looking input so the dropdown renders
+    the plain string for dev builds without creating a bogus link.
+    Reference: Vercel / Railway / Render deployment dashboards always
+    link commit hashes out to the source host — operators who land
+    on the build identity dropdown usually want the diff, not the
+    hash itself. */
+export function githubCommitUrl(commit: string | null | undefined): string | null {
+  const value = commit?.trim() ?? ''
+  if (value === '') return null
+  // Accept full (40-char) or short (≥ 7 char) hex SHAs only. Anything
+  // else (dev labels, semver, free text) gets rendered as plain text
+  // so we never produce a link to github.com/.../commit/dev.
+  if (!/^[0-9a-f]{7,40}$/i.test(value)) return null
+  return `https://github.com/${UPSTREAM_REPO}/commit/${value}`
+}
+
+/** Pure: render uptime seconds as a human-readable duration for the
+    build-identity dropdown. Delegates to formatElapsedCompact ("3s",
+    "5m 10s", "2h 30m"). Negative / NaN / non-number inputs return
+    \"알 수 없음\" so the dropdown never prints \"NaNs\" or \"-5s\". */
+export function formatUptimeSecondsHuman(
+  seconds: number | null | undefined,
+): string {
+  if (typeof seconds !== 'number' || Number.isNaN(seconds) || seconds < 0) {
+    return '알 수 없음'
+  }
+  return formatElapsedCompact(seconds)
+}
+
+
 export function BuildIdentityBadge() {
   const status = serverStatus.value
   const build = status?.build
@@ -103,7 +144,20 @@ export function BuildIdentityBadge() {
               </div>
               <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>커밋</span>
-                <strong class="text-[color:var(--text-strong)] text-right">${build?.commit ?? 'git 미감지 (dev)'}</strong>
+                ${(() => {
+                  const url = githubCommitUrl(build?.commit)
+                  const text = build?.commit ?? 'git 미감지 (dev)'
+                  return url !== null
+                    ? html`<a
+                        href=${url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="text-right font-bold text-[color:var(--text-strong)] underline decoration-dotted underline-offset-2 decoration-[color:var(--text-dim)] hover:decoration-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                        data-build-commit-link
+                        title="GitHub에서 이 커밋 보기"
+                      >${text} ↗</a>`
+                    : html`<strong class="text-[color:var(--text-strong)] text-right">${text}</strong>`
+                })()}
               </div>
               <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>서버 시작</span>
@@ -111,7 +165,10 @@ export function BuildIdentityBadge() {
               </div>
               <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>업타임</span>
-                <strong class="text-[color:var(--text-strong)] text-right">${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s` : '알 수 없음'}</strong>
+                <strong
+                  class="text-[color:var(--text-strong)] text-right tabular-nums"
+                  title=${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s raw` : undefined}
+                >${formatUptimeSecondsHuman(build?.uptime_seconds)}</strong>
               </div>
               <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>쉘 스냅샷</span>
@@ -307,18 +364,138 @@ export function TabContent() {
   }
 }
 
+/** Pure: build the shareable URL for the current section. Uses
+    window.location as the truth source (the router writes to it
+    already) so we never diverge from what the browser address bar
+    shows. Returns empty string when window is unavailable
+    (SSR/happy-dom without location) so the caller can hide the
+    share affordance gracefully. */
+export function currentSectionShareUrl(): string {
+  if (typeof window === 'undefined' || window.location === undefined) {
+    return ''
+  }
+  return window.location.href
+}
+
+/** Pure: derive the navigation trail rendered above the section title.
+    Each crumb is either a clickable ancestor (tab) or the terminal
+    leaf (current section label, non-navigable). Returns a flat array:
+    [] when both tab + section are absent (home / unknown),
+    [tab] when only tab is active (no section drilldown),
+    [tab, section] when the operator has drilled into a per-section view.
+
+    Why this exists: SurfaceLead previously rendered only the leaf
+    label (\"Discord\"). The parent tab (\"Connectors\") was implied by
+    the left nav but not surfaced in the content area — a newcomer
+    opening a deep link had to infer the hierarchy. Every modern web
+    app (GitHub / Linear / Notion / Vercel) renders the trail above
+    the page title for exactly this reason. */
+export interface BreadcrumbCrumb {
+  label: string
+  navigableTab: string | null
+}
+export function deriveBreadcrumbTrail(
+  tabLabel: string | null,
+  sectionLabel: string | null,
+  tabId: string | null,
+): BreadcrumbCrumb[] {
+  if (tabLabel === null && sectionLabel === null) return []
+  if (sectionLabel === null) {
+    return tabLabel !== null ? [{ label: tabLabel, navigableTab: null }] : []
+  }
+  if (tabLabel === null) {
+    return [{ label: sectionLabel, navigableTab: null }]
+  }
+  // Drilldown view — tab becomes a clickable parent crumb, section is
+  // the non-navigable leaf (you're already there, clicking it would
+  // be a no-op).
+  return [
+    { label: tabLabel, navigableTab: tabId },
+    { label: sectionLabel, navigableTab: null },
+  ]
+}
+
+
+/** Pure: compose the browser tab title from the current surface +
+    section. Reference: every polished SPA (GitHub / Linear / Notion /
+    Vercel) sets document.title so operators with multiple tabs open
+    can distinguish them from the browser's tab list. Without this,
+    4 dashboard tabs all say \"MASC Dashboard\" — users lose track.
+
+    Format: \"MASC · {section}\" when drilled into a section,
+            \"MASC · {tab}\" when on a tab default,
+            \"MASC Dashboard\" on home / unknown (original fallback). */
+export function composeDocumentTitle(
+  tabLabel: string | null,
+  sectionLabel: string | null,
+): string {
+  const leaf = sectionLabel ?? tabLabel
+  if (leaf === null || leaf.trim() === '') return 'MASC Dashboard'
+  return `MASC · ${leaf}`
+}
+
+
 function SurfaceLead() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
 
   const description = currentSection?.description ?? currentView?.description ?? null
+  const title = currentSection?.label ?? currentView?.label ?? '홈'
+  const shareUrl = currentSectionShareUrl()
+  // Only surface a trail when the operator has drilled into a section —
+  // otherwise the crumb would be \"Connectors\" right above a \"Connectors\"
+  // title, pure duplication.
+  const trail = currentSection !== null
+    ? deriveBreadcrumbTrail(currentView?.label ?? null, currentSection.label, currentTab)
+    : []
+
+  // Sync document.title — syncing to an external system (the browser
+  // tab title) is a legitimate useEffect. Keyed on the two labels so
+  // the effect only re-runs on actual navigation, not every render.
+  useEffect(() => {
+    document.title = composeDocumentTitle(currentView?.label ?? null, currentSection?.label ?? null)
+  }, [currentView?.label, currentSection?.label])
 
   return html`
     <div class="mb-3 flex flex-col gap-1.5">
-      <h2 class="text-[22px] font-bold tracking-tight text-[var(--text-strong)]">
-        ${currentSection?.label ?? currentView?.label ?? '홈'}
-      </h2>
+      ${trail.length > 0
+        ? html`<nav
+            class="flex items-center gap-1 text-[11px] text-[var(--text-dim)]"
+            aria-label="페이지 경로"
+            data-surface-breadcrumb
+          >
+            ${trail.map((crumb, i) => {
+              const isLast = i === trail.length - 1
+              const sep = i > 0
+                ? html`<span aria-hidden="true" class="text-[var(--white-10)]">›</span>`
+                : null
+              const crumbEl = crumb.navigableTab !== null && !isLast
+                ? html`<${RouteLink}
+                    tab=${crumb.navigableTab}
+                    class="cursor-pointer rounded px-1 py-0.5 hover:bg-[var(--white-5)] hover:text-[var(--text-body)]"
+                  >${crumb.label}<//>`
+                : html`<span
+                    class="px-1 py-0.5 ${isLast ? 'text-[var(--text-body)]' : ''}"
+                    aria-current=${isLast ? 'page' : undefined}
+                  >${crumb.label}</span>`
+              return html`${sep}${crumbEl}`
+            })}
+          </nav>`
+        : null}
+      <div class="flex items-center gap-2">
+        <h2 class="text-[22px] font-bold tracking-tight text-[var(--text-strong)]">
+          ${title}
+        </h2>
+        ${shareUrl !== ''
+          ? html`<${CopyIdButton}
+              value=${shareUrl}
+              label=${`섹션 링크 (${title})`}
+              ariaLabel="현재 섹션 URL 복사"
+              size=${14}
+            />`
+          : null}
+      </div>
       ${description ? html`<p class="m-0 text-[13px] leading-[1.5] text-[var(--text-dim)]">${description}</p>` : null}
     </div>
   `
@@ -350,5 +527,6 @@ export function DashboardMain() {
         <${TabContent} />
       </div>
     <//>
+    <${ScrollToTopButton} />
   `
 }

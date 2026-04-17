@@ -24,6 +24,14 @@
     @since 2.140.0 (filesystem-first: JSONL long_term_backend always)
     @since 2.266.0 (RFC-MASC-004 Phase 3: imperative seeding removed) *)
 
+module SMap = Map.Make(String)
+
+let rec atomic_update atomic f =
+  let old_val = Atomic.get atomic in
+  let new_val = f old_val in
+  if Atomic.compare_and_set atomic old_val new_val then ()
+  else atomic_update atomic f
+
 (** Default importance for memories stored via OAS Memory.store.
     Configurable via MASC_MEMORY_OAS_DEFAULT_IMPORTANCE. *)
 let default_importance () = Env_config.Memory_oas.default_importance
@@ -74,22 +82,18 @@ let file_stamp_opt path =
   | Sys_error _ -> None
 
 type episode_file_cache = {
-  mutable stamp : file_stamp option;
-  mutable episodes : Institution_eio.episode list;
-  mutable ids : (string, unit) Hashtbl.t;
+  stamp : file_stamp option;
+  episodes : Institution_eio.episode list;
+  ids : unit SMap.t;
 }
 
-let episode_file_cache_tbl : (string, episode_file_cache) Hashtbl.t =
-  Hashtbl.create 4
-
-let episode_cache_mu = Eio.Mutex.create ()
+let episode_file_cache_tbl : episode_file_cache SMap.t Atomic.t =
+  Atomic.make SMap.empty
 
 let episode_ids_of episodes =
-  let ids = Hashtbl.create (max 16 (List.length episodes)) in
-  List.iter
-    (fun (episode : Institution_eio.episode) -> Hashtbl.replace ids episode.id ())
-    episodes;
-  ids
+  List.fold_left
+    (fun acc (episode : Institution_eio.episode) -> SMap.add episode.id () acc)
+    SMap.empty episodes
 
 (* Keep at most this many episodes in the in-memory cache.
    Callers that need fewer use cached_recent_episodes ~limit. *)
@@ -130,20 +134,18 @@ let build_episode_cache_from_disk path =
    calls. *)
 let load_all_episodes_cached () =
   let path = Institution_eio.episodes_jsonl_path () in
+  let current_stamp = file_stamp_opt path in
   let cached_opt =
-    Eio_guard.with_mutex episode_cache_mu (fun () ->
-      let current_stamp = file_stamp_opt path in
-      match Hashtbl.find_opt episode_file_cache_tbl path with
-      | Some cache when cache.stamp = current_stamp -> Some cache
-      | _ -> None)
+    match SMap.find_opt path (Atomic.get episode_file_cache_tbl) with
+    | Some cache when cache.stamp = current_stamp -> Some cache
+    | _ -> None
   in
   match cached_opt with
   | Some cache -> cache
   | None ->
-      (* JSONL read OUTSIDE the mutex. *)
       let fresh = build_episode_cache_from_disk path in
-      Eio_guard.with_mutex episode_cache_mu (fun () ->
-        Hashtbl.replace episode_file_cache_tbl path fresh);
+      atomic_update episode_file_cache_tbl (fun map ->
+        SMap.add path fresh map);
       fresh
 
 let rec drop_list n = function
@@ -173,14 +175,14 @@ let cached_recent_episodes ~limit =
    because [note_episode_flush] just wrote to the file. *)
 let note_episode_flush (episode : Institution_eio.episode) =
   let path = Institution_eio.episodes_jsonl_path () in
-  Eio_guard.with_mutex episode_cache_mu (fun () ->
-    match Hashtbl.find_opt episode_file_cache_tbl path with
-    | None -> ()  (* No cache to update; next loader will populate fresh *)
+  atomic_update episode_file_cache_tbl (fun map ->
+    match SMap.find_opt path map with
+    | None -> map
     | Some cache ->
-      if not (Hashtbl.mem cache.ids episode.id) then begin
+      if not (SMap.mem episode.id cache.ids) then begin
         let episodes = cache.episodes @ [episode] in
-        (* Trim oldest entries when cache exceeds limit *)
         let total = List.length episodes in
+        let ids_ref = ref (SMap.add episode.id () cache.ids) in
         let episodes =
           if total > episode_cache_limit then
             let drop_n = total - episode_cache_limit in
@@ -188,46 +190,48 @@ let note_episode_flush (episode : Institution_eio.episode) =
               | [] -> []
               | remaining when n <= 0 -> remaining
               | (ep : Institution_eio.episode) :: rest ->
-                  Hashtbl.remove cache.ids ep.id;
+                  ids_ref := SMap.remove ep.id !ids_ref;
                   drop_with_evict (n - 1) rest
             in
             drop_with_evict drop_n episodes
           else
             episodes
         in
-        cache.episodes <- episodes;
-        Hashtbl.replace cache.ids episode.id ();
-      end;
-      cache.stamp <- file_stamp_opt path;
-      Hashtbl.replace episode_file_cache_tbl path cache)
+        let new_cache = {
+          stamp = file_stamp_opt path;
+          episodes;
+          ids = !ids_ref;
+        } in
+        SMap.add path new_cache map
+      end else
+        let new_cache = { cache with stamp = file_stamp_opt path } in
+        SMap.add path new_cache map)
 
 type procedure_file_cache = {
-  mutable stamp : file_stamp option;
-  mutable procedures : Procedural_memory.procedure list;
+  stamp : file_stamp option;
+  procedures : Procedural_memory.procedure list;
 }
 
-let procedure_file_cache_tbl : (string, procedure_file_cache) Hashtbl.t =
-  Hashtbl.create 16
-
-let procedure_cache_mu = Eio.Mutex.create ()
+let procedure_file_cache_tbl : procedure_file_cache SMap.t Atomic.t =
+  Atomic.make SMap.empty
 
 let load_procedures_cached ~(agent_name : string) =
-  Eio_guard.with_mutex procedure_cache_mu (fun () ->
-    let path = Procedural_memory.procedures_path ~agent_name in
-    let stamp = file_stamp_opt path in
-    match Hashtbl.find_opt procedure_file_cache_tbl path with
-    | Some cache when cache.stamp = stamp -> cache.procedures
-    | _ ->
-        let procedures = Procedural_memory.load_procedures ~agent_name in
-        Hashtbl.replace procedure_file_cache_tbl path { stamp; procedures };
-        procedures)
+  let path = Procedural_memory.procedures_path ~agent_name in
+  let stamp = file_stamp_opt path in
+  match SMap.find_opt path (Atomic.get procedure_file_cache_tbl) with
+  | Some cache when cache.stamp = stamp -> cache.procedures
+  | _ ->
+      let procedures = Procedural_memory.load_procedures ~agent_name in
+      atomic_update procedure_file_cache_tbl (fun map ->
+        SMap.add path { stamp; procedures } map);
+      procedures
 
 let store_procedures_cache ~(agent_name : string)
     (procedures : Procedural_memory.procedure list) =
-  Eio_guard.with_mutex procedure_cache_mu (fun () ->
-    let path = Procedural_memory.procedures_path ~agent_name in
-    let stamp = file_stamp_opt path in
-    Hashtbl.replace procedure_file_cache_tbl path { stamp; procedures })
+  let path = Procedural_memory.procedures_path ~agent_name in
+  let stamp = file_stamp_opt path in
+  atomic_update procedure_file_cache_tbl (fun map ->
+    SMap.add path { stamp; procedures } map)
 
 let top_procedures_cached ~(agent_name : string) ~(limit : int) =
   load_procedures_cached ~agent_name
@@ -463,7 +467,7 @@ let store_episode_from_snapshot
   Agent_sdk.Memory.store_episode memory episode
 
 let persisted_episode_ids () =
-  Hashtbl.copy (load_all_episodes_cached ()).ids
+  (load_all_episodes_cached ()).ids
 
 (** Flush new OAS episodes.
 
@@ -473,19 +477,18 @@ let flush_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int =
   let persisted_ids = persisted_episode_ids () in
   let path = Institution_eio.episodes_jsonl_path () in
   Fs_compat.mkdir_p (Filename.dirname path);
-  let flushed =
+  let flushed, _ =
     Agent_sdk.Memory.recall_episodes memory ~limit:max_int ()
     |> List.fold_left
-         (fun flushed (episode : Agent_sdk.Memory.episode) ->
-           if Hashtbl.mem persisted_ids episode.id then flushed
+         (fun (flushed, p_ids) (episode : Agent_sdk.Memory.episode) ->
+           if SMap.mem episode.id p_ids then (flushed, p_ids)
            else (
              let persisted = institution_episode_of_oas ~agent_name episode in
-             Hashtbl.replace persisted_ids episode.id ();
              Fs_compat.append_jsonl path
                (Institution_eio.episode_to_json persisted);
              note_episode_flush persisted;
-             flushed + 1))
-         0
+             (flushed + 1, SMap.add episode.id () p_ids)))
+         (0, persisted_ids)
   in
   (* Cap file growth. Called after append so we only rewrite when needed. *)
   if flushed > 0 then begin

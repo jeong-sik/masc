@@ -356,38 +356,32 @@ let cascade_metrics_for_candidates
   let capture =
     { next_attempt_index = 0; attempts_rev = []; fallback_events_rev = [] }
   in
-  let metrics : Llm_provider.Metrics.t =
-    {
-      on_cache_hit = (fun ~model_id:_ -> ());
-      on_cache_miss = (fun ~model_id:_ -> ());
-      on_request_start =
-        (fun ~model_id ->
-          record_attempt_start capture ~candidate_cfgs ~model_id);
-      on_request_end =
-        (fun ~model_id ~latency_ms ->
-          ensure_terminal_attempt capture ~candidate_cfgs ~model_id
-            ~latency_ms:(Some latency_ms) ~error:None;
-          (* Forward to Prometheus so per-model latency is visible on
-             the dashboard.  Without this, the cascade capture records
-             latency internally but never exports it — the global
-             Llm_metric_bridge sink is not consulted because this
-             per-call metrics object takes precedence. *)
-          Llm_metric_bridge.emit_request_latency ~model_id ~latency_ms);
-      on_error =
-        (fun ~model_id ~error ->
-          ensure_terminal_attempt capture ~candidate_cfgs ~model_id
-            ~latency_ms:None ~error:(Some error));
-      (* Forward HTTP status to the Prometheus counter.  When callers
-         pass this per-call metrics sink explicitly (cascade
-         observation path), OAS does not consult the global
-         Llm_metric_bridge sink, so we must re-emit here to avoid
-         blackholing provider counters for captured turns.  Delegating
-         to [Llm_metric_bridge.emit_http_status] keeps the label shape
-         a single source of truth. *)
-      on_http_status =
-        (fun ~provider ~model_id ~status ->
-          Llm_metric_bridge.emit_http_status ~provider ~model_id ~status);
-    }
+  let metrics =
+    Oas_compat.Metrics.make
+      ~on_request_start:(fun ~model_id ->
+        record_attempt_start capture ~candidate_cfgs ~model_id)
+      ~on_request_end:(fun ~model_id ~latency_ms ->
+        ensure_terminal_attempt capture ~candidate_cfgs ~model_id
+          ~latency_ms:(Some latency_ms) ~error:None;
+        (* Forward to Prometheus so per-model latency is visible on
+           the dashboard. Without this, the cascade capture records
+           latency internally but never exports it — the global
+           Llm_metric_bridge sink is not consulted because this
+           per-call metrics object takes precedence. *)
+        Llm_metric_bridge.emit_request_latency ~model_id ~latency_ms)
+      ~on_error:(fun ~model_id ~error ->
+        ensure_terminal_attempt capture ~candidate_cfgs ~model_id
+          ~latency_ms:None ~error:(Some error))
+      ~on_http_status:(fun ~provider ~model_id ~status ->
+        (* Forward HTTP status to the Prometheus counter. When callers
+           pass this per-call metrics sink explicitly (cascade
+           observation path), OAS does not consult the global
+           Llm_metric_bridge sink, so we must re-emit here to avoid
+           blackholing provider counters for captured turns.
+           Delegating to [Llm_metric_bridge.emit_http_status] keeps
+           the label shape a single source of truth. *)
+        Llm_metric_bridge.emit_http_status ~provider ~model_id ~status)
+      ()
   in
   (capture, metrics)
 

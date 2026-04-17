@@ -342,6 +342,8 @@ let timeout_error_json ?(waiting = false) key timeout_sec =
       ("message", `String message);
       ("generated_at", `String (Types.now_iso ()));
       ("timeout_kind", `String (if waiting then "waiter" else "owner"));
+      ("timeout_sec", `Float timeout_sec);
+      ("key", `String key);
     ]
 
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
@@ -385,18 +387,24 @@ let stats () =
   let now_ts = Time_compat.now () in
   let ready_fresh = ref 0 in
   let ready_stale = ref 0 in
+  let ready_expired = ref 0 in
   let computing = ref 0 in
   SMap.iter (fun _ v ->
     match v with
     | Ready e ->
-        if now_ts <= e.expires_at then incr ready_fresh
-        else incr ready_stale
+        if now_ts <= e.expires_at then
+          incr ready_fresh
+        else if now_ts <= e.stale_until then
+          incr ready_stale
+        else
+          incr ready_expired
     | Computing _ -> incr computing
   ) map;
   `Assoc [
     ("entries", `Int (SMap.cardinal map));
     ("fresh", `Int !ready_fresh);
     ("stale", `Int !ready_stale);
+    ("expired", `Int !ready_expired);
     ("ready_fresh", `Int !ready_fresh);
     ("ready_stale", `Int !ready_stale);
     ("computing", `Int !computing);

@@ -136,18 +136,6 @@ export interface BoardComment {
   created_at: string
 }
 
-export interface BoardHearth {
-  post_id: string
-  agent: string
-  created_at: string
-}
-
-export interface BoardFlair {
-  name: string
-  emoji: string
-  color: string
-}
-
 // --- Keeper Metrics ---
 
 export interface InferenceTelemetry {
@@ -900,6 +888,10 @@ export interface KeeperHookIntrospection {
 export interface KeeperConfig {
   name: string
   execution_scope: string
+  sandbox_profile?: 'legacy_local' | 'docker_hardened' | string
+  network_mode?: 'none' | 'inherit' | string
+  shared_memory_scope?: 'disabled' | 'room' | string
+  private_workspace_root?: string | null
   allowed_paths: string[]
   effective_allowed_paths: string[]
   prompt: KeeperConfigPrompt

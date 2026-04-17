@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks'
+import { InlineSpinner } from './common/inline-spinner'
 
 import {
   fetchKeeperComposite,
@@ -693,7 +694,7 @@ function StatusBar({
             ${density === 'compact' ? '▣ 조밀' : '▢ 여유'}
           </button>
           ${liveBadge}
-          ${loading ? html`<span class="inline-block h-2.5 w-2.5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin"></span>` : null}
+          ${loading ? html`<${InlineSpinner} size="xs" />` : null}
           ${paused ? html`
             <span
               class="px-1.5 py-0.5 rounded border text-[9px] font-mono text-[var(--text-muted)] border-[var(--white-10)] bg-[var(--white-3)]"

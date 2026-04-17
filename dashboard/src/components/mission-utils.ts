@@ -1,20 +1,3 @@
-import { signal } from '@preact/signals'
-import { navigate } from '../router'
-import type {
-  Agent,
-  DashboardMissionAttentionQueueItem,
-  DashboardMissionAgentBrief,
-  DashboardMissionKeeperBrief,
-  Keeper,
-  OperatorAttentionItem,
-  OperatorRecommendedAction,
-} from '../types'
-import {
-  createMissionWorkflowContext,
-  missionInterveneParams,
-  persistWorkflowContext,
-  workflowTargetLabel,
-} from '../workflow-context'
 import { relativeTime as relativeTimeBase, formatDuration } from '../lib/format-time'
 import { trimText } from '../lib/truncate'
 import { toneClass } from '../lib/tone'
@@ -25,33 +8,6 @@ export { formatDuration, trimText, toneClass, statusLabel }
 export function relativeTime(iso?: string | null): string {
   return relativeTimeBase(iso, '방금')
 }
-
-export type EnrichedKeeperRow = {
-  brief: DashboardMissionKeeperBrief
-  keeper: Keeper | null
-  currentWork: string
-  recentInput: string | null
-  recentOutput: string | null
-  recentEvent: string | null
-  recentTools: string[]
-}
-
-export type EnrichedAgentRow = {
-  brief: DashboardMissionAgentBrief
-  agent: Agent | null
-  keeper: Keeper | null
-  where: string
-  withWhom: string[]
-  currentWork: string
-  how: string | null
-  recentInput: string | null
-  recentOutput: string | null
-  recentEvent: string | null
-  recentTools: string[]
-}
-
-export const selectedAttentionId = signal<string | null>(null)
-export const selectedSessionId = signal<string | null>(null)
 
 export function missionTargetTypeLabel(value?: string | null): string {
   switch ((value ?? '').trim().toLowerCase()) {
@@ -83,78 +39,6 @@ export function signalClassLabel(value?: string | null): string | null {
     default:
       return value?.trim() || null
   }
-}
-
-export function actionModeLabel(action?: OperatorRecommendedAction | null): string {
-  return action?.confirm_required ? '확인 후 실행' : '즉시 실행'
-}
-
-export function actionTargetLabel(action?: OperatorRecommendedAction | null): string {
-  return workflowTargetLabel(
-    action ? createMissionWorkflowContext(action, null, '상황판 추천 액션') : null,
-  )
-}
-
-function navigateWithContext(
-  _mode: 'intervene' | 'command',
-  context = createMissionWorkflowContext(),
-): void {
-  persistWorkflowContext(context)
-  navigate(
-    'command',
-    { section: 'operations', ...missionInterveneParams(context) },
-  )
-}
-
-export function openIncidentIntervene(item: OperatorAttentionItem): void {
-  navigateWithContext('intervene', createMissionWorkflowContext(null, item, '상황판 incident'))
-}
-
-export function openIncidentCommand(item: OperatorAttentionItem): void {
-  navigateWithContext('command', createMissionWorkflowContext(null, item, '상황판 incident'))
-}
-
-export function openActionIntervene(
-  action: OperatorRecommendedAction,
-  incident?: OperatorAttentionItem | null,
-  sourceLabel = '상황판 추천 액션',
-): void {
-  navigateWithContext('intervene', createMissionWorkflowContext(action, incident, sourceLabel))
-}
-
-export function openActionCommand(
-  action: OperatorRecommendedAction,
-  incident?: OperatorAttentionItem | null,
-  sourceLabel = '상황판 추천 액션',
-): void {
-  navigateWithContext('command', createMissionWorkflowContext(action, incident, sourceLabel))
-}
-
-export function openSession(_mode: 'intervene' | 'command', sessionId: string): void {
-  navigate('workspace', { section: 'session', session_id: sessionId, source: 'mission' })
-}
-
-export function attentionAsIncident(item: DashboardMissionAttentionQueueItem): OperatorAttentionItem {
-  return {
-    kind: item.kind,
-    severity: item.severity,
-    summary: item.summary,
-    target_type: item.target_type,
-    target_id: item.target_id ?? null,
-    actor: null,
-    evidence: item.evidence_preview,
-  }
-}
-
-
-export function toggleAttention(id: string): void {
-  selectedAttentionId.value = selectedAttentionId.value === id ? null : id
-  selectedSessionId.value = null
-}
-
-export function toggleSession(id: string): void {
-  selectedSessionId.value = selectedSessionId.value === id ? null : id
-  selectedAttentionId.value = null
 }
 
 export function liveStateClass(status?: string | null, health?: string | null): string {

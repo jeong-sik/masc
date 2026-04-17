@@ -461,6 +461,7 @@
    keeper_turn_cycle_contract
    keeper_composite_observer
    keeper_behavioral_regime
+   keeper_behavioral_regime_observer
    keeper_campaign_fsm
    keeper_unified_prompt
    keeper_unified_turn

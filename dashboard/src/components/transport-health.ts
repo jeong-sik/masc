@@ -13,6 +13,7 @@ import {
 } from '../api/transport-health'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { TextInput } from './common/input'
+import { CopyIdButton } from './common/copy-id-button'
 
 type StatusTone = 'ok' | 'warn' | 'bad'
 
@@ -485,7 +486,10 @@ export function TransportHealthPanel() {
                     ${filtered.map((session) => html`
                       <div key=${session.session_id} class="rounded-lg border border-card-border/60 bg-bg-1/60 p-3">
                         <div class="flex items-center justify-between gap-2 mb-1">
-                          <span class="text-[11px] font-mono text-text-strong">${compactId(session.session_id)}</span>
+                          <div class="flex min-w-0 items-center gap-1">
+                            <span class="truncate text-[11px] font-mono text-text-strong">${compactId(session.session_id)}</span>
+                            <${CopyIdButton} value=${session.session_id} label="session_id" />
+                          </div>
                           <span class="text-[10px] uppercase tracking-wider text-text-muted">${session.kind}</span>
                         </div>
                         <div class="text-[11px] text-text-body">queue ${session.queue_depth}</div>

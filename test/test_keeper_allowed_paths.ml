@@ -299,6 +299,53 @@ let test_docker_hardened_rejects_paths_outside_private_root () =
         check bool "mentions private playground" true
           (String_util.contains_substring err ".masc/playground/sangsu"))
 
+let test_docker_hardened_rejects_root_allowed_path () =
+  with_temp_config (fun config ->
+    match
+      KTU.validate_sandbox_settings
+        ~config
+        ~keeper_name:"sangsu"
+        ~sandbox_profile:KT.Docker_hardened
+        ~network_mode:KT.Network_none
+        ~allowed_paths:["/"]
+    with
+    | Ok () -> fail "expected docker_hardened root-path rejection"
+    | Error err ->
+        check bool "mentions private playground" true
+          (String_util.contains_substring err ".masc/playground/sangsu"))
+
+let test_docker_hardened_rejects_glob_like_allowed_path () =
+  with_temp_config (fun config ->
+    match
+      KTU.validate_sandbox_settings
+        ~config
+        ~keeper_name:"sangsu"
+        ~sandbox_profile:KT.Docker_hardened
+        ~network_mode:KT.Network_none
+        ~allowed_paths:["/tmp/**"]
+    with
+    | Ok () -> fail "expected docker_hardened glob-like path rejection"
+    | Error err ->
+        check bool "mentions rejected path" true
+          (String_util.contains_substring err "/tmp/**"))
+
+let test_docker_hardened_rejects_traversal_allowed_path () =
+  with_temp_config (fun config ->
+    let private_root = KTU.private_workspace_root_rel "sangsu" in
+    match
+      KTU.validate_sandbox_settings
+        ~config
+        ~keeper_name:"sangsu"
+        ~sandbox_profile:KT.Docker_hardened
+        ~network_mode:KT.Network_none
+        ~allowed_paths:
+          [ private_root ^ "/repos/demo/../../../../../../etc/passwd" ]
+    with
+    | Ok () -> fail "expected docker_hardened traversal rejection"
+    | Error err ->
+        check bool "mentions private playground" true
+          (String_util.contains_substring err ".masc/playground/sangsu"))
+
 let test_docker_hardened_accepts_private_root_paths () =
   with_temp_config (fun config ->
     let private_root = KTU.private_workspace_root_rel "sangsu" in
@@ -398,6 +445,12 @@ let () =
         [
           test_case "docker_hardened rejects wildcard allowed_paths" `Quick
             test_docker_hardened_rejects_wildcard_allowed_paths;
+          test_case "docker_hardened rejects root allowed path" `Quick
+            test_docker_hardened_rejects_root_allowed_path;
+          test_case "docker_hardened rejects glob-like allowed path" `Quick
+            test_docker_hardened_rejects_glob_like_allowed_path;
+          test_case "docker_hardened rejects traversal allowed path" `Quick
+            test_docker_hardened_rejects_traversal_allowed_path;
           test_case "docker_hardened rejects paths outside private root" `Quick
             test_docker_hardened_rejects_paths_outside_private_root;
           test_case "docker_hardened accepts private root paths" `Quick

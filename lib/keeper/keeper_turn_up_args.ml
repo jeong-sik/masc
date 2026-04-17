@@ -383,20 +383,37 @@ let private_workspace_root_abs ~(config : Coord.config) keeper_name =
   |> Keeper_alerting_path.normalize_path_for_check
   |> Keeper_alerting_path.strip_trailing_slashes
 
+let sandbox_allowed_path_has_forbidden_segments path =
+  let has_glob =
+    String.exists (function
+      | '*' | '?' | '[' | ']' -> true
+      | _ -> false)
+      path
+  in
+  has_glob
+  || (path
+      |> String.split_on_char '/'
+      |> List.exists (function
+           | "." | ".." -> true
+           | _ -> false))
+
 let sandbox_allowed_path_within_private_root
     ~(config : Coord.config)
     ~keeper_name
     path =
   let trimmed = String.trim path in
   if trimmed = "" then false
-  else if Filename.is_relative trimmed then
-    let private_root_rel = private_workspace_root_rel keeper_name in
-    trimmed = private_root_rel
-    || String.starts_with ~prefix:(private_root_rel ^ "/") trimmed
+  else if sandbox_allowed_path_has_forbidden_segments trimmed then
+    false
   else
     let private_root = private_workspace_root_abs ~config keeper_name in
     let candidate =
-      trimmed
+      (if Filename.is_relative trimmed then
+         Filename.concat
+           (Keeper_alerting_path.project_root_of_config config)
+           trimmed
+       else
+         trimmed)
       |> Keeper_alerting_path.normalize_path_for_check
       |> Keeper_alerting_path.strip_trailing_slashes
     in

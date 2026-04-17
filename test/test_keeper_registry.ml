@@ -347,6 +347,16 @@ let test_record_error () =
   | Some e ->
     check (option string) "error recorded" (Some "something broke") e.last_error
 
+let test_clear_error () =
+  R.clear ();
+  let _entry = R.register ~base_path:bp "k6-clear" (make_meta "k6-clear") in
+  R.record_error ~base_path:bp "k6-clear" "stale error";
+  R.clear_error ~base_path:bp "k6-clear";
+  match R.get ~base_path:bp "k6-clear" with
+  | None -> fail "expected k6-clear"
+  | Some e ->
+      check (option string) "error cleared" None e.last_error
+
 let test_get_returns_none_for_missing () =
   R.clear ();
   check (option reject) "nonexistent returns None" None
@@ -358,6 +368,7 @@ let test_noop_on_missing () =
   ignore (R.dispatch_event ~base_path:bp "ghost" KSM.Operator_pause);
   R.record_restart ~base_path:bp "ghost";
   R.record_error ~base_path:bp "ghost" "err";
+  R.clear_error ~base_path:bp "ghost";
   R.record_crash ~base_path:bp "ghost" 0.0 "crash";
   R.set_grpc_close ~base_path:bp "ghost" None;
   R.wakeup ~base_path:bp "ghost";
@@ -703,6 +714,7 @@ let () =
           eio_test "record restart" test_record_restart;
           eio_test "is_registered" test_is_registered;
           eio_test "record error" test_record_error;
+          eio_test "clear error" test_clear_error;
           eio_test "get returns None for missing" test_get_returns_none_for_missing;
           eio_test "noop on missing keys" test_noop_on_missing;
           eio_test "register replaces existing" test_register_replaces;

@@ -1104,7 +1104,7 @@ let keeper_config_json (config : Coord.config) (name : string)
         if m.sandbox_profile = Keeper_types.Docker_hardened
            || (m.sandbox_profile = Keeper_types.Legacy_local
                && Env_config_keeper.DockerPlayground.enabled)
-        then Some Env_config_keeper.KeeperSandbox.docker_image
+        then Some (Env_config_keeper.KeeperSandbox.docker_image ())
         else None
       in
       let private_workspace_root =

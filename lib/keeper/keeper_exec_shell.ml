@@ -431,9 +431,11 @@ let docker_info_security_options ~timeout_sec =
              err)
 
 let ensure_keeper_sandbox_runtime ~timeout_sec =
-  let seccomp_profile = String.trim Env_config_keeper.KeeperSandbox.seccomp_profile in
-  let require_rootless = Env_config_keeper.KeeperSandbox.require_rootless in
-  let require_userns = Env_config_keeper.KeeperSandbox.require_userns in
+  let seccomp_profile =
+    String.trim (Env_config_keeper.KeeperSandbox.seccomp_profile ())
+  in
+  let require_rootless = Env_config_keeper.KeeperSandbox.require_rootless () in
+  let require_userns = Env_config_keeper.KeeperSandbox.require_userns () in
   let seccomp_args =
     if seccomp_profile = "" then
       Ok []
@@ -475,7 +477,7 @@ let run_docker_hardened_bash
     ~(timeout_sec : float)
     ~(cmd : string)
     ~(network_mode : network_mode) =
-  let image = Env_config_keeper.KeeperSandbox.docker_image in
+  let image = Env_config_keeper.KeeperSandbox.docker_image () in
   let sandbox_error_json message =
     Keeper_registry.record_error ~base_path:config.base_path meta.name message;
     error_json message
@@ -517,7 +519,7 @@ let run_docker_hardened_bash
         "--read-only";
         "--tmpfs";
         (Printf.sprintf "/tmp:rw,nosuid,nodev,noexec,size=%s"
-           Env_config_keeper.KeeperSandbox.tmpfs_size);
+           (Env_config_keeper.KeeperSandbox.tmpfs_size ()));
         "--cap-drop=ALL";
         "--security-opt";
         "no-new-privileges";
@@ -525,9 +527,9 @@ let run_docker_hardened_bash
       @ seccomp_args
       @ [
         "--pids-limit";
-        string_of_int Env_config_keeper.KeeperSandbox.pids_limit;
+        string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ());
         "--memory";
-        Env_config_keeper.KeeperSandbox.memory;
+        Env_config_keeper.KeeperSandbox.memory ();
         "-v";
         host_root ^ ":" ^ container_root ^ ":rw";
         "--workdir";

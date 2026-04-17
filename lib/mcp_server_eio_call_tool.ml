@@ -265,8 +265,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     else
       let truncated =
         let error_preview_max = 200 in
-        if String.length message > error_preview_max then String.sub message 0 error_preview_max ^ "..."
-        else message
+        String_util.utf8_safe ~max_bytes:(error_preview_max + 3) ~suffix:"..." message |> String_util.to_string
       in
       Some (Printf.sprintf "timeout=%d|duration_ms=%d|detail=%s"
               (if !timeout_hit then 1 else 0) duration_ms truncated)
@@ -414,9 +413,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
 
   (* Log result *)
   let preview =
-    if String.length message > 80
-    then String.sub message 0 80 ^ "..."
-    else message
+    String_util.utf8_safe ~max_bytes:83 ~suffix:"..." message |> String_util.to_string
   in
   let preview = String.map (function '\n' -> ' ' | c -> c) preview in
   Log.Mcp.info "%s -> %s" name preview;

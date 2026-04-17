@@ -63,7 +63,7 @@ let handle f handler =
 let parse_json_safe ~context str : (Yojson.Safe.t, string) result =
   try Ok (Yojson.Safe.from_string str)
   with Yojson.Json_error msg ->
-    let preview = if String.length str > 50 then String.sub str 0 50 ^ "..." else str in
+    let preview = String_util.utf8_safe ~max_bytes:53 ~suffix:"..." str |> String_util.to_string in
     Error (Printf.sprintf "[%s] JSON parse error: %s (input: %s)" context msg preview)
 
 (** Read file contents with error handling.

@@ -122,8 +122,7 @@ let build
     List.map (fun (sha, msg) ->
       { ref_type = "commit"; ref_id = sha;
         description =
-          if String.length msg <= 120 then msg
-          else String.sub msg 0 117 ^ "..." }
+          String_util.utf8_safe ~max_bytes:120 ~suffix:"..." msg |> String_util.to_string }
     ) commits
   in
   let open_loops =

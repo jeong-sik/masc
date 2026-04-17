@@ -5,8 +5,7 @@ let compact_text ?(max_len = 96) raw =
     String.trim raw |> String.split_on_char '\n' |> String.concat " " |> String.trim
   in
   if normalized = "" then ""
-  else if String.length normalized <= max_len then normalized
-  else String.sub normalized 0 (max_len - 1) ^ "…"
+  else String_util.utf8_safe ~max_bytes:((max_len - 1) + 3) ~suffix:"…" normalized |> String_util.to_string
 
 let member_assoc key json =
   match json with

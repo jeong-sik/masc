@@ -84,10 +84,8 @@ let truncate_path (path : string) : string =
 
 let truncate_message (msg : string) : string =
   let limit = max_message_length () in
-  if String.length msg > limit then
-    let prefix_len = limit - 3 in
-    String.sub msg 0 prefix_len ^ "..."
-  else msg
+  String_util.utf8_safe ~max_bytes:limit ~suffix:"..." msg
+  |> String_util.to_string
 
 let agent_lines now (agents : Types.agent list) =
   List.map (fun (agent : Types.agent) ->

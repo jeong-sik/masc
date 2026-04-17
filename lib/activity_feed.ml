@@ -160,8 +160,11 @@ let board_post_activities (config : Coord.config) : activity_item list =
       if id = "" then None
       else
         let preview = if title <> "" then title
-          else if String.length content > 80 then String.sub content 0 80 ^ "..."
-          else content
+          else
+            (* UTF-8-safe truncation (#7690): byte-based String.sub
+               corrupted activity-events/*.jsonl for Korean content. *)
+            String_util.utf8_safe ~max_bytes:83 ~suffix:"..." content
+            |> String_util.to_string
         in
         Some {
           id = "act-post-" ^ id;
@@ -190,8 +193,9 @@ let board_comment_activities (config : Coord.config) : activity_item list =
       if id = "" then None
       else
         let preview =
-          if String.length content > 80 then String.sub content 0 80 ^ "..."
-          else content
+          (* UTF-8-safe truncation (#7690). *)
+          String_util.utf8_safe ~max_bytes:83 ~suffix:"..." content
+          |> String_util.to_string
         in
         Some {
           id = "act-comment-" ^ id;
@@ -225,9 +229,9 @@ let mention_activities (config : Coord.config) : activity_item list =
         agent_name = source_agent;
         summary = Printf.sprintf "@%s mentioned @%s: %s"
                     source_agent target_agent
-                    (if String.length content_preview > 60
-                     then String.sub content_preview 0 60 ^ "..."
-                     else content_preview);
+                    (String_util.utf8_safe ~max_bytes:63 ~suffix:"..."
+                       content_preview
+                     |> String_util.to_string);
         detail_json = json;
         created_at;
       })

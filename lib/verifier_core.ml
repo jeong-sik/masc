@@ -101,7 +101,9 @@ let parse_verdict (text : string) : (verdict, string) result =
     Error "empty verifier output"
   else
     Error (sprintf "unrecognized verdict format: %s"
-      (if len > 80 then String.sub trimmed 0 80 ^ "..." else trimmed))
+      (let _ = len in
+       String_util.utf8_safe ~max_bytes:83 ~suffix:"..." trimmed
+       |> String_util.to_string))
 
 (* ================================================================ *)
 (* Structured Verdict: Tool Schema + JSON Parsing (ADR D3)          *)

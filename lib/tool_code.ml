@@ -343,8 +343,7 @@ let handle_code_search ctx args =
         in
         (false, Printf.sprintf "❌ %s\nrg output: %s" hint
            (if trimmed_out = "" then "(empty)"
-            else if String.length trimmed_out > 300 then String.sub trimmed_out 0 300 ^ "..."
-            else trimmed_out))
+            else String_util.utf8_safe ~max_bytes:303 ~suffix:"..." trimmed_out |> String_util.to_string))
     | status, output ->
         let code = match status with
           | Unix.WEXITED n -> Printf.sprintf "exit %d" n

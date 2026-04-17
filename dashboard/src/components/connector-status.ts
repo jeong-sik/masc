@@ -28,6 +28,7 @@ import { showToast } from './common/toast'
 import { CopyableCode } from './common/copyable-code'
 import { SetupGuideCard } from './setup-guide-card'
 import { ConnectorOnboardingGrid } from './connector-onboarding'
+import { SidecarLogToggle, SidecarLogViewer } from './sidecar-log-viewer'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
 
@@ -576,8 +577,9 @@ function ConnectorLivePanel({
                 >${actionLoading.value ? '…' : 'Stop'}</button>
               `
             : null}
+          <${SidecarLogToggle} connectorId=${connectorId} />
           ${sidecarLogPath
-            ? html`<span class="cursor-help text-[10px] text-[var(--text-dim)]" title=${sidecarLogPath}>logs↗</span>`
+            ? html`<span class="cursor-help text-[10px] text-[var(--text-dim)]" title=${sidecarLogPath}>↗</span>`
             : null}
           <button
             type="button"
@@ -620,6 +622,8 @@ function ConnectorLivePanel({
       ${connectorError || connector?.error
         ? html`<div class="mt-3 rounded-md border border-amber-400/20 bg-amber-500/8 px-3 py-2 text-[11px] text-amber-100">${connectorError ?? connector?.error}</div>`
         : null}
+
+      <${SidecarLogViewer} connectorId=${connectorId} />
 
       ${keeperDirectoryError && keepers.length === 0
         ? html`<div class="mt-3 rounded-md border border-amber-400/20 bg-amber-500/8 px-3 py-2 text-[11px] text-amber-100">keeper directory unavailable, manual entry only</div>`

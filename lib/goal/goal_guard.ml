@@ -17,11 +17,7 @@ let int_env name ~default ~min_v ~max_v =
         max min_v (min max_v parsed)
       with Failure _ -> default)
 
-let bool_env name ~default =
-  match Sys.getenv_opt name with
-  | Some "1" | Some "true" | Some "TRUE" | Some "yes" | Some "on" -> true
-  | Some "0" | Some "false" | Some "FALSE" | Some "no" | Some "off" -> false
-  | Some _ | None -> default
+let bool_env name ~default = Env_config_core.get_bool ~default name
 
 let load_budget () =
   {

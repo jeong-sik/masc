@@ -53,6 +53,37 @@ export interface MatrixData {
   }
 }
 
+/** Per-row or per-column state breakdown. Airflow / GitHub Actions
+    matrices render these as trailing chips so the operator can scan
+    "this keeper's coverage" or "this connector's adoption" without
+    counting cells. */
+export interface MatrixStateCounts {
+  bound: number
+  unbound: number
+  na: number
+  unknown: number
+}
+
+/** Pure: count each state in a row. */
+export function summarizeMatrixRow(row: MatrixRow): MatrixStateCounts {
+  const counts: MatrixStateCounts = { bound: 0, unbound: 0, na: 0, unknown: 0 }
+  for (const c of row.cells) counts[c.state]++
+  return counts
+}
+
+/** Pure: count each state in a column. */
+export function summarizeMatrixColumn(
+  matrix: MatrixData,
+  columnIdx: number,
+): MatrixStateCounts {
+  const counts: MatrixStateCounts = { bound: 0, unbound: 0, na: 0, unknown: 0 }
+  for (const row of matrix.rows) {
+    const cell = row.cells[columnIdx]
+    if (cell !== undefined) counts[cell.state]++
+  }
+  return counts
+}
+
 function findConnector(connectors: GateConnectorInfo[], id: string): GateConnectorInfo | null {
   return connectors.find(c => c.connector_id === id) ?? null
 }
@@ -188,9 +219,11 @@ function MatrixCellButton({ cell }: { cell: MatrixCell }) {
 
 export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
   const hasKeepers = matrix.rows.length > 0
-  // Grid template: one wide keeper-name column, N fixed-width connector cols.
-  // Fixed column widths make the grid *align*, which is the whole point.
-  const gridCols = `grid-template-columns: minmax(160px, 1fr) repeat(${matrix.columns.length}, minmax(80px, 1fr));`
+  // Grid template: one wide keeper-name column, N fixed-width connector cols,
+  // and one trailing narrow column for per-row coverage totals (Airflow /
+  // GitHub Actions matrix convention — "N bound, M unbound" chip so the
+  // operator can scan per-keeper coverage without counting cells).
+  const gridCols = `grid-template-columns: minmax(160px, 1fr) repeat(${matrix.columns.length}, minmax(80px, 1fr)) minmax(90px, auto);`
 
   return html`
     <section class="mb-4 rounded-lg border border-[var(--card-border)] bg-[var(--bg-1)] p-3" data-panel="connector-keeper-matrix">
@@ -237,6 +270,11 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
                     <span>${CONNECTOR_DISPLAY_NAMES[colId] ?? colId}</span>
                   </button>
                 `)}
+                <div
+                  class="px-1 py-1 text-center text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]"
+                  title="Per-keeper coverage totals (bound / unbound / n·a)"
+                  data-matrix-coverage-header
+                >Coverage</div>
 
                 ${matrix.rows.map(row => html`
                   <${MatrixRowRender} row=${row} />
@@ -249,6 +287,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
 }
 
 function MatrixRowRender({ row }: { row: MatrixRow }) {
+  const counts = summarizeMatrixRow(row)
   return html`
     <button
       type="button"
@@ -260,5 +299,37 @@ function MatrixRowRender({ row }: { row: MatrixRow }) {
       <span class="truncate">${row.keeperName}</span>
     </button>
     ${row.cells.map(cell => html`<${MatrixCellButton} cell=${cell} />`)}
+    <${RowCoverageChip} keeperName=${row.keeperName} counts=${counts} />
+  `
+}
+
+/** Airflow/GitHub Actions matrix convention: trailing per-row summary
+    chip showing the state breakdown so the operator can scan "this
+    keeper is bound to 2/4 connectors" without counting cells. */
+function RowCoverageChip({
+  keeperName,
+  counts,
+}: { keeperName: string; counts: MatrixStateCounts }) {
+  const { bound, unbound, na, unknown } = counts
+  const totalLive = bound + unbound + unknown // exclude n/a (connector offline)
+  const coverageLabel = `${bound}/${totalLive > 0 ? totalLive : '—'}`
+  const title = `${keeperName} — ${bound} bound, ${unbound} unbound, ${na} n/a, ${unknown} unknown`
+  // Tone follows the dominant state: if anything is unknown → amber,
+  // else if all live cells are bound → emerald, else muted.
+  const tone =
+    unknown > 0 ? 'text-amber-200' :
+    (bound > 0 && unbound === 0) ? 'text-emerald-200' :
+    'text-[var(--text-dim)]'
+  return html`
+    <div
+      class=${`flex items-center justify-end gap-1 px-1 py-1 text-[10px] tabular-nums ${tone}`}
+      title=${title}
+      data-matrix-row-coverage=${keeperName}
+      data-matrix-row-bound=${bound}
+      data-matrix-row-total-live=${totalLive}
+    >
+      <span aria-hidden="true">●</span>
+      <span>${coverageLabel}</span>
+    </div>
   `
 }

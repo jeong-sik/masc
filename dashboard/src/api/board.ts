@@ -3,7 +3,7 @@ import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } f
 import type {
   BoardPost, BoardComment, BoardSortMode,
   GovernanceContextRef,
-  GovernanceDecisionItem, GovernanceExecutedRoute, GovernanceExecutionOrder,
+  GovernanceDecisionItem, GovernanceExecutedRoute,
   GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
   KeeperApprovalQueueItem,
   GovernanceResolvedAction, GovernanceTimelineEvent, PendingConfirmation,
@@ -176,25 +176,6 @@ export function normalizeGovernanceDecisionItem(raw: unknown): GovernanceDecisio
     executed_route: normalizeGovernanceExecutedRoute(raw.executed_route),
     guardrail_state: normalizeGovernanceGuardrailState(raw.guardrail_state),
     evidence_refs: asStringList(raw.evidence_refs),
-  }
-}
-
-export function normalizeGovernanceExecutionOrder(raw: unknown): GovernanceExecutionOrder | null {
-  if (!isRecord(raw)) return null
-  const id = asString(raw.id, '').trim()
-  const caseId = asString(raw.case_id, '').trim()
-  if (!id || !caseId) return null
-  return {
-    id,
-    case_id: caseId,
-    status: asString(raw.status, 'blocked'),
-    risk_class: asNullableString(raw.risk_class),
-    action_request: normalizeGovernanceResolvedAction(raw.action_request),
-    created_at: asNullableIsoTimestamp(raw.created_at),
-    updated_at: asNullableIsoTimestamp(raw.updated_at),
-    execution_ref: asNullableString(raw.execution_ref),
-    result_summary: asNullableString(raw.result_summary),
-    actor: asNullableString(raw.actor),
   }
 }
 

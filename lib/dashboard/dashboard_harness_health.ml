@@ -203,6 +203,31 @@ let read_recent_verdicts ?since ?until ?(limit = max_recent_verdicts) ()
   in
   trim_recent limit verdicts
 
+let read_recent_verdicts_for_agents
+    ?since ?until ?(limit = max_recent_verdicts) ~agent_names ()
+    : harness_verdict_item list =
+  let wanted =
+    agent_names
+    |> List.map String.trim
+    |> List.filter (fun name -> name <> "")
+  in
+  if wanted = [] then []
+  else
+    let is_wanted name = List.exists (String.equal name) wanted in
+    let records = read_store_records (Eval_calibration.get_store ()) ?since ?until () in
+    let verdicts : harness_verdict_item list =
+      records
+      |> List.filter_map verdict_item_of_json
+      |> List.filter (fun verdict -> is_wanted verdict.agent_name)
+    in
+    let verdicts =
+      List.sort
+        (fun (left : harness_verdict_item) (right : harness_verdict_item) ->
+          Float.compare right.timestamp left.timestamp)
+        verdicts
+    in
+    trim_recent limit verdicts
+
 let read_pre_compact_events ?since ?until () =
   let records = read_store_records (get_pre_compact_store ()) ?since ?until () in
   let events : pre_compact_event list =

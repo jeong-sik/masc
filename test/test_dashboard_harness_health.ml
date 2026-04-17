@@ -118,6 +118,24 @@ let make_result ?(verdict = AR.Approve) ?(gate = AR.Structured_tool)
     fallback_reason;
   }
 
+let append_verdict_record ~timestamp ~agent_name ~task_id ~verdict ?fallback_reason () =
+  Dated_jsonl.append (Cal.get_store ())
+    (`Assoc
+      [
+        ("record_type", `String "verdict");
+        ("notes_hash", `String ("hash-" ^ task_id));
+        ("task_id", `String task_id);
+        ("task_title", `String ("Task " ^ task_id));
+        ("agent_name", `String agent_name);
+        ("verdict", `String verdict);
+        ("gate", `String "structured_tool");
+        ("evaluator_cascade", `String "cross_verifier");
+        ("timestamp", `Float timestamp);
+      ]
+      @ match fallback_reason with
+        | Some reason -> [ ("fallback_reason", `String reason) ]
+        | None -> [])
+
 let test_runtime_signals_are_persisted () =
   with_test_stores @@ fun config ->
   ignore
@@ -254,6 +272,67 @@ let test_overview_warns_when_evaluator_falls_back () =
   check (float 0.0001) "fallback ratio" 1.0
     Yojson.Safe.Util.(overview |> member "fallback_ratio" |> to_float)
 
+let test_agent_scoped_verdicts_filter_before_limit () =
+  with_test_stores @@ fun _config ->
+  append_verdict_record
+    ~timestamp:100.0
+    ~agent_name:"keeper-a"
+    ~task_id:"keeper-1"
+    ~verdict:"approve"
+    ();
+  append_verdict_record
+    ~timestamp:101.0
+    ~agent_name:"keeper-agent"
+    ~task_id:"keeper-2"
+    ~verdict:"reject:schema_violation"
+    ();
+  for i = 0 to 9 do
+    append_verdict_record
+      ~timestamp:(200.0 +. float_of_int i)
+      ~agent_name:"other-agent"
+      ~task_id:(Printf.sprintf "other-%d" i)
+      ~verdict:"reject"
+      ~fallback_reason:"timeout"
+      ()
+  done;
+  let global_latest =
+    Harness.read_recent_verdicts ~limit:1 ()
+  in
+  check string "global latest is other agent" "other-agent"
+    (match global_latest with
+     | verdict :: _ -> verdict.agent_name
+     | [] -> failwith "expected global verdict");
+  let scoped =
+    Harness.read_recent_verdicts_for_agents
+      ~limit:5
+      ~agent_names:[ "keeper-a"; "keeper-agent" ]
+      ()
+  in
+  check int "scoped verdict count survives global crowding" 2 (List.length scoped);
+  check string "scoped latest verdict agent alias" "keeper-agent"
+    (match scoped with
+     | verdict :: _ -> verdict.agent_name
+     | [] -> failwith "expected scoped verdict");
+  let outcomes =
+    Masc_mcp.Dashboard_http_keeper.compute_outcomes_rollup
+      ~keeper_name:"keeper-a"
+      ~agent_name:"keeper-agent"
+      ~recent_crash_count:0
+      ~registry_entry:None
+  in
+  check int "outcomes pass count uses scoped helper" 1
+    Yojson.Safe.Util.(outcomes |> member "validation" |> member "oas_verdicts" |> member "pass" |> to_int);
+  check int "outcomes fail count parses reject variants" 1
+    Yojson.Safe.Util.(outcomes |> member "validation" |> member "oas_verdicts" |> member "fail" |> to_int);
+  check int "outcomes unknown count stays zero" 0
+    Yojson.Safe.Util.(outcomes |> member "validation" |> member "oas_verdicts" |> member "unknown" |> to_int);
+  check (list string) "failure reasons parse reject suffix"
+    [ "schema_violation" ]
+    Yojson.Safe.Util.(outcomes |> member "validation" |> member "oas_verdicts"
+      |> member "top_failure_reasons" |> to_list |> filter_string);
+  check (option float) "last verdict timestamp preserved" (Some 101.0)
+    Yojson.Safe.Util.(outcomes |> member "validation" |> member "last_verdict_at" |> to_float_option)
+
 let () =
   run "Dashboard_harness_health"
     [
@@ -271,5 +350,7 @@ let () =
             test_runtime_stale_status;
           test_case "fallback-heavy evaluator shows warning overview" `Quick
             test_overview_warns_when_evaluator_falls_back;
+          test_case "agent-scoped verdicts filter before limit" `Quick
+            test_agent_scoped_verdicts_filter_before_limit;
         ] );
     ]

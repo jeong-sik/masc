@@ -4,10 +4,53 @@
 ## [0.9.10] - 2026-04-17
 
 ### Changed
-- TBD
+
+Bulk merge cycle (2 `/loop` batches, admin override) covering dashboard UX, keeper observability, lock-free refactors, and spec/docs cleanup.
+
+- **Dashboard UX.**
+  - Connector overview strip gains an incident banner for sidecars dropped in the last 5 min (#7925) and an aggregate summary line (#7944).
+  - Auto-restart toggle chains Save → stop → start on connector config (#7933).
+  - Quick-bind form supports Enter-to-submit with per-connector channel ID hint (#7970).
+  - Setup guide gains per-step completion checklist (#7974) and Vercel-style Start button on onboarding cards (#7963).
+  - Copy affordance: new `CopyIdButton` on transport-health hot session ids (#7973) with inline "Copied" confirmation (#7980).
+  - Live-ticking counter on startup-warning banner (#7967).
+  - Text filters added to mission worker-runs evidence list (#7975), harness-health compaction/handoff lists (#7981), agent-detail owned-tasks + histories (#7982), and runtime-monitor model-id/tool-name search (#7957).
+  - Keyboard shortcuts for connector navigation (1–4, ?) (#7958).
+  - Keeper modal KPIs regrouped into 4 question-led sections (#7946).
+  - Live Judge promoted to page title; empty toolbar card purged (#7969).
+  - Cascade Profiles + Keeper Mapping merged into one Cascade Routing card (#7986).
+  - Toast module caps visible toasts at 5 with test coverage (#7985).
+  - AA accessibility pass on connector readiness rail (#7960).
+  - Zod parse boundary for SSE events (#7955).
+  - Outcomes rollup added to keeper JSON response (#7941).
+  - Autoresearch loops API + list UI gain pagination (#7861).
+
+- **Keeper / server / lib.**
+  - Keeper behavioral regime deriver MVP (7th FSM axis: Crashing/Thrashing/Healthy) (#7968).
+  - HTTP transport session/conn registries: global mutexes eliminated via lock-free atomic maps (#7979).
+  - `a2a` global mutexes eliminated via lock-free atomic maps (#7857).
+  - Dashboard cache global mutex eliminated via lock-free atomic map (#7953).
+  - New `Lockfree_atomic` helper module extracted for reuse (#7952).
+  - `bash exec` substrate semantics hardened (#7891).
+  - Board flusher actor started with jsonl backend (#7915).
+  - Autoresearch: exception-throwing serde helpers removed (#7942).
+  - Dashboard: unexport internal-only helpers across 2 component files (#7977).
+  - Dead cluster removal: `governance-panels/detail/strips` (follow-up #7927) (#7962), 3 orphan components (mission, connector-binding-summary, execution/shared) (#7938), orphan `keeper_handoff_delta` module (#7948).
+
+- **Spec / docs / tooling.**
+  - TLA+: `KeeperConditionsGovernPhase` liveness spec + clean/buggy cfg pair (#7965).
+  - Spec §2 module table + §17 references synced with `lib/coord/` (room → coord rename) (#7954).
+  - Comprehensive glossary sync: Chain/CP/agent_ecosystem/context_budget retired (#7964).
+  - Keeper spec §05 synced with current keeper module layout (#7972).
+  - Dead `code_refs` dropped (`sdk_version.ml`, `agent_ecosystem`, `message_schema`); §6 retired (#7945).
+  - Retired CP/MDAL dropped from `DASHBOARD-INTEGRATION`; self-contradicting `BENCHMARK-RUNBOOK` note fixed (#7943).
+  - Runtime gate for frontmatter `code_refs` existence (#7966).
+  - OAS pin bumped to `cb4beb52` (PR-O2 pipeline → `Complete.complete`) (#7956).
+  - `oas-pin` orphan SHA `6c79cf3f` replaced with ref-reachable `f2387e2a` (#7898).
 
 ### Deprecated
-- TBD
+
+- None.
 
 ## [0.9.9] - 2026-04-17
 

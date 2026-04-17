@@ -9,7 +9,7 @@
 
 ## 1. Problem
 
-The keeper runtime already exposes **5 orthogonal FSM axes** per entity and a **4-invariant joint specification** verifying their composition:
+The keeper runtime exposes **6 orthogonal FSM axes** per entity and a **4-invariant joint specification** verifying their composition:
 
 | Axis | Code site                           | States                                                                    | TLA+ spec                              |
 | ---- | ----------------------------------- | ------------------------------------------------------------------------- | -------------------------------------- |
@@ -18,6 +18,7 @@ The keeper runtime already exposes **5 orthogonal FSM axes** per entity and a **
 | KDP  | `keeper_registry.mli:decision_stage`| undecided / guard_ok / gate_rejected / tool_policy_selected               | `KeeperDecisionPipeline.tla`           |
 | KCL  | `keeper_registry.mli:cascade_state` | idle / selecting / trying / done / exhausted                              | `KeeperCascadeLifecycle.tla`           |
 | KMC  | `keeper_registry.mli:compaction_stage` | accumulating / compacting / done                                        | `KeeperCompactionLifecycle.tla`        |
+| KCB  | `keeper_failure_circuit_breaker.ml` (counter-based) | clean / warning / cooling — `tripped` is unobservable because the mutator resets `consecutive_count` during the trip transition | `KeeperCircuitBreaker.tla`             |
 
 The joint invariants (`phase_turn_alignment`, `no_cascade_before_measurement`, `compaction_atomicity`, `event_priority_monotone`) are already wired into `fsm-hub-types.ts:InvariantViolationCounts` and tracked in `HubState.invariantViolations`.
 
@@ -26,7 +27,7 @@ The joint invariants (`phase_turn_alignment`, `no_cascade_before_measurement`, `
 - Backend endpoint: `GET /api/v1/keepers/<name>/composite` — one keeper per call.
 - Dashboard component: `FsmHub` in `agents-unified.ts:100` — renders the selected keeper only.
 
-An operator who wants to *compare* keeper A's 5-axis state to keeper B's, or see which lanes across the fleet are stuck, has to page through keepers one at a time. The orthogonal structure is present in the data but **invisible at the fleet level**.
+An operator who wants to *compare* keeper A's 6-axis state to keeper B's, or see which lanes across the fleet are stuck, has to page through keepers one at a time. The orthogonal structure is present in the data but **invisible at the fleet level**.
 
 ## 2. Design
 
@@ -35,16 +36,16 @@ An operator who wants to *compare* keeper A's 5-axis state to keeper B's, or see
 Four dimensions on a 2-D screen:
 
 ```
-            ┌─ axis 1 ─┬─ axis 2 ─┬─ axis 3 ─┬─ axis 4 ─┬─ axis 5 ─┐
-keeper A    │ ▮▮▮▮▮▯▯  │ ▮▮▮▯▮▮▮  │ ▯▮▮▮▮▮▮  │ ▮▮▮▮▮▮▮  │ ▮▮▯▮▮▮▮  │
-keeper B    │ ▯▮▮▮▮▮▮  │ ▯▯▯▮▮▮▮  │ ▮▮▮▯▯▮▮  │ ▮▮▮▮▯▯▯  │ ▮▮▮▮▮▮▮  │
-keeper C    │ ▮▮▮▮▮▮▮  │ ▯▯▮▮▮▮▮  │ ▮▮▮▮▯▮▮  │ ▮▯▯▮▮▮▮  │ ▮▮▮▮▮▮▮  │
-            └──────────┴──────────┴──────────┴──────────┴──────────┘
+            ┌─ axis 1 ─┬─ axis 2 ─┬─ axis 3 ─┬─ axis 4 ─┬─ axis 5 ─┬─ axis 6 ─┐
+keeper A    │ ▮▮▮▮▮▯▯  │ ▮▮▮▯▮▮▮  │ ▯▮▮▮▮▮▮  │ ▮▮▮▮▮▮▮  │ ▮▮▯▮▮▮▮  │ ▮▮▮▮▮▮▮  │
+keeper B    │ ▯▮▮▮▮▮▮  │ ▯▯▯▮▮▮▮  │ ▮▮▮▯▯▮▮  │ ▮▮▮▮▯▯▯  │ ▮▮▮▮▮▮▮  │ ▯▮▮▮▮▮▮  │
+keeper C    │ ▮▮▮▮▮▮▮  │ ▯▯▮▮▮▮▮  │ ▮▮▮▮▯▮▮  │ ▮▯▯▮▮▮▮  │ ▮▮▮▮▮▮▮  │ ▮▮▯▯▮▮▮  │
+            └──────────┴──────────┴──────────┴──────────┴──────────┴──────────┘
 row = keeper, col = FSM axis, cell = last N state chips (horizontal time axis).
 ```
 
 - **Row**: keeper identity.
-- **Column**: FSM axis (fixed order: KSM, KTC, KDP, KCL, KMC).
+- **Column**: FSM axis (fixed order: KSM, KTC, KDP, KCL, KMC, KCB).
 - **Cell**: N ≤ 30 horizontal chips, one per snapshot tick (oldest → newest left-to-right). Colour encodes state; non-transition ticks collapse to the same chip length so stalls become visibly wider blocks.
 - **Time**: per-cell horizontal (same domain as the existing `MAX_OBSERVATIONS = 30`).
 
@@ -122,7 +123,7 @@ Each PR carries its own test suite. No PR merges without a TLA+ reference if it 
 | Risk                                            | Mitigation                                                               |
 | ----------------------------------------------- | ------------------------------------------------------------------------ |
 | Fleet endpoint N+1: poll every keeper serially  | Observer fold at snapshot time; single JSON payload.                     |
-| Dashboard render cost for 20 keepers × 5 axes × 30 chips | 3,000 DOM nodes — handled. CSS grid + state-chip memoization.      |
+| Dashboard render cost for 20 keepers × 6 axes × 30 chips | 3,600 DOM nodes — handled. CSS grid + state-chip memoization.      |
 | Drift between spec and code                     | LT-15 produces drift table; any column with drift blocks its axis from matrix until resolved. |
 | OAS silent FSMs leak through envelope causality | LT-14 publishes only; does not change state. OAS must not know MASC remains enforced. |
 | Matrix overflows viewport at fleet > 50         | Row virtualisation + sort-by-violation-count. Defer until needed.        |

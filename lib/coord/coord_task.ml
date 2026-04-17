@@ -524,10 +524,16 @@ let claim_task config ~agent_name ~task_id =
       let backlog = read_backlog_or_raise config in
       let found = ref false in
       let already_claimed = ref None in
+      let blocked_reason = ref None in
       let new_tasks = List.map (fun task ->
         if task.id = task_id then begin
           found := true;
+          (* Cycle-prevention gate: see _r variant below for rationale. *)
+          (match task.do_not_reclaim_reason with
+           | Some r -> blocked_reason := Some r
+           | None -> ());
           match task.task_status with
+          | _ when !blocked_reason <> None -> task
           | Todo ->
               { task with task_status = Claimed { assignee = agent_name; claimed_at = now_iso () } }
           | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ }
@@ -538,7 +544,10 @@ let claim_task config ~agent_name ~task_id =
       ) backlog.tasks in
       if not !found then
         Printf.sprintf "❌ Task %s not found" task_id
-      else match !already_claimed with
+      else match !blocked_reason with
+        | Some r -> Printf.sprintf "🚫 Task %s blocked from re-claim: %s" task_id r
+        | None ->
+      (match !already_claimed with
         | Some other -> Printf.sprintf "⚠ Task %s is already claimed by %s" task_id other
         | None ->
             let new_backlog = {
@@ -570,7 +579,7 @@ let claim_task config ~agent_name ~task_id =
                      (Types.Claimed
                         { assignee = agent_name; claimed_at = now_iso () })
                    ());
-            Printf.sprintf "✅ %s claimed %s" agent_name task_id
+            Printf.sprintf "✅ %s claimed %s" agent_name task_id)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
@@ -619,6 +628,17 @@ let claim_task_r config ~agent_name ~task_id
             actual = Types_core.role_to_string agent_role;
           })
         else Ok ()
+      in
+      (* Cycle-prevention gate: refuse claim when do_not_reclaim_reason is set.
+         The reason is populated by the cancel hook (3+ cancels or hard-stop
+         keywords) or by the operator directly. See PRs #7794 (schema),
+         #7798 (cancel hook). *)
+      let* () =
+        match task.do_not_reclaim_reason with
+        | None -> Ok ()
+        | Some r ->
+            Error (Types.TaskInvalidState
+              (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r))
       in
       (* fold_left to find+transform in a single pass without mutable refs.
          Uses polymorphic variants for inline state tracking. *)

@@ -46,8 +46,8 @@ let get_bool ~default name =
   match raw_value_opt name with
   | Some v ->
       (match String.trim v |> String.lowercase_ascii with
-       | "true" | "1" | "yes" -> true
-       | "false" | "0" | "no" -> false
+       | "true" | "1" | "yes" | "on" -> true
+       | "false" | "0" | "no" | "off" -> false
        | "" -> default
        | _ -> default)
   | None -> default

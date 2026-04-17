@@ -249,12 +249,48 @@ let proactive_cycle_outcome_to_string = function
 let proactive_cycle_outcome_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
   | "never_started" -> Proactive_never_started
+  | "unknown" -> Proactive_unknown
   | "silent" -> Proactive_silent
   | "text_response" -> Proactive_text_response
   | "tool_use" -> Proactive_tool_use
   | "mixed_response" -> Proactive_mixed_response
   | "error" -> Proactive_error
   | _ -> Proactive_unknown
+;;
+
+(* Round-trip guard: [proactive_cycle_outcome_to_string] already fails to
+   compile when a new variant is added (its match has no wildcard).  This
+   assertion enforces the other direction — if a new variant's label is
+   not wired through [proactive_cycle_outcome_of_string], the round-trip
+   silently collapses the new case to [Proactive_unknown] and leaks it at
+   runtime.  The exhaustive pattern inside [assert_roundtrip] makes
+   adding a variant a compile error until the parser is extended too. *)
+let () =
+  let assert_roundtrip v =
+    (match v with
+     | Proactive_never_started
+     | Proactive_unknown
+     | Proactive_silent
+     | Proactive_text_response
+     | Proactive_tool_use
+     | Proactive_mixed_response
+     | Proactive_error -> ());
+    let s = proactive_cycle_outcome_to_string v in
+    if proactive_cycle_outcome_of_string s <> v then
+      failwith
+        (Printf.sprintf
+           "keeper_types: proactive round-trip broken for label %S" s)
+  in
+  List.iter
+    assert_roundtrip
+    [ Proactive_never_started
+    ; Proactive_unknown
+    ; Proactive_silent
+    ; Proactive_text_response
+    ; Proactive_tool_use
+    ; Proactive_mixed_response
+    ; Proactive_error
+    ]
 ;;
 
 let scheduled_autonomous_cycle_outcome_to_string =

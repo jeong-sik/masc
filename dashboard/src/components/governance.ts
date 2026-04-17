@@ -393,11 +393,57 @@ function DecisionInbox() {
   `
 }
 
+export function judgmentsEmptyStateMessage(): { message: string; tone: 'warn' | 'default' } {
+  const judge = governanceData.value?.judge
+  const summary = governanceData.value?.summary
+  const lastError = judge?.last_error?.trim()
+  if (lastError) {
+    return { message: `AI Judge 오류: ${lastError}`, tone: 'warn' }
+  }
+  const judgeOnline = judge?.judge_online ?? summary?.judge_online
+  if (judgeOnline === false) {
+    return { message: 'AI Judge 오프라인 — keeper 기동 여부를 확인하세요.', tone: 'warn' }
+  }
+  const lastSeen = judge?.generated_at ?? summary?.judge_last_seen_at
+  if (lastSeen) {
+    return { message: '최근 판단 이후 새 입력 대기 중입니다. keeper가 새 판단을 올리면 여기 표시됩니다.', tone: 'default' }
+  }
+  return { message: 'AI Judge가 판단을 생성하면 자동으로 여기 표시됩니다. 현재 수집된 판단이 없습니다.', tone: 'default' }
+}
+
 function JudgmentsSection() {
   const judgments = governanceData.value?.judgments ?? []
-  if (judgments.length === 0) return null
+  const isRetired = governanceCaseTrackingRetired()
+  const title = isRetired ? 'AI Judge 판단 (live)' : 'AI Judge 판단'
+
+  if (judgments.length === 0) {
+    if (!isRetired) return null
+    const { message, tone } = judgmentsEmptyStateMessage()
+    const judge = governanceData.value?.judge
+    const lastSeen = judge?.generated_at ?? governanceData.value?.summary?.judge_last_seen_at
+    const meta = [judge?.keeper_name, judge?.model_used].filter((value): value is string => typeof value === 'string' && value.length > 0).join(' · ')
+    const chipClass = tone === 'warn'
+      ? 'border-warn/30 bg-warn/10 text-warn'
+      : 'border-[var(--card-border)] bg-[var(--white-3)] text-text-muted'
+    return html`
+      <div data-testid="live-judge-empty">
+        <${Card} title=${title} class="section mb-5" variant="compact">
+          <${EmptyState} message=${message} compact />
+          ${lastSeen || meta ? html`
+            <div class="mt-1 flex flex-wrap items-center justify-center gap-2 text-[11px] ${tone === 'warn' ? 'text-warn' : 'text-text-dim'}">
+              ${lastSeen ? html`<span class="inline-flex items-center rounded-md border ${chipClass} px-2 py-0.5 font-medium">
+                마지막 판단 <${TimeAgo} timestamp=${lastSeen} />
+              </span>` : null}
+              ${meta ? html`<span class="font-mono opacity-75">${meta}</span>` : null}
+            </div>
+          ` : null}
+        <//>
+      </div>
+    `
+  }
+
   return html`
-    <${Card} title=${governanceCaseTrackingRetired() ? 'AI Judge 판단 (live)' : 'AI Judge 판단'} class="section mb-5" variant="compact">
+    <${Card} title=${title} class="section mb-5" variant="compact">
       <div class="flex flex-col gap-2.5">
         ${judgments.map(j => html`
           <div class="rounded-lg border border-card-border bg-card/34 p-3.5 text-[13px]" data-testid="judgment-item">

@@ -479,22 +479,22 @@ type post_hook = Tool_result.t -> Tool_result.t
 
 ```ocaml
 type module_tag =
-  | Mod_plan | Mod_run | Mod_operator | Mod_command_plane
-  | Mod_local_runtime | Mod_team_session | Mod_voice | Mod_cache
-  | Mod_tempo | Mod_portal | Mod_worktree
-  | Mod_code_swarm | Mod_code | Mod_code_write | Mod_vote | Mod_social
-  | Mod_council | Mod_a2a | Mod_handover
-  | Mod_relay | Mod_goals | Mod_heartbeat | Mod_encryption
-  | Mod_auth | Mod_hat | Mod_audit | Mod_rate_limit
-  | Mod_cost | Mod_agent | Mod_task | Mod_room
+  | Mod_plan | Mod_operator
+  | Mod_local_runtime
+  | Mod_worktree
+  | Mod_code | Mod_code_write
+  | Mod_a2a
+  | Mod_run
+  | Mod_compact
+  | Mod_agent | Mod_task | Mod_room
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
-  | Mod_library | Mod_keeper | Mod_compact | Mod_mdal
-  | Mod_notifications | Mod_inline
-  | Mod_autoresearch | Mod_research | Mod_model_catalog
-  | Mod_shard | Mod_fire_task
+  | Mod_library | Mod_keeper
+  | Mod_inline
+  | Mod_autoresearch
+  | Mod_shard
 ```
 
-43개 variant. 도구 이름으로 O(1) tag lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다.
+21개 variant (SSOT: `lib/tool_dispatch.mli`). 도구 이름으로 O(1) tag lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다. Retired 모듈들(command_plane, team_session, voice, mdal, goals, heartbeat, encryption, auth, hat, audit, rate_limit, cost, social, vote, council, handover, relay, cache, tempo, portal, code_swarm, notifications, research, model_catalog, fire_task)은 tag 목록에서 제거됐다.
 
 ### 4.4 Tool_result.t (structured)
 

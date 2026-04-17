@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useSignal } from '@preact/signals'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
@@ -56,6 +57,57 @@ function buildCommentTree(comments: BoardComment[]): { roots: BoardComment[]; ch
   return { roots, childrenMap }
 }
 
+/**
+ * Pure tree-aware text filter on a comment forest.
+ *
+ * Case-insensitive substring match on `comment.content`.
+ *
+ * A comment is kept if it matches OR any descendant matches. The ancestor
+ * chain is preserved so matches retain their reply context. The returned
+ * `childrenMap` contains only entries whose child list survived filtering.
+ *
+ * Empty/whitespace query returns the original `{ roots, childrenMap }` by
+ * reference (no new allocations, preserves referential equality for memo).
+ *
+ * Input collections are never mutated.
+ */
+export function filterCommentTree(
+  roots: readonly BoardComment[],
+  childrenMap: ReadonlyMap<string, readonly BoardComment[]>,
+  query: string,
+): { roots: readonly BoardComment[]; childrenMap: ReadonlyMap<string, readonly BoardComment[]> } {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return { roots, childrenMap }
+
+  const matches = (c: BoardComment): boolean =>
+    (c.content ?? '').toLowerCase().includes(needle)
+
+  const nextChildren = new Map<string, readonly BoardComment[]>()
+
+  // Recursively returns a filtered child list if any descendant (or self) matches.
+  // Side effect: populates `nextChildren` for any parent whose filtered child list
+  // is non-empty.
+  const walk = (c: BoardComment): boolean => {
+    const children = childrenMap.get(c.id) ?? []
+    const keptChildren: BoardComment[] = []
+    for (const child of children) {
+      if (walk(child)) keptChildren.push(child)
+    }
+    const selfMatches = matches(c)
+    if (keptChildren.length > 0) {
+      nextChildren.set(c.id, keptChildren)
+      return true
+    }
+    return selfMatches
+  }
+
+  const nextRoots: BoardComment[] = []
+  for (const r of roots) {
+    if (walk(r)) nextRoots.push(r)
+  }
+  return { roots: nextRoots, childrenMap: nextChildren }
+}
+
 // ── Comment item ───────────────────────────────────────────────────
 function CommentItem({
   comment,
@@ -66,7 +118,7 @@ function CommentItem({
   comment: BoardComment
   postId: string
   depth?: number
-  childrenMap: Map<string, BoardComment[]>
+  childrenMap: ReadonlyMap<string, readonly BoardComment[]>
 }) {
   const contentChars = Array.from(comment.content ?? '')
   const needsTruncation = contentChars.length > 300
@@ -135,24 +187,47 @@ function CommentItem({
 
 // ── Comment thread ─────────────────────────────────────────────────
 export function CommentThread({ comments, postId }: { comments: BoardComment[]; postId: string }) {
+  const query = useSignal('')
+  const [expanded, setExpanded] = useState(false)
+  const INITIAL_SHOW = 5
+
+  const { roots, childrenMap } = useMemo(() => buildCommentTree(comments), [comments])
+  const { roots: filteredRoots, childrenMap: filteredChildrenMap } = useMemo(
+    () => filterCommentTree(roots, childrenMap, query.value),
+    [roots, childrenMap, query.value],
+  )
+
   if (comments.length === 0) return html`<${EmptyState} message="아직 댓글이 없습니다" compact />`
 
-  const { roots, childrenMap } = buildCommentTree(comments)
-  const INITIAL_SHOW = 5
-  const [expanded, setExpanded] = useState(false)
-  const hiddenCount = roots.length - INITIAL_SHOW
-  const visible = expanded || roots.length <= INITIAL_SHOW ? roots : roots.slice(-INITIAL_SHOW)
+  const isFiltering = query.value.trim() !== ''
+  const hiddenCount = filteredRoots.length - INITIAL_SHOW
+  const visible = expanded || filteredRoots.length <= INITIAL_SHOW
+    ? filteredRoots
+    : filteredRoots.slice(-INITIAL_SHOW)
 
   return html`
     <div class="flex flex-col gap-2">
-      <div class="text-[11px] text-[var(--text-muted)] mb-1">댓글 ${comments.length}개</div>
+      <div class="flex items-center gap-2 mb-1">
+        <div class="text-[11px] text-[var(--text-muted)]">댓글 ${comments.length}개${isFiltering ? ` · 일치 ${filteredRoots.length}` : ''}</div>
+        <input
+          type="search"
+          value=${query.value}
+          placeholder="댓글 내용 검색"
+          aria-label="댓글 필터"
+          onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
+          class="ml-auto min-w-[140px] max-w-[220px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+        />
+      </div>
+      ${isFiltering && filteredRoots.length === 0 ? html`
+        <${EmptyState} message=${`"${query.value.trim()}" 일치하는 댓글 없음`} compact />
+      ` : null}
       ${!expanded && hiddenCount > 0 ? html`
         <button type="button"
           class="text-[12px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0 text-left py-1"
           onClick=${() => setExpanded(true)}
         >이전 댓글 ${hiddenCount}개 더 보기</button>
       ` : null}
-      ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} childrenMap=${childrenMap} />`)}
+      ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} childrenMap=${filteredChildrenMap} />`)}
       ${expanded && hiddenCount > 0 ? html`
         <button type="button"
           class="text-[12px] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 text-left py-1"

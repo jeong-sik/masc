@@ -55,7 +55,8 @@ vi.mock('./memory-state', () => ({
   refreshBoard: vi.fn(),
 }))
 
-import { CommentThread, PostDetail } from './memory-post-detail'
+import { CommentThread, PostDetail, filterCommentTree } from './memory-post-detail'
+import type { BoardComment } from '../types/core'
 
 afterEach(() => {
   cleanup()
@@ -86,6 +87,100 @@ describe('CommentThread', () => {
 
     expect(screen.getByText('orphan reply still visible')).toBeInTheDocument()
     expect(screen.getByText(/댓글 1개/)).toBeInTheDocument()
+  })
+})
+
+describe('filterCommentTree', () => {
+  const comment = (
+    id: string,
+    parent_id: string | null,
+    content: string,
+  ): BoardComment => ({
+    id,
+    post_id: 'post-1',
+    parent_id,
+    author: 'agent',
+    content,
+    created_at: '2026-04-17T00:00:00Z',
+  })
+
+  // Tree:
+  //   r1 "alpha"
+  //     c11 "beta"
+  //       c111 "gamma"
+  //   r2 "delta"
+  //     c21 "epsilon"
+  const r1 = comment('r1', null, 'alpha')
+  const c11 = comment('c11', 'r1', 'beta')
+  const c111 = comment('c111', 'c11', 'gamma')
+  const r2 = comment('r2', null, 'delta')
+  const c21 = comment('c21', 'r2', 'epsilon')
+
+  const roots: readonly BoardComment[] = [r1, r2]
+  const childrenMap = new Map<string, readonly BoardComment[]>([
+    ['r1', [c11]],
+    ['c11', [c111]],
+    ['r2', [c21]],
+  ])
+
+  it('returns original references on empty query (ref-equal)', () => {
+    const out = filterCommentTree(roots, childrenMap, '')
+    expect(out.roots).toBe(roots)
+    expect(out.childrenMap).toBe(childrenMap)
+  })
+
+  it('returns original references on whitespace-only query', () => {
+    const out = filterCommentTree(roots, childrenMap, '   ')
+    expect(out.roots).toBe(roots)
+    expect(out.childrenMap).toBe(childrenMap)
+  })
+
+  it('matches direct root substring case-insensitively', () => {
+    const out = filterCommentTree(roots, childrenMap, 'ALPHA')
+    expect(out.roots.map(c => c.id)).toEqual(['r1'])
+    // r1 alone matches; its descendants are not kept (only ancestor chain is preserved up, not descendants down).
+    expect(out.childrenMap.get('r1')).toBeUndefined()
+  })
+
+  it('preserves ancestor chain when a deep descendant matches', () => {
+    const out = filterCommentTree(roots, childrenMap, 'gamma')
+    expect(out.roots.map(c => c.id)).toEqual(['r1'])
+    expect(out.childrenMap.get('r1')?.map(c => c.id)).toEqual(['c11'])
+    expect(out.childrenMap.get('c11')?.map(c => c.id)).toEqual(['c111'])
+    expect(out.childrenMap.get('r2')).toBeUndefined()
+    expect(out.childrenMap.get('c21')).toBeUndefined()
+  })
+
+  it('preserves ancestor when intermediate child matches', () => {
+    const out = filterCommentTree(roots, childrenMap, 'beta')
+    expect(out.roots.map(c => c.id)).toEqual(['r1'])
+    expect(out.childrenMap.get('r1')?.map(c => c.id)).toEqual(['c11'])
+    // c11 itself matches but has no matched descendants -> no entry for c11.
+    expect(out.childrenMap.get('c11')).toBeUndefined()
+  })
+
+  it('returns empty roots on no match', () => {
+    const out = filterCommentTree(roots, childrenMap, 'zzzzz')
+    expect(out.roots).toEqual([])
+    expect(out.childrenMap.size).toBe(0)
+  })
+
+  it('trims the query before matching', () => {
+    const out = filterCommentTree(roots, childrenMap, '   alpha   ')
+    expect(out.roots.map(c => c.id)).toEqual(['r1'])
+  })
+
+  it('does not mutate the original collections', () => {
+    const rootsSnapshot = [...roots]
+    const childrenSnapshot = new Map(
+      [...childrenMap.entries()].map(([k, v]) => [k, [...v]] as const),
+    )
+    filterCommentTree(roots, childrenMap, 'gamma')
+    expect(roots).toEqual(rootsSnapshot)
+    expect(childrenMap.size).toBe(childrenSnapshot.size)
+    for (const [k, v] of childrenSnapshot) {
+      expect([...(childrenMap.get(k) ?? [])]).toEqual([...v])
+    }
   })
 })
 

@@ -356,6 +356,52 @@ let test_vote_flip () =
       | Ok score ->
           Alcotest.(check int) "score after flip" (-1) score
 
+let test_vote_persisted_by_flusher_actor () =
+  try
+    Eio_main.run @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let clock = Eio.Stdenv.clock env in
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Eio_context.with_test_env
+      ~net:(Eio.Stdenv.net env)
+      ~clock
+      ~mono_clock:(Eio.Stdenv.mono_clock env)
+      ~sw
+      (fun () ->
+        ignore (fresh_test_base_path ());
+        Board.reset_global_for_test ();
+        Board_dispatch.reset_for_test ();
+        Board_dispatch.init_jsonl ();
+        let post_id =
+          match
+            Board_dispatch.create_post ~author:"persist-test" ~content:"persist my vote"
+              ~post_kind:Board.Human_post ()
+          with
+          | Error e -> Alcotest.fail (Board.show_board_error e)
+          | Ok post -> Board.Post_id.to_string post.id
+        in
+        (match Board_dispatch.vote ~voter:"judge" ~post_id ~direction:Board.Up with
+         | Error e -> Alcotest.fail (Board.show_board_error e)
+         | Ok _ -> ());
+        let store =
+          match Board_dispatch.backend () with
+          | Board_dispatch.Jsonl store -> store
+        in
+        store.last_flush <- 0.0;
+        (match Board_dispatch.get_post ~post_id with
+         | Ok _ -> ()
+         | Error e -> Alcotest.fail (Board.show_board_error e));
+        Eio.Time.sleep clock 0.1;
+        Board.reset_global_for_test ();
+        Board_dispatch.reset_for_test ();
+        Board_dispatch.init_jsonl ();
+        (match Board_dispatch.get_post ~post_id with
+         | Error e -> Alcotest.fail (Board.show_board_error e)
+         | Ok post ->
+             Alcotest.(check int) "vote persisted after restart" 1 post.votes_up);
+        Eio.Switch.fail sw Exit)
+  with Exit -> ()
+
 (** {1 Stats / Search / Hearth} *)
 
 let test_stats () =
@@ -472,6 +518,8 @@ let () =
       Alcotest.test_case "upvote" `Quick (with_eio test_vote_post);
       Alcotest.test_case "dedup" `Quick (with_eio test_vote_dedup);
       Alcotest.test_case "flip" `Quick (with_eio test_vote_flip);
+      Alcotest.test_case "vote persisted by flusher actor" `Quick
+        test_vote_persisted_by_flusher_actor;
     ];
     "misc", [
       Alcotest.test_case "stats" `Quick (with_eio test_stats);

@@ -17,6 +17,11 @@ import {
   safeParseKeeperChatHistoryMessage,
   type KeeperChatHistoryMessage,
 } from './schemas/keeper-chat-history'
+import {
+  parseKeeperTransitionsResponse,
+  type KeeperTransition,
+  type KeeperTransitionsResponse,
+} from './schemas/keeper-transitions'
 
 export type {
   KeeperCompositeSnapshot,
@@ -42,6 +47,8 @@ export {
   KeeperChatHistoryMessageSchema,
   safeParseKeeperChatHistoryMessage,
 } from './schemas/keeper-chat-history'
+export type { KeeperTransition, KeeperTransitionsResponse }
+export { KeeperTransitionsSchemaDriftError } from './schemas/keeper-transitions'
 
 // --- Types ---
 
@@ -509,21 +516,6 @@ export async function editKeeperTools(
 
 // --- Keeper observability API ---
 
-export interface KeeperTransition {
-  prev_phase: string
-  new_phase: string
-  selected_event: unknown
-  wall_clock_at_decision: number
-  transition_outcome: string
-}
-
-export interface KeeperTransitionsResponse {
-  keeper: string
-  current_phase: string | null
-  count: number
-  transitions: KeeperTransition[]
-}
-
 export interface MemoryKindUsageEntry {
   kind: string
   used: number
@@ -559,7 +551,7 @@ export async function fetchKeeperTransitions(
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`transitions fetch failed: ${resp.status}`)
-  return resp.json() as Promise<KeeperTransitionsResponse>
+  return parseKeeperTransitionsResponse(await resp.json())
 }
 
 export async function fetchKeeperStateDiagram(

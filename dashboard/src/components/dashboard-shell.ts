@@ -25,6 +25,7 @@ const buildIdentityOpen = signal(false)
 const LazyStatus = lazy(async () => ({ default: (await import('./status')).Status }))
 const LazyWork = lazy(async () => ({ default: (await import('./work')).Work }))
 const LazyOperations = lazy(async () => ({ default: (await import('./control')).Operations }))
+const LazyConnectors = lazy(async () => ({ default: (await import('./connector-status')).ConnectorStatusPanel }))
 const LazyLabSurface = lazy(async () => ({ default: (await import('./lab')).Lab }))
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 
@@ -281,6 +282,12 @@ export function TabContent() {
       return html`
         <${Suspense} fallback=${lazyTabFallback('운영 화면')}>
           <${LazyOperations} />
+        <//>
+      `
+    case 'connectors':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('커넥터 화면')}>
+          <${LazyConnectors} />
         <//>
       `
     case 'lab':

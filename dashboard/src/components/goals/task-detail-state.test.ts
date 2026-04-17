@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { filterTaskEvents } from './task-detail-state'
+import { filterGoalRelations, filterTaskEvents } from './task-detail-state'
 import type { NormalizedTaskEvent } from './task-detail-state'
+import type { Goal } from '../../types'
 
 const sample: NormalizedTaskEvent[] = [
   {
@@ -96,5 +97,81 @@ describe('filterTaskEvents', () => {
   it('can match multiple rows when substring is shared', () => {
     const out = filterTaskEvents(sample, 'keeper')
     expect(out.map(e => e.label)).toEqual(['claim', 'done'])
+  })
+})
+
+function makeGoal(overrides: Partial<Goal> = {}): Goal {
+  return {
+    id: 'g-1',
+    horizon: 'short',
+    title: 'default title',
+    metric: null,
+    target_value: null,
+    due_date: null,
+    priority: 3,
+    status: 'active',
+    parent_goal_id: null,
+    last_review_note: null,
+    last_review_at: null,
+    created_at: '2026-04-17T00:00:00Z',
+    updated_at: '2026-04-17T00:00:00Z',
+    ...overrides,
+  }
+}
+
+describe('filterGoalRelations', () => {
+  const store: Record<string, Goal> = {
+    'g-alpha': makeGoal({ id: 'g-alpha', title: 'Reduce tool error rate', status: 'active', metric: 'error_rate' }),
+    'g-beta': makeGoal({ id: 'g-beta', title: 'Lift cascade coverage', status: 'paused', metric: 'coverage_pct' }),
+    'g-gamma': makeGoal({ id: 'g-gamma', title: 'Keeper idle audit', status: 'completed', metric: null }),
+  }
+  const ids: string[] = ['g-alpha', 'g-beta', 'g-gamma', 'g-orphan']
+  const resolve = (id: string): Goal | undefined => store[id]
+
+  it('returns the input reference when query is empty', () => {
+    expect(filterGoalRelations(ids, '', resolve)).toBe(ids)
+  })
+
+  it('returns the input reference for whitespace-only query', () => {
+    expect(filterGoalRelations(ids, '   ', resolve)).toBe(ids)
+  })
+
+  it('trims query before matching', () => {
+    expect(filterGoalRelations(ids, '  alpha  ', resolve)).toEqual(['g-alpha'])
+  })
+
+  it('matches resolved goal title (case-insensitive)', () => {
+    const out = filterGoalRelations(ids, 'CASCADE', resolve)
+    expect(out).toEqual(['g-beta'])
+  })
+
+  it('matches resolved goal status', () => {
+    const out = filterGoalRelations(ids, 'paused', resolve)
+    expect(out).toEqual(['g-beta'])
+  })
+
+  it('matches resolved goal metric substring', () => {
+    const out = filterGoalRelations(ids, 'coverage', resolve)
+    expect(out).toEqual(['g-beta'])
+  })
+
+  it('matches raw id even when the goal is unresolved', () => {
+    const out = filterGoalRelations(ids, 'orphan', resolve)
+    expect(out).toEqual(['g-orphan'])
+  })
+
+  it('returns empty when no id or resolved field matches', () => {
+    expect(filterGoalRelations(ids, 'nonexistent-token', resolve)).toHaveLength(0)
+  })
+
+  it('does not mutate the input array', () => {
+    const before = ids.slice()
+    filterGoalRelations(ids, 'alpha', resolve)
+    expect(ids).toEqual(before)
+  })
+
+  it('matches multiple ids sharing a substring and preserves input order', () => {
+    const out = filterGoalRelations(ids, 'g-', resolve)
+    expect(out).toEqual(['g-alpha', 'g-beta', 'g-gamma', 'g-orphan'])
   })
 })

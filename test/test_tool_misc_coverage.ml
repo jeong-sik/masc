@@ -70,6 +70,27 @@ let make_test_ctx () =
   let _ = Coord.init config ~agent_name:(Some "test-agent") in
   { Tool_misc.config; agent_name = "test-agent" }
 
+let write_team_memory_keeper_meta ~config ~name ~shared_memory_scope =
+  let agent_name = Printf.sprintf "keeper-%s-agent" name in
+  let meta_json =
+    `Assoc
+      [
+        ("name", `String name);
+        ("agent_name", `String agent_name);
+        ("trace_id", `String ("trace-" ^ name));
+        ("goal", `String "team memory fixture");
+        ("shared_memory_scope", `String shared_memory_scope);
+      ]
+  in
+  let meta =
+    match Keeper_types.meta_of_json meta_json with
+    | Ok meta -> meta
+    | Error err -> failwith ("meta_of_json failed: " ^ err)
+  in
+  match Keeper_types.write_meta ~force:true config meta with
+  | Ok () -> agent_name
+  | Error err -> failwith ("write_meta failed: " ^ err)
+
 (* Test dispatch returns None for unknown tool *)
 let () = test "dispatch_unknown_tool" (fun () ->
   let ctx = make_test_ctx () in
@@ -125,6 +146,53 @@ let () = test "dispatch_dashboard_current_scope" (fun () ->
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"
+)
+
+let () = test "dispatch_team_memory_write_and_read" (fun () ->
+  let ctx = make_test_ctx () in
+  let agent_name =
+    write_team_memory_keeper_meta ~config:ctx.config ~name:"room-alpha"
+      ~shared_memory_scope:"room"
+  in
+  let keeper_ctx : Tool_misc.context =
+    { config = ctx.config; agent_name }
+  in
+  let write_body =
+    match
+      Tool_misc.dispatch keeper_ctx ~name:"masc_team_memory_write"
+        ~args:
+          (`Assoc
+            [
+              ("room", `String "default");
+              ("key", `String "handoff/summary.md");
+              ("content", `String "shared summary");
+            ])
+    with
+    | Some (true, body) -> body
+    | Some (false, err) -> failwith err
+    | None -> failwith "dispatch returned None"
+  in
+  let write_json = parse_json write_body in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "write key" "handoff/summary.md"
+    (write_json |> member "key" |> to_string);
+  let read_body =
+    match
+      Tool_misc.dispatch keeper_ctx ~name:"masc_team_memory_read"
+        ~args:
+          (`Assoc
+            [
+              ("room", `String "default");
+              ("key", `String "handoff/summary.md");
+            ])
+    with
+    | Some (true, body) -> body
+    | Some (false, err) -> failwith err
+    | None -> failwith "dispatch returned None"
+  in
+  let read_json = parse_json read_body in
+  Alcotest.(check string) "read content" "shared summary"
+    (read_json |> member "content" |> to_string)
 )
 
 let () = test "dispatch_dashboard_invalid_scope" (fun () ->

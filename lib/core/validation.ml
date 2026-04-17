@@ -31,9 +31,7 @@ let log_rejection ~validator ~input ~reason =
   Atomic.incr rejection_count;
   last_rejection_time := Time_compat.now ();
   (* Truncate input for log safety *)
-  let safe_input = if String.length input > 32
-    then String.sub input 0 32 ^ "..."
-    else input in
+  let safe_input = String_util.utf8_safe ~max_bytes:35 ~suffix:"..." input |> String_util.to_string in
   Log.Misc.warn "%s rejected input '%s': %s"
     validator safe_input reason
 

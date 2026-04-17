@@ -47,10 +47,7 @@ let first_sentence text =
   loop 0 |> String.trim
 
 let truncate ~max_len text =
-  if String.length text <= max_len then
-    text
-  else
-    String.sub text 0 (max 0 (max_len - 1)) ^ "…"
+  String_util.utf8_safe ~max_bytes:((max 0 (max_len - 1)) + 3) ~suffix:"…" text |> String_util.to_string
 
 let help_doc_refs name =
   if

@@ -332,8 +332,9 @@ let default_max_item_chars = 200
 
 let cap_string ~max_chars = function
   | None -> None
-  | Some s when String.length s <= max_chars -> Some s
-  | Some s -> Some (String.sub s 0 max_chars ^ "…")
+  | Some s ->
+      Some (String_util.utf8_safe ~max_bytes:(max_chars + 3) ~suffix:"…" s
+            |> String_util.to_string)
 
 let cap_list ~max_items ~max_item_chars items =
   let rec take n = function
@@ -343,8 +344,7 @@ let cap_list ~max_items ~max_item_chars items =
   in
   take max_items items
   |> List.map (fun item ->
-      if String.length item <= max_item_chars then item
-      else String.sub item 0 max_item_chars ^ "…")
+      String_util.utf8_safe ~max_bytes:(max_item_chars + 3) ~suffix:"…" item |> String_util.to_string)
 
 let cap_snapshot
     ?(max_string_chars = default_max_string_chars)
@@ -586,10 +586,10 @@ let synthesize_state_from_run_result
   in
   let response_hint =
     let trimmed = String.trim response_text in
-    if String.length trimmed > 100 then
-      Some (String.sub trimmed 0 100 ^ "...")
-    else if trimmed <> "" then Some trimmed
-    else None
+    if trimmed = "" then None
+    else
+      Some (String_util.utf8_safe ~max_bytes:103 ~suffix:"..." trimmed
+            |> String_util.to_string)
   in
   let decisions =
     match response_hint with

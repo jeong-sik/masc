@@ -50,8 +50,11 @@ type audit_entry = {
 }
 
 let preview ?(max_len = 200) (value : string) =
-  let len = String.length value in
-  if len <= max_len then value else String.sub value 0 max_len ^ "..."
+  (* UTF-8-safe truncation: byte-based String.sub split multi-byte chars in
+     audit/*.jsonl. See Issue #7690. Use [max_bytes:(max_len + 3)] so that
+     output length cap matches the original (prefix + suffix). *)
+  String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." value
+  |> String_util.to_string
 
 (** {1 Serialization} *)
 

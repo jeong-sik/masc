@@ -164,13 +164,13 @@ let default_belief_summary_max_chars = 400
 let default_option_field_max_chars = 200
 
 let truncate_string ~max_chars s =
-  if String.length s <= max_chars then s
-  else String.sub s 0 max_chars ^ "…"
+  String_util.utf8_safe ~max_bytes:(max_chars + 3) ~suffix:"…" s |> String_util.to_string
 
 let truncate_option ~max_chars = function
   | None -> None
-  | Some s when String.length s <= max_chars -> Some s
-  | Some s -> Some (String.sub s 0 max_chars ^ "…")
+  | Some s ->
+      Some (String_util.utf8_safe ~max_bytes:(max_chars + 3) ~suffix:"…" s
+            |> String_util.to_string)
 
 let cap_social_state
     ?(belief_max_chars = default_belief_summary_max_chars)

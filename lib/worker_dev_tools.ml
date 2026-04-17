@@ -637,8 +637,7 @@ let sanitize_command_for_log cmd =
   redact false [] parts
 
 let truncate_for_log ?(max_len = 240) s =
-  if String.length s <= max_len then s
-  else String.sub s 0 max_len ^ "..."
+  String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." s |> String_util.to_string
 
 (* --- gh CLI validation for keeper_shell op=gh / PR workflow helpers --- *)
 

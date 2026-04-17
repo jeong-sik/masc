@@ -58,7 +58,7 @@ let handle_read_resource_eio state id params =
               match Yojson.Safe.from_string line with
               | json -> Some json
               | exception Yojson.Json_error msg ->
-                let preview = if String.length line > 50 then String.sub line 0 50 ^ "..." else line in
+                let preview = String_util.utf8_safe ~max_bytes:53 ~suffix:"..." line |> String_util.to_string in
                 Log.legacy_traceln ~level:Log.Warn ~module_name:"MCP"
                   (Printf.sprintf
                      "[WARN] Failed to parse event JSON: %s (line: %s)" msg

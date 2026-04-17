@@ -51,13 +51,11 @@ FAIL: <reason> - if the action is wrong or harmful
 
 One line only.|}
     req.goal
-    (if String.length req.context_summary > 300
-     then String.sub req.context_summary 0 300 ^ "..."
-     else req.context_summary)
+    (String_util.utf8_safe ~max_bytes:303 ~suffix:"..." req.context_summary
+     |> String_util.to_string)
     req.action_description
-    (if String.length req.action_result > 500
-     then String.sub req.action_result 0 500 ^ "..."
-     else req.action_result)
+    (String_util.utf8_safe ~max_bytes:503 ~suffix:"..." req.action_result
+     |> String_util.to_string)
 
 (* ================================================================ *)
 (* Core: verify                                                     *)

@@ -166,13 +166,11 @@ let find_excuse_pattern (notes : string) : (string * string) option =
 let build_prompt ?(few_shot_block = "") (req : review_request) : string =
   let desc = req.task_description in
   let desc_truncated =
-    if String.length desc > 300 then String.sub desc 0 300 ^ "..."
-    else desc
+    String_util.utf8_safe ~max_bytes:303 ~suffix:"..." desc |> String_util.to_string
   in
   let notes_truncated =
-    if String.length req.completion_notes > 500
-    then String.sub req.completion_notes 0 500 ^ "..."
-    else req.completion_notes
+    String_util.utf8_safe ~max_bytes:503 ~suffix:"..." req.completion_notes
+    |> String_util.to_string
   in
   let calibration_section =
     if few_shot_block = "" then ""
@@ -299,7 +297,7 @@ let parse_verdict (text : string) : (verdict, string) result =
        Previous behavior defaulted to Approve here — this was a
        D3 + Unknown→Permissive double violation. *)
     Error (sprintf "unrecognized review format: %s"
-      (if String.length trimmed > 80 then String.sub trimmed 0 80 ^ "..." else trimmed))
+      (String_util.utf8_safe ~max_bytes:83 ~suffix:"..." trimmed |> String_util.to_string))
 
 (* ================================================================ *)
 (* Cross-model cascade selection (#3067)                             *)

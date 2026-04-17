@@ -306,7 +306,9 @@ let truncate_text ~max_chars text =
   let len = String.length text in
   if len <= max_chars then text
   else if max_chars <= 1 then String.sub text 0 (max 0 max_chars)
-  else String.sub text 0 (max_chars - 1) ^ "…"
+  else
+    String_util.utf8_safe ~max_bytes:max_chars ~suffix:"…" text
+    |> String_util.to_string
 
 let latest_preview_of_messages (messages : Agent_sdk.Types.message list) =
   messages

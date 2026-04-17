@@ -219,3 +219,44 @@ describe('railPillAriaLabel', () => {
     expect(railPillAriaLabel(pill)).toBe('Token — 진행 중')
   })
 })
+
+describe('ConnectorReadinessRail layout', () => {
+  let container: HTMLElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    resetRailInflightState()
+  })
+  afterEach(() => {
+    document.body.removeChild(container)
+  })
+
+  // Regression guard for the truncation bug ("BINDIN…", "필…"): under
+  // flex-wrap, per-pill width depended on intrinsic label width, so short
+  // labels (Token) snapped tiny and long labels (Bindings) blew out and
+  // truncated mid-word. A 4-column grid forces equal widths across all 4
+  // pills, so when truncation does happen at narrow tile widths, it happens
+  // symmetrically.
+  it('uses a 4-column grid (not flex-wrap) so pill widths are equal', () => {
+    const pills = deriveRail(
+      { sidecarUp: true, gateHealthy: true, bindingCount: 1, keeperCount: 1 },
+      noop,
+    )
+    render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
+    const rail = container.querySelector('[data-rail-layout="grid-4"]')
+    expect(rail).toBeTruthy()
+    expect(rail?.className).toContain('grid')
+    expect(rail?.className).toContain('grid-cols-4')
+    expect(rail?.className).not.toContain('flex-wrap')
+  })
+
+  it('renders exactly 4 pill buttons regardless of state mix', () => {
+    const pills = deriveRail(
+      { sidecarUp: false, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
+      noop,
+    )
+    render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
+    const buttons = container.querySelectorAll('[data-rail-pill]')
+    expect(buttons.length).toBe(4)
+  })
+})

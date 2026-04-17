@@ -104,7 +104,7 @@ let cleanup_zombies
         (* Stop keeper fiber via hook to prevent zombie tool calls.
            Without this, the keeper fiber continues running (fiber_stop stays
            false) and makes tool calls indefinitely after cleanup. *)
-        (try !Coord_hooks.stop_keeper_fn name
+        (try (Atomic.get Coord_hooks.stop_keeper_fn) name
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn -> Log.Gc.warn "gc stop_keeper_fn error for %s: %s" name (Printexc.to_string exn));
@@ -120,7 +120,7 @@ let cleanup_zombies
         | Types.Claimed { assignee; _ }
         | Types.InProgress { assignee; _ }
           when List.exists (fun (n, _) -> n = assignee) !zombie_entries ->
-            (match !Coord_hooks.force_release_task_fn config ~agent_name:"keeper-gc" ~task_id:task.id () with
+            (match (Atomic.get Coord_hooks.force_release_task_fn) config ~agent_name:"keeper-gc" ~task_id:task.id () with
              | Ok msg -> released_tasks := (task.id, msg) :: !released_tasks
              | Error e ->
                  if not (List.mem assignee !release_failed_agents) then
@@ -390,7 +390,7 @@ let gc config ?(days=7) () =
     results := "✅ No team sessions to archive" :: !results;
 
   (* 7. Hard-delete board artifacts (via hooks) *)
-  let board_artifact_count = !Coord_hooks.cleanup_board_artifacts_fn () in
+  let board_artifact_count = (Atomic.get Coord_hooks.cleanup_board_artifacts_fn) () in
   if board_artifact_count > 0 then
     results :=
       Printf.sprintf "🧽 Removed %d board artifact post(s)"

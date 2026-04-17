@@ -515,8 +515,6 @@ let flush_dirty store =
     store.last_flush <- Time_compat.now ()
   )
 
-(** Register deferred flush now that rewrite helpers are available *)
-let () = deferred_flush_fn := flush_dirty
 
 (** {1 Karma & Flair - Reddit-style} *)
 

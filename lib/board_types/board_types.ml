@@ -161,6 +161,10 @@ type vote_direction = Up | Down
 
 (** {1 In-Memory Store with Enforced Limits} *)
 
+type flusher_msg =
+  | Flush
+  | Sweep
+
 type store = {
   posts: (string, post) Hashtbl.t;
   comments: (string, comment) Hashtbl.t;
@@ -174,6 +178,7 @@ type store = {
   comments_by_post: (string, string list) Hashtbl.t;      (** post_id -> comment_id list *)
   mutable dirty_posts: bool;                               (** Deferred flush flag *)
   mutable dirty_comments: bool;                            (** Deferred flush flag *)
-  mutable last_flush: float;                               (** Last deferred flush time *)
+  mutable last_flush: float;
+  flusher_inbox: flusher_msg Eio.Stream.t;                               (** Last deferred flush time *)
 }
 

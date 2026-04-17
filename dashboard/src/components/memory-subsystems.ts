@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { signal, useSignal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import { LoadingState } from './common/feedback-state'
 import { MermaidGraph } from './common/mermaid-graph'
 import {
@@ -130,6 +130,32 @@ const weightBarClass = (w: number) => weightTier(w).tw
 // cells drawn at #1e293b. Floor and range are arbitrary — picked by eye,
 // not derived from a perceptual model. Tune if empty/low contrast is wrong.
 const weightOpacity = (w: number) => 0.25 + 0.75 * Math.sqrt(Math.max(0, Math.min(1, w)))
+
+/**
+ * Pure filter for the Hebbian synapses table rows.
+ *
+ * Case-insensitive substring match against `from_agent` then `to_agent`;
+ * first field match wins. Synapse pairs grow N² with fleet size so on a
+ * 10+ agent fleet the table has 100+ rows — operators need a quick way
+ * to isolate "every link involving keeper-foo".
+ *
+ * Empty/whitespace query returns the input reference unchanged (preserves
+ * referential equality for `useMemo`-memoised consumers).
+ *
+ * The input array is never mutated; callers may pass a readonly array.
+ */
+export function filterSynapses(
+  synapses: readonly MemorySubsystemsSynapse[],
+  query: string,
+): readonly MemorySubsystemsSynapse[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return synapses
+  return synapses.filter(s => {
+    if (s.from_agent.toLowerCase().includes(needle)) return true
+    if (s.to_agent.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
 
 function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
   if (synapses.length === 0) return null
@@ -440,6 +466,10 @@ export function MemorySubsystems() {
   const keeperFilter = useSignal<string>('')
   const outcomeFilter = useSignal<string>('')
   const searchQuery = useSignal<string>('')
+  // Client-side substring filter for the Hebbian synapses table. Independent
+  // from the episodes filter bar above — the synapses table is N² in fleet
+  // size and needs its own needle.
+  const synapseQuery = useSignal<string>('')
 
   async function refresh(signal?: AbortSignal) {
     try {
@@ -478,6 +508,12 @@ export function MemorySubsystems() {
 
   const synapses = data?.hebbian?.synapses ?? []
   const lastConsolidation = data?.hebbian?.last_consolidation ?? 0
+  const synapseQueryValue = synapseQuery.value
+  const visibleSynapses = useMemo(
+    () => filterSynapses(synapses, synapseQueryValue),
+    [synapses, synapseQueryValue],
+  )
+  const isSynapseFiltering = synapseQueryValue.trim() !== ''
   const episodes = data?.episodes?.items ?? []
   const totalEpisodes = data?.episodes?.total ?? 0
   const filteredTotal = data?.episodes?.filtered ?? episodes.length
@@ -572,26 +608,49 @@ export function MemorySubsystems() {
                 시냅스 데이터 없음. keeper task 완료 시 자동 생성됩니다.
               </div>`
             : html`
-                <div class="overflow-x-auto">
-                  <table class="w-full text-left">
-                    <thead>
-                      <tr class="border-b border-zinc-700 text-xs text-zinc-500">
-                        <th class="py-1.5 px-2">From</th>
-                        <th class="py-1.5 px-2"></th>
-                        <th class="py-1.5 px-2">To</th>
-                        <th class="py-1.5 px-2 text-right">Weight</th>
-                        <th class="py-1.5 px-2 text-center">성공</th>
-                        <th class="py-1.5 px-2 text-center">실패</th>
-                        <th class="py-1.5 px-2">마지막</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      ${synapses.map(
-                        (s: MemorySubsystemsSynapse) => html`<${SynapseRow} s=${s} />`,
-                      )}
-                    </tbody>
-                  </table>
+                <div class="flex items-center gap-2 mb-2 flex-wrap">
+                  <input
+                    type="search"
+                    value=${synapseQueryValue}
+                    placeholder="시냅스 검색 (from/to 에이전트 이름)"
+                    aria-label="시냅스 필터"
+                    onInput=${(e: Event) => {
+                      synapseQuery.value = (e.target as HTMLInputElement).value
+                    }}
+                    class="flex-1 min-w-[200px] bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
+                  />
+                  ${
+                    isSynapseFiltering
+                      ? html`<span class="text-xs text-zinc-500">${visibleSynapses.length}/${synapses.length}</span>`
+                      : null
+                  }
                 </div>
+                ${
+                  isSynapseFiltering && visibleSynapses.length === 0
+                    ? html`<div class="text-sm text-zinc-500 bg-zinc-900 rounded-lg p-4 text-center">
+                        필터 결과 없음 (${synapses.length} items)
+                      </div>`
+                    : html`<div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                          <thead>
+                            <tr class="border-b border-zinc-700 text-xs text-zinc-500">
+                              <th class="py-1.5 px-2">From</th>
+                              <th class="py-1.5 px-2"></th>
+                              <th class="py-1.5 px-2">To</th>
+                              <th class="py-1.5 px-2 text-right">Weight</th>
+                              <th class="py-1.5 px-2 text-center">성공</th>
+                              <th class="py-1.5 px-2 text-center">실패</th>
+                              <th class="py-1.5 px-2">마지막</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            ${visibleSynapses.map(
+                              (s: MemorySubsystemsSynapse) => html`<${SynapseRow} s=${s} />`,
+                            )}
+                          </tbody>
+                        </table>
+                      </div>`
+                }
               `
         }
       </section>

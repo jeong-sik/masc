@@ -16,6 +16,7 @@ import {
   KNOWN_CONNECTOR_IDS,
   type KnownConnectorId,
 } from './connector-status'
+import { ConnectorBulkActions } from './connector-overview-strip'
 
 function OnboardingCard({ connectorId }: { connectorId: KnownConnectorId }) {
   const cmds = sidecarCommands(connectorId)
@@ -50,9 +51,11 @@ export function ConnectorOnboardingGrid() {
       <div class="mb-3">
         <h3 class="text-sm font-semibold text-[var(--text-body)]">아직 연결된 sidecar가 없습니다</h3>
         <div class="mt-1 text-[11px] text-[var(--text-dim)]">
-          4개의 채널 sidecar를 켤 수 있습니다. 카드의 시작 명령을 복사해 새 터미널에서 실행하면, 이 화면이 라이브 상태로 갱신됩니다.
+          4개의 채널 sidecar를 켤 수 있습니다. 카드의 시작 명령을 복사해 새 터미널에서 실행하거나, 아래
+          <strong>Start All</strong>로 한 번에 spawn하세요. spawn 후 이 화면이 라이브 상태로 갱신됩니다.
         </div>
       </div>
+      <${ConnectorBulkActions} connectors=${[]} />
       <div class="grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
         ${KNOWN_CONNECTOR_IDS.map(id => html`<${OnboardingCard} connectorId=${id} />`)}
       </div>

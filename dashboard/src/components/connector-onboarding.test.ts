@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ConnectorOnboardingGrid } from './connector-onboarding'
 import { resetSetupGuideExpansionState } from './setup-guide-card'
 import { sidecarCommands } from './connector-status'
+import { _testResetBulkInflight } from './connector-overview-strip'
 
 describe('ConnectorOnboardingGrid', () => {
   let container: HTMLDivElement
@@ -13,6 +14,7 @@ describe('ConnectorOnboardingGrid', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     resetSetupGuideExpansionState()
+    _testResetBulkInflight()
   })
 
   afterEach(() => {
@@ -62,6 +64,14 @@ describe('ConnectorOnboardingGrid', () => {
     toggles.forEach(btn => {
       expect(btn.getAttribute('aria-expanded')).toBe('false')
     })
+  })
+
+  it('includes bulk Start All action for cold-start spawn of all 4 at once', () => {
+    render(html`<${ConnectorOnboardingGrid} />`, container)
+    const startAll = container.querySelector('[data-bulk-action="start"]') as HTMLButtonElement
+    expect(startAll).toBeTruthy()
+    // With zero registered connectors, all 4 count as "down".
+    expect(startAll.textContent).toContain('(4)')
   })
 
   it('shows the cold-start heading explaining the empty state', () => {

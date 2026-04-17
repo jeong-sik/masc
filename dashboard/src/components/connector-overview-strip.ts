@@ -105,6 +105,13 @@ function OverviewTile({ id, connector, keeperCount }: {
   `
 }
 
+/** Standalone export of the bulk Start All / Stop All buttons so the
+    cold-start onboarding view can mount the same controls without
+    having to render the full overview strip. */
+export function ConnectorBulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
+  return BulkActions({ connectors })
+}
+
 function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
   const downCount = KNOWN_CONNECTOR_IDS.filter(id => findConnector(connectors, id)?.available !== true).length
   const upCount = KNOWN_CONNECTOR_IDS.length - downCount

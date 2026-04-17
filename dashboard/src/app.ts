@@ -38,11 +38,11 @@ import { Menu, X } from 'lucide-preact'
 // Sidebar collapsed state persists across reloads — a user who picks
 // the dense layout keeps it. Namespaced key avoids clashing with any
 // future per-user preference that might use plain \"sidebar-collapsed\".
-export const sidebarCollapsed = persistentSignal<boolean>({
+const sidebarCollapsed = persistentSignal<boolean>({
   key: 'dashboard:sidebar-collapsed',
   defaultValue: false,
 })
-export const mobileMenuOpen = signal(false)
+const mobileMenuOpen = signal(false)
 
 export function App() {
   useEffect(() => {

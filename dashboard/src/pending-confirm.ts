@@ -71,7 +71,7 @@ export function normalizePendingConfirmEnvelope(raw: unknown): PendingConfirmEnv
   }
 }
 
-export interface PendingConfirmSource {
+interface PendingConfirmSource {
   pending_confirm_envelope?: PendingConfirmEnvelope | null
   pending_confirms?: PendingConfirmation[] | null
   pending_confirm_summary?: PendingConfirmSummary | null

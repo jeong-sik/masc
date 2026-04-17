@@ -70,7 +70,7 @@ function scheduleNamespaceWarmRetry(): void {
 
 // --- Scheduler instance ---
 
-export const namespaceTruthScheduler = new FetchScheduler(doFetchNamespaceTruth, {
+const namespaceTruthScheduler = new FetchScheduler(doFetchNamespaceTruth, {
   cooldownMs: 2_000,
   debounceMs: 300,
 })

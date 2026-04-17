@@ -71,7 +71,7 @@ export function formatHeartbeatLabel(summary: HeartbeatSummary): string {
   return `Heartbeat: ${pct}% uptime · ${summary.up}/${summary.up + summary.down} observed`
 }
 
-export interface HeartbeatStripProps {
+interface HeartbeatStripProps {
   history: HeartbeatState[]
   /** Number of bar slots to render. Defaults to 45 (Uptime Kuma parity). */
   slots?: number

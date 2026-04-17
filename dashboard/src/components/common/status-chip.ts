@@ -28,7 +28,7 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
-export type StatusChipTone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral' | ''
+type StatusChipTone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral' | ''
 
 const BASE =
   'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider'
@@ -66,7 +66,7 @@ export function statusChipClasses(
   return parts.join(' ')
 }
 
-export interface StatusChipProps {
+interface StatusChipProps {
   /** Legacy API — plain text label. Prefer `children` for new
       call sites. When both are set, `children` wins. */
   label?: string

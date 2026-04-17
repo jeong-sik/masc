@@ -30,7 +30,7 @@ export function shouldShowScrollToTop(scrollY: number, thresholdPx = 400): boole
   return scrollY >= thresholdPx
 }
 
-export interface ScrollToTopButtonProps {
+interface ScrollToTopButtonProps {
   /** Threshold in pixels before the button fades in. Default 400
       matches Gmail / YouTube; callers with a denser layout can
       lower it. */

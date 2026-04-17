@@ -218,6 +218,66 @@ export function countConnectedSidecars(connectors: GateConnectorInfo[]): number 
   return KNOWN_CONNECTOR_IDS.filter(id => findConnector(connectors, id)?.available === true).length
 }
 
+export interface ConnectorStripSummary {
+  sidecarUp: number
+  sidecarTotal: number
+  bindingCount: number
+  keeperCount: number
+}
+
+/** Pure: roll up the at-a-glance stats that feed the strip header line.
+    Counts only KNOWN sidecars (matches the tile grid) so "3 of 4" always
+    lines up with what the operator sees below. Bindings are summed across
+    every connector — Grafana's "stat panel" convention: total across rows,
+    not per-row.
+
+    Reference — PatternFly "Description List" + Grafana "stat panel":
+    a single quiet line of context that stays on the page while louder
+    banners (celebration / incident) come and go. */
+export function summarizeConnectorStrip(
+  connectors: GateConnectorInfo[],
+  keeperCount: number,
+): ConnectorStripSummary {
+  const sidecarUp = countConnectedSidecars(connectors)
+  const bindingCount = KNOWN_CONNECTOR_IDS.reduce((acc, id) => {
+    const c = findConnector(connectors, id)
+    return acc + (c?.configured_bindings?.length ?? 0)
+  }, 0)
+  return {
+    sidecarUp,
+    sidecarTotal: KNOWN_CONNECTOR_IDS.length,
+    bindingCount,
+    keeperCount,
+  }
+}
+
+function StatusSummaryLine({ summary }: { summary: ConnectorStripSummary }) {
+  // One quiet aggregate sentence — always on, never loud. Sits between
+  // the loud banners (celebration / incident) and the action row, so the
+  // operator always has baseline numbers even when neither banner fires.
+  return html`
+    <div
+      class="mb-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-[var(--text-dim)]"
+      data-strip-summary
+    >
+      <span>
+        <span class="font-semibold text-[var(--text-body)]" data-strip-summary-sidecars>${summary.sidecarUp} of ${summary.sidecarTotal}</span>
+        <span> sidecars running</span>
+      </span>
+      <span aria-hidden="true" class="text-[var(--white-10)]">·</span>
+      <span>
+        <span class="font-semibold text-[var(--text-body)]" data-strip-summary-bindings>${summary.bindingCount}</span>
+        <span> ${summary.bindingCount === 1 ? 'binding' : 'bindings'} configured</span>
+      </span>
+      <span aria-hidden="true" class="text-[var(--white-10)]">·</span>
+      <span>
+        <span class="font-semibold text-[var(--text-body)]" data-strip-summary-keepers>${summary.keeperCount}</span>
+        <span> ${summary.keeperCount === 1 ? 'keeper' : 'keepers'} online</span>
+      </span>
+    </div>
+  `
+}
+
 function CelebrationBanner({ connectedCount }: { connectedCount: number }) {
   if (connectedCount < KNOWN_CONNECTOR_IDS.length) return null
   return html`
@@ -257,6 +317,7 @@ export function ConnectorOverviewStrip({ connectors, keeperCount }: OverviewProp
 
   const droppedIds = detectRecentDrops(stripMemory.value, connectors, Date.now())
   const connectedCount = countConnectedSidecars(connectors)
+  const summary = summarizeConnectorStrip(connectors, keeperCount)
   return html`
     <div
       class="sticky top-0 z-10 mb-4 -mx-4 border-b border-[var(--card-border)] bg-[var(--bg-0)]/95 px-4 pt-2 pb-3 backdrop-blur supports-[backdrop-filter]:bg-[var(--bg-0)]/80"
@@ -264,6 +325,7 @@ export function ConnectorOverviewStrip({ connectors, keeperCount }: OverviewProp
     >
       <${IncidentBanner} droppedIds=${droppedIds} />
       <${CelebrationBanner} connectedCount=${connectedCount} />
+      <${StatusSummaryLine} summary=${summary} />
       <${BulkActions} connectors=${connectors} />
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         ${KNOWN_CONNECTOR_IDS.map(id => html`

@@ -11,6 +11,7 @@ import {
   formatConnectorUptime,
   updateStripMemory,
   detectRecentDrops,
+  summarizeConnectorStrip,
 } from './connector-overview-strip'
 import type { GateConnectorInfo } from '../api/gate'
 
@@ -236,6 +237,38 @@ describe('formatConnectorUptime', () => {
 
     const hr3 = new Date(NOW - (3 * 3600 + 22 * 60) * 1000).toISOString()
     expect(formatConnectorUptime(hr3, NOW)).toBe('up 3h 22m')
+  })
+})
+
+describe('summarizeConnectorStrip', () => {
+  it('returns zeros for empty input', () => {
+    expect(summarizeConnectorStrip([], 0)).toEqual({
+      sidecarUp: 0,
+      sidecarTotal: 4,
+      bindingCount: 0,
+      keeperCount: 0,
+    })
+  })
+
+  it('sums bindings only across KNOWN connectors (unknown bridges excluded)', () => {
+    const list = [
+      mkConnector({ connector_id: 'discord', available: true, configured_bindings: ['a', 'b'] as any }),
+      mkConnector({ connector_id: 'slack', available: true, configured_bindings: ['c'] as any }),
+      mkConnector({ connector_id: 'unknown-bridge', available: true, configured_bindings: ['x', 'y', 'z'] as any }),
+    ]
+    const s = summarizeConnectorStrip(list, 5)
+    expect(s.sidecarUp).toBe(2)
+    expect(s.sidecarTotal).toBe(4)
+    expect(s.bindingCount).toBe(3) // unknown-bridge's 3 excluded
+    expect(s.keeperCount).toBe(5)
+  })
+
+  it('treats missing configured_bindings as 0', () => {
+    const list = [
+      mkConnector({ connector_id: 'discord', available: true }), // default configured_bindings = []
+    ]
+    const s = summarizeConnectorStrip(list, 0)
+    expect(s.bindingCount).toBe(0)
   })
 })
 

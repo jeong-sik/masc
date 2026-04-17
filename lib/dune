@@ -741,6 +741,7 @@
    agent_sdk
    agent_sdk.llm_provider
    agent_sdk.swarm
+   masc_mcp.oas_compat
 
    uri
    tls

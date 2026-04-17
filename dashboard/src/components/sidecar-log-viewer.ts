@@ -4,10 +4,26 @@
 // the operator isn't actively triaging.
 
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
-import { signal } from '@preact/signals'
+import { useEffect, useMemo } from 'preact/hooks'
+import { signal, useSignal } from '@preact/signals'
 import { ActionButton } from './common/button'
 import { LoadingState } from './common/feedback-state'
+
+/**
+ * Pure grep-like filter for log lines.
+ *
+ * Case-insensitive substring match on each line. Empty/whitespace query
+ * returns the input reference unchanged (no new array allocation,
+ * preserves referential equality for useMemo). Input is never mutated.
+ */
+export function filterLogLines(
+  lines: readonly string[],
+  query: string,
+): readonly string[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return lines
+  return lines.filter(line => line.toLowerCase().includes(needle))
+}
 
 interface LogResponse {
   ok: boolean
@@ -91,10 +107,14 @@ export function SidecarLogToggle({ connectorId }: { connectorId: string }) {
 
 export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
   const entry = getEntry(connectorId)
-  if (!entry.open) return null
+  // Per-viewer filter state — kept local (not in module-level logsState) so
+  // each connector's grep box lives as long as the viewer is mounted and
+  // doesn't pollute the shared fetch cache.
+  const logQuery = useSignal('')
 
   // Poll every 30s while open so the panel stays roughly fresh without
-  // the dashboard fetching for closed cards.
+  // the dashboard fetching for closed cards. Hook must run unconditionally
+  // (Rules of Hooks); the early-return below just skips rendering.
   useEffect(() => {
     const id = setInterval(() => {
       if (getEntry(connectorId).open) {
@@ -104,6 +124,14 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
     return () => clearInterval(id)
   }, [connectorId])
 
+  const visibleLines = useMemo(
+    () => filterLogLines(entry.lines, logQuery.value),
+    [entry.lines, logQuery.value],
+  )
+
+  if (!entry.open) return null
+
+  const isFiltering = logQuery.value.trim() !== ''
   const showMore = entry.requestedLines < 1000
   const onRefresh = () => fetchLogs(connectorId, entry.requestedLines)
   const onShowMore = () => fetchLogs(connectorId, 1000)
@@ -119,7 +147,11 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
         </div>
         <div class="flex items-center gap-2">
           <span class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">
-            ${entry.available ? `${entry.lines.length} / ${entry.requestedLines} lines` : 'no log yet'}
+            ${entry.available
+              ? isFiltering
+                ? `${visibleLines.length}/${entry.lines.length} lines`
+                : `${entry.lines.length} / ${entry.requestedLines} lines`
+              : 'no log yet'}
           </span>
           ${showMore
             ? html`<${ActionButton} variant="ghost" size="sm" disabled=${entry.loading} onClick=${onShowMore}>Show 1000<//>`
@@ -129,14 +161,34 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
           <//>
         </div>
       </div>
+      ${entry.available && entry.lines.length > 0
+        ? html`
+            <div class="mb-2">
+              <input
+                type="search"
+                value=${logQuery.value}
+                placeholder="grep…"
+                aria-label=${`Log filter for ${connectorId}`}
+                onInput=${(e: Event) => { logQuery.value = (e.target as HTMLInputElement).value }}
+                class="w-full rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 font-mono text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+              />
+            </div>
+          `
+        : null}
       ${entry.error
         ? html`<div class="rounded border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[11px] text-rose-100">${entry.error}</div>`
         : entry.loading && entry.lines.length === 0
           ? html`<${LoadingState}>로그 불러오는 중...<//>`
           : entry.available
-            ? html`
-                <pre class="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--bg-0)] p-2 font-mono text-[10px] leading-[1.4] text-[var(--text-body)]">${entry.lines.join('\n')}</pre>
-              `
+            ? isFiltering && visibleLines.length === 0
+              ? html`
+                  <div class="rounded bg-[var(--bg-0)] px-3 py-3 text-center font-mono text-[10px] text-[var(--text-dim)]">
+                    0 lines match filter
+                  </div>
+                `
+              : html`
+                  <pre class="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--bg-0)] p-2 font-mono text-[10px] leading-[1.4] text-[var(--text-body)]">${visibleLines.join('\n')}</pre>
+                `
             : html`
                 <div class="rounded border border-dashed border-[var(--white-8)] px-3 py-3 text-center text-[11px] text-[var(--text-dim)]">
                   오늘 날짜 로그 파일이 아직 없습니다. sidecar를 시작하면 자동 생성됩니다.

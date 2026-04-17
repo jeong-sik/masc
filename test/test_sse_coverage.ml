@@ -14,6 +14,24 @@ open Alcotest
 
 module Sse = Masc_mcp.Sse
 
+let run_domains_together count fn =
+  let ready = Atomic.make 0 in
+  let go = Atomic.make false in
+  let domains =
+    List.init count (fun index ->
+      Domain.spawn (fun () ->
+        ignore (Atomic.fetch_and_add ready 1);
+        while not (Atomic.get go) do
+          Domain.cpu_relax ()
+        done;
+        fn index))
+  in
+  while Atomic.get ready < count do
+    Domain.cpu_relax ()
+  done;
+  Atomic.set go true;
+  List.iter Domain.join domains
+
 (* ============================================================
    format_event Tests
    ============================================================ *)
@@ -138,6 +156,26 @@ let test_get_events_after_empty () =
   let future_id = Sse.current_id () + 100000 in
   let events = Sse.get_events_after future_id in
   check int "empty for future id" 0 (List.length events)
+
+let test_cleanup_expired_events_exact_under_domain_contention () =
+  let original_buffer = Atomic.get Sse.event_buffer in
+  let now = Unix.gettimeofday () in
+  let expired_count = 32 in
+  let expired_items =
+    List.init expired_count (fun index ->
+      (900_000 + index, Printf.sprintf "expired-%d" index,
+       now -. Sse.buffer_ttl_seconds -. 10.0))
+  in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Sse.event_buffer original_buffer)
+    (fun () ->
+      Atomic.set Sse.event_buffer expired_items;
+      let total_removed = Atomic.make 0 in
+      run_domains_together 2 (fun _index ->
+        ignore (Atomic.fetch_and_add total_removed (Sse.cleanup_expired_events ())));
+      check int "each expired event counted once" expired_count
+        (Atomic.get total_removed);
+      check int "buffer emptied once" 0 (List.length (Atomic.get Sse.event_buffer)))
 
 (* ============================================================
    client Type Tests
@@ -277,6 +315,8 @@ let () =
       test_case "buffer and retrieve" `Quick test_buffer_event_and_retrieve;
       test_case "filters" `Quick test_get_events_after_filters;
       test_case "empty for future" `Quick test_get_events_after_empty;
+      test_case "cleanup exact under domain contention" `Quick
+        test_cleanup_expired_events_exact_under_domain_contention;
     ];
     "broadcast", [
       test_case "sends to clients" `Quick test_broadcast_sends_to_clients;

@@ -17,8 +17,29 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> try rm_rf dir with _ -> ()) (fun () -> f dir)
 
-let dispatch ~config ~name args =
-  match Tool_team_memory.dispatch ~config ~name ~args with
+let write_keeper_meta ~config ~name ~shared_memory_scope =
+  let agent_name = Printf.sprintf "keeper-%s-agent" name in
+  let meta_json =
+    `Assoc
+      [
+        ("name", `String name);
+        ("agent_name", `String agent_name);
+        ("trace_id", `String ("trace-" ^ name));
+        ("goal", `String "test");
+        ("shared_memory_scope", `String shared_memory_scope);
+      ]
+  in
+  let meta =
+    match Keeper_types.meta_of_json meta_json with
+    | Ok meta -> meta
+    | Error err -> fail ("meta_of_json failed: " ^ err)
+  in
+  match Keeper_types.write_meta ~force:true config meta with
+  | Ok () -> agent_name
+  | Error err -> fail ("write_meta failed: " ^ err)
+
+let dispatch ~config ~agent_name ~name args =
+  match Tool_team_memory.dispatch ~config ~agent_name ~name ~args with
   | Some result -> result
   | None -> fail ("unexpected missing dispatch: " ^ name)
 
@@ -32,21 +53,26 @@ let test_write_read_search () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Coord.default_config base_path in
+  let agent_name =
+    write_keeper_meta ~config ~name:"room-alpha" ~shared_memory_scope:"room"
+  in
   let write_args =
     `Assoc
       [
-        ("room", `String "room-alpha");
+        ("room", `String "default");
         ("key", `String "notes/demo.md");
         ("content", `String "hello shared team memory");
       ]
   in
-  ignore (json_result_exn (dispatch ~config ~name:"masc_team_memory_write" write_args));
+  ignore
+    (json_result_exn
+       (dispatch ~config ~agent_name ~name:"masc_team_memory_write" write_args));
   let read_json =
     json_result_exn
-      (dispatch ~config ~name:"masc_team_memory_read"
+      (dispatch ~config ~agent_name ~name:"masc_team_memory_read"
          (`Assoc
             [
-              ("room", `String "room-alpha");
+              ("room", `String "default");
               ("key", `String "notes/demo.md");
             ]))
   in
@@ -55,10 +81,10 @@ let test_write_read_search () =
     (read_json |> member "content" |> to_string);
   let search_json =
     json_result_exn
-      (dispatch ~config ~name:"masc_team_memory_search"
+      (dispatch ~config ~agent_name ~name:"masc_team_memory_search"
          (`Assoc
             [
-              ("room", `String "room-alpha");
+              ("room", `String "default");
               ("query", `String "shared");
             ]))
   in
@@ -73,11 +99,14 @@ let test_traversal_blocked () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Coord.default_config base_path in
+  let agent_name =
+    write_keeper_meta ~config ~name:"room-alpha" ~shared_memory_scope:"room"
+  in
   let ok, err =
-    dispatch ~config ~name:"masc_team_memory_read"
+    dispatch ~config ~agent_name ~name:"masc_team_memory_read"
       (`Assoc
          [
-           ("room", `String "room-alpha");
+           ("room", `String "default");
            ("key", `String "../outside.txt");
          ])
   in
@@ -91,11 +120,14 @@ let test_secret_like_write_blocked () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Coord.default_config base_path in
+  let agent_name =
+    write_keeper_meta ~config ~name:"room-alpha" ~shared_memory_scope:"room"
+  in
   let ok, err =
-    dispatch ~config ~name:"masc_team_memory_write"
+    dispatch ~config ~agent_name ~name:"masc_team_memory_write"
       (`Assoc
          [
-           ("room", `String "room-alpha");
+           ("room", `String "default");
            ("key", `String "secrets/note.txt");
            ("content",
              `String "Authorization: Bearer sk-secret-token-1234567890");
@@ -111,7 +143,10 @@ let test_symlink_escape_blocked () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Coord.default_config base_path in
-  let root = Tool_team_memory.team_memory_root ~config "room-alpha" in
+  let agent_name =
+    write_keeper_meta ~config ~name:"room-alpha" ~shared_memory_scope:"room"
+  in
+  let root = Tool_team_memory.team_memory_root ~config "default" in
   Fs_compat.mkdir_p root;
   let outside_path = Filename.concat base_path "outside.txt" in
   (match Fs_compat.save_file_atomic outside_path "outside" with
@@ -120,16 +155,76 @@ let test_symlink_escape_blocked () =
   let link_path = Filename.concat root "escape.txt" in
   Unix.symlink outside_path link_path;
   let ok, err =
-    dispatch ~config ~name:"masc_team_memory_read"
+    dispatch ~config ~agent_name ~name:"masc_team_memory_read"
       (`Assoc
          [
-           ("room", `String "room-alpha");
+           ("room", `String "default");
            ("key", `String "escape.txt");
          ])
   in
   check bool "blocked" false ok;
   check bool "mentions symlink" true
     (String_util.contains_substring err "symlink")
+
+let test_disabled_scope_blocked () =
+  with_temp_dir "team-memory-disabled" @@ fun base_path ->
+  Fs_compat.clear_fs ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = Coord.default_config base_path in
+  let agent_name =
+    write_keeper_meta ~config ~name:"room-alpha" ~shared_memory_scope:"disabled"
+  in
+  let ok, err =
+    dispatch ~config ~agent_name ~name:"masc_team_memory_read"
+      (`Assoc
+         [
+           ("room", `String "default");
+           ("key", `String "notes/demo.md");
+         ])
+  in
+  check bool "blocked" false ok;
+  check bool "mentions shared_memory_scope" true
+    (String_util.contains_substring err "shared_memory_scope=room")
+
+let test_non_keeper_agent_blocked () =
+  with_temp_dir "team-memory-non-keeper" @@ fun base_path ->
+  Fs_compat.clear_fs ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = Coord.default_config base_path in
+  let ok, err =
+    dispatch ~config ~agent_name:"operator-human" ~name:"masc_team_memory_read"
+      (`Assoc
+         [
+           ("room", `String "default");
+           ("key", `String "notes/demo.md");
+         ])
+  in
+  check bool "blocked" false ok;
+  check bool "mentions keeper-only" true
+    (String_util.contains_substring err "keeper-only")
+
+let test_non_default_room_blocked () =
+  with_temp_dir "team-memory-room-validation" @@ fun base_path ->
+  Fs_compat.clear_fs ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = Coord.default_config base_path in
+  let agent_name =
+    write_keeper_meta ~config ~name:"room-alpha" ~shared_memory_scope:"room"
+  in
+  let ok, err =
+    dispatch ~config ~agent_name ~name:"masc_team_memory_search"
+      (`Assoc
+         [
+           ("room", `String "incident-alpha");
+           ("query", `String "shared");
+         ])
+  in
+  check bool "blocked" false ok;
+  check bool "mentions default namespace" true
+    (String_util.contains_substring err "room must be 'default'")
 
 let () =
   run "team_memory"
@@ -145,5 +240,11 @@ let () =
             test_secret_like_write_blocked;
           test_case "symlink escape blocked" `Quick
             test_symlink_escape_blocked;
+          test_case "disabled scope blocked" `Quick
+            test_disabled_scope_blocked;
+          test_case "non-keeper agent blocked" `Quick
+            test_non_keeper_agent_blocked;
+          test_case "non-default room blocked" `Quick
+            test_non_default_room_blocked;
         ] );
     ]

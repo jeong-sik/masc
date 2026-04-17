@@ -142,7 +142,7 @@ persona_name = "analyst"
 | `execution_scope` | Optional | Deployment-specific execution scope | Only when different from the default. |
 | `sandbox_profile` | Optional | Process/filesystem sandbox profile | `docker_hardened` is the new hardened path; `legacy_local` preserves current behavior. |
 | `network_mode` | Optional | Sandbox network policy | `docker_hardened` defaults to `none`; `legacy_local` defaults to `inherit`. |
-| `shared_memory_scope` | Optional | Typed shared-memory lane | `room` enables `masc_team_memory_*` room-scoped exchange. |
+| `shared_memory_scope` | Optional | Typed shared-memory lane | `room` enables keeper-authorized `masc_team_memory_*` exchange on the flattened `default` namespace. |
 | `cascade_name` | Optional | Deployment-specific cascade override | Only when not using the default cascade. |
 | `tool_preset` | Optional | Deployment-specific policy override | Only when intentionally overriding persona default. |
 
@@ -201,7 +201,7 @@ allowed_paths = [".masc/playground/analyst/repos/demo"]
 Operational intent:
 
 - private writable lane: `.masc/playground/<keeper>/...`
-- shared lane: `masc_team_memory_read/write/search` only
+- shared lane: `masc_team_memory_read/write/search` only, on flattened `room="default"`
 - no arbitrary shared writable shell directory
 - `legacy_local` remains backward-compatible for old keepers
 

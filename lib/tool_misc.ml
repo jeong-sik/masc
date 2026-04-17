@@ -119,7 +119,8 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_web_search" -> Some (handle_web_search ctx args)
   | "masc_team_memory_read" | "masc_team_memory_write"
   | "masc_team_memory_search" ->
-      Tool_team_memory.dispatch ~config:ctx.config ~name ~args
+      Tool_team_memory.dispatch ~config:ctx.config ~agent_name:ctx.agent_name
+        ~name ~args
   | "masc_tool_admin_snapshot" -> Some (Tool_misc_admin.handle_tool_admin_snapshot admin_ctx args)
   | "masc_tool_admin_update" -> Some (Tool_misc_admin.handle_tool_admin_update admin_ctx args)
   | "masc_deep_review" -> Some (Tool_deep_review.handle_deep_review ctx.config args)

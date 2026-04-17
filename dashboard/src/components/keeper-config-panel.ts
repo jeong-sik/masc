@@ -662,7 +662,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${Callout}
           title="Sandbox Core V1"
           body=${rd.sandbox_profile === 'docker_hardened'
-            ? 'docker_hardened는 keeper playground만 rw mount하고, 기본 network=none, read-only rootfs로 keeper_bash를 격리합니다. shared_memory_scope=room이면 typed team memory 도구만 공유 lane을 엽니다.'
+            ? 'docker_hardened는 keeper playground만 rw mount하고, 기본 network=none, read-only rootfs로 keeper_bash를 격리합니다. shared_memory_scope=room이면 flattened default namespace의 typed team memory 도구만 공유 lane을 엽니다.'
             : 'legacy_local는 현재 로컬 실행 모델을 유지합니다. network_mode=none은 docker_hardened에서만 유효합니다.'}
           tone=${rd.sandbox_profile === 'docker_hardened' ? 'warn' : 'neutral'}
         />

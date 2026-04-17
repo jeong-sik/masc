@@ -263,7 +263,7 @@ let keeper_schemas : tool_schema list = [
         ("shared_memory_scope", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "disabled"; `String "room"]);
-          ("description", `String "Typed shared-memory lane. 'room' enables room-scoped team memory tools, without opening a shared writable shell directory.");
+          ("description", `String "Typed shared-memory lane. 'room' enables keeper-authorized team memory tools on the flattened default namespace, without opening a shared writable shell directory.");
         ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");

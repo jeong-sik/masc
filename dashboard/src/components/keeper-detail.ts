@@ -709,7 +709,7 @@ function SandboxSummaryPanel({ keeperName }: { keeperName: string }) {
   }
 
   const laneText = config.shared_memory_scope === 'room'
-    ? 'room typed lane only (masc_team_memory_*)'
+    ? 'flattened default typed lane only (masc_team_memory_*, room=default)'
     : 'disabled'
   const sandboxTone = config.sandbox_profile === 'docker_hardened'
     ? 'border-amber-400/20 bg-amber-500/10'
@@ -765,7 +765,7 @@ function SandboxSummaryPanel({ keeperName }: { keeperName: string }) {
             `
           : html`
               <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
-                shared_memory_scope=room 이어도 공용 writable mount는 열리지 않습니다. 교류는 <span class="font-mono text-[var(--text-body)]">masc_team_memory_*</span>로만 수행합니다.
+                shared_memory_scope=room 이어도 공용 writable mount는 열리지 않습니다. 교류는 flattened <span class="font-mono text-[var(--text-body)]">default</span> namespace의 <span class="font-mono text-[var(--text-body)]">masc_team_memory_*</span>로만 수행합니다.
               </div>
             `}
       </div>

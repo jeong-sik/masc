@@ -495,6 +495,23 @@ describe('ConnectorStatusPanel', () => {
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
     expect(text).toContain('Sidecar not started')
     expect(text).toContain('cd sidecars/discord-bot && ./run.sh')
+
+    // Regression guard for the screenshot bug: when a connector card's
+    // brand accent is green (iMessage), the outer card renders a green
+    // gradient; a neutral `bg-[var(--white-4)]` panel sitting inside it
+    // used to read as a "success" tint ("not started" painted green).
+    // The panel now uses informational amber + a Portainer-style left
+    // stripe so it's unambiguously "needs action" regardless of the
+    // parent connector's brand color.
+    const panel = container.querySelector('[data-sidecar-not-started-panel]') as HTMLElement | null
+    expect(panel).toBeTruthy()
+    expect(panel!.className).toContain('bg-amber-500/5')
+    expect(panel!.className).toContain('border-l-amber-500')
+    // And the explicit "Not running" status chip is the one AT users hear.
+    const chip = panel!.querySelector('[data-sidecar-status-chip]')
+    expect(chip).toBeTruthy()
+    expect(chip!.getAttribute('aria-label')).toContain('not running')
+    expect(chip!.textContent).toContain('Not running')
   })
 
   it('shows no-keepers empty state when keeper directory is empty', async () => {

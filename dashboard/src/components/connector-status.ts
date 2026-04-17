@@ -746,10 +746,31 @@ function ConnectorLivePanel({
       ${showSidecarOffEmpty
         ? (() => {
             const cmds = sidecarCommands(connectorId)
+            // Informational amber tone (Railway / Vercel idle-service
+            // convention): "needs action, not broken". Earlier this
+            // panel inherited the connector accent gradient (iMessage =
+            // green), which visually read as "success" on a card that
+            // wasn't running. Amber overrides the accent bleed-through
+            // with an explicit "please click Start" signal. The left
+            // stripe matches the Portainer status-border pattern used
+            // on the outer card for vertical scannability.
             return html`
-              <div class="mt-3 rounded-md border border-dashed border-[var(--card-border)] bg-[var(--white-4)] px-3 py-3 text-[12px]">
+              <div
+                class="mt-3 rounded-md border border-dashed border-amber-400/30 border-l-4 border-l-amber-500 bg-amber-500/5 px-3 py-3 text-[12px]"
+                data-sidecar-not-started-panel
+              >
                 <div class="mb-1 flex items-center justify-between gap-2">
-                  <div class="font-medium text-[var(--text-body)]">Sidecar not started</div>
+                  <div class="flex items-center gap-2">
+                    <span
+                      class="inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-200"
+                      aria-label="Sidecar process status: not running"
+                      data-sidecar-status-chip
+                    >
+                      <span aria-hidden="true">⊘</span>
+                      <span>Not running</span>
+                    </span>
+                    <span class="font-medium text-[var(--text-body)]">Sidecar not started</span>
+                  </div>
                   <div class="flex items-center gap-2">
                     <${ActionButton}
                       variant="primary"
@@ -760,7 +781,7 @@ function ConnectorLivePanel({
                     <span class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">${connectorName}</span>
                   </div>
                 </div>
-                <div class="text-[11px] text-[var(--text-dim)]">
+                <div class="text-[11px] text-amber-100/80">
                   Click <strong>Start</strong> to spawn via the backend, or copy the command below to run it from a terminal.
                 </div>
                 <div class="mt-2 grid grid-cols-1 gap-1.5">

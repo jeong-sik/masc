@@ -196,6 +196,28 @@ export function normalizeGovernanceTimelineEvent(raw: unknown): GovernanceTimeli
   }
 }
 
+export function normalizeGovernanceExecutionOrder(raw: unknown): {
+  id: string
+  case_id: string
+  status: string
+  risk_class?: string
+  created_at?: string
+  actor?: string
+} | null {
+  if (!isRecord(raw)) return null
+  const id = asNullableString(raw.id)
+  const case_id = asNullableString(raw.case_id)
+  if (!id || !case_id) return null
+  return {
+    id,
+    case_id,
+    status: asNullableString(raw.status) ?? 'blocked',
+    risk_class: asNullableString(raw.risk_class) ?? undefined,
+    created_at: asNullableString(raw.created_at) ?? undefined,
+    actor: asNullableString(raw.actor) ?? undefined,
+  }
+}
+
 export function normalizeGovernanceJudgeSummary(raw: unknown): GovernanceJudgeSummary | undefined {
   if (!isRecord(raw)) return undefined
   return {

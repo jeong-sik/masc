@@ -247,6 +247,69 @@ let test_pending_for_agent () =
     let pending_claude = V.pending_for_agent ~base_path ~agent:"claude" in
     Alcotest.(check int) "claude sees 0 (own work filtered)" 0 (List.length pending_claude))
 
+(* --- Attribution conversion tests --- *)
+
+module A = Masc_mcp.Attribution
+
+let test_origin_det_for_rule_based () =
+  let cs = [ V.Contains "x"; V.Not_contains "y"; V.Schema_match (`Assoc []) ] in
+  Alcotest.(check bool) "Det" true (V.origin_of_criteria cs = A.Det)
+
+let test_origin_nondet_for_custom () =
+  let cs = [ V.Contains "x"; V.Custom "is it good?" ] in
+  Alcotest.(check bool) "NonDet" true (V.origin_of_criteria cs = A.NonDet)
+
+let test_verdict_pass_to_attribution () =
+  let attr = V.to_attribution ~origin:Det ~evidence:`Null V.Pass in
+  Alcotest.(check string) "gate" "verification" attr.gate;
+  Alcotest.(check bool) "outcome=Passed" true
+    (match attr.outcome with A.Passed -> true | _ -> false)
+
+let test_verdict_fail_to_attribution () =
+  let attr =
+    V.to_attribution ~origin:Det ~evidence:`Null
+      (V.Fail "output does not match schema")
+  in
+  match attr.outcome with
+  | A.Policy_failed { reason } ->
+    Alcotest.(check string) "reason" "output does not match schema" reason
+  | _ -> Alcotest.fail "expected Policy_failed"
+
+let test_verdict_partial_to_attribution () =
+  let attr =
+    V.to_attribution ~origin:NonDet ~evidence:`Null
+      (V.Partial (0.75, "partial match"))
+  in
+  match attr.outcome with
+  | A.Partial_pass { score; rationale } ->
+    Alcotest.(check (float 0.0001)) "score" 0.75 score;
+    Alcotest.(check string) "rationale" "partial match" rationale
+  | _ -> Alcotest.fail "expected Partial_pass"
+
+let test_attribution_of_request_none_for_pending () =
+  with_temp_dir (fun base_path ->
+    match V.create_request ~base_path ~task_id:"t1" ~output:`Null
+            ~criteria:[ V.Contains "x" ] ~worker:"w" () with
+    | Error e -> Alcotest.fail ("create failed: " ^ e)
+    | Ok req ->
+      Alcotest.(check bool) "None for Pending" true
+        (V.attribution_of_request req = None))
+
+let test_attribution_of_request_derives_origin () =
+  with_temp_dir (fun base_path ->
+    (* Build a request with a Custom criterion and a Completed Pass verdict. *)
+    match V.create_request ~base_path ~task_id:"t2" ~output:`Null
+            ~criteria:[ V.Contains "hello"; V.Custom "must be kind" ]
+            ~worker:"claude" ~verifier:"codex" () with
+    | Error e -> Alcotest.fail ("create failed: " ^ e)
+    | Ok req ->
+      let completed = { req with status = V.Completed V.Pass } in
+      match V.attribution_of_request completed with
+      | Some attr ->
+        Alcotest.(check bool) "origin=NonDet (Custom present)" true
+          (attr.A.origin = A.NonDet)
+      | None -> Alcotest.fail "expected Some attribution")
+
 let () =
   Alcotest.run "Verification" [
     "criterion", [
@@ -282,5 +345,21 @@ let () =
       Alcotest.test_case "auto verify" `Quick test_auto_verify;
       Alcotest.test_case "auto verify custom fails" `Quick test_auto_verify_with_custom_fails;
       Alcotest.test_case "pending for agent" `Quick test_pending_for_agent;
+    ];
+    "attribution", [
+      Alcotest.test_case "origin=Det for rule-based criteria" `Quick
+        test_origin_det_for_rule_based;
+      Alcotest.test_case "origin=NonDet when Custom present" `Quick
+        test_origin_nondet_for_custom;
+      Alcotest.test_case "Pass → Attribution.Passed" `Quick
+        test_verdict_pass_to_attribution;
+      Alcotest.test_case "Fail → Attribution.Policy_failed" `Quick
+        test_verdict_fail_to_attribution;
+      Alcotest.test_case "Partial → Attribution.Partial_pass" `Quick
+        test_verdict_partial_to_attribution;
+      Alcotest.test_case "attribution_of_request None for Pending" `Quick
+        test_attribution_of_request_none_for_pending;
+      Alcotest.test_case "attribution_of_request derives origin" `Quick
+        test_attribution_of_request_derives_origin;
     ];
   ]

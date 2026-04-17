@@ -151,3 +151,6 @@ val dashboard_shell_http_json :
 
 val dashboard_shell_payload_json :
   Coord.config -> Yojson.Safe.t
+
+val is_dashboard_cache_timeout_json :
+  Yojson.Safe.t -> bool

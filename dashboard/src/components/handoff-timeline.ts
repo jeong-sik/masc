@@ -26,9 +26,9 @@
 // `pointer-events: none` on the overlay so chips remain clickable.
 
 import { html } from 'htm/preact'
-import { useSignal } from '@preact/signals'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { fetchTelemetry, type TelemetryEntry } from '../api/dashboard'
+import { useSavedSignal } from '../lib/saved-signal'
 
 export type A2aEventKind = 'lifecycle' | 'failure' | 'tool' | 'handoff' | 'context' | 'unknown'
 
@@ -241,7 +241,7 @@ export function HandoffTimeline({
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState<number>(() => Date.now())
   const latestRequestId = useRef(0)
-  const query = useSignal('')
+  const [query] = useSavedSignal('dash:filter:handoff-timeline:query', '')
 
   useEffect(() => {
     let cancelled = false

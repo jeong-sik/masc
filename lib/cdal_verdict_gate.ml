@@ -82,20 +82,11 @@ let lookup_latest_verdict ?(base_dir = default_base_path)
       limit task_id);
   result
 
-let gate_check ?(base_dir = default_base_path) ~task_id () : string option =
-  match lookup_latest_verdict ~base_dir ~task_id () with
-  | None ->
-    Some (Printf.sprintf
-      "No CDAL verdict found for task %s. Submit evidence before completing."
-      task_id)
-  | Some verdict ->
-    match check_verdict verdict with
-    | Allow -> None
-    | Reject msg -> Some msg
-
 (* --- Attribution envelope conversion ---
    Layer 1 of the attribution rollout. Lets emitters surface a typed
-   verdict envelope alongside the existing string-return gate_check. *)
+   verdict envelope alongside the existing string-return gate_check.
+   Defined before gate_check so the latter can record into the ring
+   buffer without forward-referencing. *)
 
 let blocking_gap_count (v : Cdal_types.contract_verdict) : int =
   List.length
@@ -129,3 +120,16 @@ let attribution_for_missing_verdict ~task_id : Attribution.t =
       (Printf.sprintf
          "No CDAL verdict found for task %s. Submit evidence before completing."
          task_id)
+
+let gate_check ?(base_dir = default_base_path) ~task_id () : string option =
+  match lookup_latest_verdict ~base_dir ~task_id () with
+  | None ->
+    Dashboard_attribution.record (attribution_for_missing_verdict ~task_id);
+    Some (Printf.sprintf
+      "No CDAL verdict found for task %s. Submit evidence before completing."
+      task_id)
+  | Some verdict ->
+    Dashboard_attribution.record (to_attribution verdict);
+    match check_verdict verdict with
+    | Allow -> None
+    | Reject msg -> Some msg

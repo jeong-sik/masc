@@ -6,9 +6,9 @@ import { formatElapsedCompact } from '../lib/format-time'
 export const PRESSURE_HOT_RATIO = 0.75
 export const PRESSURE_WARN_RATIO = 0.5
 export const STALE_ACTIVITY_SEC = 900
-export const TELEMETRY_ACTIVITY_FRESH_SEC = 300
-export const TELEMETRY_SOURCE_STALE_SEC = 900
-export const OAS_EVENT_LAG_WARN_SEC = 600
+const TELEMETRY_ACTIVITY_FRESH_SEC = 300
+const TELEMETRY_SOURCE_STALE_SEC = 900
+const OAS_EVENT_LAG_WARN_SEC = 600
 
 export interface FleetRow {
   name: string
@@ -77,7 +77,7 @@ export function normalizeText(value: string | null | undefined): string | null {
   return trimmed === '' ? null : trimmed
 }
 
-export const MODEL_PLACEHOLDERS = new Set(['unknown', 'none', '-', 'n/a'])
+const MODEL_PLACEHOLDERS = new Set(['unknown', 'none', '-', 'n/a'])
 
 export function isPlaceholderModel(value: string): boolean {
   return MODEL_PLACEHOLDERS.has(value.toLowerCase())
@@ -108,7 +108,7 @@ export function uniqueStrings(values: Array<string | null | undefined>): string[
   return items
 }
 
-export function keeperLatestMetricModel(keeper: Keeper): string | null {
+function keeperLatestMetricModel(keeper: Keeper): string | null {
   const series = keeper.metrics_series ?? []
   for (let index = series.length - 1; index >= 0; index -= 1) {
     const model = normalizeModelText(series[index]?.model_used)
@@ -117,12 +117,12 @@ export function keeperLatestMetricModel(keeper: Keeper): string | null {
   return null
 }
 
-export function keeperMetricsWindowModel(keeper: Keeper): string | null {
+function keeperMetricsWindowModel(keeper: Keeper): string | null {
   const primary = keeper.metrics_window?.primary_model
   return typeof primary === 'string' ? normalizeModelText(primary) : null
 }
 
-export function keeperModel(keeper: Keeper): string {
+function keeperModel(keeper: Keeper): string {
   return firstNonEmptyString(
     keeper.last_model_used,
     keeperLatestMetricModel(keeper),
@@ -133,7 +133,7 @@ export function keeperModel(keeper: Keeper): string {
   ) ?? 'unknown'
 }
 
-export function keeperLastLatencyMs(keeper: Keeper): number {
+function keeperLastLatencyMs(keeper: Keeper): number {
   if (typeof keeper.last_latency_ms === 'number' && Number.isFinite(keeper.last_latency_ms)) {
     return keeper.last_latency_ms
   }
@@ -148,7 +148,7 @@ export function successClass(rate: number | null): string {
   return 'text-red-400'
 }
 
-export function keeperMetricsWindowTools(keeper: Keeper): string[] {
+function keeperMetricsWindowTools(keeper: Keeper): string[] {
   const topTools = keeper.metrics_window?.top_tools ?? []
   return uniqueStrings(topTools.map(item =>
     firstNonEmptyString(
@@ -157,7 +157,7 @@ export function keeperMetricsWindowTools(keeper: Keeper): string[] {
     )))
 }
 
-export function keeperRecentTools(keeper: Keeper): string[] {
+function keeperRecentTools(keeper: Keeper): string[] {
   return uniqueStrings([
     ...(keeper.recent_tool_names ?? []),
     ...(keeper.latest_tool_names ?? []),
@@ -165,7 +165,7 @@ export function keeperRecentTools(keeper: Keeper): string[] {
   ]).slice(0, 3)
 }
 
-export function keeperToolCallCount(keeper: Keeper, toolQualityCalls?: number): number {
+function keeperToolCallCount(keeper: Keeper, toolQualityCalls?: number): number {
   if (typeof toolQualityCalls === 'number' && Number.isFinite(toolQualityCalls) && toolQualityCalls >= 0) {
     return toolQualityCalls
   }
@@ -178,7 +178,7 @@ export function keeperToolCallCount(keeper: Keeper, toolQualityCalls?: number): 
   return counts.length > 0 ? Math.max(...counts) : 0
 }
 
-export function hasMeaningfulToolAuditSource(keeper: Keeper): boolean {
+function hasMeaningfulToolAuditSource(keeper: Keeper): boolean {
   const source = normalizeText(keeper.tool_audit_source)
   return source === 'heartbeat_task'
     || source === 'heartbeat_result'
@@ -186,7 +186,7 @@ export function hasMeaningfulToolAuditSource(keeper: Keeper): boolean {
     || source === 'keeper_metrics'
 }
 
-export function keeperHasToolTelemetry(keeper: Keeper, toolCalls: number, recentTools: string[]): boolean {
+function keeperHasToolTelemetry(keeper: Keeper, toolCalls: number, recentTools: string[]): boolean {
   return toolCalls > 0
     || recentTools.length > 0
     || hasMeaningfulToolAuditSource(keeper)
@@ -206,7 +206,7 @@ export function buildToolQualityMap(toolQuality: ToolQualityResponse): Map<strin
   return byKeeper
 }
 
-export type FleetBand = 'attention' | 'active' | 'paused' | 'offline'
+type FleetBand = 'attention' | 'active' | 'paused' | 'offline'
 
 export function fleetBand(row: FleetRow): FleetBand {
   const normalizedStatus = normalizeText(row.status)?.toLowerCase() ?? 'unknown'
@@ -254,13 +254,13 @@ export function rowUrgencyScore(row: FleetRow): number {
   return score
 }
 
-export function hasKnownActivity(row: FleetRow): boolean {
+function hasKnownActivity(row: FleetRow): boolean {
   return row.last_activity_ago_s != null
     && Number.isFinite(row.last_activity_ago_s)
     && row.last_activity_ago_s >= 0
 }
 
-export function activityAge(row: FleetRow): number {
+function activityAge(row: FleetRow): number {
   return hasKnownActivity(row) ? row.last_activity_ago_s ?? Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY
 }
 
@@ -390,7 +390,7 @@ export function numericAge(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
 }
 
-export function formatSourceAge(seconds: number | null | undefined): string | null {
+function formatSourceAge(seconds: number | null | undefined): string | null {
   const age = numericAge(seconds)
   return age == null ? null : formatElapsedCompact(age)
 }

@@ -1643,7 +1643,18 @@ let run_turn
     Agent_sdk.Hooks.compose ~outer:mem_hooks ~inner:hooks
   in
   let reducer =
-    Agent_sdk.Context_reducer.compose [
+    (* Hydration of [Tool_blob_store] markers happens BEFORE
+       [prune_tool_outputs] so the standard 4 KB cap still trims any
+       re-inflated bytes; older messages keep their markers and pay
+       only the marker's ~150-byte cost in the LLM context.
+       Returns no-op when [MASC_BASE_PATH] is unset (e.g. tests). *)
+    let hydrator_steps =
+      match Keeper_artifact_hydrator.reducer_from_env () with
+      | Some r -> [ r ]
+      | None -> []
+    in
+    Agent_sdk.Context_reducer.compose (
+      hydrator_steps @ [
       Agent_sdk.Context_reducer.drop_thinking;
       Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:3;
       Agent_sdk.Context_reducer.prune_tool_outputs ~max_output_len:4000;
@@ -1657,7 +1668,7 @@ let run_turn
             Keeper_context_core.repair_broken_tool_call_pairs;
       };
       Agent_sdk.Context_reducer.merge_contiguous;
-    ]
+    ])
   in
   (* 8. Run Agent *)
   let contract =

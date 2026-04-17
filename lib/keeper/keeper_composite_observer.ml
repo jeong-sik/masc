@@ -406,6 +406,15 @@ let observe
        | None -> None);
   }
 
+(* Fleet fold — observe every currently-registered keeper under
+   [base_path] once. Preserves registry iteration order so downstream
+   matrix rendering stays stable across successive polls.
+
+   Used by GET /api/v1/keepers/composite (LT-16a). *)
+let all_snapshots ~(base_path : string) () : snapshot list =
+  Keeper_registry.all ~base_path ()
+  |> List.map (fun entry -> observe entry)
+
 (* JSON serialisation (RFC-0003 §7) *)
 
 let invariants_to_json (inv : invariants_check) : Yojson.Safe.t =

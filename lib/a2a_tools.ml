@@ -119,11 +119,18 @@ let event_buffers : buffered_event list SMap.t Atomic.t = Atomic.make SMap.empty
 (* Max events per subscription to prevent memory bloat *)
 let max_buffered_events = Env_config_governance.Timeouts.event_buffer_size
 
+let uuid_rng = Random.State.make_self_init ()
+let uuid_mutex = Mutex.create ()
+let uuid_v4 = Uuidm.v4_gen uuid_rng
+
 (** Generate stable UUIDv4 identifiers for subscriptions and delegated tasks.
-    Mutex-protected for fiber safety (Random.State is mutable). *)
+    Uses a dedicated RNG so successive calls advance state instead of cloning
+    the process-global Random state on every invocation. *)
 let generate_uuid () =
-  let uuid = Uuidm.v4_gen (Random.get_state ()) () in
-  Uuidm.to_string uuid
+  Mutex.lock uuid_mutex;
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock uuid_mutex)
+    (fun () -> Uuidm.to_string (uuid_v4 ()))
 
 (** Get current ISO8601 timestamp *)
 let now_iso8601 () : string =

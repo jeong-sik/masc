@@ -148,8 +148,10 @@ let handle_runtime_ollama_probe _ctx args : tool_result =
   let timeout_sec =
     match member "timeout_sec" args with
     | `Int value -> value
-    | `Intlit value -> Option.value ~default:45 (parse_int_opt value)
-    | _ -> 45
+    | `Intlit value ->
+        Option.value ~default:Tool_local_runtime_probe.default_probe_timeout_sec
+          (parse_int_opt value)
+    | _ -> Tool_local_runtime_probe.default_probe_timeout_sec
   in
   ( true,
     json_ok

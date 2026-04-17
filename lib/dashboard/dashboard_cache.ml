@@ -220,17 +220,27 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            do_bg_compute ());
       stale_value
     | `Compute token ->
-      let compute_done = ref false in
       let result_ref = ref None in
-      Eio.Fiber.first
-        (fun () ->
-           (try result_ref := Some (Ok (compute ()))
-            with exn -> result_ref := Some (Error exn));
-           compute_done := true)
-        (fun () ->
-           Time_compat.sleep max_wait_sec;
-           if not !compute_done then
-             Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key max_wait_sec);
+      let run_compute () =
+        try result_ref := Some (Ok (compute ()))
+        with exn -> result_ref := Some (Error exn)
+      in
+      (match Eio_context.get_clock_opt () with
+       | Some clock ->
+           let compute_done = ref false in
+           Eio.Fiber.first
+             (fun () ->
+                run_compute ();
+                compute_done := true)
+             (fun () ->
+                Eio.Time.sleep clock max_wait_sec;
+                if not !compute_done then
+                  Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key max_wait_sec)
+       | None ->
+           (* Some read-model tests enable Eio without seeding the global
+              Eio_context clock. In that harness, run inline without the
+              watchdog rather than hard-failing. *)
+           run_compute ());
       let ts = now () in
       (match !result_ref with
        | Some (Ok value) ->

@@ -187,7 +187,7 @@ let string_of_session_lifecycle = function
   | SL_unknown -> "unknown"
 
 (** Status/health classification predicates — single source of truth.
-    Used across dashboard, briefing, operator, command_plane modules. *)
+    Used across dashboard, briefing, and operator modules. *)
 
 let is_keeper_offline status =
   List.mem status [ "offline"; "inactive"; "error" ]

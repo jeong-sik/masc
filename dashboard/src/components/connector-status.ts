@@ -226,6 +226,73 @@ export function channelIcon(ch: string): string {
 }
 
 const formatUptime = formatElapsedCompact
+
+// ── Header stat strip helpers (Grafana Stat-panel style big-number + label) ──
+
+export type HeaderStatTone = 'ok' | 'partial' | 'bad' | 'default'
+
+/** Pure: threshold tone for "N of M connected" header stat. Grafana
+    Stat-panel convention — emerald when all up, amber when partial,
+    rose when zero. Exposed so downstream tests can pin the thresholds
+    without mounting the panel. */
+export function headerConnectedTone(connected: number, total: number): HeaderStatTone {
+  if (total <= 0) return 'default'
+  if (connected >= total) return 'ok'
+  if (connected <= 0) return 'bad'
+  return 'partial'
+}
+
+/** Pure: threshold tone for a success-rate % stat. Grafana default
+    thresholds — ≥95 green, 70-95 amber, <70 red. */
+export function headerSuccessTone(successPct: number | null | undefined): HeaderStatTone {
+  if (successPct === null || successPct === undefined || Number.isNaN(successPct)) return 'default'
+  if (successPct >= 95) return 'ok'
+  if (successPct >= 70) return 'partial'
+  return 'bad'
+}
+
+/** Pure: map header tone to a Tailwind text-color utility. */
+export function headerStatToneClass(tone: HeaderStatTone): string {
+  switch (tone) {
+    case 'ok':      return 'text-emerald-200'
+    case 'partial': return 'text-amber-200'
+    case 'bad':     return 'text-rose-200'
+    case 'default':
+    default:        return 'text-[var(--text-body)]'
+  }
+}
+
+interface HeaderMiniStatProps {
+  label: string
+  value: string
+  tone?: HeaderStatTone
+  testId?: string
+}
+
+/** Inline mini Grafana-style stat tile — big tabular value on top,
+    tiny uppercase label below, threshold-colored by `tone`. Used by
+    the connector panel header; kept local because the surrounding
+    layout (right-aligned corner trio) doesn't generalize to a shared
+    primitive yet. Promote to common/ once a second caller emerges. */
+export function HeaderMiniStat({
+  label,
+  value,
+  tone = 'default',
+  testId,
+}: HeaderMiniStatProps) {
+  const valueTone = headerStatToneClass(tone)
+  return html`
+    <div
+      class="flex min-w-[60px] flex-col items-end justify-center rounded border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-1 text-right"
+      data-header-mini-stat=${label}
+      data-header-mini-stat-tone=${tone}
+      data-testid=${testId}
+    >
+      <span class=${`text-sm font-semibold tabular-nums leading-tight ${valueTone}`}>${value}</span>
+      <span class="mt-0.5 text-[9px] uppercase tracking-[0.16em] text-[var(--text-dim)]">${label}</span>
+    </div>
+  `
+}
 const timeAgo = formatTimeAgoEn
 
 function healthTone(health: string): { dot: string; badge: string; label: string } {
@@ -1263,17 +1330,39 @@ export function ConnectorStatusPanel() {
               : '4종 채널 sidecar(Discord, iMessage, Slack, Telegram)의 라이브 상태와 keeper 바인딩을 한 곳에서.'}
           </div>
         </div>
-        <div class="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
-          ${!filterId
-            ? (() => {
-                const allUp = knownConnectedCount === KNOWN_CONNECTOR_IDS.length
-                const tone = allUp ? 'text-emerald-300' : ''
-                return html`<div class=${tone}>${knownConnectedCount}/${KNOWN_CONNECTOR_IDS.length} connected</div>`
-              })()
-            : null}
-          <div>${d ? `success ${d.success_rate_pct}%` : `${visibleConnectors.length} connector${visibleConnectors.length !== 1 ? 's' : ''}`}</div>
-          <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : 'gate metrics unavailable'}</div>
-        </div>
+        ${!filterId
+          ? html`
+              <!-- Grafana Stat-panel style header strip: three mini tiles
+                   (big number + tiny label below) side-by-side. Replaces
+                   the previous 3 right-aligned text lines which read as
+                   dense small-caps metadata rather than scannable stats. -->
+              <div class="flex items-stretch gap-2" data-header-stat-strip>
+                <${HeaderMiniStat}
+                  label="connected"
+                  value=${`${knownConnectedCount}/${KNOWN_CONNECTOR_IDS.length}`}
+                  tone=${headerConnectedTone(knownConnectedCount, KNOWN_CONNECTOR_IDS.length)}
+                  testId="header-stat-connected"
+                />
+                <${HeaderMiniStat}
+                  label="success"
+                  value=${d ? `${d.success_rate_pct}%` : '—'}
+                  tone=${d ? headerSuccessTone(d.success_rate_pct) : 'default'}
+                  testId="header-stat-success"
+                />
+                <${HeaderMiniStat}
+                  label="uptime"
+                  value=${d ? formatUptime(d.uptime_seconds) : '—'}
+                  tone="default"
+                  testId="header-stat-uptime"
+                />
+              </div>
+            `
+          : html`
+              <div class="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
+                <div>${d ? `success ${d.success_rate_pct}%` : `${visibleConnectors.length} connector${visibleConnectors.length !== 1 ? 's' : ''}`}</div>
+                <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : 'gate metrics unavailable'}</div>
+              </div>
+            `}
       </div>
 
       ${!filterId

@@ -182,6 +182,34 @@ const FILTER_META: Record<StatusFilter, { label: string; description: string }> 
   },
 }
 
+/**
+ * Pure filter for agent roster rows.
+ *
+ * Case-insensitive substring match on `row.name`, `row.model`,
+ * `row.current_task`, and `row.koreanName` so operators can locate an
+ * agent/keeper by display name, by the model it runs, by its current
+ * task text, or by the Korean alias shown on the card.
+ *
+ * Empty/whitespace query returns the input reference unchanged (no new
+ * array allocation, preserves referential equality for memoisation).
+ *
+ * Input is never mutated; `Agent` is treated as readonly.
+ */
+export function filterAgentRoster(
+  rows: readonly Agent[],
+  query: string,
+): readonly Agent[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return rows
+  return rows.filter(row => {
+    if (row.name.toLowerCase().includes(needle)) return true
+    if (row.model && row.model.toLowerCase().includes(needle)) return true
+    if (row.current_task && row.current_task.toLowerCase().includes(needle)) return true
+    if (row.koreanName && row.koreanName.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
+
 export function uniqueToolNames(...groups: Array<string[] | null | undefined>): string[] {
   const seen = new Set<string>()
   const names: string[] = []
@@ -418,8 +446,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       if (filter !== 'all' && bandByAgent.get(a.name)?.key !== filter) return false
       if (normalizedSearch) {
         const terms = searchTermsByAgent.get(a.name) ?? [a.name.toLowerCase()]
-        if (!terms.some(term => term.includes(normalizedSearch))) {
-          return false
+        const identityMatch = terms.some(term => term.includes(normalizedSearch))
+        if (!identityMatch) {
+          // Fall back to the pure roster filter (model / current_task / koreanName).
+          const fieldMatch = filterAgentRoster([a], search).length === 1
+          if (!fieldMatch) return false
         }
       }
       return true
@@ -500,13 +531,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             </div>
 
             <label class="flex w-full flex-col gap-2 text-[11px] font-semibold tracking-[0.08em] text-[var(--text-muted)] uppercase">
-              <span>이름 또는 Runtime Alias</span>
+              <span>이름 / model / 작업</span>
               <${TextInput}
                 class="rounded-2xl bg-[var(--white-3)] px-4 py-3 text-[14px] text-[var(--text-body)] shadow-[inset_0_1px_0_var(--white-3)] focus:border-[var(--accent)] focus:shadow-[0_0_0_2px_var(--accent-soft)]"
                 name="agent_search"
-                ariaLabel="키퍼 또는 런타임 이름 검색"
+                ariaLabel="에이전트 이름 · 모델 · 작업 검색"
                 autoComplete="off"
-                placeholder="키퍼 이름 또는 runtime alias로 찾기"
+                placeholder="이름 · runtime alias · model · 작업으로 찾기"
                 value=${search}
                 onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
               />
@@ -765,9 +796,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         ${filtered.length === 0 ? html`
           <div class="col-span-full rounded-[var(--radius-xl)] border border-dashed border-[var(--ff-border-subtle)] bg-[var(--white-2)] px-6 py-10">
             <${EmptyState}
-              message=${showExecutionFallbackState && expectedScopedCount > 0
-                ? `${fallbackStateTitle}: ${countSourceLabel} 기준 ${scopeLabel}가 보이지만, 현재 조건에 맞는 상세 카드는 아직 없습니다.`
-                : '조건에 맞는 에이전트가 없습니다.'}
+              message=${normalizedSearch && scopedAgents.length > 0
+                ? `필터 결과 없음 (${scopedAgents.length} items)`
+                : showExecutionFallbackState && expectedScopedCount > 0
+                  ? `${fallbackStateTitle}: ${countSourceLabel} 기준 ${scopeLabel}가 보이지만, 현재 조건에 맞는 상세 카드는 아직 없습니다.`
+                  : '조건에 맞는 에이전트가 없습니다.'}
               compact
             />
           </div>

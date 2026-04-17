@@ -199,12 +199,6 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
           ]
       in
       Some (wrap ~event_type:"context_compacted" ~payload ~agent_name ())
-  (* TaskStateChanged match arm removed: OAS refactor!
-     (d3434799 "remove dead Event_bus.TaskStateChanged variant") dropped
-     the constructor entirely — it was declared in OAS#104 as a future
-     bridge point that was never implemented, with zero emit sites and
-     zero subscribers. Re-adding A2a task lifecycle to the SSE stream
-     is a deliberate forward-looking change, not an incidental fix. *)
   | Agent_sdk.Event_bus.AgentFailed { agent_name; task_id; error; elapsed } ->
       let payload =
         `Assoc

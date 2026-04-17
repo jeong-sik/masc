@@ -553,3 +553,186 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('mcp__masc__masc_status')
   })
 })
+
+describe('filterTelemetryDisplayItems', () => {
+  beforeEach(() => {
+    // The outer describe enables fake timers globally; the pure-function
+    // tests here don't need timers and dynamic import() resolves faster on
+    // real timers, so opt out for this suite.
+    vi.useRealTimers()
+  })
+
+  afterEach(() => {
+    vi.resetModules()
+    vi.doUnmock('../api/dashboard')
+  })
+
+  async function loadFilter() {
+    return import('./telemetry-unified')
+  }
+
+  const sampleEntries = [
+    {
+      source: 'tool_metric' as const,
+      ts: 1_775_709_300,
+      session_id: 'sess-alpha',
+      tool_name: 'mcp__masc__masc_status',
+      duration_ms: 15,
+      success: true,
+    },
+    {
+      source: 'keeper_metric' as const,
+      ts: 1_775_709_200,
+      name: 'keeper-bravo',
+      channel: 'turn_end',
+      model_used: 'glm-4.6',
+      tool_call_count: 2,
+      success: true,
+    },
+    {
+      source: 'agent_event' as const,
+      ts: 1_775_709_100,
+      event: ['task_claimed', { agent_id: 'keeper-charlie' }],
+    },
+    {
+      source: 'tool_call_io' as const,
+      ts: 1_775_709_000,
+      operation_id: 'op-delta',
+      keeper: 'keeper-delta',
+      tool: 'masc_broadcast',
+    },
+  ]
+
+  it('returns input reference unchanged for empty query', async () => {
+    const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadFilter()
+    const items = buildTelemetryDisplayItems([...sampleEntries])
+    expect(filterTelemetryDisplayItems(items, '')).toBe(items)
+  })
+
+  it('returns input reference unchanged for whitespace-only query', async () => {
+    const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadFilter()
+    const items = buildTelemetryDisplayItems([...sampleEntries])
+    expect(filterTelemetryDisplayItems(items, '   \t  ')).toBe(items)
+  })
+
+  it('trims query whitespace before matching', async () => {
+    const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadFilter()
+    const items = buildTelemetryDisplayItems([...sampleEntries])
+    const trimmed = filterTelemetryDisplayItems(items, '  keeper-bravo  ')
+    const raw = filterTelemetryDisplayItems(items, 'keeper-bravo')
+    expect(trimmed.length).toBe(raw.length)
+    expect(trimmed.length).toBe(1)
+  })
+
+  it('is case-insensitive', async () => {
+    const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadFilter()
+    const items = buildTelemetryDisplayItems([...sampleEntries])
+    const upper = filterTelemetryDisplayItems(items, 'KEEPER-BRAVO')
+    const lower = filterTelemetryDisplayItems(items, 'keeper-bravo')
+    expect(upper.length).toBe(lower.length)
+    expect(upper.length).toBe(1)
+  })
+
+  it('matches on the source field', async () => {
+    const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadFilter()
+    const items = buildTelemetryDisplayItems([...sampleEntries])
+    const filtered = filterTelemetryDisplayItems(items, 'agent_event')
+    expect(filtered.length).toBe(1)
+    expect(filtered[0]?.kind).toBe('entry')
+    if (filtered[0]?.kind === 'entry') {
+      expect(filtered[0].entry.source).toBe('agent_event')
+    }
+  })
+
+  it('matches on preview text (tool name)', async () => {
+    const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadFilter()
+    const items = buildTelemetryDisplayItems([...sampleEntries])
+    const filtered = filterTelemetryDisplayItems(items, 'masc_broadcast')
+    expect(filtered.length).toBe(1)
+    if (filtered[0]?.kind === 'entry') {
+      expect(filtered[0].entry.source).toBe('tool_call_io')
+    }
+  })
+
+  it('matches on scope badge (operation_id)', async () => {
+    const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadFilter()
+    const items = buildTelemetryDisplayItems([...sampleEntries])
+    const filtered = filterTelemetryDisplayItems(items, 'op-delta')
+    expect(filtered.length).toBe(1)
+    if (filtered[0]?.kind === 'entry') {
+      expect(filtered[0].entry.operation_id).toBe('op-delta')
+    }
+  })
+
+  it('returns empty array when nothing matches', async () => {
+    const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadFilter()
+    const items = buildTelemetryDisplayItems([...sampleEntries])
+    const filtered = filterTelemetryDisplayItems(items, 'zzz-no-such-token')
+    expect(filtered.length).toBe(0)
+  })
+
+  it('does not mutate input items', async () => {
+    const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadFilter()
+    const items = buildTelemetryDisplayItems([...sampleEntries])
+    const snapshot = items.map(item => item.key)
+    filterTelemetryDisplayItems(items, 'keeper-bravo')
+    expect(items.map(item => item.key)).toEqual(snapshot)
+    expect(items.length).toBe(4)
+  })
+
+  it('handles entries with missing scope/preview fields without throwing', async () => {
+    const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadFilter()
+    const sparseEntries = [
+      {
+        // agent_event with non-array event and no detail — tests sparse fields.
+        source: 'agent_event' as const,
+        ts: 1_775_709_500,
+        event: 'heartbeat_tick',
+      },
+      {
+        // tool_metric with no tool_name / duration — sparse preview.
+        source: 'tool_metric' as const,
+        ts: 1_775_709_400,
+      },
+    ]
+    const items = buildTelemetryDisplayItems(sparseEntries)
+    expect(() => filterTelemetryDisplayItems(items, 'anything')).not.toThrow()
+    const matchesSource = filterTelemetryDisplayItems(items, 'tool_metric')
+    expect(matchesSource.length).toBe(1)
+  })
+
+  it('matches group items on label (noisy tool name)', async () => {
+    const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadFilter()
+    // Three consecutive masc_status entries collapse into a single group whose
+    // label is the canonical tool name.
+    const noisyEntries = [
+      {
+        source: 'tool_metric' as const,
+        ts: 1_775_709_300,
+        session_id: 'sess-noisy',
+        tool_name: 'mcp__masc__masc_status',
+        duration_ms: 10,
+        success: true,
+      },
+      {
+        source: 'tool_usage' as const,
+        ts: 1_775_709_299,
+        session_id: 'sess-noisy',
+        caller: 'keeper_internal',
+        tool_name: 'masc_status',
+      },
+      {
+        source: 'tool_call_io' as const,
+        ts: 1_775_709_298,
+        session_id: 'sess-noisy',
+        keeper: 'keeper-alpha',
+        tool: 'masc_status',
+      },
+    ]
+    const items = buildTelemetryDisplayItems(noisyEntries)
+    expect(items[0]?.kind).toBe('group')
+    const filtered = filterTelemetryDisplayItems(items, 'masc_status')
+    expect(filtered.length).toBe(1)
+    expect(filtered[0]?.kind).toBe('group')
+  })
+})

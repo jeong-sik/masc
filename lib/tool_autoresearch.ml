@@ -269,7 +269,28 @@ let parse_operation_id json =
   | `String value when String.trim value <> "" -> Some (String.trim value)
   | _ -> None
 
+let check_concurrency_limit (ctx : context) =
+  let max_concurrent = 3 in
+  match ctx.agent_name with
+  | None -> Ok ()
+  | Some author ->
+      let active_count =
+        Autoresearch.with_loops_ro (fun () ->
+          Hashtbl.fold
+            (fun _ (state : Autoresearch_types.loop_state) acc ->
+               match state.author with
+               | Some a when a = author -> acc + 1
+               | _ -> acc)
+            Autoresearch.active_loops 0)
+      in
+      if active_count >= max_concurrent then
+        Error (Printf.sprintf "Concurrency limit reached: author '%s' already has %d active loops. Please stop or wait for them to finish." author active_count)
+      else Ok ()
+
 let handle_start (ctx : context) args =
+  match check_concurrency_limit ctx with
+  | Error message -> `Assoc [ ("error", `String message) ]
+  | Ok () ->
   match prepare_start_params ctx args with
   | Error message -> `Assoc [ ("error", `String message) ]
   | Ok params -> (
@@ -319,6 +340,20 @@ let handle_stop (ctx : context) args =
   match resolve_loop_id args with
   | None -> `Assoc [("error", `String "No autoresearch loop running")]
   | Some id ->
+      let can_stop =
+        match ctx.agent_name with
+        | None | Some "dashboard" | Some "admin" -> true
+        | Some requester ->
+            match Autoresearch.load_state ~base_path:ctx.base_path id with
+            | None -> true
+            | Some state ->
+                match state.author with
+                | Some a when a <> requester -> false
+                | _ -> true
+      in
+      if not can_stop then
+        `Assoc [("error", `String "Access denied: you can only stop loops that you started.")]
+      else
     match Autoresearch.stop_loop ~base_path:ctx.base_path ~reason id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
     | Some state ->

@@ -453,10 +453,10 @@ let test_activity_surface_contracts () =
        "Activity_graph.emit config");
   check bool "coord task lifecycle emits activity events via hook" true
     (file_contains_pattern "lib/coord/coord_task.ml"
-       "!Coord_hooks.activity_emit_fn config");
+       "(Atomic.get Coord_hooks.activity_emit_fn) config");
   check bool "coord broadcast emits activity events via hook" true
     (file_contains_pattern "lib/coord/coord_broadcast.ml"
-       "!Coord_hooks.activity_emit_fn config");
+       "(Atomic.get Coord_hooks.activity_emit_fn) config");
   check bool "board success paths emit activity events" true
     (file_contains_pattern "lib/tool_inline_dispatch_extra.ml"
        "Activity_graph.emit config")

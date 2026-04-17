@@ -133,6 +133,11 @@ They have been retired from the active runtime surface, so the current complexit
 
 ## tool_team_session.ml Split Plan (4412 lines)
 
+> **Obsolete.** The entire `tool_team_session` surface was retired rather than
+> split; the module and its dispatcher no longer exist. Kept below as historical
+> context for the decision path that led from "split the 4412-line module" to
+> "remove the swarm-start front door entirely".
+
 Recommended 4-module split:
 
 | New module | Lines | Content |

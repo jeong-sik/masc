@@ -19,6 +19,8 @@ import {
   taskEventsError,
   taskEventsSearchQuery,
   filterTaskEvents,
+  goalRelationSearchQuery,
+  filterGoalRelations,
   assigneeGoalIds,
   activeTab,
   switchToActivityTab,
@@ -268,11 +270,36 @@ function HandoffSection({ task }: { task: Task }) {
 function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
   if (goalIds.length === 0) return null
 
+  const query = goalRelationSearchQuery.value
+  const visibleIds = filterGoalRelations(goalIds, query)
+  const trimmed = query.trim()
+  const isFiltering = trimmed !== ''
+
   return html`
     <div class="flex flex-col gap-2">
-      <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">담당 키퍼의 활성 목표</div>
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">담당 키퍼의 활성 목표</div>
+        ${goalIds.length > 1 ? html`
+          <input
+            type="search"
+            value=${query}
+            placeholder="목표 검색 (title/status/metric)"
+            aria-label="목표 검색"
+            onInput=${(e: Event) => { goalRelationSearchQuery.value = (e.target as HTMLInputElement).value }}
+            class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          />
+          <span class="text-[10px] text-[var(--text-muted)] tabular-nums">
+            ${isFiltering
+              ? `${visibleIds.length} / ${goalIds.length}`
+              : `${goalIds.length}개`}
+          </span>
+        ` : null}
+      </div>
+      ${isFiltering && visibleIds.length === 0
+        ? html`<div class="py-3 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${goalIds.length} goals)</div>`
+        : html`
       <div class="flex flex-col gap-1">
-        ${goalIds.map(id => {
+        ${visibleIds.map(id => {
           const goal = goalById(id)
           return html`
             <div key=${id} class="flex items-center gap-2 rounded-lg border border-card-border/50 bg-[var(--white-3)] px-3 py-2">
@@ -282,6 +309,7 @@ function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
           `
         })}
       </div>
+        `}
     </div>
   `
 }

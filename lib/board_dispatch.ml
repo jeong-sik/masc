@@ -369,3 +369,19 @@ let backend_name () =
   match Atomic.get backend_state with
   | Active (Jsonl _) -> "jsonl"
   | Uninitialized -> "uninitialized"
+
+let start_flusher_actor ~sw =
+  match backend () with
+  | Jsonl store ->
+      Eio.Fiber.fork ~sw (fun () ->
+        Log.BoardLog.info "Board flusher actor started";
+        while true do
+          match Eio.Stream.take store.flusher_inbox with
+          | Board_types.Flush ->
+              (try Board.flush_dirty store
+               with exn -> Log.BoardLog.error "Flush failed: %s" (Printexc.to_string exn))
+          | Board_types.Sweep ->
+              (try ignore (Board.sweep store)
+               with exn -> Log.BoardLog.error "Sweep failed: %s" (Printexc.to_string exn))
+        done
+      )

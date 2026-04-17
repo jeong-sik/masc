@@ -47,13 +47,48 @@ let test_leading_whitespace_ignored () =
   (* "leading/trailing whitespace must be skipped" *)
   | _ -> assert false
 
-let test_pipe_rejected_in_skeleton () =
-  (* Pipeline production not in A1-PR-1.  Pipe metachar makes the
-     lexer reject; wrap at facade into Parse_error.  A follow-up PR
-     adds the Pipeline production and flips this to Parsed.Parsed. *)
+let test_two_stage_pipeline () =
   match Bash.parse_string "ls | cat" with
+  | Parsed.Parsed (Shell_ir.Pipeline [
+      Shell_ir.Simple s1; Shell_ir.Simple s2
+    ]) ->
+    assert (Bin.to_string s1.bin = "ls");
+    assert (Bin.to_string s2.bin = "cat");
+    assert (s1.args = []);
+    assert (s2.args = [])
+  (* "ls | cat must parse to Pipeline of two Simple" *)
+  | _ -> assert false
+
+let test_three_stage_pipeline_with_args () =
+  match Bash.parse_string "ls -la | grep foo | wc -l" with
+  | Parsed.Parsed (Shell_ir.Pipeline stages) ->
+    assert (List.length stages = 3);
+    (match stages with
+     | [ Shell_ir.Simple s1; Shell_ir.Simple s2; Shell_ir.Simple s3 ] ->
+       assert (Bin.to_string s1.bin = "ls");
+       assert (Bin.to_string s2.bin = "grep");
+       assert (Bin.to_string s3.bin = "wc");
+       assert (s2.args = [ Shell_ir.Lit "foo" ])
+     (* "3-stage pipeline inner shape wrong" *)
+     | _ -> assert false)
+  (* "3-stage pipeline must parse" *)
+  | _ -> assert false
+
+let test_single_command_is_simple_not_pipeline () =
+  (* length-1 pipelines collapse to Simple — distinguishes from
+     Shell_ir.Pipeline which requires length >= 2. *)
+  match Bash.parse_string "ls" with
+  | Parsed.Parsed (Shell_ir.Simple _) -> ()
+  (* "single command must be Simple, not Pipeline" *)
+  | _ -> assert false
+
+let test_logic_or_rejected () =
+  (* '||' is subset-excluded (Parsed.Too_complex.Logic_op in a
+     follow-up PR).  Today surfaces as Parse_error because the
+     grammar has no production for consecutive PIPE tokens. *)
+  match Bash.parse_string "ls || cat" with
   | Parsed.Parse_error _ -> ()
-  (* "pipe must reject in skeleton grammar" *)
+  (* "|| must reject" *)
   | _ -> assert false
 
 let test_redirect_rejected_in_skeleton () =
@@ -79,7 +114,10 @@ let () =
   test_ls_with_args ();
   test_echo_message ();
   test_leading_whitespace_ignored ();
-  test_pipe_rejected_in_skeleton ();
+  test_two_stage_pipeline ();
+  test_three_stage_pipeline_with_args ();
+  test_single_command_is_simple_not_pipeline ();
+  test_logic_or_rejected ();
   test_redirect_rejected_in_skeleton ();
   test_empty_input_rejected ();
   test_whitespace_only_rejected ();

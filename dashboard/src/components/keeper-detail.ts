@@ -61,6 +61,7 @@ import {
 } from './keeper-config-panel'
 import { PipelineStageBar } from './keeper-pipeline-stage'
 import { KeeperPhaseAndStage } from './keeper-phase-indicator'
+import { KeeperConditionsDivergent } from './keeper-conditions-divergent'
 import { KeeperStateDiagramPanel } from './keeper-state-diagram'
 import { KeeperMemoryTierPanel } from './keeper-memory-tier-panel'
 import { AgentJournalStream } from './agent-detail-journal'
@@ -1010,6 +1011,9 @@ export function KeeperDetailOverlay() {
             <${KeeperMemoryTierPanel} keeperName=${keeper.name} currentPhase=${keeper.phase} />
           </div>
         </details>
+
+        ${'' /* ── Divergent conditions (amber banner; renders only when phase lags observed signals) ── */}
+        <${KeeperConditionsDivergent} keeper=${keeper} />
 
         ${'' /* ── KPIs ── */}
         <${KpiGrid} keeper=${keeper} />

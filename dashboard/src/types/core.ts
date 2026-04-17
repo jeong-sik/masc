@@ -661,6 +661,7 @@ export interface Keeper {
   relationships?: Record<string, string>
   supervisor_diagnostics?: KeeperSupervisorDiagnostics
   outcomes?: KeeperOutcomes
+  conditions?: KeeperConditions
 }
 
 /** Outcomes rollup — aggregated successes / failures / validation
@@ -703,6 +704,27 @@ export interface KeeperOutcomes {
     }
     last_verdict_at: number | null
   }
+}
+
+/** 16 observable conditions that drive the keeper FSM (RFC-0002 §4).
+ *  Serialized by [Keeper_state_machine.conditions_to_json]. */
+export interface KeeperConditions {
+  launch_pending: boolean
+  fiber_alive: boolean
+  heartbeat_healthy: boolean
+  turn_healthy: boolean
+  context_within_budget: boolean
+  context_handoff_needed: boolean
+  compaction_active: boolean
+  handoff_active: boolean
+  operator_paused: boolean
+  stop_requested: boolean
+  restart_budget_remaining: boolean
+  backoff_elapsed: boolean
+  guardrail_triggered: boolean
+  drain_complete: boolean
+  context_overflow: boolean
+  compact_retry_exhausted: boolean
 }
 
 export interface KeeperSupervisorCrashLogEntry {

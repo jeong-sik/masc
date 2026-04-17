@@ -324,6 +324,12 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             | Some entry -> Some (Keeper_state_machine.phase_to_string entry.phase)
             | None -> None
           in
+          let conditions_json =
+            match registry_entry with
+            | Some entry ->
+                Keeper_state_machine.conditions_to_json entry.conditions
+            | None -> `Null
+          in
           (* reconcile_status removed with manual_reconcile blocker system. *)
           let runtime_blocker_fields =
             runtime_blocker_fields_json config m
@@ -550,6 +556,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 match phase with
                 | Some p -> `String p
                 | None -> `Null);
+              ("conditions", conditions_json);
             ] @ runtime_blocker_fields @ [
               ("supervisor_diagnostics", supervisor_diagnostics);
               ("agent_name", `String m.agent_name);

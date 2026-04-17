@@ -2,6 +2,8 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { filterHotSessions } from './transport-health'
+import type { HotSession } from '../api/transport-health'
 
 function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
   return {
@@ -245,5 +247,69 @@ describe('TransportHealthPanel', () => {
 
     await vi.advanceTimersByTimeAsync(1)
     expect(fetchTransportHealth).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('filterHotSessions', () => {
+  const sessions: HotSession[] = [
+    { session_id: 'aaaa1111-2222-3333-4444-555566667777', kind: 'observer', queue_depth: 5, last_event_id: 101, idle_seconds: 3 },
+    { session_id: 'bbbb9999-8888-7777-6666-555544443333', kind: 'coordinator', queue_depth: 12, last_event_id: 202, idle_seconds: 9 },
+    { session_id: 'cccc0000-1111-2222-3333-444455556666', kind: 'external', queue_depth: 3, last_event_id: 303, idle_seconds: 30 },
+  ]
+
+  it('returns the input reference unchanged when query is empty', () => {
+    const result = filterHotSessions(sessions, '')
+    expect(result).toBe(sessions)
+  })
+
+  it('returns the input reference unchanged when query is whitespace-only', () => {
+    const result = filterHotSessions(sessions, '   \t ')
+    expect(result).toBe(sessions)
+  })
+
+  it('matches substring of session_id (full uuid, beyond compact visual)', () => {
+    // '8888' only appears in the MIDDLE of bbbb's full uuid (compactId would hide it).
+    const result = filterHotSessions(sessions, '8888')
+    expect(result).toHaveLength(1)
+    expect(result[0]!.session_id).toBe('bbbb9999-8888-7777-6666-555544443333')
+  })
+
+  it('matches substring of kind', () => {
+    const result = filterHotSessions(sessions, 'coord')
+    expect(result).toHaveLength(1)
+    expect(result[0]!.kind).toBe('coordinator')
+  })
+
+  it('matches last_event_id by numeric-string substring', () => {
+    const result = filterHotSessions(sessions, '303')
+    expect(result).toHaveLength(1)
+    expect(result[0]!.last_event_id).toBe(303)
+  })
+
+  it('is case-insensitive', () => {
+    const upper = filterHotSessions(sessions, 'OBSERVER')
+    const lower = filterHotSessions(sessions, 'observer')
+    expect(upper).toHaveLength(1)
+    expect(lower).toHaveLength(1)
+    expect(upper[0]!.kind).toBe('observer')
+  })
+
+  it('trims the query before matching', () => {
+    const result = filterHotSessions(sessions, '  coordinator  ')
+    expect(result).toHaveLength(1)
+    expect(result[0]!.kind).toBe('coordinator')
+  })
+
+  it('returns an empty array when nothing matches', () => {
+    const result = filterHotSessions(sessions, 'zzz-not-present')
+    expect(result).toEqual([])
+  })
+
+  it('does NOT match queue_depth (numeric field is intentionally excluded)', () => {
+    // queue_depth 12 exists on bbbb session. Searching "12" should not match it
+    // unless another field (session_id / kind / last_event_id) contains "12".
+    // None of the fixture sessions have "12" in id/kind/last_event_id.
+    const result = filterHotSessions(sessions, '12')
+    expect(result).toEqual([])
   })
 })

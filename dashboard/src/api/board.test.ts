@@ -7,7 +7,6 @@ import {
   normalizeKeeperApprovalQueueItem,
   normalizeGovernanceJudgment,
   normalizeGovernanceDecisionItem,
-  normalizeGovernanceExecutionOrder,
   normalizeGovernanceTimelineEvent,
   normalizeGovernanceJudgeSummary,
 } from './board'
@@ -336,44 +335,6 @@ describe('normalizeGovernanceDecisionItem', () => {
     expect(result!.linked_task_id).toBe('t-1')
     expect(result!.linked_operation_id).toBe('op-1')
     expect(result!.linked_session_id).toBe('sess-1')
-  })
-})
-
-// ================================================================
-// normalizeGovernanceExecutionOrder
-// ================================================================
-
-describe('normalizeGovernanceExecutionOrder', () => {
-  it('returns null for null', () => {
-    expect(normalizeGovernanceExecutionOrder(null)).toBeNull()
-  })
-
-  it('returns null when id is missing', () => {
-    expect(normalizeGovernanceExecutionOrder({ case_id: 'c1' })).toBeNull()
-  })
-
-  it('returns null when case_id is missing', () => {
-    expect(normalizeGovernanceExecutionOrder({ id: '1' })).toBeNull()
-  })
-
-  it('extracts all fields', () => {
-    const result = normalizeGovernanceExecutionOrder({
-      id: 'eo-1',
-      case_id: 'case-1',
-      status: 'auto_executed',
-      risk_class: 'low',
-      created_at: '2026-04-17T12:00:00Z',
-      actor: 'janitor',
-    })
-    expect(result!.id).toBe('eo-1')
-    expect(result!.case_id).toBe('case-1')
-    expect(result!.status).toBe('auto_executed')
-    expect(result!.actor).toBe('janitor')
-  })
-
-  it('defaults status to blocked', () => {
-    const result = normalizeGovernanceExecutionOrder({ id: '1', case_id: 'c1' })
-    expect(result!.status).toBe('blocked')
   })
 })
 

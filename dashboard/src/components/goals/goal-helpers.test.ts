@@ -3,7 +3,6 @@ import {
   priorityStars,
   horizonLabel,
   horizonColor,
-  formatMetric,
   priorityLabel,
   statusFilterLabel,
   sortByPriority,
@@ -78,24 +77,6 @@ describe('horizonColor', () => {
 
   it('returns gray for unknown', () => {
     expect(horizonColor('unknown')).toBe('#888')
-  })
-})
-
-// ================================================================
-// formatMetric
-// ================================================================
-
-describe('formatMetric', () => {
-  it('formats to 4 decimal places', () => {
-    expect(formatMetric(0.1234)).toBe('0.1234')
-  })
-
-  it('pads with zeros', () => {
-    expect(formatMetric(0.5)).toBe('0.5000')
-  })
-
-  it('formats integers', () => {
-    expect(formatMetric(1)).toBe('1.0000')
   })
 })
 

@@ -455,7 +455,6 @@ describe('Governance surface', () => {
     const empty = container.querySelector('[data-testid="live-judge-empty"]')
     expect(empty).toBeTruthy()
     expect(empty?.textContent).toContain('AI Judge 오프라인')
-    // Keeper name + model chip rendered even when offline so the operator knows which runtime is failing.
     expect(empty?.textContent).toContain('governance-judge')
     expect(empty?.textContent).toContain('qwen3.5:35b')
   }, 20000)
@@ -494,6 +493,80 @@ describe('Governance surface', () => {
     expect(empty).toBeTruthy()
     expect(empty?.textContent).toContain('새 입력 대기')
     expect(empty?.textContent).toContain('마지막 판단')
+    expect(empty?.textContent).not.toContain('오프라인')
+  }, 20000)
+
+  it('renders keeper HITL empty state with judge-offline context when queue is empty and judge is offline', async () => {
+    const hitlEmptyOffline: DashboardGovernanceResponse = {
+      generated_at: '2026-04-17T00:00:00Z',
+      case_tracking_available: false,
+      summary: { cases_open: 0, pending_ruling: 0, ready_auto_execute: 0, needs_human_gate: 0, executed: 0, judge_online: false },
+      items: [],
+      activity: [],
+      pending_actions: [],
+      judgments: [],
+      approval_queue: [],
+      judge: { judge_online: false, keeper_name: 'governance-judge', model_used: 'qwen3.5:35b' },
+    }
+
+    const { Governance } = await loadComponentWithApi({
+      decideGovernanceExecutionOrder: Vitest.vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance: Vitest.vi.fn().mockResolvedValue(hitlEmptyOffline),
+      fetchParamAudit: Vitest.vi.fn().mockResolvedValue({ entries: [] }),
+      fetchGovernanceCaseStatus: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      fetchRuntimeParams: Vitest.vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
+      resolveGovernanceApproval: Vitest.vi.fn().mockResolvedValue({ ok: true, id: 'appr-1', decision: 'approve' }),
+      submitGovernanceCaseBrief: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      submitGovernancePetition: Vitest.vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+    })
+
+    render(html`<${Governance} />`, container)
+    await flushUi()
+
+    const empty = container.querySelector('[data-testid="keeper-hitl-empty"]')
+    expect(empty).toBeTruthy()
+    expect(empty?.textContent).toContain('AI Judge 오프라인')
+    expect(empty?.textContent).toContain('keeper 기동 여부')
+    expect(empty?.textContent).toContain('governance-judge')
+    expect(empty?.textContent).toContain('qwen3.5:35b')
+  }, 20000)
+
+  it('renders keeper HITL empty state with healthy-idle context when queue is empty and judge is active', async () => {
+    const hitlEmptyHealthy: DashboardGovernanceResponse = {
+      generated_at: '2026-04-17T00:00:00Z',
+      case_tracking_available: false,
+      summary: { cases_open: 0, pending_ruling: 0, ready_auto_execute: 0, needs_human_gate: 0, executed: 0, judge_online: true },
+      items: [],
+      activity: [],
+      pending_actions: [],
+      judgments: [],
+      approval_queue: [],
+      judge: {
+        judge_online: true,
+        keeper_name: 'governance-judge',
+        generated_at: '2026-04-17T00:00:00Z',
+      },
+    }
+
+    const { Governance } = await loadComponentWithApi({
+      decideGovernanceExecutionOrder: Vitest.vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance: Vitest.vi.fn().mockResolvedValue(hitlEmptyHealthy),
+      fetchParamAudit: Vitest.vi.fn().mockResolvedValue({ entries: [] }),
+      fetchGovernanceCaseStatus: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      fetchRuntimeParams: Vitest.vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
+      resolveGovernanceApproval: Vitest.vi.fn().mockResolvedValue({ ok: true, id: 'appr-1', decision: 'approve' }),
+      submitGovernanceCaseBrief: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      submitGovernancePetition: Vitest.vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+    })
+
+    render(html`<${Governance} />`, container)
+    await flushUi()
+
+    const empty = container.querySelector('[data-testid="keeper-hitl-empty"]')
+    expect(empty).toBeTruthy()
+    expect(empty?.textContent).toContain('위험도 threshold를 넘는 tool call이 없습니다')
+    expect(empty?.textContent).toContain('시스템이 정상 작동 중')
+    expect(empty?.textContent).toContain('마지막 judge 활동')
     expect(empty?.textContent).not.toContain('오프라인')
   }, 20000)
 })

@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
+import { signal } from '@preact/signals'
 import type { ComponentChildren } from 'preact'
 import { lastEvent } from '../sse'
 import type { SSEEvent } from '../types'
@@ -7,9 +8,11 @@ import { FetchScheduler } from '../lib/fetch-scheduler'
 import {
   fetchTransportHealth,
   decodeTransportHealthData,
+  type HotSession,
   type TransportHealthData,
 } from '../api/transport-health'
 import { createManagedAsyncResource } from '../lib/async-state'
+import { TextInput } from './common/input'
 
 type StatusTone = 'ok' | 'warn' | 'bad'
 
@@ -25,8 +28,35 @@ type PracticalCase = {
 const transportHealthResource = createManagedAsyncResource<TransportHealthData>()
 let inflightTransportHealthRefresh: Promise<void> | null = null
 
+// Module-scoped search state for the hot-sessions list (stale-filter-carryover
+// bug guard: must be cleared in resetTransportHealthState).
+export const hotSessionsSearchQuery = signal('')
+
+/**
+ * Case-insensitive substring filter over hot sessions.
+ * Searches: session_id (full uuid), kind, last_event_id (number → string).
+ * Does NOT match queue_depth (numeric, not useful for user search).
+ *
+ * Empty/whitespace query returns the input reference unchanged (no mutation,
+ * no new array allocation — referentially stable for memoization callers).
+ */
+export function filterHotSessions(
+  sessions: readonly HotSession[],
+  query: string,
+): readonly HotSession[] {
+  const q = query.trim().toLowerCase()
+  if (q === '') return sessions
+  return sessions.filter((session) => {
+    if (session.session_id.toLowerCase().includes(q)) return true
+    if (session.kind.toLowerCase().includes(q)) return true
+    if (String(session.last_event_id).toLowerCase().includes(q)) return true
+    return false
+  })
+}
+
 export function resetTransportHealthState(): void {
   inflightTransportHealthRefresh = null
+  hotSessionsSearchQuery.value = ''
   transportHealthResource.reset()
 }
 
@@ -419,29 +449,55 @@ export function TransportHealthPanel() {
       </details>
 
       ${data.sse.hot_sessions.length > 0
-        ? html`
+        ? (() => {
+            const query = hotSessionsSearchQuery.value
+            const filtered = filterHotSessions(data.sse.hot_sessions, query)
+            const isFiltered = query.trim() !== ''
+            return html`
             <details class="group rounded-xl border border-card-border/50 bg-card/18 overflow-hidden" open=${data.sse.hot_sessions.length >= 3}>
               <summary class="flex items-center gap-3 px-4 py-3 cursor-pointer text-[13px] font-semibold text-text-strong bg-card/28 hover:bg-card/44 transition-colors">
                 <span>핫 큐</span>
                 <span class="ml-auto text-[11px] font-normal text-text-muted">${data.sse.hot_sessions.length}개 세션 -- SSE 백프레셔 위험</span>
               </summary>
               <div class="p-4">
-                <div class="text-[11px] text-text-muted mb-3">SSE 세션 중 메시지 큐가 쌓여 있는 세션입니다. 큐 depth가 높으면 해당 클라이언트가 이벤트 처리를 따라가지 못하고 있습니다.</div>
-                <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
-                  ${data.sse.hot_sessions.map((session) => html`
-                    <div class="rounded-lg border border-card-border/60 bg-bg-1/60 p-3">
-                      <div class="flex items-center justify-between gap-2 mb-1">
-                        <span class="text-[11px] font-mono text-text-strong">${compactId(session.session_id)}</span>
-                        <span class="text-[10px] uppercase tracking-wider text-text-muted">${session.kind}</span>
-                      </div>
-                      <div class="text-[11px] text-text-body">queue ${session.queue_depth}</div>
-                      <div class="text-[10px] text-text-muted mt-1">idle ${formatIdle(session.idle_seconds)} · last ${session.last_event_id}</div>
-                    </div>
-                  `)}
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <div class="text-[11px] text-text-muted">SSE 세션 중 메시지 큐가 쌓여 있는 세션입니다. 큐 depth가 높으면 해당 클라이언트가 이벤트 처리를 따라가지 못하고 있습니다.</div>
+                  <${TextInput}
+                    type="search"
+                    class="min-w-[180px] flex-1 !py-1 !text-[11px]"
+                    name="hot_sessions_search"
+                    ariaLabel="핫 세션 검색 (session id, kind, last event id)"
+                    autoComplete="off"
+                    placeholder="검색 (id / kind / last event)"
+                    value=${query}
+                    onInput=${(e: Event) => {
+                      hotSessionsSearchQuery.value = (e.target as HTMLInputElement).value
+                    }}
+                  />
                 </div>
+                ${isFiltered ? html`
+                  <div class="mb-2 text-[11px] text-text-muted">${filtered.length} / ${data.sse.hot_sessions.length}개 세션</div>
+                ` : null}
+                ${filtered.length === 0 ? html`
+                  <div class="text-[11px] text-text-muted py-3">검색 결과 없음</div>
+                ` : html`
+                  <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
+                    ${filtered.map((session) => html`
+                      <div key=${session.session_id} class="rounded-lg border border-card-border/60 bg-bg-1/60 p-3">
+                        <div class="flex items-center justify-between gap-2 mb-1">
+                          <span class="text-[11px] font-mono text-text-strong">${compactId(session.session_id)}</span>
+                          <span class="text-[10px] uppercase tracking-wider text-text-muted">${session.kind}</span>
+                        </div>
+                        <div class="text-[11px] text-text-body">queue ${session.queue_depth}</div>
+                        <div class="text-[10px] text-text-muted mt-1">idle ${formatIdle(session.idle_seconds)} · last ${session.last_event_id}</div>
+                      </div>
+                    `)}
+                  </div>
+                `}
               </div>
             </details>
           `
+          })()
         : null}
 
       <details class="group rounded-xl border border-card-border/50 bg-card/18 overflow-hidden">

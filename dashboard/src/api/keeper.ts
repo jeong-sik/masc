@@ -9,7 +9,9 @@ import type { KeeperConversationDetails } from '../types'
 import { currentDashboardActor, jsonHeaders, runOperatorAction, fetchWithTimeout, DEFAULT_GET_TIMEOUT_MS } from './core'
 import {
   parseKeeperCompositeSnapshot,
+  parseFleetCompositeSnapshot,
   type KeeperCompositeSnapshot,
+  type FleetCompositeSnapshot,
 } from './schemas/keeper-composite'
 import {
   safeParseKeeperChatHistoryMessage,
@@ -26,10 +28,13 @@ export type {
   KeeperCompositeDecisionStage,
   KeeperCompositeCascadeState,
   KeeperCompositeCompactionStage,
+  FleetCompositeSnapshot,
 } from './schemas/keeper-composite'
 export {
   KeeperCompositeSnapshotSchema,
+  FleetCompositeSnapshotSchema,
   parseKeeperCompositeSnapshot,
+  parseFleetCompositeSnapshot,
   CompositeSchemaDriftError,
 } from './schemas/keeper-composite'
 export type { KeeperChatHistoryMessage } from './schemas/keeper-chat-history'
@@ -581,6 +586,23 @@ export async function fetchKeeperComposite(
   )
   if (!resp.ok) throw new Error(`composite fetch failed: ${resp.status}`)
   return parseKeeperCompositeSnapshot(await resp.json())
+}
+
+/**
+ * LT-16a: fetch the fleet-wide composite snapshot in one envelope.
+ * Backend reuses the same per-snapshot shape as fetchKeeperComposite,
+ * wrapped in { generated_at, count, snapshots: [...] }.
+ */
+export async function fetchKeepersComposite(
+  opts?: { signal?: AbortSignal },
+): Promise<FleetCompositeSnapshot> {
+  const resp = await fetchWithTimeout(
+    `/api/v1/keepers/composite`,
+    { headers: jsonHeaders(), signal: opts?.signal },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!resp.ok) throw new Error(`fleet composite fetch failed: ${resp.status}`)
+  return parseFleetCompositeSnapshot(await resp.json())
 }
 
 // --- Eval Quality (RFC-MASC-005 Phase 3) ---

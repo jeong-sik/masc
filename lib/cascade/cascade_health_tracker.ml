@@ -39,24 +39,50 @@ let getenv_with_alias ~primary ~deprecated =
        some
      | None -> None)
 
+let read_float_setting ~primary ~deprecated ~default =
+  match getenv_with_alias ~primary ~deprecated with
+  | None -> default
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then default
+    else
+      match Safe_ops.float_of_string_safe trimmed with
+      | Some value -> value
+      | None ->
+        Log.Misc.warn "Invalid float for %s=%S, using default %.1f"
+          primary raw default;
+        default
+
+let read_int_setting ~primary ~deprecated ~default =
+  match getenv_with_alias ~primary ~deprecated with
+  | None -> default
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then default
+    else
+      match Safe_ops.int_of_string_safe trimmed with
+      | Some value -> value
+      | None ->
+        Log.Misc.warn "Invalid int for %s=%S, using default %d"
+          primary raw default;
+        default
+
 (** Rolling window duration in seconds.  Events older than this are
     discarded on read.  Default: 300s (5 minutes), matching OpenRouter's
     rolling percentile window. *)
 let window_sec =
-  match getenv_with_alias
-          ~primary:"MASC_CASCADE_HEALTH_WINDOW_SEC"
-          ~deprecated:"OAS_CASCADE_HEALTH_WINDOW_SEC" with
-  | Some s -> (try Float.of_string s with _ -> 300.0)
-  | None -> 300.0
+  read_float_setting
+    ~primary:"MASC_CASCADE_HEALTH_WINDOW_SEC"
+    ~deprecated:"OAS_CASCADE_HEALTH_WINDOW_SEC"
+    ~default:300.0
 
 (** Number of consecutive failures before cooldown activates.
     Default: 3, matching LiteLLM's [allowed_fails] concept. *)
 let cooldown_threshold =
-  match getenv_with_alias
-          ~primary:"MASC_CASCADE_COOLDOWN_THRESHOLD"
-          ~deprecated:"OAS_CASCADE_COOLDOWN_THRESHOLD" with
-  | Some s -> (try int_of_string s with _ -> 3)
-  | None -> 3
+  read_int_setting
+    ~primary:"MASC_CASCADE_COOLDOWN_THRESHOLD"
+    ~deprecated:"OAS_CASCADE_COOLDOWN_THRESHOLD"
+    ~default:3
 
 (** Cooldown duration in seconds.  During cooldown, the provider is
     skipped (not attempted).  Default: 60s.
@@ -69,11 +95,10 @@ let cooldown_threshold =
     Override via [MASC_CASCADE_COOLDOWN_SEC] if recovery latency matters
     more than thrashing avoidance in your deployment. *)
 let cooldown_sec =
-  match getenv_with_alias
-          ~primary:"MASC_CASCADE_COOLDOWN_SEC"
-          ~deprecated:"OAS_CASCADE_COOLDOWN_SEC" with
-  | Some s -> (try Float.of_string s with _ -> 60.0)
-  | None -> 60.0
+  read_float_setting
+    ~primary:"MASC_CASCADE_COOLDOWN_SEC"
+    ~deprecated:"OAS_CASCADE_COOLDOWN_SEC"
+    ~default:60.0
 
 (* ── Types ────────────────────────────────────── *)
 

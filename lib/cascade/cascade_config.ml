@@ -374,7 +374,7 @@ let weighted_shuffle
     : Cascade_config_loader.weighted_entry list =
   match entries with
   | [] | [_] -> entries
-  | _ ->
+  | first :: rest ->
     let total_weight =
       List.fold_left (fun acc (e : Cascade_config_loader.weighted_entry) ->
           acc + e.weight) 0 entries
@@ -382,11 +382,7 @@ let weighted_shuffle
     if total_weight <= 0 then entries
     else
       let r = rand_int total_weight in
-      let default_selected, default_remaining =
-        match entries with
-        | first :: rest -> (first, rest)
-        | [] -> assert false
-      in
+      let default_selected, default_remaining = (first, rest) in
       (* Find the selected entry via cumulative weight *)
       let rec find_selected cumulative = function
         | [] -> (* fallback: first entry *)

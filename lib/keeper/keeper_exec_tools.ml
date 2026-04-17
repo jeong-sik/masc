@@ -46,6 +46,39 @@ let tool_search_fn
   ref (fun ~query:_ ~max_results:_ ->
     `Assoc [ ("results", `List []) ])
 
+type tool_result_payload =
+  | Structured_success
+  | Structured_error
+  | Plain_text
+  | Malformed_structured of string
+
+let looks_like_structured_payload payload =
+  let len = String.length payload in
+  let rec find_first_nonspace i =
+    if i >= len then None
+    else
+      match payload.[i] with
+      | ' ' | '\t' | '\n' | '\r' -> find_first_nonspace (i + 1)
+      | c -> Some c
+  in
+  match find_first_nonspace 0 with
+  | Some ('{' | '[') -> true
+  | Some _ | None -> false
+
+let classify_tool_result_payload payload =
+  if not (looks_like_structured_payload payload) then Plain_text
+  else
+    match Safe_ops.parse_json_safe ~context:"Keeper_exec_tools.classify_tool_result_payload" payload with
+    | Error msg -> Malformed_structured msg
+    | Ok (`Assoc fields) ->
+      let is_error =
+        match List.assoc_opt "ok" fields with
+        | Some (`Bool false) -> true
+        | _ -> List.mem_assoc "error" fields
+      in
+      if is_error then Structured_error else Structured_success
+    | Ok _ -> Structured_success
+
 
 
 (* ── Tool execution dispatch ──────────────────────────────────── *)
@@ -63,25 +96,26 @@ let execute_keeper_tool_call
   let args = input in
   let now_ts = Time_compat.now () in
   let apply_circuit_breaker result =
-    (* Detect error in JSON result and enrich with corrective hint
-       if the same error class has repeated [threshold] times. *)
-    let is_error =
-      try
-        match Yojson.Safe.from_string result with
-        | `Assoc fields ->
-          (match List.assoc_opt "ok" fields with
-           | Some (`Bool false) -> true
-           | _ -> List.mem_assoc "error" fields)
-        | _ -> false
-      with _ -> false
-    in
-    if is_error then
+    match classify_tool_result_payload result with
+    | Structured_error ->
       Keeper_failure_circuit_breaker.maybe_enrich_error
         ~keeper_name:meta.name ~error_msg:result
-    else begin
+    | Structured_success
+    | Plain_text ->
       Keeper_failure_circuit_breaker.record_success ~keeper_name:meta.name;
       result
-    end
+    | Malformed_structured parse_error ->
+      Log.Keeper.error
+        "keeper:%s tool:%s produced malformed structured payload: %s"
+        meta.name name parse_error;
+      let breaker_msg =
+        Printf.sprintf "malformed_tool_result: %s" parse_error
+      in
+      let _ =
+        Keeper_failure_circuit_breaker.maybe_enrich_error
+          ~keeper_name:meta.name ~error_msg:breaker_msg
+      in
+      result
   in
   let lookup = tool_access_lookup_of_meta meta in
   apply_circuit_breaker (

@@ -1,3 +1,11 @@
+---
+status: runbook
+last_verified: 2026-04-17
+code_refs:
+  - bin/main_eio.ml
+  - lib/config/
+---
+
 # Config Doctor
 
 `main_eio.exe doctor` is the canonical operator path for answering:

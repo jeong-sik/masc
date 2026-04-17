@@ -1,3 +1,11 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/
+  - config/
+---
+
 # Keeper File Model
 
 **Status**: Active  

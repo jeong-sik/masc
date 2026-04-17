@@ -11,17 +11,20 @@
     @since MASC v3.1 (Level 4)
 *)
 
-(** {1 Environment Helpers} *)
+(** {1 Environment Helpers}
+
+    Thin delegates to the [Env_config_core] SSOT so Swarm/Flocking
+    config reads the same env-var semantics (trim + malformed-value
+    fallback) as the rest of the codebase.  The positional [default]
+    argument is kept for call-site compatibility with the many
+    [Swarm.*] / [Flocking.*] thunks below and with
+    [test_level4_config_coverage]. *)
 
 let get_env_float name default =
-  match Sys.getenv_opt name with
-  | Some s -> Safe_ops.float_of_string_with_default ~default s
-  | None -> default
+  Env_config_core.get_float ~default name
 
 let get_env_int name default =
-  match Sys.getenv_opt name with
-  | Some s -> Safe_ops.int_of_string_with_default ~default s
-  | None -> default
+  Env_config_core.get_int ~default name
 
 (** {1 Random Number Generator} *)
 

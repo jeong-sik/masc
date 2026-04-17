@@ -35,6 +35,28 @@ type board_sse_event =
   | Comment_voted of { comment_id : string; voter : string; direction : Board.vote_direction }
 
 let backend_state : backend_state Atomic.t = Atomic.make Uninitialized
+let flusher_started : bool Atomic.t = Atomic.make false
+
+let start_flusher_actor ~sw store =
+  Eio.Fiber.fork ~sw (fun () ->
+    Log.BoardLog.info "Board flusher actor started";
+    while true do
+      match Eio.Stream.take store.Board.flusher_inbox with
+      | Board_types.Flush ->
+          (try Board.flush_dirty store
+           with exn -> Log.BoardLog.error "Flush failed: %s" (Printexc.to_string exn))
+      | Board_types.Sweep ->
+          (try ignore (Board.sweep store)
+           with exn -> Log.BoardLog.error "Sweep failed: %s" (Printexc.to_string exn))
+    done
+  )
+
+let ensure_flusher_actor store =
+  match Eio_context.get_switch_opt () with
+  | None -> ()
+  | Some sw ->
+      if Atomic.compare_and_set flusher_started false true then
+        start_flusher_actor ~sw store
 
 
 let keeper_board_signal_hook : (keeper_board_signal -> unit) option Atomic.t = Atomic.make None
@@ -66,15 +88,18 @@ let init_jsonl () =
   if match Atomic.get backend_state with Active _ -> true | Uninitialized -> false then
     Log.BoardLog.warn "already initialized, ignoring init_jsonl"
   else begin
-    let backend = Active (Jsonl (Board.global ())) in
-    if Atomic.compare_and_set backend_state Uninitialized backend then
+    let store = Board.global () in
+    let backend = Active (Jsonl store) in
+    if Atomic.compare_and_set backend_state Uninitialized backend then begin
+      ensure_flusher_actor store;
       Log.BoardLog.info "JSONL backend initialized"
-    else
+    end else
       Log.BoardLog.warn "already initialized concurrently, ignoring init_jsonl"
   end
 
 let reset_for_test () =
-  Atomic.set backend_state Uninitialized
+  Atomic.set backend_state Uninitialized;
+  Atomic.set flusher_started false
 
 let jsonl_forced () =
   match Env_config.Board.backend_opt () with
@@ -83,15 +108,22 @@ let jsonl_forced () =
 
 let backend () =
   match Atomic.get backend_state with
-  | Active backend -> backend
+  | Active (Jsonl store as backend) ->
+      ensure_flusher_actor store;
+      backend
   | Uninitialized ->
       Log.BoardLog.warn "backend() called before server init, auto-initializing JSONL";
-      let b = Jsonl (Board.global ()) in
+      let store = Board.global () in
+      let b = Jsonl store in
       let backend_val = Active b in
       let _ = Atomic.compare_and_set backend_state Uninitialized backend_val in
       match Atomic.get backend_state with
-      | Active active_b -> active_b
-      | Uninitialized -> b
+      | Active (Jsonl active_store as active_b) ->
+          ensure_flusher_actor active_store;
+          active_b
+      | Uninitialized ->
+          ensure_flusher_actor store;
+          b
 
 let sort_posts_in_memory ~sort_by (posts : Board.post list) =
   match sort_by with
@@ -369,19 +401,3 @@ let backend_name () =
   match Atomic.get backend_state with
   | Active (Jsonl _) -> "jsonl"
   | Uninitialized -> "uninitialized"
-
-let start_flusher_actor ~sw =
-  match backend () with
-  | Jsonl store ->
-      Eio.Fiber.fork ~sw (fun () ->
-        Log.BoardLog.info "Board flusher actor started";
-        while true do
-          match Eio.Stream.take store.flusher_inbox with
-          | Board_types.Flush ->
-              (try Board.flush_dirty store
-               with exn -> Log.BoardLog.error "Flush failed: %s" (Printexc.to_string exn))
-          | Board_types.Sweep ->
-              (try ignore (Board.sweep store)
-               with exn -> Log.BoardLog.error "Sweep failed: %s" (Printexc.to_string exn))
-        done
-      )

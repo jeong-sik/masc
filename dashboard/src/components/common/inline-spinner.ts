@@ -16,8 +16,8 @@
 
 import { html } from 'htm/preact'
 
-export type InlineSpinnerSize = 'xs' | 'sm' | 'md'
-export type InlineSpinnerTone = 'accent' | 'muted'
+type InlineSpinnerSize = 'xs' | 'sm' | 'md'
+type InlineSpinnerTone = 'accent' | 'muted'
 
 /** Pure: Tailwind size tokens for each variant. Exposed so a hot-path
     render (timeline rows, log tail, iterating progress lists) can
@@ -54,7 +54,7 @@ export function inlineSpinnerClasses(
   return parts.join(' ')
 }
 
-export interface InlineSpinnerProps {
+interface InlineSpinnerProps {
   size?: InlineSpinnerSize
   tone?: InlineSpinnerTone
   class?: string

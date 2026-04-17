@@ -98,7 +98,8 @@ val execute : string -> Yojson.Safe.t -> (bool * Yojson.Safe.t)
 
 val autoresearch_keeper_tools : Types.tool_schema list
 (** Autoresearch tools for keeper use.
-    Excludes team-session swarm-start front doors. *)
+    (Earlier revisions excluded team-session swarm-start front doors;
+    those front doors were removed along with the team_session module.) *)
 
 val shard_autoresearch : shard
 (** Autoresearch shard: start, cycle, status, inject, stop. *)

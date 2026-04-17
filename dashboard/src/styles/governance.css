@@ -33,11 +33,6 @@ button.governance-row.selected {
     inset 0 1px 0 var(--ff-gold-8);
 }
 
-/* Mention bar — nested .control-input override */
-.ff-profile__mention .control-input {
-  flex: 1;
-}
-
 @media (max-width: 768px) {
   .ff-plate {
     grid-template-columns: 1fr;

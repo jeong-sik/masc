@@ -165,18 +165,16 @@ button.monitor-row {
 }
 
 .monitor-surface-card, 
-.activity-item, 
-.focus-agent-card, 
+.activity-item,
+.focus-agent-card,
 .board-comment,
-.cmd-card,
-.goal-node-card {
+.cmd-card {
   @apply hover-lift;
 }
 
 /* Explicit button interactions */
 button:not(:disabled),
 .vote-btn,
-.action-btn,
-.tab-item {
+.action-btn {
   @apply pressable;
 }

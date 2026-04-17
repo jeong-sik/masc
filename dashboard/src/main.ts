@@ -17,7 +17,6 @@ import './styles/board.css'
 import './styles/dashboard.css'
 import './styles/governance.css'
 import './styles/governance-agent.css'
-import './styles/mission.css'
 import './styles/ops.css'
 import './styles/tools.css'
 

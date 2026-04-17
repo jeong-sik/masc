@@ -1,4 +1,4 @@
-// Tools main component — orchestrates summary/full inventory/executor views
+// Tools main component — orchestrates inventory and executor views
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
@@ -9,10 +9,8 @@ import {
   toolsData,
   toolsLoading,
   toolsError,
-  showFullInventory,
   loadTools,
 } from './tool-state'
-import { ToolSummaryView } from './tool-summary-view'
 import { FullInventoryView } from './tool-full-inventory'
 import { PromptRegistryPanel } from './prompt-registry-panel'
 import { ConfigResolutionPanel } from './config-resolution-panel'
@@ -50,30 +48,11 @@ export function Tools() {
       />
 
       <${Card} title="시스템 도구 목록" class="section mb-4">
-        <div class="mb-4">
-          <p class="text-[12px] text-[var(--text-muted)] leading-relaxed">
-            ${showFullInventory.value
-              ? 'hidden/deprecated 포함 inventory를 surface/visibility/direct-call 축으로 정리해 봅니다.'
-              : '도구 인벤토리의 핵심 surface와 노출 정책을 요약합니다.'}
-          </p>
-          <${ActionButton}
-            variant="ghost"
-            size="lg"
-            class="mt-2"
-            onClick=${() => { showFullInventory.value = !showFullInventory.value }}
-          >
-            ${showFullInventory.value ? '요약 보기' : '전체 인벤토리 보기'}
-          <//>
-        </div>
-
-        ${showFullInventory.value
-          ? html`<${FullInventoryView}
-              inventory=${inventory}
-              loading=${loading}
-              error=${error}
-            />`
-          : html`<${ToolSummaryView} inventory=${inventory} />`
-        }
+        <${FullInventoryView}
+          inventory=${inventory}
+          loading=${loading}
+          error=${error}
+        />
       <//>
 
       <${Card} title="도구 사용 현황" class="section mb-4">

@@ -89,4 +89,3 @@ export function surfaceCountForFilter(inventory: DashboardToolInventoryItem[], f
 }
 
 export const showBackToTop = signal(false)
-export const showFullInventory = signal(false)

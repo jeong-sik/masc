@@ -1,6 +1,3 @@
-import { html } from 'htm/preact'
-import { StatusChip } from './status-chip'
-
 type ProvenanceItem = {
   kind?: string | null
   label?: string | null
@@ -40,29 +37,4 @@ export function provenanceLabel(item: ProvenanceItem): string {
   if (explicit) return explicit
   const kind = normalizeProvenance(item.kind)
   return PROVENANCE_LABELS[kind] ?? (kind || 'unknown')
-}
-
-export function ProvenanceChip({ item }: { item: ProvenanceItem }) {
-  const label = provenanceLabel(item)
-  const tone = provenanceTone(item.kind)
-  return html`<${StatusChip} label=${label} tone=${tone} />`
-}
-
-export function ProvenanceStrip({
-  items,
-  className = 'mission-briefing-meta',
-  testId,
-}: {
-  items: ProvenanceItem[]
-  className?: string
-  testId?: string
-}) {
-  const normalized = items.filter(item => provenanceLabel(item).trim().length > 0)
-  if (normalized.length === 0) return null
-
-  return html`
-    <div class=${className} data-testid=${testId}>
-      ${normalized.map((item, index) => html`<${ProvenanceChip} key=${`${provenanceLabel(item)}-${index}`} item=${item} />`)}
-    </div>
-  `
 }

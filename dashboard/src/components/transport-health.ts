@@ -32,7 +32,7 @@ let inflightTransportHealthRefresh: Promise<void> | null = null
 
 // Module-scoped search state for the hot-sessions list (stale-filter-carryover
 // bug guard: must be cleared in resetTransportHealthState).
-export const hotSessionsSearchQuery = signal('')
+const hotSessionsSearchQuery = signal('')
 
 /**
  * Case-insensitive substring filter over hot sessions.

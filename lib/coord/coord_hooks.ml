@@ -23,8 +23,8 @@ type activity_entity = { kind: string; id: string }
 
 (** Force-release a task — avoids Coord_gc → Coord_task circular dep. *)
 let force_release_task_fn
-  : (Coord_utils_backend_setup.config -> agent_name:string -> task_id:string -> unit -> string masc_result) ref
-  = ref (fun _config ~agent_name:_ ~task_id:_ () ->
+  : (Coord_utils_backend_setup.config -> agent_name:string -> task_id:string -> unit -> string masc_result) Atomic.t
+  = Atomic.make (fun _config ~agent_name:_ ~task_id:_ () ->
       Error (Types.TaskInvalidState "Coord_hooks: force_release_task_fn not connected"))
 
 (* ============================================ *)
@@ -40,42 +40,42 @@ let activity_emit_fn
      kind:string ->
      payload:Yojson.Safe.t ->
      tags:string list ->
-     unit -> unit) ref
-  = ref (fun _config ~actor:_ ?subject:_ ~kind:_ ~payload:_ ~tags:_ () -> ())
+     unit -> unit) Atomic.t
+  = Atomic.make (fun _config ~actor:_ ?subject:_ ~kind:_ ~payload:_ ~tags:_ () -> ())
 
 (** Agent economy earn — wraps Agent_economy.earn for task completion credits. *)
 let agent_economy_earn_fn
-  : (base_path:string -> agent_name:string -> reason:string -> unit) ref
-  = ref (fun ~base_path:_ ~agent_name:_ ~reason:_ -> ())
+  : (base_path:string -> agent_name:string -> reason:string -> unit) Atomic.t
+  = Atomic.make (fun ~base_path:_ ~agent_name:_ ~reason:_ -> ())
 
 (** Stop keeper keepalive fiber — avoids Coord_gc → Keeper_keepalive dep.
     Called during zombie cleanup to terminate keeper fibers that would
     otherwise continue making tool calls after agent removal. *)
 let stop_keeper_fn
-  : (string -> unit) ref
-  = ref (fun _name -> ())
+  : (string -> unit) Atomic.t
+  = Atomic.make (fun _name -> ())
 
 (** Relation materializer: agent leave — wraps Relation_materializer.on_agent_leave. *)
 let relation_on_leave_fn
-  : (leaving_agent:string -> active_agents:string list -> unit) ref
-  = ref (fun ~leaving_agent:_ ~active_agents:_ -> ())
+  : (leaving_agent:string -> active_agents:string list -> unit) Atomic.t
+  = Atomic.make (fun ~leaving_agent:_ ~active_agents:_ -> ())
 
 (** Relation materializer: task done — wraps Relation_materializer.on_task_done. *)
 let relation_on_task_done_fn
-  : (assignee:string -> active_agents:string list -> unit) ref
-  = ref (fun ~assignee:_ ~active_agents:_ -> ())
+  : (assignee:string -> active_agents:string list -> unit) Atomic.t
+  = Atomic.make (fun ~assignee:_ ~active_agents:_ -> ())
 
 (** Hebbian learning: strengthen collaboration on task completion. *)
 let hebbian_on_task_done_fn
   : (Coord_utils_backend_setup.config ->
-     assignee:string -> active_agents:string list -> unit) ref
-  = ref (fun _config ~assignee:_ ~active_agents:_ -> ())
+     assignee:string -> active_agents:string list -> unit) Atomic.t
+  = Atomic.make (fun _config ~assignee:_ ~active_agents:_ -> ())
 
 (** Hebbian learning: weaken collaboration on task cancellation. *)
 let hebbian_on_task_cancelled_fn
   : (Coord_utils_backend_setup.config ->
-     agent_name:string -> active_agents:string list -> unit) ref
-  = ref (fun _config ~agent_name:_ ~active_agents:_ -> ())
+     agent_name:string -> active_agents:string list -> unit) Atomic.t
+  = Atomic.make (fun _config ~agent_name:_ ~active_agents:_ -> ())
 
 (** Shared observability hook for join/rejoin/leave events.
     Upper layers can mirror state transitions to audit, telemetry, and logs
@@ -85,8 +85,8 @@ let observe_agent_lifecycle_fn
      agent_id:string ->
      event_kind:string ->
      details:Yojson.Safe.t ->
-     unit) ref
-  = ref
+     unit) Atomic.t
+  = Atomic.make
       (fun _config ~agent_id:_ ~event_kind:_ ~details:_ -> ())
 
 (** Shared observability hook for task transitions.
@@ -98,26 +98,26 @@ let observe_task_transition_fn
      task_id:string ->
      transition:string ->
      details:Yojson.Safe.t ->
-     unit) ref
-  = ref
+     unit) Atomic.t
+  = Atomic.make
       (fun _config ~agent_name:_ ~task_id:_ ~transition:_
            ~details:_ -> ())
 
 (** Board artifact cleanup — wraps Board_dispatch.list_posts + delete_post.
     Returns number of deleted posts. *)
 let cleanup_board_artifacts_fn
-  : (unit -> int) ref
-  = ref (fun () -> 0)
+  : (unit -> int) Atomic.t
+  = Atomic.make (fun () -> 0)
 
 (** Invalidate dashboard execution cache on task mutation (add, transition).
     Wired by server bootstrap to avoid circular dependency between
     Coord sub-modules and server dashboard surfaces. *)
 let on_task_mutation_fn
-  : (unit -> unit) ref
-  = ref (fun () -> ())
+  : (unit -> unit) Atomic.t
+  = Atomic.make (fun () -> ())
 
 
 (** Auto-subscribe agent to messages on join — wraps Subscriptions.SubscriptionStore. *)
 let subscribe_messages_fn
-  : (subscriber:string -> unit) ref
-  = ref (fun ~subscriber:_ -> ())
+  : (subscriber:string -> unit) Atomic.t
+  = Atomic.make (fun ~subscriber:_ -> ())

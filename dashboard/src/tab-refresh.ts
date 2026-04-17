@@ -138,15 +138,6 @@ function recordTabVisit(tab: string, section?: string): void {
   }
 }
 
-export function getTabVisitCounts(): Record<string, number> {
-  try {
-    const raw = localStorage.getItem(VISIT_COUNTER_KEY)
-    return raw ? JSON.parse(raw) : {}
-  } catch {
-    return {}
-  }
-}
-
 export function refreshForRoute(
   routeState: Pick<RouteState, 'tab' | 'params'>,
   options?: { recordVisit?: boolean },

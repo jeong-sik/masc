@@ -2,16 +2,11 @@ import type {
   DashboardProofVerdict,
   DashboardProofWorkerRunEvidence,
 } from '../types'
-import { isRecord } from './common/normalize'
 
 export function verdictTone(verdict?: DashboardProofVerdict | null): string {
   if (verdict === 'proven') return 'ok'
   if (verdict === 'partial') return 'warn'
   return 'bad'
-}
-
-export function asRecord(value: unknown): Record<string, unknown> {
-  return isRecord(value) ? value : {}
 }
 
 export function workerRunEvidenceTone(item: DashboardProofWorkerRunEvidence): string {

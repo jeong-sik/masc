@@ -42,10 +42,6 @@ export function filterTasksByQuery<T extends { title?: string; description?: str
 
 export const expandedTasks = signal<Set<string>>(new Set())
 
-export function formatMetric(value: number): string {
-  return value.toFixed(4)
-}
-
 export function toggleTaskExpand(id: string) {
   const next = new Set(expandedTasks.value)
   if (next.has(id)) next.delete(id)

@@ -9,6 +9,7 @@ import {
   describeReconnecting,
   summarizeAttentionPreview,
   composeHealthIndicatorTitle,
+  composeBuildBadgeTitle,
 } from './dashboard-shell'
 
 describe('githubCommitUrl (pure)', () => {
@@ -394,5 +395,63 @@ describe('composeHealthIndicatorTitle (pure)', () => {
     const title = composeHealthIndicatorTitle('주의 1건', ['x'])
     expect(title.split('\n')).toHaveLength(2)
     expect(title).not.toContain('<br>')
+  })
+})
+
+describe('composeBuildBadgeTitle (pure)', () => {
+  it('no build / no fallback → "버전 정보 없음" (matches existing label)', () => {
+    expect(composeBuildBadgeTitle(null, null)).toBe('버전 정보 없음')
+    expect(composeBuildBadgeTitle(undefined, undefined)).toBe('버전 정보 없음')
+    expect(composeBuildBadgeTitle(null, '')).toBe('버전 정보 없음')
+  })
+
+  it('fallback version only → uses it + "dev" suffix (loose build info)', () => {
+    const t = composeBuildBadgeTitle(null, '0.9.13')
+    expect(t).toContain('서버 빌드')
+    expect(t).toContain('· v0.9.13 · dev')
+    expect(t).toContain('클릭하여 상세 보기')
+  })
+
+  it('full build (version + commit + uptime) → all three lines', () => {
+    const t = composeBuildBadgeTitle(
+      { release_version: '0.9.13', commit: 'a8b7412a3', uptime_seconds: 9000 },
+      null,
+    )
+    expect(t).toContain('· v0.9.13 · a8b7412a3')
+    // 9000s → 2h 30m per formatUptimeSecondsHuman
+    expect(t).toContain('업타임 2h 30m')
+    expect(t).toContain('클릭하여 상세 보기')
+  })
+
+  it('unknown uptime (null / negative) → skips the 업타임 line (no ghost "알 수 없음")', () => {
+    // Regression guard: we explicitly filter out the "unknown" sentinel
+    // so the hover tooltip stays compact during pre-boot / clock-skew.
+    const t = composeBuildBadgeTitle(
+      { release_version: '0.9.13', commit: 'abc1234', uptime_seconds: null },
+      null,
+    )
+    expect(t).not.toContain('업타임')
+    expect(t).not.toContain('알 수 없음')
+  })
+
+  it('newline separated (native title tooltip plain text)', () => {
+    // Same contract as composeHealthIndicatorTitle — never emit <br>;
+    // this is a title attribute, not HTML markup.
+    const t = composeBuildBadgeTitle(
+      { release_version: '0.9.13', commit: 'abc1234', uptime_seconds: 60 },
+      null,
+    )
+    expect(t).not.toContain('<br>')
+    expect(t.split('\n').length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('commit missing / empty → " · dev" suffix (not " · undefined")', () => {
+    const t1 = composeBuildBadgeTitle({ release_version: '0.9.13', commit: null }, null)
+    const t2 = composeBuildBadgeTitle({ release_version: '0.9.13', commit: '' }, null)
+    for (const t of [t1, t2]) {
+      expect(t).toContain('· v0.9.13 · dev')
+      expect(t).not.toContain('undefined')
+      expect(t).not.toContain('null')
+    }
   })
 })

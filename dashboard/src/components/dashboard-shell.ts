@@ -157,6 +157,33 @@ export function formatUptimeSecondsHuman(
 }
 
 
+/** Pure: compose a multi-line native-title tooltip for the build
+    identity badge so hovering reveals version + commit + uptime
+    without needing to open the dropdown. Reference UIs: Vercel
+    deployment pill, Render build badge, Railway service chip — all
+    surface the one-glance summary on hover and reserve the click for
+    \"deep details\". \n renders verbatim in native tooltips. */
+export function composeBuildBadgeTitle(
+  build: { release_version?: string | null; commit?: string | null; uptime_seconds?: number | null } | null | undefined,
+  fallbackVersion: string | null | undefined,
+): string {
+  if (!build && !fallbackVersion) return '버전 정보 없음'
+  const lines: string[] = ['서버 빌드']
+  const version = build?.release_version ?? fallbackVersion
+  if (version != null && version !== '') {
+    const commit = build?.commit != null && build.commit !== ''
+      ? ` · ${shortCommit(build.commit)}`
+      : ' · dev'
+    lines.push(`  · v${version}${commit}`)
+  }
+  const uptime = formatUptimeSecondsHuman(build?.uptime_seconds)
+  if (uptime !== '알 수 없음') {
+    lines.push(`  · 업타임 ${uptime}`)
+  }
+  lines.push('  · 클릭하여 상세 보기')
+  return lines.join('\n')
+}
+
 export function BuildIdentityBadge() {
   const status = serverStatus.value
   const build = status?.build
@@ -165,6 +192,7 @@ export function BuildIdentityBadge() {
     : status?.version
       ? `v${status.version} · dev`
       : '버전 정보 없음'
+  const hoverTitle = composeBuildBadgeTitle(build, status?.version)
 
   return html`
     <div class="relative">
@@ -172,7 +200,7 @@ export function BuildIdentityBadge() {
         class="cursor-pointer rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-[10px] py-[5px] text-[10px] text-[var(--text-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
         aria-expanded=${buildIdentityOpen.value}
         aria-label=${`서버 빌드 정보 ${label}`}
-        title="서버 빌드 정보"
+        title=${hoverTitle}
         onClick=${() => {
           buildIdentityOpen.value = !buildIdentityOpen.value
         }}

@@ -1,7 +1,7 @@
 (** Env_config_keeper — keeper runtime parameters from environment.
 
     All [MASC_KEEPER_*] env vars in this module can also be set
-    declaratively in [<base_path>/.masc/config/keeper_runtime.toml].
+    declaratively in [<resolved config root>/keeper_runtime.toml].
     The TOML loader ({!Keeper_runtime_config.load_and_apply}) runs at
     server startup and records unset values in the process-local boot
     override store before this module initializes.

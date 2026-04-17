@@ -136,7 +136,7 @@ are intentionally excluded from this TOML surface.
 | `[alert]` | 16 | `slack_enabled`, `slack_dm_user_id`, `github_enabled` |
 | `[debug]` | 1 | `enabled` |
 
-**Example** (`<base_path>/.masc/config/keeper_runtime.toml`):
+**Example** (`<active config root>/keeper_runtime.toml`):
 
 ```toml
 [autonomous]

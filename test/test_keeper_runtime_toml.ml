@@ -1,5 +1,5 @@
 (** Tests for [Keeper_runtime_config] — per-base-path keeper runtime
-    tuning loaded from [<base_path>/.masc/config/keeper_runtime.toml].
+    tuning loaded from [<resolved config root>/keeper_runtime.toml].
 
     Uses [resolve_overrides] with injected env_lookup to avoid global
     process env dependence. The load_and_apply integration path records
@@ -23,6 +23,9 @@ let with_base_path f =
   Unix.mkdir dir 0o755;
   Unix.mkdir (Filename.concat dir ".masc") 0o755;
   Unix.mkdir (Filename.concat dir ".masc/config") 0o755;
+  let oc = open_out (Filename.concat dir ".masc/config/cascade.json") in
+  output_string oc "{}\n";
+  close_out oc;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
 let write_toml base_path content =
@@ -214,6 +217,34 @@ let test_load_and_apply_records_disabled_turn_cost_override () =
       None
       (Keeper_config.keeper_tool_cost_max_usd ())
 
+let with_env name value f =
+  let prev = Sys.getenv_opt name in
+  (match value with
+   | Some v -> Unix.putenv name v
+   | None -> Unix.putenv name "");
+  Fun.protect
+    ~finally:(fun () ->
+      match prev with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
+let test_explicit_config_dir_wins_over_base_path () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  with_base_path @@ fun override_root ->
+  write_toml base_path "[budget]\ndaily_usd = 0.42\n";
+  write_toml override_root "[budget]\ndaily_usd = 0.99\n";
+  let override_config_dir = Filename.concat override_root ".masc/config" in
+  with_env "MASC_CONFIG_DIR" (Some override_config_dir) @@ fun () ->
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Error msg -> failf "unexpected error: %s" msg
+  | Ok n ->
+    check int "applied count" 1 n;
+    check (option string) "explicit config dir stored"
+      (Some "0.99")
+      (Config_boot_overrides.get_opt "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD")
+
 let test_float_value_round_trip () =
   let doc = parse_or_fail
     "[autonomous]\nsemaphore_wait_timeout_sec = 120.5\n"
@@ -239,6 +270,7 @@ let () =
         ; test_case "load_and_apply records boot override" `Quick test_load_and_apply_records_boot_override
         ; test_case "load_and_apply records turn cost override" `Quick test_load_and_apply_records_turn_cost_override
         ; test_case "load_and_apply records disabled turn cost override" `Quick test_load_and_apply_records_disabled_turn_cost_override
+        ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path
         ; test_case "float value round trip" `Quick test_float_value_round_trip
         ] )
     ]

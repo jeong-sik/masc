@@ -345,7 +345,7 @@ function runtimeLabelForKeeper(keeper: GateKeeperInfo | null | undefined): strin
   return runtime
 }
 
-function connectorStateLabel(connector: GateConnectorInfo | null): string {
+export function connectorStateLabel(connector: GateConnectorInfo | null): string {
   const advertised = connector?.status?.trim().toLowerCase()
   if (advertised === 'offline' || advertised === 'stale' || advertised === 'connected' || advertised === 'disconnected') {
     return advertised
@@ -354,6 +354,26 @@ function connectorStateLabel(connector: GateConnectorInfo | null): string {
   if (connector.stale) return 'stale'
   if (connector.connected) return 'connected'
   return 'disconnected'
+}
+
+/** Pure: Portainer-style left border tone for a connector card.
+    A 4px colored left border lets operators scan a vertical stack of
+    cards and spot problem connectors by color alone — no reading the
+    status pill required. Mapping matches Portainer's container state
+    palette: emerald for connected, amber for stale (intermittent),
+    rose for disconnected (broken), muted for offline (not running). */
+export function connectorCardBorderClass(label: string): string {
+  switch (label) {
+    case 'connected':
+      return 'border-l-4 border-l-emerald-500'
+    case 'stale':
+      return 'border-l-4 border-l-amber-500'
+    case 'disconnected':
+      return 'border-l-4 border-l-rose-500'
+    case 'offline':
+    default:
+      return 'border-l-4 border-l-[var(--white-10)]'
+  }
 }
 
 function connectorStateTone(connector: GateConnectorInfo | null): string {
@@ -595,7 +615,7 @@ function ConnectorLivePanel({
   const headerIcon = channelIcon(connector?.channel ?? connectorId)
 
   return html`
-    <div id=${`connector-card-${connectorId}`} class="mb-4 scroll-mt-4 rounded-xl border border-[var(--card-border)] p-4" style=${connectorAccentStyle(connectorId)}>
+    <div id=${`connector-card-${connectorId}`} class=${`mb-4 scroll-mt-4 rounded-xl border border-[var(--card-border)] ${connectorCardBorderClass(directLabel)} p-4`} data-connector-card-state=${directLabel} style=${connectorAccentStyle(connectorId)}>
       <div class="flex flex-wrap items-center gap-2 text-[12px]">
         <span class="text-base leading-none" aria-hidden="true">${headerIcon}</span>
         <span class="text-sm font-semibold text-[var(--text-body)]">${connectorName}</span>

@@ -2,7 +2,12 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { SetupGuideCard, resetSetupGuideExpansionState } from './setup-guide-card'
+import {
+  SetupGuideCard,
+  resetSetupGuideExpansionState,
+  stepCompletionSummary,
+  countCompletedSteps,
+} from './setup-guide-card'
 
 async function flushUi(): Promise<void> {
   await Promise.resolve()
@@ -73,6 +78,51 @@ describe('SetupGuideCard', () => {
     expect(container.querySelector('ol')).toBeNull()
   })
 
+  it('checking a step updates the header from "N steps" to "1 of N done"', async () => {
+    render(html`<${SetupGuideCard} connectorId="discord" />`, container)
+    ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
+    await flushUi()
+
+    // Header starts as "N steps"
+    const progress = container.querySelector('[data-setup-progress="discord"]')!
+    expect(progress.textContent).toMatch(/\d+ steps/)
+
+    const firstCheckbox = container.querySelector('[data-setup-step="discord:0"]') as HTMLInputElement
+    expect(firstCheckbox).toBeTruthy()
+    firstCheckbox.click()
+    await flushUi()
+
+    const progressAfter = container.querySelector('[data-setup-progress="discord"]')!
+    expect(progressAfter.textContent).toMatch(/1 of \d+ done/)
+  })
+
+  it('unchecking a step reverts the header copy', async () => {
+    render(html`<${SetupGuideCard} connectorId="slack" />`, container)
+    ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
+    await flushUi()
+    const box = container.querySelector('[data-setup-step="slack:0"]') as HTMLInputElement
+    box.click()
+    await flushUi()
+    expect(container.querySelector('[data-setup-progress="slack"]')!.textContent).toMatch(/1 of \d+ done/)
+    box.click()
+    await flushUi()
+    expect(container.querySelector('[data-setup-progress="slack"]')!.textContent).toMatch(/\d+ steps/)
+  })
+
+  it('step completion is keyed per connectorId — Discord progress does not leak into Telegram', async () => {
+    // Complete a step on Discord
+    render(html`<${SetupGuideCard} connectorId="discord" />`, container)
+    ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
+    await flushUi()
+    ;(container.querySelector('[data-setup-step="discord:0"]') as HTMLInputElement).click()
+    await flushUi()
+
+    // Switch to Telegram — header should still say "N steps" (not "X of N done")
+    render(html`<${SetupGuideCard} connectorId="telegram" />`, container)
+    await flushUi()
+    expect(container.querySelector('[data-setup-progress="telegram"]')!.textContent).toMatch(/\d+ steps/)
+  })
+
   it('keeps expand state independent per connectorId', async () => {
     // Open Discord card
     render(html`<${SetupGuideCard} connectorId="discord" />`, container)
@@ -84,5 +134,32 @@ describe('SetupGuideCard', () => {
     render(html`<${SetupGuideCard} connectorId="telegram" />`, container)
     await flushUi()
     expect(container.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')).toBe('false')
+  })
+})
+
+describe('stepCompletionSummary / countCompletedSteps', () => {
+  it('"5 steps" when zero completed, "3 of 5 done" otherwise', () => {
+    expect(stepCompletionSummary(0, 5)).toBe('5 steps')
+    expect(stepCompletionSummary(1, 5)).toBe('1 of 5 done')
+    expect(stepCompletionSummary(3, 5)).toBe('3 of 5 done')
+    expect(stepCompletionSummary(5, 5)).toBe('5 of 5 done')
+  })
+
+  it('negative completed treated as zero', () => {
+    expect(stepCompletionSummary(-1, 5)).toBe('5 steps')
+  })
+
+  it('countCompletedSteps returns 0 for undefined map', () => {
+    expect(countCompletedSteps(undefined, 5)).toBe(0)
+  })
+
+  it('countCompletedSteps counts only indices below total (stale index safety)', () => {
+    const m = { 0: true, 2: true, 99: true }
+    expect(countCompletedSteps(m, 5)).toBe(2) // 99 is out of bounds
+  })
+
+  it('countCompletedSteps ignores false/undefined entries', () => {
+    const m = { 0: true, 1: false, 2: true }
+    expect(countCompletedSteps(m, 5)).toBe(2)
   })
 })

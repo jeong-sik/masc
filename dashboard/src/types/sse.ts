@@ -259,54 +259,32 @@ export const VALID_TABS: TabId[] = [
 ]
 
 // --- Activity Graph types ---
+// The response shapes for `/api/v1/activity/graph` and
+// `/api/v1/activity/swimlane` are defined as valibot schemas in
+// `src/api/schemas/actions-activity.ts`; re-exported here so the
+// barrel (`src/types.ts`) surface stays stable for consumers.
+import type {
+  ActivityGraphNode,
+  ActivityGraphEdge,
+  ActivityGraphTimelineEvent,
+  ActivityGraphStats,
+  ActivityGraphHeatmap,
+  ActivityGraphKindCounts,
+  ActivityGraphResponse,
+  AgentSpan,
+  SwimlaneResponse,
+} from '../api/schemas/actions-activity'
 
-export interface ActivityGraphNode {
-  id: string
-  label: string
-  weight: number
-  semantic_weight?: number
-  kind: string
-  status: string
-  last_event_at?: string
-  meta?: Record<string, unknown>
-}
-
-export interface ActivityGraphEdge {
-  id?: string
-  source: string
-  target: string
-  kind: string
-  weight: number
-  active: boolean
-  last_event_at?: string
-  meta?: Record<string, unknown>
-}
-
-export interface ActivityGraphTimelineEvent {
-  kind: string
-  actor: Record<string, unknown>
-  summary: string
-  subject: { id: string; type: string } | null
-  ts: number
-  ts_iso: string
-  seq: number
-  room_id: string
-  tags: string[]
-  payload: Record<string, unknown>
-}
-
-export interface ActivityGraphStats {
-  [key: string]: number
-}
-
-export interface ActivityGraphHeatmap {
-  matrix: number[][]
-  max: number
-  total: number
-}
-
-export interface ActivityGraphKindCounts {
-  [kind: string]: number
+export type {
+  ActivityGraphNode,
+  ActivityGraphEdge,
+  ActivityGraphTimelineEvent,
+  ActivityGraphStats,
+  ActivityGraphHeatmap,
+  ActivityGraphKindCounts,
+  ActivityGraphResponse,
+  AgentSpan,
+  SwimlaneResponse,
 }
 
 export type ActivityCategory =
@@ -332,31 +310,7 @@ export interface ActionTimelineGroup {
   rawEvents: ActivityGraphTimelineEvent[]
 }
 
-export interface ActivityGraphResponse {
-  nodes: ActivityGraphNode[]
-  edges: ActivityGraphEdge[]
-  stats: ActivityGraphStats
-  kind_counts: ActivityGraphKindCounts
-  heatmap: ActivityGraphHeatmap
-  timeline: ActivityGraphTimelineEvent[]
-  generated_at: string
-  window: { limit: number; room_id: string | null; kinds: string[] }
-  stats_history?: Array<{ bucket: number; events: number; active_agents: number; tasks_done: number }>
-}
-
 // --- Swimlane types ---
-
-export interface AgentSpan {
-  agent: string
-  start_ms: number
-  end_ms: number
-  kind: string
-  label: string
-  status: string
-}
-
-export interface SwimlaneResponse {
-  agents: string[]
-  spans: AgentSpan[]
-  time_range: { min_ms: number; max_ms: number }
-}
+// `AgentSpan` and `SwimlaneResponse` are re-exported above from the
+// schema file. Keep this divider so future activity-related local
+// types have a clear section.

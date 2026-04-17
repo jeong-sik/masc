@@ -11,8 +11,22 @@ import {
   emptyReasonText,
   verdictTone,
   verdictSummary,
+  filterVerdicts,
 } from './harness-health-sections'
-import type { HarnessHealthData } from './harness-health-state'
+import type { HarnessHealthData, HarnessVerdictItem } from './harness-health-state'
+
+function makeVerdict(overrides: Partial<HarnessVerdictItem> = {}): HarnessVerdictItem {
+  return {
+    timestamp: 1_700_000_000_000,
+    task_id: 'task-1',
+    task_title: 'Task One',
+    agent_name: 'agent-alpha',
+    gate: 'code_quality',
+    verdict: 'approve',
+    evaluator_cascade: 'evaluator-cascade',
+    ...overrides,
+  }
+}
 
 function makeData(overrides: Partial<HarnessHealthData['overview']> = {}): HarnessHealthData {
   return {
@@ -340,5 +354,77 @@ describe('verdictSummary', () => {
 
   it('returns reject for whitespace-only reason', () => {
     expect(verdictSummary('reject:   ')).toBe('reject')
+  })
+})
+
+// ================================================================
+// filterVerdicts
+// ================================================================
+
+describe('filterVerdicts', () => {
+  const items: HarnessVerdictItem[] = [
+    makeVerdict({ task_id: 't-1', task_title: 'Refactor keeper loop', agent_name: 'alpha', gate: 'code_quality', evaluator_cascade: 'cas-a', verdict: 'approve' }),
+    makeVerdict({ task_id: 't-2', task_title: 'Add dashboard filter', agent_name: 'beta', gate: 'documentation', evaluator_cascade: 'cas-b', verdict: 'reject:vague notes' }),
+    makeVerdict({ task_id: 't-3', task_title: 'Token counter fix', agent_name: 'gamma', gate: 'code_quality', evaluator_cascade: 'cas-c', verdict: 'approve:conditional' }),
+  ]
+
+  it('returns the input reference when query is empty', () => {
+    expect(filterVerdicts(items, '')).toBe(items)
+  })
+
+  it('returns the input reference for whitespace-only query', () => {
+    expect(filterVerdicts(items, '   ')).toBe(items)
+  })
+
+  it('matches by task_title substring (case-insensitive)', () => {
+    const result = filterVerdicts(items, 'DASHBOARD')
+    expect(result.map(r => r.task_id)).toEqual(['t-2'])
+  })
+
+  it('matches by agent_name substring', () => {
+    const result = filterVerdicts(items, 'gamma')
+    expect(result.map(r => r.task_id)).toEqual(['t-3'])
+  })
+
+  it('matches by gate substring returning multiple rows', () => {
+    const result = filterVerdicts(items, 'code_quality')
+    expect(result.map(r => r.task_id)).toEqual(['t-1', 't-3'])
+  })
+
+  it('matches by evaluator_cascade substring', () => {
+    const result = filterVerdicts(items, 'cas-b')
+    expect(result.map(r => r.task_id)).toEqual(['t-2'])
+  })
+
+  it('matches by verdict substring', () => {
+    const result = filterVerdicts(items, 'reject')
+    expect(result.map(r => r.task_id)).toEqual(['t-2'])
+  })
+
+  it('matches by task_id substring', () => {
+    const result = filterVerdicts(items, 't-1')
+    expect(result.map(r => r.task_id)).toEqual(['t-1'])
+  })
+
+  it('returns empty when no field matches', () => {
+    expect(filterVerdicts(items, 'nonexistent-token')).toHaveLength(0)
+  })
+
+  it('trims query before matching', () => {
+    expect(filterVerdicts(items, '  alpha  ')).toHaveLength(1)
+  })
+
+  it('does not mutate the input array', () => {
+    const copy = items.slice()
+    filterVerdicts(items, 'alpha')
+    expect(items).toEqual(copy)
+  })
+
+  it('handles items with empty string fields safely', () => {
+    const sparse: HarnessVerdictItem[] = [
+      makeVerdict({ task_id: '', task_title: '', agent_name: '', gate: '', evaluator_cascade: '', verdict: 'approve' }),
+    ]
+    expect(filterVerdicts(sparse, 'approve')).toHaveLength(1)
+    expect(filterVerdicts(sparse, 'anything-else')).toHaveLength(0)
   })
 })

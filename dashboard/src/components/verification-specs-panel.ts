@@ -33,7 +33,7 @@ async function loadSpecs(resource: ManagedAsyncResource<TlaSpecsResponse>) {
   await resource.load(async (signal) => fetchTlaSpecs({ signal }))
 }
 
-function categoryLabel(cat: TlaSpecEntry['category']): string {
+export function categoryLabel(cat: TlaSpecEntry['category']): string {
   switch (cat) {
     case 'boundary':
       return '경계'
@@ -44,7 +44,7 @@ function categoryLabel(cat: TlaSpecEntry['category']): string {
   }
 }
 
-function categoryTone(cat: TlaSpecEntry['category']): 'ok' | 'warn' | 'neutral' {
+export function categoryTone(cat: TlaSpecEntry['category']): 'ok' | 'warn' | 'neutral' {
   switch (cat) {
     case 'boundary':
       return 'ok'
@@ -55,7 +55,7 @@ function categoryTone(cat: TlaSpecEntry['category']): 'ok' | 'warn' | 'neutral' 
   }
 }
 
-function cfgCoverage(entry: TlaSpecEntry): { label: string; tone: 'ok' | 'warn' | 'err' } {
+export function cfgCoverage(entry: TlaSpecEntry): { label: string; tone: 'ok' | 'warn' | 'err' } {
   if (entry.has_clean_cfg && entry.has_buggy_cfg) {
     return { label: 'clean + buggy', tone: 'ok' }
   }
@@ -68,7 +68,7 @@ function cfgCoverage(entry: TlaSpecEntry): { label: string; tone: 'ok' | 'warn' 
   return { label: 'no cfg', tone: 'err' }
 }
 
-function shortMtime(iso: string): string {
+export function shortMtime(iso: string): string {
   return iso.slice(0, 10)
 }
 

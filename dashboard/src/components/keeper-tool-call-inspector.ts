@@ -14,7 +14,7 @@ import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/as
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
 
-function formatInput(input: unknown): string {
+export function formatInput(input: unknown): string {
   if (input == null) return '-'
   if (typeof input === 'string') return input
   try {

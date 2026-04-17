@@ -4,7 +4,9 @@ include Tool_local_runtime_core
 
 let runtime_snapshot_to_yojson ~include_models
     (snapshot : Local_runtime_pool.runtime_snapshot) =
-  let endpoint = String.trim snapshot.base_url ^ "/v1/models" in
+  let endpoint =
+    String.trim snapshot.base_url ^ Masc_network_defaults.openai_models_path
+  in
   let fetched_models =
     if not include_models then []
     else
@@ -94,7 +96,10 @@ let runtime_status_json ?(include_models = true) () =
   `Assoc
     [
       ("server_url", `String Env_config.Llama.server_url);
-      ("endpoint", `String (Env_config.Llama.server_url ^ "/v1/models"));
+      ("endpoint",
+       `String
+         (Env_config.Llama.server_url
+          ^ Masc_network_defaults.openai_models_path));
       ("source", `String "llama.cpp runtime");
       ("models", `List (List.map (fun model -> `String model) models));
       ("model_count", `Int (List.length models));

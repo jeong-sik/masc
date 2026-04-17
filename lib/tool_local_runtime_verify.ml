@@ -151,7 +151,8 @@ let probe_chat_completion_compatible
       let provider_config =
         Llm_provider.Provider_config.make
           ~kind:Llm_provider.Provider_config.OpenAI_compat
-          ~model_id ~base_url:endpoint.url ~request_path:"/v1/chat/completions"
+          ~model_id ~base_url:endpoint.url
+          ~request_path:Masc_network_defaults.openai_chat_completions_path
           ~max_tokens:1 ~temperature:Oas_worker_cascade.deterministic_temperature ()
       in
       let messages =
@@ -414,7 +415,9 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
         let provider_url = base_url ^ "/health" in
         let slot_url = base_url ^ "/slots" in
         let props_url = base_url ^ "/props" in
-        let models_url = base_url ^ "/v1/models" in
+        let models_url =
+          base_url ^ Masc_network_defaults.openai_models_path
+        in
         let provider_status, provider_body, provider_err =
           match http_get_text_with_status provider_url with
           | Ok (status_code, payload) -> (status_code, Some payload, None)
@@ -480,7 +483,9 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
           match probe_model with
           | None -> (None, None, Some "chat contract probe skipped: no model id available")
           | Some model_id ->
-              let url = base_url ^ "/v1/chat/completions" in
+              let url =
+                base_url ^ Masc_network_defaults.openai_chat_completions_path
+              in
               let body_json = chat_contract_probe_body ~model_id in
               match http_post_json_text_with_status ~timeout_sec:15 ~url ~body_json with
               | Ok (status_code, payload) -> (status_code, Some payload, None)

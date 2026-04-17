@@ -16,6 +16,16 @@ let nonempty_env name =
 (** Default port for Ollama (OpenAI-compatible at /v1). *)
 let ollama_default_port = 11434
 
+(** OpenAI-compatible API path suffixes.  Shared by every local-runtime
+    client/verifier/benchmark that concatenates [base_url] with a
+    well-known endpoint — anchoring the path in one place avoids drift
+    if the provider ever versions the API (e.g. [/v2/...]). *)
+let openai_chat_completions_path = "/v1/chat/completions"
+
+(** OpenAI-compatible model listing path.  See
+    {!openai_chat_completions_path}. *)
+let openai_models_path = "/v1/models"
+
 (** Default URL for Ollama. *)
 let ollama_default_url =
   Printf.sprintf "http://127.0.0.1:%d" ollama_default_port

@@ -4,10 +4,10 @@ import { listAllMcpTools, callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
 import { buildDefaults, stripEmptyOptionals, validateRequired } from './schema-form'
 
-export const allToolSchemas = signal<McpToolSchema[]>([])
+const allToolSchemas = signal<McpToolSchema[]>([])
 export const schemasLoading = signal(false)
 export const schemasError = signal<string | null>(null)
-export const schemasLoadedAt = signal<number>(0)
+const schemasLoadedAt = signal<number>(0)
 
 export const searchQuery = signal('')
 export const tierFilter = signal<string>('all')

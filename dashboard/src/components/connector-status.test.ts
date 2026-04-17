@@ -287,6 +287,18 @@ describe('ConnectorStatusPanel', () => {
     expect(text).toContain('Gate metrics unavailable')
     expect(text).toContain('Gate-advertised connector runtime is visible')
     expect(text).toContain('keeper directory unavailable, manual entry only')
+
+    // Directory-error panel uses informational amber + left stripe so
+    // operators don't read the accent-gradient-tinted neutral
+    // background as success. Mirrors the "Sidecar not started" panel
+    // treatment from #8038 for cross-panel consistency.
+    const dirPanel = container.querySelector('[data-keeper-directory-error-panel]') as HTMLElement | null
+    expect(dirPanel).toBeTruthy()
+    expect(dirPanel!.className).toContain('bg-amber-500/5')
+    expect(dirPanel!.className).toContain('border-l-amber-500')
+    // Named chip: "Directory error" is what AT hears.
+    const dirChip = dirPanel!.querySelector('[aria-label]')
+    expect(dirChip?.getAttribute('aria-label')).toContain('unavailable')
   })
 
   it('prefers backend-advertised connector status over derived booleans', async () => {
@@ -539,6 +551,18 @@ describe('ConnectorStatusPanel', () => {
 
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
     expect(text).toContain('No keepers configured')
+
+    // Sibling of the "Sidecar not started" panel (#8038). Same fix:
+    // explicit amber override so the parent accent gradient (iMessage
+    // green) doesn't paint a "no keepers" panel as success.
+    const emptyPanel = container.querySelector('[data-no-keepers-empty-panel]') as HTMLElement | null
+    expect(emptyPanel).toBeTruthy()
+    expect(emptyPanel!.className).toContain('bg-amber-500/5')
+    expect(emptyPanel!.className).toContain('border-l-amber-500')
+    const chip = emptyPanel!.querySelector('[data-no-keepers-status-chip]')
+    expect(chip).toBeTruthy()
+    expect(chip!.getAttribute('aria-label')).toContain('none configured')
+    expect(chip!.textContent).toContain('Not configured')
   })
 
   it('expands [▾] header toggle to show per-dot liveness and metadata', async () => {

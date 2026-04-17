@@ -38,6 +38,7 @@ let main_result () =
             },
           1 )
     | Ok spec ->
+        Mirage_crypto_rng_unix.use_default ();
         Eio_main.run @@ fun env ->
         Eio_guard.enable ();
         Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -62,9 +63,9 @@ let main_result () =
                 Eio_guard.disable ())
               (fun () ->
                 match
-                  (* Worker_run_once removed *)
-                  ignore (sw, spec);
-                  (Error "Worker_run_once removed (team session layer)" : (Lib.Worker_container.run_result, string) result)
+                  Lib.Worker_runtime.run_worker_oas ~sw
+                    ~net:(Eio.Stdenv.net env)
+                    ~room_config:None spec ()
                 with
                 | Ok run_result ->
                     ( Lib.Worker_runtime_helper_protocol.success_json run_result,

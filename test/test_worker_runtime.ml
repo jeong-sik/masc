@@ -187,6 +187,49 @@ let test_run_process_with_timeout_returns_124_on_timeout () =
   in
   check int "timeout exit code" 124 result.exit_code
 
+let test_run_worker_oas_rejects_invalid_explicit_model_label () =
+  with_temp_dir "worker-runtime-local" @@ fun root ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  Fun.protect
+    ~finally:(fun () -> Time_compat.clear_clock ())
+    (fun () ->
+      Eio.Switch.run @@ fun sw ->
+      let spec : Lib.Worker_execution_spec.t =
+        {
+          base_path = root;
+          worker_name = "worker-local";
+          model_label = "not-a-model-label";
+          working_dir = None;
+          worker_class = Some Worker_types.Worker_executor;
+          execution_scope = Some Worker_types.Observe_only;
+          thinking_enabled = Some false;
+          max_turns = 2;
+          worker_run_id = Some "run-local";
+          role = Some "worker";
+          selection_note = Some "invalid label";
+          prompt = "Say hello.";
+          allowed_tools = [];
+          allowed_shell_tools = [];
+          timeout_sec = 30;
+        }
+      in
+      match
+        Lib.Worker_runtime.run_worker_oas ~sw
+          ~net:(Eio.Stdenv.net env)
+          ~room_config:None spec ()
+      with
+      | Ok _ ->
+          fail "expected invalid explicit model label to fail before execution"
+      | Error err ->
+          check bool "mentions rejected label" true
+            (String.contains err 'n' && String.contains err '-');
+          check bool "does not use removed team-session stub" false
+            (Astring.String.is_infix
+               ~affix:"Worker_run_once removed (team session layer)"
+               err))
+
 let () =
   Alcotest.run "worker_runtime"
     [
@@ -208,4 +251,8 @@ let () =
       ( "process_timeout",
         [ test_case "timeout maps to exit code 124" `Quick
             test_run_process_with_timeout_returns_124_on_timeout ] );
+      ( "local_runtime",
+        [ test_case "invalid explicit model label fails before local worker execution"
+            `Quick
+            test_run_worker_oas_rejects_invalid_explicit_model_label ] );
     ]

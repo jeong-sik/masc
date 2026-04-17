@@ -38,6 +38,34 @@ export function resetQuickBindState() {
   formState.value = {}
 }
 
+/** Pure: map a connector_id to the channel-id placeholder example that
+    matches that platform's native format. Keeps the hint close to what
+    the operator will copy-paste from the target app.
+
+    - discord  → 18-19 digit snowflake (right-click channel → Copy ID)
+    - imessage → +1XXXXXXXXXX or group id
+    - slack    → C-prefix or #name (right-click channel in Slack →
+                 Copy link → last path segment)
+    - telegram → -100… or @channel_name
+
+    Reference — Linear / Stripe onboarding: show an example that LOOKS
+    like what the operator will paste, not a generic "ID". Unknown
+    connectors fall through to a neutral example. */
+export function channelIdPlaceholder(connectorId: string): string {
+  switch (connectorId) {
+    case 'discord':
+      return '1234567890123456789 (18-19 digit snowflake)'
+    case 'slack':
+      return 'C0123ABCD 또는 #general'
+    case 'telegram':
+      return '-1001234567890 또는 @channel_name'
+    case 'imessage':
+      return '+1XXXXXXXXXX 또는 group id'
+    default:
+      return '1234567890 또는 #general'
+  }
+}
+
 async function submit(connectorId: string, entry: FormEntry) {
   const channel = entry.channelId.trim()
   if (!channel || !entry.keeperName) return
@@ -81,10 +109,18 @@ export function QuickBindForm({ connectorId, keepers }: {
         <${TextInput}
           id=${`qb-channel-${connectorId}`}
           value=${entry.channelId}
-          placeholder="1234567890 또는 #general"
+          placeholder=${channelIdPlaceholder(connectorId)}
           onInput=${(ev: InputEvent) => {
             const target = ev.currentTarget as HTMLInputElement
             setEntry(connectorId, { channelId: target.value })
+          }}
+          onKeyDown=${(ev: KeyboardEvent) => {
+            // Enter submits from either input; Shift+Enter falls through
+            // in case we ever swap this field for a multi-line input.
+            if (ev.key === 'Enter' && !ev.shiftKey) {
+              ev.preventDefault()
+              void submit(connectorId, getEntry(connectorId, keepers))
+            }
           }}
         />
       </div>

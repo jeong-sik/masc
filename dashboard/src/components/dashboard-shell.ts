@@ -227,6 +227,46 @@ export function BuildIdentityBadge() {
 
 
 
+/** Pure: gather the top-N attention-item summaries as tooltip lines so
+    hovering the bottom-left health dot answers "what are the N
+    things?" without a click. Reference UIs: Datadog monitor rollup
+    tooltip, Vercel deployment status footer, Gmail "2 unread" with
+    sender preview — all reveal the contributing items on hover so the
+    operator decides whether to navigate. Exposed for tests. */
+export function summarizeAttentionPreview(
+  items: ReadonlyArray<{ summary?: string | null; kind?: string | null }>,
+  max = 3,
+): string[] {
+  // Two-pass: first filter to valid (non-empty summary or kind), then
+  // cap. This separates "skipped for noise" from "truncated for max"
+  // so the tail count only reflects genuinely pending items that
+  // didn't fit — never padding from null/empty rows.
+  const valid: string[] = []
+  for (const item of items) {
+    if (!item) continue
+    const summary = item.summary?.trim()
+    const kind = item.kind?.trim()
+    const raw = (summary && summary !== '') ? summary : (kind && kind !== '' ? kind : '')
+    if (raw === '') continue
+    valid.push(raw.length > 60 ? `${raw.slice(0, 57)}...` : raw)
+  }
+  if (valid.length <= max) return valid
+  return [...valid.slice(0, max), `… 외 ${valid.length - max}건`]
+}
+
+/** Pure: compose the full title-attribute string for the health
+    indicator — label on the first line, attention previews indented
+    under it. Newlines render in native title tooltips on all major
+    browsers, so no HTML escaping or markup is needed. */
+export function composeHealthIndicatorTitle(
+  label: string,
+  attentionLines: ReadonlyArray<string>,
+): string {
+  if (attentionLines.length === 0) return label
+  const indented = attentionLines.map(line => `  · ${line}`)
+  return [label, ...indented].join('\n')
+}
+
 function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   const live = connected.value
   const snap = missionSnapshot.value
@@ -235,7 +275,8 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   for (let i = 0; i < sessions.length; i++) {
     if (sessions[i]?.blocker_summary) blockers++
   }
-  const attentionCount = (snap?.attention_queue ?? []).length
+  const attentionQueue = snap?.attention_queue ?? []
+  const attentionCount = attentionQueue.length
 
   let dotClass: string
   let label: string
@@ -255,14 +296,17 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
     label = '정상'
   }
 
+  const attentionLines = attentionCount > 0 ? summarizeAttentionPreview(attentionQueue) : []
+  const titleText = composeHealthIndicatorTitle(label, attentionLines)
+
   const dot = html`<span class="block size-2 shrink-0 rounded-full ${dotClass} shadow-[0_0_6px_rgba(0,0,0,0.4)]"></span>`
 
   if (collapsed) {
-    return html`<div class="flex justify-center" title=${label} role="img" aria-label=${label}>${dot}</div>`
+    return html`<div class="flex justify-center" title=${titleText} role="img" aria-label=${label}>${dot}</div>`
   }
 
   return html`
-    <div class="flex items-center gap-2 px-1" role="status" aria-label=${label}>
+    <div class="flex items-center gap-2 px-1" role="status" aria-label=${label} title=${titleText}>
       ${dot}
       <span class="text-[11px] text-[var(--text-muted)] truncate">${label}</span>
     </div>

@@ -309,19 +309,57 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   (* Track in-memory call counter for all declared tool names (including hidden). *)
   Tool_registry.record_call_if_known ~source:External_mcp ~tool_name:name ~success ~duration_ms ();
 
+  let tool_args_preview =
+    Observability_redact.redact_tool_input ~tool_name:name arguments
+  in
+  let activity_string_field key =
+    match Safe_ops.json_string_opt key arguments with
+    | Some value when String.trim value <> "" ->
+        Some (key, `String (Observability_redact.redact_preview value))
+    | _ -> None
+  in
+  let activity_int_field key =
+    match Safe_ops.json_int_opt key arguments with
+    | Some value -> Some (key, `Int value)
+    | None -> None
+  in
+  let activity_payload =
+    `Assoc
+      ([
+         ("tool_name", `String name);
+         ("success", `Bool success);
+         ("duration_ms", `Int duration_ms);
+         ("source", `String (Tool_registry.string_of_source External_mcp));
+         ("error", match error_detail with Some e -> `String e | None -> `Null);
+         ( "tool_args_preview",
+           match tool_args_preview with
+           | Some preview -> `String preview
+           | None -> `Null );
+       ]
+       @ List.filter_map activity_string_field
+           [
+             "cmd";
+             "task_id";
+             "repo";
+             "path";
+             "message";
+             "branch";
+             "branch_name";
+             "title";
+             "session_id";
+             "operation_id";
+             "verification_id";
+           ]
+       @ List.filter_map activity_int_field [ "pr_number"; "issue_number" ])
+  in
+
   (* Emit activity graph event for tool call — enables real-time dashboard tracking *)
   (try
     ignore (Activity_graph.emit state.Mcp_server.room_config
       ~actor:(Activity_graph.entity ~kind:"agent" agent_name)
       ~subject:(Activity_graph.entity ~kind:"tool" name)
       ~kind:"tool.called"
-      ~payload:(`Assoc [
-        ("tool_name", `String name);
-        ("success", `Bool success);
-        ("duration_ms", `Int duration_ms);
-        ("source", `String (Tool_registry.string_of_source External_mcp));
-        ("error", match error_detail with Some e -> `String e | None -> `Null);
-      ])
+      ~payload:activity_payload
       ~tags:(if success then ["tool"; "success"] else ["tool"; "failure"])
       ())
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

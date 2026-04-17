@@ -73,6 +73,7 @@
         test_decision_pipeline
         test_decision_pipeline_observer
         test_keeper_composite_observer
+        test_keeper_behavioral_regime
         test_keeper_telemetry_feedback
         test_keeper_toml
         test_keeper_runtime_toml
@@ -165,6 +166,7 @@
           test_decision_pipeline
           test_decision_pipeline_observer
           test_keeper_composite_observer
+          test_keeper_behavioral_regime
           test_keeper_telemetry_feedback
           test_keeper_toml
           test_keeper_runtime_toml

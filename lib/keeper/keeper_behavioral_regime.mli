@@ -1,22 +1,26 @@
 (** Keeper Behavioral Regime — pure projection (7th FSM axis MVP).
 
-    Projects a [Keeper_registry.registry_entry] into a {b derived}
+    Projects a keeper's {b observable signals} into a derived
     behavioral regime — distinct from the 6 mechanical FSM axes
     (KSM/KTC/KDP/KCL/KMC/KCB) which capture "where in the code".
 
     This axis answers the orthogonal question: "what mode is the
-    keeper actually in?" Example regimes (research basis: Anthropic
-    persona vectors, Jason Wei CS25 V4 emergent-capability cliffs,
-    Fowler circuit breaker, Reflexion rumination spiral).
+    keeper actually in?" (research basis: Anthropic persona vectors,
+    Jason Wei CS25 V4 emergent-capability cliffs, Fowler circuit
+    breaker.)
 
     Contract (mirrors [Keeper_composite_observer]):
     - Pure read. No mutation, no I/O, no event emission.
     - Does not read provider names, token counts, or context bytes —
       those belong to OAS (see [feedback_masc-oas-layer-boundary]).
-    - Only consumes fields already materialised on [registry_entry].
+    - Takes a {b minimal} input record {!input} rather than the full
+      [Keeper_registry.registry_entry]. The wrapper in
+      [Dashboard_behavioral_regime] handles projection from the
+      registry entry; this keeps the deriver trivially testable and
+      framework-free (Alexis King, "Parse don't validate").
 
     MVP scope: 3 regimes derived from turn-failure counter + restart
-    history + tool-usage aggregates. Phase 2 adds Ruminating /
+    history + per-tool failure aggregates. Phase 2 adds Ruminating /
     Avoiding / Saturated / Echoing once richer telemetry hooks exist.
 
     @since RFC-0003 Phase 3 — 7th axis. *)
@@ -30,26 +34,39 @@
 type regime =
   | Crashing
       (** Lifecycle instability — restart count elevated in a recent
-          window. Highest precedence because it subsumes downstream
-          regimes (a crashing keeper cannot meaningfully thrash). *)
+          window. Highest precedence because a crashing keeper cannot
+          meaningfully thrash. *)
   | Thrashing
       (** Repeated failure without recovery — turn failures or per-tool
           failure saturation. Analog of Fowler circuit-breaker pre-trip
-          but at the turn level rather than per-call. *)
+          at the turn level rather than per-call. *)
   | Healthy
       (** None of the above. Default. *)
 
 val all_regimes : regime list
-(** Enumeration of all regime values in precedence order. Used by
-    the dashboard to build a stable column header. *)
-
 val regime_of_string : string -> regime option
-(** [regime_of_string s] parses a canonical lowercase name. Returns
-    [None] when [s] does not match any declared regime. *)
-
 val string_of_regime : regime -> string
-(** [string_of_regime r] returns the canonical lowercase name. Stable
-    wire format — the dashboard and TLA+ spec both depend on it. *)
+
+(** A single tool's aggregate usage. Mirrors the shape of
+    [Keeper_types.tool_call_entry] but is declared here so the
+    deriver does not depend on that module directly. *)
+type tool_aggregate = {
+  count : int;
+  failures : int;
+}
+
+(** Minimal input the deriver needs. All fields are the caller's
+    responsibility to project from whatever stateful source
+    (registry entry, replay log, test fixture). *)
+type input = {
+  turn_consecutive_failures : int;
+  restart_count : int;
+  last_restart_ts : float;
+      (** Unix seconds; 0.0 when the keeper has never restarted. *)
+  tool_aggregates : (string * tool_aggregate) list;
+      (** One entry per tool the keeper has invoked. Empty list when
+          no tool has been used yet. *)
+}
 
 (** Reason carries {b why} the deriver picked this regime. The dashboard
     hub panel surfaces it verbatim so an operator can see which rule
@@ -59,33 +76,24 @@ type reason = {
       (** Short stable identifier (e.g. ["turn_fail_streak"]). *)
   evidence : string list;
       (** Concrete values that made the rule fire — already
-          human-readable (e.g. ["turn_consecutive_failures=5"]). *)
+          human-readable. *)
 }
 
-(** Snapshot returned per keeper per poll. *)
 type snapshot = {
   regime : regime;
   reason : reason;
       (** Empty evidence + [rule_id = "default_healthy"] when
           [regime = Healthy]. *)
   updated_at : float;
-      (** Wall-clock when the snapshot was computed. *)
 }
 
-val derive :
-  now:float ->
-  Keeper_registry.registry_entry ->
-  snapshot
-(** [derive ~now entry] applies the regime rules in precedence order
-    and returns the first match (or [Healthy] when none match).
-
-    [now] is injected for determinism and testing — the deriver does
-    not call [Unix.time] itself, matching the pure-projection contract
-    of [Keeper_composite_observer]. Typical caller: the composite
-    observer wrapper, which already has a wall-clock source. *)
+val derive : now:float -> input -> snapshot
+(** Apply the regime rules in precedence order and return the first
+    match (or [Healthy] when none match). [now] is injected so the
+    deriver stays pure and deterministic. *)
 
 val snapshot_to_json : snapshot -> Yojson.Safe.t
-(** JSON projection for the dashboard telemetry response. Shape:
+(** Stable wire format. Shape:
 
     {[
       {
@@ -95,34 +103,16 @@ val snapshot_to_json : snapshot -> Yojson.Safe.t
         "updated_at": 1234567890.12
       }
     ]}
-
-    Stable — the dashboard API schema treats this as a forward-compat
-    sub-object, and the TLA+ regime invariant reads [regime] as the
-    enum value directly. *)
+*)
 
 (** {1 Thresholds}
 
-    Tunable constants exposed for tests. Defaults are conservative;
-    revisit after 2-week empirical observation (per plan
-    {e Track C}: empirical-before-design). *)
+    Tunable constants. Defaults are conservative; revisit after
+    2-week empirical observation (plan {e Track C}:
+    empirical-before-design). *)
 
 val turn_fail_streak_threshold : int
-(** [turn_consecutive_failures >= N] triggers Thrashing.
-    Default: 3. *)
-
 val recent_restart_window_sec : float
-(** Restarts within this window count as {e recent} for Crashing.
-    Default: 300.0 (5 minutes). *)
-
 val recent_restart_count_threshold : int
-(** [restart_count] at or above this AND within the recent window
-    triggers Crashing. Default: 2. *)
-
 val tool_failure_count_threshold : int
-(** A tool with [failures >= this] AND failure ratio exceeding
-    {!tool_failure_ratio_threshold} contributes to Thrashing.
-    Default: 3. *)
-
 val tool_failure_ratio_threshold : float
-(** Minimum [failures / count] ratio for a tool to count as saturated.
-    Default: 0.7. *)

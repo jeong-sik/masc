@@ -1,11 +1,5 @@
 (** Behavioral regime deriver — pure. See [.mli] for contract. *)
 
-(* Use [Keeper_registry.StringMap] so [registry_entry.tool_usage]
-   typechecks directly without coercion. A fresh [Map.Make(String)]
-   here would be a distinct nominal type even though structurally
-   identical. *)
-module StringMap = Keeper_registry.StringMap
-
 type regime =
   | Crashing
   | Thrashing
@@ -23,6 +17,18 @@ let regime_of_string = function
   | "thrashing" -> Some Thrashing
   | "healthy" -> Some Healthy
   | _ -> None
+
+type tool_aggregate = {
+  count : int;
+  failures : int;
+}
+
+type input = {
+  turn_consecutive_failures : int;
+  restart_count : int;
+  last_restart_ts : float;
+  tool_aggregates : (string * tool_aggregate) list;
+}
 
 type reason = {
   rule_id : string;
@@ -45,67 +51,51 @@ let tool_failure_ratio_threshold = 0.7
 
 (* ── Rule predicates ────────────────────────────────────── *)
 
-(* Crashing: keeper has restarted repeatedly in a recent window. We
-   look at [restart_count] together with [last_restart_ts] so a
-   long-lived keeper that restarted once at t=0 does not linger in
-   Crashing forever. *)
-let crashing_rule ~now (e : Keeper_registry.registry_entry) : reason option =
-  if e.restart_count >= recent_restart_count_threshold
-     && now -. e.last_restart_ts <= recent_restart_window_sec
+let crashing_rule ~now (i : input) : reason option =
+  if i.restart_count >= recent_restart_count_threshold
+     && now -. i.last_restart_ts <= recent_restart_window_sec
   then
     Some {
       rule_id = "recent_restart_streak";
       evidence = [
-        Printf.sprintf "restart_count=%d" e.restart_count;
-        Printf.sprintf "last_restart_age_sec=%.1f" (now -. e.last_restart_ts);
+        Printf.sprintf "restart_count=%d" i.restart_count;
+        Printf.sprintf "last_restart_age_sec=%.1f" (now -. i.last_restart_ts);
       ];
     }
   else None
 
-(* Thrashing rule A: the runtime's own turn failure counter is at or
-   above threshold. Coarser than per-tool-args hashing (the plan's
-   original signal) but uses a field [registry_entry] actually carries. *)
-let thrashing_turn_streak_rule (e : Keeper_registry.registry_entry) : reason option =
-  if e.turn_consecutive_failures >= turn_fail_streak_threshold
+let thrashing_turn_streak_rule (i : input) : reason option =
+  if i.turn_consecutive_failures >= turn_fail_streak_threshold
   then
     Some {
       rule_id = "turn_fail_streak";
       evidence = [
-        Printf.sprintf "turn_consecutive_failures=%d" e.turn_consecutive_failures;
+        Printf.sprintf "turn_consecutive_failures=%d" i.turn_consecutive_failures;
       ];
     }
   else None
 
-(* Thrashing rule B: any single tool has accumulated a failure-dominant
-   usage profile. [tool_call_entry] is per-tool aggregate (not per-args),
-   so this catches "a keeper keeps calling a tool that keeps failing" —
-   the same structural pathology as the plan's "same args ≥3 fails" but
-   at lower resolution. *)
-let tool_failure_ratio (entry : Keeper_types.tool_call_entry) : float =
-  if entry.count <= 0 then 0.0
-  else float_of_int entry.failures /. float_of_int entry.count
+let tool_failure_ratio (agg : tool_aggregate) : float =
+  if agg.count <= 0 then 0.0
+  else float_of_int agg.failures /. float_of_int agg.count
 
-let thrashing_tool_saturation_rule
-    (tool_usage : Keeper_types.tool_call_entry StringMap.t) : reason option =
-  let offenders =
-    StringMap.fold
-      (fun name entry acc ->
-         if entry.Keeper_types.failures >= tool_failure_count_threshold
-            && tool_failure_ratio entry >= tool_failure_ratio_threshold
-         then (name, entry) :: acc
-         else acc)
-      tool_usage
-      []
+let thrashing_tool_saturation_rule (aggs : (string * tool_aggregate) list) : reason option =
+  let saturated =
+    List.filter
+      (fun (_name, a) ->
+         a.failures >= tool_failure_count_threshold
+         && tool_failure_ratio a >= tool_failure_ratio_threshold)
+      aggs
   in
-  match offenders with
+  match saturated with
   | [] -> None
-  | (name, entry) :: _ ->
+  | (name, agg) :: _ ->
       Some {
         rule_id = "tool_failure_saturation";
         evidence = [
           Printf.sprintf "tool=%s" name;
-          Printf.sprintf "failures=%d/%d" entry.failures entry.count;
-          Printf.sprintf "ratio=%.2f" (tool_failure_ratio entry);
+          Printf.sprintf "failures=%d/%d" agg.failures agg.count;
+          Printf.sprintf "ratio=%.2f" (tool_failure_ratio agg);
         ];
       }
 
@@ -116,15 +106,15 @@ let healthy_reason = {
   evidence = [];
 }
 
-let derive ~now (entry : Keeper_registry.registry_entry) : snapshot =
+let derive ~now (i : input) : snapshot =
   let regime, reason =
-    match crashing_rule ~now entry with
+    match crashing_rule ~now i with
     | Some r -> Crashing, r
     | None ->
-        match thrashing_turn_streak_rule entry with
+        match thrashing_turn_streak_rule i with
         | Some r -> Thrashing, r
         | None ->
-            match thrashing_tool_saturation_rule entry.tool_usage with
+            match thrashing_tool_saturation_rule i.tool_aggregates with
             | Some r -> Thrashing, r
             | None -> Healthy, healthy_reason
   in

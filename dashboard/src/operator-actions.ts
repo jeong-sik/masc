@@ -1,4 +1,5 @@
 import { confirmOperatorAction, fetchOperatorDigest, fetchOperatorSnapshot, runOperatorAction } from './api'
+import { extractApiError } from './api/core'
 import type {
   OperatorActionLogEntry,
   OperatorActionRequest,
@@ -11,8 +12,10 @@ import {
   operatorRoomDigest,
   operatorLoading,
   operatorError,
+  operatorErrorStatus,
   operatorDigestLoading,
   operatorDigestError,
+  operatorDigestErrorStatus,
   operatorActionBusy,
   operatorActionLog,
 } from './operator-signals'
@@ -73,13 +76,16 @@ export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<vo
   if (isFresh(lastSnapshotRefreshAt, opts)) return
   operatorLoading.value = true
   operatorError.value = null
+  operatorErrorStatus.value = null
   snapshotRefreshInflight = (async () => {
     try {
       const raw = await fetchOperatorSnapshot()
       operatorSnapshot.value = normalizeOperatorSnapshot(raw)
       lastSnapshotRefreshAt = Date.now()
     } catch (err) {
-      operatorError.value = err instanceof Error ? err.message : 'Failed to load operator snapshot'
+      const summary = extractApiError(err, 'Failed to load operator snapshot')
+      operatorError.value = summary.message
+      operatorErrorStatus.value = summary.status
     } finally {
       operatorLoading.value = false
       snapshotRefreshInflight = null
@@ -93,13 +99,16 @@ export async function refreshOperatorRoomDigest(opts?: RefreshOptions): Promise<
   if (isFresh(lastRoomDigestRefreshAt, opts)) return
   operatorDigestLoading.value = true
   operatorDigestError.value = null
+  operatorDigestErrorStatus.value = null
   roomDigestRefreshInflight = (async () => {
     try {
       const raw = await fetchOperatorDigest({ targetType: 'namespace' })
       operatorRoomDigest.value = normalizeOperatorDigest(raw)
       lastRoomDigestRefreshAt = Date.now()
     } catch (err) {
-      operatorDigestError.value = err instanceof Error ? err.message : 'Failed to load operator digest'
+      const summary = extractApiError(err, 'Failed to load operator digest')
+      operatorDigestError.value = summary.message
+      operatorDigestErrorStatus.value = summary.status
     } finally {
       operatorDigestLoading.value = false
       roomDigestRefreshInflight = null
@@ -111,6 +120,7 @@ export async function refreshOperatorRoomDigest(opts?: RefreshOptions): Promise<
 export async function dispatchOperatorAction(request: OperatorActionRequest): Promise<OperatorActionResult> {
   operatorActionBusy.value = true
   operatorError.value = null
+  operatorErrorStatus.value = null
   try {
     const result = await runOperatorAction(request)
     appendLog({
@@ -125,8 +135,10 @@ export async function dispatchOperatorAction(request: OperatorActionRequest): Pr
     await refreshOperatorRoomDigest({ force: true })
     return result
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Operator action failed'
+    const summary = extractApiError(err, 'Operator action failed')
+    const message = summary.message
     operatorError.value = message
+    operatorErrorStatus.value = summary.status
     appendLog({
       actor: request.actor,
       action_type: request.action_type,
@@ -147,6 +159,7 @@ export async function confirmOperatorPendingAction(
 ): Promise<OperatorActionResult> {
   operatorActionBusy.value = true
   operatorError.value = null
+  operatorErrorStatus.value = null
   try {
     const result = await confirmOperatorAction(actor, confirmToken, decision)
     appendLog({
@@ -161,8 +174,10 @@ export async function confirmOperatorPendingAction(
     await refreshOperatorRoomDigest({ force: true })
     return result
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Operator confirmation failed'
+    const summary = extractApiError(err, 'Operator confirmation failed')
+    const message = summary.message
     operatorError.value = message
+    operatorErrorStatus.value = summary.status
     appendLog({
       actor,
       action_type: 'confirm',

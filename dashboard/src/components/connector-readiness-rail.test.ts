@@ -10,7 +10,9 @@ import {
   getRailInflight,
   withRailInflight,
   resetRailInflightState,
+  railPillAriaLabel,
   type RailHandlers,
+  type RailPill,
 } from './connector-readiness-rail'
 
 const noop: RailHandlers = {
@@ -151,5 +153,69 @@ describe('ConnectorReadinessRail rendering', () => {
     const tokenPill = container.querySelector('[data-rail-pill="token"]') as HTMLButtonElement
     tokenPill.click()
     expect(opened).toBe(1)
+  })
+
+  it('each pill carries a screen-reader aria-label and a keyboard focus ring', () => {
+    const pills = deriveRail(
+      { sidecarUp: false, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
+      noop,
+    )
+    render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
+    const tokenPill = container.querySelector('[data-rail-pill="token"]') as HTMLButtonElement
+    // AA: button has an aria-label that includes both the label AND the
+    // action-outcome detail, so screen readers announce more than "Token".
+    const aria = tokenPill.getAttribute('aria-label') ?? ''
+    expect(aria).toContain('Token')
+    expect(aria).toContain('Config')
+    // Focus ring is applied via focus-visible so mouse clicks don't light up.
+    expect(tokenPill.className).toContain('focus-visible:outline')
+  })
+
+  it('inflight pill sets aria-busy="true"', () => {
+    const pills = deriveRail(
+      { sidecarUp: false, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
+      noop,
+      { process: true },
+    )
+    render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
+    const processPill = container.querySelector('[data-rail-pill="process"]') as HTMLButtonElement
+    expect(processPill.getAttribute('aria-busy')).toBe('true')
+  })
+
+  it('decorative glyph spans are aria-hidden so AT does not read "dot dot dot"', () => {
+    const pills = deriveRail(
+      { sidecarUp: true, gateHealthy: true, bindingCount: 1, keeperCount: 1 },
+      noop,
+    )
+    render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
+    const tokenPill = container.querySelector('[data-rail-pill="token"]')!
+    const hidden = tokenPill.querySelectorAll('[aria-hidden="true"]')
+    // One for the glyph circle + one for uppercase label + one for detail line.
+    expect(hidden.length).toBeGreaterThanOrEqual(3)
+  })
+})
+
+describe('railPillAriaLabel', () => {
+  const basePill: RailPill = {
+    key: 'token',
+    state: 'ok',
+    label: 'Token',
+    detail: '설정됨',
+    hint: null,
+    onClick: () => {},
+  }
+
+  it('includes label and detail with an em-dash separator', () => {
+    expect(railPillAriaLabel(basePill)).toBe('Token — 설정됨')
+  })
+
+  it('appends hint when provided', () => {
+    const pill = { ...basePill, hint: '클릭하면 Config' }
+    expect(railPillAriaLabel(pill)).toBe('Token — 설정됨 — 클릭하면 Config')
+  })
+
+  it('replaces detail with "진행 중" when inflight so AT announces the busy state', () => {
+    const pill = { ...basePill, inflight: true }
+    expect(railPillAriaLabel(pill)).toBe('Token — 진행 중')
   })
 })

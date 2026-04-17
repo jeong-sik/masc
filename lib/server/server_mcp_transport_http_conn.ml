@@ -12,19 +12,23 @@ type sse_conn_info = {
   mutable closed : bool;
 }
 
-let sse_conn_by_session : (string, sse_conn_info) Hashtbl.t = Hashtbl.create 128
+module SMap = Map.Make(String)
+
+let rec atomic_update atomic f =
+  let old_val = Atomic.get atomic in
+  let new_val = f old_val in
+  if Atomic.compare_and_set atomic old_val new_val then ()
+  else atomic_update atomic f
+
+let sse_conn_by_session : sse_conn_info SMap.t Atomic.t = Atomic.make SMap.empty
 
 type sse_connect_guard_state = {
-  mutable last_connect_at : float;
-  mutable connect_times : float list;
+  last_connect_at : float;
+  connect_times : float list;
 }
 
 let sse_connect_guard_by_session :
-    (string, sse_connect_guard_state) Hashtbl.t =
-  Hashtbl.create 256
-
-(** Single mutex protecting both Hashtbl registries. *)
-let sse_registry_mutex = Eio.Mutex.create ()
+    sse_connect_guard_state SMap.t Atomic.t = Atomic.make SMap.empty
 
 let env_float_or ~name ~default =
   match Sys.getenv_opt name with
@@ -65,13 +69,12 @@ let guard_deadline state =
   Float.max session_deadline window_deadline
 
 let guard_expired ~now ~session_id state =
-  not (Hashtbl.mem sse_conn_by_session session_id) && now >= guard_deadline state
+  not (SMap.mem session_id (Atomic.get sse_conn_by_session)) && now >= guard_deadline state
 
 (** Register an SSE connection under [sse_registry_mutex].
     All call sites must use this instead of direct [Hashtbl.replace]. *)
 let register_sse_conn ~session_id ~info =
-  Eio.Mutex.use_rw ~protect:true sse_registry_mutex (fun () ->
-    Hashtbl.replace sse_conn_by_session session_id info)
+  atomic_update sse_conn_by_session (fun map -> SMap.add session_id info map)
 
 let close_sse_conn info =
   if not info.closed then (
@@ -86,14 +89,17 @@ let close_sse_conn info =
     Sse.unregister_if_current info.session_id info.client_id)
 
 let stop_sse_session_impl ~clear_guard session_id =
-  let info_opt = Eio.Mutex.use_rw ~protect:true sse_registry_mutex (fun () ->
-    match Hashtbl.find_opt sse_conn_by_session session_id with
-    | None -> None
+  let info_opt = ref None in
+  atomic_update sse_conn_by_session (fun map ->
+    match SMap.find_opt session_id map with
+    | None -> map
     | Some info ->
-        Hashtbl.remove sse_conn_by_session session_id;
-        if clear_guard then Hashtbl.remove sse_connect_guard_by_session session_id;
-        Some info) in
-  match info_opt with
+        info_opt := Some info;
+        SMap.remove session_id map
+  );
+  if clear_guard then
+    atomic_update sse_connect_guard_by_session (fun map -> SMap.remove session_id map);
+  match !info_opt with
   | None -> ()
   | Some info -> close_sse_conn info
 
@@ -104,32 +110,32 @@ let stop_sse_session_preserve_guard session_id =
   stop_sse_session_impl ~clear_guard:false session_id
 
 let is_active_sse_session session_id =
-  Eio.Mutex.use_ro sse_registry_mutex (fun () ->
-    Hashtbl.mem sse_conn_by_session session_id)
+  SMap.mem session_id (Atomic.get sse_conn_by_session)
 
 (** Number of active SSE connections. *)
 let active_session_count () =
-  Eio.Mutex.use_ro sse_registry_mutex (fun () ->
-    Hashtbl.length sse_conn_by_session)
+  SMap.cardinal (Atomic.get sse_conn_by_session)
 
 let reap_stale_guards () =
-  Eio.Mutex.use_rw ~protect:true sse_registry_mutex (fun () ->
-    let now = Time_compat.now () in
-    let stale =
-      Hashtbl.fold (fun sid state acc ->
-        if guard_expired ~now ~session_id:sid state then sid :: acc
-        else acc
-      ) sse_connect_guard_by_session []
-    in
-    List.iter (Hashtbl.remove sse_connect_guard_by_session) stale;
-    List.length stale)
+  let now = Time_compat.now () in
+  let stale =
+    SMap.fold (fun sid state acc ->
+      if guard_expired ~now ~session_id:sid state then sid :: acc
+      else acc
+    ) (Atomic.get sse_connect_guard_by_session) []
+  in
+  if stale <> [] then
+    atomic_update sse_connect_guard_by_session (fun map ->
+      List.fold_left (fun acc sid -> SMap.remove sid acc) map stale
+    );
+  List.length stale
 
 let close_all_sse_connections () =
-  let infos = Eio.Mutex.use_rw ~protect:true sse_registry_mutex (fun () ->
-    let all = Hashtbl.fold (fun _k v acc -> v :: acc) sse_conn_by_session [] in
-    Hashtbl.clear sse_conn_by_session;
-    Hashtbl.clear sse_connect_guard_by_session;
-    all) in
+  let infos =
+    SMap.fold (fun _k v acc -> v :: acc) (Atomic.get sse_conn_by_session) []
+  in
+  Atomic.set sse_conn_by_session SMap.empty;
+  Atomic.set sse_connect_guard_by_session SMap.empty;
   List.iter close_sse_conn infos;
   Log.Server.info "MASC MCP: Closed %d SSE connections"
     (List.length infos)
@@ -166,17 +172,18 @@ let prune_connect_times ~now times =
   else List.filter (fun ts -> now -. ts <= sse_connect_window_s) times
 
 let check_sse_connect_guard session_id =
-  Eio.Mutex.use_rw ~protect:true sse_registry_mutex (fun () ->
-    let now = Time_compat.now () in
+  let now = Time_compat.now () in
+  let result = ref (Ok ()) in
+  atomic_update sse_connect_guard_by_session (fun map ->
     let state =
-      match Hashtbl.find_opt sse_connect_guard_by_session session_id with
+      match SMap.find_opt session_id map with
       | Some v ->
-          v.connect_times <- prune_connect_times ~now v.connect_times;
-          if guard_expired ~now ~session_id v then (
-            Hashtbl.remove sse_connect_guard_by_session session_id;
-            { last_connect_at = -.1.0; connect_times = [] })
+          let pruned_times = prune_connect_times ~now v.connect_times in
+          let v' = { v with connect_times = pruned_times } in
+          if guard_expired ~now ~session_id v' then
+            { last_connect_at = -.1.0; connect_times = [] }
           else
-            v
+            v'
       | None -> { last_connect_at = -.1.0; connect_times = [] }
     in
     let recent = state.connect_times in
@@ -186,9 +193,10 @@ let check_sse_connect_guard session_id =
       else
         sse_reconnect_min_interval_s -. (now -. state.last_connect_at)
     in
-    if session_wait_s > 0.0 then
-      Error ("session_cooldown", session_wait_s)
-    else
+    if session_wait_s > 0.0 then begin
+      result := Error ("session_cooldown", session_wait_s);
+      map
+    end else begin
       let window_wait_s =
         if sse_connect_window_s <= 0.0 || sse_connect_max_in_window <= 0 then
           0.0
@@ -199,10 +207,13 @@ let check_sse_connect_guard session_id =
         else
           0.0
       in
-      if window_wait_s > 0.0 then
-        Error ("window_limit", window_wait_s)
-      else (
-        state.last_connect_at <- now;
-        state.connect_times <- now :: recent;
-        Hashtbl.replace sse_connect_guard_by_session session_id state;
-        Ok ()))
+      if window_wait_s > 0.0 then begin
+        result := Error ("window_limit", window_wait_s);
+        map
+      end else begin
+        result := Ok ();
+        SMap.add session_id { last_connect_at = now; connect_times = now :: recent } map
+      end
+    end
+  );
+  !result

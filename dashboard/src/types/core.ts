@@ -228,9 +228,9 @@ export interface Goal {
 
 // --- Keeper ---
 
-export type KeeperHealthState = 'healthy' | 'idle' | 'stale' | 'degraded' | 'offline'
+type KeeperHealthState = 'healthy' | 'idle' | 'stale' | 'degraded' | 'offline'
 
-export type KeeperQuietReason =
+type KeeperQuietReason =
   | 'quiet_hours'
   | 'min_gap'
   | 'no_recent_activity'
@@ -241,13 +241,13 @@ export type KeeperQuietReason =
   | 'never_started'
   | 'unknown'
 
-export type KeeperNextActionPath =
+type KeeperNextActionPath =
   | 'direct_message'
   | 'manual_social_sweep'
   | 'probe'
   | 'recover'
 
-export type KeeperReplyStatus =
+type KeeperReplyStatus =
   | 'never'
   | 'awaiting_reply'
   | 'delivered'
@@ -256,7 +256,7 @@ export type KeeperReplyStatus =
   | 'error'
   | 'unknown'
 
-export type KeeperContinuityState =
+type KeeperContinuityState =
   | 'not_running'
   | 'recovering'
   | 'healthy'
@@ -298,7 +298,7 @@ export type KeeperConversationDelivery =
   | 'timeout'
   | 'error'
 
-export interface KeeperConversationUsage {
+interface KeeperConversationUsage {
   inputTokens?: number | null
   outputTokens?: number | null
   totalTokens?: number | null

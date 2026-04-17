@@ -14,8 +14,6 @@ describe('normalizeOperatorDigest', () => {
     expect(result.health).toBeUndefined()
     expect(result.attention_items).toEqual([])
     expect(result.recommended_actions).toEqual([])
-    expect(result.review_queue).toEqual([])
-    expect(result.deferred_queue).toEqual([])
     expect(result.recent_reviews).toEqual([])
     expect(result.worker_cards).toEqual([])
   })
@@ -129,28 +127,6 @@ describe('normalizeOperatorDigest', () => {
       operator_judge_runtime: 'invalid',
     })
     expect(result.operator_judge_runtime).toBeNull()
-  })
-
-  it('extracts review_summary', () => {
-    const result = normalizeOperatorDigest({
-      review_summary: {
-        active_count: 5,
-        deferred_count: 2,
-        recent_count: 10,
-      },
-    })
-    expect(result.review_summary).not.toBeNull()
-    expect(result.review_summary!.active_count).toBe(5)
-    expect(result.review_summary!.deferred_count).toBe(2)
-  })
-
-  it('defaults review_summary counts to 0', () => {
-    const result = normalizeOperatorDigest({
-      review_summary: {},
-    })
-    expect(result.review_summary).not.toBeNull()
-    expect(result.review_summary!.active_count).toBe(0)
-    expect(result.review_summary!.deferred_count).toBe(0)
   })
 
   it('extracts worker_cards', () => {

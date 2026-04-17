@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper/keeper_config.ml
+  - lib/keeper/keeper_campaign_fsm.ml
+---
+
 # Adaptive Heartbeat Production Rollout RFC
 
 **Status**: Draft, production gate

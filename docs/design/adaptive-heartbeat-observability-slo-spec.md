@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/keeper_accountability.ml
+  - lib/keeper/keeper_alerting.ml
+  - lib/keeper/keeper_composite_observer.ml
+---
+
 # Adaptive Heartbeat Observability and SLO Spec
 
 **Status**: Draft, production prerequisite

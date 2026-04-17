@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper/keeper_compact_policy.ml
+  - specs/keeper-state-machine/KeeperCompactionLifecycle.tla
+---
+
 # Compaction FSM ↔ TLA+ Spec Audit (2026-04-16)
 
 **Status**: v2 — TLA+ side enumerated end-to-end, OCaml FSM core verified with direct reads (phases, events, compaction handlers).

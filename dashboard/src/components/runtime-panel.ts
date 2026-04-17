@@ -18,7 +18,7 @@ import { PrometheusMetrics } from './prometheus-metrics'
 import { CascadeConfigPanel } from './cascade-config-panel'
 import { VerificationSpecsPanel } from './verification-specs-panel'
 
-export type RuntimeView = 'default' | 'cascade' | 'providers' | 'prometheus' | 'verification'
+type RuntimeView = 'default' | 'cascade' | 'providers' | 'prometheus' | 'verification'
 
 const RUNTIME_VIEWS: RuntimeView[] = ['default', 'cascade', 'providers', 'prometheus', 'verification']
 

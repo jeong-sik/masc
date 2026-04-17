@@ -4,7 +4,7 @@ import { namespaceTruth, namespaceTruthInitializing } from '../../namespace-trut
 import { serverStatus } from '../../store'
 import { showToast } from '../common/toast'
 
-export type FlowState = 'unknown' | 'initializing' | 'running' | 'paused'
+type FlowState = 'unknown' | 'initializing' | 'running' | 'paused'
 export const flowState = signal<FlowState>('unknown')
 export const flowLoading = signal(false)
 

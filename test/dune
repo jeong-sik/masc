@@ -384,6 +384,9 @@
         test_governance_yojson_roundtrip
         test_eval_calibration
         test_goal_janitor
+        test_goal_store
+        test_string_util
+        test_board_core_payload
         test_voice_config)
  (modules
         test_runtime_params
@@ -532,6 +535,9 @@
         test_governance_yojson_roundtrip
         test_eval_calibration
         test_goal_janitor
+        test_goal_store
+        test_string_util
+        test_board_core_payload
         test_voice_config)
  (libraries masc_test_deps)
  (deps ../bin/main_eio.exe))

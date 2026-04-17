@@ -9,11 +9,6 @@ include Autoresearch_types
 
 let decision_to_string = function Keep -> "keep" | Discard -> "discard"
 
-let decision_of_string = function
-  | "keep" -> Keep
-  | "discard" -> Discard
-  | s -> invalid_arg (Printf.sprintf "Unknown decision: %s" s)
-
 let decision_of_string_result = function
   | "keep" -> Ok Keep
   | "discard" -> Ok Discard
@@ -24,13 +19,6 @@ let status_to_string = function
   | Completed -> "completed"
   | Stopped -> "stopped"
   | Error -> "error"
-
-let status_of_string = function
-  | "running" -> Some Running
-  | "completed" -> Some Completed
-  | "stopped" -> Some Stopped
-  | "error" -> Some Error
-  | _ -> None
 
 let status_of_string_result = function
   | "running" -> Ok Running
@@ -186,11 +174,6 @@ let cycle_of_yojson_result (json : Yojson.Safe.t) : (cycle_record, string) resul
       timestamp;
     }
 
-let cycle_of_yojson (json : Yojson.Safe.t) : cycle_record =
-  match cycle_of_yojson_result json with
-  | Ok value -> value
-  | Stdlib.Error msg -> invalid_arg msg
-
 let state_to_yojson (s : loop_state) : Yojson.Safe.t =
   `Assoc [
     ("loop_id", `String s.loop_id);
@@ -336,11 +319,6 @@ let state_of_yojson_result (json : Yojson.Safe.t) : (persisted_summary, string) 
       lower_is_better;
     }
 
-let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
-  match state_of_yojson_result json with
-  | Ok value -> value
-  | Stdlib.Error msg -> invalid_arg msg
-
 let swarm_link_to_yojson (link : swarm_link) : Yojson.Safe.t =
   `Assoc
     [
@@ -376,7 +354,3 @@ let swarm_link_of_yojson_result (json : Yojson.Safe.t) : (swarm_link, string) re
       linked_at;
     }
 
-let swarm_link_of_yojson (json : Yojson.Safe.t) : swarm_link =
-  match swarm_link_of_yojson_result json with
-  | Ok value -> value
-  | Stdlib.Error msg -> invalid_arg msg

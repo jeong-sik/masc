@@ -110,7 +110,8 @@ export function computeDivergences(
 export function KeeperConditionsDivergent({ keeper }: { keeper: Keeper }) {
   if (!keeper.conditions) return null
   const divs = computeDivergences(keeper.conditions, keeper.phase)
-  if (divs.length === 0) return null
+  const [first, ...rest] = divs
+  if (!first) return null
 
   return html`
     <section class="rounded-xl border border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.05)] p-3 mb-3">
@@ -131,7 +132,7 @@ export function KeeperConditionsDivergent({ keeper }: { keeper: Keeper }) {
         `)}
       </div>
       <div class="mt-2 text-[10px] text-[var(--text-dim)] leading-snug">
-        ${divs[0].reason}${divs.length > 1 ? ` (외 ${divs.length - 1}건, 칩 hover로 확인)` : ''}
+        ${first.reason}${rest.length > 0 ? ` (외 ${rest.length}건, 칩 hover로 확인)` : ''}
       </div>
     </section>
   `

@@ -202,39 +202,6 @@ export function createMissionWorkflowContext(
   }
 }
 
-export function createExecutionWorkflowContext({
-  targetType,
-  targetId,
-  focusKind,
-  sourceLabel = 'Execution 진단',
-  summary,
-  operationId = null,
-}: {
-  targetType: string
-  targetId: string
-  focusKind: string
-  sourceLabel?: string
-  summary: string
-  operationId?: string | null
-}): DashboardWorkflowContext {
-  const createdAt = new Date().toISOString()
-  return {
-    id: workflowContextId('execution', sourceLabel, null, targetType, targetId, focusKind, operationId, createdAt),
-    source_surface: 'execution',
-    source_label: sourceLabel,
-    action_type: null,
-    target_type: targetType,
-    target_id: targetId,
-    focus_kind: focusKind,
-    operation_id: operationId,
-    summary,
-    payload_preview: null,
-    suggested_payload: null,
-    preview: null,
-    evidence: null,
-    created_at: createdAt,
-  }
-}
 
 function matchesRouteParams(
   context: DashboardWorkflowContext,

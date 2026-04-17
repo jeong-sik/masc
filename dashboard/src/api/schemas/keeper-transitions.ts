@@ -1,21 +1,9 @@
-/**
- * Keeper transitions schema — schema-at-boundary for
- * `GET /api/v1/keepers/:name/transitions`.
- *
- * Contract (see dashboard/docs/API_CONTRACT.md):
- * - Types derived via `InferOutput`; no hand-typed interface remains.
- * - `fetchKeeperTransitions` passes the response through
- *   `parseKeeperTransitionsResponse`. Shape drift raises
- *   `KeeperTransitionsSchemaDriftError` rather than leaving callers
- *   with `.transitions[0].new_phase` being `undefined`.
- * - Phase names and outcomes are left as open `string()` because the
- *   backend emits new values ahead of the dashboard; strict enums here
- *   would brick the strip / diagram during a backend-ahead deploy
- *   window. `selected_event` is `unknown()` since downstream already
- *   treats it opaquely for diagnostics.
- *
- * Rolled out as part of #7441 (P2 rollout) following pilot #7439.
- */
+// Phase names and outcomes are kept open (`string()`) because the
+// backend ships new phase variants ahead of the dashboard. A strict
+// `picklist` here would brick the transition strip and state diagram
+// during a backend-ahead deploy window.
+// `selected_event` stays `unknown()` — callers render it opaquely for
+// diagnostics and never branch on its shape.
 
 import {
   array,
@@ -51,14 +39,13 @@ export class KeeperTransitionsSchemaDriftError extends Error {
   readonly issues: readonly BaseIssue<unknown>[]
   constructor(issues: readonly BaseIssue<unknown>[]) {
     const summary = issues
-      .slice(0, 3)
       .map(issue => {
         const path = issue.path?.map(p => String(p.key)).join('.') ?? '<root>'
         return `${path}: ${issue.message}`
       })
       .join('; ')
     super(`keeper transitions schema drift: ${summary}`)
-    this.name = 'KeeperTransitionsSchemaDriftError'
+    this.name = KeeperTransitionsSchemaDriftError.name
     this.issues = issues
   }
 }
@@ -66,7 +53,10 @@ export class KeeperTransitionsSchemaDriftError extends Error {
 export function parseKeeperTransitionsResponse(
   data: unknown,
 ): KeeperTransitionsResponse {
-  const result = safeParse(KeeperTransitionsResponseSchema, data)
+  // abortEarly bounds both the parse cost and the retained `issues`
+  // array on thrown errors — a 30-transition total-drift payload would
+  // otherwise pin ~150 issue objects per error instance.
+  const result = safeParse(KeeperTransitionsResponseSchema, data, { abortEarly: true })
   if (!result.success) {
     throw new KeeperTransitionsSchemaDriftError(result.issues)
   }

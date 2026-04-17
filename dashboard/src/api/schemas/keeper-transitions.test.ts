@@ -29,8 +29,6 @@ describe('parseKeeperTransitionsResponse', () => {
   })
 
   it('accepts a populated list with opaque selected_event', () => {
-    // selected_event is stored as unknown on purpose — callers render
-    // it for diagnostics only, not for branching.
     const out = parseKeeperTransitionsResponse({
       keeper: 'greeter',
       current_phase: 'Running',
@@ -48,7 +46,7 @@ describe('parseKeeperTransitionsResponse', () => {
     expect(out.transitions[1]!.new_phase).toBe('Running')
   })
 
-  it('accepts null current_phase (just-booted keeper with no decisions yet)', () => {
+  it('accepts null current_phase', () => {
     const out = parseKeeperTransitionsResponse({
       keeper: 'cold-start',
       current_phase: null,
@@ -58,9 +56,7 @@ describe('parseKeeperTransitionsResponse', () => {
     expect(out.current_phase).toBeNull()
   })
 
-  it('accepts unknown phase values (backend evolves new phases ahead of dashboard)', () => {
-    // Phases are open `string()` — a new backend phase should not
-    // brick the transition strip during a backend-ahead deploy window.
+  it('accepts unknown phase values', () => {
     const out = parseKeeperTransitionsResponse({
       keeper: 'g',
       current_phase: 'NovelPhase',

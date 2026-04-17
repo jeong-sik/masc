@@ -97,6 +97,21 @@ let is_loopback_host_opt = function
   | Some host -> is_loopback_host host
   | None -> false
 
+(** Default port for the dashboard's Vite dev server.  Used by
+    [Server_auth.default_loopback_dev_mutation_origins] to whitelist
+    the frontend dev origin on each loopback variant. *)
+let vite_dev_default_port = 5173
+
+(** Loopback dev-server origins for the Vite frontend on
+    {!vite_dev_default_port}.  Ordered [127.0.0.1 → localhost → ::1]
+    to match the historical CORS allowlist. *)
+let vite_dev_default_origins =
+  [
+    Printf.sprintf "http://127.0.0.1:%d" vite_dev_default_port;
+    Printf.sprintf "http://localhost:%d" vite_dev_default_port;
+    Printf.sprintf "http://[::1]:%d" vite_dev_default_port;
+  ]
+
 (** Default port for SearXNG local search. *)
 let searxng_default_port = 8888
 

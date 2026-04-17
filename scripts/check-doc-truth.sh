@@ -178,3 +178,5 @@ if ((${#missing_refs[@]} > 0)); then
 fi
 
 printf 'Doc truth OK: front-door docs and key specs are aligned with current repo truth\n'
+
+scripts/check-doc-code-refs.sh

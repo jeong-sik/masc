@@ -1,11 +1,20 @@
 // ActionButton — reusable button with variant styles
-// Replaces repeated inline button patterns across dashboard
+// Replaces repeated inline button patterns across dashboard.
+//
+// Props are a strict whitelist — htm/preact function components do not
+// implicitly spread unlisted props to children (see the parallel note
+// in ../common/input.ts). If you want a new attribute to reach the
+// <button>, add it to the interface AND forward it below. Missing
+// entries silently drop, which is how the pre-refactor callers that
+// passed `aria-busy` / `data-*` ended up rendering plain buttons and
+// forced a couple of sites to fall back to raw <button>.
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
 type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'subtle'
 type ButtonSize = 'sm' | 'md' | 'lg'
+type ButtonType = 'button' | 'submit' | 'reset'
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
   sm: 'py-1 px-2 text-[10px]',
@@ -25,11 +34,23 @@ const BASE = 'rounded-lg cursor-pointer transition-all duration-200 font-medium 
 interface ActionButtonProps {
   variant?: ButtonVariant
   size?: ButtonSize
+  type?: ButtonType
   class?: string
+  id?: string
   disabled?: boolean
   /** Full width */
   block?: boolean
   ariaLabel?: string
+  /** Announce "busy" to assistive tech while an async op backed by
+      this button is in flight. Pair with a disabled=${true} to lock
+      the UI; the busy role informs AT, the disabled flag handles
+      pointer events. */
+  ariaBusy?: boolean
+  /** Hover tooltip text (native browser title). */
+  title?: string
+  /** Rendered as `data-testid` so E2E / unit tests can target this
+      button without coupling to visible text (which may be i18n'd). */
+  testId?: string
   onClick?: (e: Event) => void
   children: ComponentChildren
 }
@@ -37,10 +58,15 @@ interface ActionButtonProps {
 export function ActionButton({
   variant = 'primary',
   size = 'md',
+  type = 'button',
   class: cx,
+  id,
   disabled,
   block,
   ariaLabel,
+  ariaBusy,
+  title,
+  testId,
   onClick,
   children,
 }: ActionButtonProps) {
@@ -54,6 +80,16 @@ export function ActionButton({
   ].filter(Boolean).join(' ')
 
   return html`
-    <button type="button" class=${cls} onClick=${onClick} disabled=${disabled} aria-label=${ariaLabel}>${children}</button>
+    <button
+      type=${type}
+      id=${id}
+      class=${cls}
+      onClick=${onClick}
+      disabled=${disabled}
+      aria-label=${ariaLabel}
+      aria-busy=${ariaBusy === true ? 'true' : undefined}
+      title=${title}
+      data-testid=${testId}
+    >${children}</button>
   `
 }

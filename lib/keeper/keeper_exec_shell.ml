@@ -1051,8 +1051,8 @@ let handle_keeper_shell
       (* Reversibility gate (Thariq / Anthropic auto-mode principle):
          - R0 read / R1 reversible mutation: allowed; R1 is audit-logged.
          - R2 irreversible: rejected with a structured-tool hint so the
-           LLM can self-recover toward keeper_pr_submit / operator
-           approval without a second round-trip. *)
+           LLM can self-recover toward an operator-approval path without
+           a second round-trip. *)
       let reversibility = Worker_dev_tools.classify_gh_reversibility cmd_str in
       let rev_tag = Worker_dev_tools.string_of_gh_reversibility reversibility in
       let gh_cmd_display = Printf.sprintf "gh %s" cmd_str in
@@ -1073,9 +1073,8 @@ let handle_keeper_shell
              (Worker_dev_tools.structured_tool_hint_for_r2 cmd_str)
              ~default:
                "This gh command mutates state that gh itself cannot \
-                restore. Route through a structured keeper tool \
-                (keeper_pr_submit for PR ops) or post on the board \
-                for operator approval."
+                restore. Route through the appropriate structured \
+                keeper tool or post on the board for operator approval."
          in
          Log.Keeper.warn
            "keeper_shell op=gh R2 blocked: %s (keeper=%s)"

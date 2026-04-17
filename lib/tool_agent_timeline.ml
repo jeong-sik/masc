@@ -232,24 +232,16 @@ let tool_call_events (config : Coord.config) ~agent_name ~limit :
        | None -> false)
   |> List.filter_map (fun (e : Activity_graph.event) ->
        let ts = Float.of_int e.ts_ms /. 1000.0 in
-       let open Yojson.Safe.Util in
        let tool_name =
-         try e.payload |> member "tool_name" |> to_string
-         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> "unknown"
+         Safe_ops.json_string ~default:"unknown" "tool_name" e.payload
        in
        let success =
-         try e.payload |> member "success" |> to_bool
-         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> true
+         Safe_ops.json_bool ~default:true "success" e.payload
        in
        let duration_ms =
-         try e.payload |> member "duration_ms" |> to_int
-         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 0
+         Safe_ops.json_int ~default:0 "duration_ms" e.payload
        in
-       let error_str =
-         try match e.payload |> member "error" with
-             | `String s -> Some s | _ -> None
-         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
-       in
+       let error_str = Safe_ops.json_string_opt "error" e.payload in
        Some
          {
            ts;

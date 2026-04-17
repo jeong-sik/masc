@@ -6,10 +6,34 @@ import { useState } from 'preact/hooks'
 import { EmptyState } from '../common/empty-state'
 import { ErrorState, LoadingState } from '../common/feedback-state'
 import { TimeAgo } from '../common/time-ago'
+import { TextInput } from '../common/input'
 import { JsonViewerCard, parseJsonLikeData } from '../common/json-viewer'
 import { Settings, MessageSquare, CheckSquare, Heart, RefreshCcw, Dot, ChevronRight } from 'lucide-preact'
 import type { UnifiedTraceEvent, TraceEventKind } from '../session-trace/session-trace-state'
-import { activeFilter, type ActivityFilter } from './task-detail-state'
+import { activeFilter, activityListSearchQuery, type ActivityFilter } from './task-detail-state'
+
+// Pure helper — filter events by categorical kind + free-text query.
+// Query matches summary, toolName, error, and stringified toolArgs/toolResult (case-insensitive).
+export function filterActivityEvents(
+  events: UnifiedTraceEvent[],
+  filter: ActivityFilter,
+  query: string,
+): UnifiedTraceEvent[] {
+  const byKind = filter === 'all' ? events : events.filter(e => e.kind === filter)
+  const q = query.trim().toLowerCase()
+  if (q === '') return byKind
+  return byKind.filter(e => {
+    if (e.summary.toLowerCase().includes(q)) return true
+    if (e.toolName && e.toolName.toLowerCase().includes(q)) return true
+    if (e.error && e.error.toLowerCase().includes(q)) return true
+    if (e.toolArgs != null) {
+      const s = typeof e.toolArgs === 'string' ? e.toolArgs : JSON.stringify(e.toolArgs)
+      if (s.toLowerCase().includes(q)) return true
+    }
+    if (e.toolResult != null && e.toolResult.toLowerCase().includes(q)) return true
+    return false
+  })
+}
 
 function kindIcon(kind: TraceEventKind) {
   switch (kind) {
@@ -106,9 +130,8 @@ export function TaskActivityList({
   if (events.length === 0) return html`<${EmptyState} message="담당자의 최근 활동이 없습니다" compact />`
 
   const filter = activeFilter.value
-  const filtered = filter === 'all'
-    ? events
-    : events.filter(e => e.kind === filter)
+  const query = activityListSearchQuery.value
+  const filtered = filterActivityEvents(events, filter, query)
 
   const filterChips: { key: ActivityFilter; label: string }[] = [
     { key: 'all', label: '전체' },
@@ -119,6 +142,15 @@ export function TaskActivityList({
 
   return html`
     <div class="flex flex-col gap-2">
+      <${TextInput}
+        type="search"
+        value=${query}
+        placeholder="활동 검색 (summary, tool, error)"
+        ariaLabel="활동 검색"
+        onInput=${(e: Event) => {
+          activityListSearchQuery.value = (e.currentTarget as HTMLInputElement).value
+        }}
+      />
       <div class="flex items-center gap-1.5">
         ${filterChips.map(chip => html`
           <button
@@ -135,7 +167,10 @@ export function TaskActivityList({
         <span class="ml-auto text-[10px] text-text-dim tabular-nums">${filtered.length}건</span>
       </div>
       <div class="flex flex-col gap-0.5 max-h-[400px] overflow-y-auto">
-        ${filtered.map((evt, i) => html`<${ActivityEntry} key=${evt.id ?? i} event=${evt} />`)}
+        ${filtered.map((evt, i) => {
+          const stable = evt.id ?? evt.ts_iso ?? evt.summary
+          return html`<${ActivityEntry} key=${`${stable}-${i}`} event=${evt} />`
+        })}
       </div>
     </div>
   `

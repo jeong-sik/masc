@@ -43,6 +43,7 @@
    ;; masc_mcp.swarm_status removed (retire swarm read surfaces, #7572)
    ;; masc_mcp.team_session_types removed (Epic #6107)
    (re_export masc_mcp.tool_schemas)
+   (re_export masc_mcp.masc_tool_blob_store)
    (re_export masc_process)
    (re_export masc_coord)
    (re_export masc_types)

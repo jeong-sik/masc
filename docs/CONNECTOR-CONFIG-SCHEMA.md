@@ -124,17 +124,32 @@ For each connector the dashboard should render:
    `BotConfig(**payload)` to re-run Pydantic validators, returns per-field
    errors on failure.
 
-## Known gaps (to fix as separate PRs)
+## Known gaps and progress
 
-- `sidecars/{imessage,slack,telegram}-bot/src/config.py` reference `Path` and
+- ~~`sidecars/{imessage,slack,telegram}-bot/src/config.py` reference `Path` and
   `os` inside `_runtime_toml_path()` without importing them — `BotConfig()`
-  hits `NameError` the moment `TomlConfigSettingsSource` is wired. Discord is
-  fine. Fix: add `from pathlib import Path` to all three, add `import os` to
-  slack + telegram.
-- No backend endpoint to start/stop a sidecar — currently the dashboard only
-  advertises state written to `status.json`.
-- No per-connector config-TOML write endpoint.
-- No JSON-schema export endpoint for Pydantic models.
+  hits `NameError` the moment `TomlConfigSettingsSource` is wired.~~ **Fixed**
+  in `fix/sidecar-config-imports` (regression test per sidecar).
+- ~~Only discord-bot ships a `run.sh` wrapper — imessage/slack/telegram have
+  no first-class start/tail/status entry point.~~ **Fixed** in
+  `feature/sidecar-run-sh`: all 4 bots now expose
+  `./run.sh [start|stop|tail|status]` with a `.env.example` and
+  per-bridge token guidance.
+- ~~Dashboard's lifecycle hint forks discord-only `./run.sh` from
+  `python -m src` for the others.~~ **Fixed** in
+  `feature/dash-connectors-toplevel`: `sidecarCommands()` is now a single
+  `./run.sh <verb>` table; stop routes through `./run.sh stop` (no more
+  hand-rolled pkill).
+- **Open**: no backend endpoint to start/stop a sidecar — the dashboard
+  shows shell snippets to copy. Native Start/Stop/Restart buttons need a
+  `/api/v1/sidecar/<id>/{start,stop,status,logs}` endpoint that shells out
+  to the wrapper (Eio.Process based).
+- **Open**: no per-connector config-TOML write endpoint. Form submit needs
+  `/api/v1/sidecar/<id>/config` POST that writes
+  `${MASC_BASE_PATH}/.gate/runtime/<id>/config.toml` with mode 0600.
+- **Open**: no JSON-schema export endpoint for Pydantic models. Each sidecar
+  could expose `BotConfig.model_json_schema()` once and the dashboard
+  generates a form from that — single source of truth, zero drift.
 
 ## References
 

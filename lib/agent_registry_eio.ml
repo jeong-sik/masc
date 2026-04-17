@@ -48,70 +48,51 @@ let get_registry_exn () =
   | Ok reg -> reg
   | Error msg -> raise (Registry_init_failed msg)
 
+module SMap = Map.Make(String)
+
+let rec atomic_update atomic f =
+  let old_val = Atomic.get atomic in
+  let new_val = f old_val in
+  if Atomic.compare_and_set atomic old_val new_val then ()
+  else atomic_update atomic f
+
 (** MCP session to identity mapping for fast lookup *)
-let session_identity_map : (string, string) Hashtbl.t = Hashtbl.create 64
+let session_identity_map : string SMap.t Atomic.t = Atomic.make SMap.empty
 
-(** Caches the final resolved agent_name per MCP session to skip
-    ~180 lines of identity resolution on 2nd+ calls. *)
-let resolved_names : (string, string) Hashtbl.t = Hashtbl.create 64
-
-(** Mutex serialising multi-step operations on the two session caches
-    above.  Single [Hashtbl] operations are atomic on a single Eio
-    domain, but [get_or_create_identity] interleaves a cache lookup
-    with a [Registry.register] call that yields via [reg.lock], which
-    is a classic check-then-act race window:
-
-    Fiber A                             Fiber B
-    Hashtbl.find_opt sid -> None
-                                        Hashtbl.find_opt sid -> None
-    Registry.register id_a              Registry.register id_b
-    Hashtbl.replace sid id_a.key        Hashtbl.replace sid id_b.key
-
-    Both fibers produce fresh UUID session keys via
-    [Agent_identity.generate_session_key], so [Registry.register] is
-    NOT idempotent here — it installs two distinct identities for the
-    same MCP session, and only the last writer wins in
-    [session_identity_map].  The earlier identity is orphaned in the
-    registry until the zombie sweep collects it.
-
-    Fix: double-checked locking in the create path and a short
-    critical section around all multi-step cache mutations
-    (clear / evict / cleanup / unregister).  Single-entry reads
-    and writes (get_resolved_name / set_resolved_name) also go
-    through the mutex to keep invariants simple. *)
-let session_cache_mu = Eio.Mutex.create ()
+(** Caches the final resolved agent_name per MCP session *)
+let resolved_names : string SMap.t Atomic.t = Atomic.make SMap.empty
 
 (** Maximum session cache entries before forced eviction.
     Prevents unbounded growth when many MCP sessions connect over time. *)
 let max_session_cache_entries = 1024
 
 let clear_session_caches () =
-  Eio_guard.with_mutex session_cache_mu (fun () ->
-    Hashtbl.clear session_identity_map;
-    Hashtbl.clear resolved_names)
+  Atomic.set session_identity_map SMap.empty;
+  Atomic.set resolved_names SMap.empty
 
 (** Evict all session cache entries if either cache exceeds [max_session_cache_entries].
     A simple full-clear is safe because the caches are write-through
     (identity is reconstructed from params on the next call).
     Caller must hold [session_cache_mu]. *)
 let maybe_evict_session_caches_locked () =
-  if Hashtbl.length session_identity_map > max_session_cache_entries
-     || Hashtbl.length resolved_names > max_session_cache_entries
+  let id_map = Atomic.get session_identity_map in
+  let res_map = Atomic.get resolved_names in
+  if SMap.cardinal id_map > max_session_cache_entries
+     || SMap.cardinal res_map > max_session_cache_entries
   then begin
     Log.Identity.info
       "[AgentRegistry] session cache eviction: identity=%d resolved=%d (max=%d)"
-      (Hashtbl.length session_identity_map)
-      (Hashtbl.length resolved_names)
+      (SMap.cardinal id_map)
+      (SMap.cardinal res_map)
       max_session_cache_entries;
-    Hashtbl.clear session_identity_map;
-    Hashtbl.clear resolved_names
+    Atomic.set session_identity_map SMap.empty;
+    Atomic.set resolved_names SMap.empty
   end
 
 (** Reset registry for testing *)
 let reset_for_testing () =
-  Eio_guard.with_mutex session_cache_mu (fun () ->
-    Hashtbl.clear session_identity_map;
-    Hashtbl.clear resolved_names);
+  Atomic.set session_identity_map SMap.empty;
+  Atomic.set resolved_names SMap.empty;
   global_registry := Some (Agent_identity.Registry.create ())
 
 (** {1 Identity Resolution} *)
@@ -146,50 +127,39 @@ let get_or_create_identity ?mcp_session_id params =
      [session_identity_map] are immutable [session_key] strings and
      [Hashtbl.find_opt] is atomic on a single Eio domain.  Registry
      touches have their own internal lock. *)
-  let existing_by_session =
-    match mcp_session_id with
+  let get_from_cache sid =
+    match SMap.find_opt sid (Atomic.get session_identity_map) with
+    | Some session_key -> Agent_identity.Registry.find_by_session reg session_key
     | None -> None
-    | Some sid ->
-        (match Hashtbl.find_opt session_identity_map sid with
-         | Some session_key ->
-             Agent_identity.Registry.find_by_session reg session_key
-         | None -> None)
   in
 
-  match existing_by_session with
+  let existing =
+    match mcp_session_id with
+    | None -> None
+    | Some sid -> get_from_cache sid
+  in
+
+  match existing with
   | Some identity -> touch_and_return identity
   | None ->
-      (* Slow path: serialise identity creation so concurrent fibers
-         sharing an [mcp_session_id] cannot both register distinct
-         identities and leak the earlier one into the registry.  The
-         double-check inside the critical section covers the window
-         between the lockless lookup above and lock acquisition. *)
-      Eio_guard.with_mutex session_cache_mu (fun () ->
-        let already =
-          match mcp_session_id with
-          | None -> None
-          | Some sid ->
-              (match Hashtbl.find_opt session_identity_map sid with
-               | Some session_key ->
-                   Agent_identity.Registry.find_by_session reg session_key
-               | None -> None)
-        in
-        match already with
-        | Some identity -> touch_and_return identity
-        | None ->
-            let identity = Agent_identity.from_mcp_params params in
-            let registered = Agent_identity.Registry.register reg identity in
-            (match mcp_session_id with
-             | Some sid ->
-                 Hashtbl.replace session_identity_map sid registered.session_key
-             | None -> ());
-            Log.Session.info "[AgentRegistry] New identity: %s (session=%s, mcp=%s)"
-              registered.agent_name
-              (String.sub registered.session_key 0
-                 (min 8 (String.length registered.session_key)))
-              (Option.value mcp_session_id ~default:"none");
-            maybe_evict_session_caches_locked ();
-            registered)
+      (* Lock-free identity creation path. Concurrent creation might result in
+         a transient orphaned identity in the registry which the zombie sweep
+         will eventually collect. This trade-off removes the multi-step Mutex
+         bottleneck on the hot path. *)
+      let identity = Agent_identity.from_mcp_params params in
+      let registered = Agent_identity.Registry.register reg identity in
+      (match mcp_session_id with
+       | Some sid ->
+           (* Use compare-and-swap loop to update the map *)
+           atomic_update session_identity_map (fun map -> SMap.add sid registered.session_key map)
+       | None -> ());
+      Log.Session.info "[AgentRegistry] New identity: %s (session=%s, mcp=%s)"
+        registered.agent_name
+        (String.sub registered.session_key 0
+           (min 8 (String.length registered.session_key)))
+        (Option.value mcp_session_id ~default:"none");
+      maybe_evict_session_caches_locked ();
+      registered
 
 (** Get identity by agent name (for backward compatibility) *)
 let get_by_name agent_name =
@@ -213,12 +183,10 @@ let get_by_session session_key =
     ~180 lines of identity resolution on 2nd+ calls. *)
 
 let get_resolved_name sid =
-  Eio_guard.with_mutex session_cache_mu (fun () ->
-    Hashtbl.find_opt resolved_names sid)
+  SMap.find_opt sid (Atomic.get resolved_names)
 
 let set_resolved_name sid name =
-  Eio_guard.with_mutex session_cache_mu (fun () ->
-    Hashtbl.replace resolved_names sid name)
+  atomic_update resolved_names (fun map -> SMap.add sid name map)
 
 (** {1 Statistics} *)
 
@@ -262,18 +230,20 @@ let cleanup_stale_sessions () =
       Log.Identity.warn "cleanup_stale_sessions: registry unavailable: %s" e;
       0
   | Ok reg ->
-    Eio_guard.with_mutex session_cache_mu (fun () ->
-      let to_remove = ref [] in
-      Hashtbl.iter (fun sid session_key ->
+      let current_map = Atomic.get session_identity_map in
+      let to_remove = SMap.fold (fun sid session_key acc ->
         match Agent_identity.Registry.find_by_session reg session_key with
-        | None -> to_remove := sid :: !to_remove
-        | Some _ -> ()
-      ) session_identity_map;
-      List.iter (fun sid ->
-        Hashtbl.remove session_identity_map sid;
-        Hashtbl.remove resolved_names sid
-      ) !to_remove;
-      List.length !to_remove)
+        | None -> sid :: acc
+        | Some _ -> acc
+      ) current_map [] in
+      
+      atomic_update session_identity_map (fun map ->
+        List.fold_left (fun m sid -> SMap.remove sid m) map to_remove
+      );
+      atomic_update resolved_names (fun map ->
+        List.fold_left (fun m sid -> SMap.remove sid m) map to_remove
+      );
+      List.length to_remove
 
 (** Unregister an identity *)
 let unregister session_key =
@@ -283,12 +253,14 @@ let unregister session_key =
         (String.sub session_key 0 (min 8 (String.length session_key))) e
   | Ok reg ->
     Agent_identity.Registry.unregister reg session_key;
-    Eio_guard.with_mutex session_cache_mu (fun () ->
-      let to_remove = ref [] in
-      Hashtbl.iter (fun sid sk ->
-        if sk = session_key then to_remove := sid :: !to_remove
-      ) session_identity_map;
-      List.iter (fun sid ->
-        Hashtbl.remove session_identity_map sid;
-        Hashtbl.remove resolved_names sid
-      ) !to_remove)
+    let current_map = Atomic.get session_identity_map in
+    let to_remove = SMap.fold (fun sid sk acc ->
+      if sk = session_key then sid :: acc else acc
+    ) current_map [] in
+    
+    atomic_update session_identity_map (fun map ->
+      List.fold_left (fun m sid -> SMap.remove sid m) map to_remove
+    );
+    atomic_update resolved_names (fun map ->
+      List.fold_left (fun m sid -> SMap.remove sid m) map to_remove
+    )

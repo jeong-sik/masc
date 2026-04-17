@@ -83,6 +83,28 @@ export function shouldUseGateKeeperFallback(
   return !executionLoadedValue && storeNames.length === 0
 }
 
+/**
+ * Pure filter for the keeper tab list rendered in the FSM Hub status bar.
+ *
+ * Case-insensitive substring match on the full keeper name. Operators on a
+ * fleet with many keepers (keeper-planner-agent, keeper-critic-agent,
+ * keeper-router-agent, ...) otherwise scan the whole tab row to pick one.
+ *
+ * Empty/whitespace query returns the input reference unchanged so the
+ * caller's useMemo identity is preserved for the non-filtering path (no
+ * new array allocation, stable reference for downstream deps).
+ *
+ * Input is never mutated.
+ */
+export function filterKeeperNames(
+  names: readonly string[],
+  query: string,
+): readonly string[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return names
+  return names.filter(name => name.toLowerCase().includes(needle))
+}
+
 export function isCompositeFetchNotFound(err: unknown): boolean {
   return err instanceof Error && /composite fetch failed: 404$/.test(err.message)
 }
@@ -159,6 +181,7 @@ export function FsmHub(props: FsmHubProps = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.selectedName])
   const [hub, dispatch] = useReducer(reduceHubState, initialHubState)
+  const [keeperFilter, setKeeperFilter] = useState('')
   const [pollTick, setPollTick] = useState(0)
   const [now, setNow] = useState(() => Date.now() / 1000)
   const [graphOpen, setGraphOpen] = useState(false)
@@ -306,6 +329,10 @@ export function FsmHub(props: FsmHubProps = {}) {
   const keeperNames = shouldUseGateKeeperFallback(executionLoadedValue, storeNames)
     ? gateKeeperNames
     : storeNames
+  const visibleKeeperNames = useMemo(
+    () => filterKeeperNames(keeperNames, keeperFilter),
+    [keeperNames, keeperFilter],
+  )
   const activeSelected = useMemo(() => {
     if (selected && keeperNames.includes(selected)) return selected
     return keeperNames[0] ?? null
@@ -422,6 +449,9 @@ export function FsmHub(props: FsmHubProps = {}) {
         density=${density}
         onDensityToggle=${() => setDensity(d => d === 'comfortable' ? 'compact' : 'comfortable')}
         keeperNames=${keeperNames}
+        visibleKeeperNames=${visibleKeeperNames}
+        keeperFilter=${keeperFilter}
+        onKeeperFilterChange=${setKeeperFilter}
         selected=${activeSelected}
         onSelect=${setSelected}
         loading=${loading}
@@ -576,6 +606,9 @@ function StatusBar({
   density,
   onDensityToggle,
   keeperNames,
+  visibleKeeperNames,
+  keeperFilter,
+  onKeeperFilterChange,
   selected,
   onSelect,
   loading,
@@ -591,6 +624,9 @@ function StatusBar({
   density: 'comfortable' | 'compact'
   onDensityToggle: () => void
   keeperNames: string[]
+  visibleKeeperNames: readonly string[]
+  keeperFilter: string
+  onKeeperFilterChange: (q: string) => void
   selected: string | null
   onSelect: (n: string) => void
   loading: boolean
@@ -600,6 +636,9 @@ function StatusBar({
   transitionCount: number
   observationCount: number
 }) {
+  const isFilteringKeepers = keeperFilter.trim() !== ''
+  const keeperFilterHasNoMatch =
+    isFilteringKeepers && visibleKeeperNames.length === 0 && keeperNames.length > 0
   const idleDuration = snapshot && !snapshot.is_live
     ? fmtDuration(Math.max(0, now - (snapshot.last_outcome?.ended_at ?? snapshot.ts)))
     : null
@@ -676,7 +715,21 @@ function StatusBar({
           ` : null}
         </div>
         <div class="flex items-center gap-1.5 flex-wrap" role="tablist" aria-label="Keeper 선택">
-          ${keeperNames.map((name, i) => {
+          ${keeperNames.length > 0 ? html`
+            <input
+              type="search"
+              value=${keeperFilter}
+              placeholder="keeper 이름 필터"
+              aria-label="Keeper 이름 필터"
+              onInput=${(e: Event) => onKeeperFilterChange((e.target as HTMLInputElement).value)}
+              class="min-w-[120px] max-w-[180px] rounded-full border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-0.5 text-[10px] font-mono text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent-30)]"
+            />
+          ` : null}
+          ${keeperFilterHasNoMatch ? html`
+            <span class="text-[10px] font-mono text-[var(--text-dim)]">
+              필터 결과 없음 (${keeperNames.length} keepers)
+            </span>
+          ` : visibleKeeperNames.map((name, i) => {
             const active = name === selected
             const cls = active
               ? 'bg-[var(--accent-10)] border-[var(--accent-30)] text-[var(--accent)]'
@@ -691,13 +744,13 @@ function StatusBar({
                 title=${i < 9 ? `${name} — 단축키 ${i + 1}` : name}
                 onKeyDown=${(e: KeyboardEvent) => {
                   let next = -1
-                  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (i + 1) % keeperNames.length
-                  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (i - 1 + keeperNames.length) % keeperNames.length
+                  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (i + 1) % visibleKeeperNames.length
+                  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (i - 1 + visibleKeeperNames.length) % visibleKeeperNames.length
                   else if (e.key === 'Home') next = 0
-                  else if (e.key === 'End') next = keeperNames.length - 1
+                  else if (e.key === 'End') next = visibleKeeperNames.length - 1
                   if (next >= 0) {
                     e.preventDefault()
-                    const nextName = keeperNames[next]
+                    const nextName = visibleKeeperNames[next]
                     if (nextName) {
                       onSelect(nextName);
                       (e.currentTarget as HTMLElement)?.parentElement?.querySelectorAll<HTMLElement>('[role=tab]')[next]?.focus()

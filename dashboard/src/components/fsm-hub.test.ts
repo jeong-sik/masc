@@ -12,6 +12,7 @@ import {
   deriveTimeAxisTicks,
   deriveTopTransitions,
   deriveTransitionHistory,
+  filterKeeperNames,
   flagTooltip,
   inferTransitionReason,
   invariantDescription,
@@ -576,5 +577,71 @@ describe('invariantDescription', () => {
 
   it('falls back to generic text for unknown keys', () => {
     expect(invariantDescription('mystery_invariant')).toMatch(/^Invariant defined by/)
+  })
+})
+
+describe('filterKeeperNames', () => {
+  const fleet: readonly string[] = [
+    'keeper-planner-agent',
+    'keeper-critic-agent',
+    'keeper-router-agent',
+    'keeper-autoresearch-agent',
+    'governance-keeper',
+  ]
+
+  it('returns the same reference when query is empty', () => {
+    expect(filterKeeperNames(fleet, '')).toBe(fleet)
+  })
+
+  it('returns the same reference when query is whitespace only', () => {
+    expect(filterKeeperNames(fleet, '   ')).toBe(fleet)
+  })
+
+  it('performs case-insensitive substring match', () => {
+    expect(filterKeeperNames(fleet, 'PLAN')).toEqual(['keeper-planner-agent'])
+    expect(filterKeeperNames(fleet, 'Critic')).toEqual(['keeper-critic-agent'])
+  })
+
+  it('matches multiple rows on a shared substring', () => {
+    const out = filterKeeperNames(fleet, 'keeper-')
+    expect(out).toHaveLength(4)
+    expect(out).toContain('keeper-planner-agent')
+    expect(out).not.toContain('governance-keeper')
+  })
+
+  it('matches substring that does not anchor on prefix', () => {
+    expect(filterKeeperNames(fleet, 'research')).toEqual(['keeper-autoresearch-agent'])
+    expect(filterKeeperNames(fleet, 'governance')).toEqual(['governance-keeper'])
+  })
+
+  it('returns empty array when nothing matches', () => {
+    expect(filterKeeperNames(fleet, 'xyz-no-such-keeper')).toEqual([])
+  })
+
+  it('trims surrounding whitespace from the query', () => {
+    expect(filterKeeperNames(fleet, '  router  ')).toEqual(['keeper-router-agent'])
+  })
+
+  it('preserves input order of surviving rows', () => {
+    const out = filterKeeperNames(fleet, 'agent')
+    expect(out).toEqual([
+      'keeper-planner-agent',
+      'keeper-critic-agent',
+      'keeper-router-agent',
+      'keeper-autoresearch-agent',
+    ])
+  })
+
+  it('does not mutate the input array', () => {
+    const input = [...fleet]
+    const snapshot = [...input]
+    filterKeeperNames(input, 'critic')
+    expect(input).toEqual(snapshot)
+  })
+
+  it('returns input reference unchanged for empty query even when input is empty', () => {
+    const empty: readonly string[] = []
+    expect(filterKeeperNames(empty, '')).toBe(empty)
+    expect(filterKeeperNames(empty, 'anything')).toEqual([])
   })
 })

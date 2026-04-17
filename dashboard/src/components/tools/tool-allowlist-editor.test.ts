@@ -5,6 +5,7 @@ import '@testing-library/jest-dom'
 
 import {
   buildResolvedAllowlistGroups,
+  filterResolvedTools,
   ResolvedPreview,
 } from './tool-allowlist-editor'
 
@@ -27,6 +28,64 @@ describe('buildResolvedAllowlistGroups', () => {
       { category: 'board', names: ['board-a', 'board-b'] },
       { category: 'misc', names: ['misc-a'] },
     ])
+  })
+})
+
+describe('filterResolvedTools', () => {
+  const catMap = new Map<string, string>([
+    ['board-post', 'board'],
+    ['board-read', 'board'],
+    ['shell-exec', 'shell'],
+    ['memory-store', 'memory'],
+    ['Graph-Query', 'graph'],
+  ])
+
+  it('returns input reference when query is empty', () => {
+    const tools = ['board-post', 'shell-exec']
+    expect(filterResolvedTools(tools, catMap, '')).toBe(tools)
+  })
+
+  it('returns input reference when query is whitespace', () => {
+    const tools = ['board-post', 'shell-exec']
+    expect(filterResolvedTools(tools, catMap, '   ')).toBe(tools)
+  })
+
+  it('matches tool name substring case-insensitively', () => {
+    const tools = ['board-post', 'board-read', 'shell-exec']
+    expect(filterResolvedTools(tools, catMap, 'BOARD')).toEqual(['board-post', 'board-read'])
+  })
+
+  it('matches category substring case-insensitively', () => {
+    const tools = ['board-post', 'shell-exec', 'memory-store']
+    expect(filterResolvedTools(tools, catMap, 'MEM')).toEqual(['memory-store'])
+  })
+
+  it('matches mixed-case tool names', () => {
+    const tools = ['Graph-Query', 'shell-exec']
+    expect(filterResolvedTools(tools, catMap, 'graph')).toEqual(['Graph-Query'])
+  })
+
+  it('returns empty array when nothing matches', () => {
+    const tools = ['board-post', 'shell-exec']
+    expect(filterResolvedTools(tools, catMap, 'zzznope')).toEqual([])
+  })
+
+  it('handles tools without a category entry (no crash, no category match)', () => {
+    const tools = ['orphan-tool', 'board-post']
+    expect(filterResolvedTools(tools, catMap, 'board')).toEqual(['board-post'])
+    expect(filterResolvedTools(tools, catMap, 'orphan')).toEqual(['orphan-tool'])
+  })
+
+  it('does not mutate the input array', () => {
+    const tools = ['board-post', 'shell-exec', 'memory-store']
+    const snapshot = [...tools]
+    filterResolvedTools(tools, catMap, 'board')
+    expect(tools).toEqual(snapshot)
+  })
+
+  it('trims query before matching', () => {
+    const tools = ['board-post', 'shell-exec']
+    expect(filterResolvedTools(tools, catMap, '  board  ')).toEqual(['board-post'])
   })
 })
 

@@ -201,8 +201,73 @@ function OverviewTile({ id, connector, keeperCount }: {
         </span>
       </button>
       <${ConnectorReadinessRail} pills=${pills} />
+      <${TilePrimaryAction} id=${id} sidecarUp=${sidecarUp} />
       <${TileHeartbeatStrip} id=${id} />
     </div>
+  `
+}
+
+/** Pure: derive the primary-action button label/tone from the sidecar
+    state + inflight flag. Exposed so tests pin the four combinations
+    without mounting the component. */
+export interface TilePrimaryActionView {
+  label: string
+  tone: 'start' | 'stop'
+  busy: boolean
+}
+export function tilePrimaryActionView(
+  sidecarUp: boolean,
+  inflight: boolean,
+): TilePrimaryActionView {
+  if (sidecarUp) {
+    return {
+      label: inflight ? '정지 중...' : '■ Stop',
+      tone: 'stop',
+      busy: inflight,
+    }
+  }
+  return {
+    label: inflight ? '시작 중...' : '▶ Start',
+    tone: 'start',
+    busy: inflight,
+  }
+}
+
+const TILE_ACTION_TONE_CLASS: Record<'start' | 'stop', string> = {
+  // Emerald tokens match BulkActions "Start All" — one color vocabulary
+  // across per-tile + bulk controls. The per-tile button is deliberately
+  // block-width and text-[12px] so it reads as the primary action of the
+  // tile, distinct from the smaller pill row above.
+  start: 'border-emerald-400/40 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/25',
+  stop: 'border-rose-400/40 bg-rose-500/15 text-rose-100 hover:bg-rose-500/25',
+}
+
+/** The prominent per-tile Start/Stop button. Reference UIs (Vercel
+    service card, Railway deployment card, Uptime Kuma monitor row):
+    the tile's primary action should live as a full-width button near
+    the tile footer, not buried inside a process/readiness pill. The
+    readiness rail pills above still toggle process state for
+    keyboard-forward operators, but a new operator scanning the page
+    reads "Start" as the obvious next step. */
+function TilePrimaryAction({ id, sidecarUp }: { id: KnownConnectorId; sidecarUp: boolean }) {
+  const inflight = getRailInflight(id).process === true
+  const view = tilePrimaryActionView(sidecarUp, inflight)
+  const tone = TILE_ACTION_TONE_CLASS[view.tone]
+  return html`
+    <button
+      type="button"
+      class=${`w-full cursor-pointer rounded-md border px-2 py-1.5 text-[12px] font-semibold tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${tone}`}
+      disabled=${view.busy}
+      aria-busy=${view.busy ? 'true' : 'false'}
+      aria-label=${sidecarUp ? `${id} sidecar 정지` : `${id} sidecar 시작`}
+      onClick=${() => {
+        void withRailInflight(id, 'process', () =>
+          sidecarUp ? stopSidecar(id) : startSidecar(id),
+        )
+      }}
+      data-tile-primary-action=${id}
+      data-tile-primary-action-tone=${view.tone}
+    >${view.label}</button>
   `
 }
 

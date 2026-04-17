@@ -12,6 +12,7 @@ import {
   updateStripMemory,
   detectRecentDrops,
   summarizeConnectorStrip,
+  tilePrimaryActionView,
 } from './connector-overview-strip'
 import type { GateConnectorInfo } from '../api/gate'
 
@@ -334,5 +335,100 @@ describe('stripMemory pure helpers', () => {
       60_000,
     )
     expect(dropped).toEqual([])
+  })
+})
+
+describe('tilePrimaryActionView (pure)', () => {
+  it('sidecar down, not inflight → Start (emerald), not busy', () => {
+    expect(tilePrimaryActionView(false, false)).toEqual({
+      label: '▶ Start', tone: 'start', busy: false,
+    })
+  })
+
+  it('sidecar down, inflight → 시작 중... (start tone, busy)', () => {
+    expect(tilePrimaryActionView(false, true)).toEqual({
+      label: '시작 중...', tone: 'start', busy: true,
+    })
+  })
+
+  it('sidecar up, not inflight → Stop (rose), not busy', () => {
+    expect(tilePrimaryActionView(true, false)).toEqual({
+      label: '■ Stop', tone: 'stop', busy: false,
+    })
+  })
+
+  it('sidecar up, inflight → 정지 중... (stop tone, busy)', () => {
+    expect(tilePrimaryActionView(true, true)).toEqual({
+      label: '정지 중...', tone: 'stop', busy: true,
+    })
+  })
+})
+
+describe('TilePrimaryAction component (rendered inside ConnectorOverviewStrip)', () => {
+  let container: HTMLElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    _testResetBulkInflight()
+    _testResetStripMemory()
+  })
+  afterEach(() => {
+    render(null, container)
+    document.body.removeChild(container)
+  })
+
+  it('renders a Start button (emerald) for a down sidecar', () => {
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[mkConnector({ connector_id: 'discord', available: false })]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    const btn = container.querySelector('[data-tile-primary-action="discord"]') as HTMLButtonElement
+    expect(btn).toBeTruthy()
+    expect(btn.getAttribute('data-tile-primary-action-tone')).toBe('start')
+    expect(btn.textContent?.trim()).toBe('▶ Start')
+    expect(btn.className).toContain('emerald')
+  })
+
+  it('renders a Stop button (rose) for an up sidecar', () => {
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[mkConnector({ connector_id: 'discord', available: true })]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    const btn = container.querySelector('[data-tile-primary-action="discord"]') as HTMLButtonElement
+    expect(btn.getAttribute('data-tile-primary-action-tone')).toBe('stop')
+    expect(btn.textContent?.trim()).toBe('■ Stop')
+    expect(btn.className).toContain('rose')
+  })
+
+  it('aria-label names the connector + action (screen-reader parity)', () => {
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[mkConnector({ connector_id: 'slack', available: false })]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    const btn = container.querySelector('[data-tile-primary-action="slack"]')!
+    expect(btn.getAttribute('aria-label')).toBe('slack sidecar 시작')
+  })
+
+  it('every known tile gets a primary action button (no missing rows)', () => {
+    // Regression guard: adding a 5th bridge must not leave three tiles
+    // with buttons and one tile without (asymmetric view that would
+    // be hard to spot visually).
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    expect(container.querySelectorAll('[data-tile-primary-action]').length).toBeGreaterThanOrEqual(4)
   })
 })

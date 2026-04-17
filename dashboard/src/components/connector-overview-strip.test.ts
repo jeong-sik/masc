@@ -12,6 +12,7 @@ import {
   updateStripMemory,
   detectRecentDrops,
   summarizeConnectorStrip,
+  summarizeOverviewTile,
   tilePrimaryActionView,
   formatTileIdentityLine,
   offlineConnectorNames,
@@ -24,7 +25,10 @@ const mkConnector = (overrides: Partial<GateConnectorInfo> = {}): GateConnectorI
   connector_id: overrides.connector_id ?? 'discord',
   display_name: overrides.display_name ?? 'Discord',
   channel: overrides.channel ?? 'discord',
+  status: overrides.status ?? ((overrides.available ?? true) ? 'connected' : 'offline'),
   available: overrides.available ?? true,
+  connected: overrides.connected ?? (overrides.available ?? true),
+  stale: overrides.stale ?? false,
   gate_healthy: overrides.gate_healthy ?? true,
   configured_bindings: overrides.configured_bindings ?? [],
   capabilities: overrides.capabilities ?? ['bindings'],
@@ -52,18 +56,20 @@ describe('ConnectorOverviewStrip', () => {
     expect(ids).toEqual(['discord', 'imessage', 'slack', 'telegram'])
   })
 
-  it('marks running connector as 🟢 connected and offline ones as ⊘ offline', () => {
+  it('shows visible summary copy for healthy and offline tiles', () => {
     render(
       html`<${ConnectorOverviewStrip}
-        connectors=${[mkConnector({ connector_id: 'discord', available: true })]}
+        connectors=${[mkConnector({ connector_id: 'discord', available: true, configured_bindings: ['room-1'] as any })]}
         keeperCount=${0}
       />`,
       container,
     )
     const discordTile = container.querySelector('[data-overview-tile="discord"]')!
     const imessageTile = container.querySelector('[data-overview-tile="imessage"]')!
-    expect(discordTile.textContent).toContain('connected')
-    expect(imessageTile.textContent).toContain('offline')
+    expect(discordTile.textContent).toContain('정상')
+    expect(discordTile.textContent).toContain('binding active')
+    expect(imessageTile.textContent).toContain('설정 필요')
+    expect(imessageTile.textContent).toContain('Config와 Start')
   })
 
   it('Start All button counts only sidecars currently down', () => {
@@ -110,22 +116,28 @@ describe('ConnectorOverviewStrip', () => {
     expect(stopBtn.title).toContain('실행 중인 sidecar 없음')
   })
 
-  it('renders 4 readiness pills inside each tile', () => {
+  it('marks the selected tile and exposes a detail CTA', () => {
     render(
-      html`<${ConnectorOverviewStrip} connectors=${[]} keeperCount=${0} />`,
+      html`<${ConnectorOverviewStrip}
+        connectors=${[]}
+        keeperCount=${0}
+        selectedConnectorId="slack"
+      />`,
       container,
     )
-    const discordTile = container.querySelector('[data-overview-tile="discord"]')!
-    const pills = discordTile.querySelectorAll('[data-rail-pill]')
-    expect(pills.length).toBe(4)
+    const slackTile = container.querySelector('[data-overview-tile="slack"]') as HTMLElement
+    const discordTile = container.querySelector('[data-overview-tile="discord"]') as HTMLElement
+    expect(slackTile.dataset.overviewSelected).toBe('true')
+    expect(slackTile.textContent).toContain('Selected')
+    expect(discordTile.textContent).toContain('View Details')
   })
 
-  it('strip root has sticky positioning so it stays visible while scrolling', () => {
+  it('strip root is a regular surface, not a sticky header', () => {
     render(html`<${ConnectorOverviewStrip} connectors=${[]} keeperCount=${0} />`, container)
     const root = container.querySelector('[data-overview-strip-root]') as HTMLElement
     expect(root).toBeTruthy()
-    expect(root.className).toContain('sticky')
-    expect(root.className).toContain('top-0')
+    expect(root.className).toContain('rounded-xl')
+    expect(root.className).not.toContain('sticky')
   })
 
   it('shows incident banner for ids that dropped within the last 5 minutes', () => {
@@ -153,20 +165,11 @@ describe('ConnectorOverviewStrip', () => {
     expect(container.querySelector('[data-incident-banner]')).toBeNull()
   })
 
-  it('celebration banner hidden when fewer than 4 sidecars are up', () => {
-    _testResetBulkInflight()
-    const threeUp = ['discord', 'imessage', 'slack'].map(id => mkConnector({ connector_id: id, available: true }))
-    render(html`<${ConnectorOverviewStrip} connectors=${threeUp} keeperCount=${0} />`, container)
-    expect(container.querySelector('[data-celebration]')).toBeNull()
-  })
-
-  it('celebration banner shows when all 4 sidecars are up', () => {
+  it('does not render the old celebration banner even when all 4 sidecars are up', () => {
     _testResetBulkInflight()
     const allUp = ['discord', 'imessage', 'slack', 'telegram'].map(id => mkConnector({ connector_id: id, available: true }))
     render(html`<${ConnectorOverviewStrip} connectors=${allUp} keeperCount=${0} />`, container)
-    const banner = container.querySelector('[data-celebration="all-connected"]')
-    expect(banner).toBeTruthy()
-    expect(banner?.textContent).toContain('4/4')
+    expect(container.querySelector('[data-celebration]')).toBeNull()
   })
 
   it('uptime chip renders inside tile when sidecar is up and last_ready_at is recent', () => {
@@ -248,10 +251,10 @@ describe('formatConnectorUptime', () => {
 describe('summarizeConnectorStrip', () => {
   it('returns zeros for empty input', () => {
     expect(summarizeConnectorStrip([], 0)).toEqual({
-      sidecarUp: 0,
-      sidecarTotal: 4,
+      runningCount: 0,
+      healthyCount: 0,
+      connectorTotal: 4,
       bindingCount: 0,
-      keeperCount: 0,
     })
   })
 
@@ -262,10 +265,10 @@ describe('summarizeConnectorStrip', () => {
       mkConnector({ connector_id: 'unknown-bridge', available: true, configured_bindings: ['x', 'y', 'z'] as any }),
     ]
     const s = summarizeConnectorStrip(list, 5)
-    expect(s.sidecarUp).toBe(2)
-    expect(s.sidecarTotal).toBe(4)
+    expect(s.runningCount).toBe(2)
+    expect(s.healthyCount).toBe(2)
+    expect(s.connectorTotal).toBe(4)
     expect(s.bindingCount).toBe(3) // unknown-bridge's 3 excluded
-    expect(s.keeperCount).toBe(5)
   })
 
   it('treats missing configured_bindings as 0', () => {
@@ -274,6 +277,23 @@ describe('summarizeConnectorStrip', () => {
     ]
     const s = summarizeConnectorStrip(list, 0)
     expect(s.bindingCount).toBe(0)
+  })
+})
+
+describe('summarizeOverviewTile', () => {
+  it('treats missing connectors as setup-needed', () => {
+    expect(summarizeOverviewTile(null, 0)).toEqual(expect.objectContaining({
+      badge: '설정 필요',
+    }))
+  })
+
+  it('treats stale connectors as attention-needed', () => {
+    expect(summarizeOverviewTile(
+      mkConnector({ connector_id: 'discord', available: true, stale: true, status: 'stale' }),
+      0,
+    )).toEqual(expect.objectContaining({
+      badge: '주의',
+    }))
   })
 })
 

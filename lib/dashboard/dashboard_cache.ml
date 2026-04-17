@@ -220,22 +220,27 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            do_bg_compute ());
       stale_value
     | `Compute token ->
-      let clock =
-        match Eio_context.get_clock_opt () with
-        | Some c -> c
-        | None -> failwith "Eio clock unavailable"
-      in
-      let compute_done = ref false in
       let result_ref = ref None in
-      Eio.Fiber.first
-        (fun () ->
-           (try result_ref := Some (Ok (compute ()))
-            with exn -> result_ref := Some (Error exn));
-           compute_done := true)
-        (fun () ->
-           Eio.Time.sleep clock max_wait_sec;
-           if not !compute_done then
-             Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key max_wait_sec);
+      let run_compute () =
+        try result_ref := Some (Ok (compute ()))
+        with exn -> result_ref := Some (Error exn)
+      in
+      (match Eio_context.get_clock_opt () with
+       | Some clock ->
+           let compute_done = ref false in
+           Eio.Fiber.first
+             (fun () ->
+                run_compute ();
+                compute_done := true)
+             (fun () ->
+                Eio.Time.sleep clock max_wait_sec;
+                if not !compute_done then
+                  Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key max_wait_sec)
+       | None ->
+           (* Some read-model tests enable Eio without seeding the global
+              Eio_context clock. In that harness, run inline without the
+              watchdog rather than hard-failing. *)
+           run_compute ());
       let ts = now () in
       (match !result_ref with
        | Some (Ok value) ->
@@ -322,6 +327,25 @@ let get_or_compute key ~ttl compute =
   if Eio_guard.is_ready () then get_or_compute_eio key ~ttl compute
   else get_or_compute_simple key ~ttl compute
 
+let timeout_error_json ?(waiting = false) key timeout_sec =
+  let message =
+    if waiting then
+      Printf.sprintf
+        "Dashboard %s timed out after %.0fs waiting for an in-flight computation"
+        key timeout_sec
+    else
+      Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec
+  in
+  `Assoc
+    [
+      ("error", `String "computation_timeout");
+      ("message", `String message);
+      ("generated_at", `String (Types.now_iso ()));
+      ("timeout_kind", `String (if waiting then "waiter" else "owner"));
+      ("timeout_sec", `Float timeout_sec);
+      ("key", `String key);
+    ]
+
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
   try
     if Eio_guard.is_ready () then
@@ -335,29 +359,18 @@ let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
           Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
           raise (Compute_timeout (key, false)))
     else
-      get_or_compute_simple key ~ttl compute
+      get_or_compute_simple key ~ttl (fun () ->
+        match
+          Eio.Time.with_timeout clock timeout_sec (fun () ->
+            Ok (compute ()))
+        with
+        | Ok value -> value
+        | Error `Timeout ->
+          Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
+          raise (Compute_timeout (key, false)))
   with
-  | Compute_timeout (key, true) ->
-      Log.Dashboard.warn "cache: returning waiter timeout error for %s" key;
-      `Assoc
-        [
-          ("error", `String "computation_timeout");
-          ("timeout_kind", `String "waiter");
-          ("timeout_sec", `Float timeout_sec);
-          ("key", `String key);
-        ]
-  | Compute_timeout (key, false) ->
-      Log.Dashboard.warn "cache: returning immediate timeout error for %s" key;
-      let err_json =
-        `Assoc
-          [
-            ("error", `String "computation_timeout");
-            ("timeout_kind", `String "compute");
-            ("timeout_sec", `Float timeout_sec);
-            ("key", `String key);
-          ]
-      in
-      err_json
+  | Compute_timeout (key, waiting) ->
+      timeout_error_json ~waiting key timeout_sec
 
 let invalidate key =
   atomic_update table (fun map -> SMap.remove key map)

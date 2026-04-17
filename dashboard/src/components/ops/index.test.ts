@@ -101,7 +101,6 @@ describe('Ops surface', () => {
           target_id: 'keeper-a',
         },
       ],
-      worker_cards: [],
     } as unknown as OperatorDigest
     operatorActionLog.value = [
       {
@@ -165,7 +164,6 @@ describe('Ops surface', () => {
       attention_items: [],
       recommended_actions: [],
       recent_reviews: [],
-      worker_cards: [],
     } as unknown as OperatorDigest
     operatorActionLog.value = []
 
@@ -214,7 +212,6 @@ describe('Ops surface', () => {
       attention_items: [],
       recommended_actions: [],
       recent_reviews: [],
-      worker_cards: [],
     } as unknown as OperatorDigest
     operatorActionLog.value = []
 
@@ -257,7 +254,6 @@ describe('Ops surface', () => {
       attention_items: [],
       recommended_actions: [],
       recent_reviews: [],
-      worker_cards: [],
     } as unknown as OperatorDigest
     operatorActionLog.value = []
 

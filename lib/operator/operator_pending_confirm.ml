@@ -44,7 +44,6 @@ let operator_surface_contract_json =
       ("recommended_actions", `String "fallback");
       ("active_recommended_actions", `String "judgment_or_fallback");
       ("recent_reviews", `String "operator_state");
-      ("worker_cards", `String "truth");
     ]
 
 let operator_judge_runtime_json (config : Coord.config) =

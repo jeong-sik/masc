@@ -148,7 +148,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           ("active_recommendation_summary", summary_of_recommendations ~actor:"dashboard" []);
           ("fallback_recommended_actions", `List []);
           ("recent_reviews", recent_reviews);
-          ("worker_cards", `List []);
         ])
   else
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
@@ -202,7 +201,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
                      recommended_actions) );
               ("recommendation_summary", fallback_recommendation_summary);
               ("root", room_state_json);
-              ("worker_cards", `List []);
             ]
             @ [ ("recent_reviews", recent_reviews) ]
             @ active_guidance))

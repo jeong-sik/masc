@@ -20,7 +20,6 @@ import type {
   OperatorSessionSnapshot,
   OperatorSnapshot,
   OperatorNamespaceSnapshot,
-  OperatorWorkerCard,
   PendingConfirmation,
 } from './types'
 
@@ -170,34 +169,6 @@ function normalizeOperatorJudgment(raw: unknown): OperatorJudgment | null {
   }
 }
 
-function normalizeWorkerCard(raw: unknown): OperatorWorkerCard | null {
-  if (!isRecord(raw)) return null
-  return {
-    actor: asString(raw.actor) ?? null,
-    spawn_agent: asString(raw.spawn_agent) ?? null,
-    spawn_role: asString(raw.spawn_role) ?? null,
-    spawn_model: asString(raw.spawn_model) ?? null,
-    worker_class: asString(raw.worker_class) ?? null,
-    parent_actor: asString(raw.parent_actor) ?? null,
-    capsule_mode: asString(raw.capsule_mode) ?? null,
-    runtime_pool: asString(raw.runtime_pool) ?? null,
-    lane_id: asString(raw.lane_id) ?? null,
-    controller_level: asString(raw.controller_level) ?? null,
-    control_domain: asString(raw.control_domain) ?? null,
-    supervisor_actor: asString(raw.supervisor_actor) ?? null,
-    model_tier: asString(raw.model_tier) ?? null,
-    task_profile: asString(raw.task_profile) ?? null,
-    risk_level: asString(raw.risk_level) ?? null,
-    routing_confidence: asNumber(raw.routing_confidence) ?? null,
-    routing_reason: asString(raw.routing_reason) ?? null,
-    status: asString(raw.status) ?? 'unknown',
-    turn_count: asNumber(raw.turn_count) ?? 0,
-    empty_note_turn_count: asNumber(raw.empty_note_turn_count) ?? 0,
-    has_turn: asBoolean(raw.has_turn) ?? false,
-    last_turn_ts_iso: asString(raw.last_turn_ts_iso) ?? null,
-  }
-}
-
 function normalizeLinkedAutoresearch(raw: unknown): OperatorLinkedAutoresearch | null {
   if (!isRecord(raw)) return null
   const loopId = asString(raw.loop_id)
@@ -255,9 +226,6 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
     recent_reviews: extractArray(root.recent_reviews)
       .map(normalizeReviewDecision)
       .filter((item): item is OperatorReviewDecision => item !== null),
-    worker_cards: extractArray(root.worker_cards)
-      .map(normalizeWorkerCard)
-      .filter((item): item is OperatorWorkerCard => item !== null),
   }
 }
 

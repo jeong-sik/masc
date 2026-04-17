@@ -272,17 +272,15 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       ] in
       let t_end = Time_compat.now () in
       let total_ms = (t_end -. t_start) *. 1000.0 in
-      let snapshot_ms = 0.0 in
-      let render_ms = total_ms in
       if total_ms > 10000.0 then
         Log.Dashboard.warn
-          "[dashboard_execution] slow render: total=%.0fms snapshot=%.0fms render=%.0fms (keepers=%d)"
-          total_ms snapshot_ms render_ms
+          "[dashboard_execution] slow render: total=%.0fms (keepers=%d)"
+          total_ms
           (List.length keepers)
       else
         Log.Dashboard.debug
-          "[dashboard_execution] timing: total=%.0fms snapshot=%.0fms render=%.0fms"
-          total_ms snapshot_ms render_ms;
+          "[dashboard_execution] timing: total=%.0fms"
+          total_ms;
       if light then
         `Assoc (base_fields @ task_fields)
       else

@@ -310,8 +310,8 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
           let dt_total = Unix.gettimeofday () -. started_at in
           if dt_total >= 5.0 then
             Log.Dashboard.warn
-              "[operator_snapshot profile] total=%.1fs sessions=%.1fs(%d) snapshot=%.1fs"
-              dt_total 0.0 0 dt_snapshot;
+              "[operator_snapshot profile] total=%.1fs snapshot=%.1fs"
+              dt_total dt_snapshot;
           json
           |> with_projection_diagnostics ~surface:"operator_snapshot" ~started_at
                ~extra:(operator_snapshot_extra ()))

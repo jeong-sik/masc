@@ -337,11 +337,26 @@ let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
     else
       get_or_compute_simple key ~ttl compute
   with
+  | Compute_timeout (key, true) ->
+      Log.Dashboard.warn "cache: returning waiter timeout error for %s" key;
+      `Assoc
+        [
+          ("error", `String "computation_timeout");
+          ("timeout_kind", `String "waiter");
+          ("timeout_sec", `Float timeout_sec);
+          ("key", `String key);
+        ]
   | Compute_timeout (key, false) ->
       Log.Dashboard.warn "cache: returning immediate timeout error for %s" key;
-      let err_json = `Assoc [("error", `String "Compute timeout");
-                             ("timeout_sec", `Float timeout_sec);
-                             ("key", `String key)] in
+      let err_json =
+        `Assoc
+          [
+            ("error", `String "computation_timeout");
+            ("timeout_kind", `String "compute");
+            ("timeout_sec", `Float timeout_sec);
+            ("key", `String key);
+          ]
+      in
       err_json
 
 let invalidate key =
@@ -359,16 +374,24 @@ let stats () =
   let now_ts = Time_compat.now () in
   let ready_fresh = ref 0 in
   let ready_stale = ref 0 in
+  let ready_expired = ref 0 in
   let computing = ref 0 in
   SMap.iter (fun _ v ->
     match v with
     | Ready e ->
-        if now_ts <= e.expires_at then incr ready_fresh
-        else incr ready_stale
+        if now_ts <= e.expires_at then
+          incr ready_fresh
+        else if now_ts <= e.stale_until then
+          incr ready_stale
+        else
+          incr ready_expired
     | Computing _ -> incr computing
   ) map;
   `Assoc [
     ("entries", `Int (SMap.cardinal map));
+    ("fresh", `Int !ready_fresh);
+    ("stale", `Int !ready_stale);
+    ("expired", `Int !ready_expired);
     ("ready_fresh", `Int !ready_fresh);
     ("ready_stale", `Int !ready_stale);
     ("computing", `Int !computing);

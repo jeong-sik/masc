@@ -15,12 +15,11 @@ open Coord_broadcast
     Reads at most 200 bytes to avoid OOM on large/corrupt files. *)
 let agent_parse_error_snapshot ~agent_name ~agent_file =
   let raw_head =
-    try
+    Safe_ops.protect ~default:"" (fun () ->
       In_channel.with_open_text agent_file (fun ic ->
         let buf = Bytes.create 200 in
         let n = In_channel.input ic buf 0 200 in
-        Bytes.sub_string buf 0 n)
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
+        Bytes.sub_string buf 0 n))
   in
   `Assoc [
     ("agent_name", `String agent_name);

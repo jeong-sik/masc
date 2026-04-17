@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps pin-external-deps sync-oas-pin-docs doctor-oas-pin dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak
+.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps pin-external-deps sync-oas-pin-docs doctor-oas-pin doctor-oas-drift dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak
 
 # Default target — OCaml + dashboard
 all: build-all
@@ -95,6 +95,13 @@ release-evidence:
 # Fast local-only doctor for OAS/agent_sdk pin drift in the current switch.
 doctor-oas-pin:
 	bash scripts/check-oas-pin.sh --local-only
+
+# Check OAS API surface (Event_bus variants, HttpError variants, Metrics fields)
+# against scripts/oas-api-surface.json fingerprint. Catches upstream variant/field
+# additions before they surface as scattered non-exhaustive warnings in consumer
+# modules. Regenerate with: bash scripts/oas-drift-check.sh --regenerate
+doctor-oas-drift:
+	bash scripts/oas-drift-check.sh
 
 # Development setup
 dev-setup: pin-external-deps install-deps

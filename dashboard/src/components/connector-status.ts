@@ -29,6 +29,7 @@ import { CopyableCode } from './common/copyable-code'
 import { SetupGuideCard } from './setup-guide-card'
 import { ConnectorOnboardingGrid } from './connector-onboarding'
 import { SidecarLogToggle, SidecarLogViewer } from './sidecar-log-viewer'
+import { ConnectorConfigToggle, ConnectorConfigForm } from './connector-config-form'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
 
@@ -578,6 +579,7 @@ function ConnectorLivePanel({
               `
             : null}
           <${SidecarLogToggle} connectorId=${connectorId} />
+          <${ConnectorConfigToggle} connectorId=${connectorId} />
           ${sidecarLogPath
             ? html`<span class="cursor-help text-[10px] text-[var(--text-dim)]" title=${sidecarLogPath}>↗</span>`
             : null}
@@ -624,6 +626,7 @@ function ConnectorLivePanel({
         : null}
 
       <${SidecarLogViewer} connectorId=${connectorId} />
+      <${ConnectorConfigForm} connectorId=${connectorId} />
 
       ${keeperDirectoryError && keepers.length === 0
         ? html`<div class="mt-3 rounded-md border border-amber-400/20 bg-amber-500/8 px-3 py-2 text-[11px] text-amber-100">keeper directory unavailable, manual entry only</div>`

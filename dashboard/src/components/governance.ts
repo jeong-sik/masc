@@ -20,7 +20,7 @@ import {
 import { formatAgeSummary } from './governance-utils'
 
 // Re-export for consumers that import from './governance'
-export { refreshGovernance, loadRuntimeParams, loadParamAudit } from './governance-store'
+export { refreshGovernance } from './governance-store'
 
 function GovernanceSummaryStrip() {
   const data = governanceData.value

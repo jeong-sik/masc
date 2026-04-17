@@ -15,11 +15,6 @@ export {
   selectedDecisionKey,
   selectedCaseDetail,
   detailLoading,
-  runtimeParams,
-  runtimeSurfaces,
-  runtimeLoading,
-  paramAuditEntries,
-  paramAuditLoading,
 } from './governance-signals'
 export {
   selectDecision,
@@ -28,6 +23,4 @@ export {
   submitBrief,
   respondToExecutionOrder,
   respondToKeeperApproval,
-  loadRuntimeParams,
-  loadParamAudit,
 } from './governance-actions'

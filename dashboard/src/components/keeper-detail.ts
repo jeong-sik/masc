@@ -554,7 +554,7 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
         <div class="text-[11px] text-[var(--text-muted)]">
           current OAS checkpoint와 OAS snapshot history만 노출합니다.
           ${inventory && inventory.legacy_shadow_count > 0
-            ? html`<span class="block mt-1 text-amber-300">legacy shadow ${inventory.legacy_shadow_count}개는 picker에서 제외됩니다.</span>`
+            ? html`<span class="block mt-1 text-[var(--warn)]">legacy shadow ${inventory.legacy_shadow_count}개는 picker에서 제외됩니다.</span>`
             : null}
         </div>
         <div class="flex items-center gap-2">

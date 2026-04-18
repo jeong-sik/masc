@@ -748,7 +748,7 @@ export function MemorySubsystems() {
 
       ${
         error
-          ? html`<div class="text-xs text-amber-500 mt-2">refresh error: ${error}</div>`
+          ? html`<div class="text-xs text-[var(--warn)] mt-2">refresh error: ${error}</div>`
           : null
       }
     </div>

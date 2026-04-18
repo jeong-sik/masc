@@ -29,8 +29,8 @@ function outcomeTag(entry: TelemetryEntry): { label: string; tone: 'ok' | 'bad' 
 }
 
 function toneClass(tone: 'ok' | 'bad' | 'neutral'): string {
-  if (tone === 'ok') return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-  if (tone === 'bad') return 'bg-red-500/15 text-red-300 border-red-500/30'
+  if (tone === 'ok') return 'bg-emerald-500/15 text-[var(--ok)] border-emerald-500/30'
+  if (tone === 'bad') return 'bg-red-500/15 text-[var(--bad-light)] border-red-500/30'
   return 'bg-white/5 text-text-dim border-card-border'
 }
 

@@ -70,34 +70,34 @@ const INVARIANT_KEYS = Object.keys(INVARIANT_LABELS) as Array<
 // recommendation: stable=gray, in-motion=amber/blue, terminal=red.
 const CHIP_CLASS_BY_STATE: Record<string, string> = {
   // KSM
-  Running:      'bg-emerald-900/40 text-emerald-200 border-emerald-700',
-  Failing:      'bg-red-900/50 text-red-200 border-red-700',
+  Running:      'bg-emerald-900/40 text-[var(--ok)] border-emerald-700',
+  Failing:      'bg-red-900/50 text-[var(--bad-light)] border-red-700',
   Overflowed:   'bg-orange-900/50 text-orange-200 border-orange-700',
-  Compacting:   'bg-amber-900/50 text-amber-200 border-amber-700',
+  Compacting:   'bg-amber-900/50 text-[var(--warn)] border-amber-700',
   HandingOff:   'bg-blue-900/50 text-blue-200 border-blue-700',
   Draining:     'bg-sky-900/40 text-sky-200 border-sky-700',
   Paused:       'bg-zinc-800 text-zinc-300 border-zinc-600',
   Stopped:      'bg-zinc-800 text-zinc-400 border-zinc-700',
-  Crashed:      'bg-red-950 text-red-300 border-red-800',
+  Crashed:      'bg-red-950 text-[var(--bad-light)] border-red-800',
   Restarting:   'bg-violet-900/50 text-violet-200 border-violet-700',
   Dead:         'bg-black text-[var(--bad-light)] border-red-900',
   Offline:      'bg-zinc-900 text-zinc-500 border-zinc-800',
   // KTC
   idle:         'bg-zinc-800 text-zinc-400 border-zinc-700',
   prompting:    'bg-blue-900/40 text-blue-200 border-blue-700',
-  executing:    'bg-emerald-900/40 text-emerald-200 border-emerald-700',
-  compacting:   'bg-amber-900/50 text-amber-200 border-amber-700',
+  executing:    'bg-emerald-900/40 text-[var(--ok)] border-emerald-700',
+  compacting:   'bg-amber-900/50 text-[var(--warn)] border-amber-700',
   finalizing:   'bg-sky-900/40 text-sky-200 border-sky-700',
   // KDP
   undecided:          'bg-zinc-800 text-zinc-400 border-zinc-700',
-  guard_ok:           'bg-emerald-900/40 text-emerald-200 border-emerald-700',
-  gate_rejected:      'bg-red-900/40 text-red-200 border-red-700',
+  guard_ok:           'bg-emerald-900/40 text-[var(--ok)] border-emerald-700',
+  gate_rejected:      'bg-red-900/40 text-[var(--bad-light)] border-red-700',
   tool_policy_selected: 'bg-indigo-900/50 text-indigo-200 border-indigo-700',
   // KCL
   selecting:    'bg-blue-900/40 text-blue-200 border-blue-700',
-  trying:       'bg-amber-900/50 text-amber-200 border-amber-700',
-  done:         'bg-emerald-900/40 text-emerald-200 border-emerald-700',
-  exhausted:    'bg-red-900/50 text-red-200 border-red-700',
+  trying:       'bg-amber-900/50 text-[var(--warn)] border-amber-700',
+  done:         'bg-emerald-900/40 text-[var(--ok)] border-emerald-700',
+  exhausted:    'bg-red-900/50 text-[var(--bad-light)] border-red-700',
   // KMC
   accumulating: 'bg-zinc-800 text-zinc-400 border-zinc-700',
   // KCB (LT-16-KCB Phase 3). Clean = baseline grey same as any other
@@ -107,7 +107,7 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   // chip colour by design — the mutator resets the count before any
   // observer can see it.
   clean:   'bg-zinc-800 text-zinc-400 border-zinc-700',
-  warning: 'bg-amber-900/50 text-amber-200 border-amber-700',
+  warning: 'bg-amber-900/50 text-[var(--warn)] border-amber-700',
   cooling: 'bg-sky-900/40 text-sky-200 border-sky-700',
 }
 
@@ -303,7 +303,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     return html`
       <div
         data-testid="fleet-fsm-matrix"
-        class="rounded border border-red-800 bg-red-950/40 p-4 text-sm text-red-200"
+        class="rounded border border-red-800 bg-red-950/40 p-4 text-sm text-[var(--bad-light)]"
       >
         Fleet snapshot failed: ${error}
       </div>
@@ -346,8 +346,8 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                 ${INVARIANT_KEYS.map(k => {
                   const count = tallies[k]
                   const tone = count === 0
-                    ? 'bg-emerald-900/30 text-emerald-200 border-emerald-800'
-                    : 'bg-red-900/40 text-red-200 border-red-700'
+                    ? 'bg-emerald-900/30 text-[var(--ok)] border-emerald-800'
+                    : 'bg-red-900/40 text-[var(--bad-light)] border-red-700'
                   return html`
                     <span
                       data-invariant=${k}

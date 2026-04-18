@@ -455,7 +455,7 @@ function SloCard({ slo }: { slo: CascadeSloResponse }) {
         <${StatusChip} tone=${tone}>${sloStatusLabel(slo.status)}<//>
         <span class="text-xs text-[var(--text-muted)]">sample ${totalEvents}/${slo.window_sample_size}</span>
         ${slo.violations.length > 0
-          ? html`<span class="text-xs text-red-500">violating: ${slo.violations.join(', ')}</span>`
+          ? html`<span class="text-xs text-[var(--bad-light)]">violating: ${slo.violations.join(', ')}</span>`
           : null}
       </div>
       <div class="grid grid-cols-3 gap-3">

@@ -110,7 +110,7 @@ export function CopyableCode({
         : null}
       <code class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-[11px] text-[var(--text-body)]">${command}</code>
       ${justCopied
-        ? html`<span class="shrink-0 text-[10px] font-semibold text-emerald-300" data-copied-badge aria-live="polite">✓ Copied</span>`
+        ? html`<span class="shrink-0 text-[10px] font-semibold text-[var(--ok)]" data-copied-badge aria-live="polite">✓ Copied</span>`
         : null}
       <button
         type="button"

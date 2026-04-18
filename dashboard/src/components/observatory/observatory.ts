@@ -305,7 +305,7 @@ export function Observatory() {
       </div>
 
       ${activeView.value === 'timeline' && data.error ? html`
-        <div class="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200">
+        <div class="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] text-[var(--warn)]">
           일부 데이터 불러오기 실패: ${data.error}
         </div>
       ` : null}

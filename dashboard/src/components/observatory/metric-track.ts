@@ -97,8 +97,8 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
                 </rect>
               `
             })}
-            <line x1="0" y1="${viewBoxHeight * 0.03}" x2="${viewBoxWidth}" y2="${viewBoxHeight * 0.03}" stroke="currentColor" stroke-dasharray="2 4" class="text-emerald-500/30" stroke-width="0.5" />
-            <line x1="0" y1="${viewBoxHeight * 0.1}" x2="${viewBoxWidth}" y2="${viewBoxHeight * 0.1}" stroke="currentColor" stroke-dasharray="2 4" class="text-amber-500/30" stroke-width="0.5" />
+            <line x1="0" y1="${viewBoxHeight * 0.03}" x2="${viewBoxWidth}" y2="${viewBoxHeight * 0.03}" stroke="currentColor" stroke-dasharray="2 4" class="text-[var(--ok)]/30" stroke-width="0.5" />
+            <line x1="0" y1="${viewBoxHeight * 0.1}" x2="${viewBoxWidth}" y2="${viewBoxHeight * 0.1}" stroke="currentColor" stroke-dasharray="2 4" class="text-[var(--warn)]/30" stroke-width="0.5" />
             <polyline
               points=${polyline}
               fill="none"

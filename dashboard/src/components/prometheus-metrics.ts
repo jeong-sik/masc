@@ -153,8 +153,8 @@ function fmtValue(value: number, type: string, name: string): string {
 function typeBadge(type: string): ReturnType<typeof html> {
   const colors: Record<string, string> = {
     counter: 'bg-blue-900/40 text-blue-300',
-    gauge: 'bg-emerald-900/40 text-emerald-300',
-    summary: 'bg-amber-900/40 text-amber-300',
+    gauge: 'bg-emerald-900/40 text-[var(--ok)]',
+    summary: 'bg-amber-900/40 text-[var(--warn)]',
   }
   return html`<span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-mono ${colors[type] ?? 'bg-gray-800 text-gray-400'}">${type}</span>`
 }
@@ -175,7 +175,7 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
     }
     if (k === 'tool_name' || k === 'tool') {
       return html`<button
-        class="rounded bg-amber-900/40 px-1 py-0.5 text-[10px] text-amber-300 font-mono hover:bg-amber-800/60 hover:text-amber-200 transition-colors cursor-pointer"
+        class="rounded bg-amber-900/40 px-1 py-0.5 text-[10px] text-[var(--warn)] font-mono hover:bg-amber-800/60 hover:text-[var(--warn)] transition-colors cursor-pointer"
         title="View tool quality"
         onClick=${(e: Event) => {
           e.stopPropagation()
@@ -309,7 +309,7 @@ export function PrometheusMetrics() {
       </div>
 
       ${error.value && html`
-        <div class="rounded-md bg-red-900/20 border border-red-800/30 px-3 py-2 text-xs text-red-300">
+        <div class="rounded-md bg-red-900/20 border border-red-800/30 px-3 py-2 text-xs text-[var(--bad-light)]">
           ${error.value}
         </div>
       `}

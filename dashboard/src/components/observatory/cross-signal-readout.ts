@@ -55,7 +55,7 @@ function Row({
 }) {
   const toneClass =
     tone === 'ok' ? 'text-[var(--ok)]'
-      : tone === 'warn' ? 'text-amber-300'
+      : tone === 'warn' ? 'text-[var(--warn)]'
       : tone === 'bad' ? 'text-[var(--bad-light)]'
       : 'text-text-strong'
   return html`

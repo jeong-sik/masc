@@ -12,7 +12,8 @@ open Server_auth
 let add_delete_action_routes router =
   router
   |> Http.Router.post "/api/v1/dashboard/board/delete" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+       with_token_permission_auth ~permission:Types.CanAdmin
+         (fun _state _agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
@@ -35,7 +36,8 @@ let add_delete_action_routes router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/dashboard/tasks/delete" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       with_token_permission_auth ~permission:Types.CanAdmin
+         (fun state _agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
@@ -59,7 +61,8 @@ let add_delete_action_routes router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/dashboard/goals/delete" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       with_token_permission_auth ~permission:Types.CanAdmin
+         (fun state _agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
@@ -84,7 +87,8 @@ let add_delete_action_routes router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/dashboard/goals/sweep" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
+       with_token_permission_auth ~permission:Types.CanAdmin
+         (fun state _agent_name _req reqd ->
          let config = state.Mcp_server.room_config in
          let result = Goal_janitor.run config in
          Http.Response.json ~compress:true ~request

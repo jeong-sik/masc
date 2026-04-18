@@ -611,6 +611,52 @@ let test_custom_dev_origin_allows_loopback_cross_port () =
     | Ok () -> ()
     | Error e -> fail (Types.masc_error_to_string e))
 
+let test_public_read_cors_allows_matching_origin () =
+  let module SA = Masc_mcp.Server_auth in
+  let headers =
+    Httpun.Headers.of_list
+      [
+        ("host", "localhost:9000");
+        ("origin", "http://localhost:9000");
+      ]
+  in
+  let request = Httpun.Request.create ~headers `GET "/api/v1/gate/events" in
+  match SA.public_read_cors_origin_opt request with
+  | Some origin ->
+      Alcotest.(check string) "matching origin reflected" "http://localhost:9000" origin
+  | None -> fail "expected public-read cors origin"
+
+let test_public_read_cors_rejects_cross_origin () =
+  let module SA = Masc_mcp.Server_auth in
+  let headers =
+    Httpun.Headers.of_list
+      [
+        ("host", "localhost:9000");
+        ("origin", "https://evil.example");
+      ]
+  in
+  let request = Httpun.Request.create ~headers `GET "/api/v1/gate/events" in
+  match SA.public_read_cors_origin_opt request with
+  | None -> ()
+  | Some origin -> fail ("unexpected reflected origin: " ^ origin)
+
+let test_public_read_cors_allows_allowlisted_loopback_origin () =
+  let module SA = Masc_mcp.Server_auth in
+  with_env "MASC_HTTP_DEV_MUTATION_ORIGINS" "http://localhost:4317" (fun () ->
+    let headers =
+      Httpun.Headers.of_list
+        [
+          ("host", "localhost:9000");
+          ("origin", "http://localhost:4317");
+        ]
+    in
+    let request = Httpun.Request.create ~headers `GET "/api/v1/gate/events" in
+    match SA.public_read_cors_origin_opt request with
+    | Some origin ->
+        Alcotest.(check string) "allowlisted loopback origin reflected"
+          "http://localhost:4317" origin
+    | None -> fail "expected allowlisted public-read cors origin")
+
 let test_public_read_path_allows_generic_connector_status () =
   let module SA = Masc_mcp.Server_auth in
   check bool "generic connector status is public read" true
@@ -818,6 +864,12 @@ let () =
         test_env_flag_overrides_all;
       test_case "custom dev origin allows loopback cross-port" `Quick
         test_custom_dev_origin_allows_loopback_cross_port;
+      test_case "public-read cors allows matching origin" `Quick
+        test_public_read_cors_allows_matching_origin;
+      test_case "public-read cors rejects cross origin" `Quick
+        test_public_read_cors_rejects_cross_origin;
+      test_case "public-read cors allows allowlisted loopback origin" `Quick
+        test_public_read_cors_allows_allowlisted_loopback_origin;
       test_case "generic connector status is public read" `Quick
         test_public_read_path_allows_generic_connector_status;
       test_case "generic connector bind is not public read" `Quick

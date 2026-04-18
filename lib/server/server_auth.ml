@@ -275,6 +275,30 @@ let get_origin (request : Httpun.Request.t) =
   Httpun.Headers.get request.headers "origin"
   |> Option.value ~default:"*"
 
+let public_read_cors_origin_opt (request : Httpun.Request.t) =
+  match Httpun.Headers.get request.Httpun.Request.headers "origin" with
+  | None -> None
+  | Some origin -> (
+      match host_port_scheme_of_origin origin, host_port_of_request request with
+      | Some (origin_host, origin_port, scheme),
+        Some (request_host, request_port)
+        when String.equal
+               (normalize_loopback_host origin_host)
+               (normalize_loopback_host request_host) ->
+          let default = default_port_of_scheme scheme in
+          let norm p = match p with Some _ -> p | None -> default in
+          if norm origin_port = norm request_port then
+            Some origin
+          else if
+            is_loopback_host (normalize_loopback_host origin_host)
+            && is_allowlisted_loopback_dev_origin origin
+          then
+            Some origin
+          else
+            None
+      | _ when is_allowlisted_loopback_dev_origin origin -> Some origin
+      | _ -> None)
+
 (** CORS headers *)
 let cors_allow_headers_value =
   "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, \
@@ -298,6 +322,15 @@ let cors_headers origin =
 let respond_json_with_cors ?(status = `OK) request reqd body =
   let origin = get_origin request in
   Http_server_eio.Response.json ~status ~extra_headers:(cors_headers origin) body reqd
+
+let public_read_cors_headers request =
+  match public_read_cors_origin_opt request with
+  | Some origin -> cors_headers origin
+  | None -> [ ("vary", "Origin") ]
+
+let respond_public_read_json ?(status = `OK) request reqd body =
+  Http_server_eio.Response.json ~status
+    ~extra_headers:(public_read_cors_headers request) body reqd
 
 let auth_error_json err =
   Yojson.Safe.to_string

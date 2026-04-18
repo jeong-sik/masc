@@ -3,8 +3,10 @@
     Provides [/api/v1/gate/*] endpoints for external channel consumers
     (Discord bots, Telegram bots, etc.) to interact with keepers.
 
-    All Channel Gate API endpoints use Bearer token auth via [with_tool_auth],
-    except [/api/v1/gate/health], which is public and uses [with_public_read].
+    Mutation endpoints use Bearer token auth via [with_tool_auth]. Public
+    monitoring surfaces stay on [with_public_read], but their JSON responses
+    only emit CORS headers for same-origin or explicitly allowlisted local
+    dev origins.
 
     @since 2.217.0 *)
 
@@ -183,14 +185,14 @@ let handle_gate_events _state request reqd =
       ?room_id:(trim_filter "room_id")
       ~limit ()
   in
-  respond_json_with_cors ~status:`OK request reqd
+  respond_public_read_json ~status:`OK request reqd
     (Yojson.Safe.to_string json)
 
 (** GET /api/v1/gate/health
 
     Simple health check for the gate layer. *)
 let handle_gate_health _state request reqd =
-  respond_json_with_cors ~status:`OK request reqd
+  respond_public_read_json ~status:`OK request reqd
     {|{"ok":true,"service":"channel_gate"}|}
 
 (** GET /api/v1/gate/status
@@ -199,7 +201,7 @@ let handle_gate_health _state request reqd =
     average latency, error counts.  Public read. *)
 let handle_gate_status _state request reqd =
   let json = Channel_gate_metrics.snapshot_json () in
-  respond_json_with_cors ~status:`OK request reqd
+  respond_public_read_json ~status:`OK request reqd
     (Yojson.Safe.to_string json)
 
 (** GET /api/v1/gate/connectors
@@ -218,7 +220,7 @@ let handle_gate_connectors _state request reqd =
     Channel_gate_connector.connectors_json ~gate_status_json:gate_status
       ~audit_limit ()
   in
-  respond_json_with_cors ~status:`OK request reqd
+  respond_public_read_json ~status:`OK request reqd
     (Yojson.Safe.to_string json)
 
 (** GET /api/v1/gate/connector/status?name=<connector>&audit_limit=<n>
@@ -243,13 +245,13 @@ let handle_gate_connector_status _state request reqd =
   in
   match connector_name with
   | None | Some "" ->
-      respond_json_with_cors ~status:`Bad_request request reqd
+      respond_public_read_json ~status:`Bad_request request reqd
         (Yojson.Safe.to_string
            (Channel_gate.error_json "name or channel is required"))
   | Some name -> (
       match Channel_gate_connector.find name with
       | None ->
-          respond_json_with_cors ~status:`Not_found request reqd
+          respond_public_read_json ~status:`Not_found request reqd
             (Yojson.Safe.to_string
                (Channel_gate.error_json ("unknown connector: " ^ name)))
       | Some (module C) ->
@@ -257,7 +259,7 @@ let handle_gate_connector_status _state request reqd =
             int_query_param request "audit_limit" ~default:10
             |> fun value -> max 1 (min 50 value)
           in
-          respond_json_with_cors ~status:`OK request reqd
+          respond_public_read_json ~status:`OK request reqd
             (Yojson.Safe.to_string (C.status_json ~audit_limit ())))
 
 let gate_keeper_ctx ~sw ~clock state =

@@ -67,11 +67,11 @@ let add_routes router =
            let path = Http.Request.path request in
            match extract_path_param ~prefix:"/api/v1/artifacts/" path with
            | None ->
-               respond_json_with_cors ~status:`Bad_request request reqd
+               respond_public_read_json ~status:`Bad_request request reqd
                  (Yojson.Safe.to_string
                     (`Assoc [ ("error", `String "sha256 path parameter required") ]))
            | Some raw when not (is_valid_sha256 raw) ->
-               respond_json_with_cors ~status:`Bad_request request reqd
+               respond_public_read_json ~status:`Bad_request request reqd
                  (Yojson.Safe.to_string
                     (`Assoc
                       [
@@ -81,6 +81,6 @@ let add_routes router =
                       ]))
            | Some sha256 ->
                let json, status = blob_response ~sha256 in
-               respond_json_with_cors ~status request reqd
+               respond_public_read_json ~status request reqd
                  (Yojson.Safe.to_string json))
          request reqd)

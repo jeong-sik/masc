@@ -247,6 +247,21 @@ let test_http_write_auth_contracts () =
   check bool "provider runs post requires admin permission" true
     (file_contains_pattern "lib/server/server_routes_http_routes_provider_runs.ml"
        {|with_token_permission_auth ~permission:Types.CanAdmin|});
+  check bool "dashboard delete actions require token-bound admin permission" true
+    (file_contains_pattern "lib/server/server_dashboard_http_delete_actions.ml"
+       {|with_token_permission_auth ~permission:Types.CanAdmin|});
+  check bool "server auth defines public-read cors origin helper" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       "let public_read_cors_origin_opt");
+  check bool "server auth exposes public-read json responder" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       "let respond_public_read_json");
+  check bool "channel gate public reads use constrained cors responder" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_channel_gate.ml"
+       "respond_public_read_json");
+  check bool "artifacts endpoint uses constrained cors responder" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_artifacts.ml"
+       "respond_public_read_json");
   check bool "provider runs route threads state net into dashboard single-run" true
     (file_contains_pattern "lib/server/server_routes_http_routes_provider_runs.ml"
        "~net:state.Mcp_server.net");

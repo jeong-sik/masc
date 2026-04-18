@@ -29,6 +29,7 @@ module Dashboard_mission = Masc_mcp.Dashboard_mission
 module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
 module Build_identity = Masc_mcp.Build_identity
 module Config_doctor = Masc_mcp.Config_doctor
+module Doctor_cli = Masc_mcp.Doctor_cli
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Types
 module Tempo = Masc_mcp.Tempo
@@ -300,6 +301,10 @@ let base_path =
 let doctor_json =
   let doc = "Emit machine-readable JSON instead of text output" in
   Arg.(value & flag & info ["json"] ~doc)
+
+let doctor_fix =
+  let doc = "Run available auto-fixes before re-checking sidecar doctors" in
+  Arg.(value & flag & info ["fix"] ~doc)
 
 (** Graceful shutdown exception *)
 (* Shutdown exception removed: graceful shutdown returns normally from
@@ -580,28 +585,226 @@ let run_cmd_exit host port base_path =
   run_cmd host port base_path;
   Cmd.Exit.ok
 
-let doctor_cmd_exit base_path as_json =
+let doctor_config_report base_path =
   let report =
     Config_doctor.analyze
       ~base_path_input:base_path
       ~default_base_path:(default_base_path ())
       ()
   in
+  let exit_code = Config_doctor.exit_code report in
+  let text = Config_doctor.render_text report in
+  let json = Config_doctor.to_yojson report in
+  (exit_code, text, json)
+
+let doctor_config_cmd_exit base_path as_json =
+  let exit_code, text, json = doctor_config_report base_path in
   let output =
     if as_json then
-      Config_doctor.to_yojson report |> Yojson.Safe.pretty_to_string
+      Yojson.Safe.pretty_to_string json
     else
-      Config_doctor.render_text report
+      text
   in
   print_endline output;
-  Config_doctor.exit_code report
+  exit_code
 
-let doctor_cmd =
+type doctor_block = {
+  title : string;
+  exit_code : int;
+  text : string;
+  json : Yojson.Safe.t;
+}
+
+let process_status_exit_code = function
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 2
+
+let merge_env_binding key value =
+  let prefix = key ^ "=" in
+  Unix.environment ()
+  |> Array.to_list
+  |> List.filter (fun entry ->
+         let entry_len = String.length entry in
+         let prefix_len = String.length prefix in
+         entry_len < prefix_len
+         || not (String.equal (String.sub entry 0 prefix_len) prefix))
+  |> fun entries -> Array.of_list ((prefix ^ value) :: entries)
+
+let doctor_block_error ~title message =
+  {
+    title;
+    exit_code = 2;
+    text = message;
+    json =
+      `Assoc
+        [
+          ("title", `String title);
+          ("error", `String message);
+          ("summary", `Assoc [ ("ok", `Int 0); ("info", `Int 0); ("warn", `Int 0); ("error", `Int 1); ("skip", `Int 0) ]);
+        ];
+  }
+
+let render_doctor_blocks_text blocks =
+  blocks
+  |> List.map (fun block ->
+         let body = String.trim block.text in
+         if body = ""
+         then Printf.sprintf "## %s" block.title
+         else Printf.sprintf "## %s\n%s" block.title body)
+  |> String.concat "\n\n"
+
+let doctor_blocks_exit_code blocks =
+  List.fold_left (fun acc block -> max acc block.exit_code) 0 blocks
+
+let parse_json_output ~title raw =
+  try Ok (Yojson.Safe.from_string raw)
+  with Yojson.Json_error err ->
+    Error (doctor_block_error ~title
+             (Printf.sprintf "doctor JSON parse failed: %s\nraw output:\n%s" err raw))
+
+let run_sidecar_doctor_blocks ~base_path ~as_json ~fix request =
+  let title_of_sidecar sidecar =
+    Printf.sprintf "%s Sidecar Doctor" (Doctor_cli.sidecar_display_name sidecar)
+  in
+  match
+    Doctor_cli.find_repo_root ~cwd:(Sys.getcwd ()) ~exe_path:Sys.executable_name ()
+  with
+  | Error message ->
+      [ doctor_block_error ~title:"Sidecar Doctor" message ]
+  | Ok repo_root ->
+      let env =
+        merge_env_binding "MASC_BASE_PATH"
+          (Env_config.normalize_masc_base_path_input base_path)
+      in
+      Doctor_cli.sidecars_of_request request
+      |> List.map (fun sidecar ->
+             let title = title_of_sidecar sidecar in
+             let spec =
+               Doctor_cli.sidecar_run_spec ~repo_root ~sidecar ~json:as_json ~fix
+             in
+             let status, output =
+               Process_eio.run_argv_with_status ~timeout_sec:60.0 ~env spec.argv
+             in
+             let exit_code = process_status_exit_code status in
+             if as_json then
+               match parse_json_output ~title output with
+               | Ok json -> { title; exit_code; text = output; json }
+               | Error block -> block
+             else
+               {
+                 title;
+                 exit_code;
+                 text = output;
+                 json =
+                   `Assoc
+                     [
+                       ("title", `String title);
+                       ("raw_output", `String output);
+                       ("exit_code", `Int exit_code);
+                     ];
+               })
+
+let doctor_sidecar_request =
+  let doc =
+    Printf.sprintf
+      "Sidecar target (%s or all). Defaults to all."
+      (String.concat ", " (Doctor_cli.sidecar_names ()))
+  in
+  Arg.(value & pos 0 (some string) None & info [] ~docv:"TARGET" ~doc)
+
+let doctor_sidecar_cmd_exit base_path as_json fix request =
+  let parsed_request =
+    match request with
+    | None -> Ok None
+    | Some raw ->
+        (match Doctor_cli.sidecar_request_of_string raw with
+         | Ok parsed -> Ok (Some parsed)
+         | Error msg -> Error msg)
+  in
+  let blocks =
+    match parsed_request with
+    | Ok parsed ->
+        run_sidecar_doctor_blocks ~base_path ~as_json ~fix parsed
+    | Error message ->
+        [ doctor_block_error ~title:"Sidecar Doctor" message ]
+  in
+  let output =
+    if as_json then
+      `Assoc
+        [
+          ("kind", `String "sidecar");
+          ("sidecars", `List (List.map (fun block -> block.json) blocks));
+          ("exit_code", `Int (doctor_blocks_exit_code blocks));
+        ]
+      |> Yojson.Safe.pretty_to_string
+    else
+      render_doctor_blocks_text blocks
+  in
+  print_endline output;
+  doctor_blocks_exit_code blocks
+
+let doctor_all_cmd_exit base_path as_json fix =
+  let config_exit, config_text, config_json = doctor_config_report base_path in
+  let sidecar_blocks =
+    run_sidecar_doctor_blocks ~base_path ~as_json ~fix None
+  in
+  let blocks =
+    { title = "Config Doctor"; exit_code = config_exit; text = config_text; json = config_json }
+    :: sidecar_blocks
+  in
+  let output =
+    if as_json then
+      `Assoc
+        [
+          ("kind", `String "all");
+          ("config", config_json);
+          ("sidecars", `List (List.map (fun block -> block.json) sidecar_blocks));
+          ("exit_code", `Int (doctor_blocks_exit_code blocks));
+        ]
+      |> Yojson.Safe.pretty_to_string
+    else
+      render_doctor_blocks_text blocks
+  in
+  print_endline output;
+  doctor_blocks_exit_code blocks
+
+let doctor_config_cmd =
   let doc =
     "Diagnose config initialization, active config roots, and base-path shadowing"
   in
+  let info = Cmd.info "config" ~doc in
+  Cmd.v info Term.(const doctor_config_cmd_exit $ base_path $ doctor_json)
+
+let doctor_sidecar_cmd =
+  let doc =
+    "Run sidecar doctor checks (defaults to all registered sidecars)"
+  in
+  let info = Cmd.info "sidecar" ~doc in
+  Cmd.v info
+    Term.(
+      const doctor_sidecar_cmd_exit
+      $ base_path
+      $ doctor_json
+      $ doctor_fix
+      $ doctor_sidecar_request)
+
+let doctor_all_cmd =
+  let doc =
+    "Run config doctor plus all registered sidecar doctors"
+  in
+  let info = Cmd.info "all" ~doc in
+  Cmd.v info
+    Term.(const doctor_all_cmd_exit $ base_path $ doctor_json $ doctor_fix)
+
+let doctor_cmd =
+  let doc =
+    "Diagnostics front door: config, sidecar, or all"
+  in
   let info = Cmd.info "doctor" ~doc in
-  Cmd.v info Term.(const doctor_cmd_exit $ base_path $ doctor_json)
+  Cmd.group
+    ~default:Term.(const doctor_config_cmd_exit $ base_path $ doctor_json)
+    info
+    [ doctor_config_cmd; doctor_sidecar_cmd; doctor_all_cmd ]
 
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in

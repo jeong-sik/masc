@@ -45,6 +45,16 @@ $ ./run.sh doctor
 summary: 3 ok, 1 warn, 1 error
 ```
 
+현재 front door 는 top-level `doctor` 계층으로 정리한다:
+
+```bash
+./_build/default/bin/main_eio.exe doctor                # config doctor (기본)
+./_build/default/bin/main_eio.exe doctor config
+./_build/default/bin/main_eio.exe doctor sidecar        # 등록된 sidecar 전부
+./_build/default/bin/main_eio.exe doctor sidecar discord
+./_build/default/bin/main_eio.exe doctor all            # config + sidecar 전부
+```
+
 ## 계약
 
 ### Severity 5단계
@@ -123,8 +133,9 @@ class AutoFix:
 
 | 계층 | Doctor | 구현 상태 |
 |------|--------|-----------|
-| OCaml 서버 | `main_eio.exe doctor` — 베이스 경로 / 활성 config root | 운영 중 (`docs/CONFIG-DOCTOR.md`) |
-| Discord sidecar | `python -m src doctor` | 이 PR |
+| OCaml front door | `main_eio.exe doctor [config|sidecar|all]` | 이 PR에서 top-level entry 정리 |
+| OCaml config doctor | `main_eio.exe doctor` / `main_eio.exe doctor config` | 운영 중 (`docs/CONFIG-DOCTOR.md`) |
+| Discord sidecar | `python -m src doctor` / `main_eio.exe doctor sidecar discord` | 이 PR |
 | Slack sidecar | `python -m src doctor` | 후속 |
 | Telegram sidecar | `python -m src doctor` | 후속 |
 | iMessage sidecar | `python -m src doctor` | 후속 |

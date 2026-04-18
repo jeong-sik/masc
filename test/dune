@@ -118,6 +118,7 @@
         test_observability_provider_contracts
         test_worker_oas_scope_gate
         test_config_doctor
+        test_doctor_cli
         test_run_local_script
         test_tool_prefilter
         test_keeper_state_machine
@@ -222,6 +223,7 @@
           test_observability_provider_contracts
           test_worker_oas_scope_gate
           test_config_doctor
+          test_doctor_cli
           test_run_local_script
           test_tool_prefilter
           test_keeper_state_machine

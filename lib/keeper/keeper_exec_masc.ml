@@ -22,15 +22,36 @@ let handle_keeper_autoresearch_tool
   | None -> error_json ~fields:[ "tool", `String name ] "unknown_autoresearch_tool"
 ;;
 
+(* Read-only masc_code_* tools (search, read, symbols) are path-bearing but
+   should NOT go through the strict write resolver. The write resolver
+   anchors raw relative paths at project-root and rejects on first miss;
+   the read resolver adds [maybe_resolve_missing_relative_read_path] which
+   walks the keeper's allowed roots looking for a matching suffix. That
+   recovery is what turns a keeper call like
+     masc_code_search path=repos/masc-mcp/lib
+   into a successful lookup against
+     <base>/.masc/playground/<name>/repos/masc-mcp/lib
+   — exactly the path the keeper's prompt refers to. Field evidence on
+   2026-04-17/18 showed ~240 masc_code_* failures with [path_not_in_
+   allowed_paths] that would have resolved under the read walker.
+   See memory/handoff-2026-04-18-masc-tool-failure-investigation.md R1. *)
 let keeper_masc_path_blocked
       ~(config : Coord.config)
       ~(meta : keeper_meta)
+      ~(name : string)
       ~(args : Yojson.Safe.t)
   =
-  let effective_paths = keeper_effective_write_allowed_paths ~meta in
+  let is_read_only = Tool_dispatch.is_read_only name in
+  let effective_paths =
+    if is_read_only
+    then keeper_effective_allowed_paths ~meta
+    else keeper_effective_write_allowed_paths ~meta
+  in
   if effective_paths = [] && meta.execution_scope <> Keeper_execution_scope.Observe_only
   then None
-  else if meta.execution_scope = Keeper_execution_scope.Observe_only && effective_paths = []
+  else if meta.execution_scope = Keeper_execution_scope.Observe_only
+          && effective_paths = []
+          && not is_read_only
   then (
     let has_path_arg =
       List.exists
@@ -50,11 +71,17 @@ let keeper_masc_path_blocked
            | _ -> None)
         [ "path"; "file_path"; "target_path" ]
     in
+    let resolve raw =
+      if is_read_only then
+        Keeper_alerting_path.resolve_keeper_read_path
+          ~config ~allowed_paths:effective_paths ~raw_path:raw
+      else
+        Keeper_alerting_path.resolve_keeper_target_path
+          ~config ~allowed_paths:effective_paths ~raw_path:raw
+    in
     List.find_map
       (fun raw ->
-         match
-           Keeper_alerting_path.resolve_keeper_target_path ~config ~allowed_paths:effective_paths ~raw_path:raw
-         with
+         match resolve raw with
          | Error e -> Some e
          | Ok _ -> None)
       candidates)
@@ -66,7 +93,7 @@ let handle_keeper_masc_tool
       ~(name : string)
       ~(args : Yojson.Safe.t)
   =
-  match keeper_masc_path_blocked ~config ~meta ~args with
+  match keeper_masc_path_blocked ~config ~meta ~name ~args with
   | Some err -> error_json err
   | None ->
     (match Tool_dispatch.mint_token ~name with

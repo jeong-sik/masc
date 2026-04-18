@@ -463,7 +463,10 @@ let run_named
            on_success ~provider_key:provider_cfg.model_id;
            Ok result
          | Cascade_fsm.Try_next { last_err = new_err } ->
-           Log.Misc.warn "cascade %s: accept rejected %s (%s), trying next" cascade_name provider_cfg.model_id reason;
+           (* Demoted from WARN to INFO (task-239): cascade will retry the
+              next tier.  Tagged [cascade-fallback] so dashboard filters
+              can distinguish recovery-in-progress from hard failures. *)
+           Log.Misc.info "[cascade-fallback] cascade %s: accept rejected %s (%s), trying next" cascade_name provider_cfg.model_id reason;
            Oas_worker_cascade.record_fallback_event capture ~candidate_cfgs
              ~from_model:provider_cfg.model_id ~to_model:"next" ~reason;
            try_cascade ?resume_checkpoint:next_resume rest new_err
@@ -473,6 +476,8 @@ let run_named
                ~candidate_cfgs ~selected_model_raw:(Some result.response.model) ~capture
            in
            Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Rejected ~observation:(Some observation);
+           Log.Misc.error "cascade %s exhausted: all tiers rejected by accept predicate (last model=%s, reason=%s)"
+             cascade_name result.response.model reason;
            Error
              (sdk_error_of_masc_internal_error
                 (Accept_rejected
@@ -510,7 +515,14 @@ let run_named
          | Some outcome ->
            (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
             | Cascade_fsm.Try_next { last_err = new_err } ->
-              Log.Misc.warn "cascade %s: %s failed (%s), trying next" cascade_name provider_cfg.model_id (Oas.Error.to_string sdk_err);
+              (* Demoted from WARN to INFO (task-239): cascade will retry
+                 the next tier.  Tagged [cascade-fallback] so dashboards
+                 and log filters can distinguish recovery-in-progress
+                 from hard failures.  The exec layer's per-tier
+                 "agent errored" log was also demoted to DEBUG in the
+                 same change, so this INFO is the canonical per-tier
+                 signal. *)
+              Log.Misc.info "[cascade-fallback] cascade %s: %s failed (%s), trying next" cascade_name provider_cfg.model_id (Oas.Error.to_string sdk_err);
               Oas_worker_cascade.record_fallback_event capture ~candidate_cfgs
                 ~from_model:provider_cfg.model_id ~to_model:"next"
                 ~reason:(Oas.Error.to_string sdk_err);
@@ -521,6 +533,8 @@ let run_named
                   ~candidate_cfgs ~selected_model_raw:None ~capture
               in
               Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
+              Log.Misc.error "cascade %s exhausted: all tiers failed (last model=%s, error=%s)"
+                cascade_name provider_cfg.model_id (Oas.Error.to_string sdk_err);
               Error sdk_err
             | _ -> Error sdk_err)
          | None ->
@@ -530,6 +544,8 @@ let run_named
                ~candidate_cfgs ~selected_model_raw:None ~capture
            in
            Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
+           Log.Misc.error "cascade %s: non-cascadable error from %s: %s"
+             cascade_name provider_cfg.model_id (Oas.Error.to_string sdk_err);
            Error sdk_err))
   in
   (* Pluggable strategy + cycle/backoff wrapper (since 0.9.6).

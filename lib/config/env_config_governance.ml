@@ -17,10 +17,26 @@ module Inference = struct
     max 5
       (get_int ~default:timeout_seconds_int "MASC_OPERATOR_JUDGE_TIMEOUT_SEC")
 
-  (** Dashboard governance judge timeout: falls back to the global
-      inference timeout (timeout_seconds_int), floored at 5 seconds. *)
+  (** Dashboard governance judge timeout (seconds).
+      Reads [MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC] when set; otherwise
+      falls back to a 60s default that gives glm-5-turbo room for cold-start.
+      Floored at 5 seconds.
+
+      Previously this silently used the global 30s inference timeout with no
+      override path, so the judge flapped offline whenever the upstream model
+      took longer than 30s — see dashboard "Timeout: Execution timed out
+      after 30.0s" reports. Now operators can raise/lower via env var, and
+      the default is high enough that one slow turn no longer marks the
+      judge offline. *)
   let dashboard_governance_judge_timeout_seconds =
-    max 5 timeout_seconds_int
+    let dedicated =
+      get_int ~default:0 "MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC"
+    in
+    let chosen =
+      if dedicated > 0 then dedicated
+      else max 60 timeout_seconds_int
+    in
+    max 5 chosen
 
   (** Enable inference response cache (L1+L2). *)
   let cache_enabled =

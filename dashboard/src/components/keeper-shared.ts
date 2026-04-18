@@ -183,7 +183,7 @@ export function KeeperDiagnosticSummary({
   return html`
     <div class="py-3 px-4 rounded border border-[var(--card-border)] bg-[rgba(5,14,31,0.55)]">
       <div class="mb-3 flex items-center justify-between gap-3">
-        <div class="text-2xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">명시적 상태 조회</div>
+        <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--text-muted)]">명시적 상태 조회</div>
         <button
           type="button"
           class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
@@ -293,14 +293,14 @@ export function KeeperConversationPanel({
       <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(9,15,28,0.96),rgba(5,10,20,0.94))] shadow-[0_24px_56px_rgba(0,0,0,0.28)]">
         <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--slate-gray-12)] px-4 py-4">
           <div class="min-w-55 flex-1">
-            <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 대화</div>
+            <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--text-muted)]">직접 대화</div>
             <div class="mt-2 flex flex-wrap items-center gap-2">
               <div class="text-md font-semibold text-[var(--text-strong)]">@${keeperName}</div>
-              <span class=${`inline-flex items-center rounded-sm border px-2.5 py-1 text-3xs font-medium uppercase tracking-[0.1em] ${conversationStateClass(sending, hydrating)}`}>
+              <span class=${`inline-flex items-center rounded-sm border px-2.5 py-1 text-3xs font-medium uppercase tracking-2 ${conversationStateClass(sending, hydrating)}`}>
                 ${conversationStateLabel(sending, hydrating)}
               </span>
             </div>
-            <div class="mt-1 text-sm leading-[1.65] text-[var(--text-secondary)]">
+            <div class="mt-1 text-sm leading-loose text-[var(--text-secondary)]">
               Keeper 상세 안에서 직접 대화와 내부 메시지를 함께 봅니다. 필요하면 토글로 내부 프롬프트와 tool chatter를 숨길 수 있습니다.
             </div>
           </div>
@@ -341,7 +341,7 @@ export function KeeperConversationPanel({
         <div class="px-4 py-4">
           ${chatAccess.message
             ? html`
-                <div class="mb-4 rounded-[16px] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-[1.6] text-[var(--warn-bright)]">
+                <div class="mb-4 rounded-[16px] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]">
                   ${chatAccess.message}
                 </div>
               `
@@ -356,7 +356,7 @@ export function KeeperConversationPanel({
 
         ${!showInternal && hiddenCount > 0
           ? html`
-              <div class="mx-4 mb-4 rounded-[16px] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-[1.55] text-[var(--warn-bright)]">
+              <div class="mx-4 mb-4 rounded-[16px] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)]">
                 ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지 표시"로 볼 수 있습니다.
               </div>
             `

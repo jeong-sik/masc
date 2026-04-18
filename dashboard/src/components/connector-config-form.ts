@@ -316,7 +316,7 @@ export function ConnectorConfigToggle({ connectorId }: { connectorId: string }) 
   return html`
     <button
       type="button"
-      class="cursor-pointer rounded border border-[var(--white-8)] px-2 py-0.5 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
+      class="cursor-pointer rounded border border-[var(--white-8)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
       aria-expanded=${entry.open}
       aria-controls=${`connector-config-${connectorId}`}
       onClick=${onClick}
@@ -454,7 +454,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
   return html`
     <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-3">
       <div class="mb-2 flex items-center justify-between">
-        <div class="text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]">
+        <div class="text-3xs uppercase tracking-4 text-[var(--text-dim)]">
           ${entry.fields.length} fields · ${entry.fields.filter(f => f.required).length} required
           ${entry.lastSavedAt
             ? html`
@@ -473,7 +473,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
         </div>
         <div class="flex items-center gap-2">
           <label
-            class="flex cursor-pointer items-center gap-1 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)] hover:text-[var(--text-body)]"
+            class="flex cursor-pointer items-center gap-1 text-3xs uppercase tracking-4 text-[var(--text-dim)] hover:text-[var(--text-body)]"
             title="저장 직후 자동으로 sidecar 재시작 (stop → 800ms → start)"
           >
             <input
@@ -515,7 +515,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
             <label class="flex items-center gap-1.5 text-2xs font-medium text-[var(--text-body)]" for=${`field-${connectorId}-${field.name}`}>
               <span>${field.name}</span>
               ${field.required ? html`<span class="text-[var(--bad-light)]" aria-label="required">*</span>` : null}
-              <span class="text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]">${field.type}</span>
+              <span class="text-3xs uppercase tracking-4 text-[var(--text-dim)]">${field.type}</span>
             </label>
             <${FieldWidget}
               id=${connectorId}
@@ -551,7 +551,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
       </div>
 
       <div class="mt-3 border-t border-[var(--white-8)] pt-2.5">
-        <div class="mb-1 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]">
+        <div class="mb-1 text-3xs uppercase tracking-4 text-[var(--text-dim)]">
           .env 블록 (현재 입력값)
         </div>
         ${envBlock === ''

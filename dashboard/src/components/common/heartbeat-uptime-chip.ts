@@ -61,7 +61,7 @@ export function HeartbeatUptimeChip({
   const title = `${view.label}% uptime · ${summary.up}/${summary.up + summary.down} observed`
   const chipClass = cx ?? ''
   return html`<span
-    class=${`inline-flex items-center gap-0.5 rounded-sm border px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-[0.14em] tabular-nums ${tone} ${chipClass}`}
+    class=${`inline-flex items-center gap-0.5 rounded-sm border px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 tabular-nums ${tone} ${chipClass}`}
     title=${title}
     aria-label=${title}
     data-heartbeat-uptime-chip

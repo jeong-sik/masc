@@ -158,7 +158,7 @@ function Pill({ pill }: { pill: RailPill }) {
       </span>
       <span
         aria-hidden="true"
-        class=${`block text-3xs uppercase tracking-[0.14em] ${tone.text}`}
+        class=${`block text-3xs uppercase tracking-4 ${tone.text}`}
       >${pill.label}</span>
     </button>
   `

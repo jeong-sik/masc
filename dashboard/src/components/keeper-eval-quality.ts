@@ -134,7 +134,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
   if (loading && !data) {
     return html`
       <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-2)]">
-        <div class="text-3xs font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)] mb-2">Eval Quality</div>
+        <div class="text-3xs font-semibold tracking-1 uppercase text-[var(--text-muted)] mb-2">Eval Quality</div>
         <div class="text-2xs text-[var(--text-dim)] animate-pulse">데이터 로딩 중...</div>
       </div>
     `
@@ -143,7 +143,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
   if (error && !data) {
     return html`
       <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-2)]">
-        <div class="text-3xs font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)] mb-2">Eval Quality</div>
+        <div class="text-3xs font-semibold tracking-1 uppercase text-[var(--text-muted)] mb-2">Eval Quality</div>
         <div class="text-2xs text-[var(--text-dim)]">eval 데이터 없음</div>
       </div>
     `
@@ -152,7 +152,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
   if (!data || data.count === 0) {
     return html`
       <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-2)]">
-        <div class="text-3xs font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)] mb-2">Eval Quality</div>
+        <div class="text-3xs font-semibold tracking-1 uppercase text-[var(--text-muted)] mb-2">Eval Quality</div>
         <div class="text-2xs text-[var(--text-dim)]">eval 결과 없음. OAS harness가 verdict를 생성하면 여기에 표시됩니다.</div>
       </div>
     `
@@ -173,7 +173,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* Header */}
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
-          <span class="text-3xs font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">Eval Quality</span>
+          <span class="text-3xs font-semibold tracking-1 uppercase text-[var(--text-muted)]">Eval Quality</span>
           ${allPassed
             ? html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-3xs font-semibold bg-[rgba(74,222,128,0.12)] text-[var(--ok)]">ALL PASS</span>`
             : html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-3xs font-semibold bg-[var(--bad-12)] text-[var(--bad)]">FAIL</span>`

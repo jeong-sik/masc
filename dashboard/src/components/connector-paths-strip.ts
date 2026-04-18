@@ -67,7 +67,7 @@ function PathRow({ label, value, hint }: { label: string; value: string; hint: s
   return html`
     <div class="flex items-center gap-2" data-paths-row=${label}>
       <span
-        class="w-25 shrink-0 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]"
+        class="w-25 shrink-0 text-3xs uppercase tracking-4 text-[var(--text-dim)]"
         title=${hint}
       >${label}</span>
       <div class="min-w-0 flex-1">
@@ -93,7 +93,7 @@ export function ConnectorPathsStrip({ connectors }: { connectors: GateConnectorI
         aria-controls="connector-paths-body"
       >
         <span>
-          <span class="mr-2 text-3xs uppercase tracking-[0.14em]">Paths</span>
+          <span class="mr-2 text-3xs uppercase tracking-4">Paths</span>
           <span class="font-mono">${paths.connectorsDir ?? paths.sidecarsDir}</span>
           <span class="ml-2 text-[var(--text-dim)]">${paths.connectorsDir ? '' : '(런타임 미관찰 · sidecar 경로만 표시)'}</span>
         </span>

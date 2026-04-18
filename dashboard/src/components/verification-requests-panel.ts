@@ -360,7 +360,7 @@ function VerificationRow({
                   ${hasTaskTitle
                     ? html`
                         <div>
-                          <div class="text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] mb-1">
+                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--text-muted)] mb-1">
                             Task Title
                           </div>
                           <div class="text-[var(--text-body)]">${row.task_title}</div>
@@ -370,7 +370,7 @@ function VerificationRow({
                   ${hasContract
                     ? html`
                         <div>
-                          <div class="text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] mb-1">
+                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--text-muted)] mb-1">
                             Completion Contract
                           </div>
                           <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--text-body)]">
@@ -382,7 +382,7 @@ function VerificationRow({
                   ${hasEvidence
                     ? html`
                         <div>
-                          <div class="text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] mb-1">
+                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--text-muted)] mb-1">
                             Required Evidence
                           </div>
                           <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--text-body)]">
@@ -394,7 +394,7 @@ function VerificationRow({
                   ${row.verdict_reason !== ''
                     ? html`
                         <div>
-                          <div class="text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] mb-1">
+                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--text-muted)] mb-1">
                             Verdict Reason
                           </div>
                           <div class="text-[var(--text-body)]">${row.verdict_reason}</div>

@@ -180,7 +180,7 @@ function HarnessFlowCard({ data }: { data: HarnessHealthData }) {
       <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
         <div>
           <div class="text-sm font-medium text-[var(--text-strong)]">실시간 상태 그래프</div>
-          <div class="mt-1 text-sm leading-[1.6] text-[var(--text-muted)]">
+          <div class="mt-1 text-sm leading-loose text-[var(--text-muted)]">
             작업 완료, 컨텍스트 압축, 세대 교체 신호가 하네스로 모이는 구조입니다.
           </div>
         </div>
@@ -247,7 +247,7 @@ export function HarnessHealth() {
             <div class="max-w-3xl">
               <${SectionCap}>keeper 장기 실행 중 평가/압축/교체가 정상인지 감시합니다<//>
               <div class="mt-2 text-2xl font-semibold text-[var(--text-strong)]">${heroTitle(data)}</div>
-              <div class="mt-2 text-sm leading-[1.7] text-[var(--text-body)]">${heroBody(data)}</div>
+              <div class="mt-2 text-sm leading-airy text-[var(--text-body)]">${heroBody(data)}</div>
             </div>
             <div class="flex items-center gap-2">
               <button
@@ -289,7 +289,7 @@ export function HarnessHealth() {
           </div>
         </div>
 
-        <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] px-4 py-3 text-sm leading-[1.7] text-[var(--text-body)]">
+        <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] px-4 py-3 text-sm leading-airy text-[var(--text-body)]">
           ${data.scope_note}
         </div>
 
@@ -355,7 +355,7 @@ export function HarnessHealth() {
               />
             </div>
 
-            <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-3 text-xs leading-[1.6] text-[var(--text-muted)]">
+            <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-3 text-xs leading-loose text-[var(--text-muted)]">
               인간 라벨 ${cal.labeled_count}건이 calibration ground truth입니다. 값이 0이면 runtime health는 볼 수 있어도 evaluator accuracy는 아직 검증되지 않았습니다.
             </div>
 

@@ -77,7 +77,7 @@ export function DistributionBars({
     <div class="rounded border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3">
       ${title
         ? html`
-            <div class="text-3xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">${title}</div>
+            <div class="text-3xs font-semibold uppercase tracking-5 text-[var(--text-muted)]">${title}</div>
             ${subtitle ? html`<div class="mt-1 text-2xs text-[var(--text-muted)]">${subtitle}</div>` : null}
           `
         : null}
@@ -135,7 +135,7 @@ export function SegmentedBar({
     <div class="rounded border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3">
       ${title
         ? html`
-            <div class="text-3xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">${title}</div>
+            <div class="text-3xs font-semibold uppercase tracking-5 text-[var(--text-muted)]">${title}</div>
             ${subtitle ? html`<div class="mt-1 text-2xs text-[var(--text-muted)]">${subtitle}</div>` : null}
           `
         : null}

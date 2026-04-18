@@ -269,21 +269,21 @@ export function GraphView({ data }: GraphViewProps) {
         </div>
         <div class="grid grid-cols-3 gap-3 mb-3">
           <div class="text-center">
-            <div class="text-3xs text-[var(--text-muted)] uppercase tracking-[0.08em]">중요도</div>
+            <div class="text-3xs text-[var(--text-muted)] uppercase tracking-1">중요도</div>
             <div class="text-xl font-bold text-[var(--text-near-white)] tabular-nums">${(selectedNode.semantic_weight ?? selectedNode.weight).toFixed(1)}</div>
           </div>
           <div class="text-center">
-            <div class="text-3xs text-[var(--text-muted)] uppercase tracking-[0.08em]">빈도</div>
+            <div class="text-3xs text-[var(--text-muted)] uppercase tracking-1">빈도</div>
             <div class="text-xl font-bold text-[var(--text-slate-light)] tabular-nums">${selectedNode.weight}</div>
           </div>
           <div class="text-center">
-            <div class="text-3xs text-[var(--text-muted)] uppercase tracking-[0.08em]">연결</div>
+            <div class="text-3xs text-[var(--text-muted)] uppercase tracking-1">연결</div>
             <div class="text-xl font-bold text-[var(--text-slate-light)] tabular-nums">${connectedEdges.length}</div>
           </div>
         </div>
         ${connectedEdges.length > 0 ? html`
           <div class="border-t border-[var(--slate-gray-10)] pt-3">
-            <div class="text-3xs text-[var(--text-muted)] uppercase tracking-[0.08em] mb-2">연결된 관계</div>
+            <div class="text-3xs text-[var(--text-muted)] uppercase tracking-1 mb-2">연결된 관계</div>
             <div class="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
               ${connectedEdges.slice(0, 20).map(({ edge, otherLabel }) => html`
                 <div class="flex items-center gap-2 text-sm py-1 px-2 rounded bg-[rgba(15,23,42,0.4)]" key=${edge.id ?? `${edge.source}-${edge.kind}-${edge.target}`}>

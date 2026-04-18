@@ -66,6 +66,24 @@
   --font-size-2xl: 20px;
   --font-size-3xl: 30px;
 
+  /* Letter-spacing for uppercase mono labels (sec-lbl, t-label, status pills).
+     Numbered scale 1..5 corresponds to widening uppercase tracking; the
+     dashboard's mono uppercase labels need wider tracking than body to read
+     as discrete tokens, not running text. tracking-1 is the default for
+     UI labels; 4/5 are reserved for dense tabular header rows. */
+  --tracking-1: 0.08em;
+  --tracking-2: 0.10em;
+  --tracking-3: 0.12em;
+  --tracking-4: 0.14em;
+  --tracking-5: 0.16em;
+
+  /* Line-height presets. Tailwind v4 `leading-normal` (1.5) covers compact
+     UI text. The other named tokens cover documentation-style copy where
+     longer line-length needs more breathing room. */
+  --leading-paragraph: 1.55;  /* article body inside cards */
+  --leading-loose: 1.6;       /* multi-line tooltip / hint text */
+  --leading-airy: 1.7;        /* large headings or onboarding flows */
+
   --color-text-dim: #a0a8b4;
   --color-text-slate: #b0bfd4;
   --color-text-slate-light: #cbd5e1;

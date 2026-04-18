@@ -103,7 +103,7 @@ export function QuickBindForm({ connectorId, keepers }: {
       data-quick-bind=${connectorId}
     >
       <div class="min-w-0 flex-1 basis-[160px]">
-        <label class="mb-1 block text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]" for=${`qb-channel-${connectorId}`}>
+        <label class="mb-1 block text-3xs uppercase tracking-4 text-[var(--text-dim)]" for=${`qb-channel-${connectorId}`}>
           채널 ID
         </label>
         <${TextInput}
@@ -125,7 +125,7 @@ export function QuickBindForm({ connectorId, keepers }: {
         />
       </div>
       <div class="min-w-0 basis-[140px]">
-        <label class="mb-1 block text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]" for=${`qb-keeper-${connectorId}`}>
+        <label class="mb-1 block text-3xs uppercase tracking-4 text-[var(--text-dim)]" for=${`qb-keeper-${connectorId}`}>
           Keeper
         </label>
         <select

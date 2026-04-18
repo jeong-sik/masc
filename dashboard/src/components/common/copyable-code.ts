@@ -69,8 +69,8 @@ export function copyableWrapperClasses(variant: CopyableVariant): string {
     at the left edge and starts leading the reader's eye into the command. */
 export function copyableLabelClasses(variant: CopyableVariant): string {
   return variant === 'primary'
-    ? 'shrink-0 text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--accent)]'
-    : 'shrink-0 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]'
+    ? 'shrink-0 text-3xs font-semibold uppercase tracking-4 text-[var(--accent)]'
+    : 'shrink-0 text-3xs uppercase tracking-4 text-[var(--text-dim)]'
 }
 
 export function CopyableCode({

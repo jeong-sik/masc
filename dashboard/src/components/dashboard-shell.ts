@@ -612,7 +612,7 @@ function SurfaceLead() {
             />`
           : null}
       </div>
-      ${description ? html`<p class="m-0 text-sm leading-[1.5] text-[var(--text-dim)]">${description}</p>` : null}
+      ${description ? html`<p class="m-0 text-sm leading-normal text-[var(--text-dim)]">${description}</p>` : null}
     </div>
   `
 }

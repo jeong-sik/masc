@@ -93,7 +93,7 @@ export function OperationalMeaningPanel({
     >
       <div class="flex items-start justify-between gap-3 flex-wrap">
         <div class="min-w-0">
-          <div class="text-3xs font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">Operator Meaning</div>
+          <div class="text-3xs font-semibold uppercase tracking-2 text-[var(--text-muted)]">Operator Meaning</div>
           <div class="mt-1 text-xl font-semibold text-[var(--text-strong)]">${insight.headline}</div>
           <div class="mt-1 text-2xs text-[var(--text-dim)] leading-relaxed">${insight.detail}</div>
         </div>
@@ -115,7 +115,7 @@ export function OperationalMeaningPanel({
       </div>
 
       <div class="mt-4 flex items-center justify-between gap-2">
-        <div class="text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
           관찰 레인
         </div>
         <input
@@ -135,7 +135,7 @@ export function OperationalMeaningPanel({
             ${visibleLanes.map(lane => html`
               <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
                 <div class="flex items-center justify-between gap-2">
-                  <span class="text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${lane.field}</span>
+                  <span class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">${lane.field}</span>
                   <span class=${`rounded-sm border px-1.5 py-0.5 text-4xs font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
                     ${fmtDuration(lane.observedForSec)}
                   </span>
@@ -406,7 +406,7 @@ export function TurnPipelineStrip({
 }) {
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
-      <div class="mb-2 text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+      <div class="mb-2 text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
         턴 파이프라인
       </div>
       <div class="flex flex-col gap-1 md:flex-row md:gap-0 md:items-stretch" role="list" aria-label="턴 파이프라인 단계">

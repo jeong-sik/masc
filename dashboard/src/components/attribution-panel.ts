@@ -294,10 +294,10 @@ export function AttributionPanel() {
   return html`
     <div class="flex flex-col gap-4">
       <div class="flex flex-col gap-1">
-        <div class="text-2xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+        <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
           Attribution — gate chain 관찰
         </div>
-        <p class="m-0 text-xs leading-[1.55] text-[var(--text-muted)]">
+        <p class="m-0 text-xs leading-paragraph text-[var(--text-muted)]">
           각 gate의 결과 카운트 + 최근 ${RECENT_LIMIT}건 이벤트. 5초마다 자동 갱신.
         </p>
       </div>
@@ -344,7 +344,7 @@ export function AttributionPanel() {
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <${SurfaceCard} variant="light">
           <div class="flex flex-col">
-            <div class="px-3 py-2 border-b border-[var(--card-border)] text-2xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+            <div class="px-3 py-2 border-b border-[var(--card-border)] text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
               최근 이벤트 (${isFiltering
                 ? `${visibleEvents.length}/${gateFiltered.length}`
                 : gateFiltered.length})

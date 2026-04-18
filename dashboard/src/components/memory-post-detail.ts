@@ -142,7 +142,7 @@ function CommentItem({
             onClick=${() => { replyingTo.value = isReplying ? null : comment.id; commentText.value = '' }}
           >${isReplying ? '취소' : '답글'}</button>
         </div>
-        <div class="text-sm text-[var(--text-body)] leading-[1.55]"><${RichContent} text=${displayText} previewLimit=${1} /></div>
+        <div class="text-sm text-[var(--text-body)] leading-paragraph"><${RichContent} text=${displayText} previewLimit=${1} /></div>
         ${needsTruncation ? html`
           <button type="button"
             class="mt-1 text-2xs text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0"
@@ -299,7 +299,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
             <h1 class="m-0 text-2xl font-semibold leading-tight text-[var(--text-strong)]">${post.title}</h1>
           </div>
 
-          <div class="text-sm text-[var(--text-body)] leading-[1.65]">
+          <div class="text-sm text-[var(--text-body)] leading-loose">
             <${RichContent} text=${stripStateBlocks(post.body)} previewLimit=${4} />
           </div>
 

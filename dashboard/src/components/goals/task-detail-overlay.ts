@@ -138,7 +138,7 @@ function GateSection({
     <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
       <div class="flex items-center justify-between gap-3">
         <div class="text-xs font-medium text-text-strong">${title}</div>
-        <span class=${`rounded border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[0.08em] ${gateTone(gate.status)}`}>${gate.status}</span>
+        <span class=${`rounded border px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 ${gateTone(gate.status)}`}>${gate.status}</span>
       </div>
       ${gate.reasons && gate.reasons.length > 0 ? html`
         <div class="mt-2 flex flex-col gap-1">
@@ -165,10 +165,10 @@ function ContractSection({ task }: { task: Task }) {
   return html`
     <div class="flex flex-col gap-3">
       <div class="flex items-center gap-2">
-        <div class="text-2xs font-semibold uppercase tracking-[0.12em] text-text-muted">계약 게이트</div>
-        <span class=${`rounded border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[0.08em] ${contract?.strict ? 'text-accent border-accent/25 bg-[var(--accent-10)]' : 'text-text-muted border-[var(--white-10)] bg-[var(--white-5)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
+        <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted">계약 게이트</div>
+        <span class=${`rounded border px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 ${contract?.strict ? 'text-accent border-accent/25 bg-[var(--accent-10)]' : 'text-text-muted border-[var(--white-10)] bg-[var(--white-5)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
         ${isAwaitingVerification ? html`
-          <span class="rounded border border-accent/40 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[0.08em] text-accent">
+          <span class="rounded border border-accent/40 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 text-accent">
             검증 대기
           </span>
         ` : null}
@@ -228,11 +228,11 @@ function ExecutionLinksSection({ task }: { task: Task }) {
 
   return html`
     <div>
-      <div class="text-2xs font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">연결된 실행</div>
+      <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted mb-2">연결된 실행</div>
       <div class="flex flex-col gap-2">
         ${items.map(([label, value]) => html`
           <div key=${label} class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
-            <div class="text-3xs uppercase tracking-[0.12em] text-text-dim">${label}</div>
+            <div class="text-3xs uppercase tracking-3 text-text-dim">${label}</div>
             <div class="mt-1 text-xs font-mono text-text-body break-all">${value}</div>
           </div>
         `)}
@@ -247,7 +247,7 @@ function HandoffSection({ task }: { task: Task }) {
 
   return html`
     <div>
-      <div class="text-2xs font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">최근 Handoff</div>
+      <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted mb-2">최근 Handoff</div>
       <div class="rounded border border-warn/20 bg-warn/8 px-4 py-3">
         <div class="text-sm leading-relaxed text-text-body"><${RichContent} text=${handoff.summary} previewLimit=${2} /></div>
         ${handoff.reason ? html`<div class="mt-2 text-2xs text-text-muted">reason: ${handoff.reason}</div>` : null}
@@ -278,7 +278,7 @@ function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex flex-wrap items-center gap-2">
-        <div class="text-2xs font-semibold uppercase tracking-[0.12em] text-text-muted">담당 키퍼의 활성 목표</div>
+        <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted">담당 키퍼의 활성 목표</div>
         ${goalIds.length > 1 ? html`
           <input
             type="search"
@@ -378,7 +378,7 @@ export function TaskDetailOverlay() {
           ${'' /* Description */}
           ${task.description ? html`
             <div>
-              <div class="text-2xs font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">설명</div>
+              <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted mb-2">설명</div>
               <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3 text-sm leading-relaxed text-text-body">
                 <${RichContent} text=${task.description} previewLimit=${2} />
               </div>
@@ -394,7 +394,7 @@ export function TaskDetailOverlay() {
 
           ${'' /* Recent task events */}
           <div>
-            <div class="text-2xs font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">최근 태스크 이벤트</div>
+            <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted mb-2">최근 태스크 이벤트</div>
             <${TaskEventsSection} />
           </div>
 

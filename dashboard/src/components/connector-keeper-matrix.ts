@@ -229,7 +229,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
     <section class="mb-4 rounded border border-[var(--card-border)] bg-[var(--bg-1)] p-3" data-panel="connector-keeper-matrix">
       <header class="mb-2 flex items-baseline justify-between gap-3">
         <div>
-          <h4 class="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-body)]">
+          <h4 class="text-xs font-semibold uppercase tracking-4 text-[var(--text-body)]">
             Keeper × Connector Matrix
           </h4>
           <p class="mt-0.5 text-3xs text-[var(--text-dim)]">
@@ -258,11 +258,11 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
         : html`
             <div class="overflow-x-auto">
               <div class="grid gap-1 text-2xs" style=${gridCols} data-matrix-grid>
-                <div class="px-1 py-1 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]">Keeper ↓ / Connector →</div>
+                <div class="px-1 py-1 text-3xs uppercase tracking-4 text-[var(--text-dim)]">Keeper ↓ / Connector →</div>
                 ${matrix.columns.map(colId => html`
                   <button
                     type="button"
-                    class="flex cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-3xs uppercase tracking-[0.12em] text-[var(--text-dim)] hover:text-[var(--text-body)]"
+                    class="flex cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-3xs uppercase tracking-3 text-[var(--text-dim)] hover:text-[var(--text-body)]"
                     onClick=${() => scrollToConnectorRow(colId)}
                     title=${`${CONNECTOR_DISPLAY_NAMES[colId] ?? colId} — 행으로 이동`}
                   >
@@ -271,7 +271,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
                   </button>
                 `)}
                 <div
-                  class="px-1 py-1 text-center text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]"
+                  class="px-1 py-1 text-center text-3xs uppercase tracking-4 text-[var(--text-dim)]"
                   title="Per-keeper coverage totals (bound / unbound / n·a)"
                   data-matrix-coverage-header
                 >Coverage</div>
@@ -304,7 +304,7 @@ function MatrixColumnTotalsRow({ matrix }: { matrix: MatrixData }) {
       data-matrix-column-totals-divider
     ></div>
     <div
-      class="flex items-center gap-1 px-2 py-1 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]"
+      class="flex items-center gap-1 px-2 py-1 text-3xs uppercase tracking-4 text-[var(--text-dim)]"
       data-matrix-column-totals-label
     >Totals →</div>
     ${matrix.columns.map((_, idx) => html`

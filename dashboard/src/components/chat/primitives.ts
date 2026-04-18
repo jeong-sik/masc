@@ -138,7 +138,7 @@ function ChatMessageBubble({
       <div class=${`flex justify-between gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
         <div class=${`flex min-w-0 flex-1 gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
           <div
-            class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center border text-2xs font-semibold uppercase tracking-[0.08em] ${
+            class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center border text-2xs font-semibold uppercase tracking-1 ${
               isMessenger ? 'size-8 rounded-card' : 'size-10 rounded'
             }`}
           >
@@ -157,7 +157,7 @@ function ChatMessageBubble({
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
-                            class="inline-flex items-center rounded-sm border border-[var(--card-border)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-medium uppercase tracking-[0.08em] text-[var(--text-muted)]"
+                            class="inline-flex items-center rounded-sm border border-[var(--card-border)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-medium uppercase tracking-1 text-[var(--text-muted)]"
                             data-chat-delivery=${delivery}
                           >
                             ${delivery}
@@ -169,14 +169,14 @@ function ChatMessageBubble({
               : html`
                   <div class="flex flex-wrap items-center gap-1.5">
                     <span
-                      class=${`chat-role-chip ${tone} inline-flex items-center rounded-sm border px-2.5 py-1 text-3xs font-semibold uppercase tracking-[0.12em]`}
+                      class=${`chat-role-chip ${tone} inline-flex items-center rounded-sm border px-2.5 py-1 text-3xs font-semibold uppercase tracking-3`}
                     >
                       ${entry.label}
                     </span>
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
-                            class="inline-flex items-center rounded-sm border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-1 text-3xs font-medium uppercase tracking-[0.1em] text-[var(--text-muted)]"
+                            class="inline-flex items-center rounded-sm border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-1 text-3xs font-medium uppercase tracking-2 text-[var(--text-muted)]"
                             data-chat-delivery=${delivery}
                           >
                             ${delivery}
@@ -222,12 +222,12 @@ function ChatMessageBubble({
           </div>`
         : null}
 
-      <div class="whitespace-pre-wrap break-words text-base leading-[1.7] text-[var(--text-body)]">
+      <div class="whitespace-pre-wrap break-words text-base leading-airy text-[var(--text-body)]">
         ${entry.text || (entry.delivery === 'streaming' ? '' : '(empty reply)')}
       </div>
       ${entry.error
         ? html`
-            <div class="rounded border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.28)] px-3 py-2 text-xs leading-[1.55] text-[var(--bad-light)]">
+            <div class="rounded border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.28)] px-3 py-2 text-xs leading-paragraph text-[var(--bad-light)]">
               ${entry.error}
             </div>
           `
@@ -241,7 +241,7 @@ function ChatMessageBubble({
                     <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                       ${overview.map(item => html`
                         <div class="rounded border border-[var(--slate-gray-12)] bg-[var(--white-3)] px-3 py-2.5">
-                          <div class="text-3xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">${item.label}</div>
+                          <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--text-muted)]">${item.label}</div>
                           <div class="mt-1 text-sm font-semibold text-[var(--text-strong)]">${item.value}</div>
                         </div>
                       `)}
@@ -251,10 +251,10 @@ function ChatMessageBubble({
               ${entry.details.skillPrimary
                 ? html`
                     <div class="chat-detail-callout rounded border border-[rgba(76,181,137,0.18)] px-3 py-3">
-                      <div class="text-3xs font-semibold uppercase tracking-[0.12em] text-[#8fdcb3]">스킬 경로</div>
+                      <div class="text-3xs font-semibold uppercase tracking-3 text-[#8fdcb3]">스킬 경로</div>
                       <div class="mt-1 text-sm font-semibold text-[#d8f7e6]">${entry.details.skillPrimary}</div>
                       ${entry.details.skillReason
-                        ? html`<div class="mt-1 text-xs leading-[1.6] text-[#bfe8cf]">${entry.details.skillReason}</div>`
+                        ? html`<div class="mt-1 text-xs leading-loose text-[#bfe8cf]">${entry.details.skillReason}</div>`
                         : null}
                     </div>
                   `
@@ -262,12 +262,12 @@ function ChatMessageBubble({
               ${state.length > 0
                 ? html`
                     <div class="flex flex-col gap-2">
-                      <div class="text-3xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">상태 스냅샷</div>
+                      <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--text-muted)]">상태 스냅샷</div>
                       <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                         ${state.map(item => html`
                           <div class="rounded border border-[var(--accent-soft)] bg-[rgba(71,184,255,0.06)] px-3 py-2.5">
-                            <div class="text-3xs font-semibold uppercase tracking-[0.1em] text-[var(--accent)]">${item.label}</div>
-                            <div class="mt-1 text-xs leading-[1.55] text-[var(--text-body)]">${item.value}</div>
+                            <div class="text-3xs font-semibold uppercase tracking-2 text-[var(--accent)]">${item.label}</div>
+                            <div class="mt-1 text-xs leading-paragraph text-[var(--text-body)]">${item.value}</div>
                           </div>
                         `)}
                       </div>
@@ -333,8 +333,8 @@ export function ChatTranscript({
       ${entries.length === 0
         ? html`
             <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[rgba(148,163,184,0.18)] bg-[var(--white-3)] px-6 text-center">
-              <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 메시지 없음</div>
-              <div class="mt-3 max-w-[34rem] text-sm leading-[1.7] text-[var(--text-secondary)]">${emptyText}</div>
+              <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--text-muted)]">직접 메시지 없음</div>
+              <div class="mt-3 max-w-[34rem] text-sm leading-airy text-[var(--text-secondary)]">${emptyText}</div>
             </div>
           `
         : entries.map(entry => html`<${ChatMessageBubble} key=${entry.id} entry=${entry} showMetadata=${showMetadata !== false} variant=${variant} />`)}
@@ -382,11 +382,11 @@ export function ChatComposer({
   return html`
     <div class="chat-composer flex flex-col gap-3">
       <div class="flex flex-wrap items-center justify-between gap-2">
-        <div class="text-2xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">메시지</div>
+        <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--text-muted)]">메시지</div>
         <div class="text-2xs text-[var(--text-muted)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
       </div>
       <textarea
-        class="control-textarea min-h-24 rounded-card border border-[var(--slate-gray-16)] bg-[var(--white-3)] px-3 py-3 text-base leading-[1.6]"
+        class="control-textarea min-h-24 rounded-card border border-[var(--slate-gray-16)] bg-[var(--white-3)] px-3 py-3 text-base leading-loose"
         placeholder=${placeholder}
         value=${draft}
         onInput=${(event: Event) => { onDraftChange((event.target as HTMLTextAreaElement).value) }}
@@ -401,7 +401,7 @@ export function ChatComposer({
         disabled=${disabled}
       ></textarea>
       <div class="flex flex-wrap items-center justify-between gap-2">
-        <div class="text-2xs leading-[1.55] text-[var(--text-muted)]">
+        <div class="text-2xs leading-paragraph text-[var(--text-muted)]">
           ${streaming
             ? '키퍼 응답 스트림이 활성 상태입니다. 멈춘 것 같으면 중지할 수 있습니다.'
             : '직접 메시지만 이 레인에 표시됩니다. 내부 키퍼 프롬프트는 숨겨집니다.'}

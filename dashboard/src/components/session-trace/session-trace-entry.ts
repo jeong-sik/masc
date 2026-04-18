@@ -164,7 +164,7 @@ function DiffBlock({ text }: { text: string }) {
   const truncatedCount = allLines.length - lines.length
 
   return html`
-    <div class="font-mono text-2xs leading-[1.6] overflow-x-auto">
+    <div class="font-mono text-2xs leading-loose overflow-x-auto">
       ${lines.map((line: string) => {
         const cls =
           line.startsWith('+') && !line.startsWith('+++') ? 'text-[var(--ok)] bg-[var(--ok-6)]'

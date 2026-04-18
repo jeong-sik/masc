@@ -100,7 +100,7 @@ export function QuickIntervene() {
       ${showAdvanced
         ? html`
             <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
-              <label class="block text-2xs font-medium uppercase tracking-[0.08em] text-[var(--text-muted)]" for="quick-intervene-actor">
+              <label class="block text-2xs font-medium uppercase tracking-1 text-[var(--text-muted)]" for="quick-intervene-actor">
                 기록 주체
               </label>
               <p class="mt-1 text-xs leading-[1.45] text-[var(--text-muted)]">개입과 승인 요청은 이 이름으로 기록됩니다.</p>

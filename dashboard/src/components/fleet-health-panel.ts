@@ -63,8 +63,8 @@ export function FleetHealthPanel() {
   return html`
     <div class="flex flex-col gap-4">
         <div class="flex flex-col gap-1">
-          <div class="text-2xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">운영 신호 묶음</div>
-          <p class="m-0 text-xs leading-[1.55] text-[var(--text-muted)]">
+          <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">운영 신호 묶음</div>
+          <p class="m-0 text-xs leading-paragraph text-[var(--text-muted)]">
             이 화면은 roster가 아니라 이벤트, 비교, 도구 품질, 거버넌스 같은 플릿 신호를 보는 곳입니다.
           </p>
         </div>

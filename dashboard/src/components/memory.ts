@@ -419,7 +419,7 @@ function PostCard({ post }: { post: BoardPost }) {
         <div class="text-md font-semibold text-[var(--text-strong)] leading-snug mb-1.5 group-hover:text-[var(--accent)] transition-colors">${stripInlineMarkdown(post.title)}</div>
 
         <!-- Content preview: rendered markdown, height-capped -->
-        <div class="board-post-preview text-sm text-[var(--text-body)] leading-[1.55] mb-2.5 overflow-hidden relative ${richPreview ? 'max-h-[12rem]' : 'max-h-[4.8em]'}">
+        <div class="board-post-preview text-sm text-[var(--text-body)] leading-paragraph mb-2.5 overflow-hidden relative ${richPreview ? 'max-h-[12rem]' : 'max-h-[4.8em]'}">
           <${RichContent} text=${previewBody} class="board-post-preview__content" previewLimit=${1} />
           <div class="absolute bottom-0 left-0 right-0 ${richPreview ? 'h-10' : 'h-6'} bg-gradient-to-t from-[var(--card)] to-transparent pointer-events-none" />
         </div>

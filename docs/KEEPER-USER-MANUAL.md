@@ -69,6 +69,13 @@ OAS_CODEX_CONFIG = "sandbox_mode=read-only"
 
 키는 반드시 `^OAS_(CLAUDE|CODEX|GEMINI)_.+` 패턴에 맞아야 한다. 그 외 키(`PATH`, `LD_PRELOAD`, 임의 변수 등)는 silently 드롭되어 ambient env 주입을 차단한다. bool 값은 `true`→`"1"`, `false`→`"0"`으로 자동 변환된다.
 
+빠른 운영 규칙:
+- `OAS_CODEX_SANDBOX=read-only`: 읽기/진단 전용
+- `OAS_CODEX_SANDBOX=workspace-write`: 일반적인 로컬 코딩
+- `OAS_CODEX_SANDBOX=danger-full-access`: 마지막 수단
+
+주의: 이건 Codex CLI sandbox다. keeper Docker sandbox는 아래 3.1.1과 [DOCKER-SANDBOX-QUICKSTART.md](./DOCKER-SANDBOX-QUICKSTART.md)가 canonical이다.
+
 ### 1.2 MASC --- 조정 레이어
 
 MASC는 OAS 위에 멀티에이전트 협업 기능을 확장한다:
@@ -280,6 +287,14 @@ spawn 시 인자로 직접 설정하는 필드.
 | `shared_memory_scope` | string | `disabled` | typed shared-memory lane. `room`이면 keeper-authorized `masc_team_memory_*`를 flattened `default` namespace에서 사용 가능 | `masc_keeper_up`의 `shared_memory_scope` 인자 |
 
 ### 3.1.1 Sandbox Core V1 사용법
+
+처음엔 이 규칙만 쓰면 된다:
+
+- 기본: `sandbox_profile="docker_hardened"` + `network_mode="none"`
+- 네트워크가 실제로 필요할 때만 `network_mode="inherit"`
+- Docker가 문제일 때만 `sandbox_profile="legacy_local"`
+
+짧은 복붙 문서는 [DOCKER-SANDBOX-QUICKSTART.md](./DOCKER-SANDBOX-QUICKSTART.md)다.
 
 가장 보수적인 기본 패턴:
 

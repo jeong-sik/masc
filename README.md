@@ -392,6 +392,7 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 | [docs/RELEASE-EVIDENCE.md](docs/RELEASE-EVIDENCE.md) | Release-grade smoke checks and proof bundle contract |
 | [docs/BENCHMARK-RUNBOOK.md](docs/BENCHMARK-RUNBOOK.md) | Benchmark and comparison harnesses |
 | [docs/KEEPER-USER-MANUAL.md](docs/KEEPER-USER-MANUAL.md) | Keeper lifecycle and troubleshooting |
+| [docs/DOCKER-SANDBOX-QUICKSTART.md](docs/DOCKER-SANDBOX-QUICKSTART.md) | Keeper Docker sandbox presets and copy-paste recipes |
 | [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md) | Supervised execution / operator workflow |
 | [docs/SWARM-DELIVERY-RUNBOOK.md](docs/SWARM-DELIVERY-RUNBOOK.md) | Single-agent vs swarm delivery |
 | [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md) | OAS/MASC ownership boundary |

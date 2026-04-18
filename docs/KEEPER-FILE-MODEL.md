@@ -188,6 +188,14 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 
 ### Sandbox + Shared Memory Example
 
+If you want the shortest operator rule, start with:
+
+- `sandbox_profile = "docker_hardened"`
+- `network_mode = "none"`
+
+Only open network when the actual task needs it. Quick operator guide:
+[DOCKER-SANDBOX-QUICKSTART.md](./DOCKER-SANDBOX-QUICKSTART.md)
+
 ```toml
 [keeper]
 persona_name = "analyst"

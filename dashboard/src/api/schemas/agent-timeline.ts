@@ -20,7 +20,7 @@ import {
   type InferOutput,
 } from 'valibot'
 
-export const AgentTimelineEventSchema = object({
+const AgentTimelineEventSchema = object({
   ts: string(),
   type: string(),
   detail: record(string(), unknown()),
@@ -40,7 +40,7 @@ const AgentTimelineSummarySchema = object({
   total_events: number(),
 })
 
-export const AgentTimelineResponseSchema = object({
+const AgentTimelineResponseSchema = object({
   agent: string(),
   period: AgentTimelinePeriodSchema,
   events: array(AgentTimelineEventSchema),

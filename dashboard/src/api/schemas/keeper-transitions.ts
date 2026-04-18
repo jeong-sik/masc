@@ -17,7 +17,7 @@ import {
   type InferOutput,
 } from 'valibot'
 
-export const KeeperTransitionSchema = object({
+const KeeperTransitionSchema = object({
   prev_phase: string(),
   new_phase: string(),
   selected_event: unknown(),
@@ -25,7 +25,7 @@ export const KeeperTransitionSchema = object({
   transition_outcome: string(),
 })
 
-export const KeeperTransitionsResponseSchema = object({
+const KeeperTransitionsResponseSchema = object({
   keeper: string(),
   current_phase: nullable(string()),
   count: number(),

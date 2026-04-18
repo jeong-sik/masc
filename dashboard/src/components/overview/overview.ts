@@ -26,6 +26,8 @@ import {
   shellMetaCognition,
   shellConfigResolution,
   shellRuntimeResolution,
+  tasks,
+  keepers,
 } from '../../store'
 import type { ObservatoryAgent } from '../../observatory-store'
 import type {
@@ -722,6 +724,74 @@ function OperationsHubCard() {
   `
 }
 
+function JourneyEntryCard() {
+  const activeTasks = tasks.value.filter(task => {
+    const status = (task.status ?? 'todo').trim()
+    return status === 'todo' || status === 'claimed' || status === 'in_progress' || status === 'awaiting_verification'
+  }).length
+  const liveKeepers = keepers.value.filter(keeper => {
+    const status = (keeper.status ?? '').trim().toLowerCase()
+    if (keeper.keepalive_running === true) return true
+    return !['offline', 'inactive', 'stopped', 'dead'].includes(status)
+  }).length
+  const blockedJourneys = keepers.value.filter(keeper => keeper.runtime_blocker_class != null).length
+
+  return html`
+    <div>
+      <${HomeSectionHeader}
+        label="여정 맵"
+        linkLabel="모니터링에서 열기 ->"
+        linkTab="monitoring"
+        linkParams=${{ section: 'journey' }}
+      />
+      <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 max-[920px]:grid-cols-1">
+        <div class="rounded border border-card-border/40 bg-card/40 p-4">
+          <div class="text-[13px] leading-[1.7] text-[var(--text-body)]">
+            새 통합 화면입니다. <strong class="text-[var(--text-strong)]">Task → Run → Contract → Keeper → Thinking → Memory → Turn → Life → Cascade</strong>
+            를 같은 카드 안에서 읽습니다. task에 묶인 실행 흐름과 task 밖 keeper continuity를 한 화면에서 바로 파악할 때 이쪽이 첫 진입점입니다.
+          </div>
+          <div class="mt-4 grid grid-cols-3 gap-3 max-[720px]:grid-cols-1">
+            <div class=${opHubTileBorderClass(activeTasks)}>
+              <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">활성 태스크</div>
+              <div class=${opHubTileNumberClass(activeTasks)}>${activeTasks}</div>
+              <div class="mt-1 text-[11px] text-[var(--text-muted)]">task journeys</div>
+            </div>
+            <div class=${opHubTileBorderClass(liveKeepers)}>
+              <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">라이브 키퍼</div>
+              <div class=${opHubTileNumberClass(liveKeepers)}>${liveKeepers}</div>
+              <div class="mt-1 text-[11px] text-[var(--text-muted)]">keeper journeys</div>
+            </div>
+            <div class=${opHubTileBorderClass(blockedJourneys)}>
+              <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">런타임 차단</div>
+              <div class=${opHubTileNumberClass(blockedJourneys)}>${blockedJourneys}</div>
+              <div class="mt-1 text-[11px] text-[var(--text-muted)]">blocked journeys</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <${RouteLink}
+            tab="monitoring"
+            params=${{ section: 'journey' }}
+            class="rounded border border-accent/25 bg-[var(--accent-10)] px-4 py-3 text-[13px] font-semibold text-accent transition-colors hover:bg-accent/18"
+            title="여정 맵 열기"
+          >
+            여정 맵 열기
+          <//>
+          <${RouteLink}
+            tab="monitoring"
+            params=${{ section: 'observatory' }}
+            class="rounded border border-card-border/45 bg-card/45 px-4 py-3 text-[13px] font-semibold text-[var(--text-strong)] transition-colors hover:bg-card"
+            title="관찰소 열기"
+          >
+            관찰소 비교 보기
+          <//>
+        </div>
+      </div>
+    </div>
+  `
+}
+
 function resolutionTone(status?: string | null): string {
   switch ((status ?? '').trim().toLowerCase()) {
     case 'ready':
@@ -908,6 +978,10 @@ export function Overview() {
       <${OverviewFreshnessStrip} />
       <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
       <${AttentionSpotlight} snap=${snap} />
+
+      <div class=${OVERVIEW_CARD}>
+        <${JourneyEntryCard} />
+      </div>
 
       <div class=${OVERVIEW_CARD}>
         <${OperationsHubCard} />

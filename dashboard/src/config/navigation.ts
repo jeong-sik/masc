@@ -4,6 +4,7 @@ type SurfaceId = TabId
 type SurfaceSectionId =
   // monitoring
   | 'observatory'
+  | 'journey'
   | 'agents'
   | 'runtime'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
@@ -129,6 +130,12 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = DASHBOARD_SURFACES.map(su
 
 export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavItem[]> = {
   monitoring: [
+    {
+      id: 'journey',
+      label: '여정 맵',
+      description: 'Task, run, contract, keeper, thinking, memory, turn, life, cascade를 한 카드에 묶어 봅니다.',
+      params: { section: 'journey' },
+    },
     {
       id: 'observatory',
       label: '관찰소 (beta)',

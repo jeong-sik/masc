@@ -3,7 +3,8 @@
     {!Verification_protocol} request.
 
     Consumes {!Verification.list_requests}, which reads
-    [.masc/verifications/*.json]. Pure read-only: no mutation, no network.
+    [<base_path>/verifications/*.json]. Pure read-only: no mutation, no
+    network.
 
     Status mapping:
     - [Pending] | [Assigned _] -> ["pending"]
@@ -29,6 +30,7 @@
       {
         "request_id":         "vrf-1713280000-abc123",
         "task_id":            "task-foo",
+        "task_title":         "Fix foo bottleneck" | "",
         "keeper":             "keeper-name" | null,
         "status":             "pending" | "approved" | "rejected" | "timed_out",
         "created_at":         "2026-04-17T...",

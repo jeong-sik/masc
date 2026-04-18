@@ -79,7 +79,7 @@ let test_requests_json_shape () =
     let r = List.hd reqs in
     (* Required per-request fields *)
     let required_string_fields = [
-      "request_id"; "task_id"; "status"; "created_at";
+      "request_id"; "task_id"; "task_title"; "status"; "created_at";
       "submitted_by"; "verdict_reason";
     ] in
     List.iter (fun key ->
@@ -125,7 +125,14 @@ let test_requests_json_shape () =
      | _ -> Alcotest.fail "status should be string");
     (match member "submitted_by" r with
      | `String "keeper-alpha" -> ()
-     | _ -> Alcotest.fail "submitted_by mismatch"))
+     | _ -> Alcotest.fail "submitted_by mismatch");
+    (* task_title is pulled from the submit envelope so the UI detail cell
+       has a fallback when contract/evidence/verdict_reason are all empty. *)
+    (match member "task_title" r with
+     | `String "title for task-shape" -> ()
+     | `String s ->
+         Alcotest.fail (Printf.sprintf "task_title mismatch: got %S" s)
+     | _ -> Alcotest.fail "task_title should be string"))
 
 let test_task_id_filter () =
   with_temp_base_path (fun base_path ->

@@ -202,6 +202,15 @@ let agent_role_of_string = function
   | "admin" -> Ok Admin
   | s -> Error ("Unknown agent role: " ^ s)
 
+(** Issue #8386: schema enums for [agent_role] used to be hand-rolled
+    in [tool_schemas_misc.ml:208], matching the same drift class as
+    #8354 (task_status) and #8372 (agent_status). [agent_role] is
+    nullary across all constructors so the simple [List.map] trick
+    works. Adding a 4th constructor will fail compilation in
+    [agent_role_to_string] and in the test asserts. *)
+let all_agent_roles = [ Reader; Worker; Admin ]
+let valid_agent_role_strings = List.map agent_role_to_string all_agent_roles
+
 let agent_role_to_yojson r = `String (agent_role_to_string r)
 
 let agent_role_of_yojson = function

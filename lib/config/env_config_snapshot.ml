@@ -988,6 +988,20 @@ let all_categories () =
     category "session" (session_entries @ team_session_entries @ tempo_entries);
   ]
 
+(** Issue #8493: Variant SSOT for masc_config tool's [category] filter.
+    Derived from [all_categories ()] so adding a new category there
+    flows through to consumers (notably the JSON Schema enum in
+    [tool_schemas_misc.ml] which previously hand-listed only 9 of 21
+    categories — missing keeper_execution, keeper_guardrails, autonomy,
+    level2, economy, governance, channel, process, worker, web_search,
+    session). Order is deterministic (matches [all_categories ()]).
+
+    Consumers that cannot depend on this module (e.g. tool_schemas_misc
+    only depends on masc_types) hand-mirror this list with a sync
+    regression test in [test_types.ml :: config_category_ssot]. *)
+let valid_config_category_strings () =
+  List.map fst (all_categories ())
+
 let to_json ?server_meta ?generated_at ?cat () =
   let categories =
     match cat with

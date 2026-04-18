@@ -515,6 +515,30 @@ let () =
           Masc_mcp.Keeper_tool_pr_review.valid_pr_review_event_strings
           Masc_mcp.Tool_shard.pr_review_event_enum_strings);
     ];
+    "config_category_ssot", [
+      (* Issue #8493: schema in [tool_schemas_misc.ml] hand-listed only
+         9 of 21 categories actually exposed by [Env_config_snapshot.
+         all_categories ()]. This test asserts the [Tool_schemas_misc]
+         mirror == [Env_config_snapshot] SSOT so adding a new category
+         in env_config_snapshot.ml fails the test before shipping with
+         a stale schema enum. Same shape as #8467/#8480/#8484/#8490
+         mirror+sync pattern. *)
+      Alcotest.test_case "schema mirror matches env_config_snapshot SSOT" `Quick (fun () ->
+        Alcotest.(check (list string)) "tool_schemas_misc mirror == SSOT"
+          (Env_config_snapshot.valid_config_category_strings ())
+          Tool_schemas_misc.config_category_enum_strings);
+      Alcotest.test_case "missing categories now present" `Quick (fun () ->
+        let missing_before_fix = [
+          "keeper_execution"; "keeper_guardrails"; "autonomy"; "level2";
+          "economy"; "governance"; "channel"; "process"; "worker";
+          "web_search"; "session";
+        ] in
+        let actual = Tool_schemas_misc.config_category_enum_strings in
+        List.iter (fun expected ->
+          Alcotest.(check bool) (Printf.sprintf "%s now in schema" expected) true
+            (List.mem expected actual)
+        ) missing_before_fix);
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

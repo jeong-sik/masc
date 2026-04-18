@@ -2,6 +2,25 @@
 
 open Types
 
+(** Issue #8493: hand-mirrored from
+    [Env_config_snapshot.valid_config_category_strings ()].
+    [masc_tool_schemas] only depends on [masc_types], so it cannot
+    derive directly. The sync regression test
+    [test_types.ml :: config_category_ssot] asserts these stay in
+    lock-step so adding a new category in [env_config_snapshot.ml]
+    fails the test before shipping with a stale schema. Same shape as
+    #8467 / #8480 / #8484 / #8490 mirror+sync pattern.
+
+    Order matches [all_categories ()] for UI/schema determinism. The
+    schema previously hand-listed only 9 of 21 categories — missing
+    keeper_execution, keeper_guardrails, autonomy, level2, economy,
+    governance, channel, process, worker, web_search, session. *)
+let config_category_enum_strings =
+  [ "server"; "auth"; "transport"; "storage"; "runtime"; "rate_limiting";
+    "inference"; "keeper"; "keeper_execution"; "keeper_guardrails";
+    "autonomy"; "level2"; "dashboard"; "economy"; "governance"; "channel";
+    "process"; "worker"; "web_search"; "session" ]
+
 let schemas : tool_schema list = [
   {
     name = "masc_config";
@@ -13,7 +32,9 @@ Pass category to filter results to a single section.";
       ("properties", `Assoc [
         ("category", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "server"; `String "auth"; `String "transport"; `String "storage"; `String "runtime"; `String "rate_limiting"; `String "inference"; `String "keeper"; `String "dashboard"]);
+          (* Issue #8493: derive from local mirror that tracks
+             [Env_config_snapshot.valid_config_category_strings ()]. *)
+          ("enum", `List (List.map (fun s -> `String s) config_category_enum_strings));
           ("description", `String "Filter by config category");
         ]);
       ]);

@@ -5,6 +5,25 @@
 
 ### Changed
 
+- **Verification surface — advisory CDAL attribution + verifier keeper
+  signal + Kanban visibility + TLA+ bug-model.** Responds to the
+  "검증 흔적이 UI에서 안 보인다" feedback by making every hop of the
+  verification pipeline observable.
+  - CDAL gate records an attribution entry for advisory (strict=false)
+    contracts instead of silently skipping the lookup (#8402).
+  - `Keeper_unified_turn.is_verifier_role_keeper` predicate plus
+    `observation.verifier_role_keeper` field on every decision record
+    let the dashboard pick verification-authority keepers out of the
+    fleet (#8422).
+  - Kanban adds a "검증 대기" column (store bucket +
+    `TaskBacklog` wiring + card pill) so `awaiting_verification`
+    tasks stop disappearing into the Done column (#8424).
+  - `tla/TaskLifecycle.tla` bug-model: `DoneRequiresApproval`
+    invariant is verified on the clean cfg (5 states, exit 0) and
+    violated on the buggy cfg (exit 12), confirming the contract
+    that Done is reachable only after Approve_verification (#8437,
+    draft).
+
 - **Dashboard design-system migration.** Multi-wave sweep of raw Tailwind
   color utilities to semantic CSS var tokens (`var(--ok)`, `var(--warn)`,
   `var(--bad-light)`, `var(--accent)`) across ~50 files.

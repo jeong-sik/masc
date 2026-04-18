@@ -46,11 +46,10 @@ let set_latest_hash ~keeper_name ~trace_id hash =
 
 (** Snapshot git status before a turn. Returns hash of status lines. *)
 let snapshot_before_turn ~base_path ~keeper_name:_ : string option =
-  try
+  Safe_ops.protect ~default:None (fun () ->
     let root = repo_root ~base_path in
     let lines = git_status_lines ~repo_root:root in
-    Some (hash_lines lines)
-  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+    Some (hash_lines lines))
 
 (** Capture turn evidence after a turn completes.
     Compares before_hash with current state to detect delta. *)
@@ -227,7 +226,7 @@ let latest_evidence ~base_path ~keeper_name ~trace_id
   in
   if not (Fs_compat.file_exists evidence_dir) then None
   else
-    try
+    Safe_ops.protect ~default:None (fun () ->
       let entries = Sys.readdir evidence_dir |> Array.to_list in
       let json_files =
         List.filter (fun f -> Filename.check_suffix f ".json") entries
@@ -238,5 +237,4 @@ let latest_evidence ~base_path ~keeper_name ~trace_id
       | latest :: _ ->
         let path = Filename.concat evidence_dir latest in
         let content = Fs_compat.load_file path in
-        Some (Yojson.Safe.from_string content)
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+        Some (Yojson.Safe.from_string content))

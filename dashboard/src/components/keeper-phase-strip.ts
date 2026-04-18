@@ -66,7 +66,7 @@ function TransitionDot({ t, idx }: { t: KeeperTransition; idx: number }) {
         style="border-color: ${color}; background: ${color}33"
       />
       <div class="absolute bottom-full mb-2 hidden group-hover:flex flex-col items-center z-10">
-        <div class="rounded-lg border border-[var(--card-border)] bg-[var(--card)] px-3 py-2 shadow-lg text-[11px] whitespace-nowrap">
+        <div class="rounded-lg border border-[var(--card-border)] bg-[var(--card)] px-3 py-2 shadow-sm text-[11px] whitespace-nowrap">
           <div class="font-semibold">${t.prev_phase} → ${t.new_phase}</div>
           <div class="text-[var(--text-muted)] mt-0.5">${eventLabel(t.selected_event)}</div>
           <div class="text-[var(--text-muted)]"><${TimeAgo} timestamp=${t.wall_clock_at_decision * 1000} /></div>

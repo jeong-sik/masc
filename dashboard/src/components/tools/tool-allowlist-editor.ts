@@ -355,7 +355,7 @@ function ToolSearchPicker({
 
         <ul ...${getMenuProps({
           class: showMenu && filtered.length > 0
-            ? 'absolute z-10 top-full left-0 right-0 mt-1 max-h-[220px] overflow-y-auto rounded-lg border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] shadow-lg backdrop-blur-sm list-none m-0 p-0'
+            ? 'absolute z-10 top-full left-0 right-0 mt-1 max-h-[220px] overflow-y-auto rounded-lg border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] shadow-sm backdrop-blur-sm list-none m-0 p-0'
             : 'hidden',
         })}>
           ${showMenu && filtered.length > 0

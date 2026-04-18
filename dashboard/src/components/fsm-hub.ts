@@ -571,7 +571,7 @@ function ShortcutsOverlay({
       aria-label="키보드 단축키"
     >
       <div
-        class="rounded border border-[var(--white-10)] bg-[var(--bg-0)] p-5 min-w-[280px] shadow-2xl"
+        class="rounded border border-[var(--white-10)] bg-[var(--bg-0)] p-5 min-w-[280px] shadow-sm"
         onClick=${(e: MouseEvent) => e.stopPropagation()}
       >
         <div class="flex items-center justify-between mb-3">

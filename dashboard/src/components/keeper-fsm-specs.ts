@@ -14,7 +14,7 @@ import type { FsmGraphSpec, FsmNode, FsmEdge } from './common/cytoscape-fsm'
 // simultaneously". No cross-cluster edges — causal ordering between
 // sub-FSMs is captured by the invariants panel, not the graph edges.
 
-export interface CompositeFsmParams {
+interface CompositeFsmParams {
   phase: string            // KSM — Running | Failing | Overflowed | Compacting | HandingOff | Draining | Stable
   turnPhase: string        // KTC — idle | prompting | executing | compacting | finalizing
   decisionStage: string    // KDP — undecided | guard_ok | gate_rejected | tool_policy_selected

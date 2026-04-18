@@ -129,7 +129,7 @@ export function buildCompositeFsmMermaid(): string {
   return MERMAID_COMPOSITE
 }
 
-export interface CompositeFsmFlowchartProps {
+interface CompositeFsmFlowchartProps {
   class?: string
 }
 

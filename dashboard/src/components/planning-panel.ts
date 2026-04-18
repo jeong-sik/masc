@@ -10,7 +10,7 @@ import { FilterChips } from './common/filter-chips'
 import { Planning } from './goals'
 import { GoalTree } from './goals/goal-tree'
 
-export type PlanningView = 'default' | 'goal-tree'
+type PlanningView = 'default' | 'goal-tree'
 
 const PLANNING_VIEWS: PlanningView[] = ['default', 'goal-tree']
 

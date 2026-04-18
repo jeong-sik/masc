@@ -46,7 +46,7 @@ export function countCompletedSteps(
   return n
 }
 
-export type SetupGuideTone = 'idle' | 'in-progress' | 'complete'
+type SetupGuideTone = 'idle' | 'in-progress' | 'complete'
 
 /** Pure: 0..100 integer progress. Total=0 returns 0 (no div by zero). */
 export function setupGuideProgressPct(done: number, total: number): number {

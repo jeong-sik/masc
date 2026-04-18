@@ -17,7 +17,7 @@ export function resolveKeeperMissionBrief(
     ?? null
 }
 
-export interface KeeperToolPolicySnapshot {
+interface KeeperToolPolicySnapshot {
   source: 'keeper_config' | 'loading' | 'error' | 'none'
   mode: 'preset' | 'custom' | string
   preset: KeeperConfigTools['tool_preset']
@@ -79,7 +79,7 @@ export function resolveKeeperToolPolicy(
   }
 }
 
-export interface KeeperObservedToolAuditSnapshot {
+interface KeeperObservedToolAuditSnapshot {
   source: 'mission_brief' | 'dashboard_summary' | 'none'
   latestToolNames: string[]
   latestToolCallCount: number | null

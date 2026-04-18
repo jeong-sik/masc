@@ -12,7 +12,7 @@ export type MetricKey = 'context_ratio' | 'tool_success_pct' | 'tool_calls' | 'l
 
 export type TrendDirection = 'up' | 'down' | 'flat'
 
-export interface TrendInfo {
+interface TrendInfo {
   direction: TrendDirection
   delta: number
   deltaPercent: number

@@ -17,7 +17,7 @@ import {
 // --- Loops list (deduplication via AsyncResource) ---
 
 export const loopsResource = createAsyncResource<AutoresearchLoopsResponse>()
-export const loopsLimit = signal(100)
+const loopsLimit = signal(100)
 
 export const hasMoreLoops = computed(() => {
   const state = loopsResource.state.value

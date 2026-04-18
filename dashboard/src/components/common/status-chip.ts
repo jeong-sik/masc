@@ -24,6 +24,17 @@
 // ~12 caller sites already pass children (cascade-config-panel,
 // verification-requests-panel.test mocks). Accepting both keeps
 // every existing usage compiling while the caller mix converges.
+//
+// P3 update — `uppercase` prop (default true) splits the shape
+// tokens (rounded-full + border + px-2 py-0.5 + text-[10px]) from
+// the uppercase/tracking-wider pair. `uppercase={false}` renders
+// a plain (non-uppercase, non-tracked) neutral pill — the shape
+// used by config-resolution-panel's 4 "inline tag" call sites
+// (sourceLabel / pathInfo.kind / cache age / resolved config
+// root). Those sites were inline Tailwind strings with the exact
+// same shape minus the uppercase/tracking — folding them into
+// StatusChip removes the last remaining chip-shape duplication
+// from that file.
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
@@ -38,8 +49,9 @@ type StatusChipTone =
   | 'select'
   | ''
 
-const BASE =
-  'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider'
+const BASE_SHAPE =
+  'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px]'
+const UPPERCASE_CLASS = 'uppercase tracking-wider'
 
 const SEMANTIC_TONE: Record<StatusChipTone, string> = {
   ok: 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]',
@@ -118,18 +130,22 @@ export function isSemanticTone(tone: string): tone is StatusChipTone {
   return tone in SEMANTIC_TONE
 }
 
-/** Pure: class string for given tone + optional extra. Handles the
-    semantic/raw dichotomy so callers never have to. Base Tailwind
-    tokens (rounded-full + border + px-2 py-0.5 + uppercase +
-    tracking-wider) are always present — they are what makes the
-    chip visually consistent across the dashboard regardless of
-    which tone helper the caller chose. */
+/** Pure: class string for given tone + optional extra + optional
+    uppercase flag (default true). Handles the semantic/raw tone
+    dichotomy so callers never have to.
+
+    Shape tokens (rounded-full + border + px-2 py-0.5 + text-[10px])
+    are always present. `uppercase + tracking-wider` is conditional
+    on the `uppercase` flag — callers rendering plain tag pills
+    (no all-caps) pass `uppercase={false}` to drop both together. */
 export function statusChipClasses(
   tone: string = '',
   extra?: string,
+  uppercase: boolean = true,
 ): string {
   const toneClass = isSemanticTone(tone) ? SEMANTIC_TONE[tone] : tone
-  const parts = [BASE]
+  const parts = [BASE_SHAPE]
+  if (uppercase) parts.push(UPPERCASE_CLASS)
   if (toneClass !== '') parts.push(toneClass)
   if (extra !== undefined && extra !== '') parts.push(extra)
   return parts.join(' ')
@@ -144,6 +160,11 @@ interface StatusChipProps {
   tone?: string
   /** Extra Tailwind classes for caller layout (margin, shrink-0). */
   class?: string
+  /** Render with `uppercase tracking-wider` (default true). Set
+      false for plain tag pills (e.g. neutral "inline label" chips
+      where uppercase would change the visual grammar — typically
+      file paths, enum values, short textual tags). */
+  uppercase?: boolean
   children?: ComponentChildren
   testId?: string
 }
@@ -152,15 +173,17 @@ export function StatusChip({
   label,
   tone = '',
   class: cx,
+  uppercase = true,
   children,
   testId,
 }: StatusChipProps) {
-  const cls = statusChipClasses(tone, cx)
+  const cls = statusChipClasses(tone, cx, uppercase)
   const content = children ?? label ?? ''
   return html`<span
     class=${cls}
     data-status-chip
     data-status-chip-tone=${tone}
+    data-status-chip-uppercase=${uppercase ? 'true' : 'false'}
     data-testid=${testId}
   >${content}</span>`
 }

@@ -9,6 +9,9 @@
 #   ./run.sh              start the bot (foreground, tees to today's log)
 #   ./run.sh tail         tail -F today's log file
 #   ./run.sh status       pretty-print the current status.json
+#   ./run.sh doctor       run health checks without starting the bot
+#   ./run.sh doctor --json   machine-readable check output
+#   ./run.sh doctor --fix    run available auto-fixes then recheck
 
 set -euo pipefail
 
@@ -62,6 +65,11 @@ case "$cmd" in
       cat "$STATUS_FILE"
     fi
     ;;
+  doctor)
+    cd "$(script_dir)"
+    shift || true
+    python -m src doctor "$@"
+    ;;
   stop)
     # Match by absolute script_dir path so we never hit another sidecar.
     if pgrep -f "$(script_dir)/src" >/dev/null 2>&1; then
@@ -72,7 +80,7 @@ case "$cmd" in
     fi
     ;;
   *)
-    echo "Usage: $0 [start|stop|tail|status]" >&2
+    echo "Usage: $0 [start|stop|tail|status|doctor]" >&2
     exit 2
     ;;
 esac

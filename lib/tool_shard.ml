@@ -518,7 +518,13 @@ and priority for each task. Use to see what work is available or in progress.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("status", `Assoc [("type", `String "string"); ("enum", `List [`String "todo"; `String "claimed"; `String "in_progress"; `String "done"; `String "cancelled"]); ("description", `String "Filter by task status")]);
+        ("status", `Assoc [
+          ("type", `String "string");
+          (* Issue #8354: derived from Types.task_status Variant SSOT.
+             Hand-rolled enum used to drop awaiting_verification. *)
+          ("enum", `List (List.map (fun s -> `String s) Types.valid_task_status_strings));
+          ("description", `String "Filter by task status");
+        ]);
         ("include_done", `Assoc [("type", `String "boolean"); ("description", `String "Include completed tasks (default: false)")]);
         ("limit", `Assoc [
           ("type", `String "integer");

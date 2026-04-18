@@ -414,21 +414,12 @@ let read_event_lines config ~limit =
     List.rev !collected
 
 let schema_json =
+  (* Issue #8354: enums derived from Variant SSOT in [Types]. Hand-rolled
+     lists used to drop [awaiting_verification] and the verification
+     actions ([submit_for_verification] / [approve] / [reject]). *)
   `Assoc [
-    ("task_statuses", `List [
-      `String "todo";
-      `String "claimed";
-      `String "in_progress";
-      `String "done";
-      `String "cancelled";
-    ]);
-    ("actions", `List [
-      `String "claim";
-      `String "start";
-      `String "done";
-      `String "cancel";
-      `String "release";
-    ]);
+    ("task_statuses", `List (List.map (fun s -> `String s) Types.valid_task_status_strings));
+    ("actions", `List (List.map (fun s -> `String s) Types.valid_task_action_strings));
     ("transitions", `List [
       `Assoc [("action", `String "claim"); ("from", `List [`String "todo"]); ("to", `String "claimed")];
       `Assoc [("action", `String "start"); ("from", `List [`String "claimed"]); ("to", `String "in_progress")];

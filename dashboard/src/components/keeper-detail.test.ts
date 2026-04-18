@@ -25,6 +25,8 @@ vi.mock('../keeper-runtime', () => ({
 import {
   closeKeeperDetail,
   filterCheckpointHistory,
+  lineageTransitionLabel,
+  lineageVerdictMeta,
   openKeeperDetail,
   selectedKeeper,
 } from './keeper-detail'
@@ -164,5 +166,38 @@ describe('filterCheckpointHistory', () => {
   it('preserves the original order of matching rows', () => {
     const result = filterCheckpointHistory(rows, 'snap-')
     expect(result.map(r => r.snapshot_id)).toEqual(['snap-abc123', 'snap-def456', 'snap-ghi789'])
+  })
+})
+
+describe('lineageVerdictMeta', () => {
+  it('maps verified to an operator-facing preserved-state explanation', () => {
+    expect(lineageVerdictMeta('verified')).toEqual({
+      badgeLabel: 'state preserved',
+      detail: 'Continuity checks whether the keeper goal, instructions, and saved state summary carried across the handoff.',
+    })
+  })
+
+  it('maps drift_detected to a review-oriented explanation', () => {
+    expect(lineageVerdictMeta('drift_detected')).toEqual({
+      badgeLabel: 'review drift',
+      detail: 'The handoff completed, but the saved continuity summary changed enough that an operator should review it.',
+    })
+  })
+
+  it('falls back to unknown for unmapped verdicts', () => {
+    expect(lineageVerdictMeta('mystery')).toEqual({
+      badgeLabel: 'unknown',
+      detail: 'A continuity signal exists, but this verdict is not yet mapped to an operator-facing explanation.',
+    })
+  })
+})
+
+describe('lineageTransitionLabel', () => {
+  it('uses root when the parent generation is absent', () => {
+    expect(lineageTransitionLabel(null, 3)).toBe('root -> gen 3')
+  })
+
+  it('renders explicit generation-to-generation transitions', () => {
+    expect(lineageTransitionLabel(4, 5)).toBe('gen 4 -> gen 5')
   })
 })

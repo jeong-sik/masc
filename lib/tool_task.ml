@@ -233,11 +233,25 @@ let persisted_contract_rejection ~(ctx : context)
     end else
       match task.contract with
       | None -> None
-      | Some contract when not contract.strict -> None
-      | Some _contract ->
-        Log.Task.info "[cdal-gate] checking verdict for task=%s agent=%s"
-          task.id ctx.agent_name;
-        Cdal_verdict_gate.gate_check ~task_id:task.id ()
+      | Some contract ->
+        (* Always run the verdict lookup so Dashboard_attribution records the
+           outcome (pass / policy_failed / missing). strict=false stays
+           advisory — we drop the rejection but keep the audit trail so the
+           dashboard shows a verification trace instead of nothing. *)
+        Log.Task.info
+          "[cdal-gate] checking verdict for task=%s agent=%s strict=%b"
+          task.id ctx.agent_name contract.strict;
+        let rejection = Cdal_verdict_gate.gate_check ~task_id:task.id () in
+        if contract.strict then rejection
+        else begin
+          (match rejection with
+           | Some msg ->
+             Log.Task.info
+               "[cdal-gate] advisory (strict=false) for task=%s: %s"
+               task.id msg
+           | None -> ());
+          None
+        end
 
 (* Handlers *)
 

@@ -15,23 +15,41 @@ import importlib.metadata
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 _shared_root = Path(__file__).resolve().parent.parent.parent / "shared"
 if str(_shared_root) not in sys.path:
     sys.path.insert(0, str(_shared_root))
 
+# httpx is required for the doctor itself. pydantic_settings / slack_bolt
+# are NOT imported at module top so the doctor can still run and report
+# them as missing instead of crashing before any check executes.
 import httpx  # noqa: E402
-from pydantic import ValidationError  # noqa: E402
 
 from gate_shared import AutoFix, Check, Doctor, Severity  # noqa: E402
-from gate_shared.doctor import NETWORK_TIMEOUT_SEC  # noqa: E402
+from gate_shared.doctor import (  # noqa: E402
+    NETWORK_TIMEOUT_SEC,
+    check_dependencies_installed,
+)
 
-from .config import BotConfig, get_config  # noqa: E402
+if TYPE_CHECKING:
+    from .config import BotConfig
+
+
+_REQUIRED_PACKAGES = (
+    "slack-bolt",
+    "slack-sdk",
+    "pydantic",
+    "pydantic-settings",
+    "httpx",
+    "httpx-sse",
+)
 
 
 async def run_doctor() -> Doctor:
     doc = Doctor("Slack Sidecar Doctor")
     doc.register(check_python_version)
+    doc.register(check_dependencies_installed(_REQUIRED_PACKAGES))
     doc.register(check_slack_bolt_version)
     doc.register(check_bot_token)
     doc.register(check_app_token)
@@ -75,6 +93,14 @@ async def check_slack_bolt_version() -> Check:
 
 
 def _config_or_none() -> BotConfig | None:
+    """Lazy config load — survives missing pydantic_settings."""
+
+    try:
+        from pydantic import ValidationError  # noqa: PLC0415
+
+        from .config import get_config  # noqa: PLC0415
+    except ImportError:
+        return None
     try:
         return get_config()
     except (ValidationError, OSError):

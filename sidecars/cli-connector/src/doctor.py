@@ -28,12 +28,18 @@ if str(_shared_root) not in sys.path:
 import httpx  # noqa: E402
 
 from gate_shared import Check, Doctor, Severity  # noqa: E402
-from gate_shared.doctor import NETWORK_TIMEOUT_SEC  # noqa: E402
+from gate_shared.doctor import (  # noqa: E402
+    NETWORK_TIMEOUT_SEC,
+    check_dependencies_installed,
+)
+
+_REQUIRED_PACKAGES = ("httpx",)
 
 
 async def run_doctor() -> Doctor:
     doc = Doctor("CLI Connector Doctor")
     doc.register(check_python_version)
+    doc.register(check_dependencies_installed(_REQUIRED_PACKAGES))
     doc.register(check_httpx_installed)
     doc.register(check_stdin_is_tty)
     doc.register(check_env_gate_url)

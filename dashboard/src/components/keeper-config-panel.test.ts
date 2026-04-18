@@ -89,10 +89,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       count_total: 2,
       last_reason: 'board quiet',
     },
-    auto_team_session: {
-      status: 'source_only',
-      enabled: null,
-    },
     handoff: {
       auto: true,
       threshold: 0.85,
@@ -272,7 +268,6 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
       cooldown_sec: 0,
     } as KeeperConfig['proactive'],
     drift: {} as KeeperConfig['drift'],
-    auto_team_session: {} as KeeperConfig['auto_team_session'],
     handoff: {
       auto: false,
       threshold: 0.9,

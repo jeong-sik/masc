@@ -180,11 +180,6 @@ let all_flags : flag list = [
     default = false; category = "runtime";
     lifecycle = Deprecated "superseded by zero-zombie cleanup since v2.130.0"; since = "2.0.0" };
 
-  { env_name = "MASC_TEAM_SESSION_ROUTER_JUDGE";
-    description = "Team session routing judge for dispatch";
-    default = true; category = "runtime";
-    lifecycle = Active; since = "2.140.0" };
-
   { env_name = "MASC_LOCAL_RUNTIME_DEBUG";
     description = "Local LLM runtime debug output";
     default = false; category = "runtime";

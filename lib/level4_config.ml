@@ -1,6 +1,6 @@
 (** MASC Level 4 Configuration - Externalized Magic Numbers
 
-    All configurable parameters for Swarm behavior.
+    Shared numeric tuning helpers and normalized-value wrappers.
     Environment variables override defaults.
 
     Based on extreme reviewer feedback:
@@ -13,12 +13,9 @@
 
 (** {1 Environment Helpers}
 
-    Thin delegates to the [Env_config_core] SSOT so Swarm/Flocking
-    config reads the same env-var semantics (trim + malformed-value
-    fallback) as the rest of the codebase.  The positional [default]
-    argument is kept for call-site compatibility with the many
-    [Swarm.*] / [Flocking.*] thunks below and with
-    [test_level4_config_coverage]. *)
+    Thin delegates to the [Env_config_core] SSOT so config reads use the
+    same env-var semantics (trim + malformed-value fallback) as the rest
+    of the codebase. *)
 
 let get_env_float name default =
   Env_config_core.get_float ~default name
@@ -33,7 +30,7 @@ let rng_initialized = ref false
 
 let ensure_rng_init () =
   if not !rng_initialized then begin
-    let seed = get_env_int "MASC_SWARM_SEED" (int_of_float (Time_compat.now () *. 1000.0)) in
+    let seed = get_env_int "MASC_RANDOM_SEED" (int_of_float (Time_compat.now () *. 1000.0)) in
     Random.init seed;
     rng_initialized := true
   end
@@ -57,73 +54,9 @@ let random_int max =
 let make_rng ?seed () =
   let s = match seed with
     | Some s -> s
-    | None -> get_env_int "MASC_SWARM_SEED" (int_of_float (Time_compat.now () *. 1000.0))
+    | None -> get_env_int "MASC_RANDOM_SEED" (int_of_float (Time_compat.now () *. 1000.0))
   in
   Random.State.make [|s|]
-
-(** {1 Swarm Configuration} *)
-
-module Swarm = struct
-  (** Initial fitness for new agents (0.0-1.0) *)
-  let initial_fitness () = get_env_float "MASC_SWARM_INITIAL_FITNESS" 0.5
-
-  (** Default selection pressure (0.0-1.0) *)
-  let selection_pressure () = get_env_float "MASC_SWARM_SELECTION_PRESSURE" 0.3
-
-  (** Default mutation rate (0.0-1.0) *)
-  let mutation_rate () = get_env_float "MASC_SWARM_MUTATION_RATE" 0.1
-
-  (** Default pheromone evaporation rate per hour *)
-  let evaporation_rate () = get_env_float "MASC_SWARM_EVAPORATION_RATE" 0.1
-
-  (** Default quorum threshold (0.0-1.0) *)
-  let quorum_threshold () = get_env_float "MASC_SWARM_QUORUM_THRESHOLD" 0.6
-
-  (** Maximum agents per swarm *)
-  let max_agents () = get_env_int "MASC_SWARM_MAX_AGENTS" 50
-
-  (** Minimum agents for foraging behavior switch *)
-  let min_agents_for_flocking () = get_env_int "MASC_SWARM_MIN_AGENTS_FLOCKING" 5
-end
-
-(** {1 Flocking Configuration} *)
-
-module Flocking = struct
-  (** Separation force weight *)
-  let separation_weight () = get_env_float "MASC_FLOCK_SEPARATION" 1.5
-
-  (** Alignment force weight *)
-  let alignment_weight () = get_env_float "MASC_FLOCK_ALIGNMENT" 1.0
-
-  (** Cohesion force weight *)
-  let cohesion_weight () = get_env_float "MASC_FLOCK_COHESION" 1.0
-
-  (** Perception radius for neighbor detection *)
-  let perception_radius () = get_env_float "MASC_FLOCK_PERCEPTION_RADIUS" 100.0
-
-  (** Fitness cohesion multiplier *)
-  let fitness_cohesion_multiplier () = get_env_float "MASC_FLOCK_FITNESS_MULT" 2.0
-end
-
-(** {1 Foraging Configuration} *)
-
-module Foraging = struct
-  (** Default exploration rate (epsilon for epsilon-greedy) *)
-  let exploration_rate () = 0.3
-end
-
-(** {1 Stigmergy Configuration} *)
-
-module Stigmergy = struct
-  (** Pheromone deposit rate per success *)
-  let deposit_rate () = 0.2
-
-  (** Minimum pheromone strength to follow *)
-  let following_threshold () = 0.1
-
-  (** Number of top trails to consider *)
-  let top_trails_limit () = 5
-end
 
 (** {1 Validation} *)
 
@@ -196,7 +129,7 @@ end = struct
   let of_json = Normalized.of_json
 
   let initial () =
-    of_float_clamped (Swarm.initial_fitness ())
+    of_float_clamped 0.5
 
   let combine a b =
     of_float_clamped ((to_float a +. to_float b) /. 2.0)
@@ -210,4 +143,3 @@ module Strength = Normalized
 
 (** Threshold: Normalized alias for quorum thresholds *)
 module Threshold = Normalized
-

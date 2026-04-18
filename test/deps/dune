@@ -7,7 +7,6 @@
  (libraries
    (re_export agent_sdk)
    (re_export agent_sdk.llm_provider)
-   (re_export agent_sdk.swarm)
    (re_export alcotest)
    (re_export astring)
    (re_export base64)

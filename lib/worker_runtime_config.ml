@@ -86,12 +86,7 @@ let load_file_config path =
     try
       let json = Safe_ops.read_json_eio path in
         let open Yojson.Safe.Util in
-        let spawn_json =
-          (* Accept both new "worker_spawn" and legacy "team_session_spawn" keys *)
-          match member "worker_spawn" json with
-          | `Null -> member "team_session_spawn" json
-          | v -> v
-        in
+        let spawn_json = member "worker_spawn" json in
         let backend =
           match spawn_json |> member "backend" with
           | `String value -> (

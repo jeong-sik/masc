@@ -44,7 +44,6 @@ test-webrtc-live-env:
 # Contract harness against an already running server (default :8935)
 test-contract-live:
 	bash scripts/harness/contract/streamable_http_contract.sh
-	bash scripts/harness/contract/team_session_contract.sh
 	bash scripts/harness/contract/golden_path_1_contract.sh
 
 # All tests: unit + contract + transport

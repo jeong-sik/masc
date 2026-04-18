@@ -120,7 +120,7 @@ resolve_seed_args() {
     SEED_HAS_KV_UNIFIED="false"; has_flag "--kv-unified" "${TOKENS[@]}" && SEED_HAS_KV_UNIFIED="true"
   else
     MODEL_PATH="${LLAMA_MODEL_PATH:-}"
-    MODEL_ALIAS="${LLAMA_SWARM_MODEL:-}"
+    MODEL_ALIAS="${LLAMA_WORKER_MODEL:-}"
     NGL="${LLAMA_POOL_NGL:-999}"
     CTX_SIZE="$DEFAULT_CTX"
     PARALLEL="$DEFAULT_PARALLEL"
@@ -147,7 +147,7 @@ resolve_seed_args() {
   fi
 
   if [ -z "${MODEL_PATH:-}" ] || [ -z "${MODEL_ALIAS:-}" ]; then
-    echo "Missing seed llama model configuration. Need running seed on port ${SEED_PORT} or LLAMA_MODEL_PATH + LLAMA_SWARM_MODEL." >&2
+    echo "Missing seed llama model configuration. Need running seed on port ${SEED_PORT} or LLAMA_MODEL_PATH + LLAMA_WORKER_MODEL." >&2
     exit 1
   fi
 }

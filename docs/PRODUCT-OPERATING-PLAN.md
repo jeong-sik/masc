@@ -39,7 +39,7 @@ The front-door promise is level 1. Levels 2-3 are supported surfaces. Retired co
 |-----------|----------------|---------------|----------|----------|-------------|
 | Room and task hygiene | Done | Front door | `docs/spec/C-implementation-status.md`, `README.md` | docs were too spread out | keep as default entry path |
 | Worktree and collision control | Done | Front door | README, room/tool coverage, live usage | onboarding clarity | keep in front-door docs |
-| Supervised execution + Supervisor | Working | Advanced | `docs/SWARM-DELIVERY-RUNBOOK.md`, `docs/SUPERVISOR-MODE.md` | still not the safest starting path | present as advanced flow |
+| Supervised execution + Supervisor | Working | Advanced | `docs/SUPERVISOR-MODE.md` | still not the safest starting path | present as advanced flow |
 | Keeper continuity | Not done for product promise | Advanced | `docs/design/keeper-continuity-product-rfc.md`, `docs/KEEPER-CONTINUITY-VALIDATION.md` | checkpoint truth and bounded contract are not productized yet | ship as bounded same-trace continuity with explicit runbook |
 | Dashboard core read models | Working | Supporting | — | transport truth and config visibility gaps | harden read truth and config introspection |
 | Remote-safe operator | Working | Supporting | `docs/spec/09-server-transport.md`, `docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md` | auth and release posture still need tightening | keep surface reduced and explicit |

@@ -4,14 +4,14 @@ include Operator_control_snapshot
 open Result_syntax
 
 let judgment_surface_enums =
-  [ "command.namespace"; "command.swarm"; "intervene" ]
+  [ "command.namespace"; "intervene" ]
 
 let normalize_judgment_surface value =
   let normalized = String.trim value |> String.lowercase_ascii in
   match normalized with
   | "command.namespace" -> Ok "command.namespace"
-  | "command.swarm" | "intervene" -> Ok normalized
-  | _ -> Error "surface must be one of command.namespace, command.swarm, intervene"
+  | "intervene" -> Ok normalized
+  | _ -> Error "surface must be one of command.namespace, intervene"
 
 let normalize_judgment_target_type value =
   let normalized = String.trim value |> String.lowercase_ascii in
@@ -22,7 +22,7 @@ let normalize_judgment_target_type value =
 let default_fresh_ttl_sec surface =
   match surface with
   | "command.namespace" -> 60
-  | "command.swarm" | "intervene" -> 300
+  | "intervene" -> 300
   | _ -> 120
 
 let judgment_write_json (ctx : 'a context) args =

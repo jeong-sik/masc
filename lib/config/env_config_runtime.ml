@@ -157,9 +157,9 @@ module Local_runtime = struct
     if primary > 0 then primary
     else get_int ~default:32768 "MASC_LLAMA_MAX_TOKENS"
 
-  (** Llama swarm model override (formerly in Chain module). *)
-  let llama_swarm_model_opt () =
-    Sys.getenv_opt "LLAMA_SWARM_MODEL" |> trim_opt
+  (** Default worker model override for the local runtime. *)
+  let worker_model_opt () =
+    Sys.getenv_opt "LLAMA_WORKER_MODEL" |> trim_opt
 
   (** MASC MCP endpoint URL (formerly in Chain module).
       Defaults to {base_url}/mcp. *)
@@ -323,24 +323,6 @@ module Transport = struct
   let startup_watchdog_sec () =
     let v = get_float ~default:240.0 "MASC_STARTUP_WATCHDOG_SEC" in
     Float.max 30.0 (Float.min 600.0 v)
-end
-
-module TeamSession = struct
-  (** Enable routing judge in team session dispatch. Default: true. *)
-  let router_judge_enabled () =
-    Feature_flag_registry.get_bool "MASC_TEAM_SESSION_ROUTER_JUDGE"
-
-  let router_judge_timeout_sec () =
-    max 5 (get_int ~default:15 "MASC_TEAM_SESSION_ROUTER_JUDGE_TIMEOUT_SEC")
-
-  let router_judge_confidence_threshold () =
-    let value =
-      get_float ~default:0.72 "MASC_TEAM_SESSION_ROUTER_CONFIDENCE_THRESHOLD"
-    in
-    Float.max 0.0 (Float.min 1.0 value)
-
-  let router_judge_model_opt () =
-    Sys.getenv_opt "MASC_TEAM_SESSION_ROUTER_JUDGE_MODEL" |> trim_opt
 end
 
 module Cdal = struct

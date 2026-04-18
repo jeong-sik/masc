@@ -328,8 +328,8 @@ describe('normalizeGovernanceDecisionItem', () => {
         board_post_id: 'bp-1',
         task_id: 't-1',
         operation_id: 'op-1',
-        team_session_id: 'sess-1',
       },
+      linked_session_id: 'sess-1',
     })
     expect(result!.linked_board_post_id).toBe('bp-1')
     expect(result!.linked_task_id).toBe('t-1')

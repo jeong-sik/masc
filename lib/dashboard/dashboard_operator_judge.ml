@@ -191,46 +191,6 @@ let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used jso
              ~fresh_until_unix ~keeper_name ())
   | _ -> None
 
-let parse_session_judgment ~config ~generated_at ~generated_at_unix ~model_used json =
-  match json with
-  | `Assoc _ -> (
-      match json |> member "session_id" |> to_string_option with
-      | Some session_id when String.trim session_id <> "" ->
-          let summary =
-            normalize_text
-              (json |> member "summary" |> to_string_option
-              |> Option.value ~default:"")
-          in
-          if summary = "" then None
-          else
-            let confidence =
-              match json |> member "confidence" with
-              | `Float value -> value
-              | `Int value -> float_of_int value
-              | _ -> 0.0
-            in
-            let fresh_until_unix =
-              generated_at_unix +. float_of_int (session_ttl_sec ())
-            in
-            Some
-              (Operator_judgment.record config ~surface:"command.swarm"
-                 ~target_type:Operator_judgment.Coord
-                 ~target_id:(Some session_id) ~summary ~confidence
-                 ?model_name:(Some model_used)
-                 ?recommended_action:
-                   (build_recommended_action ~actor:keeper_name
-                      ~target_type:"root" ~target_id:(Some session_id)
-                      (json |> member "recommended_action"))
-                 ~evidence_refs:(parse_string_list json "evidence_refs")
-                 ~disagreement_with_truth:
-                   (json |> member "disagreement_with_truth" |> to_bool_option
-                   |> Option.value ~default:false)
-                 ~generated_at ~generated_at_unix
-                 ~fresh_until:(iso_of_unix fresh_until_unix)
-                 ~fresh_until_unix ~keeper_name ())
-      | _ -> None)
-  | _ -> None
-
 let compute_judgments
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
@@ -298,25 +258,13 @@ let refresh_once ~sw ~net
         let generated_at_unix = Unix.gettimeofday () in
         let generated_at = iso_of_unix generated_at_unix in
         let expires_at =
-          iso_of_unix
-            (generated_at_unix +. float_of_int (max (room_ttl_sec ()) (session_ttl_sec ())))
+          iso_of_unix (generated_at_unix +. float_of_int (room_ttl_sec ()))
         in
         let room_judgment =
           parse_room_judgment ~config ~generated_at ~generated_at_unix
             ~model_used result_json
         in
-        let session_judgments =
-          match result_json |> member "sessions" with
-          | `List items ->
-              items
-              |> List.filter_map
-                   (parse_session_judgment ~config ~generated_at
-                      ~generated_at_unix ~model_used)
-          | _ -> []
-        in
-        let has_any =
-          Option.is_some room_judgment || session_judgments <> []
-        in
+        let has_any = Option.is_some room_judgment in
         with_lock st (fun () ->
             st.refreshing <- false;
             st.judge_online <- has_any;

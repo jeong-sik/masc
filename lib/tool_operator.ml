@@ -64,7 +64,6 @@ let digest_target_type_enums = [ `String "root"; `String "namespace" ]
 let judgment_surface_enums =
   [
     `String "command.namespace";
-    `String "command.swarm";
     `String "intervene";
   ]
 
@@ -122,9 +121,9 @@ let action_schema ~remote =
     name = "masc_operator_action";
     description =
       if remote then
-        "Preview or run a structured operator action. Use this when you need to broadcast, steer a team session, pause a namespace, or message a keeper through the remote operator surface. Use social_sweep for immediate public-square social processing."
+        "Preview or run a structured operator action. Use this when you need to broadcast, pause a namespace, or message a keeper through the remote operator surface. Use social_sweep for immediate public-square social processing."
       else
-        "Run a structured operator action against the namespace, a team session, or a keeper. Use this when you need guided control with preview-confirm safety for disruptive actions. Use social_sweep for immediate public-square social processing.";
+        "Run a structured operator action against the namespace or a keeper. Use this when you need guided control with preview-confirm safety for disruptive actions. Use social_sweep for immediate public-square social processing.";
     input_schema =
       `Assoc
         [
@@ -181,7 +180,7 @@ let judgment_write_schema =
   {
     name = "masc_operator_judgment_write";
     description =
-      "Internal operator-judge write path. Use this to store a durable operator judgment for namespace or team-session supervision. Hidden from the default catalog and intended for keeper/automation experiments.";
+      "Internal operator-judge write path. Use this to store a durable operator judgment for namespace supervision. Hidden from the default catalog and intended for keeper/automation experiments.";
     input_schema =
       `Assoc
         [

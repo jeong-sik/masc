@@ -1050,7 +1050,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const compaction = isRecord(data.compaction) ? data.compaction : {}
   const proactive = isRecord(data.proactive) ? data.proactive : {}
   const drift = isRecord(data.drift) ? data.drift : {}
-  const autoTeamSession = isRecord(data.auto_team_session) ? data.auto_team_session : {}
   const handoff = isRecord(data.handoff) ? data.handoff : {}
   const hooks = isRecord(data.hooks) ? data.hooks : null
   const runtime = isRecord(data.runtime) ? data.runtime : {}
@@ -1116,15 +1115,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       min_turn_gap: asInt(drift.min_turn_gap) ?? null,
       count_total: asInt(drift.count_total) ?? null,
       last_reason: asNullableString(drift.last_reason),
-    },
-    auto_team_session: {
-      status: normalizeKeeperFeatureStatus(autoTeamSession.status),
-      enabled:
-        typeof autoTeamSession.enabled === 'boolean'
-          ? autoTeamSession.enabled
-          : (typeof autoTeamSession.enabled === 'string'
-              ? asLooseBoolean(autoTeamSession.enabled)
-              : null),
     },
     handoff: {
       auto: asLooseBoolean(handoff.auto),

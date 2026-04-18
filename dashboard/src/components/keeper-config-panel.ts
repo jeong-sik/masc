@@ -9,6 +9,7 @@ import type { KeeperConfigUpdatePayload } from '../api/dashboard'
 import type { KeeperConfig, KeeperHookSlot } from '../types'
 import type { KeeperConfigLoadStatus } from './keeper-detail-source'
 import { formatTokens } from '../lib/format-number'
+import { isVerifierRoleKeeper } from '../lib/keeper-utils'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { createAsyncResource, loaded } from '../lib/async-state'
@@ -804,6 +805,12 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="프레즌스 간격" value=${c.runtime.presence_keepalive_sec + 's'} />
 
       <${SectionHeader} title="네임스페이스 조율" />
+      ${isVerifierRoleKeeper(c.coordination.mention_targets) ? html`
+      <div class="mb-2 flex items-center gap-2 rounded border border-accent/30 bg-[var(--accent-10)] px-3 py-2">
+        <span class="rounded border border-accent/40 bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 text-accent">Verifier</span>
+        <span class="text-2xs text-text-body">이 keeper는 task completion_contract를 독립 실측하는 검증자 역할입니다.</span>
+      </div>
+      ` : null}
       <${ConfigRow} label="프로젝트 범위" value=${c.coordination.room_scope || '--'} />
       ${c.coordination.mention_targets.length > 0 ? html`
       <div class="mt-1.5">

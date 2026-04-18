@@ -100,6 +100,25 @@ let cooldown_sec =
     ~deprecated:"OAS_CASCADE_COOLDOWN_SEC"
     ~default:60.0
 
+(** Cooldown duration for provider calls classified as hard-quota exhaustion
+    (account balance depleted, monthly quota reached, resource exhausted).
+    Unlike transient 429s, hard-quota errors will not recover within a short
+    window — retrying on the next cascade tick just wastes a turn.  This
+    cooldown is applied immediately on the first such error (no threshold)
+    and is significantly longer than {!cooldown_sec}.
+
+    Default: 3600s (1h), matching the typical granularity of quota/billing
+    reset cycles.  Override via [MASC_CASCADE_HARD_QUOTA_COOLDOWN_SEC] if
+    your provider's quota window is shorter (e.g. per-minute tier limits
+    that happen to trigger hard-quota indicator strings).
+
+    @since 0.161.0 *)
+let hard_quota_cooldown_sec =
+  read_float_setting
+    ~primary:"MASC_CASCADE_HARD_QUOTA_COOLDOWN_SEC"
+    ~deprecated:"OAS_CASCADE_HARD_QUOTA_COOLDOWN_SEC"
+    ~default:3600.0
+
 (* ── Types ────────────────────────────────────── *)
 
 (* [Rejected] is the third outcome kind introduced in 0.160.0.  It
@@ -108,7 +127,14 @@ let cooldown_sec =
    trigger, same success-rate impact) but visible to the dashboard so
    operators can tell a down provider apart from one whose outputs are
    consistently unusable. *)
-type outcome = Success | Failure | Rejected
+(* [Hard_quota] is the fourth outcome kind introduced in 0.161.0.  It
+   represents "provider returned a terminal quota-exhaustion error (balance
+   0, monthly quota reached, resource exhausted)" — classified via OAS
+   [Llm_provider.Retry.is_hard_quota].  Unlike [Failure], a single event
+   triggers an immediate long cooldown ([hard_quota_cooldown_sec]); the
+   [cooldown_threshold] does not apply because retry on the next cascade
+   tick is pointless when the upstream account is out of credit. *)
+type outcome = Success | Failure | Rejected | Hard_quota
 
 type event = {
   time: float;  (* Unix timestamp *)
@@ -174,7 +200,18 @@ let record t ~provider_key ~outcome ~now =
          [provider_info] can count Rejected separately for dashboards. *)
       state.consecutive_failures <- state.consecutive_failures + 1;
       if state.consecutive_failures >= cooldown_threshold then
-        state.cooldown_until <- now +. cooldown_sec)
+        state.cooldown_until <- now +. cooldown_sec
+    | Hard_quota ->
+      (* Hard-quota errors (balance depleted, quota exceeded, resource
+         exhausted) don't recover on short-window retries — set a long
+         cooldown immediately regardless of [consecutive_failures].  We
+         still increment the counter for dashboard continuity.  Preserve
+         an already-longer cooldown (e.g. if two hard-quota events fire
+         concurrently and the second arrives first in wall time). *)
+      state.consecutive_failures <- state.consecutive_failures + 1;
+      let new_until = now +. hard_quota_cooldown_sec in
+      if new_until > state.cooldown_until then
+        state.cooldown_until <- new_until)
 
 let record_success t ~provider_key =
   record t ~provider_key ~outcome:Success ~now:(Unix.gettimeofday ())
@@ -184,6 +221,9 @@ let record_failure t ~provider_key =
 
 let record_rejected t ~provider_key =
   record t ~provider_key ~outcome:Rejected ~now:(Unix.gettimeofday ())
+
+let record_hard_quota t ~provider_key =
+  record t ~provider_key ~outcome:Hard_quota ~now:(Unix.gettimeofday ())
 
 (* ── Queries ──────────────────────────────────── *)
 

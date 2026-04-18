@@ -23,6 +23,17 @@ val cooldown_threshold : int
 val cooldown_sec : float
 (** Cooldown duration in seconds.  Default 60.0. *)
 
+val hard_quota_cooldown_sec : float
+(** Cooldown duration applied immediately on a hard-quota-classified error
+    (balance depleted, monthly quota reached, resource exhausted).  Unlike
+    {!cooldown_sec}, no threshold is required — one hard-quota event is
+    enough.  Default 3600.0 (1h).
+
+    Env: [MASC_CASCADE_HARD_QUOTA_COOLDOWN_SEC] (with deprecated
+    [OAS_CASCADE_HARD_QUOTA_COOLDOWN_SEC] alias).
+
+    @since 0.161.0 *)
+
 (** Opaque health tracker state. *)
 type t
 
@@ -53,6 +64,23 @@ val record_failure : t -> provider_key:string -> unit
 
     @since 0.160.0 *)
 val record_rejected : t -> provider_key:string -> unit
+
+(** Record a provider call that failed with a hard-quota error (balance
+    depleted, monthly quota reached, resource exhausted — classified
+    upstream via [Llm_provider.Retry.is_hard_quota]).
+
+    Unlike {!record_failure}, this triggers an immediate long cooldown
+    ({!hard_quota_cooldown_sec}, default 1h) with no threshold — a
+    provider whose account is out of credit will not recover within the
+    60s [cooldown_sec] window, and weighted_random re-selection just
+    wastes cascade turns.
+
+    Preserves an already-longer cooldown if one exists (no regression).
+    Counts toward [consecutive_failures] for dashboard continuity and
+    toward [events_in_window] in {!provider_info}.
+
+    @since 0.161.0 *)
+val record_hard_quota : t -> provider_key:string -> unit
 
 (** Drop tracker entries whose rolling window is empty AND whose cooldown
     has expired.  Intended as opportunistic maintenance — idle providers

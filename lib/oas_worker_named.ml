@@ -493,7 +493,18 @@ let run_named
            on_success ~provider_key:provider_cfg.model_id;
            Ok result)
       | Error sdk_err ->
-        Cascade_health_tracker.(record_failure global ~provider_key:provider_cfg.model_id);
+        (* Classify hard-quota (account-level exhaustion) distinctly from
+           transient failures.  Hard quota (e.g. Anthropic multi-day usage
+           limit, ZAI balance 0) will not recover within the 60s
+           [cooldown_sec]; apply an immediate long cooldown
+           ([hard_quota_cooldown_sec], default 1h) so weighted_random
+           re-selection doesn't waste cascade turns on a provider that
+           is terminally unavailable. *)
+        (match sdk_err with
+         | Oas.Error.Api api_err when Llm_provider.Retry.is_hard_quota api_err ->
+           Cascade_health_tracker.(record_hard_quota global ~provider_key:provider_cfg.model_id)
+         | _ ->
+           Cascade_health_tracker.(record_failure global ~provider_key:provider_cfg.model_id));
         (* FSM: Call_err → decide *)
         (match sdk_error_to_cascade_outcome sdk_err with
          | Some outcome ->

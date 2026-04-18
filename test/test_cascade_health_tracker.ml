@@ -141,6 +141,73 @@ let test_evict_idle_returns_zero_when_all_active () =
   check int "no eviction when all providers have recent events"
     0 (H.evict_idle t)
 
+(* ── Hard_quota outcome (0.161.0) ──────────────────── *)
+
+let test_hard_quota_triggers_immediate_cooldown () =
+  (* Unlike record_failure which needs [cooldown_threshold] consecutive
+     events, a single hard_quota event must trip cooldown on its own —
+     balance depletion will not recover within 60s. *)
+  let t = H.create () in
+  H.record_hard_quota t ~provider_key:"p";
+  check bool "single hard_quota event trips cooldown immediately"
+    true (H.is_in_cooldown t ~provider_key:"p")
+
+let test_hard_quota_cooldown_is_long () =
+  let t = H.create () in
+  H.record_hard_quota t ~provider_key:"p";
+  match H.provider_info t ~provider_key:"p" with
+  | None -> fail "provider_info returned None after record_hard_quota"
+  | Some info ->
+    let now = Unix.gettimeofday () in
+    (match info.cooldown_expires_at with
+     | None -> fail "expected cooldown_expires_at = Some _, got None"
+     | Some expires ->
+       let remaining = expires -. now in
+       (* Should be close to hard_quota_cooldown_sec (default 3600.0),
+          significantly longer than cooldown_sec (60.0).  Use 300s as
+          the lower bound to be robust to env overrides in CI. *)
+       check bool
+         (Printf.sprintf "hard_quota cooldown (%.0fs) >> regular cooldown (60s)" remaining)
+         true (remaining > 300.0))
+
+let test_hard_quota_effective_weight_zero () =
+  let t = H.create () in
+  H.record_hard_quota t ~provider_key:"p";
+  check int "effective_weight = 0 during hard_quota cooldown"
+    0 (H.effective_weight t ~provider_key:"p" ~config_weight:100)
+
+let test_hard_quota_success_clears_cooldown () =
+  (* The dashboard story: if the operator tops up billing and the
+     provider starts responding again, one successful call should
+     let us re-select the provider on the next tick. *)
+  let t = H.create () in
+  H.record_hard_quota t ~provider_key:"p";
+  H.record_success t ~provider_key:"p";
+  check bool "success after hard_quota clears cooldown"
+    false (H.is_in_cooldown t ~provider_key:"p")
+
+let test_hard_quota_preserves_longer_existing_cooldown () =
+  (* If the provider is already in a long cooldown, a subsequent
+     hard_quota event should not accidentally shorten it.  We can't
+     easily set a longer-than-default cooldown in a unit test, so this
+     test focuses on the idempotent case: two hard_quota events should
+     leave the cooldown no shorter than a single event. *)
+  let t = H.create () in
+  H.record_hard_quota t ~provider_key:"p";
+  let expires_after_first =
+    match H.provider_info t ~provider_key:"p" with
+    | Some { cooldown_expires_at = Some x; _ } -> x
+    | _ -> fail "no cooldown after first hard_quota"
+  in
+  H.record_hard_quota t ~provider_key:"p";
+  let expires_after_second =
+    match H.provider_info t ~provider_key:"p" with
+    | Some { cooldown_expires_at = Some x; _ } -> x
+    | _ -> fail "no cooldown after second hard_quota"
+  in
+  check bool "second hard_quota does not shorten cooldown"
+    true (expires_after_second >= expires_after_first)
+
 let () =
   run "cascade_health_tracker" [
     "record", [
@@ -174,5 +241,17 @@ let () =
         test_evict_idle_drops_no_event_providers;
       test_case "all-active → no eviction" `Quick
         test_evict_idle_returns_zero_when_all_active;
+    ];
+    "hard_quota", [
+      test_case "single event trips immediate cooldown" `Quick
+        test_hard_quota_triggers_immediate_cooldown;
+      test_case "cooldown duration is long (≫ 60s)" `Quick
+        test_hard_quota_cooldown_is_long;
+      test_case "effective_weight = 0 during hard_quota cooldown" `Quick
+        test_hard_quota_effective_weight_zero;
+      test_case "success after hard_quota clears cooldown" `Quick
+        test_hard_quota_success_clears_cooldown;
+      test_case "second hard_quota does not shorten cooldown" `Quick
+        test_hard_quota_preserves_longer_existing_cooldown;
     ];
   ]

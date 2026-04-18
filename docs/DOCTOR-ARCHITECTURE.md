@@ -130,6 +130,7 @@ class AutoFix:
 | Telegram sidecar | `masc-mcp doctor sidecar telegram` ↔ `python -m src doctor` | 운영 중 |
 | iMessage sidecar | `masc-mcp doctor sidecar imessage` ↔ `python -m src doctor` | 운영 중 |
 | CLI connector | `masc-mcp doctor sidecar cli` ↔ `python -m src doctor` | 운영 중 |
+| 전 계층 fan-out | `masc-mcp doctor all` | 운영 중 |
 | 대시보드 | `/api/v1/dashboard/doctor` 취합 패널 | 후속 |
 
 ### Dispatch
@@ -139,14 +140,29 @@ masc-mcp doctor                     # default → config (backward-compat)
 masc-mcp doctor config              # base path / config root 진단
 masc-mcp doctor sidecar <name>      # python -m src doctor 를 해당 sidecar 디렉터리에서 실행
 masc-mcp doctor sidecar <name> --json
+masc-mcp doctor all                 # config + 5 sidecar 연쇄 실행 + aggregate 요약
 ```
 
 지원 sidecar 이름: `discord`, `slack`, `telegram`, `imessage`, `cli`.
 
-구현은 `lib/doctor_dispatch.ml` (pure mapping) + `bin/main_eio.ml` 의
-`doctor_sidecar_exit` (subprocess spawn). Python 실행 파일은 `MASC_PYTHON`
-env 로 override 할 수 있고, 기본값은 `python3`. stdout/stderr 은 그대로
-forward 되며 exit code 도 그대로 전달된다.
+구현은 `lib/doctor_dispatch.ml` (pure mapping + `aggregate_exit_code`) +
+`bin/main_eio.ml` 의 `doctor_sidecar_exit` / `doctor_all_exit`. Python 실행
+파일은 `MASC_PYTHON` env 로 override 할 수 있고, 기본값은 `python3`.
+stdout/stderr 은 그대로 forward 되며 exit code 도 그대로 전달된다.
+
+`doctor all` 은 각 Doctor 의 stdout 을 그대로 흘려보낸 뒤 마지막에
+
+```
+========================================
+합계: 6 Doctor · 정상 3 · 경고 2 · 오류 1
+config=정상 · discord=경고 · slack=경고 · telegram=오류 · imessage=정상 · cli=정상
+========================================
+```
+
+형태의 aggregate 요약을 붙인다. 종합 exit code 는 `max(all rcs)`
+(`error>warn>ok`) 로 계산되며, 종료 신호나 알 수 없는 rc (`<0` 또는 `>2`) 는
+`error` 로 상향 처리된다. `--json` 은 아직 미지원 (각 서브커맨드 단위로만
+지원; 후속 PR 에서 통합 포맷 추가 예정).
 
 ## Discord Sidecar Doctor 체크 목록
 

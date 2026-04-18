@@ -678,13 +678,83 @@ let doctor_sidecar_cmd =
   let info = Cmd.info "sidecar" ~doc in
   Cmd.v info Term.(const doctor_sidecar_exit $ sidecar_name_arg $ doctor_json)
 
+let doctor_all_divider () =
+  print_endline "========================================"
+
+let doctor_all_section title =
+  print_newline ();
+  doctor_all_divider ();
+  print_endline title;
+  doctor_all_divider ()
+
+let label_for_rc = function
+  | 0 -> "정상"
+  | 1 -> "경고"
+  | 2 -> "오류"
+  | _ -> "오류"
+
+let doctor_all_exit base_path as_json =
+  if as_json
+  then begin
+    Printf.eprintf
+      "masc-mcp doctor all --json: not yet implemented (use --json on \
+       individual subcommands for now)\n";
+    2
+  end
+  else begin
+    doctor_all_section "Config Doctor";
+    let config_rc = doctor_cmd_exit base_path false in
+    let sidecar_rcs =
+      List.map
+        (fun name ->
+          doctor_all_section
+            (Printf.sprintf
+               "%s Sidecar Doctor"
+               (String.capitalize_ascii name));
+          let rc = doctor_sidecar_exit name false in
+          (name, rc))
+        Masc_mcp.Doctor_dispatch.known_sidecars
+    in
+    let all_rcs = config_rc :: List.map snd sidecar_rcs in
+    let total = List.length all_rcs in
+    let count_eq v = List.length (List.filter (( = ) v) all_rcs) in
+    let ok_count = count_eq 0 in
+    let warn_count = count_eq 1 in
+    let err_count = total - ok_count - warn_count in
+    print_newline ();
+    doctor_all_divider ();
+    Printf.printf
+      "합계: %d Doctor · 정상 %d · 경고 %d · 오류 %d\n"
+      total
+      ok_count
+      warn_count
+      err_count;
+    let breakdown =
+      ("config", config_rc) :: sidecar_rcs
+      |> List.map (fun (name, rc) ->
+             Printf.sprintf "%s=%s" name (label_for_rc rc))
+      |> String.concat " · "
+    in
+    print_endline breakdown;
+    doctor_all_divider ();
+    Masc_mcp.Doctor_dispatch.aggregate_exit_code all_rcs
+  end
+
+let doctor_all_cmd =
+  let doc =
+    "Run config + every registered sidecar doctor and show an aggregate \
+     summary"
+  in
+  let info = Cmd.info "all" ~doc in
+  Cmd.v info Term.(const doctor_all_exit $ base_path $ doctor_json)
+
 let doctor_cmd =
   let doc = "Doctor: diagnose MASC server and sidecars" in
   let info = Cmd.info "doctor" ~doc in
   Cmd.group
     ~default:Term.(const doctor_cmd_exit $ base_path $ doctor_json)
     info
-    [ doctor_config_cmd; doctor_sidecar_cmd ]
+    [ doctor_config_cmd; doctor_sidecar_cmd; doctor_all_cmd ]
 
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in

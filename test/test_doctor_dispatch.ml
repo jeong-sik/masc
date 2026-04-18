@@ -40,6 +40,27 @@ let test_known_summary_lists_all () =
       then failf "known_summary missing %S" name)
     Doctor_dispatch.known_sidecars
 
+let test_aggregate_empty_is_zero () =
+  (check int) "empty" 0 (Doctor_dispatch.aggregate_exit_code [])
+
+let test_aggregate_all_ok () =
+  (check int) "all ok" 0 (Doctor_dispatch.aggregate_exit_code [ 0; 0; 0 ])
+
+let test_aggregate_warn_wins_over_ok () =
+  (check int) "warn dominates ok" 1 (Doctor_dispatch.aggregate_exit_code [ 0; 1; 0 ])
+
+let test_aggregate_error_wins_over_warn () =
+  (check int)
+    "error dominates warn"
+    2
+    (Doctor_dispatch.aggregate_exit_code [ 1; 2; 1 ])
+
+let test_aggregate_unknown_treated_as_error () =
+  (check int)
+    "signal/junk → error"
+    2
+    (Doctor_dispatch.aggregate_exit_code [ 0; 137 ])
+
 let () =
   run
     "doctor_dispatch"
@@ -60,5 +81,15 @@ let () =
             "known_summary lists all names"
             `Quick
             test_known_summary_lists_all
+        ] )
+    ; ( "aggregate_exit_code"
+      , [ test_case "empty → 0" `Quick test_aggregate_empty_is_zero
+        ; test_case "all ok → 0" `Quick test_aggregate_all_ok
+        ; test_case "warn > ok" `Quick test_aggregate_warn_wins_over_ok
+        ; test_case "error > warn" `Quick test_aggregate_error_wins_over_warn
+        ; test_case
+            "unknown rc → error"
+            `Quick
+            test_aggregate_unknown_treated_as_error
         ] )
     ]

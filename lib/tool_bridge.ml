@@ -41,14 +41,26 @@ let externalization_disabled () =
   | Some ("0" | "false" | "no" | "off") -> true
   | _ -> false
 
-(* Lazy singleton. Resolved once per process from [base_path_opt]; if no
-   base path is configured (typical in tests with [MASC_BASE_PATH ""]),
-   externalization is silently disabled. *)
-let blob_store_lazy : Tool_blob_store.t option Lazy.t =
-  lazy
-    (match Env_config_core.base_path_opt () with
-     | None -> None
-     | Some base_path -> Some (Tool_blob_store.create ~base_path))
+(* This path is exercised both under Eio and from tests/module-init code, so a
+   cross-context Atomic+Stdlib.Mutex memo is safer than Stdlib.Lazy.force. *)
+let blob_store_cache : Tool_blob_store.t option option Atomic.t = Atomic.make None
+let blob_store_cache_mu = Mutex.create ()
+
+let resolve_blob_store () =
+  match Atomic.get blob_store_cache with
+  | Some store -> store
+  | None ->
+      Mutex.protect blob_store_cache_mu (fun () ->
+        match Atomic.get blob_store_cache with
+        | Some store -> store
+        | None ->
+            let store =
+              match Env_config_core.base_path_opt () with
+              | None -> None
+              | Some base_path -> Some (Tool_blob_store.create ~base_path)
+            in
+            Atomic.set blob_store_cache (Some store);
+            store)
 
 (** Externalize [msg] when it exceeds the threshold AND a blob store is
     available; otherwise pass through unchanged. Best-effort — any
@@ -60,7 +72,7 @@ let maybe_externalize ?(mime = "text/plain") (msg : string) : string =
     let threshold = externalize_threshold_bytes () in
     if String.length msg <= threshold then msg
     else
-      match Lazy.force blob_store_lazy with
+      match resolve_blob_store () with
       | None -> msg
       | Some store ->
           (try

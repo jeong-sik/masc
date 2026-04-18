@@ -331,36 +331,28 @@ module Request = struct
 
   (** Read request body synchronously - uses Condition for proper synchronization *)
   let read_body_sync reqd =
-    let result = ref None in
-    let mutex = Eio.Mutex.create () in
-    let cond = Eio.Condition.create () in
+    let result_promise, resolve_result = Eio.Promise.create () in
+    let resolved = Atomic.make false in
+
+    let resolve_once outcome =
+      if Atomic.compare_and_set resolved false true then
+        Eio.Promise.resolve resolve_result outcome
+    in
 
     read_body_async_with_limit reqd
       ~on_body:(fun body_str ->
-        Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-          result := Some (Ok body_str);
-          Eio.Condition.broadcast cond))
+        resolve_once (Ok body_str))
       ~on_error:(function
         | `Too_large max_bytes ->
             respond_too_large reqd max_bytes;
-            Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-              result := Some (Error (Printf.sprintf "Request too large (max %d bytes)" max_bytes));
-              Eio.Condition.broadcast cond)
+            resolve_once
+              (Error
+                 (Printf.sprintf "Request too large (max %d bytes)" max_bytes))
         | `Internal exn ->
             respond_internal_error reqd exn;
-            Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-              result := Some (Error (Printexc.to_string exn));
-              Eio.Condition.broadcast cond));
+            resolve_once (Error (Printexc.to_string exn)));
 
-    Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-      while !result = None do
-        Eio.Condition.await_no_mutex cond
-      done);
-
-    match !result with
-    | Some (Ok s) -> Ok s
-    | Some (Error msg) -> Error msg
-    | None -> Error "read_body_sync: impossible state"
+    Eio.Promise.await result_promise
 
   (** Get path from request target *)
   let path (request : Httpun.Request.t) =

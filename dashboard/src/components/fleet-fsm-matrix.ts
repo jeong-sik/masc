@@ -72,7 +72,7 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   // KSM
   Running:      'bg-emerald-900/40 text-[var(--ok)] border-[var(--ok-20)]',
   Failing:      'bg-red-900/50 text-[var(--bad-light)] border-[var(--bad-20)]',
-  Overflowed:   'bg-orange-900/50 text-orange-200 border-orange-700',
+  Overflowed:   'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
   Compacting:   'bg-amber-900/50 text-[var(--warn)] border-[var(--warn-20)]',
   HandingOff:   'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
   Draining:     'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',

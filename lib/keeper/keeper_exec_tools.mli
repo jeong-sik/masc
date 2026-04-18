@@ -37,6 +37,12 @@ val core_discovery_tools : string list
 (** Returns [core_discovery_tools].  Discovery mode is the default. *)
 val effective_core_tools : unit -> string list
 
+(** Keeper tools dispatched by the server but withheld from the visible
+    keeper tool set (admin/opt-in only — see [optional] group in
+    [config/tool_policy.toml]).  Exported so startup validators can
+    recognise them as runtime rather than orphan config. *)
+val keeper_admin_dispatched_tools : string list
+
 (** Keeper-local read-only tools that do not always flow through Tool_spec. *)
 val keeper_read_only_tools : string list
 

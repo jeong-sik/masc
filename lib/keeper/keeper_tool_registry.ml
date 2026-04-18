@@ -83,6 +83,19 @@ let core_discovery_tools =
 
 let effective_core_tools () = core_discovery_tools
 
+(** Keeper tools that the dispatcher accepts but that are intentionally
+    withheld from the visible/core set — served only when a keeper
+    opts in via [policy_config.also_allow] (e.g. the [optional] group
+    in [config/tool_policy.toml]).
+
+    Must stay in sync with [Keeper_exec_tools.execute_keeper_tool_call]
+    match arms.  Exported so [Tool_registration_check] can recognise
+    them as legitimate runtime names instead of flagging them as
+    orphan toml entries (#7696). *)
+let keeper_admin_dispatched_tools =
+  List.map Tool_name.to_string
+    Tool_name.[ Keeper Board_cleanup; Keeper Board_delete ]
+
 let core_always_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length core_always_tools) in
   List.iter (fun name -> Hashtbl.replace tbl name ()) core_always_tools;

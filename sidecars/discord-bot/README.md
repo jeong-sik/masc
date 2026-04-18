@@ -207,9 +207,10 @@ Use the `/keeper-ask` slash command to talk to any keeper from any channel.
   without a process restart
 - relative connector paths resolve from `MASC_BASE_PATH` when it is set; this
   keeps the bot on the same project data root as the MASC server
-- when the new default binding path is empty but the legacy sidecar-local
-  `.gate/discord_bindings.json` exists, the bot loads that legacy map as a
-  compatibility fallback and reports `binding_source=legacy-fallback`
+- when the new default runtime files are missing but the legacy
+  `.masc/connectors/discord/*` files still exist under the same
+  `MASC_BASE_PATH`, startup migrates them into `.gate/runtime/discord/*`
+  before the bot loads state
 
 ## Operations Upgrades
 

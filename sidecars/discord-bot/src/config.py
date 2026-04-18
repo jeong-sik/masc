@@ -27,11 +27,11 @@ DEFAULT_STATUS_PATH: Final[str] = ".gate/runtime/discord/status.json"
 DEFAULT_NAMES_PATH: Final[str] = ".gate/runtime/discord/names.json"
 
 # Legacy layout from the pre-v0.9.0 release (OCaml side migrated in
-# #7467/#7468 B3a/B3b). On first startup after upgrade, bot.py's 1-tier
-# fallback picks up data from the legacy location and the next write lands
-# at the new default. The even older `sidecars/discord-bot/.gate/discord_*`
-# cwd-relative layout is no longer auto-discovered; deployments still on it
-# must set explicit DISCORD_*_PATH env vars.
+# #7467/#7468 B3a/B3b). On startup the bot now migrates these files into the
+# new runtime layout when the operator still uses the default target paths.
+# The even older `sidecars/discord-bot/.gate/discord_*` cwd-relative layout is
+# no longer auto-discovered; deployments still on it must set explicit
+# DISCORD_*_PATH env vars.
 LEGACY_BINDING_STORE_PATH: Final[str] = ".masc/connectors/discord/bindings.json"
 LEGACY_BINDING_AUDIT_PATH: Final[str] = ".masc/connectors/discord/binding_audit.jsonl"
 LEGACY_STATUS_PATH: Final[str] = ".masc/connectors/discord/status.json"
@@ -169,7 +169,9 @@ class BotConfig(BaseSettings):
     )
     gate_breaker_reset_sec: int = Field(
         default=30,
-        validation_alias=AliasChoices("GATE_BREAKER_RESET_SEC", "gate_breaker_reset_sec"),
+        validation_alias=AliasChoices(
+            "GATE_BREAKER_RESET_SEC", "gate_breaker_reset_sec"
+        ),
     )
     status_heartbeat_sec: int = Field(
         default=10,
@@ -289,6 +291,11 @@ class BotConfig(BaseSettings):
     def names_path(self) -> Path:
         return self._resolve_storage_path(self.discord_names_path)
 
+    def _matches_default_storage_path(self, raw_path: str, default_path: str) -> bool:
+        return self._resolve_storage_path(raw_path) == self._resolve_storage_path(
+            default_path
+        )
+
     # Legacy paths now resolve under the same base as the new defaults
     # (MASC_BASE_PATH or cwd), not under sidecars/discord-bot/, because the
     # pre-v0.9.0 layout was already MASC_BASE_PATH-relative.
@@ -303,6 +310,46 @@ class BotConfig(BaseSettings):
 
     def legacy_names_path(self) -> Path:
         return self._resolve_storage_path(LEGACY_NAMES_PATH)
+
+    def legacy_runtime_migrations(self) -> list[tuple[str, Path, Path]]:
+        migrations: list[tuple[str, Path, Path]] = []
+        candidates = [
+            (
+                "binding store",
+                self.discord_binding_store_path,
+                DEFAULT_BINDING_STORE_PATH,
+                self.legacy_binding_store_path(),
+                self.binding_store_path(),
+            ),
+            (
+                "binding audit",
+                self.discord_binding_audit_path,
+                DEFAULT_BINDING_AUDIT_PATH,
+                self.legacy_binding_audit_path(),
+                self.binding_audit_path(),
+            ),
+            (
+                "status",
+                self.discord_status_path,
+                DEFAULT_STATUS_PATH,
+                self.legacy_status_path(),
+                self.status_path(),
+            ),
+            (
+                "names",
+                self.discord_names_path,
+                DEFAULT_NAMES_PATH,
+                self.legacy_names_path(),
+                self.names_path(),
+            ),
+        ]
+        for label, raw_path, default_path, legacy_path, target_path in candidates:
+            if (
+                self._matches_default_storage_path(raw_path, default_path)
+                and legacy_path != target_path
+            ):
+                migrations.append((label, legacy_path, target_path))
+        return migrations
 
     def gate_message_url(self) -> str:
         base = self.gate_base_url.rstrip("/")

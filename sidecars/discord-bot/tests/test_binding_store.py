@@ -102,13 +102,16 @@ def test_config_resolves_legacy_paths_from_base_path(tmp_path: Path) -> None:
         os.environ["MASC_BASE_PATH"] = str(base_path)
         os.chdir(tmp_path)
         assert cfg.legacy_binding_store_path() == (
-            base_path / "sidecars" / "discord-bot" / ".gate" / "discord_bindings.json"
+            base_path / ".masc" / "connectors" / "discord" / "bindings.json"
         )
         assert cfg.legacy_binding_audit_path() == (
-            base_path / "sidecars" / "discord-bot" / ".gate" / "discord_binding_audit.jsonl"
+            base_path / ".masc" / "connectors" / "discord" / "binding_audit.jsonl"
         )
         assert cfg.legacy_status_path() == (
-            base_path / "sidecars" / "discord-bot" / ".gate" / "discord_status.json"
+            base_path / ".masc" / "connectors" / "discord" / "status.json"
+        )
+        assert cfg.legacy_names_path() == (
+            base_path / ".masc" / "connectors" / "discord" / "names.json"
         )
     finally:
         if previous_base_path is None:
@@ -118,7 +121,9 @@ def test_config_resolves_legacy_paths_from_base_path(tmp_path: Path) -> None:
         os.chdir(original_cwd)
 
 
-def test_config_resolves_legacy_paths_from_cwd_without_base_path(tmp_path: Path) -> None:
+def test_config_resolves_legacy_paths_from_cwd_without_base_path(
+    tmp_path: Path,
+) -> None:
     cfg = BotConfig(
         discord_bot_token="test-token",
         gate_api_token="test-api-token",
@@ -129,10 +134,58 @@ def test_config_resolves_legacy_paths_from_cwd_without_base_path(tmp_path: Path)
     try:
         os.environ.pop("MASC_BASE_PATH", None)
         os.chdir(tmp_path)
-        assert cfg.legacy_binding_store_path() == tmp_path / ".gate" / "discord_bindings.json"
-        assert cfg.legacy_binding_audit_path() == tmp_path / ".gate" / "discord_binding_audit.jsonl"
-        assert cfg.legacy_status_path() == tmp_path / ".gate" / "discord_status.json"
+        assert cfg.legacy_binding_store_path() == (
+            tmp_path / ".masc" / "connectors" / "discord" / "bindings.json"
+        )
+        assert cfg.legacy_binding_audit_path() == (
+            tmp_path / ".masc" / "connectors" / "discord" / "binding_audit.jsonl"
+        )
+        assert cfg.legacy_status_path() == (
+            tmp_path / ".masc" / "connectors" / "discord" / "status.json"
+        )
+        assert cfg.legacy_names_path() == (
+            tmp_path / ".masc" / "connectors" / "discord" / "names.json"
+        )
     finally:
         if previous_base_path is not None:
+            os.environ["MASC_BASE_PATH"] = previous_base_path
+        os.chdir(original_cwd)
+
+
+def test_config_plans_runtime_migration_only_for_default_paths(tmp_path: Path) -> None:
+    base_path = tmp_path / "workspace"
+    base_path.mkdir()
+    cfg = BotConfig(
+        discord_bot_token="test-token",
+        gate_api_token="test-api-token",
+        discord_status_path="custom/status.json",
+    )
+
+    previous_base_path = os.getenv("MASC_BASE_PATH")
+    original_cwd = Path.cwd()
+    try:
+        os.environ["MASC_BASE_PATH"] = str(base_path)
+        os.chdir(tmp_path)
+        assert cfg.legacy_runtime_migrations() == [
+            (
+                "binding store",
+                base_path / ".masc" / "connectors" / "discord" / "bindings.json",
+                base_path / ".gate" / "runtime" / "discord" / "bindings.json",
+            ),
+            (
+                "binding audit",
+                base_path / ".masc" / "connectors" / "discord" / "binding_audit.jsonl",
+                base_path / ".gate" / "runtime" / "discord" / "binding_audit.jsonl",
+            ),
+            (
+                "names",
+                base_path / ".masc" / "connectors" / "discord" / "names.json",
+                base_path / ".gate" / "runtime" / "discord" / "names.json",
+            ),
+        ]
+    finally:
+        if previous_base_path is None:
+            os.environ.pop("MASC_BASE_PATH", None)
+        else:
             os.environ["MASC_BASE_PATH"] = previous_base_path
         os.chdir(original_cwd)

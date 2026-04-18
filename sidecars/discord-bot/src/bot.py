@@ -33,6 +33,7 @@ from .formatters import (
     strip_state_blocks,
 )
 from .gate_client import BreakerSnapshot, GateClient, GateResponse
+from .storage_migration import migrate_legacy_runtime_files
 from .status_store import (
     ConnectorRuntimeStatus,
     NamesSnapshot,
@@ -60,7 +61,9 @@ def attachment_lines(message: discord.Message) -> list[str]:
     return lines
 
 
-def channel_stats_for(status: dict[str, Any] | None, channel_name: str) -> dict[str, Any] | None:
+def channel_stats_for(
+    status: dict[str, Any] | None, channel_name: str
+) -> dict[str, Any] | None:
     """Extract one connector row from gate status."""
     if status is None:
         return None
@@ -85,6 +88,9 @@ class GateBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self.gate = GateClient()
         self.cfg = get_config()
+        migrate_legacy_runtime_files(
+            self.cfg.legacy_runtime_migrations(), logger=logger
+        )
         self.binding_store = BindingStore(self.cfg.binding_store_path())
         self.audit_store = BindingAuditStore(self.cfg.binding_audit_path())
         self.status_store = StatusStore(self.cfg.status_path())
@@ -181,7 +187,9 @@ class GateBot(discord.Client):
             return self.keeper_bindings.get(str(channel.parent.id))
         return None
 
-    def channel_binding_debug(self, channel: discord.abc.Snowflake) -> tuple[str | None, str]:
+    def channel_binding_debug(
+        self, channel: discord.abc.Snowflake
+    ) -> tuple[str | None, str]:
         self._maybe_reload_bindings()
         channel_id = str(channel.id)
         direct = self.keeper_bindings.get(channel_id)
@@ -287,7 +295,11 @@ class GateBot(discord.Client):
         try:
             self.status_store.write(status)
         except OSError as exc:
-            logger.warning("Failed to write Discord status store %s: %s", self.status_store.path, exc)
+            logger.warning(
+                "Failed to write Discord status store %s: %s",
+                self.status_store.path,
+                exc,
+            )
 
     def _write_names_snapshot(self) -> None:
         """Snapshot guild and channel names for dashboard humanization.
@@ -459,7 +471,10 @@ class GateBot(discord.Client):
         member = interaction.user
         if not isinstance(member, discord.Member):
             return False
-        if member.guild_permissions.administrator or member.guild_permissions.manage_guild:
+        if (
+            member.guild_permissions.administrator
+            or member.guild_permissions.manage_guild
+        ):
             return True
         role_id = self.cfg.discord_admin_role_id.strip()
         if not role_id:
@@ -537,7 +552,9 @@ class GateBot(discord.Client):
             return
 
         # Strip keeper-internal [STATE] blocks before rendering
-        response = dataclasses.replace(response, reply=strip_state_blocks(response.reply))
+        response = dataclasses.replace(
+            response, reply=strip_state_blocks(response.reply)
+        )
 
         # Try structured rendering (from gate or auto-parsed markdown)
         structured = response.structured or markdown_to_structured(response.reply)
@@ -725,16 +742,16 @@ async def keeper_name_autocomplete(
     assert isinstance(bot, GateBot)
     names = await bot.gate.list_keepers()
     needle = current.strip().lower()
-    matches = [
-        name for name in names if not needle or needle in name.lower()
-    ][:25]
+    matches = [name for name in names if not needle or needle in name.lower()][:25]
     return [app_commands.Choice(name=name, value=name) for name in matches]
 
 
 # ── Slash Commands ──────────────────────────────────────────
 
 
-@app_commands.command(name="keeper-ask", description="Send a message to a specific keeper")
+@app_commands.command(
+    name="keeper-ask", description="Send a message to a specific keeper"
+)
 @app_commands.describe(
     keeper="Keeper name",
     message="Message to send",
@@ -857,7 +874,9 @@ async def keeper_status(
         else (None, "no-channel")
     )
     embed = connector_status_embed(
-        channel_id=str(interaction.channel_id) if interaction.channel_id is not None else None,
+        channel_id=str(interaction.channel_id)
+        if interaction.channel_id is not None
+        else None,
         channel_binding=channel_binding,
         gate_status=await bot.gate.gate_status(),
         breaker=bot.gate.breaker_snapshot(),
@@ -894,7 +913,9 @@ async def keeper_bind(
         return
 
     if interaction.channel is None:
-        await interaction.response.send_message("Channel context required.", ephemeral=True)
+        await interaction.response.send_message(
+            "Channel context required.", ephemeral=True
+        )
         return
 
     await interaction.response.defer(thinking=True, ephemeral=True)
@@ -965,7 +986,9 @@ async def keeper_unbind(interaction: discord.Interaction) -> None:
         return
 
     if interaction.channel is None:
-        await interaction.response.send_message("Channel context required.", ephemeral=True)
+        await interaction.response.send_message(
+            "Channel context required.", ephemeral=True
+        )
         return
 
     channel_id = str(interaction.channel.id)

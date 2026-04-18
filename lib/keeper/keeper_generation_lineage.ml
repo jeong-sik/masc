@@ -230,6 +230,7 @@ let record_handoff_artifacts
       ~manifest_path
       ~parent ~child ~parent_trace_id ~trigger_reason ~context_ratio ~model
   in
+  ignore (Keeper_fs.ensure_dir (Filename.dirname manifest_path));
   match
     Fs_compat.save_file_atomic manifest_path (Yojson.Safe.pretty_to_string manifest)
   with

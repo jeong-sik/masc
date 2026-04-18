@@ -103,7 +103,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
           <span class="text-xs text-[var(--text-muted)]">(${filtered.length})</span>
         </div>
         ${customCount > 0 ? html`
-          <span class="text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
+          <span class="text-[10px] px-2 py-0.5 rounded-sm bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
             ${customCount} custom
           </span>
         ` : null}

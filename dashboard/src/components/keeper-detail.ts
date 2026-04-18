@@ -175,7 +175,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     <div class="px-6 pt-4">
       <div class="rounded border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[12px] text-[var(--text-body)]">
         ${keeper.paused
-          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">일시정지</span>
+          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">일시정지</span>
             <button
               class="inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition-colors disabled:opacity-50"
               disabled=${directiveLoading.value}
@@ -192,24 +192,24 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
             ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
           : null}
         ${hbStale
-          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">Heartbeat stale</span>
+          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">Heartbeat stale</span>
             <span>마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>`
           : null}
         ${continueGate
           ? html`
-              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">
+              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">
                 계속 진행 승인 대기
               </span>
             `
           : socialFallbackActive
           ? html`
-              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">
+              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">
                 Social fallback
               </span>
             `
           : runtimeBlockerClass
           ? html`
-              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">
+              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">
                 ${runtimeBlockerLabel ?? 'Runtime blocker'}
               </span>
             `
@@ -433,14 +433,14 @@ function CheckpointSummaryCard({
     <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3">
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-[12px] font-semibold text-[var(--text-strong)]">${title}</span>
-        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.18)]">
+        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.18)]">
           gen ${summary.generation}
         </span>
-        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]">
+        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]">
           ${summary.message_count} msgs
         </span>
         ${summary.system_prompt_present
-          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]">system kept</span>`
+          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]">system kept</span>`
           : null}
       </div>
       <div class="mt-2 text-[11px] text-[var(--text-muted)]">
@@ -615,14 +615,14 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
                     <div class="min-w-0 flex-1">
                       <div class="flex flex-wrap items-center gap-2">
                         <span class="font-mono text-[var(--text-strong)]">${item.snapshot_id}</span>
-                        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.18)]">
+                        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.18)]">
                           gen ${item.generation}
                         </span>
-                        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]">
+                        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]">
                           ${item.message_count} msgs
                         </span>
                         ${item.system_prompt_present
-                          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]">system kept</span>`
+                          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]">system kept</span>`
                           : null}
                       </div>
                       <div class="mt-1 text-[11px] text-[var(--text-muted)]">

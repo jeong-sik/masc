@@ -28,7 +28,7 @@
 // NOT a replacement for:
 //  - `Kbd` (keyboard shortcut pill — has <kbd> semantics)
 //  - `CountBadge` (numeric pill — tabular-nums + tone background)
-//  - `StatusChip` (status pill — rounded-full + border + tone)
+//  - `StatusChip` (status pill — rounded-sm + border + tone)
 // SectionCap is a *label*, not a *chip*. It has no border/background
 // by default and renders as <div> so flexbox stacking works without
 // the caller reaching for inline-block overrides.

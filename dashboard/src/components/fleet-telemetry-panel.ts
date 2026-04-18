@@ -338,7 +338,7 @@ function FailureCategoryPanel({ toolQuality }: { toolQuality: ToolQualityRespons
         <div class="flex items-center gap-2 text-[11px]">
           <div class="flex min-w-0 flex-1 items-center gap-1.5">
             <div
-              class="h-1.5 rounded-full bg-[var(--bad-10)]"
+              class="h-1.5 rounded-sm bg-[var(--bad-10)]"
               style="width: ${Math.max(6, (category.count / maxCount) * 100)}%"
             ></div>
             <span class="truncate font-mono text-[var(--bad-light)]" title=${category.category}>${category.category}</span>
@@ -499,10 +499,10 @@ export function FleetTelemetryPanel() {
         <div class="flex items-center gap-3">
           <h2 class="text-sm font-medium">Keeper 텔레메트리</h2>
           <div class="flex items-center gap-2 text-[10px]">
-            ${activeCount > 0 ? html`<span class="rounded-full bg-[var(--ok-10)] px-1.5 py-0.5 text-[var(--ok)]">${activeCount} 가동</span>` : null}
-            ${attentionCount > 0 ? html`<span class="rounded-full bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--warn)]">${attentionCount} 주의</span>` : null}
-            ${offlineCount > 0 ? html`<span class="rounded-full bg-[var(--white-8)] px-1.5 py-0.5 text-[var(--text-dim)]">${offlineCount} 오프라인</span>` : null}
-            ${budgetOverrideCount > 0 ? html`<span class="rounded-full bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--warn)]">${budgetOverrideCount} 예산 재정의</span>` : null}
+            ${activeCount > 0 ? html`<span class="rounded-sm bg-[var(--ok-10)] px-1.5 py-0.5 text-[var(--ok)]">${activeCount} 가동</span>` : null}
+            ${attentionCount > 0 ? html`<span class="rounded-sm bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--warn)]">${attentionCount} 주의</span>` : null}
+            ${offlineCount > 0 ? html`<span class="rounded-sm bg-[var(--white-8)] px-1.5 py-0.5 text-[var(--text-dim)]">${offlineCount} 오프라인</span>` : null}
+            ${budgetOverrideCount > 0 ? html`<span class="rounded-sm bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--warn)]">${budgetOverrideCount} 예산 재정의</span>` : null}
           </div>
         </div>
         <div class="flex items-center gap-2">

@@ -285,7 +285,7 @@ function KeeperApprovalAlertBanner() {
       role="status"
       aria-live="polite"
     >
-      <div class="shrink-0 flex items-center justify-center w-11 h-11 rounded-full border border-current/30 bg-current/10">
+      <div class="shrink-0 flex items-center justify-center w-11 h-11 rounded-sm border border-current/30 bg-current/10">
         <${AlertTriangle} size=${22} aria-hidden="true" />
       </div>
       <div class="flex-1 min-w-0">

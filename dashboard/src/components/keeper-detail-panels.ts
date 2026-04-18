@@ -135,8 +135,8 @@ function KpiCard({ label, value, hint, tone = 'default', progress }: {
       </div>
       <div class="text-2xl font-bold ${KPI_VALUE_TONE[tone]} tabular-nums leading-none">${value}</div>
       ${progress != null ? html`
-        <div class="w-full h-1 bg-[var(--white-6)] rounded-full overflow-hidden mt-0.5">
-          <div class="h-full rounded-full transition-all duration-500" style="width:${Math.min(progress, 100)}%;background:${ctxColor(progress)}"></div>
+        <div class="w-full h-1 bg-[var(--white-6)] rounded-sm overflow-hidden mt-0.5">
+          <div class="h-full rounded-sm transition-all duration-500" style="width:${Math.min(progress, 100)}%;background:${ctxColor(progress)}"></div>
         </div>
       ` : null}
       ${hint ? html`<div class="text-[10px] text-[var(--text-dim)] leading-snug">${hint}</div>` : null}
@@ -253,17 +253,17 @@ function OutcomesLedger({ keeper, outcomes }: {
           <span class="tabular-nums"><span class="text-[var(--warn)]">⚠️</span> ${failures.turn_failed} 실패</span>
           <span class="tabular-nums"><span class="text-[var(--bad)]">🚫</span> ${failures.gate_rejected} 거절</span>
         </div>
-        <div class="mt-2 w-full h-1.5 bg-[var(--white-6)] rounded-full overflow-hidden flex" aria-label="성공/실패 비율 바">
+        <div class="mt-2 w-full h-1.5 bg-[var(--white-6)] rounded-sm overflow-hidden flex" aria-label="성공/실패 비율 바">
           <div class="h-full bg-[var(--ok)]" style="width:${pctSuccess}%" title=${`성공 ${pctSuccess.toFixed(0)}%`}></div>
           <div class="h-full bg-[var(--warn)]" style="width:${pctFail}%" title=${`실패 ${pctFail.toFixed(0)}%`}></div>
           <div class="h-full bg-[var(--bad)]" style="width:${pctReject}%" title=${`거절 ${pctReject.toFixed(0)}%`}></div>
         </div>
         ${(successes.compactions_ok > 0 || successes.handoffs_ok > 0 || failures.compaction_failed > 0 || failures.handoff_failed > 0) ? html`
           <div class="mt-2 flex flex-wrap gap-1.5 text-[10px]">
-            ${successes.compactions_ok > 0 ? html`<span class="px-2 py-0.5 rounded-full border border-[rgba(74,222,128,0.2)] bg-[rgba(74,222,128,0.06)] text-[var(--ok)]">압축 ${successes.compactions_ok}</span>` : null}
-            ${failures.compaction_failed > 0 ? html`<span class="px-2 py-0.5 rounded-full border border-[var(--bad-20)] bg-[rgba(239,68,68,0.06)] text-[var(--bad)]">압축 실패 ${failures.compaction_failed}</span>` : null}
-            ${successes.handoffs_ok > 0 ? html`<span class="px-2 py-0.5 rounded-full border border-[rgba(74,222,128,0.2)] bg-[rgba(74,222,128,0.06)] text-[var(--ok)]">인계 ${successes.handoffs_ok}</span>` : null}
-            ${failures.handoff_failed > 0 ? html`<span class="px-2 py-0.5 rounded-full border border-[var(--bad-20)] bg-[rgba(239,68,68,0.06)] text-[var(--bad)]">인계 실패 ${failures.handoff_failed}</span>` : null}
+            ${successes.compactions_ok > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[rgba(74,222,128,0.2)] bg-[rgba(74,222,128,0.06)] text-[var(--ok)]">압축 ${successes.compactions_ok}</span>` : null}
+            ${failures.compaction_failed > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--bad-20)] bg-[rgba(239,68,68,0.06)] text-[var(--bad)]">압축 실패 ${failures.compaction_failed}</span>` : null}
+            ${successes.handoffs_ok > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[rgba(74,222,128,0.2)] bg-[rgba(74,222,128,0.06)] text-[var(--ok)]">인계 ${successes.handoffs_ok}</span>` : null}
+            ${failures.handoff_failed > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--bad-20)] bg-[rgba(239,68,68,0.06)] text-[var(--bad)]">인계 실패 ${failures.handoff_failed}</span>` : null}
           </div>
         ` : null}
       </div>
@@ -278,8 +278,8 @@ function OutcomesLedger({ keeper, outcomes }: {
         </div>
         ${verdictTotal > 0 ? html`
           <div class="flex items-center gap-2">
-            <div class="flex-1 h-1.5 bg-[var(--white-6)] rounded-full overflow-hidden">
-              <div class="h-full rounded-full transition-all duration-300" style="width:${passRatePct}%;background:${passBarColor}"></div>
+            <div class="flex-1 h-1.5 bg-[var(--white-6)] rounded-sm overflow-hidden">
+              <div class="h-full rounded-sm transition-all duration-300" style="width:${passRatePct}%;background:${passBarColor}"></div>
             </div>
             <span class="shrink-0 text-sm font-semibold tabular-nums" style="color:${passBarColor}">${passRatePct}%</span>
           </div>
@@ -287,7 +287,7 @@ function OutcomesLedger({ keeper, outcomes }: {
             <div class="mt-2 flex flex-wrap gap-1.5 text-[10px]">
               <span class="text-[var(--text-dim)]">주요 실패 원인:</span>
               ${verdicts.top_failure_reasons.map(reason => html`
-                <span class="px-2 py-0.5 rounded-full border border-[var(--card-border)] bg-[var(--white-4)] font-mono text-[var(--text-body)]">${reason}</span>
+                <span class="px-2 py-0.5 rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] font-mono text-[var(--text-body)]">${reason}</span>
               `)}
             </div>
           ` : null}
@@ -314,11 +314,11 @@ function OutcomesLedger({ keeper, outcomes }: {
           <span class="text-[10px] text-[var(--text-dim)]">supervisor 이력</span>
         </div>
         <div class="flex flex-wrap gap-1.5 text-[11px]">
-          <span class="px-2 py-0.5 rounded-full border border-[var(--card-border)] bg-[var(--white-4)] tabular-nums">세대 ${keeper.generation ?? '-'}</span>
-          <span class=${`px-2 py-0.5 rounded-full tabular-nums ${failures.crashes > 0 ? 'border border-[var(--bad-20)] bg-[rgba(239,68,68,0.06)] text-[var(--bad)]' : 'border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)]'}`}>크래시 ${failures.crashes}회</span>
-          <span class=${`px-2 py-0.5 rounded-full tabular-nums ${failures.restarts > 0 ? 'border border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.06)] text-[var(--warn)]' : 'border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)]'}`}>재시작 ${failures.restarts}회</span>
+          <span class="px-2 py-0.5 rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] tabular-nums">세대 ${keeper.generation ?? '-'}</span>
+          <span class=${`px-2 py-0.5 rounded-sm tabular-nums ${failures.crashes > 0 ? 'border border-[var(--bad-20)] bg-[rgba(239,68,68,0.06)] text-[var(--bad)]' : 'border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)]'}`}>크래시 ${failures.crashes}회</span>
+          <span class=${`px-2 py-0.5 rounded-sm tabular-nums ${failures.restarts > 0 ? 'border border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.06)] text-[var(--warn)]' : 'border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)]'}`}>재시작 ${failures.restarts}회</span>
           ${failures.consecutive_fail_current > 0 ? html`
-            <span class="px-2 py-0.5 rounded-full border border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.06)] text-[var(--warn)] tabular-nums">연속 실패 ${failures.consecutive_fail_current}</span>
+            <span class="px-2 py-0.5 rounded-sm border border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.06)] text-[var(--warn)] tabular-nums">연속 실패 ${failures.consecutive_fail_current}</span>
           ` : null}
         </div>
       </div>
@@ -509,8 +509,8 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
     const color = ctxColor(pct)
     return html`
       <div class="flex items-center gap-3 mb-5 p-3 rounded border border-[var(--card-border)] bg-[var(--white-3)]">
-        <div class="flex-1 h-2 bg-[var(--white-6)] rounded-full overflow-hidden">
-          <div class="h-full rounded-full transition-all duration-300" style="width:${pct.toFixed(1)}%;background:${color}"></div>
+        <div class="flex-1 h-2 bg-[var(--white-6)] rounded-sm overflow-hidden">
+          <div class="h-full rounded-sm transition-all duration-300" style="width:${pct.toFixed(1)}%;background:${color}"></div>
         </div>
         <span class="text-sm font-semibold tabular-nums text-[var(--text-strong)]">${pct.toFixed(1)}%</span>
       </div>`
@@ -800,7 +800,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">latest turn input</span>
             <span class="text-xs font-mono tabular-nums text-[var(--accent)]">${formatTokens(latestTotal)}</span>
           </div>
-          <div class="h-3 rounded-full overflow-hidden border border-[var(--white-8)] bg-[var(--white-2)] flex">
+          <div class="h-3 rounded-sm overflow-hidden border border-[var(--white-8)] bg-[var(--white-2)] flex">
             ${latestEntries.map(([key, segment]) => {
               const pct = latestTotal > 0 ? (segment.estimated_tokens / latestTotal) * 100 : 0
               return html`<div
@@ -1073,7 +1073,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
           </div>
           <div class="flex flex-wrap gap-1.5">
             ${modelSwitches.map(s => html`
-              <span class="text-[10px] px-2 py-0.5 rounded-full bg-[var(--warn-10)] text-[var(--warn)] border border-[var(--warn-20)] font-mono">
+              <span class="text-[10px] px-2 py-0.5 rounded-sm bg-[var(--warn-10)] text-[var(--warn)] border border-[var(--warn-20)] font-mono">
                 T${s.index} -> ${s.model.length > MODEL_NAME_MAX_LEN ? s.model.slice(0, MODEL_NAME_MAX_LEN) + '...' : s.model}
               </span>
             `)}
@@ -1090,7 +1090,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
           </div>
           <div class="flex flex-wrap gap-1.5">
             ${series.filter((p: KeeperMetricPoint) => p.fallback_applied).slice(-10).map((p: KeeperMetricPoint) => html`
-              <span class="text-[10px] px-2 py-0.5 rounded-full bg-[rgba(239,68,68,0.1)] text-[var(--bad)] border border-[rgba(239,68,68,0.2)] font-mono">
+              <span class="text-[10px] px-2 py-0.5 rounded-sm bg-[rgba(239,68,68,0.1)] text-[var(--bad)] border border-[rgba(239,68,68,0.2)] font-mono">
                 ${p.fallback_from ?? '?'} -> ${p.fallback_to ?? p.model_used}${p.fallback_reason ? ` (${p.fallback_reason.length > 20 ? p.fallback_reason.slice(0, 20) + '...' : p.fallback_reason})` : ''}
               </span>
             `)}
@@ -1203,7 +1203,7 @@ export function RelationshipList({ rels }: { rels: Record<string, string> }) {
     <div class="max-h-[220px] overflow-y-auto flex flex-col gap-1.5">
       ${entries.map(([name, relation]) => html`
         <div class="flex items-center gap-2 py-2 px-3 bg-[var(--white-3)] rounded-lg">
-          <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[11px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">${name}</span>
+          <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-[11px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">${name}</span>
           <span class="text-[11px] text-[var(--text-muted)] font-mono">${relation}</span>
         </div>
       `)}
@@ -1218,7 +1218,7 @@ export function TraitsList({ traits, label }: { traits: string[]; label: string 
     <div class="mb-3">
       <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-semibold mb-2">${label}</div>
       <div class="flex flex-wrap gap-1.5">
-        ${traits.map(t => html`<span class="inline-flex items-center py-0.5 px-2.5 rounded-full text-[11px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">${t}</span>`)}
+        ${traits.map(t => html`<span class="inline-flex items-center py-0.5 px-2.5 rounded-sm text-[11px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">${t}</span>`)}
       </div>
     </div>
   `

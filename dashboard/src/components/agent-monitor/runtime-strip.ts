@@ -38,9 +38,9 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
       ${ctxPct != null ? html`
         <div class="flex items-center gap-1.5 text-[13px]">
           <span class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">CTX</span>
-          <div class="w-16 h-1.5 bg-[#1a1a2e] rounded-full overflow-hidden">
+          <div class="w-16 h-1.5 bg-[#1a1a2e] rounded-sm overflow-hidden">
             <div
-              class="agent-runtime-ctx-fill rounded-full ${ctxBarClass(ctxRatio)}"
+              class="agent-runtime-ctx-fill rounded-sm ${ctxBarClass(ctxRatio)}"
               style=${{ width: `${ctxPct}%` }}
             ></div>
           </div>

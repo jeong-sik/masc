@@ -93,7 +93,7 @@ export function AgentsUnified() {
           <${RouteLink}
             tab="monitoring"
             params=${{ section: 'fleet-health' }}
-            class="inline-flex shrink-0 items-center justify-center rounded-full border border-[var(--accent-20)] bg-[var(--accent-10)] px-3 py-1.5 text-[12px] font-medium text-[var(--text-strong)] transition-colors hover:bg-[var(--accent-20)]"
+            class="inline-flex shrink-0 items-center justify-center rounded-sm border border-[var(--accent-20)] bg-[var(--accent-10)] px-3 py-1.5 text-[12px] font-medium text-[var(--text-strong)] transition-colors hover:bg-[var(--accent-20)]"
           >
             플릿 텔레메트리 열기
           <//>

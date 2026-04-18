@@ -218,7 +218,7 @@ function BroadcastReport({ report, index }: { report: { ts: string; content: str
         onClick=${() => setExpanded(!expanded)}
       >
         <div class="flex items-center gap-2">
-          <span class="size-2 rounded-full ${index === 0 ? 'bg-accent' : 'bg-white/20'}"></span>
+          <span class="size-2 rounded-sm ${index === 0 ? 'bg-accent' : 'bg-white/20'}"></span>
           <${TimeAgo} timestamp=${report.ts} />
         </div>
         ${isLong ? html`

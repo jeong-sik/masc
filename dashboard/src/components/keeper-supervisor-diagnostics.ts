@@ -65,7 +65,7 @@ function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntr
   return html`
     <div>
       <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">장애 유형 분포</div>
-      <div class="flex w-full h-3 rounded-full overflow-hidden bg-[var(--white-5)]">
+      <div class="flex w-full h-3 rounded-sm overflow-hidden bg-[var(--white-5)]">
         ${entries.map(([key, count]) => html`
           <div style="width: ${(count / total * 100).toFixed(1)}%; background: ${COHORT_COLORS[key]}"
                title="${key}: ${count}건 (${(count / total * 100).toFixed(0)}%)"
@@ -144,8 +144,8 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-xs text-[var(--text-muted)]">재시작 예산</span>
             <span class="text-xs font-mono text-[var(--text-body)]">${restart_count}/${max_restarts}</span>
           </div>
-          <div class="w-full h-1.5 rounded-full bg-[var(--white-5)] overflow-hidden">
-            <div class="h-full rounded-full transition-all duration-300" style="width: ${budgetPct}%; background: ${budgetColor}"></div>
+          <div class="w-full h-1.5 rounded-sm bg-[var(--white-5)] overflow-hidden">
+            <div class="h-full rounded-sm transition-all duration-300" style="width: ${budgetPct}%; background: ${budgetColor}"></div>
           </div>
         </div>
         ${typeof dead_eta_sec === 'number' && dead_eta_sec > 0 && dead_since == null ? html`

@@ -439,7 +439,7 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
             ${item.strategies.length > 0 ? html`
               <div class="mt-2 flex flex-wrap gap-1">
                 ${item.strategies.map(strategy => html`
-                  <span class="rounded-full border border-[var(--white-8)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">${strategy}</span>
+                  <span class="rounded-sm border border-[var(--white-8)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">${strategy}</span>
                 `)}
               </div>
             ` : null}

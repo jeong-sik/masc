@@ -148,28 +148,28 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
   return html`
     <div class="flex flex-col gap-3">
       <div class="flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-dim)]">
-        <span class="inline-flex items-center rounded-full border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-[var(--accent)]">
+        <span class="inline-flex items-center rounded-sm border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-[var(--accent)]">
           composite ${snapshot.phase}
         </span>
         ${keeperPhase ? html`
-          <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+          <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
             keeper ${keeperPhase}
           </span>
         ` : null}
-        <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
           KTC ${snapshot.turn_phase}
         </span>
-        <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
           KDP ${snapshot.decision.stage}
         </span>
-        <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
           KCL ${snapshot.cascade.state}
         </span>
-        <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
           KMC ${snapshot.compaction.stage}
         </span>
         ${transitions.length > 0 ? html`
-          <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+          <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
             observed ${transitions.length} transitions
           </span>
         ` : null}
@@ -207,7 +207,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
                 <span class="font-mono text-[var(--text-strong)]">${normalizePhase(transition.prev_phase) ?? transition.prev_phase}</span>
                 <span class="text-[var(--text-dim)]">→</span>
                 <span class="font-mono text-[var(--accent)]">${normalizePhase(transition.new_phase) ?? transition.new_phase}</span>
-                <span class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
+                <span class="rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
                   ${transitionType(transition.selected_event)}
                 </span>
               </div>

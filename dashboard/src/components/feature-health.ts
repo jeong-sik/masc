@@ -133,7 +133,7 @@ function statusChipClass(status: FeatureStatus): string {
 
 function StatusPill({ status }: { status: FeatureStatus }) {
   return html`
-    <span class=${`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusChipClass(status)}`}>
+    <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusChipClass(status)}`}>
       ${statusLabel(status)}
     </span>
   `
@@ -181,7 +181,7 @@ function CategorySection({ category, categoryData }: { category: string; categor
             ${categoryData.enabled} / ${categoryData.total} enabled (${enabledRatio}%)
           </div>
         </div>
-        <div class="rounded-full border border-[var(--white-8)] bg-[var(--white-6)] px-3 py-1 text-xs font-semibold text-[var(--text-body)]">
+        <div class="rounded-sm border border-[var(--white-8)] bg-[var(--white-6)] px-3 py-1 text-xs font-semibold text-[var(--text-body)]">
           ${categoryData.total}
         </div>
       </div>

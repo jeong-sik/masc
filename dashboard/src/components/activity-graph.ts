@@ -214,7 +214,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                 <div class="flex flex-wrap items-start justify-between gap-3">
                   <div class="min-w-0 flex-1">
                     <div class="flex flex-wrap items-center gap-2">
-                      <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${actionCategoryClass(group)}">
+                      <span class="inline-flex items-center rounded-sm border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${actionCategoryClass(group)}">
                         ${categoryLabel(group.category)}
                       </span>
                       ${group.actor ? html`<span class="text-[11px] font-medium text-[var(--text-body)]">${group.actor}</span>` : null}

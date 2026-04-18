@@ -191,9 +191,9 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* Coverage bar */}
       <div class="flex items-center gap-3 mb-3">
         <span class="text-[10px] text-[var(--text-muted)] flex-shrink-0 w-16">Coverage</span>
-        <div class="flex-1 h-2 bg-[var(--white-6)] rounded-full overflow-hidden">
+        <div class="flex-1 h-2 bg-[var(--white-6)] rounded-sm overflow-hidden">
           <div
-            class="h-full rounded-full transition-all duration-500"
+            class="h-full rounded-sm transition-all duration-500"
             style="width:${coveragePct}%;background:${coverageColor(coverage)}"
           ></div>
         </div>

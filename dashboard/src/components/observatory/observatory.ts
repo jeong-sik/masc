@@ -294,7 +294,7 @@ export function Observatory() {
             >
               ${liveMode.value ? html`
                 <span class="relative flex h-2 w-2">
-                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--ok-10)] opacity-75"></span>
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-sm bg-[var(--ok-10)] opacity-75"></span>
                   <span class="relative inline-flex rounded-full h-2 w-2 bg-[var(--ok-10)]"></span>
                 </span>
                 자동 갱신

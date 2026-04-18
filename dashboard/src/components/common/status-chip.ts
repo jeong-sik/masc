@@ -1,4 +1,4 @@
-// StatusChip — rounded-full status/tag pill.
+// StatusChip — rounded-sm status/tag pill.
 //
 // Reference UIs (GitHub label, Linear state badge, Stripe API key
 // badge, Vercel deployment state): a 10px uppercase pill with a
@@ -26,7 +26,7 @@
 // every existing usage compiling while the caller mix converges.
 //
 // P3 update — `uppercase` prop (default true) splits the shape
-// tokens (rounded-full + border + px-2 py-0.5 + text-[10px]) from
+// tokens (rounded-sm + border + px-2 py-0.5 + text-[10px]) from
 // the uppercase/tracking-wider pair. `uppercase={false}` renders
 // a plain (non-uppercase, non-tracked) neutral pill — the shape
 // used by config-resolution-panel's 4 "inline tag" call sites
@@ -50,7 +50,7 @@ type StatusChipTone =
   | ''
 
 const BASE_SHAPE =
-  'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px]'
+  'inline-flex items-center rounded-sm border px-2 py-0.5 text-[10px]'
 const UPPERCASE_CLASS = 'uppercase tracking-wider'
 
 const SEMANTIC_TONE: Record<StatusChipTone, string> = {
@@ -134,7 +134,7 @@ export function isSemanticTone(tone: string): tone is StatusChipTone {
     uppercase flag (default true). Handles the semantic/raw tone
     dichotomy so callers never have to.
 
-    Shape tokens (rounded-full + border + px-2 py-0.5 + text-[10px])
+    Shape tokens (rounded-sm + border + px-2 py-0.5 + text-[10px])
     are always present. `uppercase + tracking-wider` is conditional
     on the `uppercase` flag — callers rendering plain tag pills
     (no all-caps) pass `uppercase={false}` to drop both together. */

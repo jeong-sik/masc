@@ -121,7 +121,7 @@ export function FullInventoryView({
             onClick=${() => { surfaceFilter.value = key }}
           >
             ${SURFACE_LABELS[key]}
-            <span class="inline-flex items-center justify-center min-w-5 h-[18px] px-[5px] text-[10px] font-semibold bg-[var(--white-8)] text-[var(--text-muted)] rounded-full ml-1">${surfaceCountForFilter(inventory, key)}</span>
+            <span class="inline-flex items-center justify-center min-w-5 h-[18px] px-[5px] text-[10px] font-semibold bg-[var(--white-8)] text-[var(--text-muted)] rounded-sm ml-1">${surfaceCountForFilter(inventory, key)}</span>
           </button>
         `)}
       </div>

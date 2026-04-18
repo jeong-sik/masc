@@ -61,7 +61,7 @@ function InspectorTabButton({
     <button
       type="button"
       class=${[
-        'rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-colors',
+        'rounded-sm border px-3 py-1.5 text-[11px] font-semibold transition-colors',
         active
           ? 'border-accent/30 bg-[var(--accent-10)] text-[var(--accent)]'
           : 'border-card-border bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-body)] hover:bg-[var(--white-6)]',

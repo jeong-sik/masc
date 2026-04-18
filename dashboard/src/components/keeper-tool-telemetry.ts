@@ -107,8 +107,8 @@ function SuccessRateBar({ stat }: { stat: ToolStat }) {
 
   return html`
     <div class="flex items-center gap-2 w-full">
-      <div class="flex-1 h-1.5 rounded-full bg-[var(--white-5)] overflow-hidden">
-        <div class="h-full rounded-full transition-all duration-300" style="width: ${successPct}%; background: ${barColor}"></div>
+      <div class="flex-1 h-1.5 rounded-sm bg-[var(--white-5)] overflow-hidden">
+        <div class="h-full rounded-sm transition-all duration-300" style="width: ${successPct}%; background: ${barColor}"></div>
       </div>
       <span class="text-[10px] font-mono w-10 text-right" style="color: ${barColor}">
         ${successPct === 100 ? '100%' : `${successPct.toFixed(0)}%`}

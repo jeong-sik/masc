@@ -353,11 +353,11 @@ export function PrometheusMetrics() {
                 <span class="text-xs text-[var(--text-muted)]">${meta.description}</span>
               </div>
               <div class="flex items-center gap-2">
-                <span class="rounded-full bg-[var(--bg-2)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
+                <span class="rounded-sm bg-[var(--bg-2)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
                   ${catMetrics.length} metrics
                 </span>
                 ${activeSamples > 0 && html`
-                  <span class="rounded-full bg-[var(--ok-10)] px-2 py-0.5 text-[10px] text-[var(--ok)]">
+                  <span class="rounded-sm bg-[var(--ok-10)] px-2 py-0.5 text-[10px] text-[var(--ok)]">
                     ${activeSamples} active
                   </span>
                 `}

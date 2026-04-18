@@ -400,14 +400,6 @@ let compaction_entries =
       "Absolute ceiling for compaction ratio_gate (clamped 0.80-0.99)";
   ]
 
-let control_plane_entries =
-  [
-    entry ~default:"14" "MASC_CP_CLEANUP_DAYS"
-      "Days before dead/stale CP data is eligible for cleanup";
-    entry ~default:"(none)" "MASC_CP_SUMMARY_REFRESH_DISABLED"
-      "Disable CP summary refresh loop (1=disabled)";
-  ]
-
 let decision_entries =
   [
     entry ~default:"50" "MASC_DECISION_AUDIT_RING_CAPACITY"
@@ -948,7 +940,7 @@ let zombie_cleanup_entries =
 let all_categories () =
   [
     category "server"
-      (server_entries @ path_entries @ control_plane_entries
+      (server_entries @ path_entries
        @ docker_playground_entries @ test_entries);
     category "auth" auth_entries;
     category "transport" transport_entries;

@@ -1,6 +1,27 @@
 # Changelog
 
 
+## [0.10.1] - 2026-04-19
+
+### Changed
+
+- **OAS pin bump → `v0.160.1`.** `agent_sdk` floor raised from `0.160.0`
+  to `0.160.1` (dune-project + masc_mcp.opam + pin script SHA
+  `f70fd95e79bbe5f53ddd6687d3438e39f7b2c59f`). Picks up OAS #1001's
+  `completion_contract` fix: `validate_response` now accepts no-ToolUse
+  responses when `stop_reason` is `MaxTokens` or `Unknown "pause_turn"`
+  (resumable), unblocking Haiku 4.5 vendor_mix_balanced cascades that
+  exhaust the 8192-token output budget during extended thinking before a
+  ToolUse block emits. `EndTurn` / `StopToolUse` / `StopSequence` /
+  other `Unknown` reasons continue to reject no-ToolUse responses.
+
+### Context
+
+Observed empirically via `~/me/.masc/logs/system_log_2026-04-18.jsonl`:
+104 `Completion contract [require_tool_use] violated` entries in a single
+day, with +12 new violations accumulating in the 25 minutes between
+observation and fix — silent cost of the pre-fix contract shape.
+
 ## [0.10.0] - 2026-04-18
 
 ### Changed

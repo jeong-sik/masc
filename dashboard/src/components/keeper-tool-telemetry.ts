@@ -178,7 +178,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
   const trimmedQuery = query.trim()
 
   return html`
-    <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/30 hover:shadow-md">
+    <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/30 hover:shadow-sm">
       <div class="text-[11px] font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
         <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
         도구 텔레메트리

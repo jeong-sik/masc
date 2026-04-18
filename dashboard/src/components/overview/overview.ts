@@ -430,7 +430,7 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
     <${RouteLink}
       tab="monitoring"
       params=${{ section: 'agents', session_id: s.session_id }}
-      class="rounded border bg-card/55 p-4 cursor-pointer transition-[transform,background-color,border-color,box-shadow] duration-200 shadow-sm shadow-black/8 hover:shadow-md hover:bg-card hover:-translate-y-0.5 group ${hasBlocker ? 'border-bad/45' : 'border-card-border hover:border-accent/32'}"
+      class="rounded border bg-card/55 p-4 cursor-pointer transition-[transform,background-color,border-color,box-shadow] duration-200 shadow-sm shadow-black/8 hover:shadow-sm hover:bg-card hover:-translate-y-0.5 group ${hasBlocker ? 'border-bad/45' : 'border-card-border hover:border-accent/32'}"
       title=${primary}
     >
       <div class="mb-2.5 flex items-start gap-3">
@@ -563,7 +563,7 @@ function AgentPulse() {
           <${RouteLink}
             tab="monitoring"
             params=${{ section: 'agents', agent: a.name }}
-            class="flex items-start gap-3 p-4 rounded border border-card-border bg-card/55 cursor-pointer transition-[transform,background-color,border-color,box-shadow] duration-200 shadow-sm shadow-black/8 hover:shadow-md hover:bg-card hover:-translate-y-0.5 hover:border-accent/32 group"
+            class="flex items-start gap-3 p-4 rounded border border-card-border bg-card/55 cursor-pointer transition-[transform,background-color,border-color,box-shadow] duration-200 shadow-sm shadow-black/8 hover:shadow-sm hover:bg-card hover:-translate-y-0.5 hover:border-accent/32 group"
             title=${a.koreanName ?? a.name}
           >
             <${AgentAvatar} name=${a.name} emoji=${a.emoji} size=${40} />

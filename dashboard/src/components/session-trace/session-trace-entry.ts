@@ -167,7 +167,7 @@ function DiffBlock({ text }: { text: string }) {
     <div class="font-mono text-[11px] leading-[1.6] overflow-x-auto">
       ${lines.map((line: string) => {
         const cls =
-          line.startsWith('+') && !line.startsWith('+++') ? 'text-[var(--ok)] bg-[rgba(74,222,128,0.06)]'
+          line.startsWith('+') && !line.startsWith('+++') ? 'text-[var(--ok)] bg-[var(--ok-6)]'
           : line.startsWith('-') && !line.startsWith('---') ? 'text-[var(--bad)] bg-[var(--bad-6)]'
           : line.startsWith('@@') ? 'text-[var(--accent)] font-semibold'
           : 'text-[var(--text-body)]'

@@ -59,9 +59,9 @@ export function runtimeBadgeClass(band: RuntimeBand): string {
 export function stageBadgeClass(stageKey: string): string {
   if (stageKey === 'tool_use') return 'border-[rgba(71,184,255,0.24)] bg-[rgba(71,184,255,0.12)] text-[var(--accent)]'
   if (stageKey === 'scheduled_autonomous' || stageKey === 'thinking') return 'border-[rgba(52,211,153,0.22)] bg-[rgba(52,211,153,0.1)] text-[var(--ok)]'
-  if (stageKey === 'handoff' || stageKey === 'compacting') return 'border-[rgba(167,139,250,0.24)] bg-[var(--purple-12)] text-[#c4b5fd]'
+  if (stageKey === 'handoff' || stageKey === 'compacting') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[#c4b5fd]'
   if (stageKey === 'failing' || stageKey === 'crashed') return 'border-[rgba(239,68,68,0.24)] bg-[rgba(239,68,68,0.12)] text-[var(--bad)]'
-  if (stageKey === 'paused') return 'border-[rgba(167,139,250,0.24)] bg-[var(--purple-12)] text-[#a78bfa]'
+  if (stageKey === 'paused') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[#a78bfa]'
   return 'border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]'
 }
 

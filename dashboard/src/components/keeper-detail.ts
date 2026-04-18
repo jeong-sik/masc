@@ -1093,7 +1093,7 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                   const isLatest = index === 0
                   const entryMeta = lineageVerdictMeta(entry.continuity_verdict)
                   return html`
-                  <div class=${`px-3 py-2 rounded border ${isLatest ? 'border-[rgba(71,184,255,0.22)] bg-[rgba(71,184,255,0.08)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}>
+                  <div class=${`px-3 py-2 rounded border ${isLatest ? 'border-[var(--accent-22)] bg-[rgba(71,184,255,0.08)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}>
                     <div class="flex flex-wrap items-center gap-2">
                       <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">gen ${entry.generation}</span>
                       ${isLatest

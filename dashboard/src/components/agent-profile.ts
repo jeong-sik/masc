@@ -385,7 +385,7 @@ export function AgentProfile({ name }: { name: string }) {
               ${collabs.length > 0 ? html`
                 <div class="flex flex-col gap-1">
                   ${collabs.map(c => html`
-                    <button type="button" class="w-full flex items-center gap-2 px-2 py-1.5 transition-colors duration-150 hover:bg-[rgba(255,215,0,0.08)] rounded text-left cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent" key=${c.name}
+                    <button type="button" class="w-full flex items-center gap-2 px-2 py-1.5 transition-colors duration-150 hover:bg-[var(--gold-8)] rounded text-left cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent" key=${c.name}
                       onClick=${() => navigate('monitoring', { section: 'agents', agent: c.name })}
                     >
                       <span class="text-[var(--ff-gold)] font-semibold text-base flex-1">${c.name}</span>
@@ -399,8 +399,8 @@ export function AgentProfile({ name }: { name: string }) {
                 <div class="border-t border-[var(--white-6)] pt-2 mt-2">
                   <span class="ff-interests-label">관심사</span>
                   <div class="flex flex-wrap gap-1 mt-1.5">
-                    ${interests.slice(0, 12).map(t => html`<span class="bg-[rgba(255,215,0,0.1)] text-[var(--white-70)] px-2 py-0.5 rounded-xs text-[11px] border border-[rgba(255,215,0,0.15)]" key=${t}>${t}</span>`)}
-                    ${interests.length > 12 ? html`<span class="bg-[rgba(255,215,0,0.1)] text-[var(--white-70)] px-2 py-0.5 rounded-xs text-[11px] border border-[rgba(255,215,0,0.15)]">+${interests.length - 12}</span>` : null}
+                    ${interests.slice(0, 12).map(t => html`<span class="bg-[var(--gold-10)] text-[var(--white-70)] px-2 py-0.5 rounded-xs text-[11px] border border-[var(--gold-15)]" key=${t}>${t}</span>`)}
+                    ${interests.length > 12 ? html`<span class="bg-[var(--gold-10)] text-[var(--white-70)] px-2 py-0.5 rounded-xs text-[11px] border border-[var(--gold-15)]">+${interests.length - 12}</span>` : null}
                   </div>
                 </div>
               ` : null}

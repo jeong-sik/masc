@@ -95,7 +95,7 @@ type KpiTone = 'default' | 'ok' | 'warn' | 'bad'
 
 const KPI_TONE: Record<KpiTone, string> = {
   default: 'border-[var(--card-border)] bg-[var(--white-3)]',
-  ok: 'border-[var(--ok-20)] bg-[rgba(74,222,128,0.06)]',
+  ok: 'border-[var(--ok-20)] bg-[var(--ok-6)]',
   warn: 'border-[var(--warn-20)] bg-[var(--warn-8)]',
   bad: 'border-[var(--bad-20)] bg-[var(--bad-6)]',
 }
@@ -260,9 +260,9 @@ function OutcomesLedger({ keeper, outcomes }: {
         </div>
         ${(successes.compactions_ok > 0 || successes.handoffs_ok > 0 || failures.compaction_failed > 0 || failures.handoff_failed > 0) ? html`
           <div class="mt-2 flex flex-wrap gap-1.5 text-[10px]">
-            ${successes.compactions_ok > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--ok-20)] bg-[rgba(74,222,128,0.06)] text-[var(--ok)]">압축 ${successes.compactions_ok}</span>` : null}
+            ${successes.compactions_ok > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--ok-20)] bg-[var(--ok-6)] text-[var(--ok)]">압축 ${successes.compactions_ok}</span>` : null}
             ${failures.compaction_failed > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--bad-20)] bg-[var(--bad-6)] text-[var(--bad)]">압축 실패 ${failures.compaction_failed}</span>` : null}
-            ${successes.handoffs_ok > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--ok-20)] bg-[rgba(74,222,128,0.06)] text-[var(--ok)]">인계 ${successes.handoffs_ok}</span>` : null}
+            ${successes.handoffs_ok > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--ok-20)] bg-[var(--ok-6)] text-[var(--ok)]">인계 ${successes.handoffs_ok}</span>` : null}
             ${failures.handoff_failed > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--bad-20)] bg-[var(--bad-6)] text-[var(--bad)]">인계 실패 ${failures.handoff_failed}</span>` : null}
           </div>
         ` : null}

@@ -95,6 +95,44 @@
   --black-20: rgba(0, 0, 0, 0.20);
   --black-50: rgba(0, 0, 0, 0.50);
 
+  /* Semantic - Yellow Bright. Pure spectrum yellow (#facc15), distinct
+     from --warn (251,191,36 = #fbbf24, slightly muted gold). Used for
+     "highlighted attention" badges in the config resolution panel. */
+  --yellow-bright: #facc15;
+  --yellow-bright-10: rgba(250, 204, 21, 0.10);
+  --yellow-bright-28: rgba(250, 204, 21, 0.28);
+
+  /* Semantic - Amber Bright. Pure orange (#f59e0b), distinct from
+     --warn-bright (#f97316, redder orange). Used for FSM "Compacting"
+     swimlane segments where amber reads as cautionary-but-not-critical. */
+  --amber-bright: #f59e0b;
+  --amber-bright-45: rgba(245, 158, 11, 0.45);
+
+  /* Semantic - Indigo. Cool blue-violet (#818cf8), distinct from
+     --accent (#47b8ff, cyan-leaning) and --purple (#a78bfa, plum-leaning).
+     Used for FSM "Awaiting" / dependency-blocked indicators. */
+  --indigo: #818cf8;
+  --indigo-4: rgba(129, 140, 248, 0.04);
+  --indigo-40: rgba(129, 140, 248, 0.40);
+  --indigo-45: rgba(129, 140, 248, 0.45);
+  --indigo-50: rgba(129, 140, 248, 0.50);
+
+  /* Semantic - Gold (pure). Saturated #ffd700, distinct from --select
+     (c8a84e, brass) and --ff-gold-* (same brass family). Used for
+     FF-specific accent badges in agent profile. */
+  --gold: #ffd700;
+  --gold-8: rgba(255, 215, 0, 0.08);
+  --gold-10: rgba(255, 215, 0, 0.10);
+  --gold-15: rgba(255, 215, 0, 0.15);
+
+  /* Family extensions */
+  --ok-6: rgba(74, 222, 128, 0.06);
+  --emerald-30: rgba(34, 197, 94, 0.30);
+  --purple-24: rgba(167, 139, 250, 0.24);
+  --slate-gray-14: rgba(148, 163, 184, 0.14);
+  --slate-gray-16: rgba(148, 163, 184, 0.16);
+  --accent-22: rgba(71, 184, 255, 0.22);
+
   /* Semantic - Paused (Plum). Introduced for the 12-keeper-state spec
      in the Anyang Sleepers design system. On dark theme a lightened
      plum keeps the chip legible against navy; the paper theme

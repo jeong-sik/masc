@@ -324,7 +324,7 @@ export function buildActionTimelineGroups(events: ActivityGraphTimelineEvent[]):
     .sort((a, b) => b.latestTsMs - a.latestTsMs)
 }
 
-export function emptyCategoryCounts(): Record<ActivityCategory, number> {
+function emptyCategoryCounts(): Record<ActivityCategory, number> {
   return {
     task: 0,
     session: 0,

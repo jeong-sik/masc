@@ -41,7 +41,7 @@ const OVERVIEW_STALE_MS = 300_000
     dashboards use a ~60s boundary between "fresh" and "getting old". */
 const OVERVIEW_WARN_MS = 60_000
 
-export type FreshnessTier = 'unknown' | 'fresh' | 'warn' | 'stale'
+type FreshnessTier = 'unknown' | 'fresh' | 'warn' | 'stale'
 
 /** Pure: classify snapshot age into a 4-tier health reading that maps
     1:1 to StatusDot tones (unknown=muted, fresh=ok, warn=amber, stale=bad).

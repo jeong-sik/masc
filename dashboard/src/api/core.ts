@@ -206,7 +206,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-async function errorDetailFromResponse(res: Response): Promise<string | undefined> {
+export async function errorDetailFromResponse(res: Response): Promise<string | undefined> {
   let rawText = ''
   try {
     rawText = (await res.text()).trim()
@@ -226,6 +226,21 @@ async function errorDetailFromResponse(res: Response): Promise<string | undefine
     // Fall through to plain-text body.
   }
   return rawText
+}
+
+export async function apiRequestErrorFromResponse(
+  method: string,
+  path: string,
+  res: Response,
+): Promise<ApiRequestError> {
+  const detail = await errorDetailFromResponse(res)
+  return new ApiRequestError({
+    method,
+    path,
+    status: res.status,
+    statusText: res.statusText,
+    detail,
+  })
 }
 
 function isNotInitializedEnvelope(raw: unknown): boolean {
@@ -358,14 +373,7 @@ export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
     if (warmPayload !== null) {
       return warmPayload as T
     }
-    const detail = await errorDetailFromResponse(res)
-    throw new ApiRequestError({
-      method: 'GET',
-      path,
-      status: res.status,
-      statusText: res.statusText,
-      detail,
-    })
+    throw await apiRequestErrorFromResponse('GET', path, res)
   }
   const data = await res.json()
   // Server may return 200 OK with {"error":"not initialized"} during startup
@@ -442,14 +450,7 @@ export async function post<T>(
     body: JSON.stringify(body),
   }, timeoutMs)
   if (!res.ok) {
-    const detail = await errorDetailFromResponse(res)
-    throw new ApiRequestError({
-      method: 'POST',
-      path,
-      status: res.status,
-      statusText: res.statusText,
-      detail,
-    })
+    throw await apiRequestErrorFromResponse('POST', path, res)
   }
   return res.json() as Promise<T>
 }
@@ -470,14 +471,7 @@ export async function patch<T>(
     body: JSON.stringify(body),
   }, timeoutMs)
   if (!res.ok) {
-    const detail = await errorDetailFromResponse(res)
-    throw new ApiRequestError({
-      method: 'PATCH',
-      path,
-      status: res.status,
-      statusText: res.statusText,
-      detail,
-    })
+    throw await apiRequestErrorFromResponse('PATCH', path, res)
   }
   return res.json() as Promise<T>
 }
@@ -497,14 +491,7 @@ export async function postRaw(
     body: JSON.stringify(body),
   }, timeoutMs)
   if (!res.ok) {
-    const detail = await errorDetailFromResponse(res)
-    throw new ApiRequestError({
-      method: 'POST',
-      path,
-      status: res.status,
-      statusText: res.statusText,
-      detail,
-    })
+    throw await apiRequestErrorFromResponse('POST', path, res)
   }
   return res.text()
 }

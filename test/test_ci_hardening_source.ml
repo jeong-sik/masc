@@ -559,6 +559,9 @@ let test_transport_route_contracts () =
   check bool "frontend exposes ws discovery route" true
     (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
        {|Http.Router.get "/ws" websocket_discovery_handler|});
+  check bool "mcp http agent injection preserves explicit legacy agent_name" true
+    (file_contains_pattern "lib/server/server_mcp_transport_http.ml"
+       {|Option.is_some existing_agent || Option.is_some existing_legacy_agent|});
   check bool "common http deps prefer runtime captured in server_state" true
     (file_contains_pattern "lib/server/server_routes_http_common.ml"
        "state.Mcp_server.sw");

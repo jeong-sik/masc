@@ -100,11 +100,11 @@ export function ConfirmDialogOverlay() {
           </div>
           <div class="mt-6 flex items-center justify-end gap-2">
             <button type="button"
-              class="px-4 py-2 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] text-text-body hover:bg-[var(--white-8)] transition-colors cursor-pointer"
+              class="px-4 py-2 rounded text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] text-text-body hover:bg-[var(--white-8)] transition-colors cursor-pointer"
               onClick=${state.onCancel}
             >${state.cancelText}</button>
             <button type="button"
-              class="px-4 py-2 rounded-lg text-[13px] font-medium border border-transparent transition-colors cursor-pointer ${confirmBtnClass}"
+              class="px-4 py-2 rounded text-[13px] font-medium border border-transparent transition-colors cursor-pointer ${confirmBtnClass}"
               onClick=${state.onConfirm}
             >${state.confirmText}</button>
           </div>

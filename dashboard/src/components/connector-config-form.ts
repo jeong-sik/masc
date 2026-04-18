@@ -421,7 +421,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.loading) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded-md border border-[var(--white-8)] bg-[var(--bg-1)] p-3">
+      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-3">
         <${LoadingState}>config schema 불러오는 중...<//>
       </div>
     `
@@ -429,7 +429,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.error !== null) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded-md border border-[var(--bad-20)] bg-[var(--bad-10)] p-3 text-[11px] text-[var(--bad-light)]">
+      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] p-3 text-[11px] text-[var(--bad-light)]">
         <div class="font-semibold">schema 가져오기 실패</div>
         <div class="mt-1 text-[10px] opacity-80">${entry.error}</div>
         <button
@@ -443,7 +443,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.fields.length === 0) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded-md border border-[var(--white-8)] bg-[var(--bg-1)] p-3 text-[11px] text-[var(--text-dim)]">
+      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-3 text-[11px] text-[var(--text-dim)]">
         schema가 비어있습니다. backend가 sidecar venv를 못 찾았을 수 있어요.
       </div>
     `
@@ -452,7 +452,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
   const envBlock = buildEnvBlock(entry)
 
   return html`
-    <div id=${`connector-config-${connectorId}`} class="mt-3 rounded-md border border-[var(--white-8)] bg-[var(--bg-1)] p-3">
+    <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-3">
       <div class="mb-2 flex items-center justify-between">
         <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">
           ${entry.fields.length} fields · ${entry.fields.filter(f => f.required).length} required

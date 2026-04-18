@@ -56,7 +56,7 @@ function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
   return html`
     <div class="flex flex-wrap gap-2 text-[10px] text-[var(--text-muted)]">
       ${items.map(item => html`
-        <span class="inline-flex items-center bg-[var(--white-4)] border border-[var(--white-6)] px-2 py-1 rounded-md font-medium">
+        <span class="inline-flex items-center bg-[var(--white-4)] border border-[var(--white-6)] px-2 py-1 rounded font-medium">
           ${item}
         </span>
       `)}
@@ -183,7 +183,7 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
       ${'' /* Event list */}
       <div
         ref=${listRef}
-        class="flex flex-col gap-0.5 max-h-[500px] overflow-y-auto rounded-lg border border-[var(--card-border)] bg-[var(--white-2)]"
+        class="flex flex-col gap-0.5 max-h-[500px] overflow-y-auto rounded border border-[var(--card-border)] bg-[var(--white-2)]"
       >
         ${events.map(evt => html`<${SessionTraceEntry} key=${evt.id} event=${evt} searchQuery=${searchQuery} />`)}
         <${LiveIndicator} events=${events} />

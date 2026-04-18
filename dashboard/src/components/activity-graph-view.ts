@@ -263,8 +263,8 @@ export function GraphView({ data }: GraphViewProps) {
       <div class="rounded border border-[var(--card-border)] bg-[var(--card)] p-4 mt-2">
         <div class="flex items-center gap-3 mb-3">
           <strong class="text-lg text-[var(--text-near-white)]">${selectedNode.label}</strong>
-          <span class="py-0.5 px-2 bg-[var(--slate-gray-15)] text-[11px] text-[var(--text-slate)] rounded-md">${kindLabel(selectedNode.kind)}</span>
-          <span class="py-0.5 px-2 rounded-md text-[11px] ${selectedNode.status === 'active' || selectedNode.status === 'done' ? 'text-[var(--ok)] bg-[var(--ok-10)]' : selectedNode.status === 'offline' || selectedNode.status === 'retired' ? 'text-[var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[var(--text-slate-light)] bg-[var(--slate-gray-10)]'}">${statusLabel(selectedNode.status)}</span>
+          <span class="py-0.5 px-2 bg-[var(--slate-gray-15)] text-[11px] text-[var(--text-slate)] rounded">${kindLabel(selectedNode.kind)}</span>
+          <span class="py-0.5 px-2 rounded text-[11px] ${selectedNode.status === 'active' || selectedNode.status === 'done' ? 'text-[var(--ok)] bg-[var(--ok-10)]' : selectedNode.status === 'offline' || selectedNode.status === 'retired' ? 'text-[var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[var(--text-slate-light)] bg-[var(--slate-gray-10)]'}">${statusLabel(selectedNode.status)}</span>
           <button type="button" class="ml-auto text-[var(--text-muted)] hover:text-[var(--text-slate-light)] text-sm cursor-pointer bg-transparent border-none" onClick=${() => { selectedNodeId.value = null }}>닫기</button>
         </div>
         <div class="grid grid-cols-3 gap-3 mb-3">
@@ -286,7 +286,7 @@ export function GraphView({ data }: GraphViewProps) {
             <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-[0.08em] mb-2">연결된 관계</div>
             <div class="flex flex-col gap-1.5 max-h-[160px] overflow-y-auto">
               ${connectedEdges.slice(0, 20).map(({ edge, otherLabel }) => html`
-                <div class="flex items-center gap-2 text-[13px] py-1 px-2 rounded-lg bg-[rgba(15,23,42,0.4)]" key=${edge.id ?? `${edge.source}-${edge.kind}-${edge.target}`}>
+                <div class="flex items-center gap-2 text-[13px] py-1 px-2 rounded bg-[rgba(15,23,42,0.4)]" key=${edge.id ?? `${edge.source}-${edge.kind}-${edge.target}`}>
                   <span class="text-[var(--text-slate-light)]">${otherLabel}</span>
                   <span class="text-[11px] text-[var(--text-muted)]">${edgeKindLabel(edge.kind)}</span>
                   ${edge.active ? html`<span class="w-1.5 h-1.5 rounded-full bg-[var(--ok)]"></span>` : null}

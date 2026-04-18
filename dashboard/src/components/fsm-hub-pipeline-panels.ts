@@ -124,7 +124,7 @@ export function OperationalMeaningPanel({
           placeholder="field / label / state / meaning 필터"
           aria-label="관찰 레인 필터"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-          class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
 
@@ -133,7 +133,7 @@ export function OperationalMeaningPanel({
         : html`
           <div class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
             ${visibleLanes.map(lane => html`
-              <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
+              <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
                 <div class="flex items-center justify-between gap-2">
                   <span class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${lane.field}</span>
                   <span class=${`rounded-sm border px-1.5 py-0.5 text-[8px] font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
@@ -374,7 +374,7 @@ export function PipelineStep({
     <div class="flex items-center gap-0 flex-1 min-w-0" role="listitem" aria-label=${`${label}: ${displayState(value)}${limited ? ' (관찰 제한)' : ''}${heldFor ? `, ${heldFor}` : ''}`}
       title=${`${label} (${shortLabel}): ${value} → ${displayState(value)}${heldFor ? ` · ${heldFor}` : ''}${limited ? '\n⚠ 관찰 제한: 일부 상태만 registry에서 파생 가능 (#7122)' : ''}\n${STATE_DESCRIPTIONS[value] ?? ''}`}
     >
-      <div class=${`flex-1 rounded-lg border px-3 py-2 transition-all duration-500 ${borderCls} ${bgCls} ${limited && !isActive ? 'opacity-60' : ''}`}>
+      <div class=${`flex-1 rounded border px-3 py-2 transition-all duration-500 ${borderCls} ${bgCls} ${limited && !isActive ? 'opacity-60' : ''}`}>
         <div class="flex items-center justify-between gap-1.5">
           <div class="flex items-center gap-1.5 min-w-0">
             ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[#818cf8] ${activePulse} shrink-0"></span>` : null}

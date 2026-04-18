@@ -1,4 +1,4 @@
-// IdPill — rounded-md accent pill for identifier-style tokens
+// IdPill — rounded accent pill for identifier-style tokens
 // (task ids, agent run tokens, object handles). Distinct from
 // StatusChip (rounded-sm semantic status badge) and Kbd (keyboard
 // shortcut pill): IdPill is *flat value surface* — the reader sees
@@ -6,7 +6,7 @@
 //
 // Reference UIs (Linear issue id badge, GitHub commit SHA pill,
 // Vercel deployment hash, Stripe object id chip): small accent-
-// tinted rounded-md badges with monospace option for hashes/SHAs.
+// tinted rounded badges with monospace option for hashes/SHAs.
 //
 // Before this primitive, agent-detail.ts had three sites re-
 // implementing the same accent-tinted identifier pill shape
@@ -41,7 +41,7 @@ import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
 const BASE =
-  'inline-flex items-center text-[10px] font-medium py-1 px-2.5 rounded-md whitespace-nowrap shadow-sm border'
+  'inline-flex items-center text-[10px] font-medium py-1 px-2.5 rounded whitespace-nowrap shadow-sm border'
 const TONE_ACCENT =
   'border-accent/20 bg-[var(--accent-10)] text-accent'
 const MONO_CLASS = 'font-mono'

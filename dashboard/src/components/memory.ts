@@ -166,7 +166,7 @@ function renderCategorySection(
         }} />
         <div class="text-center py-3">
           <button type="button"
-            class="px-4 py-2 rounded-lg text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer disabled:opacity-50"
+            class="px-4 py-2 rounded text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer disabled:opacity-50"
             disabled=${loadingMore}
             onClick=${() => {
               expandCategory(category, limits, limit, posts.length)
@@ -189,7 +189,7 @@ function NewPostForm() {
   if (!showNewPostForm.value) {
     return html`
       <button type="button"
-        class="w-full py-2.5 rounded-lg border border-dashed border-[var(--card-border)] text-[13px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-4)] hover:text-[var(--text-body)] transition-colors bg-transparent"
+        class="w-full py-2.5 rounded border border-dashed border-[var(--card-border)] text-[13px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-4)] hover:text-[var(--text-body)] transition-colors bg-transparent"
         onClick=${() => { showNewPostForm.value = true }}
       >+ 새 글 작성</button>
     `
@@ -215,11 +215,11 @@ function NewPostForm() {
       />
       <div class="flex gap-2 justify-end">
         <button type="button"
-          class="px-3 py-1.5 rounded-lg text-[13px] border border-[var(--card-border)] bg-transparent text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]"
+          class="px-3 py-1.5 rounded text-[13px] border border-[var(--card-border)] bg-transparent text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]"
           onClick=${() => { showNewPostForm.value = false; newPostTitle.value = ''; newPostContent.value = '' }}
         >취소</button>
         <button type="button"
-          class="px-4 py-1.5 rounded-lg text-[13px] font-medium border border-[rgba(71,184,255,0.4)] bg-[var(--accent-soft)] text-[var(--accent)] cursor-pointer hover:bg-[rgba(71,184,255,0.2)] disabled:opacity-50"
+          class="px-4 py-1.5 rounded text-[13px] font-medium border border-[rgba(71,184,255,0.4)] bg-[var(--accent-soft)] text-[var(--accent)] cursor-pointer hover:bg-[rgba(71,184,255,0.2)] disabled:opacity-50"
           disabled=${newPostSubmitting.value || !newPostTitle.value.trim() || !newPostContent.value.trim()}
           onClick=${() => { void submitNewPost() }}
         >${newPostSubmitting.value ? '등록 중...' : '등록'}</button>
@@ -237,7 +237,7 @@ function SortBar() {
       <div class="flex items-center gap-1.5 flex-wrap">
         ${SORT_MODES.map(mode => html`
           <button type="button"
-            class="px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all duration-150 border cursor-pointer
+            class="px-3 py-1.5 rounded text-[12px] font-medium transition-all duration-150 border cursor-pointer
               ${current === mode.id
                 ? 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)]'
                 : 'bg-transparent text-[var(--text-muted)] border-transparent hover:bg-[var(--white-8)] hover:text-[var(--text-body)]'
@@ -260,7 +260,7 @@ function SortBar() {
           const isHidden = boardHiddenCategories.value.has(g.category)
           return html`
             <button type="button"
-              class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer
+              class="px-2.5 py-1 rounded text-[11px] font-medium transition-all duration-150 border cursor-pointer
                 ${isHidden
                   ? 'bg-[var(--accent-12)] text-[var(--accent)] border-[var(--accent-18)] line-through opacity-60'
                   : 'bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]'
@@ -281,7 +281,7 @@ function SortBar() {
           placeholder="작성자"
           aria-label="작성자 필터"
           value=${boardAuthorFilter.value}
-          class="px-2.5 py-1 rounded-lg text-[11px] font-medium border bg-transparent text-[var(--text)] border-[var(--border-slate-16)] placeholder:text-[var(--text-muted)] w-28 focus:outline-none focus:border-[var(--accent)]"
+          class="px-2.5 py-1 rounded text-[11px] font-medium border bg-transparent text-[var(--text)] border-[var(--border-slate-16)] placeholder:text-[var(--text-muted)] w-28 focus:outline-none focus:border-[var(--accent)]"
           onKeyDown=${(e: KeyboardEvent) => {
             if (e.key === 'Enter') {
               boardAuthorFilter.value = (e.target as HTMLInputElement).value.trim()
@@ -299,19 +299,19 @@ function SortBar() {
         <div class="ml-auto flex items-center gap-2">
           ${selectedPostIds.value.size > 0 ? html`
             <button type="button"
-              class="px-3 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-30)] hover:bg-[rgba(239,68,68,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+              class="px-3 py-1 rounded text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-30)] hover:bg-[rgba(239,68,68,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
               onClick=${bulkDeleteSelected}
               disabled=${bulkDeleting.value}
             >
               ${bulkDeleting.value ? '삭제 중...' : `선택 삭제 (${selectedPostIds.value.size})`}
             </button>
             <button type="button"
-              class="px-2 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]"
+              class="px-2 py-1 rounded text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]"
               onClick=${() => { selectedPostIds.value = new Set() }}
             >선택 해제</button>
           ` : null}
           <button type="button"
-            class="px-3 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-3 py-1 rounded text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] disabled:opacity-50 disabled:cursor-not-allowed"
             onClick=${refreshBoard}
             disabled=${boardLoading.value}
           >
@@ -492,7 +492,7 @@ export function Memory() {
           <div>
             <${MemorySummary} />
             <button type="button"
-              class="mb-4 px-3 py-1.5 rounded-lg text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
+              class="mb-4 px-3 py-1.5 rounded text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
               onClick=${() => navigate('workspace', { section: 'board' })}
             >← 게시판으로 돌아가기</button>
             ${detailLoading.value
@@ -521,7 +521,7 @@ export function Memory() {
           placeholder="제목/본문에서 검색"
           aria-label="게시글 본문 필터"
           onInput=${(e: Event) => setContentQuery((e.target as HTMLInputElement).value)}
-          class="min-w-[180px] max-w-[320px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[12px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[180px] max-w-[320px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[12px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && posts.length === 0 && rawPosts.length > 0

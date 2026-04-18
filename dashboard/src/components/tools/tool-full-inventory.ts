@@ -117,7 +117,7 @@ export function FullInventoryView({
       <div class="flex flex-wrap gap-2 mb-4">
         ${(Object.keys(SURFACE_LABELS) as SurfaceFilter[]).map(key => html`
           <button type="button"
-            class=${`px-3 py-1.5 rounded-lg text-[13px] font-medium border transition-colors cursor-pointer ${surfaceFilter.value === key ? 'border-[var(--accent)]/40 text-[var(--accent)] bg-[var(--accent-8)]' : 'border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] text-[var(--text-body)]'}`}
+            class=${`px-3 py-1.5 rounded text-[13px] font-medium border transition-colors cursor-pointer ${surfaceFilter.value === key ? 'border-[var(--accent)]/40 text-[var(--accent)] bg-[var(--accent-8)]' : 'border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] text-[var(--text-body)]'}`}
             onClick=${() => { surfaceFilter.value = key }}
           >
             ${SURFACE_LABELS[key]}
@@ -139,7 +139,7 @@ export function FullInventoryView({
           }}
         />
         <select
-          class="px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--card-border)] text-[var(--text-body)] text-[13px] focus:border-[var(--accent)]/50 outline-none"
+          class="px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--card-border)] text-[var(--text-body)] text-[13px] focus:border-[var(--accent)]/50 outline-none"
           name="tool_inventory_category"
           aria-label="도구 카테고리 필터"
           value=${categoryFilter.value}
@@ -183,7 +183,7 @@ export function FullInventoryView({
           <span>지원 중단 표시</span>
         </label>
         <button type="button"
-          class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
+          class="px-3 py-1.5 rounded text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
           onClick=${() => { void loadTools() }}
           disabled=${loading}
         >

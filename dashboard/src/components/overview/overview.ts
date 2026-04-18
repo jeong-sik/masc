@@ -110,8 +110,8 @@ export function opHubTileNumberClass(count: number): string {
     existing subdued card style. */
 export function opHubTileBorderClass(count: number): string {
   return opHubTileIsActive(count)
-    ? 'rounded-lg border border-accent/30 bg-accent/5 p-3'
-    : 'rounded-lg border border-card-border/35 bg-card/55 p-3'
+    ? 'rounded border border-accent/30 bg-accent/5 p-3'
+    : 'rounded border border-card-border/35 bg-card/55 p-3'
 }
 
 function timestampToMs(timestamp?: string | null): number | null {
@@ -449,7 +449,7 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
         ${s.member_names?.length ? html`<span>${s.member_names.length}명</span>` : null}
       </div>
       ${hasBlocker ? html`
-        <div class="mt-3 truncate rounded-lg border border-bad/20 bg-bad/10 px-3 py-1.5 pl-5 text-[11px] font-medium text-bad-light">${s.blocker_summary}</div>
+        <div class="mt-3 truncate rounded border border-bad/20 bg-bad/10 px-3 py-1.5 pl-5 text-[11px] font-medium text-bad-light">${s.blocker_summary}</div>
       ` : null}
     <//>
   `
@@ -554,7 +554,7 @@ function AgentPulse() {
           placeholder="이름 / 상태 / focus 필터"
           aria-label="에이전트 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && visibleAgents.length === 0
@@ -598,7 +598,7 @@ interface CompactKpiProps {
 
 function CompactKpi({ value, valueClass, label }: CompactKpiProps) {
   return html`
-    <div class="rounded-lg border border-card-border/30 bg-card/40 p-3 text-center">
+    <div class="rounded border border-card-border/30 bg-card/40 p-3 text-center">
       <div class="text-[22px] font-bold ${valueClass ?? 'text-text-strong'}">${value}</div>
       <div class="text-[11px] text-text-muted mt-1">${label}</div>
     </div>
@@ -836,7 +836,7 @@ function PathTruthBlock({
   if (!item) return null
 
   return html`
-    <div class="rounded-lg border border-card-border/35 bg-card/45 p-3">
+    <div class="rounded border border-card-border/35 bg-card/45 p-3">
       <div class="flex flex-wrap items-center gap-2">
         <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">${label}</div>
         <span class="rounded-sm border px-2 py-0.5 text-[10px] font-semibold ${item.exists ? 'border-ok/25 bg-ok/10 text-ok' : 'border-bad/25 bg-bad/10 text-bad-light'}">
@@ -914,14 +914,14 @@ function ConfigTruthCard() {
             ? html`
                 <div class="mt-4 flex flex-col gap-2">
                   ${configResolution?.warnings.slice(0, 2).map(warning => html`
-                    <div class="rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-[12px] text-[var(--text-body)]">${warning}</div>
+                    <div class="rounded border border-warn/25 bg-warn/10 px-3 py-2 text-[12px] text-[var(--text-body)]">${warning}</div>
                   `)}
                   ${runtimeResolution?.warnings.slice(0, 2).map(warning => html`
-                    <div class="rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-[12px] text-[var(--text-body)]">${warning}</div>
+                    <div class="rounded border border-warn/25 bg-warn/10 px-3 py-2 text-[12px] text-[var(--text-body)]">${warning}</div>
                   `)}
                   ${runtimeResolution?.source_mismatch
                     ? html`
-                        <div class="rounded-lg border border-bad/25 bg-bad/10 px-3 py-2 text-[12px] text-[var(--text-body)]">
+                        <div class="rounded border border-bad/25 bg-bad/10 px-3 py-2 text-[12px] text-[var(--text-body)]">
                           workspace와 runtime build source가 다릅니다.
                         </div>
                       `

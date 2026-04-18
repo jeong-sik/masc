@@ -150,7 +150,7 @@ function renderMarkdown(text: string): string {
     }
     const innerHtml = md.parse((m[1] as string).trim()) as string
     parts.push(
-      `<details class="think-block rounded-lg"><summary>생각 중...</summary><div>${innerHtml}</div></details>`
+      `<details class="think-block rounded"><summary>생각 중...</summary><div>${innerHtml}</div></details>`
     )
     lastIdx = m.index + m[0].length
   }
@@ -260,7 +260,7 @@ function MarkdownContent({ text, class: className }: { text: string; class?: str
 
           if (shikiPre && shikiPre.tagName === 'PRE') {
             // Apply dashboard specific classes to match existing UI
-            shikiPre.classList.add('shiki-rendered', 'rounded-lg', 'my-3', 'text-[13px]', 'leading-relaxed')
+            shikiPre.classList.add('shiki-rendered', 'rounded', 'my-3', 'text-[13px]', 'leading-relaxed')
 
             pre.replaceWith(shikiPre)
           }

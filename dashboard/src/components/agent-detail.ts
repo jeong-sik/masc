@@ -222,13 +222,13 @@ export function AgentDetailOverlay() {
                 <h2 id=${titleId} class="m-0 flex items-baseline gap-3 text-text-strong text-2xl font-bold tracking-tight">
                   ${displayName}
                   ${koreanName ? html`<span class="text-sm text-text-dim font-medium tracking-normal">(${koreanName})</span>` : ''}
-                  ${showSecondaryLabel ? html`<span class="font-mono text-xs text-text-dim bg-white/5 px-2 py-0.5 rounded-md">${secondaryLabel}</span>` : ''}
+                  ${showSecondaryLabel ? html`<span class="font-mono text-xs text-text-dim bg-white/5 px-2 py-0.5 rounded">${secondaryLabel}</span>` : ''}
                 </h2>
                 <div class="flex items-center gap-2 mt-2 flex-wrap">
                   <${StatusBadge} status=${unified.canonical} />
-                  ${unified.description !== unified.label ? html`<span class="text-[10px] font-medium py-1 px-2 border border-white/10 bg-white/5 text-text-muted whitespace-nowrap rounded-md" title=${unified.description}>${unified.description}</span>` : null}
+                  ${unified.description !== unified.label ? html`<span class="text-[10px] font-medium py-1 px-2 border border-white/10 bg-white/5 text-text-muted whitespace-nowrap rounded" title=${unified.description}>${unified.description}</span>` : null}
                   ${isArchivedParticipant ? html`<${IdPill}>이전 세션 참여자<//>` : null}
-                  ${agent?.model ? html`<span class="font-mono text-[10px] font-medium bg-white/10 border border-white/5 px-2 py-1 rounded-md text-text-muted shadow-sm">${agent.model}</span>` : ''}
+                  ${agent?.model ? html`<span class="font-mono text-[10px] font-medium bg-white/10 border border-white/5 px-2 py-1 rounded text-text-muted shadow-sm">${agent.model}</span>` : ''}
                   ${!agent && missionBrief?.archived_reason
                     ? html`<span class="text-xs text-text-dim italic">${missionBrief.archived_reason}</span>`
                     : null}
@@ -237,9 +237,9 @@ export function AgentDetailOverlay() {
             </div>
             <div class="mt-2 flex gap-3 flex-wrap text-text-muted text-[13px] font-medium">
               ${agent?.current_task || missionBrief?.current_work
-                ? html`<span class="bg-card/40 px-3 py-1.5 rounded-lg border border-card-border shadow-sm">태스크: <span class="text-text-strong">${agent?.current_task ?? missionBrief?.current_work}</span></span>`
+                ? html`<span class="bg-card/40 px-3 py-1.5 rounded border border-card-border shadow-sm">태스크: <span class="text-text-strong">${agent?.current_task ?? missionBrief?.current_work}</span></span>`
                 : null}
-              ${lastSeenAt ? html`<span class="bg-card/40 px-3 py-1.5 rounded-lg border border-card-border shadow-sm">마지막 확인: <span class="text-text-strong"><${TimeAgo} timestamp=${lastSeenAt} /></span></span>` : null}
+              ${lastSeenAt ? html`<span class="bg-card/40 px-3 py-1.5 rounded border border-card-border shadow-sm">마지막 확인: <span class="text-text-strong"><${TimeAgo} timestamp=${lastSeenAt} /></span></span>` : null}
             </div>
             ${keeper || continuitySummary || missionBrief?.related_session_id
               ? html`
@@ -257,7 +257,7 @@ export function AgentDetailOverlay() {
                         </span>`
                       : null}
                     ${missionBrief?.related_session_id ? html`<span class="flex items-center gap-1.5">세션: <strong class="font-mono text-text-strong text-xs bg-white/5 px-1.5 rounded">${missionBrief.related_session_id}</strong></span>` : null}
-                    ${continuitySummary ? html`<span class="text-accent/90 bg-[var(--accent-10)] px-2 py-0.5 rounded-md border border-accent/10">${continuitySummary}</span>` : null}
+                    ${continuitySummary ? html`<span class="text-accent/90 bg-[var(--accent-10)] px-2 py-0.5 rounded border border-accent/10">${continuitySummary}</span>` : null}
                   </div>
                 `
               : null}
@@ -304,7 +304,7 @@ export function AgentDetailOverlay() {
             placeholder="id / title / status 필터"
             aria-label="작업 필터"
             onInput=${(e: Event) => { taskQuery.value = (e.target as HTMLInputElement).value }}
-            class="min-w-[160px] max-w-[280px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-[160px] max-w-[280px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
           />
         </div>
 

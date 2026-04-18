@@ -905,7 +905,7 @@ function ConnectorLivePanel({
 
       ${ui.headerExpanded
         ? html`
-            <div class="mt-2 rounded-md border border-[var(--card-border)] bg-[var(--white-4)] p-3 text-[11px]">
+            <div class="mt-2 rounded border border-[var(--card-border)] bg-[var(--white-4)] p-3 text-[11px]">
               <div class="space-y-1.5">
                 ${livenessDots.map(dot => html`
                   <div class="flex min-w-0 flex-wrap items-center gap-2">
@@ -933,7 +933,7 @@ function ConnectorLivePanel({
         : null}
 
       ${connectorError || connector?.error
-        ? html`<div class="mt-3 rounded-md border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]">${connectorError ?? connector?.error}</div>`
+        ? html`<div class="mt-3 rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]">${connectorError ?? connector?.error}</div>`
         : null}
 
       <${SidecarLogViewer} connectorId=${connectorId} />
@@ -942,7 +942,7 @@ function ConnectorLivePanel({
       ${keeperDirectoryError && keepers.length === 0
         ? html`
             <div
-              class="mt-3 rounded-md border border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]"
+              class="mt-3 rounded border border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]"
               data-keeper-directory-error-panel
             >
               <span
@@ -960,7 +960,7 @@ function ConnectorLivePanel({
       ${showNoKeeperEmpty
         ? html`
             <div
-              class="mt-3 rounded-md border border-dashed border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-3 text-[12px]"
+              class="mt-3 rounded border border-dashed border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-3 text-[12px]"
               data-no-keepers-empty-panel
             >
               <div class="mb-1 flex items-center gap-2">
@@ -994,7 +994,7 @@ function ConnectorLivePanel({
             // on the outer card for vertical scannability.
             return html`
               <div
-                class="mt-3 rounded-md border border-dashed border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-3 text-[12px]"
+                class="mt-3 rounded border border-dashed border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-3 text-[12px]"
                 data-sidecar-not-started-panel
               >
                 <div class="mb-1 flex items-center justify-between gap-2">
@@ -1052,7 +1052,7 @@ function ConnectorLivePanel({
                   aria-label="Keeper 필터"
                   data-testid=${`keeper-filter-${connectorId}`}
                   onInput=${(e: Event) => { patchConnectorUiState(connectorId, { keeperGroupQuery: (e.target as HTMLInputElement).value }) }}
-                  class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                  class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
                 />
               </div>
               ${isFilteringKeepers && visibleKnownGroups.length === 0
@@ -1072,7 +1072,7 @@ function ConnectorLivePanel({
                   }
                 }
                 return html`
-                  <div class="rounded-md border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2" data-keeper=${group.name}>
+                  <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2" data-keeper=${group.name}>
                     <div class="flex flex-wrap items-baseline gap-3">
                       <div class="text-sm font-medium text-[var(--text-body)]">${group.name}</div>
                       ${keeper
@@ -1183,7 +1183,7 @@ function ConnectorLivePanel({
         ? html`
             <div class="mt-3 space-y-2">
               ${unknownGroups.map(group => html`
-                <div class="rounded-md border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2" data-keeper=${group.name}>
+                <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2" data-keeper=${group.name}>
                   <div class="flex items-baseline gap-2">
                     <span class="text-[var(--warn)]">⚠</span>
                     <div class="min-w-0">
@@ -1245,7 +1245,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
   const lastError = shortText(ch.last_error)
 
   return html`
-    <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-4)] p-3">
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] p-3">
       <div class="mb-3 flex items-start justify-between gap-3">
         <div class="flex items-center gap-2">
           <span class="text-lg">${channelIcon(ch.channel)}</span>
@@ -1312,7 +1312,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
 
       ${lastError
         ? html`
-            <div class="mt-3 rounded-md border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-[11px] text-[var(--bad-light)]">
+            <div class="mt-3 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-[11px] text-[var(--bad-light)]">
               <div class="mb-1 uppercase tracking-[0.16em] text-[var(--bad-light)]/80">
                 ${ch.last_error_kind || 'error'} · ${timeAgo(ch.last_error_at)}
               </div>
@@ -1329,7 +1329,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
   const lastError = shortText(binding.last_error, 72)
 
   return html`
-    <div class="rounded-md border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="text-xs font-medium text-[var(--text-body)]">
@@ -1375,7 +1375,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
     : 'border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-dim)]'
 
   return html`
-    <div class="rounded-md border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0 text-[11px] text-[var(--text-dim)]">
           <div class="font-medium text-[var(--text-body)]">
@@ -1454,7 +1454,7 @@ function GateAnalyticsSection({
     >
       ${gate === null
         ? html`
-            <div class="rounded-md border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">
+            <div class="rounded border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">
               Gate-advertised connector runtime is visible, but Gate-observed traffic is not available yet.
             </div>
           `
@@ -1468,11 +1468,11 @@ function GateAnalyticsSection({
               </div>
 
               <div class="mb-4 grid grid-cols-2 gap-2 text-[11px] text-[var(--text-dim)] max-[720px]:grid-cols-1">
-                <div class="rounded-md border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
+                <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
                   duplicate suppressions
                   <span class="ml-2 font-mono text-[var(--text-body)]">${gate.total_duplicates}</span>
                 </div>
-                <div class="rounded-md border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
+                <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
                   active connectors
                   <span class="ml-2 font-mono text-[var(--text-body)]">${gate.channels.length}</span>
                 </div>
@@ -1484,7 +1484,7 @@ function GateAnalyticsSection({
                     Observed room bindings
                   </div>
                   ${gate.bindings.length === 0
-                    ? html`<div class="rounded-md border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">관찰된 room 바인딩 없음</div>`
+                    ? html`<div class="rounded border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">관찰된 room 바인딩 없음</div>`
                     : html`
                         <div class="space-y-2">
                           ${gate.bindings.slice(0, 6).map(binding => html`<${BindingRow} binding=${binding} />`)}
@@ -1497,7 +1497,7 @@ function GateAnalyticsSection({
                     Recent gate events
                   </div>
                   ${gate.recent_events.length === 0
-                    ? html`<div class="rounded-md border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">커넥터 이벤트 기록 없음</div>`
+                    ? html`<div class="rounded border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">커넥터 이벤트 기록 없음</div>`
                     : html`
                         <div class="space-y-2">
                           ${gate.recent_events.slice(0, 8).map(event => html`<${EventRow} event=${event} />`)}
@@ -1562,7 +1562,7 @@ export function ConnectorStatusPanel() {
 
   if (filterId && allConnectors.length > 0 && visibleConnectors.length === 0) {
     return html`
-      <div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-6 text-center text-xs text-[var(--text-dim)]">
+      <div class="rounded border border-dashed border-[var(--white-8)] px-3 py-6 text-center text-xs text-[var(--text-dim)]">
         ${filterId} sidecar가 아직 Gate에 등록되지 않았습니다. 시작 후 다시 확인하세요.
       </div>
     `

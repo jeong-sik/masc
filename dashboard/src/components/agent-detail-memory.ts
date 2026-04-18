@@ -202,7 +202,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                   onInput=${(e: Event) => {
                     episodeQuery.value = (e.target as HTMLInputElement).value
                   }}
-                  class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                  class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
                 />`
               : null}
           </div>

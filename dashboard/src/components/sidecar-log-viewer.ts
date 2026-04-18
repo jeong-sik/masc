@@ -188,7 +188,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
   return html`
     <div
       id=${`sidecar-log-${connectorId}`}
-      class="mt-3 rounded-md border border-[var(--white-8)] bg-[var(--bg-1)] p-2"
+      class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-2"
     >
       <div class="mb-2 flex items-center justify-between gap-2">
         <div class="min-w-0 truncate text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]" title=${entry.logPath}>

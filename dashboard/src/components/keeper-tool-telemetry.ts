@@ -187,18 +187,18 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
 
       ${'' /* Summary row */}
       <div class="flex gap-3 flex-wrap text-[11px]">
-        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-muted)]">
+        <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-muted)]">
           <span class="font-mono font-medium text-[var(--text-strong)]">${s.tools.length}</span> 도구
         </span>
-        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-muted)]">
+        <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-muted)]">
           <span class="font-mono font-medium text-[var(--text-strong)]">${s.totalEntries}</span> 호출
         </span>
         ${totalCost > 0 ? html`
-          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--accent-12)] border border-[rgba(71,184,255,0.15)] text-[var(--text-muted)]">
+          <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--accent-12)] border border-[rgba(71,184,255,0.15)] text-[var(--text-muted)]">
             <span class="font-mono font-medium text-[var(--accent)]">$${totalCost.toFixed(3)}</span>
           </span>
         ` : null}
-        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-dim)]">
+        <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-dim)]">
           ${s.windowHours}h 기간
         </span>
       </div>
@@ -224,7 +224,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
               placeholder="도구 검색 (이름/카테고리)"
               aria-label="도구 텔레메트리 검색"
               onInput=${(e: Event) => { setQuery((e.target as HTMLInputElement).value) }}
-              class="min-w-[160px] rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+              class="min-w-[160px] rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
             />
             <span class="text-[10px] text-[var(--text-muted)] tabular-nums">
               ${trimmedQuery

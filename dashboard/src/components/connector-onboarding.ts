@@ -52,7 +52,7 @@ function OnboardingCard({ connectorId }: { connectorId: KnownConnectorId }) {
         </div>
         <button
           type="button"
-          class=${`rounded-lg cursor-pointer transition-all duration-200 font-medium border border-solid border-[var(--accent-30)] bg-[var(--accent-12)] text-[var(--text-strong)] hover:bg-[var(--accent-20)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)] py-1 px-2 text-[10px] ${starting ? 'opacity-50 pointer-events-none' : 'active:scale-[0.97]'}`}
+          class=${`rounded cursor-pointer transition-all duration-200 font-medium border border-solid border-[var(--accent-30)] bg-[var(--accent-12)] text-[var(--text-strong)] hover:bg-[var(--accent-20)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)] py-1 px-2 text-[10px] ${starting ? 'opacity-50 pointer-events-none' : 'active:scale-[0.97]'}`}
           disabled=${starting}
           aria-busy=${starting ? 'true' : 'false'}
           data-onboarding-start=${connectorId}

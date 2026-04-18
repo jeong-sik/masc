@@ -78,7 +78,7 @@ export function TaskCreateForm() {
               options=${PRIORITY_OPTIONS}
               onInput=${(v: string) => { priority.value = Number(v) }}
             />
-            <div class="rounded-lg border border-card-border/60 bg-white/3 px-3 py-2 text-[11px] leading-relaxed text-text-muted">
+            <div class="rounded border border-card-border/60 bg-white/3 px-3 py-2 text-[11px] leading-relaxed text-text-muted">
               backlog 카드와 동일하게 <strong class="text-text-strong">P1 → P4</strong> 순으로 표시됩니다.
             </div>
           </div>

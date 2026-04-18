@@ -839,7 +839,7 @@ function SkeletonLayout() {
         <${SkeletonBar} w="w-24" h="h-2" />
         <div class="mt-2 flex gap-2">
           ${[1,2,3,4].map(i => html`
-            <div key=${i} class="flex-1 rounded-lg border border-[var(--white-8)] p-2">
+            <div key=${i} class="flex-1 rounded border border-[var(--white-8)] p-2">
               <${SkeletonBar} w="w-10" h="h-2" />
               <div class="mt-1"><${SkeletonBar} w="w-16" h="h-4" /></div>
               <div class="mt-1"><${SkeletonBar} w="w-14" h="h-2" /></div>

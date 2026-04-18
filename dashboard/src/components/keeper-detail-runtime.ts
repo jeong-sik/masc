@@ -54,7 +54,7 @@ export function resolveKeeperCurrentTaskLabel(
 
 function SignalRow({ label, value }: { label: string; value: string | number }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+    <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
       <span class="text-xs text-[var(--text-muted)]">${label}</span>
       <span class="text-xs font-medium text-[var(--text-strong)]">${value}</span>
     </div>
@@ -230,7 +230,7 @@ function BudgetRow({ label, slot, manifest, clamp }: {
   }
 
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+    <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
       <span class="text-xs text-[var(--text-muted)]">${label}</span>
       <div class="flex items-center gap-2">
         ${isOverride && deltaText
@@ -453,7 +453,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
             <div class="flex items-center gap-2">
               <input
                 type="search"
-                class="flex-1 min-w-0 py-1.5 px-2 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-30)]"
+                class="flex-1 min-w-0 py-1.5 px-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-30)]"
                 placeholder="신호 지표 필터 (예: 폴백, 메모리, 컴팩션)"
                 aria-label="런타임 신호 지표 필터"
                 value=${signalQuery}
@@ -470,7 +470,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
         : null}
       ${showEmptyState
         ? html`
-            <div class="py-3 px-3 rounded-lg border border-dashed border-[var(--card-border)] text-[11px] text-[var(--text-muted)] italic">
+            <div class="py-3 px-3 rounded border border-dashed border-[var(--card-border)] text-[11px] text-[var(--text-muted)] italic">
               필터 결과 없음 (${totalRows} items)
             </div>
           `
@@ -606,7 +606,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
 
       <div class="flex justify-end mt-1">
         <button type="button"
-          class="py-1.5 px-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
+          class="py-1.5 px-3 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
           disabled=${!openToolsQuery}
           onClick=${() => { openToolsInventory(openToolsQuery) }}
         >
@@ -665,7 +665,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       />
 
       <${SignalRow} label="도구 호출" value=${typeof toolCallCount === 'number' ? toolCallCount : observedFallback === 'none_recent' ? 0 : metadataFallback} />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+      <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">감사</span>
         <span class="text-xs font-medium text-[var(--text-strong)]">${auditSource ?? metadataFallback}${auditAt ? html` · <${TimeAgo} timestamp=${auditAt} />` : ''}</span>
       </div>

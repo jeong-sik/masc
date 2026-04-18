@@ -99,7 +99,7 @@ export function QuickBindForm({ connectorId, keepers }: {
 
   return html`
     <div
-      class="mt-3 flex flex-wrap items-end gap-2 rounded-md border border-dashed border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2.5"
+      class="mt-3 flex flex-wrap items-end gap-2 rounded border border-dashed border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2.5"
       data-quick-bind=${connectorId}
     >
       <div class="min-w-0 flex-1 basis-[160px]">

@@ -485,7 +485,7 @@ export function TransportHealthPanel() {
                 ` : html`
                   <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
                     ${filtered.map((session) => html`
-                      <div key=${session.session_id} class="rounded-lg border border-card-border/60 bg-bg-1/60 p-3">
+                      <div key=${session.session_id} class="rounded border border-card-border/60 bg-bg-1/60 p-3">
                         <div class="flex items-center justify-between gap-2 mb-1">
                           <div class="flex min-w-0 items-center gap-1">
                             <span class="truncate text-[11px] font-mono text-text-strong">${compactId(session.session_id)}</span>

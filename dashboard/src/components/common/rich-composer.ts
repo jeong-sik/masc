@@ -32,7 +32,7 @@ export function RichComposer({
             <button
               key=${tab}
               type="button"
-              class=${`rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              class=${`rounded border px-2.5 py-1 text-[11px] font-medium transition-colors ${
                 mode === tab
                   ? 'border-[rgba(71,184,255,0.35)] bg-[var(--accent-12)] text-[var(--accent)]'
                   : 'border-transparent bg-transparent text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]'
@@ -63,12 +63,12 @@ export function RichComposer({
             `
           : value.trim()
             ? html`
-                <div class="max-h-[320px] overflow-auto rounded-lg border border-[var(--card-border)] bg-[var(--bg-0)] p-3 custom-scrollbar">
+                <div class="max-h-[320px] overflow-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] p-3 custom-scrollbar">
                   <${RichContent} text=${value} previewLimit=${previewLimit} />
                 </div>
               `
             : html`
-                <div class="rounded-lg border border-dashed border-[var(--card-border)] bg-[var(--white-3)] px-3 py-6 text-center text-[12px] text-[var(--text-muted)]">
+                <div class="rounded border border-dashed border-[var(--card-border)] bg-[var(--white-3)] px-3 py-6 text-center text-[12px] text-[var(--text-muted)]">
                   미리볼 내용이 아직 없습니다.
                 </div>
               `}

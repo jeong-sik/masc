@@ -31,7 +31,7 @@ export function AuthStatus() {
   return html`
     <div class="relative">
       <button type="button"
-        class="flex items-center gap-1.5 text-[11px] py-1 px-2 rounded-md border border-solid border-[var(--card-border)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--white-8)] text-[var(--text-muted)]"
+        class="flex items-center gap-1.5 text-[11px] py-1 px-2 rounded border border-solid border-[var(--card-border)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--white-8)] text-[var(--text-muted)]"
         onClick=${() => { popoverOpen.value = !popoverOpen.value }}
         title="인증 상태"
       >
@@ -62,12 +62,12 @@ function AuthPopover({ authenticated }: { authenticated: boolean }) {
   }
 
   return html`
-    <div class="absolute right-0 top-full mt-1.5 w-[280px] rounded-lg border border-[var(--card-border)] bg-[rgba(10,18,34,0.97)] shadow-sm backdrop-blur-sm p-3 z-50">
+    <div class="absolute right-0 top-full mt-1.5 w-[280px] rounded border border-[var(--card-border)] bg-[rgba(10,18,34,0.97)] shadow-sm backdrop-blur-sm p-3 z-50">
       ${authenticated ? html`
         <div class="flex flex-col gap-2">
           <div class="text-[11px] text-[var(--text-muted)]">Bearer token이 설정되어 있습니다.</div>
           <button type="button"
-            class="w-full py-1.5 px-3 rounded-md text-[11px] border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] cursor-pointer transition-colors"
+            class="w-full py-1.5 px-3 rounded text-[11px] border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] cursor-pointer transition-colors"
             onClick=${handleClearToken}
           >토큰 제거</button>
         </div>
@@ -78,13 +78,13 @@ function AuthPopover({ authenticated }: { authenticated: boolean }) {
             type="password"
             placeholder="Bearer token"
             aria-label="Bearer token"
-            class="w-full py-1.5 px-2 rounded-md text-[11px] border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] placeholder-[var(--text-muted)] outline-none focus:border-[rgba(71,184,255,0.5)]"
+            class="w-full py-1.5 px-2 rounded text-[11px] border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] placeholder-[var(--text-muted)] outline-none focus:border-[rgba(71,184,255,0.5)]"
             value=${tokenInput.value}
             onInput=${(e: Event) => { tokenInput.value = (e.target as HTMLInputElement).value }}
             onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') handleSetToken() }}
           />
           <button type="button"
-            class="w-full py-1.5 px-3 rounded-md text-[11px] border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[rgba(71,184,255,0.15)] cursor-pointer transition-colors"
+            class="w-full py-1.5 px-3 rounded text-[11px] border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[rgba(71,184,255,0.15)] cursor-pointer transition-colors"
             onClick=${handleSetToken}
           >토큰 설정</button>
         </div>

@@ -55,9 +55,9 @@ describe('opHubTileBorderClass (pure)', () => {
     expect(opHubTileBorderClass(1)).toContain('border-accent')
   })
 
-  it('both variants keep the same p-3 padding + rounded-lg (layout invariant)', () => {
+  it('both variants keep the same p-3 padding + rounded (layout invariant)', () => {
     for (const count of [0, 1]) {
-      expect(opHubTileBorderClass(count)).toContain('rounded-lg')
+      expect(opHubTileBorderClass(count)).toContain('rounded')
       expect(opHubTileBorderClass(count)).toContain('p-3')
     }
   })

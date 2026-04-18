@@ -188,17 +188,17 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
             placeholder="액션 필터 (title, actor, subject...)"
             aria-label="액션 타임라인 필터"
             onInput=${(e: Event) => { actionQuery.value = (e.target as HTMLInputElement).value }}
-            class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
           />
           <button
             type="button"
-            class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-all duration-150 ${showLifecycle.value
+            class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-[11px] transition-all duration-150 ${showLifecycle.value
               ? 'border-[var(--border-slate-22)] bg-[var(--accent-soft)] text-[var(--text-strong)]'
               : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)]'}"
             onClick=${() => { showLifecycle.value = !showLifecycle.value }}
           >
             생명주기 ${showLifecycle.value ? '표시 중' : '숨김'}
-            <span class="rounded-md bg-[var(--white-6)] px-1.5 py-0.5 text-[10px]">${rawCounts.lifecycle}</span>
+            <span class="rounded bg-[var(--white-6)] px-1.5 py-0.5 text-[10px]">${rawCounts.lifecycle}</span>
           </button>
         </div>
       </div>
@@ -230,7 +230,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                 </div>
                 <div class="mt-3 flex flex-wrap gap-1.5">
                   ${group.kinds.slice(0, 4).map(kind => html`
-                    <span class="inline-flex items-center rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]" key=${kind}>
+                    <span class="inline-flex items-center rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]" key=${kind}>
                       ${activityEventKindLabel(kind)}
                     </span>
                   `)}
@@ -240,13 +240,13 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                   <div class="flex items-center gap-2">
                     ${group.actor ? html`
                       <a
-                        class="rounded-lg border border-[var(--accent-20)] bg-[var(--accent-soft)] px-3 py-1.5 text-[11px] text-[var(--accent)] no-underline transition-all duration-150 hover:bg-[var(--accent-10)]"
+                        class="rounded border border-[var(--accent-20)] bg-[var(--accent-soft)] px-3 py-1.5 text-[11px] text-[var(--accent)] no-underline transition-all duration-150 hover:bg-[var(--accent-10)]"
                         href=${hashForRoute('monitoring', { section: 'observatory', keeper: group.actor, range: activityRange() })}
                       >이 keeper로 보기</a>
                     ` : null}
                     <button
                       type="button"
-                      class="rounded-lg border border-[var(--white-10)] bg-[var(--white-4)] px-3 py-1.5 text-[11px] text-[var(--text-body)] transition-all duration-150 hover:bg-[var(--white-8)]"
+                      class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-3 py-1.5 text-[11px] text-[var(--text-body)] transition-all duration-150 hover:bg-[var(--white-8)]"
                       onClick=${() => toggleExpandedGroup(group.id)}
                     >
                       ${expanded ? '원본 접기' : '원본 보기'}
@@ -256,8 +256,8 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                 ${expanded ? html`
                   <div class="mt-3 flex flex-col gap-2 rounded border border-[var(--white-8)] bg-[rgba(15,23,42,0.42)] p-3">
                     ${group.rawEvents.map(event => html`
-                      <div class="flex items-start gap-3 rounded-lg border border-[var(--white-6)] bg-[var(--white-3)] px-3 py-2" key=${event.seq}>
-                        <span class="inline-flex min-w-[72px] items-center rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
+                      <div class="flex items-start gap-3 rounded border border-[var(--white-6)] bg-[var(--white-3)] px-3 py-2" key=${event.seq}>
+                        <span class="inline-flex min-w-[72px] items-center rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
                           ${activityEventKindLabel(event.kind)}
                         </span>
                         <div class="min-w-0 flex-1">
@@ -314,7 +314,7 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
               </div>
             </div>
             <span class="text-sm font-semibold text-text-slate-light min-w-[32px] text-right">${score.toFixed(1)}</span>
-            <span class="text-[11px] py-0.5 px-[7px] rounded-md ${node.status === 'offline' || node.status === 'retired' ? 'text-[var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[var(--ok)] bg-[var(--ok-10)]'}">${node.status}</span>
+            <span class="text-[11px] py-0.5 px-[7px] rounded ${node.status === 'offline' || node.status === 'retired' ? 'text-[var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[var(--ok)] bg-[var(--ok-10)]'}">${node.status}</span>
           </div>
         `
       })}

@@ -183,7 +183,7 @@ export function SituationBanner({ snap }: SituationBannerProps) {
 
   return html`
     <div class="flex flex-col gap-0">
-      <div class="flex items-center gap-3 px-4 py-3 rounded-lg border border-[var(--card-border)] border-l-[3px] ${toneBorderClass(tone)} ${toneBgClass(tone)}">
+      <div class="flex items-center gap-3 px-4 py-3 rounded border border-[var(--card-border)] border-l-[3px] ${toneBorderClass(tone)} ${toneBgClass(tone)}">
         <span class="shrink-0 w-5 h-5 flex items-center justify-center text-sm ${toneTextClass(tone)}">${toneIcon(tone)}</span>
         <span class="flex-1 min-w-0 text-sm font-medium text-[var(--text-strong)] leading-snug">${text}</span>
       </div>

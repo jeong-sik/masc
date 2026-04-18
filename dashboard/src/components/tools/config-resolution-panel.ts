@@ -155,7 +155,7 @@ function ConfigRow({
   const showSourceBadge = !isRoot && (rootSource === '' || item.source !== rootSource)
 
   return html`
-    <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3" title=${item.path}>
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3" title=${item.path}>
       <div class="mb-2 flex flex-wrap items-center gap-2">
         <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">${label}</div>
         <${StatusChip} tone=${toneClass(item.exists ? 'ready' : item.source === 'invalid_env' ? 'invalid_env' : 'warn')}>${item.exists ? 'present' : 'missing'}<//>
@@ -195,7 +195,7 @@ function WarningBlock({
   if (warnings.length === 0) return null
 
   return html`
-    <div class="rounded-lg border border-[rgba(250,204,21,0.28)] bg-[var(--warn-10)] px-3 py-3">
+    <div class="rounded border border-[rgba(250,204,21,0.28)] bg-[var(--warn-10)] px-3 py-3">
       <div class="mb-2 text-[11px] uppercase tracking-[0.08em] text-[#fde68a]">${title}</div>
       <div class="flex flex-col gap-2">
         ${warnings.map(warning => html`
@@ -214,7 +214,7 @@ function RuntimeMetaRow({
   value: string
 }) {
   return html`
-    <div class="flex items-center justify-between gap-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-2">
+    <div class="flex items-center justify-between gap-3 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-2">
       <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">${label}</div>
       <div class="break-all text-right font-mono text-[12px] text-[var(--text-body)]">${value}</div>
     </div>
@@ -223,7 +223,7 @@ function RuntimeMetaRow({
 
 function DiagnosticRow({ item }: { item: DashboardRuntimeDiagnostic }) {
   return html`
-    <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3">
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3">
       <div class="mb-1 flex flex-wrap items-center gap-2">
         <${StatusChip} tone="neutral">${item.kind}<//>
         ${item.signal
@@ -316,7 +316,7 @@ function RuntimeProbePanel() {
   const signal = assessment?.signal ?? null
 
   return html`
-    <div class="mt-4 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] px-4 py-4">
+    <div class="mt-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-4 py-4">
       <div class="mb-3 flex flex-wrap items-center gap-2">
         <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">ollama warm / kv probe</div>
         <${StatusChip} tone=${probeTone(signal, probe?.probe_ok)}>${probeSignalLabel(signal)}<//>
@@ -335,7 +335,7 @@ function RuntimeProbePanel() {
 
       ${state.value.error
         ? html`
-            <div class="rounded-lg border border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.10)] px-3 py-3 text-[12px] text-[#fecdd3]">
+            <div class="rounded border border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.10)] px-3 py-3 text-[12px] text-[#fecdd3]">
               ${state.value.error}
             </div>
           `
@@ -391,7 +391,7 @@ function RuntimeProbePanel() {
               ? html`
                   <div class="mt-3 flex flex-col gap-2">
                     ${probe.observations?.map(item => html`
-                      <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-6)] px-3 py-2 text-[12px] text-[var(--text-body)]">
+                      <div class="rounded border border-[var(--card-border)] bg-[var(--white-6)] px-3 py-2 text-[12px] text-[var(--text-body)]">
                         ${item}
                       </div>
                     `)}
@@ -403,7 +403,7 @@ function RuntimeProbePanel() {
               ? html`
                   <div class="mt-3 flex flex-col gap-2">
                     ${probe.errors?.map(item => html`
-                      <div class="rounded-lg border border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.10)] px-3 py-2 text-[12px] text-[#fecdd3]">
+                      <div class="rounded border border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.10)] px-3 py-2 text-[12px] text-[#fecdd3]">
                         ${item}
                       </div>
                     `)}
@@ -537,7 +537,7 @@ export function ConfigResolutionPanel({
                           placeholder="kind / signal / message 필터"
                           aria-label="Diagnostics 필터"
                           onInput=${(e: Event) => { diagnosticsQuery.value = (e.target as HTMLInputElement).value }}
-                          class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                          class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
                         />
                       `
                     : null}
@@ -545,13 +545,13 @@ export function ConfigResolutionPanel({
                 <div class="flex flex-col gap-3">
                   ${runtimeResolution.diagnostics.length === 0
                     ? html`
-                        <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3 text-[12px] text-[var(--text-muted)]">
+                        <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3 text-[12px] text-[var(--text-muted)]">
                           최근 runtime warning이 없습니다.
                         </div>
                       `
                     : isFilteringDiagnostics && visibleDiagnostics.length === 0
                       ? html`
-                          <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3 text-center text-[12px] text-[var(--text-muted)]">
+                          <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3 text-center text-[12px] text-[var(--text-muted)]">
                             필터 결과 없음 (${runtimeResolution.diagnostics.length} diagnostics)
                           </div>
                         `

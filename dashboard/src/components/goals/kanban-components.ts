@@ -105,12 +105,12 @@ function KanbanCard({ task }: { task: Task }) {
     <article class="flex flex-col gap-3 rounded border border-card-border/60 border-l-4 bg-[rgba(7,12,20,0.92)] p-4 ${priorityToneClass(p)}">
       <div class="flex items-start justify-between gap-3">
         <div class="flex flex-wrap items-center gap-2">
-          <span class="rounded-md border border-current/20 px-2 py-0.5 text-[11px] font-semibold">${priorityLabel(p)}</span>
-          ${scope ? html`<span class="rounded-md border border-card-border/70 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-text-body">${scope}</span>` : null}
+          <span class="rounded border border-current/20 px-2 py-0.5 text-[11px] font-semibold">${priorityLabel(p)}</span>
+          ${scope ? html`<span class="rounded border border-card-border/70 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-text-body">${scope}</span>` : null}
         </div>
         <button
           type="button"
-          class="rounded-lg border border-[var(--bad-30)] bg-[var(--bad-10)] px-2 py-1 text-[10px] font-semibold text-[var(--bad-light)] transition-colors hover:bg-[rgba(239,68,68,0.16)] disabled:opacity-50 disabled:cursor-not-allowed"
+          class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-2 py-1 text-[10px] font-semibold text-[var(--bad-light)] transition-colors hover:bg-[rgba(239,68,68,0.16)] disabled:opacity-50 disabled:cursor-not-allowed"
           onClick=${handleDelete}
           disabled=${isDeleting}
         >
@@ -132,7 +132,7 @@ function KanbanCard({ task }: { task: Task }) {
           ${canExpand ? html`
             <button
               type="button"
-              class="w-fit rounded-md border border-card-border/70 bg-white/4 px-2 py-1 text-[11px] text-text-muted transition-colors hover:text-text-strong"
+              class="w-fit rounded border border-card-border/70 bg-white/4 px-2 py-1 text-[11px] text-text-muted transition-colors hover:text-text-strong"
               onClick=${() => toggleTaskExpand(task.id)}
             >
               ${isExpanded ? '설명 접기' : '설명 더 보기'}
@@ -145,18 +145,18 @@ function KanbanCard({ task }: { task: Task }) {
 
       <div class="flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
         ${task.completed_at && task.status === 'done'
-          ? html`<span class="rounded-md border border-ok/25 bg-ok/10 px-2 py-1 text-ok">완�� <${TimeAgo} timestamp=${task.completed_at} /></span>`
+          ? html`<span class="rounded border border-ok/25 bg-ok/10 px-2 py-1 text-ok">완�� <${TimeAgo} timestamp=${task.completed_at} /></span>`
           : task.completed_at && task.status === 'cancelled'
-            ? html`<span class="rounded-md border border-[var(--bad-30)] bg-[var(--bad-10)] px-2 py-1 text-[var(--bad-light)]">취소 <${TimeAgo} timestamp=${task.completed_at} /></span>`
+            ? html`<span class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-2 py-1 text-[var(--bad-light)]">취소 <${TimeAgo} timestamp=${task.completed_at} /></span>`
             : task.created_at
-              ? html`<span class="rounded-md border border-card-border/70 bg-white/4 px-2 py-1"><${TimeAgo} timestamp=${task.created_at} /></span>`
+              ? html`<span class="rounded border border-card-border/70 bg-white/4 px-2 py-1"><${TimeAgo} timestamp=${task.created_at} /></span>`
               : null}
-        ${task.assignee ? html`<span class="rounded-md border border-accent/20 bg-[var(--accent-10)] px-2 py-1 text-accent">@${task.assignee}</span>` : null}
+        ${task.assignee ? html`<span class="rounded border border-accent/20 bg-[var(--accent-10)] px-2 py-1 text-accent">@${task.assignee}</span>` : null}
         <a
           href=${link.href}
           target="_blank"
           rel="noreferrer"
-          class="inline-flex items-center gap-1 rounded-md border border-card-border/70 bg-white/4 px-2 py-1 text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
+          class="inline-flex items-center gap-1 rounded border border-card-border/70 bg-white/4 px-2 py-1 text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
         >
           ${link.label}
           <span aria-hidden="true">\u2197</span>
@@ -194,7 +194,7 @@ function TaskColumn({
           <h3 class="text-[15px] font-semibold text-text-strong">${title}</h3>
           <p class="mt-1 text-[12px] leading-relaxed text-text-muted">${description}</p>
         </div>
-        <span class="rounded-lg px-2.5 py-1 text-[12px] font-semibold ${badgeClass}">${count}</span>
+        <span class="rounded px-2.5 py-1 text-[12px] font-semibold ${badgeClass}">${count}</span>
       </div>
       <div ref=${listRef} class="flex max-h-[680px] flex-col gap-3 overflow-y-auto pr-1 custom-scrollbar">
         ${children}
@@ -266,7 +266,7 @@ export function TaskBacklog() {
   return html`
     <${Card} title="태스크 백로그" class="section">
       ${hasError && hasData ? html`
-        <div class="mb-3 rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-[12px] text-warn">마지막 갱신에 실패했습니다. 표시된 데이터가 오래되었을 수 있습니다.</div>
+        <div class="mb-3 rounded border border-warn/25 bg-warn/10 px-3 py-2 text-[12px] text-warn">마지막 갱신에 실패했습니다. 표시된 데이터가 오래되었을 수 있습니다.</div>
       ` : null}
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <div class="min-w-[220px] flex-1">
@@ -280,7 +280,7 @@ export function TaskBacklog() {
         ${hasSearch ? html`
           <button
             type="button"
-            class="rounded-lg border border-card-border/70 bg-white/4 px-3 py-2 text-[12px] text-text-muted transition-colors hover:border-accent/35 hover:text-text-strong"
+            class="rounded border border-card-border/70 bg-white/4 px-3 py-2 text-[12px] text-text-muted transition-colors hover:border-accent/35 hover:text-text-strong"
             onClick=${() => {
               resetTaskSearch()
               searchDoneVisibleCount.value = DONE_PAGE_SIZE
@@ -322,7 +322,7 @@ export function TaskBacklog() {
           ${hasMoreDone ? html`
             <button
               type="button"
-              class="w-full rounded-lg border border-card-border/60 bg-white/3 px-3 py-2 text-[12px] font-medium text-text-muted transition-colors hover:border-accent/35 hover:text-text-strong"
+              class="w-full rounded border border-card-border/60 bg-white/3 px-3 py-2 text-[12px] font-medium text-text-muted transition-colors hover:border-accent/35 hover:text-text-strong"
               onClick=${() => {
                 if (hasSearch) searchDoneVisibleCount.value += DONE_PAGE_SIZE
                 else doneVisibleCount.value += DONE_PAGE_SIZE

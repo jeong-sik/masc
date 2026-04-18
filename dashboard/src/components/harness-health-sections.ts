@@ -235,7 +235,7 @@ export { StatCard } from './common/stat-card'
 
 export function EmptySignal({ text }: { text: string }) {
   return html`
-    <div class="rounded-lg border border-dashed border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-sm text-[var(--text-dim)]">
+    <div class="rounded border border-dashed border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-sm text-[var(--text-dim)]">
       ${text}
     </div>
   `
@@ -371,13 +371,13 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
           placeholder="task / agent / gate / cascade 필터"
           aria-label="판정 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && visibleItems.length === 0
         ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${items.length} items)</div>`
         : visibleItems.map(item => html`
-          <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+          <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
             <div class="flex items-start justify-between gap-3">
               <div>
                 <div class="text-sm font-medium text-[var(--text-strong)]">${item.task_title || item.task_id}</div>
@@ -418,13 +418,13 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
           placeholder="keeper / trigger / model / strategy 필터"
           aria-label="압축 이벤트 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && visibleItems.length === 0
         ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
         : visibleItems.map(item => html`
-          <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+          <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
             <div class="flex items-start justify-between gap-3">
               <div class="text-sm font-medium text-[var(--text-strong)]">${item.keeper_name}</div>
               <div class="text-xs text-[var(--text-muted)]">${formatTimestamp(item.timestamp)}</div>
@@ -470,13 +470,13 @@ export function HandoffList({ section }: { section: HarnessSignalSection<Handoff
           placeholder="keeper / model / trace_id 필터"
           aria-label="세대 교체 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && visibleItems.length === 0
         ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
         : visibleItems.map(item => html`
-          <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+          <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
             <div class="flex items-start justify-between gap-3">
               <div class="text-sm font-medium text-[var(--text-strong)]">${item.keeper_name}</div>
               <div class="text-xs text-[var(--text-muted)]">${formatTimestamp(item.timestamp)}</div>

@@ -91,7 +91,7 @@ function InspectorOverview() {
                 <div class="mt-2 text-[11px] leading-[1.6] text-[var(--text-muted)]">${surface.description}</div>
                 <button
                   type="button"
-                  class="mt-3 rounded-lg border border-accent/25 bg-[var(--accent-10)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--accent)] transition-colors hover:bg-[var(--accent-20)]"
+                  class="mt-3 rounded border border-accent/25 bg-[var(--accent-10)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--accent)] transition-colors hover:bg-[var(--accent-20)]"
                   onClick=${() => navigate(surface.tab, surface.params)}
                 >
                   ${surface.action}

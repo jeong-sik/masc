@@ -351,7 +351,7 @@ export function AgentProfile({ name }: { name: string }) {
       </div>
 
       ${ps.status === 'error'
-        ? html`<div class="rounded-lg border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2">${ps.message}</div>`
+        ? html`<div class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2">${ps.message}</div>`
         : null}
 
       <${CharacterPlate} name=${name} />
@@ -364,7 +364,7 @@ export function AgentProfile({ name }: { name: string }) {
           ${owned.length === 0
             ? html`<${EmptyState} message="할당된 태스크 없음" compact />`
             : html`<div class="flex flex-col gap-2">${owned.map(t => html`
-                <div class="flex items-center gap-2 border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 rounded-lg" key=${t.id}>
+                <div class="flex items-center gap-2 border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 rounded" key=${t.id}>
                   <span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">${t.id}</span>
                   <span class="flex-1 text-[var(--text-strong)]">${t.title}</span>
                   <${StatusBadge} status=${t.status} />
@@ -442,12 +442,12 @@ export function AgentProfile({ name }: { name: string }) {
                       placeholder="활동 필터 (메시지 본문)"
                       aria-label="프로젝트 활동 필터"
                       onInput=${(e: Event) => { activityQuery.value = (e.target as HTMLInputElement).value }}
-                      class="w-full rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                      class="w-full rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
                     />
                     ${isFiltering && visible.length === 0
                       ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${lines.length} items)</div>`
                       : html`<div class="max-h-[210px] overflow-y-auto flex flex-col gap-1.5">${visible.map((line: string, idx: number) =>
-                          html`<div key=${idx} class="border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-[13px] text-[var(--text-body)] leading-[1.4] rounded-lg">${line}</div>`)}</div>`}
+                          html`<div key=${idx} class="border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-[13px] text-[var(--text-body)] leading-[1.4] rounded">${line}</div>`)}</div>`}
                   </div>
                 `
               })()}
@@ -468,7 +468,7 @@ export function AgentProfile({ name }: { name: string }) {
       ${isKeeper ? html`
         <${KeeperChatPanel} name=${keeperChatName} />
       ` : html`
-        <div class="flex gap-2 items-center px-3.5 py-2.5 bg-[rgba(10,22,40,0.8)] border border-[var(--ff-gold-15)] rounded-lg">
+        <div class="flex gap-2 items-center px-3.5 py-2.5 bg-[rgba(10,22,40,0.8)] border border-[var(--ff-gold-15)] rounded">
           <span class="text-[13px] font-semibold text-[var(--ff-gold)] whitespace-nowrap">@${name}</span>
           <${TextInput}
             placeholder="메시지 입력..."

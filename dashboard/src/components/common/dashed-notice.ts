@@ -31,8 +31,8 @@ export function dashedNoticeClasses(
     ? 'border-[var(--white-8)]'
     : 'border-[var(--card-border)]'
   const sized = size === 'md'
-    ? 'rounded-lg px-4 py-6 text-[12px]'
-    : 'rounded-lg px-4 py-2 text-[10px]'
+    ? 'rounded px-4 py-6 text-[12px]'
+    : 'rounded px-4 py-2 text-[10px]'
   const parts = [
     'border border-dashed text-center text-[var(--text-dim)]',
     sized,

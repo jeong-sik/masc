@@ -412,6 +412,52 @@ let test_dashboard_exposes_keeper_approval_queue () =
         fail "expected approval resume, got edit"
       | None -> fail "approval fiber did not resume")
 
+let test_recommended_action_tool_is_canonicalized () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let now = Unix.gettimeofday () in
+      let generated_at = iso8601_of_unix now in
+      let expires_at = iso8601_of_unix (now +. 3600.0) in
+      write_legacy_judgment ~base_path:dir
+        (`Assoc
+          [
+            ("target_kind", `String "agent_health");
+            ("target_id", `String "canonical-tool");
+            ("status", `String "active");
+            ("summary", `String "tool names should tolerate whitespace drift");
+            ("confidence", `Float 0.92);
+            ("generated_at", `String generated_at);
+            ("expires_at", `String expires_at);
+            ("model_used", `String "llama:test");
+            ("keeper_name", `String Lib.Dashboard_governance_judge.keeper_name);
+            ( "recommended_action",
+              `Assoc
+                [
+                  ("action_kind", `String "recover");
+                  ("resolved_tool", `String "  MASC_OPERATOR_CONFIRM  ");
+                  ("target_type", `String "agent");
+                  ("target_id", `String "canonical-tool");
+                  ("reason", `String "normalize whitespace and case");
+                ] );
+          ]);
+      let json =
+        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+          ~status_filter:None
+      in
+      let open Yojson.Safe.Util in
+      let judgments = json |> member "judgments" |> to_list in
+      check int "canonicalized judgment surfaced" 1 (List.length judgments);
+      let resolved_tool =
+        List.hd judgments
+        |> member "recommended_action" |> member "resolved_tool" |> to_string
+      in
+      check string "resolved_tool canonicalized" "masc_operator_confirm"
+        resolved_tool)
+
 let () =
   run "dashboard_governance"
     [
@@ -429,6 +475,8 @@ let () =
             test_governance_monitoring_uses_live_runtime;
           test_case "dashboard exposes keeper approval queue" `Quick
             test_dashboard_exposes_keeper_approval_queue;
+          test_case "recommended action tool is canonicalized" `Quick
+            test_recommended_action_tool_is_canonicalized;
           test_case "pending_ruling reflects disk truth (#7815)" `Quick
             test_pending_ruling_reflects_disk_truth;
         ] );

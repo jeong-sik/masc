@@ -3,7 +3,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
-import { createAsyncResource } from '../lib/async-state'
+import { createManagedAsyncResource } from '../lib/async-state'
 import { Card } from './common/card'
 import { EmptyState, LoadingState } from './common/feedback-state'
 import { ActionButton } from './common/button'
@@ -34,7 +34,7 @@ import {
 } from '../observatory-filter-store'
 import type { ActivityGraphResponse, ActivityGraphNode, ActionTimelineGroup } from '../types'
 
-const graphResource = createAsyncResource<ActivityGraphResponse | null>()
+const graphResource = createManagedAsyncResource<ActivityGraphResponse | null>(null)
 const DEFAULT_ACTIVITY_RANGE: TimeRangePreset = '1h'
 
 const actionFilter = signal<ActionTimelineFilter>('all')
@@ -79,10 +79,14 @@ function activityRange(): TimeRangePreset {
   return currentTimeRangeFilter() ?? DEFAULT_ACTIVITY_RANGE
 }
 
-function loadGraph() {
-  return graphResource.load(() => {
-    return fetchActivityGraph(activityRange())
+function loadGraphForRange(since: TimeRangePreset) {
+  return graphResource.load((signal) => {
+    return fetchActivityGraph(since, { signal })
   })
+}
+
+function loadGraph() {
+  return loadGraphForRange(activityRange())
 }
 
 function StatsRow({ data }: { data: ActivityGraphResponse }) {
@@ -336,19 +340,33 @@ function EmptyActivityGraph() {
   `
 }
 
-export { loadGraph as refreshActivityGraph }
-
-function useActivityGraphRefresh() {
-  useEffect(() => {
-    void loadGraph()
-    return registerActivityRefresh(() => {
-      void loadGraph()
-    })
-  }, [])
+function WarmingUpActivityGraph() {
+  return html`
+    <div class="flex flex-col gap-5">
+      <${Card} title="활동 분석" class="section mb-4" testId="activity_graph.warming">
+        <div class="mb-4">
+          <h2 class="monitor-headline">활동 분석 초기화 중</h2>
+          <p class="monitor-subheadline">서버가 activity feed를 아직 준비 중입니다. 초기화가 끝나면 그래프와 타임라인이 자동으로 갱신됩니다.</p>
+        </div>
+        <${LoadingState}>activity feed 워밍업 중...<//>
+      <//>
+    </div>
+  `
 }
 
-function useActivityGraphState() {
-  useActivityGraphRefresh()
+export { loadGraph as refreshActivityGraph }
+
+function useActivityGraphRefresh(since: TimeRangePreset) {
+  useEffect(() => {
+    void loadGraphForRange(since)
+    return registerActivityRefresh(() => {
+      void loadGraphForRange(since)
+    })
+  }, [since])
+}
+
+function useActivityGraphState(since: TimeRangePreset) {
+  useActivityGraphRefresh(since)
   return graphResource.state.value
 }
 
@@ -396,23 +414,25 @@ function DerivedActivityPanels({ data }: { data: ActivityGraphResponse }) {
 }
 
 export function ObservatoryActivityPanels() {
-  const state = useActivityGraphState()
-  const data = state.status === 'loaded' ? state.data : undefined
   const since = activityRange()
+  const state = useActivityGraphState(since)
+  const data = state.data ?? undefined
   const actionCount = data ? buildActionTimelineGroups(data.timeline).length : 0
 
   return html`
     <div class="flex flex-col gap-5">
-      ${state.status === 'loading' || state.status === 'idle'
+      ${state.loading && !data
         ? html`<${LoadingState}>활동 분석 패널 불러오는 중...<//>`
-        : state.status === 'error'
+        : state.error && !data
           ? html`
               <${Card} title="활동 분석" class="section" testId="activity_graph.error">
-                <${EmptyState} message=${'활동 그래프를 불러올 수 없습니다: ' + state.message} compact />
-                <${ActionButton} variant="ghost" onClick=${loadGraph}>다시 시도<//>
+                <${EmptyState} message=${'활동 그래프를 불러올 수 없습니다: ' + state.error} compact />
+                <${ActionButton} variant="ghost" onClick=${() => { void loadGraph() }}>다시 시도<//>
               <//>
             `
-          : !data || (data.stats.event_count ?? 0) === 0
+          : !data
+            ? html`<${WarmingUpActivityGraph} />`
+            : (data.stats.event_count ?? 0) === 0
             ? html`<${EmptyActivityGraph} />`
             : html`
                 <${CollapsibleSection}
@@ -431,7 +451,7 @@ export function ObservatoryActivityPanels() {
         <${KeeperPhaseTimeline} />
       <//>
 
-      ${state.status === 'loaded' && data && (data.stats.event_count ?? 0) > 0 ? html`
+      ${data && (data.stats.event_count ?? 0) > 0 ? html`
         <${CollapsibleSection} title="파생 분석">
           <${DerivedActivityPanels} data=${data} />
         <//>
@@ -439,4 +459,3 @@ export function ObservatoryActivityPanels() {
     </div>
   `
 }
-

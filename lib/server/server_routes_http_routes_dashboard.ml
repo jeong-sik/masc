@@ -334,6 +334,45 @@ let rec add_routes ~sw ~clock router =
          let json = dashboard_memory_subsystems_http_json ~config req in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/doctor" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let self_bin = Sys.argv.(0) in
+         let cmd =
+           Printf.sprintf "%s doctor all --json" (Filename.quote self_bin)
+         in
+         try
+           let ic = Unix.open_process_in cmd in
+           let buf = Buffer.create 8192 in
+           (try
+              while true do
+                Buffer.add_channel buf ic 4096
+              done
+            with End_of_file -> ());
+           let _ = Unix.close_process_in ic in
+           Http.Response.json
+             ~compress:true
+             ~request:req
+             (Buffer.contents buf)
+             reqd
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+           let err =
+             Yojson.Safe.to_string
+               (`Assoc
+                 [ "error", `String (Printexc.to_string exn)
+                 ; ( "hint"
+                   , `String
+                       "server must be launched from the repo root so the \
+                        self-binary can resolve sidecar/ paths" )
+                 ])
+           in
+           Http.Response.json
+             ~status:`Internal_server_error
+             ~request:req
+             err
+             reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/governance" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = state.Mcp_server.room_config.base_path in

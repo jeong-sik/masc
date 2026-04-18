@@ -16,18 +16,51 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 _shared_root = Path(__file__).resolve().parent.parent.parent / "shared"
 if str(_shared_root) not in sys.path:
     sys.path.insert(0, str(_shared_root))
 
+# httpx is a hard requirement — bundled with every sidecar install step.
+# pydantic_settings / discord.py are NOT imported at module top on purpose:
+# the first thing the doctor reports is whether they are installed, so this
+# module must import cleanly even when they are absent.
 import httpx  # noqa: E402
-from pydantic import ValidationError  # noqa: E402
 
 from gate_shared import AutoFix, Check, Doctor, Severity  # noqa: E402
-from gate_shared.doctor import NETWORK_TIMEOUT_SEC  # noqa: E402
+from gate_shared.doctor import (  # noqa: E402
+    NETWORK_TIMEOUT_SEC,
+    check_dependencies_installed,
+)
 
-from .config import BotConfig, get_config  # noqa: E402
+if TYPE_CHECKING:
+    from .config import BotConfig
+
+
+def _config_or_none() -> BotConfig | None:
+    """Lazy config load. Returns None when pydantic/pydantic_settings/env
+    reading fails so the rest of the doctor still reports what it can."""
+
+    try:
+        from pydantic import ValidationError  # noqa: PLC0415
+
+        from .config import get_config  # noqa: PLC0415
+    except ImportError:
+        return None
+    try:
+        return get_config()
+    except (ValidationError, OSError):
+        return None
+
+
+_REQUIRED_PACKAGES = (
+    "discord.py",
+    "pydantic",
+    "pydantic-settings",
+    "httpx",
+    "httpx-sse",
+)
 
 
 async def run_doctor() -> Doctor:
@@ -35,6 +68,7 @@ async def run_doctor() -> Doctor:
 
     doc = Doctor("Discord Sidecar Doctor")
     doc.register(check_python_version)
+    doc.register(check_dependencies_installed(_REQUIRED_PACKAGES))
     doc.register(check_discord_py_version)
     doc.register(check_env_token)
     doc.register(check_env_gate_url)
@@ -101,13 +135,6 @@ async def check_discord_py_version() -> Check:
         detail=ver,
         message="",
     )
-
-
-def _config_or_none() -> BotConfig | None:
-    try:
-        return get_config()
-    except (ValidationError, OSError):
-        return None
 
 
 async def check_env_token() -> Check:

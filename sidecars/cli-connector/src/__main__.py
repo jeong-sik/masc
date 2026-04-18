@@ -18,11 +18,11 @@ if str(_shared_root) not in sys.path:
 
 from gate_shared import exit_code_for, render_json, render_pretty  # noqa: E402
 
-from .bot import main  # noqa: E402
-from .doctor import run_doctor  # noqa: E402
-
 
 def _run_doctor(argv: list[str]) -> int:
+    # Lazy import — doctor must still run when runtime deps are missing.
+    from .doctor import run_doctor  # noqa: PLC0415
+
     as_json = "--json" in argv
     auto_fix = "--fix" in argv
 
@@ -43,6 +43,8 @@ def _run_doctor(argv: list[str]) -> int:
 
 if len(sys.argv) > 1 and sys.argv[1] == "doctor":
     raise SystemExit(_run_doctor(sys.argv[2:]))
+
+from .bot import main  # noqa: E402
 
 keeper = sys.argv[1] if len(sys.argv) > 1 else None
 asyncio.run(main(keeper_override=keeper))

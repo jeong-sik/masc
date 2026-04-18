@@ -20,33 +20,31 @@ let default_lookback_days = 7
 let min_success_rate = 0.3
 let recency_lambda = 0.01
 
-(* [Safe_ops.int_of_string_with_default] is built on the
-   exception-free [int_of_string_opt], so these readers no longer need
-   a hand-rolled [try ... with Eio.Cancel.Cancelled -> raise | _ ->
-   default] block.  The clamp runs after parsing, so a malformed env
-   value returns [default] unmodified.
-
-   An empty or whitespace-only value is treated as "unset" because
-   OCaml's stdlib lacks a portable [Unix.unsetenv] prior to 4.12 and
-   the codebase convention is [Unix.putenv name ""] to clear an env
-   var.  Without this guard, [Some ""] would be distinguishable from
-   [None] at the reader level even though the intent is identical. *)
-let configured_max_k ?(getenv = Sys.getenv_opt) () =
-  match getenv "MASC_KEEPER_TOOL_AFFINITY_K" with
+(* Empty/whitespace-only env values count as unset: OCaml stdlib has no
+   portable [Unix.unsetenv] before 4.12, and the codebase convention is
+   [Unix.putenv name ""] to clear a var. Without the trim guard,
+   [Some ""] would be distinguishable from [None] at the reader level
+   even though the intent is identical. *)
+let clamped_env_int ?(getenv = Sys.getenv_opt) ~name ~min_val ~max_val ~default () =
+  match getenv name with
   | Some s when String.trim s <> "" ->
-    max 0
-      (min 20
-         (Safe_ops.int_of_string_with_default ~default:default_max_k s))
-  | Some _ | None -> default_max_k
+    max min_val
+      (min max_val
+         (Safe_ops.int_of_string_with_default ~default s))
+  | Some _ | None -> default
+
+(* Clamp bounds: max_k cap of 20 keeps the discovered-tools window
+   bounded for small-context models; lookback cap of 30 days matches
+   the trajectory retention window. *)
+let configured_max_k ?(getenv = Sys.getenv_opt) () =
+  clamped_env_int ~getenv
+    ~name:"MASC_KEEPER_TOOL_AFFINITY_K"
+    ~min_val:0 ~max_val:20 ~default:default_max_k ()
 
 let configured_lookback_days ?(getenv = Sys.getenv_opt) () =
-  match getenv "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" with
-  | Some s when String.trim s <> "" ->
-    max 1
-      (min 30
-         (Safe_ops.int_of_string_with_default
-            ~default:default_lookback_days s))
-  | Some _ | None -> default_lookback_days
+  clamped_env_int ~getenv
+    ~name:"MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS"
+    ~min_val:1 ~max_val:30 ~default:default_lookback_days ()
 
 (* ================================================================ *)
 (* Types                                                             *)
@@ -118,7 +116,7 @@ let compute_affinity ~(tool_stats : Trajectory.tool_stat list)
         Some { tool_name = s.name; score; call_count = s.call_count;
                success_rate })
     |> List.sort (fun a b -> Float.compare b.score a.score)
-    |> List.filteri (fun i _ -> i < max_k)
+    |> List.take max_k
 
 (* ================================================================ *)
 (* Main entry point                                                  *)

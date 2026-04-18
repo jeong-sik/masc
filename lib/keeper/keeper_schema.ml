@@ -2,6 +2,14 @@
 
 open Types
 
+(** Issue #8430: canonical [tool_preset] strings. Mirrors
+    [Keeper_types.valid_tool_preset_strings]. Direct dependency would
+    create a cycle (Keeper_schema -> Keeper_types -> Keeper_types_profile
+    -> Keeper_schema), so the test in [test_types.ml :: tool_preset_ssot]
+    asserts these two lists stay in sync. *)
+let tool_preset_enum_strings =
+  [ "minimal"; "social"; "messaging"; "coding"; "research"; "delivery"; "full" ]
+
 let string_array_schema =
   `Assoc [
     ("type", `String "array");
@@ -113,7 +121,13 @@ let keeper_schemas : tool_schema list = [
         ("tool_preset", `Assoc [
           ("type", `String "string");
           ("description", `String "Compatibility field. Use tool_access.kind='preset' for new callers.");
-          ("enum", `List [`String "minimal"; `String "messaging"; `String "coding"; `String "research"; `String "full"]);
+          (* Issue #8430: mirrors [Keeper_types.valid_tool_preset_strings].
+             Direct dependency would create a cycle
+             (Keeper_schema -> Keeper_types -> Keeper_types_profile ->
+             Keeper_schema). Test [test_types.ml :: tool_preset_ssot]
+             asserts the two stay in sync — if either side adds a value
+             the other diverges. Used to drop Social and Delivery. *)
+          ("enum", `List (List.map (fun s -> `String s) tool_preset_enum_strings));
         ]);
         ("tool_custom_allowlist", `Assoc [
           ("type", `String "array");
@@ -263,7 +277,13 @@ let keeper_schemas : tool_schema list = [
             "Canonical tool policy. Prefer this over tool_preset/tool_also_allow. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
         ("tool_preset", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "minimal"; `String "messaging"; `String "coding"; `String "research"; `String "full"]);
+          (* Issue #8430: mirrors [Keeper_types.valid_tool_preset_strings].
+             Direct dependency would create a cycle
+             (Keeper_schema -> Keeper_types -> Keeper_types_profile ->
+             Keeper_schema). Test [test_types.ml :: tool_preset_ssot]
+             asserts the two stay in sync — if either side adds a value
+             the other diverges. Used to drop Social and Delivery. *)
+          ("enum", `List (List.map (fun s -> `String s) tool_preset_enum_strings));
           ("description", `String "Compatibility field. Use tool_access.kind='preset' for new callers.");
         ]);
         ("tool_custom_allowlist", `Assoc [

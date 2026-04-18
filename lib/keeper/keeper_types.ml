@@ -224,6 +224,17 @@ let tool_preset_to_string = function
   | Full -> "full"
 ;;
 
+(** Issue #8430: schema enums for [tool_preset] in [keeper_schema.ml]
+    used to be hand-rolled and dropped [Social] and [Delivery] — a live
+    correctness bug since callers reading the schema could not discover
+    those values exist. Same Variant SSOT class as #8354 / #8392. All
+    constructors are nullary so the simple [List.map] trick works.
+    Adding an 8th constructor will fail compilation in
+    [tool_preset_to_string] and in the witness test. *)
+let all_tool_presets =
+  [ Minimal; Social; Messaging; Coding; Research; Delivery; Full ]
+let valid_tool_preset_strings = List.map tool_preset_to_string all_tool_presets
+
 let tool_preset_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
   | "minimal" -> Some Minimal

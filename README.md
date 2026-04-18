@@ -208,6 +208,13 @@ Schematically: `Offline → Running → {Failing | Overflowed | Compacting | Han
 
 Keeper definitions live in `config/keepers/*.toml`. When `MASC_KEEPER_BOOTSTRAP_ENABLED=true`, the server discovers and starts all keepers on boot with staggered warmup delays.
 
+Current experimental canary:
+
+- `config/keepers/watchdog.toml` + `config/personas/watchdog/profile.json`
+- role: chase stale `awaiting_verification` items and ask for re-validation
+- sandbox: `docker_hardened` + `network_mode=none`
+- quick operator guide: [docs/DOCKER-SANDBOX-QUICKSTART.md](docs/DOCKER-SANDBOX-QUICKSTART.md)
+
 ### Turn Budget
 
 Each keeper call to `Agent.run` is limited to `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` turns (default: 15). When exhausted, the keeper saves a checkpoint and resumes in the next heartbeat cycle. The keeper can call `extend_turns` to request more turns up to an absolute ceiling (200).

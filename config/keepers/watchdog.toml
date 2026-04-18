@@ -1,0 +1,8 @@
+[keeper]
+persona_name = "watchdog"
+execution_scope = "workspace"
+cascade_name = "cross_verifier"
+sandbox_profile = "docker_hardened"
+network_mode = "none"
+telemetry_feedback_enabled = true
+telemetry_feedback_window_hours = 24

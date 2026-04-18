@@ -21,6 +21,15 @@ basepath/.masc/keepers/sangsu.json
 basepath/.masc/keepers/sangsu/<many runtime artifacts>
 ```
 
+Operational picture:
+
+```text
+profile.json  ---> identity / intent / tone / default tool policy
+keeper.toml   ---> deployment override / sandbox / cascade / execution scope
+keeper.json   ---> durable current runtime state
+keepers/<name>/ ---> append-only runtime artifacts
+```
+
 ## Ownership Model
 
 | Path | Meaning | Truth class | Human edit surface |

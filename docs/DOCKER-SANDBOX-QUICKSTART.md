@@ -20,6 +20,22 @@ code_refs:
 이 문서에서 말하는 sandbox는 **keeper 실행용 Docker sandbox**다.
 `OAS_CODEX_SANDBOX` 같은 CLI sandbox와는 다른 레이어다.
 
+## 0.5 어디를 고치나
+
+```text
+config/personas/watchdog/profile.json   -> 누구인지 / 어떤 역할인지
+config/keepers/watchdog.toml            -> 여기서 어떻게 태울지
+<basepath>/.masc/keepers/watchdog.json  -> 지금 어떤 상태인지
+<basepath>/.masc/keepers/watchdog/      -> 로그, 메트릭, 흔적
+```
+
+짧은 암기:
+
+- `profile.json` = who
+- `keeper.toml` = where/how
+- `keeper.json` = current runtime state
+- `keeper/` directory = detailed history
+
 ## 1. 고르기
 
 | 상황 | 권장 설정 | 왜 |
@@ -89,6 +105,38 @@ tool_also_allow = [
   "masc_team_memory_write",
   "masc_team_memory_search",
 ]
+```
+
+### 실제 canary 예시: watchdog
+
+이 브랜치에는 Docker-born 감시 keeper 예시가 같이 들어 있다:
+
+```text
+config/personas/watchdog/profile.json
+config/keepers/watchdog.toml
+```
+
+역할:
+
+- awaiting_verification 상태를 훑는다
+- stale verification이나 빠진 evidence를 찾는다
+- assignee / verifier에게 다시 돌릴 명령과 필요한 artifact를 남긴다
+- 같은 reminder를 상태 변화 없이 반복하지 않는다
+
+재기동 확인:
+
+```bash
+# admin token + dashboard URL bootstrap
+~/me/scripts/masc dashboard-admin --no-open
+
+# restart only the watchdog keeper
+curl -sS -X POST http://127.0.0.1:8935/api/v1/keepers/watchdog/shutdown \
+  -H "Authorization: Bearer $MASC_OPERATOR_TOKEN" \
+  -H "X-MASC-Agent: ${MASC_OPERATOR_AGENT:-codex-local-admin}"
+
+curl -sS -X POST http://127.0.0.1:8935/api/v1/keepers/watchdog/boot \
+  -H "Authorization: Bearer $MASC_OPERATOR_TOKEN" \
+  -H "X-MASC-Agent: ${MASC_OPERATOR_AGENT:-codex-local-admin}"
 ```
 
 ## 3. 의미

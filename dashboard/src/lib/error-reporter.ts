@@ -11,7 +11,7 @@
  * the reporter would send is exposed via `buildErrorPayload` so that
  * wiring it in later is a single-site change.
  */
-export interface ReporterInfo {
+interface ReporterInfo {
   componentStack?: string
 }
 

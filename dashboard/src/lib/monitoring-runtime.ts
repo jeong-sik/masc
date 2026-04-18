@@ -3,19 +3,19 @@ import { keeperDisplayStatus, keeperRuntimeBlockerHint } from './keeper-runtime-
 
 export type RuntimeBand = 'active' | 'attention' | 'paused' | 'offline'
 
-export interface RuntimeBandMeta {
+interface RuntimeBandMeta {
   key: RuntimeBand
   label: string
   description: string
 }
 
-export interface PhaseMeta {
+interface PhaseMeta {
   key: string
   label: string
   description: string
 }
 
-export interface StageMeta {
+interface StageMeta {
   key: string
   label: string
   description: string
@@ -303,7 +303,7 @@ function agentBand(status: string | undefined | null): RuntimeBand {
   return 'active'
 }
 
-export function runtimeBandForAgent(agent: Agent, keeper?: Keeper | null): RuntimeBand {
+function runtimeBandForAgent(agent: Agent, keeper?: Keeper | null): RuntimeBand {
   if (keeper) return summarizeKeeperMonitoring(keeper).band.key
   return agentBand(agent.status)
 }

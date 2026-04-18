@@ -14,7 +14,7 @@
  * with `]` as the last character.
  */
 
-export const SENTINEL_PREFIX = '[masc:blob '
+const SENTINEL_PREFIX = '[masc:blob '
 
 export interface ToolBlobMarker {
   sha256: string

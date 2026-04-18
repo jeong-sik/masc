@@ -102,7 +102,7 @@ function fmtCooldownExpiry(expiresAt: number | null): string {
   return `${Math.ceil(delta / 60)}분 후`
 }
 
-export interface KeeperCascadeRow {
+interface KeeperCascadeRow {
   keeper: string
   /** Declared cascade name from TOML / runtime JSON (pre-canonicalize). */
   raw_cascade_name: string

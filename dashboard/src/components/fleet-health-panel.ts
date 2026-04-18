@@ -12,7 +12,7 @@ import { FleetTelemetryPanel } from './fleet-telemetry-panel'
 import { ToolQualityPanel } from './tool-quality-panel'
 import { GovernanceMonitor } from './governance-monitor'
 
-export type FleetHealthView = 'default' | 'event-log' | 'comparison' | 'tool-quality' | 'governance'
+type FleetHealthView = 'default' | 'event-log' | 'comparison' | 'tool-quality' | 'governance'
 
 const FLEET_VIEWS: FleetHealthView[] = ['default', 'event-log', 'comparison', 'tool-quality', 'governance']
 

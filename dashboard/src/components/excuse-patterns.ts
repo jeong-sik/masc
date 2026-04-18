@@ -10,7 +10,7 @@ const patternsResource = createAsyncResource<ExcusePattern[]>()
 const saving = signal(false)
 const saveMessage = signal('')
 
-export function refreshExcusePatterns(): Promise<void> {
+function refreshExcusePatterns(): Promise<void> {
   patternsResource.reset()
   return patternsResource.load(fetchExcusePatterns)
 }

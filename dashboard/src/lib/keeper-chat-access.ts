@@ -1,6 +1,6 @@
 import type { DashboardShellAuthSummary } from '../types'
 
-export interface KeeperDirectChatAccess {
+interface KeeperDirectChatAccess {
   blocked: boolean
   message: string | null
 }

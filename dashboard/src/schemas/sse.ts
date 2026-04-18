@@ -14,10 +14,10 @@
 import { z } from 'zod'
 
 // --- Type discriminator (closed enum) -------------------------------------
-// Mirror of `SSEEventType` in ../types/sse.ts. Keep in sync on add/remove.
-// Strict: an unknown `type` value causes safeParse to fail and the event
-// is dropped with a console.warn.
-export const SSEEventTypeSchema = z.enum([
+// Mirror of the non-OAS literals in `SSEEventType` in ../types/sse.ts.
+// OAS bridge events stay open by prefix so a newer server does not get
+// parse-dropped the moment it adds a new `oas:*` event family.
+const FixedSSEEventTypeSchema = z.enum([
   'agent_joined',
   'agent_left',
   'broadcast',
@@ -53,30 +53,21 @@ export const SSEEventTypeSchema = z.enum([
   'governance_param_changed',
   'approval:pending',
   'approval:resolved',
-  'oas:masc:autonomy:agent_selected',
-  'oas:masc:autonomy:agent_decision',
-  'oas:masc:autonomy:agent_action_executed',
-  'oas:masc:keeper:snapshot',
-  'oas:masc:keeper:lifecycle',
-  'oas:masc:trust_updated',
-  'oas:masc:reputation_changed',
-  'oas:agent_started',
-  'oas:agent_completed',
-  'oas:tool_called',
-  'oas:tool_completed',
-  'oas:turn_started',
-  'oas:turn_completed',
-  'oas:context_compacted',
-  'oas:task_state_changed',
-  'oas:masc:harness:verdict_recorded',
-  'oas:masc:harness:pre_compact',
-  'oas:masc:harness:handoff',
   'room_truth_snapshot',
   'namespace_truth_snapshot',
   'execution_snapshot',
   'operator_snapshot',
   'operator_digest',
   'transport_health_snapshot',
+])
+
+const OasPrefixedEventTypeSchema = z
+  .string()
+  .regex(/^oas:/, 'Expected an oas:* event type')
+
+export const SSEEventTypeSchema = z.union([
+  FixedSSEEventTypeSchema,
+  OasPrefixedEventTypeSchema,
 ])
 
 export type SSEEventType = z.infer<typeof SSEEventTypeSchema>

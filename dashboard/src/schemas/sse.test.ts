@@ -11,6 +11,13 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('keeper_heartbeat')).toBe('keeper_heartbeat')
   })
 
+  it('accepts current and future oas-prefixed event types', () => {
+    expect(SSEEventTypeSchema.parse('oas:agent_failed')).toBe('oas:agent_failed')
+    expect(SSEEventTypeSchema.parse('oas:context_overflow_imminent')).toBe('oas:context_overflow_imminent')
+    expect(SSEEventTypeSchema.parse('oas:masc:keeper_gate')).toBe('oas:masc:keeper_gate')
+    expect(SSEEventTypeSchema.parse('oas:future:event')).toBe('oas:future:event')
+  })
+
   it('rejects an unknown event type', () => {
     const r = SSEEventTypeSchema.safeParse('this_is_not_a_real_event')
     expect(r.success).toBe(false)
@@ -119,6 +126,15 @@ describe('parseSSEMessage', () => {
     const msg = parseSSEMessage({ type: 'broadcast', message: 'hi' })
     expect(msg).not.toBeNull()
     expect(msg?.type).toBe('broadcast')
+  })
+
+  it('keeps unknown oas-prefixed events instead of dropping them', () => {
+    const msg = parseSSEMessage({
+      type: 'oas:slot_scheduler_observed',
+      payload: { state: 'saturated', active: 3, max_slots: 3 },
+    })
+    expect(msg).not.toBeNull()
+    expect(msg?.type).toBe('oas:slot_scheduler_observed')
   })
 
   it('returns null and warns on invalid input', () => {

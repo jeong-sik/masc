@@ -146,8 +146,11 @@ const REFRESH_FNS: Record<RefreshTarget, () => void> = {
 
 const KEEPER_LIFECYCLE_EVENTS = new Set([
   'keeper_handoff', 'keeper_compaction', 'keeper_turn_complete', 'keeper_phase_changed',
-  'masc/keeper_handoff', 'masc/keeper_compaction', 'masc/keeper_turn_complete',
 ])
+
+function normalizeMascEventType(type: string): string {
+  return type.startsWith('masc/') ? type.slice('masc/'.length) : type
+}
 
 const AUTORESEARCH_EVENTS = new Set([
   'autoresearch_cycle',
@@ -217,7 +220,7 @@ function handleKeeperLifecycle(event: { type: string; name?: string }): void {
   scheduleRefresh('operator', () => _refreshOperatorFn?.(), SSE_KEEPER_OPERATOR_DEBOUNCE_MS)
 
   // keeper_turn_complete: re-hydrate active keeper's conversation + trajectory
-  if (event.type === 'keeper_turn_complete') {
+  if (normalizeMascEventType(event.type) === 'keeper_turn_complete') {
     const keeperName = event.name ?? ''
     const viewing = activeKeeperName.value
     if (keeperName && keeperName === viewing) {
@@ -407,7 +410,7 @@ export function setupSSEReaction(): () => void {
     }
 
     // 5. Keeper lifecycle — additional operator refresh + thread hydration
-    if (KEEPER_LIFECYCLE_EVENTS.has(event.type)) {
+    if (KEEPER_LIFECYCLE_EVENTS.has(normalizeMascEventType(event.type))) {
       handleKeeperLifecycle(event)
     }
 

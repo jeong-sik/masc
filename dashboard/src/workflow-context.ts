@@ -237,6 +237,8 @@ export function workflowActionLabel(actionType?: string | null): string {
       return '프로젝트 재개'
     case 'task_inject':
       return '프로젝트 작업 주입'
+    case 'social_sweep':
+      return '소셜 스위프'
     case 'team_turn':
       return 'session 업데이트'
     case 'team_note':

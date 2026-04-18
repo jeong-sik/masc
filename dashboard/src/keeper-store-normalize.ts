@@ -46,11 +46,13 @@ const BACKEND_PHASE_MAP: Record<string, KeeperPhase> = {
 
 export function toKeeperPhase(raw: string | null | undefined): KeeperPhase | null {
   if (!raw) return null
-  return BACKEND_PHASE_MAP[raw] ?? null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  return BACKEND_PHASE_MAP[trimmed] ?? null
 }
 
 function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
-  const raw = typeof value === 'string' ? value.toLowerCase() : ''
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
   if (
     raw === 'active'
     || raw === 'busy'
@@ -69,7 +71,7 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
 }
 
 export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
-  const status = keeper.status?.toLowerCase() ?? ''
+  const status = keeper.status?.trim().toLowerCase() ?? ''
   if (isOfflineStatus(status)) return keeperDisplayStatus(keeper) as KeeperLifecycleState
 
   const series = keeper.metrics_series

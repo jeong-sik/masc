@@ -34,20 +34,29 @@ effect(() => {
   syncFlowStateFromDashboardSignals()
 })
 
+function normalizedFlowStatus(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
 export async function fetchPauseStatus(): Promise<void> {
   if (syncFlowStateFromDashboardSignals()) return
   try {
     const raw = await callMcpTool('masc_pause_status', {})
     const parsed = JSON.parse(raw) as { paused?: boolean | null; status?: string; initializing?: boolean }
-    if (parsed.paused === true || parsed.status === 'paused') {
+    const status = normalizedFlowStatus(parsed.status)
+    if (parsed.paused === true || status === 'paused') {
       flowState.value = 'paused'
       return
     }
-    if (parsed.initializing === true || parsed.status === 'initializing') {
+    if (parsed.initializing === true || status === 'initializing') {
       flowState.value = 'initializing'
       return
     }
-    flowState.value = 'running'
+    if (parsed.paused === false || status === 'running') {
+      flowState.value = 'running'
+      return
+    }
+    flowState.value = 'unknown'
   } catch { flowState.value = 'unknown' }
 }
 

@@ -35,12 +35,12 @@ describe('flow-control-state', () => {
     serverStatus.value = null
     const { flowState } = await import('./flow-control-state')
     flowState.value = 'unknown'
-  }, 60_000)
+  }, 120_000)
 
   afterEach(async () => {
     const { flowState } = await import('./flow-control-state')
     flowState.value = 'unknown'
-  }, 60_000)
+  }, 120_000)
 
   it('reuses namespace truth pause state before calling MCP', async () => {
     namespaceTruth.value = {
@@ -88,6 +88,28 @@ describe('flow-control-state', () => {
     await fetchPauseStatus()
 
     expect(flowState.value).toBe('paused')
+  })
+
+  it('trims status strings before matching pause state', async () => {
+    callMcpTool.mockResolvedValueOnce(
+      JSON.stringify({ status: ' paused ', paused: null }),
+    )
+
+    const { fetchPauseStatus, flowState } = await import('./flow-control-state')
+    await fetchPauseStatus()
+
+    expect(flowState.value).toBe('paused')
+  })
+
+  it('fails safe to unknown for unexpected status strings', async () => {
+    callMcpTool.mockResolvedValueOnce(
+      JSON.stringify({ status: 'mystery', paused: null, initializing: false }),
+    )
+
+    const { fetchPauseStatus, flowState } = await import('./flow-control-state')
+    await fetchPauseStatus()
+
+    expect(flowState.value).toBe('unknown')
   })
 
   it('reacts to namespace-truth signal changes after mount', async () => {

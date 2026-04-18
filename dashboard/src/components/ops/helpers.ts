@@ -37,8 +37,15 @@ export function normalizeStatus(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : ''
 }
 
+function canonicalizeActionType(value?: string | null): string | null {
+  if (!value) return null
+  const normalized = value.trim()
+  if (normalized === 'keeper_msg') return 'keeper_message'
+  return normalized
+}
+
 export function actionTypeLabel(value?: string | null): string {
-  switch (value) {
+  switch (canonicalizeActionType(value)) {
     case 'broadcast':
       return '전체 공지'
     case 'namespace_pause':
@@ -49,6 +56,8 @@ export function actionTypeLabel(value?: string | null): string {
       return '프로젝트 재개'
     case 'task_inject':
       return '작업 주입'
+    case 'social_sweep':
+      return '소셜 스위프'
     case 'keeper_message':
       return '키퍼 메시지'
     case 'keeper_probe':
@@ -106,18 +115,19 @@ function hydrateActionForm(input: {
   summary: string
 }): void {
   const payload = payloadRecord(input.payload)
+  const actionType = canonicalizeActionType(input.action_type)
   if (isNamespaceTarget(input.target_type)) {
-    if (input.action_type === 'broadcast') {
+    if (actionType === 'broadcast') {
       broadcastMessage.value = workflowPayloadString(payload, 'message') ?? input.summary
       return
     }
-    if (input.action_type === 'task_inject') {
+    if (actionType === 'task_inject') {
       taskTitle.value = workflowPayloadString(payload, 'title') ?? '운영자 주입 작업'
       taskDescription.value = workflowPayloadString(payload, 'description') ?? input.summary
       taskPriority.value = workflowPayloadString(payload, 'priority') ?? taskPriority.value
       return
     }
-    if (input.action_type === 'namespace_pause' || input.action_type === 'room_pause') {
+    if (actionType === 'namespace_pause' || actionType === 'room_pause') {
       pauseReason.value = workflowPayloadString(payload, 'reason') ?? input.summary
     }
     return
@@ -152,7 +162,7 @@ export function workflowTargetReady(
 }
 
 export async function executeAction(input: {
-  action_type: 'broadcast' | 'namespace_pause' | 'namespace_resume' | 'room_pause' | 'room_resume' | 'task_inject' | 'keeper_message' | 'keeper_probe' | 'keeper_recover'
+  action_type: 'broadcast' | 'namespace_pause' | 'namespace_resume' | 'room_pause' | 'room_resume' | 'social_sweep' | 'task_inject' | 'keeper_message' | 'keeper_probe' | 'keeper_recover'
   target_type: 'root' | 'namespace' | 'room' | 'keeper'
   target_id?: string
   payload: Record<string, unknown>

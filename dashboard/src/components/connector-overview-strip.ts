@@ -506,7 +506,7 @@ function deriveTrendColor(series: readonly number[]): string {
   // the border-*-400 tones used on HeartbeatUptimeChip.
   if (last >= 99) return '#34d399'
   if (last >= 95) return 'var(--warn)'
-  return '#fb7185'
+  return 'var(--rose-light)'
 }
 
 /** Standalone export of the bulk Start All / Stop All buttons so the

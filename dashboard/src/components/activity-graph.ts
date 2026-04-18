@@ -104,8 +104,8 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
 
   return html`
     <div class="stats-grid grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-4">
-      ${statCard('노드', s.node_count ?? 0, [], '#94a3b8')}
-      ${statCard('엣지', s.edge_count ?? 0, [], '#64748b')}
+      ${statCard('노드', s.node_count ?? 0, [], 'var(--slate-400)')}
+      ${statCard('엣지', s.edge_count ?? 0, [], 'var(--slate-500)')}
       ${statCard('활성 에이전트', s.active_agents ?? 0, agSeries, 'var(--ok)', true)}
       ${statCard('작업', s.task_count ?? 0, tdSeries, 'var(--warn)')}
       ${statCard('이벤트', s.event_count ?? 0, evSeries, 'var(--purple)')}
@@ -124,7 +124,7 @@ function actionCategoryClass(group: ActionTimelineGroup): string {
     case 'board':
       return 'border-[#c084fc]/35 bg-[#c084fc]/10 text-[var(--purple)]'
     case 'governance':
-      return 'border-[#fb7185]/35 bg-[var(--bad)]/10 text-[var(--bad-light)]'
+      return 'border-[var(--rose-light)]/35 bg-[var(--bad)]/10 text-[var(--bad-light)]'
     case 'lifecycle':
       return 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)]'
     default:

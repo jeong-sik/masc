@@ -13,7 +13,7 @@ export const selectedNodeId = signal<string | null>(null)
 export const highlightedAgentId = signal<string | null>(null)
 
 function nodeColor(kind: string, status: string): string {
-  if (status === 'offline' || status === 'retired') return '#64748b'
+  if (status === 'offline' || status === 'retired') return 'var(--slate-500)'
   switch (kind) {
     case 'agent': return 'var(--cyan)'
     case 'task': return 'var(--warn)'
@@ -21,7 +21,7 @@ function nodeColor(kind: string, status: string): string {
     case 'operation': return 'var(--ok)'
     case 'debate': return '#fb923c'
     case 'post': return '#f472b6'
-    default: return '#94a3b8'
+    default: return 'var(--slate-400)'
   }
 }
 
@@ -105,10 +105,10 @@ export function GraphView({ data }: GraphViewProps) {
           },
           hover: {
             background: color,
-            border: '#ffffff'
+            border: 'var(--white-pure)'
           }
         },
-        font: { color: '#e2e8f0', size: 12 },
+        font: { color: 'var(--frost-100)', size: 12 },
         shape: 'dot'
       }
     }))

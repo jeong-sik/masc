@@ -123,11 +123,11 @@ describe('ProgressBar component', () => {
 
   it('class prop overrides tone (threshold-varying colors)', () => {
     render(
-      html`<${ProgressBar} pct=${50} class="bg-[#38bdf8]" />`,
+      html`<${ProgressBar} pct=${50} class="bg-[var(--sky-400)]" />`,
       container,
     )
     const fill = container.querySelector('[data-progress-bar] > div') as HTMLElement
-    expect(fill.className).toContain('bg-[#38bdf8]')
+    expect(fill.className).toContain('bg-[var(--sky-400)]')
     // Tone fallback must NOT also be present when class is given.
     expect(fill.className).not.toContain('bg-[var(--accent)]')
   })

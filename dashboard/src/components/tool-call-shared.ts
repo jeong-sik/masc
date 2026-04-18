@@ -40,13 +40,13 @@ const TOOL_CATEGORIES: ToolCategoryEntry[] = [
     icon: 'B', color: 'text-[var(--purple)]', label: 'board' },
   // Search / Read / Library / Symbols
   { match: n => n.includes('search') || n.includes('symbols') || n.includes('library'),
-    icon: 'S', color: 'text-[#60a5fa]', label: 'search' },
+    icon: 'S', color: 'text-[var(--blue-400)]', label: 'search' },
   // Voice — audio/speech
   { match: n => n.includes('voice'),
     icon: 'V', color: 'text-[#f472b6]', label: 'voice' },
   // Web — network access
   { match: n => n.includes('web') || n.includes('fetch'),
-    icon: 'W', color: 'text-[#38bdf8]', label: 'web' },
+    icon: 'W', color: 'text-[var(--sky-400)]', label: 'web' },
   // Coordination — tasks, transitions, heartbeat
   { match: n => n.includes('task') || n.includes('transition') || n.includes('claim') || n.includes('heartbeat') || n.includes('broadcast'),
     icon: 'C', color: 'text-[var(--warn)]', label: 'coord' },
@@ -61,9 +61,9 @@ const TOOL_CATEGORIES: ToolCategoryEntry[] = [
     icon: 'P', color: 'text-[#fb923c]', label: 'browser' },
   // Read (generic, after more specific patterns)
   { match: n => n.includes('read'),
-    icon: 'R', color: 'text-[#60a5fa]', label: 'read' },
+    icon: 'R', color: 'text-[var(--blue-400)]', label: 'read' },
 ]
-const DEFAULT_TOOL_STYLE: Omit<ToolCategoryEntry, 'match'> = { icon: 'T', color: 'text-[#94a3b8]', label: 'tool' }
+const DEFAULT_TOOL_STYLE: Omit<ToolCategoryEntry, 'match'> = { icon: 'T', color: 'text-[var(--slate-400)]', label: 'tool' }
 
 // ── Functions ───────────────────────────────────────────
 

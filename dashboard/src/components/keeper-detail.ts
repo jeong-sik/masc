@@ -259,7 +259,7 @@ function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; e
 
   if (isRunning) return html`
     <button type="button"
-      class="py-1 px-3 rounded text-[11px] font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[var(--bad-soft)] transition-colors"
+      class="py-1 px-3 rounded text-[11px] font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
       onClick=${() => {
         void (async () => {
           const confirmed = await requestConfirm({
@@ -565,7 +565,7 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
           >새로고침</button>
           <button
             type="button"
-            class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-1.5 text-[11px] font-semibold text-[#fb7185] hover:bg-[var(--bad-soft)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-1.5 text-[11px] font-semibold text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             disabled=${deleting || selectedIds.length === 0}
             onClick=${deleteSelected}
           >${deleting ? '삭제 중...' : `선택 삭제 (${selectedIds.length})`}</button>
@@ -1305,7 +1305,7 @@ export function KeeperDetailOverlay() {
           <div class="flex items-center gap-2">
             <button
               type="button"
-              class="py-1 px-3 rounded text-[11px] font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[var(--bad-soft)] transition-colors"
+              class="py-1 px-3 rounded text-[11px] font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
               onClick=${() => setClearDialogOpen(true)}
             >비우기</button>
             <${KeeperLifecycleButtons} keeper=${keeper} effectiveStatus=${effectiveStatus} />

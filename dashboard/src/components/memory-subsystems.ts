@@ -45,7 +45,7 @@ const ARCHITECTURE_FLOW = `graph LR
     G1 --> D1
     D1 --> UI[기억 서브시스템 패널]
 
-    classDef store fill:#1e293b,stroke:#334155,color:#f1f5f9
+    classDef store fill:var(--slate-800),stroke:#334155,color:#f1f5f9
     classDef action fill:#0f766e,stroke:#14b8a6,color:#f0fdfa
     classDef ui fill:#7c2d12,stroke:var(--warn-bright),color:#ffedd5
     class F1,G1 store
@@ -127,7 +127,7 @@ const weightBarClass = (w: number) => weightTier(w).tw
 
 // √ compresses the high end so differences near 0 remain visible.
 // Floor 0.25 keeps low-weight cells distinguishable from empty (undefined)
-// cells drawn at #1e293b. Floor and range are arbitrary — picked by eye,
+// cells drawn at var(--slate-800). Floor and range are arbitrary — picked by eye,
 // not derived from a perceptual model. Tune if empty/low contrast is wrong.
 const weightOpacity = (w: number) => 0.25 + 0.75 * Math.sqrt(Math.max(0, Math.min(1, w)))
 
@@ -229,8 +229,8 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
                 y=${y}
                 width=${cell - 1}
                 height=${cell - 1}
-                fill="#1e293b"
-                stroke="#0f172a"
+                fill="var(--slate-800)"
+                stroke="var(--panel-dark)"
                 stroke-width="0.5"
               />`
             }
@@ -247,7 +247,7 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
                   height=${cell - 1}
                   fill=${weightColor(s.weight)}
                   opacity=${weightOpacity(s.weight)}
-                  stroke=${active ? '#f1f5f9' : isDiag ? '#64748b' : '#0f172a'}
+                  stroke=${active ? '#f1f5f9' : isDiag ? 'var(--slate-500)' : 'var(--panel-dark)'}
                   stroke-dasharray=${isDiag ? '2 2' : ''}
                   stroke-width=${active ? '1.5' : '0.5'}
                   class="cursor-pointer hover:stroke-[var(--text-muted)]"
@@ -262,7 +262,7 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
         )}
 
         <g transform="translate(${leftPad + n * cell + 16}, ${topPad})">
-          <text x="0" y="-8" font-size="9" fill="#94a3b8">weight</text>
+          <text x="0" y="-8" font-size="9" fill="var(--slate-400)">weight</text>
           ${LEGEND_STOPS.map(
             (v, i) => html`
               <g>
@@ -278,7 +278,7 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
                   x="20"
                   y=${i * 16 + 10}
                   font-size="9"
-                  fill="#94a3b8"
+                  fill="var(--slate-400)"
                   font-family="monospace"
                 >${Math.round(v * 100)}%</text>
               </g>
@@ -313,7 +313,7 @@ function WeightSparkline({ history }: { history?: Array<[number, number]> }) {
   const last = chronological[n - 1]?.[1] ?? 0
   const trendColor =
     last > first + TREND_DEAD_ZONE ? '#10b981' :
-    last < first - TREND_DEAD_ZONE ? 'var(--bad-light)' : '#94a3b8'
+    last < first - TREND_DEAD_ZONE ? 'var(--bad-light)' : 'var(--slate-400)'
   return html`
     <svg
       viewBox="0 0 ${sw} ${sh}"

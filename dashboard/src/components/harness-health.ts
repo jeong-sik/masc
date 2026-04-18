@@ -135,12 +135,12 @@ export function buildHarnessFlowMermaid(data: HarnessHealthData): string {
   const currentRail = activeRail(data)
   const source = [
     'flowchart LR',
-    '  classDef source fill:#0f172a,stroke:#475569,color:#cbd5e1;',
-    '  classDef hub fill:#111827,stroke:#38bdf8,color:#e0f2fe;',
+    '  classDef source fill:var(--panel-dark),stroke:#475569,color:#cbd5e1;',
+    '  classDef hub fill:#111827,stroke:var(--sky-400),color:#e0f2fe;',
     '  classDef healthyRail fill:#082f1d,stroke:var(--ok),color:#dcfce7;',
     '  classDef warningRail fill:#3b2a07,stroke:var(--warn),color:#fde68a;',
-    '  classDef staleRail fill:#1f2937,stroke:#94a3b8,color:#e2e8f0,stroke-dasharray: 5 3;',
-    '  classDef idleRail fill:#111827,stroke:#475569,color:#94a3b8,stroke-dasharray: 3 4;',
+    '  classDef staleRail fill:#1f2937,stroke:var(--slate-400),color:var(--frost-100),stroke-dasharray: 5 3;',
+    '  classDef idleRail fill:#111827,stroke:#475569,color:var(--slate-400),stroke-dasharray: 3 4;',
     '  classDef activeRail stroke:#7dd3fc,stroke-width:3px;',
     '  taskDone["작업 완료<br/>판정 검증"]',
     '  keeperTurn["keeper 턴<br/>압축 압력"]',

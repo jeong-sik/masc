@@ -41,9 +41,9 @@ export function resetTaskBacklogState() {
 
 function priorityToneClass(priority: number): string {
   switch (priority) {
-    case 1: return 'border-l-[#fb7185] bg-[var(--bad)]/10 text-[#fecdd3]'
+    case 1: return 'border-l-[var(--rose-light)] bg-[var(--bad)]/10 text-[#fecdd3]'
     case 2: return 'border-l-[var(--warn)] bg-[var(--warn)]/10 text-[#fde68a]'
-    case 3: return 'border-l-[#60a5fa] bg-[#60a5fa]/10 text-[#bfdbfe]'
+    case 3: return 'border-l-[var(--blue-400)] bg-[var(--blue-400)]/10 text-[#bfdbfe]'
     default: return 'border-l-[rgba(148,163,184,0.45)] bg-white/5 text-text-muted'
   }
 }

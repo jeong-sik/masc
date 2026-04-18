@@ -223,7 +223,7 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
         <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">성공률 추이</span>
         <span class="text-xs font-mono" style="color:${lineColor}">${lastRate.toFixed(1)}%</span>
       </div>
-      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
         ${bars.map(b => html`
           <rect x="${b.x.toFixed(1)}" y="${b.y.toFixed(1)}" width="${b.w.toFixed(1)}" height="${b.h.toFixed(1)}" fill="${b.failures > 0 ? 'rgba(239,68,68,0.3)' : 'var(--ok-soft)'}" rx="0.5" />
         `)}

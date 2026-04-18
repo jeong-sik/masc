@@ -68,7 +68,7 @@ function drawHeatmap(
 
   // Hour labels (top)
   ctx.font = '10px system-ui, sans-serif'
-  ctx.fillStyle = '#64748b'
+  ctx.fillStyle = 'var(--slate-500)'
   ctx.textAlign = 'center'
   for (const hour of HOUR_LABELS) {
     const x = LEFT_MARGIN + hour * (CELL + GAP) + CELL / 2
@@ -81,7 +81,7 @@ function drawHeatmap(
     const y = TOP_PAD + day * (CELL + GAP)
     const label = DAY_LABELS[day]!
 
-    ctx.fillStyle = '#94a3b8'
+    ctx.fillStyle = 'var(--slate-400)'
     ctx.font = '11px system-ui, sans-serif'
     ctx.fillText(label, LEFT_MARGIN - 6, y + CELL / 2 + 4)
 
@@ -98,7 +98,7 @@ function drawHeatmap(
   // Legend
   const legendY = TOP_PAD + 7 * (CELL + GAP) + 8
   ctx.font = '10px system-ui, sans-serif'
-  ctx.fillStyle = '#64748b'
+  ctx.fillStyle = 'var(--slate-500)'
   ctx.textAlign = 'left'
   ctx.fillText('적음', LEFT_MARGIN, legendY + 10)
 
@@ -111,7 +111,7 @@ function drawHeatmap(
     ctx.fill()
   }
 
-  ctx.fillStyle = '#64748b'
+  ctx.fillStyle = 'var(--slate-500)'
   ctx.textAlign = 'left'
   ctx.fillText('많음', legendStartX + COLORS.length * (CELL + 2) + 4, legendY + 10)
 
@@ -139,7 +139,7 @@ function drawHeatmap(
     ctx.lineWidth = 1
     ctx.stroke()
 
-    ctx.fillStyle = '#e2e8f0'
+    ctx.fillStyle = 'var(--frost-100)'
     ctx.textAlign = 'left'
     ctx.fillText(text, tx + padX, ty + padY + 11)
   }

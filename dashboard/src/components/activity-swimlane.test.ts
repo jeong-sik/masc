@@ -51,33 +51,33 @@ describe('truncateLabel', () => {
 describe('spanStyle', () => {
   it('returns task style', () => {
     const style = spanStyle('task')
-    expect(style).toEqual({ bg: 'var(--warn)', text: '#0f172a' })
+    expect(style).toEqual({ bg: 'var(--warn)', text: 'var(--panel-dark)' })
   })
 
   it('returns operation style', () => {
     const style = spanStyle('operation')
-    expect(style).toEqual({ bg: 'var(--ok)', text: '#0f172a' })
+    expect(style).toEqual({ bg: 'var(--ok)', text: 'var(--panel-dark)' })
   })
 
   it('returns autonomy style', () => {
     const style = spanStyle('autonomy')
-    expect(style).toEqual({ bg: 'var(--cyan)', text: '#0f172a' })
+    expect(style).toEqual({ bg: 'var(--cyan)', text: 'var(--panel-dark)' })
   })
 
   it('returns presence style with rgba', () => {
     const style = spanStyle('presence')
     expect(style.bg).toContain('rgba(')
-    expect(style.text).toBe('#e2e8f0')
+    expect(style.text).toBe('var(--frost-100)')
   })
 
   it('returns default for unknown kind', () => {
     const style = spanStyle('unknown')
-    expect(style).toEqual({ bg: '#94a3b8', text: '#0f172a' })
+    expect(style).toEqual({ bg: 'var(--slate-400)', text: 'var(--panel-dark)' })
   })
 
   it('returns default for empty string', () => {
     const style = spanStyle('')
-    expect(style).toEqual({ bg: '#94a3b8', text: '#0f172a' })
+    expect(style).toEqual({ bg: 'var(--slate-400)', text: 'var(--panel-dark)' })
   })
 
   it('each known style has bg and text keys', () => {

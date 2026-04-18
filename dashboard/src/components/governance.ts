@@ -41,6 +41,8 @@ function GovernanceSummaryStrip() {
       ? (judge.refreshing ? '갱신 중' : '온라인')
       : (judge?.last_error ? '오류' : '오프라인')
   const liveJudgeModel = judge?.model_used?.trim() || judge?.keeper_name?.trim() || '-'
+  const judgeHealthy = judge?.judge_online === true && !judge?.last_error?.trim()
+  const judgeUnhealthy = judge?.judge_online === false || Boolean(judge?.last_error?.trim())
 
   return html`
     ${isStale ? html`
@@ -74,15 +76,21 @@ function GovernanceSummaryStrip() {
       </div>
     </div>
     <div class="mb-5 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
-      <${KpiCard} label="Judge 상태" value=${liveJudgeState} hint=${judge?.keeper_name?.trim() || 'live judge'} />
+      <${KpiCard}
+        label="Judge 상태"
+        value=${liveJudgeState}
+        hint=${judge?.keeper_name?.trim() || 'live judge'}
+        tone=${judgeUnhealthy ? 'text-warn' : (judgeHealthy ? 'text-ok' : undefined)}
+        class=${judgeUnhealthy ? 'border-warn/40 bg-warn/5 ring-1 ring-warn/25' : (judgeHealthy ? 'border-ok/30 bg-ok/5' : '')}
+      />
       <${KpiCard} label="Judge 모델" value=${liveJudgeModel} hint=${judge?.model_used?.trim() ? 'runtime reported' : 'unknown'} />
       <${KpiCard} label="최근 판단" value=${judgmentCount} hint="live" />
       <${KpiCard}
         label="관리자 승인 대기"
         value=${approvalCount}
-        hint=${approvalCount > 0 ? '검토 필요' : 'live'}
-        tone=${approvalCount > 0 ? 'text-warn' : undefined}
-        class=${approvalCount > 0 ? 'border-warn/40 bg-warn/5 ring-1 ring-warn/25' : ''}
+        hint=${approvalCount > 0 ? '검토 필요' : (judgeHealthy ? '정상' : 'live')}
+        tone=${approvalCount > 0 ? 'text-warn' : (judgeHealthy ? 'text-ok' : undefined)}
+        class=${approvalCount > 0 ? 'border-warn/40 bg-warn/5 ring-1 ring-warn/25' : (judgeHealthy ? 'border-ok/30 bg-ok/5' : '')}
       />
     </div>
     <${JudgeStatusBar} />

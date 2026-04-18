@@ -753,6 +753,17 @@ let work_kind_of_selected_mode (selected_mode : string) : string =
   | "noop" -> "noop"
   | _ -> "text_turn"
 
+(* A keeper acts as a verification authority when its persona wires the
+   "verifier"/"검증자" mention targets. The dashboard and prompt builder
+   need a cheap predicate to pick verifier keepers out of the fleet
+   without reloading the persona profile. *)
+let verifier_role_mention_tokens = [ "verifier"; "검증자" ]
+
+let is_verifier_role_keeper (meta : Keeper_types.keeper_meta) : bool =
+  List.exists
+    (fun token -> List.mem token meta.mention_targets)
+    verifier_role_mention_tokens
+
 let observed_triggers_of_observation
     (observation : Keeper_world_observation.world_observation) : string list =
   let triggers = ref [] in
@@ -895,6 +906,7 @@ let append_decision_record
               ("pending_verification_count", `Int observation.pending_verification_count);
               ("active_agent_count", `Int observation.active_agent_count);
               ("worktree_change_detected", `Bool (Option.is_some observation.worktree_change_summary));
+              ("verifier_role_keeper", `Bool (is_verifier_role_keeper meta));
             ] );
         ("tool_call_count", `Int tool_call_count);
         ("tools_used", `List (List.map (fun s -> `String s) tools_used));

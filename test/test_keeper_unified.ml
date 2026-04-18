@@ -3660,4 +3660,36 @@ let () =
           test_case "keeper allowed tools exclude heartbeat" `Quick
             test_keeper_allowed_tools_exclude_heartbeat;
         ] );
+      ( "verifier_role",
+        [
+          test_case "is_verifier_role_keeper detects english token" `Quick
+            (fun () ->
+              let meta =
+                { minimal_meta with mention_targets = [ "verifier" ] }
+              in
+              check bool "verifier token matches" true
+                (UT.is_verifier_role_keeper meta));
+          test_case "is_verifier_role_keeper detects korean token" `Quick
+            (fun () ->
+              let meta =
+                { minimal_meta with mention_targets = [ "검증자" ] }
+              in
+              check bool "korean token matches" true
+                (UT.is_verifier_role_keeper meta));
+          test_case "is_verifier_role_keeper rejects non-verifier persona"
+            `Quick (fun () ->
+              let meta =
+                {
+                  minimal_meta with
+                  mention_targets = [ "analyst"; "scholar" ];
+                }
+              in
+              check bool "non-verifier mention targets" false
+                (UT.is_verifier_role_keeper meta));
+          test_case "is_verifier_role_keeper empty mention targets" `Quick
+            (fun () ->
+              check bool "empty mention_targets" false
+                (UT.is_verifier_role_keeper
+                   { minimal_meta with mention_targets = [] }));
+        ] );
     ]

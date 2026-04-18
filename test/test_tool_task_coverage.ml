@@ -533,6 +533,37 @@ let () = test "transition_claim_leaves_planning_current_task_unset" (fun () ->
   assert (Planning_eio.get_current_task ctx.config = None)
 )
 
+let () = test "transition_accepts_underscore_prefixed_internal_markers" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Marker test")]) in
+  let (success, result) =
+    Tool_task.handle_transition ctx
+      (`Assoc [
+        ("task_id", `String "task-001");
+        ("action", `String "claim");
+        ("_agent_name", `String "dashboard");
+        ("_session_marker", `String "sess-xyz");
+      ])
+  in
+  assert success;
+  assert (not (str_contains result "Unknown argument"))
+)
+
+let () = test "transition_still_rejects_plain_unknown_arguments" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Reject test")]) in
+  let (success, result) =
+    Tool_task.handle_transition ctx
+      (`Assoc [
+        ("task_id", `String "task-001");
+        ("action", `String "claim");
+        ("totally_bogus", `String "no");
+      ])
+  in
+  assert (not success);
+  assert (str_contains result "Unknown argument(s): totally_bogus")
+)
+
 (* Test handle_done returns owner guidance when another agent owns the task *)
 let () = test "handle_done_owned_by_other_guidance" (fun () ->
   let ctx = make_test_ctx () in

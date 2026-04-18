@@ -291,6 +291,27 @@ let test_stopped_entry_action_is_observability_only () =
                check string "stop event" "drain_complete"
                  (Json.member "event" payload |> Json.to_string)))
 
+let test_overflow_entry_action_promotes_to_compacting () =
+  R.clear ();
+  ignore (R.register ~base_path:bp "k-overflow" (make_meta "k-overflow"));
+  ignore
+    (R.dispatch_event ~base_path:bp "k-overflow"
+       (KSM.Context_overflow_detected
+          {
+            source = `Prompt_rejected;
+            token_count = 205_000;
+            limit_tokens = Some 200_000;
+          }));
+  match R.get ~base_path:bp "k-overflow" with
+  | None -> fail "expected k-overflow"
+  | Some entry ->
+      check string "registry auto-promotes overflow to compacting" "compacting"
+        (KSM.phase_to_string entry.phase);
+      check bool "compaction_active latched" true
+        entry.conditions.compaction_active;
+      check bool "context_overflow remains latched" true
+        entry.conditions.context_overflow
+
 let test_count_running () =
   R.clear ();
   let _e1 = R.register ~base_path:bp "r1" (make_meta "r1") in
@@ -725,6 +746,8 @@ let () =
           eio_test "extended states" test_extended_states;
           eio_test "stopped entry action is observability-only"
             test_stopped_entry_action_is_observability_only;
+          eio_test "overflow entry action promotes to compacting"
+            test_overflow_entry_action_promotes_to_compacting;
           eio_test "count running" test_count_running;
           eio_test "count running atomic transitions" test_count_running_atomic_transitions;
           eio_test "record restart" test_record_restart;

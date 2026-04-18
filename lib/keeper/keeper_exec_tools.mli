@@ -148,6 +148,22 @@ type tool_result_payload =
   | Plain_text
   | Malformed_structured of string
 
+(** Bridge-facing execution outcome.
+    [tool_not_allowed] remains a non-failure outcome so preset/policy
+    rejections do not trip repeated-failure guardrails. *)
+type execution_outcome = [ `Success | `Failure ]
+
+(** Typed keeper tool execution result.
+    [raw_output] preserves the original payload, [outcome] is the
+    authoritative success/failure decision for bridge consumers, and
+    [payload_shape] captures the post-execution wire shape for telemetry
+    and malformed-payload handling. *)
+type executed_tool_result = {
+  raw_output : string;
+  outcome : execution_outcome;
+  payload_shape : tool_result_payload;
+}
+
 (** Inspect a keeper tool result payload without applying side effects. *)
 val classify_tool_result_payload : string -> tool_result_payload
 
@@ -163,6 +179,16 @@ val keeper_masc_tool_schemas : keeper_meta -> Types.tool_schema list
 
 (** Compute the keeper's sender identity for portals and broadcasts.
     Guards against double "keeper-" prefix. See #5104. *)
+
+val execute_keeper_tool_call_with_outcome :
+  config:Coord.config ->
+  meta:keeper_meta ->
+  ctx_work:working_context ->
+  ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
+  name:string ->
+  input:Yojson.Safe.t ->
+  unit ->
+  executed_tool_result
 
 val execute_keeper_tool_call :
   config:Coord.config ->

@@ -310,41 +310,187 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
            ?tool_name:(payload_string_opt "tool_name" payload)
            ())
 
-(** Relay a single Event_bus event to SSE. *)
-let relay_event ?store evt =
-  let json = native_event_to_json evt in
-  match json with
-  | None -> ()
-  | Some j ->
+let relay_max_attempts = 3
+let relay_max_queue_depth = 256
+
+type relay_stage =
+  | Append
+  | Broadcast
+
+type relay_result =
+  | Delivered
+  | Retryable_failure of relay_stage * exn
+
+type pending_relay = {
+  json : Yojson.Safe.t;
+  attempts : int;
+}
+
+let relay_stage_to_string = function
+  | Append -> "append"
+  | Broadcast -> "broadcast"
+
+let json_field_string_opt key = function
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`String value) when String.trim value <> "" -> Some value
+      | _ -> None)
+  | _ -> None
+
+let relay_event_type json =
+  match json_field_string_opt "event_type" json with
+  | Some value -> value
+  | None ->
+      (match json_field_string_opt "type" json with
+       | Some value -> value
+       | None -> "unknown")
+
+let update_relay_queue_depth pending =
+  Prometheus.set_gauge Prometheus.metric_oas_sse_relay_queue_depth
+    (float_of_int (List.length pending))
+
+let emit_relay_retry_log ~(pending : pending_relay) ~(stage : relay_stage)
+    ~(attempt : int) exn =
+  Log.Misc.warn
+    "oas_sse_bridge: retrying event_type=%s stage=%s attempt=%d/%d correlation_id=%s run_id=%s error=%s"
+    (relay_event_type pending.json)
+    (relay_stage_to_string stage)
+    attempt
+    relay_max_attempts
+    (Option.value
+       ~default:"<none>"
+       (json_field_string_opt "correlation_id" pending.json))
+    (Option.value
+       ~default:"<none>"
+       (json_field_string_opt "run_id" pending.json))
+    (Printexc.to_string exn)
+
+let emit_relay_drop_log ~(pending : pending_relay) ~(stage_label : string)
+    ~(attempts : int) =
+  Log.Server.error
+    "oas_sse_bridge: dropping event_type=%s stage=%s attempts=%d correlation_id=%s run_id=%s"
+    (relay_event_type pending.json)
+    stage_label
+    attempts
+    (Option.value
+       ~default:"<none>"
+       (json_field_string_opt "correlation_id" pending.json))
+    (Option.value
+       ~default:"<none>"
+       (json_field_string_opt "run_id" pending.json))
+
+let broadcast_drop_marker ~(pending : pending_relay) ~(stage_label : string)
+    ~(attempts : int) =
+  let marker =
+    `Assoc
+      [
+        ("type", `String "oas:relay_dropped");
+        ("event_type", `String "relay_dropped");
+        ("ts_unix", `Float (Time_compat.now ()));
+        ( "correlation_id",
+          match json_field_string_opt "correlation_id" pending.json with
+          | Some value -> `String value
+          | None -> `Null );
+        ( "run_id",
+          match json_field_string_opt "run_id" pending.json with
+          | Some value -> `String value
+          | None -> `Null );
+        ( "agent_name",
+          match json_field_string_opt "agent_name" pending.json with
+          | Some value -> `String value
+          | None -> `Null );
+        ("failed_stage", `String stage_label);
+        ("attempts", `Int attempts);
+        ("original_event_type", `String (relay_event_type pending.json));
+      ]
+  in
+  try
+    Sse.broadcast_to All marker
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Misc.warn "oas_sse_bridge: drop marker broadcast failed: %s"
+        (Printexc.to_string exn)
+
+let prepare_pending_event evt =
+  match native_event_to_json evt with
+  | None -> None
+  | Some json ->
       (* OAS event payloads may carry tool output or user-facing text that
          contains invalid UTF-8 bytes (e.g. truncated multi-byte sequences
-         from subprocess captures).  Scrub before persisting or broadcasting
-         so that JSONL consumers and SSE clients receive well-formed UTF-8. *)
-      let j = Inference_utils.sanitize_json_utf8 j in
-      emit_native_event_log evt j;
-      (match store with
-       | Some store ->
-           (try Dated_jsonl.append store j
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-                Log.Misc.warn "oas_sse_bridge: durable append failed: %s"
-                  (Printexc.to_string exn))
-       | None -> ());
-      (try Sse.broadcast_to All j
+         from subprocess captures). Scrub once before the event enters the
+         retry queue so every retry uses the same sanitized payload. *)
+      let json = Inference_utils.sanitize_json_utf8 json in
+      emit_native_event_log evt json;
+      Some { json; attempts = 0; }
+
+let deliver_pending ?store_ref (pending : pending_relay) =
+  let append_result =
+    match store_ref with
+    | Some store_ref ->
+        let store = !store_ref in
+        (try
+           Dated_jsonl.append store pending.json;
+           Delivered
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             store_ref :=
+               Dated_jsonl.create ~base_dir:(Dated_jsonl.base_dir store) ();
+             Retryable_failure (Append, exn))
+    | None -> Delivered
+  in
+  match append_result with
+  | Retryable_failure _ as retry -> retry
+  | Delivered ->
+      (try
+         Sse.broadcast_to All pending.json;
+         Delivered
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           Log.Server.error "oas_sse_bridge: broadcast failed: %s"
-             (Printexc.to_string exn))
+       | exn -> Retryable_failure (Broadcast, exn))
 
-(** Background fiber: drain events and relay to SSE. *)
-let start ~sw ~clock ~(config : Coord.config) ~bus =
-  let interval_s = drain_interval_s () in
+let enqueue_pending pending item =
+  if List.length pending < relay_max_queue_depth then
+    (pending @ [ item ], None)
+  else
+    match pending with
+    | dropped :: rest -> (rest @ [ item ], Some dropped)
+    | [] -> ([ item ], None)
+
+let rec process_pending ?store_ref acc = function
+  | [] -> List.rev acc
+  | pending :: rest -> (
+      match deliver_pending ?store_ref pending with
+      | Delivered ->
+          process_pending ?store_ref acc rest
+      | Retryable_failure (stage, exn) ->
+          let attempt = pending.attempts + 1 in
+          if attempt >= relay_max_attempts then begin
+            Prometheus.inc_counter Prometheus.metric_oas_sse_relay_drops
+              ~labels:[ ("stage", relay_stage_to_string stage) ] ();
+            emit_relay_drop_log ~pending
+              ~stage_label:(relay_stage_to_string stage)
+              ~attempts:attempt;
+            broadcast_drop_marker ~pending
+              ~stage_label:(relay_stage_to_string stage)
+              ~attempts:attempt;
+            process_pending ?store_ref acc rest
+          end else begin
+            Prometheus.inc_counter Prometheus.metric_oas_sse_relay_retries
+              ~labels:[ ("stage", relay_stage_to_string stage) ] ();
+            emit_relay_retry_log ~pending ~stage ~attempt exn;
+            process_pending ?store_ref
+              ({ pending with attempts = attempt; } :: acc)
+              rest
+          end)
+
+let start_impl ~interval_s ~sw ~clock ~(config : Coord.config) ~bus =
   let store =
-    Dated_jsonl.create
-      ~base_dir:(Filename.concat (Coord.masc_root_dir config) "oas-events")
-      ()
+    ref
+      (Dated_jsonl.create
+         ~base_dir:(Filename.concat (Coord.masc_root_dir config) "oas-events")
+         ())
   in
   let sub =
     Oas_bus_instrument.subscribe
@@ -354,11 +500,33 @@ let start ~sw ~clock ~(config : Coord.config) ~bus =
   in
   Eio.Switch.on_release sw (fun () ->
     Oas_bus_instrument.unsubscribe bus sub);
+  let pending = ref [] in
+  update_relay_queue_depth !pending;
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       (try
          let events = Oas_bus_instrument.drain sub in
-         List.iter (relay_event ~store) events
+         List.iter
+           (fun evt ->
+              match prepare_pending_event evt with
+              | None -> ()
+              | Some item ->
+                  let next_pending, dropped = enqueue_pending !pending item in
+                  pending := next_pending;
+                  (match dropped with
+                   | None -> ()
+                   | Some dropped ->
+                       Prometheus.inc_counter Prometheus.metric_oas_sse_relay_drops
+                         ~labels:[ ("stage", "queue") ] ();
+                       emit_relay_drop_log ~pending:dropped
+                         ~stage_label:"queue"
+                         ~attempts:dropped.attempts;
+                       broadcast_drop_marker ~pending:dropped
+                         ~stage_label:"queue"
+                         ~attempts:dropped.attempts))
+           events;
+         pending := process_pending ~store_ref:store [] !pending;
+         update_relay_queue_depth !pending
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
@@ -369,3 +537,11 @@ let start ~sw ~clock ~(config : Coord.config) ~bus =
       loop ()
     in
     loop ())
+
+(** Background fiber: drain events and relay to SSE. *)
+let start ~sw ~clock ~(config : Coord.config) ~bus =
+  start_impl ~interval_s:(drain_interval_s ()) ~sw ~clock ~config ~bus
+
+let start_with_interval ~drain_interval_s:interval_s ~sw ~clock
+    ~(config : Coord.config) ~bus =
+  start_impl ~interval_s ~sw ~clock ~config ~bus

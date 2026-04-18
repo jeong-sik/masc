@@ -64,41 +64,6 @@ let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
 let max_consecutive_failures =
   Env_config.KeeperToolExec.max_consecutive_tool_failures
 
-let keeper_tool_result_is_failure (result : string) : bool =
-  try
-    let json = Yojson.Safe.from_string result in
-    (* Policy gate rejections are not tool failures — the tool works correctly,
-       but the keeper's preset denies execution.  Counting these as failures
-       inflates metrics for social-preset keepers that discover tools like
-       keeper_fs_edit or keeper_bash via core_discovery_tools but
-       cannot execute them.  The LLM still sees the error message and can
-       adapt; only the metric classification changes. *)
-    let is_policy_gate =
-      match Safe_ops.json_string_opt "error" json with
-      | Some msg -> String.equal (String.trim msg) "tool_not_allowed"
-      | None -> false
-    in
-    if is_policy_gate then false
-    else
-      let has_error_field =
-        match Safe_ops.json_string_opt "error" json with
-        | Some msg -> String.trim msg <> ""
-        | None -> false
-      in
-      let has_error_status =
-        match Safe_ops.json_string_opt "status" json with
-        | Some status ->
-            String.equal (String.lowercase_ascii (String.trim status)) "error"
-        | None -> false
-      in
-      let has_ok_false =
-        match Safe_ops.json_bool_opt "ok" json with
-        | Some false -> true
-        | Some true | None -> false
-      in
-      has_error_field || has_error_status || has_ok_false
-  with Yojson.Json_error _ -> false
-
 (** Normalize a raw tool result string into a consistent JSON envelope.
 
     The LLM sees this output directly. Without normalization, tool results
@@ -110,8 +75,8 @@ let keeper_tool_result_is_failure (result : string) : bool =
     - Success with changes: {"ok": true, "result": ..., "changes": <delta>}
     - Failure: {"ok": false, "error": <message>, "detail": <original_json|null>}
 
-    The [success] flag comes from [keeper_tool_result_is_failure], which
-    already handles all legacy schema variants. *)
+    The [success] flag comes from the typed outcome returned by
+    [Keeper_exec_tools.execute_keeper_tool_call_with_outcome]. *)
 let normalize_tool_result ~(success : bool) (raw : string) : string =
   try
     let json = Yojson.Safe.from_string raw in
@@ -211,12 +176,17 @@ let make_tools
             try
               let (result, duration_ms) =
                 Inference_utils.timed (fun () ->
-                  Keeper_exec_tools.execute_keeper_tool_call
+                  Keeper_exec_tools.execute_keeper_tool_call_with_outcome
                     ~config ~meta ~ctx_work:ctx_snapshot
                     ?search_fn
                     ~name:td.name ~input ())
               in
-              let is_failure = keeper_tool_result_is_failure result in
+              let raw_result = result.raw_output in
+              let is_failure =
+                match result.outcome with
+                | `Failure -> true
+                | `Success -> false
+              in
               if is_failure then begin
                 let count = prior_fails + 1 in
                 Hashtbl.replace failure_counts key count;
@@ -231,7 +201,7 @@ let make_tools
                     duration_ms = Float.of_int duration_ms; data = `Null } in
                  ignore (Tool_dispatch.run_post_hooks tr));
                 let detail =
-                  let s = String.trim result in
+                  let s = String.trim raw_result in
                   String_util.utf8_safe ~max_bytes:(sse_error_preview_max_chars + 3) ~suffix:"..." s |> String_util.to_string
                 in
                 let ts = Time_compat.now () in
@@ -249,7 +219,9 @@ let make_tools
                 Log.Keeper.error
                   "tool %s returned error result (%d/%d): %s"
                   td.name count max_consecutive_failures detail;
-                let normalized_error = normalize_tool_result ~success:false result in
+                let normalized_error =
+                  normalize_tool_result ~success:false raw_result
+                in
                 (try
                   Keeper_types_support.append_jsonl_line
                     (Keeper_types_support.keeper_decision_log_path config meta.name)
@@ -304,7 +276,9 @@ let make_tools
                      Log.Keeper.info "post-tool git delta detected for %s after %s"
                        meta.name td.name
                  | None -> ());
-                let normalized = normalize_tool_result ~success:true result in
+                let normalized =
+                  normalize_tool_result ~success:true raw_result
+                in
                 let final_result =
                   match change_block with
                   | None -> normalized

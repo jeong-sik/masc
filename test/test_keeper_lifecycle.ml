@@ -1833,6 +1833,33 @@ let test_dispatch_post_turn_lifecycle_events_uses_room_base_path () =
             (KST.phase_to_string entry.phase)
       | None -> fail "expected registered keeper after lifecycle dispatch")
 
+let test_dispatch_keeper_phase_event_rejection_increments_metric () =
+  let base_dir = temp_dir "keeper_lifecycle_registry_rejection" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let labels = [ ("event", "compaction_started") ] in
+      let before =
+        Masc_mcp.Prometheus.get_metric_value
+          Masc_mcp.Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          ~labels ()
+        |> Option.value ~default:0.0
+      in
+      KEC.dispatch_keeper_phase_event
+        ~config
+        ~keeper_name:"missing-keeper"
+        KST.Compaction_started;
+      let after =
+        Masc_mcp.Prometheus.get_metric_value
+          Masc_mcp.Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          ~labels ()
+        |> Option.value ~default:0.0
+      in
+      check bool "rejection metric increments" true (after > before))
+
 let () =
   run "keeper_lifecycle"
     [
@@ -1929,5 +1956,7 @@ let () =
             test_dispatch_keeper_phase_event_uses_room_base_path;
           test_case "post-turn lifecycle events use room base_path" `Quick
             test_dispatch_post_turn_lifecycle_events_uses_room_base_path;
+          test_case "phase event rejection increments metric" `Quick
+            test_dispatch_keeper_phase_event_rejection_increments_metric;
         ] );
     ]

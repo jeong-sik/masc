@@ -825,6 +825,16 @@ let execute_entry_action_observability
   | Cleanup_and_unregister ->
       ()
 
+let followup_event_of_entry_action
+    ~(phase : Keeper_state_machine.phase)
+    (action : Keeper_state_machine.entry_action)
+  : Keeper_state_machine.event option =
+  match phase, action with
+  | Keeper_state_machine.Overflowed, Start_compaction ->
+      Some Keeper_state_machine.Auto_compact_triggered
+  | _ ->
+      None
+
 let pending_measurement_after_event now entry event =
   match event with
   | Keeper_state_machine.Context_measured { auto_rules; _ } ->
@@ -845,9 +855,10 @@ let compaction_stage_after_event entry event =
   | _ -> entry.compaction_stage
 
 (** Registry mutation is still non-yielding (StringMap lookup + put,
-    Atomic.set). Observability-only entry actions run after [put_entry], so
-    any SSE/log side effects happen after the registry state is consistent. *)
-let dispatch_event_with_audit
+    Atomic.set). Entry actions run only after [put_entry], so any
+    observability or follow-up state transitions happen after the registry
+    state is consistent. *)
+let rec dispatch_event_with_audit
     ~base_path
     ?snapshot
     ?events_fired
@@ -958,6 +969,12 @@ let dispatch_event_with_audit
             ~phase:tr.new_phase
             ~ts_unix:now)
          tr.entry_actions;
+       List.iter
+         (fun followup_event ->
+            ignore (dispatch_event_with_audit ~base_path name followup_event))
+         (List.filter_map
+            (followup_event_of_entry_action ~phase:tr.new_phase)
+            tr.entry_actions);
        (* Composite-lifecycle SSE envelope — RFC-0003 §6.
           The body carries only the keeper name and observation timestamp;
           subscribers re-fetch [/api/v1/keepers/:name/composite] for the

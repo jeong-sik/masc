@@ -191,8 +191,12 @@ let event_to_string = function
 (* ── Entry Actions ─────────────────────────────────────── *)
 
 (** Runtime contract mirrors [.mli]:
-    - [Publish_lifecycle] is the only entry action currently executed.
-    - The remaining variants describe supervisor-owned work and are kept as
+    - [Publish_lifecycle] is executed by the registry as an observability
+      side effect.
+    - [Start_compaction] is executed by the registry only for the
+      [Overflowed] auto-compact path, which emits
+      [Auto_compact_triggered] after the transition is committed.
+    - The remaining variants describe runtime-owned work and remain
       explicit phase-entry intent until that integration is unified. *)
 type entry_action =
   | Start_compaction
@@ -463,9 +467,11 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     }
 
 (** Compute entry actions for a phase transition.
-    Only [Publish_lifecycle] is consumed by the current registry runtime.
-    Other variants remain intentional no-ops here because the underlying
-    side effects are owned elsewhere (post-turn lifecycle or supervisor). *)
+    [Publish_lifecycle] is always consumed by the registry runtime.
+    [Start_compaction] is additionally consumed for the auto-compact
+    [Overflowed] path; the remaining variants stay descriptive here
+    because their side effects are still owned elsewhere
+    (post-turn lifecycle or supervisor). *)
 let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action list =
   let lifecycle name detail =
     Publish_lifecycle { event_name = name; detail }
@@ -490,12 +496,10 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
     [ lifecycle "restarting" "backoff elapsed" ]
   | Restarting, Running ->
     [ lifecycle "restarted" "fiber launched" ]
-  (* [Overflowed] entry actions: request a compaction so the next
-     derivation moves us to [Compacting], and publish the transition so
-     operators can see "context overflow" distinctly from generic failure.
-     [Start_compaction] is a side-effect descriptor; the registry
-     integration is responsible for promoting it into an
-     [Auto_compact_triggered] event on the next event-loop tick. *)
+  (* [Overflowed] entry actions: request a compaction so the registry can
+     promote the committed [Overflowed] transition into the follow-up
+     [Auto_compact_triggered] event, and publish the transition so
+     operators can see "context overflow" distinctly from generic failure. *)
   | _, Overflowed ->
     [ Start_compaction;
       lifecycle "overflowed"

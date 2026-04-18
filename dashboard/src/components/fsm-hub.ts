@@ -786,7 +786,7 @@ function StatusBar({
               class=${`absolute inset-0 ${
                 observationCount >= MAX_OBSERVATIONS
                   ? 'bg-[rgba(245,158,11,0.08)]'
-                  : 'bg-[rgba(255,255,255,0.03)]'
+                  : 'bg-[var(--white-3)]'
               }`}
               style=${`width: ${Math.round((observationCount / MAX_OBSERVATIONS) * 100)}%`}
             ></span>

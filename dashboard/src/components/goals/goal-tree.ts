@@ -149,23 +149,23 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
 function TreeSummary({ summary }: { summary: GoalTreeSummary }) {
   return html`
     <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3">
-      <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3 text-center">
+      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
         <div class="text-2xl font-bold text-text-strong tabular-nums">${summary.total_goals}</div>
         <div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-1">전체 목표</div>
       </div>
-      <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3 text-center">
+      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
         <div class="text-2xl font-bold text-ok tabular-nums">${summary.active_goals}</div>
         <div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-1">진행 중</div>
       </div>
-      <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3 text-center">
+      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
         <div class="text-2xl font-bold text-text-strong tabular-nums">${summary.total_tasks}</div>
         <div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-1">연결 태스크</div>
       </div>
-      <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3 text-center">
+      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
         <div class="text-2xl font-bold text-ok tabular-nums">${summary.done_tasks}</div>
         <div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-1">완료</div>
       </div>
-      <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3">
+      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
         <div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-2">전체 수렴도</div>
         <${ConvergenceBar} pct=${summary.overall_convergence_pct} />
       </div>

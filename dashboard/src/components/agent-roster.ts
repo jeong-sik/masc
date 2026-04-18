@@ -710,7 +710,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               <p class="m-0 text-[13px] leading-[1.55] text-[var(--text-body)] break-words line-clamp-2" title=${summaryText}>${summaryText}</p>
 
               ${isKeeper ? html`
-                <div class="rounded-[16px] border border-[var(--border-slate-12)] bg-[linear-gradient(180deg,var(--white-3),rgba(255,255,255,0.02))] px-3 py-2.5">
+                <div class="rounded-[16px] border border-[var(--border-slate-12)] bg-[linear-gradient(180deg,var(--white-3),var(--white-1))] px-3 py-2.5">
                   <div class="flex flex-wrap items-center gap-2">
                     <span class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">FSM</span>
                     ${fsmPhaseKey

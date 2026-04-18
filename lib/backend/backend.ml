@@ -223,24 +223,45 @@ module FileSystem = struct
               Error (IOError (Printexc.to_string exn))
     )
 
-  (** Set value (auto-compresses with ZSTD if beneficial) *)
+  (** Set value (auto-compresses with ZSTD if beneficial).
+
+      Writes go through a sibling [.tmp-atomic] file and are then
+      [Eio.Path.rename]d into place. Without this indirection a reader
+      that opens the target file while [Eio.Path.save ~Or_truncate] is
+      still streaming bytes observes a truncated payload — that was the
+      source of the [JSON parse error: Unexpected end of input] storm
+      on [backlog.json] (62 occurrences in one hour, 2026-04-18) that
+      dropped the stale-claims GC into its read-failure skip branch
+      and blocked claim lifecycle transitions.
+
+      The mutex inside [t] already serialises writers against each
+      other; this change adds atomicity against concurrent readers. *)
   let set t key value =
     Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
-      match key_to_path t key with
+      match validate_key key with
       | Error e -> Error e
-      | Ok path ->
+      | Ok safe_key ->
+          let path_part =
+            String.map (function ':' -> '/' | c -> c) safe_key
+          in
+          let path = Eio.Path.(t.fs / path_part) in
+          let tmp_path =
+            Eio.Path.(t.fs / (path_part ^ ".tmp-atomic"))
+          in
           try
             _ensure_parent_dir ~log_errors:true path;
-            (* Compact Protocol v4: Compress before saving (if beneficial) *)
             let compressed = _compress value in
-            (* Write file *)
-            Eio.Path.save ~create:(`Or_truncate 0o644) path compressed;
+            Eio.Path.save ~create:(`Or_truncate 0o644) tmp_path compressed;
+            Eio.Path.rename tmp_path path;
             ki_replace t key ();
             Ok ()
           with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | Eio.Cancel.Cancelled _ as exn ->
+              (try Eio.Path.unlink tmp_path with _ -> ());
+              raise exn
           | exn ->
-            Error (IOError (Printexc.to_string exn))
+              (try Eio.Path.unlink tmp_path with _ -> ());
+              Error (IOError (Printexc.to_string exn))
     )
 
   (** Delete key *)

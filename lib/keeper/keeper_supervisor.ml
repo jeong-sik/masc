@@ -275,7 +275,7 @@ let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
   let input =
     `Assoc
       [
-        ("kind", `String "reconcile_required");
+        ("kind", `String "continue_gate_required");
         ("keeper_name", `String meta.name);
         ("failure_reason", `String failure_reason);
         ("error_detail", `String blocker);
@@ -285,7 +285,7 @@ let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
   let _approval_id =
     Keeper_approval_queue.submit_pending
       ~keeper_name:meta.name
-      ~tool_name:"keeper_continue_after_reconcile"
+      ~tool_name:"keeper_continue_after_partial_commit"
       ~input
       ~risk_level:Keeper_approval_queue.Critical
       ~on_resolution:(fun decision ->
@@ -294,15 +294,15 @@ let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
         | Agent_sdk.Hooks.Edit _ ->
             resume_keeper_after_reconcile_gate ctx meta;
             Log.Keeper.info
-              "%s: restored reconcile continue gate approved; keeper resumed"
+              "%s: restored partial-commit continue gate approved; keeper resumed"
               meta.name
         | Agent_sdk.Hooks.Reject reason ->
             Log.Keeper.warn
-              "%s: restored reconcile continue gate rejected; keeper remains paused (%s)"
+              "%s: restored partial-commit continue gate rejected; keeper remains paused (%s)"
               meta.name reason)
   in
   Log.Keeper.warn
-    "%s: restored reconcile continue gate from persisted paused meta"
+    "%s: restored partial-commit continue gate from persisted paused meta"
     meta.name
 
 (* ── Sweep and recover ───────────────────────────────────── *)

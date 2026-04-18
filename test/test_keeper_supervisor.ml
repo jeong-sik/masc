@@ -272,8 +272,8 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
         (AQ.has_pending_for_keeper ~keeper_name:meta.name);
       check int "approval count incremented"
         (pending_before + 1) (AQ.pending_count ());
-      let approval_id =
-        match AQ.list_pending_json () with
+      let approval_row =
+        match AQ.list_pending_dashboard_json () with
         | `List entries ->
             entries
             |> List.find_map (function
@@ -281,13 +281,23 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
                      let row = `Assoc fields in
                      if Yojson.Safe.Util.(row |> member "keeper_name" |> to_string_option)
                         = Some meta.name
-                     then Yojson.Safe.Util.(row |> member "id" |> to_string_option)
+                     then Some row
                      else None
                  | _ -> None)
-            |> Option.value ~default:""
-        | _ -> ""
+            |> Option.value ~default:`Null
+        | _ -> `Null
+      in
+      let approval_id =
+        Yojson.Safe.Util.(approval_row |> member "id" |> to_string_option)
+        |> Option.value ~default:""
       in
       check bool "approval id present" true (approval_id <> "");
+      check string "restored gate uses stable tool name"
+        "keeper_continue_after_partial_commit"
+        Yojson.Safe.Util.(approval_row |> member "tool_name" |> to_string);
+      check string "restored gate keeps stable input kind"
+        "continue_gate_required"
+        Yojson.Safe.Util.(approval_row |> member "input" |> member "kind" |> to_string);
       (match AQ.resolve ~id:approval_id ~decision:Agent_sdk.Hooks.Approve () with
        | Ok () -> ()
        | Error msg -> fail ("resolve failed: " ^ msg));

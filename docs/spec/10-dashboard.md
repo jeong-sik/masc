@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-04-18
 code_refs:
   - lib/dashboard/
   - lib/dashboard.ml
@@ -204,6 +204,15 @@ type attention_item = {
 - `cases_json`: 빈 case 목록 (pagination 유지)
 - `case_detail_json`: 단일 case 조회 시 not-found 응답
 - `factual_snapshot_json`: judge 입력용 빈 팩트 스냅샷
+- `approval_queue`: keeper HITL continue gate 목록. Ambiguous partial commit으로 keeper가 pause되면
+  `tool_name="keeper_continue_after_partial_commit"`와 `input.kind="continue_gate_required"`로 enqueue된다.
+  프로세스 재시작으로 in-memory queue가 유실돼도 supervisor sweep가 같은 shape의 gate를 재복원한다.
+
+continue gate lifecycle:
+- keeper turn이 committed mutating tool 이후 timeout/failure로 ambiguous partial commit에 들어가면 pause + approval queue enqueue
+- operator approve 시 keeper pause 해제, failure reason reset, 다음 cycle 재개
+- operator reject 시 keeper는 paused 상태 유지
+- dashboard resolve API와 `masc_approval_resolve`는 stale approval id에 대해 `keeper/tool/kind` fallback resolve를 지원
 
 ### 3.6. Governance Judge (`dashboard_governance_judge.ml`)
 

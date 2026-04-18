@@ -92,6 +92,9 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
       Some (true, Yojson.Safe.to_string json)
   | "masc_approval_resolve" ->
       let id = arg_get_string "id" "" in
+      let keeper_name = arg_get_string_opt "keeper_name" in
+      let tool_name = arg_get_string_opt "tool_name" in
+      let input_kind = arg_get_string_opt "input_kind" in
       let decision_str = arg_get_string "decision" "approve" in
       if id = "" then Some (false, "id is required")
       else
@@ -102,7 +105,8 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
             Oas.Hooks.Reject reason
           | _ -> Oas.Hooks.Reject (Printf.sprintf "unknown decision: %s" decision_str)
         in
-        (match Keeper_approval_queue.resolve ~id ~decision () with
+        (match Keeper_approval_queue.resolve ?keeper_name ?tool_name ?input_kind
+                 ~id ~decision () with
          | Ok () ->
            Some (true, Printf.sprintf "{\"resolved\":\"%s\",\"decision\":\"%s\"}" id decision_str)
          | Error msg -> Some (false, msg))

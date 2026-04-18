@@ -593,9 +593,20 @@ let transition_known_args =
   ]
 
 let handle_transition ctx args =
+  (* Underscore-prefixed keys (e.g. "_agent_name") are internal protocol markers
+     injected by the HTTP transport and dashboard client for identity
+     propagation. They are consumed upstream in Agent_identity and must not
+     trigger the strict-schema "Unknown argument(s)" rejection here. *)
+  let is_internal_marker k =
+    String.length k > 0 && k.[0] = '_'
+  in
   let unknown = match args with
     | `Assoc kvs ->
-      List.filter (fun (k, _) -> not (List.mem k transition_known_args)) kvs
+      List.filter
+        (fun (k, _) ->
+          (not (is_internal_marker k))
+          && not (List.mem k transition_known_args))
+        kvs
     | _ -> []
   in
   if unknown <> [] then

@@ -135,6 +135,13 @@ let get_metric_value name ?(labels=[]) () =
 let metric_value_or_zero name ?(labels=[]) () =
   get_metric_value name ~labels () |> Option.value ~default:0.0
 
+let metric_total name =
+  with_lock (fun () ->
+    Hashtbl.fold
+      (fun _ (m : metric) acc ->
+        if String.equal m.name name then acc +. m.value else acc)
+      metrics 0.0)
+
 (** Observe a histogram value.
     Tracks cumulative sum in the metric value; a matching _count counter
     is auto-created for computing averages. *)

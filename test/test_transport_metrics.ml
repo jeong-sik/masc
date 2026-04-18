@@ -211,6 +211,17 @@ let test_transport_health_json () =
        ~push:(fun _ -> ()) ~last_event_id:0);
   TM.set_grpc_active_streams 1;
   TM.set_grpc_subscribers 2;
+  Prometheus.set_gauge Prometheus.metric_oas_sse_relay_queue_depth 4.0;
+  Prometheus.inc_counter Prometheus.metric_oas_sse_relay_retries
+    ~labels:[ ("stage", "append") ] ~delta:2.0 ();
+  Prometheus.inc_counter Prometheus.metric_oas_sse_relay_retries
+    ~labels:[ ("stage", "broadcast") ] ~delta:1.0 ();
+  Prometheus.inc_counter Prometheus.metric_oas_sse_relay_drops
+    ~labels:[ ("stage", "queue") ] ~delta:3.0 ();
+  Prometheus.inc_counter Prometheus.metric_oas_sse_relay_drops
+    ~labels:[ ("stage", "append") ] ~delta:1.0 ();
+  Prometheus.inc_counter Prometheus.metric_keeper_lifecycle_dispatch_rejections
+    ~labels:[ ("event", "compaction_started") ] ~delta:2.0 ();
   Masc_mcp.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
   let json = TM.transport_health_json ~config in
   let sse_json = json |> U.member "sse" in
@@ -219,6 +230,7 @@ let test_transport_health_json () =
   let webrtc_json = json |> U.member "webrtc" in
   let cluster_json = json |> U.member "cluster" in
   let summary_json = json |> U.member "summary" in
+  let agent_health_json = json |> U.member "agent_health" in
   check int "observer sessions" 1
     (sse_json |> U.member "sessions_observer" |> U.to_int);
   check int "coordinator sessions" 1
@@ -227,6 +239,12 @@ let test_transport_health_json () =
     ((sse_json |> U.member "queue_max_depth" |> U.to_int) > 0);
   check bool "hot sessions are reported" true
     ((sse_json |> U.member "hot_sessions" |> U.to_list |> List.length) > 0);
+  check int "relay queue depth" 4
+    (sse_json |> U.member "relay_queue_depth" |> U.to_int);
+  check int "relay retries total" 3
+    (sse_json |> U.member "relay_retry_total" |> U.to_int);
+  check int "relay drops total" 4
+    (sse_json |> U.member "relay_drop_total" |> U.to_int);
   check int "grpc active streams" 1
     (grpc_json |> U.member "active_streams" |> U.to_int);
   check int "grpc subscribers" 2
@@ -253,6 +271,12 @@ let test_transport_health_json () =
     (cluster_json |> U.member "room_id" |> U.to_string);
   check bool "summary primary path exists" true
     (String.length (summary_json |> U.member "primary_path" |> U.to_string) > 0);
+  check string "summary queue pressure reflects relay drops" "high"
+    (summary_json |> U.member "queue_pressure" |> U.to_string);
+  check int "agent lifecycle dispatch rejections surfaced" 2
+    (agent_health_json
+     |> U.member "lifecycle_dispatch_rejections_total"
+     |> U.to_int);
   ignore (Masc_mcp.Sse.close_all_clients ());
   cleanup_dir base_dir
 

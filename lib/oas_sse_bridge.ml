@@ -328,14 +328,15 @@ type relay_stage =
   | Append
   | Broadcast
 
-type relay_result =
-  | Delivered
-  | Retryable_failure of relay_stage * exn
-
 type pending_relay = {
   json : Yojson.Safe.t;
   attempts : int;
+  appended : bool;
 }
+
+type relay_result =
+  | Delivered
+  | Retryable_failure of pending_relay * relay_stage * exn
 
 let relay_stage_to_string = function
   | Append -> "append"
@@ -433,33 +434,50 @@ let prepare_pending_event evt =
          retry queue so every retry uses the same sanitized payload. *)
       let json = Inference_utils.sanitize_json_utf8 json in
       emit_native_event_log evt json;
-      Some { json; attempts = 0; }
+      Some { json; attempts = 0; appended = false; }
+
+let deliver_pending_with
+    ~(append_json : Yojson.Safe.t -> unit)
+    ~(broadcast_json : Yojson.Safe.t -> unit)
+    (pending : pending_relay) =
+  let pending =
+    if pending.appended then pending
+    else begin
+      append_json pending.json;
+      { pending with appended = true; }
+    end
+  in
+  try
+    broadcast_json pending.json;
+    Delivered
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Retryable_failure (pending, Broadcast, exn)
 
 let deliver_pending ?store_ref (pending : pending_relay) =
-  let append_result =
+  let append_json =
     match store_ref with
+    | None -> (fun _json -> ())
     | Some store_ref ->
-        let store = !store_ref in
-        (try
-           Dated_jsonl.append store pending.json;
-           Delivered
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-             store_ref :=
-               Dated_jsonl.create ~base_dir:(Dated_jsonl.base_dir store) ();
-             Retryable_failure (Append, exn))
-    | None -> Delivered
+        (fun json ->
+           let store = !store_ref in
+           try
+             Dated_jsonl.append store json
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+               store_ref :=
+                 Dated_jsonl.create ~base_dir:(Dated_jsonl.base_dir store) ();
+               raise exn)
   in
-  match append_result with
-  | Retryable_failure _ as retry -> retry
-  | Delivered ->
-      (try
-         Sse.broadcast_to All pending.json;
-         Delivered
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn -> Retryable_failure (Broadcast, exn))
+  try
+    deliver_pending_with
+      ~append_json
+      ~broadcast_json:(Sse.broadcast_to All)
+      pending
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Retryable_failure (pending, Append, exn)
 
 let enqueue_pending pending item =
   if List.length pending < relay_max_queue_depth then
@@ -475,7 +493,7 @@ let rec process_pending ?store_ref acc = function
       match deliver_pending ?store_ref pending with
       | Delivered ->
           process_pending ?store_ref acc rest
-      | Retryable_failure (stage, exn) ->
+      | Retryable_failure (pending, stage, exn) ->
           let attempt = pending.attempts + 1 in
           if attempt >= relay_max_attempts then begin
             Prometheus.inc_counter Prometheus.metric_oas_sse_relay_drops
@@ -495,6 +513,59 @@ let rec process_pending ?store_ref acc = function
               ({ pending with attempts = attempt; } :: acc)
               rest
           end)
+
+type bridge_pending_relay = pending_relay
+type bridge_relay_stage = relay_stage
+type bridge_relay_result = relay_result
+
+let deliver_pending_with_impl = deliver_pending_with
+
+module For_testing = struct
+  type pending_relay = {
+    json : Yojson.Safe.t;
+    attempts : int;
+    appended : bool;
+  }
+
+  type relay_stage =
+    | Append
+    | Broadcast
+
+  type relay_result =
+    | Delivered
+    | Retryable_failure of pending_relay * relay_stage * exn
+
+  let make_pending json = { json; attempts = 0; appended = false; }
+
+  let to_pending (pending : pending_relay) : bridge_pending_relay =
+    { json = pending.json;
+      attempts = pending.attempts;
+      appended = pending.appended; }
+
+  let of_pending (pending : bridge_pending_relay) : pending_relay =
+    { json = pending.json;
+      attempts = pending.attempts;
+      appended = pending.appended; }
+
+  let of_stage (stage : bridge_relay_stage) =
+    match relay_stage_to_string stage with
+    | "append" -> Append
+    | "broadcast" -> Broadcast
+    | _ -> Broadcast
+
+  let of_result (result : bridge_relay_result) =
+    match result with
+    | Delivered -> Delivered
+    | Retryable_failure (pending, stage, exn) ->
+        Retryable_failure (of_pending pending, of_stage stage, exn)
+
+  let deliver_pending_with ~append_json ~broadcast_json pending =
+    deliver_pending_with_impl
+      ~append_json
+      ~broadcast_json
+      (to_pending pending)
+    |> of_result
+end
 
 let start_impl ~interval_s ~sw ~clock ~(config : Coord.config) ~bus =
   let store =

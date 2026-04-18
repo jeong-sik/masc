@@ -336,7 +336,7 @@ export function TaskDetailOverlay() {
       panelClass="w-full max-w-[900px] max-h-[90vh] overflow-y-auto bg-[#0d1526] rounded border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.5)]"
     >
       ${'' /* Sticky Header */}
-      <div class="sticky top-0 z-10 flex items-center justify-between gap-4 px-6 py-4 border-b border-[var(--card-border)] bg-[rgba(13,21,38,0.97)] backdrop-blur-md rounded-t-2xl">
+      <div class="sticky top-0 z-10 flex items-center justify-between gap-4 px-6 py-4 border-b border-[var(--card-border)] bg-[rgba(13,21,38,0.97)] backdrop-blur-sm rounded-t-2xl">
         <div class="flex-1 min-w-0">
           <h2 id=${titleId} class="text-[16px] font-semibold text-text-strong break-words">${task.title}</h2>
           <div class="mt-1.5 flex flex-wrap items-center gap-2">

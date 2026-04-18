@@ -299,7 +299,7 @@ function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
 export function TurnBudgetSection({ keeper }: { keeper: Keeper }) {
   const diverges = hasTurnBudgetDivergence(keeper)
   return html`
-    <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md shadow-sm" open=${diverges}>
+    <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm" open=${diverges}>
       <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
         <span class="w-1.5 h-1.5 rounded-full ${diverges ? 'bg-[var(--warn-10)]' : 'bg-accent/50'}"></span>
         턴 예산

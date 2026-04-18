@@ -260,7 +260,7 @@ const formatUptime = formatElapsedCompact
 
 // ── Header stat strip helpers (Grafana Stat-panel style big-number + label) ──
 
-export type HeaderStatTone = 'ok' | 'partial' | 'bad' | 'default'
+type HeaderStatTone = 'ok' | 'partial' | 'bad' | 'default'
 
 /** Pure: threshold tone for "N of M connected" header stat. Grafana
     Stat-panel convention — emerald when all up, amber when partial,

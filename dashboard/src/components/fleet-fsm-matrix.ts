@@ -225,7 +225,7 @@ export function tallyInvariantViolations(
   return counts
 }
 
-export interface FleetFsmMatrixProps {
+interface FleetFsmMatrixProps {
   onSelectKeeper?: (name: string) => void
   // Injectable for tests.
   fetcher?: () => Promise<FleetCompositeSnapshot>

@@ -11,6 +11,7 @@ import { LoadingState } from './common/feedback-state'
 import { SectionCap } from './common/section-cap'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
 import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
+import { parseToolBlobMarker } from '../lib/tool-blob-marker'
 
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
@@ -23,6 +24,30 @@ export function formatInput(input: unknown): string {
   } catch {
     return String(input)
   }
+}
+
+function tryPrettyJson(s: string): string | null {
+  try {
+    return JSON.stringify(JSON.parse(s), null, 2)
+  } catch {
+    return null
+  }
+}
+
+// Tool output may be (a) a raw string, (b) a JSON blob we logged as a string,
+// or (c) a [masc:blob ...] sentinel produced by Tool_output.encode_for_oas
+// when the bytes exceeded the inline threshold. Render all three as
+// human-readable pretty JSON when possible so the inspector matches what
+// Input already does via [formatInput].
+export function formatOutput(output: string): string {
+  if (!output) return '(empty)'
+  const marker = parseToolBlobMarker(output)
+  if (marker !== null) {
+    const prettyPreview = tryPrettyJson(marker.preview) ?? marker.preview
+    const shaShort = marker.sha256.slice(0, 12)
+    return `[masc:blob sha256=${shaShort}\u2026 bytes=${marker.bytes} mime=${marker.mime}]\n${prettyPreview}`
+  }
+  return tryPrettyJson(output) ?? output
 }
 
 // ── Single tool call row (expandable) ───────────────────
@@ -66,7 +91,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
           </div>
           <div>
             <${SectionCap} class="mb-1">Output<//>
-            <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-64 whitespace-pre-wrap text-[var(--text-strong)]">${entry.output || '(empty)'}</pre>
+            <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-64 whitespace-pre-wrap text-[var(--text-strong)]">${formatOutput(entry.output)}</pre>
           </div>
         </div>
       ` : null}

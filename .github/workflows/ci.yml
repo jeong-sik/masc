@@ -582,6 +582,9 @@ jobs:
         working-directory: dashboard
         run: pnpm test
 
+      - name: Dashboard styling-drift gate
+        run: scripts/dashboard-drift-check.sh
+
   tla-specs:
     name: TLA+ Model Checking
     runs-on: ubuntu-latest

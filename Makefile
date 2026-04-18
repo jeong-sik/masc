@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps pin-external-deps sync-oas-pin-docs doctor-oas-pin doctor-oas-drift dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak
+.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps pin-external-deps sync-oas-pin-docs doctor-oas-pin doctor-oas-drift dashboard-drift-check dashboard-drift-regen dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak
 
 # Default target — OCaml + dashboard
 all: build-all
@@ -102,6 +102,16 @@ doctor-oas-pin:
 # modules. Regenerate with: bash scripts/oas-drift-check.sh --regenerate
 doctor-oas-drift:
 	bash scripts/oas-drift-check.sh
+
+# Dashboard styling-drift ratchet gate — fail if forbidden Tailwind patterns
+# (bg-white/N, border-white/N, rounded-[Npx], text-zinc-*, text-[9px], ...)
+# increase above the committed baseline. Regenerate baseline with the -regen
+# target after an intentional bulk-migration.
+dashboard-drift-check:
+	bash scripts/dashboard-drift-check.sh
+
+dashboard-drift-regen:
+	bash scripts/dashboard-drift-check.sh --regenerate
 
 # Development setup
 dev-setup: pin-external-deps install-deps

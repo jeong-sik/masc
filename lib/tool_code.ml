@@ -58,6 +58,53 @@ let normalize_path path =
   let joined = String.concat "/" resolved in
   if is_absolute then "/" ^ joined else joined
 
+let normalize_agent_relative_path ~(config : Coord.config) ~(agent_name : string)
+    (raw_path : string) : string =
+  let trimmed = String.trim raw_path in
+  let own_bundle_rel = Keeper_alerting_path.playground_path_of_keeper agent_name in
+  let trimmed =
+    if Filename.is_relative trimmed
+       && String.length trimmed >= String.length own_bundle_rel
+       && String.starts_with ~prefix:own_bundle_rel trimmed
+    then
+      let rest =
+        String.sub trimmed (String.length own_bundle_rel)
+          (String.length trimmed - String.length own_bundle_rel)
+      in
+      if rest = "" then "." else rest
+    else trimmed
+  in
+  let trimmed =
+    if not (Filename.is_relative trimmed) then
+      let own_bundle_abs =
+        Filename.concat config.Coord.base_path own_bundle_rel
+        |> Keeper_alerting_path.strip_trailing_slashes
+      in
+      let doubled_prefix = own_bundle_abs ^ "/" ^ own_bundle_rel in
+      if String.starts_with ~prefix:doubled_prefix trimmed then
+        let rest =
+          String.sub trimmed (String.length doubled_prefix)
+            (String.length trimmed - String.length doubled_prefix)
+        in
+        Filename.concat own_bundle_abs rest
+      else trimmed
+    else trimmed
+  in
+  let is_playground_lane =
+    Filename.is_relative trimmed
+    && List.exists
+         (fun prefix ->
+            String.equal trimmed prefix
+            || String.starts_with ~prefix:(prefix ^ "/") trimmed)
+         [ "mind"; "repos" ]
+  in
+  if is_playground_lane then
+    Filename.concat
+      (Filename.concat config.Coord.base_path own_bundle_rel)
+      trimmed
+  else
+    trimmed
+
 (* Security: Validate path is within git root.
    Uses canonical path resolution to prevent .. traversal attacks. *)
 let validate_path config path =
@@ -122,6 +169,7 @@ let validate_path config path =
    Sibling write fix: iter6 #6610 in tool_code_write.ml. *)
 let validate_read_path ~agent_name config path =
   let base_path = config.Coord.base_path in
+  let path = normalize_agent_relative_path ~config ~agent_name path in
   match validate_path config path with
   | Error e -> Error e
   | Ok canonical_string ->

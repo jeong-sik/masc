@@ -88,8 +88,10 @@ let make_fixture ~tag =
   let other_rel = ".masc/playground/agent-beta" in
   mkdir_p (Filename.concat base_path own_rel);
   mkdir_p (Filename.concat base_path other_rel);
+  mkdir_p (Filename.concat base_path (Filename.concat own_rel "repos/masc-mcp/lib"));
   mkdir_p (Filename.concat base_path "lib");
   touch (Filename.concat base_path (Filename.concat own_rel "own-file.ml"));
+  touch (Filename.concat base_path (Filename.concat own_rel "repos/masc-mcp/lib/demo.ml"));
   touch (Filename.concat base_path (Filename.concat other_rel "secret.env"));
   touch (Filename.concat base_path "lib/shared.ml");
   let own_abs =
@@ -138,6 +140,25 @@ let () =
     | Error e ->
         failwith
           (Printf.sprintf "expected Ok on own playground, got Error %s"
+             (Types.masc_error_to_string e)))
+
+let () =
+  test "relative_repos_prefix_maps_to_own_playground" (fun () ->
+    let config, own_abs, _other, _shared = make_fixture ~tag:"repos_prefix" in
+    let expected = Filename.concat own_abs "repos/masc-mcp/lib/demo.ml" in
+    match
+      Tool_code.validate_read_path
+        ~agent_name:"agent-alpha" config "repos/masc-mcp/lib/demo.ml"
+    with
+    | Ok resolved ->
+        let expected_real =
+          try Unix.realpath expected with Unix.Unix_error _ -> expected
+        in
+        assert (resolved = expected_real)
+    | Error e ->
+        failwith
+          (Printf.sprintf
+             "expected repos/ prefix to map into own playground, got Error %s"
              (Types.masc_error_to_string e)))
 
 (* 3. Cross-keeper playground read — rejected with SSOT name. *)

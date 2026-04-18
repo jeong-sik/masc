@@ -119,8 +119,16 @@ let relative_path_targets_allowed_root ~(meta : keeper_meta) (raw : string) =
   |> List.filter Filename.is_relative
   |> List.exists boundary
 
-(* Bare filenames default to the keeper playground, but rooted-looking relative
-   paths (for example "workspace/..." or "lib/...") keep project-root/boundary semantics.
+let is_playground_lane_relative_path (raw : string) =
+  List.exists
+    (fun prefix ->
+       String.equal raw prefix
+       || String.starts_with ~prefix:(prefix ^ "/") raw)
+    [ "mind"; "repos" ]
+
+(* Bare filenames and canonical playground bundle lanes default to the keeper
+   playground, but rooted-looking relative paths (for example
+   "workspace/..." or "lib/...") keep project-root/boundary semantics.
 
    Additionally, strip the keeper's own playground prefix when the path already
    includes it.  Keeper LLMs sometimes construct paths like
@@ -171,7 +179,8 @@ let playground_relative_unless_allowed_root ~(config : Coord.config)
   in
   if trimmed = ""
      || not (Filename.is_relative trimmed)
-     || String.contains trimmed '/'
+     || (String.contains trimmed '/'
+         && not (is_playground_lane_relative_path trimmed))
      || relative_path_targets_allowed_root ~meta trimmed
   then trimmed
   else

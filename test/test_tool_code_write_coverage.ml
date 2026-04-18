@@ -312,6 +312,25 @@ let test_writable_path_allows_own_playground () =
   (check bool) "agent-a writing into agent-a own playground is allowed"
     false (is_error result)
 
+let test_writable_path_maps_relative_repos_prefix () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let raw = "repos/masc-mcp/lib/demo.ml" in
+  let expected =
+    Filename.concat base_path ".masc/playground/agent-a/repos/masc-mcp/lib/demo.ml"
+    |> Masc_mcp.Tool_code.normalize_path
+  in
+  let result =
+    Tool_code_write.validate_writable_path ~agent_name:"agent-a" config raw
+  in
+  match result with
+  | Error e ->
+    fail ("expected repos/ prefix to map into own playground, got: "
+          ^ Types.masc_error_to_string e)
+  | Ok resolved ->
+    (check string) "repos/ path resolves under own playground repos"
+      expected resolved
+
 let test_writable_path_blocks_cross_agent () =
   let base_path = fresh_base_path () in
   let config = make_config base_path in
@@ -398,6 +417,8 @@ let () =
     ("per_agent_containment_6527_iter6", [
       test_case "writable_path allows own playground" `Quick
         test_writable_path_allows_own_playground;
+      test_case "writable_path maps relative repos prefix" `Quick
+        test_writable_path_maps_relative_repos_prefix;
       test_case "writable_path blocks cross-agent" `Quick
         test_writable_path_blocks_cross_agent;
       test_case "clone_cwd does not reject own repos on containment axis" `Quick

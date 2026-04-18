@@ -121,6 +121,33 @@ val is_ambiguous_side_effect_error : Oas.Error.sdk_error -> bool
 (** [true] when a structured error indicates context overflow. *)
 val is_context_overflow : Oas.Error.sdk_error -> bool
 
+(** Turn-local overflow hint published by the OAS event bus before a
+    proactive compaction attempt. Exposed for regression tests. *)
+type turn_event_bus_overflow = {
+  estimated_tokens : int;
+  limit_tokens : int;
+}
+
+(** Summary of event-bus signals observed during a single keeper turn.
+    Exposed for regression tests. *)
+type turn_event_bus_summary = {
+  correlation_id : string option;
+  overflow_imminent : turn_event_bus_overflow option;
+}
+
+(** Fold the drained OAS event-bus events for a single keeper turn into
+    the signals MASC currently consumes. *)
+val summarize_turn_event_bus :
+  Agent_sdk.Event_bus.event list -> turn_event_bus_summary
+
+(** Build the keeper overflow event from either a drained event-bus
+    signal or the structured OAS error fallback. Exposed for tests. *)
+val context_overflow_event_of_error :
+  fallback_tokens:int ->
+  ?turn_event_bus:turn_event_bus_summary ->
+  Oas.Error.sdk_error ->
+  Keeper_state_machine.event
+
 (** [true] when an error represents terminal cascade exhaustion or a
     final accept-rejected result from the MASC OAS boundary. *)
 val is_cascade_exhausted_error : Oas.Error.sdk_error -> bool

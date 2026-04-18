@@ -305,6 +305,66 @@ let test_registered_hook_bypasses_empty_schema () =
   Alcotest.(check bool) "args unchanged" true
     (Yojson.Safe.equal forwarded args)
 
+let find_schema_exn name schemas =
+  match List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name name) schemas with
+  | Some schema -> schema.input_schema
+  | None -> failwith ("missing schema: " ^ name)
+
+let masc_transition_schema =
+  find_schema_exn "masc_transition" Tool_task_schemas.schemas
+
+let assoc_string key json =
+  match Yojson.Safe.Util.member key json with
+  | `String value -> value
+  | _ -> failwith ("expected string field: " ^ key)
+
+let test_registered_hook_transition_compat_to_and_note () =
+  let args =
+    `Assoc
+      [
+        ("agent_name", `String "codex-local-admin");
+        ("task_id", `String "task-239");
+        ("to", `String "claimed");
+        ("note", `String "PR #8308 Draft");
+      ]
+  in
+  let blocked, forwarded =
+    run_registered_hook
+      ~schema:masc_transition_schema
+      ~tool_name:"masc_transition"
+      ~args
+      ()
+  in
+  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
+  Alcotest.(check string) "to -> action claim" "claim"
+    (assoc_string "action" forwarded);
+  Alcotest.(check string) "note -> notes" "PR #8308 Draft"
+    (assoc_string "notes" forwarded);
+  Alcotest.(check bool) "to removed" true
+    (Yojson.Safe.Util.member "to" forwarded = `Null);
+  Alcotest.(check bool) "note removed" true
+    (Yojson.Safe.Util.member "note" forwarded = `Null)
+
+let test_registered_hook_transition_compat_status_action () =
+  let args =
+    `Assoc
+      [
+        ("agent_name", `String "keeper-ani1999-agent");
+        ("task_id", `String "task-193");
+        ("action", `String "claimed");
+      ]
+  in
+  let blocked, forwarded =
+    run_registered_hook
+      ~schema:masc_transition_schema
+      ~tool_name:"masc_transition"
+      ~args
+      ()
+  in
+  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
+  Alcotest.(check string) "claimed -> claim" "claim"
+    (assoc_string "action" forwarded)
+
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
@@ -345,5 +405,9 @@ let () =
         test_registered_hook_bypasses_unknown_tool;
       Alcotest.test_case "empty schema bypasses validation" `Quick
         test_registered_hook_bypasses_empty_schema;
+      Alcotest.test_case "masc_transition compat: to/note aliases" `Quick
+        test_registered_hook_transition_compat_to_and_note;
+      Alcotest.test_case "masc_transition compat: status-like action" `Quick
+        test_registered_hook_transition_compat_status_action;
     ]);
   ]

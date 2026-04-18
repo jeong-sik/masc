@@ -439,6 +439,18 @@ let test_transition_release () =
     | Error _ -> Alcotest.fail "Expected Ok"
   )
 
+let test_transition_release_todo_noop () =
+  with_test_env (fun config ->
+    let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
+
+    let result = Coord.release_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
+    match result with
+    | Ok msg ->
+        Alcotest.(check bool) "release todo no-op" true
+          (str_contains msg "already todo")
+    | Error _ -> Alcotest.fail "Expected Ok no-op"
+  )
+
 let test_transition_invalid () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
@@ -1077,6 +1089,8 @@ let () =
       Alcotest.test_case "claim" `Quick test_transition_claim;
       Alcotest.test_case "start" `Quick test_transition_start;
       Alcotest.test_case "release" `Quick test_transition_release;
+      Alcotest.test_case "release todo no-op" `Quick
+        test_transition_release_todo_noop;
       Alcotest.test_case "invalid" `Quick test_transition_invalid;
       Alcotest.test_case "version mismatch" `Quick test_transition_version_mismatch;
       Alcotest.test_case "done idempotent" `Quick test_transition_done_idempotent;

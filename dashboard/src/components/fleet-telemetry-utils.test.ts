@@ -37,6 +37,8 @@ function makeRow(overrides: Partial<FleetRow> = {}): FleetRow {
     name: 'test-keeper',
     status: 'active',
     keepalive_running: true,
+    diagnostic_health_state: null,
+    diagnostic_summary: null,
     context_ratio: 0.3,
     turn_count: 10,
     last_latency_ms: 500,
@@ -161,6 +163,14 @@ describe('fleetBand', () => {
     expect(fleetBand(makeRow({ status: 'paused' }))).toBe('paused')
   })
 
+  it('classifies inactive keepalive rows as attention, not offline', () => {
+    expect(fleetBand(makeRow({ status: 'inactive', keepalive_running: true }))).toBe('attention')
+  })
+
+  it('classifies attention for stale diagnostic health state', () => {
+    expect(fleetBand(makeRow({ status: 'inactive', diagnostic_health_state: 'stale' }))).toBe('attention')
+  })
+
   it('classifies attention for runtime blocker', () => {
     expect(fleetBand(makeRow({ runtime_blocker_class: 'admission_queue_wait_timeout' }))).toBe('attention')
   })
@@ -249,6 +259,14 @@ describe('statusClass', () => {
 
   it('returns warn for runtime blocker', () => {
     expect(statusClass(makeRow({ runtime_blocker_class: 'turn_timeout' }))).toContain('var(--warn)')
+  })
+
+  it('returns warn for stale diagnostic health state', () => {
+    expect(statusClass(makeRow({ status: 'inactive', diagnostic_health_state: 'stale' }))).toContain('var(--warn)')
+  })
+
+  it('returns bad-light for offline diagnostic health state', () => {
+    expect(statusClass(makeRow({ status: 'inactive', diagnostic_health_state: 'offline' }))).toContain('var(--bad-light)')
   })
 
   it('returns ok for healthy', () => {

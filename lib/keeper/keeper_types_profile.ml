@@ -29,6 +29,14 @@ let sandbox_profile_of_string raw =
   | "docker_hardened" -> Some Docker_hardened
   | _ -> None
 
+(* Issue #8467: Variant SSOT — adding a constructor to [sandbox_profile]
+   forces [sandbox_profile_to_string] exhaustiveness AND extends
+   [valid_sandbox_profile_strings] so [keeper_schema] picks it up via
+   the mirror declared there. *)
+let all_sandbox_profiles = [ Legacy_local; Docker_hardened ]
+let valid_sandbox_profile_strings =
+  List.map sandbox_profile_to_string all_sandbox_profiles
+
 let network_mode_to_string = function
   | Network_none -> "none"
   | Network_inherit -> "inherit"
@@ -39,6 +47,11 @@ let network_mode_of_string raw =
   | "inherit" -> Some Network_inherit
   | _ -> None
 
+(* Issue #8467: Variant SSOT for [network_mode]. *)
+let all_network_modes = [ Network_none; Network_inherit ]
+let valid_network_mode_strings =
+  List.map network_mode_to_string all_network_modes
+
 let shared_memory_scope_to_string = function
   | Shared_memory_disabled -> "disabled"
   | Shared_memory_room -> "room"
@@ -48,6 +61,11 @@ let shared_memory_scope_of_string raw =
   | "disabled" -> Some Shared_memory_disabled
   | "room" -> Some Shared_memory_room
   | _ -> None
+
+(* Issue #8467: Variant SSOT for [shared_memory_scope]. *)
+let all_shared_memory_scopes = [ Shared_memory_disabled; Shared_memory_room ]
+let valid_shared_memory_scope_strings =
+  List.map shared_memory_scope_to_string all_shared_memory_scopes
 
 let default_sandbox_profile = Legacy_local
 

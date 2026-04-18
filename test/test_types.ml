@@ -305,6 +305,52 @@ let () =
           (Masc_mcp.Operator_control_snapshot.snapshot_view_of_string_opt
              "sessions" <> None));
     ];
+    "keeper_profile_enum_ssot", [
+      (* Issue #8467: witness exhaustiveness for [Keeper_types_profile]
+         nullary variants — adding a new constructor fails compilation
+         in the matching [*_to_string] function. *)
+      Alcotest.test_case "sandbox_profile witness covers both variants" `Quick (fun () ->
+        let open Masc_mcp.Keeper_types_profile in
+        let witness s =
+          let actual = sandbox_profile_to_string s in
+          if not (List.mem actual valid_sandbox_profile_strings) then
+            Alcotest.failf "sandbox_profile_to_string %S not in valid_sandbox_profile_strings" actual
+        in
+        witness Legacy_local; witness Docker_hardened;
+        Alcotest.(check int) "count" 2 (List.length valid_sandbox_profile_strings));
+      Alcotest.test_case "network_mode witness covers both variants" `Quick (fun () ->
+        let open Masc_mcp.Keeper_types_profile in
+        let witness s =
+          let actual = network_mode_to_string s in
+          if not (List.mem actual valid_network_mode_strings) then
+            Alcotest.failf "network_mode_to_string %S not in valid_network_mode_strings" actual
+        in
+        witness Network_none; witness Network_inherit;
+        Alcotest.(check int) "count" 2 (List.length valid_network_mode_strings));
+      Alcotest.test_case "shared_memory_scope witness covers both variants" `Quick (fun () ->
+        let open Masc_mcp.Keeper_types_profile in
+        let witness s =
+          let actual = shared_memory_scope_to_string s in
+          if not (List.mem actual valid_shared_memory_scope_strings) then
+            Alcotest.failf "shared_memory_scope_to_string %S not in valid_shared_memory_scope_strings" actual
+        in
+        witness Shared_memory_disabled; witness Shared_memory_room;
+        Alcotest.(check int) "count" 2 (List.length valid_shared_memory_scope_strings));
+      Alcotest.test_case "schema mirrors stay in sync" `Quick (fun () ->
+        (* Cycle-avoidance: Keeper_schema cannot depend on
+           Keeper_types_profile directly, so it hand-mirrors the SSOT.
+           This test catches drift before a new constructor silently
+           drops from the JSON Schema. *)
+        Alcotest.(check (list string)) "sandbox_profile mirror"
+          Masc_mcp.Keeper_types_profile.valid_sandbox_profile_strings
+          Masc_mcp.Keeper_schema.sandbox_profile_enum_strings;
+        Alcotest.(check (list string)) "network_mode mirror"
+          Masc_mcp.Keeper_types_profile.valid_network_mode_strings
+          Masc_mcp.Keeper_schema.network_mode_enum_strings;
+        Alcotest.(check (list string)) "shared_memory_scope mirror"
+          Masc_mcp.Keeper_types_profile.valid_shared_memory_scope_strings
+          Masc_mcp.Keeper_schema.shared_memory_scope_enum_strings);
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

@@ -180,13 +180,11 @@ let emit_task_activity ?correlation_id ?run_id
       Log.Misc.warn "task activity emit failed (%s %s): %s" kind task_id
         (Printexc.to_string exn)
 
-let task_status_to_string = function
-  | Types.Todo -> "todo"
-  | Types.Claimed _ -> "claimed"
-  | Types.InProgress _ -> "in_progress"
-  | Types.AwaitingVerification _ -> "awaiting_verification"
-  | Types.Done _ -> "done"
-  | Types.Cancelled _ -> "cancelled"
+(* Issue #8354: was a verbatim duplicate of [Types.task_status_to_string].
+   Folded to a single-line alias so adding a 7th task_status constructor
+   only requires updating [Types]. The local name is kept so caller
+   sites (224, 269, 863, 870, 1019, 1020) need no churn. *)
+let task_status_to_string = Types.task_status_to_string
 
 (** Current assignee from the task status, for error messages.
 

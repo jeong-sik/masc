@@ -346,12 +346,12 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
               onClick=${() => toggleSynapsePairFilter(s.from_agent, s.to_agent)}
             >
               <button
-                class="text-[var(--text-muted)] hover:text-sky-400 truncate w-32 text-right"
+                class="text-[var(--text-muted)] hover:text-[var(--accent)] truncate w-32 text-right"
                 onClick=${(e: Event) => { e.stopPropagation(); openAgentDetail(s.from_agent) }}
               >${shortAgentLabel(s.from_agent)}</button>
               <span class="text-[var(--text-muted)]">→</span>
               <button
-                class="text-[var(--text-muted)] hover:text-sky-400 truncate w-32 text-left"
+                class="text-[var(--text-muted)] hover:text-[var(--accent)] truncate w-32 text-left"
                 onClick=${(e: Event) => { e.stopPropagation(); openAgentDetail(s.to_agent) }}
               >${shortAgentLabel(s.to_agent)}</button>
               <div class="flex-1 bg-[var(--white-5)] rounded h-1.5 min-w-[60px]">
@@ -375,14 +375,14 @@ function SynapseRow({ s }: { s: MemorySubsystemsSynapse }) {
     <tr class="border-b border-[var(--white-10)]">
       <td class="py-1.5 px-2 text-sm font-mono">
         <button
-          class="hover:text-sky-400 hover:underline focus:outline-none focus:text-sky-400"
+          class="hover:text-[var(--accent)] hover:underline focus:outline-none focus:text-[var(--accent)]"
           onClick=${() => openAgentDetail(s.from_agent)}
         >${s.from_agent}</button>
       </td>
       <td class="py-1.5 px-2 text-sm text-[var(--text-muted)] text-center">→</td>
       <td class="py-1.5 px-2 text-sm font-mono">
         <button
-          class="hover:text-sky-400 hover:underline focus:outline-none focus:text-sky-400"
+          class="hover:text-[var(--accent)] hover:underline focus:outline-none focus:text-[var(--accent)]"
           onClick=${() => openAgentDetail(s.to_agent)}
         >${s.to_agent}</button>
       </td>

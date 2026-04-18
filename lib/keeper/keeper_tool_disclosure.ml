@@ -41,6 +41,23 @@ let merge_reported_and_observed_tool_names
         reported_tool_names
 ;;
 
+let unexpected_tool_names
+      ~(allowed_tool_names : string list)
+      ~(tool_names : string list)
+  : string list
+  =
+  let allowed = Hashtbl.create (List.length allowed_tool_names) in
+  let seen = Hashtbl.create (List.length tool_names) in
+  List.iter (fun tool_name -> Hashtbl.replace allowed tool_name ()) allowed_tool_names;
+  tool_names
+  |> List.filter (fun tool_name ->
+       if Hashtbl.mem allowed tool_name || Hashtbl.mem seen tool_name
+       then false
+       else (
+         Hashtbl.replace seen tool_name ();
+         true))
+;;
+
 type completion_contract =
   | Allow_text_or_tool
   | Require_tool_use

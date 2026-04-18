@@ -131,10 +131,9 @@ let apply_deterministic_grader (g : deterministic_grader) (value : string) : gra
         in
         find_at 0
     | Regex pattern ->
-        (try
-           let re = Re.Pcre.re pattern |> Re.compile in
-           Re.execp re value
-         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> false)
+        Safe_ops.protect ~default:false (fun () ->
+          let re = Re.Pcre.re pattern |> Re.compile in
+          Re.execp re value)
     | NotContains ->
         let v_lower = String.lowercase_ascii value in
         let e_lower = String.lowercase_ascii g.expected in

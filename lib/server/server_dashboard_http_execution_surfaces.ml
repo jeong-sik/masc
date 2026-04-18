@@ -136,11 +136,15 @@ let _transport_health_cache =
 
 let keepalive_running_of_lifecycle_event = function
   | "started" | "restarted" | "reconciled" -> Some true
+  | "resumed" -> Some true
+  | "paused" -> Some true
   | "stopped" | "crashed" | "dead" -> Some false
   | _ -> None
 
 let phase_of_lifecycle_event = function
   | "started" | "restarted" | "reconciled" -> Some "running"
+  | "resumed" -> Some "running"
+  | "paused" -> Some "paused"
   | "stopped" -> Some "stopped"
   | "crashed" -> Some "crashed"
   | "dead" -> Some "dead"
@@ -148,8 +152,15 @@ let phase_of_lifecycle_event = function
 
 let pipeline_stage_of_lifecycle_event = function
   | "started" | "restarted" | "reconciled" -> Some "idle"
+  | "resumed" -> Some "idle"
+  | "paused" -> Some "paused"
   | "stopped" | "dead" -> Some "offline"
   | "crashed" -> Some "crashed"
+  | _ -> None
+
+let paused_of_lifecycle_event = function
+  | "started" | "restarted" | "reconciled" | "resumed" -> Some false
+  | "paused" | "stopped" -> Some true
   | _ -> None
 
 let keeper_agent_status_opt row =
@@ -183,6 +194,11 @@ let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
             row_fields
             |> upsert_assoc_field "keepalive_running" (`Bool keepalive_running)
             |> upsert_assoc_field "status" (patched_keeper_status row ~keepalive_running)
+          in
+          let row_fields =
+            match paused_of_lifecycle_event event with
+            | Some paused -> upsert_assoc_field "paused" (`Bool paused) row_fields
+            | None -> row_fields
           in
           let row_fields =
             match phase_of_lifecycle_event event with

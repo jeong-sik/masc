@@ -273,6 +273,69 @@ let run_curl_post ?body ?token ~port ~path () =
   { status; body; curl_exit; stderr }
 ;;
 
+let run_curl_get ?token ~port ~path () =
+  let header_file = Filename.temp_file "dashboard-keeper-get-" ".hdr" in
+  let body_file = Filename.temp_file "dashboard-keeper-get-" ".body" in
+  let url = Printf.sprintf "http://127.0.0.1:%d%s" port path in
+  let base_args =
+    [ "curl"
+    ; "-sS"
+    ; "--http1.1"
+    ; "--max-time"
+    ; "3"
+    ; "-X"
+    ; "GET"
+    ; "-o"
+    ; body_file
+    ; "-D"
+    ; header_file
+    ]
+  in
+  let args =
+    let args =
+      match token with
+      | Some raw_token ->
+          base_args @ [ "-H"; Printf.sprintf "Authorization: Bearer %s" raw_token ]
+      | None -> base_args
+    in
+    Array.of_list (args @ [ url ])
+  in
+  let ic, oc, ec = Unix.open_process_args_full "curl" args (Unix.environment ()) in
+  close_out_noerr oc;
+  let _stdout = read_all ic in
+  let stderr = read_all ec in
+  let curl_exit =
+    match Unix.close_process_full (ic, oc, ec) with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED code -> 128 + code
+    | Unix.WSTOPPED code -> 256 + code
+  in
+  let status = parse_status (read_file header_file) in
+  let body = read_file body_file in
+  (try Sys.remove header_file with
+   | _ -> ());
+  (try Sys.remove body_file with
+   | _ -> ());
+  { status; body; curl_exit; stderr }
+;;
+
+let execution_keeper_paused body keeper_name =
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string body in
+  let keepers = json |> member "keepers" |> to_list in
+  match
+    List.find_opt
+      (fun row -> row |> member "name" |> to_string = keeper_name)
+      keepers
+  with
+  | Some row -> (
+      match row |> member "paused" with
+      | `Bool value -> value
+      | `Null -> false
+      | _ -> false)
+  | None -> fail ("keeper missing from execution payload: " ^ keeper_name)
+;;
+
 let make_keeper_meta_json ?(name = "route-shadow-demo") () =
   match
     Masc_mcp.Keeper_types.meta_of_json
@@ -400,6 +463,7 @@ let test_keeper_post_route_classification () =
   check_route "/api/v1/keepers/sangsu/reset" Keeper_api.Keeper_post_reset;
   check_route "/api/v1/keepers/sangsu/clear" Keeper_api.Keeper_post_clear;
   check_route "/api/v1/keepers/sangsu/checkpoints" Keeper_api.Keeper_post_checkpoints;
+  check_route "/api/v1/keepers/sangsu/directive" Keeper_api.Keeper_post_directive;
   check_route "/api/v1/keepers/sangsu" Keeper_api.Keeper_post_unknown;
   check_route "/api/v1/keepers//boot" Keeper_api.Keeper_post_unknown
 ;;
@@ -437,6 +501,17 @@ let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
     "boot route reaches lifecycle handler"
     true
     (contains_substr {|"action":"boot"|} boot_result.body);
+  (match Masc_mcp.Keeper_types.read_meta config keeper_name with
+   | Ok (Some meta) ->
+       check bool "boot resumes paused keeper meta" false meta.paused
+   | Ok None -> fail "keeper meta missing after boot route"
+   | Error err -> fail ("failed to read keeper meta after boot route: " ^ err));
+  let execution_after_boot =
+    run_curl_get ~port ~path:"/api/v1/dashboard/execution" ()
+  in
+  require_status "execution GET returns 200 after boot" 200 execution_after_boot;
+  check bool "execution reflects resumed keeper after boot" false
+    (execution_keeper_paused execution_after_boot.body keeper_name);
   let shutdown_result =
     run_curl_post ~body:"{}" ~token:admin_token ~port ~path:shutdown_path ()
   in
@@ -505,6 +580,40 @@ let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
   | Ok (Some meta) -> check bool "shutdown persists paused keeper meta" true meta.paused
   | Ok None -> fail "keeper meta missing after shutdown route"
   | Error err -> fail ("failed to read keeper meta after shutdown: " ^ err)
+;;
+
+let test_keeper_directive_resume_updates_paused_meta () =
+  with_seeded_server
+  @@ fun ~port ~config ~admin_token ~keeper_name ->
+  let directive_path =
+    Printf.sprintf "/api/v1/keepers/%s/directive" keeper_name
+  in
+  let resume_result =
+    run_curl_post
+      ~body:{|{"action":"resume"}|}
+      ~token:admin_token
+      ~port
+      ~path:directive_path
+      ()
+  in
+  require_status "directive route returns 200" 200 resume_result;
+  check
+    bool
+    "directive route reaches lifecycle handler"
+    true
+    (contains_substr {|"action":"resume"|} resume_result.body);
+  let execution_after_resume =
+    run_curl_get ~port ~path:"/api/v1/dashboard/execution" ()
+  in
+  require_status "execution GET returns 200 after directive" 200 execution_after_resume;
+  check bool "execution reflects resumed keeper after directive" false
+    (execution_keeper_paused execution_after_resume.body keeper_name);
+  match Masc_mcp.Keeper_types.read_meta config keeper_name with
+  | Ok (Some meta) ->
+      check bool "directive resume clears paused keeper meta" false meta.paused
+  | Ok None -> fail "keeper meta missing after directive resume"
+  | Error err ->
+      fail ("failed to read keeper meta after directive resume: " ^ err)
 ;;
 
 let test_merge_keeper_trace_lines_includes_internal_history () =
@@ -589,6 +698,10 @@ let () =
             "lifecycle POST routes do not fall through to generic 404"
             `Slow
             test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404
+        ; test_case
+            "directive resume updates paused meta"
+            `Slow
+            test_keeper_directive_resume_updates_paused_meta
         ; test_case
             "merge keeper trace lines includes internal history"
             `Quick

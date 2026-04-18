@@ -373,7 +373,7 @@ function truncateMiddle(value: string, limit = 18): string {
   return `${trimmed.slice(0, head)}…${trimmed.slice(-tail)}`
 }
 
-export function humanizeChannel(names: ConnectorNames | undefined, channelId: string): string {
+function humanizeChannel(names: ConnectorNames | undefined, channelId: string): string {
   if (!names) return ''
   const channelName = names.channel_names[channelId]
   const guildId = names.channel_to_guild[channelId]
@@ -489,7 +489,7 @@ function findKnownConnector(connectors: GateConnectorInfo[], connectorId: KnownC
   return connectors.find(connector => connector.connector_id === connectorId) ?? null
 }
 
-export function connectorFocusScore(
+function connectorFocusScore(
   connector: GateConnectorInfo | null,
   keeperCount: number,
 ): number {
@@ -505,7 +505,7 @@ export function connectorFocusScore(
   return 20
 }
 
-export function resolveConnectorFocusId(
+function resolveConnectorFocusId(
   connectors: GateConnectorInfo[],
   keeperCount: number,
   preferredId: KnownConnectorId | null,

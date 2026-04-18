@@ -12,11 +12,11 @@ import { registerActivityRefresh } from '../sse-store'
 import type { SwimlaneResponse } from '../types'
 import { selectedNodeId, highlightedAgentId } from './activity-graph-view'
 import { formatDurationMs } from '../lib/format-time'
-import { createAsyncResource } from '../lib/async-state'
+import { createManagedAsyncResource } from '../lib/async-state'
 import { escapeHtml, tooltipHtml } from '../lib/escape-html'
 import 'vis-timeline/styles/vis-timeline-graph2d.css'
 
-const swimlaneResource = createAsyncResource<SwimlaneResponse | null>()
+const swimlaneResource = createManagedAsyncResource<SwimlaneResponse | null>(null)
 type TimelineItemId = number
 
 interface SwimlaneTimelineItem {
@@ -90,7 +90,7 @@ export function spanStyle(kind: string) {
 }
 
 function loadSwimlane(since?: string) {
-  return swimlaneResource.load(() => fetchSwimlane(since))
+  return swimlaneResource.load((signal) => fetchSwimlane(since, { signal }))
 }
 
 export function ActivitySwimlane({ since }: { since?: string }) {
@@ -106,7 +106,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
   }, [since])
 
   const s = swimlaneResource.state.value
-  const data = s.status === 'loaded' ? s.data : undefined
+  const data = s.data ?? undefined
 
   useEffect(() => {
     const container = containerRef.current
@@ -205,7 +205,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
     )
   }, [data, highlightedAgentId.value])
 
-  if (s.status === 'loading' || s.status === 'idle') {
+  if (s.loading && !data) {
     return html`
       <${Card} title="활동 타임라인" testId="activity_swimlane">
         <${LoadingState}>타임라인 불러오는 중...<//>
@@ -213,15 +213,23 @@ export function ActivitySwimlane({ since }: { since?: string }) {
     `
   }
 
-  if (s.status === 'error') {
+  if (s.error && !data) {
     return html`
       <${Card} title="활동 타임라인" testId="activity_swimlane">
-        <${EmptyState}>타임라인을 불러올 수 없습니다: ${s.message}<//>
+        <${EmptyState}>타임라인을 불러올 수 없습니다: ${s.error}<//>
       <//>
     `
   }
 
-  if (!data || data.agents.length === 0) {
+  if (!data) {
+    return html`
+      <${Card} title="활동 타임라인" testId="activity_swimlane">
+        <${LoadingState}>activity feed 워밍업 중...<//>
+      <//>
+    `
+  }
+
+  if (data.agents.length === 0) {
     return html`
       <${Card} title="활동 타임라인" testId="activity_swimlane">
         <${EmptyState}>표시할 에이전트 활동 타임라인이 없습니다.<//>

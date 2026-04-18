@@ -364,6 +364,45 @@ async function bootstrapWarmPayload(path: string, res: Response): Promise<unknow
   }
 }
 
+async function parseJsonResponse<T>(
+  method: string,
+  path: string,
+  res: Response,
+): Promise<T> {
+  let rawText = ''
+  try {
+    rawText = await res.text()
+  } catch {
+    throw new ApiRequestError({
+      method,
+      path,
+      status: res.status,
+      statusText: res.statusText,
+      detail: 'failed to read response body',
+    })
+  }
+  if (rawText.trim() === '') {
+    throw new ApiRequestError({
+      method,
+      path,
+      status: res.status,
+      statusText: res.statusText,
+      detail: 'empty JSON response',
+    })
+  }
+  try {
+    return JSON.parse(rawText) as T
+  } catch {
+    throw new ApiRequestError({
+      method,
+      path,
+      status: res.status,
+      statusText: res.statusText,
+      detail: 'invalid JSON response',
+    })
+  }
+}
+
 export function defaultBoardVoter(): string {
   const params = getQueryParams()
   return sanitizeDashboardActorName(params.get('agent'))
@@ -395,7 +434,7 @@ export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
     }
     throw await apiRequestErrorFromResponse('GET', path, res)
   }
-  const data = await res.json()
+  const data = await parseJsonResponse<T>('GET', path, res)
   // Server may return 200 OK with {"error":"not initialized"} during startup
   if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
     const payload = bootstrapInitializingPayload(path)
@@ -475,7 +514,7 @@ export async function post<T>(
   if (!res.ok) {
     throw await apiRequestErrorFromResponse('POST', path, res)
   }
-  return res.json() as Promise<T>
+  return parseJsonResponse<T>('POST', path, res)
 }
 
 export async function patch<T>(
@@ -496,7 +535,7 @@ export async function patch<T>(
   if (!res.ok) {
     throw await apiRequestErrorFromResponse('PATCH', path, res)
   }
-  return res.json() as Promise<T>
+  return parseJsonResponse<T>('PATCH', path, res)
 }
 
 export async function postRaw(

@@ -9,6 +9,15 @@ import {
   type SwimlaneResponse,
 } from './schemas/actions-activity'
 
+type ActivityFetchOptions = {
+  signal?: AbortSignal
+}
+
+function isNotInitializedEnvelope(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false
+  return (raw as { error?: unknown }).error === 'not initialized'
+}
+
 // --- Control Dock ---
 
 export async function sendBroadcast(agentName: string, message: string): Promise<void> {
@@ -43,13 +52,18 @@ export function fetchTaskEvents(taskId: string, limit = 50): Promise<unknown[]> 
 
 // --- Activity Graph ---
 
-export async function fetchActivityGraph(since?: string): Promise<ActivityGraphResponse | null> {
+export async function fetchActivityGraph(
+  since?: string,
+  options: ActivityFetchOptions = {},
+): Promise<ActivityGraphResponse | null> {
   const params = since ? `?since=${since}` : ''
   try {
     const raw = await get<unknown>(`/api/v1/activity/graph${params}`, {
       timeoutMs: ACTIVITY_TIMEOUT_MS,
       includeActorHeader: false,
+      signal: options.signal,
     })
+    if (isNotInitializedEnvelope(raw)) return null
     return parseActivityGraphResponse(raw)
   } catch (err) {
     if (err instanceof ActionsActivitySchemaDriftError) throw err
@@ -58,13 +72,18 @@ export async function fetchActivityGraph(since?: string): Promise<ActivityGraphR
   }
 }
 
-export async function fetchSwimlane(since?: string): Promise<SwimlaneResponse | null> {
+export async function fetchSwimlane(
+  since?: string,
+  options: ActivityFetchOptions = {},
+): Promise<SwimlaneResponse | null> {
   const params = since ? `?since=${since}` : ''
   try {
     const raw = await get<unknown>(`/api/v1/activity/swimlane${params}`, {
       timeoutMs: ACTIVITY_TIMEOUT_MS,
       includeActorHeader: false,
+      signal: options.signal,
     })
+    if (isNotInitializedEnvelope(raw)) return null
     return parseSwimlaneResponse(raw)
   } catch (err) {
     if (err instanceof ActionsActivitySchemaDriftError) throw err

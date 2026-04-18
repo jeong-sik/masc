@@ -221,8 +221,11 @@ let normalize_text raw =
   raw |> String.trim |> String.split_on_char '\n' |> List.map String.trim
   |> List.filter (fun item -> item <> "") |> String.concat " " |> String.trim
 
+let normalize_allowed_tool_name value =
+  value |> String.trim |> String.lowercase_ascii
+
 let allowed_tool tool =
-  List.mem tool
+  List.mem (normalize_allowed_tool_name tool)
     [
       "masc_governance_status";
       "masc_execution_orders";
@@ -235,10 +238,13 @@ let parse_recommended_action json =
   let action_json = json |> member "recommended_action" in
   match action_json with
   | `Assoc _ ->
-      let resolved_tool = action_json |> member "resolved_tool" |> to_string_option in
+      let resolved_tool =
+        action_json |> member "resolved_tool" |> to_string_option
+        |> Option.map normalize_allowed_tool_name
+      in
       let resolved_tool =
         match resolved_tool with
-        | Some tool when allowed_tool tool -> Some tool
+        | Some tool when tool <> "" && allowed_tool tool -> Some tool
         | _ -> None
       in
       Some

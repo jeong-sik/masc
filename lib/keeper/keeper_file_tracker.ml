@@ -36,17 +36,26 @@ let gc_stale () =
     tracker []
   |> List.iter (Hashtbl.remove tracker)
 
-(** Record files from a turn's git status output. Returns collision warnings.
-    Each status line is e.g. " M lib/foo.ml" — extract file path. *)
+(** Git porcelain v1 status line format is [XY PATH] where X,Y are the
+    staging/worktree status chars (either of which may be space) and
+    PATH starts at byte offset 3. [String.trim] strips the leading space
+    of unstaged-only rows (" M foo" → "M foo") and then slicing at 3
+    would eat the first path char. Parse the raw line instead. *)
+let extract_path_of_status_line line =
+  if String.length line >= 4 then
+    let rest = String.sub line 3 (String.length line - 3) in
+    (* Handle rename/copy entries: "R  old -> new" — normalise to
+       the destination so both keepers agree on the same key. *)
+    match String.index_opt rest '>' with
+    | Some i when i > 0 && rest.[i - 1] = '-' ->
+        String.trim (String.sub rest (i + 1) (String.length rest - i - 1))
+    | _ -> String.trim rest
+  else String.trim line
+
+(** Record files from a turn's git status output. Returns collision warnings. *)
 let record_turn_files ~keeper_name ~files : collision_warning list =
   let now = Unix.gettimeofday () in
-  let extract_path line =
-    let trimmed = String.trim line in
-    if String.length trimmed > 3 then
-      String.sub trimmed 3 (String.length trimmed - 3)
-      |> String.trim
-    else trimmed
-  in
+  let extract_path = extract_path_of_status_line in
   with_lock (fun () ->
     gc_stale ();
     let warnings = ref [] in

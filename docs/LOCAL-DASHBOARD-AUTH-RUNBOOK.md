@@ -28,28 +28,32 @@ MASC_BASE_PATH="$BASE_PATH" \
   --base-path "$BASE_PATH"
 ```
 
-In another shell, mint or rotate a local admin bearer and extract the values:
+In another shell, do the whole local admin flow in one command:
+
+```bash
+~/me/scripts/masc dashboard-admin
+```
+
+That command:
+
+- mints or rotates the admin bearer
+- prints `token=...` and `export MASC_OPERATOR_TOKEN=...`
+- opens the dashboard URL once
+- verifies `/api/v1/dashboard/shell`
+
+If you want the raw values without opening a browser:
+
+```bash
+~/me/scripts/masc dashboard-admin --no-open
+```
+
+If you need raw JSON for scripting:
 
 ```bash
 LOGIN_JSON="$(~/me/scripts/masc login --json --agent codex-local-admin)"
 TOKEN="$(printf '%s\n' "$LOGIN_JSON" | jq -r '.bearer_token')"
 URL="$(printf '%s\n' "$LOGIN_JSON" | jq -r '.dashboard_url')"
 printf 'token=%s\nurl=%s\n' "$TOKEN" "$URL"
-```
-
-Open the dashboard as admin:
-
-```bash
-open "$URL"
-```
-
-Verify the admin session:
-
-```bash
-curl -sS http://127.0.0.1:8935/api/v1/dashboard/shell \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "X-MASC-Agent: codex-local-admin" \
-  | jq '.auth'
 ```
 
 Expected quick checks:
@@ -137,7 +141,13 @@ Then run `./_build/default/bin/main_eio.exe doctor --base-path "$BASE_PATH"` and
 
 If you already have an admin bearer, skip to step 5.
 
-Preferred path:
+Fastest path if you want the browser + verification too:
+
+```bash
+~/me/scripts/masc dashboard-admin
+```
+
+JSON path if you are scripting around the token:
 
 ```bash
 ~/me/scripts/masc login --json --agent codex-local-admin

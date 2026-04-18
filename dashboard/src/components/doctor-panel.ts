@@ -6,6 +6,7 @@
 // Backend contract: see `docs/DOCTOR-ARCHITECTURE.md` "Backend endpoint" section.
 
 import { html } from 'htm/preact'
+import { useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { get } from '../api/core'
 import { createAsyncResource, type AsyncResource } from '../lib/async-state'
@@ -101,24 +102,159 @@ export async function refreshDoctor(): Promise<void> {
   await loadDoctor()
 }
 
+// ── Payload extractors (runtime type guards) ───────────────────────────
+// Payload is `unknown` at the envelope layer because config and sidecar
+// Doctors have different shapes. The extractors below defensively pull the
+// few fields the drill-down UI consumes.
+
+export interface SidecarCheckView {
+  name: string
+  severity: string
+  message?: string
+  detail?: string
+  hint?: string
+}
+
+export function extractSidecarChecks(payload: unknown): SidecarCheckView[] {
+  if (!payload || typeof payload !== 'object') return []
+  const p = payload as Record<string, unknown>
+  if (!Array.isArray(p.checks)) return []
+  const out: SidecarCheckView[] = []
+  for (const raw of p.checks) {
+    if (!raw || typeof raw !== 'object') continue
+    const c = raw as Record<string, unknown>
+    if (typeof c.name !== 'string' || typeof c.severity !== 'string') continue
+    const view: SidecarCheckView = { name: c.name, severity: c.severity }
+    if (typeof c.message === 'string' && c.message !== '') view.message = c.message
+    if (typeof c.detail === 'string' && c.detail !== '') view.detail = c.detail
+    if (typeof c.hint === 'string' && c.hint !== '') view.hint = c.hint
+    out.push(view)
+  }
+  return out
+}
+
+export interface ConfigNotesView {
+  warnings: string[]
+  next_actions: string[]
+}
+
+export function extractConfigNotes(payload: unknown): ConfigNotesView {
+  const empty: ConfigNotesView = { warnings: [], next_actions: [] }
+  if (!payload || typeof payload !== 'object') return empty
+  const p = payload as Record<string, unknown>
+  const filterStrings = (arr: unknown): string[] =>
+    Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : []
+  return {
+    warnings: filterStrings(p.warnings),
+    next_actions: filterStrings(p.next_actions),
+  }
+}
+
+// Map per-check severity strings (Python's Severity enum) to the shared
+// ok/warn/error chip palette used by doctor exit codes.
+function chipClassForSidecarSeverity(severity: string): string {
+  switch (severity) {
+    case 'ok':
+    case 'info':
+      return severityChipClass(0)
+    case 'warn':
+    case 'skip':
+      return severityChipClass(1)
+    case 'error':
+      return severityChipClass(2)
+    default:
+      return severityChipClass(2)
+  }
+}
+
 // ── Component ──────────────────────────────────────────────────────────
+
+function SidecarChecksList({ checks }: { checks: SidecarCheckView[] }) {
+  if (checks.length === 0) {
+    return html`<div class="text-xs text-[var(--text-muted)]">세부 검사 없음.</div>`
+  }
+  return html`
+    <ul class="mt-3 space-y-2">
+      ${checks.map((c) => {
+        const chip = chipClassForSidecarSeverity(c.severity)
+        return html`
+          <li class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-2">
+            <div class="flex items-baseline justify-between gap-2">
+              <div class="text-xs font-medium text-[var(--text-strong)]">${c.name}</div>
+              <span class="rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${chip}">
+                ${c.severity}
+              </span>
+            </div>
+            ${c.detail ? html`<div class="mt-1 text-[11px] text-[var(--text-muted)]">${c.detail}</div>` : ''}
+            ${c.message ? html`<div class="mt-1 text-[11px] text-[var(--text-body)]">↳ ${c.message}</div>` : ''}
+            ${c.hint ? html`<div class="mt-1 text-[11px] text-[var(--text-muted)]">hint: ${c.hint}</div>` : ''}
+          </li>
+        `
+      })}
+    </ul>
+  `
+}
+
+function ConfigNotesList({ notes }: { notes: ConfigNotesView }) {
+  const { warnings, next_actions } = notes
+  if (warnings.length === 0 && next_actions.length === 0) {
+    return html`<div class="text-xs text-[var(--text-muted)]">추가 메모 없음.</div>`
+  }
+  return html`
+    <div class="mt-3 space-y-3">
+      ${warnings.length > 0
+        ? html`
+            <div>
+              <div class="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">경고</div>
+              <ul class="mt-1 list-disc space-y-1 pl-5 text-[11px] text-[var(--text-body)]">
+                ${warnings.map((w) => html`<li>${w}</li>`)}
+              </ul>
+            </div>
+          `
+        : ''}
+      ${next_actions.length > 0
+        ? html`
+            <div>
+              <div class="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">다음 조치</div>
+              <ul class="mt-1 list-disc space-y-1 pl-5 text-[11px] text-[var(--text-body)]">
+                ${next_actions.map((a) => html`<li>${a}</li>`)}
+              </ul>
+            </div>
+          `
+        : ''}
+    </div>
+  `
+}
 
 function DoctorEntryCard({ entry }: { entry: DoctorEntry }) {
   const label = severityLabel(entry.exit_code)
   const chip = severityChipClass(entry.exit_code)
+  const expanded = useSignal(false)
+  const onToggle = () => { expanded.value = !expanded.value }
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
-      <div class="flex items-baseline justify-between gap-2">
+      <button
+        type="button"
+        class="flex w-full items-baseline justify-between gap-2 text-left"
+        aria-expanded=${expanded.value}
+        onClick=${onToggle}
+      >
         <div class="text-sm font-semibold text-[var(--text-strong)]">
           ${doctorHeading(entry)}
+          <span class="ml-2 text-[10px] text-[var(--text-muted)]">${expanded.value ? '▾' : '▸'}</span>
         </div>
         <span class="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider ${chip}">
           ${label}
         </span>
-      </div>
+      </button>
       <div class="mt-1 text-xs text-[var(--text-muted)]">
         ${entry.kind === 'config' ? 'Config Doctor' : `${entry.name} sidecar`} · exit ${entry.exit_code}
       </div>
+      ${expanded.value
+        ? entry.kind === 'sidecar'
+          ? html`<${SidecarChecksList} checks=${extractSidecarChecks(entry.payload)} />`
+          : html`<${ConfigNotesList} notes=${extractConfigNotes(entry.payload)} />`
+        : ''}
     </div>
   `
 }

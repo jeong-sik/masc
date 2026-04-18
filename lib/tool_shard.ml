@@ -16,6 +16,13 @@ type shard = {
 
 module StringMap = Map.Make(String)
 
+(* Cycle-aware mirror of Keeper_exec_memory.valid_memory_search_source_strings.
+   Tool_shard cannot depend on Keeper_exec_memory directly without reintroducing
+   the Tool_shard -> Keeper_exec_memory -> Keeper_alerting -> Tool_shard cycle.
+   Keep this list in sync with Keeper_exec_memory and guard it with tests. *)
+let keeper_memory_search_source_enum_strings =
+  [ "memory"; "history"; "all" ]
+
 (** Predefined shards *)
 
 let base_tools : Types.tool_schema list = [
@@ -70,7 +77,7 @@ Use source='history' for raw user messages, source='all' for both.";
         ("query", `Assoc [("type", `String "string"); ("description", `String "keyword to search for")]);
         ("kind", `Assoc [("type", `String "string"); ("enum", `List [`String "goal"; `String "decision"; `String "progress"; `String "next"; `String "open_question"; `String "constraints"]); ("description", `String "Filter by memory kind")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "max results (1-10, default 5)")]);
-        ("source", `Assoc [("type", `String "string"); ("enum", `List [`String "memory"; `String "history"; `String "all"]); ("description", `String "Search scope: memory (default, structured notes), history (raw messages), or all")]);
+        ("source", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) keeper_memory_search_source_enum_strings)); ("description", `String "Search scope: memory (default, structured notes), history (raw messages), or all")]);
       ]);
       ("required", `List [`String "query"]);
     ];

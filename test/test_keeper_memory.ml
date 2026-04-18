@@ -2,6 +2,7 @@ open Alcotest
 
 module Mention = Mention
 module Keeper_execution = Masc_mcp.Keeper_execution
+module Keeper_exec_memory = Masc_mcp.Keeper_exec_memory
 module Keeper_memory = Masc_mcp.Keeper_memory
 module Keeper_memory_recall = Masc_mcp.Keeper_memory_recall
 module Keeper_world_observation = Masc_mcp.Keeper_world_observation
@@ -844,6 +845,25 @@ let test_memory_search_bank_basic () =
     let score = Yojson.Safe.Util.(first_match |> member "score" |> to_float) in
     check bool "score is positive" true (score > 0.0))
 
+let test_memory_search_unknown_source_defaults_to_memory () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"unknown-source-keeper"
+      ~mention_targets:["unknown-source-keeper"] () in
+    write_memory_bank config "unknown-source-keeper" [
+      memory_note ~kind:"decision" ~text:"alpha in memory" ~priority:86
+        ~generation:1 ~turn:1 ~ts_unix:1000.0 ();
+    ];
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "alpha"); ("source", `String "bogus") ])
+      () in
+    let json = Yojson.Safe.from_string result in
+    check string "unknown source falls back to memory explicitly" "memory"
+      Yojson.Safe.Util.(json |> member "source" |> to_string))
+
 (** Test: kind filter narrows results to matching kind only. *)
 let test_memory_search_bank_kind_filter () =
   let dir = test_tmpdir () in
@@ -1011,6 +1031,39 @@ let test_memory_search_source_all () =
     let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
     check bool "found matches from both sources" true (match_count >= 2))
 
+let test_memory_search_source_variant_witness () =
+  let witness source =
+    let actual = Keeper_exec_memory.memory_search_source_to_string source in
+    check bool
+      (Printf.sprintf "%s present in valid_memory_search_source_strings" actual)
+      true
+      (List.mem actual Keeper_exec_memory.valid_memory_search_source_strings)
+  in
+  witness Keeper_exec_memory.Memory;
+  witness Keeper_exec_memory.History;
+  witness Keeper_exec_memory.All;
+  check int "exactly 3 canonical sources" 3
+    (List.length Keeper_exec_memory.valid_memory_search_source_strings)
+
+let test_memory_search_source_schema_enum_sync () =
+  let memory_search_schema =
+    Masc_mcp.Tool_shard.base_tools
+    |> List.find (fun (schema : Types.tool_schema) ->
+         schema.name = "keeper_memory_search")
+  in
+  let schema_enum =
+    let open Yojson.Safe.Util in
+    memory_search_schema.input_schema
+    |> member "properties"
+    |> member "source"
+    |> member "enum"
+    |> to_list
+    |> List.map to_string
+  in
+  check (list string) "schema enum mirrors variant strings"
+    Keeper_exec_memory.valid_memory_search_source_strings
+    schema_enum
+
 let () =
   run "Keeper_memory"
     [
@@ -1106,9 +1159,15 @@ let () =
             test_memory_search_bank_empty;
           test_case "no matching query returns no_match" `Quick
             test_memory_search_bank_no_match;
+          test_case "unknown source defaults to memory" `Quick
+            test_memory_search_unknown_source_defaults_to_memory;
           test_case "source=history uses legacy search" `Quick
             test_memory_search_source_history;
           test_case "source=all merges bank and history" `Quick
             test_memory_search_source_all;
+          test_case "source variant witness" `Quick
+            test_memory_search_source_variant_witness;
+          test_case "source schema enum sync" `Quick
+            test_memory_search_source_schema_enum_sync;
         ] );
     ]

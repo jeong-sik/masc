@@ -18,6 +18,27 @@ type memory_match = {
   score: float;
 }
 
+type memory_search_source =
+  | Memory
+  | History
+  | All
+
+let memory_search_source_to_string = function
+  | Memory -> "memory"
+  | History -> "history"
+  | All -> "all"
+
+let memory_search_source_of_string_opt = function
+  | "memory" -> Some Memory
+  | "history" -> Some History
+  | "all" -> Some All
+  | _ -> None
+
+let all_memory_search_sources = [ Memory; History; All ]
+
+let valid_memory_search_source_strings =
+  List.map memory_search_source_to_string all_memory_search_sources
+
 let search_memory_bank
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -195,21 +216,27 @@ let keeper_memory_search_json
       ~(args : Yojson.Safe.t) =
   let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
   let limit = max 1 (min 10 (Safe_ops.json_int ~default:5 "limit" args)) in
-  let source = Safe_ops.json_string ~default:"memory" "source" args |> String.trim in
+  let raw_source =
+    Safe_ops.json_string ~default:(memory_search_source_to_string Memory) "source" args
+    |> String.trim
+  in
+  let source =
+    memory_search_source_of_string_opt raw_source |> Option.value ~default:Memory
+  in
   let kind_filter = Safe_ops.json_string ~default:"" "kind" args |> String.trim in
   let result =
     match source with
-    | "history" ->
+    | History ->
       let matches = search_history ~config ~meta ~ctx_work ~query ~limit in
       let no_match = matches = [] in
       let match_jsons = List.map (fun msg -> `String msg) matches in
       `Assoc ([
         "query", `String query;
-        "source", `String "history";
+        "source", `String (memory_search_source_to_string source);
         "match_count", `Int (List.length matches);
         "matches", `List match_jsons;
       ] @ (if no_match then [ "no_match", `Bool true ] else []))
-    | "all" ->
+    | All ->
       let (bank_matches, bank_total) =
         search_memory_bank ~config ~meta ~query ~kind_filter ~limit
       in
@@ -227,12 +254,12 @@ let keeper_memory_search_json
       ) history_matches in
       `Assoc ([
         "query", `String query;
-        "source", `String "all";
+        "source", `String (memory_search_source_to_string source);
         "total_candidates", `Int bank_total;
         "match_count", `Int total_matches;
         "matches", `List (bank_jsons @ history_jsons);
       ] @ (if no_match then [ "no_match", `Bool true ] else []))
-    | _ (* "memory" *) ->
+    | Memory ->
       let (matches, total_candidates) =
         search_memory_bank ~config ~meta ~query ~kind_filter ~limit
       in
@@ -240,7 +267,7 @@ let keeper_memory_search_json
       let match_jsons = List.map memory_match_to_json matches in
       `Assoc ([
         "query", `String query;
-        "source", `String "memory";
+        "source", `String (memory_search_source_to_string source);
         "total_candidates", `Int total_candidates;
         "match_count", `Int (List.length matches);
         "matches", `List match_jsons;
@@ -271,7 +298,7 @@ let keeper_memory_search_json
       "ts_unix", `Float (Time_compat.now ());
       "event", `String "memory_search";
       "query", `String query;
-      "source", `String source;
+      "source", `String (memory_search_source_to_string source);
       "kind_filter", `String kind_filter;
       "match_count", `Int log_match_count;
     ] @ (match log_top_score with

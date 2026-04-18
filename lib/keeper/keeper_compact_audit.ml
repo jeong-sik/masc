@@ -393,13 +393,16 @@ let spawn_subscriber
     resolve_retention_days ~default:retention_days
   in
   let sub =
-    Agent_sdk.Event_bus.subscribe ~filter:compaction_filter bus
+    Oas_bus_instrument.subscribe
+      ~purpose:"compact_audit"
+      ~filter:compaction_filter
+      bus
   in
   Eio.Switch.on_release sw (fun () ->
-    Agent_sdk.Event_bus.unsubscribe bus sub);
+    Oas_bus_instrument.unsubscribe bus sub);
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
-      let batch = Agent_sdk.Event_bus.drain sub in
+      let batch = Oas_bus_instrument.drain sub in
       List.iter
         (handle_event ~base_path ~retention_days:effective_retention)
         batch;

@@ -135,7 +135,7 @@ let emit_gate_event
       ("source", `String "hook");
     ] in
     (try
-      Agent_sdk.Event_bus.publish bus
+      Oas_bus_instrument.publish bus
         (Agent_sdk.Event_bus.mk_event
            (Agent_sdk.Event_bus.Custom ("masc:keeper_gate", payload)))
     with

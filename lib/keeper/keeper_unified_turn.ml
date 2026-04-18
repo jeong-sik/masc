@@ -1686,7 +1686,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let event_bus_sub =
         match Keeper_event_bus.get () with
         | Some bus ->
-          Some (Agent_sdk.Event_bus.subscribe
+          Some (Oas_bus_instrument.subscribe
+                  ~purpose:"keeper_turn"
                   ~filter:(Agent_sdk.Event_bus.filter_agent meta.name) bus)
         | None -> None
       in
@@ -1695,7 +1696,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         let summary =
           match event_bus_sub, Keeper_event_bus.get () with
           | Some sub, Some _bus ->
-              summarize_turn_event_bus (Agent_sdk.Event_bus.drain sub)
+              summarize_turn_event_bus (Oas_bus_instrument.drain sub)
           | _ -> empty_turn_event_bus_summary
         in
         turn_event_bus :=
@@ -1704,7 +1705,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       in
       let unsubscribe_event_bus () =
         match event_bus_sub, Keeper_event_bus.get () with
-        | Some sub, Some bus -> Agent_sdk.Event_bus.unsubscribe bus sub
+        | Some sub, Some bus -> Oas_bus_instrument.unsubscribe bus sub
         | _ -> ()
       in
       (* Mark turn boundary for the composite observer (issue #7122).

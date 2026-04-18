@@ -346,13 +346,18 @@ let start ~sw ~clock ~(config : Coord.config) ~bus =
       ~base_dir:(Filename.concat (Coord.masc_root_dir config) "oas-events")
       ()
   in
-  let sub = Agent_sdk.Event_bus.subscribe bus
-    ~filter:Agent_sdk.Event_bus.accept_all
+  let sub =
+    Oas_bus_instrument.subscribe
+      ~purpose:"sse_bridge"
+      ~filter:Agent_sdk.Event_bus.accept_all
+      bus
   in
+  Eio.Switch.on_release sw (fun () ->
+    Oas_bus_instrument.unsubscribe bus sub);
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       (try
-         let events = Agent_sdk.Event_bus.drain sub in
+         let events = Oas_bus_instrument.drain sub in
          List.iter (relay_event ~store) events
        with
        | Eio.Cancel.Cancelled _ as e -> raise e

@@ -62,16 +62,23 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     ~retention_days:14
     event_bus;
   let keeper_lifecycle_sub =
-    Agent_sdk.Event_bus.subscribe event_bus
+    Oas_bus_instrument.subscribe
+      ~purpose:"lifecycle_listener"
       ~filter:(fun (evt : Agent_sdk.Event_bus.event) ->
         match evt.payload with
         | Agent_sdk.Event_bus.Custom ("masc:keeper:lifecycle", _) -> true
         | _ -> false)
+      event_bus
   in
+  Eio.Switch.on_release sw (fun () ->
+    Oas_bus_instrument.unsubscribe event_bus keeper_lifecycle_sub);
+  (* Spawn the OAS bus depth sampler so warnings surface on stdout
+     even when /metrics is not scraped. *)
+  Oas_bus_instrument.start_sampler ~sw ~clock ();
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       (try
-        let events = Agent_sdk.Event_bus.drain keeper_lifecycle_sub in
+        let events = Oas_bus_instrument.drain keeper_lifecycle_sub in
         List.iter
           (fun (evt : Agent_sdk.Event_bus.event) ->
             match evt.payload with

@@ -99,8 +99,13 @@ let generate_id () =
   "appr_" ^ String.sub digest 0 12
 
 let input_preview_of_json (json : Yojson.Safe.t) =
+  (* Per-leaf sentinel-aware truncation: a naive [String.sub] on the
+     serialized form would chop a [masc:blob ...] marker mid-field and
+     leave sha256/bytes/mime malformed so the approval-queue viewer
+     cannot round-trip the preview. *)
+  let json = Observability_redact.preview_json_strings ~max_len:200 json in
   let raw = Yojson.Safe.to_string json in
-  String.sub raw 0 (min 200 (String.length raw))
+  Observability_redact.redact_preview ~max_len:200 raw
 
 let create_entry ~id ~keeper_name ~tool_name ~input ~risk_level
     ~resolver ~on_resolution =

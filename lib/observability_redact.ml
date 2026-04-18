@@ -55,8 +55,31 @@ let truncate ?(max_len = default_max_len) (s : string) : string =
   if String.length s <= max_len then s
   else String.sub s 0 max_len ^ "...(truncated)"
 
+(* Blob sentinels (see [Tool_output.encode_for_oas]) embed a 64-hex sha256
+   that the 24+ alnum pattern would otherwise overwrite with [REDACTED],
+   destroying the structural fields the dashboard needs to render the marker
+   as a "Stored blob" preview. Decode, redact only the user-visible preview
+   body, then re-encode so sha256/bytes/mime survive intact. *)
 let redact_preview ?(max_len = default_max_len) (s : string) : string =
-  s |> truncate ~max_len |> redact_patterns
+  if Tool_output.is_sentinel s then
+    match Tool_output.decode_from_oas s with
+    | Tool_output.Stored { sha256; bytes; preview; mime } ->
+        let preview = preview |> truncate ~max_len |> redact_patterns in
+        Tool_output.encode_for_oas
+          (Tool_output.Stored { sha256; bytes; preview; mime })
+    | Tool_output.Inline _ ->
+        s |> truncate ~max_len |> redact_patterns
+  else s |> truncate ~max_len |> redact_patterns
+
+let rec preview_json_strings ?(max_len = default_max_len) (json : Yojson.Safe.t)
+    : Yojson.Safe.t =
+  match json with
+  | `String s -> `String (redact_preview ~max_len s)
+  | `Assoc fields ->
+      `Assoc
+        (List.map (fun (k, v) -> (k, preview_json_strings ~max_len v)) fields)
+  | `List items -> `List (List.map (preview_json_strings ~max_len) items)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as j -> j
 
 let rec redact_json_value = function
   | `Assoc fields ->

@@ -97,29 +97,29 @@ describe('HeartbeatUptimeChip component', () => {
     const el = container.querySelector('[data-heartbeat-uptime-chip]') as HTMLElement
     expect(el).toBeTruthy()
     expect(el.textContent).toContain('100%')
-    expect(el.className).toContain('emerald')
+    expect(el.className).toContain('var(--ok)')
     expect(el.getAttribute('data-heartbeat-uptime-tone')).toBe('operational')
     expect(el.getAttribute('data-heartbeat-uptime-pct')).toBe('100')
   })
 
-  it('tone class reflects degraded band (amber) for 95-99%', () => {
+  it('tone class reflects degraded band (warn) for 95-99%', () => {
     const hist = [...Array(19).fill('up'), 'down']
     render(
       html`<${HeartbeatUptimeChip} history=${hist} />`,
       container,
     )
     const el = container.querySelector('[data-heartbeat-uptime-chip]')!
-    expect(el.className).toContain('amber')
+    expect(el.className).toContain('var(--warn)')
     expect(el.getAttribute('data-heartbeat-uptime-tone')).toBe('degraded')
   })
 
-  it('tone class reflects unhealthy band (rose) for < 95%', () => {
+  it('tone class reflects unhealthy band (bad) for < 95%', () => {
     render(
       html`<${HeartbeatUptimeChip} history=${['up', 'up', 'up', 'down']} />`,
       container,
     )
     const el = container.querySelector('[data-heartbeat-uptime-chip]')!
-    expect(el.className).toContain('rose')
+    expect(el.className).toContain('var(--bad-light)')
     expect(el.getAttribute('data-heartbeat-uptime-tone')).toBe('unhealthy')
   })
 

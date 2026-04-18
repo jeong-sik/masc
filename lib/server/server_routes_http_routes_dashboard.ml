@@ -359,18 +359,8 @@ let rec add_routes ~sw ~clock router =
                     refresh the queue rather than treating it as a malformed
                     request. Validation errors stay as 400. *)
                  let is_stale =
-                   let s = String.lowercase_ascii message in
-                   let contains sub =
-                     let len_s = String.length s in
-                     let len_sub = String.length sub in
-                     let rec loop i =
-                       if i + len_sub > len_s then false
-                       else if String.sub s i len_sub = sub then true
-                       else loop (i + 1)
-                     in
-                     loop 0
-                   in
-                   contains "not found" || contains "already resolved"
+                   String_util.contains_substring_ci message "not found"
+                   || String_util.contains_substring_ci message "already resolved"
                  in
                  let status = if is_stale then `Not_found else `Bad_request in
                  respond_json_with_cors ~status request reqd

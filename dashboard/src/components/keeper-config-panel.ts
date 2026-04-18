@@ -267,7 +267,7 @@ function LongText({ text, truncateAt = 200 }: { text: string; truncateAt?: numbe
     truncateAt !== null && truncateAt >= 0 && text.length > truncateAt
       ? text.slice(0, truncateAt) + '...'
       : text
-  return html`<div class="text-[12px] text-text-body whitespace-pre-wrap max-h-[140px] overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-md p-3 rounded mt-1.5 leading-relaxed shadow-inner hover:bg-card/60 transition-colors">${truncated}</div>`
+  return html`<div class="text-[12px] text-text-body whitespace-pre-wrap max-h-[140px] overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-sm p-3 rounded mt-1.5 leading-relaxed shadow-inner hover:bg-card/60 transition-colors">${truncated}</div>`
 }
 
 
@@ -302,7 +302,7 @@ function PromptBlock({
   `
 }
 
-const fieldStyle = 'w-full bg-card/60 backdrop-blur-md text-text-strong text-[13px] border border-card-border rounded py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all duration-200 shadow-inner'
+const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-[13px] border border-card-border rounded py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all duration-200 shadow-inner'
 
 // ── Inline editing components for runtime config ────────
 

@@ -675,7 +675,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
 
 function SectionCard({ title, children }: { title: string; children: preact.ComponentChildren }) {
   return html`
-    <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/30 hover:shadow-sm">
+    <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/30 hover:shadow-sm">
       <div class="text-[11px] font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
         <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
         ${title}
@@ -1237,7 +1237,7 @@ export function KeeperDetailOverlay() {
     >
 
         ${'' /* ── Sticky Header ── */}
-        <div class="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-[var(--card-border)] bg-[rgba(13,21,38,0.97)] backdrop-blur-md rounded-t-2xl">
+        <div class="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-[var(--card-border)] bg-[rgba(13,21,38,0.97)] backdrop-blur-sm rounded-t-2xl">
           <div class="flex items-center gap-4">
             <div class="size-12 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xl">${keeper.emoji}</div>
             <div class="flex flex-col gap-0.5">
@@ -1427,7 +1427,7 @@ export function KeeperDetailOverlay() {
 
         ${'' /* ── Runtime diagnostics (supervisor + keeper diagnostics unified) ── */}
         <details
-          class="rounded border border-card-border bg-card/40 backdrop-blur-md shadow-sm"
+          class="rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm"
           open=${diagOpen}
           onToggle=${(e: Event) => setDiagOpen((e.currentTarget as HTMLDetailsElement).open)}
         >
@@ -1512,7 +1512,7 @@ export function KeeperDetailOverlay() {
             <//>
           </div>
 
-          <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
+          <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
             <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
               <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
               품질 시그널 (고급 지표)
@@ -1523,7 +1523,7 @@ export function KeeperDetailOverlay() {
 
           <${TurnBudgetSection} keeper=${keeper} />
 
-          <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
+          <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
             <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
               <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
               도구 정책
@@ -1535,7 +1535,7 @@ export function KeeperDetailOverlay() {
 
           <${PlaygroundReposPanel} keeperName=${keeper.name} />
 
-          <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
+          <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
             <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
               <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
               설정
@@ -1545,7 +1545,7 @@ export function KeeperDetailOverlay() {
             </div>
           </details>
 
-          <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
+          <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
             <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
               <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
               Checkpoint & Snapshots
@@ -1566,11 +1566,11 @@ export function KeeperDetailOverlay() {
             디버그
           </summary>
           <div class="mt-2 flex flex-col gap-4">
-            <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md">
+            <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm">
               <h4 class="m-0 mb-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">저널</h4>
               <${AgentJournalStream} agentName=${keeper.name} />
             </div>
-            <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md">
+            <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm">
               <h4 class="m-0 mb-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">원시 데이터</h4>
               <${RawDataDebug} keeper=${keeper} />
             </div>

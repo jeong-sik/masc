@@ -354,6 +354,10 @@ let extra_guard_fragments_for_name = function
       [ "agent_name must match the authenticated agent";
         "no credential found" ]
   | "masc_auth_revoke" -> [ "no credential found" ]
+  | "masc_team_memory_read"
+  | "masc_team_memory_search"
+  | "masc_team_memory_write" ->
+      [ "keeper-only"; "not a keeper agent" ]
   | "masc_autoresearch_cycle"
   | "masc_autoresearch_inject"
   | "masc_autoresearch_status"

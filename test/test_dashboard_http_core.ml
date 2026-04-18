@@ -29,6 +29,9 @@ let with_env key value f =
       | None -> Unix.putenv key "")
     f
 
+let request target =
+  Httpun.Request.create ~headers:(Httpun.Headers.of_list []) `GET target
+
 let with_test_env f =
   let dir = test_dir () in
   Fun.protect
@@ -188,7 +191,11 @@ let test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming () =
       Atomic.set Lib.Server_dashboard_http._shell_warmed false;
       Atomic.set Lib.Server_dashboard_http._shell_warming true;
       Atomic.set Lib.Server_dashboard_http._last_good_shell (`Assoc []);
-      let json = Lib.Server_dashboard_http_core.dashboard_shell_http_json config in
+      let json =
+        Lib.Server_dashboard_http_core.dashboard_shell_http_json
+          ~request:(request "/api/v1/dashboard/shell")
+          config
+      in
       let open Yojson.Safe.Util in
       check string "bootstrap status project" "initializing"
         (json |> member "status" |> member "project" |> to_string);
@@ -220,7 +227,11 @@ let test_dashboard_shell_http_json_prefers_last_good_while_prewarming () =
       Atomic.set Lib.Server_dashboard_http._shell_warmed false;
       Atomic.set Lib.Server_dashboard_http._shell_warming true;
       Atomic.set Lib.Server_dashboard_http._last_good_shell last_good;
-      let json = Lib.Server_dashboard_http_core.dashboard_shell_http_json config in
+      let json =
+        Lib.Server_dashboard_http_core.dashboard_shell_http_json
+          ~request:(request "/api/v1/dashboard/shell")
+          config
+      in
       let open Yojson.Safe.Util in
       check string "last-good project reused" "warm-room"
         (json |> member "status" |> member "project" |> to_string);

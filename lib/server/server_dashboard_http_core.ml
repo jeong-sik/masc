@@ -1041,8 +1041,10 @@ let dashboard_shell_http_json ?clock ?request (config : Coord.config) : Yojson.S
     && Server_startup_state.elapsed_since_start ()
        < (dashboard_shell_timeout_s +. 10.0)
   in
+  let apply_startup_prewarm_guard = Option.is_some request in
   let startup_prewarm_pending =
-    (Atomic.get _shell_warming || startup_shell_bootstrap_pending)
+    apply_startup_prewarm_guard
+    && (Atomic.get _shell_warming || startup_shell_bootstrap_pending)
     && not (Atomic.get _shell_warmed)
   in
   let payload =

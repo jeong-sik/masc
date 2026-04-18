@@ -5,6 +5,16 @@
 
     @since 2.62.0 *)
 
+(** Issue #8480: hand-mirrored from
+    [Keeper_tool_pr_review.valid_pr_review_event_strings]. Direct
+    dependency would create a cycle (Tool_shard -> Keeper_tool_pr_review
+    -> Keeper_alerting -> Tool_shard). The sync regression test
+    [test_types.ml :: pr_review_event_ssot] asserts these stay in
+    lock-step so adding a new event in keeper_tool_pr_review.ml fails
+    the test before shipping with a stale schema. *)
+let pr_review_event_enum_strings =
+  [ "COMMENT"; "APPROVE"; "REQUEST_CHANGES" ]
+
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;
@@ -382,7 +392,13 @@ Pass the PR number as `pr_number` (preferred) or `number` (legacy alias).";
         ("pr_number", `Assoc [("type", `String "integer"); ("description", `String "PR number (preferred field name)")]);
         ("number", `Assoc [("type", `String "integer"); ("description", `String "PR number (legacy alias for pr_number)")]);
         ("body", `Assoc [("type", `String "string"); ("description", `String "Review body text")]);
-        ("event", `Assoc [("type", `String "string"); ("enum", `List [`String "COMMENT"; `String "APPROVE"; `String "REQUEST_CHANGES"]); ("description", `String "Review event type")]);
+        (* Issue #8480: mirrors [Keeper_tool_pr_review.valid_pr_review_event_strings].
+           Direct dependency would create a cycle (Tool_shard ->
+           Keeper_tool_pr_review -> Keeper_alerting -> Tool_shard), so the
+           sync regression test [test_types.ml :: pr_review_event_ssot]
+           asserts these stay in lock-step. Same pattern as #8467
+           (sandbox_profile / network_mode / shared_memory_scope). *)
+        ("event", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) pr_review_event_enum_strings)); ("description", `String "Review event type")]);
         ("path", `Assoc [("type", `String "string"); ("description", `String "File path for inline comment (optional)")]);
         ("line", `Assoc [("type", `String "integer"); ("description", `String "Line number for inline comment (optional)")]);
       ]);

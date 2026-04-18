@@ -5,6 +5,40 @@
 open Keeper_types
 open Keeper_exec_shared
 
+(* Issue #8480: Variant SSOT for PR review event. Adding a new
+   constructor forces compilation in [pr_review_event_to_string],
+   [pr_review_event_of_string_opt], and [pr_review_event_to_gh_flag],
+   so the schema enum in [tool_shard.ml] (derived from
+   [valid_pr_review_event_strings]) and the gh CLI dispatcher stay in
+   lock-step. Strings are uppercase to match GitHub's review event
+   vocabulary and the canonical [gh pr review] flag mapping. *)
+type pr_review_event =
+  | Comment
+  | Approve
+  | Request_changes
+
+let pr_review_event_to_string = function
+  | Comment -> "COMMENT"
+  | Approve -> "APPROVE"
+  | Request_changes -> "REQUEST_CHANGES"
+
+let pr_review_event_of_string_opt raw =
+  match String.uppercase_ascii (String.trim raw) with
+  | "COMMENT" -> Some Comment
+  | "APPROVE" -> Some Approve
+  | "REQUEST_CHANGES" -> Some Request_changes
+  | _ -> None
+
+let pr_review_event_to_gh_flag = function
+  | Comment -> "--comment"
+  | Approve -> "--approve"
+  | Request_changes -> "--request-changes"
+
+let all_pr_review_events = [ Comment; Approve; Request_changes ]
+
+let valid_pr_review_event_strings =
+  List.map pr_review_event_to_string all_pr_review_events
+
 (* Both "pr_number" and "number" are accepted for schema-drift compat. *)
 let pr_number_of_args args =
   let from_pr = Safe_ops.json_int ~default:0 "pr_number" args in
@@ -94,15 +128,19 @@ let handle_keeper_pr_review_comment
   =
   let pr_number = pr_number_of_args args in
   let body = Safe_ops.json_string ~default:"" "body" args |> String.trim in
-  let event = Safe_ops.json_string ~default:"COMMENT" "event" args |> String.trim |> String.uppercase_ascii in
+  let event_raw = Safe_ops.json_string ~default:"COMMENT" "event" args in
+  let event_opt = pr_review_event_of_string_opt event_raw in
   let repo = Safe_ops.json_string ~default:"" "repo" args |> String.trim in
   if pr_number = 0 then
     error_json "pr_number is required."
   else if body = "" then
     error_json "body is required."
-  else if not (List.mem event ["COMMENT"; "APPROVE"; "REQUEST_CHANGES"]) then
-    error_json "event must be COMMENT, APPROVE, or REQUEST_CHANGES."
-  else
+  else match event_opt with
+  | None ->
+      error_json
+        (Printf.sprintf "event must be one of [%s]; got %S"
+           (String.concat ", " valid_pr_review_event_strings) event_raw)
+  | Some event ->
     (* Check preset: requires delivery/coding/full for mutations *)
     let preset_ok =
       match Keeper_types.tool_access_preset meta.tool_access with
@@ -124,20 +162,17 @@ let handle_keeper_pr_review_comment
         "cd %s && gh pr review %d%s --body %s %s 2>&1"
         (Filename.quote root) pr_number repo_flag
         (Filename.quote body)
-        (match event with
-         | "APPROVE" -> "--approve"
-         | "REQUEST_CHANGES" -> "--request-changes"
-         | _ -> "--comment") in
+        (pr_review_event_to_gh_flag event) in
       let st, out =
         Process_eio.run_argv_with_status ~timeout_sec:30.0
           [ "/bin/zsh"; "-lc"; cmd ] in
       Log.Keeper.info "pr_review_comment: pr=%d event=%s keeper=%s ok=%b"
-        pr_number event meta.name (st = Unix.WEXITED 0);
+        pr_number (pr_review_event_to_string event) meta.name (st = Unix.WEXITED 0);
       Yojson.Safe.to_string
         (`Assoc
             [ "ok", `Bool (st = Unix.WEXITED 0)
             ; "pr_number", `Int pr_number
-            ; "event", `String event
+            ; "event", `String (pr_review_event_to_string event)
             ; "output", `String out
             ; "keeper", `String meta.name
             ])

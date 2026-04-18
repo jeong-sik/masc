@@ -31,7 +31,8 @@ PATTERNS=(
   "bg-zinc|bg-zinc-[0-9]+|zero|Use bg-[var(--white-N)]"
   "border-zinc|border-zinc-[0-9]+|zero|Use border-[var(--border-*)]"
   "rounded-px-literal|rounded-\\[[0-9]+px\\]|ratchet|Use rounded-{xs,sm,md,lg,xl,card} (tokens.css)"
-  "text-9px|text-\\[9px\\]|zero|Use text-[10px] (kbd sm) or text-[11px]"
+  "text-9px|text-\\[9px\\]|zero|Use text-3xs (10px) or text-2xs (11px)"
+  "text-px-literal|text-\\[[0-9]+px\\]|ratchet|Use text-{4xs,3xs,2xs,xs,sm,base,md,lg} (tokens.css)"
 )
 
 count_pattern() {

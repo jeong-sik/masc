@@ -495,7 +495,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-2">
-            <h3 class="m-0 text-[18px] font-semibold text-[var(--text-strong)]">${record.title}</h3>
+            <h3 class="m-0 text-xl font-semibold text-[var(--text-strong)]">${record.title}</h3>
             ${task?.status
               ? html`<${StatusBadge} status=${task.status} />`
               : keeper?.status
@@ -739,7 +739,7 @@ export function JourneyPanel() {
       <${Card} class="flex flex-col gap-4">
         <div class="flex flex-col gap-2">
           <div class="flex flex-wrap items-center gap-2">
-            <h2 class="m-0 text-[20px] font-semibold text-[var(--text-strong)]">Task → Run → Contract → Keeper → Thinking → Memory → Turn → Life → Cascade</h2>
+            <h2 class="m-0 text-2xl font-semibold text-[var(--text-strong)]">Task → Run → Contract → Keeper → Thinking → Memory → Turn → Life → Cascade</h2>
             <${StatusChip} tone="info">journey beta<//>
           </div>
           <div class="text-sm leading-relaxed text-[var(--text-muted)]">

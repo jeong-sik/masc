@@ -381,7 +381,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                   aria-label=${surface.label}
                   ariaCurrent=${isSurfaceActive ? 'page' : undefined}
                 >
-                  <span class="text-[18px] drop-shadow-sm" aria-hidden="true">${surface.icon}</span>
+                  <span class="text-xl drop-shadow-sm" aria-hidden="true">${surface.icon}</span>
                 <//>
               `
             }

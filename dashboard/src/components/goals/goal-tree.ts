@@ -302,7 +302,7 @@ export function GoalTree() {
         <div class="flex flex-wrap items-start justify-between gap-4 mb-4">
           <div class="max-w-[760px]">
             <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Goal Tree</div>
-            <h3 class="mt-1 text-[20px] font-semibold tracking-[-0.02em] text-text-strong">목표 계층 구조</h3>
+            <h3 class="mt-1 text-2xl font-semibold tracking-[-0.02em] text-text-strong">목표 계층 구조</h3>
             <p class="mt-1.5 text-sm leading-relaxed text-text-muted">
               목표의 부모-자식 관계와 연결된 태스크를 트리 형태로 보여줍니다. 수렴도는 하위 태스크 완료율 기반입니다.
             </p>

@@ -58,7 +58,7 @@ function PerfStat({
   return html`
     <div class="rounded border border-card-border/45 bg-[var(--white-5)]/10 px-3 py-3">
       <div class="text-3xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">${label}</div>
-      <div class="mt-1 text-[20px] font-bold text-[var(--text-strong)]">${value}</div>
+      <div class="mt-1 text-2xl font-bold text-[var(--text-strong)]">${value}</div>
       ${detail ? html`<div class="mt-1 text-2xs text-[var(--text-muted)]">${detail}</div>` : null}
     </div>
   `

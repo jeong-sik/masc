@@ -290,7 +290,7 @@ function KeeperApprovalAlertBanner() {
       </div>
       <div class="flex-1 min-w-0">
         <div class="flex items-baseline gap-2 flex-wrap">
-          <span class="text-[20px] font-extrabold leading-none">${items.length}건</span>
+          <span class="text-2xl font-extrabold leading-none">${items.length}건</span>
           <span class="text-sm font-semibold">Keeper HITL 승인 대기</span>
           ${maxRisk ? html`<span class="text-2xs font-bold uppercase tracking-wider opacity-80">최고 ${maxRisk}</span>` : null}
         </div>

@@ -94,7 +94,7 @@ export function OperationalMeaningPanel({
       <div class="flex items-start justify-between gap-3 flex-wrap">
         <div class="min-w-0">
           <div class="text-3xs font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">Operator Meaning</div>
-          <div class="mt-1 text-[18px] font-semibold text-[var(--text-strong)]">${insight.headline}</div>
+          <div class="mt-1 text-xl font-semibold text-[var(--text-strong)]">${insight.headline}</div>
           <div class="mt-1 text-2xs text-[var(--text-dim)] leading-relaxed">${insight.detail}</div>
         </div>
         <span class=${`rounded-sm border px-2.5 py-0.5 text-3xs font-mono ${INSIGHT_BADGE_CLS[insight.tone]}`}>

@@ -52,16 +52,16 @@ type StatusFilter = 'all' | RuntimeBand
 export function runtimeBadgeClass(band: RuntimeBand): string {
   if (band === 'active') return 'border-[rgba(52,211,153,0.2)] bg-[rgba(52,211,153,0.12)] text-[var(--ok)]'
   if (band === 'attention') return 'border-[var(--warn-20)] bg-[rgba(251,191,36,0.12)] text-[var(--warn)]'
-  if (band === 'paused') return 'border-[rgba(167,139,250,0.2)] bg-[rgba(167,139,250,0.12)] text-[#a78bfa]'
+  if (band === 'paused') return 'border-[rgba(167,139,250,0.2)] bg-[var(--purple-12)] text-[#a78bfa]'
   return 'border-[var(--white-8)] bg-[var(--white-4)] text-[var(--text-dim)]'
 }
 
 export function stageBadgeClass(stageKey: string): string {
   if (stageKey === 'tool_use') return 'border-[rgba(71,184,255,0.24)] bg-[rgba(71,184,255,0.12)] text-[var(--accent)]'
   if (stageKey === 'scheduled_autonomous' || stageKey === 'thinking') return 'border-[rgba(52,211,153,0.22)] bg-[rgba(52,211,153,0.1)] text-[var(--ok)]'
-  if (stageKey === 'handoff' || stageKey === 'compacting') return 'border-[rgba(167,139,250,0.24)] bg-[rgba(167,139,250,0.12)] text-[#c4b5fd]'
+  if (stageKey === 'handoff' || stageKey === 'compacting') return 'border-[rgba(167,139,250,0.24)] bg-[var(--purple-12)] text-[#c4b5fd]'
   if (stageKey === 'failing' || stageKey === 'crashed') return 'border-[rgba(239,68,68,0.24)] bg-[rgba(239,68,68,0.12)] text-[var(--bad)]'
-  if (stageKey === 'paused') return 'border-[rgba(167,139,250,0.24)] bg-[rgba(167,139,250,0.12)] text-[#a78bfa]'
+  if (stageKey === 'paused') return 'border-[rgba(167,139,250,0.24)] bg-[var(--purple-12)] text-[#a78bfa]'
   return 'border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]'
 }
 

@@ -168,7 +168,7 @@ function DiffBlock({ text }: { text: string }) {
       ${lines.map((line: string) => {
         const cls =
           line.startsWith('+') && !line.startsWith('+++') ? 'text-[var(--ok)] bg-[rgba(74,222,128,0.06)]'
-          : line.startsWith('-') && !line.startsWith('---') ? 'text-[var(--bad)] bg-[rgba(239,68,68,0.06)]'
+          : line.startsWith('-') && !line.startsWith('---') ? 'text-[var(--bad)] bg-[var(--bad-6)]'
           : line.startsWith('@@') ? 'text-[var(--accent)] font-semibold'
           : 'text-[var(--text-body)]'
         return html`<div class="${cls} px-2 min-h-[1.6em]">${line || ' '}</div>`
@@ -192,7 +192,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
   const titleLabel = isErr ? 'Error' : 'Result'
   const titleColor = isErr ? 'text-[var(--bad)]' : 'text-[var(--text-muted)]'
   const borderColor = isErr ? 'border-[var(--bad-20)]' : 'border-[var(--white-8)]'
-  const bgColor = isErr ? 'bg-[rgba(239,68,68,0.04)]' : 'bg-[var(--white-3)]'
+  const bgColor = isErr ? 'bg-[var(--bad-6)]' : 'bg-[var(--white-3)]'
 
   const MAX_TEXT_LEN = 100000
   const isTruncatedPlain = hint === 'plain' && text.length > MAX_TEXT_LEN
@@ -423,7 +423,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const domain = typeof d.error_domain === 'string' ? d.error_domain : 'unknown'
     const errorDetail = typeof d.detail === 'string' ? d.detail : ''
     return html`
-      <div class="mt-2 px-3 py-2 rounded bg-[rgba(239,68,68,0.04)] border border-[var(--bad-soft)] space-y-1">
+      <div class="mt-2 px-3 py-2 rounded bg-[var(--bad-6)] border border-[var(--bad-soft)] space-y-1">
         <div class="text-[12px]"><span class="text-[var(--text-dim)]">도메인:</span> <span class="font-mono text-[var(--bad)]">${domain}</span></div>
         ${errorDetail ? html`<div class="text-[11px] font-mono text-[var(--text-body)] break-all">${errorDetail}</div>` : null}
       </div>

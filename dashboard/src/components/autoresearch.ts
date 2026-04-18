@@ -284,7 +284,7 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
                   <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-right py-2.5 px-3 font-medium">이후</th>
                   <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-right py-2.5 px-3 font-medium">변화</th>
                   <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-center py-2.5 px-3 font-medium">판정</th>
-                  <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-right py-2.5 px-3 font-medium shadow-[1px_1px_2px_rgba(0,0,0,0.2)]">시간</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-right py-2.5 px-3 font-medium shadow-[1px_1px_2px_var(--black-20)]">시간</th>
                 </tr>
               </thead>
               <tbody>

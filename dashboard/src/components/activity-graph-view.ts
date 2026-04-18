@@ -32,7 +32,7 @@ function edgeColor(kind: string, active: boolean): string {
     case 'creates': return 'rgba(74, 222, 128, 0.4)'
     case 'broadcasts': return 'rgba(34, 211, 238, 0.35)'
     case 'mentions': return 'rgba(34, 211, 238, 0.55)'
-    case 'hands_off_to': return 'rgba(167, 139, 250, 0.5)'
+    case 'hands_off_to': return 'var(--purple-50)'
     case 'posts': return 'rgba(244, 114, 182, 0.4)'
     case 'comments_on': return 'rgba(244, 114, 182, 0.3)'
     case 'votes_on': return 'rgba(167, 139, 250, 0.35)'

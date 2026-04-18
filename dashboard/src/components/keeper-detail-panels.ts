@@ -96,8 +96,8 @@ type KpiTone = 'default' | 'ok' | 'warn' | 'bad'
 const KPI_TONE: Record<KpiTone, string> = {
   default: 'border-[var(--card-border)] bg-[var(--white-3)]',
   ok: 'border-[var(--ok-20)] bg-[rgba(74,222,128,0.06)]',
-  warn: 'border-[var(--warn-20)] bg-[rgba(251,191,36,0.06)]',
-  bad: 'border-[var(--bad-20)] bg-[rgba(239,68,68,0.06)]',
+  warn: 'border-[var(--warn-20)] bg-[var(--warn-8)]',
+  bad: 'border-[var(--bad-20)] bg-[var(--bad-6)]',
 }
 
 const KPI_VALUE_TONE: Record<KpiTone, string> = {
@@ -261,9 +261,9 @@ function OutcomesLedger({ keeper, outcomes }: {
         ${(successes.compactions_ok > 0 || successes.handoffs_ok > 0 || failures.compaction_failed > 0 || failures.handoff_failed > 0) ? html`
           <div class="mt-2 flex flex-wrap gap-1.5 text-[10px]">
             ${successes.compactions_ok > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--ok-20)] bg-[rgba(74,222,128,0.06)] text-[var(--ok)]">압축 ${successes.compactions_ok}</span>` : null}
-            ${failures.compaction_failed > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--bad-20)] bg-[rgba(239,68,68,0.06)] text-[var(--bad)]">압축 실패 ${failures.compaction_failed}</span>` : null}
+            ${failures.compaction_failed > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--bad-20)] bg-[var(--bad-6)] text-[var(--bad)]">압축 실패 ${failures.compaction_failed}</span>` : null}
             ${successes.handoffs_ok > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--ok-20)] bg-[rgba(74,222,128,0.06)] text-[var(--ok)]">인계 ${successes.handoffs_ok}</span>` : null}
-            ${failures.handoff_failed > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--bad-20)] bg-[rgba(239,68,68,0.06)] text-[var(--bad)]">인계 실패 ${failures.handoff_failed}</span>` : null}
+            ${failures.handoff_failed > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--bad-20)] bg-[var(--bad-6)] text-[var(--bad)]">인계 실패 ${failures.handoff_failed}</span>` : null}
           </div>
         ` : null}
       </div>
@@ -315,10 +315,10 @@ function OutcomesLedger({ keeper, outcomes }: {
         </div>
         <div class="flex flex-wrap gap-1.5 text-[11px]">
           <span class="px-2 py-0.5 rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] tabular-nums">세대 ${keeper.generation ?? '-'}</span>
-          <span class=${`px-2 py-0.5 rounded-sm tabular-nums ${failures.crashes > 0 ? 'border border-[var(--bad-20)] bg-[rgba(239,68,68,0.06)] text-[var(--bad)]' : 'border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)]'}`}>크래시 ${failures.crashes}회</span>
-          <span class=${`px-2 py-0.5 rounded-sm tabular-nums ${failures.restarts > 0 ? 'border border-[var(--warn-20)] bg-[rgba(251,191,36,0.06)] text-[var(--warn)]' : 'border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)]'}`}>재시작 ${failures.restarts}회</span>
+          <span class=${`px-2 py-0.5 rounded-sm tabular-nums ${failures.crashes > 0 ? 'border border-[var(--bad-20)] bg-[var(--bad-6)] text-[var(--bad)]' : 'border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)]'}`}>크래시 ${failures.crashes}회</span>
+          <span class=${`px-2 py-0.5 rounded-sm tabular-nums ${failures.restarts > 0 ? 'border border-[var(--warn-20)] bg-[var(--warn-8)] text-[var(--warn)]' : 'border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)]'}`}>재시작 ${failures.restarts}회</span>
           ${failures.consecutive_fail_current > 0 ? html`
-            <span class="px-2 py-0.5 rounded-sm border border-[var(--warn-20)] bg-[rgba(251,191,36,0.06)] text-[var(--warn)] tabular-nums">연속 실패 ${failures.consecutive_fail_current}</span>
+            <span class="px-2 py-0.5 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-8)] text-[var(--warn)] tabular-nums">연속 실패 ${failures.consecutive_fail_current}</span>
           ` : null}
         </div>
       </div>
@@ -1083,7 +1083,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
 
       ${'' /* Cascade fallback events */}
       ${fallbackCount > 0 ? html`
-        <div class="md:col-span-2 p-3 rounded border border-[var(--bad-20)] bg-[rgba(239,68,68,0.04)]">
+        <div class="md:col-span-2 p-3 rounded border border-[var(--bad-20)] bg-[var(--bad-6)]">
           <div class="flex items-center justify-between mb-1.5">
             <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Cascade Fallback</span>
             <span class="text-[10px] text-[var(--bad)]">${fallbackCount}회</span>

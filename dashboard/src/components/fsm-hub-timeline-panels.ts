@@ -58,7 +58,7 @@ export function swimlaneSegmentColor(value: string): string {
   if (IDLE_LIKE_VALUES.has(value)) return 'bg-[var(--white-7)]'
   if (value === 'Overflowed') return 'bg-[rgba(245,158,11,0.45)]'
   if (value === 'Compacting' || value === 'compacting') return 'bg-[rgba(245,158,11,0.45)]'
-  if (value === 'HandingOff') return 'bg-[rgba(167,139,250,0.5)]'
+  if (value === 'HandingOff') return 'bg-[var(--purple-50)]'
   return 'bg-[rgba(129,140,248,0.45)]'
 }
 
@@ -293,7 +293,7 @@ export function SwimlaneTimeline({
       <div class="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-dim)]">
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(129,140,248,0.45)]"></span>active</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(245,158,11,0.45)]"></span>compact</span>
-        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(167,139,250,0.5)]"></span>handoff</span>
+        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--purple-50)]"></span>handoff</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(239,68,68,0.5)]"></span>alarm</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm border border-[var(--white-8)] bg-[var(--white-3)]"></span>idle</span>
       </div>

@@ -33,9 +33,9 @@ function sourceBadgeClass(source: PromptSource): string {
     case 'override':
       return 'text-[var(--warn)] bg-[rgba(250,204,21,0.12)] border-[rgba(250,204,21,0.28)]'
     case 'file':
-      return 'text-[var(--ok-20)] bg-[rgba(34,197,94,0.12)] border-[rgba(34,197,94,0.28)]'
+      return 'text-[var(--ok-20)] bg-[rgba(34,197,94,0.12)] border-[var(--emerald-28)]'
     case 'missing':
-      return 'text-[var(--bad-light)] bg-[rgba(244,63,94,0.12)] border-[rgba(244,63,94,0.28)]'
+      return 'text-[var(--bad-light)] bg-[rgba(244,63,94,0.12)] border-[var(--rose-28)]'
     default:
       return 'text-[var(--text-muted)] bg-[var(--white-6)] border-[var(--card-border)]'
   }

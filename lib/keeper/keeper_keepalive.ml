@@ -1606,15 +1606,18 @@ let run_heartbeat_loop
   loop ()
 ;;
 
-let with_keeper_entry_by_agent_name ~agent_name ~on_missing f =
-  match Keeper_registry.find_by_agent_name agent_name with
+let with_keeper_entry_by_identity ~identity ~on_missing f =
+  match Keeper_registry.find_by_agent_name identity with
   | Some entry -> f entry
-  | None -> on_missing ()
+  | None ->
+    (match Keeper_registry.find_by_name identity with
+     | Some entry -> f entry
+     | None -> on_missing ())
 ;;
 
 let set_keeper_paused_state ~agent_name paused =
-  with_keeper_entry_by_agent_name
-    ~agent_name
+  with_keeper_entry_by_identity
+    ~identity:agent_name
     ~on_missing:(fun () ->
       let action = if paused then "pause" else "resume" in
       Log.Keeper.warn "directive %s: agent %s not in registry" action agent_name)
@@ -1633,16 +1636,16 @@ let set_keeper_paused_state ~agent_name paused =
 ;;
 
 let wakeup_keeper_by_agent_name ~agent_name =
-  with_keeper_entry_by_agent_name
-    ~agent_name
+  with_keeper_entry_by_identity
+    ~identity:agent_name
     ~on_missing:(fun () ->
       Log.Keeper.warn "directive wakeup: agent %s not in registry" agent_name)
     (fun entry -> wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
 let assign_keeper_task_from_directive ~agent_name ~task_id =
-  with_keeper_entry_by_agent_name
-    ~agent_name
+  with_keeper_entry_by_identity
+    ~identity:agent_name
     ~on_missing:(fun () ->
       Log.Keeper.warn "directive claim: agent %s not in registry" agent_name)
     (fun entry ->
@@ -1961,6 +1964,20 @@ let record_keeper_crashed
 
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_meta) : unit
   =
+  let existing_entry =
+    Keeper_registry.get ~base_path:ctx.config.base_path m.name
+  in
+  let reclaim_stale_stopped_entry (entry : Keeper_registry.registry_entry) =
+    entry.phase = Keeper_state_machine.Stopped
+    && Eio.Promise.peek entry.done_p = Some `Stopped
+  in
+  (match existing_entry with
+   | Some entry when reclaim_stale_stopped_entry entry ->
+       Log.Keeper.info
+         "start_keepalive: reclaiming stale stopped entry %s"
+         m.name;
+       Keeper_registry.unregister ~base_path:ctx.config.base_path m.name
+   | _ -> ());
   if Keeper_registry.is_registered ~base_path:ctx.config.base_path m.name
   then Log.Keeper.info "start_keepalive: skipped %s (already registered)" m.name
   else if not (Keeper_registry.spawn_slots_available ())

@@ -106,6 +106,9 @@ val force_done_task_r :
 val complete_task :
   config -> agent_name:string -> task_id:string -> notes:string -> string
 
+(** Low-level completion helper retained for legacy/tests.
+    Runtime surfaces should prefer [transition_task_r ~action:Done_action]
+    so CDAL / verification / lifecycle guards stay aligned in one path. *)
 val complete_task_r :
   config -> agent_name:string -> task_id:string ->
   notes:string -> string Types.masc_result

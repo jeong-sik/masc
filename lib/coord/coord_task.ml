@@ -796,9 +796,14 @@ let transition_task_r config ~agent_name ~task_id ~action
               assignee = agent_name;
               started_at = now;
             }, None)
+        | Types.Submit_for_verification, Types.Claimed { assignee; _ }
         | Types.Submit_for_verification, Types.InProgress { assignee; _ }
           when assignee = agent_name
                && Env_config_runtime.Verification.fsm_enabled () ->
+            (* Keepers are prompted with Claim -> Work -> Done and do not
+               always emit an explicit Start transition before completing.
+               Allow submission from Claimed so the verifier FSM matches the
+               public task lifecycle instead of requiring a hidden extra step. *)
             (* [Random_id] is the shared leaf helper used by both
                [masc_coord] here and [masc_mcp.Verification.generate_id],
                so the vrf- id algorithm is now defined once (#7544

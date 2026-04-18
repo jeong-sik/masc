@@ -88,6 +88,19 @@ let test_submit_for_verification_moves_to_awaiting () =
       Alcotest.(check string) "status" "awaiting_verification"
         (status_string config task_id))
 
+let test_submit_for_verification_from_claimed_moves_to_awaiting () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_strict_task config in
+    ignore
+      (Coord.transition_task_r config ~agent_name:"worker"
+         ~task_id ~action:Types.Claim ());
+    match Coord.transition_task_r config ~agent_name:"worker"
+            ~task_id ~action:Types.Submit_for_verification () with
+    | Error e -> Alcotest.fail ("submit from claimed failed: " ^ Types.show_masc_error e)
+    | Ok _ ->
+      Alcotest.(check string) "status" "awaiting_verification"
+        (status_string config task_id))
+
 (* Regression for the criteria ← completion_contract vs
    evidence_refs ← verify_gate_evidence split. Prior to the fix both
    sides pulled from verify_gate_evidence, so criteria ended up
@@ -262,6 +275,8 @@ let () =
     ("transitions_enabled", [
       Alcotest.test_case "submit moves to awaiting_verification" `Quick
         test_submit_for_verification_moves_to_awaiting;
+      Alcotest.test_case "submit from claimed moves to awaiting_verification"
+        `Quick test_submit_for_verification_from_claimed_moves_to_awaiting;
       Alcotest.test_case "submit splits criteria/evidence by contract field"
         `Quick test_submit_populates_criteria_from_completion_contract;
       Alcotest.test_case "cross-agent approve moves to done" `Quick

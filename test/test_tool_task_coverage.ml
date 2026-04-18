@@ -429,6 +429,69 @@ let () = test "handle_transition_release_empty_summary_error_includes_example" (
   assert (str_contains result_empty "\"summary\"")
 )
 
+let () = test "handle_transition_done_prefers_ownership_error_over_cdal_gate" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Tool_task.handle_add_task ctx
+      (`Assoc
+        [
+          ("title", `String "Strict owned task");
+          ( "contract",
+            `Assoc
+              [
+                ("strict", `Bool true);
+                ("completion_contract", `List [ `String "deliverable-ready" ]);
+              ] );
+        ])
+  in
+  let _ = Coord.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
+  let success, result =
+    Tool_task.handle_transition ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "done");
+          ("notes", `String "deliverable-ready");
+        ])
+  in
+  assert (not success);
+  assert (str_contains result "currently owned by other-agent");
+  assert (not (str_contains result "CDAL verdict"))
+)
+
+let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx () in
+    let _ =
+      Tool_task.handle_add_task ctx
+        (`Assoc
+          [
+            ("title", `String "Awaiting verification task");
+            ( "contract",
+              `Assoc
+                [
+                  ("strict", `Bool true);
+                  ("completion_contract", `List [ `String "tests pass" ]);
+                ] );
+          ])
+    in
+    let _ = Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" in
+    let _ =
+      Coord.transition_task_r ctx.config ~agent_name:"test-agent"
+        ~task_id:"task-001" ~action:Types.Submit_for_verification ()
+    in
+    let success, result =
+      Tool_task.handle_transition ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "done");
+            ("notes", `String "tests pass");
+          ])
+    in
+    assert (not success);
+    assert (str_contains result "awaiting verification");
+    assert (str_contains result "approve or reject")))
 let () = test "handle_claim_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Claim direct")]) in

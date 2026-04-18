@@ -195,6 +195,18 @@ let find_pending_id ~keeper_name ~tool_name =
         else None)
     (Atomic.get pending) None
 
+let find_pending_id_in_map map ~keeper_name ~tool_name =
+  SMap.fold
+    (fun id entry acc ->
+      match acc with
+      | Some _ -> acc
+      | None ->
+        if String.equal entry.keeper_name keeper_name
+           && String.equal entry.tool_name tool_name
+        then Some id
+        else None)
+    map None
+
 let sort_entries_by_requested_at entries =
   List.sort
     (fun left right ->
@@ -227,29 +239,24 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
 
 let submit_pending ~keeper_name ~tool_name ~input ~risk_level ~on_resolution
   : string =
-  let created_entry = ref None in
-  atomic_update pending (fun map ->
-    match find_pending_id ~keeper_name ~tool_name with
-    | Some id -> 
-        created_entry := Some (`Existing id);
-        map
+  let rec submit () =
+    let map = Atomic.get pending in
+    match find_pending_id_in_map map ~keeper_name ~tool_name with
+    | Some id -> id
     | None ->
-        let id = generate_id () in
-        let entry =
-          create_entry ~id ~keeper_name ~tool_name ~input ~risk_level
-            ~resolver:None ~on_resolution:(Some on_resolution)
-        in
-        created_entry := Some (`Created entry);
-        SMap.add id entry map
-  );
-  (* The ref is always set inside the CAS body above (both branches assign),
-     so None is unreachable. *)
-  match !created_entry with
-  | None -> assert false
-  | Some (`Existing id) -> id
-  | Some (`Created entry) ->
-    record_pending entry;
-    entry.id
+      let id = generate_id () in
+      let entry =
+        create_entry ~id ~keeper_name ~tool_name ~input ~risk_level
+          ~resolver:None ~on_resolution:(Some on_resolution)
+      in
+      let updated = SMap.add id entry map in
+      if Atomic.compare_and_set pending map updated then (
+        record_pending entry;
+        id
+      ) else
+        submit ()
+  in
+  submit ()
 
 (* ── Resolve (operator action) ────────────────────────────── *)
 

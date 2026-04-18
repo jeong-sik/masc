@@ -281,6 +281,41 @@ let test_background_pending_callback_and_keeper_lookup () =
   | Some _ -> Alcotest.fail "expected approve callback"
   | None -> Alcotest.fail "expected callback to fire"
 
+let test_background_pending_reuses_existing_entry () =
+  Eio_main.run @@ fun _env ->
+  let initial_count = AQ.pending_count () in
+  let first_callback = ref None in
+  let second_callback = ref None in
+  let id1 =
+    AQ.submit_pending
+      ~keeper_name:"gate-keeper"
+      ~tool_name:"keeper_continue_after_partial_commit"
+      ~input:(`Assoc [("kind", `String "continue_gate_required")])
+      ~risk_level:AQ.Critical
+      ~on_resolution:(fun decision -> first_callback := Some decision)
+  in
+  let after_first = AQ.pending_count () in
+  let id2 =
+    AQ.submit_pending
+      ~keeper_name:"gate-keeper"
+      ~tool_name:"keeper_continue_after_partial_commit"
+      ~input:(`Assoc [("kind", `String "continue_gate_required")])
+      ~risk_level:AQ.Critical
+      ~on_resolution:(fun decision -> second_callback := Some decision)
+  in
+  Alcotest.(check string) "existing pending id reused" id1 id2;
+  Alcotest.(check int) "only one entry created"
+    (initial_count + 1) after_first;
+  Alcotest.(check int) "second submit does not grow queue"
+    after_first (AQ.pending_count ());
+  (match AQ.resolve ~id:id1 ~decision:Agent_sdk.Hooks.Approve with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail ("resolve failed: " ^ msg));
+  Alcotest.(check bool) "first callback fired" true
+    (match !first_callback with Some Agent_sdk.Hooks.Approve -> true | _ -> false);
+  Alcotest.(check bool) "second callback not attached to duplicate submit" true
+    (Option.is_none !second_callback)
+
 (* ── 4. Approval callback integration ────────────────────── *)
 
 let test_callback_approves_low_risk () =
@@ -375,6 +410,8 @@ let () =
       Alcotest.test_case "cancel cleans up" `Quick test_approval_queue_cancel_cleans_up;
       Alcotest.test_case "background pending callback" `Quick
         test_background_pending_callback_and_keeper_lookup;
+      Alcotest.test_case "background pending reuses existing entry" `Quick
+        test_background_pending_reuses_existing_entry;
     ]);
     ("callback_integration", [
       Alcotest.test_case "low risk auto-approved" `Quick test_callback_approves_low_risk;

@@ -29,13 +29,25 @@ type persisted_record = {
   duration_ms : float;
 }
 
-let parse_record (json : Yojson.Safe.t) : persisted_record option =
+let parse_record (json : Yojson.Safe.t)
+  : (persisted_record, string) result =
   let tool_name = Safe_ops.json_string_opt "tool_name" json in
   let success = Safe_ops.json_bool_opt "success" json in
   let duration_ms = Safe_ops.json_float_opt "duration_ms" json in
   match tool_name, success, duration_ms with
-  | Some tn, Some s, Some d -> Some { tool_name = tn; success = s; duration_ms = d }
-  | _ -> None
+  | Some tn, Some s, Some d -> Ok { tool_name = tn; success = s; duration_ms = d }
+  | _ ->
+    let missing =
+      [ ("tool_name", Option.is_none tool_name)
+      ; ("success", Option.is_none success)
+      ; ("duration_ms", Option.is_none duration_ms)
+      ]
+      |> List.filter_map (fun (field, is_missing) ->
+        if is_missing then Some field else None)
+    in
+    Error
+      (Printf.sprintf "missing required field(s): %s"
+         (String.concat ", " missing))
 
 (* ── Write queue ────────────────────────────────────── *)
 
@@ -132,12 +144,14 @@ let start_flush_fiber ~sw ~clock ~base_path =
 let restore ~base_path : int =
   let store = get_or_create_store ~base_path in
   let count = ref 0 in
+  let skipped = ref 0 in
+  let first_skip_reason = ref None in
   (try
      (* Read all available records (cap at 1M to avoid OOM on huge histories) *)
      let jsons = Dated_jsonl.read_recent store 1_000_000 in
      List.iter (fun json ->
        match parse_record json with
-       | Some r ->
+       | Ok r ->
          let result : Tool_result.t = {
            tool_name = r.tool_name;
            success = r.success;
@@ -146,8 +160,18 @@ let restore ~base_path : int =
          } in
          Tool_metrics.record result;
          incr count
-       | None -> ()
-     ) jsons
+       | Error reason ->
+         incr skipped;
+         if Option.is_none !first_skip_reason then
+           first_skip_reason := Some reason
+     ) jsons;
+     if !skipped > 0 then
+       Log.Metrics.warn
+         "tool_metrics_persist: skipped %d malformed restore record(s)%s"
+         !skipped
+         (match !first_skip_reason with
+          | Some reason -> Printf.sprintf " (first error: %s)" reason
+          | None -> "")
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->

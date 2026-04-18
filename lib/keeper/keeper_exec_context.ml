@@ -145,6 +145,10 @@ let dispatch_keeper_phase_event ~(config : Coord.config) ~keeper_name event =
   with
   | Ok _ -> ()
   | Error err ->
+      Prometheus.inc_counter
+        Prometheus.metric_keeper_lifecycle_dispatch_rejections
+        ~labels:[ ("event", Keeper_state_machine.event_to_string event) ]
+        ();
       Log.Keeper.warn
         "%s: post-turn lifecycle dispatch failed event=%s error=%s"
         keeper_name

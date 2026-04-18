@@ -194,6 +194,16 @@ let metric_keeper_heartbeat_failures =
   "masc_keeper_heartbeat_failures_total"
 let metric_keeper_write_meta_failures =
   "masc_keeper_write_meta_failures_total"
+let metric_keeper_lifecycle_dispatch_rejections =
+  "masc_keeper_lifecycle_dispatch_rejections_total"
+
+(* OAS SSE relay (oas_sse_bridge.ml). *)
+let metric_oas_sse_relay_retries =
+  "masc_oas_sse_relay_retries_total"
+let metric_oas_sse_relay_drops =
+  "masc_oas_sse_relay_drops_total"
+let metric_oas_sse_relay_queue_depth =
+  "masc_oas_sse_relay_queue_depth"
 
 (* MCP tool schema budget (set once at boot from mcp_server_eio.ml
    via [set_tool_schema_stats]). *)
@@ -283,6 +293,18 @@ let init () =
   add metric_keeper_write_meta_failures
     "Total keeper meta-file write failures, labeled by keeper and phase"
     Counter;
+  add metric_keeper_lifecycle_dispatch_rejections
+    "Total post-turn lifecycle dispatch rejections, labeled by event"
+    Counter;
+  add metric_oas_sse_relay_retries
+    "Total OAS SSE relay retry attempts, labeled by failed stage"
+    Counter;
+  add metric_oas_sse_relay_drops
+    "Total OAS SSE relay drops after retries or queue pressure, labeled by stage"
+    Counter;
+  add metric_oas_sse_relay_queue_depth
+    "Current in-memory OAS SSE relay retry queue depth"
+    Gauge;
   add "masc_board_truncated_posts_total"
     "Total board posts truncated due to size limits"
     Counter;

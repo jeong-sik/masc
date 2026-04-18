@@ -39,6 +39,27 @@ let contains_substring s needle =
   in
   if n_len = 0 then true else loop 0
 
+let sse_data_json raw_event =
+  let prefix = "data: " in
+  let prefix_len = String.length prefix in
+  raw_event
+  |> String.split_on_char '\n'
+  |> List.find_map (fun line ->
+       if String.length line >= prefix_len
+          && String.sub line 0 prefix_len = prefix
+       then
+         Some
+           (Yojson.Safe.from_string
+              (String.sub line prefix_len
+                 (String.length line - prefix_len)))
+       else
+         None)
+  |> Option.value ~default:`Null
+
+let relay_test_config broken_root =
+  let base = Coord.default_config (Filename.get_temp_dir_name ()) in
+  { base with base_path = broken_root; workspace_path = broken_root }
+
 (* ================================================================ *)
 (* Oas_events tests                                                  *)
 (* ================================================================ *)
@@ -183,41 +204,42 @@ let test_oas_sse_bridge_persists_native_events () =
       Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
-          Oas_sse_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
-          Event_bus.publish bus
-            (Event_bus.mk_event
-               ~correlation_id:"sess-bridge" ~run_id:"run-bridge"
-               (ToolCalled
-                  {
-                    agent_name = "bridge-agent";
-                    tool_name = "masc_status";
-                    input = `Assoc [];
-                  }));
-          Eio.Time.sleep (Eio.Stdenv.clock env) 2.2;
-          let store =
-            Dated_jsonl.create
-              ~base_dir:(Filename.concat (Coord.masc_root_dir config) "oas-events")
-              ()
-          in
-          let events = Dated_jsonl.read_recent store 5 in
-          Alcotest.(check bool) "durable oas event appended" true (events <> []);
-          (match List.hd events with
-           | `Assoc fields ->
-               let field_string name =
-                 match List.assoc_opt name fields with
-                 | Some (`String value) -> value
-                 | _ -> ""
-               in
-               Alcotest.(check string) "event type" "tool_called"
-                 (field_string "event_type");
-               Alcotest.(check string) "agent name" "bridge-agent"
-                 (field_string "agent_name");
-               Alcotest.(check string) "correlation id" "sess-bridge"
-                 (field_string "correlation_id");
-               Alcotest.(check string) "run id" "run-bridge"
-                 (field_string "run_id")
-           | _ -> Alcotest.fail "expected persisted oas event object");
-          raise Exit)
+            Oas_sse_bridge.start_with_interval ~drain_interval_s:0.1
+              ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
+            Event_bus.publish bus
+              (Event_bus.mk_event
+                 ~correlation_id:"sess-bridge" ~run_id:"run-bridge"
+                 (ToolCalled
+                    {
+                      agent_name = "bridge-agent";
+                      tool_name = "masc_status";
+                      input = `Assoc [];
+                    }));
+            Eio.Time.sleep (Eio.Stdenv.clock env) 0.6;
+            let store =
+              Dated_jsonl.create
+                ~base_dir:(Filename.concat (Coord.masc_root_dir config) "oas-events")
+                ()
+            in
+            let events = Dated_jsonl.read_recent store 5 in
+            Alcotest.(check bool) "durable oas event appended" true (events <> []);
+            (match List.hd events with
+             | `Assoc fields ->
+                 let field_string name =
+                   match List.assoc_opt name fields with
+                   | Some (`String value) -> value
+                   | _ -> ""
+                 in
+                 Alcotest.(check string) "event type" "tool_called"
+                   (field_string "event_type");
+                 Alcotest.(check string) "agent name" "bridge-agent"
+                   (field_string "agent_name");
+                 Alcotest.(check string) "correlation id" "sess-bridge"
+                   (field_string "correlation_id");
+                 Alcotest.(check string) "run id" "run-bridge"
+                   (field_string "run_id")
+             | _ -> Alcotest.fail "expected persisted oas event object");
+            raise Exit)
       with Exit -> ())
 
 let test_oas_sse_bridge_broadcasts_lifecycle_to_observers () =
@@ -235,25 +257,120 @@ let test_oas_sse_bridge_broadcasts_lifecycle_to_observers () =
       Masc_mcp.Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
-          ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
-                    "observer-lifecycle" ~push:(fun _ -> ()) ~last_event_id:0);
-          ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Coordinator
-                    "coordinator-lifecycle" ~push:(fun _ -> ()) ~last_event_id:0);
-          Oas_sse_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
-          Oas_events.publish_keeper_lifecycle bus
-            ~event:"started"
-            ~keeper_name:"keeper-a"
-            ~phase:Masc_mcp.Keeper_state_machine.Running
-            ~detail:"supervised"
-            ();
-          Eio.Time.sleep (Eio.Stdenv.clock env) 2.2;
-          let observer_event = Masc_mcp.Sse.try_pop "observer-lifecycle" in
-          let coordinator_event = Masc_mcp.Sse.try_pop "coordinator-lifecycle" in
-          Alcotest.(check bool) "observer got oas lifecycle" true
-            (observer_event <> None);
-          Alcotest.(check bool) "coordinator got oas lifecycle" true
-            (coordinator_event <> None);
-          raise Exit)
+            ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
+                      "observer-lifecycle" ~push:(fun _ -> ()) ~last_event_id:0);
+            ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Coordinator
+                      "coordinator-lifecycle" ~push:(fun _ -> ()) ~last_event_id:0);
+            Oas_sse_bridge.start_with_interval ~drain_interval_s:0.1
+              ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
+            Oas_events.publish_keeper_lifecycle bus
+              ~event:"started"
+              ~keeper_name:"keeper-a"
+              ~phase:Masc_mcp.Keeper_state_machine.Running
+              ~detail:"supervised"
+              ();
+            Eio.Time.sleep (Eio.Stdenv.clock env) 0.6;
+            let observer_event = Masc_mcp.Sse.try_pop "observer-lifecycle" in
+            let coordinator_event = Masc_mcp.Sse.try_pop "coordinator-lifecycle" in
+            Alcotest.(check bool) "observer got oas lifecycle" true
+              (observer_event <> None);
+            Alcotest.(check bool) "coordinator got oas lifecycle" true
+              (coordinator_event <> None);
+            raise Exit)
+      with Exit -> ())
+
+let test_oas_sse_bridge_retries_append_failure_then_recovers () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "oas_sse_bridge_retry" in
+  let broken_root = Filename.concat dir "broken-root" in
+  Out_channel.with_open_text broken_root (fun oc -> output_string oc "blocked");
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Masc_mcp.Sse.close_all_clients ());
+      cleanup_dir dir)
+    (fun () ->
+      let config = relay_test_config broken_root in
+      let bus = Event_bus.create () in
+      Masc_mcp.Sse.set_clock (Eio.Stdenv.clock env);
+      try
+        Eio.Switch.run (fun sw ->
+            ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
+                      "observer-retry" ~push:(fun _ -> ()) ~last_event_id:0);
+            Oas_sse_bridge.start_with_interval ~drain_interval_s:0.1
+              ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
+            Event_bus.publish bus
+              (Event_bus.mk_event
+                 ~correlation_id:"sess-retry" ~run_id:"run-retry"
+                 (ToolCalled
+                    {
+                      agent_name = "retry-agent";
+                      tool_name = "keeper_status";
+                      input = `Assoc [];
+                    }));
+            Eio.Time.sleep (Eio.Stdenv.clock env) 0.12;
+            Sys.remove broken_root;
+            Unix.mkdir broken_root 0o755;
+            Eio.Time.sleep (Eio.Stdenv.clock env) 0.45;
+            let store =
+              Dated_jsonl.create
+                ~base_dir:(Filename.concat (Coord.masc_root_dir config) "oas-events")
+                ()
+            in
+            let events = Dated_jsonl.read_recent store 5 in
+            Alcotest.(check bool) "event eventually persisted" true (events <> []);
+            Alcotest.(check bool) "observer eventually sees recovered event" true
+              (Masc_mcp.Sse.try_pop "observer-retry" <> None);
+            raise Exit)
+      with Exit -> ())
+
+let test_oas_sse_bridge_drop_marker_on_exhausted_append_failure () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "oas_sse_bridge_drop" in
+  let broken_root = Filename.concat dir "broken-root" in
+  Out_channel.with_open_text broken_root (fun oc -> output_string oc "blocked");
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Masc_mcp.Sse.close_all_clients ());
+      cleanup_dir dir)
+    (fun () ->
+      let config = relay_test_config broken_root in
+      let bus = Event_bus.create () in
+      Masc_mcp.Sse.set_clock (Eio.Stdenv.clock env);
+      try
+        Eio.Switch.run (fun sw ->
+            ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
+                      "observer-drop" ~push:(fun _ -> ()) ~last_event_id:0);
+            Oas_sse_bridge.start_with_interval ~drain_interval_s:0.1
+              ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
+            Event_bus.publish bus
+              (Event_bus.mk_event
+                 ~correlation_id:"sess-drop" ~run_id:"run-drop"
+                 (ToolCalled
+                    {
+                      agent_name = "drop-agent";
+                      tool_name = "keeper_status";
+                      input = `Assoc [];
+                    }));
+            Eio.Time.sleep (Eio.Stdenv.clock env) 0.8;
+            let observer_event = Masc_mcp.Sse.try_pop "observer-drop" in
+            Alcotest.(check bool) "drop marker broadcast" true
+              (observer_event <> None);
+            match observer_event with
+            | None -> Alcotest.fail "expected relay drop marker"
+            | Some raw_event ->
+                let json = sse_data_json raw_event in
+                let event_type =
+                  Yojson.Safe.Util.(member "type" json |> to_string)
+                in
+                let failed_stage =
+                  Yojson.Safe.Util.(member "failed_stage" json |> to_string)
+                in
+                Alcotest.(check string) "marker type" "oas:relay_dropped"
+                  event_type;
+                Alcotest.(check string) "failed stage" "append" failed_stage;
+                raise Exit)
       with Exit -> ())
 
 (* ================================================================ *)
@@ -593,6 +710,10 @@ let () =
         test_oas_sse_bridge_persists_native_events;
       Alcotest.test_case "sse bridge sends lifecycle to observers" `Quick
         test_oas_sse_bridge_broadcasts_lifecycle_to_observers;
+      Alcotest.test_case "sse bridge retries append failure then recovers" `Quick
+        test_oas_sse_bridge_retries_append_failure_then_recovers;
+      Alcotest.test_case "sse bridge emits drop marker on exhausted append failure" `Quick
+        test_oas_sse_bridge_drop_marker_on_exhausted_append_failure;
       Alcotest.test_case "agent_completed includes usage" `Quick
         test_agent_completed_includes_usage;
       Alcotest.test_case "agent_completed no usage on error" `Quick

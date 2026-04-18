@@ -204,7 +204,10 @@ val event_to_string : event -> string
     Runtime contract:
     - [Publish_lifecycle] is executed by the registry integration as an
       observability-only SSE/log side effect.
-    - All other variants remain descriptive placeholders for
+    - [Start_compaction] is executed by the registry only for the
+      [Overflowed] auto-compact path, which emits
+      [Auto_compact_triggered] after the transition is committed.
+    - The remaining variants remain descriptive placeholders for
       supervisor-owned work and are intentionally ignored by the registry. *)
 type entry_action =
   | Start_compaction

@@ -33,6 +33,14 @@ type tool_result_payload =
   | Plain_text
   | Malformed_structured of string
 
+type execution_outcome = [ `Success | `Failure ]
+
+type executed_tool_result = {
+  raw_output : string;
+  outcome : execution_outcome;
+  payload_shape : tool_result_payload;
+}
+
 let looks_like_structured_payload payload =
   let len = String.length payload in
   let rec find_first_nonspace i =
@@ -60,11 +68,47 @@ let classify_tool_result_payload payload =
       if is_error then Structured_error else Structured_success
     | Ok _ -> Structured_success
 
+let is_policy_gate_error raw_output =
+  match Safe_ops.parse_json_safe
+          ~context:"Keeper_exec_tools.is_policy_gate_error"
+          raw_output
+  with
+  | Ok json ->
+      (match Safe_ops.json_string_opt "error" json with
+       | Some msg -> String.equal (String.trim msg) "tool_not_allowed"
+       | None -> false)
+  | Error _ -> false
+
+let inferred_outcome_of_result ~raw_output ~payload_shape =
+  match payload_shape with
+  | Structured_success
+  | Plain_text ->
+      `Success
+  | Structured_error ->
+      if is_policy_gate_error raw_output then `Success else `Failure
+  | Malformed_structured _ ->
+      `Failure
+
+let make_executed_tool_result ?outcome raw_output =
+  let payload_shape = classify_tool_result_payload raw_output in
+  let outcome =
+    match outcome with
+    | Some explicit -> explicit
+    | None -> inferred_outcome_of_result ~raw_output ~payload_shape
+  in
+  { raw_output; outcome; payload_shape }
+
+let success_tool_result raw_output =
+  make_executed_tool_result ~outcome:`Success raw_output
+
+let failure_tool_result raw_output =
+  make_executed_tool_result ~outcome:`Failure raw_output
+
 
 
 (* ── Tool execution dispatch ──────────────────────────────────── *)
 
-let execute_keeper_tool_call
+let execute_keeper_tool_call_with_outcome
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
@@ -72,31 +116,37 @@ let execute_keeper_tool_call
       ~(name : string)
       ~(input : Yojson.Safe.t)
       ()
-  : string
+  : executed_tool_result
   =
   let args = input in
   let now_ts = Time_compat.now () in
-  let apply_circuit_breaker result =
-    match classify_tool_result_payload result with
-    | Structured_error ->
-      Keeper_failure_circuit_breaker.maybe_enrich_error
-        ~keeper_name:meta.name ~error_msg:result
-    | Structured_success
-    | Plain_text ->
+  let apply_circuit_breaker (result : executed_tool_result) =
+    match result.outcome, result.payload_shape with
+    | `Success, _ ->
       Keeper_failure_circuit_breaker.record_success ~keeper_name:meta.name;
       result
-    | Malformed_structured parse_error ->
+    | `Failure, Malformed_structured parse_error ->
       Log.Keeper.error
         "keeper:%s tool:%s produced malformed structured payload: %s"
         meta.name name parse_error;
       let breaker_msg =
         Printf.sprintf "malformed_tool_result: %s" parse_error
       in
-      let _ =
+      let raw_output =
         Keeper_failure_circuit_breaker.maybe_enrich_error
           ~keeper_name:meta.name ~error_msg:breaker_msg
       in
-      result
+      { raw_output; outcome = `Failure;
+        payload_shape = classify_tool_result_payload raw_output; }
+    | `Failure, Structured_error
+    | `Failure, Structured_success
+    | `Failure, Plain_text ->
+      let raw_output =
+        Keeper_failure_circuit_breaker.maybe_enrich_error
+          ~keeper_name:meta.name ~error_msg:result.raw_output
+      in
+      { raw_output; outcome = `Failure;
+        payload_shape = classify_tool_result_payload raw_output; }
   in
   let lookup = tool_access_lookup_of_meta meta in
   apply_circuit_breaker (
@@ -118,14 +168,15 @@ let execute_keeper_tool_call
         , Printf.sprintf
             "'%s' exists but your preset does not allow it. Use keeper_tools_list to see available tools." name )
     in
-    Yojson.Safe.to_string
-      (`Assoc [
-        ("ok", `Bool false);
-        ("error", `String "tool_not_allowed");
-        ("tool", `String name);
-        ("reason", `String reason);
-        ("hint", `String hint);
-      ])
+    make_executed_tool_result
+      (Yojson.Safe.to_string
+         (`Assoc [
+           ("ok", `Bool false);
+           ("error", `String "tool_not_allowed");
+           ("tool", `String name);
+           ("reason", `String reason);
+           ("hint", `String hint);
+         ]))
   else (
     match name with
     | "keeper_tool_search" ->
@@ -136,32 +187,45 @@ let execute_keeper_tool_call
         min 10 (max 1 (Safe_ops.json_int ~default:5 "max_results" args))
       in
       if query = "" then
-        error_json "query is required. Good: query='read file'. Bad: query=''."
+        failure_tool_result
+          (error_json
+             "query is required. Good: query='read file'. Bad: query=''.")
 
       else
         let fn = match search_fn with
           | Some f -> f
           | None -> !tool_search_fn
         in
-        Yojson.Safe.to_string (fn ~query ~max_results)
+        success_tool_result (Yojson.Safe.to_string (fn ~query ~max_results))
     | "keeper_stay_silent" ->
-      Yojson.Safe.to_string (`Assoc [ "status", `String "silent" ])
-    | "keeper_tools_list" -> Keeper_exec_shared.keeper_tools_list_json ~meta
+      success_tool_result
+        (Yojson.Safe.to_string (`Assoc [ "status", `String "silent" ]))
+    | "keeper_tools_list" ->
+      success_tool_result (Keeper_exec_shared.keeper_tools_list_json ~meta)
     | "keeper_time_now" ->
-      Yojson.Safe.to_string
-        (`Assoc [ "now_iso", `String (now_iso ()); "now_unix", `Float now_ts ])
-    | "keeper_context_status" -> Keeper_exec_memory.keeper_context_status_json ~meta ~ctx_work
-    | "keeper_memory_search" -> Keeper_exec_memory.keeper_memory_search_json ~config ~meta ~ctx_work ~args
+      success_tool_result
+        (Yojson.Safe.to_string
+           (`Assoc [ "now_iso", `String (now_iso ());
+                     "now_unix", `Float now_ts ]))
+    | "keeper_context_status" ->
+      success_tool_result
+        (Keeper_exec_memory.keeper_context_status_json ~meta ~ctx_work)
+    | "keeper_memory_search" ->
+      success_tool_result
+        (Keeper_exec_memory.keeper_memory_search_json ~config ~meta ~ctx_work ~args)
     | "keeper_library_search" ->
       let ok, msg =
         Tool_library.handle_search Tool_library.{ agent_name = meta.name } args
       in
-      if ok then msg else Yojson.Safe.to_string (`Assoc [ "error", `String msg ])
+      if ok then success_tool_result msg
+      else failure_tool_result
+             (Yojson.Safe.to_string (`Assoc [ "error", `String msg ]))
     | "keeper_library_read" ->
       let ok, msg =
         Tool_library.handle_read Tool_library.{ agent_name = meta.name } args
       in
-      tool_result_or_error (ok, msg)
+      if ok then success_tool_result msg
+      else failure_tool_result (error_json msg)
     | "keeper_board_post"
     | "keeper_board_list"
     | "keeper_board_get"
@@ -170,21 +234,41 @@ let execute_keeper_tool_call
     | "keeper_board_stats"
     | "keeper_board_search"
     | "keeper_board_delete"
-    | "keeper_board_cleanup" -> Keeper_exec_board.handle_keeper_board_tool ~meta ~name ~args
-    | "keeper_fs_read" -> Keeper_exec_fs.handle_keeper_fs_read ~config ~meta ~args
-    | "keeper_fs_edit" -> Keeper_exec_fs.handle_keeper_fs_edit ~config ~meta ~args
-    | "keeper_bash" -> Keeper_exec_shell.handle_keeper_bash ~config ~meta ~args
-    | "keeper_shell" -> Keeper_exec_shell.handle_keeper_shell ~config ~meta ~args
+    | "keeper_board_cleanup" ->
+      make_executed_tool_result
+        (Keeper_exec_board.handle_keeper_board_tool ~meta ~name ~args)
+    | "keeper_fs_read" ->
+      make_executed_tool_result
+        (Keeper_exec_fs.handle_keeper_fs_read ~config ~meta ~args)
+    | "keeper_fs_edit" ->
+      make_executed_tool_result
+        (Keeper_exec_fs.handle_keeper_fs_edit ~config ~meta ~args)
+    | "keeper_bash" ->
+      make_executed_tool_result
+        (Keeper_exec_shell.handle_keeper_bash ~config ~meta ~args)
+    | "keeper_shell" ->
+      make_executed_tool_result
+        (Keeper_exec_shell.handle_keeper_shell ~config ~meta ~args)
     | "keeper_voice_speak"
     | "keeper_voice_listen"
     | "keeper_voice_agent"
     | "keeper_voice_sessions"
     | "keeper_voice_session_start"
-    | "keeper_voice_session_end" -> Keeper_exec_voice.handle_keeper_voice_tool ~meta ~name ~args
-    | "keeper_preflight_check" -> Keeper_exec_preflight.handle_keeper_preflight_check ~config ~meta ~args
-    | "keeper_pr_review_read" -> Keeper_tool_pr_review.handle_keeper_pr_review_read ~config ~meta ~args
-    | "keeper_pr_review_comment" -> Keeper_tool_pr_review.handle_keeper_pr_review_comment ~config ~meta ~args
-    | "keeper_pr_review_reply" -> Keeper_tool_pr_review.handle_keeper_pr_review_reply ~config ~meta ~args
+    | "keeper_voice_session_end" ->
+      make_executed_tool_result
+        (Keeper_exec_voice.handle_keeper_voice_tool ~meta ~name ~args)
+    | "keeper_preflight_check" ->
+      make_executed_tool_result
+        (Keeper_exec_preflight.handle_keeper_preflight_check ~config ~meta ~args)
+    | "keeper_pr_review_read" ->
+      make_executed_tool_result
+        (Keeper_tool_pr_review.handle_keeper_pr_review_read ~config ~meta ~args)
+    | "keeper_pr_review_comment" ->
+      make_executed_tool_result
+        (Keeper_tool_pr_review.handle_keeper_pr_review_comment ~config ~meta ~args)
+    | "keeper_pr_review_reply" ->
+      make_executed_tool_result
+        (Keeper_tool_pr_review.handle_keeper_pr_review_reply ~config ~meta ~args)
     | "keeper_tasks_list"
     | "keeper_tasks_audit"
     | "keeper_task_force_release"
@@ -192,11 +276,15 @@ let execute_keeper_tool_call
     | "keeper_broadcast"
     | "keeper_task_claim"
     | "keeper_task_create"
-    | "keeper_task_done" -> Keeper_exec_task.handle_keeper_task_tool ~config ~meta ~name ~args
+    | "keeper_task_done" ->
+      make_executed_tool_result
+        (Keeper_exec_task.handle_keeper_task_tool ~config ~meta ~name ~args)
     | n when String.starts_with ~prefix:"masc_autoresearch_" n ->
-      Keeper_exec_masc.handle_keeper_autoresearch_tool ~config ~meta ~name ~args
+      make_executed_tool_result
+        (Keeper_exec_masc.handle_keeper_autoresearch_tool ~config ~meta ~name ~args)
     | n when String.starts_with ~prefix:"masc_" n ->
-      Keeper_exec_masc.handle_keeper_masc_tool ~config ~meta ~name ~args
+      make_executed_tool_result
+        (Keeper_exec_masc.handle_keeper_masc_tool ~config ~meta ~name ~args)
     | other ->
       let suggestion =
         let candidates = keeper_allowed_tool_names meta in
@@ -251,4 +339,20 @@ let execute_keeper_tool_call
              [ ("did_you_mean", `List (List.map enrich_suggestion names));
                ("hint", `String "Call one of these tools with the correct parameters.") ])
       in
-      Yojson.Safe.to_string (`Assoc fields)))
+      make_executed_tool_result (Yojson.Safe.to_string (`Assoc fields))))
+
+let execute_keeper_tool_call
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~(ctx_work : working_context)
+      ?search_fn
+      ~(name : string)
+      ~(input : Yojson.Safe.t)
+      ()
+  : string
+  =
+  let result =
+    execute_keeper_tool_call_with_outcome
+      ~config ~meta ~ctx_work ?search_fn ~name ~input ()
+  in
+  result.raw_output

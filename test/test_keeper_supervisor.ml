@@ -288,7 +288,7 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
         | _ -> ""
       in
       check bool "approval id present" true (approval_id <> "");
-      (match AQ.resolve ~id:approval_id ~decision:Agent_sdk.Hooks.Approve with
+      (match AQ.resolve ~id:approval_id ~decision:Agent_sdk.Hooks.Approve () with
        | Ok () -> ()
        | Error msg -> fail ("resolve failed: " ^ msg));
       let resumed_meta =

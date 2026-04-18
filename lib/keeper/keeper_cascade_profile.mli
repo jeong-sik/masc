@@ -17,11 +17,14 @@
 type t =
   | Default
   | Keeper_unified
+  | Governance_judge
+  | Operator_judge
   | Sangsu
   | Local_only
   | Local_recovery
   | Tool_rerank
-  (* v1 active catalog (2026-04-17): keepers route through these via
+  (* v1 active catalog (2026-04-18): keepers and dashboard judge loops
+     route through these via
      [config/cascade.json] presets. Adding a profile here unlocks lookup
      for [<name>_models]/[<name>_temperature]/[<name>_max_tokens] keys.
      Without the variant, [canonicalize] silently collapses the name to

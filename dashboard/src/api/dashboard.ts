@@ -371,11 +371,19 @@ export function resolveGovernanceApproval(
   id: string,
   decision: 'approve' | 'reject',
   reason?: string,
+  hint?: {
+    keeper_name?: string
+    tool_name?: string
+    input_kind?: string
+  },
 ): Promise<{ ok: boolean; id: string; decision: 'approve' | 'reject' }> {
   return post('/api/v1/dashboard/governance/approvals/resolve', {
     id,
     decision,
     reason,
+    keeper_name: hint?.keeper_name,
+    tool_name: hint?.tool_name,
+    input_kind: hint?.input_kind,
   })
 }
 

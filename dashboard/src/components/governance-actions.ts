@@ -126,7 +126,19 @@ export async function respondToKeeperApproval(id: string, decision: 'approve' | 
   if (!id) return
   governanceApprovalActing.value = id
   try {
-    await resolveGovernanceApproval(id, decision)
+    const approval =
+      governanceData.value?.approval_queue?.find(item => item.id === id)
+    const rawInput = approval?.input
+    const inputKind =
+      rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput)
+      && typeof (rawInput as { kind?: unknown }).kind === 'string'
+        ? (rawInput as { kind: string }).kind
+        : undefined
+    await resolveGovernanceApproval(id, decision, undefined, {
+      keeper_name: approval?.keeper_name,
+      tool_name: approval?.tool_name,
+      input_kind: inputKind,
+    })
     showToast(decision === 'approve' ? 'keeper 승인 요청을 승인했습니다' : 'keeper 승인 요청을 거부했습니다', 'success')
     await refreshGovernance()
   } catch (err) {
@@ -137,4 +149,3 @@ export async function respondToKeeperApproval(id: string, decision: 'approve' | 
     governanceApprovalActing.value = null
   }
 }
-

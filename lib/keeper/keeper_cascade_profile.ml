@@ -8,6 +8,8 @@
 type t =
   | Default
   | Keeper_unified
+  | Governance_judge
+  | Operator_judge
   | Sangsu
   | Local_only
   | Local_recovery
@@ -24,6 +26,8 @@ type t =
 let to_string = function
   | Default -> "default"
   | Keeper_unified -> "keeper_unified"
+  | Governance_judge -> "governance_judge"
+  | Operator_judge -> "operator_judge"
   | Sangsu -> "sangsu"
   | Local_only -> "local_only"
   | Local_recovery -> "local_recovery"
@@ -38,9 +42,10 @@ let to_string = function
   | Resilient_breaker -> "resilient_breaker"
 
 let all =
-  [ Default; Keeper_unified; Sangsu; Local_only; Local_recovery; Tool_rerank;
-    Nick0cave; Capacity_queue_trio; Vendor_mix_balanced; Cost_tier_ladder;
-    Oauth_cli_rotate; Quality_sticky_glm51; Tool_use_strict; Resilient_breaker ]
+  [ Default; Keeper_unified; Governance_judge; Operator_judge; Sangsu;
+    Local_only; Local_recovery; Tool_rerank; Nick0cave; Capacity_queue_trio;
+    Vendor_mix_balanced; Cost_tier_ladder; Oauth_cli_rotate;
+    Quality_sticky_glm51; Tool_use_strict; Resilient_breaker ]
 
 (** All known cascade profile names, derived from the variant. Consumers
     that still operate on strings can use this list; new code should
@@ -62,6 +67,8 @@ let of_string_opt (raw : string) : t option =
      through to default. Collapsed here so bucket/metric code does not
      see a ghost value. *)
   | "keeper_turn" | "keeper_reply" -> Some default
+  | "governance_judge" -> Some Governance_judge
+  | "operator_judge" -> Some Operator_judge
   | "sangsu" -> Some Sangsu
   | "local_only" -> Some Local_only
   | "local_recovery" -> Some Local_recovery

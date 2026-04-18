@@ -151,7 +151,7 @@ let test_approval_queue_submit_and_resolve () =
     | _ -> Alcotest.fail "bad entry"
   in
   (* Operator resolves: approve *)
-  (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+  (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve () with
    | Ok () -> ()
    | Error msg -> Alcotest.fail ("resolve failed: " ^ msg));
   (* Agent fiber should resume *)
@@ -187,7 +187,7 @@ let test_approval_queue_reject () =
        | _ -> "")
     | _ -> ""
   in
-  (match AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "too dangerous") with
+  (match AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "too dangerous") () with
    | Ok () -> ()
    | Error msg -> Alcotest.fail ("resolve failed: " ^ msg));
   Eio.Fiber.yield ();
@@ -223,7 +223,7 @@ let test_approval_queue_expire_stale () =
 
 let test_approval_resolve_nonexistent () =
   Eio_main.run @@ fun _env ->
-  match AQ.resolve ~id:"nonexistent_id" ~decision:Agent_sdk.Hooks.Approve with
+  match AQ.resolve ~id:"nonexistent_id" ~decision:Agent_sdk.Hooks.Approve () with
   | Error msg ->
     Alcotest.(check bool) "error message" true
       (String.length msg > 0)
@@ -269,7 +269,7 @@ let test_background_pending_callback_and_keeper_lookup () =
     (AQ.has_pending_for_keeper ~keeper_name:"gate-keeper");
   Alcotest.(check int) "background entry added"
     (initial_count + 1) (AQ.pending_count ());
-  (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+  (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve () with
    | Ok () -> ()
    | Error msg -> Alcotest.fail ("resolve failed: " ^ msg));
   Alcotest.(check bool) "keeper pending cleared" false
@@ -280,6 +280,34 @@ let test_background_pending_callback_and_keeper_lookup () =
   | Some Agent_sdk.Hooks.Approve -> ()
   | Some _ -> Alcotest.fail "expected approve callback"
   | None -> Alcotest.fail "expected callback to fire"
+
+let test_background_pending_resolves_stale_id_via_hint () =
+  Eio_main.run @@ fun _env ->
+  let callback_result = ref None in
+  let _actual_id =
+    AQ.submit_pending
+      ~keeper_name:"gate-keeper"
+      ~tool_name:"keeper_continue_after_partial_commit"
+      ~input:(`Assoc [("kind", `String "continue_gate_required")])
+      ~risk_level:AQ.Critical
+      ~on_resolution:(fun decision -> callback_result := Some decision)
+  in
+  (match
+     AQ.resolve
+       ~id:"appr_stale"
+       ~keeper_name:"gate-keeper"
+       ~tool_name:"keeper_continue_after_partial_commit"
+       ~input_kind:"continue_gate_required"
+       ~decision:Agent_sdk.Hooks.Approve ()
+   with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail ("stale-id fallback resolve failed: " ^ msg));
+  Alcotest.(check bool) "keeper pending cleared via fallback" false
+    (AQ.has_pending_for_keeper ~keeper_name:"gate-keeper");
+  match !callback_result with
+  | Some Agent_sdk.Hooks.Approve -> ()
+  | Some _ -> Alcotest.fail "expected approve callback via stale-id fallback"
+  | None -> Alcotest.fail "expected callback to fire via stale-id fallback"
 
 (* ── 4. Approval callback integration ────────────────────── *)
 
@@ -325,7 +353,7 @@ let test_callback_production_keeper_write_requires_approval () =
        | _ -> Alcotest.fail "missing approval id")
     | _ -> Alcotest.fail "expected pending approval entry"
   in
-  (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+  (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve () with
    | Ok () -> ()
    | Error msg -> Alcotest.fail ("resolve failed: " ^ msg));
   Eio.Fiber.yield ();
@@ -375,6 +403,8 @@ let () =
       Alcotest.test_case "cancel cleans up" `Quick test_approval_queue_cancel_cleans_up;
       Alcotest.test_case "background pending callback" `Quick
         test_background_pending_callback_and_keeper_lookup;
+      Alcotest.test_case "background pending stale-id fallback" `Quick
+        test_background_pending_resolves_stale_id_via_hint;
     ]);
     ("callback_integration", [
       Alcotest.test_case "low risk auto-approved" `Quick test_callback_approves_low_risk;

@@ -20,6 +20,30 @@
   "keeper_unified_temperature": 0.2,
   "keeper_unified_max_tokens": 16384,
 
+  "_comment_governance_judge": "Dashboard governance judge must resolve to its own cascade profile; if the name is missing from keeper_cascade_profile SSOT it silently collapses to keeper_unified and competes with live keeper traffic.",
+  "governance_judge_models": [
+    {"model": "claude_code:claude-haiku-4-5-20251001", "weight": 80},
+    {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 20}
+  ],
+  "governance_judge_strategy": "weighted_random",
+  "governance_judge_max_cycles": 1,
+  "governance_judge_cli_max_concurrent": 1,
+  "governance_judge_ollama_max_concurrent": 1,
+  "governance_judge_temperature": 0.1,
+  "governance_judge_max_tokens": 4096,
+
+  "_comment_operator_judge": "Operator judge runs on the same dashboard control plane but should not borrow keeper_unified routing; keep it cheap and isolated from long-running keeper cascades.",
+  "operator_judge_models": [
+    {"model": "claude_code:claude-haiku-4-5-20251001", "weight": 80},
+    {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 20}
+  ],
+  "operator_judge_strategy": "weighted_random",
+  "operator_judge_max_cycles": 1,
+  "operator_judge_cli_max_concurrent": 1,
+  "operator_judge_ollama_max_concurrent": 1,
+  "operator_judge_temperature": 0.1,
+  "operator_judge_max_tokens": 4096,
+
   "local_only_models": [
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],

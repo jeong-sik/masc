@@ -38,6 +38,25 @@ describe('post', () => {
 
     expect(defaultBoardVoter()).toBe('dashboard-user')
   })
+
+  it('surfaces structured server error bodies on POST failures', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"error":"approval appr_stale not found or already resolved"}', {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(post('/api/v1/dashboard/governance/approvals/resolve', {
+      id: 'appr_stale',
+      decision: 'approve',
+    })).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      status: 400,
+      responseMessage: 'approval appr_stale not found or already resolved',
+    })
+  })
 })
 
 describe('get bootstrap warm-up mapping', () => {

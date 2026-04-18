@@ -99,20 +99,23 @@ export class ApiRequestError extends Error {
   status?: number
   statusText?: string
   timeout: boolean
+  responseMessage?: string
 
   constructor(opts: {
     method: string
     path: string
     status?: number
     statusText?: string
+    responseMessage?: string
     timeout?: boolean
     timeoutMs?: number
   }) {
     const method = opts.method.toUpperCase()
     const timeout = opts.timeout === true
+    const responseMessage = opts.responseMessage?.trim()
     const message = timeout
       ? `${method} ${opts.path}: timeout after ${opts.timeoutMs ?? 0}ms`
-      : `${method} ${opts.path}: ${opts.status ?? 'unknown'} ${opts.statusText ?? ''}`.trim()
+      : `${method} ${opts.path}: ${opts.status ?? 'unknown'} ${opts.statusText ?? ''}${responseMessage ? ` - ${responseMessage}` : ''}`.trim()
     super(message)
     this.name = 'ApiRequestError'
     this.method = method
@@ -120,6 +123,7 @@ export class ApiRequestError extends Error {
     this.status = opts.status
     this.statusText = opts.statusText
     this.timeout = timeout
+    this.responseMessage = responseMessage
   }
 }
 
@@ -195,6 +199,31 @@ const DASHBOARD_BOOTSTRAP_WARM_PATHS = new Set([
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+async function readErrorMessage(res: Response): Promise<string | undefined> {
+  let rawText = ''
+  try {
+    rawText = await res.text()
+  } catch {
+    return undefined
+  }
+  const trimmed = rawText.trim()
+  if (trimmed === '') return undefined
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (isRecord(parsed)) {
+      if (typeof parsed.error === 'string' && parsed.error.trim() !== '') {
+        return parsed.error.trim()
+      }
+      if (typeof parsed.message === 'string' && parsed.message.trim() !== '') {
+        return parsed.message.trim()
+      }
+    }
+  } catch {
+    // Plain-text error bodies are still useful operator feedback.
+  }
+  return trimmed
 }
 
 function isNotInitializedEnvelope(raw: unknown): boolean {
@@ -323,15 +352,17 @@ export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
     opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS,
   )
   if (!res.ok) {
-    const warmPayload = await bootstrapWarmPayload(path, res)
+    const warmPayload = await bootstrapWarmPayload(path, res.clone())
     if (warmPayload !== null) {
       return warmPayload as T
     }
+    const responseMessage = await readErrorMessage(res)
     throw new ApiRequestError({
       method: 'GET',
       path,
       status: res.status,
       statusText: res.statusText,
+      responseMessage,
     })
   }
   const data = await res.json()
@@ -409,11 +440,13 @@ export async function post<T>(
     body: JSON.stringify(body),
   }, timeoutMs)
   if (!res.ok) {
+    const responseMessage = await readErrorMessage(res)
     throw new ApiRequestError({
       method: 'POST',
       path,
       status: res.status,
       statusText: res.statusText,
+      responseMessage,
     })
   }
   return res.json() as Promise<T>

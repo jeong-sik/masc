@@ -9,6 +9,8 @@ module Profile = Masc_mcp.Keeper_cascade_profile
 let active_names =
   [ "default";
     "keeper_unified";
+    "governance_judge";
+    "operator_judge";
     "sangsu";
     "local_only";
     "local_recovery";

@@ -102,7 +102,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
             Oas.Hooks.Reject reason
           | _ -> Oas.Hooks.Reject (Printf.sprintf "unknown decision: %s" decision_str)
         in
-        (match Keeper_approval_queue.resolve ~id ~decision with
+        (match Keeper_approval_queue.resolve ~id ~decision () with
          | Ok () ->
            Some (true, Printf.sprintf "{\"resolved\":\"%s\",\"decision\":\"%s\"}" id decision_str)
          | Error msg -> Some (false, msg))

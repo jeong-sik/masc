@@ -218,6 +218,9 @@ let dashboard_governance_approval_resolve_http_json ~(args : Yojson.Safe.t) :
   | None ->
       Error "id is required"
   | Some id ->
+      let keeper_name = Safe_ops.json_string_opt "keeper_name" args in
+      let tool_name = Safe_ops.json_string_opt "tool_name" args in
+      let input_kind = Safe_ops.json_string_opt "input_kind" args in
       let decision_name =
         Safe_ops.json_string_opt "decision" args
         |> Option.value ~default:"approve"
@@ -239,7 +242,10 @@ let dashboard_governance_approval_resolve_http_json ~(args : Yojson.Safe.t) :
       match decision with
       | Error _ as err -> err
       | Ok decision ->
-          (match Keeper_approval_queue.resolve ~id ~decision with
+          (match
+             Keeper_approval_queue.resolve ?keeper_name ?tool_name ?input_kind
+               ~id ~decision ()
+           with
            | Ok () ->
                Ok
                  (`Assoc

@@ -354,7 +354,7 @@ let test_dashboard_exposes_keeper_approval_queue () =
         {|{"path":"/tmp/danger"}|}
         (approval |> member "input_preview" |> to_string);
       let id = approval |> member "id" |> to_string in
-      (match Lib.Keeper_approval_queue.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+      (match Lib.Keeper_approval_queue.resolve ~id ~decision:Agent_sdk.Hooks.Approve () with
        | Ok () -> ()
        | Error msg -> fail ("resolve failed: " ^ msg));
       Eio.Fiber.yield ();

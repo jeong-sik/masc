@@ -629,7 +629,7 @@ let test_pending_approval_blocks_turns_until_resolved () =
   check (list string) "approval pending reason is surfaced"
     [ "approval_pending" ]
     (WO.verdict_reasons_to_strings decision.verdict);
-  match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+  match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve () with
   | Ok () ->
     let resumed = WO.unified_turn_decision ~meta:minimal_meta reactive_obs in
     check bool "approval resolve re-opens reactive scheduling" true resumed.should_run;

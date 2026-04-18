@@ -195,6 +195,27 @@ let find_pending_id ~keeper_name ~tool_name =
         else None)
     (Atomic.get pending) None
 
+let input_kind_opt (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "kind" fields with
+      | Some (`String value) ->
+          let trimmed = String.trim value in
+          if trimmed = "" then None else Some trimmed
+      | _ -> None)
+  | _ -> None
+
+let fallback_matches ~keeper_name ~tool_name ?input_kind map =
+  SMap.bindings map
+  |> List.filter (fun (_id, entry) ->
+         String.equal entry.keeper_name keeper_name
+         && String.equal entry.tool_name tool_name
+         &&
+         match input_kind with
+         | None -> true
+         | Some expected ->
+             Option.equal String.equal (input_kind_opt entry.input) (Some expected))
+
 let sort_entries_by_requested_at entries =
   List.sort
     (fun left right ->
@@ -256,8 +277,12 @@ let submit_pending ~keeper_name ~tool_name ~input ~risk_level ~on_resolution
 (** Resolve a pending approval. Returns [Ok ()] if found, [Error msg] if not.
     Called from the dashboard approval HTTP handler
     ([server_dashboard_http.ml]). *)
-let resolve ~id ~(decision : Oas.Hooks.approval_decision) : (unit, string) result =
-  let result = ref (Error (Printf.sprintf "approval %s not found or already resolved" id)) in
+let resolve ?keeper_name ?tool_name ?input_kind
+    ~id ~(decision : Oas.Hooks.approval_decision) () : (unit, string) result =
+  let result =
+    ref
+      (Error (Printf.sprintf "approval %s not found or already resolved" id))
+  in
   atomic_update pending (fun map ->
     match SMap.find_opt id map with
     | None -> map
@@ -266,10 +291,57 @@ let resolve ~id ~(decision : Oas.Hooks.approval_decision) : (unit, string) resul
       SMap.remove id map
   );
   match !result with
-  | Error _ as err -> err
   | Ok entry ->
     resolve_entry entry decision;
     Ok ()
+  | Error _ -> (
+      match keeper_name, tool_name with
+      | Some keeper_name, Some tool_name ->
+        let fallback_result =
+          ref
+            (Error
+               (Printf.sprintf "approval %s not found or already resolved" id))
+        in
+        atomic_update pending (fun map ->
+          match fallback_matches ~keeper_name ~tool_name ?input_kind map with
+          | [] ->
+              let kind_suffix =
+                match input_kind with
+                | Some kind -> Printf.sprintf " kind=%s" kind
+                | None -> ""
+              in
+              fallback_result :=
+                Error
+                  (Printf.sprintf
+                     "approval %s not found or already resolved; no pending approval matches keeper=%s tool=%s%s"
+                     id keeper_name tool_name kind_suffix);
+              map
+          | [ (resolved_id, entry) ] ->
+              fallback_result := Ok (resolved_id, entry);
+              SMap.remove resolved_id map
+          | matches ->
+              let ids =
+                matches
+                |> List.map fst
+                |> String.concat ", "
+              in
+              fallback_result :=
+                Error
+                  (Printf.sprintf
+                     "approval %s not found; fallback hint matched multiple pending approvals (%s)"
+                     id ids);
+              map);
+        (match !fallback_result with
+         | Error _ as err -> err
+         | Ok (resolved_id, entry) ->
+             Log.Keeper.warn
+               "approval_queue: resolved stale approval id=%s via fallback keeper=%s tool=%s -> %s"
+               id keeper_name tool_name resolved_id;
+             resolve_entry entry decision;
+             Ok ())
+      | _ ->
+          Error
+            (Printf.sprintf "approval %s not found or already resolved" id))
 
 (* ── Query ────────────────────────────────────────────────── *)
 

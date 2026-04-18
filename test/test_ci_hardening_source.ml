@@ -630,6 +630,12 @@ let test_oas_capacity_restore_contracts () =
   check bool "governance judge selection is explicit" true
     (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
        {|[ "governance_judge" ]|});
+  check bool "governance judge has dedicated cascade config" true
+    (file_contains_pattern "config/cascade.json"
+       {|"governance_judge_models"|});
+  check bool "operator judge has dedicated cascade config" true
+    (file_contains_pattern "config/cascade.json"
+       {|"operator_judge_models"|});
   check bool "autoresearch background gating restores OAS capacity query" true
     (file_contains_pattern "lib/autoresearch_codegen.ml"
        "local_capacity_for_selections ~sw ~net");

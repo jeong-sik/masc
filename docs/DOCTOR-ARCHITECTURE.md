@@ -6,6 +6,10 @@ code_refs:
   - sidecars/discord-bot/src/doctor.py
   - bin/main_eio.ml
   - lib/doctor_dispatch.ml
+  - lib/server/server_routes_http_routes_dashboard.ml
+  - dashboard/src/components/doctor-panel.ts
+  - dashboard/src/components/lab-inspector.ts
+  - dashboard/src/tab-refresh.ts
 ---
 
 # Doctor 아키텍처
@@ -130,8 +134,9 @@ class AutoFix:
 | Telegram sidecar | `masc-mcp doctor sidecar telegram` ↔ `python -m src doctor` | 운영 중 |
 | iMessage sidecar | `masc-mcp doctor sidecar imessage` ↔ `python -m src doctor` | 운영 중 |
 | CLI connector | `masc-mcp doctor sidecar cli` ↔ `python -m src doctor` | 운영 중 |
-| 전 계층 fan-out | `masc-mcp doctor all` | 운영 중 |
-| 대시보드 | `/api/v1/dashboard/doctor` 취합 패널 | 후속 |
+| 전 계층 fan-out | `masc-mcp doctor all` (+ `--json` envelope) | 운영 중 |
+| 대시보드 Backend | `GET /api/v1/dashboard/doctor` | 운영 중 (phase 1 subprocess) |
+| 대시보드 Frontend | Lab → inspector → Doctor sub-tab | 운영 중 |
 
 ### Dispatch
 
@@ -250,11 +255,30 @@ GET /api/v1/dashboard/doctor
   이는 phase 2 에서 library 추출 + Eio.Process ~cwd 로 제거 예정.
 - 실패 시 `{error, hint}` 로 5xx 반환 — 운영자가 원인 즉시 확인 가능.
 
-### Frontend panel (후속)
+### Frontend panel (운영 중 — phase 1)
 
-대시보드 UI 는 이 endpoint 를 poll (권장 TTL 30-60s) 또는 SSE 구독하고
-각 커넥터별로 세부 섹션을 접어두며 red/yellow 가 있을 때만 자동으로 펼친다.
-`--fix` 버튼은 `callback_available` 이 `true` 인 체크에만 노출한다.
+Lab 탭 → inspector → **Doctor** sub-tab 에서 확인한다. 구현:
+
+- `dashboard/src/components/doctor-panel.ts` — types (`DoctorEnvelope`,
+  `DoctorEntry`, `DoctorSummary`), pure helpers (`severityLabel`,
+  `severityChipClass`, `summaryLine`, `doctorHeading`), async resource
+  (`loadDoctor` / `refreshDoctor`), React 컴포넌트
+  (`<DoctorPanel />`, `<DoctorEntryCard />`).
+- `dashboard/src/components/lab-inspector.ts` — "Doctor" sub-tab 등록.
+- `dashboard/src/tab-refresh.ts` — inspector refresh 파이프라인에
+  `refreshDoctorSurface` 합류. 사용자가 Lab 돌아올 때 자동 갱신.
+
+현재 UI:
+
+- Summary header — "N Doctor · 정상 X · 경고 Y · 오류 Z" + 새로고침 버튼
+- 6 doctor grid (config + 5 sidecar) — 각자 severity chip + exit code
+
+Follow-up (phase 2):
+
+- Drill-down — sidecar `checks[]` / config `warnings[]` 펼침 (`kind`
+  discriminator 로 payload 분기)
+- `--fix` 버튼 — `callback_available` 인 check 한해 AutoFix trigger
+- SSE live update — 현재는 inspector 복귀 시 refresh
 
 ### Phase 2 (후속 — in-process)
 

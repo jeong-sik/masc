@@ -670,6 +670,22 @@ let () =
           Masc_mcp.Tool_agent.valid_collaboration_format_strings
           Tool_schemas_agent.collaboration_format_enum_strings);
     ];
+    "sort_order_schema_ssot", [
+      (* Issue #8513: Tool_shard.sort_order_enum_strings (used in
+         keeper_board_list schema) hand-listed only 3 of 5 sort orders
+         exposed by Board_dispatch.valid_sort_order_strings (#8453).
+         Trending and Discussed were missing. This test asserts the
+         mirror == SSOT so adding a new sort order Variant flows
+         through to the schema automatically. *)
+      Alcotest.test_case "tool_shard mirror == Board_dispatch SSOT" `Quick (fun () ->
+        Alcotest.(check (list string)) "schema mirror == sort_order SSOT"
+          Masc_mcp.Board_dispatch.valid_sort_order_strings
+          Masc_mcp.Tool_shard.sort_order_enum_strings);
+      Alcotest.test_case "Trending and Discussed now present" `Quick (fun () ->
+        let actual = Masc_mcp.Tool_shard.sort_order_enum_strings in
+        Alcotest.(check bool) "trending present" true (List.mem "trending" actual);
+        Alcotest.(check bool) "discussed present" true (List.mem "discussed" actual));
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

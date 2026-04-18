@@ -440,7 +440,7 @@ function CheckpointSummaryCard({
           ${summary.message_count} msgs
         </span>
         ${summary.system_prompt_present
-          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-emerald-500/20 bg-emerald-500/10 text-emerald-400">system kept</span>`
+          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-emerald-500/20 bg-emerald-500/10 text-[var(--ok)]">system kept</span>`
           : null}
       </div>
       <div class="mt-2 text-[11px] text-[var(--text-muted)]">
@@ -622,7 +622,7 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
                           ${item.message_count} msgs
                         </span>
                         ${item.system_prompt_present
-                          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-emerald-500/20 bg-emerald-500/10 text-emerald-400">system kept</span>`
+                          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-emerald-500/20 bg-emerald-500/10 text-[var(--ok)]">system kept</span>`
                           : null}
                       </div>
                       <div class="mt-1 text-[11px] text-[var(--text-muted)]">
@@ -768,7 +768,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
                     <div class="flex items-center gap-2">
                       <span class="text-xs font-medium text-[var(--text-strong)] truncate">${r.name}</span>
                       <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">${r.branch}</span>
-                      ${r.shallow ? html`<span class="text-[10px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">shallow</span>` : null}
+                      ${r.shallow ? html`<span class="text-[10px] px-1 py-0.5 rounded bg-amber-500/10 text-[var(--warn)] border border-amber-500/20">shallow</span>` : null}
                     </div>
                     <div class="text-[10px] text-[var(--text-muted)] font-mono mt-0.5 truncate">${r.latest_commit}</div>
                   </div>
@@ -787,7 +787,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
                 <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
                   <span class="text-xs text-[var(--text-strong)] truncate flex-1">${pr.title}</span>
                   <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">${pr.branch}</span>
-                  ${pr.draft ? html`<span class="text-[10px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">draft</span>` : null}
+                  ${pr.draft ? html`<span class="text-[10px] px-1 py-0.5 rounded bg-amber-500/10 text-[var(--warn)] border border-amber-500/20">draft</span>` : null}
                   <a href=${pr.pr_url} target="_blank" rel="noopener" class="text-[10px] text-[var(--accent)] hover:underline flex-shrink-0">PR</a>
                 </div>
               `)}
@@ -940,9 +940,9 @@ export function lineageTransitionLabel(parentGeneration: number | null | undefin
 function verdictBadgeClass(verdict: string | undefined): string {
   switch (verdict) {
     case 'verified':
-      return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+      return 'bg-emerald-500/10 text-[var(--ok)] border border-emerald-500/20'
     case 'drift_detected':
-      return 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+      return 'bg-amber-500/10 text-[var(--warn)] border border-amber-500/20'
     case 'unavailable':
       return 'bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)]'
     default:
@@ -1262,7 +1262,7 @@ export function KeeperDetailOverlay() {
                   return html`
                     <span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-semibold uppercase tracking-wide
                       ${canPR
-                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        ? 'bg-emerald-500/10 text-[var(--ok)] border border-emerald-500/20'
                         : 'bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)]'
                       }"
                       title=${`Tool preset: ${preset}${canPR ? ' (clone/PR 가능)' : ''}`}

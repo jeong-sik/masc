@@ -54,9 +54,9 @@ function Row({
   tone?: 'neutral' | 'ok' | 'warn' | 'bad'
 }) {
   const toneClass =
-    tone === 'ok' ? 'text-emerald-400'
+    tone === 'ok' ? 'text-[var(--ok)]'
       : tone === 'warn' ? 'text-amber-300'
-      : tone === 'bad' ? 'text-red-400'
+      : tone === 'bad' ? 'text-[var(--bad-light)]'
       : 'text-text-strong'
   return html`
     <div class="flex items-center justify-between gap-4 text-[11px]">

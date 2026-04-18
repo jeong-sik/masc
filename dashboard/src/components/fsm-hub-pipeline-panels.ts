@@ -275,11 +275,11 @@ export function HeroPhase({
   }, [snapshot.phase])
 
   const phaseColor: Record<string, string> = {
-    Running: 'text-emerald-400',
-    Overflowed: 'text-amber-400',
-    Compacting: 'text-amber-400',
+    Running: 'text-[var(--ok)]',
+    Overflowed: 'text-[var(--warn)]',
+    Compacting: 'text-[var(--warn)]',
     HandingOff: 'text-violet-400',
-    Failing: 'text-red-400',
+    Failing: 'text-[var(--bad-light)]',
     Stable: 'text-[var(--text-dim)]',
   }
   const color = phaseColor[snapshot.phase] ?? 'text-[var(--accent)]'

@@ -46,9 +46,9 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
   const lastRate = windowed[windowed.length - 1]?.point.success_rate ?? null
   const lastRateColor =
     lastRate == null ? 'text-text-dim'
-      : lastRate >= 97 ? 'text-emerald-400'
+      : lastRate >= 97 ? 'text-[var(--ok)]'
       : lastRate >= 90 ? 'text-text-strong'
-      : 'text-red-400'
+      : 'text-[var(--bad-light)]'
 
   return html`
     <div class="flex items-center gap-3">
@@ -60,7 +60,7 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
           </div>
         ` : html`<div class="text-[10px] text-text-dim">데이터 없음</div>`}
         ${anomalyCount > 0 ? html`
-          <div class="text-[10px] font-mono text-red-400">${anomalyCount} anomaly</div>
+          <div class="text-[10px] font-mono text-[var(--bad-light)]">${anomalyCount} anomaly</div>
         ` : null}
       </div>
       <div
@@ -116,7 +116,7 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
                   cy="${y.toFixed(1)}"
                   r=${r.isAnomaly ? '3' : '1.5'}
                   fill="currentColor"
-                  class=${r.isAnomaly ? (r.zScore < 0 ? 'text-red-400' : 'text-amber-400') : 'text-accent'}
+                  class=${r.isAnomaly ? (r.zScore < 0 ? 'text-[var(--bad-light)]' : 'text-[var(--warn)]') : 'text-accent'}
                   stroke=${r.isAnomaly ? 'currentColor' : 'none'}
                   stroke-width=${r.isAnomaly ? '0.5' : '0'}
                 >

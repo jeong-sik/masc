@@ -229,10 +229,10 @@ export function AgentDetailMemory({ agentName }: Props) {
                               : '○'
                         const outcomeColor =
                           ep.outcome === 'success'
-                            ? 'text-emerald-400'
+                            ? 'text-[var(--ok)]'
                             : ep.outcome === 'partial'
-                              ? 'text-amber-400'
-                              : 'text-red-400'
+                              ? 'text-[var(--warn)]'
+                              : 'text-[var(--bad-light)]'
                         return html`
                           <div class="border border-zinc-800 rounded px-2 py-1.5 text-xs">
                             <div class="flex items-center justify-between gap-2">

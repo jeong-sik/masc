@@ -424,7 +424,7 @@ function TextModeToggle({
   return html`
     <div class="flex gap-2">
       <button type="button"
-        class="text-[10px] text-emerald-400 hover:text-emerald-300 cursor-pointer transition-colors"
+        class="text-[10px] text-[var(--ok)] hover:text-emerald-300 cursor-pointer transition-colors"
         onClick=${() => {
           listSig.value = parseToolList(textInputBuffer.value)
           textInputSection.value = null
@@ -688,7 +688,7 @@ export function ToolAllowlistEditor({
         ? html`<span class="text-[10px] text-[var(--bad)]">${lastError.value}</span>`
         : null}
       ${lastSuccess.value
-        ? html`<span class="text-[10px] text-emerald-400">${lastSuccess.value}</span>`
+        ? html`<span class="text-[10px] text-[var(--ok)]">${lastSuccess.value}</span>`
         : null}
     </div>
   `

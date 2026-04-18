@@ -440,7 +440,7 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
 }
 
 function DiagnosisCard({ title, value, detail, tone }: { title: string; value: string; detail: string; tone: 'ok' | 'warn' | 'neutral' }) {
-  const toneColor = tone === 'ok' ? 'text-emerald-400' : tone === 'warn' ? 'text-amber-400' : 'text-[var(--text-muted)]'
+  const toneColor = tone === 'ok' ? 'text-[var(--ok)]' : tone === 'warn' ? 'text-[var(--warn)]' : 'text-[var(--text-muted)]'
   return html`
     <div class="rounded-lg border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3 min-w-[140px]">
       <div class="text-xs font-medium text-[var(--text-muted)] mb-1">${title}</div>
@@ -476,7 +476,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
           ${timeAgoSafe(ts)}
         </span>
         ${success != null ? html`
-          <span class="flex-shrink-0 w-4 ${success ? 'text-green-400' : 'text-red-400'}">
+          <span class="flex-shrink-0 w-4 ${success ? 'text-[var(--ok)]' : 'text-[var(--bad-light)]'}">
             ${success ? 'O' : 'X'}
           </span>
         ` : html`<span class="w-4"></span>`}
@@ -841,7 +841,7 @@ export function TelemetryUnified() {
       </div>
 
       ${error ? html`
-        <div class="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+        <div class="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-[var(--bad-light)]">
           ${error}
         </div>
       ` : null}

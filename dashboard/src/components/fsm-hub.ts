@@ -648,7 +648,7 @@ function StatusBar({
     && (now - (snapshot.last_outcome?.ended_at ?? snapshot.ts)) > 300
   const liveBadge = snapshot
     ? snapshot.is_live
-      ? html`<span class="px-2 py-0.5 rounded-full border text-[10px] font-mono text-emerald-400 border-emerald-500/40 bg-emerald-500/10 animate-pulse">● 실행 중</span>`
+      ? html`<span class="px-2 py-0.5 rounded-full border text-[10px] font-mono text-[var(--ok)] border-emerald-500/40 bg-emerald-500/10 animate-pulse">● 실행 중</span>`
       : html`<span class="px-2 py-0.5 rounded-full border text-[10px] font-mono ${idleIsLong ? 'text-[var(--text-muted)] border-amber-500/30' : 'text-[var(--text-dim)] border-white/10'}">○ 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-[8px] opacity-70">· 턴 #${snapshot.last_outcome.turn_id}</span>` : ''}</span>`
     : null
 
@@ -704,11 +704,11 @@ function StatusBar({
             </span>
           ` : null}
           ${staleSec > 120 ? html`
-            <span class="text-[10px] font-mono text-red-400 animate-pulse" title="마지막 관측이 2분 이상 경과 — 대시보드 데이터가 현재 상태를 반영하지 않을 수 있습니다">
+            <span class="text-[10px] font-mono text-[var(--bad-light)] animate-pulse" title="마지막 관측이 2분 이상 경과 — 대시보드 데이터가 현재 상태를 반영하지 않을 수 있습니다">
               ${fmtDuration(staleSec)} 전 갱신
             </span>
           ` : staleSec > 60 ? html`
-            <span class="text-[10px] font-mono text-amber-400" title="마지막 관측이 1분 이상 경과">
+            <span class="text-[10px] font-mono text-[var(--warn)]" title="마지막 관측이 1분 이상 경과">
               ${fmtDuration(staleSec)} 전 갱신
             </span>
           ` : null}

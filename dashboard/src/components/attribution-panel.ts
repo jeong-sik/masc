@@ -47,10 +47,10 @@ function outcomeLabel(a: Attribution): string {
 
 function outcomeToneClass(kind: Attribution['outcome']['kind']): string {
   switch (kind) {
-    case 'passed': return 'text-emerald-400'
-    case 'policy_failed': return 'text-rose-400'
-    case 'transition_blocked': return 'text-rose-400'
-    case 'partial_pass': return 'text-amber-400'
+    case 'passed': return 'text-[var(--ok)]'
+    case 'policy_failed': return 'text-[var(--bad-light)]'
+    case 'transition_blocked': return 'text-[var(--bad-light)]'
+    case 'partial_pass': return 'text-[var(--warn)]'
   }
 }
 
@@ -143,10 +143,10 @@ function GateCard({
             <span class="text-[10px] text-[var(--text-muted)]">${total}건</span>
           </div>
           <div class="grid grid-cols-2 gap-1 text-[11px]">
-            <span class="text-emerald-400">✓ ${passed}</span>
-            <span class="text-amber-400">◐ ${partial}</span>
-            <span class="text-rose-400">✗ ${policyFailed}</span>
-            <span class="text-rose-400">⊘ ${blocked}</span>
+            <span class="text-[var(--ok)]">✓ ${passed}</span>
+            <span class="text-[var(--warn)]">◐ ${partial}</span>
+            <span class="text-[var(--bad-light)]">✗ ${policyFailed}</span>
+            <span class="text-[var(--bad-light)]">⊘ ${blocked}</span>
           </div>
         </div>
       </${SurfaceCard}>

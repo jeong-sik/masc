@@ -365,6 +365,29 @@ let test_registered_hook_transition_compat_status_action () =
   Alcotest.(check string) "claimed -> claim" "claim"
     (assoc_string "action" forwarded)
 
+let test_registered_hook_transition_strips_internal_agent_marker () =
+  let args =
+    `Assoc
+      [
+        ("_agent_name", `String "codex-local-admin");
+        ("agent_name", `String "codex-local-admin");
+        ("task_id", `String "task-216");
+        ("action", `String "done");
+      ]
+  in
+  let blocked, forwarded =
+    run_registered_hook
+      ~schema:masc_transition_schema
+      ~tool_name:"masc_transition"
+      ~args
+      ()
+  in
+  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
+  Alcotest.(check bool) "_agent_name removed before schema validation" true
+    (Yojson.Safe.Util.member "_agent_name" forwarded = `Null);
+  Alcotest.(check string) "agent_name preserved" "codex-local-admin"
+    (assoc_string "agent_name" forwarded)
+
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
@@ -409,5 +432,7 @@ let () =
         test_registered_hook_transition_compat_to_and_note;
       Alcotest.test_case "masc_transition compat: status-like action" `Quick
         test_registered_hook_transition_compat_status_action;
+      Alcotest.test_case "masc_transition strips internal markers" `Quick
+        test_registered_hook_transition_strips_internal_agent_marker;
     ]);
   ]

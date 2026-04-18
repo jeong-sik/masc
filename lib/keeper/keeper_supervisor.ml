@@ -208,7 +208,12 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     let live_meta =
       try
         let synced = ensure_keeper_room_presence ctx.config meta in
-        ignore (write_meta ctx.config synced);
+        (match write_meta ctx.config synced with
+         | Ok () -> ()
+         | Error msg ->
+           Log.Keeper.warn
+             "supervisor presence sync: write_meta failed for %s: %s"
+             meta.name msg);
         synced
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         Log.Keeper.error "supervisor presence sync failed: %s"

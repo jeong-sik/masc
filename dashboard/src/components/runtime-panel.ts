@@ -85,25 +85,25 @@ export function RuntimePanel() {
         : html`
             <${OasHealthChip} />
             <details class=${DETAILS_CLASS} data-testid="runtime-details-cascade">
-              <summary class=${SUMMARY_CLASS}>Cascade 설정 · Health · Capacity · SLO</summary>
+              <summary class=${SUMMARY_CLASS}>Cascade</summary>
               <div class="p-3 border-t border-[var(--card-border)]">
                 <${CascadeConfigPanel} />
               </div>
             </details>
             <details class=${DETAILS_CLASS} data-testid="runtime-details-providers">
-              <summary class=${SUMMARY_CLASS}>프로바이더 & 모델 메트릭</summary>
+              <summary class=${SUMMARY_CLASS}>프로바이더</summary>
               <div class="p-3 border-t border-[var(--card-border)]">
                 <${RuntimeMonitor} />
               </div>
             </details>
             <details class=${DETAILS_CLASS} data-testid="runtime-details-prometheus">
-              <summary class=${SUMMARY_CLASS}>Raw Prometheus 메트릭</summary>
+              <summary class=${SUMMARY_CLASS}>메트릭</summary>
               <div class="p-3 border-t border-[var(--card-border)]">
                 <${PrometheusMetrics} />
               </div>
             </details>
             <details class=${DETAILS_CLASS} data-testid="runtime-details-verification">
-              <summary class=${SUMMARY_CLASS}>형식 검증 Specs</summary>
+              <summary class=${SUMMARY_CLASS}>형식검증</summary>
               <div class="p-3 border-t border-[var(--card-border)]">
                 <${VerificationSpecsPanel} />
               </div>

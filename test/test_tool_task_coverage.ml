@@ -396,6 +396,39 @@ let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun 
   | _ -> failwith "expected exactly one task"
 )
 
+let () = test "handle_transition_release_empty_summary_error_includes_example" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Tool_task.handle_add_task ctx
+      (`Assoc
+        [
+          ("title", `String "Strict release task");
+          ("contract", `Assoc [ ("strict", `Bool true) ]);
+        ])
+  in
+  let _ = Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  (* Empty-string summary must also fail, and error must include a payload example
+     so the keeper LLM can self-correct instead of retrying the same partial payload. *)
+  let success_empty, result_empty =
+    Tool_task.handle_transition ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "release");
+          ( "handoff_context",
+            `Assoc
+              [
+                ("summary", `String "   ");
+                ("next_step", `String "re-check fixture");
+              ] );
+        ])
+  in
+  assert (not success_empty);
+  assert (str_contains result_empty "handoff_context.summary is required");
+  assert (str_contains result_empty "Example");
+  assert (str_contains result_empty "\"summary\"")
+)
+
 let () = test "handle_claim_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Claim direct")]) in

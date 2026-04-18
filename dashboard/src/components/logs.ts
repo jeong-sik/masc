@@ -245,7 +245,7 @@ function renderLogRow(entry: LogEntry) {
   return html`
     <div
       key=${entry.seq}
-      class="logs-row grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 rounded-[18px] border border-[rgba(255,255,255,0.05)] px-3 py-3 ${backgroundClass}"
+      class="logs-row grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 rounded-card border border-[rgba(255,255,255,0.05)] px-3 py-3 ${backgroundClass}"
     >
       <div class="font-mono text-[11px] whitespace-nowrap text-[color:var(--text-muted)]">
         ${entry.ts.replace('T', ' ').replace('Z', '')}

@@ -128,7 +128,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
           ${tone === 'complete'
             ? html`
                 <span
-                  class="inline-flex items-center gap-1 rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--ok)]"
+                  class="inline-flex items-center gap-1 rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--ok)]"
                   aria-label="Setup guide complete"
                   data-setup-complete-badge
                 >
@@ -139,7 +139,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
             : null}
         </div>
         <span
-          class=${`text-3xs uppercase tracking-[0.14em] tabular-nums ${countToneClass}`}
+          class=${`text-3xs uppercase tracking-4 tabular-nums ${countToneClass}`}
           data-setup-progress=${connectorId}
           data-setup-progress-pct=${pct}
         >${stepCompletionSummary(doneCount, guide.steps.length)}</span>
@@ -214,7 +214,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
               ${guide.references.length > 0
                 ? html`
                     <div class="mt-3 flex flex-wrap items-center gap-1.5 border-t border-[var(--white-8)] pt-2">
-                      <span class="text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]">refs</span>
+                      <span class="text-3xs uppercase tracking-4 text-[var(--text-dim)]">refs</span>
                       ${guide.references.map(ref => html`<${ExternalLinkChip} href=${ref.href} label=${ref.label} />`)}
                     </div>
                   `

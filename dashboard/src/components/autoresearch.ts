@@ -352,7 +352,7 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
       <div class="flex flex-col gap-3">
         <div>
           <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] mb-1 font-medium">Research Brief</div>
-          <div class="text-sm leading-[1.55] text-[var(--text-body)]">
+          <div class="text-sm leading-paragraph text-[var(--text-body)]">
             이 루프는 <span class="font-semibold text-[var(--text-strong)]">${loop.goal}</span> 를 목표로
             <span class="font-mono text-[var(--text-strong)]"> ${loop.target_file} </span>
             변경을 시도하고,
@@ -388,7 +388,7 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
           </div>
         </div>
 
-        <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-xs leading-[1.5] text-[var(--text-muted)]">
+        <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-xs leading-normal text-[var(--text-muted)]">
           이 화면은 generator loop 자체를 설명합니다. Safety Harness는 evaluator와 장기 실행 safety rail을 보여주며,
           각 cycle의 keep/discard 판정을 직접 대체하지 않습니다.
         </div>
@@ -404,7 +404,7 @@ function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
         <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
           <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Experiment Outcomes</div>
           <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">이 화면은 keep/discard 루프를 봅니다.</div>
-          <div class="mt-2 text-sm leading-[1.6] text-[var(--text-body)]">
+          <div class="mt-2 text-sm leading-loose text-[var(--text-body)]">
             어떤 파일을 바꾸고 어떤 metric을 밀어 올리려는지, 그리고 현재 ${loopCount}개 루프가 어떤 cycle에 있는지 직접 봅니다.
           </div>
         </div>
@@ -412,7 +412,7 @@ function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
         <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-3">
           <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Safety Harness</div>
           <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">심판 기계의 건강도는 별도로 봅니다.</div>
-          <div class="mt-2 text-sm leading-[1.6] text-[var(--text-body)]">
+          <div class="mt-2 text-sm leading-loose text-[var(--text-body)]">
             평가 모델, 압축 전 상태, 세대 교체 rail 상태는 하네스에서 봅니다.
           </div>
           <button

@@ -124,7 +124,7 @@ export function SidecarLogToggle({ connectorId }: { connectorId: string }) {
   return html`
     <button
       type="button"
-      class="cursor-pointer rounded border border-[var(--white-8)] px-2 py-0.5 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
+      class="cursor-pointer rounded border border-[var(--white-8)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
       aria-expanded=${entry.open}
       aria-controls=${`sidecar-log-${connectorId}`}
       onClick=${onClick}
@@ -146,7 +146,7 @@ function LevelPills({ connectorId, active }: { connectorId: string; active: LogL
     <div class="flex items-center gap-1" role="radiogroup" aria-label="log level filter">
       ${LEVELS.map(level => {
         const isActive = level === active
-        const base = 'cursor-pointer rounded border px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-[0.14em]'
+        const base = 'cursor-pointer rounded border px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4'
         const activeCls = 'border-[var(--accent-1)] bg-[var(--accent-1)]/15 text-[var(--text-body)]'
         const idleCls = 'border-[var(--white-8)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]'
         return html`
@@ -191,11 +191,11 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
       class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-2"
     >
       <div class="mb-2 flex items-center justify-between gap-2">
-        <div class="min-w-0 truncate text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]" title=${entry.logPath}>
+        <div class="min-w-0 truncate text-3xs uppercase tracking-4 text-[var(--text-dim)]" title=${entry.logPath}>
           ${entry.logPath || '(log path unknown)'}
         </div>
         <div class="flex items-center gap-2">
-          <span class="text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]" data-log-count>
+          <span class="text-3xs uppercase tracking-4 text-[var(--text-dim)]" data-log-count>
             ${entry.available
               ? hasFilter
                 ? `${filtered.length} / ${entry.lines.length} lines`
@@ -229,7 +229,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
                 ? html`
                     <button
                       type="button"
-                      class="cursor-pointer rounded border border-[var(--white-8)] px-1.5 py-0.5 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
+                      class="cursor-pointer rounded border border-[var(--white-8)] px-1.5 py-0.5 text-3xs uppercase tracking-4 text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
                       data-log-filter-clear
                       onClick=${() => setEntry(connectorId, { level: 'all', keyword: '' })}
                     >clear</button>

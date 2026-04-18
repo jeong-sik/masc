@@ -458,7 +458,7 @@ export function AgentProfile({ name }: { name: string }) {
             <div class="agent-history-list">${(profileData?.taskHistories ?? []).map((row: TaskHistoryRow) => html`
               <div class="border border-[var(--card-border)] rounded-[10px] bg-[var(--white-2)] p-2.5" key=${row.taskId}>
                 <div class="mb-2"><span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">${row.taskId}</span></div>
-                <pre class="m-0 whitespace-pre-wrap text-sm leading-[1.5] text-[var(--text-strong)] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || '이력 없음'}</pre>
+                <pre class="m-0 whitespace-pre-wrap text-sm leading-normal text-[var(--text-strong)] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || '이력 없음'}</pre>
               </div>
             `)}</div>
           <//>

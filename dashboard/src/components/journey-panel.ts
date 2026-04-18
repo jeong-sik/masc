@@ -449,7 +449,7 @@ function MetricChip({
 }) {
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
-      <div class="text-3xs uppercase tracking-[0.12em] text-[var(--text-dim)]">${label}</div>
+      <div class="text-3xs uppercase tracking-3 text-[var(--text-dim)]">${label}</div>
       <div class="mt-1 flex items-center gap-2 text-sm font-semibold text-[var(--text-strong)]">
         <${StatusChip} tone=${tone} uppercase=${false}>${value}<//>
       </div>
@@ -466,7 +466,7 @@ function JourneyTile({
 }) {
   return html`
     <section class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] p-4 flex flex-col gap-3 min-h-[150px]">
-      <div class="text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--text-dim)]">${label}</div>
+      <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--text-dim)]">${label}</div>
       <div class="flex flex-col gap-2 text-sm text-[var(--text-body)]">
         ${children}
       </div>
@@ -778,7 +778,7 @@ export function JourneyPanel() {
             ${taskRecords.length > 0
               ? html`
                   <div class="flex flex-col gap-3">
-                    <div class="text-2xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">Task Journeys</div>
+                    <div class="text-2xs font-semibold uppercase tracking-3 text-[var(--text-muted)]">Task Journeys</div>
                     ${taskRecords.map((record) => html`<${JourneyCard} key=${record.key} record=${record} />`)}
                   </div>
                 `
@@ -787,7 +787,7 @@ export function JourneyPanel() {
             ${keeperRecords.length > 0
               ? html`
                   <div class="flex flex-col gap-3">
-                    <div class="text-2xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">Standalone Keeper Journeys</div>
+                    <div class="text-2xs font-semibold uppercase tracking-3 text-[var(--text-muted)]">Standalone Keeper Journeys</div>
                     ${keeperRecords.map((record) => html`<${JourneyCard} key=${record.key} record=${record} />`)}
                   </div>
                 `

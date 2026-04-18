@@ -41,7 +41,7 @@ function PlanningStat({
 
   return html`
     <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
-      <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-text-muted">${label}</div>
+      <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">${label}</div>
       <div class="mt-2 text-3xl font-bold leading-none tabular-nums ${toneClass}">${value}</div>
     </div>
   `
@@ -84,7 +84,7 @@ function GuideCard({
     <section class="flex flex-col gap-3 rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
       <div class="flex items-start justify-between gap-3">
         <div>
-          <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-text-muted">${eyebrow}</div>
+          <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">${eyebrow}</div>
           <h3 class="mt-1 text-md font-semibold text-text-strong">${title}</h3>
         </div>
         <span class="rounded border border-card-border/70 bg-white/4 px-2.5 py-1 text-2xs font-semibold text-text-body">
@@ -153,7 +153,7 @@ function KeeperToolActivity() {
       <div class="p-5">
         ${activeKeepers.length > 0 ? html`
           <div class="mb-4">
-            <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-text-muted mb-2">활성 keeper</div>
+            <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted mb-2">활성 keeper</div>
             <div class="flex flex-wrap gap-2">
               ${activeKeepers.map(k => html`
                 <button
@@ -172,7 +172,7 @@ function KeeperToolActivity() {
 
         ${topTools.length > 0 ? html`
           <div>
-            <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-text-muted mb-2">최근 자주 사용된 도구</div>
+            <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted mb-2">최근 자주 사용된 도구</div>
             <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1.5">
               ${topTools.map(([name, count]) => html`
                 <div key=${name} class="flex items-center justify-between rounded bg-white/3 px-3 py-1.5 text-xs">
@@ -239,7 +239,7 @@ export function Planning() {
         <div class="mt-5 grid gap-4 xl:grid-cols-2">
           <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
             <div class="mb-3">
-              <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-text-muted">Backlog Entry</div>
+              <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">Backlog Entry</div>
               <h3 class="mt-1 text-md font-semibold text-text-strong">태스크 추가</h3>
             </div>
             <${TaskCreateForm} />
@@ -268,7 +268,7 @@ export function Planning() {
       <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
         <div class="flex items-center justify-between gap-3">
           <div>
-            <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-text-muted">Goal Pipeline</div>
+            <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">Goal Pipeline</div>
             <h3 class="mt-1 text-md font-semibold text-text-strong">
               장기 목표 ${hasGoals ? `(${goals.value.length})` : ''}
             </h3>

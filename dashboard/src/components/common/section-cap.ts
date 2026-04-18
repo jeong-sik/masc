@@ -6,7 +6,7 @@
 // small section" marker. Recognizing it instantly gives the reader
 // a grid: subhead above, content below, more whitespace before the
 // next one. Inline Tailwind strings scattered across ~20 files
-// always drift within weeks (tracking-[0.08em] vs tracking-[0.14em]
+// always drift within weeks (tracking-1 vs tracking-4
 // vs tracking-[0.18em] — pixel-noise differences that break the
 // grid silently).
 //

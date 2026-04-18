@@ -177,7 +177,7 @@ export function PromptRegistryPanel() {
       <div class="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div class="min-h-65 rounded border border-[var(--card-border)] bg-[var(--white-3)] p-2">
           <div class="mb-2 flex items-center justify-between gap-2 px-2">
-            <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">
+            <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">
               등록된 프롬프트
               ${sourceFilter.value !== 'all' || searchQuery.value
                 ? html`<span class="ml-1 normal-case tracking-normal text-[var(--text-muted)]">${visiblePrompts.length} / ${prompts.length}</span>`
@@ -246,18 +246,18 @@ export function PromptRegistryPanel() {
 
             <div class="mb-4 grid gap-3 md:grid-cols-2">
               <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
-                <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">마크다운 파일</div>
+                <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">마크다운 파일</div>
                 <div class="mt-1 break-all font-mono text-xs text-[var(--text-body)]">${selectedPrompt.file_path ?? '미설정'}</div>
               </div>
               <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
-                <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">문자 수</div>
+                <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">문자 수</div>
                 <div class="mt-1 font-mono text-xs text-[var(--text-body)]">${selectedPrompt.char_count}</div>
               </div>
             </div>
 
             ${selectedPrompt.template_variables.length > 0 ? html`
               <div class="mb-4 rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
-                <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">허용된 플레이스홀더</div>
+                <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">허용된 플레이스홀더</div>
                 <div class="mt-2 flex flex-wrap gap-2">
                   ${selectedPrompt.template_variables.map(variable => html`
                     <span class="rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 font-mono text-2xs text-[var(--text-body)]">${`{{${variable}}}`}</span>
@@ -267,12 +267,12 @@ export function PromptRegistryPanel() {
             ` : null}
 
             <div class="mb-4">
-              <div class="mb-2 text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">파일 기준값</div>
+              <div class="mb-2 text-2xs uppercase tracking-1 text-[var(--text-muted)]">파일 기준값</div>
               <div class="max-h-55 overflow-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```markdown\n' + (selectedPrompt.file_value ?? '없음') + '\n```'} /></div>
             </div>
 
             <div class="mb-2 flex items-center justify-between gap-2">
-              <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">런타임 오버라이드</div>
+              <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">런타임 오버라이드</div>
               <div class="text-2xs text-[var(--text-muted)]">저장 후 effective 미리보기가 오버라이드를 반영합니다</div>
             </div>
             <${TextArea}

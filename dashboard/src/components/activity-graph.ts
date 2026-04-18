@@ -95,7 +95,7 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
   function statCard(label: string, value: number, series: number[], color: string, highlight = false) {
     return html`
       <div class="rounded border border-[var(--card-border)] bg-[var(--card)] py-[15px] px-3.5">
-        <div class="text-3xs text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">${label}</div>
+        <div class="text-3xs text-[var(--text-muted)] tracking-1 uppercase font-medium">${label}</div>
         <div class="mt-1.5 text-[var(--text-strong)] text-3xl font-bold leading-none tabular-nums ${highlight ? 'text-[var(--ok)]' : ''}">${value}</div>
         ${series.length >= 2 ? html`<div class="mt-2"><${Sparkline} values=${series} color=${color} /></div>` : null}
       </div>
@@ -214,14 +214,14 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                 <div class="flex flex-wrap items-start justify-between gap-3">
                   <div class="min-w-0 flex-1">
                     <div class="flex flex-wrap items-center gap-2">
-                      <span class="inline-flex items-center rounded-sm border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[0.08em] ${actionCategoryClass(group)}">
+                      <span class="inline-flex items-center rounded-sm border px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 ${actionCategoryClass(group)}">
                         ${categoryLabel(group.category)}
                       </span>
                       ${group.actor ? html`<span class="text-2xs font-medium text-[var(--text-body)]">${group.actor}</span>` : null}
                       ${group.subjectId ? html`<span class="text-2xs text-[var(--text-muted)] font-mono">${group.subjectId}</span>` : null}
                     </div>
                     <div class="mt-2 text-md font-semibold text-[var(--text-strong)]">${group.title}</div>
-                    <div class="mt-1 text-sm leading-[1.6] text-[var(--text-body)]">${group.summary}</div>
+                    <div class="mt-1 text-sm leading-loose text-[var(--text-body)]">${group.summary}</div>
                   </div>
                   <div class="flex shrink-0 flex-col items-end gap-2 text-2xs text-[var(--text-muted)]">
                     <span>${group.rawCount}건</span>

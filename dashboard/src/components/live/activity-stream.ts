@@ -67,7 +67,7 @@ export function ActivityStream() {
                 <span class="text-[0.75rem] text-[var(--text-body)] font-medium">${entry.agent}</span>
                 <span class="text-[0.7rem] text-[var(--text-muted)] ml-auto">${formatTimeAgo(entry.timestamp)}</span>
               </div>
-              <div class="text-sm text-[var(--text-body)] leading-[1.5] break-words">${entry.text}</div>
+              <div class="text-sm text-[var(--text-body)] leading-normal break-words">${entry.text}</div>
             </div>
           `)}
       </div>

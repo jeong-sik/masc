@@ -157,7 +157,7 @@ function ConfigRow({
   return html`
     <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3" title=${item.path}>
       <div class="mb-2 flex flex-wrap items-center gap-2">
-        <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">${label}</div>
+        <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">${label}</div>
         <${StatusChip} tone=${toneClass(item.exists ? 'ready' : item.source === 'invalid_env' ? 'invalid_env' : 'warn')}>${item.exists ? 'present' : 'missing'}<//>
         ${showSourceBadge
           ? html`
@@ -196,7 +196,7 @@ function WarningBlock({
 
   return html`
     <div class="rounded border border-[var(--yellow-bright-28)] bg-[var(--warn-10)] px-3 py-3">
-      <div class="mb-2 text-2xs uppercase tracking-[0.08em] text-[var(--yellow-100)]">${title}</div>
+      <div class="mb-2 text-2xs uppercase tracking-1 text-[var(--yellow-100)]">${title}</div>
       <div class="flex flex-col gap-2">
         ${warnings.map(warning => html`
           <div class="text-xs leading-relaxed text-[var(--text-body)]">${warning}</div>
@@ -215,7 +215,7 @@ function RuntimeMetaRow({
 }) {
   return html`
     <div class="flex items-center justify-between gap-3 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-2">
-      <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">${label}</div>
+      <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">${label}</div>
       <div class="break-all text-right font-mono text-xs text-[var(--text-body)]">${value}</div>
     </div>
   `
@@ -318,7 +318,7 @@ function RuntimeProbePanel() {
   return html`
     <div class="mt-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-4 py-4">
       <div class="mb-3 flex flex-wrap items-center gap-2">
-        <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">ollama warm / kv probe</div>
+        <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">ollama warm / kv probe</div>
         <${StatusChip} tone=${probeTone(signal, probe?.probe_ok)}>${probeSignalLabel(signal)}<//>
         ${state.value.data?.cache_hit !== undefined
           ? html`
@@ -526,7 +526,7 @@ export function ConfigResolutionPanel({
 
               <div class="mt-4">
                 <div class="mb-2 flex items-center justify-between gap-2">
-                  <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                  <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">
                     recent diagnostics
                   </div>
                   ${runtimeResolution.diagnostics.length > 0

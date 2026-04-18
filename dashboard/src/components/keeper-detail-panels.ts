@@ -165,7 +165,7 @@ function OperationalHealth({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] p-3">
-      <div class="mb-2 text-3xs font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">운영 건강도</div>
+      <div class="mb-2 text-3xs font-semibold tracking-1 uppercase text-[var(--text-muted)]">운영 건강도</div>
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
         ${hb ? html`
           <div class="p-2 rounded border ${KPI_TONE[hbTone]} flex flex-col gap-0.5">
@@ -348,7 +348,7 @@ function KpiSection({ title, question, children }: {
   return html`
     <section class="rounded border border-[var(--card-border)] bg-[var(--white-2)] p-3">
       <header class="mb-2 flex items-baseline justify-between gap-2">
-        <h3 class="text-2xs font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">${title}</h3>
+        <h3 class="text-2xs font-semibold tracking-1 uppercase text-[var(--text-muted)]">${title}</h3>
         <span class="text-3xs text-[var(--text-dim)] truncate">${question}</span>
       </header>
       ${children}
@@ -429,7 +429,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
           <${OperationalHealth} keeper=${keeper} />
           ${totalCalls > 0 ? html`
             <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] p-3">
-              <div class="mb-2 text-3xs font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">모델 호출 분포</div>
+              <div class="mb-2 text-3xs font-semibold tracking-1 uppercase text-[var(--text-muted)]">모델 호출 분포</div>
               <div class="flex flex-col gap-1.5">
                 ${modelEntries.slice(0, 4).map(([model, count]) => {
                   const pct = Math.round((count / totalCalls) * 100)

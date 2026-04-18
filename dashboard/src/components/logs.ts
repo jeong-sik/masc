@@ -257,7 +257,7 @@ function renderLogRow(entry: LogEntry) {
         ${entry.module || '(root)'}
       </div>
       <div class="flex flex-wrap items-start gap-1">
-        <span class="rounded-sm border px-2 py-0.5 text-3xs uppercase tracking-[0.08em] ${sourceClass}">
+        <span class="rounded-sm border px-2 py-0.5 text-3xs uppercase tracking-1 ${sourceClass}">
           ${sourceLabel(source)}
         </span>
         ${entry.legacy_classified
@@ -451,7 +451,7 @@ export function LogViewer() {
         ` : null}
 
         <div class="px-3 pt-3">
-          <div class="grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-left text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+          <div class="grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-left text-3xs font-semibold uppercase tracking-4 text-[var(--text-muted)]">
             <div>timestamp</div>
             <div>level</div>
             <div>module</div>

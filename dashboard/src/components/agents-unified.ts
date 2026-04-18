@@ -88,7 +88,7 @@ export function AgentsUnified() {
 
       ${currentView !== 'fsm' ? html`
         <div class="monitor-muted-panel flex flex-wrap items-center gap-2 px-4 py-3 text-xs text-[var(--text-muted)]">
-          <span class="text-2xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">이 화면 밖</span>
+          <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">이 화면 밖</span>
           <span>이벤트 로그, 도구 품질, 거버넌스</span>
           <${RouteLink}
             tab="monitoring"

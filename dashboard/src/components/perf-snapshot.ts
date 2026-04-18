@@ -57,7 +57,7 @@ function PerfStat({
 }) {
   return html`
     <div class="rounded border border-card-border/45 bg-[var(--white-5)]/10 px-3 py-3">
-      <div class="text-3xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">${label}</div>
+      <div class="text-3xs font-semibold uppercase tracking-5 text-[var(--text-muted)]">${label}</div>
       <div class="mt-1 text-2xl font-bold text-[var(--text-strong)]">${value}</div>
       ${detail ? html`<div class="mt-1 text-2xs text-[var(--text-muted)]">${detail}</div>` : null}
     </div>
@@ -73,7 +73,7 @@ function DiffRow({ row }: { row: DashboardPerfComparisonRow }) {
         <div class="truncate text-xs font-semibold text-[var(--text-strong)]">${row.benchmark}</div>
         <div class="text-2xs text-[var(--text-muted)]">avg ${avgDelta}ms · p95 ${p95Delta}ms</div>
       </div>
-      <div class="shrink-0 text-2xs font-semibold uppercase tracking-[0.14em] ${verdictTone(row.verdict)}">${row.verdict}</div>
+      <div class="shrink-0 text-2xs font-semibold uppercase tracking-4 ${verdictTone(row.verdict)}">${row.verdict}</div>
     </div>
   `
 }
@@ -255,7 +255,7 @@ export function PerfSnapshotPanel() {
               ? html`
                   <div class="grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] gap-3 max-[960px]:grid-cols-1">
                     <div class="flex flex-col gap-2">
-                      <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Top Changes</div>
+                      <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--text-muted)]">Top Changes</div>
                       ${topChanges.slice(0, 4).map(row => html`<${DiffRow} row=${row} />`)}
                     </div>
                     <${DistributionBars}

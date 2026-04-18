@@ -116,7 +116,7 @@ export function KeeperConditionsDivergent({ keeper }: { keeper: Keeper }) {
   return html`
     <section class="rounded border border-[var(--warn-24)] bg-[rgba(251,191,36,0.05)] p-3 mb-3">
       <header class="mb-2 flex items-baseline justify-between gap-2">
-        <h3 class="text-2xs font-semibold tracking-[0.08em] uppercase text-[var(--warn)]">
+        <h3 class="text-2xs font-semibold tracking-1 uppercase text-[var(--warn)]">
           ⚠️ 조건-Phase 불일치
         </h3>
         <span class="text-3xs text-[var(--text-dim)]">phase가 아직 반응하지 않은 관측 신호</span>

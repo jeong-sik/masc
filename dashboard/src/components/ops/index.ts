@@ -173,7 +173,7 @@ function renderActivityTimeline() {
             <span>${entry.actor}</span>
             <span><${TimeAgo} timestamp=${entry.at} /></span>
           </div>
-          <div class="mt-2 text-sm leading-[1.55] text-[var(--text-body)]">${entry.detail}</div>
+          <div class="mt-2 text-sm leading-paragraph text-[var(--text-body)]">${entry.detail}</div>
         </article>
       `)}
     </div>

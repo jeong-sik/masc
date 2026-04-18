@@ -531,7 +531,7 @@ export function FsmHub(props: FsmHubProps = {}) {
           open=${graphOpen}
           onToggle=${(e: Event) => setGraphOpen((e.target as HTMLDetailsElement).open)}
         >
-          <summary class="cursor-pointer select-none px-4 py-2.5 text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] hover:text-[var(--text-body)]">
+          <summary class="cursor-pointer select-none px-4 py-2.5 text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)] hover:text-[var(--text-body)]">
             Compound Graph — 5 sub-FSMs (Cytoscape)
           </summary>
           <div class="px-3 pb-3">
@@ -575,7 +575,7 @@ function ShortcutsOverlay({
         onClick=${(e: MouseEvent) => e.stopPropagation()}
       >
         <div class="flex items-center justify-between mb-3">
-          <div class="text-2xs font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">
+          <div class="text-2xs font-semibold uppercase tracking-2 text-[var(--text-muted)]">
             키보드 단축키
           </div>
           <button
@@ -671,7 +671,7 @@ function StatusBar({
     <div class=${`sticky top-0 z-20 rounded border border-[var(--white-8)] bg-[var(--panel-dark-60)] backdrop-blur-sm shadow-[0_4px_12px_rgba(0,0,0,0.25)] ${containerPadding}`}>
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-3">
-          <span class="text-3xs font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">FSM Hub</span>
+          <span class="text-3xs font-semibold uppercase tracking-3 text-[var(--text-muted)]">FSM Hub</span>
           <${Kbd} size="sm" class="hidden md:inline-flex" title="단축키 목록 (?)">?<//>
           <button
             class=${`text-3xs font-mono px-1.5 py-0.5 rounded border cursor-pointer transition-all ${
@@ -932,7 +932,7 @@ function CollapsibleZone({
         aria-expanded=${!collapsed}
         aria-controls=${`zone-${id}`}
       >
-        <span class="text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${zoneTitle}</span>
+        <span class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">${zoneTitle}</span>
         <span class=${`text-3xs text-[var(--text-dim)] transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`}>▾</span>
       </button>
       ${!collapsed ? html`<div id=${`zone-${id}`} class="px-4 pb-3">${children}</div>` : null}

@@ -203,7 +203,7 @@ export function KeeperMemoryTierPanel({
       </div>
 
       <div class="mt-2">
-        <div class="text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">
+        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)] mb-2">
           Compaction sub-FSM (KeeperCompactionLifecycle.tla)
         </div>
         <${CytoscapeFsm} spec=${compactionSpec} height="200px" />

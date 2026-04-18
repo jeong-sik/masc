@@ -331,10 +331,10 @@ function KeeperClearContextDialog({
         </div>
 
         <label class="flex flex-col gap-2">
-          <span class="text-2xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">사유</span>
+          <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">사유</span>
           <textarea
             ref=${reasonRef}
-            class="min-h-[112px] resize-y rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-2 text-sm leading-[1.55] text-[var(--text-body)] outline-none focus:border-[var(--accent-45)] focus:ring-2 focus:ring-[var(--accent-18)]"
+            class="min-h-[112px] resize-y rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-2 text-sm leading-paragraph text-[var(--text-body)] outline-none focus:border-[var(--accent-45)] focus:ring-2 focus:ring-[var(--accent-18)]"
             placeholder="예: stale continuity replay 제거"
             disabled=${pending}
             value=${reason}
@@ -579,7 +579,7 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
 
       <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)]">
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--card-border)] px-3 py-2">
-          <div class="text-2xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+          <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
             OAS Snapshot History
             ${inventory && inventory.history.length > 0 && historyQuery.trim() !== ''
               ? html`<span class="ml-2 text-3xs font-normal normal-case tracking-normal text-[var(--text-dim)]">${filterCheckpointHistory(inventory.history, historyQuery).length}/${inventory.history.length}</span>`

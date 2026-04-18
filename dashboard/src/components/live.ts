@@ -22,7 +22,7 @@ export function Live({ variant = 'full' }: LiveProps) {
           <div class="flex flex-col gap-2">
             <div class="flex flex-col gap-2">
               <h2 class="m-0 text-[1.25rem] font-semibold text-[var(--text-strong)]">라이브 모니터</h2>
-              <p class="m-0 text-sm leading-[1.55] text-[var(--text-body)]">실시간 이벤트 흐름과 활성 에이전트 상태를 한 화면에서 봅니다.</p>
+              <p class="m-0 text-sm leading-paragraph text-[var(--text-body)]">실시간 이벤트 흐름과 활성 에이전트 상태를 한 화면에서 봅니다.</p>
             </div>
           </div>
         </section>

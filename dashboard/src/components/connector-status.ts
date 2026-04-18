@@ -320,7 +320,7 @@ export function HeaderMiniStat({
       data-testid=${testId}
     >
       <span class=${`text-sm font-semibold tabular-nums leading-tight ${valueTone}`}>${value}</span>
-      <span class="mt-0.5 text-3xs uppercase tracking-[0.16em] text-[var(--text-dim)]">${label}</span>
+      <span class="mt-0.5 text-3xs uppercase tracking-5 text-[var(--text-dim)]">${label}</span>
     </div>
   `
 }
@@ -834,7 +834,7 @@ function ConnectorLivePanel({
           ? html`<span class="text-[var(--text-dim)]">· ${connector.bot_user_name}</span>`
           : null}
         <span class="text-[var(--text-dim)]">·</span>
-        <span class=${`inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-3xs uppercase tracking-[0.14em] ${directTone}`}>
+        <span class=${`inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-3xs uppercase tracking-4 ${directTone}`}>
           <span class=${`inline-block h-2 w-2 rounded-full ${dotClassForLabel(directLabel)}`}></span>
           <span>${directLabel}</span>
         </span>
@@ -850,7 +850,7 @@ function ConnectorLivePanel({
             ? html`
                 <button
                   type="button"
-                  class="cursor-pointer rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-0.5 text-3xs uppercase tracking-[0.14em] text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:opacity-50"
+                  class="cursor-pointer rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:opacity-50"
                   disabled=${isActionLoading}
                   aria-label=${`stop ${connectorName} sidecar`}
                   onClick=${() => { void stopSidecar(connectorId) }}
@@ -946,7 +946,7 @@ function ConnectorLivePanel({
               data-keeper-directory-error-panel
             >
               <span
-                class="mr-2 inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
+                class="mr-2 inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--warn)]"
                 aria-label="Keeper directory status: unavailable"
               >
                 <span aria-hidden="true">⚠</span>
@@ -965,7 +965,7 @@ function ConnectorLivePanel({
             >
               <div class="mb-1 flex items-center gap-2">
                 <span
-                  class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
+                  class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--warn)]"
                   aria-label="Keeper configuration status: none configured"
                   data-no-keepers-status-chip
                 >
@@ -1000,7 +1000,7 @@ function ConnectorLivePanel({
                 <div class="mb-1 flex items-center justify-between gap-2">
                   <div class="flex items-center gap-2">
                     <span
-                      class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
+                      class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--warn)]"
                       aria-label="Sidecar process status: not running"
                       data-sidecar-status-chip
                     >
@@ -1016,7 +1016,7 @@ function ConnectorLivePanel({
                       disabled=${isActionLoading}
                       onClick=${() => { void startSidecar(connectorId) }}
                     >${isActionLoading ? '...' : 'Start'}<//>
-                    <span class="text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]">${connectorName}</span>
+                    <span class="text-3xs uppercase tracking-4 text-[var(--text-dim)]">${connectorName}</span>
                   </div>
                 </div>
                 <div class="text-2xs text-[var(--warn)]/80">
@@ -1026,7 +1026,7 @@ function ConnectorLivePanel({
                   <${CopyableCode} label="start" command=${cmds.start} variant="primary" />
                 </div>
                 <div class="mt-2">
-                  <div class="mb-1 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]">
+                  <div class="mb-1 text-3xs uppercase tracking-4 text-[var(--text-dim)]">
                     Or for diagnostics
                   </div>
                   <div class="grid grid-cols-1 gap-1.5" data-sidecar-secondary-cmds>
@@ -1258,7 +1258,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
         </div>
         <div class="flex items-center gap-2">
           <div class="h-2 w-2 rounded-full" style="background: ${tone.dot}"></div>
-          <span class=${`rounded-sm px-2 py-1 text-3xs uppercase tracking-[0.16em] ${tone.badge}`}>
+          <span class=${`rounded-sm px-2 py-1 text-3xs uppercase tracking-5 ${tone.badge}`}>
             ${tone.label}
           </span>
         </div>
@@ -1313,7 +1313,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
       ${lastError
         ? html`
             <div class="mt-3 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-2xs text-[var(--bad-light)]">
-              <div class="mb-1 uppercase tracking-[0.16em] text-[var(--bad-light)]/80">
+              <div class="mb-1 uppercase tracking-5 text-[var(--bad-light)]/80">
                 ${ch.last_error_kind || 'error'} · ${timeAgo(ch.last_error_at)}
               </div>
               <div>${lastError}</div>
@@ -1335,11 +1335,11 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
           <div class="text-xs font-medium text-[var(--text-body)]">
             ${binding.channel} · room ${truncateMiddle(binding.room_id)}
           </div>
-          <div class="text-3xs uppercase tracking-[0.16em] text-[var(--text-dim)]">
+          <div class="text-3xs uppercase tracking-5 text-[var(--text-dim)]">
             ${binding.keeper ? `keeper ${binding.keeper}` : 'keeper pending'}
           </div>
         </div>
-        <span class=${`rounded-sm px-2 py-1 text-3xs uppercase tracking-[0.16em] ${tone.badge}`}>
+        <span class=${`rounded-sm px-2 py-1 text-3xs uppercase tracking-5 ${tone.badge}`}>
           ${tone.label}
         </span>
       </div>
@@ -1388,7 +1388,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
               : null}
           </div>
         </div>
-        <span class=${`rounded-sm px-2 py-1 text-3xs uppercase tracking-[0.16em] ${badgeClass}`}>
+        <span class=${`rounded-sm px-2 py-1 text-3xs uppercase tracking-5 ${badgeClass}`}>
           ${event.outcome}
         </span>
       </div>
@@ -1419,7 +1419,7 @@ function DisclosurePanel({
       <summary class="cursor-pointer list-none px-3 py-2.5">
         <div class="flex items-center justify-between gap-3">
           <div>
-            <div class="text-2xs font-semibold uppercase tracking-[0.14em] text-[var(--text-body)]">${title}</div>
+            <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--text-body)]">${title}</div>
             <div class="mt-1 text-2xs text-[var(--text-dim)]">${subtitle}</div>
           </div>
           <span class="text-2xs text-[var(--text-dim)]">펴기</span>
@@ -1480,7 +1480,7 @@ function GateAnalyticsSection({
 
               <div class="mb-4 grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
                 <div>
-                  <div class="mb-2 text-3xs uppercase tracking-[0.16em] text-[var(--text-dim)]">
+                  <div class="mb-2 text-3xs uppercase tracking-5 text-[var(--text-dim)]">
                     Observed room bindings
                   </div>
                   ${gate.bindings.length === 0
@@ -1493,7 +1493,7 @@ function GateAnalyticsSection({
                 </div>
 
                 <div>
-                  <div class="mb-2 text-3xs uppercase tracking-[0.16em] text-[var(--text-dim)]">
+                  <div class="mb-2 text-3xs uppercase tracking-5 text-[var(--text-dim)]">
                     Recent gate events
                   </div>
                   ${gate.recent_events.length === 0
@@ -1596,7 +1596,7 @@ export function ConnectorStatusPanel() {
         </div>
         ${filterId
           ? html`
-              <div class="text-right text-3xs uppercase tracking-[0.16em] text-[var(--text-dim)]">
+              <div class="text-right text-3xs uppercase tracking-5 text-[var(--text-dim)]">
                 <div>${d ? `success ${d.success_rate_pct}%` : `${visibleConnectors.length} connector${visibleConnectors.length !== 1 ? 's' : ''}`}</div>
                 <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : 'gate metrics unavailable'}</div>
               </div>

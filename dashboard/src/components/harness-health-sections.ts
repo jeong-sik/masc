@@ -304,7 +304,7 @@ export function ScopePairing() {
               onClick=${() => navigate('lab', { section: 'autoresearch' })}
             >오토리서치 열기</button>
           </div>
-          <div class="text-sm leading-[1.6] text-[var(--text-body)]">
+          <div class="text-sm leading-loose text-[var(--text-body)]">
             어떤 파일을 어떻게 바꿔 어떤 metric을 밀어 올리려는지, 그리고 cycle별 keep/discard가 어땠는지 봅니다.
           </div>
         </div>
@@ -314,7 +314,7 @@ export function ScopePairing() {
         <div class="flex flex-col gap-2">
           <${SectionCap}>안전 감시<//>
           <div class="text-sm font-medium text-[var(--text-strong)]">하네스가 답하는 것</div>
-          <div class="text-sm leading-[1.6] text-[var(--text-body)]">
+          <div class="text-sm leading-loose text-[var(--text-body)]">
             평가 모델이 건강한지, 장기 실행 중 압축이 정상인지, 세대 교체가 안전한지 봅니다.
           </div>
         </div>
@@ -341,7 +341,7 @@ export function RailHeader({
           <div class="text-sm font-medium text-[var(--text-strong)]">${title}</div>
           <${StatusPill} status=${status} />
         </div>
-        <div class="mt-1 text-sm leading-[1.6] text-[var(--text-muted)]">${description}</div>
+        <div class="mt-1 text-sm leading-loose text-[var(--text-muted)]">${description}</div>
       </div>
       <div class="text-xs text-[var(--text-dim)]">최근 신호 ${freshnessLabel(lastEventAt)}</div>
     </div>

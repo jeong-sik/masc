@@ -280,7 +280,7 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
         </span>
       </button>
       <${ConnectorReadinessRail} pills=${pills} />
-      <span class=${`text-3xs uppercase tracking-[0.14em] ${selected ? 'text-[var(--accent-1)]' : 'text-[var(--text-dim)]'}`}>
+      <span class=${`text-3xs uppercase tracking-4 ${selected ? 'text-[var(--accent-1)]' : 'text-[var(--text-dim)]'}`}>
         ${selected ? 'Selected' : 'View Details'}
       </span>
       <${TilePrimaryAction} id=${id} sidecarUp=${sidecarUp} />
@@ -442,7 +442,7 @@ function TileErrorNotice({ connector }: { connector: GateConnectorInfo | null })
       data-tile-notice=${notice.tone}
     >
       <span aria-hidden="true" class="shrink-0">${glyph}</span>
-      <span class="shrink-0 font-semibold uppercase tracking-[0.1em]">${notice.label}</span>
+      <span class="shrink-0 font-semibold uppercase tracking-2">${notice.label}</span>
       <span class="min-w-0 truncate font-normal normal-case tracking-normal opacity-80">${notice.detail}</span>
     </div>
   `

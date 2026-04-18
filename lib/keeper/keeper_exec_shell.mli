@@ -7,6 +7,17 @@
     Both tools default to the keeper playground unless an explicit
     allowed [cwd] is provided. *)
 
+(** Issue #8524: Variant SSOT for keeper_shell op.  Mirror in
+    [Tool_shard.keeper_shell_op_enum_strings] (cycle-aware, sync test
+    catches drift). Schema previously omitted git_worktree. *)
+type shell_op =
+  | Pwd | Ls | Cat | Rg | Git_status | Find | Head | Tail | Wc | Tree
+  | Git_log | Git_diff | Git_worktree | Bash | Git_clone | Gh
+
+val shell_op_to_string : shell_op -> string
+val all_shell_ops : shell_op list
+val valid_shell_op_strings : string list
+
 val handle_keeper_bash :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

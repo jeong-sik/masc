@@ -821,7 +821,8 @@
           test_operator_control_judgment
           test_operator_control_swarm
           test_operator_control_keeper)
- (libraries masc_test_deps))
+ (libraries masc_test_deps)
+ (enabled_if (= %{env:MASC_INCLUDE_OPERATOR_CONTROL=true} "true")))
 
 ; Normalized actor (operator_pending_confirm)
 (test

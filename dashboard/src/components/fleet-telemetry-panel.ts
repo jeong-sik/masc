@@ -124,7 +124,7 @@ function SummaryCard({
         : 'border-[var(--card-border)] bg-[rgba(255,255,255,0.02)]'
 
   return html`
-    <div class="rounded-lg border ${toneClass} p-3">
+    <div class="rounded border ${toneClass} p-3">
       <div class="text-[10px] uppercase tracking-wider text-[var(--text-dim)]">${title}</div>
       <div class="mt-1 text-xl font-semibold text-[var(--text)]">${value}</div>
       <div class="mt-1 text-[11px] leading-relaxed text-[var(--text-dim)]">${detail}</div>
@@ -135,7 +135,7 @@ function SummaryCard({
 function WarningBanner({ warnings }: { warnings: string[] }) {
   if (warnings.length === 0) return null
   return html`
-    <div class="rounded-lg border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]">
+    <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]">
       <div class="font-medium text-[var(--warn)]">Partial telemetry</div>
       <div class="mt-1 flex flex-col gap-1">
         ${warnings.map(warning => html`<div>${warning}</div>`)}
@@ -157,14 +157,14 @@ function PressureWatchlist({ rows }: { rows: FleetRow[] }) {
 
   if (watchlist.length === 0) {
     return html`
-      <div class="rounded-lg border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3 text-[11px] text-[var(--text-dim)]">
+      <div class="rounded border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3 text-[11px] text-[var(--text-dim)]">
         No keepers are near context pressure or stale activity thresholds.
       </div>
     `
   }
 
   return html`
-    <div class="rounded-lg border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)]">
+    <div class="rounded border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)]">
       ${watchlist.map(row => html`
         <div class="flex items-center justify-between gap-3 border-b border-[var(--card-border)] px-3 py-2 text-[11px] last:border-b-0">
           <div class="min-w-0">
@@ -310,7 +310,7 @@ function TelemetrySourcesPanel({ sources }: { sources: TelemetrySourceSummary[] 
   return html`
     <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
       ${sorted.map(source => html`
-        <div class="rounded-lg border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3">
+        <div class="rounded border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3">
           <div class="flex items-center justify-between gap-3">
             <div class="text-[11px] font-medium text-[var(--text)]">${sourceLabel(source.source)}</div>
             <div class="font-mono text-[11px] ${sourceCountClass(source)}">
@@ -565,7 +565,7 @@ export function FleetTelemetryPanel() {
             placeholder="name / model / blocker 필터"
             aria-label="Keeper 필터"
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-            class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
           />
         </div>
         ${isFiltering && visibleRows.length === 0 && value.rows.length > 0

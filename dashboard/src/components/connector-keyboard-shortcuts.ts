@@ -87,7 +87,7 @@ export function ConnectorKeyboardShortcuts() {
   if (!cheatsheetOpen.value) return null
   return html`
     <div
-      class="fixed bottom-4 right-4 z-50 rounded-lg border border-[var(--white-10)] bg-[var(--bg-1)] p-3 text-[11px] text-[var(--text-body)] shadow-sm"
+      class="fixed bottom-4 right-4 z-50 rounded border border-[var(--white-10)] bg-[var(--bg-1)] p-3 text-[11px] text-[var(--text-body)] shadow-sm"
       data-connector-shortcut-cheatsheet
       role="dialog"
       aria-label="커넥터 단축키"

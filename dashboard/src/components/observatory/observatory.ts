@@ -113,7 +113,7 @@ function TimeAxis({ windowStart, windowEnd }: { windowStart: number; windowEnd: 
 function RangeSelector() {
   const current = currentTimeRangeFilter() ?? DEFAULT_RANGE
   return html`
-    <div class="inline-flex items-center gap-0.5 rounded-md border border-card-border p-0.5 text-[11px]">
+    <div class="inline-flex items-center gap-0.5 rounded border border-card-border p-0.5 text-[11px]">
       ${TIME_RANGE_PRESETS.map((preset: TimeRangePreset) => html`
         <button
           type="button"
@@ -140,7 +140,7 @@ function ViewSelector({
   onSelect: (view: ObservatoryView) => void
 }) {
   return html`
-    <div class="inline-flex items-center gap-0.5 rounded-md border border-card-border p-0.5 text-[11px]">
+    <div class="inline-flex items-center gap-0.5 rounded border border-card-border p-0.5 text-[11px]">
       ${([
         { key: 'timeline', label: '타임라인' },
         { key: 'live', label: '라이브' },
@@ -281,7 +281,7 @@ export function Observatory() {
             <${RangeSelector} />
             <button
               type="button"
-              class="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-[11px] font-medium transition-colors ${
                 liveMode.value
                   ? 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]'
                   : 'border-card-border text-text-muted hover:text-text-strong hover:bg-white/5'
@@ -305,7 +305,7 @@ export function Observatory() {
       </div>
 
       ${activeView.value === 'timeline' && data.error ? html`
-        <div class="rounded-lg border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]">
+        <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]">
           일부 데이터 불러오기 실패: ${data.error}
         </div>
       ` : null}

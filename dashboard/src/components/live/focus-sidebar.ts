@@ -54,13 +54,13 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
                   ${agent.emoji ? html`<span class="text-[0.95rem]">${agent.emoji}</span>` : null}
                   ${agent.koreanName ?? agent.name}
                 </span>
-                <span class="focus-pressure-badge rounded-md ${pressureClass(agent.pressure)}">
+                <span class="focus-pressure-badge rounded ${pressureClass(agent.pressure)}">
                   ${pressureLabel(agent.pressure)}
                   ${agent.assignedCount > 0 ? html` <span class="bg-[var(--white-10)] px-1 text-[0.6rem] rounded">${agent.assignedCount}</span>` : null}
                 </span>
               </div>
               ${agent.currentTask
-                ? html`<div class="text-[0.75rem] text-[var(--text-body)] py-[3px] px-2 bg-[var(--white-2)] border border-[var(--border-slate-12)] whitespace-nowrap overflow-hidden text-ellipsis rounded-md">${agent.currentTask}</div>`
+                ? html`<div class="text-[0.75rem] text-[var(--text-body)] py-[3px] px-2 bg-[var(--white-2)] border border-[var(--border-slate-12)] whitespace-nowrap overflow-hidden text-ellipsis rounded">${agent.currentTask}</div>`
                 : null}
               <div class="flex items-center gap-2 mt-1">
                 ${agent.lastActivityText

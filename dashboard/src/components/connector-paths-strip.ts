@@ -82,7 +82,7 @@ export function ConnectorPathsStrip({ connectors }: { connectors: GateConnectorI
   const open = pathsExpanded.value
   return html`
     <div
-      class="mb-3 rounded-lg border border-[var(--card-border)] bg-[var(--bg-1)]"
+      class="mb-3 rounded border border-[var(--card-border)] bg-[var(--bg-1)]"
       data-panel="connector-paths-strip"
     >
       <button

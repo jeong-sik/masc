@@ -186,7 +186,7 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
   const height = topPad + n * cell + 30
 
   return html`
-    <div class="bg-[var(--white-5)] rounded-lg p-3 overflow-x-auto">
+    <div class="bg-[var(--white-5)] rounded p-3 overflow-x-auto">
       <svg viewBox="0 0 ${width} ${height}" class="w-full h-auto" style="max-height:560px">
         ${agents.map(
           (name, i) => html`
@@ -331,7 +331,7 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
   if (synapses.length === 0) return null
   const top = [...synapses].sort((a, b) => b.weight - a.weight).slice(0, TOP_LINK_COUNT)
   return html`
-    <div class="bg-[var(--white-5)] rounded-lg p-3 mt-3">
+    <div class="bg-[var(--white-5)] rounded p-3 mt-3">
       <div class="text-xs text-[var(--text-muted)]0 mb-2">강한 연결 Top ${TOP_LINK_COUNT} · sparkline = 학습 궤적</div>
       <div class="space-y-1.5">
         ${top.map(s => {
@@ -411,7 +411,7 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
   const outcomeIcon =
     ep.outcome === 'success' ? '●' : ep.outcome === 'partial' ? '◐' : '○'
   return html`
-    <div class="border border-[var(--white-10)] rounded-lg p-3 mb-2 hover:border-[var(--white-10)] transition-colors">
+    <div class="border border-[var(--white-10)] rounded p-3 mb-2 hover:border-[var(--white-10)] transition-colors">
       <div class="flex items-start justify-between gap-2 mb-1">
         <div class="flex items-center gap-2 min-w-0">
           <span class="${outcomeColor} text-xs">${outcomeIcon}</span>
@@ -552,7 +552,7 @@ export function MemorySubsystems() {
 
   return html`
     <div class="space-y-6">
-      <div class="rounded-lg border border-[var(--white-10)] bg-[var(--white-5)] px-3 py-2 text-xs text-[var(--text-muted)]">
+      <div class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-3 py-2 text-xs text-[var(--text-muted)]">
         이 화면은 <span class="text-[var(--text-muted)] font-medium">global memory surface</span>만 보여줍니다.
         institution episodes와 Hebbian graph는 여기서 보고,
         keeper checkpoint/history/memory bank는 Keeper Detail에서 확인합니다.
@@ -562,7 +562,7 @@ export function MemorySubsystems() {
       <section>
         <button
           onClick=${() => (showArch.value = !showArch.value)}
-          class="w-full flex items-center justify-between p-2 bg-[var(--white-5)] rounded-lg hover:bg-[var(--white-5)] transition-colors"
+          class="w-full flex items-center justify-between p-2 bg-[var(--white-5)] rounded hover:bg-[var(--white-5)] transition-colors"
         >
           <span class="text-sm font-semibold text-[var(--text-muted)] flex items-center gap-2">
             <span class="text-xs">${showArch.value ? '▼' : '▶'}</span>
@@ -575,7 +575,7 @@ export function MemorySubsystems() {
         ${
           showArch.value
             ? html`
-                <div class="mt-2 bg-[var(--white-5)] rounded-lg p-3">
+                <div class="mt-2 bg-[var(--white-5)] rounded p-3">
                   <${MermaidGraph}
                     source=${ARCHITECTURE_FLOW}
                     prefix="memory-arch"
@@ -610,7 +610,7 @@ export function MemorySubsystems() {
         }
         ${
           synapses.length === 0
-            ? html`<div class="text-sm text-[var(--text-muted)]0 bg-[var(--white-5)] rounded-lg p-4 text-center">
+            ? html`<div class="text-sm text-[var(--text-muted)]0 bg-[var(--white-5)] rounded p-4 text-center">
                 시냅스 데이터 없음. keeper task 완료 시 자동 생성됩니다.
               </div>`
             : html`
@@ -633,7 +633,7 @@ export function MemorySubsystems() {
                 </div>
                 ${
                   isSynapseFiltering && visibleSynapses.length === 0
-                    ? html`<div class="text-sm text-[var(--text-muted)]0 bg-[var(--white-5)] rounded-lg p-4 text-center">
+                    ? html`<div class="text-sm text-[var(--text-muted)]0 bg-[var(--white-5)] rounded p-4 text-center">
                         필터 결과 없음 (${synapses.length} items)
                       </div>`
                     : html`<div class="overflow-x-auto">
@@ -727,7 +727,7 @@ export function MemorySubsystems() {
 
         ${
           visibleEpisodes.length === 0
-            ? html`<div class="text-sm text-[var(--text-muted)]0 bg-[var(--white-5)] rounded-lg p-4 text-center">
+            ? html`<div class="text-sm text-[var(--text-muted)]0 bg-[var(--white-5)] rounded p-4 text-center">
                 ${hasFilter
                   ? '필터 조건에 맞는 에피소드가 없습니다.'
                   : '에피소드 없음. keeper [STATE] 출력 시 자동 기록됩니다.'}

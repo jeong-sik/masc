@@ -116,7 +116,7 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
       `)}
       ${hasMore ? html`
         <button type="button"
-          class="w-full py-2 bg-transparent border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-xs cursor-pointer text-center rounded-md hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+          class="w-full py-2 bg-transparent border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-xs cursor-pointer text-center rounded hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
           onClick=${() => { expandedItems.value += baseLimit }}
         >
           더 보기 (${totalAvailable - limit}건 남음)

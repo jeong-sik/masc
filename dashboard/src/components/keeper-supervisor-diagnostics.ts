@@ -161,7 +161,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
           </div>
         ` : null}
         ${dead_since ? html`
-          <div class="py-2 px-3 rounded-lg bg-[rgba(239,68,68,0.06)] border border-[rgba(239,68,68,0.15)] text-xs text-[#fb7185]">
+          <div class="py-2 px-3 rounded bg-[rgba(239,68,68,0.06)] border border-[rgba(239,68,68,0.15)] text-xs text-[#fb7185]">
             ${formatTimeAgo(dead_since)} 이후 중단됨. 재기동 필요.
           </div>
         ` : null}

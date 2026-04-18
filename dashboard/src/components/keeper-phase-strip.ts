@@ -66,7 +66,7 @@ function TransitionDot({ t, idx }: { t: KeeperTransition; idx: number }) {
         style="border-color: ${color}; background: ${color}33"
       />
       <div class="absolute bottom-full mb-2 hidden group-hover:flex flex-col items-center z-10">
-        <div class="rounded-lg border border-[var(--card-border)] bg-[var(--card)] px-3 py-2 shadow-sm text-[11px] whitespace-nowrap">
+        <div class="rounded border border-[var(--card-border)] bg-[var(--card)] px-3 py-2 shadow-sm text-[11px] whitespace-nowrap">
           <div class="font-semibold">${t.prev_phase} → ${t.new_phase}</div>
           <div class="text-[var(--text-muted)] mt-0.5">${eventLabel(t.selected_event)}</div>
           <div class="text-[var(--text-muted)]"><${TimeAgo} timestamp=${t.wall_clock_at_decision * 1000} /></div>
@@ -81,11 +81,11 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
   const transitions = data.transitions
 
   return html`
-    <div class="flex items-center gap-3 py-2 px-3 rounded-lg border border-[var(--white-6)] bg-[var(--white-3)]">
+    <div class="flex items-center gap-3 py-2 px-3 rounded border border-[var(--white-6)] bg-[var(--white-3)]">
       <div class="w-24 shrink-0">
         <div class="text-[13px] font-semibold text-[var(--text-strong)] truncate">${name}</div>
         <div
-          class="inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold tracking-wide mt-1"
+          class="inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold tracking-wide mt-1"
           style="${phaseInlineStyle(phase)}"
         >
           ${getPhaseStyle(toPascalPhase(phase)).icon} ${getPhaseStyle(toPascalPhase(phase)).label}
@@ -137,7 +137,7 @@ export function KeeperPhaseTimeline() {
         return d
           ? html`<${KeeperStrip} name=${k.name} data=${d} key=${k.name} />`
           : html`
-            <div class="flex items-center gap-3 py-2 px-3 rounded-lg border border-[var(--white-6)] bg-[var(--white-3)]" key=${k.name}>
+            <div class="flex items-center gap-3 py-2 px-3 rounded border border-[var(--white-6)] bg-[var(--white-3)]" key=${k.name}>
               <div class="w-24 text-[13px] font-semibold text-[var(--text-strong)] truncate">${k.name}</div>
               <span class="text-[11px] text-[var(--text-muted)]">데이터 없음</span>
             </div>

@@ -68,7 +68,7 @@ function DiffRow({ row }: { row: DashboardPerfComparisonRow }) {
   const avgDelta = row.avg_delta_ms > 0 ? `+${row.avg_delta_ms}` : `${row.avg_delta_ms}`
   const p95Delta = row.p95_delta_ms > 0 ? `+${row.p95_delta_ms}` : `${row.p95_delta_ms}`
   return html`
-    <div class="flex items-center justify-between gap-3 rounded-lg border border-card-border/35 bg-[var(--white-5)]/8 px-3 py-2">
+    <div class="flex items-center justify-between gap-3 rounded border border-card-border/35 bg-[var(--white-5)]/8 px-3 py-2">
       <div class="min-w-0">
         <div class="truncate text-[12px] font-semibold text-[var(--text-strong)]">${row.benchmark}</div>
         <div class="text-[11px] text-[var(--text-muted)]">avg ${avgDelta}ms · p95 ${p95Delta}ms</div>

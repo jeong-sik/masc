@@ -63,7 +63,7 @@ export function ActivityStream() {
               class="activity-item rounded border border-[var(--border-slate-12)] border-l-2 bg-[var(--white-2)] px-3.5 py-3 ${eventKindColor(entry)} ${i === 0 ? 'activity-item-new' : ''}"
             >
               <div class="activity-item-head flex items-center gap-2">
-                <span class="activity-kind-chip rounded-md px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.04em] ${eventKindColor(entry)}">${eventKindLabel(entry)}</span>
+                <span class="activity-kind-chip rounded px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.04em] ${eventKindColor(entry)}">${eventKindLabel(entry)}</span>
                 <span class="text-[0.75rem] text-[var(--text-body)] font-medium">${entry.agent}</span>
                 <span class="text-[0.7rem] text-[var(--text-muted)] ml-auto">${formatTimeAgo(entry.timestamp)}</span>
               </div>

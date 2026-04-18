@@ -317,7 +317,7 @@ export function HandoffTimeline({
           placeholder="keeper / event / task / peer 필터"
           aria-label="Handoff timeline 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-card-border bg-bg-1/40 px-2 py-1 text-[11px] text-text placeholder:text-text-dim focus:outline-none focus:border-accent"
+          class="min-w-[160px] max-w-[260px] flex-1 rounded border border-card-border bg-bg-1/40 px-2 py-1 text-[11px] text-text placeholder:text-text-dim focus:outline-none focus:border-accent"
         />
       </div>
       ${error !== null
@@ -371,7 +371,7 @@ export function HandoffTimeline({
                           onClick=${() => onSelectKeeper?.(row.keeper)}
                         >${row.keeper}</button>`
                       : html`<div class=${rowLabelCls} title=${row.keeper}>${row.keeper}</div>`}
-                    <div class="relative flex-1 h-6 rounded-md bg-bg-1/40 border border-card-border/50">
+                    <div class="relative flex-1 h-6 rounded bg-bg-1/40 border border-card-border/50">
                       ${row.chips.map(chip => {
                         const pct = ((chip.ts - windowStart) / span) * 100
                         const cls = CHIP_CLASS_BY_KIND[chip.kind]

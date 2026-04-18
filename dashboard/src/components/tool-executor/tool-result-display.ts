@@ -73,7 +73,7 @@ function StoredBlobView({
           <span class="text-[11px] text-[var(--text-muted)]">${toolName}</span>
           <span class="text-[10px] text-[var(--text-muted)] ml-auto">${timeStr}</span>
         </div>
-        <div class="rounded-lg border border-[var(--card-border)] bg-[var(--bg-0)] overflow-hidden">
+        <div class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] overflow-hidden">
           <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--card-border)]">
             <button type="button" class="text-[10px] text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-body)]"
               onClick=${() => { expanded.value = false }}>
@@ -103,7 +103,7 @@ function StoredBlobView({
         <span class="text-[11px] text-[var(--text-muted)]">${toolName}</span>
         <span class="text-[10px] text-[var(--text-muted)] ml-auto">${timeStr}</span>
       </div>
-      <div class="rounded-lg border border-[var(--card-border)] bg-[var(--bg-0)] overflow-hidden">
+      <div class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] overflow-hidden">
         <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--card-border)]">
           <span class="text-[10px] text-[var(--text-muted)]">
             저장된 출력 · ${marker.bytes.toLocaleString()}B · sha ${marker.sha256.slice(0, 12)}\u2026
@@ -152,7 +152,7 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
         <span class="text-[11px] text-[var(--text-muted)]">${toolName}</span>
         <span class="text-[10px] text-[var(--text-muted)] ml-auto">${timeStr}</span>
       </div>
-      <div class="rounded-lg border border-[var(--card-border)] bg-[var(--bg-0)] overflow-hidden">
+      <div class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] overflow-hidden">
         <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--card-border)]">
           <button type="button" class="text-[10px] text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-body)]"
             onClick=${() => { expanded.value = !expanded.value }}>

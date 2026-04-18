@@ -87,7 +87,7 @@ function LayerResultRow({ layer }: { layer: EvalLayerResult }) {
   const detail = layer.detail ?? layer.evidence[0] ?? ''
 
   return html`
-    <div class="flex items-center gap-3 py-1.5 px-2 rounded-lg hover:bg-[var(--white-3)] transition-colors">
+    <div class="flex items-center gap-3 py-1.5 px-2 rounded hover:bg-[var(--white-3)] transition-colors">
       <span class="flex-shrink-0 w-4 text-center font-bold text-sm ${iconCls}">${icon}</span>
       <span class="flex-shrink-0 w-[120px] text-[11px] font-mono text-[var(--accent)] truncate" title=${layer.layer_name}>${layer.layer_name}</span>
       <span class="flex-shrink-0 w-10 text-right text-[11px] font-mono tabular-nums text-[var(--text-strong)]">${scoreText}</span>

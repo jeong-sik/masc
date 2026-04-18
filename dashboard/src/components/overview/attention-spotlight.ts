@@ -88,7 +88,7 @@ export function AttentionSpotlight({ snap }: AttentionSpotlightProps) {
       </div>
       <div class="flex flex-col gap-2">
         ${items.map(item => html`
-          <div class="flex rounded-lg border border-[var(--card-border)] bg-[var(--card)] overflow-hidden" key=${item.id}>
+          <div class="flex rounded border border-[var(--card-border)] bg-[var(--card)] overflow-hidden" key=${item.id}>
             <div class="w-1 shrink-0 ${severityBarColor(item.severity)}" />
             <div class="flex flex-col gap-1.5 p-4 min-w-0 flex-1">
               <div class="flex items-start gap-2">

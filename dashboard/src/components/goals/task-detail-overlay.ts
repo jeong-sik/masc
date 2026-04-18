@@ -95,8 +95,8 @@ function TaskEventsSection() {
         const { icon, color } = eventBadge(evt.label)
         const key = evt.ts ? `${evt.ts}-${i}` : `${evt.label}-${i}`
         return html`
-          <div key=${key} class="flex items-start gap-3 py-2 px-3 rounded-lg hover:bg-[var(--white-3)] transition-colors">
-            <div class="size-7 shrink-0 rounded-md bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-[11px] font-mono font-bold ${color}">
+          <div key=${key} class="flex items-start gap-3 py-2 px-3 rounded hover:bg-[var(--white-3)] transition-colors">
+            <div class="size-7 shrink-0 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-[11px] font-mono font-bold ${color}">
               ${icon}
             </div>
             <div class="flex-1 min-w-0">
@@ -138,7 +138,7 @@ function GateSection({
     <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
       <div class="flex items-center justify-between gap-3">
         <div class="text-[12px] font-medium text-text-strong">${title}</div>
-        <span class=${`rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${gateTone(gate.status)}`}>${gate.status}</span>
+        <span class=${`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${gateTone(gate.status)}`}>${gate.status}</span>
       </div>
       ${gate.reasons && gate.reasons.length > 0 ? html`
         <div class="mt-2 flex flex-col gap-1">
@@ -166,9 +166,9 @@ function ContractSection({ task }: { task: Task }) {
     <div class="flex flex-col gap-3">
       <div class="flex items-center gap-2">
         <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">계약 게이트</div>
-        <span class=${`rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${contract?.strict ? 'text-accent border-accent/25 bg-[var(--accent-10)]' : 'text-text-muted border-[var(--white-10)] bg-[var(--white-5)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
+        <span class=${`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${contract?.strict ? 'text-accent border-accent/25 bg-[var(--accent-10)]' : 'text-text-muted border-[var(--white-10)] bg-[var(--white-5)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
         ${isAwaitingVerification ? html`
-          <span class="rounded-md border border-accent/40 bg-[var(--accent-10)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-accent">
+          <span class="rounded border border-accent/40 bg-[var(--accent-10)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-accent">
             검증 대기
           </span>
         ` : null}
@@ -207,7 +207,7 @@ function ContractSection({ task }: { task: Task }) {
           <div class="text-[12px] font-medium text-text-strong">Required Evidence</div>
           <div class="mt-2 flex flex-wrap gap-1.5">
             ${requiredEvidence.map((item: string) => html`
-              <span key=${item} class="rounded-md border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-[10px] font-mono text-text-body">${item}</span>
+              <span key=${item} class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-[10px] font-mono text-text-body">${item}</span>
             `)}
           </div>
         </div>
@@ -256,7 +256,7 @@ function HandoffSection({ task }: { task: Task }) {
         ${handoff.evidence_refs && handoff.evidence_refs.length > 0 ? html`
           <div class="mt-2 flex flex-wrap gap-1.5">
             ${handoff.evidence_refs.map((item: string) => html`
-              <span key=${item} class="rounded-md border border-warn/20 bg-[var(--white-5)] px-2 py-0.5 text-[10px] font-mono text-text-body">${item}</span>
+              <span key=${item} class="rounded border border-warn/20 bg-[var(--white-5)] px-2 py-0.5 text-[10px] font-mono text-text-body">${item}</span>
             `)}
           </div>
         ` : null}
@@ -286,7 +286,7 @@ function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
             placeholder="목표 검색 (title/status/metric)"
             aria-label="목표 검색"
             onInput=${(e: Event) => { goalRelationSearchQuery.value = (e.target as HTMLInputElement).value }}
-            class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
           />
           <span class="text-[10px] text-[var(--text-muted)] tabular-nums">
             ${isFiltering
@@ -302,7 +302,7 @@ function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
         ${visibleIds.map(id => {
           const goal = goalById(id)
           return html`
-            <div key=${id} class="flex items-center gap-2 rounded-lg border border-card-border/50 bg-[var(--white-3)] px-3 py-2">
+            <div key=${id} class="flex items-center gap-2 rounded border border-card-border/50 bg-[var(--white-3)] px-3 py-2">
               <span class="text-[12px] text-text-body">${goal?.title ?? id}</span>
               ${goal?.status ? html`<${StatusBadge} status=${goal.status} />` : null}
             </div>
@@ -341,14 +341,14 @@ export function TaskDetailOverlay() {
           <h2 id=${titleId} class="text-[16px] font-semibold text-text-strong break-words">${task.title}</h2>
           <div class="mt-1.5 flex flex-wrap items-center gap-2">
             <${StatusBadge} status=${task.status ?? 'todo'} />
-            <span class="rounded-md border border-current/20 bg-[var(--white-5)] px-2 py-0.5 text-[11px] font-semibold text-text-body">${priorityLabel(p)}</span>
+            <span class="rounded border border-current/20 bg-[var(--white-5)] px-2 py-0.5 text-[11px] font-semibold text-text-body">${priorityLabel(p)}</span>
             ${task.assignee ? html`<span class="text-[11px] text-accent">@${task.assignee}${assigneeKind ? ` (${assigneeKind})` : ''}</span>` : null}
           </div>
         </div>
         <button
           ref=${closeButtonRef}
           type="button"
-          class="shrink-0 size-8 flex items-center justify-center rounded-lg border border-[var(--white-10)] bg-[var(--white-5)] text-text-muted cursor-pointer transition-colors hover:bg-[var(--white-10)] hover:text-text-strong"
+          class="shrink-0 size-8 flex items-center justify-center rounded border border-[var(--white-10)] bg-[var(--white-5)] text-text-muted cursor-pointer transition-colors hover:bg-[var(--white-10)] hover:text-text-strong"
           onClick=${closeTaskDetail}
           aria-label="닫기"
         ><${X} size=${16} /></button>
@@ -361,7 +361,7 @@ export function TaskDetailOverlay() {
             <button
               key=${tab}
               type="button"
-              class="px-3 py-1.5 rounded-lg text-[12px] font-medium border cursor-pointer transition-colors ${
+              class="px-3 py-1.5 rounded text-[12px] font-medium border cursor-pointer transition-colors ${
                 activeTab.value === tab
                   ? 'border-accent/40 bg-accent/12 text-[var(--accent)]'
                   : 'border-transparent text-text-muted hover:bg-[var(--white-8)]'

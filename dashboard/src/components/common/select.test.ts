@@ -120,7 +120,7 @@ describe('Select', () => {
   it('base classes preserved even when `class` extension is given', () => {
     render(html`<${Select} options=${['a']} class="extra-hook" />`, container)
     const cn = container.querySelector('select')!.className
-    expect(cn).toContain('rounded-lg')
+    expect(cn).toContain('rounded')
     expect(cn).toContain('appearance-none')
   })
 })

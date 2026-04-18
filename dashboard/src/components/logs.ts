@@ -368,7 +368,7 @@ export function LogViewer() {
             <select
               name="log-level"
               aria-label="로그 레벨"
-              class="logs-select rounded-md border border-[var(--white-10)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
+              class="logs-select rounded border border-[var(--white-10)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
               value=${levelFilter.value}
               onChange=${(e: Event) => {
                 levelFilter.value = (e.target as HTMLSelectElement).value
@@ -405,7 +405,7 @@ export function LogViewer() {
             <select
               name="log-limit"
               aria-label="로그 개수"
-              class="logs-select rounded-md border border-[var(--white-10)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
+              class="logs-select rounded border border-[var(--white-10)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[var(--text-body)]"
               value=${String(logLimit.value)}
               onChange=${(e: Event) => {
                 logLimit.value = parseInt((e.target as HTMLSelectElement).value, 10)
@@ -433,7 +433,7 @@ export function LogViewer() {
             </label>
             <button
               type="button"
-              class="logs-refresh-btn rounded-md border border-[rgba(71,184,255,0.22)] bg-[var(--accent-10)] px-3 py-2 text-[11px] font-medium text-[#dff3ff]"
+              class="logs-refresh-btn rounded border border-[rgba(71,184,255,0.22)] bg-[var(--accent-10)] px-3 py-2 text-[11px] font-medium text-[#dff3ff]"
               onClick=${() => {
                 latestSeq.value = null
                 logResource.reset()
@@ -447,7 +447,7 @@ export function LogViewer() {
         </div>
 
         ${logError ? html`
-          <div class="mx-4 mt-4 rounded-md border border-solid border-[#e05050] bg-[rgba(224,80,80,0.12)] px-4 py-3 text-[12px] text-[#ffb3b3]">${logError}</div>
+          <div class="mx-4 mt-4 rounded border border-solid border-[#e05050] bg-[rgba(224,80,80,0.12)] px-4 py-3 text-[12px] text-[#ffb3b3]">${logError}</div>
         ` : null}
 
         <div class="px-3 pt-3">

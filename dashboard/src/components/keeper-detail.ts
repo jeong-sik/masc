@@ -334,7 +334,7 @@ function KeeperClearContextDialog({
           <span class="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">사유</span>
           <textarea
             ref=${reasonRef}
-            class="min-h-[112px] resize-y rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-2 text-[13px] leading-[1.55] text-[var(--text-body)] outline-none focus:border-[rgba(71,184,255,0.45)] focus:ring-2 focus:ring-[rgba(71,184,255,0.18)]"
+            class="min-h-[112px] resize-y rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-2 text-[13px] leading-[1.55] text-[var(--text-body)] outline-none focus:border-[var(--accent-45)] focus:ring-2 focus:ring-[var(--accent-18)]"
             placeholder="예: stale continuity replay 제거"
             disabled=${pending}
             value=${reason}
@@ -433,7 +433,7 @@ function CheckpointSummaryCard({
     <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3">
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-[12px] font-semibold text-[var(--text-strong)]">${title}</span>
-        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.18)]">
+        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-18)]">
           gen ${summary.generation}
         </span>
         <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]">
@@ -615,7 +615,7 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
                     <div class="min-w-0 flex-1">
                       <div class="flex flex-wrap items-center gap-2">
                         <span class="font-mono text-[var(--text-strong)]">${item.snapshot_id}</span>
-                        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.18)]">
+                        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-18)]">
                           gen ${item.generation}
                         </span>
                         <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]">
@@ -767,7 +767,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
                       <span class="text-xs font-medium text-[var(--text-strong)] truncate">${r.name}</span>
-                      <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">${r.branch}</span>
+                      <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">${r.branch}</span>
                       ${r.shallow ? html`<span class="text-[10px] px-1 py-0.5 rounded bg-[var(--warn-10)] text-[var(--warn)] border border-[var(--warn-20)]">shallow</span>` : null}
                     </div>
                     <div class="text-[10px] text-[var(--text-muted)] font-mono mt-0.5 truncate">${r.latest_commit}</div>
@@ -786,7 +786,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
               ${prs.map(pr => html`
                 <div class="flex items-center gap-2 px-3 py-1.5 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
                   <span class="text-xs text-[var(--text-strong)] truncate flex-1">${pr.title}</span>
-                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">${pr.branch}</span>
+                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">${pr.branch}</span>
                   ${pr.draft ? html`<span class="text-[10px] px-1 py-0.5 rounded bg-[var(--warn-10)] text-[var(--warn)] border border-[var(--warn-20)]">draft</span>` : null}
                   <a href=${pr.pr_url} target="_blank" rel="noopener" class="text-[10px] text-[var(--accent)] hover:underline flex-shrink-0">PR</a>
                 </div>
@@ -986,7 +986,7 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
             <div class="rounded border border-[var(--accent-20)] bg-[rgba(71,184,255,0.08)] p-3 mb-3">
               <div class="flex flex-wrap items-center gap-2 mb-1">
                 <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]">Latest Handoff</span>
-                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">
+                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">
                   ${lineageTransitionLabel(latestEntry.parent_generation, latestEntry.generation)}
                 </span>
                 <span class="text-[10px] px-1.5 py-0.5 rounded ${verdictBadgeClass(latestEntry.continuity_verdict)}">
@@ -1029,7 +1029,7 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
             <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3 mb-3">
               <div class="flex flex-wrap items-center gap-2 mb-2">
                 <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Current Manifest</span>
-                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">gen ${manifest.generation}</span>
+                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">gen ${manifest.generation}</span>
                 ${continuity?.verdict
                   ? html`<span class="text-[10px] px-1.5 py-0.5 rounded ${verdictBadgeClass(continuity.verdict)}">${continuityMeta.badgeLabel}</span>`
                   : null}
@@ -1095,9 +1095,9 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                   return html`
                   <div class=${`px-3 py-2 rounded border ${isLatest ? 'border-[rgba(71,184,255,0.22)] bg-[rgba(71,184,255,0.08)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}>
                     <div class="flex flex-wrap items-center gap-2">
-                      <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">gen ${entry.generation}</span>
+                      <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">gen ${entry.generation}</span>
                       ${isLatest
-                        ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-[rgba(71,184,255,0.18)] bg-[rgba(71,184,255,0.12)] text-[var(--accent)]">latest</span>`
+                        ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-[var(--accent-18)] bg-[rgba(71,184,255,0.12)] text-[var(--accent)]">latest</span>`
                         : null}
                       ${entry.continuity_verdict
                         ? html`<span class="text-[10px] px-1.5 py-0.5 rounded ${verdictBadgeClass(entry.continuity_verdict)}">${entryMeta.badgeLabel}</span>`
@@ -1313,7 +1313,7 @@ export function KeeperDetailOverlay() {
               ref=${closeButtonRef}
               type="button"
               onClick=${() => closeKeeperDetail()}
-              class="flex items-center justify-center size-8 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1526]"
+              class="flex items-center justify-center size-8 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1526]"
               aria-label="키퍼 상세 닫기"
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>

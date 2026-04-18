@@ -29,7 +29,7 @@
 // • agent-detail:230 (agent.model) — mono neutral pill with
 //   reversed opacities to 228. P6.
 // • agent-detail-worker:45 (signal_truth) — `rounded-sm` with
-//   raw `rgba(71,184,255,0.36)` border. That is StatusChip
+//   raw `var(--accent-36)` border. That is StatusChip
 //   shape with an untypeable border, not IdPill shape. P6 when
 //   raw rgba colors resolve to CSS vars.
 //

@@ -194,7 +194,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           <span class="font-mono font-medium text-[var(--text-strong)]">${s.totalEntries}</span> 호출
         </span>
         ${totalCost > 0 ? html`
-          <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--accent-12)] border border-[rgba(71,184,255,0.15)] text-[var(--text-muted)]">
+          <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--accent-12)] border border-[var(--accent-15)] text-[var(--text-muted)]">
             <span class="font-mono font-medium text-[var(--accent)]">$${totalCost.toFixed(3)}</span>
           </span>
         ` : null}

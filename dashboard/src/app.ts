@@ -101,12 +101,12 @@ export function App() {
   return html`
     <div class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--bg-0)] bg-[radial-gradient(ellipse_at_top,rgba(25,40,70,0.3)_0%,rgba(11,18,32,1)_80%)] text-[var(--text-body)]">
       <header class="relative z-10 shrink-0 border-b border-[var(--white-5)] bg-[rgba(8,14,26,0.36)] px-4 py-1.5 backdrop-blur-xl">
-        <div class="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[rgba(71,184,255,0.15)] to-transparent"></div>
+        <div class="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[var(--accent-15)] to-transparent"></div>
         <div class="flex w-full items-center justify-between gap-3 max-[900px]:flex-col max-[900px]:items-stretch">
           <div class="min-w-0 flex items-center gap-3">
             <div class="flex shrink-0 items-center gap-2">
               <button type="button"
-                class="hidden max-[768px]:flex size-9 items-center justify-center rounded border border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-body)] cursor-pointer transition-colors hover:bg-[rgba(255,255,255,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
+                class="hidden max-[768px]:flex size-9 items-center justify-center rounded border border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-body)] cursor-pointer transition-colors hover:bg-[rgba(255,255,255,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
                 aria-expanded=${mobileMenuOpen.value}
                 aria-label=${mobileMenuOpen.value ? '탐색 메뉴 닫기' : '탐색 메뉴 열기'}
                 aria-controls="dashboard-side-rail"

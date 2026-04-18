@@ -33,6 +33,17 @@
   --accent-10: rgba(71, 184, 255, 0.10);
   --accent-20: rgba(71, 184, 255, 0.20);
   --accent-30: rgba(71, 184, 255, 0.30);
+  /* Off-alpha accent tokens absorbed from Phase B inline-rgba sweep.
+     Same blue hue, opacity buckets that were already spread across
+     components. Naming follows the --accent-N (N = opacity %) convention.
+     Note: --accent-18 was previously pruned as unused; this PR reintroduces
+     it with 5 active callsites. */
+  --accent-15: rgba(71, 184, 255, 0.15);
+  --accent-18: rgba(71, 184, 255, 0.18);
+  --accent-36: rgba(71, 184, 255, 0.36);
+  /* --accent-45 reserved for focus-ring strength (high-contrast keyboard
+     focus halo). Distinct semantic from -30 so the role is grep-able. */
+  --accent-45: rgba(71, 184, 255, 0.45);
 
   /* Semantic - Success (Green) */
   --ok-soft: rgba(74, 222, 128, 0.15);

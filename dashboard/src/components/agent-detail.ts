@@ -275,7 +275,7 @@ export function AgentDetailOverlay() {
             <button
               ref=${closeButtonRef}
               type="button"
-              class="px-4 py-2 text-[13px] font-semibold rounded border border-transparent bg-white/10 text-text-strong hover:bg-white/20 transition-colors duration-200 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]"
+              class="px-4 py-2 text-[13px] font-semibold rounded border border-transparent bg-white/10 text-text-strong hover:bg-white/20 transition-colors duration-200 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]"
               onClick=${closeAgentDetail}
             >
               닫기

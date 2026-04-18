@@ -87,8 +87,8 @@ let audit_approval_event ~event_type ~id ~keeper_name ~tool_name
       ("risk", `String (risk_level_to_string risk_level));
       ("decision", `String decision);
     ] in
-    (try Dated_jsonl.append store json
-     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+    Safe_ops.protect ~default:() (fun () ->
+      Dated_jsonl.append store json)
 
 let generate_id () =
   let entropy =
@@ -222,9 +222,8 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
   Fun.protect
     (fun () -> Eio.Promise.await promise)
     ~finally:(fun () ->
-      (try
-         atomic_update pending (fun map -> SMap.remove id map)
-       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()))
+      Safe_ops.protect ~default:() (fun () ->
+        atomic_update pending (fun map -> SMap.remove id map)))
 
 let submit_pending ~keeper_name ~tool_name ~input ~risk_level ~on_resolution
   : string =

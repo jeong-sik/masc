@@ -313,7 +313,13 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           message_gate = compaction_message_gate;
           token_gate = compaction_token_gate;
           cooldown_sec = continuity_compaction_cooldown_sec;
-          max_checkpoint_messages = 80;
+          (* Honour [Keeper_context_core.default_max_checkpoint_messages]
+             instead of the 80 literal that used to ship here.  The
+             literal shadowed the declared default (120) for 13/15
+             keepers.  Per-keeper overrides set by the operator via the
+             keeper JSON still win.  See #7859. *)
+          max_checkpoint_messages =
+            Keeper_context_core.default_max_checkpoint_messages;
         };
         auto_handoff;
         handoff_threshold;

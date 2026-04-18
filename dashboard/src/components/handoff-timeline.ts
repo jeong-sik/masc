@@ -284,7 +284,7 @@ export function HandoffTimeline({
   const isFiltering = query.value.trim() !== ''
 
   return html`
-    <section class="rounded-xl border border-card-border bg-card-bg p-4 flex flex-col gap-3">
+    <section class="rounded border border-card-border bg-card-bg p-4 flex flex-col gap-3">
       <header class="flex items-baseline justify-between">
         <div>
           <h3 class="text-sm font-semibold text-text">A2A Event Timeline</h3>

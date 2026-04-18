@@ -257,7 +257,7 @@ export function ActivityHeatmap({ data }: HeatmapProps) {
       <div class="mb-2">
         <p class="text-[13px] text-[var(--text-muted)]">필터링된 전체 이벤트를 기준으로 요일별, 시간대별 활동 밀도를 보여줍니다.</p>
       </div>
-      <div ref=${containerRef} class="relative overflow-x-auto bg-[#0f1117] rounded-xl p-3">
+      <div ref=${containerRef} class="relative overflow-x-auto bg-[#0f1117] rounded p-3">
         <canvas ref=${canvasRef} class="block" />
       </div>
     <//>

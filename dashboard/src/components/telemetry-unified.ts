@@ -720,7 +720,7 @@ export function TelemetryUnified() {
 
   return html`
     <div class="flex flex-col gap-4">
-      <div class="rounded-xl border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-4">
+      <div class="rounded border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-4">
         <div class="text-[12px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Runtime Diagnosis</div>
         <div class="mt-1 text-[14px] leading-relaxed text-[var(--text-body)]">
           MASC telemetry store (keeper/tool/agent) 진단 뷰.
@@ -846,7 +846,7 @@ export function TelemetryUnified() {
         </div>
       ` : null}
 
-      <div class="rounded-xl border border-[var(--card-border)] overflow-hidden">
+      <div class="rounded border border-[var(--card-border)] overflow-hidden">
         <div class="px-3 py-2 border-b border-[var(--card-border)] bg-[var(--white-3)] text-xs text-[var(--text-muted)]">
           MASC telemetry store entries ${entries.length.toLocaleString()}건
           ${isFilteringEntries

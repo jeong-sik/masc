@@ -102,7 +102,7 @@ function KanbanCard({ task }: { task: Task }) {
   }
 
   return html`
-    <article class="flex flex-col gap-3 rounded-xl border border-card-border/60 border-l-4 bg-[rgba(7,12,20,0.92)] p-4 ${priorityToneClass(p)}">
+    <article class="flex flex-col gap-3 rounded border border-card-border/60 border-l-4 bg-[rgba(7,12,20,0.92)] p-4 ${priorityToneClass(p)}">
       <div class="flex items-start justify-between gap-3">
         <div class="flex flex-wrap items-center gap-2">
           <span class="rounded-md border border-current/20 px-2 py-0.5 text-[11px] font-semibold">${priorityLabel(p)}</span>
@@ -188,7 +188,7 @@ function TaskColumn({
   }, [listRef])
 
   return html`
-    <section class="flex min-h-[240px] flex-col gap-4 rounded-2xl border border-card-border/60 bg-[rgba(9,14,24,0.82)] p-4">
+    <section class="flex min-h-[240px] flex-col gap-4 rounded border border-card-border/60 bg-[rgba(9,14,24,0.82)] p-4">
       <div class="flex items-start justify-between gap-3 border-b border-card-border/50 pb-3">
         <div>
           <h3 class="text-[15px] font-semibold text-text-strong">${title}</h3>

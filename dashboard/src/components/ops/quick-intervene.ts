@@ -99,7 +99,7 @@ export function QuickIntervene() {
 
       ${showAdvanced
         ? html`
-            <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+            <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
               <label class="block text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--text-muted)]" for="quick-intervene-actor">
                 기록 주체
               </label>

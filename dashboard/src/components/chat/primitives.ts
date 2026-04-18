@@ -139,7 +139,7 @@ function ChatMessageBubble({
         <div class=${`flex min-w-0 flex-1 gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
           <div
             class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center border text-[11px] font-semibold uppercase tracking-[0.08em] ${
-              isMessenger ? 'size-8 rounded-[18px]' : 'size-10 rounded-2xl'
+              isMessenger ? 'size-8 rounded-[18px]' : 'size-10 rounded'
             }`}
           >
             ${avatarMonogram(entry)}
@@ -202,7 +202,7 @@ function ChatMessageBubble({
               <button
                 type="button"
                 class=${`border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--text-body)] ${
-                  isMessenger ? 'rounded-xl px-2.5 py-1' : 'rounded-full px-3 py-1'
+                  isMessenger ? 'rounded px-2.5 py-1' : 'rounded-full px-3 py-1'
                 }`}
                 onClick=${() => { setExpandedRaw(!expandedRaw) }}
               >
@@ -227,7 +227,7 @@ function ChatMessageBubble({
       </div>
       ${entry.error
         ? html`
-            <div class="rounded-2xl border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.28)] px-3 py-2 text-[12px] leading-[1.55] text-[var(--bad-light)]">
+            <div class="rounded border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.28)] px-3 py-2 text-[12px] leading-[1.55] text-[var(--bad-light)]">
               ${entry.error}
             </div>
           `
@@ -240,7 +240,7 @@ function ChatMessageBubble({
                 ? html`
                     <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                       ${overview.map(item => html`
-                        <div class="rounded-2xl border border-[rgba(148,163,184,0.12)] bg-[var(--white-3)] px-3 py-2.5">
+                        <div class="rounded border border-[rgba(148,163,184,0.12)] bg-[var(--white-3)] px-3 py-2.5">
                           <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">${item.label}</div>
                           <div class="mt-1 text-[13px] font-semibold text-[var(--text-strong)]">${item.value}</div>
                         </div>
@@ -250,7 +250,7 @@ function ChatMessageBubble({
                 : null}
               ${entry.details.skillPrimary
                 ? html`
-                    <div class="chat-detail-callout rounded-2xl border border-[rgba(76,181,137,0.18)] px-3 py-3">
+                    <div class="chat-detail-callout rounded border border-[rgba(76,181,137,0.18)] px-3 py-3">
                       <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8fdcb3]">스킬 경로</div>
                       <div class="mt-1 text-[13px] font-semibold text-[#d8f7e6]">${entry.details.skillPrimary}</div>
                       ${entry.details.skillReason
@@ -265,7 +265,7 @@ function ChatMessageBubble({
                       <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">상태 스냅샷</div>
                       <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                         ${state.map(item => html`
-                          <div class="rounded-2xl border border-[var(--accent-soft)] bg-[rgba(71,184,255,0.06)] px-3 py-2.5">
+                          <div class="rounded border border-[var(--accent-soft)] bg-[rgba(71,184,255,0.06)] px-3 py-2.5">
                             <div class="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--accent)]">${item.label}</div>
                             <div class="mt-1 text-[12px] leading-[1.55] text-[var(--text-body)]">${item.value}</div>
                           </div>

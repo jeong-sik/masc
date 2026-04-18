@@ -376,7 +376,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <${RouteLink}
                   tab=${surface.defaultTab}
                   params=${surface.defaultParams}
-                  class="flex items-center justify-center w-full rounded-xl border p-2 cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive ? 'bg-[var(--accent-soft)] text-[var(--text-strong)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'border-transparent text-[var(--text-muted)] hover:bg-[var(--white-5)]'}"
+                  class="flex items-center justify-center w-full rounded border p-2 cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive ? 'bg-[var(--accent-soft)] text-[var(--text-strong)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'border-transparent text-[var(--text-muted)] hover:bg-[var(--white-5)]'}"
                   title=${surface.label}
                   aria-label=${surface.label}
                   ariaCurrent=${isSurfaceActive ? 'page' : undefined}
@@ -634,7 +634,7 @@ export function DashboardMain() {
 
   return html`
     ${namespaceTruthInitializing.value ? html`
-      <div class="mb-3 shrink-0 rounded-xl border border-solid border-[rgba(230,167,0,0.22)] bg-[rgba(230,167,0,0.1)] px-4 py-1.5 text-center text-[0.78rem] text-[#e6a700]">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
+      <div class="mb-3 shrink-0 rounded border border-solid border-[rgba(230,167,0,0.22)] bg-[rgba(230,167,0,0.1)] px-4 py-1.5 text-center text-[0.78rem] text-[#e6a700]">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
     ` : null}
     <${SurfaceLead} />
     <${ObservatoryFilterBar} />

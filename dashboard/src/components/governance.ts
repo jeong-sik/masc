@@ -46,7 +46,7 @@ function GovernanceSummaryStrip() {
 
   return html`
     ${isStale ? html`
-      <div class="mb-3.5 flex items-center gap-3 rounded-xl border border-warn/30 bg-warn/10 p-3.5 text-[13px] font-medium text-warn shadow-sm">
+      <div class="mb-3.5 flex items-center gap-3 rounded border border-warn/30 bg-warn/10 p-3.5 text-[13px] font-medium text-warn shadow-sm">
         <div class="shrink-0"><${AlertTriangle} size=${18} aria-hidden="true" /></div>
         <div>
           모든 열린 케이스가 ${formatAgeSummary(oldestAge)} 이상 경과됨.
@@ -280,7 +280,7 @@ function KeeperApprovalAlertBanner() {
 
   return html`
     <div
-      class="mb-3.5 flex items-center gap-4 rounded-xl border ${tone} p-4 shadow-sm ring-2 ${ringTone}"
+      class="mb-3.5 flex items-center gap-4 rounded border ${tone} p-4 shadow-sm ring-2 ${ringTone}"
       data-testid="keeper-hitl-alert-banner"
       role="status"
       aria-live="polite"
@@ -433,7 +433,7 @@ function KeeperApprovalQueueSection() {
               ${visibleItems.map(item => {
                 const disabled = actingId === item.id
                 return html`
-                  <div class="rounded-xl border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-item">
+                  <div class="rounded border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-item">
                     <div class="flex flex-wrap items-start gap-2.5">
                       <span class="inline-flex items-center rounded-md border border-white/10 bg-[var(--white-3)] px-2 py-0.5 text-[10px] font-bold text-text-muted">
                         keeper ${item.keeper_name}

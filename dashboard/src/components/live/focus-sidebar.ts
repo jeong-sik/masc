@@ -45,7 +45,7 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
           : list.map(agent => html`
             <div
               key=${agent.name}
-              class="focus-agent-card rounded-2xl border border-[var(--border-slate-12)] bg-[var(--white-3)] p-3.5 transition-colors duration-200 ${selected === agent.name ? 'focus-agent-selected' : ''}"
+              class="focus-agent-card rounded border border-[var(--border-slate-12)] bg-[var(--white-3)] p-3.5 transition-colors duration-200 ${selected === agent.name ? 'focus-agent-selected' : ''}"
               onClick=${() => openAgentDetail(agent.name)}
             >
               <div class="focus-agent-header">

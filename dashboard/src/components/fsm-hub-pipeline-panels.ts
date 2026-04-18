@@ -87,7 +87,7 @@ export function OperationalMeaningPanel({
 
   return html`
     <div
-      class=${`rounded-xl border p-4 transition-colors duration-300 ${panelCls}`}
+      class=${`rounded border p-4 transition-colors duration-300 ${panelCls}`}
       role=${isAlarm ? 'alert' : undefined}
       aria-live=${isAlarm ? 'polite' : undefined}
     >
@@ -286,7 +286,7 @@ export function HeroPhase({
   const heldFor = phaseSince != null ? fmtDuration(Math.max(0, now - phaseSince)) : null
 
   return html`
-    <div class=${`rounded-xl border p-5 transition-all duration-700 ${flash ? 'border-[var(--accent)] bg-[rgba(71,184,255,0.06)] shadow-[0_0_16px_rgba(71,184,255,0.2)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}
+    <div class=${`rounded border p-5 transition-all duration-700 ${flash ? 'border-[var(--accent)] bg-[rgba(71,184,255,0.06)] shadow-[0_0_16px_rgba(71,184,255,0.2)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}
       role="status" aria-live="polite" aria-label=${`Keeper 상태: ${displayState(snapshot.phase)}${heldFor ? `, ${heldFor}` : ''}`}
       title=${STATE_DESCRIPTIONS[snapshot.phase] ?? snapshot.phase}
     >
@@ -405,7 +405,7 @@ export function TurnPipelineStrip({
   now: number
 }) {
   return html`
-    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+    <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
       <div class="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
         턴 파이프라인
       </div>

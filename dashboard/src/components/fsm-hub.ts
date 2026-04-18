@@ -527,7 +527,7 @@ export function FsmHub(props: FsmHubProps = {}) {
         <//>
 
         ${/* ── Zone 5: Collapsible Graph ── */ ''}
-        <details class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)]"
+        <details class="rounded border border-[var(--white-8)] bg-[var(--white-2)]"
           open=${graphOpen}
           onToggle=${(e: Event) => setGraphOpen((e.target as HTMLDetailsElement).open)}
         >
@@ -571,7 +571,7 @@ function ShortcutsOverlay({
       aria-label="키보드 단축키"
     >
       <div
-        class="rounded-xl border border-[var(--white-10)] bg-[var(--bg-0)] p-5 min-w-[280px] shadow-2xl"
+        class="rounded border border-[var(--white-10)] bg-[var(--bg-0)] p-5 min-w-[280px] shadow-2xl"
         onClick=${(e: MouseEvent) => e.stopPropagation()}
       >
         <div class="flex items-center justify-between mb-3">
@@ -668,7 +668,7 @@ function StatusBar({
 
   const containerPadding = density === 'compact' ? 'px-3 py-1.5' : 'px-4 py-2.5'
   return html`
-    <div class=${`sticky top-0 z-20 rounded-xl border border-[var(--white-8)] bg-[var(--panel-dark-60)] backdrop-blur-md shadow-[0_4px_12px_rgba(0,0,0,0.25)] ${containerPadding}`}>
+    <div class=${`sticky top-0 z-20 rounded border border-[var(--white-8)] bg-[var(--panel-dark-60)] backdrop-blur-md shadow-[0_4px_12px_rgba(0,0,0,0.25)] ${containerPadding}`}>
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-3">
           <span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">FSM Hub</span>
@@ -813,7 +813,7 @@ function SkeletonLayout() {
   return html`
     <div class="flex flex-col gap-3" aria-hidden="true" aria-label="Loading composite snapshot">
       ${/* Operator Meaning skeleton */ ''}
-      <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-4">
+      <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-4">
         <${SkeletonBar} w="w-24" h="h-2" />
         <div class="mt-3"><${SkeletonBar} w="w-3/4" h="h-5" /></div>
         <div class="mt-2"><${SkeletonBar} w="w-full" h="h-3" /></div>
@@ -825,7 +825,7 @@ function SkeletonLayout() {
       </div>
 
       ${/* Hero Phase skeleton */ ''}
-      <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-5">
+      <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-5">
         <${SkeletonBar} w="w-32" h="h-2" />
         <div class="mt-2"><${SkeletonBar} w="w-40" h="h-8" /></div>
         <div class="mt-2"><${SkeletonBar} w="w-20" h="h-2" /></div>
@@ -835,7 +835,7 @@ function SkeletonLayout() {
       </div>
 
       ${/* Pipeline Strip skeleton */ ''}
-      <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+      <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
         <${SkeletonBar} w="w-24" h="h-2" />
         <div class="mt-2 flex gap-2">
           ${[1,2,3,4].map(i => html`
@@ -849,7 +849,7 @@ function SkeletonLayout() {
       </div>
 
       ${/* Swimlane skeleton */ ''}
-      <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+      <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
         <${SkeletonBar} w="w-28" h="h-2" />
         <div class="mt-2 flex flex-col gap-1.5">
           ${[1,2,3,4,5].map(i => html`
@@ -864,7 +864,7 @@ function SkeletonLayout() {
       ${/* Health Grid skeleton */ ''}
       <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         ${[1,2,3].map(i => html`
-          <div key=${i} class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+          <div key=${i} class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
             <${SkeletonBar} w="w-20" h="h-2" />
             <div class="mt-2 flex flex-wrap gap-1.5">
               <${SkeletonBar} w="w-14" h="h-5" />
@@ -924,7 +924,7 @@ function CollapsibleZone({
   }
 
   return html`
-    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] overflow-hidden">
+    <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] overflow-hidden">
       <button
         type="button"
         class="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-[var(--white-3)] transition-colors cursor-pointer select-none"

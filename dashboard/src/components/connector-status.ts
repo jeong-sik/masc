@@ -826,7 +826,7 @@ function ConnectorLivePanel({
   const headerIcon = channelIcon(connector?.channel ?? connectorId)
 
   return html`
-    <div id=${`connector-card-${connectorId}`} class=${`mb-4 scroll-mt-4 rounded-xl border border-[var(--card-border)] ${connectorCardBorderClass(directLabel)} p-4`} data-connector-card-state=${directLabel} style=${connectorAccentStyle(connectorId)}>
+    <div id=${`connector-card-${connectorId}`} class=${`mb-4 scroll-mt-4 rounded border border-[var(--card-border)] ${connectorCardBorderClass(directLabel)} p-4`} data-connector-card-state=${directLabel} style=${connectorAccentStyle(connectorId)}>
       <div class="flex flex-wrap items-center gap-2 text-[12px]">
         <span class="text-base leading-none" aria-hidden="true">${headerIcon}</span>
         <span class="text-sm font-semibold text-[var(--text-body)]">${connectorName}</span>
@@ -1415,7 +1415,7 @@ function DisclosurePanel({
   testId: string
 }) {
   return html`
-    <details class="mb-4 rounded-xl border border-[var(--card-border)] bg-[var(--bg-1)]" data-testid=${testId}>
+    <details class="mb-4 rounded border border-[var(--card-border)] bg-[var(--bg-1)]" data-testid=${testId}>
       <summary class="cursor-pointer list-none px-3 py-2.5">
         <div class="flex items-center justify-between gap-3">
           <div>
@@ -1620,7 +1620,7 @@ export function ConnectorStatusPanel() {
         ? html`
             <div
               id="connector-detail-panel"
-              class="mb-4 rounded-xl border border-[var(--card-border)] bg-[var(--bg-0)]/40 p-3"
+              class="mb-4 rounded border border-[var(--card-border)] bg-[var(--bg-0)]/40 p-3"
               data-testid="connector-detail-panel"
             >
               <div class="mb-3 flex items-center justify-between gap-3 text-[11px]">

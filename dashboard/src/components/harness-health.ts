@@ -242,7 +242,7 @@ export function HarnessHealth() {
   } else if (data) {
     overviewContent = html`
       <div class="space-y-4">
-        <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] p-4">
+        <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-4">
           <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div class="max-w-3xl">
               <${SectionCap}>keeper 장기 실행 중 평가/압축/교체가 정상인지 감시합니다<//>

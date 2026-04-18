@@ -39,7 +39,7 @@ describe('ErrorBoundary', () => {
     const button = container.querySelector('button')
     expect(button).not.toBeNull()
     expect(button?.className).toContain('border-[var(--card-border)]')
-    expect(button?.className).not.toContain('card rounded-xl-border')
+    expect(button?.className).not.toContain('card rounded-border')
   })
 
   it('renders children untouched when no error is thrown', async () => {

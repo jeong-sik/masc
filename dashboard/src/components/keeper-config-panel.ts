@@ -201,7 +201,7 @@ export function peekKeeperConfigLoadStatus(
 
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
+    <div class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
       <span class="text-[12px] font-medium text-text-muted">${label}</span>
       <span class="text-[12px] font-semibold text-text-strong">${value}</span>
     </div>
@@ -231,7 +231,7 @@ function Callout({
       ? 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn)]'
       : 'border-card-border/60 bg-card/35 text-text-body'
   return html`
-    <div class="rounded-xl border px-3 py-3 shadow-sm ${toneClass}">
+    <div class="rounded border px-3 py-3 shadow-sm ${toneClass}">
       <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-1">${title}</div>
       <div class="text-[12px] leading-relaxed">${body}</div>
     </div>
@@ -267,7 +267,7 @@ function LongText({ text, truncateAt = 200 }: { text: string; truncateAt?: numbe
     truncateAt !== null && truncateAt >= 0 && text.length > truncateAt
       ? text.slice(0, truncateAt) + '...'
       : text
-  return html`<div class="text-[12px] text-text-body whitespace-pre-wrap max-h-[140px] overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-md p-3 rounded-xl mt-1.5 leading-relaxed shadow-inner hover:bg-card/60 transition-colors">${truncated}</div>`
+  return html`<div class="text-[12px] text-text-body whitespace-pre-wrap max-h-[140px] overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-md p-3 rounded mt-1.5 leading-relaxed shadow-inner hover:bg-card/60 transition-colors">${truncated}</div>`
 }
 
 
@@ -302,13 +302,13 @@ function PromptBlock({
   `
 }
 
-const fieldStyle = 'w-full bg-card/60 backdrop-blur-md text-text-strong text-[13px] border border-card-border rounded-xl py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all duration-200 shadow-inner'
+const fieldStyle = 'w-full bg-card/60 backdrop-blur-md text-text-strong text-[13px] border border-card-border rounded py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all duration-200 shadow-inner'
 
 // ── Inline editing components for runtime config ────────
 
 function InlineToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
+    <div class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
       <span class="text-[12px] font-medium text-text-muted">${label}</span>
       <button type="button"
         class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-white/10'}"
@@ -325,7 +325,7 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix }: {
   min?: number; max?: number; step?: number; suffix?: string
 }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
+    <div class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
       <span class="text-[12px] font-medium text-text-muted">${label}</span>
       <div class="flex items-center gap-1.5">
         <input type="number"
@@ -716,7 +716,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       `}
 
       ${runtimeHasChanges ? html`
-        <div class="flex gap-2 items-center mt-4 mb-2 p-3 rounded-xl border border-accent/30 bg-accent/5">
+        <div class="flex gap-2 items-center mt-4 mb-2 p-3 rounded border border-accent/30 bg-accent/5">
           <button type="button"
             class="${btnBase} bg-[var(--ok)] text-[#000]"
             onClick=${saveRuntimeConfig}
@@ -750,7 +750,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0
             ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${allEntries.length} slots)</div>`
             : visibleEntries.map(([name, slot]) => html`
-                <div class="flex items-start gap-2 py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 mb-1.5">
+                <div class="flex items-start gap-2 py-2 px-3 rounded border border-card-border/50 bg-card/20 mb-1.5">
                   <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--text-dim)]'}"></span>
                   <div class="flex-1 min-w-0">
                     <div class="flex justify-between">

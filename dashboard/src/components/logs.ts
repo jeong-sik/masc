@@ -362,7 +362,7 @@ export function LogViewer() {
 
   return html`
     <div class="logs-viewer flex h-full min-h-0 flex-col gap-4">
-      <section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[rgba(138,163,211,0.16)] bg-[rgba(7,13,24,0.86)]">
+      <section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-[rgba(138,163,211,0.16)] bg-[rgba(7,13,24,0.86)]">
         <div class="logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[rgba(255,255,255,0.06)] px-4 py-4">
           <div class="logs-filters flex flex-wrap gap-2 items-center">
             <select

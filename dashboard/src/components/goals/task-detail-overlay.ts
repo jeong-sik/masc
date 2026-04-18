@@ -135,7 +135,7 @@ function GateSection({
   if (!gate) return null
 
   return html`
-    <div class="rounded-xl border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
+    <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
       <div class="flex items-center justify-between gap-3">
         <div class="text-[12px] font-medium text-text-strong">${title}</div>
         <span class=${`rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${gateTone(gate.status)}`}>${gate.status}</span>
@@ -175,7 +175,7 @@ function ContractSection({ task }: { task: Task }) {
       </div>
 
       ${isAwaitingVerification ? html`
-        <div class="rounded-xl border border-accent/30 bg-[var(--accent-5)] px-4 py-3">
+        <div class="rounded border border-accent/30 bg-[var(--accent-5)] px-4 py-3">
           <div class="text-[12px] font-medium text-accent">Verifier Keeper 검증 중</div>
           <div class="mt-1 text-[11px] text-text-body">
             Submitter: <span class="font-mono">${verifierAssignee ?? '(unknown)'}</span>
@@ -192,7 +192,7 @@ function ContractSection({ task }: { task: Task }) {
       <${GateSection} title="Verify → Review" gate=${gate?.verify_to_review} />
 
       ${completionItems.length > 0 ? html`
-        <div class="rounded-xl border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
+        <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
           <div class="text-[12px] font-medium text-text-strong">Completion Contract</div>
           <div class="mt-2 flex flex-col gap-1">
             ${completionItems.map((item: string) => html`
@@ -203,7 +203,7 @@ function ContractSection({ task }: { task: Task }) {
       ` : null}
 
       ${requiredEvidence.length > 0 ? html`
-        <div class="rounded-xl border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
+        <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
           <div class="text-[12px] font-medium text-text-strong">Required Evidence</div>
           <div class="mt-2 flex flex-wrap gap-1.5">
             ${requiredEvidence.map((item: string) => html`
@@ -231,7 +231,7 @@ function ExecutionLinksSection({ task }: { task: Task }) {
       <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">연결된 실행</div>
       <div class="flex flex-col gap-2">
         ${items.map(([label, value]) => html`
-          <div key=${label} class="rounded-xl border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
+          <div key=${label} class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
             <div class="text-[10px] uppercase tracking-[0.12em] text-text-dim">${label}</div>
             <div class="mt-1 text-[12px] font-mono text-text-body break-all">${value}</div>
           </div>
@@ -248,7 +248,7 @@ function HandoffSection({ task }: { task: Task }) {
   return html`
     <div>
       <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">최근 Handoff</div>
-      <div class="rounded-xl border border-warn/20 bg-warn/8 px-4 py-3">
+      <div class="rounded border border-warn/20 bg-warn/8 px-4 py-3">
         <div class="text-[13px] leading-relaxed text-text-body"><${RichContent} text=${handoff.summary} previewLimit=${2} /></div>
         ${handoff.reason ? html`<div class="mt-2 text-[11px] text-text-muted">reason: ${handoff.reason}</div>` : null}
         ${handoff.next_step ? html`<div class="mt-1 text-[11px] text-text-muted">next: ${handoff.next_step}</div>` : null}
@@ -333,7 +333,7 @@ export function TaskDetailOverlay() {
       onClose=${closeTaskDetail}
       initialFocusRef=${closeButtonRef}
       overlayClass="fixed inset-0 z-[60] bg-[var(--white-5)]/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
-      panelClass="w-full max-w-[900px] max-h-[90vh] overflow-y-auto bg-[#0d1526] rounded-2xl border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.5)]"
+      panelClass="w-full max-w-[900px] max-h-[90vh] overflow-y-auto bg-[#0d1526] rounded border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.5)]"
     >
       ${'' /* Sticky Header */}
       <div class="sticky top-0 z-10 flex items-center justify-between gap-4 px-6 py-4 border-b border-[var(--card-border)] bg-[rgba(13,21,38,0.97)] backdrop-blur-md rounded-t-2xl">
@@ -379,7 +379,7 @@ export function TaskDetailOverlay() {
           ${task.description ? html`
             <div>
               <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">설명</div>
-              <div class="rounded-xl border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3 text-[13px] leading-relaxed text-text-body">
+              <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3 text-[13px] leading-relaxed text-text-body">
                 <${RichContent} text=${task.description} previewLimit=${2} />
               </div>
             </div>

@@ -140,7 +140,7 @@ function OverviewFreshnessStrip() {
   const refreshing = missionLoading.value || namespaceTruthLoading.value
 
   return html`
-    <div class="rounded-xl border px-4 py-3 shadow-sm shadow-black/8 ${isStale ? 'border-warn/35 bg-warn/10' : 'border-card-border/40 bg-card/24'}">
+    <div class="rounded border px-4 py-3 shadow-sm shadow-black/8 ${isStale ? 'border-warn/35 bg-warn/10' : 'border-card-border/40 bg-card/24'}">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
@@ -332,7 +332,7 @@ function MetaCognitionCard() {
   const hasNarrative = Boolean(belief || tension || desire)
 
   return html`
-    <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
+    <div class="rounded border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
       <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <${HomeSectionHeader} label="집단 메타인지" />
@@ -359,7 +359,7 @@ function MetaCognitionCard() {
 
       ${focus
         ? html`
-            <div class="mb-3 rounded-xl border border-accent/20 bg-accent/8 px-3 py-2 text-[12px] text-[var(--text-body)]">
+            <div class="mb-3 rounded border border-accent/20 bg-accent/8 px-3 py-2 text-[12px] text-[var(--text-body)]">
               <span class="font-semibold text-[var(--text-strong)]">namespace-truth focus</span>
               <span class="ml-2">${focus.reason}</span>
             </div>
@@ -369,7 +369,7 @@ function MetaCognitionCard() {
       ${hasNarrative
         ? html`
             <div class="grid grid-cols-3 gap-3 max-[960px]:grid-cols-1">
-              <div class="rounded-xl border border-card-border/50 bg-card/48 p-3">
+              <div class="rounded border border-card-border/50 bg-card/48 p-3">
                 <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
                   <${Users} size=${12} class="shrink-0" aria-hidden="true" />
                   공감대
@@ -382,7 +382,7 @@ function MetaCognitionCard() {
                 </div>
               </div>
 
-              <div class="rounded-xl border border-card-border/50 bg-card/48 p-3">
+              <div class="rounded border border-card-border/50 bg-card/48 p-3">
                 <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
                   <${Zap} size=${12} class="shrink-0" aria-hidden="true" />
                   긴장
@@ -397,7 +397,7 @@ function MetaCognitionCard() {
                 </div>
               </div>
 
-              <div class="rounded-xl border border-card-border/50 bg-card/48 p-3">
+              <div class="rounded border border-card-border/50 bg-card/48 p-3">
                 <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
                   <${Target} size=${12} class="shrink-0" aria-hidden="true" />
                   욕구
@@ -412,7 +412,7 @@ function MetaCognitionCard() {
             </div>
           `
         : html`
-            <div class="rounded-xl border border-dashed border-card-border/50 bg-card/40 px-4 py-5 text-[12px] text-[var(--text-muted)]">
+            <div class="rounded border border-dashed border-card-border/50 bg-card/40 px-4 py-5 text-[12px] text-[var(--text-muted)]">
               아직 namespace-level 서사를 만들 만큼 강한 social signal이 쌓이지 않았습니다.
             </div>
           `}
@@ -430,7 +430,7 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
     <${RouteLink}
       tab="monitoring"
       params=${{ section: 'agents', session_id: s.session_id }}
-      class="rounded-xl border bg-card/55 p-4 cursor-pointer transition-[transform,background-color,border-color,box-shadow] duration-200 shadow-sm shadow-black/8 hover:shadow-md hover:bg-card hover:-translate-y-0.5 group ${hasBlocker ? 'border-bad/45' : 'border-card-border hover:border-accent/32'}"
+      class="rounded border bg-card/55 p-4 cursor-pointer transition-[transform,background-color,border-color,box-shadow] duration-200 shadow-sm shadow-black/8 hover:shadow-md hover:bg-card hover:-translate-y-0.5 group ${hasBlocker ? 'border-bad/45' : 'border-card-border hover:border-accent/32'}"
       title=${primary}
     >
       <div class="mb-2.5 flex items-start gap-3">
@@ -563,7 +563,7 @@ function AgentPulse() {
           <${RouteLink}
             tab="monitoring"
             params=${{ section: 'agents', agent: a.name }}
-            class="flex items-start gap-3 p-4 rounded-xl border border-card-border bg-card/55 cursor-pointer transition-[transform,background-color,border-color,box-shadow] duration-200 shadow-sm shadow-black/8 hover:shadow-md hover:bg-card hover:-translate-y-0.5 hover:border-accent/32 group"
+            class="flex items-start gap-3 p-4 rounded border border-card-border bg-card/55 cursor-pointer transition-[transform,background-color,border-color,box-shadow] duration-200 shadow-sm shadow-black/8 hover:shadow-md hover:bg-card hover:-translate-y-0.5 hover:border-accent/32 group"
             title=${a.koreanName ?? a.name}
           >
             <${AgentAvatar} name=${a.name} emoji=${a.emoji} size=${40} />
@@ -666,7 +666,7 @@ function OperationsHubCard() {
         linkParams=${{ section: 'operations' }}
       />
       <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 max-[900px]:grid-cols-1">
-        <div class="rounded-xl border border-card-border/40 bg-card/40 p-4">
+        <div class="rounded border border-card-border/40 bg-card/40 p-4">
           <div class="text-[13px] leading-[1.7] text-[var(--text-body)]">
             판단 검토, 승인 대기, 운영자 개입을 한 화면군으로 묶었습니다.
             위험한 행동은 <strong class="text-[var(--text-strong)]">거버넌스</strong>에서 검토하고,
@@ -674,7 +674,7 @@ function OperationsHubCard() {
           </div>
           ${focus
             ? html`
-                <div class="mt-3 rounded-xl border border-accent/20 bg-accent/8 px-3 py-2 text-[12px] text-[var(--text-body)]">
+                <div class="mt-3 rounded border border-accent/20 bg-accent/8 px-3 py-2 text-[12px] text-[var(--text-body)]">
                   <span class="font-semibold text-[var(--text-strong)]">${focus.label}</span>
                   <span class="ml-2">${focus.reason}</span>
                 </div>
@@ -703,7 +703,7 @@ function OperationsHubCard() {
           <${RouteLink}
             tab="command"
             params=${{ section: 'operations' }}
-            class="rounded-xl border border-accent/25 bg-[var(--accent-10)] px-4 py-3 text-[13px] font-semibold text-accent transition-colors hover:bg-accent/18"
+            class="rounded border border-accent/25 bg-[var(--accent-10)] px-4 py-3 text-[13px] font-semibold text-accent transition-colors hover:bg-accent/18"
             title="거버넌스 열기"
           >
             거버넌스 열기
@@ -711,7 +711,7 @@ function OperationsHubCard() {
           <${RouteLink}
             tab="command"
             params=${{ section: 'operations' }}
-            class="rounded-xl border border-card-border/45 bg-card/45 px-4 py-3 text-[13px] font-semibold text-[var(--text-strong)] transition-colors hover:bg-card"
+            class="rounded border border-card-border/45 bg-card/45 px-4 py-3 text-[13px] font-semibold text-[var(--text-strong)] transition-colors hover:bg-card"
             title="실시간 개입 열기"
           >
             실시간 개입
@@ -800,7 +800,7 @@ function ConfigTruthCard() {
         linkParams=${{ section: 'tools' }}
       />
       <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 max-[920px]:grid-cols-1">
-        <div class="rounded-xl border border-card-border/40 bg-card/40 p-4">
+        <div class="rounded border border-card-border/40 bg-card/40 p-4">
           <div class="flex flex-wrap items-center gap-2">
             ${configResolution
               ? html`
@@ -865,7 +865,7 @@ function ConfigTruthCard() {
           <${RouteLink}
             tab="command"
             params=${{ section: 'operations', view: 'inspector' }}
-            class="rounded-xl border border-accent/25 bg-[var(--accent-10)] px-4 py-3 text-[13px] font-semibold text-accent transition-colors hover:bg-accent/18"
+            class="rounded border border-accent/25 bg-[var(--accent-10)] px-4 py-3 text-[13px] font-semibold text-accent transition-colors hover:bg-accent/18"
             title="운영 인스펙터 열기"
           >
             운영 인스펙터
@@ -873,7 +873,7 @@ function ConfigTruthCard() {
           <${RouteLink}
             tab="lab"
             params=${{ section: 'tools' }}
-            class="rounded-xl border border-card-border/45 bg-card/45 px-4 py-3 text-[13px] font-semibold text-[var(--text-strong)] transition-colors hover:bg-card"
+            class="rounded border border-card-border/45 bg-card/45 px-4 py-3 text-[13px] font-semibold text-[var(--text-strong)] transition-colors hover:bg-card"
             title="설정 경로 상세"
           >
             설정 경로 상세
@@ -886,7 +886,7 @@ function ConfigTruthCard() {
 
 // --- Overview (Home) ---
 
-const OVERVIEW_CARD = 'rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8'
+const OVERVIEW_CARD = 'rounded border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8'
 
 export function Overview() {
   const snap = missionSnapshot.value

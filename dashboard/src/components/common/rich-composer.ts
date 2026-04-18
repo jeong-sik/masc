@@ -25,7 +25,7 @@ export function RichComposer({
   const [mode, setMode] = useState<ComposerMode>('write')
 
   return html`
-    <div class="rounded-xl border border-[var(--card-border)] bg-[rgba(8,13,22,0.88)]">
+    <div class="rounded border border-[var(--card-border)] bg-[rgba(8,13,22,0.88)]">
       <div class="flex items-center justify-between gap-3 border-b border-[var(--card-border)] px-3 py-2">
         <div class="flex items-center gap-1.5">
           ${(['write', 'preview'] as ComposerMode[]).map(tab => html`

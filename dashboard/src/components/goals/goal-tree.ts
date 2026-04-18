@@ -149,23 +149,23 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
 function TreeSummary({ summary }: { summary: GoalTreeSummary }) {
   return html`
     <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3">
-      <div class="rounded-xl border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3 text-center">
+      <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3 text-center">
         <div class="text-2xl font-bold text-text-strong tabular-nums">${summary.total_goals}</div>
         <div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-1">전체 목표</div>
       </div>
-      <div class="rounded-xl border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3 text-center">
+      <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3 text-center">
         <div class="text-2xl font-bold text-ok tabular-nums">${summary.active_goals}</div>
         <div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-1">진행 중</div>
       </div>
-      <div class="rounded-xl border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3 text-center">
+      <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3 text-center">
         <div class="text-2xl font-bold text-text-strong tabular-nums">${summary.total_tasks}</div>
         <div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-1">연결 태스크</div>
       </div>
-      <div class="rounded-xl border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3 text-center">
+      <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3 text-center">
         <div class="text-2xl font-bold text-ok tabular-nums">${summary.done_tasks}</div>
         <div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-1">완료</div>
       </div>
-      <div class="rounded-xl border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3">
+      <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3">
         <div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-2">전체 수렴도</div>
         <${ConvergenceBar} pct=${summary.overall_convergence_pct} />
       </div>
@@ -198,7 +198,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
   return html`
     <div class="flex flex-col" style="margin-left:${indent}px">
       <div
-        class="group flex items-start gap-3 rounded-xl border border-card-border/60 bg-[rgba(8,13,22,0.86)] p-3 transition-colors hover:border-card-border/90 ${hasContent ? 'cursor-pointer' : ''}"
+        class="group flex items-start gap-3 rounded border border-card-border/60 bg-[rgba(8,13,22,0.86)] p-3 transition-colors hover:border-card-border/90 ${hasContent ? 'cursor-pointer' : ''}"
         onClick=${hasContent ? () => toggleNode(node.id) : undefined}
       >
         ${hasContent ? html`
@@ -285,7 +285,7 @@ export function GoalTree() {
 
   return html`
     <div class="flex flex-col gap-5">
-      <section class="rounded-2xl border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
+      <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
         <div class="flex flex-wrap items-start justify-between gap-4 mb-4">
           <div class="max-w-[760px]">
             <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">Goal Tree</div>

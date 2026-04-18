@@ -14,7 +14,7 @@ export function KeeperSpawnPanel() {
     </div>`
   }
   return html`
-    <div class="mb-4 rounded-xl border border-[var(--card-border)] bg-[var(--bg-1)] p-4">
+    <div class="mb-4 rounded border border-[var(--card-border)] bg-[var(--bg-1)] p-4">
       <div class="flex items-center justify-between mb-3">
         <h3 class="text-[13px] text-[var(--text-strong)] font-medium">키퍼 생성</h3>
         <${ActionButton} variant="subtle" size="sm" onClick=${() => { showSpawnPanel.value = false }}>닫기<//>

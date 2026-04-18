@@ -9,7 +9,7 @@ export function InventoryRow({ item }: { item: DashboardToolInventoryItem }) {
   const categoryHint = item.category === 'uncategorized' ? ' (서버 미지정)' : ''
 
   return html`
-    <article class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+    <article class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-3)]">
       <div class="flex justify-between gap-3 items-start">
         <div>
           <div class="text-[15px] font-bold text-[var(--text-strong)]">${item.name}</div>

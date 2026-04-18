@@ -277,7 +277,7 @@ export function HeroRailCard({
   freshness: string
 }) {
   return html`
-    <div class=${`rounded-xl border p-3 ${statusCardClass(status)}`}>
+    <div class=${`rounded border p-3 ${statusCardClass(status)}`}>
       <div class="flex items-start justify-between gap-3">
         <div class="text-sm font-medium text-[var(--text-strong)]">${label}</div>
         <${StatusPill} status=${status} />

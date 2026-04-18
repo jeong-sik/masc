@@ -533,7 +533,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <label class="flex w-full flex-col gap-2 text-[11px] font-semibold tracking-[0.08em] text-[var(--text-muted)] uppercase">
               <span>이름 / model / 작업</span>
               <${TextInput}
-                class="rounded-2xl bg-[var(--white-3)] px-4 py-3 text-[14px] text-[var(--text-body)] shadow-[inset_0_1px_0_var(--white-3)] focus:border-[var(--accent)] focus:shadow-[0_0_0_2px_var(--accent-soft)]"
+                class="rounded bg-[var(--white-3)] px-4 py-3 text-[14px] text-[var(--text-body)] shadow-[inset_0_1px_0_var(--white-3)] focus:border-[var(--accent)] focus:shadow-[0_0_0_2px_var(--accent-soft)]"
                 name="agent_search"
                 ariaLabel="에이전트 이름 · 모델 · 작업 검색"
                 autoComplete="off"
@@ -562,7 +562,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           ${showExecutionFallbackState
             ? html`
-                <div class="rounded-2xl border ${executionError.value ? 'border-[rgba(251,191,36,0.28)] bg-[var(--warn-10)]' : 'border-[var(--accent-20)] bg-[var(--accent-10)]'} px-4 py-3 shadow-[0_10px_28px_rgba(0,0,0,0.12)]">
+                <div class="rounded border ${executionError.value ? 'border-[rgba(251,191,36,0.28)] bg-[var(--warn-10)]' : 'border-[var(--accent-20)] bg-[var(--accent-10)]'} px-4 py-3 shadow-[0_10px_28px_rgba(0,0,0,0.12)]">
                   <div class="flex flex-col gap-2">
                     <div class="flex flex-wrap items-center gap-2">
                       <strong class="text-[12px] font-semibold text-[var(--text-strong)]">${fallbackStateTitle}</strong>

@@ -279,7 +279,7 @@ function SectionCard({
   children: ComponentChildren
 }) {
   return html`
-    <div class="rounded-xl border border-card-border bg-bg-1/60 p-4">
+    <div class="rounded border border-card-border bg-bg-1/60 p-4">
       <div class="flex items-center justify-between gap-3 mb-3">
         <div class="flex items-center gap-2 min-w-0">
           <${StatusDot} size="sm" class=${statusDot(status)} />
@@ -296,7 +296,7 @@ function SectionCard({
 
 function CaseCard({ item, data }: { item: PracticalCase; data: TransportHealthData }) {
   return html`
-    <div class="rounded-xl border border-card-border/70 bg-card/40 p-4">
+    <div class="rounded border border-card-border/70 bg-card/40 p-4">
       <div class="flex items-center justify-between gap-3 mb-2">
         <div class="text-sm font-semibold text-text-strong">${item.title}</div>
         <div class="text-[10px] uppercase tracking-wider text-text-muted">${item.transport}</div>
@@ -388,7 +388,7 @@ export function TransportHealthPanel() {
         >새로고침</button>
       </div>
 
-      <details class="group rounded-xl border border-card-border/50 bg-card/18 overflow-hidden" open=${hasAnyBadTransport}>
+      <details class="group rounded border border-card-border/50 bg-card/18 overflow-hidden" open=${hasAnyBadTransport}>
         <summary class="flex items-center gap-3 px-4 py-3 cursor-pointer text-[13px] font-semibold text-text-strong bg-card/28 hover:bg-card/44 transition-colors">
           <span>트랜스포트 상세</span>
           <span class="ml-auto flex items-center gap-2 text-[11px] font-normal text-text-muted">
@@ -456,7 +456,7 @@ export function TransportHealthPanel() {
             const filtered = filterHotSessions(data.sse.hot_sessions, query)
             const isFiltered = query.trim() !== ''
             return html`
-            <details class="group rounded-xl border border-card-border/50 bg-card/18 overflow-hidden" open=${data.sse.hot_sessions.length >= 3}>
+            <details class="group rounded border border-card-border/50 bg-card/18 overflow-hidden" open=${data.sse.hot_sessions.length >= 3}>
               <summary class="flex items-center gap-3 px-4 py-3 cursor-pointer text-[13px] font-semibold text-text-strong bg-card/28 hover:bg-card/44 transition-colors">
                 <span>핫 큐</span>
                 <span class="ml-auto text-[11px] font-normal text-text-muted">${data.sse.hot_sessions.length}개 세션 -- SSE 백프레셔 위험</span>
@@ -505,7 +505,7 @@ export function TransportHealthPanel() {
           })()
         : null}
 
-      <details class="group rounded-xl border border-card-border/50 bg-card/18 overflow-hidden">
+      <details class="group rounded border border-card-border/50 bg-card/18 overflow-hidden">
         <summary class="flex items-center gap-3 px-4 py-3 cursor-pointer text-[13px] font-semibold text-text-strong bg-card/28 hover:bg-card/44 transition-colors">
           <span>실용 경로</span>
           <span class="ml-auto text-[11px] font-normal text-text-muted">각 트랜스포트의 실제 연결 방법 레퍼런스</span>

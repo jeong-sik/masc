@@ -173,7 +173,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="px-6 pt-4">
-      <div class="rounded-xl border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[12px] text-[var(--text-body)]">
+      <div class="rounded border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[12px] text-[var(--text-body)]">
         ${keeper.paused
           ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">일시정지</span>
             <button
@@ -320,7 +320,7 @@ function KeeperClearContextDialog({
       onClose=${pending ? () => {} : onClose}
       initialFocusRef=${reasonRef}
       overlayClass="fixed inset-0 z-[80] bg-[var(--white-5)]/70 backdrop-blur-sm isolate flex items-center justify-center p-4"
-      panelClass="w-full max-w-[520px] rounded-2xl border border-[var(--bad-30)] bg-[rgba(13,21,38,0.98)] shadow-[0_24px_64px_rgba(0,0,0,0.6)]"
+      panelClass="w-full max-w-[520px] rounded border border-[var(--bad-30)] bg-[rgba(13,21,38,0.98)] shadow-[0_24px_64px_rgba(0,0,0,0.6)]"
     >
       <div class="p-5 flex flex-col gap-4">
         <div class="flex flex-col gap-1">
@@ -334,7 +334,7 @@ function KeeperClearContextDialog({
           <span class="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">사유</span>
           <textarea
             ref=${reasonRef}
-            class="min-h-[112px] resize-y rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-2 text-[13px] leading-[1.55] text-[var(--text-body)] outline-none focus:border-[rgba(71,184,255,0.45)] focus:ring-2 focus:ring-[rgba(71,184,255,0.18)]"
+            class="min-h-[112px] resize-y rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-2 text-[13px] leading-[1.55] text-[var(--text-body)] outline-none focus:border-[rgba(71,184,255,0.45)] focus:ring-2 focus:ring-[rgba(71,184,255,0.18)]"
             placeholder="예: stale continuity replay 제거"
             disabled=${pending}
             value=${reason}
@@ -342,7 +342,7 @@ function KeeperClearContextDialog({
           ></textarea>
         </label>
 
-        <label class="flex items-start gap-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3 text-[12px] text-[var(--text-body)]">
+        <label class="flex items-start gap-3 rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3 text-[12px] text-[var(--text-body)]">
           <input
             type="checkbox"
             class="mt-0.5"
@@ -356,7 +356,7 @@ function KeeperClearContextDialog({
           </span>
         </label>
 
-        <div class="rounded-xl border border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
+        <div class="rounded border border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
           마지막 수단용 액션입니다. 잘못된 continuity가 재주입될 때만 쓰고, 실행 후 즉시 상태를 다시 확인하세요.
         </div>
 
@@ -423,14 +423,14 @@ function CheckpointSummaryCard({
 }) {
   if (!summary) {
     return html`
-      <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3 text-[12px] text-[var(--text-muted)]">
+      <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3 text-[12px] text-[var(--text-muted)]">
         ${title}: 저장된 checkpoint 없음
       </div>
     `
   }
 
   return html`
-    <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3">
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3">
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-[12px] font-semibold text-[var(--text-strong)]">${title}</span>
         <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.18)]">
@@ -529,7 +529,7 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
 
   if (loading) {
     return html`
-      <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3 text-[12px] text-[var(--text-muted)]">
+      <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3 text-[12px] text-[var(--text-muted)]">
         checkpoint inventory 로딩 중...
       </div>
     `
@@ -537,7 +537,7 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
 
   if (error) {
     return html`
-      <div class="rounded-xl border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-3 text-[12px] text-[#fda4af]">
+      <div class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-3 text-[12px] text-[#fda4af]">
         ${error}
         <button
           type="button"
@@ -577,7 +577,7 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
         summary=${inventory?.current ?? null}
       />
 
-      <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)]">
+      <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)]">
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--card-border)] px-3 py-2">
           <div class="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
             OAS Snapshot History
@@ -656,7 +656,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
       <h3 class="m-0 mb-3 text-[13px] font-semibold text-[var(--text-strong)] uppercase tracking-[0.06em]">직접 통신</h3>
 
       ${isOffline ? html`
-        <div class="px-4 py-3 rounded-xl border border-[var(--card-border)] bg-[rgba(90,100,120,0.08)] text-[13px] text-[var(--text-muted)]">
+        <div class="px-4 py-3 rounded border border-[var(--card-border)] bg-[rgba(90,100,120,0.08)] text-[13px] text-[var(--text-muted)]">
           이 키퍼는 현재 비활동 상태입니다. 기동 후 메시지를 보낼 수 있습니다.
         </div>
       ` : html`
@@ -675,7 +675,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
 
 function SectionCard({ title, children }: { title: string; children: preact.ComponentChildren }) {
   return html`
-    <div class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/30 hover:shadow-md">
+    <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/30 hover:shadow-md">
       <div class="text-[11px] font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
         <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
         ${title}
@@ -1233,13 +1233,13 @@ export function KeeperDetailOverlay() {
       onClose=${closeKeeperDetail}
       initialFocusRef=${closeButtonRef}
       overlayClass="keeper-detail-overlay fixed inset-0 z-[60] bg-[var(--white-5)]/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
-      panelClass="w-full max-w-[1100px] max-h-[90vh] overflow-y-auto bg-[#0d1526] rounded-2xl border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.5)]"
+      panelClass="w-full max-w-[1100px] max-h-[90vh] overflow-y-auto bg-[#0d1526] rounded border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.5)]"
     >
 
         ${'' /* ── Sticky Header ── */}
         <div class="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-[var(--card-border)] bg-[rgba(13,21,38,0.97)] backdrop-blur-md rounded-t-2xl">
           <div class="flex items-center gap-4">
-            <div class="size-12 rounded-xl bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xl">${keeper.emoji}</div>
+            <div class="size-12 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xl">${keeper.emoji}</div>
             <div class="flex flex-col gap-0.5">
               <div class="flex items-center gap-2.5">
                 <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
@@ -1328,7 +1328,7 @@ export function KeeperDetailOverlay() {
 
         ${'' /* ── Pipeline stage + Phase state diagram ── */}
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
-        <details class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)]">
+        <details class="rounded border border-[var(--white-8)] bg-[var(--white-2)]">
           <summary class="cursor-pointer py-2 px-4 text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-[rgba(71,184,255,0.5)]"></span>
             Phase State Machine
@@ -1338,7 +1338,7 @@ export function KeeperDetailOverlay() {
           </div>
         </details>
 
-        <details class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)]">
+        <details class="rounded border border-[var(--white-8)] bg-[var(--white-2)]">
           <summary class="cursor-pointer py-2 px-4 text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-[rgba(99,102,241,0.5)]"></span>
             Memory Tier & Compaction
@@ -1427,7 +1427,7 @@ export function KeeperDetailOverlay() {
 
         ${'' /* ── Runtime diagnostics (supervisor + keeper diagnostics unified) ── */}
         <details
-          class="rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm"
+          class="rounded border border-card-border bg-card/40 backdrop-blur-md shadow-sm"
           open=${diagOpen}
           onToggle=${(e: Event) => setDiagOpen((e.currentTarget as HTMLDetailsElement).open)}
         >
@@ -1512,7 +1512,7 @@ export function KeeperDetailOverlay() {
             <//>
           </div>
 
-          <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
+          <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
             <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
               <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
               품질 시그널 (고급 지표)
@@ -1523,7 +1523,7 @@ export function KeeperDetailOverlay() {
 
           <${TurnBudgetSection} keeper=${keeper} />
 
-          <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
+          <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
             <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
               <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
               도구 정책
@@ -1535,7 +1535,7 @@ export function KeeperDetailOverlay() {
 
           <${PlaygroundReposPanel} keeperName=${keeper.name} />
 
-          <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
+          <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
             <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
               <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
               설정
@@ -1545,7 +1545,7 @@ export function KeeperDetailOverlay() {
             </div>
           </details>
 
-          <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
+          <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
             <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
               <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
               Checkpoint & Snapshots
@@ -1561,16 +1561,16 @@ export function KeeperDetailOverlay() {
 
         ${'' /* ── Debug (journal + raw data) ── */}
         <details class="mt-4">
-          <summary class="cursor-pointer py-3 px-4 text-[11px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
+          <summary class="cursor-pointer py-3 px-4 text-[11px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none rounded border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
             디버그
           </summary>
           <div class="mt-2 flex flex-col gap-4">
-            <div class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
+            <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md">
               <h4 class="m-0 mb-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">저널</h4>
               <${AgentJournalStream} agentName=${keeper.name} />
             </div>
-            <div class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
+            <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-md">
               <h4 class="m-0 mb-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">원시 데이터</h4>
               <${RawDataDebug} keeper=${keeper} />
             </div>

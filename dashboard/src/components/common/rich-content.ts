@@ -24,7 +24,7 @@ function previewCard(preview: LinkPreview) {
       href=${href}
       target="_blank"
       rel="noreferrer"
-      class="group flex overflow-hidden rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] text-inherit no-underline transition-colors hover:border-[var(--accent-20)] hover:bg-[var(--white-5)]"
+      class="group flex overflow-hidden rounded border border-[var(--card-border)] bg-[var(--white-3)] text-inherit no-underline transition-colors hover:border-[var(--accent-20)] hover:bg-[var(--white-5)]"
     >
       ${imageUrl
         ? html`

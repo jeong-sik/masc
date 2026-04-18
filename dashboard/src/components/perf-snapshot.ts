@@ -56,7 +56,7 @@ function PerfStat({
   detail?: string | null
 }) {
   return html`
-    <div class="rounded-xl border border-card-border/45 bg-[var(--white-5)]/10 px-3 py-3">
+    <div class="rounded border border-card-border/45 bg-[var(--white-5)]/10 px-3 py-3">
       <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">${label}</div>
       <div class="mt-1 text-[20px] font-bold text-[var(--text-strong)]">${value}</div>
       ${detail ? html`<div class="mt-1 text-[11px] text-[var(--text-muted)]">${detail}</div>` : null}
@@ -196,11 +196,11 @@ export function PerfSnapshotPanel() {
       </div>
 
       ${error.value
-        ? html`<div class="rounded-xl border border-bad/35 bg-bad/10 px-3 py-3 text-[12px] text-[var(--bad)]">${error.value}</div>`
+        ? html`<div class="rounded border border-bad/35 bg-bad/10 px-3 py-3 text-[12px] text-[var(--bad)]">${error.value}</div>`
         : null}
 
       ${data?.status === 'empty'
-        ? html`<div class="rounded-xl border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3 text-[12px] text-[var(--text-muted)]">
+        ? html`<div class="rounded border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3 text-[12px] text-[var(--text-muted)]">
             benchmark artifact가 아직 없습니다. <code>benchmark.sh</code>를 한 번 돌리면 latest summary와 baseline diff가 여기에 나타납니다.
           </div>`
         : null}

@@ -40,7 +40,7 @@ function PlanningStat({
           : 'text-text-strong'
 
   return html`
-    <div class="rounded-xl border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-4">
+    <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-4">
       <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">${label}</div>
       <div class="mt-2 text-[30px] font-bold leading-none tabular-nums ${toneClass}">${value}</div>
     </div>
@@ -81,7 +81,7 @@ function GuideCard({
   children?: ComponentChildren
 }) {
   return html`
-    <section class="flex flex-col gap-3 rounded-xl border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-4">
+    <section class="flex flex-col gap-3 rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-4">
       <div class="flex items-start justify-between gap-3">
         <div>
           <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">${eyebrow}</div>
@@ -138,7 +138,7 @@ function KeeperToolActivity() {
   }, [keeperList])
 
   return html`
-    <details class="overview-section-collapsible group overflow-hidden rounded-xl border border-card-border/60 bg-[rgba(9,14,24,0.82)]" open=${true}>
+    <details class="overview-section-collapsible group overflow-hidden rounded border border-card-border/60 bg-[rgba(9,14,24,0.82)]" open=${true}>
       <summary class="flex items-center gap-3 border-b border-card-border/60 px-4 py-3.5 cursor-pointer text-[14px] font-bold text-text-strong transition-colors hover:bg-white/3">
         <div class="min-w-0">
           <div>도구 활동 요약</div>
@@ -211,7 +211,7 @@ export function Planning() {
 
   return html`
     <div class="flex flex-col gap-6">
-      <section class="rounded-2xl border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
+      <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-[760px]">
             <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">Planning Status</div>
@@ -237,7 +237,7 @@ export function Planning() {
         </div>
 
         <div class="mt-5 grid gap-4 xl:grid-cols-2">
-          <section class="rounded-xl border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-4">
+          <section class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-4">
             <div class="mb-3">
               <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">Backlog Entry</div>
               <h3 class="mt-1 text-[15px] font-semibold text-text-strong">태스크 추가</h3>
@@ -265,7 +265,7 @@ export function Planning() {
 
       <${KeeperToolActivity} />
 
-      <section class="rounded-xl border border-card-border/60 bg-[rgba(9,14,24,0.82)] p-4">
+      <section class="rounded border border-card-border/60 bg-[rgba(9,14,24,0.82)] p-4">
         <div class="flex items-center justify-between gap-3">
           <div>
             <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">Goal Pipeline</div>

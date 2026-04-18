@@ -315,7 +315,7 @@ export function Observatory() {
         : !hasTrackData && data.loading
         ? html`<${LoadingState}>관찰소 데이터 불러오는 중...<//>`
         : html`
-            <div class="flex flex-col gap-2 rounded-xl border border-card-border bg-card/30 p-4">
+            <div class="flex flex-col gap-2 rounded border border-card-border bg-card/30 p-4">
               <${TimeAxis} windowStart=${data.windowStart} windowEnd=${data.windowEnd} />
               <${EventTrack}
                 events=${data.events}

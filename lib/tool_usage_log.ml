@@ -24,8 +24,15 @@ let is_system_internal name = StringSet.mem name system_internal_set
 
 let store_ref : Dated_jsonl.t option ref = ref None
 
-let init ~base_path =
-  let dir = Filename.concat base_path ".masc/tool_usage" in
+let init ?cluster_name ~base_path () =
+  let cluster_name =
+    Option.value ~default:(Env_config_core.cluster_name ()) cluster_name
+  in
+  let dir =
+    Filename.concat
+      (Coord_utils.masc_root_dir_from ~base_path ~cluster_name)
+      "tool_usage"
+  in
   (try
      Fs_compat.mkdir_p dir;
      let store = Dated_jsonl.create ~base_dir:dir () in

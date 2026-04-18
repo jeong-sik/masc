@@ -393,6 +393,61 @@ let test_keeper_paths_use_cluster_root () =
           Alcotest.(check bool) "keeper dir under cluster root" true
             (String.starts_with ~prefix:expected_root keeper_dir)))
 
+let test_tool_usage_log_uses_cluster_root () =
+  with_temp_dir "startup-tool-usage-cluster" (fun dir ->
+      with_env "MASC_CLUSTER_NAME" (Some "cluster-alpha") (fun () ->
+          Tool_usage_log.init ~base_path:dir ~cluster_name:"cluster-alpha" ();
+          Tool_usage_log.log_call
+            ~tool_name:"keeper_tasks_list" ~success:true
+            ~caller:(Some "oracle");
+          let expected_dir =
+            Filename.concat
+              (Filename.concat
+                 (Filename.concat (Filename.concat dir ".masc") "clusters")
+                 "cluster-alpha")
+              "tool_usage"
+          in
+          let legacy_dir =
+            Filename.concat (Filename.concat dir ".masc") "tool_usage"
+          in
+          Alcotest.(check bool) "cluster tool_usage dir exists" true
+            (Sys.file_exists expected_dir && Sys.is_directory expected_dir);
+          Alcotest.(check bool) "legacy tool_usage dir absent" false
+            (Sys.file_exists legacy_dir);
+          Alcotest.(check int) "tool_usage row readable from cluster store" 1
+            (List.length (Tool_usage_log.read_recent ~n:10 ()))))
+
+let test_keeper_tool_call_log_uses_cluster_root () =
+  with_temp_dir "startup-tool-call-cluster" (fun dir ->
+      with_env "MASC_CLUSTER_NAME" (Some "cluster-alpha") (fun () ->
+          Keeper_tool_call_log.reset_for_testing ();
+          Fun.protect
+            ~finally:Keeper_tool_call_log.reset_for_testing
+            (fun () ->
+              Keeper_tool_call_log.init ~base_path:dir
+                ~cluster_name:"cluster-alpha" ();
+              Keeper_tool_call_log.log_call
+                ~keeper_name:"oracle" ~tool_name:"keeper_tasks_list"
+                ~input:(`Assoc []) ~output_text:"ok"
+                ~success:true ~duration_ms:1.0 ();
+              let expected_dir =
+                Filename.concat
+                  (Filename.concat
+                     (Filename.concat (Filename.concat dir ".masc") "clusters")
+                     "cluster-alpha")
+                  "tool_calls"
+              in
+              let legacy_dir =
+                Filename.concat (Filename.concat dir ".masc") "tool_calls"
+              in
+              Alcotest.(check bool) "cluster tool_calls dir exists" true
+                (Sys.file_exists expected_dir && Sys.is_directory expected_dir);
+              Alcotest.(check bool) "legacy tool_calls dir absent" false
+                (Sys.file_exists legacy_dir);
+              Alcotest.(check int) "tool_call row readable from cluster store"
+                1
+                (List.length (Keeper_tool_call_log.read_recent ~n:10 ())))))
+
 let test_room_init_bootstraps_keeper_runtime_dirs () =
   with_temp_dir "startup-keeper-dirs" (fun dir ->
       let config = Coord.default_config dir in
@@ -1015,6 +1070,10 @@ let () =
             `Quick test_restore_persisted_sessions_uses_flat_agents_dir;
           Alcotest.test_case "keeper paths use cluster root" `Quick
             test_keeper_paths_use_cluster_root;
+          Alcotest.test_case "tool usage log uses cluster root" `Quick
+            test_tool_usage_log_uses_cluster_root;
+          Alcotest.test_case "keeper tool call log uses cluster root" `Quick
+            test_keeper_tool_call_log_uses_cluster_root;
           Alcotest.test_case "room init bootstraps keeper runtime dirs" `Quick
             test_room_init_bootstraps_keeper_runtime_dirs;
           Alcotest.test_case "otel exporter setup failure is soft" `Quick

@@ -49,8 +49,9 @@ val get_turn_context :
     session_id, turn)] for the keeper, or [None] values when no turn context
     has been recorded. *)
 
-val init : base_path:string -> unit
-(** [init ~base_path] creates the Dated_jsonl store. Call once at startup. *)
+val init : ?cluster_name:string -> base_path:string -> unit -> unit
+(** [init ?cluster_name ~base_path ()] creates the cluster-aware Dated_jsonl
+    store. Call once at startup. *)
 
 val log_call :
   keeper_name:string ->

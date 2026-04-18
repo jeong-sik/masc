@@ -81,8 +81,15 @@ let get_turn_context ~keeper_name () =
 
 let store_ref : Dated_jsonl.t option ref = ref None
 
-let init ~base_path =
-  let dir = Filename.concat base_path ".masc/tool_calls" in
+let init ?cluster_name ~base_path () =
+  let cluster_name =
+    Option.value ~default:(Env_config_core.cluster_name ()) cluster_name
+  in
+  let dir =
+    Filename.concat
+      (Coord_utils.masc_root_dir_from ~base_path ~cluster_name)
+      "tool_calls"
+  in
   (try
      let store = Dated_jsonl.create ~base_dir:dir () in
      store_ref := Some store
@@ -185,16 +192,17 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
       let json =
         `Assoc
           ([ ("ts", `Float (Time_compat.now ()))
-          ; ("keeper", `String keeper_name)
-          ; ("tool", `String tool_name)
-          ; ("input", safe_input)
-          ; ("output", `String safe_output)
-          ; ("success", `Bool success)
-          ; ("duration_ms", `Float duration_ms)
-          ] @ model_field @ lane_field @ tool_choice_field
-            @ thinking_enabled_field @ thinking_budget_field
-            @ trace_id_field @ session_id_field @ turn_field
-            @ result_bytes_field @ truncated_to_field)
+           ; ("keeper", `String keeper_name)
+           ; ("tool", `String tool_name)
+           ; ("input", safe_input)
+           ; ("output", `String safe_output)
+           ; ("success", `Bool success)
+           ; ("duration_ms", `Float duration_ms)
+           ]
+           @ model_field @ lane_field @ tool_choice_field
+           @ thinking_enabled_field @ thinking_budget_field
+           @ trace_id_field @ session_id_field @ turn_field
+           @ result_bytes_field @ truncated_to_field)
       in
       (* Sanitize UTF-8 before persisting.  Tool output may contain invalid
          byte sequences (truncated UTF-8, binary output from subprocess

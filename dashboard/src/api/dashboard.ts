@@ -1871,7 +1871,7 @@ interface ResolveVerificationRequestOptions {
   reason?: string
 }
 
-export interface ResolveVerificationResponse {
+interface ResolveVerificationResponse {
   ok: boolean
   task_id: string
   verification_id: string
@@ -1954,13 +1954,13 @@ export function fetchCascadeStrategyTrace(opts?: {
 
 export type CascadeSloStatus = 'ok' | 'warn' | 'violated'
 
-export interface CascadeSloTargets {
+interface CascadeSloTargets {
   ordered_ratio_min: number
   exhaustion_count_max: number
   burn_rate_max: number
 }
 
-export interface CascadeSloCurrent {
+interface CascadeSloCurrent {
   ordered_ratio: number
   exhaustion_count: number
   burn_rate: number

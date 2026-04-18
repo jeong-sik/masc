@@ -21,7 +21,7 @@ import {
 
 import { SchemaDriftError, parseOrThrow } from './drift-error'
 
-export const OperatorActionResultSchema = object({
+const OperatorActionResultSchema = object({
   status: string(),
   confirm_required: optional(boolean()),
   confirm_token: optional(string()),

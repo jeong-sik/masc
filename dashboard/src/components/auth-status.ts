@@ -67,7 +67,7 @@ function AuthPopover({ authenticated }: { authenticated: boolean }) {
         <div class="flex flex-col gap-2">
           <div class="text-[11px] text-[var(--text-muted)]">Bearer token이 설정되어 있습니다.</div>
           <button type="button"
-            class="w-full py-1.5 px-3 rounded text-[11px] border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[var(--bad-soft)] cursor-pointer transition-colors"
+            class="w-full py-1.5 px-3 rounded text-[11px] border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer transition-colors"
             onClick=${handleClearToken}
           >토큰 제거</button>
         </div>

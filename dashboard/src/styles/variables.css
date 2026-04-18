@@ -164,6 +164,25 @@
   --backdrop-deep: rgba(7, 12, 20, 0.82);
   --backdrop-modal: rgba(10, 18, 34, 0.95);
 
+  /* Tailwind-aligned base colors. Introduced in Phase G to absorb
+     remaining inline #hex literals across the dashboard. Names mirror
+     the tailwindcss palette so callers can grep both ways
+     (e.g. "slate-400" → --slate-400 token or Tailwind class). */
+  --slate-400: #94a3b8;
+  --slate-500: #64748b;
+  --slate-800: #1e293b;
+  --rose-light: #fb7185;
+  --sky-400: #38bdf8;
+  --blue-400: #60a5fa;
+  --frost-100: #e2e8f0;
+  --white-pure: #ffffff;
+
+  /* Surface bases — distinct from --bg-root (#0c1424) which is the
+     primary panel background; these are deeper navy used for hero
+     panels or modal foundations where the eye expects more depth. */
+  --panel-dark: #0f172a;
+  --bg-deepest: #0b1220;
+
   /* Legacy Compatibility Variables — only aliases with active references kept.
      Dead aliases pruned: accent-8/12/14/18, ok-8/12/18/22/24/25/30/35/40/48,
      bad-8/12/15/30, warn-12/15/28/30, white-3h/25/30/35/40/45/55/56/60/68/72/78/82,

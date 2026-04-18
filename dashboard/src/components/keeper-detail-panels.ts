@@ -45,14 +45,14 @@ const CTX_SEGMENT_LABELS: Record<string, string> = {
 const CTX_SEGMENT_COLORS: Record<string, string> = {
   system_prompt: 'var(--amber-bright)',
   dynamic_context: '#8b5cf6',
-  memory_context: '#fb7185',
+  memory_context: 'var(--rose-light)',
   temporal_context: '#14b8a6',
-  user_message: '#38bdf8',
+  user_message: 'var(--sky-400)',
   history_user: 'var(--purple)',
-  history_assistant_text: '#60a5fa',
+  history_assistant_text: 'var(--blue-400)',
   history_tool_use: '#84cc16',
   history_tool_result: 'var(--bad-light)',
-  history_other: '#94a3b8',
+  history_other: 'var(--slate-400)',
   unattributed: '#475569',
 }
 
@@ -61,7 +61,7 @@ export function ctxSegmentLabel(key: string): string {
 }
 
 export function ctxSegmentColor(key: string): string {
-  return CTX_SEGMENT_COLORS[key] ?? '#94a3b8'
+  return CTX_SEGMENT_COLORS[key] ?? 'var(--slate-400)'
 }
 
 /**
@@ -529,7 +529,7 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="flex items-center gap-3 mb-5 p-3 rounded border border-[var(--card-border)] bg-[var(--white-3)]">
-      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded" style="background:#0b1220;">
+      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded" style="background:var(--bg-deepest);">
         <line x1="${pad}" y1="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" stroke="#444" stroke-dasharray="3,3" stroke-width="0.5"/>
         <line x1="${pad}" y1="${(H - pad - (CTX_WARN_PCT / 100) * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - (CTX_WARN_PCT / 100) * (H - 2 * pad)).toFixed(1)}" stroke="#444" stroke-dasharray="3,3" stroke-width="0.5"/>
         <line x1="${pad}" y1="${(H - pad - (CTX_CRITICAL_PCT / 100) * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - (CTX_CRITICAL_PCT / 100) * (H - 2 * pad)).toFixed(1)}" stroke="${CTX_COLOR_WARN}" stroke-dasharray="3,3" stroke-width="0.5"/>
@@ -611,7 +611,7 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
               <span class="font-mono text-[var(--good)]">${formatTokens(lastOutput)}</span>
             </span>
           </div>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
             ${inputLine ? html`<polyline points="${inputLine}" fill="none" stroke="#67e8f9" stroke-width="1.5" opacity="0.8"/>` : null}
             ${outputLine ? html`<polyline points="${outputLine}" fill="none" stroke="var(--ok)" stroke-width="1.5" opacity="0.8"/>` : null}
           </svg>
@@ -690,7 +690,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">estimated prompt tokens</span>
             <span class="text-xs font-mono tabular-nums text-[var(--accent)]">${latestTotal != null ? formatTokens(latestTotal) : '-'}</span>
           </div>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
             ${totalLine ? html`<polyline points="${totalLine}" fill="none" stroke="var(--amber-bright)" stroke-width="1.5"/>` : null}
           </svg>
           <div class="mt-1 flex flex-wrap gap-2 text-[10px] text-[var(--text-dim)]">
@@ -838,7 +838,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">stacked history</span>
             <span class="text-[10px] text-[var(--text-dim)]">${points.length} turns</span>
           </div>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
             ${points.map((point: KeeperMetricPoint, index: number) => {
               const comp = point.ctx_composition
               if (!comp || comp.display_total_tokens <= 0) return null
@@ -970,7 +970,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">tok/s</span>
             <span class="text-xs font-mono tabular-nums text-[var(--good)]">${lastTps.toFixed(1)}</span>
           </div>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
             ${tpsLine ? html`<polyline points="${tpsLine}" fill="none" stroke="var(--ok)" stroke-width="1.5"/>` : null}
           </svg>
           <div class="text-[10px] text-[var(--text-dim)] mt-1">avg ${avgTps.toFixed(1)}</div>
@@ -982,7 +982,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">API latency</span>
             <span class="text-xs font-mono tabular-nums text-[var(--accent)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
           </div>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
             ${latencyLine ? html`<polyline points="${latencyLine}" fill="none" stroke="#9ad9ff" stroke-width="1.5"/>` : null}
           </svg>
         </div>
@@ -1044,7 +1044,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
             <span class="text-xs font-mono tabular-nums text-[var(--accent)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
           </span>
         </div>
-        <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+        <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
           ${fallbackIndices.map((idx: number) => {
             const x = SPARKLINE_PAD + (idx / Math.max(n - 1, 1)) * (W - 2 * SPARKLINE_PAD)
             return html`<line x1="${x.toFixed(1)}" y1="${SPARKLINE_PAD}" x2="${x.toFixed(1)}" y2="${H - SPARKLINE_PAD}" stroke="var(--bad)" stroke-width="1.5" opacity="0.6"/>`
@@ -1059,7 +1059,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
           <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">비용</span>
           <span class="text-xs font-mono tabular-nums text-[var(--purple)]">$${totalCost.toFixed(4)}</span>
         </div>
-        <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+        <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
           ${costLine ? html`<polyline points="${costLine}" fill="none" stroke="var(--purple)" stroke-width="1.5"/>` : null}
         </svg>
       </div>

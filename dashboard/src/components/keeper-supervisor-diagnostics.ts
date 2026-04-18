@@ -39,7 +39,7 @@ function registryStateBadge(state: string | null) {
   const colors: Record<string, { bg: string; text: string }> = {
     Running: { bg: 'bg-[rgba(34,197,94,0.12)]', text: 'text-[var(--ok)]' },
     Crashed: { bg: 'bg-[var(--bad-soft)]', text: 'text-[var(--bad)]' },
-    Dead: { bg: 'bg-[rgba(100,116,139,0.15)]', text: 'text-[#94a3b8]' },
+    Dead: { bg: 'bg-[rgba(100,116,139,0.15)]', text: 'text-[var(--slate-400)]' },
     Stopped: { bg: 'bg-[rgba(234,179,8,0.12)]', text: 'text-[var(--warn)]' },
     Paused: { bg: 'bg-[var(--white-10)]', text: 'text-[var(--purple)]' },
   }
@@ -157,11 +157,11 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
         ${last_failure_reason ? html`
           <div class="flex items-center justify-between">
             <span class="text-xs text-[var(--text-muted)]">마지막 실패 원인</span>
-            <span class="text-[11px] font-mono text-[#fb7185]">${last_failure_reason}</span>
+            <span class="text-[11px] font-mono text-[var(--rose-light)]">${last_failure_reason}</span>
           </div>
         ` : null}
         ${dead_since ? html`
-          <div class="py-2 px-3 rounded bg-[var(--bad-6)] border border-[var(--bad-soft)] text-xs text-[#fb7185]">
+          <div class="py-2 px-3 rounded bg-[var(--bad-6)] border border-[var(--bad-soft)] text-xs text-[var(--rose-light)]">
             ${formatTimeAgo(dead_since)} 이후 중단됨. 재기동 필요.
           </div>
         ` : null}
@@ -204,7 +204,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
                 ` : visible.map((e) => html`
                   <div class="flex items-center justify-between py-1 px-2 rounded text-[11px] bg-[var(--white-3)]">
                     <span class="font-mono text-[var(--text-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
-                    <span class="text-[#fb7185]">${e.reason ?? 'unknown'}</span>
+                    <span class="text-[var(--rose-light)]">${e.reason ?? 'unknown'}</span>
                   </div>
                 `)}
               </div>

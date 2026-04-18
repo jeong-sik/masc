@@ -68,15 +68,15 @@ interface KindStyle {
 }
 
 const KIND_STYLES: Record<TraceEventKind, KindStyle> = {
-  broadcast:  { icon: 'M', color: 'text-[#60a5fa]', label: '브로드캐스트' },
+  broadcast:  { icon: 'M', color: 'text-[var(--blue-400)]', label: '브로드캐스트' },
   task:       { icon: 'T', color: 'text-[var(--accent)]', label: '태스크' },
   tool_call:  { icon: '>', color: 'text-[var(--ok)]', label: '도구 호출' },
-  heartbeat:  { icon: 'H', color: 'text-[#94a3b8]', label: '하트비트' },
+  heartbeat:  { icon: 'H', color: 'text-[var(--slate-400)]', label: '하트비트' },
   lifecycle:  { icon: 'L', color: 'text-[var(--warn)]', label: '생명주기' },
   thinking:   { icon: '\u{1F4AD}', color: 'text-[#c084fc]', label: '내부 사고' },
   oas_tool:   { icon: 'O', color: 'text-[var(--amber-bright)]', label: 'OAS 도구' },
-  oas_turn:   { icon: 'R', color: 'text-[#fb7185]', label: 'OAS 턴' },
-  oas_context: { icon: 'C', color: 'text-[#38bdf8]', label: 'OAS 압축' },
+  oas_turn:   { icon: 'R', color: 'text-[var(--rose-light)]', label: 'OAS 턴' },
+  oas_context: { icon: 'C', color: 'text-[var(--sky-400)]', label: 'OAS 압축' },
 }
 
 // Use shared tool category from tool-call-shared (SSOT)
@@ -89,13 +89,13 @@ function toolStyle(name: string): { icon: string; color: string } {
 // are visually separable in the trace timeline.
 function durableStyle(kind: unknown): { icon: string; color: string } | null {
   switch (kind) {
-    case 'llm_request':      return { icon: '>', color: 'text-[#38bdf8]' }
+    case 'llm_request':      return { icon: '>', color: 'text-[var(--sky-400)]' }
     case 'llm_response':     return { icon: '<', color: 'text-[var(--cyan)]' }
     case 'error_occurred':   return { icon: '!', color: 'text-[var(--bad)]' }
     case 'tool_called':      return { icon: 't', color: 'text-[var(--ok)]' }
     case 'tool_completed':   return { icon: 'x', color: 'text-[var(--ok)]' }
     case 'state_transition': return { icon: '>', color: 'text-[var(--accent)]' }
-    case 'checkpoint_saved': return { icon: '*', color: 'text-[#94a3b8]' }
+    case 'checkpoint_saved': return { icon: '*', color: 'text-[var(--slate-400)]' }
     case 'turn_started':     return { icon: 'r', color: 'text-[var(--warn)]' }
     default: return null
   }
@@ -366,9 +366,9 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
               size="md"
               trackTone="muted"
               trackClass="flex-1"
-              class="bg-[#38bdf8]"
+              class="bg-[var(--sky-400)]"
             />
-            <span class="text-[10px] font-mono text-[#38bdf8]">-${saved.toLocaleString()}tok (${(ratio ?? 0).toFixed(0)}%)</span>
+            <span class="text-[10px] font-mono text-[var(--sky-400)]">-${saved.toLocaleString()}tok (${(ratio ?? 0).toFixed(0)}%)</span>
           </div>
         ` : null}
         ${compactPhase ? html`<div class="text-[10px] text-[var(--text-dim)]">단계: ${compactPhase}</div>` : null}

@@ -68,11 +68,11 @@ describe('ctxSegmentColor', () => {
   })
 
   it('returns known color for memory_context', () => {
-    expect(ctxSegmentColor('memory_context')).toBe('#fb7185')
+    expect(ctxSegmentColor('memory_context')).toBe('var(--rose-light)')
   })
 
   it('returns default color for unknown keys', () => {
-    expect(ctxSegmentColor('unknown_key')).toBe('#94a3b8')
+    expect(ctxSegmentColor('unknown_key')).toBe('var(--slate-400)')
   })
 })
 

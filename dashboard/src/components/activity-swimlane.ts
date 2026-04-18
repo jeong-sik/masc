@@ -78,12 +78,12 @@ function syncTimelineSelection(
 }
 
 const SPAN_STYLES: Record<string, { bg: string; text: string }> = {
-  task:      { bg: 'var(--warn)', text: '#0f172a' },
-  operation: { bg: 'var(--ok)', text: '#0f172a' },
-  autonomy:  { bg: 'var(--cyan)', text: '#0f172a' },
-  presence:  { bg: 'rgba(148, 163, 184, 0.25)', text: '#e2e8f0' },
+  task:      { bg: 'var(--warn)', text: 'var(--panel-dark)' },
+  operation: { bg: 'var(--ok)', text: 'var(--panel-dark)' },
+  autonomy:  { bg: 'var(--cyan)', text: 'var(--panel-dark)' },
+  presence:  { bg: 'rgba(148, 163, 184, 0.25)', text: 'var(--frost-100)' },
 }
-const SPAN_DEFAULT = { bg: '#94a3b8', text: '#0f172a' } as const
+const SPAN_DEFAULT = { bg: 'var(--slate-400)', text: 'var(--panel-dark)' } as const
 
 export function spanStyle(kind: string) {
   return SPAN_STYLES[kind] ?? SPAN_DEFAULT
@@ -116,7 +116,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
       id: agent,
       content: agent.length > 16 ? agent.slice(0, 15) + '..' : agent,
       title: agent,
-      className: 'agent-swimlane-group text-[11px] font-system text-[#94a3b8]',
+      className: 'agent-swimlane-group text-[11px] font-system text-[var(--slate-400)]',
       order: i
     })))
 

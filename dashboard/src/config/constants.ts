@@ -62,7 +62,7 @@ export const TRUNCATE_DEFAULT = 260
 
 // --- Heatmap color scale (5-level: empty → max intensity) ---
 export const HEATMAP_COLORS = [
-  '#1e293b', // 0 events
+  'var(--slate-800)', // 0 events
   '#0e4a5c', // 1-25%
   '#0e6e7e', // 26-50%
   '#14919b', // 51-75%

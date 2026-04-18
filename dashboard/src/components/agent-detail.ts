@@ -12,6 +12,7 @@ import { resolveUnifiedStatus } from '../lib/unified-status'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { keeperIdentityHint } from './common/keeper-identity'
+import { IdPill } from './common/id-pill'
 import { AgentJournalStream } from './agent-detail-journal'
 import { AgentSessionReport } from './agent-detail-session-report'
 import { AgentTimelineSection } from './agent-detail-timeline'
@@ -114,7 +115,7 @@ export function filterTaskHistories(
 function TaskSummary({ task }: { task: Task }) {
   return html`
     <div class="flex items-center gap-3 border border-card-border bg-card/40 hover:bg-card/60 transition-colors px-3 py-2.5 rounded-xl shadow-sm">
-      <span class="text-[10px] font-medium py-1 px-2.5 border border-accent/20 bg-[var(--accent-10)] text-accent whitespace-nowrap rounded-md shadow-sm">${task.id}</span>
+      <${IdPill}>${task.id}<//>
       <span class="flex-1 text-[13px] text-text-strong font-medium truncate">${task.title}</span>
       <${StatusBadge} status=${task.status} />
     </div>
@@ -125,7 +126,7 @@ function TaskHistoryPanel({ row }: { row: TaskHistoryRow }) {
   return html`
     <div class="border border-card-border rounded-xl bg-card/40 p-4 shadow-sm hover:border-accent/30 transition-colors group">
       <div class="mb-3">
-        <span class="text-[10px] font-medium py-1 px-2.5 border border-accent/20 bg-[var(--accent-10)] text-accent whitespace-nowrap rounded-md shadow-sm group-hover:bg-accent/20 transition-colors">${row.taskId}</span>
+        <${IdPill} class="group-hover:bg-accent/20 transition-colors">${row.taskId}<//>
       </div>
       <pre class="m-0 whitespace-pre-wrap text-[12px] leading-relaxed text-text-body font-mono opacity-90">${row.text || '작업 이력 없음'}</pre>
     </div>
@@ -226,7 +227,7 @@ export function AgentDetailOverlay() {
                 <div class="flex items-center gap-2 mt-2 flex-wrap">
                   <${StatusBadge} status=${unified.canonical} />
                   ${unified.description !== unified.label ? html`<span class="text-[10px] font-medium py-1 px-2 border border-white/10 bg-white/5 text-text-muted whitespace-nowrap rounded-md" title=${unified.description}>${unified.description}</span>` : null}
-                  ${isArchivedParticipant ? html`<span class="text-[10px] font-medium py-1 px-2 border border-accent/20 bg-[var(--accent-10)] text-accent whitespace-nowrap rounded-md shadow-sm">이전 세션 참여자</span>` : null}
+                  ${isArchivedParticipant ? html`<${IdPill}>이전 세션 참여자<//>` : null}
                   ${agent?.model ? html`<span class="font-mono text-[10px] font-medium bg-white/10 border border-white/5 px-2 py-1 rounded-md text-text-muted shadow-sm">${agent.model}</span>` : ''}
                   ${!agent && missionBrief?.archived_reason
                     ? html`<span class="text-xs text-text-dim italic">${missionBrief.archived_reason}</span>`

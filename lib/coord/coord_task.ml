@@ -202,6 +202,37 @@ let task_assignee_of_status = function
   | Types.AwaitingVerification { assignee; _ } -> Some assignee
   | Types.Todo | Types.Done _ | Types.Cancelled _ -> None
 
+(** Issue #7646: symmetric to [task_assignee_of_status]. When a transition
+    fails for a reason other than ownership mismatch, surface what
+    actions ARE legal from the current state so the LLM stops
+    guess-retrying.
+
+    Exhaustive [match] over [Types.task_status]: adding a 7th constructor
+    will fail to compile. Each branch lists actions that
+    [transition_task_r]'s match-arms accept for that status — keep this
+    in sync if you add new transitions there. Verifier-FSM transitions
+    require [MASC_VERIFICATION_FSM_ENABLED=true] but are listed
+    unconditionally so the hint stays accurate when the flag is on; the
+    flag-off case still rejects them and produces a more specific error. *)
+let valid_next_actions_for_status : Types.task_status -> Types.task_action list = function
+  | Types.Todo                   -> [Types.Claim; Types.Cancel]
+  | Types.Claimed _              -> [Types.Start; Types.Done_action;
+                                     Types.Submit_for_verification;
+                                     Types.Release; Types.Cancel]
+  | Types.InProgress _           -> [Types.Done_action;
+                                     Types.Submit_for_verification;
+                                     Types.Release; Types.Cancel]
+  | Types.AwaitingVerification _ -> [Types.Approve_verification;
+                                     Types.Reject_verification]
+  | Types.Done _ | Types.Cancelled _ -> []  (* terminal *)
+
+let next_actions_hint status =
+  match valid_next_actions_for_status status with
+  | [] -> ""
+  | xs ->
+    Printf.sprintf ", valid_next_actions=[%s]"
+      (String.concat ";" (List.map Types.task_action_to_string xs))
+
 let task_started_at_unix status =
   let default_time = Time_compat.now () in
   match status with
@@ -856,10 +887,19 @@ let transition_task_r config ~agent_name ~task_id ~action
                 Printf.sprintf ", current_assignee=%s" a
               | _ -> ""
             in
+            (* Issue #7646: ownership-mismatch dominates; only show
+               valid_next_actions when the failure isn't an ownership
+               problem. Otherwise the hint risks misdirecting the LLM
+               toward retrying actions it cannot perform on someone
+               else's task. *)
+            let actions_hint =
+              if assignee_hint <> "" then ""
+              else next_actions_hint task.task_status
+            in
             Error (Types.TaskInvalidState
-              (Printf.sprintf "Invalid transition: %s -> %s (%s, agent=%s%s)"
+              (Printf.sprintf "Invalid transition: %s -> %s (%s, agent=%s%s%s)"
                 (task_status_to_string task.task_status) action_s task_id agent_name
-                assignee_hint))
+                assignee_hint actions_hint))
       in
       if new_status = task.task_status && set_current = None then
         (* Idempotent no-op: status unchanged, skip write/events.

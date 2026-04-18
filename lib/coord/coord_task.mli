@@ -41,6 +41,17 @@ val task_actor_kind : string -> string
 
 val task_status_to_string : Types.task_status -> string
 
+val valid_next_actions_for_status : Types.task_status -> Types.task_action list
+(** Issue #7646: actions that [transition_task_r] accepts from the given
+    [task_status]. Used to enrich "Invalid transition" error messages so
+    LLM keepers see what they SHOULD have called, not just what failed.
+    Empty list for terminal states ([Done], [Cancelled]). *)
+
+val next_actions_hint : Types.task_status -> string
+(** Issue #7646: rendered hint string suitable for embedding in error
+    messages, e.g. [", valid_next_actions=[claim;cancel]"]. Returns the
+    empty string for terminal states. *)
+
 val task_started_at_unix : Types.task_status -> float
 
 val task_transition_details :

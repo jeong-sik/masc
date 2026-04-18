@@ -238,6 +238,51 @@ let () = test "get_bool_missing" (fun () ->
   assert (Tool_args.get_bool args "key" true = true)
 )
 
+(* Issue #7646: valid_next_actions_for_status hint tests. One per
+   [Types.task_status] variant. The witness ensures every variant has a
+   defined hint AND the ones with content list each action canonically. *)
+let next_hint = Coord_task.next_actions_hint
+
+let () = test "next_hint_todo lists claim and cancel" (fun () ->
+  let h = next_hint Types.Todo in
+  assert (str_contains h "claim");
+  assert (str_contains h "cancel");
+  assert (str_contains h "valid_next_actions=")
+)
+
+let () = test "next_hint_claimed lists start, done, release, cancel" (fun () ->
+  let h = next_hint (Types.Claimed { assignee = "a"; claimed_at = "t" }) in
+  assert (str_contains h "start");
+  assert (str_contains h "done");
+  assert (str_contains h "release");
+  assert (str_contains h "cancel")
+)
+
+let () = test "next_hint_in_progress lists done and release" (fun () ->
+  let h = next_hint (Types.InProgress { assignee = "a"; started_at = "t" }) in
+  assert (str_contains h "done");
+  assert (str_contains h "release");
+  assert (not (str_contains h "claim"))  (* Claim is not legal from InProgress *)
+)
+
+let () = test "next_hint_awaiting_verification lists approve and reject" (fun () ->
+  let h = next_hint (Types.AwaitingVerification {
+    assignee = "a"; submitted_at = "t"; verification_id = "v";
+    required_verifier_role = Types.Reviewer; deadline = None }) in
+  assert (str_contains h "approve");
+  assert (str_contains h "reject")
+)
+
+let () = test "next_hint_done is empty (terminal)" (fun () ->
+  let h = next_hint (Types.Done { assignee = "a"; completed_at = "t"; notes = None }) in
+  assert (h = "")
+)
+
+let () = test "next_hint_cancelled is empty (terminal)" (fun () ->
+  let h = next_hint (Types.Cancelled { cancelled_by = "a"; cancelled_at = "t"; reason = None }) in
+  assert (h = "")
+)
+
 let () =
   Alcotest.run "Tool_coord"
     [

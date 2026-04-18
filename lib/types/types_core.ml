@@ -902,8 +902,23 @@ let backlog_of_yojson json =
     let tasks = List.filter_map (fun j ->
       match task_of_yojson j with Ok t -> Some t | Error _ -> None
     ) tasks_json in
-    let last_updated = json |> member "last_updated" |> to_string in
-    let version = json |> member "version" |> to_int in
+    (* [last_updated] and [version] are display metadata; writers may
+       omit them (observed in live basepath [~/me/.masc/tasks/backlog.json]
+       where the top-level is just [{"tasks": [...]}]).  Strict
+       [to_string]/[to_int] decoders rejected such payloads as
+       [Type_error("Expected string, got null")], forcing every reader
+       onto the [read_backlog] empty fallback and wiping every claim
+       from the reader's view (hundreds of [read_backlog backlog decode
+       failed] entries/day driven [stale-claims] GC to skip mutation,
+       so claims never transitioned).  Tolerate missing/null fields. *)
+    let last_updated =
+      json |> member "last_updated" |> to_string_option
+      |> Option.value ~default:""
+    in
+    let version =
+      json |> member "version" |> to_int_option
+      |> Option.value ~default:1
+    in
     Ok { tasks; last_updated; version }
   with e -> Error (Printexc.to_string e)
 

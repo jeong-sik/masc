@@ -426,6 +426,10 @@ let schema_json =
       `Assoc [("action", `String "done"); ("from", `List [`String "claimed"; `String "in_progress"]); ("to", `String "done")];
       `Assoc [("action", `String "cancel"); ("from", `List [`String "todo"; `String "claimed"; `String "in_progress"]); ("to", `String "cancelled")];
       `Assoc [("action", `String "release"); ("from", `List [`String "claimed"; `String "in_progress"]); ("to", `String "todo")];
+      (* Verifier-FSM transitions, gated by MASC_VERIFICATION_FSM_ENABLED. *)
+      `Assoc [("action", `String "submit_for_verification"); ("from", `List [`String "claimed"; `String "in_progress"]); ("to", `String "awaiting_verification")];
+      `Assoc [("action", `String "approve"); ("from", `List [`String "awaiting_verification"]); ("to", `String "done")];
+      `Assoc [("action", `String "reject"); ("from", `List [`String "awaiting_verification"]); ("to", `String "in_progress")];
     ]);
     ("cas", `Assoc [
       ("field", `String "backlog.version");
@@ -442,8 +446,12 @@ let schema_markdown =
     "- done: claimed/in_progress(by you) -> done";
     "- cancel: todo/claimed/in_progress(by you) -> cancelled";
     "- release: claimed/in_progress(by you) -> todo";
+    "- submit_for_verification: claimed/in_progress(by you) -> awaiting_verification";
+    "- approve: awaiting_verification(verifier != assignee) -> done";
+    "- reject: awaiting_verification(verifier != assignee) -> in_progress";
     "";
     "CAS guard: expected_version == backlog.version";
+    "Verifier FSM transitions require MASC_VERIFICATION_FSM_ENABLED=true";
   ]
 
 (** MCP Server state *)

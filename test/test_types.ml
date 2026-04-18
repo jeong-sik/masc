@@ -146,6 +146,46 @@ let test_actions_enum_has_verification_actions () =
       (List.mem s valid_task_action_strings)
   ) must
 
+(* Issue #8474: the published FSM transition matrix in [Mcp_server.schema_json]
+   must cover every action that [Coord_task.valid_next_actions_for_status]
+   exposes for reachable statuses. The witness list below is exhaustive over
+   [task_status], so a new constructor forces this test to be updated. *)
+let test_schema_transitions_cover_valid_next_actions () =
+  let open Yojson.Safe.Util in
+  let schema_transitions =
+    Masc_mcp.Mcp_server.schema_json
+    |> member "transitions"
+    |> to_list
+    |> List.map (fun entry ->
+         ( entry |> member "action" |> to_string,
+           entry |> member "from" |> to_list |> List.map to_string ))
+  in
+  let witness_statuses = [
+    Todo;
+    Claimed { assignee = "a"; claimed_at = "t" };
+    InProgress { assignee = "a"; started_at = "t" };
+    AwaitingVerification {
+      assignee = "a"; submitted_at = "t"; verification_id = "v";
+      required_verifier_role = Reviewer; deadline = None };
+    Done { assignee = "a"; completed_at = "t"; notes = None };
+    Cancelled { cancelled_by = "a"; cancelled_at = "t"; reason = None };
+  ] in
+  List.iter (fun status ->
+    let from_status = task_status_to_string status in
+    Coord_task.valid_next_actions_for_status status
+    |> List.iter (fun action ->
+         let action_name = task_action_to_string action in
+         let present =
+           List.exists (fun (schema_action, schema_from) ->
+             schema_action = action_name && List.mem from_status schema_from
+           ) schema_transitions
+         in
+         Alcotest.(check bool)
+           (Printf.sprintf "schema transition present for %s from %s"
+              action_name from_status)
+           true present)
+  ) witness_statuses
+
 (* Regression for live-basepath decode spike (2026-04-18): backlog.json
    written without the [last_updated]/[version] metadata fields used to
    fail parsing with [Type_error("Expected string, got null")], forcing
@@ -230,6 +270,8 @@ let () =
       Alcotest.test_case "status strings match witness" `Quick test_status_strings_match_variant_witness;
       Alcotest.test_case "awaiting_verification in enum" `Quick test_awaiting_verification_in_enum;
       Alcotest.test_case "actions enum has verification actions" `Quick test_actions_enum_has_verification_actions;
+      Alcotest.test_case "schema transitions cover valid next actions" `Quick
+        test_schema_transitions_cover_valid_next_actions;
     ];
     "agent_role_ssot", [
       Alcotest.test_case "witness covers all variants" `Quick (fun () ->

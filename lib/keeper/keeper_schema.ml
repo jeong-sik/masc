@@ -10,6 +10,22 @@ open Types
 let tool_preset_enum_strings =
   [ "minimal"; "social"; "messaging"; "coding"; "research"; "delivery"; "full" ]
 
+(** Issue #8467: canonical strings for [Keeper_types_profile.sandbox_profile],
+    [network_mode], and [shared_memory_scope]. Same cycle constraint as
+    [tool_preset_enum_strings] above — Keeper_schema cannot depend on
+    Keeper_types_profile directly because the latter [include]s
+    Keeper_config and is otherwise downstream. The test
+    [test_types.ml :: keeper_profile_enum_ssot] asserts these mirrors
+    stay in sync with [valid_*_strings] so adding a constructor in
+    Keeper_types_profile fails the test instead of silently dropping
+    from the JSON Schema. *)
+let sandbox_profile_enum_strings =
+  [ "legacy_local"; "docker_hardened" ]
+let network_mode_enum_strings =
+  [ "none"; "inherit" ]
+let shared_memory_scope_enum_strings =
+  [ "disabled"; "room" ]
+
 let string_array_schema =
   `Assoc [
     ("type", `String "array");
@@ -254,17 +270,17 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("sandbox_profile", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "legacy_local"; `String "docker_hardened"]);
+          ("enum", `List (List.map (fun s -> `String s) sandbox_profile_enum_strings));
           ("description", `String "Filesystem/process sandbox profile. 'legacy_local' keeps the current local execution model. 'docker_hardened' runs keeper_bash in an ephemeral hardened Docker container rooted at the keeper playground.");
         ]);
         ("network_mode", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "none"; `String "inherit"]);
+          ("enum", `List (List.map (fun s -> `String s) network_mode_enum_strings));
           ("description", `String "Network policy associated with the sandbox profile. 'none' is valid only with sandbox_profile='docker_hardened'.");
         ]);
         ("shared_memory_scope", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "disabled"; `String "room"]);
+          ("enum", `List (List.map (fun s -> `String s) shared_memory_scope_enum_strings));
           ("description", `String "Typed shared-memory lane policy. 'room' enables keeper-authorized masc_team_memory_* access on the flattened default namespace.");
         ]);
         ("allowed_paths", `Assoc [

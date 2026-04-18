@@ -19,7 +19,6 @@ jobs:
       - name: Setup OCaml
         uses: ./.github/actions/setup-ocaml-toolchain
         with:
-          ocaml-compiler: 5.4.1
           dune-cache: true
 
       - name: Setup Node

@@ -116,6 +116,36 @@ let test_agent_status_strings_complete () =
       (List.mem expected valid_agent_status_strings)
   ) ["active"; "busy"; "listening"; "inactive"]
 
+(* Issue #8354: schema enums must stay in sync with the Variant SSOT.
+   The witness function below uses an exhaustive [match]: adding a 7th
+   constructor to [task_status] forces this match to fail to compile. *)
+let test_status_strings_match_variant_witness () =
+  let witness s =
+    let actual = task_status_to_string s in
+    if not (List.mem actual valid_task_status_strings) then
+      Alcotest.failf "task_status_to_string %S not in valid_task_status_strings" actual
+  in
+  witness Todo;
+  witness (Claimed { assignee = "a"; claimed_at = "t" });
+  witness (InProgress { assignee = "a"; started_at = "t" });
+  witness (AwaitingVerification {
+    assignee = "a"; submitted_at = "t"; verification_id = "v";
+    required_verifier_role = Reviewer; deadline = None });
+  witness (Done { assignee = "a"; completed_at = "t"; notes = None });
+  witness (Cancelled { cancelled_by = "a"; cancelled_at = "t"; reason = None });
+  Alcotest.(check int) "count" 6 (List.length valid_task_status_strings)
+
+let test_awaiting_verification_in_enum () =
+  Alcotest.(check bool) "awaiting_verification present"
+    true (List.mem "awaiting_verification" valid_task_status_strings)
+
+let test_actions_enum_has_verification_actions () =
+  let must = ["submit_for_verification"; "approve"; "reject"] in
+  List.iter (fun s ->
+    Alcotest.(check bool) (Printf.sprintf "%s present" s) true
+      (List.mem s valid_task_action_strings)
+  ) must
+
 let () =
   Alcotest.run "Types" [
     "agent_status", [
@@ -146,5 +176,10 @@ let () =
     "agent_status_ssot", [
       Alcotest.test_case "witness covers all variants" `Quick test_agent_status_witness_in_enum;
       Alcotest.test_case "all 4 strings present" `Quick test_agent_status_strings_complete;
+    ];
+    "variant_ssot", [
+      Alcotest.test_case "status strings match witness" `Quick test_status_strings_match_variant_witness;
+      Alcotest.test_case "awaiting_verification in enum" `Quick test_awaiting_verification_in_enum;
+      Alcotest.test_case "actions enum has verification actions" `Quick test_actions_enum_has_verification_actions;
     ];
   ]

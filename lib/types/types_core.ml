@@ -358,6 +358,31 @@ let task_status_to_string = function
 
 let string_of_task_status = task_status_to_string
 
+(** Issue #8354: schema enums for [task_status] used to be hand-rolled in
+    [tool_shard.ml] and [mcp_server.ml], dropping [awaiting_verification].
+    [task_status] carries record payloads so we cannot enumerate dummy
+    values like [task_action]. Instead, this helper uses an exhaustive
+    [match] driven by a witness function: adding a 7th constructor to
+    [task_status] forces this match to be updated by the compiler, so
+    schema enums cannot silently drift again.
+
+    Order matches the FSM lifecycle (Todo -> Claimed -> InProgress ->
+    AwaitingVerification -> Done | Cancelled) for readable schema docs. *)
+let all_task_status_names : string list =
+  let witness =
+    function
+    | Todo -> "todo"
+    | Claimed _ -> "claimed"
+    | InProgress _ -> "in_progress"
+    | AwaitingVerification _ -> "awaiting_verification"
+    | Done _ -> "done"
+    | Cancelled _ -> "cancelled"
+  in
+  let _ = witness in
+  [ "todo"; "claimed"; "in_progress"; "awaiting_verification"; "done"; "cancelled" ]
+
+let valid_task_status_strings = all_task_status_names
+
 (* Manual yojson conversion for task_status (sum type with records) *)
 let task_status_to_yojson = function
   | Todo -> `Assoc [("status", `String "todo")]

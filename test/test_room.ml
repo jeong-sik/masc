@@ -311,6 +311,15 @@ let test_event_log () =
 
 let contains_error result = String.sub result 0 3 = "\xE2\x9D\x8C"  (* ❌ *)
 
+let transition_done_r config ~agent_name ~task_id ~notes =
+  Coord.transition_task_r config ~agent_name ~task_id
+    ~action:Types.Done_action ~notes ()
+
+let transition_done config ~agent_name ~task_id ~notes =
+  match transition_done_r config ~agent_name ~task_id ~notes with
+  | Ok msg -> msg
+  | Error err -> Types.masc_error_to_string err
+
 (* Helper to create fresh test environment.
    Eio context + Fs_compat.set_fs are set up in the top-level runner,
    so Coord.default_config gets FileSystem backend. *)
@@ -370,8 +379,8 @@ let test_complete_without_claim () =
     let _ = Coord.add_task config ~title:"Unclaimed" ~priority:1 ~description:"" in
 
     (* Try to complete without claiming - should fail *)
-    let result = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
-    Alcotest.(check bool) "complete without claim blocked" true (contains_warning result)
+    let result = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
+    Alcotest.(check bool) "complete without claim blocked" true (contains_error result)
   )
 
 let test_complete_by_wrong_agent () =
@@ -380,13 +389,15 @@ let test_complete_by_wrong_agent () =
     let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
 
     (* Gemini tries to complete claude's task - should fail *)
-    let result = Coord.complete_task config ~agent_name:"gemini" ~task_id:"task-001" ~notes:"" in
-    Alcotest.(check bool) "wrong agent blocked" true (contains_warning result)
+    let result = transition_done config ~agent_name:"gemini" ~task_id:"task-001" ~notes:"" in
+    Alcotest.(check bool) "wrong agent blocked" true (contains_error result);
+    Alcotest.(check bool) "wrong agent points at current assignee" true
+      (str_contains result "current_assignee=claude")
   )
 
 let test_complete_nonexistent_task () =
   with_test_env (fun config ->
-    let result = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-999" ~notes:"" in
+    let result = transition_done config ~agent_name:"claude" ~task_id:"task-999" ~notes:"" in
     Alcotest.(check bool) "nonexistent task" true (contains_error result)
   )
 
@@ -400,11 +411,13 @@ let test_double_complete () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
     let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-    let _ = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"first" in
+    let _ = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"first" in
 
-    (* Try to complete again - should fail (already done) *)
-    let result = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"second" in
-    Alcotest.(check bool) "double complete blocked" true (contains_warning result)
+    (* Done is idempotent at the Coord FSM layer. *)
+    let result = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"second" in
+    Alcotest.(check bool) "double complete is no-op" true (contains_check result);
+    Alcotest.(check bool) "double complete mentions no-op" true
+      (str_contains result "no-op")
   )
 
 (* --- Join/Leave Edge Cases --- *)
@@ -531,10 +544,10 @@ let test_multiple_tasks_independent () =
     (* Claim one, complete another - verify independence *)
     let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
     let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-002" in
-    let _ = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
+    let _ = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
 
     (* Task 002 should still be claimable to complete *)
-    let result = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-002" ~notes:"" in
+    let result = transition_done config ~agent_name:"claude" ~task_id:"task-002" ~notes:"" in
     Alcotest.(check bool) "independent tasks" true (contains_check result)
   )
 
@@ -572,9 +585,9 @@ let test_multiple_agents_multiple_tasks () =
     Alcotest.(check bool) "codex gets 003" true (contains_check r3);
 
     (* Each completes their own *)
-    let c1 = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
-    let c2 = Coord.complete_task config ~agent_name:"gemini" ~task_id:"task-002" ~notes:"" in
-    let c3 = Coord.complete_task config ~agent_name:"codex" ~task_id:"task-003" ~notes:"" in
+    let c1 = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
+    let c2 = transition_done config ~agent_name:"gemini" ~task_id:"task-002" ~notes:"" in
+    let c3 = transition_done config ~agent_name:"codex" ~task_id:"task-003" ~notes:"" in
 
     Alcotest.(check bool) "claude done" true (contains_check c1);
     Alcotest.(check bool) "gemini done" true (contains_check c2);
@@ -637,7 +650,7 @@ let test_event_log_on_claim_done () =
   let _ = Coord.init config ~agent_name:(Some "claude") in
   let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
   let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-  let _ = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"done" in
+  let _ = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"done" in
 
   (* Verify task state via Coord.read_backlog (backend-agnostic) *)
   let backlog = Coord.read_backlog config in
@@ -1446,7 +1459,7 @@ let test_bug006_transition_with_unsuffixed_name () =
          Alcotest.failf "start with unsuffixed name failed (BUG-006): %s"
            (Types.show_masc_error e));
     (* Complete using the unsuffixed name — same resolution path *)
-    (match Coord.complete_task_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
+    (match transition_done_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
              ~notes:"done" with
      | Ok _ -> ()
      | Error e ->
@@ -1482,7 +1495,7 @@ let test_no_active_tasks_stop_signal () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Done Task" ~priority:1 ~description:"" in
     let _ = Coord.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
-    let _ = Coord.complete_task config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done" in
+    let _ = transition_done config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done" in
     let result = Coord.list_tasks config in
     Alcotest.(check bool) "contains STOP signal"
       true (str_contains result "STOP calling keeper_tasks_list"))

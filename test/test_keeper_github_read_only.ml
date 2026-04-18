@@ -466,11 +466,16 @@ let test_keeper_bash_still_opens_boundary () =
    blocked.  Lock the [masc_] and [keeper_] families to the same
    exemption semantics so the next rename does not silently drift. *)
 let test_masc_coordination_aliases_bypass_boundary () =
-  let check name =
+  let check_pair name =
+    let expected_ro = Tool_dispatch.is_read_only name in
+    Alcotest.(check bool)
+      (Printf.sprintf "%s read-only classification" name)
+      expected_ro
+      (is_ro ~tool_name:name ~input:(`Assoc []));
     Alcotest.(check bool) (name ^ " bypasses boundary") true
       (is_boundary_exempt ~tool_name:name ~input:(`Assoc []))
   in
-  List.iter check
+  List.iter check_pair
     [ "masc_tasks"; "masc_add_task"; "masc_claim_next";
       "masc_batch_add_tasks"; "masc_plan_init"; "masc_plan_set_task";
       "masc_plan_update"; "masc_plan_get"; "masc_transition";

@@ -141,6 +141,15 @@ isolated_build_dir_cmd() {
   printf 'export DUNE_BUILD_DIR=%q; %s' "${ACTIVE_TEST_BUILD_DIR}" "${cmd}"
 }
 
+cache_disabled_cmd() {
+  local cmd="${1}"
+  if [[ "${cmd}" == *"DUNE_CACHE=disabled"* ]]; then
+    printf '%s' "${cmd}"
+  else
+    printf 'export DUNE_CACHE=disabled; %s' "${cmd}"
+  fi
+}
+
 agent_sdk_interface_mismatch_detected() {
   [[ -f "${TEST_LOG_FILE}" ]] || return 1
   grep -Eq \
@@ -163,6 +172,19 @@ clean_current_build_dir() {
       > >(tee -a "${TEST_LOG_FILE}") \
       2> >(tee -a "${TEST_LOG_FILE}" >&2)
   fi
+}
+
+run_agent_sdk_clean_retry() {
+  CI_TEST_CLEAN_RETRY_DONE=1
+  run_cmd="$(cache_disabled_cmd "${run_cmd}")"
+  log_line "[ci-run] WARN: detected Agent_sdk interface mismatch; running dune clean and retrying once with DUNE_CACHE=disabled"
+  log_line "[ci-run] retry_command: ${run_cmd}"
+  clean_current_build_dir
+  log_line "[ci-run] retry_started_at=$(iso_now)"
+  set +e
+  run_with_timeout "${run_cmd}"
+  status=$?
+  set -e
 }
 
 run_with_timeout() {
@@ -243,14 +265,7 @@ if [[ "${status}" -ne 0 ]] \
   && [[ "${CI_TEST_CLEAN_RETRY_DONE}" -eq 0 ]] \
   && test_cmd_needs_dune_sanitization \
   && agent_sdk_interface_mismatch_detected; then
-  CI_TEST_CLEAN_RETRY_DONE=1
-  log_line "[ci-run] WARN: detected Agent_sdk interface mismatch; running dune clean and retrying once"
-  clean_current_build_dir
-  log_line "[ci-run] retry_started_at=$(iso_now)"
-  set +e
-  run_with_timeout "${run_cmd}"
-  status=$?
-  set -e
+  run_agent_sdk_clean_retry
 fi
 
 if [[ "${status}" -eq 124 ]]; then
@@ -280,6 +295,14 @@ if [[ "${status}" -ne 0 ]] \
   run_with_timeout "${run_cmd}"
   status=$?
   set -e
+fi
+
+if [[ "${status}" -ne 0 ]] \
+  && [[ "${CI_TEST_ALLOW_CLEAN_RETRY}" = "1" ]] \
+  && [[ "${CI_TEST_CLEAN_RETRY_DONE}" -eq 0 ]] \
+  && test_cmd_needs_dune_sanitization \
+  && agent_sdk_interface_mismatch_detected; then
+  run_agent_sdk_clean_retry
 fi
 
 if [[ "${status}" -ne 0 ]]; then

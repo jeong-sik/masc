@@ -158,8 +158,6 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
    | Fresh | Init_only -> ());
   { generic; config; meta; ctx_snapshot; tools }
 
-let keeper_agent_name fixture = "keeper-" ^ fixture.meta.name
-
 let find_tool fixture name =
   List.find_opt
     (fun (tool : Agent_sdk.Tool.t) -> String.equal tool.schema.name name)
@@ -175,7 +173,7 @@ let ensure_keeper_claim fixture =
   ignore (Generic.ensure_task fixture.generic);
   ignore
     (Masc_mcp.Coord.claim_next fixture.config
-       ~agent_name:(keeper_agent_name fixture))
+       ~agent_name:fixture.meta.agent_name)
 
 let ensure_voice_session fixture =
   let mgr = Masc_mcp.Keeper_voice_local.get_session_manager () in
@@ -293,7 +291,9 @@ let keeper_arguments fixture (schema : Types.tool_schema) =
       `Assoc
         [
           ("task_id", `String (Generic.ensure_task fixture.generic));
-          ("result", `String "tool matrix result");
+          ( "result",
+            `String
+              "Validated the keeper tool matrix case, confirmed the task fixture was claimed, and recorded the successful completion path." );
         ]
   | "keeper_board_cleanup" | "keeper_board_delete" ->
       `Assoc [ ("post_id", `String (Generic.ensure_board_post fixture.generic)) ]
@@ -342,6 +342,13 @@ let keeper_expectation_for_name name =
   | "keeper_pr_review_reply"
   | "keeper_preflight_check" ->
       Expect_success_or_guard github_guard_fragments
+  | "keeper_task_done" ->
+      Expect_success_or_guard
+        [
+          "Completion rejected by anti-rationalization gate";
+          "review format unrecognized";
+          "Revise your completion notes";
+        ]
   | "keeper_fs_read" ->
       (* Playground resolves paths under .masc/playground/<agent>/ but
          the sample file is written at base_path. File-not-found in

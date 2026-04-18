@@ -420,7 +420,7 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
   const hasData = src.entry_count > 0
 
   return html`
-    <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 min-w-[140px]">
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 min-w-35">
       <div class="flex items-center gap-2 mb-1">
         <span class="font-mono font-bold ${meta.color}">${meta.icon}</span>
         <span class="text-xs font-medium text-[var(--text-strong)]">${meta.label}</span>
@@ -442,7 +442,7 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
 function DiagnosisCard({ title, value, detail, tone }: { title: string; value: string; detail: string; tone: 'ok' | 'warn' | 'neutral' }) {
   const toneColor = tone === 'ok' ? 'text-[var(--ok)]' : tone === 'warn' ? 'text-[var(--warn)]' : 'text-[var(--text-muted)]'
   return html`
-    <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 min-w-[140px]">
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 min-w-35">
       <div class="text-xs font-medium text-[var(--text-muted)] mb-1">${title}</div>
       <div class="text-2xl font-bold ${toneColor}">${value}</div>
       <div class="text-3xs text-[var(--text-dim)]">${detail}</div>
@@ -491,7 +491,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
               ${scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-3xs text-[var(--text-dim)] font-mono">${badge}</span>`)}
             </div>
           ` : null}
-          <pre class="text-3xs font-mono text-[var(--text-muted)] bg-[rgba(0,0,0,0.3)] rounded p-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-all">
+          <pre class="text-3xs font-mono text-[var(--text-muted)] bg-[rgba(0,0,0,0.3)] rounded p-2 overflow-x-auto max-h-75 overflow-y-auto whitespace-pre-wrap break-all">
 ${JSON.stringify(entry, null, 2)}</pre>
         </div>
       ` : null}
@@ -553,7 +553,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
           })}
           <details class="rounded bg-[var(--black-20)] px-2 py-1.5">
             <summary class="cursor-pointer text-3xs text-[var(--text-dim)]">Raw JSON</summary>
-            <pre class="mt-2 text-3xs font-mono text-[var(--text-muted)] overflow-x-auto max-h-[280px] overflow-y-auto whitespace-pre-wrap break-all">
+            <pre class="mt-2 text-3xs font-mono text-[var(--text-muted)] overflow-x-auto max-h-70 overflow-y-auto whitespace-pre-wrap break-all">
 ${JSON.stringify(item.entries, null, 2)}</pre>
           </details>
         ` : null}
@@ -724,7 +724,7 @@ export function TelemetryUnified() {
 
       <div class="flex flex-wrap gap-3">
         ${summary.map(src => html`<${SummaryCard} src=${src} />`)}
-        <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 min-w-[140px]">
+        <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 min-w-35">
           <div class="text-xs font-medium text-[var(--text-muted)] mb-1">전체</div>
           <div class="text-2xl font-bold text-[var(--text-strong)]">${totalEntries.toLocaleString()}</div>
         </div>
@@ -857,7 +857,7 @@ export function TelemetryUnified() {
             })}
           </div>
         ` : null}
-        <div class="max-h-[600px] overflow-y-auto">
+        <div class="max-h-150 overflow-y-auto">
           ${displayItems.length > 0
             ? displayItems.map(item => item.kind === 'group'
               ? html`<${GroupRow} key=${item.key} item=${item} />`

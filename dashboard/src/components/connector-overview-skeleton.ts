@@ -33,7 +33,7 @@ export function overviewSkeletonTileCount(): number {
   return KNOWN_CONNECTOR_IDS.length
 }
 
-const BAR = 'h-3 w-[4px] rounded-[1px] bg-[var(--white-4)] animate-pulse'
+const BAR = 'h-3 w-1 rounded-[1px] bg-[var(--white-4)] animate-pulse'
 const PILL = 'h-4 flex-1 rounded-sm bg-[var(--white-4)] animate-pulse'
 const LINE = 'h-3 rounded bg-[var(--white-4)] animate-pulse'
 
@@ -56,10 +56,10 @@ function TileSkeleton() {
         <div class=${PILL}></div>
       </div>
       <div class="flex items-center gap-1">
-        <div class="h-4 w-[64px] rounded-sm bg-[var(--white-4)] animate-pulse"></div>
-        <div class="h-4 w-[44px] rounded-sm bg-[var(--white-4)] animate-pulse"></div>
+        <div class="h-4 w-16 rounded-sm bg-[var(--white-4)] animate-pulse"></div>
+        <div class="h-4 w-11 rounded-sm bg-[var(--white-4)] animate-pulse"></div>
       </div>
-      <div class="flex items-end gap-[2px]" aria-hidden="true">
+      <div class="flex items-end gap-0.5" aria-hidden="true">
         ${Array.from({ length: 45 }, (_, i) => html`<span class=${BAR} data-skeleton-bar-index=${i}></span>`)}
       </div>
     </div>

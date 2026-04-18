@@ -57,13 +57,13 @@ export function RichComposer({
                 placeholder=${placeholder}
                 rows=${rows}
                 disabled=${disabled}
-                class="min-h-[140px]"
+                class="min-h-35"
                 onInput=${(event: Event) => onValueChange((event.target as HTMLTextAreaElement).value)}
               />
             `
           : value.trim()
             ? html`
-                <div class="max-h-[320px] overflow-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] p-3 custom-scrollbar">
+                <div class="max-h-80 overflow-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] p-3 custom-scrollbar">
                   <${RichContent} text=${value} previewLimit=${previewLimit} />
                 </div>
               `

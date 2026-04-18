@@ -356,7 +356,7 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
                 class="text-[var(--text-muted)] hover:text-[var(--accent)] truncate w-32 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                 onClick=${() => openAgentDetail(s.to_agent)}
               >${shortAgentLabel(s.to_agent)}</button>
-              <div class="flex-1 bg-[var(--white-5)] rounded h-1.5 min-w-[60px]">
+              <div class="flex-1 bg-[var(--white-5)] rounded h-1.5 min-w-15">
                 <div class="${weightBarClass(s.weight)} rounded h-1.5" style="width:${pct}%"></div>
               </div>
               <span class="text-[var(--text-muted)] w-10 text-right">${pct}%</span>
@@ -581,7 +581,7 @@ export function MemorySubsystems() {
                   <${MermaidGraph}
                     source=${ARCHITECTURE_FLOW}
                     prefix="memory-arch"
-                    minHeightClass="min-h-[320px]"
+                    minHeightClass="min-h-80"
                   />
                 </div>
               `
@@ -625,7 +625,7 @@ export function MemorySubsystems() {
                     onInput=${(e: Event) => {
                       synapseQuery.value = (e.target as HTMLInputElement).value
                     }}
-                    class="flex-1 min-w-[200px] bg-[var(--white-5)] border border-[var(--white-10)] rounded px-2 py-1 text-sm text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:border-[var(--white-10)]0 focus:outline-none"
+                    class="flex-1 min-w-50 bg-[var(--white-5)] border border-[var(--white-10)] rounded px-2 py-1 text-sm text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:border-[var(--white-10)]0 focus:outline-none"
                   />
                   ${
                     isSynapseFiltering
@@ -693,7 +693,7 @@ export function MemorySubsystems() {
             placeholder="검색 (summary, learnings, event_type...)"
             value=${searchQuery.value}
             onInput=${onSearchInput}
-            class="flex-1 min-w-[200px] bg-[var(--white-5)] border border-[var(--white-10)] rounded px-2 py-1 text-sm text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:border-[var(--white-10)]0 focus:outline-none"
+            class="flex-1 min-w-50 bg-[var(--white-5)] border border-[var(--white-10)] rounded px-2 py-1 text-sm text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:border-[var(--white-10)]0 focus:outline-none"
           />
           <select
             value=${keeperFilter.value}

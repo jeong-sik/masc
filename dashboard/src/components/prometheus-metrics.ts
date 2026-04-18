@@ -315,7 +315,7 @@ export function PrometheusMetrics() {
       `}
 
       <${TextInput}
-        class="max-w-[300px]"
+        class="max-w-75"
         placeholder="검색 (메트릭 이름, 라벨...)"
         ariaLabel="메트릭 검색"
         value=${searchQuery.value}

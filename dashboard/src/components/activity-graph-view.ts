@@ -242,7 +242,7 @@ export function GraphView({ data }: GraphViewProps) {
 
   return html`
     <div class="relative w-full my-3 rounded border border-[var(--card-border)] bg-[#0f1117]">
-      <div ref=${containerRef} class="w-full h-[360px]"></div>
+      <div ref=${containerRef} class="w-full h-90"></div>
     </div>
     <div class="flex flex-wrap gap-x-4 gap-y-1 mt-1 px-1">
       ${[
@@ -284,7 +284,7 @@ export function GraphView({ data }: GraphViewProps) {
         ${connectedEdges.length > 0 ? html`
           <div class="border-t border-[var(--slate-gray-10)] pt-3">
             <div class="text-3xs text-[var(--text-muted)] uppercase tracking-[0.08em] mb-2">연결된 관계</div>
-            <div class="flex flex-col gap-1.5 max-h-[160px] overflow-y-auto">
+            <div class="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
               ${connectedEdges.slice(0, 20).map(({ edge, otherLabel }) => html`
                 <div class="flex items-center gap-2 text-sm py-1 px-2 rounded bg-[rgba(15,23,42,0.4)]" key=${edge.id ?? `${edge.source}-${edge.kind}-${edge.target}`}>
                   <span class="text-[var(--text-slate-light)]">${otherLabel}</span>

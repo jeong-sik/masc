@@ -352,7 +352,7 @@ export function ToolQualityPanel() {
         <div class="flex items-center justify-between mb-1 gap-2">
           <div class="text-3xs text-[var(--text-dim)] uppercase tracking-wider">도구별 성공률</div>
           <${TextInput}
-            class="max-w-[180px]"
+            class="max-w-45"
             name="tool_quality_search"
             ariaLabel="도구 이름 검색"
             autoComplete="off"

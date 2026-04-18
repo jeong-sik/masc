@@ -218,7 +218,7 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
           placeholder="도구/카테고리 필터"
           aria-label="resolved allowlist 필터"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-          class="min-w-[140px] max-w-[220px] flex-1 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-35 max-w-55 flex-1 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && visibleTools.length === 0
@@ -355,7 +355,7 @@ function ToolSearchPicker({
 
         <ul ...${getMenuProps({
           class: showMenu && filtered.length > 0
-            ? 'absolute z-10 top-full left-0 right-0 mt-1 max-h-[220px] overflow-y-auto rounded border border-[var(--card-border)] bg-[var(--backdrop-modal)] shadow-sm backdrop-blur-sm list-none m-0 p-0'
+            ? 'absolute z-10 top-full left-0 right-0 mt-1 max-h-55 overflow-y-auto rounded border border-[var(--card-border)] bg-[var(--backdrop-modal)] shadow-sm backdrop-blur-sm list-none m-0 p-0'
             : 'hidden',
         })}>
           ${showMenu && filtered.length > 0
@@ -576,7 +576,7 @@ export function ToolAllowlistEditor({
             ${textInputSection.value === 'also_allow'
               ? html`
                 <textarea
-                  class="min-h-[72px] w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
+                  class="min-h-18 w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
                   placeholder="쉼표 또는 줄바꿈으로 구분"
                   value=${textInputBuffer.value}
                   onInput=${(e: Event) => { textInputBuffer.value = (e.target as HTMLTextAreaElement).value }}
@@ -642,7 +642,7 @@ export function ToolAllowlistEditor({
         ${textInputSection.value === 'deny'
           ? html`
             <textarea
-              class="min-h-[72px] w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
+              class="min-h-18 w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
               placeholder="쉼표 또는 줄바꿈으로 구분"
               value=${textInputBuffer.value}
               onInput=${(e: Event) => { textInputBuffer.value = (e.target as HTMLTextAreaElement).value }}

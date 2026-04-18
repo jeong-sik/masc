@@ -188,7 +188,7 @@ function TaskColumn({
   }, [listRef])
 
   return html`
-    <section class="flex min-h-[240px] flex-col gap-4 rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+    <section class="flex min-h-60 flex-col gap-4 rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
       <div class="flex items-start justify-between gap-3 border-b border-card-border/50 pb-3">
         <div>
           <h3 class="text-md font-semibold text-text-strong">${title}</h3>
@@ -196,7 +196,7 @@ function TaskColumn({
         </div>
         <span class="rounded px-2.5 py-1 text-xs font-semibold ${badgeClass}">${count}</span>
       </div>
-      <div ref=${listRef} class="flex max-h-[680px] flex-col gap-3 overflow-y-auto pr-1 custom-scrollbar">
+      <div ref=${listRef} class="flex max-h-170 flex-col gap-3 overflow-y-auto pr-1 custom-scrollbar">
         ${children}
       </div>
     </section>
@@ -269,7 +269,7 @@ export function TaskBacklog() {
         <div class="mb-3 rounded border border-warn/25 bg-warn/10 px-3 py-2 text-xs text-warn">마지막 갱신에 실패했습니다. 표시된 데이터가 오래되었을 수 있습니다.</div>
       ` : null}
       <div class="mb-4 flex flex-wrap items-center gap-2">
-        <div class="min-w-[220px] flex-1">
+        <div class="min-w-55 flex-1">
           <${TextInput}
             value=${query}
             placeholder="태스크 제목/설명/담당자 검색..."

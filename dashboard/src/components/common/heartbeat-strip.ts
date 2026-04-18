@@ -15,7 +15,7 @@ const COLOR: Record<HeartbeatState, string> = {
   unknown: 'bg-[var(--white-8)]',
 }
 
-const BAR_W = 'w-[4px]'
+const BAR_W = 'w-1'
 const BAR_H = 'h-3'
 const BAR_RADIUS = 'rounded-[1px]'
 
@@ -92,7 +92,7 @@ export function HeartbeatStrip({
   const bars = padHistory(history, slots)
   const summary = summarizeHistory(history)
   const label = ariaLabel ?? formatHeartbeatLabel(summary)
-  const cls = cx ? `inline-flex items-end gap-[2px] ${cx}` : 'inline-flex items-end gap-[2px]'
+  const cls = cx ? `inline-flex items-end gap-0.5 ${cx}` : 'inline-flex items-end gap-0.5'
   return html`<span
     class=${cls}
     role="img"

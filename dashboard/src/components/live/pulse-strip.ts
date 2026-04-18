@@ -34,7 +34,7 @@ export function PulseStrip() {
           title="${p.koreanName ? `${p.name} (${p.koreanName})` : p.name}${p.currentTask ? ` — ${p.currentTask}` : ''}"
         >
           <span class="text-[1.15rem] leading-none">${p.emoji || p.name.charAt(0).toUpperCase()}</span>
-          <span class="text-[0.65rem] text-[var(--text-muted)] whitespace-nowrap overflow-hidden text-ellipsis max-w-[64px]">${p.koreanName ?? p.name}</span>
+          <span class="text-[0.65rem] text-[var(--text-muted)] whitespace-nowrap overflow-hidden text-ellipsis max-w-16">${p.koreanName ?? p.name}</span>
         </button>
       `)}
     </div>

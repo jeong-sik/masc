@@ -199,7 +199,7 @@ function HarnessFlowCard({ data }: { data: HarnessHealthData }) {
         source=${source}
         prefix="harness-flow"
         fallbackText=${fallbackText}
-        minHeightClass="min-h-[260px]"
+        minHeightClass="min-h-65"
         diagramClass="border border-[var(--white-8)]"
       />
     </div>

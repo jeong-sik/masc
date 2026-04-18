@@ -14,7 +14,7 @@
 //  - `sm`           — dense inline hints (\"press ?\" micro-badge, status
 //                     bar). Same 10px text as `md` (P5 density sweep
 //                     upgraded `sm` from 9px → 10px for legibility),
-//                     but tighter padding (px-1 py-0 vs px-1.5 py-[1px]).
+//                     but tighter padding (px-1 py-0 vs px-1.5 py-px).
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
@@ -30,7 +30,7 @@ export function kbdClasses(size: KbdSize = 'md', extra?: string): string {
   const sized =
     size === 'sm'
       ? 'text-3xs px-1 py-0 border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)]'
-      : 'text-3xs px-1.5 py-[1px] border-[var(--white-10)] bg-[var(--bg-0)] text-[var(--text-body)]'
+      : 'text-3xs px-1.5 py-px border-[var(--white-10)] bg-[var(--bg-0)] text-[var(--text-body)]'
   return extra === undefined || extra === ''
     ? `${BASE} ${sized}`
     : `${BASE} ${sized} ${extra}`

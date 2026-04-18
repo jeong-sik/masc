@@ -58,7 +58,7 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
       ${model ? html`
         <div class="flex items-center gap-1.5 text-sm">
           <span class="text-3xs text-[var(--text-muted)] uppercase tracking-wider">MODEL</span>
-          <span class="text-sm text-[var(--text-body)] font-mono truncate max-w-[200px]">${model}</span>
+          <span class="text-sm text-[var(--text-body)] font-mono truncate max-w-50">${model}</span>
         </div>
       ` : null}
 

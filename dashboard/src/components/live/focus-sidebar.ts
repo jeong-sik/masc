@@ -39,7 +39,7 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
               <span class="text-xs text-[var(--text-muted)]">${list.length}명 활성</span>
             </div>
           `}
-      <div class="grid content-start gap-1.5 overflow-y-auto pr-1 ${compact ? 'max-h-[32vh]' : 'max-h-[560px]'}">
+      <div class="grid content-start gap-1.5 overflow-y-auto pr-1 ${compact ? 'max-h-[32vh]' : 'max-h-140'}">
         ${list.length === 0
           ? html`<div class="py-6 text-center text-[var(--text-muted)] text-sm">활성 에이전트 없음. masc_join으로 접속하면 여기에 표시됩니다.</div>`
           : list.map(agent => html`

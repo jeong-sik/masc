@@ -222,7 +222,7 @@ export function KeeperDiagnosticSummary({
         ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed mt-1">${diagnostic.last_error}</div>`
         : null}
       ${showRawStatus
-        ? html`<div class="mt-3 max-h-[240px] overflow-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
+        ? html`<div class="mt-3 max-h-60 overflow-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
         : null}
     </div>
   `
@@ -292,7 +292,7 @@ export function KeeperConversationPanel({
     <div class="flex flex-col gap-3">
       <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(9,15,28,0.96),rgba(5,10,20,0.94))] shadow-[0_24px_56px_rgba(0,0,0,0.28)]">
         <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--slate-gray-12)] px-4 py-4">
-          <div class="min-w-[220px] flex-1">
+          <div class="min-w-55 flex-1">
             <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 대화</div>
             <div class="mt-2 flex flex-wrap items-center gap-2">
               <div class="text-md font-semibold text-[var(--text-strong)]">@${keeperName}</div>

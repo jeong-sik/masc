@@ -128,7 +128,7 @@ export function FullInventoryView({
 
       <div class="flex flex-wrap gap-3 items-center">
         <${TextInput}
-          class="max-w-[320px]"
+          class="max-w-80"
           name="tool_inventory_query"
           ariaLabel="도구 인벤토리 검색"
           autoComplete="off"
@@ -194,7 +194,7 @@ export function FullInventoryView({
 
     ${error ? html`<${ErrorState} message=${error} class="mt-2" />` : null}
 
-    <div ref=${listContainerRef} class="overflow-y-auto max-h-[calc(100vh-420px)] min-h-[300px]">
+    <div ref=${listContainerRef} class="overflow-y-auto max-h-[calc(100vh-420px)] min-h-75">
       ${filtered.length > 0
         ? html`<${VirtualList}
             items=${filtered}

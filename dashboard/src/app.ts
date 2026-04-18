@@ -146,7 +146,7 @@ export function App() {
       <${RemoteWarningBanner} />
 
       <div class="flex flex-1 gap-2 overflow-hidden p-2 max-[1100px]:flex-col">
-        <aside id="dashboard-side-rail" class="${sidebarCollapsed.value ? 'w-14' : 'w-[220px]'} shrink-0 overflow-y-auto overflow-x-hidden rounded-xl border border-[var(--white-5)] bg-[rgba(15,22,36,0.6)] backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] max-[1100px]:w-full max-[1100px]:max-h-[300px] ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
+        <aside id="dashboard-side-rail" class="${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-y-auto overflow-x-hidden rounded-xl border border-[var(--white-5)] bg-[rgba(15,22,36,0.6)] backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] max-[1100px]:w-full max-[1100px]:max-h-75 ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
           <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
         </aside>
 

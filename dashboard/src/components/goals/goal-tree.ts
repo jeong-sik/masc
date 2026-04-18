@@ -139,7 +139,7 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
       <div class="flex-1 ${h} rounded-sm bg-white/10 overflow-hidden">
         <div class="${h} rounded-sm transition-all duration-500" style="width:${clamped}%;background:${barColor}"></div>
       </div>
-      <span class="text-2xs font-semibold tabular-nums text-text-muted w-[36px] text-right">${clamped}%</span>
+      <span class="text-2xs font-semibold tabular-nums text-text-muted w-9 text-right">${clamped}%</span>
     </div>
   `
 }
@@ -231,7 +231,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
         ` : null}
       </div>
 
-      <div class="mt-2 max-w-[400px]">
+      <div class="mt-2 max-w-100">
         <${ConvergenceBar} pct=${node.convergence_pct} size="sm" />
       </div>
     </div>
@@ -300,7 +300,7 @@ export function GoalTree() {
     <div class="flex flex-col gap-5">
       <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
         <div class="flex flex-wrap items-start justify-between gap-4 mb-4">
-          <div class="max-w-[760px]">
+          <div class="max-w-190">
             <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Goal Tree</div>
             <h3 class="mt-1 text-2xl font-semibold tracking-[-0.02em] text-text-strong">목표 계층 구조</h3>
             <p class="mt-1.5 text-sm leading-relaxed text-text-muted">
@@ -315,7 +315,7 @@ export function GoalTree() {
                 placeholder="목표 / 태스크 제목 필터"
                 aria-label="목표 트리 필터"
                 onInput=${(e: Event) => { filterQuery.value = (e.target as HTMLInputElement).value }}
-                class="min-w-[180px] max-w-[260px] rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent"
+                class="min-w-45 max-w-65 rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent"
               />
               <${ActionButton} variant="ghost" size="sm" onClick=${() => expandAll(data.tree)}>
                 모두 펼치기

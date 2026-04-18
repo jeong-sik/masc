@@ -175,7 +175,7 @@ export function PromptRegistryPanel() {
       ${status ? html`<div class="mb-4 rounded border border-[var(--sky-28)] bg-[var(--sky-8)] px-3 py-2 text-xs text-[#bae6fd]">${status}</div>` : null}
 
       <div class="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-        <div class="min-h-[260px] rounded border border-[var(--card-border)] bg-[var(--white-3)] p-2">
+        <div class="min-h-65 rounded border border-[var(--card-border)] bg-[var(--white-3)] p-2">
           <div class="mb-2 flex items-center justify-between gap-2 px-2">
             <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">
               등록된 프롬프트
@@ -205,7 +205,7 @@ export function PromptRegistryPanel() {
               onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
             />
           </div>
-          <div class="flex max-h-[520px] flex-col gap-2 overflow-y-auto pr-1">
+          <div class="flex max-h-130 flex-col gap-2 overflow-y-auto pr-1">
             ${visiblePrompts.length === 0 ? html`
               <div class="rounded border border-dashed border-[var(--card-border)] px-3 py-6 text-center text-2xs text-[var(--text-muted)]">
                 조건에 맞는 프롬프트가 없습니다.
@@ -268,7 +268,7 @@ export function PromptRegistryPanel() {
 
             <div class="mb-4">
               <div class="mb-2 text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">파일 기준값</div>
-              <div class="max-h-[220px] overflow-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```markdown\n' + (selectedPrompt.file_value ?? '없음') + '\n```'} /></div>
+              <div class="max-h-55 overflow-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```markdown\n' + (selectedPrompt.file_value ?? '없음') + '\n```'} /></div>
             </div>
 
             <div class="mb-2 flex items-center justify-between gap-2">
@@ -278,7 +278,7 @@ export function PromptRegistryPanel() {
             <${TextArea}
               rows=${18}
               value=${draft}
-              class="min-h-[320px] font-mono text-xs"
+              class="min-h-80 font-mono text-xs"
               onInput=${(event: Event) => {
                 setDraft((event.target as HTMLTextAreaElement).value)
                 setStatus(null)

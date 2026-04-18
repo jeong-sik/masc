@@ -67,7 +67,7 @@ function PathRow({ label, value, hint }: { label: string; value: string; hint: s
   return html`
     <div class="flex items-center gap-2" data-paths-row=${label}>
       <span
-        class="w-[100px] shrink-0 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]"
+        class="w-25 shrink-0 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]"
         title=${hint}
       >${label}</span>
       <div class="min-w-0 flex-1">

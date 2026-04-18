@@ -290,7 +290,7 @@ export function AgentSessionReport({ agentName }: { agentName: string }) {
             value=${query}
             placeholder="리포트/태스크 검색..."
             ariaLabel="세션 리포트 검색"
-            class="max-w-[360px]"
+            class="max-w-90"
             onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
           />
           ${hasQuery ? html`

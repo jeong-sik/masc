@@ -297,7 +297,7 @@ function HealthTable({
     <div class="flex items-center gap-3 mb-2">
       <${TextInput}
         type="search"
-        class="max-w-[280px]"
+        class="max-w-70"
         placeholder="provider 필터 (key, cooldown...)"
         ariaLabel="health provider 검색"
         value=${searchQuery.value}
@@ -719,7 +719,7 @@ export function CascadeConfigPanel() {
           ? html`
             <div class="flex items-center gap-3 mb-3">
               <${TextInput}
-                class="max-w-[280px]"
+                class="max-w-70"
                 placeholder="검색 (cascade, strategy, 결과...)"
                 ariaLabel="strategy trace 검색"
                 value=${traceSearch.value}

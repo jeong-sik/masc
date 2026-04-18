@@ -411,7 +411,7 @@ export function AgentProfile({ name }: { name: string }) {
         <${Card} title="타임라인" class="ff-card rounded">
           ${!timeline || (timeline.events ?? []).length === 0
             ? html`<${EmptyState} message="이벤트 없음" compact />`
-            : html`<div class="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto">${(timeline.events ?? []).map((evt: AgentTimelineEvent, idx: number) => {
+            : html`<div class="flex flex-col gap-0.5 max-h-75 overflow-y-auto">${(timeline.events ?? []).map((evt: AgentTimelineEvent, idx: number) => {
                 const detail = evt.detail as Record<string, string | undefined>
                 const title = detail.title ?? detail.content ?? ''
                 return html`

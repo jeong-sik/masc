@@ -202,7 +202,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                   onInput=${(e: Event) => {
                     episodeQuery.value = (e.target as HTMLInputElement).value
                   }}
-                  class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                  class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
                 />`
               : null}
           </div>
@@ -216,7 +216,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                     필터 결과 없음 (${episodes.length}개 중 0)
                   </div>`
                 : html`
-                  <div class="space-y-1.5 max-h-[240px] overflow-y-auto pr-1 custom-scrollbar">
+                  <div class="space-y-1.5 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
                     ${visibleEpisodes
                       .slice()
                       .reverse()

@@ -435,7 +435,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
                   const pct = Math.round((count / totalCalls) * 100)
                   return html`
                     <div class="flex items-center gap-2 text-xs">
-                      <span class="shrink-0 w-[140px] truncate font-mono text-2xs text-[var(--accent)]" title=${model}>${model}</span>
+                      <span class="shrink-0 w-35 truncate font-mono text-2xs text-[var(--accent)]" title=${model}>${model}</span>
                       <${ProgressBar}
                         pct=${pct}
                         size="sm"
@@ -1200,7 +1200,7 @@ export function RelationshipList({ rels }: { rels: Record<string, string> }) {
   if (entries.length === 0) return html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic">관계 없음</div>`
 
   return html`
-    <div class="max-h-[220px] overflow-y-auto flex flex-col gap-1.5">
+    <div class="max-h-55 overflow-y-auto flex flex-col gap-1.5">
       ${entries.map(([name, relation]) => html`
         <div class="flex items-center gap-2 py-2 px-3 bg-[var(--white-3)] rounded">
           <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-2xs font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">${name}</span>

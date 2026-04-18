@@ -367,33 +367,25 @@ let handle_post_create args =
       | Error e ->
           (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 
-(** Sort posts by different criteria *)
-type sort_order = Hot | Trending | Recent | Updated | Discussed
+(** Issue #8449 PR B: [sort_order] is now a re-export of
+    [Board_dispatch.sort_order] (type-alias with definition equality),
+    eliminating the parallel Variant + bridge function. Constructors
+    [Hot]/[Trending]/[Recent]/[Updated]/[Discussed] are interchangeable
+    across both modules — no [dispatch_sort_of] conversion needed. *)
+type sort_order = Board_dispatch.sort_order =
+  | Hot | Trending | Recent | Updated | Discussed
 
-let sort_order_of_string = function
-  | "hot" -> Hot
-  | "trending" -> Trending
-  | "recent" | "new" -> Recent
-  | "updated" | "active" -> Updated
-  | "discussed" | "comments" -> Discussed
-  | _ -> Hot  (* default *)
-
+(** Issue #8449 PR B: parser delegates to [Board_dispatch.sort_order_of_string_opt]
+    (canonical + documented aliases new/active/comments). Error message
+    derives from [Board_dispatch.valid_sort_order_strings] so adding a
+    constructor automatically updates the user-facing list. *)
 let parse_sort_order value =
-  match String.lowercase_ascii (String.trim value) with
-  | "hot" -> Ok Hot
-  | "trending" -> Ok Trending
-  | "recent" | "new" -> Ok Recent
-  | "updated" | "active" -> Ok Updated
-  | "discussed" | "comments" -> Ok Discussed
-  | _ -> Error "invalid sort. Valid: hot, trending, recent, updated, discussed"
-
-let dispatch_sort_of sort_by =
-  match sort_by with
-  | Hot -> Board_dispatch.Hot
-  | Trending -> Board_dispatch.Trending
-  | Recent -> Board_dispatch.Recent
-  | Updated -> Board_dispatch.Updated
-  | Discussed -> Board_dispatch.Discussed
+  match Board_dispatch.sort_order_of_string_opt value with
+  | Some s -> Ok s
+  | None ->
+    Error (Printf.sprintf
+      "invalid sort. Valid: %s"
+      (String.concat ", " Board_dispatch.valid_sort_order_strings))
 
 (** Deterministic cache key from board_list args.  Serializes the
     normalized JSON so identical parameter sets hit the same entry. *)
@@ -441,7 +433,7 @@ let handle_post_list_uncached args =
       let sorted_posts =
         Board_dispatch.list_posts ~visibility_filter ?hearth ?author_filter
           ~exclude_system ~exclude_automation
-          ~sort_by:(dispatch_sort_of sort_by) ~limit:fetch_limit ()
+          ~sort_by ~limit:fetch_limit ()
       in
 
       let posts =

@@ -4,13 +4,13 @@
 // renderer lives in setup-guide-card.ts. Source of truth for the steps:
 // docs/CONNECTOR-CONFIG-SCHEMA.md.
 
-export interface SetupStep {
+interface SetupStep {
   text: string
   // Optional inline external link rendered after the step text.
   link?: { href: string; label: string }
 }
 
-export interface ConnectorSetupGuide {
+interface ConnectorSetupGuide {
   title: string
   intro: string
   steps: SetupStep[]

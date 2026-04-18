@@ -39,7 +39,7 @@ if (typeof window !== 'undefined') {
 
 /** Pure: derive the heartbeat state for a connector from the gate info
     that the overview strip already polls. No extra network calls. */
-export function deriveHeartbeatState(
+function deriveHeartbeatState(
   connector: GateConnectorInfo | null,
 ): HeartbeatState {
   if (connector === null) return 'unknown'
@@ -499,7 +499,7 @@ function TileHeartbeatStrip({ id }: { id: KnownConnectorId }) {
     Uses Tailwind's 400-weight hex literals for parity with the
     chip border/bg tones. Returns muted token for empty/sparse
     series so a new connector doesn't leak a stale hue. */
-export function deriveTrendColor(series: readonly number[]): string {
+function deriveTrendColor(series: readonly number[]): string {
   if (series.length === 0) return '#ffffff22'
   const last = series[series.length - 1]!
   // Tailwind emerald-400 / amber-400 / rose-400 hex codes — matches
@@ -551,7 +551,7 @@ export function countConnectedSidecars(connectors: GateConnectorInfo[]): number 
   return KNOWN_CONNECTOR_IDS.filter(id => findConnector(connectors, id)?.available === true).length
 }
 
-export interface ConnectorStripSummary {
+interface ConnectorStripSummary {
   runningCount: number
   healthyCount: number
   connectorTotal: number

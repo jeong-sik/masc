@@ -4,6 +4,260 @@
 
 /* ═══ Dashboard ═══ */
 
+/* ── Shell ─────────────────────────────────────────────────────────────── */
+
+.dashboard-shell-app {
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 14% 0%, rgba(251, 191, 36, 0.10), transparent 24%),
+    radial-gradient(circle at 88% 12%, rgba(71, 184, 255, 0.14), transparent 28%),
+    linear-gradient(180deg, #08111d 0%, #0d1729 48%, #09111d 100%);
+}
+
+.dashboard-shell-app::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.35;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: linear-gradient(180deg, rgba(255, 255, 255, 0.4), transparent 82%);
+}
+
+.dashboard-topbar {
+  border-bottom: 1px solid rgba(138, 163, 211, 0.14);
+  background:
+    linear-gradient(135deg, rgba(9, 15, 25, 0.90), rgba(16, 24, 40, 0.88));
+  box-shadow:
+    inset 0 -1px 0 rgba(255, 255, 255, 0.04),
+    0 12px 28px rgba(0, 0, 0, 0.20);
+}
+
+.dashboard-topbar::after {
+  content: "";
+  position: absolute;
+  inset: auto 20px 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(251, 191, 36, 0.45), rgba(71, 184, 255, 0.45), transparent);
+}
+
+.dashboard-topbar__eyebrow,
+.dashboard-rail__eyebrow,
+.dashboard-surface-lead__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dashboard-topbar__title {
+  margin: 2px 0 0;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: var(--text-strong);
+}
+
+.dashboard-topbar__summary {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.dashboard-shell-grid {
+  position: relative;
+}
+
+.dashboard-rail {
+  border: 1px solid rgba(138, 163, 211, 0.16);
+  border-radius: 24px;
+  background:
+    linear-gradient(180deg, rgba(10, 17, 29, 0.94), rgba(16, 24, 39, 0.96));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 18px 44px rgba(0, 0, 0, 0.24);
+}
+
+.dashboard-main-panel {
+  position: relative;
+  border-radius: 28px;
+  border: 1px solid rgba(138, 163, 211, 0.16);
+  background:
+    linear-gradient(180deg, rgba(9, 15, 25, 0.88), rgba(12, 19, 32, 0.98));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 24px 56px rgba(0, 0, 0, 0.26);
+}
+
+.dashboard-main-panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 20px;
+  right: 20px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.24), transparent);
+}
+
+.dashboard-chip {
+  border-radius: 999px;
+  border: 1px solid rgba(138, 163, 211, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.dashboard-chip:hover {
+  border-color: rgba(71, 184, 255, 0.24);
+  background: rgba(255, 255, 255, 0.08);
+  text-decoration: none;
+}
+
+.dashboard-chip--meta,
+.dashboard-chip--control,
+.dashboard-chip--quiet {
+  padding: 5px 10px;
+}
+
+.dashboard-chip--live {
+  padding: 5px 10px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.03));
+}
+
+.dashboard-chip--control {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.dashboard-chip--quiet {
+  border-color: rgba(251, 191, 36, 0.18);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.dashboard-surface-code {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 54px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(71, 184, 255, 0.24);
+  background: linear-gradient(135deg, rgba(71, 184, 255, 0.16), rgba(71, 184, 255, 0.05));
+  color: var(--text-strong);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.dashboard-surface-code--small {
+  min-width: 44px;
+  height: 28px;
+  font-size: 10px;
+}
+
+.dashboard-surface-code--pill {
+  min-width: auto;
+  height: auto;
+  padding: 4px 10px;
+  font-size: 10px;
+}
+
+.dashboard-rail__surface {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  padding: 10px;
+  color: var(--text-strong);
+  background: rgba(255, 255, 255, 0.02);
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+
+.dashboard-rail__surface:hover {
+  border-color: rgba(138, 163, 211, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+  text-decoration: none;
+}
+
+.dashboard-rail__surface.is-active {
+  border-color: rgba(71, 184, 255, 0.22);
+  background: linear-gradient(135deg, rgba(71, 184, 255, 0.14), rgba(251, 191, 36, 0.05));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.dashboard-rail__surface--collapsed {
+  justify-content: center;
+  padding: 8px 6px;
+}
+
+.dashboard-rail__section {
+  display: block;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+  transition: border-color 0.2s, background 0.2s, color 0.2s;
+}
+
+.dashboard-rail__section:hover {
+  border-color: rgba(138, 163, 211, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-body);
+  text-decoration: none;
+}
+
+.dashboard-rail__section.is-active {
+  border-color: rgba(71, 184, 255, 0.16);
+  background: rgba(71, 184, 255, 0.10);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.dashboard-surface-lead {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(138, 163, 211, 0.18);
+  border-radius: 24px;
+  padding: 20px 22px;
+  background:
+    linear-gradient(145deg, rgba(12, 19, 32, 0.92), rgba(18, 28, 45, 0.98));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 18px 44px rgba(0, 0, 0, 0.20);
+}
+
+.dashboard-surface-lead::after {
+  content: "";
+  position: absolute;
+  right: -40px;
+  bottom: -90px;
+  width: 240px;
+  height: 240px;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(71, 184, 255, 0.18), transparent 66%);
+}
+
+.dashboard-surface-lead__breadcrumb {
+  position: relative;
+  z-index: 1;
+}
+
 /* ── Collapsible Sections ── */
 .overview-section-collapsible > summary {
   transition: background 0.15s;

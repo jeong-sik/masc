@@ -99,7 +99,7 @@ export function ConnectionStatus() {
 
   return html`
     <div
-      class="flex items-center gap-1.5 whitespace-nowrap text-[12px] ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}"
+      class="dashboard-chip dashboard-chip--live flex items-center gap-1.5 whitespace-nowrap text-[12px] ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}"
       title=${titleAttr || undefined}
     >
       <span class="inline-block size-[8px] rounded-sm ${isConnected ? 'bg-[var(--ok)] shadow-[0_0_7px_rgba(74,222,128,0.75)]' : 'bg-[var(--bad)]'}"></span>
@@ -107,7 +107,7 @@ export function ConnectionStatus() {
       ${attentionCount > 0 ? html`
         <${RouteLink}
           tab="overview"
-          class="inline-flex items-center justify-center rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 tabular-nums attention-badge"
+          class="dashboard-chip dashboard-chip--quiet inline-flex items-center justify-center tabular-nums attention-badge"
         >주의 ${attentionCount}건<//>
       ` : null}
     </div>
@@ -197,7 +197,7 @@ export function BuildIdentityBadge() {
   return html`
     <div class="relative">
       <button type="button"
-        class="cursor-pointer rounded-sm border border-[var(--white-10)] bg-[var(--white-4)] px-[10px] py-[5px] text-[10px] text-[var(--text-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
+        class="dashboard-chip dashboard-chip--meta cursor-pointer px-[10px] py-[5px] text-[10px] text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
         aria-expanded=${buildIdentityOpen.value}
         aria-label=${`서버 빌드 정보 ${label}`}
         title=${hoverTitle}
@@ -350,13 +350,13 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
     <nav class="flex flex-col h-full" aria-label="Dashboard navigation">
       <div class="flex items-center ${collapsed ? 'justify-center' : 'justify-between'} px-2 pt-2 pb-1">
         ${!collapsed ? html`
-          <div class="px-1">
-            <div class="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--text-muted)]">내비게이션</div>
-            <div class="mt-0.5 text-[13px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">MASC Core</div>
+          <div class="dashboard-rail__title px-1">
+            <div class="dashboard-rail__eyebrow">Field Map</div>
+            <div class="mt-0.5 text-[13px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">MASC Surfaces</div>
           </div>
         ` : null}
         <button type="button"
-          class="flex size-7 items-center justify-center rounded text-[var(--text-muted)] cursor-pointer transition-colors duration-200 hover:bg-[var(--white-10)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]"
+          class="dashboard-chip dashboard-chip--control flex size-7 items-center justify-center p-0 cursor-pointer text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]"
           aria-label=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
           onClick=${onToggle}
           title=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
@@ -376,12 +376,12 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <${RouteLink}
                   tab=${surface.defaultTab}
                   params=${surface.defaultParams}
-                  class="flex items-center justify-center w-full rounded border p-2 cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive ? 'bg-[var(--accent-soft)] text-[var(--text-strong)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'border-transparent text-[var(--text-muted)] hover:bg-[var(--white-5)]'}"
+                  class="dashboard-rail__surface dashboard-rail__surface--collapsed ${isSurfaceActive ? 'is-active' : ''}"
                   title=${surface.label}
                   aria-label=${surface.label}
                   ariaCurrent=${isSurfaceActive ? 'page' : undefined}
                 >
-                  <span class="text-[18px] drop-shadow-sm" aria-hidden="true">${surface.icon}</span>
+                  <span class="dashboard-surface-code dashboard-surface-code--small" aria-hidden="true">${surface.icon}</span>
                 <//>
               `
             }
@@ -391,13 +391,14 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <${RouteLink}
                   tab=${surface.defaultTab}
                   params=${surface.defaultParams}
-                  class="flex items-center gap-2 w-full rounded border px-2 py-1.5 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive && sections.length === 0 ? 'bg-[linear-gradient(135deg,rgba(71,184,255,0.14),rgba(71,184,255,0.04))] text-[var(--text-strong)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'bg-transparent border-transparent text-[var(--text-strong)] hover:bg-[var(--white-5)]'}"
+                  class="dashboard-rail__surface ${isSurfaceActive && sections.length === 0 ? 'is-active' : ''}"
                   ariaCurrent=${isSurfaceActive && sections.length === 0 ? 'page' : undefined}
                 >
-                  <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[14px]" aria-hidden="true">
+                  <span class="dashboard-surface-code dashboard-surface-code--small" aria-hidden="true">
                     ${surface.icon}
                   </span>
                   <div class="flex-1 min-w-0">
+                    <div class="text-[11px] uppercase tracking-[0.18em] text-[var(--text-dim)]">Surface</div>
                     <div class="text-[14px] font-medium truncate leading-none ${isSurfaceActive ? 'text-[var(--accent)]' : ''}">${surface.label}</div>
                   </div>
                 <//>
@@ -411,7 +412,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                           role="listitem"
                           tab=${surface.id}
                           params=${item.params}
-                          class="w-full rounded border px-2 py-1 text-left cursor-pointer text-[13px] transition-[background-color,border-color,color,box-shadow] duration-200 ${isSectionActive ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-medium shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-soft)]' : 'border-transparent text-[var(--text-muted)] hover:bg-[var(--white-5)] hover:text-[var(--text-body)]'}"
+                          class="dashboard-rail__section ${isSectionActive ? 'is-active' : ''}"
                           ariaCurrent=${isSectionActive ? 'page' : undefined}
                         >
                           <div class="truncate">${item.label}</div>
@@ -558,6 +559,7 @@ function SurfaceLead() {
 
   const description = currentSection?.description ?? currentView?.description ?? null
   const title = currentSection?.label ?? currentView?.label ?? '홈'
+  const surfaceCode = currentView?.icon ?? 'MC'
   const shareUrl = currentSectionShareUrl()
   // Only surface a trail when the operator has drilled into a section —
   // otherwise the crumb would be \"Connectors\" right above a \"Connectors\"
@@ -574,10 +576,14 @@ function SurfaceLead() {
   }, [currentView?.label, currentSection?.label])
 
   return html`
-    <div class="mb-3 flex flex-col gap-1.5">
+    <div class="dashboard-surface-lead mb-4 flex flex-col gap-2">
+      <div class="dashboard-surface-lead__eyebrow">
+        <span class="dashboard-surface-code dashboard-surface-code--pill">${surfaceCode}</span>
+        <span>${currentView?.label ?? 'MASC'}</span>
+      </div>
       ${trail.length > 0
         ? html`<nav
-            class="flex items-center gap-1 text-[11px] text-[var(--text-dim)]"
+            class="dashboard-surface-lead__breadcrumb flex items-center gap-1 text-[11px] text-[var(--text-dim)]"
             aria-label="페이지 경로"
             data-surface-breadcrumb
           >
@@ -600,7 +606,7 @@ function SurfaceLead() {
           </nav>`
         : null}
       <div class="flex items-center gap-2">
-        <h2 class="text-[22px] font-bold tracking-tight text-[var(--text-strong)]">
+        <h2 class="text-[24px] font-semibold tracking-[-0.03em] text-[var(--text-strong)]">
           ${title}
         </h2>
         ${shareUrl !== ''
@@ -612,7 +618,7 @@ function SurfaceLead() {
             />`
           : null}
       </div>
-      ${description ? html`<p class="m-0 text-[13px] leading-[1.5] text-[var(--text-dim)]">${description}</p>` : null}
+      ${description ? html`<p class="m-0 max-w-[72ch] text-[13px] leading-[1.6] text-[var(--text-dim)]">${description}</p>` : null}
     </div>
   `
 }

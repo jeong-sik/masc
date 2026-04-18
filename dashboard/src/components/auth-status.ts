@@ -31,7 +31,7 @@ export function AuthStatus() {
   return html`
     <div class="relative">
       <button type="button"
-        class="flex items-center gap-1.5 text-[11px] py-1 px-2 rounded border border-solid border-[var(--card-border)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--white-8)] text-[var(--text-muted)]"
+        class="dashboard-chip dashboard-chip--meta flex items-center gap-1.5 text-[11px] py-1 px-2 cursor-pointer font-[inherit] text-[var(--text-muted)]"
         onClick=${() => { popoverOpen.value = !popoverOpen.value }}
         title="인증 상태"
       >

@@ -60,7 +60,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
     id: 'overview',
     label: '오버뷰',
-    icon: '🏠',
+    icon: 'OV',
     description: '빠른 신호 및 브리핑 통합 화면',
     defaultTab: 'overview',
     tabs: ['overview'],
@@ -68,7 +68,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
     id: 'monitoring',
     label: '모니터링',
-    icon: '📡',
+    icon: 'MN',
     description: '에이전트 디렉터리와 플릿 신호 관찰',
     defaultTab: 'monitoring',
     defaultParams: { section: 'agents' },
@@ -77,7 +77,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
     id: 'command',
     label: '운영',
-    icon: '🎛️',
+    icon: 'OP',
     description: '실시간 개입과 거버넌스 판단/승인 운영 화면',
     defaultTab: 'command',
     defaultParams: { section: 'operations' },
@@ -86,7 +86,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
     id: 'connectors',
     label: '커넥터',
-    icon: '🔌',
+    icon: 'IO',
     description: 'Discord, iMessage, Slack, Telegram 등 채널 sidecar 상태와 keeper 바인딩',
     defaultTab: 'connectors',
     defaultParams: { section: 'connector-status' },
@@ -95,7 +95,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
     id: 'workspace',
     label: '작업',
-    icon: '📋',
+    icon: 'WK',
     description: '작업 게시판, 증명/판정, 계획 이력 탐색',
     defaultTab: 'workspace',
     defaultParams: { section: 'board' },
@@ -104,7 +104,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
     id: 'lab',
     label: '실험실',
-    icon: '🧪',
+    icon: 'LB',
     description: '도구 진단과 실험 제어',
     defaultTab: 'lab',
     defaultParams: { section: 'tools' },
@@ -113,7 +113,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
     id: 'logs',
     label: '로그',
-    icon: '📜',
+    icon: 'LG',
     description: '시스템 실행 로그',
     defaultTab: 'logs',
     tabs: ['logs'],

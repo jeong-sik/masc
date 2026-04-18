@@ -20,6 +20,34 @@ function makeMetric(overrides: Partial<DashboardRuntimeModelMetric> = {}): Dashb
 // ── runtimeProviderTone ──
 
 describe('runtimeProviderTone', () => {
+  it('prefers backend-advertised missing_auth over optimistic booleans', () => {
+    expect(
+      runtimeProviderTone(
+        makeProvider({
+          status: 'missing_auth',
+          available: true,
+          discovery: { healthy: true },
+        }),
+      ),
+    ).toBe('bad')
+  })
+
+  it('treats vertex_adc as warn because inventory is visible but run is disabled', () => {
+    expect(
+      runtimeProviderTone(
+        makeProvider({
+          status: 'vertex_adc',
+          available: true,
+          discovery: { healthy: true },
+        }),
+      ),
+    ).toBe('warn')
+  })
+
+  it('treats unsupported backend status as bad', () => {
+    expect(runtimeProviderTone(makeProvider({ status: 'unsupported' }))).toBe('bad')
+  })
+
   it('returns bad when available is false', () => {
     expect(runtimeProviderTone(makeProvider({ available: false }))).toBe('bad')
   })
@@ -40,7 +68,7 @@ describe('runtimeProviderTone', () => {
     expect(runtimeProviderTone(makeProvider())).toBe('warn')
   })
 
-  it('returns warn when available is true but discovery is null', () => {
+  it('returns ok when available is true but discovery is null', () => {
     expect(runtimeProviderTone(makeProvider({ available: true, discovery: null }))).toBe('ok')
   })
 })

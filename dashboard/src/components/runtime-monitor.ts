@@ -80,6 +80,13 @@ async function loadRuntimeData(resource: ManagedAsyncResource<RuntimeData>, wind
 // performance (success_rate, cooldown). Both signals can be shown together
 // without being duplicates.
 export function runtimeProviderTone(provider: DashboardRuntimeProviderSnapshot): string {
+  const advertised = provider.status?.trim().toLowerCase()
+  if (advertised === 'missing_auth' || advertised === 'unsupported' || advertised === 'offline') {
+    return 'bad'
+  }
+  if (advertised === 'vertex_adc') {
+    return 'warn'
+  }
   if (provider.available === false) return 'bad'
   if (provider.discovery?.healthy === false) return 'warn'
   if (provider.available === true) return 'ok'

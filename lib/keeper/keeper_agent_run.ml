@@ -1860,52 +1860,66 @@ let run_turn
        let tool_names =
          Keeper_tool_disclosure.merge_reported_and_observed_tool_names ~reported_tool_names ~observed_tool_names
        in
-       let usage = Keeper_exec_context.usage_of_response result.response in
-       let ctx_composition =
-         build_ctx_composition_metrics
-           ~system_prompt:turn_system_prompt
-           ~dynamic_context
-           ~memory_context
-           ~temporal_context
-           ~user_message
-           ~history_messages
-           ~actual_input_tokens:usage.input_tokens
+       let unexpected_tool_names =
+         Keeper_tool_disclosure.unexpected_tool_names
+           ~allowed_tool_names:all_tool_names
+           ~tool_names
        in
-       (* Text-response trap tolerance: when tool_choice=Any is set but
-          the provider ignores it (e.g. Ollama #14493), the model returns
-          text-only on non-last turns. Instead of hard-failing the turn
-          (which wastes the entire OAS run), log a warning and treat the
-          text response as valid. The turn is counted as text_response
-          in telemetry via keeper_unified_turn. See #5566. *)
-       let text =
-         match
-           Keeper_tool_disclosure.validate_completion_contract
-             ~contract:!completion_contract_ref
-             ~tool_names
-             ()
-         with
-         | Ok () -> text
-         | Error reason ->
-           let contract_str =
-             match !completion_contract_ref with
-             | Keeper_tool_disclosure.Allow_text_or_tool -> "Allow_text_or_tool"
-             | Keeper_tool_disclosure.Require_tool_use -> "Require_tool_use"
-           in
-           Log.Keeper.warn
-             "keeper:%s text_response trap: tool contract violated \
-              (turn=%d, tools=0, contract=%s). \
-              Provider likely ignored tool_choice=Any. Tolerating text-only \
-              response to avoid wasting OAS run. Reason: %s"
-             meta.name result.turns contract_str reason;
-           (* When both text and tool_names are empty, normalize_response_text
-              would hard-fail. Synthesize minimal text so the turn survives. *)
-           if String.trim text = "" && tool_names = []
-           then "[no output]"
-           else text
-       in
-       (match Keeper_tool_disclosure.normalize_response_text ~text ~tool_names () with
-        | Error e -> Error (Oas.Error.Internal e)
-        | Ok response_text ->
+       if unexpected_tool_names <> [] then
+         let reason =
+           Printf.sprintf
+             "keeper turn reported unexpected tool names outside keeper surface: %s"
+             (String.concat ", " unexpected_tool_names)
+         in
+         Log.Keeper.error "keeper:%s %s" meta.name reason;
+         Error (Oas.Error.Internal reason)
+       else (
+         let usage = Keeper_exec_context.usage_of_response result.response in
+         let ctx_composition =
+           build_ctx_composition_metrics
+             ~system_prompt:turn_system_prompt
+             ~dynamic_context
+             ~memory_context
+             ~temporal_context
+             ~user_message
+             ~history_messages
+             ~actual_input_tokens:usage.input_tokens
+         in
+         (* Text-response trap tolerance: when tool_choice=Any is set but
+            the provider ignores it (e.g. Ollama #14493), the model returns
+            text-only on non-last turns. Instead of hard-failing the turn
+            (which wastes the entire OAS run), log a warning and treat the
+            text response as valid. The turn is counted as text_response
+            in telemetry via keeper_unified_turn. See #5566. *)
+         let text =
+           match
+             Keeper_tool_disclosure.validate_completion_contract
+               ~contract:!completion_contract_ref
+               ~tool_names
+               ()
+           with
+           | Ok () -> text
+           | Error reason ->
+             let contract_str =
+               match !completion_contract_ref with
+               | Keeper_tool_disclosure.Allow_text_or_tool -> "Allow_text_or_tool"
+               | Keeper_tool_disclosure.Require_tool_use -> "Require_tool_use"
+             in
+             Log.Keeper.warn
+               "keeper:%s text_response trap: tool contract violated \
+                (turn=%d, tools=0, contract=%s). \
+                Provider likely ignored tool_choice=Any. Tolerating text-only \
+                response to avoid wasting OAS run. Reason: %s"
+               meta.name result.turns contract_str reason;
+             (* When both text and tool_names are empty, normalize_response_text
+                would hard-fail. Synthesize minimal text so the turn survives. *)
+             if String.trim text = "" && tool_names = []
+             then "[no output]"
+             else text
+         in
+         match Keeper_tool_disclosure.normalize_response_text ~text ~tool_names () with
+         | Error e -> Error (Oas.Error.Internal e)
+         | Ok response_text ->
           (* Ensure every generation has a [STATE] block for continuity.
              If the model omitted it, synthesize one deterministically
              from tool usage and stop reason. *)
@@ -2213,10 +2227,11 @@ let run_turn
                ; usage
                ; tools_used = tool_names
                ; checkpoint = saved_checkpoint
-               ; proof = result.proof
-               ; trace_ref = result.trace_ref
-               ; run_validation = result.run_validation
-               ; stop_reason = result.stop_reason
-               ; inference_telemetry = result.response.telemetry
-               }))
+	               ; proof = result.proof
+	               ; trace_ref = result.trace_ref
+	               ; run_validation = result.run_validation
+	               ; stop_reason = result.stop_reason
+	               ; inference_telemetry = result.response.telemetry
+	               })
+	       )
 ;;

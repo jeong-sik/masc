@@ -2602,6 +2602,22 @@ let test_validate_completion_contract_accepts_stay_silent () =
   | Ok () -> ()
   | Error e -> fail ("unexpected error: " ^ e)
 
+let test_unexpected_tool_names_accepts_keeper_surface () =
+  check (list string) "no unexpected tools" []
+    (KTD.unexpected_tool_names
+       ~allowed_tool_names:
+         [ "keeper_task_claim"; "keeper_board_comment"; "extend_turns" ]
+       ~tool_names:[ "keeper_task_claim"; "extend_turns" ])
+
+let test_unexpected_tool_names_reports_foreign_surface () =
+  check (list string) "foreign tools flagged"
+    [ "Skill"; "Bash"; "Agent" ]
+    (KTD.unexpected_tool_names
+       ~allowed_tool_names:
+         [ "keeper_task_claim"; "keeper_board_comment"; "extend_turns" ]
+       ~tool_names:
+         [ "keeper_task_claim"; "Skill"; "Bash"; "Skill"; "Agent" ])
+
 let test_completion_contract_of_tool_choice_allows_auto () =
   check bool "auto allows text" true
     (match KTD.completion_contract_of_tool_choice None with
@@ -3460,6 +3476,10 @@ let () =
             test_validate_completion_contract_requires_tool_use;
           test_case "completion contract accepts stay silent" `Quick
             test_validate_completion_contract_accepts_stay_silent;
+          test_case "unexpected tool names accepts keeper surface" `Quick
+            test_unexpected_tool_names_accepts_keeper_surface;
+          test_case "unexpected tool names reports foreign surface" `Quick
+            test_unexpected_tool_names_reports_foreign_surface;
           test_case "completion contract mapping allows auto" `Quick
             test_completion_contract_of_tool_choice_allows_auto;
           test_case "completion contract mapping requires any" `Quick

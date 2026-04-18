@@ -276,6 +276,36 @@ let task_action_of_string s =
   | "reject" -> Ok Reject_verification
   | other -> Error (Printf.sprintf "Unknown task action: %s" other)
 
+(** Issue #8312: callers (especially small LLM keepers) often pass target-state
+    aliases such as "claimed" or status verbs from the lifecycle vocabulary.
+    [task_action_of_alias] returns [Some action] when the input maps to a
+    canonical action via a documented alias, and [None] when it does not.
+    Compose with [task_action_of_string] for "permissive input, strict output":
+    canonical strings still parse via [task_action_of_string]; only foreign
+    inputs fall through to the alias map. *)
+let task_action_of_alias s =
+  match String.lowercase_ascii s with
+  | "claimed" -> Some Claim
+  | "started" | "in_progress" | "inprogress" | "running" -> Some Start
+  | "completed" | "complete" | "finished" -> Some Done_action
+  | "cancelled" | "canceled" | "abort" | "aborted" -> Some Cancel
+  | "todo" | "released" | "unclaim" | "unclaimed" -> Some Release
+  | "awaiting_verification" | "submit" -> Some Submit_for_verification
+  | "approved" -> Some Approve_verification
+  | "rejected" -> Some Reject_verification
+  | _ -> None
+
+(** Lenient parser: tries strict canonical first, then alias map.
+    Strict callers (registry validation, schema docs) keep using
+    [task_action_of_string]; user-facing tool dispatch uses this. *)
+let task_action_of_string_lenient s =
+  match task_action_of_string s with
+  | Ok _ as ok -> ok
+  | Error _ as err ->
+    (match task_action_of_alias s with
+     | Some action -> Ok action
+     | None -> err)
+
 let task_action_to_string = function
   | Claim -> "claim"
   | Start -> "start"

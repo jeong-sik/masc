@@ -546,6 +546,32 @@ and handle_transition ctx args =
   let is_internal_marker k =
     String.length k > 0 && k.[0] = '_'
   in
+  (* Issue #8312: small LLM keepers and operator UIs frequently send
+     - target-state aliases via [to] instead of canonical [action]
+     - singular [note] instead of [notes]
+     Normalize before strict-schema validation so callers do not have
+     to memorize canonical vocabulary. The Variant ([Types.task_action])
+     remains the SSOT — only the transport-level keys get rewritten.
+     Existing canonical keys are never overridden. *)
+  let normalize_args = function
+    | `Assoc kvs ->
+      let has k = List.exists (fun (k', _) -> String.equal k k') kvs in
+      let kvs =
+        if has "note" && not (has "notes") then
+          List.map (fun (k, v) -> if String.equal k "note" then ("notes", v) else (k, v)) kvs
+        else
+          List.filter (fun (k, _) -> not (String.equal k "note") || not (has "notes")) kvs
+      in
+      let kvs =
+        if has "to" && not (has "action") then
+          List.map (fun (k, v) -> if String.equal k "to" then ("action", v) else (k, v)) kvs
+        else
+          List.filter (fun (k, _) -> not (String.equal k "to") || not (has "action")) kvs
+      in
+      `Assoc kvs
+    | other -> other
+  in
+  let args = normalize_args args in
   let unknown = match args with
     | `Assoc kvs ->
       List.filter
@@ -568,7 +594,7 @@ and handle_transition ctx args =
   if action_raw = "" then
     (false, Printf.sprintf "action is required (%s)" (String.concat ", " Types.valid_task_action_strings))
   else
-  match Types.task_action_of_string action_raw with
+  match Types.task_action_of_string_lenient action_raw with
   | Error msg -> (false, msg)
   | Ok action ->
   let action_s = Types.task_action_to_string action in

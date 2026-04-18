@@ -12,6 +12,7 @@ import { formatTokens } from '../lib/format-number'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { createAsyncResource, loaded } from '../lib/async-state'
+import { SetupGuideCard } from './setup-guide-card'
 
 // ── State ────────────────────────────────────────────────
 
@@ -712,6 +713,9 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           title="Base Path Anchor"
           body=${sandboxAnchorText(c)}
         />
+        ${rd.sandbox_profile === 'docker_hardened' ? html`
+          <${SetupGuideCard} connectorId="sandbox_hardened" />
+        ` : null}
       ` : html`
         <${ConfigRow} label="execution_scope" value=${c.execution_scope ?? 'workspace'} />
         <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'legacy_local'} />

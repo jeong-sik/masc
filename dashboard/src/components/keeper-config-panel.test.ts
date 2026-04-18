@@ -494,6 +494,23 @@ describe('KeeperConfigPanel', () => {
     )
   })
 
+  it('shows the sandbox preflight guide when docker_hardened is selected', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    expect(container.textContent).not.toContain('Docker Sandbox 프리플라이트')
+
+    const sandboxProfile = container.querySelector('select[aria-label="sandbox_profile"]') as HTMLSelectElement | null
+    expect(sandboxProfile).not.toBeNull()
+
+    sandboxProfile!.value = 'docker_hardened'
+    sandboxProfile!.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+
+    expect(container.textContent).toContain('Docker Sandbox 프리플라이트')
+  })
+
   it('supports forced config refresh for already-loaded keepers', async () => {
     await loadKeeperConfig('keeper-sangsu')
     await loadKeeperConfig('keeper-sangsu')

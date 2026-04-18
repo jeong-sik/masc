@@ -51,12 +51,30 @@ let snapshot_before_turn ~base_path ~keeper_name:_ : string option =
     let lines = git_status_lines ~repo_root:root in
     Some (hash_lines lines))
 
+(** Snapshot git status before a turn. Returns hash of status lines AND
+    the raw status lines themselves, so the post-turn capture can compute
+    an actual per-turn file delta (instead of flagging every pre-existing
+    dirty file as a "collision"). *)
+let snapshot_before_turn_with_lines ~base_path ~keeper_name:_
+    : (string * string list) option =
+  Safe_ops.protect ~default:None (fun () ->
+    let root = repo_root ~base_path in
+    let lines = git_status_lines ~repo_root:root in
+    Some (hash_lines lines, lines))
+
 (** Capture turn evidence after a turn completes.
-    Compares before_hash with current state to detect delta. *)
+    Compares before_hash with current state to detect delta.
+
+    [before_lines] (optional) is the raw pre-turn [git status --porcelain]
+    output captured by [snapshot_before_turn_with_lines]. When supplied,
+    collision detection only considers files this turn actually changed
+    (after − before), which prevents every keeper from repeatedly flagging
+    the same pre-existing dirty files as "collisions" with each other. *)
 let capture_turn_evidence
     ~base_path ~keeper_name ~trace_id
     ~turn_number ~tool_calls_made
     ~(before_hash : string option)
+    ?(before_lines : string list option)
     ()
   : Yojson.Safe.t option =
   let root = repo_root ~base_path in
@@ -87,10 +105,25 @@ let capture_turn_evidence
       else None)
   in
   let files_changed = List.length status_lines in
-  (* Collision detection *)
+  (* Collision detection — only consider lines that this turn actually
+     introduced or changed. Without a before snapshot we can't tell what
+     this keeper touched, so we skip the tracker rather than flag every
+     pre-existing dirty file as a cross-keeper collision. *)
+  let turn_delta_lines =
+    match before_lines with
+    | None -> []
+    | Some before ->
+        let before_set = List.fold_left
+          (fun acc l -> (l, ()) :: acc) [] before
+        in
+        List.filter
+          (fun l -> not (List.mem_assoc l before_set))
+          status_lines
+  in
   let collision_warnings =
-    if delta_detected && files_changed > 0 then
-      Keeper_file_tracker.record_turn_files ~keeper_name ~files:status_lines
+    if delta_detected && turn_delta_lines <> [] then
+      Keeper_file_tracker.record_turn_files
+        ~keeper_name ~files:turn_delta_lines
     else []
   in
   if collision_warnings <> [] then begin

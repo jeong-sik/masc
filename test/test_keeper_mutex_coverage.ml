@@ -155,6 +155,65 @@ let test_keeper_evidence_ignores_preexisting_dirty_state_without_delta () =
   Alcotest.(check int) "second keeper also sees no collision without new delta" 0
     (collision_count ev2)
 
+(* Regression: three keepers sharing the same working tree each observing
+   51 pre-existing dirty files. Without the per-turn delta, every keeper
+   after the first would mis-report each of the 51 shared files as a
+   collision (measurement artifact, task-236). With before_lines threaded
+   through, only files newly dirtied by this turn (here: one file per
+   keeper) can trigger a collision. *)
+let test_keeper_evidence_collision_uses_per_turn_delta () =
+  with_eio_env @@ fun _env ->
+  with_temp_dir "keeper-evidence-per-turn-delta" @@ fun base_path ->
+  init_git_repo base_path;
+  let gitignore = Filename.concat base_path ".gitignore" in
+  Out_channel.with_open_bin gitignore (fun oc -> output_string oc ".masc/\n");
+  (* Create 51 shared files + one per-keeper file, all committed clean. *)
+  for i = 0 to 50 do
+    let f = Filename.concat base_path (Printf.sprintf "shared_%02d.ml" i) in
+    Out_channel.with_open_bin f (fun oc ->
+      output_string oc (Printf.sprintf "let v_%d = 0\n" i))
+  done;
+  run_in_dir base_path "git add . && git commit -q -m init";
+  (* Simulate a long-running pre-existing dirty state: 51 files touched
+     before any keeper turn starts. *)
+  for i = 0 to 50 do
+    let f = Filename.concat base_path (Printf.sprintf "shared_%02d.ml" i) in
+    Out_channel.with_open_bin f (fun oc ->
+      output_string oc (Printf.sprintf "let v_%d = 1\n" i))
+  done;
+  let snapshot name =
+    Keeper_evidence.snapshot_before_turn_with_lines ~base_path ~keeper_name:name
+  in
+  let run_turn ~name ~trace ~new_file snap =
+    (* This keeper's turn dirties exactly one additional file. *)
+    let path = Filename.concat base_path new_file in
+    Out_channel.with_open_bin path (fun oc ->
+      output_string oc "let k = 1\n");
+    Keeper_evidence.capture_turn_evidence ~base_path ~keeper_name:name
+      ~trace_id:trace ~turn_number:1 ~tool_calls_made:0
+      ~before_hash:(Option.map fst snap)
+      ?before_lines:(Option.map snd snap)
+      ()
+  in
+  let snap_a = snapshot "janitor" in
+  let ev_a = run_turn ~name:"janitor" ~trace:"t-a"
+               ~new_file:"new_a.ml" snap_a in
+  let snap_b = snapshot "masc-improver" in
+  let ev_b = run_turn ~name:"masc-improver" ~trace:"t-b"
+               ~new_file:"new_b.ml" snap_b in
+  let snap_c = snapshot "ani1999" in
+  let ev_c = run_turn ~name:"ani1999" ~trace:"t-c"
+               ~new_file:"new_c.ml" snap_c in
+  (* Each keeper introduces one genuinely new path. Since new_a/b/c do not
+     overlap, no cross-keeper collision should be reported — certainly not
+     51 shared pre-existing files per keeper. *)
+  Alcotest.(check int) "janitor sees 0 collisions (51 shared dirty files)"
+    0 (collision_count ev_a);
+  Alcotest.(check int) "masc-improver sees 0 collisions (only new_b changed)"
+    0 (collision_count ev_b);
+  Alcotest.(check int) "ani1999 sees 0 collisions (only new_c changed)"
+    0 (collision_count ev_c)
+
 let () =
   run "keeper_mutex_coverage"
     [
@@ -170,5 +229,7 @@ let () =
           test_keeper_evidence_chain_verifies;
         test_case "ignores preexisting dirty state without delta" `Quick
           test_keeper_evidence_ignores_preexisting_dirty_state_without_delta;
+        test_case "collision detection uses per-turn delta (task-236)" `Quick
+          test_keeper_evidence_collision_uses_per_turn_delta;
       ];
     ]

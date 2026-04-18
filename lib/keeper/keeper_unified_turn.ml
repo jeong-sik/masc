@@ -1701,11 +1701,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         | None -> None
       in
       let turn_event_bus = ref empty_turn_event_bus_summary in
-      let evidence_before_hash =
-        try Keeper_evidence.snapshot_before_turn
+      let evidence_before_snapshot =
+        try Keeper_evidence.snapshot_before_turn_with_lines
           ~base_path:config.base_path ~keeper_name:meta.name
         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
       in
+      let evidence_before_hash = Option.map fst evidence_before_snapshot in
+      let evidence_before_lines = Option.map snd evidence_before_snapshot in
       let drain_turn_event_bus () =
         let summary =
           match event_bus_sub, Keeper_event_bus.get () with
@@ -2409,6 +2411,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 ~turn_number:updated_meta.runtime.usage.total_turns
                 ~tool_calls_made:result.tool_calls_made
                 ~before_hash:evidence_before_hash
+                ?before_lines:evidence_before_lines
                 ()
             with
             | Eio.Cancel.Cancelled _ as e -> raise e

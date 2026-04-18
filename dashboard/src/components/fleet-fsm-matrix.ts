@@ -124,7 +124,10 @@ export function chipClassFor(value: string): string {
  */
 export function sparkClassFor(value: string): string {
   const full = chipClassFor(value)
-  const m = /\bbg-[a-z0-9/-]+/i.exec(full)
+  // Chip strings mix semantic tokens (`bg-[var(--ok-10)]`) with size /
+  // border utilities. Extract just the bg-* token, whether it uses
+  // Tailwind's arbitrary-value bracket syntax or a plain palette class.
+  const m = /\bbg-(?:\[[^\]]+\]|[a-z0-9/-]+)/i.exec(full)
   return m?.[0] ?? 'bg-[var(--white-5)]'
 }
 

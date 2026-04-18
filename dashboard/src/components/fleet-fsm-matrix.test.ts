@@ -45,14 +45,17 @@ function snapshot(
 }
 
 describe('chipClassFor', () => {
-  it('maps known states to a distinct tailwind class', () => {
-    expect(chipClassFor('Running')).toMatch(/emerald/)
-    expect(chipClassFor('Failing')).toMatch(/red/)
-    expect(chipClassFor('Compacting')).toMatch(/amber/)
-    expect(chipClassFor('exhausted')).toMatch(/red/)
+  it('maps known states to the right semantic tone', () => {
+    // After the design-system migration the chip strings use semantic
+    // tokens (`--ok`, `--bad-light`, `--warn`, `--accent`) rather than
+    // raw Tailwind color names.
+    expect(chipClassFor('Running')).toContain('var(--ok')
+    expect(chipClassFor('Failing')).toContain('var(--bad-light')
+    expect(chipClassFor('Compacting')).toContain('var(--warn')
+    expect(chipClassFor('exhausted')).toContain('var(--bad-light')
     // KCB (LT-16-KCB Phase 3)
-    expect(chipClassFor('warning')).toMatch(/amber/)
-    expect(chipClassFor('cooling')).toMatch(/sky/)
+    expect(chipClassFor('warning')).toContain('var(--warn')
+    expect(chipClassFor('cooling')).toContain('var(--accent')
   })
 
   it('falls back to the default chip for unknown states', () => {
@@ -109,13 +112,16 @@ describe('tallyInvariantViolations', () => {
 
 describe('sparkClassFor', () => {
   it('extracts a single bg-* utility from the full chip class', () => {
-    expect(sparkClassFor('Running')).toMatch(/^bg-[var(--ok-10)]/)
-    expect(sparkClassFor('Failing')).toMatch(/^bg-[var(--bad-10)]/)
+    // The bracketed arbitrary-value syntax (`bg-[var(...)]`) cannot
+    // live inside a JS regex literal because `[...]` starts a
+    // character class; use startsWith on the extracted prefix.
+    expect(sparkClassFor('Running').startsWith('bg-[var(--ok-10)]')).toBe(true)
+    expect(sparkClassFor('Failing').startsWith('bg-[var(--bad-10)]')).toBe(true)
   })
 
-  it('falls back to a grey shade on unknown states', () => {
+  it('falls back to the muted white token on unknown states', () => {
     // DEFAULT_CHIP carries `bg-[var(--white-5)]`; sparkClassFor preserves it.
-    expect(sparkClassFor('__not_a_state__')).toMatch(/^bg-zinc-(700|800)/)
+    expect(sparkClassFor('__not_a_state__').startsWith('bg-[var(--white-5)]')).toBe(true)
   })
 })
 

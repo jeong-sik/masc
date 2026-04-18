@@ -51,10 +51,18 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
         let shell_ref = ref (`Assoc []) in
         let execution_ref = ref (`Assoc []) in
         let command_ref = ref (`Assoc []) in
-        (* Single env var for namespace-truth fiber timeouts.
-           Cold start uses higher defaults to allow shell/namespace reads to warm up. *)
-        let warm_timeout_s = 8.0 in
-        let cold_timeout_s = 15.0 in
+        (* Namespace-truth fiber timeouts.  Cold start uses higher defaults to
+           allow shell/namespace reads to warm up.  Tunable via env for fleets
+           whose observed fetch latency drifts above the literal defaults (see
+           #7908 — fleet p50 ≈ 17s made the 12s shell cap misfire). *)
+        let warm_timeout_s =
+          float_of_env_default "MASC_NAMESPACE_TRUTH_WARM_TIMEOUT_S"
+            ~default:8.0 ~min_v:1.0 ~max_v:120.0
+        in
+        let cold_timeout_s =
+          float_of_env_default "MASC_NAMESPACE_TRUTH_COLD_TIMEOUT_S"
+            ~default:15.0 ~min_v:1.0 ~max_v:120.0
+        in
         let is_cold =
           not (cached_surface_has_success Execution_surfaces._execution_cache)
         in
@@ -78,10 +86,17 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
            (dashboard_shell_timeout_s, default 8s) to avoid the double-timeout
            race where the inner cache returns timeout-error JSON while the outer
            fiber also fires, discarding even stale data.  Fixes #5090. *)
-        let shell_fiber_timeout_s = 12.0 in
+        let shell_fiber_timeout_s =
+          float_of_env_default "MASC_NAMESPACE_TRUTH_SHELL_FIBER_TIMEOUT_S"
+            ~default:12.0 ~min_v:1.0 ~max_v:120.0
+        in
+        let cold_safety_margin_s =
+          float_of_env_default "MASC_NAMESPACE_TRUTH_COLD_SAFETY_MARGIN_S"
+            ~default:4.0 ~min_v:0.0 ~max_v:60.0
+        in
         let shell_timeout_s =
           if Atomic.get _shell_warmed then shell_fiber_timeout_s
-          else Float.max cold_timeout_s (shell_fiber_timeout_s +. 4.0)
+          else Float.max cold_timeout_s (shell_fiber_timeout_s +. cold_safety_margin_s)
         in
         (* Graceful degradation: on timeout fall back to the last successful
            shell result rather than empty JSON, which would zero out namespace

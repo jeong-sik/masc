@@ -302,6 +302,14 @@ let dashboard_entries =
       "Duration after which a signal is stale (seconds, 20 min)";
     entry ~default:"8" "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
       "Transport health timeout";
+    entry ~default:"15.0" "MASC_NAMESPACE_TRUTH_COLD_TIMEOUT_S"
+      "Namespace-truth fiber base timeout on cold start (seconds, 1-120)";
+    entry ~default:"4.0" "MASC_NAMESPACE_TRUTH_COLD_SAFETY_MARGIN_S"
+      "Extra margin added to shell fiber timeout on cold start (seconds, 0-60)";
+    entry ~default:"12.0" "MASC_NAMESPACE_TRUTH_SHELL_FIBER_TIMEOUT_S"
+      "Namespace-truth shell fiber timeout after warm-up (seconds, 1-120)";
+    entry ~default:"8.0" "MASC_NAMESPACE_TRUTH_WARM_TIMEOUT_S"
+      "Namespace-truth fiber base timeout after warm-up (seconds, 1-120)";
   ]
 
 (* --- New categories for the 229 missing env vars --- *)

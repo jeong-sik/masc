@@ -248,4 +248,33 @@ let () =
             (List.mem expected valid_agent_role_strings)
         ) ["reader"; "worker"; "admin"]);
     ];
+    "tool_preset_ssot", [
+      (* Issue #8430: witness covers all 7 variants — adding an 8th
+         constructor will fail to compile here AND in
+         tool_preset_to_string. *)
+      Alcotest.test_case "witness covers all variants" `Quick (fun () ->
+        let open Masc_mcp.Keeper_types in
+        let witness s =
+          let actual = tool_preset_to_string s in
+          if not (List.mem actual valid_tool_preset_strings) then
+            Alcotest.failf "tool_preset_to_string %S not in valid_tool_preset_strings" actual
+        in
+        witness Minimal; witness Social; witness Messaging; witness Coding;
+        witness Research; witness Delivery; witness Full;
+        Alcotest.(check int) "count" 7 (List.length valid_tool_preset_strings));
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        (* Keeper_schema.tool_preset_enum_strings is a hand-mirrored copy
+           of Keeper_types.valid_tool_preset_strings (cycle-avoidance).
+           If they ever diverge this test fails and a silently-dropped
+           schema enum constructor is caught immediately. *)
+        Alcotest.(check (list string)) "schema mirror == variant SSOT"
+          Masc_mcp.Keeper_types.valid_tool_preset_strings
+          Masc_mcp.Keeper_schema.tool_preset_enum_strings);
+      Alcotest.test_case "Social and Delivery present" `Quick (fun () ->
+        let open Masc_mcp.Keeper_types in
+        Alcotest.(check bool) "social present" true
+          (List.mem "social" valid_tool_preset_strings);
+        Alcotest.(check bool) "delivery present" true
+          (List.mem "delivery" valid_tool_preset_strings));
+    ];
   ]

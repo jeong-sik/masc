@@ -37,7 +37,7 @@ import {
 // and the dashboard renders them via a best-effort label/color lookup
 // with string fallback — a strict `picklist` here would brick the
 // whole graph during a backend-ahead deploy window.
-export const ActivityGraphNodeSchema = object({
+const ActivityGraphNodeSchema = object({
   id: string(),
   label: string(),
   weight: number(),
@@ -48,7 +48,7 @@ export const ActivityGraphNodeSchema = object({
   meta: optional(record(string(), unknown())),
 })
 
-export const ActivityGraphEdgeSchema = object({
+const ActivityGraphEdgeSchema = object({
   id: optional(string()),
   source: string(),
   target: string(),
@@ -127,7 +127,7 @@ function deriveActivitySummary(
     ?? kind
 }
 
-export const ActivityGraphTimelineEventSchema = pipe(
+const ActivityGraphTimelineEventSchema = pipe(
   ActivityGraphTimelineEventRawSchema,
   transform((raw: InferOutput<typeof ActivityGraphTimelineEventRawSchema>) => {
     const actor = raw.actor ?? {}
@@ -153,30 +153,30 @@ export const ActivityGraphTimelineEventSchema = pipe(
 // dashboard release. Consumers read specific keys defensively
 // (`stats.event_count ?? 0`), so an open `record` keeps new keys
 // visible without churning this schema on every backend addition.
-export const ActivityGraphStatsSchema = record(string(), number())
+const ActivityGraphStatsSchema = record(string(), number())
 
-export const ActivityGraphKindCountsSchema = record(string(), number())
+const ActivityGraphKindCountsSchema = record(string(), number())
 
-export const ActivityGraphHeatmapSchema = object({
+const ActivityGraphHeatmapSchema = object({
   matrix: array(array(number())),
   max: number(),
   total: number(),
 })
 
-export const ActivityGraphWindowSchema = object({
+const ActivityGraphWindowSchema = object({
   limit: number(),
   room_id: nullable(string()),
   kinds: array(string()),
 })
 
-export const ActivityGraphStatsHistoryEntrySchema = object({
+const ActivityGraphStatsHistoryEntrySchema = object({
   bucket: number(),
   events: number(),
   active_agents: number(),
   tasks_done: number(),
 })
 
-export const ActivityGraphResponseSchema = object({
+const ActivityGraphResponseSchema = object({
   nodes: array(ActivityGraphNodeSchema),
   edges: array(ActivityGraphEdgeSchema),
   stats: ActivityGraphStatsSchema,
@@ -191,7 +191,7 @@ export const ActivityGraphResponseSchema = object({
 // Swimlane span `kind` / `status` are free-form for the same reason
 // as the graph node's status above: operators render them via a
 // label/color lookup that falls back to the raw string.
-export const AgentSpanSchema = object({
+const AgentSpanSchema = object({
   agent: string(),
   start_ms: number(),
   end_ms: number(),
@@ -200,7 +200,7 @@ export const AgentSpanSchema = object({
   status: string(),
 })
 
-export const SwimlaneResponseSchema = object({
+const SwimlaneResponseSchema = object({
   agents: array(string()),
   spans: array(AgentSpanSchema),
   time_range: object({

@@ -44,7 +44,7 @@ const LogEntryRawSchema = object({
   details: optional(nullable(record(string(), unknown()))),
 })
 
-export const LogEntrySchema = pipe(
+const LogEntrySchema = pipe(
   LogEntryRawSchema,
   transform(entry => ({
     ...entry,
@@ -56,7 +56,7 @@ export const LogEntrySchema = pipe(
 
 export type LogEntry = InferOutput<typeof LogEntrySchema>
 
-export const LogsResponseSchema = object({
+const LogsResponseSchema = object({
   total: fallback(number(), 0),
   entries: unknown(),
 })

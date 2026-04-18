@@ -781,6 +781,20 @@ let dashboard_shell_timeout_s = 16.0
 let meta_cognition_summary_ttl = 120.0
 let meta_cognition_warm_mu = Eio.Mutex.create ()
 let meta_cognition_warm_inflight : (string, unit) Hashtbl.t = Hashtbl.create 4
+let meta_cognition_last_good_mu = Eio.Mutex.create ()
+let meta_cognition_last_good : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 4
+let meta_cognition_summary_stale_for = meta_cognition_summary_ttl *. 3.0
+
+let meta_cognition_summary_empty_json =
+  `Assoc
+    [
+      ("stagnation_score", `Float 0.0);
+      ("belief_count", `Int 0);
+      ("contested_belief_count", `Int 0);
+      ("dominant_belief", `Null);
+      ("top_tension", `Null);
+      ("top_desire", `Null);
+    ]
 
 let dashboard_shell_cache_prefix (config : Coord.config) =
   Printf.sprintf "shell:coord=%s:" config.base_path
@@ -791,7 +805,15 @@ let dashboard_shell_cache_key (config : Coord.config) =
     config.workspace_path
 
 let meta_cognition_summary_key (config : Coord.config) =
-  Printf.sprintf "meta_cognition_summary:%s" config.base_path
+  room_scoped_cache_key config "meta_cognition_summary" "dashboard_shell"
+
+let store_last_good_meta_cognition_summary key json =
+  Eio_guard.with_mutex meta_cognition_last_good_mu (fun () ->
+      Hashtbl.replace meta_cognition_last_good key json)
+
+let find_last_good_meta_cognition_summary key =
+  Eio_guard.with_mutex meta_cognition_last_good_mu (fun () ->
+      Hashtbl.find_opt meta_cognition_last_good key)
 
 let clear_meta_cognition_warm_flag key =
   Eio_guard.with_mutex meta_cognition_warm_mu (fun () ->
@@ -799,6 +821,11 @@ let clear_meta_cognition_warm_flag key =
 
 let schedule_meta_cognition_summary_warm (config : Coord.config) =
   let key = meta_cognition_summary_key config in
+  let compute () =
+    let json = Meta_cognition.summary_json config in
+    store_last_good_meta_cognition_summary key json;
+    json
+  in
   let should_start =
     Eio_guard.with_mutex meta_cognition_warm_mu (fun () ->
         if Hashtbl.mem meta_cognition_warm_inflight key then
@@ -815,10 +842,10 @@ let schedule_meta_cognition_summary_warm (config : Coord.config) =
               ~finally:(fun () -> clear_meta_cognition_warm_flag key)
               (fun () ->
                 try
+                  Dashboard_cache.invalidate key;
                   ignore
-                    (Dashboard_cache.get_or_compute key
-                       ~ttl:meta_cognition_summary_ttl
-                       (fun () -> Meta_cognition.summary_json config))
+                    (Dashboard_cache.get_or_compute key ~ttl:meta_cognition_summary_ttl
+                       compute)
                   (* Drop cached shell payloads that were rendered while the
                      meta-cognition summary was still warming. *)
                   ;
@@ -834,13 +861,31 @@ let schedule_meta_cognition_summary_warm (config : Coord.config) =
 
 let meta_cognition_summary_cached (config : Coord.config) : Yojson.Safe.t =
   let key = meta_cognition_summary_key config in
+  let fallback =
+    match find_last_good_meta_cognition_summary key with
+    | Some json -> json
+    | None -> meta_cognition_summary_empty_json
+  in
+  let compute () =
+    let json = Meta_cognition.summary_json config in
+    store_last_good_meta_cognition_summary key json;
+    json
+  in
   match Dashboard_cache.peek key with
   | Some _ ->
-      Dashboard_cache.get_or_compute key ~ttl:meta_cognition_summary_ttl
-        (fun () -> Meta_cognition.summary_json config)
+      let result =
+        Dashboard_cache.get_or_compute key ~ttl:meta_cognition_summary_ttl
+          compute
+      in
+      if result = `Null then fallback else result
   | None ->
+      (match find_last_good_meta_cognition_summary key with
+       | Some stale ->
+           Dashboard_cache.seed_stale_if_missing key
+             ~stale_for:meta_cognition_summary_stale_for stale
+       | None -> ());
       schedule_meta_cognition_summary_warm config;
-      `Null
+      if fallback = meta_cognition_summary_empty_json then `Null else fallback
 
 let dashboard_shell_paths_json (config : Coord.config) : Yojson.Safe.t =
   Server_base_path_diagnostics.detect
@@ -893,7 +938,7 @@ let dashboard_shell_last_good_opt () =
 let is_dashboard_cache_timeout_json = function
   | `Assoc fields -> (
       match List.assoc_opt "error" fields with
-      | Some (`String "Compute timeout") -> true
+      | Some (`String ("Compute timeout" | "computation_timeout")) -> true
       | _ -> false)
   | _ -> false
 

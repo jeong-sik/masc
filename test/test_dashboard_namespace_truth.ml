@@ -98,7 +98,10 @@ let warm_execution_cache () =
     (`Assoc [("status", `String "ok")])
 
 let warm_meta_cognition_summary (config : Lib.Coord.config) =
-  let key = Printf.sprintf "meta_cognition_summary:%s" config.base_path in
+  let key =
+    Lib.Server_dashboard_http.room_scoped_cache_key config
+      "meta_cognition_summary" "dashboard_shell"
+  in
   ignore
     (Lib.Dashboard_cache.get_or_compute key ~ttl:120.0 (fun () ->
          Lib.Meta_cognition.summary_json config));

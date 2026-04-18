@@ -45,6 +45,13 @@ val get_or_compute_with_timeout :
     preserved (not overwritten by error JSON).  On timeout with no stale
     data, returns a timeout-error JSON without caching it. *)
 
+val seed_stale_if_missing :
+  string -> stale_for:float -> Yojson.Safe.t -> unit
+(** [seed_stale_if_missing key ~stale_for value] inserts [value] as an
+    immediately-stale entry only when [key] is absent. The next
+    [get_or_compute] read returns [value] immediately and refreshes in the
+    background when a switch is available. Existing entries are left intact. *)
+
 val invalidate : string -> unit
 (** Remove a single cache entry.  If the key is currently being computed,
     waiting fibers are woken and will recompute. *)

@@ -2,6 +2,38 @@
 
 open Dashboard_http_helpers
 
+let pending_confirm_summary_ttl = 10.0
+let pending_confirm_summary_stale_for = pending_confirm_summary_ttl *. 3.0
+
+let pending_confirm_summary_empty_json =
+  `Assoc
+    [
+      ("actor_filter", `Null);
+      ("filter_active", `Bool false);
+      ("visible_count", `Int 0);
+      ("total_count", `Int 0);
+      ("hidden_count", `Int 0);
+      ("hidden_actors", `List []);
+      ("confirm_required_actions", `List []);
+    ]
+
+let _last_good_pending_confirm_summary : Yojson.Safe.t Atomic.t =
+  Atomic.make pending_confirm_summary_empty_json
+
+let pending_confirm_summary_cached (config : Coord.config) =
+  let key = Printf.sprintf "pending_confirm_summary:%s" config.base_path in
+  let fallback = Atomic.get _last_good_pending_confirm_summary in
+  let compute () =
+    let json = Operator_control.pending_confirm_summary_json config in
+    Atomic.set _last_good_pending_confirm_summary json;
+    json
+  in
+  if Option.is_some (Eio_context.get_switch_opt ()) then
+    Dashboard_cache.seed_stale_if_missing key
+      ~stale_for:pending_confirm_summary_stale_for fallback;
+  let result = Dashboard_cache.get_or_compute key ~ttl:pending_confirm_summary_ttl compute in
+  if result = `Null then fallback else result
+
 let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
     ~operator_digest_json ~top_queue =
   let recommendation_summary =
@@ -251,9 +283,7 @@ let derived_operator_digest_json (config : Coord.config) _execution_json
           ] );
       ( "recommendation_summary",
         `Assoc [ ("count", `Int 0); ("provenance", `String "derived") ] );
-      ( "pending_confirm_summary",
-        Dashboard_cache.get_or_compute "pending_confirm_summary" ~ttl:10.0
-          (fun () -> Operator_control.pending_confirm_summary_json config) );
+      ("pending_confirm_summary", pending_confirm_summary_cached config);
     ]
 
 let execution_top_queue execution_json =

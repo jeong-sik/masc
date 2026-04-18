@@ -65,9 +65,9 @@ describe('headerSuccessTone (pure)', () => {
 
 describe('headerStatToneClass (pure)', () => {
   it('maps each tone to a distinct text-color utility', () => {
-    expect(headerStatToneClass('ok')).toContain('emerald')
-    expect(headerStatToneClass('partial')).toContain('amber')
-    expect(headerStatToneClass('bad')).toContain('rose')
+    expect(headerStatToneClass('ok')).toContain('var(--ok)')
+    expect(headerStatToneClass('partial')).toContain('var(--warn)')
+    expect(headerStatToneClass('bad')).toContain('var(--bad-light)')
     expect(headerStatToneClass('default')).toContain('text-')
   })
 
@@ -109,12 +109,12 @@ describe('HeaderMiniStat component', () => {
     expect(el.getAttribute('data-header-mini-stat-tone')).toBe('default')
   })
 
-  it('value carries the tone text-color class (bad → rose)', () => {
+  it('value carries the tone text-color class (bad → var(--bad-light))', () => {
     render(html`<${HeaderMiniStat} label="x" value="0/4" tone="bad" />`, container)
     const el = container.querySelector('[data-header-mini-stat="x"]')!
     // Value is the first <span> child.
     const valueSpan = el.querySelector('span')!
-    expect(valueSpan.className).toContain('rose')
+    expect(valueSpan.className).toContain('var(--bad-light)')
   })
 
   it('testId renders as data-testid', () => {

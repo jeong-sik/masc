@@ -651,7 +651,7 @@ describe('StatusSummaryLine offline annotation (rendered inside ConnectorOvervie
     const annotation = container.querySelector('[data-strip-summary-offline-names]') as HTMLElement
     expect(annotation).toBeTruthy()
     expect(annotation.textContent).toContain('Slack offline')
-    expect(annotation.className).toContain('rose')
+    expect(annotation.className).toContain('var(--bad-light)')
   })
 })
 

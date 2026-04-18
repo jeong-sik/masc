@@ -184,10 +184,15 @@ let primary_path ~webrtc_channels ~grpc_subscribers ~ws_sessions ~sse_sessions =
   else if sse_sessions > 0 then "sse"
   else "streamable_http"
 
-let queue_pressure ~sse_queue_max ~relay_queue_depth =
+let queue_pressure
+    ~sse_queue_max
+    ~relay_queue_depth
+    ~relay_retry_total
+    ~relay_drop_total =
   let max_queue_depth = max sse_queue_max relay_queue_depth in
-  if max_queue_depth >= 32 then "high"
-  else if max_queue_depth >= 8 || relay_queue_depth > 0 then "watch"
+  if max_queue_depth >= 32 || relay_drop_total > 0 then "high"
+  else if max_queue_depth >= 8 || relay_queue_depth > 0 || relay_retry_total > 0
+  then "watch"
   else "steady"
 
 let ws_enabled () = Env_config.Transport.ws_enabled ()
@@ -305,7 +310,11 @@ let transport_health_json ~config =
       ("primary_path", `String primary_path);
       ("queue_pressure",
        `String
-         (queue_pressure ~sse_queue_max ~relay_queue_depth));
+         (queue_pressure
+            ~sse_queue_max
+            ~relay_queue_depth
+            ~relay_retry_total
+            ~relay_drop_total));
       ("recent_messages", int_option_json recent_messages);
       ("recent_messages_available", `Bool recent_messages_available);
       ("recent_messages_source", `String degraded_source);

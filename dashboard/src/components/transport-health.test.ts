@@ -242,7 +242,7 @@ describe('TransportHealthPanel', () => {
       sampleResponse({
         summary: {
           primary_path: 'streamable_http',
-          queue_pressure: 'watch',
+          queue_pressure: 'high',
           recent_messages: null,
           recent_messages_available: false,
           recent_messages_source: 'metrics_only',
@@ -282,6 +282,7 @@ describe('TransportHealthPanel', () => {
     render(html`<${TransportHealthPanel} />`, container)
     await flushUi()
 
+    expect(container.textContent).toContain('high')
     expect(container.textContent).toContain('Relay Queue')
     expect(container.textContent).toContain('Relay Retries')
     expect(container.textContent).toContain('Relay Drops')

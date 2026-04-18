@@ -271,7 +271,7 @@ let test_transport_health_json () =
     (cluster_json |> U.member "room_id" |> U.to_string);
   check bool "summary primary path exists" true
     (String.length (summary_json |> U.member "primary_path" |> U.to_string) > 0);
-  check string "summary queue pressure reflects relay queue" "watch"
+  check string "summary queue pressure reflects relay drops" "high"
     (summary_json |> U.member "queue_pressure" |> U.to_string);
   check int "agent lifecycle dispatch rejections surfaced" 2
     (agent_health_json

@@ -31,6 +31,17 @@ let memory_search_source_enum_strings =
 let fs_write_mode_enum_strings =
   [ "overwrite"; "append" ]
 
+(** Issue #8513: hand-mirrored from
+    [Board_dispatch.valid_sort_order_strings] (#8453 SSOT). Direct
+    dependency would risk a Tool_shard -> Board_* -> Tool_shard cycle.
+    Sync regression test in [test_types.ml :: sort_order_schema_ssot]
+    catches drift. The schema previously hand-listed only 3 of 5 sort
+    orders (recent/hot/updated) — Trending and Discussed were dropped,
+    so LLM clients couldn't filter by them via schema validation even
+    though [sort_order_of_string_opt] accepts them. Same shape as
+    #8430 / #8471 / #8474 / #8493 REAL drift bugs. *)
+let sort_order_enum_strings =
+  [ "hot"; "trending"; "recent"; "updated"; "discussed" ]
 
 (** Issue #8506: hand-mirrored from
     [Board_votes.valid_vote_direction_strings]. Direct dependency
@@ -169,7 +180,10 @@ and content preview for each post.";
       ("properties", `Assoc [
         ("hearth", `Assoc [("type", `String "string"); ("description", `String "Filter by topic channel (e.g. code-review, research)")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return (default: 20, max: 50)")]);
-        ("sort_by", `Assoc [("type", `String "string"); ("enum", `List [`String "recent"; `String "hot"; `String "updated"]); ("description", `String "Sort order (default: recent)")]);
+        (* Issue #8513: derive from local mirror tracking
+           [Board_dispatch.valid_sort_order_strings].  Schema used to
+           expose only 3 of 5 sort orders. *)
+        ("sort_by", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) sort_order_enum_strings)); ("description", `String "Sort order (default: recent)")]);
       ]);
     ];
   };

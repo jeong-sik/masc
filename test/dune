@@ -935,6 +935,11 @@
  (libraries alcotest unix str))
 
 (test
+ (name test_keeper_pause_silent_failure_source)
+ (modules test_keeper_pause_silent_failure_source)
+ (libraries alcotest unix str))
+
+(test
  (name test_channel_gate)
  (modules test_channel_gate)
  (libraries masc_test_deps))

@@ -25,7 +25,37 @@ val record_success : keeper_name:string -> unit
     unchanged if under threshold, or message + hint if tripped. *)
 val maybe_enrich_error : keeper_name:string -> error_msg:string -> string
 
-(** JSON snapshot of all breaker states for diagnostics. *)
+(** {1 Failure signature diagnostics (task-240)}
+
+    When the breaker trips, "3 consecutive other failures" on its own
+    gives an operator no handle on *which* three failures caused it.
+    To preserve that context, every [record_failure] call also writes a
+    bounded-size signature (timestamp + class + fingerprint of the
+    error message) to a per-keeper ring buffer. The trip log line
+    names the buffer contents, and downstream observers (dashboard,
+    snapshot JSON) can read them via [recent_failures_of]. *)
+
+type failure_signature = {
+  ts : float;
+  cls : error_class;
+  fingerprint : string;
+}
+
+(** Collapse an error message into a single-line, size-bounded
+    fingerprint suitable for logs and JSON payloads. Default
+    [max_len = 120]. Not cryptographic — pattern-matching only. *)
+val fingerprint_of_error : ?max_len:int -> string -> string
+
+(** Last-N failure signatures for [keeper_name] (newest first). Returns
+    [[]] for keepers that have never failed. N is bounded internally
+    (currently 3, matching the trip threshold). *)
+val recent_failures_of : keeper_name:string -> failure_signature list
+
+(** JSON snapshot of all breaker states for diagnostics.
+
+    Each entry adds a [recent_failures] array (newest first):
+    {[ { "ts": 1..., "class": "other", "fingerprint": "..." } ]}
+    *)
 val snapshot_json : unit -> Yojson.Safe.t
 
 (** {1 Observable display state (LT-16-KCB)}

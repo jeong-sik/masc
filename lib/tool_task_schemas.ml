@@ -227,14 +227,32 @@ Use submit_for_verification to request cross-agent review; approve/reject for ve
         ]);
         ("handoff_context", `Assoc [
           ("type", `String "object");
-          ("description", `String "Typed handoff payload used when action='release' on strict contract tasks.");
+          ("description", `String "Typed handoff payload used when action='release' on strict contract tasks. 'summary' is REQUIRED and must be a non-empty string. Example: {\"summary\": \"tests green, PR #123 pending review\", \"next_step\": \"wait for CI\", \"evidence_refs\": [\"PR#123\"]}.");
           ("properties", `Assoc [
-            ("summary", `Assoc [ ("type", `String "string") ]);
-            ("reason", `Assoc [ ("type", `String "string") ]);
-            ("next_step", `Assoc [ ("type", `String "string") ]);
-            ("failure_mode", `Assoc [ ("type", `String "string") ]);
-            ("evidence_refs", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+            ("summary", `Assoc [
+              ("type", `String "string");
+              ("minLength", `Int 1);
+              ("description", `String "REQUIRED. Non-empty one-line summary of current state at release time. Example: 'tests green, PR #123 pending review'.");
+            ]);
+            ("reason", `Assoc [
+              ("type", `String "string");
+              ("description", `String "Why the task is being released (blocker, handoff, pause).");
+            ]);
+            ("next_step", `Assoc [
+              ("type", `String "string");
+              ("description", `String "What the next owner should do first.");
+            ]);
+            ("failure_mode", `Assoc [
+              ("type", `String "string");
+              ("description", `String "If released due to failure, describe the failure mode.");
+            ]);
+            ("evidence_refs", `Assoc [
+              ("type", `String "array");
+              ("items", `Assoc [ ("type", `String "string") ]);
+              ("description", `String "PR numbers, file paths, log links substantiating summary.");
+            ]);
           ]);
+          ("required", `List [`String "summary"]);
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "task_id"; `String "action"]);

@@ -164,7 +164,10 @@ let parse_handoff_context ~(agent_name : string) args =
       | Ok handoff_context ->
           let summary = String.trim handoff_context.summary in
           if summary = "" then
-            Error "handoff_context.summary is required"
+            Error
+              "handoff_context.summary is required (non-empty string). \
+               Example: {\"summary\": \"tests green, PR #123 pending review\", \
+               \"next_step\": \"wait for CI\", \"evidence_refs\": [\"PR#123\"]}"
           else
             Ok
               (Some

@@ -43,13 +43,64 @@ let error_class_to_string = function
 (* Per-keeper state                                                  *)
 (* ================================================================ *)
 
+(** A single failure signature captured for diagnostics.
+    [fingerprint] is a single-line, size-bounded slice of the raw
+    [error_msg] — enough for an operator to recognise the failure mode
+    without dumping full payloads into logs. *)
+type failure_signature = {
+  ts : float;
+  cls : error_class;
+  fingerprint : string;
+}
+
+(** Bounded ring-buffer capacity for [recent_failures]. Matches
+    [threshold] so a trip log can always name the three failures that
+    caused it. Not exposed — an operator-visible knob would imply a
+    policy change, which is out of scope for LT-16-KCB diagnostics. *)
+let recent_failures_capacity = 3
+
 type breaker_state = {
   mutable consecutive_class : error_class;
   mutable consecutive_count : int;
   mutable total_tripped : int;
+  (* Newest-first; length bounded by [recent_failures_capacity].
+     Retained across trips so "cooling" inspection still has context. *)
+  mutable recent_failures : failure_signature list;
 }
 
 let states : (string, breaker_state) Hashtbl.t = Hashtbl.create 16
+
+(** Collapse an error message into a fingerprint suitable for log lines
+    and JSON payloads. Strips newlines/tabs, collapses whitespace runs,
+    and truncates to [max_len] characters with an ellipsis marker so the
+    original length is still recognisable.
+
+    Not cryptographic — the goal is "operator pattern-matches failures
+    across keepers", not uniqueness. *)
+let fingerprint_of_error ?(max_len = 120) (error_msg : string) : string =
+  let len = String.length error_msg in
+  let buf = Buffer.create (min len max_len) in
+  let prev_space = ref false in
+  let i = ref 0 in
+  while !i < len && Buffer.length buf < max_len do
+    let c = error_msg.[!i] in
+    let is_space = c = ' ' || c = '\t' || c = '\n' || c = '\r' in
+    if is_space then begin
+      if not !prev_space && Buffer.length buf > 0 then Buffer.add_char buf ' ';
+      prev_space := true
+    end else begin
+      Buffer.add_char buf c;
+      prev_space := false
+    end;
+    incr i
+  done;
+  let s = Buffer.contents buf in
+  (* Trim trailing whitespace injected by the collapse above. *)
+  let s =
+    let n = String.length s in
+    if n > 0 && s.[n - 1] = ' ' then String.sub s 0 (n - 1) else s
+  in
+  if !i < len then s ^ "…" else s
 
 (** Mutex protecting [states] and every per-keeper [breaker_state].
     Every production path goes through [Keeper_exec_tools.apply_circuit_breaker]
@@ -72,9 +123,44 @@ let get_or_create_locked keeper_name =
   | Some s -> s
   | None ->
     let s = { consecutive_class = Other; consecutive_count = 0;
-              total_tripped = 0 } in
+              total_tripped = 0; recent_failures = [] } in
     Hashtbl.replace states keeper_name s;
     s
+
+(* Caller must hold [states_mu]. Prepends [sig_] and trims the tail so
+   the list never exceeds [recent_failures_capacity]. *)
+let push_recent_failure_locked (s : breaker_state)
+    (sig_ : failure_signature) : unit =
+  let rec take n = function
+    | _ when n <= 0 -> []
+    | [] -> []
+    | x :: xs -> x :: take (n - 1) xs
+  in
+  s.recent_failures <- take recent_failures_capacity (sig_ :: s.recent_failures)
+
+let signature_to_string (sig_ : failure_signature) : string =
+  Printf.sprintf "%s:%s"
+    (error_class_to_string sig_.cls) sig_.fingerprint
+
+let signature_to_json (sig_ : failure_signature) : Yojson.Safe.t =
+  `Assoc [
+    "ts", `Float sig_.ts;
+    "class", `String (error_class_to_string sig_.cls);
+    "fingerprint", `String sig_.fingerprint;
+  ]
+
+let format_recent_failures (sigs : failure_signature list) : string =
+  match sigs with
+  | [] -> "<none>"
+  | _ ->
+    (* Oldest-first in the log for reading-order clarity. *)
+    let ordered = List.rev sigs in
+    let parts =
+      List.mapi (fun i s ->
+        Printf.sprintf "[%d] %s" (i + 1) (signature_to_string s)
+      ) ordered
+    in
+    String.concat " | " parts
 
 (* ================================================================ *)
 (* Record + hint generation                                         *)
@@ -87,8 +173,14 @@ let record_success ~keeper_name =
 
 let rec record_failure ~keeper_name ~(error_msg : string) : string option =
   let cls = classify_error error_msg in
+  let sig_ = {
+    ts = Time_compat.now ();
+    cls;
+    fingerprint = fingerprint_of_error error_msg;
+  } in
   with_states_rw (fun () ->
     let s = get_or_create_locked keeper_name in
+    push_recent_failure_locked s sig_;
     if cls = s.consecutive_class then
       s.consecutive_count <- s.consecutive_count + 1
     else begin
@@ -99,9 +191,12 @@ let rec record_failure ~keeper_name ~(error_msg : string) : string option =
       s.total_tripped <- s.total_tripped + 1;
       s.consecutive_count <- 0;
       let tripped = s.total_tripped in
+      let recent = s.recent_failures in
       Log.Keeper.warn
-        "circuit_breaker tripped for %s: %d consecutive %s failures (total trips: %d)"
-        keeper_name threshold (error_class_to_string cls) tripped;
+        "circuit_breaker tripped for %s: %d consecutive %s failures \
+         (total trips: %d) recent=%s"
+        keeper_name threshold (error_class_to_string cls) tripped
+        (format_recent_failures recent);
       Some (corrective_hint cls keeper_name)
     end else
       None)
@@ -178,15 +273,25 @@ let snapshot_json () : Yojson.Safe.t =
   let entries =
     with_states_ro (fun () ->
       Hashtbl.fold (fun name state acc ->
+        let recent_json =
+          `List (List.map signature_to_json state.recent_failures)
+        in
         `Assoc [
           "keeper", `String name;
           "consecutive_class", `String (error_class_to_string state.consecutive_class);
           "consecutive_count", `Int state.consecutive_count;
           "total_tripped", `Int state.total_tripped;
+          "recent_failures", recent_json;
         ] :: acc
       ) states [])
   in
   `List entries
+
+let recent_failures_of ~keeper_name : failure_signature list =
+  with_states_ro (fun () ->
+    match Hashtbl.find_opt states keeper_name with
+    | None -> []
+    | Some s -> s.recent_failures)
 
 (* ================================================================ *)
 (* Observable display state (LT-16-KCB Phase 1)                     *)

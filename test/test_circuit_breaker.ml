@@ -195,12 +195,109 @@ let test_display_state_of_clears_after_success () =
   let s = CB.display_state_of ~keeper_name:name in
   check string "after success, back to clean" "clean" (display_state_str s)
 
+(* ── task-240: failure signature diagnostics ────────────────── *)
+
+let test_fingerprint_collapses_whitespace () =
+  let fp = CB.fingerprint_of_error "line1\n  line2\ttab" in
+  check bool "no newline" false (contains fp "\n");
+  check bool "no tab" false (contains fp "\t");
+  check bool "starts with line1" true (contains fp "line1")
+
+let test_fingerprint_truncates () =
+  let long = String.make 200 'x' in
+  let fp = CB.fingerprint_of_error ~max_len:50 long in
+  check bool "truncated length bounded" true (String.length fp <= 60);
+  check bool "has ellipsis" true (contains fp "…")
+
+let test_fingerprint_does_not_fake_truncation_after_space_collapse () =
+  let padded = (String.make 200 ' ') ^ "keeper_shell failed" in
+  let fp = CB.fingerprint_of_error ~max_len:50 padded in
+  check bool "keeps content" true (contains fp "keeper_shell failed");
+  check bool "no fake ellipsis" false (contains fp "…")
+
+let test_recent_failures_empty_for_unknown () =
+  let r = CB.recent_failures_of ~keeper_name:"never-touched-sig-xyz" in
+  check int "empty list" 0 (List.length r)
+
+let test_recent_failures_bounded_and_newest_first () =
+  let name = "sig-bounded" in
+  CB.record_success ~keeper_name:name;
+  ignore (CB.maybe_enrich_error ~keeper_name:name ~error_msg:"err-1");
+  ignore (CB.maybe_enrich_error ~keeper_name:name ~error_msg:"err-2");
+  ignore (CB.maybe_enrich_error ~keeper_name:name ~error_msg:"err-3");
+  ignore (CB.maybe_enrich_error ~keeper_name:name ~error_msg:"err-4");
+  let r = CB.recent_failures_of ~keeper_name:name in
+  check int "bounded to 3" 3 (List.length r);
+  (* newest first: err-4 is head *)
+  (match r with
+   | first :: _ ->
+     check bool "newest fingerprint is err-4" true
+       (contains first.CB.fingerprint "err-4")
+   | [] -> Alcotest.fail "expected entries")
+
+let test_snapshot_json_exposes_recent_failures () =
+  let name = "sig-snap" in
+  CB.record_success ~keeper_name:name;
+  ignore (CB.maybe_enrich_error
+            ~keeper_name:name ~error_msg:"uniq-signature-ABC");
+  let json = CB.snapshot_json () in
+  match json with
+  | `List entries ->
+    let found =
+      List.exists (fun e ->
+        match e with
+        | `Assoc fields ->
+          (match List.assoc_opt "keeper" fields,
+                 List.assoc_opt "recent_failures" fields with
+           | Some (`String n), Some (`List rs) when n = name ->
+             List.exists (fun r ->
+               match r with
+               | `Assoc rf ->
+                 (match List.assoc_opt "fingerprint" rf with
+                  | Some (`String fp) -> contains fp "uniq-signature-ABC"
+                  | _ -> false)
+               | _ -> false
+             ) rs
+           | _ -> false)
+        | _ -> false
+      ) entries
+    in
+    check bool "snapshot includes fingerprint" true found
+  | _ -> Alcotest.fail "expected top-level list"
+
+let test_recent_failures_survive_trip () =
+  (* After a trip, consecutive_count resets but recent_failures must
+     still hold the 3 signatures so operators can diagnose the trip. *)
+  let name = "sig-survive" in
+  CB.record_success ~keeper_name:name;
+  ignore (CB.maybe_enrich_error ~keeper_name:name ~error_msg:"trip-a");
+  ignore (CB.maybe_enrich_error ~keeper_name:name ~error_msg:"trip-b");
+  ignore (CB.maybe_enrich_error ~keeper_name:name ~error_msg:"trip-c");
+  let r = CB.recent_failures_of ~keeper_name:name in
+  check int "3 signatures retained post-trip" 3 (List.length r)
+
 let () =
   run "Circuit_breaker" [
     "classify", [
       test_case "path_not_found" `Quick test_classify_path_not_found;
       test_case "path_not_allowed" `Quick test_classify_path_not_allowed;
       test_case "other" `Quick test_classify_other;
+    ];
+    "signatures", [
+      test_case "fingerprint collapses whitespace"
+        `Quick test_fingerprint_collapses_whitespace;
+      test_case "fingerprint truncates with ellipsis"
+        `Quick test_fingerprint_truncates;
+      test_case "fingerprint does not fake truncation after space collapse"
+        `Quick test_fingerprint_does_not_fake_truncation_after_space_collapse;
+      test_case "recent_failures empty for unknown"
+        `Quick test_recent_failures_empty_for_unknown;
+      test_case "recent_failures bounded, newest first"
+        `Quick test_recent_failures_bounded_and_newest_first;
+      test_case "snapshot_json exposes recent_failures"
+        `Quick test_snapshot_json_exposes_recent_failures;
+      test_case "recent_failures survive trip"
+        `Quick test_recent_failures_survive_trip;
     ];
     "threshold", [
       test_case "no hint under threshold" `Quick test_no_hint_under_threshold;

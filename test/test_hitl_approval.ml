@@ -309,6 +309,67 @@ let test_background_pending_resolves_stale_id_via_hint () =
   | Some _ -> Alcotest.fail "expected approve callback via stale-id fallback"
   | None -> Alcotest.fail "expected callback to fire via stale-id fallback"
 
+let test_background_pending_keeps_distinct_input_kinds_separate () =
+  Eio_main.run @@ fun _env ->
+  let initial_count = AQ.pending_count () in
+  let first_callback = ref None in
+  let second_callback = ref None in
+  let id1 =
+    AQ.submit_pending
+      ~keeper_name:"gate-keeper-kind"
+      ~tool_name:"keeper_continue_after_partial_commit"
+      ~input:(`Assoc [("kind", `String "continue_gate_required")])
+      ~risk_level:AQ.Critical
+      ~on_resolution:(fun decision -> first_callback := Some decision)
+  in
+  let id2 =
+    AQ.submit_pending
+      ~keeper_name:"gate-keeper-kind"
+      ~tool_name:"keeper_continue_after_partial_commit"
+      ~input:(`Assoc [("kind", `String "manual_review_required")])
+      ~risk_level:AQ.Critical
+      ~on_resolution:(fun decision -> second_callback := Some decision)
+  in
+  Alcotest.(check bool) "different input kinds do not dedupe" true (id1 <> id2);
+  Alcotest.(check int) "both background entries kept"
+    (initial_count + 2) (AQ.pending_count ());
+  let pending_kinds =
+    match AQ.list_pending_json () with
+    | `List rows ->
+        rows
+        |> List.filter_map (function
+             | `Assoc fields ->
+                 let row = `Assoc fields in
+                 if Yojson.Safe.Util.(row |> member "keeper_name" |> to_string_option)
+                    = Some "gate-keeper-kind"
+                 then Yojson.Safe.Util.(row |> member "input_kind" |> to_string_option)
+                 else None
+             | _ -> None)
+        |> List.sort String.compare
+    | _ -> []
+  in
+  Alcotest.(check (list string)) "pending json includes both input kinds"
+    [ "continue_gate_required"; "manual_review_required" ]
+    pending_kinds;
+  (match AQ.resolve ~id:id1 ~decision:Agent_sdk.Hooks.Approve () with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail ("resolve first distinct kind failed: " ^ msg));
+  Alcotest.(check bool) "second distinct kind remains pending" true
+    (AQ.has_pending_for_keeper ~keeper_name:"gate-keeper-kind");
+  (match AQ.resolve ~id:id2 ~decision:(Agent_sdk.Hooks.Reject "keep paused") () with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail ("resolve second distinct kind failed: " ^ msg));
+  Alcotest.(check int) "all distinct-kind entries removed"
+    initial_count (AQ.pending_count ());
+  (match !first_callback with
+   | Some Agent_sdk.Hooks.Approve -> ()
+   | Some _ -> Alcotest.fail "expected first distinct-kind callback approve"
+   | None -> Alcotest.fail "expected first distinct-kind callback");
+  (match !second_callback with
+   | Some (Agent_sdk.Hooks.Reject "keep paused") -> ()
+   | Some _ -> Alcotest.fail "expected second distinct-kind callback reject"
+   | None -> Alcotest.fail "expected second distinct-kind callback")
+
 (* ── 4. Approval callback integration ────────────────────── *)
 
 let test_callback_approves_low_risk () =
@@ -405,6 +466,8 @@ let () =
         test_background_pending_callback_and_keeper_lookup;
       Alcotest.test_case "background pending stale-id fallback" `Quick
         test_background_pending_resolves_stale_id_via_hint;
+      Alcotest.test_case "background pending keeps distinct input kinds separate" `Quick
+        test_background_pending_keeps_distinct_input_kinds_separate;
     ]);
     ("callback_integration", [
       Alcotest.test_case "low risk auto-approved" `Quick test_callback_approves_low_risk;

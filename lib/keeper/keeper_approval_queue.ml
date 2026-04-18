@@ -183,18 +183,6 @@ let resolve_entry (entry : pending_approval) (decision : decision) =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> ()
 
-let find_pending_id ~keeper_name ~tool_name =
-  SMap.fold
-    (fun id entry acc ->
-      match acc with
-      | Some _ -> acc
-      | None ->
-        if String.equal entry.keeper_name keeper_name
-           && String.equal entry.tool_name tool_name
-        then Some id
-        else None)
-    (Atomic.get pending) None
-
 let input_kind_opt (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields -> (
@@ -204,6 +192,23 @@ let input_kind_opt (json : Yojson.Safe.t) =
           if trimmed = "" then None else Some trimmed
       | _ -> None)
   | _ -> None
+
+let find_pending_id map ~keeper_name ~tool_name ~input_kind =
+  SMap.fold
+    (fun id entry acc ->
+      match acc with
+      | Some _ -> acc
+      | None ->
+        if String.equal entry.keeper_name keeper_name
+           && String.equal entry.tool_name tool_name
+           &&
+           match input_kind with
+           | None -> true
+           | Some expected ->
+               Option.equal String.equal (input_kind_opt entry.input) (Some expected)
+        then Some id
+        else None)
+    map None
 
 let fallback_matches ~keeper_name ~tool_name ?input_kind map =
   SMap.bindings map
@@ -250,7 +255,8 @@ let submit_pending ~keeper_name ~tool_name ~input ~risk_level ~on_resolution
   : string =
   let created_entry = ref None in
   atomic_update pending (fun map ->
-    match find_pending_id ~keeper_name ~tool_name with
+    let input_kind = input_kind_opt input in
+    match find_pending_id map ~keeper_name ~tool_name ~input_kind with
     | Some id -> 
         created_entry := Some (`Existing id);
         map
@@ -353,6 +359,8 @@ let list_pending_json () : Yojson.Safe.t =
       ("keeper_name", `String entry.keeper_name);
       ("tool_name", `String entry.tool_name);
       ("risk_level", `String (risk_level_to_string entry.risk_level));
+      ("input_kind", Json_util.option_to_yojson (fun value -> `String value)
+         (input_kind_opt entry.input));
       ("requested_at", `Float entry.requested_at);
       ("waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at));
     ] :: acc
@@ -366,6 +374,8 @@ let list_pending_dashboard_json () : Yojson.Safe.t =
       ("keeper_name", `String entry.keeper_name);
       ("tool_name", `String entry.tool_name);
       ("risk_level", `String (risk_level_to_string entry.risk_level));
+      ("input_kind", Json_util.option_to_yojson (fun value -> `String value)
+         (input_kind_opt entry.input));
       ("requested_at", `Float entry.requested_at);
       ("requested_at_iso", `String (Types.iso8601_of_unix_seconds entry.requested_at));
       ("waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at));

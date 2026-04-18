@@ -21,6 +21,9 @@ let contains_check result = String.sub result 0 3 = "\xE2\x9C\x85"  (* ✅ *)
 let contains_warning result = String.sub result 0 3 = "\xE2\x9A\xA0"  (* ⚠ *)
 let contains_portal result = String.sub result 0 4 = "\xF0\x9F\x8C\x80"  (* 🌀 *)
 
+let backlog_recovery_path config =
+  Coord.backlog_path config ^ ".last-good"
+
 let room_config tmp_dir =
   Unix.putenv "MASC_BASE_PATH" tmp_dir;
   Coord.default_config tmp_dir
@@ -724,15 +727,37 @@ let test_room_bootstrap_ignores_invalid_room_id_in_flat_mode () =
       (Coord.is_initialized config)
   )
 
-let test_read_backlog_r_reports_parse_error () =
+let test_read_backlog_r_recovers_from_last_good_snapshot () =
+  with_test_env (fun config ->
+    let expected =
+      {
+        Types.tasks = [];
+        last_updated = Types.now_iso ();
+        version = 7;
+      }
+    in
+    Coord.write_backlog config expected;
+    Out_channel.with_open_text (Coord.backlog_path config) (fun oc ->
+      output_string oc "{\n  \"tasks\": [\n");
+    match Coord.read_backlog_r config with
+    | Ok backlog ->
+        Alcotest.(check int) "recovered backlog version" expected.version backlog.version
+    | Error msg -> Alcotest.failf "expected recovery, got error: %s" msg
+  )
+
+let test_read_backlog_r_reports_parse_error_when_recovery_is_also_invalid () =
   with_test_env (fun config ->
     Out_channel.with_open_text (Coord.backlog_path config) (fun oc ->
+      output_string oc "{\n  \"tasks\": [\n");
+    Out_channel.with_open_text (backlog_recovery_path config) (fun oc ->
       output_string oc "{\n  \"tasks\": [\n");
     match Coord.read_backlog_r config with
     | Ok _ -> Alcotest.fail "expected backlog parse error"
     | Error msg ->
-        Alcotest.(check bool) "mentions backlog decode/read failure" true
-          (str_contains msg "read_backlog" || str_contains msg "JSON parse error")
+        Alcotest.(check bool) "mentions primary backlog failure" true
+          (str_contains msg "read_backlog" || str_contains msg "JSON parse error");
+        Alcotest.(check bool) "mentions recovery failure" true
+          (str_contains msg "recovery")
   )
 
 let test_release_stale_claims_skips_invalid_backlog () =
@@ -1610,8 +1635,10 @@ let () =
       Alcotest.test_case "get agents status" `Quick test_get_agents_status;
       Alcotest.test_case "backend bootstrap preserves room state" `Quick test_room_bootstrap_preserves_backend_state;
       Alcotest.test_case "bootstrap ignores invalid room id in flat mode" `Quick test_room_bootstrap_ignores_invalid_room_id_in_flat_mode;
-      Alcotest.test_case "read_backlog_r reports parse error" `Quick
-        test_read_backlog_r_reports_parse_error;
+      Alcotest.test_case "read_backlog_r recovers from last good snapshot" `Quick
+        test_read_backlog_r_recovers_from_last_good_snapshot;
+      Alcotest.test_case "read_backlog_r reports parse error when recovery also invalid" `Quick
+        test_read_backlog_r_reports_parse_error_when_recovery_is_also_invalid;
       Alcotest.test_case "release stale claims skips invalid backlog" `Quick
         test_release_stale_claims_skips_invalid_backlog;
       Alcotest.test_case "cleanup zombies empty" `Quick test_cleanup_zombies_empty;

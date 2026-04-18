@@ -1,6 +1,7 @@
 """Shared connector components for MASC Channel Gate sidecars."""
 
 from .doctor import (
+    NETWORK_TIMEOUT_SEC,
     AutoFix,
     Check,
     CheckFn,
@@ -21,6 +22,7 @@ __all__ = [
     "Doctor",
     "GateClientBase",
     "GateResponse",
+    "NETWORK_TIMEOUT_SEC",
     "Severity",
     "exit_code_for",
     "render_json",

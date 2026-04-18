@@ -57,6 +57,14 @@ def test_exit_code_priority() -> None:
     assert exit_code_for(err) == 2
 
 
+def test_severity_needs_action() -> None:
+    assert Severity.warn.needs_action()
+    assert Severity.error.needs_action()
+    assert not Severity.ok.needs_action()
+    assert not Severity.info.needs_action()
+    assert not Severity.skip.needs_action()
+
+
 @pytest.mark.asyncio
 async def test_doctor_runs_all_checks_even_when_one_raises() -> None:
     async def good() -> Check:

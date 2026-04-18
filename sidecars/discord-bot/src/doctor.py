@@ -6,20 +6,7 @@
     python -m src doctor --json    # 자동화용 JSON
     python -m src doctor --fix     # 가능한 부분은 자동 치유
 
-각 체크는 ``gate_shared.doctor`` 의 ``Check`` 를 반환한다.
-
-다음을 확인한다:
-
-1. 필수 env (DISCORD_BOT_TOKEN, GATE_BASE_URL) 존재 여부
-2. GATE_API_TOKEN 규칙 (loopback 이 아니면 필수)
-3. DISCORD_KEEPER_MAP JSON 파싱 + 값이 비어있지 않은지
-4. Channel Gate (/api/v1/gate/health) 도달 가능 여부
-5. Gate 가 알고 있는 keeper 목록에 DISCORD_KEEPER_MAP 의 대상이 모두 존재하는지
-6. binding/audit/status/names 저장 경로의 상위 디렉터리 생성 가능 여부
-7. Legacy 경로 (`.masc/connectors/discord/*`) 잔존 여부 (있으면 자동 이관 힌트)
-8. DISCORD_ADMIN_ROLE_ID 가 비어 있는지 (비어 있으면 서버 권한 가드 없음 → warn)
-
-각 체크는 독립적이고, 이전 실패에 관계없이 모두 실행된다.
+등록된 체크 목록은 ``run_doctor`` 의 ``register`` 호출이 SSOT.
 """
 
 from __future__ import annotations
@@ -35,8 +22,10 @@ if str(_shared_root) not in sys.path:
     sys.path.insert(0, str(_shared_root))
 
 import httpx  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
 
 from gate_shared import AutoFix, Check, Doctor, Severity  # noqa: E402
+from gate_shared.doctor import NETWORK_TIMEOUT_SEC  # noqa: E402
 
 from .config import BotConfig, get_config  # noqa: E402
 
@@ -117,7 +106,7 @@ async def check_discord_py_version() -> Check:
 def _config_or_none() -> BotConfig | None:
     try:
         return get_config()
-    except Exception:  # pydantic ValidationError 포함
+    except (ValidationError, OSError):
         return None
 
 
@@ -246,7 +235,7 @@ async def check_gate_reachable() -> Check:
         )
     url = cfg.gate_health_url()
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(timeout=NETWORK_TIMEOUT_SEC) as client:
             resp = await client.get(url)
     except httpx.ConnectError as exc:
         return Check(
@@ -305,7 +294,7 @@ async def check_keeper_map_alignment() -> Check:
     base = cfg.gate_base_url.rstrip("/")
     url = f"{base}/api/v1/gate/keepers"
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(timeout=NETWORK_TIMEOUT_SEC) as client:
             resp = await client.get(
                 url,
                 headers={"Authorization": f"Bearer {cfg.gate_api_token}"}
@@ -407,11 +396,16 @@ async def check_binding_paths_writable() -> Check:
         )
 
     async def _attempt_chmod() -> None:
+        # Auto-fix failure must be observable: silent pass makes the follow-up
+        # rerun look identical to "fix didn't run" from the operator's side.
         for p in auto_fix_targets:
             try:
                 p.chmod(0o755)
-            except OSError:
-                pass
+            except OSError as exc:
+                print(
+                    f"[doctor] chmod 0755 {p} failed: {exc.strerror or exc}",
+                    file=sys.stderr,
+                )
 
     return Check(
         name="binding paths writable",

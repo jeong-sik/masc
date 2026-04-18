@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from collections.abc import Awaitable, Callable, Iterable, Sequence
@@ -23,11 +24,15 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Final
 
+NETWORK_TIMEOUT_SEC: Final[float] = 3.0
+"""체크 하나의 HTTP 타임아웃 상한. 체크 1개가 run 전체를 막지 않도록 짧게 둔다."""
+
 __all__ = [
     "AutoFix",
     "Check",
     "CheckFn",
     "Doctor",
+    "NETWORK_TIMEOUT_SEC",
     "Severity",
     "render_pretty",
     "render_json",
@@ -35,31 +40,18 @@ __all__ = [
 
 
 class Severity(str, Enum):
-    """체크 심각도.
-
-    - ``ok``: 정상. 추가 조치 불필요.
-    - ``info``: 참고용 정보. 동작에는 영향 없음.
-    - ``warn``: 일부 기능이 비활성화되거나 권장 설정이 빠짐.
-    - ``error``: 실행 자체가 불가능. 반드시 조치 필요.
-    - ``skip``: 사전 조건이 충족되지 않아 검사를 건너뜀.
-    """
-
     ok = "ok"
     info = "info"
     warn = "warn"
     error = "error"
     skip = "skip"
 
+    def needs_action(self) -> bool:
+        return self in (Severity.warn, Severity.error)
+
 
 @dataclass(frozen=True, slots=True)
 class AutoFix:
-    """자동 치유 힌트.
-
-    ``command`` 는 복사해서 실행할 수 있는 쉘 예시.
-    ``callback`` 는 ``doctor --fix`` 시 실제로 호출되는 함수.
-    둘 중 하나만 채우면 되며, 양쪽 모두 제공 시 ``callback`` 가 우선한다.
-    """
-
     description: str
     command: str | None = None
     callback: Callable[[], Awaitable[None]] | None = None
@@ -67,12 +59,6 @@ class AutoFix:
 
 @dataclass(frozen=True, slots=True)
 class Check:
-    """단일 진단 결과.
-
-    ``detail`` 에는 사용자가 바로 참고할 수 있는 수치/경로를 담는다.
-    예: 파일 크기, URL, PID, 버전.
-    """
-
     name: str
     severity: Severity
     message: str
@@ -185,13 +171,6 @@ def _tally(checks: Sequence[Check]) -> dict[Severity, int]:
 
 
 def exit_code_for(checks: Sequence[Check]) -> int:
-    """관례: 0 = 건강, 1 = 조치 필요, 2 = 실행 불가.
-
-    - error 가 하나라도 있으면 2
-    - warn 이 있고 error 는 없으면 1
-    - 나머지는 0
-    """
-
     counts = _tally(checks)
     if counts[Severity.error] > 0:
         return 2
@@ -201,17 +180,6 @@ def exit_code_for(checks: Sequence[Check]) -> int:
 
 
 class Doctor:
-    """체크 등록 → 실행 → 렌더링 오케스트레이터.
-
-    사용 예::
-
-        doctor = Doctor("Discord Sidecar Doctor")
-        doctor.register(check_env)
-        doctor.register(check_gate_reachable)
-        checks = await doctor.run()
-        print(render_pretty(doctor.title, checks))
-    """
-
     def __init__(self, title: str) -> None:
         self._title = title
         self._checks: list[CheckFn] = []
@@ -228,37 +196,27 @@ class Doctor:
             self.register(c)
 
     async def run(self) -> list[Check]:
-        """모든 체크를 순차 실행한다.
+        # Checks are independent (env reads, disk stat, HTTP to different
+        # endpoints). Sequential execution makes a slow gate timeout block
+        # every later check; gather collapses the worst case to one timeout.
+        return list(await asyncio.gather(*(self._safe_call(fn) for fn in self._checks)))
 
-        체크 내부 예외는 ``Severity.error`` 로 승격된다.
-        하나의 체크가 실패해도 나머지는 계속 실행된다.
-        """
-
-        results: list[Check] = []
-        for fn in self._checks:
-            try:
-                results.append(await fn())
-            except Exception as exc:  # 진단 도구 자체는 멈추면 안 된다.
-                results.append(
-                    Check(
-                        name=getattr(fn, "__name__", "unknown_check"),
-                        severity=Severity.error,
-                        message=f"check raised: {exc.__class__.__name__}: {exc}",
-                    )
-                )
-        return results
+    @staticmethod
+    async def _safe_call(fn: CheckFn) -> Check:
+        try:
+            return await fn()
+        except Exception as exc:  # 진단 도구 자체는 멈추면 안 된다.
+            return Check(
+                name=getattr(fn, "__name__", "unknown_check"),
+                severity=Severity.error,
+                message=f"check raised: {exc.__class__.__name__}: {exc}",
+            )
 
     async def run_auto_fixes(self, checks: Sequence[Check]) -> list[Check]:
-        """auto_fix callback 이 있는 체크만 재실행용으로 처리한다.
-
-        실제 호출 결과는 '후속 체크 1회 더 돌리기' 로 검증해야 정확하다.
-        여기서는 callback 만 실행하고, 다시 ``run()`` 한 결과를 돌려준다.
-        """
-
         for c in checks:
             if c.auto_fix is None or c.auto_fix.callback is None:
                 continue
-            if c.severity not in (Severity.warn, Severity.error):
+            if not c.severity.needs_action():
                 continue
             await c.auto_fix.callback()
         return await self.run()

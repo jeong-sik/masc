@@ -696,7 +696,15 @@ let tool_post_list : Types.tool_schema = {
     ("type", `String "object");
     ("properties", `Assoc [
       ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return"); ("default", `Int 20); ("minimum", `Int 1); ("maximum", `Int 100)]);
-      ("visibility", `Assoc [("type", `String "string"); ("enum", `List [`String "public"; `String "unlisted"; `String "internal"; `String "direct"]); ("description", `String "Filter by visibility")]);
+      ("visibility", `Assoc [
+        ("type", `String "string");
+        (* Issue #8392: derived from Board_types.visibility Variant SSOT.
+           Hand-rolled enum risks dropping a constructor on extension. *)
+        ("enum", `List (List.map (fun s -> `String s) Board_core_classify.valid_visibility_strings));
+        ("description", `String
+          (Printf.sprintf "Filter by visibility (%s)"
+             (String.concat " | " Board_core_classify.valid_visibility_strings)));
+      ]);
       ("hearth", `Assoc [("type", `String "string"); ("maxLength", `Int 100); ("description", `String "Filter by hearth topic (e.g. webrtc, code-review)")]);
       ("random", `Assoc [("type", `String "boolean"); ("description", `String "Shuffle posts randomly (default: false)")]);
       ("offset", `Assoc [("type", `String "integer"); ("description", `String "Skip first N posts (default: 0)"); ("minimum", `Int 0); ("maximum", `Int 1000)]);

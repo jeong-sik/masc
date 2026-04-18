@@ -12,6 +12,32 @@ let with_eio f () =
 let test_default_ttl () =
   Alcotest.(check int) "default_ttl_hours is 0" 0 Limits.default_ttl_hours
 
+(* Issue #8392: schema enums for [visibility] must stay in sync with the
+   Variant SSOT. The witness function uses an exhaustive [match]: adding
+   a 5th constructor to [visibility] forces [visibility_to_string] to
+   fail compilation, and the count assertion below catches list/Variant
+   drift in [all_visibilities]. *)
+let test_visibility_witness_in_enum () =
+  let module C = Masc_mcp.Board_core_classify in
+  let witness s =
+    let actual = C.visibility_to_string s in
+    if not (List.mem actual C.valid_visibility_strings) then
+      Alcotest.failf "visibility_to_string %S not in valid_visibility_strings" actual
+  in
+  witness Public;
+  witness Unlisted;
+  witness Internal;
+  witness Direct;
+  Alcotest.(check int) "count" 4
+    (List.length C.valid_visibility_strings)
+
+let test_visibility_strings_complete () =
+  let strs = Masc_mcp.Board_core_classify.valid_visibility_strings in
+  List.iter (fun expected ->
+    Alcotest.(check bool) (Printf.sprintf "%s present" expected) true
+      (List.mem expected strs)
+  ) ["public"; "unlisted"; "internal"; "direct"]
+
 let test_permanent_post () =
   let store = create_store () in
   match
@@ -150,6 +176,13 @@ let () =
             (with_eio test_expiring_post);
           Alcotest.test_case "sweeper skips permanent" `Quick
             (with_eio test_sweeper_skips_permanent);
+        ] );
+      ( "visibility_ssot",
+        [
+          Alcotest.test_case "witness covers all 4 variants" `Quick
+            test_visibility_witness_in_enum;
+          Alcotest.test_case "all 4 strings present" `Quick
+            test_visibility_strings_complete;
         ] );
       ( "post_kind",
         [

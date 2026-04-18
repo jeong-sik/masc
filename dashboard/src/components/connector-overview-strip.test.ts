@@ -651,7 +651,10 @@ describe('StatusSummaryLine offline annotation (rendered inside ConnectorOvervie
     const annotation = container.querySelector('[data-strip-summary-offline-names]') as HTMLElement
     expect(annotation).toBeTruthy()
     expect(annotation.textContent).toContain('Slack offline')
-    expect(annotation.className).toContain('rose')
+    // #8273 swapped the raw rose utility for the --bad-light semantic token
+    // on this annotation (start/stop buttons and error notices still carry
+    // the border/bg rose classes, only the bare text class changed here).
+    expect(annotation.className).toContain('--bad')
   })
 })
 

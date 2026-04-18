@@ -65,9 +65,11 @@ describe('headerSuccessTone (pure)', () => {
 
 describe('headerStatToneClass (pure)', () => {
   it('maps each tone to a distinct text-color utility', () => {
-    expect(headerStatToneClass('ok')).toContain('emerald')
-    expect(headerStatToneClass('partial')).toContain('amber')
-    expect(headerStatToneClass('bad')).toContain('rose')
+    // After #8273 migrated raw Tailwind colors to semantic CSS vars,
+    // the utility is `text-[var(--<tone>)]`.
+    expect(headerStatToneClass('ok')).toContain('--ok')
+    expect(headerStatToneClass('partial')).toContain('--warn')
+    expect(headerStatToneClass('bad')).toContain('--bad')
     expect(headerStatToneClass('default')).toContain('text-')
   })
 
@@ -109,12 +111,12 @@ describe('HeaderMiniStat component', () => {
     expect(el.getAttribute('data-header-mini-stat-tone')).toBe('default')
   })
 
-  it('value carries the tone text-color class (bad → rose)', () => {
+  it('value carries the tone text-color class (bad → --bad-light)', () => {
     render(html`<${HeaderMiniStat} label="x" value="0/4" tone="bad" />`, container)
     const el = container.querySelector('[data-header-mini-stat="x"]')!
     // Value is the first <span> child.
     const valueSpan = el.querySelector('span')!
-    expect(valueSpan.className).toContain('rose')
+    expect(valueSpan.className).toContain('--bad')
   })
 
   it('testId renders as data-testid', () => {

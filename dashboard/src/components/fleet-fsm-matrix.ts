@@ -76,20 +76,20 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   Compacting:   'bg-amber-900/50 text-[var(--warn)] border-[var(--warn-20)]',
   HandingOff:   'bg-blue-900/50 text-blue-200 border-blue-700',
   Draining:     'bg-sky-900/40 text-sky-200 border-sky-700',
-  Paused:       'bg-zinc-800 text-zinc-300 border-zinc-600',
-  Stopped:      'bg-zinc-800 text-zinc-400 border-zinc-700',
+  Paused:       'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
+  Stopped:      'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
   Crashed:      'bg-red-950 text-[var(--bad-light)] border-red-800',
   Restarting:   'bg-violet-900/50 text-violet-200 border-violet-700',
   Dead:         'bg-black text-[var(--bad-light)] border-red-900',
-  Offline:      'bg-zinc-900 text-zinc-500 border-zinc-800',
+  Offline:      'bg-[var(--white-5)] text-[var(--text-muted)]0 border-[var(--white-10)]',
   // KTC
-  idle:         'bg-zinc-800 text-zinc-400 border-zinc-700',
+  idle:         'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
   prompting:    'bg-blue-900/40 text-blue-200 border-blue-700',
   executing:    'bg-emerald-900/40 text-[var(--ok)] border-[var(--ok-20)]',
   compacting:   'bg-amber-900/50 text-[var(--warn)] border-[var(--warn-20)]',
   finalizing:   'bg-sky-900/40 text-sky-200 border-sky-700',
   // KDP
-  undecided:          'bg-zinc-800 text-zinc-400 border-zinc-700',
+  undecided:          'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
   guard_ok:           'bg-emerald-900/40 text-[var(--ok)] border-[var(--ok-20)]',
   gate_rejected:      'bg-red-900/40 text-[var(--bad-light)] border-[var(--bad-20)]',
   tool_policy_selected: 'bg-indigo-900/50 text-indigo-200 border-indigo-700',
@@ -99,19 +99,19 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   done:         'bg-emerald-900/40 text-[var(--ok)] border-[var(--ok-20)]',
   exhausted:    'bg-red-900/50 text-[var(--bad-light)] border-[var(--bad-20)]',
   // KMC
-  accumulating: 'bg-zinc-800 text-zinc-400 border-zinc-700',
+  accumulating: 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
   // KCB (LT-16-KCB Phase 3). Clean = baseline grey same as any other
   // "nothing happening" state; warning = amber (partial failure
   // streak); cooling = blue (at least one past trip, currently
   // recovered). "tripped" is unobservable at snapshot time and has no
   // chip colour by design — the mutator resets the count before any
   // observer can see it.
-  clean:   'bg-zinc-800 text-zinc-400 border-zinc-700',
+  clean:   'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
   warning: 'bg-amber-900/50 text-[var(--warn)] border-[var(--warn-20)]',
   cooling: 'bg-sky-900/40 text-sky-200 border-sky-700',
 }
 
-const DEFAULT_CHIP = 'bg-zinc-800 text-zinc-300 border-zinc-700'
+const DEFAULT_CHIP = 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]'
 
 export function chipClassFor(value: string): string {
   return CHIP_CLASS_BY_STATE[value] ?? DEFAULT_CHIP
@@ -125,7 +125,7 @@ export function chipClassFor(value: string): string {
 export function sparkClassFor(value: string): string {
   const full = chipClassFor(value)
   const m = /\bbg-[a-z0-9/-]+/i.exec(full)
-  return m?.[0] ?? 'bg-zinc-700'
+  return m?.[0] ?? 'bg-[var(--white-5)]'
 }
 
 /** Per-axis observation ring keyed by keeper name. */
@@ -292,7 +292,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     return html`
       <div
         data-testid="fleet-fsm-matrix"
-        class="rounded border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400"
+        class="rounded border border-[var(--white-10)] bg-[var(--white-5)] p-4 text-sm text-[var(--text-muted)]"
       >
         Loading fleet composite snapshot…
       </div>
@@ -314,7 +314,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     return html`
       <div
         data-testid="fleet-fsm-matrix"
-        class="rounded border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400"
+        class="rounded border border-[var(--white-10)] bg-[var(--white-5)] p-4 text-sm text-[var(--text-muted)]"
       >
         No keepers registered.
       </div>
@@ -324,11 +324,11 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   return html`
     <section
       data-testid="fleet-fsm-matrix"
-      class="rounded border border-zinc-800 bg-zinc-950"
+      class="rounded border border-[var(--white-10)] bg-[var(--white-5)]"
     >
-      <header class="flex flex-wrap items-baseline gap-3 border-b border-zinc-800 p-3">
-        <h2 class="text-sm font-semibold text-zinc-100">Fleet composite (KSM × KTC × KDP × KCL × KMC)</h2>
-        <span class="text-xs text-zinc-500">
+      <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--white-10)] p-3">
+        <h2 class="text-sm font-semibold text-[var(--text-muted)]">Fleet composite (KSM × KTC × KDP × KCL × KMC)</h2>
+        <span class="text-xs text-[var(--text-muted)]0">
           ${data.count} keepers · updated ${new Date(data.generated_at * 1000).toLocaleTimeString()}
         </span>
         <input
@@ -338,7 +338,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
           aria-label="Keeper 필터"
           data-testid="fleet-fsm-matrix-filter"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-          class="min-w-[160px] max-w-[260px] rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none"
+          class="min-w-[160px] max-w-[260px] rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-xs text-[var(--text-muted)] placeholder:text-[var(--text-muted)]0 focus:border-[var(--white-10)]0 focus:outline-none"
         />
         ${tallies
           ? html`
@@ -366,7 +366,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
         ? html`
             <div
               data-testid="fleet-fsm-matrix-empty"
-              class="p-4 text-center text-xs text-zinc-500"
+              class="p-4 text-center text-xs text-[var(--text-muted)]0"
             >
               필터 결과 없음 (${data.snapshots.length} keepers)
             </div>
@@ -374,12 +374,12 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
         : null}
       <div class="overflow-x-auto">
         <table class="min-w-full text-xs">
-          <thead class="bg-zinc-900 text-zinc-300">
+          <thead class="bg-[var(--white-5)] text-[var(--text-muted)]">
             <tr>
               <th class="px-3 py-2 text-left font-semibold">Keeper</th>
               ${AXES.map(a => html`
                 <th class="px-3 py-2 text-left font-semibold" title=${a.label}>
-                  ${a.acronym} <span class="text-zinc-500">${a.label}</span>
+                  ${a.acronym} <span class="text-[var(--text-muted)]0">${a.label}</span>
                 </th>
               `)}
             </tr>
@@ -392,10 +392,10 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
               return html`
                 <tr
                   data-keeper=${name}
-                  class="border-t border-zinc-800 hover:bg-zinc-900 ${rowTone}"
+                  class="border-t border-[var(--white-10)] hover:bg-[var(--white-5)] ${rowTone}"
                   onClick=${props.onSelectKeeper ? () => props.onSelectKeeper?.(name) : undefined}
                 >
-                  <td class="px-3 py-2 font-mono text-zinc-200">${name}</td>
+                  <td class="px-3 py-2 font-mono text-[var(--text-muted)]">${name}</td>
                   ${AXES.map(a => {
                     const raw = extractLaneValue(snap, a.key)
                     const cls = chipClassFor(raw)
@@ -411,7 +411,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                           <div
                             data-spark
                             data-axis=${a.key}
-                            class="flex h-2 overflow-hidden rounded-sm border border-zinc-800 bg-zinc-950"
+                            class="flex h-2 overflow-hidden rounded-sm border border-[var(--white-10)] bg-[var(--white-5)]"
                             title=${`last ${series.length}/${FLEET_HISTORY_LEN} ticks`}
                           >
                             ${series.map((v, i) => html`

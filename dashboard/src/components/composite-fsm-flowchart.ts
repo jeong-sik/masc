@@ -137,15 +137,15 @@ export function CompositeFsmFlowchart(props: CompositeFsmFlowchartProps = {}) {
   return html`
     <section
       data-testid="composite-fsm-flowchart"
-      class="rounded border border-zinc-800 bg-zinc-950 ${props.class ?? ''}"
+      class="rounded border border-[var(--white-10)] bg-[var(--white-5)] ${props.class ?? ''}"
     >
-      <header class="border-b border-zinc-800 p-3">
-        <h2 class="text-sm font-semibold text-zinc-100">
+      <header class="border-b border-[var(--white-10)] p-3">
+        <h2 class="text-sm font-semibold text-[var(--text-muted)]">
           Composite FSM flowchart (TLA+ spec)
         </h2>
-        <p class="mt-1 text-xs text-zinc-400">
+        <p class="mt-1 text-xs text-[var(--text-muted)]">
           6 orthogonal axes rendered as Harel parallel regions. Source:
-          <code class="text-zinc-300">specs/keeper-state-machine/*.tla</code>.
+          <code class="text-[var(--text-muted)]">specs/keeper-state-machine/*.tla</code>.
           Transitions here are the common-case edges; the TLA+
           model-checker owns the exhaustive enumeration.
         </p>

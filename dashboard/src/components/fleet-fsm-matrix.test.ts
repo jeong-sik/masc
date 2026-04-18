@@ -57,7 +57,7 @@ describe('chipClassFor', () => {
 
   it('falls back to the default chip for unknown states', () => {
     const cls = chipClassFor('unknown_state_variant')
-    expect(cls).toContain('bg-zinc-800')
+    expect(cls).toContain('bg-[var(--white-5)]')
   })
 })
 
@@ -114,7 +114,7 @@ describe('sparkClassFor', () => {
   })
 
   it('falls back to a grey shade on unknown states', () => {
-    // DEFAULT_CHIP carries `bg-zinc-800`; sparkClassFor preserves it.
+    // DEFAULT_CHIP carries `bg-[var(--white-5)]`; sparkClassFor preserves it.
     expect(sparkClassFor('__not_a_state__')).toMatch(/^bg-zinc-(700|800)/)
   })
 })

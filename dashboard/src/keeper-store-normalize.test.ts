@@ -24,6 +24,11 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
     expect(toKeeperPhase('HandingOff')).toBe('HandingOff')
   })
 
+  it('trims surrounding whitespace before matching', () => {
+    expect(toKeeperPhase(' running ')).toBe('Running')
+    expect(toKeeperPhase(' HandingOff ')).toBe('HandingOff')
+  })
+
   it('returns null for unknown or empty values', () => {
     expect(toKeeperPhase(null)).toBeNull()
     expect(toKeeperPhase(undefined)).toBeNull()
@@ -67,6 +72,14 @@ describe('normalizeKeepers phase field', () => {
       { name: 'no-phase', status: 'active' },
     ])
     expect(keeper?.phase).toBeNull()
+  })
+
+  it('trims keeper status before normalization', () => {
+    const [keeper] = normalizeKeepers([
+      { name: 'trimmed-status', status: ' active ', phase: ' running ' },
+    ])
+    expect(keeper?.status).toBe('active')
+    expect(keeper?.phase).toBe('Running')
   })
 })
 

@@ -259,6 +259,10 @@ describe('workflowActionLabel', () => {
     expect(workflowActionLabel('task_inject')).toBe('프로젝트 작업 주입')
   })
 
+  it('returns "소셜 스위프" for social_sweep', () => {
+    expect(workflowActionLabel('social_sweep')).toBe('소셜 스위프')
+  })
+
   it('returns "session 업데이트" for team_turn', () => {
     expect(workflowActionLabel('team_turn')).toBe('session 업데이트')
   })

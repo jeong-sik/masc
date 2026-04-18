@@ -180,7 +180,7 @@ export async function confirmOperatorPendingAction(
     operatorErrorStatus.value = summary.status
     appendLog({
       actor,
-      action_type: 'confirm',
+      action_type: decision,
       target_label: confirmToken,
       outcome: 'error',
       message,

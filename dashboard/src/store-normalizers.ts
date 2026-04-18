@@ -19,7 +19,7 @@ import type {
 // --- Data fetchers ---
 
 export function normalizeAgentStatus(value: unknown): Agent['status'] {
-  const raw = typeof value === 'string' ? value.toLowerCase() : ''
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
   if (
     raw === 'active'
     || raw === 'busy'
@@ -36,7 +36,7 @@ export function normalizeAgentStatus(value: unknown): Agent['status'] {
 }
 
 export function normalizeTaskStatus(value: unknown): Task['status'] {
-  const raw = typeof value === 'string' ? value.toLowerCase() : ''
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
   if (raw === 'todo' || raw === 'in_progress' || raw === 'claimed' || raw === 'done' || raw === 'cancelled') {
     return raw
   }

@@ -178,6 +178,12 @@ function queuePressureTone(pressure: string): StatusTone {
   return 'ok'
 }
 
+function sseTone(data: TransportHealthData): StatusTone {
+  if (data.sse.relay_drop_total > 0) return 'bad'
+  if (data.sse.relay_retry_total > 0 || data.sse.relay_queue_depth > 0) return 'warn'
+  return queuePressureTone(data.summary.queue_pressure)
+}
+
 function transportTone(configured: boolean, listening: boolean, active: boolean): StatusTone {
   if (!configured) return 'warn'
   if (!listening) return 'bad'
@@ -222,6 +228,12 @@ function staleTone(staleTotal: number): StatusTone {
   if (staleTotal === 0) return 'ok'
   if (staleTotal < 3) return 'warn'
   return 'bad'
+}
+
+function agentPoolTone(data: TransportHealthData): StatusTone {
+  const staleStatus = staleTone(data.agent_health.stale_total)
+  if (staleStatus !== 'ok') return staleStatus
+  return data.agent_health.lifecycle_dispatch_rejections_total > 0 ? 'warn' : 'ok'
 }
 
 function formatMetricValue(value: number | null): string | number {
@@ -347,12 +359,12 @@ export function TransportHealthPanel() {
     return html`<div class="p-6 text-center text-text-muted text-sm">트랜스포트 데이터 불완전. <button class="underline" onClick=${() => void refreshTransportHealth()}>재시도</button></div>`
   }
 
-  const sseStatus = queuePressureTone(data.summary.queue_pressure)
+  const sseStatus = sseTone(data)
   const grpcStatus = grpcTone(data)
   const wsStatus = websocketTone(data)
   const webrtcStatus = webrtcTone(data)
   const h2Status = http2Tone(data)
-  const clusterStatus = data.cluster.topology_available ? staleTone(data.agent_health.stale_total) : 'warn'
+  const clusterStatus = data.cluster.topology_available ? agentPoolTone(data) : 'warn'
   const hasAnyBadTransport = [sseStatus, grpcStatus, wsStatus, webrtcStatus, h2Status, clusterStatus].includes('bad')
   const clusterEyebrow = data.cluster.topology_available
     ? `${formatMetricValue(data.cluster.live_agents)} live`
@@ -406,6 +418,9 @@ export function TransportHealthPanel() {
               <${MetricRow} label="Coordinator" value=${data.sse.sessions_coordinator} />
               <${MetricRow} label="External Fanout" value=${data.sse.external_subscribers} />
               <${MetricRow} label="Queue" value=${data.sse.queue_max_depth} sub=${`max / avg ${formatFloat(data.sse.queue_avg_depth)}`} />
+              <${MetricRow} label="Relay Queue" value=${data.sse.relay_queue_depth} />
+              <${MetricRow} label="Relay Retries" value=${data.sse.relay_retry_total} sub=${`append ${data.sse.relay_retry_append} · broadcast ${data.sse.relay_retry_broadcast}`} />
+              <${MetricRow} label="Relay Drops" value=${data.sse.relay_drop_total} sub=${`queue ${data.sse.relay_drop_queue} · append ${data.sse.relay_drop_append} · broadcast ${data.sse.relay_drop_broadcast}`} />
               <${MetricRow} label="Broadcast Avg" value=${formatLatency(data.sse.broadcast_avg_seconds)} sub=${`${data.sse.broadcast_count} events`} />
             <//>
 
@@ -445,6 +460,7 @@ export function TransportHealthPanel() {
               <${MetricRow} label="활성 작업" value=${formatMetricValue(data.cluster.active_operations)} />
               <${MetricRow} label="부실 유닛" value=${formatMetricValue(data.cluster.stale_units)} />
               <${MetricRow} label="부실 에이전트" value=${data.agent_health.stale_total} />
+              <${MetricRow} label="Lifecycle Rejects" value=${data.agent_health.lifecycle_dispatch_rejections_total} />
             <//>
           </div>
         </div>

@@ -24,6 +24,14 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
       broadcast_count: 2,
       queue_avg_depth: 0,
       queue_max_depth: 1,
+      relay_queue_depth: 0,
+      relay_retry_total: 0,
+      relay_retry_append: 0,
+      relay_retry_broadcast: 0,
+      relay_drop_total: 0,
+      relay_drop_queue: 0,
+      relay_drop_append: 0,
+      relay_drop_broadcast: 0,
       hot_sessions: [],
     },
     grpc: {
@@ -87,6 +95,7 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
     },
     agent_health: {
       stale_total: 0,
+      lifecycle_dispatch_rejections_total: 0,
     },
     generated_at: '2026-04-02T00:00:00Z',
     ...overrides,
@@ -226,6 +235,59 @@ describe('TransportHealthPanel', () => {
     expect(container.textContent).toContain('live_metrics')
     expect(container.textContent).toContain('cache fresh')
     expect(container.textContent).toContain('last ok 2026-04-15T10:00:00Z')
+  })
+
+  it('renders relay health rows and lifecycle rejects when boundary failures are present', async () => {
+    const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(
+      sampleResponse({
+        summary: {
+          primary_path: 'streamable_http',
+          queue_pressure: 'watch',
+          recent_messages: null,
+          recent_messages_available: false,
+          recent_messages_source: 'metrics_only',
+          external_fanout_targets: 0,
+        },
+        sse: {
+          sessions_observer: 1,
+          sessions_coordinator: 0,
+          sessions_total: 1,
+          external_subscribers: 0,
+          broadcast_avg_seconds: 0.01,
+          broadcast_count: 2,
+          queue_avg_depth: 0,
+          queue_max_depth: 1,
+          relay_queue_depth: 3,
+          relay_retry_total: 4,
+          relay_retry_append: 1,
+          relay_retry_broadcast: 3,
+          relay_drop_total: 2,
+          relay_drop_queue: 1,
+          relay_drop_append: 1,
+          relay_drop_broadcast: 0,
+          hot_sessions: [],
+        },
+        agent_health: {
+          stale_total: 0,
+          lifecycle_dispatch_rejections_total: 5,
+        },
+      }),
+    )
+
+    const { TransportHealthPanel } = await loadComponentWithApi({
+      fetchTransportHealth,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${TransportHealthPanel} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('Relay Queue')
+    expect(container.textContent).toContain('Relay Retries')
+    expect(container.textContent).toContain('Relay Drops')
+    expect(container.textContent).toContain('Lifecycle Rejects')
+    expect(container.textContent).toContain('append 1 · broadcast 3')
+    expect(container.textContent).toContain('queue 1 · append 1 · broadcast 0')
   })
 
   it('debounces SSE-driven transport refreshes through FetchScheduler', async () => {

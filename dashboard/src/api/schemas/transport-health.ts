@@ -62,6 +62,14 @@ const SseOuterSchema = object({
   broadcast_count: fallback(number(), 0),
   queue_avg_depth: fallback(number(), 0),
   queue_max_depth: fallback(number(), 0),
+  relay_queue_depth: fallback(number(), 0),
+  relay_retry_total: fallback(number(), 0),
+  relay_retry_append: fallback(number(), 0),
+  relay_retry_broadcast: fallback(number(), 0),
+  relay_drop_total: fallback(number(), 0),
+  relay_drop_queue: fallback(number(), 0),
+  relay_drop_append: fallback(number(), 0),
+  relay_drop_broadcast: fallback(number(), 0),
   // Lenient per-entry on hot_sessions handled in parseSse below.
   hot_sessions: optional(unknown()),
 })
@@ -75,6 +83,14 @@ interface SseSection {
   broadcast_count: number
   queue_avg_depth: number
   queue_max_depth: number
+  relay_queue_depth: number
+  relay_retry_total: number
+  relay_retry_append: number
+  relay_retry_broadcast: number
+  relay_drop_total: number
+  relay_drop_queue: number
+  relay_drop_append: number
+  relay_drop_broadcast: number
   hot_sessions: HotSession[]
 }
 
@@ -146,6 +162,7 @@ const ClusterSchema = object({
 
 const AgentHealthSchema = object({
   stale_total: fallback(number(), 0),
+  lifecycle_dispatch_rejections_total: fallback(number(), 0),
 })
 
 // `projection_diagnostics` is only present when the backend explicitly
@@ -230,6 +247,14 @@ export function parseTransportHealthData(data: unknown): TransportHealthData {
       broadcast_count: outer.sse.broadcast_count,
       queue_avg_depth: outer.sse.queue_avg_depth,
       queue_max_depth: outer.sse.queue_max_depth,
+      relay_queue_depth: outer.sse.relay_queue_depth,
+      relay_retry_total: outer.sse.relay_retry_total,
+      relay_retry_append: outer.sse.relay_retry_append,
+      relay_retry_broadcast: outer.sse.relay_retry_broadcast,
+      relay_drop_total: outer.sse.relay_drop_total,
+      relay_drop_queue: outer.sse.relay_drop_queue,
+      relay_drop_append: outer.sse.relay_drop_append,
+      relay_drop_broadcast: outer.sse.relay_drop_broadcast,
       hot_sessions: parseSseHotSessions(outer.sse.hot_sessions),
     },
     grpc: outer.grpc,

@@ -16,7 +16,7 @@ export function KpiCard({ label, value, hint, tone, class: cx }: KpiCardProps) {
   return html`
     <div class="flex flex-col gap-1 p-3 rounded border border-[var(--card-border)] bg-[var(--white-3)] ${cx ?? ''}">
       <span class="text-3xs text-[var(--text-muted)] uppercase tracking-[0.06em] font-medium">${label}</span>
-      <span class="text-[20px] font-semibold tabular-nums leading-none ${tone ?? 'text-[var(--text-strong)]'}">${value}</span>
+      <span class="text-2xl font-semibold tabular-nums leading-none ${tone ?? 'text-[var(--text-strong)]'}">${value}</span>
       ${hint ? html`<span class="text-2xs text-[var(--text-dim)] mt-0.5">${hint}</span>` : null}
     </div>
   `

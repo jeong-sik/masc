@@ -248,7 +248,7 @@ function CharacterPlate({ name }: { name: string }) {
 
       <div class="flex flex-col gap-1.5 min-w-0">
         <div class="flex items-baseline gap-2 flex-wrap">
-          <h2 class="m-0 text-[20px] text-[var(--ff-gold)] flex items-center gap-1.5">
+          <h2 class="m-0 text-2xl text-[var(--ff-gold)] flex items-center gap-1.5">
             ${agentEmoji ? html`<span class="text-[1.4em]">${agentEmoji}</span>` : ''}
             ${displayName}
           </h2>

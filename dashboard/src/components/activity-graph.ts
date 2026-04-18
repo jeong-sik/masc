@@ -96,7 +96,7 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
     return html`
       <div class="rounded border border-[var(--card-border)] bg-[var(--card)] py-[15px] px-3.5">
         <div class="text-3xs text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">${label}</div>
-        <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums ${highlight ? 'text-[var(--ok)]' : ''}">${value}</div>
+        <div class="mt-1.5 text-[var(--text-strong)] text-3xl font-bold leading-none tabular-nums ${highlight ? 'text-[var(--ok)]' : ''}">${value}</div>
         ${series.length >= 2 ? html`<div class="mt-2"><${Sparkline} values=${series} color=${color} /></div>` : null}
       </div>
     `

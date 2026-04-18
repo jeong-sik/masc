@@ -48,6 +48,12 @@
   --radius-xs: 3px;
   --radius-card: 18px;
 
+  /* Font-size scale.
+     INTENTIONAL OVERRIDE: --font-size-sm = 13px (Tailwind v4 default is 14px)
+     and --font-size-md = 15px (Tailwind v4 has no built-in md; we add one).
+     The dashboard's dense operational UI runs one notch tighter than the
+     stock Tailwind scale — keep this in mind when copying components from
+     external Tailwind v4 docs/examples. */
   --font-size-4xs: 8px;
   --font-size-3xs: 10px;
   --font-size-2xs: 11px;
@@ -56,6 +62,9 @@
   --font-size-base: 14px;
   --font-size-md: 15px;
   --font-size-lg: 16px;
+  --font-size-xl: 18px;
+  --font-size-2xl: 20px;
+  --font-size-3xl: 30px;
 
   --color-text-dim: #a0a8b4;
   --color-text-slate: #b0bfd4;

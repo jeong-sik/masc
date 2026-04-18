@@ -128,7 +128,7 @@ export function App() {
                     </div>
                   `
                 : null}
-              <h1 class="min-w-0 text-[18px] font-semibold tracking-[-0.02em] text-[var(--text-strong)] leading-none [overflow-wrap:anywhere]">
+              <h1 class="min-w-0 text-xl font-semibold tracking-[-0.02em] text-[var(--text-strong)] leading-none [overflow-wrap:anywhere]">
                 ${currentSection?.label ?? currentView?.label ?? 'Multi-Agent Namespace Console'}
               </h1>
             </div>

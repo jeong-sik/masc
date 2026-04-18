@@ -42,7 +42,7 @@ function PlanningStat({
   return html`
     <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
       <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-text-muted">${label}</div>
-      <div class="mt-2 text-[30px] font-bold leading-none tabular-nums ${toneClass}">${value}</div>
+      <div class="mt-2 text-3xl font-bold leading-none tabular-nums ${toneClass}">${value}</div>
     </div>
   `
 }

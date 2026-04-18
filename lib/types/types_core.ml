@@ -171,33 +171,63 @@ let iso8601_of_unix_seconds ts =
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
-let normalize_agent_last_seen = function
+let normalize_agent_last_seen ~joined_at = function
   | `String _ as value -> Some value
   | `Int seconds ->
       Some (`String (iso8601_of_unix_seconds (float_of_int seconds)))
   | `Float seconds ->
       Some (`String (iso8601_of_unix_seconds seconds))
+  | `Null -> joined_at  (* bootstrap from joined_at — see #7947 *)
   | _ -> None
+
+let short_json_repr = function
+  | `Null -> "null"
+  | `Bool b -> Printf.sprintf "%b" b
+  | `Int i -> string_of_int i
+  | `Float f -> Printf.sprintf "%g" f
+  | `String s ->
+      if String.length s <= 40 then Printf.sprintf "\"%s\"" s
+      else Printf.sprintf "\"%s...\"" (String.sub s 0 37)
+  | `Assoc _ -> "<object>"
+  | `List _ -> "<array>"
+  | `Intlit s -> s
+  | `Tuple _ -> "<tuple>"
+  | `Variant _ -> "<variant>"
 
 let agent_of_yojson json =
   match agent_of_yojson_generated json with
   | Ok _ as ok -> ok
   | Error original_error -> (
       match json with
-      | `Assoc fields -> (
-          match
-            List.assoc_opt "last_seen" fields
-            |> function
-            | Some value -> normalize_agent_last_seen value
-            | None -> None
-          with
+      | `Assoc fields ->
+          let joined_at_value =
+            match List.assoc_opt "joined_at" fields with
+            | Some (`String _ as v) -> Some v
+            | _ -> None
+          in
+          let last_seen_raw = List.assoc_opt "last_seen" fields in
+          let annotated_error () =
+            let last_seen_repr =
+              match last_seen_raw with
+              | Some v -> short_json_repr v
+              | None -> "<missing>"
+            in
+            Printf.sprintf "%s (last_seen=%s)" original_error last_seen_repr
+          in
+          (match
+             match last_seen_raw with
+             | Some value -> normalize_agent_last_seen ~joined_at:joined_at_value value
+             | None -> joined_at_value  (* missing last_seen → bootstrap *)
+           with
           | Some normalized_last_seen ->
               let normalized_fields =
                 ("last_seen", normalized_last_seen)
                 :: List.remove_assoc "last_seen" fields
               in
-              agent_of_yojson_generated (`Assoc normalized_fields)
-          | None -> Error original_error)
+              (match agent_of_yojson_generated (`Assoc normalized_fields) with
+               | Ok _ as ok -> ok
+               | Error _ -> Error (annotated_error ()))
+          | None -> Error (annotated_error ()))
       | _ -> Error original_error)
 
 (* ============================================ *)

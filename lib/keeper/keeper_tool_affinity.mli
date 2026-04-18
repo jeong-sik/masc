@@ -44,10 +44,13 @@ val pre_populate_from_history :
 
 val configured_max_k : ?getenv:(string -> string option) -> unit -> int
 (** Read max_k from [MASC_KEEPER_TOOL_AFFINITY_K] env, clamped to [0, 20].
-    Default: 5.  Set to 0 to disable affinity.
+    Default: 5.  Set to 0 to disable affinity.  Empty or whitespace-only
+    values are treated as unset (the codebase convention for clearing an
+    env var is [Unix.putenv name ""]).
     Optional [?getenv] parameter allows mock/test-specific environment lookup. *)
 
 val configured_lookback_days : ?getenv:(string -> string option) -> unit -> int
-(** Read lookback_days from [MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS] env, clamped to [1, 30].
-    Default: 7.
+(** Read lookback_days from [MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS] env,
+    clamped to [1, 30].  Default: 7.  Empty or whitespace-only values are
+    treated as unset.
     Optional [?getenv] parameter allows mock/test-specific environment lookup. *)

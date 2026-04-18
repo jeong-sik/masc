@@ -24,23 +24,29 @@ let recency_lambda = 0.01
    exception-free [int_of_string_opt], so these readers no longer need
    a hand-rolled [try ... with Eio.Cancel.Cancelled -> raise | _ ->
    default] block.  The clamp runs after parsing, so a malformed env
-   value returns [default] unmodified. *)
+   value returns [default] unmodified.
+
+   An empty or whitespace-only value is treated as "unset" because
+   OCaml's stdlib lacks a portable [Unix.unsetenv] prior to 4.12 and
+   the codebase convention is [Unix.putenv name ""] to clear an env
+   var.  Without this guard, [Some ""] would be distinguishable from
+   [None] at the reader level even though the intent is identical. *)
 let configured_max_k ?(getenv = Sys.getenv_opt) () =
   match getenv "MASC_KEEPER_TOOL_AFFINITY_K" with
-  | Some s ->
+  | Some s when String.trim s <> "" ->
     max 0
       (min 20
          (Safe_ops.int_of_string_with_default ~default:default_max_k s))
-  | None -> default_max_k
+  | Some _ | None -> default_max_k
 
 let configured_lookback_days ?(getenv = Sys.getenv_opt) () =
   match getenv "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" with
-  | Some s ->
+  | Some s when String.trim s <> "" ->
     max 1
       (min 30
          (Safe_ops.int_of_string_with_default
             ~default:default_lookback_days s))
-  | None -> default_lookback_days
+  | Some _ | None -> default_lookback_days
 
 (* ================================================================ *)
 (* Types                                                             *)

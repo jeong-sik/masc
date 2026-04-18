@@ -696,7 +696,31 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                  name
                  (if paused then "pause" else "resume")
                  err)
-      | Ok None | Error _ -> ()
+      (* Issue #8391 HIGH #1: split [Ok None] (meta vanished) from
+         [Error _] (IO/parse failure) so silent failures become visible.
+         The boot HTTP contract is unchanged — auto-resume cleanup is a
+         best-effort side effect of [boot], not the primary action. *)
+      | Ok None ->
+          Log.Keeper.warn
+            "keeper %s %s: meta missing — skipping paused-state persist"
+            name
+            (if paused then "pause" else "resume");
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_paused_state_persist_errors
+            ~labels:[("phase", "boot_resume_persist");
+                     ("reason", "meta_missing")]
+            ()
+      | Error err ->
+          Log.Keeper.error
+            "keeper %s %s: read_meta failed: %s"
+            name
+            (if paused then "pause" else "resume")
+            err;
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_paused_state_persist_errors
+            ~labels:[("phase", "boot_resume_persist");
+                     ("reason", "read_meta_error")]
+            ()
     in
     let resume_booted_keeper_if_needed () =
       match Keeper_types.read_meta config name with
@@ -711,9 +735,29 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                Log.Keeper.warn
                  "keeper boot: agent_name not found for paused keeper %s"
                  name)
-      | Ok (Some _)
-      | Ok None
-      | Error _ -> ()
+      | Ok (Some _) -> ()
+      (* Issue #8391 HIGH #1: split [Ok None] from [Error _] — boot itself
+         already succeeded via Tool_keeper.dispatch, so we don't change the
+         HTTP status. We make the failure observable instead. *)
+      | Ok None ->
+          Log.Keeper.warn
+            "keeper %s boot: meta missing — skipping auto-resume check"
+            name;
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_paused_state_persist_errors
+            ~labels:[("phase", "boot_resume_check");
+                     ("reason", "meta_missing")]
+            ()
+      | Error err ->
+          Log.Keeper.error
+            "keeper %s boot: read_meta failed during auto-resume check: %s"
+            name
+            err;
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_paused_state_persist_errors
+            ~labels:[("phase", "boot_resume_check");
+                     ("reason", "read_meta_error")]
+            ()
     in
     let keeper_ctx : _ Tool_keeper.context =
       {
@@ -815,8 +859,13 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
           reqd
     | Ok action_str ->
         let config = state.Mcp_server.room_config in
+        (* Issue #8391 HIGH #1: split [Ok None] (meta vanished) from [Error _]
+           (IO/parse failure). For pause/resume the operator expects state to
+           change; silent 200 hides the failure. For wakeup we preserve the
+           prior best-effort semantics (wakeup does not require meta). *)
+        let read_result = Keeper_types.read_meta config name in
         let meta_opt =
-          match Keeper_types.read_meta config name with
+          match read_result with
           | Ok (Some meta) -> Some meta
           | Ok None | Error _ -> None
         in
@@ -840,29 +889,83 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                      err)
           | Some _ | None -> ()
         in
-        (match action_str with
-         | "pause" -> persist_paused_state true
-         | "resume" -> persist_paused_state false
-         | "wakeup"
-         | _ -> ());
-        let resolved_agent_name =
-          match Keeper_registry.find_by_name name with
-          | Some entry -> entry.meta.agent_name
-          | None -> (
-              match meta_opt with
-              | Some meta -> meta.agent_name
-              | None -> Keeper_types.keeper_agent_name name)
+        let proceed () =
+          (match action_str with
+           | "pause" -> persist_paused_state true
+           | "resume" -> persist_paused_state false
+           | "wakeup"
+           | _ -> ());
+          let resolved_agent_name =
+            match Keeper_registry.find_by_name name with
+            | Some entry -> entry.meta.agent_name
+            | None -> (
+                match meta_opt with
+                | Some meta -> meta.agent_name
+                | None -> Keeper_types.keeper_agent_name name)
+          in
+          Keeper_keepalive.process_directive
+            ~agent_name:resolved_agent_name action_str;
+          (match action_str with
+           | "pause" -> refresh_keeper_execution_surfaces ~name "paused"
+           | "resume" -> refresh_keeper_execution_surfaces ~name "resumed"
+           | "wakeup" -> invalidate_keeper_execution_surfaces ()
+           | _ -> invalidate_keeper_execution_surfaces ());
+          Http.Response.json ~compress:true ~request:req
+            (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s"}|}
+               (String.escaped action_str) (String.escaped name))
+            reqd
         in
-        Keeper_keepalive.process_directive ~agent_name:resolved_agent_name action_str;
-        (match action_str with
-         | "pause" -> refresh_keeper_execution_surfaces ~name "paused"
-         | "resume" -> refresh_keeper_execution_surfaces ~name "resumed"
-         | "wakeup" -> invalidate_keeper_execution_surfaces ()
-         | _ -> invalidate_keeper_execution_surfaces ());
-        Http.Response.json ~compress:true ~request:req
-          (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s"}|}
-             (String.escaped action_str) (String.escaped name))
-          reqd
+        let needs_meta_for_state_transition =
+          match action_str with
+          | "pause" | "resume" -> true
+          | _ -> false
+        in
+        (match read_result, needs_meta_for_state_transition with
+         | Error err, true ->
+             Log.Keeper.error
+               "directive %s: read_meta failed for %s: %s"
+               action_str
+               name
+               err;
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_paused_state_persist_errors
+               ~labels:[("phase", "directive");
+                        ("reason", "read_meta_error")]
+               ();
+             Http.Response.json ~status:`Internal_server_error ~request:req
+               (Printf.sprintf
+                  {|{"ok":false,"action":"%s","name":"%s","error":"read_meta failed: %s"}|}
+                  (String.escaped action_str)
+                  (String.escaped name)
+                  (String.escaped err))
+               reqd
+         | Ok None, true ->
+             Log.Keeper.warn
+               "directive %s: keeper meta missing for %s — refusing silent no-op"
+               action_str
+               name;
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_paused_state_persist_errors
+               ~labels:[("phase", "directive");
+                        ("reason", "meta_missing")]
+               ();
+             Http.Response.json ~status:`Not_found ~request:req
+               (Printf.sprintf
+                  {|{"ok":false,"action":"%s","name":"%s","error":"keeper meta not found"}|}
+                  (String.escaped action_str)
+                  (String.escaped name))
+               reqd
+         | Error err, false ->
+             (* Wakeup does not require meta; log but proceed. *)
+             Log.Keeper.warn
+               "directive %s: read_meta failed for %s (best-effort proceed): %s"
+               action_str
+               name
+               err;
+             proceed ()
+         | Ok None, false
+         | Ok (Some _), _ ->
+             proceed ())
 
 (** Keeper GET sub-routes handler: /config, /chat/history, /trajectory.
     Called from prefix_get "/api/v1/keepers/" in the main routing file. *)

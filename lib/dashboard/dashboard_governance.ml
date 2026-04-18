@@ -24,18 +24,32 @@ let judge_json_of_runtime (runtime : Dashboard_governance_judge.runtime_snapshot
       ("last_error", string_option_json runtime.last_error);
     ]
 
-let summary_json_of_runtime (runtime : Dashboard_governance_judge.runtime_snapshot) =
+let summary_json_of_runtime ?base_path
+    (runtime : Dashboard_governance_judge.runtime_snapshot) =
   let pending_approval_count = Keeper_approval_queue.pending_count () in
+  let pending_ruling, oldest_json =
+    match base_path with
+    | None -> 0, `Null
+    | Some base_path ->
+      let n =
+        Governance_cases_snapshot.pending_ruling_count ~base_path
+      in
+      let oldest =
+        Governance_cases_snapshot.oldest_pending_ruling_age_s ~base_path
+          ~now_ts:(Unix.gettimeofday ())
+      in
+      n, Option.fold ~none:`Null ~some:(fun v -> `Float v) oldest
+  in
   `Assoc
     [
-      ("cases_open", `Int 0);
-      ("pending_ruling", `Int 0);
+      ("cases_open", `Int pending_ruling);
+      ("pending_ruling", `Int pending_ruling);
       ("ready_auto_execute", `Int 0);
       ("needs_human_gate", `Int pending_approval_count);
       ("executed", `Int 0);
       ("blocked", `Int 0);
       ("ready_to_execute", `Int 0);
-      ("oldest_open_case_age_s", `Null);
+      ("oldest_open_case_age_s", oldest_json);
       ("last_activity_age_s", `Null);
       ("judge_online", `Bool runtime.judge_online);
       ("judge_last_seen_at", timestamp_option_json runtime.generated_at runtime.generated_at_unix);
@@ -56,7 +70,7 @@ let dashboard_json ~base_path ~limit ~offset:_ ~status_filter:_ =
   `Assoc
     [
       ("generated_at", `String (Types.now_iso ()));
-      ("summary", summary_json_of_runtime runtime);
+      ("summary", summary_json_of_runtime ~base_path runtime);
       ("items", `List []);
       ("activity", `List []);
       ("judge", judge_json_of_runtime runtime);

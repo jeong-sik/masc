@@ -9,17 +9,11 @@
 
 import { get } from './core'
 
-export interface ToolBlobResponse {
+interface ToolBlobResponse {
   sha256: string
   bytes: number
   mime: string
   content: string
-}
-
-export interface ToolBlobError {
-  error: string
-  reason?: string
-  sha256?: string
 }
 
 /**

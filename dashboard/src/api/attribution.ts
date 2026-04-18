@@ -27,7 +27,7 @@ export interface AttributionEvent {
   recorded_at: number
 }
 
-export interface AttributionRecentResponse {
+interface AttributionRecentResponse {
   events: AttributionEvent[]
   count: number
 }

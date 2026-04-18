@@ -3,7 +3,7 @@
 
 import { statusLabel } from './status-label.js'
 
-export interface UnifiedStatusResult {
+interface UnifiedStatusResult {
   canonical: string
   label: string
   description: string

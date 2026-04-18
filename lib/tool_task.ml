@@ -153,6 +153,38 @@ let parse_task_contract args =
             (Printf.sprintf "Invalid contract payload: %s" error))
   | _ -> Error "contract must be an object when provided"
 
+(* Synthesize a summary from sibling [notes] / [reason] transition args
+   when [handoff_context.summary] is empty. Keeper LLMs frequently send
+   a non-empty [reason] or [notes] but forget the nested summary field —
+   rejecting the call in that case burned 76/132 masc_transition calls
+   on 2026-04-17/18 (see memory/handoff-2026-04-18-masc-tool-failure-
+   investigation.md). Prefer [notes] when present (it's the canonical
+   done-note) then fall back to [reason] (release blocker note). Truncate
+   to keep the synthesized summary single-line. *)
+let synthesize_summary_from_siblings args =
+  let pick key =
+    match args |> member key with
+    | `String s ->
+        let trimmed = String.trim s in
+        if trimmed = "" then None else Some trimmed
+    | _ -> None
+  in
+  let first_line s =
+    match String.index_opt s '\n' with
+    | Some i -> String.sub s 0 i
+    | None -> s
+  in
+  let truncate ~max_len s =
+    if String.length s <= max_len then s
+    else String.sub s 0 max_len ^ "…"
+  in
+  match pick "notes" with
+  | Some s -> Some (truncate ~max_len:240 (first_line s))
+  | None ->
+      match pick "reason" with
+      | Some s -> Some (truncate ~max_len:240 (first_line s))
+      | None -> None
+
 let parse_handoff_context ~(agent_name : string) args =
   match args |> member "handoff_context" with
   | `Null -> Ok None
@@ -163,11 +195,18 @@ let parse_handoff_context ~(agent_name : string) args =
             (Printf.sprintf "Invalid handoff_context payload: %s" error)
       | Ok handoff_context ->
           let summary = String.trim handoff_context.summary in
+          let summary =
+            if summary = "" then
+              Option.value ~default:"" (synthesize_summary_from_siblings args)
+            else summary
+          in
           if summary = "" then
             Error
               "handoff_context.summary is required (non-empty string). \
                Example: {\"summary\": \"tests green, PR #123 pending review\", \
-               \"next_step\": \"wait for CI\", \"evidence_refs\": [\"PR#123\"]}"
+               \"next_step\": \"wait for CI\", \"evidence_refs\": [\"PR#123\"]}. \
+               Alternatively pass a non-empty top-level 'notes' or 'reason' \
+               and it will be synthesized into summary automatically."
           else
             Ok
               (Some

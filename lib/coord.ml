@@ -194,18 +194,17 @@ let () = Atomic.set Coord_hooks.hebbian_on_task_done_fn (fun config ~assignee ~a
         (try Hebbian_eio.strengthen config ~from_agent:assignee ~to_agent:peer ()
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Coord.warn "hebbian strengthen failed: %s" (Printexc.to_string exn));
-        (try
-           (Atomic.get Coord_hooks.activity_emit_fn) config
-             ~actor:Coord_hooks.{ kind = "agent"; id = assignee }
-             ~subject:Coord_hooks.{ kind = "agent"; id = peer }
-             ~kind:"hebbian.strengthen"
-             ~payload:(`Assoc [
-               ("from_agent", `String assignee);
-               ("to_agent", `String peer);
-             ])
-             ~tags:[ "hebbian"; "strengthen"; "memory" ]
-             ()
-         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+        Safe_ops.protect ~default:() (fun () ->
+          (Atomic.get Coord_hooks.activity_emit_fn) config
+            ~actor:Coord_hooks.{ kind = "agent"; id = assignee }
+            ~subject:Coord_hooks.{ kind = "agent"; id = peer }
+            ~kind:"hebbian.strengthen"
+            ~payload:(`Assoc [
+              ("from_agent", `String assignee);
+              ("to_agent", `String peer);
+            ])
+            ~tags:[ "hebbian"; "strengthen"; "memory" ]
+            ())
       end
     ) active_agents)
 
@@ -216,18 +215,17 @@ let () = Atomic.set Coord_hooks.hebbian_on_task_cancelled_fn (fun config ~agent_
         (try Hebbian_eio.weaken config ~from_agent:agent_name ~to_agent:peer ()
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Coord.warn "hebbian weaken failed: %s" (Printexc.to_string exn));
-        (try
-           (Atomic.get Coord_hooks.activity_emit_fn) config
-             ~actor:Coord_hooks.{ kind = "agent"; id = agent_name }
-             ~subject:Coord_hooks.{ kind = "agent"; id = peer }
-             ~kind:"hebbian.weaken"
-             ~payload:(`Assoc [
-               ("from_agent", `String agent_name);
-               ("to_agent", `String peer);
-             ])
-             ~tags:[ "hebbian"; "weaken"; "memory" ]
-             ()
-         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+        Safe_ops.protect ~default:() (fun () ->
+          (Atomic.get Coord_hooks.activity_emit_fn) config
+            ~actor:Coord_hooks.{ kind = "agent"; id = agent_name }
+            ~subject:Coord_hooks.{ kind = "agent"; id = peer }
+            ~kind:"hebbian.weaken"
+            ~payload:(`Assoc [
+              ("from_agent", `String agent_name);
+              ("to_agent", `String peer);
+            ])
+            ~tags:[ "hebbian"; "weaken"; "memory" ]
+            ())
       end
     ) active_agents)
 

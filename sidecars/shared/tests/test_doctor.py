@@ -15,6 +15,7 @@ from gate_shared.doctor import (
     Check,
     Doctor,
     Severity,
+    check_dependencies_installed,
     exit_code_for,
     render_json,
     render_pretty,
@@ -55,6 +56,22 @@ def test_exit_code_priority() -> None:
     assert exit_code_for(ok) == 0
     assert exit_code_for(warn) == 1
     assert exit_code_for(err) == 2
+
+
+@pytest.mark.asyncio
+async def test_check_dependencies_installed_reports_missing() -> None:
+    fn = check_dependencies_installed(["httpx", "nonexistent_pkg_xyz_xyz"])
+    result = await fn()
+    assert result.severity == Severity.error
+    assert "nonexistent_pkg_xyz_xyz" in result.detail
+    assert result.hint is not None
+
+
+@pytest.mark.asyncio
+async def test_check_dependencies_installed_all_present() -> None:
+    fn = check_dependencies_installed(["httpx"])
+    result = await fn()
+    assert result.severity == Severity.ok
 
 
 def test_severity_needs_action() -> None:

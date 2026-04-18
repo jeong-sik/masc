@@ -257,7 +257,12 @@ let block_reason_to_string = function
      Do NOT use: cmd='cd x && dune build' or cmd='rg foo | wc -l'. \
      To write files, use keeper_fs_edit."
   | Injection ->
-    "Shell injection syntax (;, &&, standalone &, `, $) not allowed."
+    "Shell injection syntax (;, &&, standalone &, `, $) not allowed. \
+     Run ONE command per call. Example: cmd='dune build'. \
+     Do NOT use: cmd='cd x && dune build' or cmd='cmd1 ; cmd2'. \
+     keeper_bash runs from the playground root — pass full relative \
+     paths in the command itself (cmd='rg pattern lib/keeper/file.ml'). \
+     For file writes, use keeper_fs_edit."
   | Process_substitution ->
     "Process substitution (<(...) or >(...)) is not allowed."
   | Unsafe_redirect ->

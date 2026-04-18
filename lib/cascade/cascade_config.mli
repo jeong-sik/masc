@@ -72,9 +72,20 @@ val parse_weighted_entry :
   Cascade_config_loader.weighted_entry ->
   Llm_provider.Provider_config.t option
 
-(** Parse a list of weighted entries, discarding unavailable providers.
-    Preserves input order. Equivalent to
-    [List.filter_map parse_weighted_entry].
+(** Parse a list of weighted entries, dropping ones that cannot produce a
+    provider config. Preserves input order.
+
+    Drops are categorised (unregistered provider scheme, unavailable
+    provider, invalid syntax) and logged once per call through
+    {!Log.Misc}: unregistered schemes and invalid syntax are promoted to
+    ERROR because they usually indicate cascade.json drift or a stale
+    binary linked against an older provider registry. Unavailable
+    schemes (missing API key, missing CLI binary) log at WARN. If every
+    entry is filtered out the call escalates to an additional ERROR so
+    zero-provider cascades surface at load time rather than silently
+    producing no responses.
+
+    [cascade_name] is included in diagnostics when supplied.
 
     @since 0.150.0 *)
 val parse_weighted_entries :
@@ -82,6 +93,7 @@ val parse_weighted_entries :
   ?max_tokens:int ->
   ?system_prompt:string ->
   ?api_key_env_overrides:(string * string) list ->
+  ?cascade_name:string ->
   Cascade_config_loader.weighted_entry list ->
   Llm_provider.Provider_config.t list
 

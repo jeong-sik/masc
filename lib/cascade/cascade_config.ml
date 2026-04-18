@@ -206,17 +206,99 @@ let parse_weighted_entry
     ?supports_tool_choice_override:entry.supports_tool_choice
     entry.model
 
-(** Parse a list of weighted entries, discarding unavailable providers. *)
+(** Categorised diagnostic for a failed weighted-entry parse. *)
+type weighted_entry_drop =
+  | Drop_unregistered_scheme of { model : string; scheme : string }
+  | Drop_unavailable_scheme of { model : string; scheme : string }
+  | Drop_invalid_syntax of string
+
+(** Parse a weighted entry, distinguishing why it was rejected (unregistered
+    scheme, unavailable scheme, invalid syntax). Used by
+    {!parse_weighted_entries} to produce actionable load-time diagnostics
+    instead of silently discarding entries via [List.filter_map]. *)
+let parse_weighted_entry_diag
+    ?(temperature = Llm_provider.Constants.Inference.default_temperature)
+    ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
+    ?system_prompt ?(api_key_env_overrides = [])
+    (entry : Cascade_config_loader.weighted_entry)
+  : (Llm_provider.Provider_config.t, weighted_entry_drop) result =
+  let raw = String.trim entry.model in
+  match split_provider_model raw with
+  | None -> Error (Drop_invalid_syntax raw)
+  | Some ("custom", model_id) ->
+    (match make_custom_config ~temperature ~max_tokens ?system_prompt
+             ?supports_tool_choice_override:entry.supports_tool_choice model_id with
+     | Some c -> Ok c
+     | None -> Error (Drop_invalid_syntax raw))
+  | Some (provider_name, model_id) ->
+    match Llm_provider.Provider_registry.find default_registry provider_name with
+    | None ->
+      Error (Drop_unregistered_scheme { model = raw; scheme = provider_name })
+    | Some reg_entry when not (reg_entry.is_available ()) ->
+      Error (Drop_unavailable_scheme { model = raw; scheme = provider_name })
+    | Some reg_entry ->
+      Ok (make_registry_config ~temperature ~max_tokens ?system_prompt
+            ~api_key_env_overrides
+            ?supports_tool_choice_override:entry.supports_tool_choice
+            ~provider_name ~model_id reg_entry)
+
+(** Parse a list of weighted entries, dropping ones that cannot produce a
+    provider config. Load-time drops are logged once per call with
+    categorised reasons so upstream drift (e.g. a cascade.json entry
+    referencing an unregistered provider scheme due to library/binary
+    version skew) surfaces as ERROR rather than silently filtering away.
+
+    If [cascade_name] is supplied it appears in the log message. *)
 let parse_weighted_entries
     ?(temperature = Llm_provider.Constants.Inference.default_temperature)
     ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
     ?system_prompt ?(api_key_env_overrides = [])
+    ?(cascade_name = "")
     (entries : Cascade_config_loader.weighted_entry list)
   : Llm_provider.Provider_config.t list =
-  List.filter_map
-    (parse_weighted_entry ~temperature ~max_tokens ?system_prompt
-       ~api_key_env_overrides)
-    entries
+  let parsed, unregistered, unavailable, invalid =
+    List.fold_left
+      (fun (acc, unr, unv, inv) entry ->
+         match parse_weighted_entry_diag ~temperature ~max_tokens
+                 ?system_prompt ~api_key_env_overrides entry with
+         | Ok c -> (c :: acc, unr, unv, inv)
+         | Error (Drop_unregistered_scheme { model; scheme }) ->
+           (acc, (model, scheme) :: unr, unv, inv)
+         | Error (Drop_unavailable_scheme { model; scheme }) ->
+           (acc, unr, (model, scheme) :: unv, inv)
+         | Error (Drop_invalid_syntax s) -> (acc, unr, unv, s :: inv))
+      ([], [], [], [])
+      entries
+  in
+  let label =
+    if cascade_name = "" then "cascade" else Printf.sprintf "cascade %S" cascade_name
+  in
+  let render_drops drops =
+    String.concat ", "
+      (List.map (fun (model, scheme) ->
+         Printf.sprintf "%s (scheme=%s)" model scheme) drops)
+  in
+  (if unregistered <> [] then
+     Log.Misc.error
+       "%s: dropped %d entry/entries referencing unregistered provider \
+        scheme(s): [%s]. Likely library/binary drift or cascade.json typo \
+        — rebuild or fix the config entry."
+       label (List.length unregistered) (render_drops unregistered));
+  (if invalid <> [] then
+     Log.Misc.error
+       "%s: dropped %d invalid-syntax entry/entries: [%s]"
+       label (List.length invalid) (String.concat ", " invalid));
+  (if unavailable <> [] then
+     Log.Misc.warn
+       "%s: skipped %d unavailable entry/entries (missing credential or \
+        CLI binary): [%s]"
+       label (List.length unavailable) (render_drops unavailable));
+  (if parsed = [] && entries <> [] then
+     Log.Misc.error
+       "%s: all %d configured entries filtered out — cascade will \
+        produce no responses until at least one entry resolves"
+       label (List.length entries));
+  List.rev parsed
 
 let parse_model_string_exn
     ?(temperature = Llm_provider.Constants.Inference.default_temperature)

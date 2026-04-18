@@ -338,21 +338,30 @@ let compute_judgments
   | Ok result -> (
       let response = result.Oas_worker.response in
       try
-        let parsed = Yojson.Safe.from_string (Oas_response.text_of_response response) in
-        let generated_at = now_iso () in
-        let expires_at = iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
-        let items =
-          match parsed |> member "items" with
-          | `List rows -> rows
-          | _ -> []
-        in
-        let judgments =
-          items
-          |> List.filter_map
-               (parse_item_judgment ~generated_at ~expires_at
-                  ~model_used:response.model)
-        in
-        Ok (response.model, generated_at, expires_at, judgments)
+        (* LLMs frequently wrap JSON in ```json … ``` markdown fences despite
+           explicit prompt instructions. Lenient_json strips fences, repairs
+           trailing commas, unwraps double-stringified JSON, and falls back
+           to {raw: string} only after all recovery transforms fail. *)
+        let raw_text = Oas_response.text_of_response response in
+        let parsed = Llm_provider.Lenient_json.parse raw_text in
+        match parsed with
+        | `Assoc [("raw", `String _)] ->
+            Error "Governance judge returned unparseable response (Lenient_json fallback hit)"
+        | _ ->
+            let generated_at = now_iso () in
+            let expires_at = iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
+            let items =
+              match parsed |> member "items" with
+              | `List rows -> rows
+              | _ -> []
+            in
+            let judgments =
+              items
+              |> List.filter_map
+                   (parse_item_judgment ~generated_at ~expires_at
+                      ~model_used:response.model)
+            in
+            Ok (response.model, generated_at, expires_at, judgments)
       with
       | Yojson.Json_error msg ->
           Error (Printf.sprintf "Governance judge returned invalid JSON: %s" msg)

@@ -40,6 +40,33 @@ let test_mkdir_p_does_not_shell_inject () =
   check bool "no shell side-effect file created" false (Sys.file_exists pwned);
   check bool "dangerous path exists" true (Sys.file_exists dangerous && Sys.is_directory dangerous)
 
+let test_save_file_atomic_leaves_no_tmp_on_success () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir @@ fun base ->
+  let target = Filename.concat base "out.json" in
+  (match Fs_compat.save_file_atomic target {|{"ok":true}|} with
+   | Ok () -> ()
+   | Error msg -> fail msg);
+  check bool "target exists" true (Sys.file_exists target);
+  check string "content matches" {|{"ok":true}|} (Fs_compat.load_file target);
+  let leftover_tmps =
+    Sys.readdir base
+    |> Array.to_list
+    |> List.filter (fun n ->
+        String.length n >= 8 && String.sub n 0 8 = ".atomic_")
+  in
+  check (list string) "no leftover .atomic_ tmp files" [] leftover_tmps
+
+let test_save_file_atomic_overwrites_existing () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir @@ fun base ->
+  let target = Filename.concat base "out.json" in
+  Fs_compat.save_file target "old";
+  (match Fs_compat.save_file_atomic target "new" with
+   | Ok () -> ()
+   | Error msg -> fail msg);
+  check string "overwrite succeeded" "new" (Fs_compat.load_file target)
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -49,6 +76,14 @@ let () =
     , [
         test_case "creates nested dirs" `Quick test_mkdir_p_creates_nested_dirs;
         test_case "no shell injection" `Quick test_mkdir_p_does_not_shell_inject;
+      ]
+    );
+    ( "save_file_atomic"
+    , [
+        test_case "leaves no .atomic_ tmp on success" `Quick
+          test_save_file_atomic_leaves_no_tmp_on_success;
+        test_case "overwrites existing target" `Quick
+          test_save_file_atomic_overwrites_existing;
       ]
     );
   ]

@@ -9,13 +9,22 @@
 
 (* Fail-closed by types: [~assignee] is passed directly by the caller,
    which already destructures [AwaitingVerification { assignee; _ }]. Removes
-   the prior "unknown" fallback that violated Silent Failure 금지. Issue #7547. *)
+   the prior "unknown" fallback that violated Silent Failure 금지. Issue #7547.
+
+   Contract source rules (must stay aligned with [task_contract] in
+   types_core.ml):
+   - [criteria]: the operator-facing "must be true" statements →
+     [task.contract.completion_contract] wrapped in [Verification.Custom].
+   - [evidence_refs]: the artefact list the verifier expects to see →
+     [task.contract.verify_gate_evidence], passed in by the caller at
+     [tool_task.ml] so this function does not reach into task.contract
+     twice for different fields. *)
 let on_submit_for_verification ~(config : Coord.config)
     ~(task : Types.task) ~assignee ~verification_id ~evidence_refs =
   let base_path = config.Coord.base_path in
   let criteria = List.map (fun s -> Verification.Custom s)
     (match task.contract with
-     | Some c -> c.verify_gate_evidence
+     | Some c -> c.completion_contract
      | None -> []) in
   let _req =
     Verification.create_request ~base_path ~task_id:task.id ~request_id:verification_id

@@ -344,10 +344,22 @@ let submit_verdict ~base_path ~req_id ~verifier ~verdict =
       match validate_cross_agent ~worker:req.worker ~verifier with
       | Error e -> Error e
       | Ok () ->
-          let updated = { req with status = Completed verdict } in
+          (* Persist the verifier into the record, not just validate it.
+             Before this fix callers that skipped [assign_verifier] left
+             [req.verifier = None] forever, which surfaced as "approved
+             without approver" in the dashboard projection. *)
+          let updated =
+            { req with status = Completed verdict; verifier = Some verifier }
+          in
           match save_request base_path updated with
           | Ok _ -> Ok updated
           | Error e -> Error e
+
+(* Sentinel verifier recorded when auto_verify transitions a request to
+   Completed without a human/LLM judge. Keeps approved_by non-null in the
+   dashboard projection so operators can distinguish rule-based passes
+   from peer-agent verdicts ("operator:*") and peer keepers (bare names). *)
+let auto_verifier_sentinel = "auto"
 
 let auto_verify ~base_path ~req_id =
   match load_request base_path req_id with
@@ -358,7 +370,12 @@ let auto_verify ~base_path ~req_id =
         Error "Cannot auto-verify: custom criteria require agent judgment"
       else
         let verdict = evaluate_all req.output req.criteria in
-        let updated = { req with status = Completed verdict } in
+        let verifier =
+          match req.verifier with
+          | Some _ as v -> v
+          | None -> Some auto_verifier_sentinel
+        in
+        let updated = { req with status = Completed verdict; verifier } in
         match save_request base_path updated with
         | Ok _ -> Ok updated
         | Error e -> Error e

@@ -1824,6 +1824,7 @@ export type VerificationRequestVerdict = 'pass' | 'fail' | 'partial' | null
 export interface VerificationRequest {
   request_id: string
   task_id: string
+  task_title: string
   keeper: string | null
   status: VerificationRequestStatus
   created_at: string

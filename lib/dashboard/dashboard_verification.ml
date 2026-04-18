@@ -1,7 +1,8 @@
 (** Dashboard projection for verification requests.
 
-    Reads [.masc/verifications/*.json] via {!Verification.list_requests} and
-    emits the Mission detail table row structure. No mutation, no network. *)
+    Reads [<base_path>/verifications/*.json] via {!Verification.list_requests}
+    and emits the Mission detail table row structure. No mutation, no
+    network. *)
 
 module V = Verification
 
@@ -48,6 +49,17 @@ let required_evidence_of_output (output : Yojson.Safe.t) : string list =
        | _ -> [])
   | _ -> []
 
+(* Pull task_title from the submit envelope so the UI detail cell has a
+   fallback when contract/evidence/verdict_reason are all empty. Empty
+   string means "nothing to show"; the UI treats it identically to missing. *)
+let task_title_of_output (output : Yojson.Safe.t) : string =
+  match output with
+  | `Assoc fields ->
+      (match List.assoc_opt "task_title" fields with
+       | Some (`String s) -> s
+       | _ -> "")
+  | _ -> ""
+
 (** Status + verdict + approver triple. Keeps all three derivations in one
     place so the match is exhaustive over the Verification state machine. *)
 let derive_status_fields (req : V.verification_request)
@@ -72,9 +84,11 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
   in
   let contract = completion_contract_of_criteria req.criteria in
   let evidence = required_evidence_of_output req.output in
+  let task_title = task_title_of_output req.output in
   `Assoc [
     ("request_id", `String req.id);
     ("task_id", `String req.task_id);
+    ("task_title", `String task_title);
     (* Keeper name: file-based storage has no dedicated keeper field,
        but the verifier is a keeper when assigned. Surface None when
        unassigned rather than inventing a value. *)

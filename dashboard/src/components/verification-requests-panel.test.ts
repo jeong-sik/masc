@@ -97,6 +97,7 @@ function makeRequest(overrides: Partial<VerificationRequest> = {}): Verification
   return {
     request_id: 'req-001',
     task_id: 'task-001',
+    task_title: '',
     keeper: null,
     status: 'pending',
     created_at: new Date().toISOString(),

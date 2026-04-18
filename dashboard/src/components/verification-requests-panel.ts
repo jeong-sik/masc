@@ -305,7 +305,9 @@ function VerificationRow({
 }: { row: VerificationRequest; refresh: () => void }) {
   const hasContract = row.completion_contract.length > 0
   const hasEvidence = row.required_evidence.length > 0
-  const hasDetails = hasContract || hasEvidence || row.verdict_reason !== ''
+  const hasTaskTitle = row.task_title !== ''
+  const hasDetails =
+    hasContract || hasEvidence || hasTaskTitle || row.verdict_reason !== ''
   const actionState = rowActions.value.get(row.request_id) ?? { kind: 'idle' as const }
 
   return html`
@@ -355,6 +357,16 @@ function VerificationRow({
                   자세히
                 </summary>
                 <div class="flex flex-col gap-2 mt-2 p-2 rounded border border-[var(--card-border)] bg-[var(--bg-0)]">
+                  ${hasTaskTitle
+                    ? html`
+                        <div>
+                          <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] mb-1">
+                            Task Title
+                          </div>
+                          <div class="text-[var(--text-body)]">${row.task_title}</div>
+                        </div>
+                      `
+                    : null}
                   ${hasContract
                     ? html`
                         <div>
@@ -485,6 +497,12 @@ export function VerificationRequestsPanel() {
     return filterVerificationRequests(byStatus, searchQuery.value)
   }, [rows, statusFilter.value, searchQuery.value])
 
+  // UX hint: when requests exist but none are pending, the 액션 column is
+  // empty by design (approve/reject only apply to pending rows). Surface the
+  // reason so operators don't read "—" as a broken control.
+  const pendingCount = rows.filter((r) => r.status === 'pending').length
+  const showNoPendingHint = rows.length > 0 && pendingCount === 0
+
   return html`
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
@@ -537,6 +555,18 @@ export function VerificationRequestsPanel() {
 
       ${current.loading && !data
         ? html`<${LoadingState}>검증 요청 불러오는 중...<//>`
+        : null}
+
+      ${showNoPendingHint
+        ? html`
+            <div
+              role="note"
+              class="rounded border border-[var(--card-border)] bg-[var(--bg-panel)] px-3 py-2 text-[11px] text-[var(--text-muted)]"
+            >
+              검증 대기(pending) 요청이 없어 액션 컬럼이 비어 있습니다. 승인/반려 버튼은
+              <code class="text-[var(--text-strong)]">pending</code> 상태에서만 표시됩니다.
+            </div>
+          `
         : null}
 
       <${Card} title="검증 요청">

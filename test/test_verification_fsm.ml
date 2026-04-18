@@ -88,6 +88,50 @@ let test_submit_for_verification_moves_to_awaiting () =
       Alcotest.(check string) "status" "awaiting_verification"
         (status_string config task_id))
 
+(* Regression for the criteria ← completion_contract vs
+   evidence_refs ← verify_gate_evidence split. Prior to the fix both
+   sides pulled from verify_gate_evidence, so criteria ended up
+   containing artefact paths instead of the contract text.
+
+   Exercises Verification_protocol.on_submit_for_verification directly —
+   Coord.transition_task_r only flips task.task_status; the protocol call
+   that persists the verification record lives in tool_task.ml. *)
+let test_submit_populates_criteria_from_completion_contract () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_strict_task config in
+    let task =
+      match get_task config task_id with
+      | Some t -> t
+      | None -> Alcotest.fail "fixture task not retrievable"
+    in
+    let evidence_refs = match task.contract with
+      | Some c -> c.verify_gate_evidence
+      | None -> []
+    in
+    Verification_protocol.on_submit_for_verification ~config ~task
+      ~assignee:"verifier-agent" ~verification_id:"vrf-wiring"
+      ~evidence_refs;
+    let reqs = Verification.list_requests config.Coord.base_path in
+    let req = List.find (fun (r : Verification.verification_request) ->
+      r.task_id = task_id) reqs in
+    let custom_texts = List.filter_map (function
+      | Verification.Custom s -> Some s
+      | _ -> None) req.criteria in
+    (* add_strict_task fixture: completion_contract = ["tests pass"];
+       verify_gate_evidence = ["output.json"]. *)
+    Alcotest.(check (list string)) "criteria from completion_contract"
+      ["tests pass"] custom_texts;
+    let persisted_refs = match req.output with
+      | `Assoc fields ->
+          (match List.assoc_opt "evidence_refs" fields with
+           | Some (`List xs) ->
+               List.filter_map (function `String s -> Some s | _ -> None) xs
+           | _ -> [])
+      | _ -> []
+    in
+    Alcotest.(check (list string)) "evidence_refs from verify_gate_evidence"
+      ["output.json"] persisted_refs)
+
 let test_approve_by_other_agent_moves_to_done () =
   with_temp_config ~fsm_enabled:true (fun config ->
     let task_id = add_strict_task config in
@@ -218,6 +262,8 @@ let () =
     ("transitions_enabled", [
       Alcotest.test_case "submit moves to awaiting_verification" `Quick
         test_submit_for_verification_moves_to_awaiting;
+      Alcotest.test_case "submit splits criteria/evidence by contract field"
+        `Quick test_submit_populates_criteria_from_completion_contract;
       Alcotest.test_case "cross-agent approve moves to done" `Quick
         test_approve_by_other_agent_moves_to_done;
       Alcotest.test_case "cross-agent reject moves to in_progress" `Quick

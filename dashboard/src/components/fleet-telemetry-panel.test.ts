@@ -13,6 +13,8 @@ function makeRow(overrides: Partial<FleetRow> = {}): FleetRow {
     name: 'keeper-x',
     status: 'active',
     keepalive_running: true,
+    diagnostic_health_state: null,
+    diagnostic_summary: null,
     context_ratio: 0.3,
     turn_count: 0,
     last_latency_ms: 0,
@@ -287,6 +289,47 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('Partial telemetry')
     expect(container.textContent).toContain('keepers are blocked in the admission queue')
     expect(container.textContent).toContain('Admission queue wait timeout after 45.0s.')
+  }, 30_000)
+
+  it('surfaces snapshot diagnostic summaries for inactive keepers', async () => {
+    const fetchDashboardExecution = vi.fn().mockResolvedValue({
+      ...executionResponse,
+      keepers: [
+        {
+          name: 'keeper-stale',
+          status: 'inactive',
+          keepalive_running: true,
+          context_ratio: 0.22,
+          total_turns: 11,
+          last_latency_ms: 1200,
+          last_activity_ago_s: 640,
+          last_model_used: 'gpt-5.4',
+          diagnostic: {
+            health_state: 'stale',
+            next_action_path: 'recover',
+            last_reply_status: 'stale',
+            summary: 'Keepalive heartbeat is stale; probe or recover before the next turn.',
+          },
+        },
+      ],
+    } satisfies DashboardExecutionResponse)
+    const fetchToolQuality = vi.fn().mockResolvedValue({ ...toolQualityResponse, by_keeper: [] })
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue(telemetrySummaryResponse)
+    const { FleetTelemetryPanel } = await loadPanel({
+      fetchDashboardExecution,
+      fetchToolQuality,
+      fetchTelemetrySummary,
+    })
+
+    await act(async () => {
+      render(html`<${FleetTelemetryPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('keeper-stale')
+    expect(container.textContent).toContain('Keepalive heartbeat is stale; probe or recover before the next turn.')
+    expect(container.textContent).toContain('1 주의')
   }, 30_000)
 
   it('falls back to runtime model and tool audit data when quality rows are sparse', async () => {

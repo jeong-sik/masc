@@ -499,6 +499,41 @@ let test_dashboard_execution_fresh_join_not_marked_stale () =
           false has_test_agent
       ))
 
+let test_dashboard_execution_surfaces_keeper_diagnostic () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:None);
+      Eio.Switch.run (fun sw ->
+        Fun.protect
+          ~finally:(fun () ->
+            Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu")
+          (fun () ->
+            create_keeper env sw config "sangsu";
+            let json =
+              Lib.Dashboard_execution.json
+                ~config
+                ~sw
+                ~clock:(Eio.Stdenv.clock env)
+                ~proc_mgr:None
+                ()
+            in
+            let open Yojson.Safe.Util in
+            let row =
+              json |> member "keepers" |> to_list
+              |> List.find (fun keeper -> keeper |> member "name" |> to_string = "sangsu")
+            in
+            check bool "diagnostic surfaced on execution keeper row" true
+              (row |> member "diagnostic" <> `Null);
+            check bool "diagnostic health state surfaced" true
+              (row |> member "diagnostic" |> member "health_state" <> `Null);
+            check bool "diagnostic next action surfaced" true
+              (row |> member "diagnostic" |> member "next_action_path" <> `Null))))
+
 let test_patch_keeper_dependent_caches_tolerates_null_agent () =
   let execution_json =
     `Assoc
@@ -622,6 +657,8 @@ let () =
             test_dashboard_shell_excludes_keeper_agents_from_general_count;
           Alcotest.test_case "fresh join is not stale" `Quick
             test_dashboard_execution_fresh_join_not_marked_stale;
+          Alcotest.test_case "execution surfaces keeper diagnostic" `Quick
+            test_dashboard_execution_surfaces_keeper_diagnostic;
           Alcotest.test_case "lifecycle patch tolerates null agent" `Quick
             test_patch_keeper_dependent_caches_tolerates_null_agent;
           Alcotest.test_case "running keeper patch tolerates null agent" `Quick

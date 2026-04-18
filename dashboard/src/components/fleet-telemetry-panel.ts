@@ -29,6 +29,7 @@ import {
   buildTelemetryWarnings,
   emptyState,
   errorMessage,
+  fleetBand,
   formatActivity,
   formatLatency,
   formatPercent,
@@ -235,14 +236,28 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
         <tbody>
           ${rows.map(row => {
             const toolInfo = toolSummary(row)
+            const diagnosticState = row.diagnostic_health_state?.trim().toLowerCase() ?? null
+            const rowHint =
+              row.runtime_blocker_summary
+              ?? (
+                diagnosticState
+                && diagnosticState !== 'healthy'
+                && diagnosticState !== 'idle'
+                  ? row.diagnostic_summary ?? null
+                  : null
+              )
+            const rowHintClass =
+              diagnosticState === 'offline' || diagnosticState === 'dead'
+                ? 'text-[var(--bad-light)]'
+                : 'text-[var(--warn)]'
             return html`
             <tr class="border-b border-[var(--card-border)] border-opacity-30 align-top">
               <td class="py-1.5">
                 <div class="font-mono text-[var(--text)]">${row.name}</div>
-                ${row.runtime_blocker_summary
+                ${rowHint
                   ? html`
-                    <div class="max-w-60 truncate text-3xs text-[var(--warn)]" title=${row.runtime_blocker_summary}>
-                      ${row.runtime_blocker_summary}
+                    <div class="max-w-60 truncate text-3xs ${rowHintClass}" title=${rowHint}>
+                      ${rowHint}
                     </div>
                   `
                   : null}
@@ -485,12 +500,7 @@ export function FleetTelemetryPanel() {
   }
 
   const activeCount = counts.live
-  const attentionCount = value.rows.filter(row => row.keepalive_running && (
-    row.runtime_blocker_class != null
-    || row.context_ratio >= PRESSURE_WARN_RATIO
-    || (row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC)
-    || (row.tool_success_pct != null && row.tool_success_pct < 90)
-  )).length
+  const attentionCount = value.rows.filter(row => fleetBand(row) === 'attention').length
   const offlineCount = value.rows.length - activeCount
 
   return html`

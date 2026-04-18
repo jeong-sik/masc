@@ -45,6 +45,39 @@ let messages_safe config =
 let assoc_upsert fields key value =
   (key, value) :: List.remove_assoc key fields
 
+let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson.Safe.t) =
+  let open Yojson.Safe.Util in
+  match keeper_json with
+  | `Assoc fields -> (
+      match member "name" keeper_json with
+      | `String name -> (
+          match Keeper_types.read_meta_resolved config name with
+          | Ok (Some (_resolved_name, meta)) ->
+              let keepalive_running =
+                match member "keepalive_running" keeper_json with
+                | `Bool value -> value
+                | _ -> Keeper_status_bridge.runtime_keepalive_running config meta
+              in
+              let now_ts = Time_compat.now () in
+              let diagnostic =
+                Keeper_exec_status.keeper_diagnostic_json
+                  ~meta
+                  ~agent_status:(member "agent" keeper_json)
+                  ~keepalive_running
+                  ~history_items:[]
+                  ~now_ts
+                |> Keeper_exec_status.augment_keeper_diagnostic_json
+                     ~meta
+                     ~keepalive_running
+                     ~keepalive_started_at:
+                       (Keeper_status_bridge.runtime_keepalive_started_at config meta)
+                     ~now_ts
+              in
+              `Assoc (assoc_upsert fields "diagnostic" diagnostic)
+          | Ok None | Error _ -> keeper_json)
+      | _ -> keeper_json)
+  | _ -> keeper_json
+
 let model_map_of_keeper_rows keepers =
   let model_map : (string, string) Hashtbl.t = Hashtbl.create 8 in
   let open Yojson.Safe.Util in
@@ -184,7 +217,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let keepers =
         member_assoc "keepers" snapshot_json |> member_assoc "items"
         |> function
-        | `List items -> items
+        | `List items -> List.map (enrich_keeper_with_diagnostic ~config) items
         | _ -> []
       in
       Eio.Fiber.yield ();

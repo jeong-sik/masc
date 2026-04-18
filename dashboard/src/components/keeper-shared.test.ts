@@ -51,9 +51,10 @@ vi.mock('./common/toast', () => ({
 }))
 
 import { keeperActionErrors, keeperHydrating, keeperSending, keeperStreamStartedAt, keeperThreads } from '../keeper-runtime'
+import { keeperStatusDetails } from '../keeper-runtime'
 import { hydrateKeeperStatus } from '../keeper-runtime'
 import { shellAuthSummary } from '../store'
-import { KeeperConversationPanel, KeeperRuntimeActions } from './keeper-shared'
+import { KeeperConversationPanel, KeeperDiagnosticSummary, KeeperRuntimeActions } from './keeper-shared'
 
 describe('KeeperConversationPanel', () => {
   let container: HTMLDivElement
@@ -70,6 +71,7 @@ describe('KeeperConversationPanel', () => {
     keeperThreads.value = {}
     keeperSending.value = {}
     keeperHydrating.value = {}
+    keeperStatusDetails.value = {}
     keeperActionErrors.value = {}
     keeperStreamStartedAt.value = {}
     shellAuthSummary.value = null
@@ -164,5 +166,27 @@ describe('KeeperConversationPanel', () => {
     expect(buttons).toContain('Social sweep')
     expect(buttons).not.toContain('기동')
     expect(buttons).not.toContain('종료')
+  })
+
+  it('falls back to snapshot diagnostic when hydrated detail is absent', async () => {
+    const keeper = {
+      name: 'sangsu',
+      status: 'inactive',
+      diagnostic: {
+        health_state: 'stale',
+        next_action_path: 'recover',
+        last_reply_status: 'stale',
+        summary: 'Snapshot says the keeper heartbeat is stale.',
+      },
+    } as any
+
+    render(
+      html`<${KeeperDiagnosticSummary} keeper=${keeper} />`,
+      container,
+    )
+    await Promise.resolve()
+
+    expect(container.textContent).toContain('stale')
+    expect(container.textContent).toContain('Snapshot says the keeper heartbeat is stale.')
   })
 })

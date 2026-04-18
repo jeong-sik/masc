@@ -49,7 +49,7 @@ let test_wrap_prefixed_json_response () =
 let test_to_json () =
   let start = Time_compat.now () in
   let raw = (true, "done") in
-  let r = Tool_result.wrap ~tool_name:"masc_done" ~start_time:start raw in
+  let r = Tool_result.wrap ~tool_name:"masc_transition" ~start_time:start raw in
   let json = Tool_result.to_json r in
   match json with
   | `Assoc fields ->

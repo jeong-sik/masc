@@ -18,10 +18,10 @@ describe('swimlaneSegmentColor', () => {
   })
 
   it('returns idle color for idle-like values', () => {
-    expect(swimlaneSegmentColor('idle')).toBe('bg-[rgba(255,255,255,0.07)]')
-    expect(swimlaneSegmentColor('undecided')).toBe('bg-[rgba(255,255,255,0.07)]')
-    expect(swimlaneSegmentColor('accumulating')).toBe('bg-[rgba(255,255,255,0.07)]')
-    expect(swimlaneSegmentColor('Stable')).toBe('bg-[rgba(255,255,255,0.07)]')
+    expect(swimlaneSegmentColor('idle')).toBe('bg-[var(--white-7)]')
+    expect(swimlaneSegmentColor('undecided')).toBe('bg-[var(--white-7)]')
+    expect(swimlaneSegmentColor('accumulating')).toBe('bg-[var(--white-7)]')
+    expect(swimlaneSegmentColor('Stable')).toBe('bg-[var(--white-7)]')
   })
 
   it('returns warn color for Compacting', () => {

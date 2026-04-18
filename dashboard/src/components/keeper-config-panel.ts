@@ -12,6 +12,7 @@ import { formatTokens } from '../lib/format-number'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { createAsyncResource, loaded } from '../lib/async-state'
+import { SetupGuideCard } from './setup-guide-card'
 
 // ── State ────────────────────────────────────────────────
 
@@ -98,14 +99,14 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
 
 // Runtime config draft for proactive/compaction/handoff inline editing
 type ExecutionScope = 'observe_only' | 'workspace' | 'local'
-type SandboxProfile = 'legacy_local' | 'docker_hardened'
-type NetworkMode = 'inherit' | 'none'
-type SharedMemoryScope = 'disabled' | 'room'
+export type SandboxProfile = 'legacy_local' | 'docker_hardened'
+export type SandboxNetworkMode = 'none' | 'inherit'
+export type SharedMemoryScope = 'disabled' | 'room'
 
-type RuntimeDraft = {
+export type RuntimeDraft = {
   execution_scope: ExecutionScope
   sandbox_profile: SandboxProfile
-  network_mode: NetworkMode
+  network_mode: SandboxNetworkMode
   shared_memory_scope: SharedMemoryScope
   allowed_paths_text: string
   proactive_enabled: boolean
@@ -123,12 +124,24 @@ type RuntimeDraft = {
 const runtimeDraft = signal<RuntimeDraft | null>(null)
 const runtimeSaving = signal(false)
 
-function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
+export function coerceSandboxProfile(raw: string | undefined): SandboxProfile {
+  return raw === 'docker_hardened' ? 'docker_hardened' : 'legacy_local'
+}
+
+export function coerceNetworkMode(raw: string | undefined): SandboxNetworkMode {
+  return raw === 'none' ? 'none' : 'inherit'
+}
+
+export function coerceSharedMemoryScope(raw: string | undefined): SharedMemoryScope {
+  return raw === 'room' ? 'room' : 'disabled'
+}
+
+export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     execution_scope: (c.execution_scope as ExecutionScope) ?? 'workspace',
-    sandbox_profile: (c.sandbox_profile as SandboxProfile) ?? 'legacy_local',
-    network_mode: (c.network_mode as NetworkMode) ?? 'inherit',
-    shared_memory_scope: (c.shared_memory_scope as SharedMemoryScope) ?? 'disabled',
+    sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
+    network_mode: coerceNetworkMode(c.network_mode),
+    shared_memory_scope: coerceSharedMemoryScope(c.shared_memory_scope),
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
     proactive_enabled: c.proactive.enabled,
     proactive_idle_sec: c.proactive.idle_sec,
@@ -143,15 +156,15 @@ function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   }
 }
 
-function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
+export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
   const payload: KeeperConfigUpdatePayload = {}
   if (draft.execution_scope !== (orig.execution_scope ?? 'workspace')) payload.execution_scope = draft.execution_scope
-  if (draft.sandbox_profile !== (orig.sandbox_profile ?? 'legacy_local')) payload.sandbox_profile = draft.sandbox_profile
-  if (draft.network_mode !== (orig.network_mode ?? 'inherit')) payload.network_mode = draft.network_mode
-  if (draft.shared_memory_scope !== (orig.shared_memory_scope ?? 'disabled')) payload.shared_memory_scope = draft.shared_memory_scope
   const newPaths = draft.allowed_paths_text.split('\n').map(s => s.trim()).filter(Boolean)
   const origPaths = orig.allowed_paths ?? []
   if (JSON.stringify(newPaths) !== JSON.stringify(origPaths)) payload.allowed_paths = newPaths
+  if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
+  if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
+  if (draft.shared_memory_scope !== coerceSharedMemoryScope(orig.shared_memory_scope)) payload.shared_memory_scope = draft.shared_memory_scope
   if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
   if (draft.proactive_idle_sec !== orig.proactive.idle_sec) payload.proactive_idle_sec = draft.proactive_idle_sec
   if (draft.proactive_cooldown_sec !== orig.proactive.cooldown_sec) payload.proactive_cooldown_sec = draft.proactive_cooldown_sec
@@ -259,8 +272,8 @@ function Callout({
 
 function BoolBadge({ value }: { value: boolean }) {
   return value
-    ? html`<span class="text-[11px] font-bold px-2 py-0.5 rounded-md bg-ok/10 text-ok border border-ok/20 shadow-sm shadow-ok/5">ON</span>`
-    : html`<span class="text-[11px] font-bold px-2 py-0.5 rounded-md bg-white/5 text-text-dim border border-white/10 shadow-sm">OFF</span>`
+    ? html`<span class="text-[11px] font-bold px-2 py-0.5 rounded bg-ok/10 text-ok border border-ok/20 shadow-sm shadow-ok/5">ON</span>`
+    : html`<span class="text-[11px] font-bold px-2 py-0.5 rounded bg-white/5 text-text-dim border border-white/10 shadow-sm">OFF</span>`
 }
 
 function formatHookDestructiveTools(value: string[] | string): string {
@@ -275,7 +288,7 @@ function ModelList({ models }: { models: string[] }) {
   if (models.length === 0) return html`<span class="text-[11px] text-text-muted italic">none</span>`
   return html`
     <div class="flex flex-wrap gap-1.5">
-      ${models.map(m => html`<span class="inline-flex items-center py-1 px-2.5 rounded-lg text-[11px] font-semibold bg-[var(--accent-10)] text-accent border border-accent/20 shadow-sm hover:bg-accent/20 transition-colors cursor-default">${m}</span>`)}
+      ${models.map(m => html`<span class="inline-flex items-center py-1 px-2.5 rounded text-[11px] font-semibold bg-[var(--accent-10)] text-accent border border-accent/20 shadow-sm hover:bg-accent/20 transition-colors cursor-default">${m}</span>`)}
     </div>
   `
 }
@@ -297,7 +310,7 @@ function PromptSourceBadge({ source }: { source: string }) {
       : source === 'file'
         ? 'bg-[var(--ok-10)] text-[var(--ok)] border-[var(--ok-20)]'
         : 'bg-white/5 text-text-dim border-white/10'
-  return html`<span class="text-[10px] font-bold px-2 py-0.5 rounded-md border ${tone} shadow-sm">${source.toUpperCase()}</span>`
+  return html`<span class="text-[10px] font-bold px-2 py-0.5 rounded border ${tone} shadow-sm">${source.toUpperCase()}</span>`
 }
 
 function PromptBlock({
@@ -330,10 +343,10 @@ function InlineToggleRow({ label, value, onChange }: { label: string; value: boo
     <div class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
       <span class="text-[12px] font-medium text-text-muted">${label}</span>
       <button type="button"
-        class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-white/10'}"
+        class="relative inline-flex h-5 w-9 items-center rounded-sm transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-white/10'}"
         onClick=${() => onChange(!value)}
       >
-        <span class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${value ? 'translate-x-[18px]' : 'translate-x-[3px]'}" />
+        <span class="inline-block h-3.5 w-3.5 rounded-sm bg-white shadow-sm transition-transform ${value ? 'translate-x-[18px]' : 'translate-x-[3px]'}" />
       </button>
     </div>
   `
@@ -348,7 +361,7 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix }: {
       <span class="text-[12px] font-medium text-text-muted">${label}</span>
       <div class="flex items-center gap-1.5">
         <input type="number"
-          class="w-20 text-right bg-card/60 text-text-strong text-[12px] font-semibold border border-card-border rounded-lg py-1 px-2 focus:outline-none focus:border-accent/50 transition-colors"
+          class="w-20 text-right bg-card/60 text-text-strong text-[12px] font-semibold border border-card-border rounded py-1 px-2 focus:outline-none focus:border-accent/50 transition-colors"
           value=${value}
           min=${min}
           max=${max}
@@ -380,7 +393,7 @@ function InlineSelectRow({
       <span class="text-[12px] font-medium text-text-muted">${label}</span>
       <select
         aria-label=${label}
-        class="text-xs bg-card/60 border border-card-border rounded-lg px-2 py-1 text-text-strong"
+        class="text-xs bg-card/60 border border-card-border rounded px-2 py-1 text-text-strong"
         value=${value}
         onChange=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}
       >
@@ -516,7 +529,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     }
   }
 
-  const btnBase = 'py-1.5 px-4 rounded-lg text-xs font-semibold cursor-pointer border-none'
+  const btnBase = 'py-1.5 px-4 rounded text-xs font-semibold cursor-pointer border-none'
 
   // --- Toolbar ---
   const toolbar = html`
@@ -578,7 +591,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     <${PromptBlock} title="세계관" block=${c.prompt.system_prompt_blocks.world} />
     <${PromptBlock} title="능력" block=${c.prompt.system_prompt_blocks.capabilities} />
     <details class="mt-3">
-      <summary class="cursor-pointer py-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] list-none select-none rounded-lg hover:bg-[var(--white-3)] transition-colors">컴파일된 시스템 프롬프트 보기</summary>
+      <summary class="cursor-pointer py-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] list-none select-none rounded hover:bg-[var(--white-3)] transition-colors">컴파일된 시스템 프롬프트 보기</summary>
       <${LongText} text=${c.prompt.effective_system_prompt} truncateAt=${null} />
     </details>
   `
@@ -603,7 +616,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       <${SectionHeader} title="소스" />
       <${ConfigRow} label="기본 소스" value=${c.sources.default_source_kind || '--'} />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+      <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">라이브 오버라이드</span>
         <${BoolBadge} value=${c.sources.has_live_override} />
       </div>
@@ -624,7 +637,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       <${SectionHeader} title="실행" />
       <${ConfigRow} label="활성 모델" value=${c.execution.active_model || '--'} />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+      <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">검증</span>
         <${BoolBadge} value=${c.execution.verify} />
       </div>
@@ -671,7 +684,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           label="network_mode"
           value=${rd.network_mode}
           options=${rd.sandbox_profile === 'docker_hardened' ? ['inherit', 'none'] as const : ['inherit'] as const}
-          onChange=${(value: string) => updateRuntimeDraft('network_mode', value as NetworkMode)}
+          onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
         />
         <${InlineSelectRow}
           label="shared_memory_scope"
@@ -679,7 +692,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           options=${['disabled', 'room'] as const}
           onChange=${(value: string) => updateRuntimeDraft('shared_memory_scope', value as SharedMemoryScope)}
         />
-        <div class="py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <div class="py-2 px-3 rounded bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1">
             <span class="text-xs text-[var(--text-body)]">allowed_paths</span>
             <span class="text-[10px] text-[var(--text-muted)]">한 줄에 하나씩. * = 전체 허용</span>
@@ -696,10 +709,16 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}
           </div>
         ` : null}
+        ${rd.sandbox_profile === 'docker_hardened' ? html`
+          <${SetupGuideCard} connectorId="sandbox_hardened" />
+        ` : null}
         <${Callout}
           title="Base Path Anchor"
           body=${sandboxAnchorText(c)}
         />
+        ${rd.sandbox_profile === 'docker_hardened' ? html`
+          <${SetupGuideCard} connectorId="sandbox_hardened" />
+        ` : null}
       ` : html`
         <${ConfigRow} label="execution_scope" value=${c.execution_scope ?? 'workspace'} />
         <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'legacy_local'} />
@@ -716,7 +735,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${ConfigRow} label="docker_status" value=${dockerStatusLabel(c)} />
         <${ConfigRow} label="config_base_path" value=${c.sandbox_environment.base_path || '--'} />
         <${ConfigRow} label="project_root" value=${c.sandbox_environment.project_root || '--'} />
-        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
           <span class="text-xs text-[var(--text-muted)]">docker_playground</span>
           <${BoolBadge} value=${c.sandbox_environment.docker_playground_enabled} />
         </div>
@@ -727,11 +746,11 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${ConfigRow} label="sandbox_pids_limit" value=${String(c.sandbox_environment.pids_limit ?? '--')} />
         <${ConfigRow} label="sandbox_tmpfs_size" value=${c.sandbox_environment.tmpfs_size || '--'} />
         <${ConfigRow} label="sandbox_seccomp_profile" value=${c.sandbox_environment.seccomp_profile || '--'} />
-        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
           <span class="text-xs text-[var(--text-muted)]">require_rootless</span>
           <${BoolBadge} value=${c.sandbox_environment.require_rootless} />
         </div>
-        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
           <span class="text-xs text-[var(--text-muted)]">require_userns</span>
           <${BoolBadge} value=${c.sandbox_environment.require_userns} />
         </div>
@@ -755,7 +774,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           onChange=${(v: number) => updateRuntimeDraft('proactive_cooldown_sec', v)}
           min=${10} max=${3600} step=${10} suffix="s" />
       ` : html`
-        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
           <span class="text-xs text-[var(--text-muted)]">활성</span>
           <${BoolBadge} value=${c.proactive.enabled} />
         </div>
@@ -764,21 +783,21 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       `}
 
       <${SectionHeader} title="런타임" />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+      <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">일시정지</span>
         <${BoolBadge} value=${c.runtime.paused} />
       </div>
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+      <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">자동 부팅 등록</span>
         <${BoolBadge} value=${c.runtime.registered} />
       </div>
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+      <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">킵얼라이브 실행</span>
         <${BoolBadge} value=${c.runtime.keepalive_running} />
       </div>
       <${ConfigRow} label="레지스트리 상태" value=${c.runtime.registry_state || '--'} />
       <${ConfigRow} label="파이버 상태" value=${c.runtime.fiber_health || '--'} />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+      <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">프레즌스 킵얼라이브</span>
         <${BoolBadge} value=${c.runtime.presence_keepalive} />
       </div>
@@ -808,7 +827,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           onChange=${(v: number) => updateRuntimeDraft('handoff_cooldown_sec', v)}
           min=${0} max=${3600} step=${30} suffix="s" />
       ` : html`
-        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
           <span class="text-xs text-[var(--text-muted)]">자동</span>
           <${BoolBadge} value=${c.handoff.auto} />
         </div>
@@ -845,7 +864,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
               placeholder="슬롯 이름 / source / gate 필터"
               aria-label="훅 슬롯 필터"
               onInput=${(e: Event) => { hookFilterQuery.value = (e.target as HTMLInputElement).value }}
-              class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+              class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
             />
           </div>
           ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0
@@ -861,7 +880,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
                     ${(slot.gates ?? slot.effects ?? slot.features ?? []).length > 0 ? html`
                       <div class="flex flex-wrap gap-1 mt-1">
                         ${(slot.gates ?? slot.effects ?? slot.features ?? []).map((d: string) => html`
-                          <span class="text-[10px] px-1.5 py-0.5 rounded-md ${d.endsWith('_off') ? 'bg-[var(--white-10)] text-[var(--text-dim)]' : 'bg-[var(--accent-10)] text-[var(--accent)] opacity-80'}">${d}</span>
+                          <span class="text-[10px] px-1.5 py-0.5 rounded ${d.endsWith('_off') ? 'bg-[var(--white-10)] text-[var(--text-dim)]' : 'bg-[var(--accent-10)] text-[var(--accent)] opacity-80'}">${d}</span>
                         `)}
                       </div>
                     ` : null}

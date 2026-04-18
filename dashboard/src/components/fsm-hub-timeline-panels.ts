@@ -55,7 +55,7 @@ const ALARM_VALUES = new Set([
 
 export function swimlaneSegmentColor(value: string): string {
   if (ALARM_VALUES.has(value)) return 'bg-[rgba(239,68,68,0.5)]'
-  if (IDLE_LIKE_VALUES.has(value)) return 'bg-[rgba(255,255,255,0.07)]'
+  if (IDLE_LIKE_VALUES.has(value)) return 'bg-[var(--white-7)]'
   if (value === 'Overflowed') return 'bg-[rgba(245,158,11,0.45)]'
   if (value === 'Compacting' || value === 'compacting') return 'bg-[rgba(245,158,11,0.45)]'
   if (value === 'HandingOff') return 'bg-[rgba(167,139,250,0.5)]'
@@ -172,7 +172,7 @@ export function SwimlaneTimeline({
             const isBusiest = busiestLane === lane.short && count > 0
             return html`
               <span
-                class=${`rounded-full border px-1.5 py-0.5 text-[10px] font-mono tabular-nums ${
+                class=${`rounded-sm border px-1.5 py-0.5 text-[10px] font-mono tabular-nums ${
                   count === 0
                     ? 'text-[var(--text-dim)] border-[var(--white-8)]'
                     : isBusiest
@@ -295,7 +295,7 @@ export function SwimlaneTimeline({
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(245,158,11,0.45)]"></span>compact</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(167,139,250,0.5)]"></span>handoff</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(239,68,68,0.5)]"></span>alarm</span>
-        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm border border-[var(--white-8)] bg-[rgba(255,255,255,0.04)]"></span>idle</span>
+        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm border border-[var(--white-8)] bg-[var(--white-3)]"></span>idle</span>
       </div>
     </div>
   `
@@ -395,7 +395,7 @@ export function TransitionTrail({
           placeholder="field / from / to 필터"
           aria-label="전이 이력 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[120px] max-w-[200px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[120px] max-w-[200px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && visibleHistory.length === 0
@@ -408,7 +408,7 @@ export function TransitionTrail({
           const inSegment = isTransitionInSegment(entry, hoveredSegment)
           const dimmed = hoveredSegment != null && !inSegment
           const rowCls = inSegment
-            ? 'bg-[rgba(71,184,255,0.1)] ring-1 ring-[rgba(71,184,255,0.3)] rounded px-1'
+            ? 'bg-[var(--accent-10)] ring-1 ring-[var(--accent-30)] rounded px-1'
             : ''
           const reason = inferTransitionReason(entry.field, entry.from, entry.to)
           const tooltip = reason
@@ -469,7 +469,7 @@ export function TopTransitionsPanel({
           const dimmed = hoveredSegment != null && !matchesHover
           const widthPct = Math.max(4, Math.round((entry.count / maxCount) * 100))
           const rowCls = matchesHover
-            ? 'bg-[rgba(71,184,255,0.1)] ring-1 ring-[rgba(71,184,255,0.3)] rounded px-1'
+            ? 'bg-[var(--accent-10)] ring-1 ring-[var(--accent-30)] rounded px-1'
             : ''
           return html`
             <div
@@ -481,7 +481,7 @@ export function TopTransitionsPanel({
               <span class="text-[var(--text-muted)]">→</span>
               <span class="text-[var(--text-strong)]">${displayState(entry.to)}</span>
               <span class="ml-auto flex items-center gap-1.5 shrink-0">
-                <span class="h-1 w-12 rounded-full bg-[var(--white-8)] overflow-hidden">
+                <span class="h-1 w-12 rounded-sm bg-[var(--white-8)] overflow-hidden">
                   <span
                     class="block h-full bg-[var(--accent)]"
                     style=${`width: ${widthPct}%`}
@@ -543,7 +543,7 @@ export function DwellHistogramPanel({
                     && hoveredSegment.field === lane.field
                     && hoveredSegment.value === entry.value
                   const rowCls = highlighted
-                    ? 'bg-[rgba(71,184,255,0.1)] ring-1 ring-[rgba(71,184,255,0.3)] rounded px-0.5'
+                    ? 'bg-[var(--accent-10)] ring-1 ring-[var(--accent-30)] rounded px-0.5'
                     : ''
                   return html`
                     <div
@@ -551,7 +551,7 @@ export function DwellHistogramPanel({
                       title=${`${displayState(entry.value)}: ${fmtDuration(entry.seconds)} (${entry.pct.toFixed(1)}%)`}
                     >
                       <span class="w-[60px] shrink-0 text-[var(--text-body)] truncate">${displayState(entry.value)}</span>
-                      <span class="flex-1 h-1.5 rounded-full bg-[var(--white-8)] overflow-hidden">
+                      <span class="flex-1 h-1.5 rounded-sm bg-[var(--white-8)] overflow-hidden">
                         <span
                           class=${`block h-full ${barColor}`}
                           style=${`width: ${Math.max(2, entry.pct)}%`}

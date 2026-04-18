@@ -133,17 +133,17 @@ export function KeeperMemoryTierPanel({
   return html`
     <div class="flex flex-col gap-3">
       <div class="flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-dim)]">
-        <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
           total ${totalUsed} / ${totalCap}
         </span>
-        <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
           ${usage.length} kinds
         </span>
-        <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
           KMC ${compactionStage}
         </span>
         ${isCompacting ? html`
-          <span class="inline-flex items-center rounded-full border border-[rgba(251,191,36,0.3)] bg-[rgba(251,191,36,0.1)] px-2 py-0.5 text-[#f59e0b]">
+          <span class="inline-flex items-center rounded-sm border border-[rgba(251,191,36,0.3)] bg-[var(--warn-10)] px-2 py-0.5 text-[#f59e0b]">
             compacting
           </span>
         ` : null}
@@ -156,7 +156,7 @@ export function KeeperMemoryTierPanel({
           placeholder="kind 필터"
           aria-label="memory kind 필터"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-          class="min-w-[120px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[120px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
         <${FilterChips}
           chips=${[
@@ -188,7 +188,7 @@ export function KeeperMemoryTierPanel({
               <div class="w-24 truncate text-[var(--text-body)] font-mono" title=${row.kind}>
                 ${row.kind}
               </div>
-              <div class="relative flex-1 h-4 rounded-full bg-[var(--white-4)] border border-[var(--white-8)] overflow-hidden">
+              <div class="relative flex-1 h-4 rounded-sm bg-[var(--white-4)] border border-[var(--white-8)] overflow-hidden">
                 <div class=${`absolute inset-y-0 left-0 ${barColor}`} style=${`width: ${pct}%`}></div>
               </div>
               <div class="w-16 text-right text-[var(--text-muted)] tabular-nums">

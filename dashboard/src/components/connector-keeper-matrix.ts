@@ -226,7 +226,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
   const gridCols = `grid-template-columns: minmax(160px, 1fr) repeat(${matrix.columns.length}, minmax(80px, 1fr)) minmax(90px, auto);`
 
   return html`
-    <section class="mb-4 rounded-lg border border-[var(--card-border)] bg-[var(--bg-1)] p-3" data-panel="connector-keeper-matrix">
+    <section class="mb-4 rounded border border-[var(--card-border)] bg-[var(--bg-1)] p-3" data-panel="connector-keeper-matrix">
       <header class="mb-2 flex items-baseline justify-between gap-3">
         <div>
           <h4 class="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--text-body)]">
@@ -251,7 +251,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
 
       ${!hasKeepers
         ? html`
-            <div class="rounded-md border border-dashed border-[var(--card-border)] px-3 py-4 text-center text-[11px] text-[var(--text-dim)]">
+            <div class="rounded border border-dashed border-[var(--card-border)] px-3 py-4 text-center text-[11px] text-[var(--text-dim)]">
               No keepers yet — add one under <code class="rounded bg-[var(--white-4)] px-1">config/keepers/</code> and restart.
             </div>
           `

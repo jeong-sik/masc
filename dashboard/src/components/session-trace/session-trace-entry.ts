@@ -191,7 +191,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
 
   const titleLabel = isErr ? 'Error' : 'Result'
   const titleColor = isErr ? 'text-[var(--bad)]' : 'text-[var(--text-muted)]'
-  const borderColor = isErr ? 'border-[rgba(239,68,68,0.2)]' : 'border-[var(--white-8)]'
+  const borderColor = isErr ? 'border-[var(--bad-20)]' : 'border-[var(--white-8)]'
   const bgColor = isErr ? 'bg-[rgba(239,68,68,0.04)]' : 'bg-[var(--white-3)]'
 
   const MAX_TEXT_LEN = 100000
@@ -206,7 +206,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
           <span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] uppercase">${hint}</span>
         ` : null}
       </div>
-      <div class="rounded-lg border ${borderColor} ${bgColor} overflow-hidden">
+      <div class="rounded border ${borderColor} ${bgColor} overflow-hidden">
         <div class="${shouldCollapse ? `max-h-[${RESULT_COLLAPSED_MAX_HEIGHT}px] overflow-hidden relative` : ''}"
              style=${shouldCollapse ? `max-height: ${RESULT_COLLAPSED_MAX_HEIGHT}px` : ''}>
           ${hint === 'diff' ? html`<${DiffBlock} text=${text} />`
@@ -268,7 +268,7 @@ function BroadcastDetail({ event }: { event: UnifiedTraceEvent }) {
   const content = typeof event.detail.content === 'string' ? event.detail.content : ''
   if (!content) return null
   return html`
-    <div class="mt-2 text-[13px] leading-relaxed px-3 py-2 bg-[var(--white-3)] rounded-lg border border-[var(--white-6)]">
+    <div class="mt-2 text-[13px] leading-relaxed px-3 py-2 bg-[var(--white-3)] rounded border border-[var(--white-6)]">
       <${Markdown} text=${content} />
     </div>
   `
@@ -280,7 +280,7 @@ function TaskDetail({ event }: { event: UnifiedTraceEvent }) {
   const title = typeof d.title === 'string' ? d.title : null
   const notes = typeof d.completion_notes === 'string' ? d.completion_notes : null
   return html`
-    <div class="mt-2 text-[12px] text-[var(--text-body)] space-y-1 px-3 py-2 bg-[var(--white-3)] rounded-lg">
+    <div class="mt-2 text-[12px] text-[var(--text-body)] space-y-1 px-3 py-2 bg-[var(--white-3)] rounded">
       ${taskId ? html`<div><span class="text-[var(--text-dim)]">ID:</span> <span class="font-mono">${taskId}</span></div>` : null}
       ${title ? html`<div><span class="text-[var(--text-dim)]">제목:</span> ${title}</div>` : null}
       ${notes ? html`<div><span class="text-[var(--text-dim)]">노트:</span> ${notes}</div>` : null}
@@ -291,7 +291,7 @@ function TaskDetail({ event }: { event: UnifiedTraceEvent }) {
 function ThinkingDetail({ event }: { event: UnifiedTraceEvent }) {
   if (event.thinkingRedacted) {
     return html`
-      <div class="mt-2 px-3 py-2 rounded-lg bg-[rgba(192,132,252,0.06)] border border-[rgba(192,132,252,0.15)] text-xs text-[#c084fc] italic">
+      <div class="mt-2 px-3 py-2 rounded bg-[rgba(192,132,252,0.06)] border border-[rgba(192,132,252,0.15)] text-xs text-[#c084fc] italic">
         이 사고 과정은 비공개 처리되었습니다.
       </div>
     `
@@ -299,7 +299,7 @@ function ThinkingDetail({ event }: { event: UnifiedTraceEvent }) {
   const content = event.thinkingContent ?? ''
   if (!content) return null
   return html`
-    <div class="mt-2 px-3 py-2 rounded-lg bg-[rgba(192,132,252,0.04)] border border-[rgba(192,132,252,0.12)]">
+    <div class="mt-2 px-3 py-2 rounded bg-[rgba(192,132,252,0.04)] border border-[rgba(192,132,252,0.12)]">
       <div class="text-[13px] leading-relaxed text-[var(--text-body)]">
         <${Markdown} text=${content} />
       </div>
@@ -317,7 +317,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const phaseLabel = phase === 'called' ? '호출' : phase === 'completed' ? '완료' : phase
     const phaseColor = phase === 'called' ? 'text-[var(--accent)]' : 'text-[var(--ok)]'
     return html`
-      <div class="mt-2 px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--white-6)] space-y-1">
+      <div class="mt-2 px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--white-6)] space-y-1">
         <div class="flex items-center gap-2 text-[12px]">
           <span class="text-[var(--text-dim)]">단계:</span>
           <span class="font-mono font-semibold ${phaseColor}">${phaseLabel}</span>
@@ -336,7 +336,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const turn = d.turn
     const phaseLabel = phase === 'started' ? '시작' : phase === 'completed' ? '완료' : phase
     return html`
-      <div class="mt-2 px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--white-6)]">
+      <div class="mt-2 px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--white-6)]">
         <div class="flex items-center gap-2 text-[12px]">
           <span class="text-[var(--text-dim)]">턴 ${turn != null ? String(turn) : '-'}:</span>
           <span class="font-mono font-semibold text-[var(--text-body)]">${phaseLabel}</span>
@@ -353,7 +353,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const ratio = before != null && after != null && before > 0 ? ((saved ?? 0) / before * 100) : null
     const compactPhase = typeof d.phase === 'string' ? d.phase : ''
     return html`
-      <div class="mt-2 px-3 py-2 rounded-lg bg-[rgba(56,189,248,0.04)] border border-[rgba(56,189,248,0.15)] space-y-2">
+      <div class="mt-2 px-3 py-2 rounded bg-[rgba(56,189,248,0.04)] border border-[rgba(56,189,248,0.15)] space-y-2">
         <div class="flex items-center gap-3 text-[12px]">
           ${before != null ? html`<span><span class="text-[var(--text-dim)]">Before:</span> <span class="font-mono">${before.toLocaleString()}</span></span>` : null}
           <span class="text-[var(--text-dim)]">→</span>
@@ -384,7 +384,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const inputTokens = typeof d.input_tokens === 'number' ? d.input_tokens : 0
     const turn = d.turn
     return html`
-      <div class="mt-2 px-3 py-2 rounded-lg bg-[rgba(56,189,248,0.04)] border border-[rgba(56,189,248,0.12)] space-y-1">
+      <div class="mt-2 px-3 py-2 rounded bg-[rgba(56,189,248,0.04)] border border-[rgba(56,189,248,0.12)] space-y-1">
         <div class="flex items-center gap-3 text-[12px]">
           <span><span class="text-[var(--text-dim)]">모델:</span> <span class="font-mono">${model}</span></span>
           <span><span class="text-[var(--text-dim)]">입력:</span> <span class="font-mono">${inputTokens.toLocaleString()}tok</span></span>
@@ -402,7 +402,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const responseText = typeof d.response_text === 'string' ? d.response_text : ''
     const stopColor = stopReason === 'end_turn' || stopReason === 'stop' ? 'text-[var(--ok)]' : 'text-[var(--warn)]'
     return html`
-      <div class="mt-2 px-3 py-2 rounded-lg bg-[rgba(34,211,238,0.04)] border border-[rgba(34,211,238,0.12)] space-y-1">
+      <div class="mt-2 px-3 py-2 rounded bg-[rgba(34,211,238,0.04)] border border-[var(--cyan-12)] space-y-1">
         <div class="flex items-center gap-3 text-[12px] flex-wrap">
           <span><span class="text-[var(--text-dim)]">출력:</span> <span class="font-mono">${outputTokens.toLocaleString()}tok</span></span>
           <span><span class="text-[var(--text-dim)]">종료:</span> <span class="font-mono ${stopColor}">${stopReason}</span></span>
@@ -423,7 +423,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const domain = typeof d.error_domain === 'string' ? d.error_domain : 'unknown'
     const errorDetail = typeof d.detail === 'string' ? d.detail : ''
     return html`
-      <div class="mt-2 px-3 py-2 rounded-lg bg-[rgba(239,68,68,0.04)] border border-[rgba(239,68,68,0.15)] space-y-1">
+      <div class="mt-2 px-3 py-2 rounded bg-[rgba(239,68,68,0.04)] border border-[var(--bad-soft)] space-y-1">
         <div class="text-[12px]"><span class="text-[var(--text-dim)]">도메인:</span> <span class="font-mono text-[var(--bad)]">${domain}</span></div>
         ${errorDetail ? html`<div class="text-[11px] font-mono text-[var(--text-body)] break-all">${errorDetail}</div>` : null}
       </div>
@@ -436,7 +436,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     .map(([label, value]) => ({ label, value: typeof value === 'string' ? value : JSON.stringify(value) }))
   if (detailRows.length === 0) return null
   return html`
-    <div class="mt-2 grid gap-1.5 px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--white-6)]">
+    <div class="mt-2 grid gap-1.5 px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--white-6)]">
       ${detailRows.map(row => html`
         <div class="flex items-start gap-2 text-[12px] leading-relaxed">
           <span class="min-w-[92px] text-[var(--text-dim)] font-mono">${row.label}</span>
@@ -480,9 +480,9 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
     || (event.kind === 'lifecycle' && event.detail.durable_kind)
 
   const row = html`
-    <div class="flex items-start gap-3 py-2 px-3 rounded-lg ${gateRejected ? 'opacity-50' : ''}">
+    <div class="flex items-start gap-3 py-2 px-3 rounded ${gateRejected ? 'opacity-50' : ''}">
       ${'' /* Icon */}
-      <div class="flex-shrink-0 mt-0.5 size-7 rounded-md bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-[11px] font-mono font-bold ${style.color}">
+      <div class="flex-shrink-0 mt-0.5 size-7 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-[11px] font-mono font-bold ${style.color}">
         ${style.icon}
       </div>
 
@@ -534,7 +534,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
   if (!hasDetail) return row
 
   return html`
-    <details class="rounded-lg hover:bg-[var(--white-3)] transition-colors group">
+    <details class="rounded hover:bg-[var(--white-3)] transition-colors group">
       <summary class="list-none cursor-pointer relative pr-8">
         ${row}
         <div class="absolute right-3 top-1/2 -translate-y-1/2 opacity-40 group-hover:opacity-100 transition-opacity">

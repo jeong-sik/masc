@@ -220,7 +220,7 @@ export function Ops() {
             <span>${workflowTargetLabel(workflowContext)}</span>
           </div>
           <div class="text-[var(--text-strong)] leading-relaxed">${workflowContext.summary}</div>
-          ${workflowContext.payload_preview ? html`<div class="mt-1 p-2 rounded-lg bg-[var(--white-3)] text-[12px] font-mono">${workflowContext.payload_preview}</div>` : null}
+          ${workflowContext.payload_preview ? html`<div class="mt-1 p-2 rounded bg-[var(--white-3)] text-[12px] font-mono">${workflowContext.payload_preview}</div>` : null}
           <div class="text-[var(--text-muted)] text-[12px]">
             ${workflowReady
               ? '추천 액션 기준으로 대상 선택과 입력값을 미리 맞춰 두었습니다.'

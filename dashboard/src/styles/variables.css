@@ -33,6 +33,17 @@
   --accent-10: rgba(71, 184, 255, 0.10);
   --accent-20: rgba(71, 184, 255, 0.20);
   --accent-30: rgba(71, 184, 255, 0.30);
+  /* Off-alpha accent tokens absorbed from Phase B inline-rgba sweep.
+     Same blue hue, opacity buckets that were already spread across
+     components. Naming follows the --accent-N (N = opacity %) convention.
+     Note: --accent-18 was previously pruned as unused; this PR reintroduces
+     it with 5 active callsites. */
+  --accent-15: rgba(71, 184, 255, 0.15);
+  --accent-18: rgba(71, 184, 255, 0.18);
+  --accent-36: rgba(71, 184, 255, 0.36);
+  /* --accent-45 reserved for focus-ring strength (high-contrast keyboard
+     focus halo). Distinct semantic from -30 so the role is grep-able. */
+  --accent-45: rgba(71, 184, 255, 0.45);
 
   /* Semantic - Success (Green) */
   --ok-soft: rgba(74, 222, 128, 0.15);
@@ -67,12 +78,20 @@
   --select-20: rgba(200, 168, 78, 0.22);
 
   /* Overlays (White Alpha) — bumped from 3/5 to 4/6 for clearer surface elevation */
+  --white-1: rgba(255, 255, 255, 0.02);
   --white-3: rgba(255, 255, 255, 0.04);
   --white-5: rgba(255, 255, 255, 0.06);
+  --white-7: rgba(255, 255, 255, 0.07);
   --white-10: rgba(255, 255, 255, 0.11);
   --white-20: rgba(255, 255, 255, 0.21);
   --white-50: rgba(255, 255, 255, 0.50);
   --white-80: rgba(255, 255, 255, 0.80);
+
+  /* Backdrop overlays — modal scrim & full-blocker. Distinct semantic
+     from --white-* (which are surface tints on top of dark). These are
+     dark scrims that dim the underlying content for modal/dialog focus. */
+  --backdrop-deep: rgba(7, 12, 20, 0.82);
+  --backdrop-modal: rgba(10, 18, 34, 0.95);
 
   /* Legacy Compatibility Variables — only aliases with active references kept.
      Dead aliases pruned: accent-8/12/14/18, ok-8/12/18/22/24/25/30/35/40/48,

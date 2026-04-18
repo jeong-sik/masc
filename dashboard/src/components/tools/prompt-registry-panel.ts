@@ -172,7 +172,7 @@ export function PromptRegistryPanel() {
       </div>
 
       ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}
-      ${status ? html`<div class="mb-4 rounded-lg border border-[rgba(56,189,248,0.28)] bg-[rgba(56,189,248,0.08)] px-3 py-2 text-[12px] text-[#bae6fd]">${status}</div>` : null}
+      ${status ? html`<div class="mb-4 rounded border border-[rgba(56,189,248,0.28)] bg-[rgba(56,189,248,0.08)] px-3 py-2 text-[12px] text-[#bae6fd]">${status}</div>` : null}
 
       <div class="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div class="min-h-[260px] rounded border border-[var(--card-border)] bg-[var(--white-3)] p-2">
@@ -207,14 +207,14 @@ export function PromptRegistryPanel() {
           </div>
           <div class="flex max-h-[520px] flex-col gap-2 overflow-y-auto pr-1">
             ${visiblePrompts.length === 0 ? html`
-              <div class="rounded-lg border border-dashed border-[var(--card-border)] px-3 py-6 text-center text-[11px] text-[var(--text-muted)]">
+              <div class="rounded border border-dashed border-[var(--card-border)] px-3 py-6 text-center text-[11px] text-[var(--text-muted)]">
                 조건에 맞는 프롬프트가 없습니다.
               </div>
             ` : null}
             ${visiblePrompts.map(prompt => html`
               <button
                 type="button"
-                class="rounded-lg border px-3 py-2 text-left transition-colors ${selectedPrompt?.key === prompt.key
+                class="rounded border px-3 py-2 text-left transition-colors ${selectedPrompt?.key === prompt.key
                   ? 'border-[var(--accent-30)] bg-[var(--accent-10)]'
                   : 'border-[var(--card-border)] bg-[var(--white-2)] hover:bg-[var(--white-4)]'}"
                 onClick=${() => {
@@ -245,22 +245,22 @@ export function PromptRegistryPanel() {
             </div>
 
             <div class="mb-4 grid gap-3 md:grid-cols-2">
-              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
+              <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
                 <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">마크다운 파일</div>
                 <div class="mt-1 break-all font-mono text-[12px] text-[var(--text-body)]">${selectedPrompt.file_path ?? '미설정'}</div>
               </div>
-              <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
+              <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
                 <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">문자 수</div>
                 <div class="mt-1 font-mono text-[12px] text-[var(--text-body)]">${selectedPrompt.char_count}</div>
               </div>
             </div>
 
             ${selectedPrompt.template_variables.length > 0 ? html`
-              <div class="mb-4 rounded-lg border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
+              <div class="mb-4 rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
                 <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">허용된 플레이스홀더</div>
                 <div class="mt-2 flex flex-wrap gap-2">
                   ${selectedPrompt.template_variables.map(variable => html`
-                    <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 font-mono text-[11px] text-[var(--text-body)]">${`{{${variable}}}`}</span>
+                    <span class="rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 font-mono text-[11px] text-[var(--text-body)]">${`{{${variable}}}`}</span>
                   `)}
                 </div>
               </div>
@@ -268,7 +268,7 @@ export function PromptRegistryPanel() {
 
             <div class="mb-4">
               <div class="mb-2 text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">파일 기준값</div>
-              <div class="max-h-[220px] overflow-auto rounded-lg border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```markdown\n' + (selectedPrompt.file_value ?? '없음') + '\n```'} /></div>
+              <div class="max-h-[220px] overflow-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```markdown\n' + (selectedPrompt.file_value ?? '없음') + '\n```'} /></div>
             </div>
 
             <div class="mb-2 flex items-center justify-between gap-2">
@@ -300,7 +300,7 @@ export function PromptRegistryPanel() {
               <//>
             </div>
           ` : html`
-            <div class="rounded-lg border border-dashed border-[var(--card-border)] px-4 py-10 text-center text-[12px] text-[var(--text-muted)]">
+            <div class="rounded border border-dashed border-[var(--card-border)] px-4 py-10 text-center text-[12px] text-[var(--text-muted)]">
               ${loading ? '프롬프트 목록을 불러오는 중입니다.' : '표시할 프롬프트가 없습니다.'}
             </div>
           `}

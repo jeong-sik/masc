@@ -68,7 +68,7 @@ export function QuickIntervene() {
 
       <div class="flex gap-2 items-stretch flex-wrap">
         <select
-          class="shrink-0 rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[13px] text-[var(--text-body)] transition-colors cursor-pointer min-w-[120px] focus-visible:outline-none focus-visible:border-[rgba(71,184,255,0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(71,184,255,0.35)]"
+          class="shrink-0 rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[13px] text-[var(--text-body)] transition-colors cursor-pointer min-w-[120px] focus-visible:outline-none focus-visible:border-[rgba(71,184,255,0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(71,184,255,0.35)]"
           value=${quickTarget.value}
           aria-label="개입 대상"
           onChange=${(e: Event) => { quickTarget.value = (e.target as HTMLSelectElement).value }}

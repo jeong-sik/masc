@@ -57,8 +57,8 @@ function coverageColor(coverage: number): string {
 }
 
 function coverageTone(coverage: number): string {
-  if (coverage >= 0.9) return 'border-[rgba(74,222,128,0.2)] bg-[rgba(74,222,128,0.06)]'
-  if (coverage >= 0.6) return 'border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.06)]'
+  if (coverage >= 0.9) return 'border-[var(--ok-20)] bg-[rgba(74,222,128,0.06)]'
+  if (coverage >= 0.6) return 'border-[var(--warn-20)] bg-[rgba(251,191,36,0.06)]'
   return 'border-[var(--bad-20)] bg-[rgba(239,68,68,0.06)]'
 }
 
@@ -87,7 +87,7 @@ function LayerResultRow({ layer }: { layer: EvalLayerResult }) {
   const detail = layer.detail ?? layer.evidence[0] ?? ''
 
   return html`
-    <div class="flex items-center gap-3 py-1.5 px-2 rounded-lg hover:bg-[var(--white-3)] transition-colors">
+    <div class="flex items-center gap-3 py-1.5 px-2 rounded hover:bg-[var(--white-3)] transition-colors">
       <span class="flex-shrink-0 w-4 text-center font-bold text-sm ${iconCls}">${icon}</span>
       <span class="flex-shrink-0 w-[120px] text-[11px] font-mono text-[var(--accent)] truncate" title=${layer.layer_name}>${layer.layer_name}</span>
       <span class="flex-shrink-0 w-10 text-right text-[11px] font-mono tabular-nums text-[var(--text-strong)]">${scoreText}</span>
@@ -191,9 +191,9 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* Coverage bar */}
       <div class="flex items-center gap-3 mb-3">
         <span class="text-[10px] text-[var(--text-muted)] flex-shrink-0 w-16">Coverage</span>
-        <div class="flex-1 h-2 bg-[var(--white-6)] rounded-full overflow-hidden">
+        <div class="flex-1 h-2 bg-[var(--white-6)] rounded-sm overflow-hidden">
           <div
-            class="h-full rounded-full transition-all duration-500"
+            class="h-full rounded-sm transition-all duration-500"
             style="width:${coveragePct}%;background:${coverageColor(coverage)}"
           ></div>
         </div>

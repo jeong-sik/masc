@@ -136,8 +136,8 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
   const h = size === 'sm' ? 'h-1.5' : 'h-2.5'
   return html`
     <div class="flex items-center gap-2">
-      <div class="flex-1 ${h} rounded-full bg-white/10 overflow-hidden">
-        <div class="${h} rounded-full transition-all duration-500" style="width:${clamped}%;background:${barColor}"></div>
+      <div class="flex-1 ${h} rounded-sm bg-white/10 overflow-hidden">
+        <div class="${h} rounded-sm transition-all duration-500" style="width:${clamped}%;background:${barColor}"></div>
       </div>
       <span class="text-[11px] font-semibold tabular-nums text-text-muted w-[36px] text-right">${clamped}%</span>
     </div>
@@ -149,23 +149,23 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
 function TreeSummary({ summary }: { summary: GoalTreeSummary }) {
   return html`
     <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3">
-      <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3 text-center">
+      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
         <div class="text-2xl font-bold text-text-strong tabular-nums">${summary.total_goals}</div>
         <div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-1">전체 목표</div>
       </div>
-      <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3 text-center">
+      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
         <div class="text-2xl font-bold text-ok tabular-nums">${summary.active_goals}</div>
         <div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-1">진행 중</div>
       </div>
-      <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3 text-center">
+      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
         <div class="text-2xl font-bold text-text-strong tabular-nums">${summary.total_tasks}</div>
         <div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-1">연결 태스크</div>
       </div>
-      <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3 text-center">
+      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
         <div class="text-2xl font-bold text-ok tabular-nums">${summary.done_tasks}</div>
         <div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-1">완료</div>
       </div>
-      <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-3">
+      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
         <div class="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-2">전체 수렴도</div>
         <${ConvergenceBar} pct=${summary.overall_convergence_pct} />
       </div>
@@ -177,11 +177,11 @@ function TreeSummary({ summary }: { summary: GoalTreeSummary }) {
 
 function TreeTask({ task }: { task: GoalTreeTask }) {
   return html`
-    <div class="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-white/3 text-[12px]">
-      <span class="size-2 rounded-full shrink-0" style="background:${task.status_color}"></span>
+    <div class="flex items-center gap-2 py-1.5 px-2 rounded bg-white/3 text-[12px]">
+      <span class="size-2 rounded-sm shrink-0" style="background:${task.status_color}"></span>
       <span class="flex-1 min-w-0 truncate text-text-body">${task.title}</span>
       ${task.assignee ? html`
-        <span class="shrink-0 rounded-md border border-accent/20 bg-[var(--accent-10)] px-1.5 py-0.5 text-[10px] font-medium text-accent">${task.assignee}</span>
+        <span class="shrink-0 rounded border border-accent/20 bg-[var(--accent-10)] px-1.5 py-0.5 text-[10px] font-medium text-accent">${task.assignee}</span>
       ` : null}
       <${StatusBadge} status=${task.status} />
     </div>
@@ -209,7 +209,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
 
         <div class="flex-1 min-w-0">
           <div class="flex flex-wrap items-center gap-2 mb-1">
-            <span class="shrink-0 rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest" style="color:${horizonColor(node.horizon)}">
+            <span class="shrink-0 rounded border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest" style="color:${horizonColor(node.horizon)}">
               ${horizonLabel(node.horizon)}
             </span>
             <span class="text-[14px] font-semibold text-text-strong break-words line-clamp-2">${node.title}</span>
@@ -218,12 +218,12 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
 
           <div class="flex flex-wrap items-center gap-3 text-[11px] text-text-muted">
             ${node.metric ? html`
-              <span class="rounded-md border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-accent">
+              <span class="rounded border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-accent">
                 ${node.metric}${node.target_value ? ` \u2192 ${node.target_value}` : ''}
               </span>
             ` : null}
             ${node.due_date ? html`
-              <span class="rounded-md border border-bad/20 bg-bad/10 px-2 py-0.5 text-bad">
+              <span class="rounded border border-bad/20 bg-bad/10 px-2 py-0.5 text-bad">
                 마감 <${TimeAgo} timestamp=${node.due_date} />
               </span>
             ` : null}
@@ -251,7 +251,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
       ${isExpanded ? html`
         <div class="mt-1.5 flex flex-col gap-1.5">
           ${node.tasks.length > 0 ? html`
-            <div class="ml-6 flex flex-col gap-1 rounded-lg border border-card-border/40 bg-[rgba(5,9,16,0.6)] p-2">
+            <div class="ml-6 flex flex-col gap-1 rounded border border-card-border/40 bg-[rgba(5,9,16,0.6)] p-2">
               <div class="text-[10px] font-semibold uppercase tracking-widest text-text-dim mb-1">연결된 태스크</div>
               ${node.tasks.map(t => html`<${TreeTask} key=${t.id} task=${t} />`)}
             </div>
@@ -302,7 +302,7 @@ export function GoalTree() {
                 placeholder="목표 / 태스크 제목 필터"
                 aria-label="목표 트리 필터"
                 onInput=${(e: Event) => { filterQuery.value = (e.target as HTMLInputElement).value }}
-                class="min-w-[180px] max-w-[260px] rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[12px] text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent"
+                class="min-w-[180px] max-w-[260px] rounded border border-white/10 bg-white/5 px-2 py-1 text-[12px] text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent"
               />
               <${ActionButton} variant="ghost" size="sm" onClick=${() => expandAll(data.tree)}>
                 모두 펼치기

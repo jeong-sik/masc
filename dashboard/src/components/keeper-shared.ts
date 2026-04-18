@@ -138,7 +138,7 @@ function conversationStateClass(sending: boolean, hydrating: boolean): string {
   if (hydrating) {
     return 'border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--text-strong)]'
   }
-  return 'border-[rgba(148,163,184,0.18)] bg-[rgba(148,163,184,0.08)] text-[var(--text-body)]'
+  return 'border-[rgba(148,163,184,0.18)] bg-[var(--slate-gray-8)] text-[var(--text-body)]'
 }
 
 function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnostic | null {
@@ -151,7 +151,7 @@ function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnosti
 
 function DiagChip({ label }: { label: string }) {
   return html`
-    <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">${label}</span>
+    <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">${label}</span>
   `
 }
 
@@ -222,7 +222,7 @@ export function KeeperDiagnosticSummary({
         ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed mt-1">${diagnostic.last_error}</div>`
         : null}
       ${showRawStatus
-        ? html`<div class="mt-3 max-h-[240px] overflow-auto rounded-lg border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
+        ? html`<div class="mt-3 max-h-[240px] overflow-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
         : null}
     </div>
   `
@@ -291,12 +291,12 @@ export function KeeperConversationPanel({
   return html`
     <div class="flex flex-col gap-3">
       <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(9,15,28,0.96),rgba(5,10,20,0.94))] shadow-[0_24px_56px_rgba(0,0,0,0.28)]">
-        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[rgba(148,163,184,0.12)] px-4 py-4">
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--slate-gray-12)] px-4 py-4">
           <div class="min-w-[220px] flex-1">
             <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 대화</div>
             <div class="mt-2 flex flex-wrap items-center gap-2">
               <div class="text-[15px] font-semibold text-[var(--text-strong)]">@${keeperName}</div>
-              <span class=${`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] ${conversationStateClass(sending, hydrating)}`}>
+              <span class=${`inline-flex items-center rounded-sm border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] ${conversationStateClass(sending, hydrating)}`}>
                 ${conversationStateLabel(sending, hydrating)}
               </span>
             </div>
@@ -362,7 +362,7 @@ export function KeeperConversationPanel({
             `
           : null}
 
-        <div class="border-t border-[rgba(148,163,184,0.12)] bg-[var(--white-3)] px-4 py-4">
+        <div class="border-t border-[var(--slate-gray-12)] bg-[var(--white-3)] px-4 py-4">
           <${ChatComposer}
             draft=${draft}
             placeholder=${chatAccess.blocked ? '현재 actor는 direct keeper chat 권한이 없습니다' : placeholder}
@@ -399,11 +399,11 @@ export function KeeperRuntimeActions({
   const recommended = diagnostic?.next_action_path ?? null
   const canRecover = diagnostic?.recoverable === true
 
-  const btnBase = 'py-1.5 px-4 rounded-lg text-xs font-medium cursor-pointer transition-colors border'
+  const btnBase = 'py-1.5 px-4 rounded text-xs font-medium cursor-pointer transition-colors border'
   const ghostBtn = `${btnBase} border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]`
-  const activeGhostBtn = `${btnBase} border-[rgba(71,184,255,0.4)] bg-[var(--accent-12)] text-[var(--accent)] hover:bg-[rgba(71,184,255,0.2)]`
-  const secondaryBtn = `${btnBase} border-[rgba(251,191,36,0.3)] bg-[var(--warn-10)] text-[var(--warn)] hover:bg-[rgba(251,191,36,0.15)]`
-  const activeSecondaryBtn = `${btnBase} border-[rgba(251,191,36,0.5)] bg-[rgba(251,191,36,0.15)] text-[var(--warn)] hover:bg-[rgba(251,191,36,0.2)]`
+  const activeGhostBtn = `${btnBase} border-[rgba(71,184,255,0.4)] bg-[var(--accent-12)] text-[var(--accent)] hover:bg-[var(--accent-20)]`
+  const secondaryBtn = `${btnBase} border-[rgba(251,191,36,0.3)] bg-[var(--warn-10)] text-[var(--warn)] hover:bg-[var(--warn-soft)]`
+  const activeSecondaryBtn = `${btnBase} border-[rgba(251,191,36,0.5)] bg-[var(--warn-soft)] text-[var(--warn)] hover:bg-[var(--warn-20)]`
 
   return html`
     <div class="flex flex-wrap gap-2">

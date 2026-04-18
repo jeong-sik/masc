@@ -110,7 +110,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
 
   return html`
     <div
-      class="mt-2 overflow-hidden rounded-md border border-[var(--white-8)] bg-[var(--white-2)]"
+      class="mt-2 overflow-hidden rounded border border-[var(--white-8)] bg-[var(--white-2)]"
       data-setup-guide-tone=${tone}
     >
       <button
@@ -128,7 +128,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
           ${tone === 'complete'
             ? html`
                 <span
-                  class="inline-flex items-center gap-1 rounded-full border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--ok)]"
+                  class="inline-flex items-center gap-1 rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--ok)]"
                   aria-label="Setup guide complete"
                   data-setup-complete-badge
                 >
@@ -182,7 +182,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
                   return html`
                     <li class="flex items-start gap-2.5" data-setup-step-item=${idx}>
                       <span
-                        class=${`mt-[2px] inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-semibold tabular-nums transition-colors ${circleToneClass}`}
+                        class=${`mt-[2px] inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border text-[10px] font-semibold tabular-nums transition-colors ${circleToneClass}`}
                         aria-hidden="true"
                         data-setup-step-circle=${`${connectorId}:${idx}`}
                       >${done ? '✓' : idx + 1}</span>

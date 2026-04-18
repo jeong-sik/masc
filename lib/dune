@@ -499,8 +499,6 @@
    keeper_turn_lifecycle
    keeper_turn
    keeper_msg_async
-   keeper_file_tracker
-   keeper_evidence
    keeper_status_detail
    keeper_status
    keeper_status_bridge
@@ -523,6 +521,7 @@
    oas_worker_exec
    oas_worker_named
    masc_oas_bridge
+   oas_bus_instrument
    oas_sse_bridge
    env_config_introspect
    runtime_params
@@ -636,8 +635,6 @@
   keeper_turn_lifecycle
   keeper_msg_async
   keeper_event_bus
-  keeper_file_tracker
-  keeper_evidence
   ;; worker_container sub-modules
   worker_container_types
   worker_container

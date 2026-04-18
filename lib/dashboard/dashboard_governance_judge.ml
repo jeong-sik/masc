@@ -304,11 +304,15 @@ let prompt_for_facts facts_json =
 let compute_judgments
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
-    ~factual_json =
+    ~build_facts =
   let timeout_s = Float.of_int Env_config.Inference.dashboard_governance_judge_timeout_seconds in
-  let prompt = prompt_for_facts factual_json in
   match
+    (* build_facts() is moved inside the bridge so a deadlock in
+       factual_snapshot_json / get_agents_status is bounded by [timeout_s]
+       rather than hanging the daemon fiber indefinitely (#8319). *)
     Masc_oas_bridge.run_safe ~timeout_s (fun () ->
+      let factual_json = build_facts () in
+      let prompt = prompt_for_facts factual_json in
       Oas_worker.run_named_with_masc_tools ~cascade_name:"governance_judge"
         ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
         ~approval:Approval_callbacks.auto_approve
@@ -365,7 +369,11 @@ let refresh_once ~sw ~net
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~base_path ~build_facts =
   let st = get_state base_path in
-  if should_backoff ~sw ~net then
+  (* Cycle-start log so an operator can confirm the daemon fiber is alive.
+     Previously every branch was silent in steady state — a hung daemon was
+     indistinguishable from a healthy one producing zero events (#8319). *)
+  Log.Governance.debug "refresh_once: cycle start";
+  if should_backoff ~sw ~net then begin
     let was_online =
       with_lock st (fun () ->
           let was_online = st.judge_online in
@@ -376,10 +384,16 @@ let refresh_once ~sw ~net
     in
     if was_online then
       Log.Governance.info "backoff: local slots saturated, skipping cycle"
+    else
+      Log.Governance.debug "backoff: local slots saturated (first cycle)"
+  end
   else begin
     with_lock st (fun () -> st.refreshing <- true);
-    match compute_judgments ~masc_tools ~dispatch ~factual_json:(build_facts ()) with
+    match compute_judgments ~masc_tools ~dispatch ~build_facts with
     | Ok (model_used, generated_at, expires_at, judgments) ->
+        Log.Governance.info
+          "refresh_once: ok model=%s judgments=%d"
+          model_used (List.length judgments);
         append_judgments base_path judgments;
         with_lock st (fun () ->
             st.refreshing <- false;
@@ -394,6 +408,9 @@ let refresh_once ~sw ~net
               (fun json -> Hashtbl.replace st.judgments (judgment_key json) json)
               judgments)
     | Error message ->
+        Log.Governance.warn
+          "refresh_once: compute_judgments failed: %s"
+          message;
         with_lock st (fun () ->
             st.refreshing <- false;
             st.judge_online <- false;

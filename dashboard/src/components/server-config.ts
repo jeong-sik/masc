@@ -92,7 +92,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
   if (filtered.length === 0) return null
 
   return html`
-    <div class="border border-[var(--border-subtle)] rounded-lg overflow-hidden mb-3">
+    <div class="border border-[var(--border-subtle)] rounded overflow-hidden mb-3">
       <button
         class="w-full flex items-center justify-between px-4 py-2.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-panel-hover)] transition-colors text-left"
         onClick=${() => toggleCategory(name)}
@@ -103,7 +103,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
           <span class="text-xs text-[var(--text-muted)]">(${filtered.length})</span>
         </div>
         ${customCount > 0 ? html`
-          <span class="text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
+          <span class="text-[10px] px-2 py-0.5 rounded-sm bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
             ${customCount} custom
           </span>
         ` : null}
@@ -125,19 +125,19 @@ function ServerMeta() {
 
   return html`
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-      <div class="px-3 py-2 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
+      <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
         <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Version</div>
         <div class="text-sm font-mono text-[var(--text-primary)]">${server.version}</div>
       </div>
-      <div class="px-3 py-2 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
+      <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
         <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Uptime</div>
         <div class="text-sm font-mono text-[var(--text-primary)]">${formatUptime(server.uptime_seconds)}</div>
       </div>
-      <div class="px-3 py-2 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
+      <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
         <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">OCaml</div>
         <div class="text-sm font-mono text-[var(--text-primary)]">${server.ocaml_version}</div>
       </div>
-      <div class="px-3 py-2 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
+      <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
         <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">PID</div>
         <div class="text-sm font-mono text-[var(--text-primary)]">${server.pid}</div>
       </div>
@@ -167,7 +167,7 @@ export function ServerConfig() {
           onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
         />
         <button
-          class="px-3 py-1.5 text-xs rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-panel-hover)] transition-colors"
+          class="px-3 py-1.5 text-xs rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-panel-hover)] transition-colors"
           onClick=${() => void refreshServerConfig()}
           disabled=${loading}
         >

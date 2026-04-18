@@ -14,7 +14,7 @@ describe('idPillClasses (pure)', () => {
       'font-medium',
       'py-1',
       'px-2.5',
-      'rounded-md',
+      'rounded',
       'whitespace-nowrap',
       'shadow-sm',
       'border',
@@ -50,7 +50,7 @@ describe('idPillClasses (pure)', () => {
   it('shape tokens present regardless of mono flag (regression guard)', () => {
     for (const mono of [true, false]) {
       const cls = idPillClasses(mono)
-      for (const token of ['rounded-md', 'text-[10px]', 'px-2.5', 'py-1', 'text-accent']) {
+      for (const token of ['rounded', 'text-[10px]', 'px-2.5', 'py-1', 'text-accent']) {
         expect(cls).toContain(token)
       }
     }
@@ -102,6 +102,6 @@ describe('IdPill component', () => {
     const cls = container.querySelector('[data-id-pill]')!.getAttribute('class') ?? ''
     expect(cls).toContain('group-hover:bg-accent/20')
     expect(cls).toContain('transition-colors')
-    expect(cls).toContain('rounded-md')
+    expect(cls).toContain('rounded')
   })
 })

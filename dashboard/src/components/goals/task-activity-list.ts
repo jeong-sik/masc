@@ -71,7 +71,7 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
 
   if (!hasDetail) {
     return html`
-      <div class="flex items-center gap-3 py-1.5 px-3 rounded-lg hover:bg-[var(--white-3)] transition-colors">
+      <div class="flex items-center gap-3 py-1.5 px-3 rounded hover:bg-[var(--white-3)] transition-colors">
         <span class="text-[13px] ${kindColor(event.kind)}">${kindIcon(event.kind)}</span>
         <span class="flex-1 text-[12px] text-text-body truncate">${event.summary}</span>
         ${event.duration_ms != null ? html`<span class="text-[10px] tabular-nums ${durationColor(event.duration_ms)}">${event.duration_ms}ms</span>` : null}
@@ -82,7 +82,7 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
 
   return html`
     <details
-      class="rounded-lg hover:bg-[var(--white-3)] transition-colors"
+      class="rounded hover:bg-[var(--white-3)] transition-colors"
       onToggle=${(evt: Event) => {
         setIsOpen((evt.currentTarget as HTMLDetailsElement).open)
       }}
@@ -161,7 +161,7 @@ export function TaskActivityList({
           <button
             key=${chip.key}
             type="button"
-            class="px-2 py-1 rounded-md text-[11px] font-medium border cursor-pointer transition-colors ${
+            class="px-2 py-1 rounded text-[11px] font-medium border cursor-pointer transition-colors ${
               filter === chip.key
                 ? 'border-accent/40 bg-accent/12 text-[var(--accent)]'
                 : 'border-[var(--white-10)] bg-[var(--white-4)] text-text-muted hover:bg-[var(--white-8)]'

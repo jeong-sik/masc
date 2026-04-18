@@ -26,6 +26,8 @@ import {
   shellMetaCognition,
   shellConfigResolution,
   shellRuntimeResolution,
+  tasks,
+  keepers,
 } from '../../store'
 import type { ObservatoryAgent } from '../../observatory-store'
 import type {
@@ -108,8 +110,8 @@ export function opHubTileNumberClass(count: number): string {
     existing subdued card style. */
 export function opHubTileBorderClass(count: number): string {
   return opHubTileIsActive(count)
-    ? 'rounded-lg border border-accent/30 bg-accent/5 p-3'
-    : 'rounded-lg border border-card-border/35 bg-card/55 p-3'
+    ? 'rounded border border-accent/30 bg-accent/5 p-3'
+    : 'rounded border border-card-border/35 bg-card/55 p-3'
 }
 
 function timestampToMs(timestamp?: string | null): number | null {
@@ -152,10 +154,10 @@ function OverviewFreshnessStrip() {
             />
             <span class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Overview Freshness</span>
             ${tier === 'warn'
-              ? html`<span class="rounded-full border border-warn/25 bg-warn/10 px-2 py-0.5 text-[11px] font-medium text-warn">1분 이상 경과</span>`
+              ? html`<span class="rounded-sm border border-warn/25 bg-warn/10 px-2 py-0.5 text-[11px] font-medium text-warn">1분 이상 경과</span>`
               : null}
             ${isStale
-              ? html`<span class="rounded-full border border-warn/30 bg-warn/15 px-2 py-0.5 text-[11px] font-semibold text-warn">5분 이상 stale</span>`
+              ? html`<span class="rounded-sm border border-warn/30 bg-warn/15 px-2 py-0.5 text-[11px] font-semibold text-warn">5분 이상 stale</span>`
               : null}
           </div>
           <div class="mt-1 text-[13px] text-[var(--text-body)]">
@@ -341,15 +343,15 @@ function MetaCognitionCard() {
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <span class="rounded-full border px-2.5 py-1 text-[11px] font-semibold ${tone.className}">
+          <span class="rounded-sm border px-2.5 py-1 text-[11px] font-semibold ${tone.className}">
             ${tone.label}
           </span>
-          <span class="rounded-full border border-card-border/60 bg-card/55 px-2.5 py-1 text-[11px] font-semibold text-[var(--text-strong)]">
+          <span class="rounded-sm border border-card-border/60 bg-card/55 px-2.5 py-1 text-[11px] font-semibold text-[var(--text-strong)]">
             정체 ${stagnationPct}%
           </span>
           ${summary.contested_belief_count > 0
             ? html`
-                <span class="rounded-full border border-[var(--warn-20)] bg-[var(--warn-10)] px-2.5 py-1 text-[11px] font-semibold text-[var(--warn-bright)]">
+                <span class="rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-2.5 py-1 text-[11px] font-semibold text-[var(--warn-bright)]">
                   이견 ${summary.contested_belief_count}
                 </span>
               `
@@ -447,7 +449,7 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
         ${s.member_names?.length ? html`<span>${s.member_names.length}명</span>` : null}
       </div>
       ${hasBlocker ? html`
-        <div class="mt-3 truncate rounded-lg border border-bad/20 bg-bad/10 px-3 py-1.5 pl-5 text-[11px] font-medium text-bad-light">${s.blocker_summary}</div>
+        <div class="mt-3 truncate rounded border border-bad/20 bg-bad/10 px-3 py-1.5 pl-5 text-[11px] font-medium text-bad-light">${s.blocker_summary}</div>
       ` : null}
     <//>
   `
@@ -552,7 +554,7 @@ function AgentPulse() {
           placeholder="이름 / 상태 / focus 필터"
           aria-label="에이전트 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && visibleAgents.length === 0
@@ -596,7 +598,7 @@ interface CompactKpiProps {
 
 function CompactKpi({ value, valueClass, label }: CompactKpiProps) {
   return html`
-    <div class="rounded-lg border border-card-border/30 bg-card/40 p-3 text-center">
+    <div class="rounded border border-card-border/30 bg-card/40 p-3 text-center">
       <div class="text-[22px] font-bold ${valueClass ?? 'text-text-strong'}">${value}</div>
       <div class="text-[11px] text-text-muted mt-1">${label}</div>
     </div>
@@ -636,8 +638,8 @@ function ToolCallHealthPanel() {
         <${CompactKpi} value=${ratePct} valueClass=${rateColor} label="실패율" />
       </div>
       ${successRate != null ? html`
-        <div class="mt-2 h-1.5 rounded-full overflow-hidden bg-[var(--white-6)]">
-          <div class="${barColor} h-full rounded-full transition-all" style="width:${Math.min(successRate, 100)}%" />
+        <div class="mt-2 h-1.5 rounded-sm overflow-hidden bg-[var(--white-6)]">
+          <div class="${barColor} h-full rounded-sm transition-all" style="width:${Math.min(successRate, 100)}%" />
         </div>
       ` : null}
     </div>
@@ -722,6 +724,74 @@ function OperationsHubCard() {
   `
 }
 
+function JourneyEntryCard() {
+  const activeTasks = tasks.value.filter(task => {
+    const status = (task.status ?? 'todo').trim()
+    return status === 'todo' || status === 'claimed' || status === 'in_progress' || status === 'awaiting_verification'
+  }).length
+  const liveKeepers = keepers.value.filter(keeper => {
+    const status = (keeper.status ?? '').trim().toLowerCase()
+    if (keeper.keepalive_running === true) return true
+    return !['offline', 'inactive', 'stopped', 'dead'].includes(status)
+  }).length
+  const blockedJourneys = keepers.value.filter(keeper => keeper.runtime_blocker_class != null).length
+
+  return html`
+    <div>
+      <${HomeSectionHeader}
+        label="여정 맵"
+        linkLabel="모니터링에서 열기 ->"
+        linkTab="monitoring"
+        linkParams=${{ section: 'journey' }}
+      />
+      <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 max-[920px]:grid-cols-1">
+        <div class="rounded border border-card-border/40 bg-card/40 p-4">
+          <div class="text-[13px] leading-[1.7] text-[var(--text-body)]">
+            새 통합 화면입니다. <strong class="text-[var(--text-strong)]">Task → Run → Contract → Keeper → Thinking → Memory → Turn → Life → Cascade</strong>
+            를 같은 카드 안에서 읽습니다. task에 묶인 실행 흐름과 task 밖 keeper continuity를 한 화면에서 바로 파악할 때 이쪽이 첫 진입점입니다.
+          </div>
+          <div class="mt-4 grid grid-cols-3 gap-3 max-[720px]:grid-cols-1">
+            <div class=${opHubTileBorderClass(activeTasks)}>
+              <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">활성 태스크</div>
+              <div class=${opHubTileNumberClass(activeTasks)}>${activeTasks}</div>
+              <div class="mt-1 text-[11px] text-[var(--text-muted)]">task journeys</div>
+            </div>
+            <div class=${opHubTileBorderClass(liveKeepers)}>
+              <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">라이브 키퍼</div>
+              <div class=${opHubTileNumberClass(liveKeepers)}>${liveKeepers}</div>
+              <div class="mt-1 text-[11px] text-[var(--text-muted)]">keeper journeys</div>
+            </div>
+            <div class=${opHubTileBorderClass(blockedJourneys)}>
+              <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">런타임 차단</div>
+              <div class=${opHubTileNumberClass(blockedJourneys)}>${blockedJourneys}</div>
+              <div class="mt-1 text-[11px] text-[var(--text-muted)]">blocked journeys</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <${RouteLink}
+            tab="monitoring"
+            params=${{ section: 'journey' }}
+            class="rounded border border-accent/25 bg-[var(--accent-10)] px-4 py-3 text-[13px] font-semibold text-accent transition-colors hover:bg-accent/18"
+            title="여정 맵 열기"
+          >
+            여정 맵 열기
+          <//>
+          <${RouteLink}
+            tab="monitoring"
+            params=${{ section: 'observatory' }}
+            class="rounded border border-card-border/45 bg-card/45 px-4 py-3 text-[13px] font-semibold text-[var(--text-strong)] transition-colors hover:bg-card"
+            title="관찰소 열기"
+          >
+            관찰소 비교 보기
+          <//>
+        </div>
+      </div>
+    </div>
+  `
+}
+
 function resolutionTone(status?: string | null): string {
   switch ((status ?? '').trim().toLowerCase()) {
     case 'ready':
@@ -766,13 +836,13 @@ function PathTruthBlock({
   if (!item) return null
 
   return html`
-    <div class="rounded-lg border border-card-border/35 bg-card/45 p-3">
+    <div class="rounded border border-card-border/35 bg-card/45 p-3">
       <div class="flex flex-wrap items-center gap-2">
         <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">${label}</div>
-        <span class="rounded-full border px-2 py-0.5 text-[10px] font-semibold ${item.exists ? 'border-ok/25 bg-ok/10 text-ok' : 'border-bad/25 bg-bad/10 text-bad-light'}">
+        <span class="rounded-sm border px-2 py-0.5 text-[10px] font-semibold ${item.exists ? 'border-ok/25 bg-ok/10 text-ok' : 'border-bad/25 bg-bad/10 text-bad-light'}">
           ${item.exists ? 'present' : 'missing'}
         </span>
-        <span class="rounded-full border border-card-border/50 bg-card/55 px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
+        <span class="rounded-sm border border-card-border/50 bg-card/55 px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
           ${sourceSummaryLabel(item.source)}
         </span>
       </div>
@@ -804,26 +874,26 @@ function ConfigTruthCard() {
           <div class="flex flex-wrap items-center gap-2">
             ${configResolution
               ? html`
-                  <span class="rounded-full border px-2.5 py-1 text-[11px] font-semibold ${resolutionTone(configResolution.status)}">
+                  <span class="rounded-sm border px-2.5 py-1 text-[11px] font-semibold ${resolutionTone(configResolution.status)}">
                     config ${configResolution.status}
                   </span>
                 `
               : null}
             ${runtimeResolution
               ? html`
-                  <span class="rounded-full border px-2.5 py-1 text-[11px] font-semibold ${resolutionTone(runtimeResolution.status)}">
+                  <span class="rounded-sm border px-2.5 py-1 text-[11px] font-semibold ${resolutionTone(runtimeResolution.status)}">
                     runtime ${runtimeResolution.status}
                   </span>
                 `
               : null}
             ${warningCount > 0
               ? html`
-                  <span class="rounded-full border border-warn/25 bg-warn/12 px-2.5 py-1 text-[11px] font-semibold text-warn">
+                  <span class="rounded-sm border border-warn/25 bg-warn/12 px-2.5 py-1 text-[11px] font-semibold text-warn">
                     warning ${warningCount}
                   </span>
                 `
               : html`
-                  <span class="rounded-full border border-ok/25 bg-ok/10 px-2.5 py-1 text-[11px] font-semibold text-ok">
+                  <span class="rounded-sm border border-ok/25 bg-ok/10 px-2.5 py-1 text-[11px] font-semibold text-ok">
                     drift 없음
                   </span>
                 `}
@@ -844,14 +914,14 @@ function ConfigTruthCard() {
             ? html`
                 <div class="mt-4 flex flex-col gap-2">
                   ${configResolution?.warnings.slice(0, 2).map(warning => html`
-                    <div class="rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-[12px] text-[var(--text-body)]">${warning}</div>
+                    <div class="rounded border border-warn/25 bg-warn/10 px-3 py-2 text-[12px] text-[var(--text-body)]">${warning}</div>
                   `)}
                   ${runtimeResolution?.warnings.slice(0, 2).map(warning => html`
-                    <div class="rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-[12px] text-[var(--text-body)]">${warning}</div>
+                    <div class="rounded border border-warn/25 bg-warn/10 px-3 py-2 text-[12px] text-[var(--text-body)]">${warning}</div>
                   `)}
                   ${runtimeResolution?.source_mismatch
                     ? html`
-                        <div class="rounded-lg border border-bad/25 bg-bad/10 px-3 py-2 text-[12px] text-[var(--text-body)]">
+                        <div class="rounded border border-bad/25 bg-bad/10 px-3 py-2 text-[12px] text-[var(--text-body)]">
                           workspace와 runtime build source가 다릅니다.
                         </div>
                       `
@@ -908,6 +978,10 @@ export function Overview() {
       <${OverviewFreshnessStrip} />
       <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
       <${AttentionSpotlight} snap=${snap} />
+
+      <div class=${OVERVIEW_CARD}>
+        <${JourneyEntryCard} />
+      </div>
 
       <div class=${OVERVIEW_CARD}>
         <${OperationsHubCard} />

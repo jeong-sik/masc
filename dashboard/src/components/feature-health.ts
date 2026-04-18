@@ -133,7 +133,7 @@ function statusChipClass(status: FeatureStatus): string {
 
 function StatusPill({ status }: { status: FeatureStatus }) {
   return html`
-    <span class=${`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusChipClass(status)}`}>
+    <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusChipClass(status)}`}>
       ${statusLabel(status)}
     </span>
   `
@@ -141,7 +141,7 @@ function StatusPill({ status }: { status: FeatureStatus }) {
 
 function FeatureItem({ item }: { item: FeatureHealthItem }) {
   return html`
-    <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+    <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
       <div class="flex items-start justify-between gap-3">
         <div class="flex-1">
           <div class="flex items-center gap-2">
@@ -173,7 +173,7 @@ function CategorySection({ category, categoryData }: { category: string; categor
   const enabledRatio = categoryData.total > 0 ? Math.round((categoryData.enabled / categoryData.total) * 100) : 0
 
   return html`
-    <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] p-4">
+    <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4">
       <div class="mb-3 flex items-center justify-between">
         <div>
           <div class="text-sm font-medium text-[var(--text-strong)]">${categoryLabel}</div>
@@ -181,7 +181,7 @@ function CategorySection({ category, categoryData }: { category: string; categor
             ${categoryData.enabled} / ${categoryData.total} enabled (${enabledRatio}%)
           </div>
         </div>
-        <div class="rounded-full border border-[var(--white-8)] bg-[var(--white-6)] px-3 py-1 text-xs font-semibold text-[var(--text-body)]">
+        <div class="rounded-sm border border-[var(--white-8)] bg-[var(--white-6)] px-3 py-1 text-xs font-semibold text-[var(--text-body)]">
           ${categoryData.total}
         </div>
       </div>
@@ -284,13 +284,13 @@ export function FeatureHealth() {
                   )
                   if (filtered.length === 0) {
                     return html`
-                      <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] p-4 text-xs text-[var(--text-dim)]">
+                      <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4 text-xs text-[var(--text-dim)]">
                         조건에 맞는 기능이 없습니다.
                       </div>
                     `
                   }
                   return html`
-                    <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] p-4">
+                    <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4">
                       <div class="mb-3 text-xs text-[var(--text-muted)]">
                         ${filtered.length} / ${data.all_features.length}개 기능
                       </div>

@@ -28,12 +28,12 @@ function Chip({
   onClear: () => void
 }) {
   return html`
-    <span class="inline-flex items-center gap-1.5 rounded-full border border-card-border bg-card/50 px-2.5 py-1 text-[11px]">
+    <span class="inline-flex items-center gap-1.5 rounded-sm border border-card-border bg-card/50 px-2.5 py-1 text-[11px]">
       <span class="text-text-dim font-medium">${label}:</span>
       <span class="font-mono text-text-strong">${value}</span>
       <button
         type="button"
-        class="ml-0.5 rounded-full p-0.5 text-text-muted hover:bg-white/10 hover:text-text-strong transition-colors"
+        class="ml-0.5 rounded-sm p-0.5 text-text-muted hover:bg-white/10 hover:text-text-strong transition-colors"
         onClick=${onClear}
         aria-label=${`${label} 필터 제거`}
       >

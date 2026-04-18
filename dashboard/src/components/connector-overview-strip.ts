@@ -235,7 +235,7 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
     <div
       class=${`flex min-w-0 flex-col gap-3 rounded border bg-[var(--bg-1)] p-3 transition-colors ${
         selected
-          ? 'border-[var(--accent)] shadow-[0_0_0_1px_rgba(71,184,255,0.18)]'
+          ? 'border-[var(--accent)] shadow-[0_0_0_1px_var(--accent-18)]'
           : 'border-[var(--white-8)] hover:border-[var(--white-10)]'
       }`}
       data-overview-tile=${id}
@@ -249,17 +249,17 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
         aria-pressed=${selected ? 'true' : 'false'}
       >
         <span
-          class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[14px]"
+          class="flex h-7 w-7 shrink-0 items-center justify-center rounded text-[14px]"
           style=${accent}
         >${channelIcon(id)}</span>
         <span class="min-w-0 flex-1">
           <span class="flex items-center gap-2">
             <span class="block truncate text-[13px] font-semibold text-[var(--text-body)]">${displayName}</span>
-            <span class=${`rounded-full border px-2 py-0.5 text-[10px] font-medium ${summary.badgeClass}`}>${summary.badge}</span>
+            <span class=${`rounded-sm border px-2 py-0.5 text-[10px] font-medium ${summary.badgeClass}`}>${summary.badge}</span>
             ${uptimeLabel !== null
               ? html`
                   <span
-                    class="rounded-full border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-[1px] text-[10px] font-normal text-[var(--ok)]/80"
+                    class="rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-[1px] text-[10px] font-normal text-[var(--ok)]/80"
                     data-uptime-chip
                     title="last_ready_at 기준 경과 시간"
                   >${uptimeLabel}</span>
@@ -362,7 +362,7 @@ function TilePrimaryAction({ id, sidecarUp }: { id: KnownConnectorId; sidecarUp:
   return html`
     <button
       type="button"
-      class=${`w-full cursor-pointer rounded-md border px-2 py-1.5 text-[12px] font-semibold tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${tone}`}
+      class=${`w-full cursor-pointer rounded border px-2 py-1.5 text-[12px] font-semibold tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${tone}`}
       disabled=${view.busy}
       aria-busy=${view.busy ? 'true' : 'false'}
       aria-label=${sidecarUp ? `${id} sidecar 정지` : `${id} sidecar 시작`}
@@ -435,7 +435,7 @@ function TileErrorNotice({ connector }: { connector: GateConnectorInfo | null })
   const glyph = TILE_NOTICE_GLYPH[notice.tone]
   return html`
     <div
-      class=${`flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] ${tone}`}
+      class=${`flex min-w-0 items-center gap-1.5 rounded border px-2 py-1 text-[10px] ${tone}`}
       role="alert"
       aria-label=${`${notice.label}: ${notice.detail}`}
       title=${notice.detail}
@@ -676,7 +676,7 @@ function IncidentBanner({ droppedIds }: { droppedIds: string[] }) {
     .join(', ')
   return html`
     <div
-      class="mb-2 flex items-center gap-2 rounded-md border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-1.5 text-[11px] font-semibold text-[var(--bad-light)]"
+      class="mb-2 flex items-center gap-2 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-1.5 text-[11px] font-semibold text-[var(--bad-light)]"
       data-incident-banner
       role="alert"
     >

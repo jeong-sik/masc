@@ -54,7 +54,7 @@ interface ErrorStateProps {
 
 export function ErrorState({ message, class: cx }: ErrorStateProps) {
   return html`
-    <div class="flex items-start gap-2 rounded-lg border border-[var(--bad-30)] bg-[var(--bad-12)] px-4 py-3 text-[13px] text-[var(--bad-light)] ${cx ?? ''}">
+    <div class="flex items-start gap-2 rounded border border-[var(--bad-30)] bg-[var(--bad-12)] px-4 py-3 text-[13px] text-[var(--bad-light)] ${cx ?? ''}">
       <${AlertTriangle} size=${16} class="mt-0.5 shrink-0" />
       <span>${message}</span>
     </div>

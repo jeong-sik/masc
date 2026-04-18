@@ -175,14 +175,14 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     <div class="px-6 pt-4">
       <div class="rounded border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[12px] text-[var(--text-body)]">
         ${keeper.paused
-          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">일시정지</span>
+          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">일시정지</span>
             <button
-              class="inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition-colors disabled:opacity-50"
+              class="inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition-colors disabled:opacity-50"
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('resume')}
             >재개</button>`
           : html`<button
-              class="inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition-colors disabled:opacity-50"
+              class="inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition-colors disabled:opacity-50"
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('pause')}
             >일시정지</button>`}
@@ -192,24 +192,24 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
             ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
           : null}
         ${hbStale
-          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">Heartbeat stale</span>
+          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">Heartbeat stale</span>
             <span>마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>`
           : null}
         ${continueGate
           ? html`
-              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">
+              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">
                 계속 진행 승인 대기
               </span>
             `
           : socialFallbackActive
           ? html`
-              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">
+              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">
                 Social fallback
               </span>
             `
           : runtimeBlockerClass
           ? html`
-              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">
+              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">
                 ${runtimeBlockerLabel ?? 'Runtime blocker'}
               </span>
             `
@@ -239,7 +239,7 @@ function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; e
 
   if (isOffline) return html`
     <button type="button"
-      class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.08)] text-[var(--ok)] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
+      class="py-1 px-3 rounded text-[11px] font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.08)] text-[var(--ok)] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
       onClick=${() => {
         void (async () => {
           try {
@@ -259,7 +259,7 @@ function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; e
 
   if (isRunning) return html`
     <button type="button"
-      class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] transition-colors"
+      class="py-1 px-3 rounded text-[11px] font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[var(--bad-soft)] transition-colors"
       onClick=${() => {
         void (async () => {
           const confirmed = await requestConfirm({
@@ -334,7 +334,7 @@ function KeeperClearContextDialog({
           <span class="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">사유</span>
           <textarea
             ref=${reasonRef}
-            class="min-h-[112px] resize-y rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-2 text-[13px] leading-[1.55] text-[var(--text-body)] outline-none focus:border-[rgba(71,184,255,0.45)] focus:ring-2 focus:ring-[rgba(71,184,255,0.18)]"
+            class="min-h-[112px] resize-y rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-2 text-[13px] leading-[1.55] text-[var(--text-body)] outline-none focus:border-[var(--accent-45)] focus:ring-2 focus:ring-[var(--accent-18)]"
             placeholder="예: stale continuity replay 제거"
             disabled=${pending}
             value=${reason}
@@ -363,13 +363,13 @@ function KeeperClearContextDialog({
         <div class="flex items-center justify-end gap-2">
           <button
             type="button"
-            class="px-4 py-2 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] hover:bg-[var(--white-8)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            class="px-4 py-2 rounded text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] hover:bg-[var(--white-8)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             disabled=${pending}
             onClick=${onClose}
           >취소</button>
           <button
             type="button"
-            class="px-4 py-2 rounded-lg text-[13px] font-medium border border-transparent bg-[var(--bad)] text-white hover:bg-[rgba(239,68,68,0.88)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            class="px-4 py-2 rounded text-[13px] font-medium border border-transparent bg-[var(--bad)] text-white hover:bg-[rgba(239,68,68,0.88)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             disabled=${pending || reason.trim() === ''}
             onClick=${onSubmit}
           >${pending ? '비우는 중...' : '비우기'}</button>
@@ -433,14 +433,14 @@ function CheckpointSummaryCard({
     <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3">
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-[12px] font-semibold text-[var(--text-strong)]">${title}</span>
-        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.18)]">
+        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-18)]">
           gen ${summary.generation}
         </span>
-        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]">
+        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]">
           ${summary.message_count} msgs
         </span>
         ${summary.system_prompt_present
-          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]">system kept</span>`
+          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]">system kept</span>`
           : null}
       </div>
       <div class="mt-2 text-[11px] text-[var(--text-muted)]">
@@ -450,7 +450,7 @@ function CheckpointSummaryCard({
         ? html`<div class="mt-2 text-[12px] leading-relaxed text-[var(--text-body)]">${summary.latest_preview}</div>`
         : null}
       ${summary.continuity_summary
-        ? html`<pre class="mt-2 whitespace-pre-wrap rounded-lg border border-[var(--white-8)] bg-[rgba(255,255,255,0.03)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">${summary.continuity_summary}</pre>`
+        ? html`<pre class="mt-2 whitespace-pre-wrap rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">${summary.continuity_summary}</pre>`
         : html`<div class="mt-2 text-[11px] text-[var(--text-dim)]">continuity snapshot 없음</div>`}
     </div>
   `
@@ -560,12 +560,12 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
         <div class="flex items-center gap-2">
           <button
             type="button"
-            class="rounded-lg border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-1.5 text-[11px] font-semibold text-[var(--text-body)] hover:bg-[var(--white-8)] cursor-pointer"
+            class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-1.5 text-[11px] font-semibold text-[var(--text-body)] hover:bg-[var(--white-8)] cursor-pointer"
             onClick=${loadInventory}
           >새로고침</button>
           <button
             type="button"
-            class="rounded-lg border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-1.5 text-[11px] font-semibold text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-1.5 text-[11px] font-semibold text-[#fb7185] hover:bg-[var(--bad-soft)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             disabled=${deleting || selectedIds.length === 0}
             onClick=${deleteSelected}
           >${deleting ? '삭제 중...' : `선택 삭제 (${selectedIds.length})`}</button>
@@ -591,7 +591,7 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
             placeholder="snapshot id / preview / 요약 필터"
             aria-label="OAS snapshot history 필터"
             onInput=${(e: Event) => { setHistoryQuery((e.target as HTMLInputElement).value) }}
-            class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
           />
         </div>
         ${!inventory || inventory.history.length === 0
@@ -615,14 +615,14 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
                     <div class="min-w-0 flex-1">
                       <div class="flex flex-wrap items-center gap-2">
                         <span class="font-mono text-[var(--text-strong)]">${item.snapshot_id}</span>
-                        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.18)]">
+                        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-18)]">
                           gen ${item.generation}
                         </span>
-                        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]">
+                        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]">
                           ${item.message_count} msgs
                         </span>
                         ${item.system_prompt_present
-                          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]">system kept</span>`
+                          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[10px] font-semibold border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]">system kept</span>`
                           : null}
                       </div>
                       <div class="mt-1 text-[11px] text-[var(--text-muted)]">
@@ -633,7 +633,7 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
                         ? html`<div class="mt-2 text-[12px] leading-relaxed text-[var(--text-body)]">${item.latest_preview}</div>`
                         : null}
                       ${item.continuity_summary
-                        ? html`<pre class="mt-2 whitespace-pre-wrap rounded-lg border border-[var(--white-8)] bg-[rgba(255,255,255,0.03)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">${item.continuity_summary}</pre>`
+                        ? html`<pre class="mt-2 whitespace-pre-wrap rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">${item.continuity_summary}</pre>`
                         : html`<div class="mt-2 text-[11px] text-[var(--text-dim)]">continuity snapshot 없음</div>`}
                     </div>
                   </label>
@@ -763,11 +763,11 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
             <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Repos (${repos.length})</div>
             <div class="flex flex-col gap-1.5">
               ${repos.map(r => html`
-                <div class="flex items-center gap-3 px-3 py-2 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+                <div class="flex items-center gap-3 px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
                       <span class="text-xs font-medium text-[var(--text-strong)] truncate">${r.name}</span>
-                      <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">${r.branch}</span>
+                      <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">${r.branch}</span>
                       ${r.shallow ? html`<span class="text-[10px] px-1 py-0.5 rounded bg-[var(--warn-10)] text-[var(--warn)] border border-[var(--warn-20)]">shallow</span>` : null}
                     </div>
                     <div class="text-[10px] text-[var(--text-muted)] font-mono mt-0.5 truncate">${r.latest_commit}</div>
@@ -784,9 +784,9 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
             <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">PRs (${prs.length})</div>
             <div class="flex flex-col gap-1.5">
               ${prs.map(pr => html`
-                <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
                   <span class="text-xs text-[var(--text-strong)] truncate flex-1">${pr.title}</span>
-                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">${pr.branch}</span>
+                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">${pr.branch}</span>
                   ${pr.draft ? html`<span class="text-[10px] px-1 py-0.5 rounded bg-[var(--warn-10)] text-[var(--warn)] border border-[var(--warn-20)]">draft</span>` : null}
                   <a href=${pr.pr_url} target="_blank" rel="noopener" class="text-[10px] text-[var(--accent)] hover:underline flex-shrink-0">PR</a>
                 </div>
@@ -800,7 +800,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
             <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Worktrees (${worktrees.length})</div>
             <div class="flex flex-wrap gap-1.5">
               ${worktrees.map(w => html`
-                <span class="text-[10px] font-mono px-2 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]" title=${w.path}>${w.name}</span>
+                <span class="text-[10px] font-mono px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]" title=${w.path}>${w.name}</span>
               `)}
             </div>
           </div>
@@ -983,10 +983,10 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
 
         ${latestEntry
           ? html`
-            <div class="rounded-lg border border-[rgba(71,184,255,0.2)] bg-[rgba(71,184,255,0.08)] p-3 mb-3">
+            <div class="rounded border border-[var(--accent-20)] bg-[rgba(71,184,255,0.08)] p-3 mb-3">
               <div class="flex flex-wrap items-center gap-2 mb-1">
                 <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]">Latest Handoff</span>
-                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">
+                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">
                   ${lineageTransitionLabel(latestEntry.parent_generation, latestEntry.generation)}
                 </span>
                 <span class="text-[10px] px-1.5 py-0.5 rounded ${verdictBadgeClass(latestEntry.continuity_verdict)}">
@@ -1007,17 +1007,17 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
           : null}
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
-          <div class="px-3 py-2 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+          <div class="px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
             <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Current Gen</div>
             <div class="mt-1 text-lg font-semibold text-[var(--text-strong)]">${currentGeneration ?? '-'}</div>
             ${generationId ? html`<div class="text-[10px] text-[var(--text-dim)] font-mono truncate" title=${generationId}>${generationId}</div>` : null}
           </div>
-          <div class="px-3 py-2 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+          <div class="px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
             <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Trace Lineage</div>
             <div class="mt-1 text-lg font-semibold text-[var(--text-strong)]">${traceHistoryCount}</div>
             <div class="text-[10px] text-[var(--text-dim)]">historical traces retained in meta.trace_history</div>
           </div>
-          <div class="px-3 py-2 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+          <div class="px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
             <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Current Trace</div>
             <div class="mt-1 text-sm font-mono text-[var(--text-strong)] truncate" title=${currentTraceId ?? ''}>${currentTraceId ? compactTraceId(currentTraceId) : '-'}</div>
             <div class="text-[10px] text-[var(--text-dim)]">artifact appears after the first successful handoff</div>
@@ -1026,10 +1026,10 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
 
         ${manifest
           ? html`
-            <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] p-3 mb-3">
+            <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3 mb-3">
               <div class="flex flex-wrap items-center gap-2 mb-2">
                 <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Current Manifest</span>
-                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">gen ${manifest.generation}</span>
+                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">gen ${manifest.generation}</span>
                 ${continuity?.verdict
                   ? html`<span class="text-[10px] px-1.5 py-0.5 rounded ${verdictBadgeClass(continuity.verdict)}">${continuityMeta.badgeLabel}</span>`
                   : null}
@@ -1038,14 +1038,14 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                   : null}
               </div>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
+                <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
                   <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1">Parent</div>
                   <div class="text-[var(--text-strong)]">${manifest.parent_generation != null ? `gen ${manifest.parent_generation}` : 'root generation'}</div>
                   ${manifest.parent_trace_id
                     ? html`<div class="font-mono text-[var(--text-dim)] truncate" title=${manifest.parent_trace_id}>${compactTraceId(manifest.parent_trace_id)}</div>`
                     : null}
                 </div>
-                <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
+                <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
                   <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1">Trigger</div>
                   <div class="text-[var(--text-strong)]">${manifest.trigger_reason ?? '-'}</div>
                   <div class="text-[var(--text-dim)]">context ratio ${formatLineageRatio(manifest.context_ratio)}</div>
@@ -1054,19 +1054,19 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
               <div class="mt-3 flex flex-wrap gap-2">
                 ${delta
                   ? html`
-                    <span class="text-[10px] px-2 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">
+                    <span class="text-[10px] px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">
                       inherited ${delta.inherited_fields.length}
                     </span>
-                    <span class="text-[10px] px-2 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">
+                    <span class="text-[10px] px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">
                       changed ${delta.changed_fields.length}
                     </span>
-                    <span class="text-[10px] px-2 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">
+                    <span class="text-[10px] px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">
                       dropped ${delta.dropped_fields.length}
                     </span>
                   `
                   : null}
                 ${continuity?.similarity != null
-                  ? html`<span class="text-[10px] px-2 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">similarity ${(continuity.similarity * 100).toFixed(1)}%</span>`
+                  ? html`<span class="text-[10px] px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">similarity ${(continuity.similarity * 100).toFixed(1)}%</span>`
                   : null}
               </div>
               ${continuity?.verdict
@@ -1078,7 +1078,7 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
             </div>
           `
           : html`
-            <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] p-3 mb-3 text-[11px] text-[var(--text-muted)]">
+            <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3 mb-3 text-[11px] text-[var(--text-muted)]">
               아직 handoff lineage manifest가 없습니다. generation 0에서는 현재 trace만 유지되고, 첫 successful handoff 이후부터 manifest/index가 생깁니다.
             </div>
           `}
@@ -1093,11 +1093,11 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                   const isLatest = index === 0
                   const entryMeta = lineageVerdictMeta(entry.continuity_verdict)
                   return html`
-                  <div class=${`px-3 py-2 rounded-lg border ${isLatest ? 'border-[rgba(71,184,255,0.22)] bg-[rgba(71,184,255,0.08)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}>
+                  <div class=${`px-3 py-2 rounded border ${isLatest ? 'border-[rgba(71,184,255,0.22)] bg-[rgba(71,184,255,0.08)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}>
                     <div class="flex flex-wrap items-center gap-2">
-                      <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">gen ${entry.generation}</span>
+                      <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">gen ${entry.generation}</span>
                       ${isLatest
-                        ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-[rgba(71,184,255,0.18)] bg-[rgba(71,184,255,0.12)] text-[var(--accent)]">latest</span>`
+                        ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-[var(--accent-18)] bg-[rgba(71,184,255,0.12)] text-[var(--accent)]">latest</span>`
                         : null}
                       ${entry.continuity_verdict
                         ? html`<span class="text-[10px] px-1.5 py-0.5 rounded ${verdictBadgeClass(entry.continuity_verdict)}">${entryMeta.badgeLabel}</span>`
@@ -1249,7 +1249,7 @@ export function KeeperDetailOverlay() {
                   const lastUsed = series.length > 0 ? series[series.length - 1]?.model_used : null
                   const display = lastUsed || keeper.active_model || keeper.model
                   return display ? html`
-                    <span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-mono bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.2)]"
+                    <span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-mono bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-20)]"
                       title=${lastUsed && keeper.model ? `마지막 호출: ${lastUsed}\n설정: ${keeper.model}` : ''}
                     >${display}</span>
                   ` : null
@@ -1305,7 +1305,7 @@ export function KeeperDetailOverlay() {
           <div class="flex items-center gap-2">
             <button
               type="button"
-              class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] transition-colors"
+              class="py-1 px-3 rounded text-[11px] font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[var(--bad-soft)] transition-colors"
               onClick=${() => setClearDialogOpen(true)}
             >비우기</button>
             <${KeeperLifecycleButtons} keeper=${keeper} effectiveStatus=${effectiveStatus} />
@@ -1313,7 +1313,7 @@ export function KeeperDetailOverlay() {
               ref=${closeButtonRef}
               type="button"
               onClick=${() => closeKeeperDetail()}
-              class="flex items-center justify-center size-8 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1526]"
+              class="flex items-center justify-center size-8 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1526]"
               aria-label="키퍼 상세 닫기"
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
@@ -1365,17 +1365,17 @@ export function KeeperDetailOverlay() {
           ? html`
             <div class="flex flex-wrap items-start gap-3 px-1">
               ${keeper.last_heartbeat
-                ? html`<span class="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-muted)] px-2.5 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+                ? html`<span class="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-muted)] px-2.5 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
                     하트비트 <${TimeAgo} timestamp=${keeper.last_heartbeat} />
                   </span>`
                 : null}
               ${keeper.last_speech_act
-                ? html`<span class="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-muted)] px-2.5 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+                ? html`<span class="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-muted)] px-2.5 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
                     최근 <span class="font-mono text-[var(--text-body)]">${keeper.last_speech_act}</span>
                   </span>`
                 : null}
               ${keeper.social_model_recognized === false
-                ? html`<span class="inline-flex items-center gap-1.5 text-[11px] text-[var(--warn)] px-2.5 py-1 rounded-lg border border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)]">
+                ? html`<span class="inline-flex items-center gap-1.5 text-[11px] text-[var(--warn)] px-2.5 py-1 rounded border border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)]">
                     소셜 모델
                     ${keeper.configured_social_model
                       ? html`<span class="font-mono text-[var(--text-body)]">${keeper.configured_social_model}</span>`
@@ -1389,16 +1389,16 @@ export function KeeperDetailOverlay() {
                   </span>`
                 : null}
               ${(keeper.k2k_count ?? 0) > 0
-                ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-lg bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--text-muted)]">
+                ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--text-muted)]">
                     K2K <span class="font-mono font-medium text-[#a78bfa]">${keeper.k2k_count}</span>
                   </span>`
                 : null}
               ${keeper.memory_recent_note
-                ? html`<span class="text-[11px] text-[var(--text-muted)] px-2.5 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] truncate max-w-[360px]" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
+                ? html`<span class="text-[11px] text-[var(--text-muted)] px-2.5 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] truncate max-w-[360px]" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
                 : null}
             </div>
             ${keeper.recent_output_preview
-              ? html`<div class="py-2 px-3 rounded-lg bg-[rgba(71,184,255,0.06)] border border-[rgba(71,184,255,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
+              ? html`<div class="py-2 px-3 rounded bg-[rgba(71,184,255,0.06)] border border-[rgba(71,184,255,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
                   <div class="line-clamp-2">${keeper.recent_output_preview}</div>
                 </div>`
               : null}

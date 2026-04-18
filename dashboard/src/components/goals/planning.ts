@@ -40,7 +40,7 @@ function PlanningStat({
           : 'text-text-strong'
 
   return html`
-    <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-4">
+    <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
       <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">${label}</div>
       <div class="mt-2 text-[30px] font-bold leading-none tabular-nums ${toneClass}">${value}</div>
     </div>
@@ -53,7 +53,7 @@ function ExternalDocLink({ href, label }: { href: string; label: string }) {
       href=${href}
       target="_blank"
       rel="noreferrer"
-      class="inline-flex items-center gap-1 rounded-lg border border-card-border/70 bg-white/3 px-2.5 py-1.5 text-[11px] font-medium text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
+      class="inline-flex items-center gap-1 rounded border border-card-border/70 bg-white/3 px-2.5 py-1.5 text-[11px] font-medium text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
     >
       ${label}
       <span aria-hidden="true">\u2197</span>
@@ -81,19 +81,19 @@ function GuideCard({
   children?: ComponentChildren
 }) {
   return html`
-    <section class="flex flex-col gap-3 rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-4">
+    <section class="flex flex-col gap-3 rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
       <div class="flex items-start justify-between gap-3">
         <div>
           <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">${eyebrow}</div>
           <h3 class="mt-1 text-[15px] font-semibold text-text-strong">${title}</h3>
         </div>
-        <span class="rounded-lg border border-card-border/70 bg-white/4 px-2.5 py-1 text-[11px] font-semibold text-text-body">
+        <span class="rounded border border-card-border/70 bg-white/4 px-2.5 py-1 text-[11px] font-semibold text-text-body">
           ${count}
         </span>
       </div>
       <p class="text-[13px] leading-relaxed text-text-muted whitespace-pre-wrap">${summary}</p>
       ${command ? html`
-        <div class="rounded-lg border border-card-border/60 bg-white/3 px-3 py-2 text-[12px] leading-relaxed text-text-body">
+        <div class="rounded border border-card-border/60 bg-white/3 px-3 py-2 text-[12px] leading-relaxed text-text-body">
           <code class="text-[11px] text-text-strong">${command}</code>
         </div>
       ` : null}
@@ -146,7 +146,7 @@ function KeeperToolActivity() {
             keeper가 최근 사용한 도구와 활동 현황. 상세는 keeper 클릭.
           </div>
         </div>
-        <span class="ml-auto inline-flex items-center rounded-lg border border-card-border/70 bg-white/4 px-2.5 py-1 text-[10px] uppercase tracking-wider text-text-body font-semibold">
+        <span class="ml-auto inline-flex items-center rounded border border-card-border/70 bg-white/4 px-2.5 py-1 text-[10px] uppercase tracking-wider text-text-body font-semibold">
           ${totalToolTurns} calls
         </span>
       </summary>
@@ -159,7 +159,7 @@ function KeeperToolActivity() {
                 <button
                   key=${k.name}
                   type="button"
-                  class="inline-flex items-center gap-1.5 rounded-lg border border-card-border/60 bg-white/4 px-3 py-1.5 text-[12px] text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
+                  class="inline-flex items-center gap-1.5 rounded border border-card-border/60 bg-white/4 px-3 py-1.5 text-[12px] text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
                   onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
                 >
                   ${k.emoji ?? ''} ${k.koreanName ?? k.name}
@@ -175,7 +175,7 @@ function KeeperToolActivity() {
             <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted mb-2">최근 자주 사용된 도구</div>
             <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1.5">
               ${topTools.map(([name, count]) => html`
-                <div key=${name} class="flex items-center justify-between rounded-lg bg-white/3 px-3 py-1.5 text-[12px]">
+                <div key=${name} class="flex items-center justify-between rounded bg-white/3 px-3 py-1.5 text-[12px]">
                   <span class="font-mono text-text-body truncate">${name.replace(/^(keeper_|masc_)/, '')}</span>
                   <span class="ml-2 flex-shrink-0 font-mono text-text-dim">${count}</span>
                 </div>
@@ -237,7 +237,7 @@ export function Planning() {
         </div>
 
         <div class="mt-5 grid gap-4 xl:grid-cols-2">
-          <section class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-4">
+          <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
             <div class="mb-3">
               <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">Backlog Entry</div>
               <h3 class="mt-1 text-[15px] font-semibold text-text-strong">태스크 추가</h3>
@@ -275,7 +275,7 @@ export function Planning() {
           </div>
           <button
             type="button"
-            class="inline-flex items-center gap-1.5 rounded-lg border border-accent/25 bg-[var(--accent-12)] px-3 py-1.5 text-[12px] font-medium text-accent transition-colors hover:border-accent/40 hover:bg-[var(--accent-15)]"
+            class="inline-flex items-center gap-1.5 rounded border border-accent/25 bg-[var(--accent-12)] px-3 py-1.5 text-[12px] font-medium text-accent transition-colors hover:border-accent/40 hover:bg-[var(--accent-15)]"
             onClick=${() => navigate('workspace', { section: 'planning', view: 'goal-tree' })}
           >
             목표 트리에서 보기
@@ -285,17 +285,17 @@ export function Planning() {
         ${hasGoals ? html`
           <div class="mt-3 flex flex-wrap gap-2">
             ${(grouped.short ?? []).length > 0 ? html`
-              <span class="rounded-md border border-ok/25 bg-ok/10 px-2 py-0.5 text-[11px] text-ok">
+              <span class="rounded border border-ok/25 bg-ok/10 px-2 py-0.5 text-[11px] text-ok">
                 단기 ${(grouped.short ?? []).length}
               </span>
             ` : null}
             ${(grouped.mid ?? []).length > 0 ? html`
-              <span class="rounded-md border border-warn/25 bg-warn/10 px-2 py-0.5 text-[11px] text-warn">
+              <span class="rounded border border-warn/25 bg-warn/10 px-2 py-0.5 text-[11px] text-warn">
                 중기 ${(grouped.mid ?? []).length}
               </span>
             ` : null}
             ${(grouped.long ?? []).length > 0 ? html`
-              <span class="rounded-md border border-accent/25 bg-[var(--accent-10)] px-2 py-0.5 text-[11px] text-accent">
+              <span class="rounded border border-accent/25 bg-[var(--accent-10)] px-2 py-0.5 text-[11px] text-accent">
                 장기 ${(grouped.long ?? []).length}
               </span>
             ` : null}

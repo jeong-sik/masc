@@ -101,15 +101,6 @@ val force_done_task_r :
   config -> agent_name:string -> task_id:string ->
   notes:string -> unit -> string Types.masc_result
 
-(** {1 Task completion} *)
-
-val complete_task :
-  config -> agent_name:string -> task_id:string -> notes:string -> string
-
-val complete_task_r :
-  config -> agent_name:string -> task_id:string ->
-  notes:string -> string Types.masc_result
-
 (** {1 Task cancellation} *)
 
 val cancel_task_r :

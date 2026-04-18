@@ -44,7 +44,7 @@ const TONE_PALETTES: Record<DistributionTone, TonePalette> = {
   muted: {
     fill: 'rgba(148,163,184,0.85)',
     text: 'var(--text-muted)',
-    chipBg: 'rgba(148,163,184,0.12)',
+    chipBg: 'var(--slate-gray-12)',
     chipBorder: 'rgba(148,163,184,0.24)',
   },
 }
@@ -96,15 +96,15 @@ export function DistributionBars({
                         ${item.detail ? html`<div class="truncate text-[10px] text-[var(--text-muted)]">${item.detail}</div>` : null}
                       </div>
                       <span
-                        class="shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+                        class="shrink-0 rounded-sm border px-2 py-0.5 text-[10px] font-semibold"
                         style=${`color:${palette.text};background:${palette.chipBg};border-color:${palette.chipBorder};`}
                       >
                         ${valueFormatter(item.value)}
                       </span>
                     </div>
-                    <div class="h-2 overflow-hidden rounded-full bg-[var(--white-5)]">
+                    <div class="h-2 overflow-hidden rounded-sm bg-[var(--white-5)]">
                       <div
-                        class="h-full rounded-full transition-[width] duration-300"
+                        class="h-full rounded-sm transition-[width] duration-300"
                         style=${`width:${Math.min(width, 100)}%;background:${palette.fill};opacity:0.8;`}
                       ></div>
                     </div>
@@ -143,7 +143,7 @@ export function SegmentedBar({
         ? html`<div class="${title ? 'mt-3 ' : ''}text-[11px] italic text-[var(--text-muted)]">표시할 데이터가 없습니다.</div>`
         : html`
             <div class="${title ? 'mt-3 ' : ''}flex flex-col gap-2.5">
-              <div class="flex h-3 overflow-hidden rounded-full bg-[var(--white-5)]">
+              <div class="flex h-3 overflow-hidden rounded-sm bg-[var(--white-5)]">
                 ${visibleItems.map(item => {
                   const palette = paletteFor(item.tone)
                   const width = (item.value / total) * 100
@@ -165,7 +165,7 @@ export function SegmentedBar({
                     <span
                       aria-label=${`${item.label}: ${formattedValue}`}
                       title=${`${item.label}: ${formattedValue}`}
-                      class="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium"
+                      class="inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-[10px] font-medium"
                       style=${`color:${palette.text};background:${palette.chipBg};border-color:${palette.chipBorder};`}
                     >
                       <span class="inline-block h-1.5 w-1.5 rounded-full" style=${`background:${palette.fill};`}></span>

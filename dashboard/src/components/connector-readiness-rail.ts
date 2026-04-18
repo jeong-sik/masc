@@ -139,7 +139,7 @@ function Pill({ pill }: { pill: RailPill }) {
   return html`
     <button
       type="button"
-      class=${`group flex min-w-0 flex-1 cursor-pointer flex-col items-center gap-1 overflow-hidden rounded-md border px-1.5 py-2 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-1)] ${tone.gradient} ${tone.border} hover:brightness-125 ${inflight ? 'animate-pulse' : ''}`}
+      class=${`group flex min-w-0 flex-1 cursor-pointer flex-col items-center gap-1 overflow-hidden rounded border px-1.5 py-2 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-1)] ${tone.gradient} ${tone.border} hover:brightness-125 ${inflight ? 'animate-pulse' : ''}`}
       title=${pill.hint ?? pill.detail}
       aria-label=${railPillAriaLabel(pill)}
       aria-busy=${inflight ? 'true' : 'false'}
@@ -152,7 +152,7 @@ function Pill({ pill }: { pill: RailPill }) {
     >
       <span
         aria-hidden="true"
-        class=${`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] font-bold ${inflight ? 'bg-[var(--white-10)]' : tone.dot} text-[var(--bg-0)]`}
+        class=${`flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-[12px] font-bold ${inflight ? 'bg-[var(--white-10)]' : tone.dot} text-[var(--bg-0)]`}
       >
         ${inflight ? '…' : tone.icon}
       </span>

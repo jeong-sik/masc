@@ -66,13 +66,13 @@ export function DetailPane() {
   const source = typeof selection.entry.source === 'string' ? selection.entry.source : null
 
   return html`
-    <div class="rounded-lg border border-accent/30 bg-bg-0/60 shadow-sm">
+    <div class="rounded border border-accent/30 bg-bg-0/60 shadow-sm">
       <div class="flex items-center justify-between border-b border-card-border px-3 py-2">
         <div class="flex items-center gap-2">
           <span class="text-[10px] uppercase tracking-widest text-accent font-semibold">상세</span>
           <span class="text-[12px] font-semibold text-text-strong">${selectionTitle(selection)}</span>
           ${outcome ? html`
-            <span class="rounded-full border px-2 py-0.5 text-[10px] font-mono ${toneClass(outcome.tone)}">
+            <span class="rounded-sm border px-2 py-0.5 text-[10px] font-mono ${toneClass(outcome.tone)}">
               ${outcome.label}
             </span>
           ` : null}

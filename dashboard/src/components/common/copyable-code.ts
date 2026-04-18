@@ -100,7 +100,7 @@ export function CopyableCode({
   const labelTone = copyableLabelClasses(variant)
   return html`
     <div
-      class=${`group flex items-center gap-2 rounded-md border transition-colors hover:border-[var(--white-10)] hover:bg-[var(--white-4)] ${wrapperTone}`}
+      class=${`group flex items-center gap-2 rounded border transition-colors hover:border-[var(--white-10)] hover:bg-[var(--white-4)] ${wrapperTone}`}
       data-copyable-code
       data-copyable-variant=${variant}
       data-copied=${justCopied ? 'true' : 'false'}

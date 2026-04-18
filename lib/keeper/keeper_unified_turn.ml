@@ -707,8 +707,7 @@ let accountability_evidence_refs
     ~(trace_id : string)
     ~(turn_number : int)
     ~(result : Keeper_agent_run.run_result)
-    ~(validated_evidence : Agent_sdk.Raw_trace.run_validation option)
-    ~(turn_evidence : Yojson.Safe.t option) =
+    ~(validated_evidence : Agent_sdk.Raw_trace.run_validation option) =
   let tool_refs =
     result.tools_used
     |> List.filter_map (fun tool_name ->
@@ -731,16 +730,7 @@ let accountability_evidence_refs
           base
     | None -> []
   in
-  let turn_refs =
-    let base = [ Printf.sprintf "turn:%s:%d" trace_id turn_number ] in
-    match turn_evidence with
-    | Some (`Assoc fields) -> (
-        match List.assoc_opt "after_hash" fields with
-        | Some (`String hash) when String.trim hash <> "" ->
-            ("git:" ^ String.trim hash) :: base
-        | _ -> base)
-    | _ -> base
-  in
+  let turn_refs = [ Printf.sprintf "turn:%s:%d" trace_id turn_number ] in
   tool_refs @ validation_refs @ turn_refs
 
 let scheduled_autonomous_outcome_for_result
@@ -1696,21 +1686,17 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let event_bus_sub =
         match Keeper_event_bus.get () with
         | Some bus ->
-          Some (Agent_sdk.Event_bus.subscribe
+          Some (Oas_bus_instrument.subscribe
+                  ~purpose:"keeper_turn"
                   ~filter:(Agent_sdk.Event_bus.filter_agent meta.name) bus)
         | None -> None
       in
       let turn_event_bus = ref empty_turn_event_bus_summary in
-      let evidence_before_hash =
-        try Keeper_evidence.snapshot_before_turn
-          ~base_path:config.base_path ~keeper_name:meta.name
-        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
-      in
       let drain_turn_event_bus () =
         let summary =
           match event_bus_sub, Keeper_event_bus.get () with
           | Some sub, Some _bus ->
-              summarize_turn_event_bus (Agent_sdk.Event_bus.drain sub)
+              summarize_turn_event_bus (Oas_bus_instrument.drain sub)
           | _ -> empty_turn_event_bus_summary
         in
         turn_event_bus :=
@@ -1719,7 +1705,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       in
       let unsubscribe_event_bus () =
         match event_bus_sub, Keeper_event_bus.get () with
-        | Some sub, Some bus -> Agent_sdk.Event_bus.unsubscribe bus sub
+        | Some sub, Some bus -> Oas_bus_instrument.unsubscribe bus sub
         | _ -> ()
       in
       (* Mark turn boundary for the composite observer (issue #7122).
@@ -2399,24 +2385,6 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~selected_mode
             ~social_state
             ~result:(Some result) ();
-          (* Post-turn evidence: deterministic git before/after delta *)
-          let turn_evidence =
-            try
-              Keeper_evidence.capture_turn_evidence
-                ~base_path:config.base_path
-                ~keeper_name:meta.name
-                ~trace_id:(Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id)
-                ~turn_number:updated_meta.runtime.usage.total_turns
-                ~tool_calls_made:result.tool_calls_made
-                ~before_hash:evidence_before_hash
-                ()
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-                Log.Keeper.warn "post-turn evidence capture failed (unified): %s"
-                  (Printexc.to_string exn);
-                None
-          in
           (match explicit_accountability_claim with
           | Some claim ->
               let trace_id =
@@ -2426,13 +2394,6 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               let strong_evidence =
                 has_substantive_tool_calls result.tools_used
                 || Option.is_some validated_evidence
-                ||
-                match turn_evidence with
-                | Some (`Assoc fields) -> (
-                    match List.assoc_opt "delta_detected" fields with
-                    | Some (`Bool true) -> true
-                    | _ -> false)
-                | _ -> false
               in
               Keeper_accountability.record_completion_claim config
                 ~keeper_name:updated_meta.name
@@ -2449,8 +2410,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                      ~trace_id
                      ~turn_number:updated_meta.runtime.usage.total_turns
                      ~result
-                     ~validated_evidence
-                     ~turn_evidence)
+                     ~validated_evidence)
                 ()
           | None -> ());
           let model_used = Keeper_agent_run.surface_model_used result in

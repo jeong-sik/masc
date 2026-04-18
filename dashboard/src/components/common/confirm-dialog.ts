@@ -87,10 +87,10 @@ export function ConfirmDialogOverlay() {
 
   return html`
     <div class="fixed inset-0 z-[100] bg-[var(--white-5)]/60 backdrop-blur-sm isolate flex items-center justify-center p-4 animate-in fade-in duration-200" onClick=${handleClose}>
-      <div class="w-full max-w-[400px] bg-[rgba(13,21,38,0.98)] rounded border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.6)] overflow-hidden" onClick=${stopPropagation} role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
+      <div class="w-full max-w-[400px] bg-[rgba(13,21,38,0.98)] rounded-md border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.6)] overflow-hidden" onClick=${stopPropagation} role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
         <div class="p-5">
           <div class="flex items-start gap-4">
-            <div class="shrink-0 size-10 rounded-full border flex items-center justify-center ${iconBg} ${iconColor}">
+            <div class="shrink-0 size-10 rounded-sm border flex items-center justify-center ${iconBg} ${iconColor}">
               <${IconComponent} size=${20} />
             </div>
             <div class="flex-1 min-w-0 pt-0.5">
@@ -100,11 +100,11 @@ export function ConfirmDialogOverlay() {
           </div>
           <div class="mt-6 flex items-center justify-end gap-2">
             <button type="button"
-              class="px-4 py-2 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] text-text-body hover:bg-[var(--white-8)] transition-colors cursor-pointer"
+              class="px-4 py-2 rounded text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] text-text-body hover:bg-[var(--white-8)] transition-colors cursor-pointer"
               onClick=${state.onCancel}
             >${state.cancelText}</button>
             <button type="button"
-              class="px-4 py-2 rounded-lg text-[13px] font-medium border border-transparent transition-colors cursor-pointer ${confirmBtnClass}"
+              class="px-4 py-2 rounded text-[13px] font-medium border border-transparent transition-colors cursor-pointer ${confirmBtnClass}"
               onClick=${state.onConfirm}
             >${state.confirmText}</button>
           </div>

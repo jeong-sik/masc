@@ -299,7 +299,7 @@ export function PrometheusMetrics() {
         <div class="flex items-center gap-3">
           ${lastUpdated.value && html`<span class="text-xs text-[var(--text-muted)]">${lastUpdated.value}</span>`}
           <button
-            class="rounded-md border border-[var(--card-border)] bg-[var(--bg-1)] px-3 py-1.5 text-xs text-[var(--text-body)] hover:bg-[var(--bg-2)] transition-colors"
+            class="rounded border border-[var(--card-border)] bg-[var(--bg-1)] px-3 py-1.5 text-xs text-[var(--text-body)] hover:bg-[var(--bg-2)] transition-colors"
             onClick=${refresh}
             disabled=${loading.value}
           >
@@ -309,7 +309,7 @@ export function PrometheusMetrics() {
       </div>
 
       ${error.value && html`
-        <div class="rounded-md bg-[var(--bad-10)] border border-[var(--bad-20)] px-3 py-2 text-xs text-[var(--bad-light)]">
+        <div class="rounded bg-[var(--bad-10)] border border-[var(--bad-20)] px-3 py-2 text-xs text-[var(--bad-light)]">
           ${error.value}
         </div>
       `}
@@ -353,11 +353,11 @@ export function PrometheusMetrics() {
                 <span class="text-xs text-[var(--text-muted)]">${meta.description}</span>
               </div>
               <div class="flex items-center gap-2">
-                <span class="rounded-full bg-[var(--bg-2)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
+                <span class="rounded-sm bg-[var(--bg-2)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
                   ${catMetrics.length} metrics
                 </span>
                 ${activeSamples > 0 && html`
-                  <span class="rounded-full bg-[var(--ok-10)] px-2 py-0.5 text-[10px] text-[var(--ok)]">
+                  <span class="rounded-sm bg-[var(--ok-10)] px-2 py-0.5 text-[10px] text-[var(--ok)]">
                     ${activeSamples} active
                   </span>
                 `}

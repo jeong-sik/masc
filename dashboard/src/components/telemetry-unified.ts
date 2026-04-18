@@ -420,7 +420,7 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
   const hasData = src.entry_count > 0
 
   return html`
-    <div class="rounded-lg border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3 min-w-[140px]">
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 min-w-[140px]">
       <div class="flex items-center gap-2 mb-1">
         <span class="font-mono font-bold ${meta.color}">${meta.icon}</span>
         <span class="text-xs font-medium text-[var(--text-strong)]">${meta.label}</span>
@@ -442,7 +442,7 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
 function DiagnosisCard({ title, value, detail, tone }: { title: string; value: string; detail: string; tone: 'ok' | 'warn' | 'neutral' }) {
   const toneColor = tone === 'ok' ? 'text-[var(--ok)]' : tone === 'warn' ? 'text-[var(--warn)]' : 'text-[var(--text-muted)]'
   return html`
-    <div class="rounded-lg border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3 min-w-[140px]">
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 min-w-[140px]">
       <div class="text-xs font-medium text-[var(--text-muted)] mb-1">${title}</div>
       <div class="text-2xl font-bold ${toneColor}">${value}</div>
       <div class="text-[10px] text-[var(--text-dim)]">${detail}</div>
@@ -707,16 +707,16 @@ export function TelemetryUnified() {
 
   return html`
     <div class="flex flex-col gap-4">
-      <div class="rounded border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-4">
+      <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-4">
         <div class="text-[12px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Runtime Diagnosis</div>
         <div class="mt-1 text-[14px] leading-relaxed text-[var(--text-body)]">
           MASC telemetry store (keeper/tool/agent) 진단 뷰.
         </div>
         <div class="mt-3 flex flex-wrap gap-2">
-          <span class="rounded-md bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-dim)]">MASC: keeper/tool/agent store</span>
-          ${sessionFilter.value ? html`<span class="rounded-md bg-[var(--white-4)] px-2 py-1 text-[11px] font-mono text-[var(--text-dim)]">session ${sessionFilter.value}</span>` : null}
-          ${operationFilter.value ? html`<span class="rounded-md bg-[var(--white-4)] px-2 py-1 text-[11px] font-mono text-[var(--text-dim)]">operation ${operationFilter.value}</span>` : null}
-          ${workerRunFilter.value ? html`<span class="rounded-md bg-[var(--white-4)] px-2 py-1 text-[11px] font-mono text-[var(--text-dim)]">worker_run ${workerRunFilter.value}</span>` : null}
+          <span class="rounded bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-dim)]">MASC: keeper/tool/agent store</span>
+          ${sessionFilter.value ? html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-[11px] font-mono text-[var(--text-dim)]">session ${sessionFilter.value}</span>` : null}
+          ${operationFilter.value ? html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-[11px] font-mono text-[var(--text-dim)]">operation ${operationFilter.value}</span>` : null}
+          ${workerRunFilter.value ? html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-[11px] font-mono text-[var(--text-dim)]">worker_run ${workerRunFilter.value}</span>` : null}
         </div>
       </div>
 
@@ -724,7 +724,7 @@ export function TelemetryUnified() {
 
       <div class="flex flex-wrap gap-3">
         ${summary.map(src => html`<${SummaryCard} src=${src} />`)}
-        <div class="rounded-lg border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3 min-w-[140px]">
+        <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 min-w-[140px]">
           <div class="text-xs font-medium text-[var(--text-muted)] mb-1">전체</div>
           <div class="text-2xl font-bold text-[var(--text-strong)]">${totalEntries.toLocaleString()}</div>
         </div>
@@ -844,11 +844,11 @@ export function TelemetryUnified() {
             : ''}
         </div>
         ${condensed.groups > 0 ? html`
-          <div class="px-3 py-2 border-b border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] flex flex-wrap gap-2 text-[11px]">
+          <div class="px-3 py-2 border-b border-[var(--card-border)] bg-[var(--white-1)] flex flex-wrap gap-2 text-[11px]">
             ${Array.from(condensed.byCategory.entries()).map(([category, count]) => {
               const meta = CONDENSED_CATEGORY_META[category]
               return html`
-                <span class="rounded-md border border-[var(--card-border)] bg-[var(--white-3)] px-2 py-1 text-[var(--text-dim)]">
+                <span class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-2 py-1 text-[var(--text-dim)]">
                   <span class="font-mono ${meta.color}">${meta.icon}</span>
                   <span class="ml-1">${meta.label}</span>
                   <span class="ml-1 font-mono">${count}</span>

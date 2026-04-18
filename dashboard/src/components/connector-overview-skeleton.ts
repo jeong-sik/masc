@@ -34,13 +34,13 @@ export function overviewSkeletonTileCount(): number {
 }
 
 const BAR = 'h-3 w-[4px] rounded-[1px] bg-[var(--white-4)] animate-pulse'
-const PILL = 'h-4 flex-1 rounded-full bg-[var(--white-4)] animate-pulse'
+const PILL = 'h-4 flex-1 rounded-sm bg-[var(--white-4)] animate-pulse'
 const LINE = 'h-3 rounded bg-[var(--white-4)] animate-pulse'
 
 function TileSkeleton() {
   return html`
     <div
-      class="flex min-w-0 flex-col gap-2 rounded-lg border border-[var(--white-8)] bg-[var(--bg-1)] p-3"
+      class="flex min-w-0 flex-col gap-2 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-3"
       data-overview-skeleton-tile
     >
       <div class="flex min-w-0 items-center gap-2">
@@ -56,8 +56,8 @@ function TileSkeleton() {
         <div class=${PILL}></div>
       </div>
       <div class="flex items-center gap-1">
-        <div class="h-4 w-[64px] rounded-full bg-[var(--white-4)] animate-pulse"></div>
-        <div class="h-4 w-[44px] rounded-full bg-[var(--white-4)] animate-pulse"></div>
+        <div class="h-4 w-[64px] rounded-sm bg-[var(--white-4)] animate-pulse"></div>
+        <div class="h-4 w-[44px] rounded-sm bg-[var(--white-4)] animate-pulse"></div>
       </div>
       <div class="flex items-end gap-[2px]" aria-hidden="true">
         ${Array.from({ length: 45 }, (_, i) => html`<span class=${BAR} data-skeleton-bar-index=${i}></span>`)}

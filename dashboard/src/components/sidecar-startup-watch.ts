@@ -95,7 +95,7 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
 
   return html`
     <div
-      class="mt-2 flex items-center gap-2 rounded-md border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]"
+      class="mt-2 flex items-center gap-2 rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]"
       data-startup-warning=${connectorId}
     >
       <span class="text-base leading-none" aria-hidden="true">⚠</span>

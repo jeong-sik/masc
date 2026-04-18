@@ -54,7 +54,7 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
       </div>
       <div
         ref=${trackRef}
-        class="relative flex-1 h-8 rounded-md bg-bg-1/40 border border-card-border/50 cursor-crosshair"
+        class="relative flex-1 h-8 rounded bg-bg-1/40 border border-card-border/50 cursor-crosshair"
         onMouseMove=${(e: MouseEvent) => {
           if (trackRef.current) setCursorFromEvent(e, trackRef.current, windowStart, windowEnd)
         }}

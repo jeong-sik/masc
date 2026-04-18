@@ -129,8 +129,8 @@ function LoopSelector() {
         ${loops.map(loop => {
           const isSelected = loop.loop_id === selectedLoopId.value
           const cls = isSelected
-            ? 'px-3 py-1.5 rounded-lg text-xs font-medium border border-accent/60 bg-[var(--accent-10)] text-[var(--text-strong)] cursor-pointer'
-            : 'px-3 py-1.5 rounded-lg text-xs font-medium border border-card-border bg-card/60 text-[var(--text-muted)] cursor-pointer hover:border-accent/30 transition-colors'
+            ? 'px-3 py-1.5 rounded text-xs font-medium border border-accent/60 bg-[var(--accent-10)] text-[var(--text-strong)] cursor-pointer'
+            : 'px-3 py-1.5 rounded text-xs font-medium border border-card-border bg-card/60 text-[var(--text-muted)] cursor-pointer hover:border-accent/30 transition-colors'
           return html`
             <button type="button" key=${loop.loop_id} class=${cls} onClick=${() => selectLoop(loop.loop_id)}>
               <span class="${statusColor(loop.status)} mr-1">\u25CF</span>
@@ -143,7 +143,7 @@ function LoopSelector() {
         ${loops.length === 0 ? html`<div class="text-[var(--text-muted)] text-xs py-1.5">선택된 실행자의 루프가 없습니다.</div>` : null}
         ${hasMoreLoops.value ? html`
           <button type="button" 
-            class="px-3 py-1.5 rounded-lg text-xs font-medium border border-card-border bg-card/60 text-accent cursor-pointer hover:bg-[var(--accent-10)] hover:border-accent/40 transition-colors flex items-center gap-1" 
+            class="px-3 py-1.5 rounded text-xs font-medium border border-card-border bg-card/60 text-accent cursor-pointer hover:bg-[var(--accent-10)] hover:border-accent/40 transition-colors flex items-center gap-1" 
             onClick=${() => { void loadMoreLoops() }}>
             <span>더 불러오기</span>
           </button>
@@ -216,7 +216,7 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
             <span class="text-[var(--text-muted)] text-xs ml-1">(${keepPct}% keep)</span>
           </div>
           ${totalCycles > 0 ? html`
-            <div class="mt-1.5 h-2 rounded-full bg-[var(--white-6)] overflow-hidden flex">
+            <div class="mt-1.5 h-2 rounded-sm bg-[var(--white-6)] overflow-hidden flex">
               <div
                 class="h-full bg-[var(--ok-48)] transition-[width] duration-300"
                 style=${{ width: `${(loop.total_keeps / totalCycles) * 100}%` }}
@@ -240,7 +240,7 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
     </div>
 
     ${loop.error ? html`
-      <div class="mt-3 px-3 py-2 rounded-lg bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
+      <div class="mt-3 px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
         ${loop.error}
       </div>
     ` : null}
@@ -268,23 +268,23 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
           placeholder="가설 / 판정 / # 필터"
           aria-label="사이클 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && visibleCycles.length === 0
         ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${cycles.length} cycles)</div>`
         : html`
-          <div class="overflow-x-auto overflow-y-auto max-h-[400px] custom-scrollbar rounded-lg border border-[var(--white-6)] bg-[rgba(0,0,0,0.1)]">
+          <div class="overflow-x-auto overflow-y-auto max-h-[400px] custom-scrollbar rounded border border-[var(--white-6)] bg-[rgba(0,0,0,0.1)]">
             <table class="w-full text-xs">
               <thead>
                 <tr class="text-[var(--text-muted)] text-[10px] uppercase tracking-wider border-b border-[var(--white-10)]">
-                  <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-sm text-left py-2.5 px-3 font-medium">#</th>
-                  <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-sm text-left py-2.5 px-3 font-medium">가설</th>
-                  <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-sm text-right py-2.5 px-3 font-medium">이전</th>
-                  <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-sm text-right py-2.5 px-3 font-medium">이후</th>
-                  <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-sm text-right py-2.5 px-3 font-medium">변화</th>
-                  <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-sm text-center py-2.5 px-3 font-medium">판정</th>
-                  <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-sm text-right py-2.5 px-3 font-medium shadow-[1px_1px_2px_rgba(0,0,0,0.2)]">시간</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-left py-2.5 px-3 font-medium">#</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-left py-2.5 px-3 font-medium">가설</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-right py-2.5 px-3 font-medium">이전</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-right py-2.5 px-3 font-medium">이후</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-right py-2.5 px-3 font-medium">변화</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-center py-2.5 px-3 font-medium">판정</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-right py-2.5 px-3 font-medium shadow-[1px_1px_2px_rgba(0,0,0,0.2)]">시간</th>
                 </tr>
               </thead>
               <tbody>
@@ -336,7 +336,7 @@ function WarningsList({ warnings }: { warnings: string[] }) {
   return html`
     <div class="flex flex-col gap-1.5">
       ${warnings.map((w, i) => html`
-        <div key=${i} class="px-3 py-1.5 rounded-lg bg-[var(--warn-10)] border border-[var(--warn-20)] text-[var(--warn)] text-xs">
+        <div key=${i} class="px-3 py-1.5 rounded bg-[var(--warn-10)] border border-[var(--warn-20)] text-[var(--warn)] text-xs">
           ${w}
         </div>
       `)}
@@ -362,16 +362,16 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-          <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+          <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
             <div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">무엇을 연구하나</div>
             <div class="leading-relaxed text-[var(--text-body)]">${loop.goal}</div>
           </div>
-          <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+          <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
             <div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">무엇으로 성공을 보나</div>
             <div class="font-mono text-[var(--text-body)]">${loop.metric_fn}</div>
             <div class="mt-1 text-[var(--text-dim)]">baseline ${loop.baseline.toFixed(4)} -> best ${loop.best_score.toFixed(4)}</div>
           </div>
-          <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+          <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
             <div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">연결된 실행 컨텍스트</div>
             <div class="flex flex-col gap-1 text-[var(--text-body)]">
               <span>session ${loop.session_id ?? '없음'}</span>
@@ -379,7 +379,7 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
               <span>linked ${linkedAt}</span>
             </div>
           </div>
-          <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+          <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
             <div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">현재 가설 / 메모</div>
             <div class="flex flex-col gap-1 text-[var(--text-body)] leading-relaxed">
               <span>${loop.queued_hypothesis ?? '대기 가설 없음'}</span>
@@ -388,7 +388,7 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
           </div>
         </div>
 
-        <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[12px] leading-[1.5] text-[var(--text-muted)]">
+        <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[12px] leading-[1.5] text-[var(--text-muted)]">
           이 화면은 generator loop 자체를 설명합니다. Safety Harness는 evaluator와 장기 실행 safety rail을 보여주며,
           각 cycle의 keep/discard 판정을 직접 대체하지 않습니다.
         </div>
@@ -401,7 +401,7 @@ function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
   return html`
     <${SurfaceCard} variant="compact">
       <div class="grid grid-cols-1 gap-3 md:grid-cols-[1.3fr_1fr]">
-        <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+        <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
           <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Experiment Outcomes</div>
           <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">이 화면은 keep/discard 루프를 봅니다.</div>
           <div class="mt-2 text-sm leading-[1.6] text-[var(--text-body)]">
@@ -409,7 +409,7 @@ function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
           </div>
         </div>
 
-        <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] p-3">
+        <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-3">
           <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Safety Harness</div>
           <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">심판 기계의 건강도는 별도로 봅니다.</div>
           <div class="mt-2 text-sm leading-[1.6] text-[var(--text-body)]">
@@ -442,7 +442,7 @@ function LoopDetailView() {
 
   if (detailError.value) {
     return html`
-      <div class="px-3 py-2 rounded-lg bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
+      <div class="px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
         ${detailError.value}
       </div>
     `
@@ -483,7 +483,7 @@ function LoopDetailView() {
         </div>
         <${LoopOverview} loop=${loop} />
         ${loopActionError.value ? html`
-          <div class="mt-3 px-3 py-2 rounded-lg bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
+          <div class="mt-3 px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
             ${loopActionError.value}
           </div>
         ` : null}
@@ -530,11 +530,11 @@ export function Autoresearch() {
   if (state.status === 'error') {
     return html`
       <div class="flex flex-col gap-4">
-        <div class="px-4 py-3 rounded-lg bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-sm">
+        <div class="px-4 py-3 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-sm">
           ${state.message}
         </div>
         <button type="button"
-          class="self-start px-3 py-1.5 rounded-lg text-xs font-medium border border-card-border text-[var(--text-muted)] hover:text-[var(--text-body)] hover:border-accent/40 transition-colors"
+          class="self-start px-3 py-1.5 rounded text-xs font-medium border border-card-border text-[var(--text-muted)] hover:text-[var(--text-body)] hover:border-accent/40 transition-colors"
           onClick=${() => loadLoops()}
         >
           다시 시도

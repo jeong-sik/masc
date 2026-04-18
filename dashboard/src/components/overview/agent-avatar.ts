@@ -114,7 +114,7 @@ export function AgentAvatar({
 
   const avatar = html`
     <div
-      class="pixel-avatar rounded-md ${sizeClass} ${blockerClass} ${ringClass}"
+      class="pixel-avatar rounded ${sizeClass} ${blockerClass} ${ringClass}"
       data-status=${statusAttr}
       title=${name}
       onClick=${onClick}
@@ -128,7 +128,7 @@ export function AgentAvatar({
         aria-label=${activityDotLabel(activityAge ?? null)}
       />
       ${bubbleText ? html`
-        <span class="pixel-avatar__speech-bubble rounded-md ${alwaysShowBubble ? 'always-visible' : ''}">
+        <span class="pixel-avatar__speech-bubble rounded ${alwaysShowBubble ? 'always-visible' : ''}">
           ${bubbleText}
         </span>
       ` : null}
@@ -142,7 +142,7 @@ export function AgentAvatar({
     : 'pixel-avatar-name'
 
   return html`
-    <div class="pixel-avatar rounded-md-wrap">
+    <div class="pixel-avatar rounded-wrap">
       ${avatar}
       <span class=${nameClass}>${name}</span>
     </div>

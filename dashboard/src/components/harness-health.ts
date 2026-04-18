@@ -190,9 +190,9 @@ function HarnessFlowCard({ data }: { data: HarnessHealthData }) {
       </div>
 
       <div class="flex flex-wrap gap-2 text-[11px] text-[var(--text-dim)]">
-        <span class="rounded-full border border-[var(--white-8)] px-2 py-1">실선: 실시간 신호</span>
-        <span class="rounded-full border border-[var(--white-8)] px-2 py-1">점선: 스냅샷 갱신</span>
-        <span class="rounded-full border border-[var(--accent)] px-2 py-1 text-[var(--text-body)]">강조: 가장 최근 채널</span>
+        <span class="rounded-sm border border-[var(--white-8)] px-2 py-1">실선: 실시간 신호</span>
+        <span class="rounded-sm border border-[var(--white-8)] px-2 py-1">점선: 스냅샷 갱신</span>
+        <span class="rounded-sm border border-[var(--accent)] px-2 py-1 text-[var(--text-body)]">강조: 가장 최근 채널</span>
       </div>
 
       <${MermaidGraph}
@@ -289,7 +289,7 @@ export function HarnessHealth() {
           </div>
         </div>
 
-        <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] px-4 py-3 text-sm leading-[1.7] text-[var(--text-body)]">
+        <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] px-4 py-3 text-sm leading-[1.7] text-[var(--text-body)]">
           ${data.scope_note}
         </div>
 
@@ -325,7 +325,7 @@ export function HarnessHealth() {
             />
 
             ${fallbackPct > 80 ? html`
-              <div class="rounded-lg border border-[var(--warn-30)] bg-[var(--warn-12)] px-4 py-3">
+              <div class="rounded border border-[var(--warn-30)] bg-[var(--warn-12)] px-4 py-3">
                 <div class="mb-1 text-sm font-medium text-[var(--warn)]">평가 모델 미연결</div>
                 <div class="text-xs text-[var(--warn)]">
                   전체 ${cal.total_verdicts}건 중 ${fallbackCount}건이 대체 처리됐습니다.
@@ -355,7 +355,7 @@ export function HarnessHealth() {
               />
             </div>
 
-            <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] p-3 text-xs leading-[1.6] text-[var(--text-muted)]">
+            <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-3 text-xs leading-[1.6] text-[var(--text-muted)]">
               인간 라벨 ${cal.labeled_count}건이 calibration ground truth입니다. 값이 0이면 runtime health는 볼 수 있어도 evaluator accuracy는 아직 검증되지 않았습니다.
             </div>
 

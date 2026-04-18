@@ -98,7 +98,7 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
   return html`
     <div class="flex flex-col py-1.5 px-2 rounded hover:bg-[var(--white-4)] transition-colors" key=${idx} style=${{ animation: 'activityFadeIn 0.25s ease-out' }}>
       <div class="flex items-center gap-2 text-[13px]">
-        <div class="flex-shrink-0 size-6 rounded-md bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-[10px] font-mono font-bold ${cat.color}">
+        <div class="flex-shrink-0 size-6 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-[10px] font-mono font-bold ${cat.color}">
           ${cat.icon}
         </div>
         <span class="text-xs font-mono font-medium ${cat.color} truncate max-w-[200px]" title=${toolName}>${toolName}</span>
@@ -142,11 +142,11 @@ export function AgentTimelineSection() {
     <${Card} title="활동 타임라인 (${summary?.total_events ?? 0}건)">
       ${summary ? html`
         <div class="flex gap-1.5 flex-wrap mb-2">
-          ${summary.tasks_completed > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">완료 ${summary.tasks_completed}</span>` : null}
-          ${summary.tasks_claimed > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">수임 ${summary.tasks_claimed}</span>` : null}
-          ${summary.messages_sent > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">메시지 ${summary.messages_sent}</span>` : null}
-          ${(summary.tool_calls ?? 0) > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">도구 ${summary.tool_calls}</span>` : null}
-          ${summary.active_duration_minutes > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">${Math.round(summary.active_duration_minutes)}분 활동</span>` : null}
+          ${summary.tasks_completed > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">완료 ${summary.tasks_completed}</span>` : null}
+          ${summary.tasks_claimed > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">수임 ${summary.tasks_claimed}</span>` : null}
+          ${summary.messages_sent > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">메시지 ${summary.messages_sent}</span>` : null}
+          ${(summary.tool_calls ?? 0) > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">도구 ${summary.tool_calls}</span>` : null}
+          ${summary.active_duration_minutes > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">${Math.round(summary.active_duration_minutes)}분 활동</span>` : null}
         </div>
       ` : null}
       ${events.length === 0

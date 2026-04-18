@@ -1,38 +1,6 @@
 open Alcotest
 open Masc_mcp
 
-let temp_dir prefix =
-  let path = Filename.temp_dir prefix "" in
-  path
-
-let rec rm_rf path =
-  if Sys.file_exists path then
-    if Sys.is_directory path then begin
-      Sys.readdir path
-      |> Array.iter (fun entry -> rm_rf (Filename.concat path entry));
-      Unix.rmdir path
-    end else
-      Sys.remove path
-
-let with_temp_dir prefix f =
-  let dir = temp_dir prefix in
-  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
-
-let run_in_dir dir cmd =
-  let cwd = Sys.getcwd () in
-  Fun.protect
-    ~finally:(fun () -> Unix.chdir cwd)
-    (fun () ->
-      Unix.chdir dir;
-      match Sys.command cmd with
-      | 0 -> ()
-      | code -> failwith (Printf.sprintf "command failed (%d): %s" code cmd))
-
-let init_git_repo dir =
-  run_in_dir dir "git init -q";
-  run_in_dir dir "git config user.email 'test@example.com'";
-  run_in_dir dir "git config user.name 'Test User'"
-
 let wait_for_done request_id =
   let rec loop remaining =
     match Keeper_msg_async.poll request_id with
@@ -73,102 +41,10 @@ let test_keeper_msg_async_roundtrip () =
   Alcotest.(check int) "one pending entry" 1
     (List.length (Keeper_msg_async.list_for_keeper ~keeper_name:"alpha"))
 
-let test_keeper_file_tracker_records_collisions () =
-  with_eio_env @@ fun _env ->
-  Eio.Switch.run @@ fun sw ->
-  let make_worker keeper_name promise =
-    Eio.Fiber.fork ~sw (fun () ->
-        Eio.Fiber.yield ();
-        let warnings =
-          Keeper_file_tracker.record_turn_files ~keeper_name
-            ~files:[ " M lib/shared.ml" ]
-        in
-        Eio.Promise.resolve promise warnings)
-  in
-  let p1, r1 = Eio.Promise.create () in
-  let p2, r2 = Eio.Promise.create () in
-  make_worker "keeper-a" r1;
-  make_worker "keeper-b" r2;
-  let w1 = Eio.Promise.await p1 in
-  let w2 = Eio.Promise.await p2 in
-  Alcotest.(check int) "exactly one collision warning" 1
-    (List.length w1 + List.length w2)
-
-let test_keeper_evidence_chain_verifies () =
-  with_eio_env @@ fun _env ->
-  with_temp_dir "keeper-evidence-mutex" @@ fun base_path ->
-  init_git_repo base_path;
-  ignore
-    (Keeper_evidence.capture_turn_evidence ~base_path ~keeper_name:"alpha"
-       ~trace_id:"trace-1" ~turn_number:1 ~tool_calls_made:0
-       ~before_hash:None ());
-  ignore
-    (Keeper_evidence.capture_turn_evidence ~base_path ~keeper_name:"alpha"
-       ~trace_id:"trace-1" ~turn_number:2 ~tool_calls_made:1
-       ~before_hash:None ());
-  match
-    Keeper_evidence.verify_evidence_chain ~base_path ~keeper_name:"alpha"
-      ~trace_id:"trace-1"
-  with
-  | Ok () -> ()
-  | Error (turn, expected, actual) ->
-      failwith
-        (Printf.sprintf "evidence chain mismatch at turn %d: %s <> %s" turn
-           expected actual)
-
-let collision_count (json : Yojson.Safe.t option) =
-  match json with
-  | Some (`Assoc fields) ->
-      (match List.assoc_opt "collision_warnings" fields with
-       | Some (`List warnings) -> List.length warnings
-       | _ -> 0)
-  | _ -> 0
-
-let test_keeper_evidence_ignores_preexisting_dirty_state_without_delta () =
-  with_eio_env @@ fun _env ->
-  with_temp_dir "keeper-evidence-preexisting-dirty" @@ fun base_path ->
-  init_git_repo base_path;
-  let gitignore = Filename.concat base_path ".gitignore" in
-  let tracked = Filename.concat base_path "shared.ml" in
-  Out_channel.with_open_bin gitignore (fun oc -> output_string oc ".masc/\n");
-  Out_channel.with_open_bin tracked (fun oc -> output_string oc "let shared = 1\n");
-  run_in_dir base_path "git add .gitignore shared.ml && git commit -q -m init";
-  Out_channel.with_open_bin tracked (fun oc -> output_string oc "let shared = 2\n");
-  let before_alpha =
-    Keeper_evidence.snapshot_before_turn ~base_path ~keeper_name:"alpha"
-  in
-  let before_beta =
-    Keeper_evidence.snapshot_before_turn ~base_path ~keeper_name:"beta"
-  in
-  let ev1 =
-    Keeper_evidence.capture_turn_evidence ~base_path ~keeper_name:"alpha"
-      ~trace_id:"trace-a" ~turn_number:1 ~tool_calls_made:0
-      ~before_hash:before_alpha ()
-  in
-  let ev2 =
-    Keeper_evidence.capture_turn_evidence ~base_path ~keeper_name:"beta"
-      ~trace_id:"trace-b" ~turn_number:1 ~tool_calls_made:0
-      ~before_hash:before_beta ()
-  in
-  Alcotest.(check int) "first keeper sees no collision without new delta" 0
-    (collision_count ev1);
-  Alcotest.(check int) "second keeper also sees no collision without new delta" 0
-    (collision_count ev2)
-
 let () =
   run "keeper_mutex_coverage"
     [
       "keeper_msg_async", [
         test_case "submit/poll roundtrip" `Quick test_keeper_msg_async_roundtrip;
-      ];
-      "keeper_file_tracker", [
-        test_case "records collision warnings under parallel fibers" `Quick
-          test_keeper_file_tracker_records_collisions;
-      ];
-      "keeper_evidence", [
-        test_case "hash chain verifies in git repo" `Quick
-          test_keeper_evidence_chain_verifies;
-        test_case "ignores preexisting dirty state without delta" `Quick
-          test_keeper_evidence_ignores_preexisting_dirty_state_without_delta;
       ];
     ]

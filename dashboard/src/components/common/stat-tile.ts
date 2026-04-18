@@ -13,7 +13,7 @@ interface StatTileProps {
 const VARIANT_STYLES = {
   default: 'bg-[var(--white-4)] border-[var(--card-border)] text-[var(--text-strong)]',
   gold: 'bg-[rgba(200,168,78,0.05)] border-[var(--ff-gold-10)] text-[var(--text-strong)]',
-  accent: 'bg-[var(--accent-soft)] border-[rgba(71,184,255,0.2)] text-[var(--text-strong)]',
+  accent: 'bg-[var(--accent-soft)] border-[var(--accent-20)] text-[var(--text-strong)]',
   warn: 'bg-[rgba(230,167,0,0.06)] border-[rgba(230,167,0,0.2)] text-[var(--warn)]',
 } as const
 
@@ -26,7 +26,7 @@ const LABEL_STYLES = {
 
 function StatTile({ label, value, hint, variant = 'default' }: StatTileProps) {
   return html`
-    <div class="flex flex-col items-center gap-0.5 rounded-lg border px-4 py-3 ${VARIANT_STYLES[variant]}">
+    <div class="flex flex-col items-center gap-0.5 rounded border px-4 py-3 ${VARIANT_STYLES[variant]}">
       <span class="text-base font-bold tabular-nums leading-tight">${value}</span>
       <span class="text-[length:var(--fs-2xs)] tracking-wider uppercase ${LABEL_STYLES[variant]}">${label}</span>
       ${hint ? html`<span class="text-[length:var(--fs-2xs)] text-[var(--text-dim)] mt-0.5">${hint}</span>` : null}

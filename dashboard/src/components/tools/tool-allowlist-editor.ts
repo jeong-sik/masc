@@ -104,7 +104,7 @@ function removeFromList(listSig: typeof alsoAllowItems, name: string) {
 
 function RemovableChip({ name, onRemove }: { name: string; onRemove: () => void }) {
   return html`
-    <span class="inline-flex items-center gap-0.5 py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">
+    <span class="inline-flex items-center gap-0.5 py-0.5 px-2 rounded-sm text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">
       ${name}
       <button type="button"
         class="text-[var(--accent)]/50 hover:text-[#ff6b6b] cursor-pointer text-[11px] leading-none transition-colors"
@@ -117,7 +117,7 @@ function RemovableChip({ name, onRemove }: { name: string; onRemove: () => void 
 
 function ReadOnlyChip({ name }: { name: string }) {
   return html`
-    <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">
+    <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">
       ${name}
     </span>
   `
@@ -218,7 +218,7 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
           placeholder="도구/카테고리 필터"
           aria-label="resolved allowlist 필터"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-          class="min-w-[140px] max-w-[220px] flex-1 rounded-md border border-[var(--card-border)] bg-[var(--white-3)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[140px] max-w-[220px] flex-1 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && visibleTools.length === 0
@@ -235,7 +235,7 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
                   ${visibleNames.map(name => html`<${ReadOnlyChip} name=${name} />`)}
                   ${!expanded && hiddenToolCount > 0
                     ? html`
-                        <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium border border-dashed border-[var(--card-border)] text-[var(--text-muted)]">
+                        <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-[10px] font-medium border border-dashed border-[var(--card-border)] text-[var(--text-muted)]">
                           +${hiddenToolCount}
                         </span>
                       `
@@ -349,13 +349,13 @@ function ToolSearchPicker({
         <input
           ...${getInputProps({
             placeholder,
-            class: 'w-full px-3 py-1.5 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]',
+            class: 'w-full px-3 py-1.5 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]',
           })}
         />
 
         <ul ...${getMenuProps({
           class: showMenu && filtered.length > 0
-            ? 'absolute z-10 top-full left-0 right-0 mt-1 max-h-[220px] overflow-y-auto rounded-lg border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] shadow-sm backdrop-blur-sm list-none m-0 p-0'
+            ? 'absolute z-10 top-full left-0 right-0 mt-1 max-h-[220px] overflow-y-auto rounded border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] shadow-sm backdrop-blur-sm list-none m-0 p-0'
             : 'hidden',
         })}>
           ${showMenu && filtered.length > 0
@@ -388,7 +388,7 @@ function ToolSearchPicker({
         </ul>
         ${showMenu && filtered.length === 0
           ? html`
-            <div class="absolute z-10 top-full left-0 right-0 mt-1 px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] text-[11px] text-[var(--text-muted)]">
+            <div class="absolute z-10 top-full left-0 right-0 mt-1 px-3 py-2 rounded border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] text-[11px] text-[var(--text-muted)]">
               ${allNames.length === 0
                 ? '도구 목록 로딩 중... Enter로 직접 추가 가능'
                 : '일치하는 도구 없음. Enter로 직접 추가 가능'}
@@ -545,7 +545,7 @@ export function ToolAllowlistEditor({
       <div class="flex gap-2">
         ${(['preset', 'custom'] as const).map(mode => html`
           <button type="button"
-            class=${`py-1 px-3 rounded-lg text-[10px] font-medium border transition-colors cursor-pointer ${
+            class=${`py-1 px-3 rounded text-[10px] font-medium border transition-colors cursor-pointer ${
               policyMode.value === mode
                 ? 'border-[var(--accent-30)] bg-[var(--accent-soft)] text-[var(--accent)]'
                 : 'border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)]'
@@ -561,7 +561,7 @@ export function ToolAllowlistEditor({
           <label class="flex flex-col gap-1">
             <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">preset</span>
             <select
-              class="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)]"
+              class="w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)]"
               value=${preset.value}
               onChange=${(e: Event) => { preset.value = (e.target as HTMLSelectElement).value as typeof preset.value }}
             >
@@ -576,7 +576,7 @@ export function ToolAllowlistEditor({
             ${textInputSection.value === 'also_allow'
               ? html`
                 <textarea
-                  class="min-h-[72px] w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
+                  class="min-h-[72px] w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
                   placeholder="쉼표 또는 줄바꿈으로 구분"
                   value=${textInputBuffer.value}
                   onInput=${(e: Event) => { textInputBuffer.value = (e.target as HTMLTextAreaElement).value }}
@@ -598,7 +598,7 @@ export function ToolAllowlistEditor({
 
             ${isCustomEmpty
               ? html`
-                <div class="flex flex-col gap-2 px-3 py-2 rounded-lg bg-[rgba(239,68,68,0.12)] border border-[var(--bad-30)]">
+                <div class="flex flex-col gap-2 px-3 py-2 rounded bg-[rgba(239,68,68,0.12)] border border-[var(--bad-30)]">
                   <div class="flex items-start gap-2">
                     <span class="text-[var(--bad)] text-[13px] shrink-0 font-bold">0</span>
                     <span class="text-[11px] text-[var(--bad)] leading-snug">
@@ -608,7 +608,7 @@ export function ToolAllowlistEditor({
                   ${resolvedAllowlist.length > 0
                     ? html`
                       <button type="button"
-                        class="self-start py-1 px-3 rounded-lg text-[10px] font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[rgba(71,184,255,0.22)] cursor-pointer transition-colors"
+                        class="self-start py-1 px-3 rounded text-[10px] font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[rgba(71,184,255,0.22)] cursor-pointer transition-colors"
                         onClick=${() => { customAllowItems.value = [...resolvedAllowlist] }}
                       >현재 resolved list에서 복사 (${resolvedAllowlist.length}개)</button>
                     `
@@ -619,7 +619,7 @@ export function ToolAllowlistEditor({
             ${textInputSection.value === 'custom'
               ? html`
                 <textarea
-                  class="min-h-[88px] w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
+                  class="min-h-[88px] w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
                   placeholder="쉼표 또는 줄바꿈으로 구분"
                   value=${textInputBuffer.value}
                   onInput=${(e: Event) => { textInputBuffer.value = (e.target as HTMLTextAreaElement).value }}
@@ -642,7 +642,7 @@ export function ToolAllowlistEditor({
         ${textInputSection.value === 'deny'
           ? html`
             <textarea
-              class="min-h-[72px] w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
+              class="min-h-[72px] w-full px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
               placeholder="쉼표 또는 줄바꿈으로 구분"
               value=${textInputBuffer.value}
               onInput=${(e: Event) => { textInputBuffer.value = (e.target as HTMLTextAreaElement).value }}
@@ -663,7 +663,7 @@ export function ToolAllowlistEditor({
       <!-- Apply -->
       <div class="flex items-center gap-3">
         <button type="button"
-          class=${`py-1.5 px-4 rounded-lg text-[10px] font-medium transition-colors cursor-pointer disabled:opacity-50 ${
+          class=${`py-1.5 px-4 rounded text-[10px] font-medium transition-colors cursor-pointer disabled:opacity-50 ${
             isCustomEmpty
               ? 'bg-[var(--bad-light)] text-white hover:bg-[var(--bad)]'
               : 'bg-[var(--ok)] text-[#000] hover:bg-[#22c55e]'

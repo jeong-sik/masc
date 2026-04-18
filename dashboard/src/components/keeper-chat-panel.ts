@@ -195,7 +195,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
 
   return html`
     <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(11,18,34,0.95),rgba(6,11,22,0.92))] shadow-[0_24px_56px_rgba(0,0,0,0.24)]">
-      <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[rgba(148,163,184,0.12)] px-4 py-4">
+      <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--slate-gray-12)] px-4 py-4">
         <div class="min-w-[220px] flex-1">
           <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 대화</div>
           <div class="mt-2 text-[15px] font-semibold text-[var(--text-strong)]">@${name}</div>
@@ -213,7 +213,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
             value=${query}
             onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
           />
-          <span class="inline-flex items-center rounded-full border border-[rgba(71,184,255,0.2)] bg-[var(--accent-10)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-strong)]">
+          <span class="inline-flex items-center rounded-sm border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-strong)]">
             ${hasQuery ? `${filteredMessages.length} / ${messages.length}개 메시지` : `${messages.length}개 메시지`}
           </span>
         </div>
@@ -236,7 +236,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
         ? html`<div class="mx-4 mb-4 rounded-card border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.24)] px-3 py-2.5 text-[12px] leading-[1.6] text-[var(--bad-light)]">${chatError.value}</div>`
         : null}
 
-      <div class="border-t border-[rgba(148,163,184,0.12)] bg-[var(--white-3)] px-4 py-4">
+      <div class="border-t border-[var(--slate-gray-12)] bg-[var(--white-3)] px-4 py-4">
         <${ChatComposer}
           draft=${chatInput.value}
           placeholder=${chatAccess.blocked ? '현재 actor는 direct keeper chat 권한이 없습니다' : '메시지 입력...'}

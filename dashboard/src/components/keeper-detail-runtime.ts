@@ -54,7 +54,7 @@ export function resolveKeeperCurrentTaskLabel(
 
 function SignalRow({ label, value }: { label: string; value: string | number }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+    <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
       <span class="text-xs text-[var(--text-muted)]">${label}</span>
       <span class="text-xs font-medium text-[var(--text-strong)]">${value}</span>
     </div>
@@ -67,7 +67,7 @@ function ToolChip({ name }: { name: string }) {
   const cat = toolCategory(name)
   return html`
     <button type="button"
-      class="inline-flex items-center gap-1 py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)] hover:bg-[var(--accent-20)] cursor-pointer transition-colors"
+      class="inline-flex items-center gap-1 py-0.5 px-2 rounded-sm text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)] hover:bg-[var(--accent-20)] cursor-pointer transition-colors"
       title=${`${cat.label}: ${name}`}
       onClick=${() => openToolsInventory(name)}
     >
@@ -120,7 +120,7 @@ export function AllowlistPreview({
         ${visibleTools.map(tool => html`<${ToolChip} name=${tool} />`)}
         ${!expanded && hiddenCount > 0
           ? html`
-              <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium border border-dashed border-[var(--card-border)] text-[var(--text-muted)]">
+              <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-[10px] font-medium border border-dashed border-[var(--card-border)] text-[var(--text-muted)]">
                 +${hiddenCount}
               </span>
             `
@@ -230,7 +230,7 @@ function BudgetRow({ label, slot, manifest, clamp }: {
   }
 
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+    <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
       <span class="text-xs text-[var(--text-muted)]">${label}</span>
       <div class="flex items-center gap-2">
         ${isOverride && deltaText
@@ -271,10 +271,10 @@ function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
           턴 예산 (OAS 호출당)
         </span>
         ${hasInvalid
-          ? html`<span class="rounded-full bg-[var(--bad-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--bad-light)]">invalid override</span>`
+          ? html`<span class="rounded-sm bg-[var(--bad-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--bad-light)]">invalid override</span>`
           : hasOverride
-            ? html`<span class="rounded-full bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--warn)]">override</span>`
-            : html`<span class="rounded-full bg-[var(--ok-10)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--ok)]">inherited</span>`}
+            ? html`<span class="rounded-sm bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--warn)]">override</span>`
+            : html`<span class="rounded-sm bg-[var(--ok-10)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--ok)]">inherited</span>`}
       </div>
       <${BudgetRow}
         label="반응형"
@@ -453,7 +453,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
             <div class="flex items-center gap-2">
               <input
                 type="search"
-                class="flex-1 min-w-0 py-1.5 px-2 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-30)]"
+                class="flex-1 min-w-0 py-1.5 px-2 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-30)]"
                 placeholder="신호 지표 필터 (예: 폴백, 메모리, 컴팩션)"
                 aria-label="런타임 신호 지표 필터"
                 value=${signalQuery}
@@ -470,7 +470,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
         : null}
       ${showEmptyState
         ? html`
-            <div class="py-3 px-3 rounded-lg border border-dashed border-[var(--card-border)] text-[11px] text-[var(--text-muted)] italic">
+            <div class="py-3 px-3 rounded border border-dashed border-[var(--card-border)] text-[11px] text-[var(--text-muted)] italic">
               필터 결과 없음 (${totalRows} items)
             </div>
           `
@@ -606,7 +606,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
 
       <div class="flex justify-end mt-1">
         <button type="button"
-          class="py-1.5 px-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
+          class="py-1.5 px-3 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
           disabled=${!openToolsQuery}
           onClick=${() => { openToolsInventory(openToolsQuery) }}
         >
@@ -665,7 +665,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       />
 
       <${SignalRow} label="도구 호출" value=${typeof toolCallCount === 'number' ? toolCallCount : observedFallback === 'none_recent' ? 0 : metadataFallback} />
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+      <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">감사</span>
         <span class="text-xs font-medium text-[var(--text-strong)]">${auditSource ?? metadataFallback}${auditAt ? html` · <${TimeAgo} timestamp=${auditAt} />` : ''}</span>
       </div>

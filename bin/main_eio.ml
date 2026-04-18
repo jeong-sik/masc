@@ -693,14 +693,79 @@ let label_for_rc = function
   | 2 -> "오류"
   | _ -> "오류"
 
+let doctor_all_json_exit base_path =
+  let config_report =
+    Config_doctor.analyze
+      ~base_path_input:base_path
+      ~default_base_path:(default_base_path ())
+      ()
+  in
+  let config_payload = Config_doctor.to_yojson config_report in
+  let config_rc = Config_doctor.exit_code config_report in
+  let sidecar_entries =
+    List.map
+      (fun name ->
+        match Masc_mcp.Doctor_dispatch.capture_sidecar_json name with
+        | Ok (body, rc) ->
+          let payload : Yojson.Safe.t =
+            try Yojson.Safe.from_string body with
+            | _ ->
+              `Assoc
+                [ "raw", `String body
+                ; "parse_error", `String "invalid JSON from sidecar"
+                ]
+          in
+          (name, rc, payload)
+        | Error msg -> (name, 2, `Assoc [ "error", `String msg ]))
+      Masc_mcp.Doctor_dispatch.known_sidecars
+  in
+  let all_entries =
+    ("config", "config", config_rc, config_payload)
+    :: List.map
+         (fun (name, rc, payload) -> (name, "sidecar", rc, payload))
+         sidecar_entries
+  in
+  let all_rcs = List.map (fun (_, _, rc, _) -> rc) all_entries in
+  let total = List.length all_rcs in
+  let count_eq v = List.length (List.filter (( = ) v) all_rcs) in
+  let ok_count = count_eq 0 in
+  let warn_count = count_eq 1 in
+  let err_count = total - ok_count - warn_count in
+  let doctors_json : Yojson.Safe.t =
+    `List
+      (List.map
+         (fun (name, kind, rc, payload) ->
+           `Assoc
+             [ "name", `String name
+             ; "kind", `String kind
+             ; "exit_code", `Int rc
+             ; "payload", payload
+             ])
+         all_entries)
+  in
+  let aggregate =
+    Masc_mcp.Doctor_dispatch.aggregate_exit_code all_rcs
+  in
+  let result : Yojson.Safe.t =
+    `Assoc
+      [ "title", `String "MASC Doctor (전 계층)"
+      ; "doctors", doctors_json
+      ; ( "summary"
+        , `Assoc
+            [ "total", `Int total
+            ; "ok", `Int ok_count
+            ; "warn", `Int warn_count
+            ; "error", `Int err_count
+            ] )
+      ; "exit_code", `Int aggregate
+      ]
+  in
+  print_endline (Yojson.Safe.pretty_to_string result);
+  aggregate
+
 let doctor_all_exit base_path as_json =
   if as_json
-  then begin
-    Printf.eprintf
-      "masc-mcp doctor all --json: not yet implemented (use --json on \
-       individual subcommands for now)\n";
-    2
-  end
+  then doctor_all_json_exit base_path
   else begin
     doctor_all_section "Config Doctor";
     let config_rc = doctor_cmd_exit base_path false in

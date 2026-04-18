@@ -790,7 +790,8 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:task_state_changed': {
+    case 'oas:task_state_changed':
+    case 'oas:masc:task_transition': {
       const p = (event.payload ?? {}) as Record<string, unknown>
       const taskId = asString(p.task_id) ?? event.task_id ?? 'unknown'
       const fromState = asString(p.from_state)

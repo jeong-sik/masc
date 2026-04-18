@@ -11,8 +11,28 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('keeper_heartbeat')).toBe('keeper_heartbeat')
   })
 
+  it('accepts live masc/ compatibility variants before switch normalization', () => {
+    expect(SSEEventTypeSchema.parse('masc/agent_joined')).toBe('masc/agent_joined')
+    expect(SSEEventTypeSchema.parse('masc/broadcast')).toBe('masc/broadcast')
+  })
+
+  it('accepts native OAS events emitted by the bridge', () => {
+    expect(SSEEventTypeSchema.parse('oas:agent_failed')).toBe('oas:agent_failed')
+    expect(SSEEventTypeSchema.parse('oas:context_compact_started')).toBe('oas:context_compact_started')
+  })
+
+  it('accepts open OAS families for custom and durable relays', () => {
+    expect(SSEEventTypeSchema.parse('oas:masc:keeper_gate')).toBe('oas:masc:keeper_gate')
+    expect(SSEEventTypeSchema.parse('oas:durable:llm_request')).toBe('oas:durable:llm_request')
+  })
+
   it('rejects an unknown event type', () => {
     const r = SSEEventTypeSchema.safeParse('this_is_not_a_real_event')
+    expect(r.success).toBe(false)
+  })
+
+  it('rejects malformed oas prefixes outside the supported families', () => {
+    const r = SSEEventTypeSchema.safeParse('oas:unknown_family:event')
     expect(r.success).toBe(false)
   })
 })
@@ -108,6 +128,17 @@ describe('SSEMessageSchema', () => {
         gate: 'oas_completion',
         evidence: { reason: 'ok' },
         outcome: { kind: 'passed' },
+      },
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('accepts open-family OAS events without dropping the payload', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'oas:masc:keeper_gate',
+      payload: {
+        keeper_name: 'keeper-a',
+        decision: 'allow',
       },
     })
     expect(r.success).toBe(true)

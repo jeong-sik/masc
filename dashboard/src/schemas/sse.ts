@@ -1,10 +1,12 @@
 // Zod schema-at-boundary for SSE events from the MCP server.
 //
-// Parse gate: the top-level `type` discriminator is validated against a
-// closed enum so unknown event names surface as drift instead of becoming
-// silent no-ops. All other fields are declared as optional (mirrors the
-// existing `SSEEvent` interface) so new backend payload shapes don't hard-
-// fail the dashboard — but the field types are still checked when present.
+// Parse gate: the top-level `type` discriminator is validated against the
+// shared runtime contract in `types/sse.ts`. Exact event names stay closed,
+// while the intentionally open `oas:masc:*` / `oas:durable:*` families pass
+// through so relay namespaces do not silently disappear at the boundary. All
+// other fields are declared as optional (mirrors the existing `SSEEvent`
+// interface) so new backend payload shapes don't hard-fail the dashboard —
+// but the field types are still checked when present.
 //
 // TypeScript SSOT: src/types/sse.ts (SSEEvent interface).
 // Phase 1 goal: eliminate the `as SSEEvent` cast in src/sse.ts by giving
@@ -12,74 +14,22 @@
 // per-variant z.discriminatedUnion so handlers can switch exhaustively.
 
 import { z } from 'zod'
+import {
+  isKnownSSEEventType,
+  isOpenSSEEventType,
+  type SSEEventType,
+} from '../types/sse'
 
-// --- Type discriminator (closed enum) -------------------------------------
-// Mirror of `SSEEventType` in ../types/sse.ts. Keep in sync on add/remove.
-// Strict: an unknown `type` value causes safeParse to fail and the event
-// is dropped with a console.warn.
-export const SSEEventTypeSchema = z.enum([
-  'agent_joined',
-  'agent_left',
-  'broadcast',
-  'task_update',
-  'board_post',
-  'masc/board_post',
-  'board_comment',
-  'masc/board_comment',
-  'board_delete',
-  'masc/board_delete',
-  'post_created',
-  'comment_added',
-  'post_voted',
-  'comment_voted',
-  'heartbeat',
-  'keeper_heartbeat',
-  'keeper_handoff',
-  'masc/keeper_handoff',
-  'keeper_compaction',
-  'masc/keeper_compaction',
-  'keeper_guardrail',
-  'masc/keeper_guardrail',
-  'keeper_phase_changed',
-  'keeper_composite_changed',
-  'keeper_tool_call',
-  'masc/keeper_tool_call',
-  'keeper_tool_skipped',
-  'keeper_turn_complete',
-  'masc/keeper_turn_complete',
-  'client_input_approved',
-  'client_input_rejected',
-  'client_input_updated',
-  'governance_param_changed',
-  'approval:pending',
-  'approval:resolved',
-  'oas:masc:autonomy:agent_selected',
-  'oas:masc:autonomy:agent_decision',
-  'oas:masc:autonomy:agent_action_executed',
-  'oas:masc:keeper:snapshot',
-  'oas:masc:keeper:lifecycle',
-  'oas:masc:trust_updated',
-  'oas:masc:reputation_changed',
-  'oas:agent_started',
-  'oas:agent_completed',
-  'oas:tool_called',
-  'oas:tool_completed',
-  'oas:turn_started',
-  'oas:turn_completed',
-  'oas:context_compacted',
-  'oas:task_state_changed',
-  'oas:masc:harness:verdict_recorded',
-  'oas:masc:harness:pre_compact',
-  'oas:masc:harness:handoff',
-  'room_truth_snapshot',
-  'namespace_truth_snapshot',
-  'execution_snapshot',
-  'operator_snapshot',
-  'operator_digest',
-  'transport_health_snapshot',
-])
-
-export type SSEEventType = z.infer<typeof SSEEventTypeSchema>
+// --- Type discriminator ----------------------------------------------------
+// Exact names stay in ../types/sse.ts. `oas:masc:*` and `oas:durable:*`
+// remain open because the backend intentionally relays those namespaces
+// without a closed list at compile time.
+export const SSEEventTypeSchema = z.custom<SSEEventType>(
+  (value) =>
+    typeof value === 'string'
+    && (isKnownSSEEventType(value) || isOpenSSEEventType(value)),
+  { message: 'unknown SSE event type' },
+)
 
 // --- Attribution envelope (nested discriminated union) --------------------
 // OCaml SSOT: lib/attribution.mli. Structurally mirrors AttributionOutcome

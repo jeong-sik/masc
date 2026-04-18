@@ -1,72 +1,98 @@
 // --- SSE Events ---
 
-export type SSEEventType =
-  | 'agent_joined'
-  | 'agent_left'
-  | 'broadcast'
-  | 'task_update'
-  | 'board_post'
-  | 'masc/board_post'
-  | 'board_comment'
-  | 'masc/board_comment'
-  | 'board_delete'
-  | 'masc/board_delete'
+// Runtime SSOT for exact non-pattern event names accepted from the server.
+// Keep the open OAS families below for relayed custom/durable namespaces.
+export const SSE_EVENT_TYPES = [
+  'agent_joined',
+  'agent_left',
+  'broadcast',
+  // Legacy/live namespaced compatibility variants still emitted by inline dispatch.
+  'masc/agent_joined',
+  'masc/agent_left',
+  'masc/broadcast',
+  'task_update',
+  'board_post',
+  'masc/board_post',
+  'board_comment',
+  'masc/board_comment',
+  'board_delete',
+  'masc/board_delete',
   // Path A board events (notifications/board envelope, unwrapped to params.type)
-  | 'post_created'
-  | 'comment_added'
-  | 'post_voted'
-  | 'comment_voted'
-  | 'heartbeat'
-  | 'keeper_heartbeat'
-  | 'keeper_handoff'
-  | 'masc/keeper_handoff'
-  | 'keeper_compaction'
-  | 'masc/keeper_compaction'
-  | 'keeper_guardrail'
-  | 'masc/keeper_guardrail'
-  | 'keeper_phase_changed'
-  | 'keeper_composite_changed'
-  | 'keeper_tool_call'
-  | 'masc/keeper_tool_call'
-  | 'keeper_tool_skipped'
-  | 'keeper_turn_complete'
-  | 'masc/keeper_turn_complete'
-  | 'client_input_approved'
-  | 'client_input_rejected'
-  | 'client_input_updated'
-  | 'governance_param_changed'
-  | 'approval:pending'
-  | 'approval:resolved'
+  'post_created',
+  'comment_added',
+  'post_voted',
+  'comment_voted',
+  'heartbeat',
+  'keeper_heartbeat',
+  'keeper_handoff',
+  'masc/keeper_handoff',
+  'keeper_compaction',
+  'masc/keeper_compaction',
+  'keeper_guardrail',
+  'masc/keeper_guardrail',
+  'keeper_phase_changed',
+  'keeper_composite_changed',
+  'keeper_tool_call',
+  'masc/keeper_tool_call',
+  'keeper_tool_skipped',
+  'keeper_turn_complete',
+  'masc/keeper_turn_complete',
+  'client_input_approved',
+  'client_input_rejected',
+  'client_input_updated',
+  'governance_param_changed',
+  'approval:pending',
+  'approval:resolved',
   // OAS bridge events (relayed from Event_bus via oas_sse_bridge)
-  | 'oas:masc:autonomy:agent_selected'
-  | 'oas:masc:autonomy:agent_decision'
-  | 'oas:masc:autonomy:agent_action_executed'
-  | 'oas:masc:keeper:snapshot'
-  | 'oas:masc:keeper:lifecycle'
-  | 'oas:masc:trust_updated'
-  | 'oas:masc:reputation_changed'
-  | 'oas:agent_started'
-  | 'oas:agent_completed'
-  | 'oas:agent_failed'
-  | 'oas:tool_called'
-  | 'oas:tool_completed'
-  | 'oas:turn_started'
-  | 'oas:turn_completed'
-  | 'oas:handoff_requested'
-  | 'oas:handoff_completed'
-  | 'oas:context_compacted'
-  | 'oas:task_state_changed'
+  'oas:agent_started',
+  'oas:agent_completed',
+  'oas:agent_failed',
+  'oas:tool_called',
+  'oas:tool_completed',
+  'oas:turn_started',
+  'oas:turn_completed',
+  'oas:handoff_requested',
+  'oas:handoff_completed',
+  'oas:context_compacted',
+  'oas:context_overflow_imminent',
+  'oas:context_compact_started',
+  'oas:content_replacement_replaced',
+  'oas:content_replacement_kept',
+  'oas:slot_scheduler_observed',
+  'oas:task_state_changed',
   // Harness observability events (#3165)
-  | 'oas:masc:harness:verdict_recorded'
-  | 'oas:masc:harness:pre_compact'
-  | 'oas:masc:harness:handoff'
+  'oas:masc:harness:verdict_recorded',
+  'oas:masc:harness:pre_compact',
+  'oas:masc:harness:handoff',
+  // Known MASC custom events currently projected in the dashboard.
+  'oas:masc:autonomy:agent_selected',
+  'oas:masc:autonomy:agent_decision',
+  'oas:masc:autonomy:agent_action_executed',
+  'oas:masc:keeper:snapshot',
+  'oas:masc:keeper:lifecycle',
+  'oas:masc:trust_updated',
+  'oas:masc:reputation_changed',
   // Server-push snapshot events (proactive cache broadcasts)
-  | 'room_truth_snapshot'
-  | 'namespace_truth_snapshot'
-  | 'execution_snapshot'
-  | 'operator_snapshot'
-  | 'operator_digest'
-  | 'transport_health_snapshot'
+  'room_truth_snapshot',
+  'namespace_truth_snapshot',
+  'execution_snapshot',
+  'operator_snapshot',
+  'operator_digest',
+  'transport_health_snapshot',
+] as const
+
+type StaticSSEEventType = typeof SSE_EVENT_TYPES[number]
+type OpenSSEEventType = `oas:masc:${string}` | `oas:durable:${string}`
+
+export type SSEEventType = StaticSSEEventType | OpenSSEEventType
+
+export function isKnownSSEEventType(value: string): value is StaticSSEEventType {
+  return (SSE_EVENT_TYPES as readonly string[]).includes(value)
+}
+
+export function isOpenSSEEventType(value: string): value is OpenSSEEventType {
+  return value.startsWith('oas:masc:') || value.startsWith('oas:durable:')
+}
 
 export type JournalSeverity = 'debug' | 'info' | 'warn' | 'error' | 'unknown'
 export type JournalSource = 'structured' | 'legacy_stderr' | 'legacy_traceln' | 'sse'

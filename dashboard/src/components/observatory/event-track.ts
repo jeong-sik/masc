@@ -10,16 +10,10 @@ import { setCursorFromEvent, clearCursor } from './cursor-store'
 import { CursorLine } from './cursor-line'
 import { selectEntity, detailSelection } from './detail-selection-store'
 import { bucketTelemetryEntries, entryTimestampMs, useTrackBucketCount } from './observatory-utils'
+import { telemetrySourceMeta } from '../../config/telemetry-sources'
 
 function sourceColor(source: string | undefined): string {
-  switch (source) {
-    case 'oas_event': return 'bg-accent'
-    case 'agent_event': return 'bg-[var(--ok-10)]'
-    case 'tool_call_io': return 'bg-[var(--accent-10)]'
-    case 'tool_usage': return 'bg-[var(--accent-10)]'
-    case 'keeper_metrics': return 'bg-[var(--accent-10)]'
-    default: return 'bg-text-dim'
-  }
+  return telemetrySourceMeta(source ?? '').trackClass
 }
 
 function eventLabel(entry: TelemetryEntry): string {

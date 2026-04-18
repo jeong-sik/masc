@@ -12,13 +12,13 @@ module SS = Set.Make (String)
 let unique_preserve_order = Json_util.dedupe_keep_order
 
 let dedupe_schemas (schemas : Types.tool_schema list) =
-  let seen = Hashtbl.create (List.length schemas) in
+  let seen = ref SS.empty in
   List.filter
     (fun (schema : Types.tool_schema) ->
-      if Hashtbl.mem seen schema.name then
+      if SS.mem schema.name !seen then
         false
       else (
-        Hashtbl.add seen schema.name ();
+        seen := SS.add schema.name !seen;
         true))
     schemas
 

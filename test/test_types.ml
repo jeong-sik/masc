@@ -430,6 +430,22 @@ let () =
           Masc_mcp.Keeper_types_profile.valid_shared_memory_scope_strings
           Masc_mcp.Keeper_schema.shared_memory_scope_enum_strings);
     ];
+    "keeper_tail_order_ssot", [
+      Alcotest.test_case "witness covers both variants" `Quick (fun () ->
+        let witness order =
+          let actual = Masc_mcp.Keeper_status_detail.tail_order_to_string order in
+          if not (List.mem actual Masc_mcp.Keeper_status_detail.valid_tail_order_strings) then
+            Alcotest.failf "tail_order_to_string %S not in valid_tail_order_strings" actual
+        in
+        witness Masc_mcp.Keeper_status_detail.Oldest_first;
+        witness Masc_mcp.Keeper_status_detail.Newest_first;
+        Alcotest.(check int) "count" 2
+          (List.length Masc_mcp.Keeper_status_detail.valid_tail_order_strings));
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        Alcotest.(check (list string)) "tail_order mirror"
+          Masc_mcp.Keeper_status_detail.valid_tail_order_strings
+          Masc_mcp.Keeper_schema.tail_order_enum_strings);
+    ];
     "fsm_transition_matrix", [
       (* Issue #8474: schema transition matrix had drifted from
          [Coord_task.valid_next_actions_for_status] — submit/approve/

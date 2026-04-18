@@ -26,6 +26,14 @@ let network_mode_enum_strings =
 let shared_memory_scope_enum_strings =
   [ "disabled"; "room" ]
 
+(** Issue #8486: [masc_keeper_status.tail_order] mirrors
+    [Keeper_status_detail.valid_tail_order_strings]. Direct dependency
+    would introduce a cycle via Keeper_status_detail ->
+    Keeper_alerting -> Keeper_schema, so this stays a local mirror with
+    a regression test in [test_types.ml :: keeper_tail_order_ssot]. *)
+let tail_order_enum_strings =
+  [ "oldest_first"; "newest_first" ]
+
 let string_array_schema =
   `Assoc [
     ("type", `String "array");
@@ -350,7 +358,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tail_order", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "oldest_first"; `String "newest_first"]);
+          ("enum", `List (List.map (fun s -> `String s) tail_order_enum_strings));
           ("description", `String "Ordering for metrics/history/compaction tails and recent memory notes. Default: oldest_first (compat).");
         ]);
         ("fast", `Assoc [

@@ -79,6 +79,12 @@ let tail_order_to_string = function
   | Oldest_first -> "oldest_first"
   | Newest_first -> "newest_first"
 
+let all_tail_orders =
+  [ Oldest_first; Newest_first ]
+
+let valid_tail_order_strings =
+  List.map tail_order_to_string all_tail_orders
+
 let apply_tail_order order items =
   match order with
   | Oldest_first -> items

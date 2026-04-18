@@ -148,6 +148,64 @@ let rec add_routes ~sw ~clock router =
          in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  (* Dev-only shared bearer for the dashboard UI. Served exclusively when the
+     server binds to loopback and strict-auth env overrides are disabled, so
+     that a LAN deployment never hands out a token over the wire. On first
+     hit the token is auto-provisioned via Auth.create_token (role=Admin) and
+     persisted to .masc/auth/dashboard-dev.token for reuse across restarts.
+     The dashboard fetches this once per page load and sends it as
+     Authorization: Bearer <token> on all /mcp calls. *)
+  |> Http.Router.get "/api/v1/dashboard/dev-token" (fun request reqd ->
+       if (not (http_auth_bind_is_loopback ()))
+          || http_auth_strict_enabled () then
+         Http.Response.json ~status:`Not_found ~request:request
+           {|{"error":"dev-token endpoint disabled (non-loopback bind or strict auth)"}|}
+           reqd
+       else
+         with_public_read (fun state req reqd ->
+           let base_path = state.Mcp_server.room_config.base_path in
+           let token_file =
+             Filename.concat base_path ".masc/auth/dashboard-dev.token"
+           in
+           let raw_result : (string, string) result =
+             if Fs_compat.file_exists token_file then
+               try Ok (String.trim (Fs_compat.load_file token_file))
+               with exn ->
+                 Error
+                   (Printf.sprintf "read dev-token: %s"
+                      (Printexc.to_string exn))
+             else
+               begin
+                 match
+                   Auth.create_token base_path
+                     ~agent_name:"dashboard-dev" ~role:Types.Admin
+                 with
+                 | Ok (raw, _cred) ->
+                   (try
+                      Auth.save_private_text_file token_file raw;
+                      Ok raw
+                    with exn ->
+                      Error
+                        (Printf.sprintf "persist dev-token: %s"
+                           (Printexc.to_string exn)))
+                 | Error err ->
+                   Error (Types.masc_error_to_string err)
+               end
+           in
+           begin
+             match raw_result with
+             | Ok raw ->
+               let body =
+                 Yojson.Safe.to_string (`Assoc [ ("token", `String raw) ])
+               in
+               Http.Response.json ~request:req body reqd
+             | Error msg ->
+               let body =
+                 Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
+               in
+               Http.Response.json ~status:`Internal_server_error
+                 ~request:req body reqd
+           end) request reqd)
   |> Http.Router.get "/api/v1/dashboard/runtime-probe" (fun request reqd ->
        let force = Server_utils.bool_query_param request "force" ~default:false in
        let handle _state req reqd =

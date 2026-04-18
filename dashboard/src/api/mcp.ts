@@ -1,6 +1,13 @@
 // MASC Dashboard — MCP-over-HTTP client with session lifecycle
 
-import { fetchWithTimeout, DEFAULT_MCP_TIMEOUT_MS, authHeaders, currentDashboardActor } from './core'
+import {
+  fetchWithTimeout,
+  DEFAULT_MCP_TIMEOUT_MS,
+  authHeaders,
+  currentDashboardActor,
+  getStoredToken,
+  setStoredToken,
+} from './core'
 import {
   MCP_INIT_COOLDOWN_MS,
   MCP_INITIALIZE_TIMEOUT_MS,
@@ -13,10 +20,40 @@ import { showActionToast } from '../components/common/toast'
 
 const MCP_BLOCKED_MESSAGE = 'MCP 연결이 차단되었습니다.'
 const MCP_SESSION_BLOCKED = '__blocked__'
+const DEV_TOKEN_FETCH_TIMEOUT_MS = 3000
 
 let mcpSessionId: string | null = null
 let initPromise: Promise<void> | null = null
 let initCooldownTimer: ReturnType<typeof setTimeout> | null = null
+let devTokenBootstrapPromise: Promise<void> | null = null
+
+/** Fetch the loopback-only dev token once per page load and stash it so
+    subsequent `/mcp` requests include `Authorization: Bearer …`. The server
+    only exposes `/api/v1/dashboard/dev-token` when bound to loopback with
+    strict-auth overrides disabled; in every other case this quietly no-ops
+    and existing flows (URL `?token=…`, manual paste) continue to work. */
+async function ensureDevToken(): Promise<void> {
+  if (getStoredToken()) return
+  if (devTokenBootstrapPromise) return devTokenBootstrapPromise
+  devTokenBootstrapPromise = (async () => {
+    try {
+      const res = await fetchWithTimeout(
+        '/api/v1/dashboard/dev-token',
+        { method: 'GET', headers: { Accept: 'application/json' } },
+        DEV_TOKEN_FETCH_TIMEOUT_MS,
+      )
+      if (!res.ok) return
+      const payload = (await res.json()) as { token?: unknown }
+      if (typeof payload.token === 'string' && payload.token.length > 0) {
+        setStoredToken(payload.token)
+      }
+    } catch {
+      /* Loopback endpoint unavailable (LAN bind, strict auth, offline).
+         Leave auth headers empty; caller will surface the 401 as before. */
+    }
+  })()
+  return devTokenBootstrapPromise
+}
 
 async function bestEffortReportToolHostFailure(payload: {
   toolName: string
@@ -103,6 +140,7 @@ async function ensureSession(): Promise<void> {
   if (mcpSessionId) return
   if (initPromise) return initPromise
   initPromise = (async () => {
+    await ensureDevToken()
     try {
       const res = await fetchWithTimeout('/mcp', {
         method: 'POST',
@@ -157,6 +195,7 @@ async function ensureSession(): Promise<void> {
 export function resetMcpClientState(): void {
   mcpSessionId = null
   initPromise = null
+  devTokenBootstrapPromise = null
   if (initCooldownTimer) {
     clearTimeout(initCooldownTimer)
     initCooldownTimer = null

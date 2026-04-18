@@ -332,7 +332,7 @@ export function TaskDetailOverlay() {
       labelledBy=${titleId}
       onClose=${closeTaskDetail}
       initialFocusRef=${closeButtonRef}
-      overlayClass="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
+      overlayClass="fixed inset-0 z-[60] bg-[var(--white-5)]/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
       panelClass="w-full max-w-[900px] max-h-[90vh] overflow-y-auto bg-[#0d1526] rounded-2xl border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.5)]"
     >
       ${'' /* Sticky Header */}

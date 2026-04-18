@@ -56,7 +56,7 @@ function PerfStat({
   detail?: string | null
 }) {
   return html`
-    <div class="rounded-xl border border-card-border/45 bg-black/10 px-3 py-3">
+    <div class="rounded-xl border border-card-border/45 bg-[var(--white-5)]/10 px-3 py-3">
       <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">${label}</div>
       <div class="mt-1 text-[20px] font-bold text-[var(--text-strong)]">${value}</div>
       ${detail ? html`<div class="mt-1 text-[11px] text-[var(--text-muted)]">${detail}</div>` : null}
@@ -68,7 +68,7 @@ function DiffRow({ row }: { row: DashboardPerfComparisonRow }) {
   const avgDelta = row.avg_delta_ms > 0 ? `+${row.avg_delta_ms}` : `${row.avg_delta_ms}`
   const p95Delta = row.p95_delta_ms > 0 ? `+${row.p95_delta_ms}` : `${row.p95_delta_ms}`
   return html`
-    <div class="flex items-center justify-between gap-3 rounded-lg border border-card-border/35 bg-black/8 px-3 py-2">
+    <div class="flex items-center justify-between gap-3 rounded-lg border border-card-border/35 bg-[var(--white-5)]/8 px-3 py-2">
       <div class="min-w-0">
         <div class="truncate text-[12px] font-semibold text-[var(--text-strong)]">${row.benchmark}</div>
         <div class="text-[11px] text-[var(--text-muted)]">avg ${avgDelta}ms · p95 ${p95Delta}ms</div>
@@ -200,7 +200,7 @@ export function PerfSnapshotPanel() {
         : null}
 
       ${data?.status === 'empty'
-        ? html`<div class="rounded-xl border border-card-border/35 bg-black/10 px-3 py-3 text-[12px] text-[var(--text-muted)]">
+        ? html`<div class="rounded-xl border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3 text-[12px] text-[var(--text-muted)]">
             benchmark artifact가 아직 없습니다. <code>benchmark.sh</code>를 한 번 돌리면 latest summary와 baseline diff가 여기에 나타납니다.
           </div>`
         : null}

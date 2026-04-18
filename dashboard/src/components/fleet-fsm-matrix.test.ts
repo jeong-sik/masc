@@ -109,8 +109,8 @@ describe('tallyInvariantViolations', () => {
 
 describe('sparkClassFor', () => {
   it('extracts a single bg-* utility from the full chip class', () => {
-    expect(sparkClassFor('Running')).toMatch(/^bg-emerald-900/)
-    expect(sparkClassFor('Failing')).toMatch(/^bg-red-900/)
+    expect(sparkClassFor('Running')).toMatch(/^bg-[var(--ok-10)]/)
+    expect(sparkClassFor('Failing')).toMatch(/^bg-[var(--bad-10)]/)
   })
 
   it('falls back to a grey shade on unknown states', () => {

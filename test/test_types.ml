@@ -430,6 +430,26 @@ let () =
           Masc_mcp.Keeper_types_profile.valid_shared_memory_scope_strings
           Masc_mcp.Keeper_schema.shared_memory_scope_enum_strings);
     ];
+    "config_category_ssot", [
+      Alcotest.test_case "producer helper matches all_categories order" `Quick (fun () ->
+        Alcotest.(check (list string)) "all_categories -> names"
+          (Env_config_snapshot.all_categories () |> List.map fst)
+          Env_config_snapshot.valid_config_category_strings);
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        Alcotest.(check (list string)) "schema mirror"
+          Env_config_snapshot.valid_config_category_strings
+          Tool_schemas_misc.config_category_enum_strings);
+      Alcotest.test_case "missing runtime categories are now published" `Quick (fun () ->
+        let categories = Env_config_snapshot.valid_config_category_strings in
+        List.iter (fun expected ->
+          Alcotest.(check bool) (Printf.sprintf "%s present" expected) true
+            (List.mem expected categories)
+        ) [
+          "keeper_execution"; "keeper_guardrails"; "autonomy";
+          "level2"; "economy"; "governance"; "channel";
+          "process"; "worker"; "web_search"; "session";
+        ]);
+    ];
     "fsm_transition_matrix", [
       (* Issue #8474: schema transition matrix had drifted from
          [Coord_task.valid_next_actions_for_status] — submit/approve/

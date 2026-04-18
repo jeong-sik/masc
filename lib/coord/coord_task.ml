@@ -940,6 +940,12 @@ let transition_task_r config ~agent_name ~task_id ~action
                 " Remediation: only the current assignee can mark a task \
                  done. Pick a different task or coordinate via \
                  masc_board_post."
+              | (Types.Claimed _ | Types.InProgress _),
+                Types.Cancel when not own_assignee ->
+                " Remediation: cancellation requires owning the task. \
+                 Use masc_board_post to ask the current assignee to cancel \
+                 or release, or claim a different task with \
+                 masc_claim_next."
               | Types.InProgress _, Types.Claim ->
                 " Remediation: task is already in_progress under someone. \
                  Use masc_claim_next for unclaimed work."

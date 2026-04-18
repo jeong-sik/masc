@@ -53,6 +53,22 @@ OAS 0.159.0부터 비대화형 CLI transport(`transport_claude_code`, `transport
 - Gemini CLI는 hook 런타임 off 플래그가 없다. hook 제어가 필요하면 `gemini hooks <cmd>` subcommand로 keeper 기동 전에 비활성화한다.
 - "empty string = disable all" 구분이 필요한 MCP whitelist만 `OAS_GEMINI_NO_MCP` 불 env로 분리되어 있음(`Unix.putenv`로는 진짜 unset이 불가한 제약 반영).
 
+**선언적 설정 (권장)**: process env 대신 `config/keepers/<name>.toml`의 `[keeper.oas_env]` 테이블에 적어두면 턴 시작 시 `Unix.putenv`로 자동 적용된다. 4개 built-in keeper는 `OAS_CLAUDE_STRICT_MCP=1` + `OAS_GEMINI_NO_MCP=1` 기본값이 이미 들어있다. 예시:
+
+```toml
+[keeper]
+persona_name = "analyst"
+# ...
+
+[keeper.oas_env]
+OAS_CLAUDE_STRICT_MCP = "1"
+OAS_GEMINI_NO_MCP = "1"
+# Codex는 -c TOML override로만 제어 가능
+OAS_CODEX_CONFIG = "sandbox_mode=read-only"
+```
+
+키는 반드시 `^OAS_(CLAUDE|CODEX|GEMINI)_.+` 패턴에 맞아야 한다. 그 외 키(`PATH`, `LD_PRELOAD`, 임의 변수 등)는 silently 드롭되어 ambient env 주입을 차단한다. bool 값은 `true`→`"1"`, `false`→`"0"`으로 자동 변환된다.
+
 ### 1.2 MASC --- 조정 레이어
 
 MASC는 OAS 위에 멀티에이전트 협업 기능을 확장한다:

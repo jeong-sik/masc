@@ -219,6 +219,13 @@ type keeper_profile_defaults = {
      (MASC_KEEPER_OAS_MAX_TURNS_PER_CALL / ..._SCHEDULED_AUTONOMOUS). *)
   max_turns_per_call : int option;
   max_turns_per_call_scheduled_autonomous : int option;
+  (* Per-keeper OAS CLI transport env vars (OAS 0.159+).
+     Parsed from [[keeper.oas_env]] table.  Keys MUST match
+     ^OAS_(CLAUDE|CODEX|GEMINI)_.+ — any other entries are dropped with
+     a warning to avoid ambient env injection via keeper TOML.
+     Applied via Unix.putenv right before each turn so OAS transport
+     build_args picks them up.  Empty list = no overrides. *)
+  oas_env : (string * string) list;
 }
 
 type persona_summary = {
@@ -267,6 +274,7 @@ let empty_keeper_profile_defaults = {
   max_turns_per_call_scheduled_autonomous = None;
   cascade_name = None;
   models = None;
+  oas_env = [];
 }
 
 let personas_root_opt () =
@@ -301,6 +309,47 @@ let persona_profile_path_opt name =
 (* ================================================================ *)
 (* TOML -> keeper_profile_defaults conversion                        *)
 (* ================================================================ *)
+
+(** Scan a flat TOML doc for keys under [[keeper.oas_env]].  Only keys
+    matching ^OAS_(CLAUDE|CODEX|GEMINI)_.+ are accepted — any other
+    entries are dropped silently.  This guards against arbitrary
+    process env injection via keeper TOML.  Values are coerced to
+    strings via [string_of_toml_value_for_env] (bool → "1"/"0"), so
+    integers and booleans in TOML map to the string shapes the OAS
+    transport build_args already understand. *)
+let string_of_toml_value_for_env = function
+  | Keeper_toml_loader.Toml_string s -> Some s
+  | Keeper_toml_loader.Toml_int i -> Some (string_of_int i)
+  | Keeper_toml_loader.Toml_float f -> Some (string_of_float f)
+  | Keeper_toml_loader.Toml_bool true -> Some "1"
+  | Keeper_toml_loader.Toml_bool false -> Some "0"
+  | Keeper_toml_loader.Toml_string_array _ -> None
+
+let oas_env_key_prefix = "keeper.oas_env."
+
+let oas_env_key_is_allowed suffix =
+  let allowed_prefixes = [ "OAS_CLAUDE_"; "OAS_CODEX_"; "OAS_GEMINI_" ] in
+  String.length suffix
+    > (List.fold_left (fun acc p -> max acc (String.length p)) 0 allowed_prefixes)
+  && List.exists (fun p ->
+       String.length suffix >= String.length p
+       && String.sub suffix 0 (String.length p) = p)
+       allowed_prefixes
+
+let extract_oas_env_from_doc (doc : Keeper_toml_loader.toml_doc)
+    : (string * string) list =
+  let prefix_len = String.length oas_env_key_prefix in
+  List.filter_map
+    (fun (k, v) ->
+      if String.length k > prefix_len
+         && String.sub k 0 prefix_len = oas_env_key_prefix
+      then
+        let suffix = String.sub k prefix_len (String.length k - prefix_len) in
+        if oas_env_key_is_allowed suffix then
+          Option.map (fun sv -> (suffix, sv)) (string_of_toml_value_for_env v)
+        else None
+      else None)
+    doc
 
 let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     : (keeper_profile_defaults, string) result =
@@ -467,6 +516,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           (match strs "models" with
            | [] -> None
            | xs -> Some xs);
+        oas_env = extract_oas_env_from_doc doc;
       })
     result
 
@@ -527,9 +577,16 @@ let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
     canonical_keeper_toml_key_names
     |> List.map (fun k -> "keeper." ^ k)
   in
+  let oas_env_prefix = oas_env_key_prefix in
+  let oas_env_prefix_len = String.length oas_env_prefix in
+  let starts_with_oas_env k =
+    String.length k > oas_env_prefix_len
+    && String.sub k 0 oas_env_prefix_len = oas_env_prefix
+  in
   doc
   |> List.map fst
-  |> List.filter (fun key -> not (List.mem key known))
+  |> List.filter (fun key ->
+       not (List.mem key known) && not (starts_with_oas_env key))
   |> dedupe_keep_order
 
 let warn_unknown_keeper_toml_keys ~path (doc : Keeper_toml_loader.toml_doc) =
@@ -695,6 +752,10 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   (match Safe_ops.json_string_list "models" keeper_json with
                    | [] -> None
                    | xs -> Some xs);
+                (* oas_env lives only in keeper TOML, not persona JSON —
+                   persona profiles are a design-time artifact whereas
+                   transport env is an ops-time toggle. *)
+                oas_env = [];
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 
@@ -758,7 +819,36 @@ let merge_keeper_profile_defaults
     max_turns_per_call_scheduled_autonomous =
       prefer overlay.max_turns_per_call_scheduled_autonomous
         base.max_turns_per_call_scheduled_autonomous;
+    (* oas_env merges key-by-key: overlay wins per key, base keys that
+       overlay doesn't mention survive.  Preserves the natural intent
+       that a persona sets base defaults and keeper TOML layers its
+       own toggles on top. *)
+    oas_env =
+      (let overlay_keys = List.map fst overlay.oas_env in
+       let surviving_base =
+         List.filter (fun (k, _) -> not (List.mem k overlay_keys)) base.oas_env
+       in
+       surviving_base @ overlay.oas_env);
   }
+
+(** Apply [defaults.oas_env] to the process environment via [Unix.putenv].
+    Logs each applied key at info level for operator auditability.
+    Safe to call repeatedly — putenv is idempotent for identical values.
+
+    Scope note: [Unix.putenv] is process-global, so concurrent turns
+    from different keepers in the same process would race.  In the
+    current masc-mcp deployment each keeper lives in its own process,
+    which keeps this wiring simple; revisit if multiplexing is added. *)
+let apply_oas_env ~keeper_name (defaults : keeper_profile_defaults) : unit =
+  match defaults.oas_env with
+  | [] -> ()
+  | pairs ->
+    List.iter
+      (fun (k, v) ->
+        Unix.putenv k v;
+        Log.Keeper.info
+          "keeper %s applied OAS env %s=%s" keeper_name k v)
+      pairs
 
 let resolved_persona_name ~keeper_name
     (defaults : keeper_profile_defaults) : string =

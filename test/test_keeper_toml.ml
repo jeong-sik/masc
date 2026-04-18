@@ -867,6 +867,98 @@ mention_targets = ["a"]
     check (list string) "surfaces dead config"
       ["keeper.room_scope"; "keeper.scope_kind"] unknown
 
+let test_oas_env_parses_allowed_keys () =
+  let input = {|
+[keeper]
+persona_name = "analyst"
+[keeper.oas_env]
+OAS_CLAUDE_STRICT_MCP = "1"
+OAS_GEMINI_NO_MCP = "1"
+OAS_CODEX_CONFIG = "mcp_servers={}"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    match KTP.profile_defaults_of_toml doc with
+    | Error e -> fail e
+    | Ok d ->
+      check int "oas_env count" 3 (List.length d.oas_env);
+      check string "strict_mcp value"
+        "1" (List.assoc "OAS_CLAUDE_STRICT_MCP" d.oas_env);
+      check string "no_mcp value"
+        "1" (List.assoc "OAS_GEMINI_NO_MCP" d.oas_env);
+      check string "codex_config value"
+        "mcp_servers={}" (List.assoc "OAS_CODEX_CONFIG" d.oas_env)
+
+let test_oas_env_drops_non_oas_prefix () =
+  (* Guards against ambient env injection via keeper TOML: keys that
+     don't start with OAS_(CLAUDE|CODEX|GEMINI)_ are silently dropped. *)
+  let input = {|
+[keeper]
+persona_name = "analyst"
+[keeper.oas_env]
+PATH = "/evil/bin:/usr/bin"
+LD_PRELOAD = "/tmp/hack.so"
+OAS_CLAUDE_STRICT_MCP = "1"
+RANDOM_VAR = "nope"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    match KTP.profile_defaults_of_toml doc with
+    | Error e -> fail e
+    | Ok d ->
+      check int "only OAS_* survives" 1 (List.length d.oas_env);
+      check bool "PATH dropped" false (List.mem_assoc "PATH" d.oas_env);
+      check bool "LD_PRELOAD dropped" false (List.mem_assoc "LD_PRELOAD" d.oas_env);
+      check bool "RANDOM_VAR dropped" false (List.mem_assoc "RANDOM_VAR" d.oas_env)
+
+let test_oas_env_absent_means_empty () =
+  let input = {|
+[keeper]
+persona_name = "analyst"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    match KTP.profile_defaults_of_toml doc with
+    | Error e -> fail e
+    | Ok d ->
+      check int "no table → empty list" 0 (List.length d.oas_env)
+
+let test_oas_env_not_flagged_as_unknown () =
+  let input = {|
+[keeper]
+persona_name = "analyst"
+[keeper.oas_env]
+OAS_CLAUDE_STRICT_MCP = "1"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    let unknown = KTP.detect_unknown_keeper_toml_keys doc in
+    check int "oas_env keys whitelisted" 0 (List.length unknown)
+
+let test_oas_env_coerces_bool_to_string () =
+  (* Bools in TOML become "1"/"0" string so OAS_*_STRICT_MCP = true works. *)
+  let input = {|
+[keeper]
+persona_name = "analyst"
+[keeper.oas_env]
+OAS_CLAUDE_STRICT_MCP = true
+OAS_CODEX_SKIP_GIT = false
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    match KTP.profile_defaults_of_toml doc with
+    | Error e -> fail e
+    | Ok d ->
+      check string "true → 1" "1"
+        (List.assoc "OAS_CLAUDE_STRICT_MCP" d.oas_env);
+      check string "false → 0" "0"
+        (List.assoc "OAS_CODEX_SKIP_GIT" d.oas_env)
+
 let test_detect_unknown_keys_accepts_also_allow_alias () =
   let input = {|
 [keeper]
@@ -970,6 +1062,19 @@ let () =
             test_detect_unknown_keys_flags_legacy_dead_config;
           test_case "also_allow alias accepted" `Quick
             test_detect_unknown_keys_accepts_also_allow_alias;
+          test_case "oas_env keys not flagged as unknown" `Quick
+            test_oas_env_not_flagged_as_unknown;
+        ] );
+      ( "oas_env",
+        [
+          test_case "parses allowed OAS_* keys" `Quick
+            test_oas_env_parses_allowed_keys;
+          test_case "drops non-OAS_* keys (ambient injection guard)" `Quick
+            test_oas_env_drops_non_oas_prefix;
+          test_case "empty when table absent" `Quick
+            test_oas_env_absent_means_empty;
+          test_case "coerces bool → \"1\"/\"0\" string" `Quick
+            test_oas_env_coerces_bool_to_string;
         ] );
       ( "file_loading",
         [

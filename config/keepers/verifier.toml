@@ -4,3 +4,11 @@ execution_scope = "workspace"
 cascade_name = "cross_verifier"
 telemetry_feedback_enabled = true
 telemetry_feedback_window_hours = 24
+
+# OAS transport env (OAS 0.159+). Keys must match ^OAS_(CLAUDE|CODEX|GEMINI)_.+
+# Applied via Unix.putenv before each turn. Operators can override per
+# deployment by editing this block or via process-level env vars (this
+# table wins because it runs at turn start).
+[keeper.oas_env]
+OAS_CLAUDE_STRICT_MCP = "1"
+OAS_GEMINI_NO_MCP = "1"

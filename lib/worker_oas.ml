@@ -276,10 +276,7 @@ let build_agent
     |> Oas.Builder.with_raw_trace raw_trace
     |> Oas.Builder.with_periodic_callbacks heartbeat_callbacks
     |> Oas.Builder.with_description (description_of_meta meta)
-    (* #7883: fail-closed by default. Worker OAS runs execute MASC-issued
-       tools without a human gate; if the caller does not supply an
-       explicit approval source, reject every ApprovalRequired tool call
-       rather than letting OAS log-and-execute. *)
+    (* #7883 *)
     |> Oas.Builder.with_approval approval
   in
   let builder = match context_injector with
@@ -575,6 +572,8 @@ and resume_worker_via_oas
     ~(raw_trace : Oas.Raw_trace.t)
     ?contract
     ?worker_run_id
+    ?(approval : Oas.Hooks.approval_callback =
+      Approval_callbacks.reject_by_default)
     () : (Worker_container_types.run_result, string) result =
   let worker_name = meta.worker_name in
   let session_id = meta.mcp_session_id in
@@ -613,11 +612,8 @@ and resume_worker_via_oas
   in
   let options = { options with
     Oas.Agent_types.context_injector = Some context_injector;
-    (* #7883: resume path must install fail-closed approval callback.
-       Without this, OAS would see approval=None on resume and log
-       "ApprovalRequired but no approval callback — executing" while
-       running the tool anyway. *)
-    approval = Some Approval_callbacks.reject_by_default } in
+    (* #7883 *)
+    approval = Some approval } in
   Fun.protect
     ~finally:(fun () ->
       ignore

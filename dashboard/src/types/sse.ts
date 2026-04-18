@@ -60,6 +60,9 @@ export type SSEEventType =
   | 'oas:masc:harness:verdict_recorded'
   | 'oas:masc:harness:pre_compact'
   | 'oas:masc:harness:handoff'
+  // Forward-compat: the dashboard parser accepts any `oas:*` event so
+  // newer runtime bridges do not get dropped at the schema boundary.
+  | `oas:${string}`
   // Server-push snapshot events (proactive cache broadcasts)
   | 'room_truth_snapshot'
   | 'namespace_truth_snapshot'

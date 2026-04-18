@@ -121,7 +121,7 @@ function SummaryCard({
       ? 'border-[var(--ok-20)] bg-[var(--ok-10)]'
       : tone === 'warn'
         ? 'border-[var(--warn-20)] bg-[var(--warn-10)]'
-        : 'border-[var(--card-border)] bg-[rgba(255,255,255,0.02)]'
+        : 'border-[var(--card-border)] bg-[var(--white-1)]'
 
   return html`
     <div class="rounded border ${toneClass} p-3">
@@ -157,14 +157,14 @@ function PressureWatchlist({ rows }: { rows: FleetRow[] }) {
 
   if (watchlist.length === 0) {
     return html`
-      <div class="rounded border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3 text-[11px] text-[var(--text-dim)]">
+      <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 text-[11px] text-[var(--text-dim)]">
         No keepers are near context pressure or stale activity thresholds.
       </div>
     `
   }
 
   return html`
-    <div class="rounded border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)]">
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)]">
       ${watchlist.map(row => html`
         <div class="flex items-center justify-between gap-3 border-b border-[var(--card-border)] px-3 py-2 text-[11px] last:border-b-0">
           <div class="min-w-0">
@@ -310,7 +310,7 @@ function TelemetrySourcesPanel({ sources }: { sources: TelemetrySourceSummary[] 
   return html`
     <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
       ${sorted.map(source => html`
-        <div class="rounded border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3">
+        <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3">
           <div class="flex items-center justify-between gap-3">
             <div class="text-[11px] font-medium text-[var(--text)]">${sourceLabel(source.source)}</div>
             <div class="font-mono text-[11px] ${sourceCountClass(source)}">

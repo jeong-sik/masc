@@ -40,7 +40,7 @@ function PlanningStat({
           : 'text-text-strong'
 
   return html`
-    <div class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-4">
+    <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
       <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">${label}</div>
       <div class="mt-2 text-[30px] font-bold leading-none tabular-nums ${toneClass}">${value}</div>
     </div>
@@ -81,7 +81,7 @@ function GuideCard({
   children?: ComponentChildren
 }) {
   return html`
-    <section class="flex flex-col gap-3 rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-4">
+    <section class="flex flex-col gap-3 rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
       <div class="flex items-start justify-between gap-3">
         <div>
           <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">${eyebrow}</div>
@@ -237,7 +237,7 @@ export function Planning() {
         </div>
 
         <div class="mt-5 grid gap-4 xl:grid-cols-2">
-          <section class="rounded border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-4">
+          <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
             <div class="mb-3">
               <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">Backlog Entry</div>
               <h3 class="mt-1 text-[15px] font-semibold text-text-strong">태스크 추가</h3>

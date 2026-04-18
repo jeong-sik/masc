@@ -450,7 +450,7 @@ function CheckpointSummaryCard({
         ? html`<div class="mt-2 text-[12px] leading-relaxed text-[var(--text-body)]">${summary.latest_preview}</div>`
         : null}
       ${summary.continuity_summary
-        ? html`<pre class="mt-2 whitespace-pre-wrap rounded border border-[var(--white-8)] bg-[rgba(255,255,255,0.03)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">${summary.continuity_summary}</pre>`
+        ? html`<pre class="mt-2 whitespace-pre-wrap rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">${summary.continuity_summary}</pre>`
         : html`<div class="mt-2 text-[11px] text-[var(--text-dim)]">continuity snapshot 없음</div>`}
     </div>
   `
@@ -633,7 +633,7 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
                         ? html`<div class="mt-2 text-[12px] leading-relaxed text-[var(--text-body)]">${item.latest_preview}</div>`
                         : null}
                       ${item.continuity_summary
-                        ? html`<pre class="mt-2 whitespace-pre-wrap rounded border border-[var(--white-8)] bg-[rgba(255,255,255,0.03)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">${item.continuity_summary}</pre>`
+                        ? html`<pre class="mt-2 whitespace-pre-wrap rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">${item.continuity_summary}</pre>`
                         : html`<div class="mt-2 text-[11px] text-[var(--text-dim)]">continuity snapshot 없음</div>`}
                     </div>
                   </label>

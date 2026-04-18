@@ -235,7 +235,7 @@ function renderLogRow(entry: LogEntry) {
   const failure = failureEnvelope(entry)
   const sourceClass = sourceTone(source)
   const renderedMessage = renderLogMessage(entry)
-  let backgroundClass = 'bg-[rgba(255,255,255,0.02)]'
+  let backgroundClass = 'bg-[var(--white-1)]'
   if (level === 'ERROR') {
     backgroundClass = 'bg-[rgba(224,80,80,0.08)]'
   } else if (level === 'WARN') {

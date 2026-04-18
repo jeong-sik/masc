@@ -1211,13 +1211,18 @@ export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
     .then(raw => normalizeKeeperConfig(raw, name))
 }
 
+export type SandboxProfile = 'legacy_local' | 'docker_hardened'
+export type SandboxNetworkMode = 'none' | 'inherit'
+export type SharedMemoryScope = 'disabled' | 'room'
+
 export type KeeperConfigUpdatePayload = {
   // Scope
   execution_scope?: 'observe_only' | 'workspace' | 'local'
   allowed_paths?: string[]
-  sandbox_profile?: 'legacy_local' | 'docker_hardened'
-  network_mode?: 'none' | 'inherit'
-  shared_memory_scope?: 'disabled' | 'room'
+  // Sandbox
+  sandbox_profile?: SandboxProfile
+  network_mode?: SandboxNetworkMode
+  shared_memory_scope?: SharedMemoryScope
   // Prompt fields
   goal?: string
   short_goal?: string

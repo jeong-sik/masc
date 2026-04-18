@@ -288,6 +288,11 @@ let test_keeper_name_from_agent_name_roundtrip () =
     "agent alias resolves to keeper name" (Some "sangsu")
     (Keeper_types.keeper_name_from_agent_name "keeper-sangsu-agent")
 
+let test_keeper_name_from_generated_nickname () =
+  Alcotest.(check (option string))
+    "generated nickname resolves directly" (Some "claude-swift-fox")
+    (Keeper_types.keeper_name_from_agent_name "claude-swift-fox")
+
 let test_keeper_name_from_agent_name_rejects_plain_name () =
   Alcotest.(check (option string))
     "plain keeper name is not treated as agent alias" None
@@ -339,6 +344,8 @@ let () =
       Alcotest.test_case "agent_name prefixed" `Quick test_keeper_agent_name_prefixed;
       Alcotest.test_case "agent alias roundtrip" `Quick
         test_keeper_name_from_agent_name_roundtrip;
+      Alcotest.test_case "generated nickname is alias" `Quick
+        test_keeper_name_from_generated_nickname;
       Alcotest.test_case "plain name is not alias" `Quick
         test_keeper_name_from_agent_name_rejects_plain_name;
     ]);

@@ -1625,10 +1625,14 @@ let keeper_name_from_agent_name agent_name =
      && String.sub agent_name 0 plen = prefix
      && String.sub agent_name (alen - slen) slen = suffix
   then
+    (* Full keeper-xxx-agent format *)
     let keeper_name = String.sub agent_name plen (alen - plen - slen) in
     if validate_name keeper_name then Some keeper_name else None
   else
-    None
+    (* Only generated nicknames should alias directly to keeper names. *)
+    if Nickname.is_generated_nickname agent_name && validate_name agent_name
+    then Some agent_name
+    else None
 ;;
 
 let read_meta_resolved config name : ((string * keeper_meta) option, string) result =

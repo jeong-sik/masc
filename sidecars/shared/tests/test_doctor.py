@@ -37,6 +37,99 @@ def test_severity_symbols_render_prefix() -> None:
     assert "missing" in text and "broken" in text
 
 
+def test_banner_all_ok() -> None:
+    checks = [
+        Check(name="a", severity=Severity.ok, message=""),
+        Check(name="b", severity=Severity.ok, message=""),
+    ]
+    text = render_pretty("T", checks, use_color=False)
+    assert "모든 검사가 통과" in text
+    # all-ok 에서는 조치 항목 블록이 나오면 안 된다
+    assert "조치 항목:" not in text
+
+
+def test_banner_has_error_takes_priority_over_warn() -> None:
+    checks = [
+        Check(name="a", severity=Severity.ok, message=""),
+        Check(name="b", severity=Severity.warn, message="m"),
+        Check(name="c", severity=Severity.error, message="boom"),
+    ]
+    text = render_pretty("T", checks, use_color=False)
+    assert "심각한 문제 1개" in text
+    assert "실행 전 점검" in text
+    # warn 배너 문구는 error 가 있을 때 배너 줄에 노출되지 않아야 한다
+    banner_section = text.split("조치 항목:")[0]
+    assert "주의 항목" not in banner_section.splitlines()[2]
+
+
+def test_banner_warn_only() -> None:
+    checks = [Check(name="a", severity=Severity.warn, message="m")]
+    text = render_pretty("T", checks, use_color=False)
+    assert "주의 항목 1개" in text
+    assert "실행은 가능" in text
+
+
+def test_banner_all_skipped_not_ok() -> None:
+    """전제 부족으로 전부 skip 될 때는 '통과' 로 오해되지 않도록."""
+
+    checks = [
+        Check(name="a", severity=Severity.skip, message=""),
+        Check(name="b", severity=Severity.skip, message=""),
+    ]
+    text = render_pretty("T", checks, use_color=False)
+    assert "건너뛰었습니다" in text
+    assert "모든 검사가 통과" not in text
+
+
+def test_action_items_lists_hints_and_auto_fix() -> None:
+    checks = [
+        Check(
+            name="needs-cfg",
+            severity=Severity.warn,
+            message="m",
+            hint="SLACK_BOT_TOKEN 을 환경에 설정",
+        ),
+        Check(
+            name="needs-fix",
+            severity=Severity.error,
+            message="x",
+            auto_fix=AutoFix(description="권한 재설정", command="chmod 0755 /var/gate"),
+        ),
+    ]
+    text = render_pretty("T", checks, use_color=False)
+    assert "조치 항목:" in text
+    assert "[설정] needs-cfg — SLACK_BOT_TOKEN 을 환경에 설정" in text
+    assert "[수동 실행] 권한 재설정" in text
+    assert "$ chmod 0755 /var/gate" in text
+
+
+def test_action_item_marks_auto_fix_callback_available() -> None:
+    async def _noop() -> None:
+        return None
+
+    checks = [
+        Check(
+            name="auto",
+            severity=Severity.error,
+            message="x",
+            auto_fix=AutoFix(description="재시작", callback=_noop),
+        )
+    ]
+    text = render_pretty("T", checks, use_color=False)
+    assert "[자동 치유] 재시작" in text
+    assert "# doctor --fix 로 실행" in text
+
+
+def test_summary_line_in_korean() -> None:
+    checks = [
+        Check(name="a", severity=Severity.ok, message=""),
+        Check(name="b", severity=Severity.warn, message="m"),
+        Check(name="c", severity=Severity.error, message="x"),
+    ]
+    text = render_pretty("T", checks, use_color=False)
+    assert "합계: 정상 1 · 경고 1 · 오류 1" in text
+
+
 def test_render_json_shape() -> None:
     checks = [Check(name="x", severity=Severity.ok, message="", detail="v1")]
     payload = json.loads(render_json("T", checks))

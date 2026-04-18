@@ -782,6 +782,14 @@ let meta_cognition_summary_ttl = 120.0
 let meta_cognition_warm_mu = Eio.Mutex.create ()
 let meta_cognition_warm_inflight : (string, unit) Hashtbl.t = Hashtbl.create 4
 
+let dashboard_shell_cache_prefix (config : Coord.config) =
+  Printf.sprintf "shell:coord=%s:" config.base_path
+
+let dashboard_shell_cache_key (config : Coord.config) =
+  Printf.sprintf "%sworkspace=%s"
+    (dashboard_shell_cache_prefix config)
+    config.workspace_path
+
 let meta_cognition_summary_key (config : Coord.config) =
   Printf.sprintf "meta_cognition_summary:%s" config.base_path
 
@@ -811,6 +819,11 @@ let schedule_meta_cognition_summary_warm (config : Coord.config) =
                     (Dashboard_cache.get_or_compute key
                        ~ttl:meta_cognition_summary_ttl
                        (fun () -> Meta_cognition.summary_json config))
+                  (* Drop cached shell payloads that were rendered while the
+                     meta-cognition summary was still warming. *)
+                  ;
+                  Dashboard_cache.invalidate_prefix
+                    (dashboard_shell_cache_prefix config)
                 with
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | exn ->
@@ -1060,10 +1073,7 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     ]
 
 let dashboard_shell_http_json ?clock ?request (config : Coord.config) : Yojson.Safe.t =
-  let cache_key =
-    Printf.sprintf "shell:coord=%s:workspace=%s"
-      config.base_path config.workspace_path
-  in
+  let cache_key = dashboard_shell_cache_key config in
   let compute () =
     (* Shell endpoint is read-only; use config directly without isolation
        since state is not available in this context. *)

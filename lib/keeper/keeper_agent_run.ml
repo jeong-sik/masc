@@ -511,6 +511,10 @@ let run_turn
   in
   (* 3. Build base system prompt from meta *)
   let profile_defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
+  (* Apply per-keeper OAS transport env vars ([[keeper.oas_env]] table)
+     before any OAS call in this turn.  OAS 0.159+ transports read
+     these at build_args time; an empty [oas_env] list is a no-op. *)
+  Keeper_types_profile.apply_oas_env ~keeper_name:meta.name profile_defaults;
   let persona_extended =
     Keeper_types_profile.resolved_persona_name ~keeper_name:meta.name
       profile_defaults

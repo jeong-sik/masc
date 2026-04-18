@@ -37,6 +37,26 @@ def test_severity_symbols_render_prefix() -> None:
     assert "missing" in text and "broken" in text
 
 
+def test_title_uses_underline_style_not_markdown_heading() -> None:
+    """제목은 전통적 underline 스타일 (`Title\\n=====`) 로 렌더돼야 한다.
+
+    `masc-mcp doctor all` 섹션 divider (``====``) 와 일관된 외형 유지,
+    그리고 pretty 출력에서 markdown 기호(`# `) 가 보이지 않도록.
+    """
+
+    text = render_pretty(
+        "Discord Sidecar Doctor",
+        [Check(name="a", severity=Severity.ok, message="")],
+        use_color=False,
+    )
+    lines = text.splitlines()
+    assert lines[0] == "Discord Sidecar Doctor"
+    assert lines[1] == "=" * len("Discord Sidecar Doctor")
+    # markdown heading 기호는 제거됐어야 한다
+    assert not text.startswith("# ")
+    assert "\n# Discord" not in text
+
+
 def test_banner_all_ok() -> None:
     checks = [
         Check(name="a", severity=Severity.ok, message=""),

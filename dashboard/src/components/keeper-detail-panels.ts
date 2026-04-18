@@ -169,26 +169,26 @@ function OperationalHealth({ keeper }: { keeper: Keeper }) {
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
         ${hb ? html`
           <div class="p-2 rounded-lg border ${KPI_TONE[hbTone]} flex flex-col gap-0.5">
-            <span class="text-[9px] uppercase tracking-wider text-[var(--text-muted)]">Heartbeat</span>
+            <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Heartbeat</span>
             <span class="text-xs font-mono ${KPI_VALUE_TONE[hbTone]}">${hb.replace('T', ' ').slice(0, 19)}</span>
           </div>
         ` : null}
         ${compSavedRatio != null ? html`
           <div class="p-2 rounded-lg border ${KPI_TONE[compTone]} flex flex-col gap-0.5">
-            <span class="text-[9px] uppercase tracking-wider text-[var(--text-muted)]">압축 절감률</span>
+            <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">압축 절감률</span>
             <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE[compTone]}">${(compSavedRatio * 100).toFixed(1)}%</span>
-            ${avgSaved != null ? html`<span class="text-[9px] text-[var(--text-dim)]">avg ${formatTokens(avgSaved)} saved</span>` : null}
+            ${avgSaved != null ? html`<span class="text-[10px] text-[var(--text-dim)]">avg ${formatTokens(avgSaved)} saved</span>` : null}
           </div>
         ` : null}
         ${dropRatio != null ? html`
           <div class="p-2 rounded-lg border ${KPI_TONE[dropTone]} flex flex-col gap-0.5">
-            <span class="text-[9px] uppercase tracking-wider text-[var(--text-muted)]">메모리 손실률</span>
+            <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">메모리 손실률</span>
             <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE[dropTone]}">${(dropRatio * 100).toFixed(1)}%</span>
           </div>
         ` : null}
         ${lastCompAgo != null ? html`
           <div class="p-2 rounded-lg border ${KPI_TONE['default']} flex flex-col gap-0.5">
-            <span class="text-[9px] uppercase tracking-wider text-[var(--text-muted)]">마지막 압축</span>
+            <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">마지막 압축</span>
             <span class="text-xs font-mono text-[var(--text-strong)]">${formatDuration(lastCompAgo)} 전</span>
           </div>
         ` : null}
@@ -621,7 +621,7 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col justify-between">
           <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">In/Out 비율</span>
           <span class="text-lg font-mono tabular-nums text-[var(--accent)]">${avgRatio.toFixed(1)}x</span>
-          <span class="text-[9px] text-[var(--text-dim)]">${avgRatio > 10 ? '프롬프트 비대 주의' : avgRatio > 5 ? '프롬프트 무거움' : '정상 범위'}</span>
+          <span class="text-[10px] text-[var(--text-dim)]">${avgRatio > 10 ? '프롬프트 비대 주의' : avgRatio > 5 ? '프롬프트 무거움' : '정상 범위'}</span>
         </div>
       </div>
     </div>
@@ -679,7 +679,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
         <span class="text-[10px] text-[var(--text-dim)]">${promptPoints.length} snapshots</span>
         ${latest?.prompt_fingerprint
           ? html`<span class="inline-flex items-center gap-1">
-              <span class="text-[9px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] font-mono" title=${latest.prompt_fingerprint}>${formatFingerprint(latest.prompt_fingerprint)}</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] font-mono" title=${latest.prompt_fingerprint}>${formatFingerprint(latest.prompt_fingerprint)}</span>
               <${CopyIdButton} value=${latest.prompt_fingerprint} label="fingerprint" size=${10} />
             </span>`
           : null}
@@ -693,7 +693,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
             ${totalLine ? html`<polyline points="${totalLine}" fill="none" stroke="#f59e0b" stroke-width="1.5"/>` : null}
           </svg>
-          <div class="mt-1 flex flex-wrap gap-2 text-[9px] text-[var(--text-dim)]">
+          <div class="mt-1 flex flex-wrap gap-2 text-[10px] text-[var(--text-dim)]">
             <span>latest ${latestTotal != null ? formatTokens(latestTotal) : '-'}</span>
             <span>cacheable ${latestCacheable != null ? formatTokens(latestCacheable) : '-'}</span>
             ${cacheableRatio != null ? html`<span>${Math.round(cacheableRatio * 100)}% cacheable</span>` : null}
@@ -703,7 +703,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col justify-between">
           <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">fingerprint revisions</span>
           <span class="text-lg font-mono tabular-nums text-[var(--warn)]">${fingerprintTransitions}</span>
-          <span class="text-[9px] text-[var(--text-dim)]">${uniqueFingerprintCount} unique</span>
+          <span class="text-[10px] text-[var(--text-dim)]">${uniqueFingerprintCount} unique</span>
         </div>
 
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col justify-between">
@@ -712,7 +712,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-sm font-mono break-all text-[var(--text-strong)]" title=${latest?.prompt_fingerprint ?? ''}>${latest?.prompt_fingerprint ? formatFingerprint(latest.prompt_fingerprint) : '-'}</span>
             ${latest?.prompt_fingerprint ? html`<${CopyIdButton} value=${latest.prompt_fingerprint} label="fingerprint" size=${12} />` : null}
           </div>
-          <span class="text-[9px] text-[var(--text-dim)]">${latestSegments.length} segments</span>
+          <span class="text-[10px] text-[var(--text-dim)]">${latestSegments.length} segments</span>
         </div>
       </div>
 
@@ -723,17 +723,17 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
               <div class="flex items-center justify-between gap-2 mb-2">
                 <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">${formatSegmentLabel(segmentKey)}</span>
                 <span class="inline-flex items-center gap-1">
-                  <span class="text-[9px] font-mono text-[var(--text-dim)]" title=${segment.fingerprint ?? ''}>${formatFingerprint(segment.fingerprint)}</span>
+                  <span class="text-[10px] font-mono text-[var(--text-dim)]" title=${segment.fingerprint ?? ''}>${formatFingerprint(segment.fingerprint)}</span>
                   ${segment.fingerprint ? html`<${CopyIdButton} value=${segment.fingerprint} label="segment fingerprint" size=${10} />` : null}
                 </span>
               </div>
               <div class="grid grid-cols-2 gap-2 text-xs">
                 <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-2">
-                  <div class="text-[9px] uppercase tracking-wider text-[var(--text-dim)]">tokens</div>
+                  <div class="text-[10px] uppercase tracking-wider text-[var(--text-dim)]">tokens</div>
                   <div class="mt-1 font-mono tabular-nums text-[var(--accent)]">${formatTokens(segment.estimated_tokens)}</div>
                 </div>
                 <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-2">
-                  <div class="text-[9px] uppercase tracking-wider text-[var(--text-dim)]">bytes</div>
+                  <div class="text-[10px] uppercase tracking-wider text-[var(--text-dim)]">bytes</div>
                   <div class="mt-1 font-mono tabular-nums text-[var(--text-strong)]">${segment.bytes.toLocaleString()}</div>
                 </div>
               </div>
@@ -809,7 +809,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
               ></div>`
             })}
           </div>
-          <div class="mt-2 flex flex-wrap gap-2 text-[9px] text-[var(--text-dim)]">
+          <div class="mt-2 flex flex-wrap gap-2 text-[10px] text-[var(--text-dim)]">
             ${latestActual != null ? html`<span>actual ${formatTokens(latestActual)}</span>` : null}
             <span>known ${formatTokens(latestKnown)}</span>
             <span>${Math.round(knownRatio * 100)}% attributed</span>
@@ -828,7 +828,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col justify-between">
           <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">residual</span>
           <span class="text-lg font-mono tabular-nums text-[var(--warn)]">${formatTokens(unattributedTokens)}</span>
-          <span class="text-[9px] text-[var(--text-dim)]">tool schema / provider overhead / estimator gap</span>
+          <span class="text-[10px] text-[var(--text-dim)]">tool schema / provider overhead / estimator gap</span>
         </div>
       </div>
 
@@ -865,7 +865,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
           <div class="flex items-center justify-between gap-2 mb-2">
             <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">latest breakdown</span>
-            <span class="text-[9px] font-mono text-[var(--text-dim)]">${visibleCtxEntries.length}/${latestEntries.length}</span>
+            <span class="text-[10px] font-mono text-[var(--text-dim)]">${visibleCtxEntries.length}/${latestEntries.length}</span>
           </div>
           <input
             type="search"
@@ -961,7 +961,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
       <div class="flex items-center gap-2 mb-2">
         <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Inference Telemetry</span>
         <span class="text-[10px] text-[var(--text-dim)]">${telemetryPoints.length} points</span>
-        ${lastFp ? html`<span class="text-[9px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] font-mono">${lastFp}</span>` : null}
+        ${lastFp ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] font-mono">${lastFp}</span>` : null}
       </div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
         ${'' /* tok/s sparkline */}
@@ -973,7 +973,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
             ${tpsLine ? html`<polyline points="${tpsLine}" fill="none" stroke="#4ade80" stroke-width="1.5"/>` : null}
           </svg>
-          <div class="text-[9px] text-[var(--text-dim)] mt-1">avg ${avgTps.toFixed(1)}</div>
+          <div class="text-[10px] text-[var(--text-dim)] mt-1">avg ${avgTps.toFixed(1)}</div>
         </div>
 
         ${'' /* request latency */}
@@ -991,14 +991,14 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col justify-between">
           <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">KV Cache</span>
           <span class="text-lg font-mono tabular-nums text-[var(--purple)]">${totalCacheN > 0 ? totalCacheN.toLocaleString() : '-'}</span>
-          <span class="text-[9px] text-[var(--text-dim)]">cumulative tokens</span>
+          <span class="text-[10px] text-[var(--text-dim)]">cumulative tokens</span>
         </div>
 
         ${'' /* reasoning tokens */}
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col justify-between">
           <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Reasoning</span>
           <span class="text-lg font-mono tabular-nums text-[var(--warn)]">${totalReasoning > 0 ? totalReasoning.toLocaleString() : '-'}</span>
-          <span class="text-[9px] text-[var(--text-dim)]">total tokens</span>
+          <span class="text-[10px] text-[var(--text-dim)]">total tokens</span>
         </div>
       </div>
     </div>
@@ -1040,7 +1040,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
         <div class="flex items-center justify-between mb-1.5">
           <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">지연 시간</span>
           <span class="flex items-center gap-2">
-            ${fallbackCount > 0 ? html`<span class="text-[9px] px-1.5 py-0.5 rounded bg-[rgba(239,68,68,0.15)] text-[var(--bad)] font-mono">FB ${fallbackCount}</span>` : null}
+            ${fallbackCount > 0 ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[rgba(239,68,68,0.15)] text-[var(--bad)] font-mono">FB ${fallbackCount}</span>` : null}
             <span class="text-xs font-mono tabular-nums text-[var(--accent)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
           </span>
         </div>

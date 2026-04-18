@@ -175,7 +175,7 @@ function ToolTable({
               : 'border-b border-[var(--card-border)] border-opacity-30'
             return html`
               <tr class=${rowClass} ref=${isHighlighted ? ((el: HTMLElement | null) => el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })) : undefined}>
-                <td class="py-0.5 font-mono">${t.name.replace('keeper_', '').replace('masc_', 'm:')}${isHighlighted ? html`<span class="ml-1 text-[9px] text-[var(--warn)]">◀ selected</span>` : null}</td>
+                <td class="py-0.5 font-mono">${t.name.replace('keeper_', '').replace('masc_', 'm:')}${isHighlighted ? html`<span class="ml-1 text-[10px] text-[var(--warn)]">◀ selected</span>` : null}</td>
                 <td class="text-right py-0.5 text-[var(--text-dim)]">${t.calls}</td>
                 <td class="text-right py-0.5 font-mono ${color}">${t.success_pct.toFixed(0)}%</td>
                 <td class="text-right py-0.5 text-[var(--text-dim)]">${t.avg_ms.toFixed(0)}</td>
@@ -323,17 +323,17 @@ export function ToolQualityPanel() {
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div class="text-center">
           <div class="text-lg font-mono ${successColor.value}">${d.success_rate.toFixed(1)}%</div>
-          <div class="text-[9px] text-[var(--text-dim)] uppercase">성공률</div>
+          <div class="text-[10px] text-[var(--text-dim)] uppercase">성공률</div>
         </div>
         <div class="text-center">
           <div class="text-lg font-mono text-[var(--text)]">${d.total.toLocaleString()}</div>
-          <div class="text-[9px] text-[var(--text-dim)] uppercase">
+          <div class="text-[10px] text-[var(--text-dim)] uppercase">
             ${d.sampling_mode === 'recent_n' ? 'Sampled Calls' : 'Window Calls'}
           </div>
         </div>
         <div class="text-center">
           <div class="text-lg font-mono text-[var(--bad-light)]/80">${d.failure}</div>
-          <div class="text-[9px] text-[var(--text-dim)] uppercase">Failures</div>
+          <div class="text-[10px] text-[var(--text-dim)] uppercase">Failures</div>
         </div>
       </div>
 

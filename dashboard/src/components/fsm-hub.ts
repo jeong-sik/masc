@@ -686,7 +686,7 @@ function StatusBar({
             ${refreshFlash ? '✓' : '↻'}
           </button>
           <button
-            class="text-[9px] font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)] cursor-pointer"
+            class="text-[10px] font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)] cursor-pointer"
             onClick=${onDensityToggle}
             title=${`현재 밀도: ${density === 'compact' ? '조밀' : '여유'} (단축키 d)`}
             aria-label=${`밀도 토글: 현재 ${density === 'compact' ? '조밀' : '여유'}`}
@@ -697,18 +697,18 @@ function StatusBar({
           ${loading ? html`<${InlineSpinner} size="xs" />` : null}
           ${paused ? html`
             <span
-              class="px-1.5 py-0.5 rounded border text-[9px] font-mono text-[var(--text-muted)] border-[var(--white-10)] bg-[var(--white-3)]"
+              class="px-1.5 py-0.5 rounded border text-[10px] font-mono text-[var(--text-muted)] border-[var(--white-10)] bg-[var(--white-3)]"
               title="탭이 백그라운드 상태 — 폴링 중지됨. 탭으로 돌아오면 즉시 갱신됩니다."
             >
               ⏸ 일시 중지
             </span>
           ` : null}
           ${staleSec > 120 ? html`
-            <span class="text-[9px] font-mono text-red-400 animate-pulse" title="마지막 관측이 2분 이상 경과 — 대시보드 데이터가 현재 상태를 반영하지 않을 수 있습니다">
+            <span class="text-[10px] font-mono text-red-400 animate-pulse" title="마지막 관측이 2분 이상 경과 — 대시보드 데이터가 현재 상태를 반영하지 않을 수 있습니다">
               ${fmtDuration(staleSec)} 전 갱신
             </span>
           ` : staleSec > 60 ? html`
-            <span class="text-[9px] font-mono text-amber-400" title="마지막 관측이 1분 이상 경과">
+            <span class="text-[10px] font-mono text-amber-400" title="마지막 관측이 1분 이상 경과">
               ${fmtDuration(staleSec)} 전 갱신
             </span>
           ` : null}
@@ -766,7 +766,7 @@ function StatusBar({
         </div>
       </div>
       ${snapshot ? html`
-        <div class="mt-1.5 flex items-center gap-2 text-[9px] font-mono flex-wrap">
+        <div class="mt-1.5 flex items-center gap-2 text-[10px] font-mono flex-wrap">
           ${/* KPI micro-metrics */ ''}
           <span class="px-1.5 py-0.5 rounded border border-[var(--white-8)] text-[var(--text-body)]">
             턴 ${snapshot.last_outcome ? `#${snapshot.last_outcome.turn_id}` : '—'}

@@ -108,14 +108,14 @@ export function OperationalMeaningPanel({
 
       <div class="mt-2 flex flex-wrap gap-1.5">
         ${insight.evidence.map(item => html`
-          <span class="rounded-full border border-[var(--white-8)] px-2 py-0.5 text-[9px] font-mono text-[var(--text-dim)]">
+          <span class="rounded-full border border-[var(--white-8)] px-2 py-0.5 text-[10px] font-mono text-[var(--text-dim)]">
             ${item}
           </span>
         `)}
       </div>
 
       <div class="mt-4 flex items-center justify-between gap-2">
-        <div class="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+        <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
           관찰 레인
         </div>
         <input
@@ -135,14 +135,14 @@ export function OperationalMeaningPanel({
             ${visibleLanes.map(lane => html`
               <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
                 <div class="flex items-center justify-between gap-2">
-                  <span class="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${lane.field}</span>
+                  <span class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${lane.field}</span>
                   <span class=${`rounded-full border px-1.5 py-0.5 text-[8px] font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
                     ${fmtDuration(lane.observedForSec)}
                   </span>
                 </div>
                 <div class="mt-1 font-mono text-[13px] font-semibold text-[var(--text-strong)]">${lane.value}</div>
-                <div class="mt-0.5 text-[9px] text-[var(--text-dim)]">${lane.label}</div>
-                <div class="mt-1.5 text-[9px] leading-relaxed text-[var(--text-body)]">${lane.meaning}</div>
+                <div class="mt-0.5 text-[10px] text-[var(--text-dim)]">${lane.label}</div>
+                <div class="mt-1.5 text-[10px] leading-relaxed text-[var(--text-body)]">${lane.meaning}</div>
                 <div class="mt-1 text-[8px] font-mono text-[var(--text-dim)]">
                   ${lane.transitionCount} observed edge${lane.transitionCount === 1 ? '' : 's'}
                 </div>
@@ -296,7 +296,7 @@ export function HeroPhase({
           <div class=${`mt-1 font-mono text-[32px] font-bold tracking-tight ${color}`} aria-labelledby="ksm-label">
             ${displayState(snapshot.phase)}
           </div>
-          <div class="mt-0.5 text-[9px] font-mono text-[var(--text-dim)]">${snapshot.phase}</div>
+          <div class="mt-0.5 text-[10px] font-mono text-[var(--text-dim)]">${snapshot.phase}</div>
           ${heldFor ? html`
             <div class="mt-1 text-[10px] font-mono text-[var(--text-dim)]" aria-hidden="true">
               유지 <span class="text-[var(--text-body)]">${heldFor}</span>
@@ -378,11 +378,11 @@ export function PipelineStep({
         <div class="flex items-center justify-between gap-1.5">
           <div class="flex items-center gap-1.5 min-w-0">
             ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[#818cf8] ${activePulse} shrink-0"></span>` : null}
-            <span class="text-[9px] font-semibold tracking-[0.04em] text-[var(--text-muted)]">${label}</span>
+            <span class="text-[10px] font-semibold tracking-[0.04em] text-[var(--text-muted)]">${label}</span>
             ${limited ? html`<span class="text-[7px] font-mono text-[var(--text-dim)] border border-[var(--white-10)] rounded px-1" title="Event_bus 구독 미구현으로 일부 상태만 관찰 가능">제한</span>` : null}
           </div>
           ${heldFor ? html`
-            <span class=${`text-[9px] font-mono tabular-nums ${stalenessCls}`} aria-hidden="true">${heldFor}</span>
+            <span class=${`text-[10px] font-mono tabular-nums ${stalenessCls}`} aria-hidden="true">${heldFor}</span>
           ` : null}
         </div>
         <div class=${`mt-0.5 font-mono text-[13px] font-semibold ${isActive ? 'text-[var(--text-strong)]' : 'text-[var(--text-muted)]'} ${flash ? 'animate-pulse' : ''}`}>

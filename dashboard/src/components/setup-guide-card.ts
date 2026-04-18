@@ -128,7 +128,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
           ${tone === 'complete'
             ? html`
                 <span
-                  class="inline-flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-emerald-200"
+                  class="inline-flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200"
                   aria-label="Setup guide complete"
                   data-setup-complete-badge
                 >

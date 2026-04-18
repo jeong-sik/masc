@@ -146,7 +146,7 @@ function LevelPills({ connectorId, active }: { connectorId: string; active: LogL
     <div class="flex items-center gap-1" role="radiogroup" aria-label="log level filter">
       ${LEVELS.map(level => {
         const isActive = level === active
-        const base = 'cursor-pointer rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em]'
+        const base = 'cursor-pointer rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]'
         const activeCls = 'border-[var(--accent-1)] bg-[var(--accent-1)]/15 text-[var(--text-body)]'
         const idleCls = 'border-[var(--white-8)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]'
         return html`

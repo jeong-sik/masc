@@ -148,11 +148,11 @@ function FeatureItem({ item }: { item: FeatureHealthItem }) {
             <code class="text-xs font-medium text-[var(--text-strong)]">${item.env_name}</code>
             <${StatusPill} status=${item.status} />
             ${item.is_enabled ? html`
-              <span class="inline-flex items-center rounded border border-[var(--ok-30)] bg-[var(--ok-12)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--ok)]">
+              <span class="inline-flex items-center rounded border border-[var(--ok-30)] bg-[var(--ok-12)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--ok)]">
                 ON
               </span>
             ` : html`
-              <span class="inline-flex items-center rounded border border-[var(--white-12)] bg-[var(--white-4)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--text-muted)]">
+              <span class="inline-flex items-center rounded border border-[var(--white-12)] bg-[var(--white-4)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--text-muted)]">
                 OFF
               </span>
             `}

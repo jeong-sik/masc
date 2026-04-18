@@ -192,21 +192,55 @@ let json_string ?(default = "") key json =
   | `String s -> s
   | _ -> default
 
+(* Small LLMs (including some keepers under the local cascade) routinely
+   stringify numeric tool-call arguments: max_results:"0.0", offset:"100.0",
+   timeout_sec:"0.0". The JSON schema says "number" but the wire form is a
+   string. Prior to 2026-04-18 these fell through to [default] (0), which
+   silently produced empty search results or zero-length reads — keepers
+   then retried with the same payload and gave up (tool_metrics evidence
+   on 2026-04-17/18 showed this in masc_code_read: offset:"100.0",
+   limit:"0.0"). Accept numeric strings with strict parsing and fall back
+   to [default] only when the string does not parse as a number. Missing
+   keys still fall through to [default] — no behaviour change there. *)
+let parse_numeric_string s =
+  let trimmed = String.trim s in
+  if trimmed = "" then None
+  else match int_of_string_opt trimmed with
+    | Some _ as v -> v
+    | None -> (
+        match float_of_string_opt trimmed with
+        | Some f -> Some (int_of_float f)
+        | None -> None)
+
+let parse_float_string s =
+  let trimmed = String.trim s in
+  if trimmed = "" then None
+  else float_of_string_opt trimmed
+
+let parse_bool_string s =
+  match String.lowercase_ascii (String.trim s) with
+  | "true" | "1" | "yes" | "on" -> Some true
+  | "false" | "0" | "no" | "off" | "" -> Some false
+  | _ -> None
+
 let json_int ?(default = 0) key json =
   match safe_member key json with
   | `Int i -> i
   | `Float f -> int_of_float f
+  | `String s -> Option.value ~default (parse_numeric_string s)
   | _ -> default
 
 let json_float ?(default = 0.0) key json =
   match safe_member key json with
   | `Float f -> f
   | `Int i -> float_of_int i
+  | `String s -> Option.value ~default (parse_float_string s)
   | _ -> default
 
 let json_bool ?(default = false) key json =
   match safe_member key json with
   | `Bool b -> b
+  | `String s -> Option.value ~default (parse_bool_string s)
   | _ -> default
 
 let json_string_list key json =
@@ -220,20 +254,27 @@ let json_string_opt key json =
   | `String s -> Some s
   | _ -> None
 
+(* String-coercing *_opt variants mirror json_int/json_float/json_bool:
+   accept stringified numerics/bools from small-LLM callers. Missing key
+   or non-parseable value → None (no silent default substitution). *)
 let json_int_opt key json =
   match safe_member key json with
   | `Int i -> Some i
+  | `Float f -> Some (int_of_float f)
+  | `String s -> parse_numeric_string s
   | _ -> None
 
 let json_float_opt key json =
   match safe_member key json with
   | `Float f -> Some f
   | `Int i -> Some (float_of_int i)
+  | `String s -> parse_float_string s
   | _ -> None
 
 let json_bool_opt key json =
   match safe_member key json with
   | `Bool b -> Some b
+  | `String s -> parse_bool_string s
   | _ -> None
 
 let json_list key json =

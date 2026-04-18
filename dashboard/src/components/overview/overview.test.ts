@@ -1,678 +1,225 @@
-import { html } from 'htm/preact'
-import { render } from 'preact'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import {
+  computeFunnelCounts,
+  formatTargetRatio,
+  pickActiveSession,
+  progressPct,
+  pickActiveKeepers,
+  severityToneClass,
+  type FunnelCounts,
+} from './overview'
+import type { Task, Keeper } from '../../types/core'
+import type {
+  DashboardMissionResponse,
+  DashboardMissionSessionCard,
+} from '../../types/dashboard-mission'
 
-void vi
+const FIXED_NOW = Date.parse('2026-04-18T10:00:00+09:00')
 
-const missionSnapshot = { value: null as Record<string, unknown> | null }
-const missionLoading = { value: false }
-const refreshMissionSnapshot = vi.fn().mockResolvedValue(undefined)
-
-const namespaceTruth = { value: null as Record<string, unknown> | null }
-const namespaceTruthLoading = { value: false }
-const refreshNamespaceTruth = vi.fn().mockResolvedValue(undefined)
-
-const topActiveAgents = { value: [] as unknown[] }
-const shellMetaCognition = { value: null as Record<string, unknown> | null }
-const shellConfigResolution = { value: null as Record<string, unknown> | null }
-const shellRuntimeResolution = { value: null as Record<string, unknown> | null }
-const serverStatus = { value: null as Record<string, unknown> | null }
-const navigate = vi.fn()
-const connected = { value: true }
-const eventCount = { value: 0 }
-const lastEvent = { value: null as { ts_unix?: number } | null }
-
-async function flushUi(): Promise<void> {
-  await Promise.resolve()
-  await Promise.resolve()
+function makeSession(partial: Partial<DashboardMissionSessionCard>): DashboardMissionSessionCard {
+  return {
+    session_id: 's-1',
+    goal: 'default goal',
+    member_names: [],
+    related_attention_count: 0,
+    member_previews: [],
+    operation_badges: [],
+    keeper_refs: [],
+    ...partial,
+  }
 }
 
-async function loadOverview() {
-  vi.resetModules()
-  vi.doMock('../../mission-store', () => ({
-    missionSnapshot,
-    missionLoading,
-    refreshMissionSnapshot,
-  }))
-  vi.doMock('../../namespace-truth-store', () => ({
-    namespaceTruth,
-    namespaceTruthLoading,
-    refreshNamespaceTruth,
-  }))
-  vi.doMock('../../observatory-store', () => ({
-    topActiveAgents,
-  }))
-  vi.doMock('../../store', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('../../store')>()
-    return {
-      ...actual,
-      shellMetaCognition,
-      shellConfigResolution,
-      shellRuntimeResolution,
-      serverStatus,
-    }
-  })
-  vi.doMock('../../sse', () => ({
-    journal: [],
-    connected,
-    eventCount,
-    lastEvent,
-  }))
-  vi.doMock('../../router', () => ({
-    navigate,
-    hashForRoute: vi.fn().mockReturnValue('#'),
-  }))
-  vi.doMock('./situation-banner', () => ({
-    SituationBanner: () => html`<div>Situation</div>`,
-  }))
-  vi.doMock('./attention-spotlight', () => ({
-    AttentionSpotlight: () => html`<div>Attention</div>`,
-  }))
-  vi.doMock('./narrative-timeline', () => ({
-    NarrativeTimeline: () => html`<div>Narrative</div>`,
-  }))
-  vi.doMock('./agent-avatar', () => ({
-    AgentAvatar: () => html`<div>Avatar</div>`,
-  }))
-  vi.doMock('../transport-health', () => ({
-    TransportHealthPanel: () => html`<div>Transport</div>`,
-  }))
-  vi.doMock('../perf-snapshot', () => ({
-    PerfSnapshotPanel: () => html`<div>Perf</div>`,
-  }))
-  return import('./overview')
+function makeTask(partial: Partial<Task>): Task {
+  return { id: 't-1', title: 't', ...partial }
 }
 
-describe('Overview freshness strip', () => {
-  let container: HTMLDivElement
+function makeKeeper(partial: Partial<Keeper>): Keeper {
+  return { name: 'k', status: 'active', ...partial }
+}
 
-  beforeEach(() => {
-    vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-03-26T12:10:00Z').getTime())
-    container = document.createElement('div')
-    document.body.appendChild(container)
-    missionLoading.value = false
-    namespaceTruthLoading.value = false
-    topActiveAgents.value = []
-    shellMetaCognition.value = null
-    shellConfigResolution.value = null
-    shellRuntimeResolution.value = null
-    serverStatus.value = null
-    connected.value = true
-    eventCount.value = 0
-    lastEvent.value = null
-    missionSnapshot.value = {
-      generated_at: '2026-03-26T12:09:00Z',
-      summary: {},
-      sessions: [],
-      attention_queue: [],
-    }
-    namespaceTruth.value = {
-      generated_at: '2026-03-26T12:08:00Z',
-    }
+describe('computeFunnelCounts', () => {
+  it('counts today-created tasks regardless of status', () => {
+    const tasks = [
+      makeTask({ id: 'a', created_at: '2026-04-18T01:00:00+09:00', status: 'todo' }),
+      makeTask({ id: 'b', created_at: '2026-04-18T09:59:00+09:00', status: 'in_progress' }),
+      makeTask({ id: 'c', created_at: '2026-04-17T23:59:59+09:00', status: 'todo' }),
+    ]
+    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
+    expect(counts.created).toBe(2)
   })
 
-  afterEach(() => {
-    render(null, container)
-    container.remove()
-    vi.clearAllMocks()
-    vi.restoreAllMocks()
-    vi.resetModules()
-    vi.doUnmock('../../mission-store')
-    vi.doUnmock('../../namespace-truth-store')
-    vi.doUnmock('../../observatory-store')
-    vi.doUnmock('../../store')
-    vi.doUnmock('../../sse')
-    vi.doUnmock('../../router')
-    vi.doUnmock('./situation-banner')
-    vi.doUnmock('./attention-spotlight')
-    vi.doUnmock('./narrative-timeline')
-    vi.doUnmock('./agent-avatar')
-    vi.doUnmock('../transport-health')
-    vi.doUnmock('../perf-snapshot')
-
+  it('groups claimed + in_progress as inProgress', () => {
+    const tasks = [
+      makeTask({ id: 'a', status: 'claimed' }),
+      makeTask({ id: 'b', status: 'in_progress' }),
+      makeTask({ id: 'c', status: 'todo' }),
+    ]
+    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
+    expect(counts.inProgress).toBe(2)
   })
 
-  it('shows a stale warning when the oldest overview snapshot is over 5 minutes old', async () => {
-    namespaceTruth.value = {
-      generated_at: '2026-03-26T12:03:00Z',
-    }
+  it('separates awaiting_verification from other statuses', () => {
+    const tasks = [
+      makeTask({ id: 'a', status: 'awaiting_verification' }),
+      makeTask({ id: 'b', status: 'done', completed_at: '2026-04-18T05:00:00+09:00' }),
+    ]
+    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
+    expect(counts.awaiting).toBe(1)
+    expect(counts.completed).toBe(1)
+  })
 
-    const { Overview } = await loadOverview()
-    render(html`<${Overview} />`, container)
-    await flushUi()
+  it('counts only today-completed done tasks', () => {
+    const tasks = [
+      makeTask({ id: 'a', status: 'done', completed_at: '2026-04-18T05:00:00+09:00' }),
+      makeTask({ id: 'b', status: 'done', completed_at: '2026-04-17T23:00:00+09:00' }),
+      makeTask({ id: 'c', status: 'done' }),
+    ]
+    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
+    expect(counts.completed).toBe(1)
+  })
 
-    expect(container.textContent).toContain('Overview Freshness')
-    expect(container.textContent).toContain('마지막 갱신:')
-    expect(container.textContent).toContain('7분 전')
-    expect(container.textContent).toContain('5분 이상 stale')
-  }, 15000)
+  it('takes target from active session required_count when positive', () => {
+    const active = makeSession({ required_count: 12 })
+    const counts = computeFunnelCounts([], active, FIXED_NOW)
+    expect(counts.target).toBe(12)
+  })
 
-  it('forces both overview data sources to refresh from the action button', async () => {
-    const { Overview } = await loadOverview()
-    render(html`<${Overview} />`, container)
-    await flushUi()
+  it('returns null target when required_count is 0 or missing', () => {
+    expect(computeFunnelCounts([], makeSession({ required_count: 0 }), FIXED_NOW).target).toBeNull()
+    expect(computeFunnelCounts([], makeSession({}), FIXED_NOW).target).toBeNull()
+    expect(computeFunnelCounts([], null, FIXED_NOW).target).toBeNull()
+  })
 
-    expect(container.textContent).not.toContain('5분 이상 stale')
-
-    const button = Array.from(container.querySelectorAll('button'))
-      .find(candidate => candidate.textContent?.includes('새로고침'))
-    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flushUi()
-
-    expect(refreshNamespaceTruth).toHaveBeenCalledWith({ force: true })
-    expect(refreshMissionSnapshot).toHaveBeenCalledWith({ force: true })
-  }, 15000)
-
-  it('hides the config truth card when shell truth is unavailable', async () => {
-    shellConfigResolution.value = null
-    shellRuntimeResolution.value = null
-
-    const { Overview } = await loadOverview()
-    render(html`<${Overview} />`, container)
-    await flushUi()
-
-    expect(container.textContent).not.toContain('설정 Truth')
-    expect(container.textContent).not.toContain('config root')
-  }, 15000)
-
-  it('renders the config truth card with warnings from shell truth', async () => {
-    shellConfigResolution.value = {
-      status: 'warn',
-      warnings: ['Resolved config child is missing: keepers'],
-      config_root: {
-        path: '/Users/dancer/me/.masc/config',
-        exists: true,
-        source: 'local_masc',
-      },
-      cascade: {
-        path: '/Users/dancer/me/.masc/config/cascade.json',
-        exists: true,
-        source: 'local_masc',
-      },
-      prompts: {
-        path: '/Users/dancer/me/.masc/config/prompts',
-        exists: true,
-        source: 'local_masc',
-      },
-      keepers: {
-        path: '/Users/dancer/me/.masc/config/keepers',
-        exists: false,
-        source: 'local_masc',
-      },
-      personas: {
-        path: '/Users/dancer/me/.masc/config/personas',
-        exists: true,
-        source: 'local_masc',
-      },
-    }
-    shellRuntimeResolution.value = {
-      status: 'warn',
-      warnings: ['Runtime build commit (deadbee) differs from workspace HEAD (cafef00d).'],
-      base_path: {
-        path: '/Users/dancer/me',
-        exists: true,
-        source: 'input',
-      },
-      workspace_path: {
-        path: '/Users/dancer/me/workspace/yousleepwhen/masc-mcp',
-        exists: true,
-        source: 'workspace',
-      },
-      resolved_base_path: {
-        path: '/Users/dancer/me',
-        exists: true,
-        source: 'resolved_base',
-      },
-      data_root: {
-        path: '/Users/dancer/me/.masc',
-        exists: true,
-        source: 'runtime_data',
-      },
-      prompt_markdown_dir: {
-        path: '/Users/dancer/me/.masc/config/prompts',
-        exists: true,
-        source: 'prompt_registry',
-      },
-      workspace_git_commit: 'cafef00d',
-      resolved_base_git_commit: 'deadbee',
-      source_mismatch: true,
-      diagnostics: [],
-      build: {
-        release_version: 'test',
-        commit: 'deadbee',
-        started_at: '2026-03-26T12:00:00Z',
-        uptime_seconds: 12,
-      },
-    }
-
-    const { Overview } = await loadOverview()
-    render(html`<${Overview} />`, container)
-    await flushUi()
-
-    expect(container.textContent).toContain('설정 Truth')
-    expect(container.textContent).toContain('warning 3')
-    expect(container.textContent).toContain('config root')
-    expect(container.textContent).toContain('/Users/dancer/me/.masc/config')
-    expect(container.textContent).toContain('runtime root')
-    expect(container.textContent).toContain('/Users/dancer/me/.masc')
-    expect(container.textContent).toContain('personas')
-    expect(container.textContent).toContain('Resolved config child is missing: keepers')
-    expect(container.textContent).toContain('Runtime build commit (deadbee) differs from workspace HEAD (cafef00d).')
-    expect(container.textContent).toContain('workspace와 runtime build source가 다릅니다.')
-  }, 15000)
-
-  it('renders the operations hub card and routes to governance', async () => {
-    namespaceTruth.value = {
-      generated_at: '2026-03-26T12:08:00Z',
-      command: {
-        pending_approvals: 2,
-      },
-      operator: {
-        attention_summary: {
-          count: 3,
-        },
-        pending_confirm_summary: {
-          visible_count: 1,
-          total_count: 1,
-        },
-      },
-      focus: {
-        label: '운영 검토 필요',
-        reason: '승인 대기 항목이 누적되고 있습니다.',
-        source: 'governance',
-        provenance: 'truth',
-        suggested_tab: 'command',
-      },
-    }
-
-    const { Overview } = await loadOverview()
-    render(html`<${Overview} />`, container)
-    await flushUi()
-
-    expect(container.textContent).toContain('운영 허브')
-    expect(container.textContent).toContain('정책 승인')
-    expect(container.textContent).toContain('운영 확인')
-    expect(container.textContent).toContain('주의 신호')
-    expect(container.textContent).toContain('승인 대기 항목이 누적되고 있습니다.')
-
-    const governanceLink = Array.from(container.querySelectorAll('a'))
-      .find(candidate => candidate.textContent?.includes('거버넌스 열기'))
-    governanceLink?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-
-    expect(navigate).toHaveBeenCalledWith('command', { section: 'operations' })
-  }, 15000)
-
-  it('renders the meta-cognition summary card when shell data is available', async () => {
-    namespaceTruth.value = {
-      generated_at: '2026-03-26T12:08:00Z',
-      focus: {
-        label: '주의 필요',
-        reason: '집단 인식에 이견이 있습니다: keepers believe masc_* tools are blocked',
-        source: 'meta_cognition',
-        provenance: 'derived',
-        suggested_tab: 'overview',
-      },
-    }
-    shellMetaCognition.value = {
-      stagnation_score: 0.72,
-      belief_count: 2,
-      contested_belief_count: 1,
-      dominant_belief: {
-        id: 'belief:masc_tools_blocked',
-        claim: 'keepers believe masc_* tools are blocked',
-        status: 'contested',
-        support_agent_count: 2,
-      },
-      top_tension: {
-        id: 'tension:masc_tool_blockage',
-        topic: 'keeper-facing masc_* tool blockage',
-        severity: 'high',
-        needs_operator: true,
-      },
-      top_desire: {
-        id: 'desire:operator_guidance',
-        desired_state: 'get operator guidance to unblock current work',
-        actionability: 'operator',
-      },
-    }
-
-    const { Overview } = await loadOverview()
-    render(html`<${Overview} />`, container)
-    await flushUi()
-
-    expect(container.textContent).toContain('집단 메타인지')
-    expect(container.textContent).toContain('정체 72%')
-    expect(container.textContent).toContain('이견 1')
-    expect(container.textContent).toContain('공감대')
-    expect(container.textContent).toContain('긴장')
-    expect(container.textContent).toContain('욕구')
-    expect(container.textContent).toContain('namespace-truth focus')
-    expect(container.textContent).toContain('집단 인식에 이견이 있습니다')
-    expect(container.textContent).toContain('운영자 개입 필요')
-  }, 15000)
-
-  it('hides the meta-cognition summary card when namespace-truth focus is elsewhere', async () => {
-    namespaceTruth.value = {
-      generated_at: '2026-03-26T12:08:00Z',
-      focus: {
-        label: '주의 필요',
-        reason: 'command lane needs attention',
-        source: 'command',
-        provenance: 'derived',
-        suggested_tab: 'command',
-      },
-    }
-    shellMetaCognition.value = {
-      stagnation_score: 0.72,
-      belief_count: 2,
-      contested_belief_count: 1,
-      dominant_belief: {
-        id: 'belief:masc_tools_blocked',
-        claim: 'keepers believe masc_* tools are blocked',
-        status: 'contested',
-        support_agent_count: 2,
-      },
-      top_tension: {
-        id: 'tension:masc_tool_blockage',
-        topic: 'keeper-facing masc_* tool blockage',
-        severity: 'high',
-        needs_operator: true,
-      },
-      top_desire: {
-        id: 'desire:operator_guidance',
-        desired_state: 'get operator guidance to unblock current work',
-        actionability: 'operator',
-      },
-    }
-
-    const { Overview } = await loadOverview()
-    render(html`<${Overview} />`, container)
-    await flushUi()
-
-    expect(container.textContent).not.toContain('집단 메타인지')
-  }, 15000)
+  it('ignores invalid ISO timestamps', () => {
+    const tasks = [
+      makeTask({ id: 'a', created_at: 'not-a-date', status: 'todo' }),
+      makeTask({ id: 'b', created_at: '', status: 'done', completed_at: 'nope' }),
+    ]
+    const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
+    expect(counts.created).toBe(0)
+    expect(counts.completed).toBe(0)
+  })
 })
 
-describe('ToolCallHealthPanel', () => {
-  let container: HTMLDivElement
+describe('formatTargetRatio', () => {
+  const base: FunnelCounts = {
+    created: 0,
+    inProgress: 0,
+    awaiting: 0,
+    completed: 0,
+    target: null,
+  }
 
-  beforeEach(() => {
-    vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-03-26T12:10:00Z').getTime())
-    container = document.createElement('div')
-    document.body.appendChild(container)
-    missionLoading.value = false
-    namespaceTruthLoading.value = false
-    topActiveAgents.value = []
-    shellMetaCognition.value = null
-    shellConfigResolution.value = null
-    shellRuntimeResolution.value = null
-    serverStatus.value = null
-    connected.value = true
-    eventCount.value = 0
-    lastEvent.value = null
-    missionSnapshot.value = {
-      generated_at: '2026-03-26T12:09:00Z',
-      summary: {},
-      sessions: [],
-      attention_queue: [],
-    }
-    namespaceTruth.value = {
-      generated_at: '2026-03-26T12:08:00Z',
-    }
+  it('returns just the completed count when target is null', () => {
+    expect(formatTargetRatio({ ...base, completed: 3 })).toBe('3')
   })
 
-  afterEach(() => {
-    render(null, container)
-    container.remove()
-    vi.clearAllMocks()
-    vi.restoreAllMocks()
-    vi.resetModules()
-    vi.doUnmock('../../mission-store')
-    vi.doUnmock('../../namespace-truth-store')
-    vi.doUnmock('../../observatory-store')
-    vi.doUnmock('../../store')
-    vi.doUnmock('../../sse')
-    vi.doUnmock('../../router')
-    vi.doUnmock('./situation-banner')
-    vi.doUnmock('./attention-spotlight')
-    vi.doUnmock('./narrative-timeline')
-    vi.doUnmock('./agent-avatar')
-    vi.doUnmock('../transport-health')
-    vi.doUnmock('../perf-snapshot')
-
+  it('formats ratio as n/m (p%)', () => {
+    expect(formatTargetRatio({ ...base, completed: 4, target: 10 })).toBe('4/10 (40%)')
   })
 
-  it('hides the panel when serverStatus is null', async () => {
-    serverStatus.value = null
-
-    const { Overview } = await loadOverview()
-    render(html`<${Overview} />`, container)
-    await flushUi()
-
-    expect(container.textContent).not.toContain('도구 호출')
-    expect(container.textContent).not.toContain('호출')
-  }, 15000)
-
-  it('hides the panel when tool_calls is 0', async () => {
-    serverStatus.value = {
-      tool_call_health: {
-        window_hours: 1,
-        tool_calls: 0,
-        failures: 0,
-        failure_rate: 0,
-        since_epoch: 1711454400,
-      },
-    }
-
-    const { Overview } = await loadOverview()
-    render(html`<${Overview} />`, container)
-    await flushUi()
-
-    expect(container.textContent).not.toContain('도구 호출')
-  }, 15000)
-
-  it('shows the panel with correct counts and failure rate when tool_calls > 0', async () => {
-    serverStatus.value = {
-      tool_call_health: {
-        window_hours: 1,
-        tool_calls: 42,
-        failures: 3,
-        failure_rate: 0.0714,
-        since_epoch: 1711454400,
-      },
-    }
-
-    const { Overview } = await loadOverview()
-    render(html`<${Overview} />`, container)
-    await flushUi()
-
-    expect(container.textContent).toContain('도구 호출')
-    expect(container.textContent).toContain('42')
-    expect(container.textContent).toContain('3')
-    expect(container.textContent).toContain('7.1%')
-  }, 15000)
-
-  it('shows 0.0% failure rate when there are no failures', async () => {
-    serverStatus.value = {
-      tool_call_health: {
-        window_hours: 1,
-        tool_calls: 10,
-        failures: 0,
-        failure_rate: 0,
-        since_epoch: 1711454400,
-      },
-    }
-
-    const { Overview } = await loadOverview()
-    render(html`<${Overview} />`, container)
-    await flushUi()
-
-    expect(container.textContent).toContain('도구 호출')
-    expect(container.textContent).toContain('10')
-    expect(container.textContent).toContain('0.0%')
-  }, 15000)
+  it('caps percentage at 100 when completed exceeds target', () => {
+    expect(formatTargetRatio({ ...base, completed: 20, target: 5 })).toBe('20/5 (100%)')
+  })
 })
 
-describe('filterAgentPulseRows', () => {
-  interface AgentLike {
-    name: string
-    koreanName: string | null
-    emoji: string | null
-    model: string | null
-    status: string
-    state: 'working' | 'watching' | 'quiet' | 'offline'
-    focus: string | null
-    currentTask: string | null
-    recentTools: string[]
-    recentOutputPreview: string | null
-    contextRatio: number | null
-    lastSignalAt: string | null
-    lastSignalAgeSec: number | null
-    signalTruth: string | null
-    relatedSessionId: string | null
-  }
-
-  function makeAgent(overrides: Partial<AgentLike>): AgentLike {
-    return {
-      name: 'dreamer',
-      koreanName: '몽상가',
-      emoji: null,
-      model: null,
-      status: 'ok',
-      state: 'working',
-      focus: null,
-      currentTask: null,
-      recentTools: [],
-      recentOutputPreview: null,
-      contextRatio: null,
-      lastSignalAt: null,
-      lastSignalAgeSec: null,
-      signalTruth: null,
-      relatedSessionId: null,
-      ...overrides,
-    }
-  }
-
-  async function loadFilter() {
-    vi.resetModules()
-    vi.doMock('../../mission-store', () => ({
-      missionSnapshot: { value: null },
-      missionLoading: { value: false },
-      refreshMissionSnapshot: vi.fn(),
-    }))
-    vi.doMock('../../namespace-truth-store', () => ({
-      namespaceTruth: { value: null },
-      namespaceTruthLoading: { value: false },
-      refreshNamespaceTruth: vi.fn(),
-    }))
-    vi.doMock('../../observatory-store', () => ({
-      topActiveAgents: { value: [] },
-    }))
-    vi.doMock('../../sse', () => ({
-      journal: [],
-      connected: { value: true },
-      eventCount: { value: 0 },
-      lastEvent: { value: null },
-    }))
-    vi.doMock('../../router', () => ({
-      navigate: vi.fn(),
-      hashForRoute: vi.fn().mockReturnValue('#'),
-    }))
-    vi.doMock('./situation-banner', () => ({ SituationBanner: () => null }))
-    vi.doMock('./attention-spotlight', () => ({ AttentionSpotlight: () => null }))
-    vi.doMock('./narrative-timeline', () => ({ NarrativeTimeline: () => null }))
-    vi.doMock('./agent-avatar', () => ({ AgentAvatar: () => null }))
-    vi.doMock('../transport-health', () => ({ TransportHealthPanel: () => null }))
-    vi.doMock('../perf-snapshot', () => ({ PerfSnapshotPanel: () => null }))
-    return import('./overview')
-  }
-
-  it('returns the input reference unchanged for an empty query', async () => {
-    const { filterAgentPulseRows } = await loadFilter()
-    const rows = [makeAgent({ name: 'dreamer' }), makeAgent({ name: 'weaver' })]
-    expect(filterAgentPulseRows(rows, '')).toBe(rows)
+describe('pickActiveSession', () => {
+  it('returns null for null snapshot', () => {
+    expect(pickActiveSession(null)).toBeNull()
   })
 
-  it('returns the input reference unchanged for a whitespace-only query', async () => {
-    const { filterAgentPulseRows } = await loadFilter()
-    const rows = [makeAgent({ name: 'dreamer' })]
-    expect(filterAgentPulseRows(rows, '   \t  ')).toBe(rows)
+  it('returns null for empty sessions', () => {
+    const snap = { sessions: [] } as unknown as DashboardMissionResponse
+    expect(pickActiveSession(snap)).toBeNull()
   })
 
-  it('trims the query before matching', async () => {
-    const { filterAgentPulseRows } = await loadFilter()
-    const rows = [makeAgent({ name: 'dreamer' }), makeAgent({ name: 'weaver' })]
-    const filtered = filterAgentPulseRows(rows, '  dream  ')
-    expect(filtered).toHaveLength(1)
-    expect(filtered[0]?.name).toBe('dreamer')
+  it('prefers first session with active/running/busy status', () => {
+    const a = makeSession({ session_id: 'a', status: 'paused' })
+    const b = makeSession({ session_id: 'b', status: 'running' })
+    const c = makeSession({ session_id: 'c', status: 'active' })
+    const snap = { sessions: [a, b, c] } as unknown as DashboardMissionResponse
+    expect(pickActiveSession(snap)?.session_id).toBe('b')
   })
 
-  it('matches on name case-insensitively', async () => {
-    const { filterAgentPulseRows } = await loadFilter()
-    const rows = [makeAgent({ name: 'Dreamer' }), makeAgent({ name: 'Weaver' })]
-    const filtered = filterAgentPulseRows(rows, 'DREAM')
-    expect(filtered).toHaveLength(1)
-    expect(filtered[0]?.name).toBe('Dreamer')
+  it('falls back to first session when none are active', () => {
+    const a = makeSession({ session_id: 'a', status: 'paused' })
+    const b = makeSession({ session_id: 'b', status: 'paused' })
+    const snap = { sessions: [a, b] } as unknown as DashboardMissionResponse
+    expect(pickActiveSession(snap)?.session_id).toBe('a')
+  })
+})
+
+describe('progressPct', () => {
+  it('returns null when no active session', () => {
+    expect(progressPct(null)).toBeNull()
   })
 
-  it('matches on koreanName substring', async () => {
-    const { filterAgentPulseRows } = await loadFilter()
-    const rows = [
-      makeAgent({ name: 'dreamer', koreanName: '몽상가' }),
-      makeAgent({ name: 'weaver', koreanName: '직조자' }),
+  it('returns null when required_count is missing or zero', () => {
+    expect(progressPct(makeSession({}))).toBeNull()
+    expect(progressPct(makeSession({ required_count: 0 }))).toBeNull()
+  })
+
+  it('computes seen/required rounded percentage', () => {
+    expect(progressPct(makeSession({ required_count: 10, seen_count: 3 }))).toBe(30)
+    expect(progressPct(makeSession({ required_count: 4, seen_count: 1 }))).toBe(25)
+  })
+
+  it('falls back to active_count when seen_count is missing', () => {
+    expect(progressPct(makeSession({ required_count: 10, active_count: 4 }))).toBe(40)
+  })
+
+  it('caps percentage at 100', () => {
+    expect(progressPct(makeSession({ required_count: 3, seen_count: 10 }))).toBe(100)
+  })
+})
+
+describe('pickActiveKeepers', () => {
+  it('returns empty when no keepers', () => {
+    expect(pickActiveKeepers([])).toEqual([])
+  })
+
+  it('sorts by latest heartbeat descending', () => {
+    const keepers: Keeper[] = [
+      makeKeeper({ name: 'old', last_heartbeat: '2026-04-18T08:00:00+09:00' }),
+      makeKeeper({ name: 'new', last_heartbeat: '2026-04-18T09:59:00+09:00' }),
+      makeKeeper({ name: 'middle', last_heartbeat: '2026-04-18T09:00:00+09:00' }),
     ]
-    const filtered = filterAgentPulseRows(rows, '직조')
-    expect(filtered).toHaveLength(1)
-    expect(filtered[0]?.name).toBe('weaver')
+    const picked = pickActiveKeepers(keepers, 3)
+    expect(picked.map(k => k.name)).toEqual(['new', 'middle', 'old'])
   })
 
-  it('matches on state', async () => {
-    const { filterAgentPulseRows } = await loadFilter()
-    const rows = [
-      makeAgent({ name: 'dreamer', state: 'working' }),
-      makeAgent({ name: 'weaver', state: 'quiet' }),
-      makeAgent({ name: 'scribe', state: 'working' }),
+  it('deprioritizes paused keepers even with recent heartbeat', () => {
+    const keepers: Keeper[] = [
+      makeKeeper({
+        name: 'paused-recent',
+        paused: true,
+        last_heartbeat: '2026-04-18T09:59:00+09:00',
+      }),
+      makeKeeper({ name: 'active-older', last_heartbeat: '2026-04-18T08:00:00+09:00' }),
     ]
-    const filtered = filterAgentPulseRows(rows, 'working')
-    expect(filtered).toHaveLength(2)
-    expect(filtered.map(a => a.name)).toEqual(['dreamer', 'scribe'])
+    const picked = pickActiveKeepers(keepers, 2)
+    expect(picked[0]?.name).toBe('active-older')
   })
 
-  it('matches on focus substring', async () => {
-    const { filterAgentPulseRows } = await loadFilter()
-    const rows = [
-      makeAgent({ name: 'dreamer', focus: 'reviewing PR #7892' }),
-      makeAgent({ name: 'weaver', focus: 'drafting ADR' }),
-    ]
-    const filtered = filterAgentPulseRows(rows, 'pr #7892')
-    expect(filtered).toHaveLength(1)
-    expect(filtered[0]?.name).toBe('dreamer')
+  it('respects max parameter', () => {
+    const keepers: Keeper[] = Array.from({ length: 5 }, (_, i) =>
+      makeKeeper({ name: `k${i}`, last_heartbeat: `2026-04-18T0${i}:00:00+09:00` }),
+    )
+    expect(pickActiveKeepers(keepers, 2)).toHaveLength(2)
   })
+})
 
-  it('returns an empty array when no row matches', async () => {
-    const { filterAgentPulseRows } = await loadFilter()
-    const rows = [makeAgent({ name: 'dreamer' }), makeAgent({ name: 'weaver' })]
-    const filtered = filterAgentPulseRows(rows, 'nonexistent')
-    expect(filtered).toEqual([])
-  })
-
-  it('handles null/missing optional fields without throwing', async () => {
-    const { filterAgentPulseRows } = await loadFilter()
-    const rows = [
-      makeAgent({ name: 'dreamer', koreanName: null, focus: null }),
-      makeAgent({ name: 'weaver', koreanName: null, focus: null }),
-    ]
-    const filtered = filterAgentPulseRows(rows, 'dream')
-    expect(filtered).toHaveLength(1)
-    expect(filtered[0]?.name).toBe('dreamer')
-  })
-
-  it('does not mutate the input array', async () => {
-    const { filterAgentPulseRows } = await loadFilter()
-    const rows = [makeAgent({ name: 'dreamer' }), makeAgent({ name: 'weaver' })]
-    const snapshot = rows.map(a => a.name)
-    filterAgentPulseRows(rows, 'weaver')
-    expect(rows.map(a => a.name)).toEqual(snapshot)
-    expect(rows).toHaveLength(2)
+describe('severityToneClass', () => {
+  it.each<[string | null | undefined, string]>([
+    ['critical', 'text-[var(--bad)]'],
+    ['HIGH', 'text-[var(--bad)]'],
+    ['warn', 'text-[var(--warn)]'],
+    ['medium', 'text-[var(--warn)]'],
+    ['info', 'text-[var(--text-muted)]'],
+    ['', 'text-[var(--text-muted)]'],
+    [null, 'text-[var(--text-muted)]'],
+    [undefined, 'text-[var(--text-muted)]'],
+  ])('maps severity %s to expected tone', (input, expected) => {
+    expect(severityToneClass(input)).toBe(expected)
   })
 })

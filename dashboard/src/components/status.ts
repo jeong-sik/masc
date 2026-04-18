@@ -1,5 +1,5 @@
 // MASC Dashboard — Status Surface (Phase 2+4: fleet-health + runtime unified)
-// Read-only observability surfaces: observatory, agents, activity, runtime,
+// Read-only observability surfaces: observatory, journey, agents, runtime,
 // fleet-health (FilterChips unified panel), memory-subsystems.
 
 import { html } from 'htm/preact'
@@ -10,15 +10,17 @@ import { MemorySubsystems } from './memory-subsystems'
 import { FleetHealthPanel } from './fleet-health-panel'
 import { Observatory } from './observatory/observatory'
 import { AttributionPanel } from './attribution-panel'
+import { JourneyPanel } from './journey-panel'
 
 type StatusSection =
-  | 'observatory' | 'agents' | 'runtime' | 'fleet-health'
+  | 'observatory' | 'journey' | 'agents' | 'runtime' | 'fleet-health'
   | 'memory-subsystems' | 'attribution'
 
 function currentSection(): StatusSection {
   const section = route.value.params.section
   if (
     section === 'observatory'
+    || section === 'journey'
     || section === 'runtime'
     || section === 'fleet-health'
     || section === 'memory-subsystems'
@@ -35,6 +37,8 @@ export function Status() {
       <div class="transition-opacity duration-300">
         ${section === 'observatory'
           ? html`<${Observatory} />`
+          : section === 'journey'
+            ? html`<${JourneyPanel} />`
           : section === 'runtime'
             ? html`<${RuntimePanel} />`
           : section === 'fleet-health'

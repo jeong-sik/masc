@@ -786,7 +786,19 @@ let transition_task_r config ~agent_name ~task_id ~action
         | (Types.Claim | Types.Start), Types.Done _ ->
             (* Idempotent: already done, no-op *)
             Ok (task.task_status, None)
-        | Types.Done_action, Types.Claimed { assignee; _ }
+        | Types.Done_action, Types.Claimed { assignee; _ } when assignee = agent_name || force ->
+            (* FSM drift: TLA+ KeeperTaskInterlock.DoneTask requires in_progress.
+               Log WARN so dashboards can surface keepers that skip Start. The
+               jump is still permitted for client compatibility; strictness
+               ratchet follows once keeper_task_start is exposed. *)
+            Log.RoomTask.warn
+              "fsm_drift claimed_to_done_skip task=%s agent=%s force=%b"
+              task_id agent_name force;
+            Ok (Types.Done {
+              assignee = agent_name;
+              completed_at = now;
+              notes = if notes = "" then None else Some notes;
+            }, None)
         | Types.Done_action, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
             Ok (Types.Done {
               assignee = agent_name;

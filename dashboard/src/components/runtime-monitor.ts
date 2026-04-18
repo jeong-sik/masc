@@ -75,7 +75,11 @@ async function loadRuntimeData(resource: ManagedAsyncResource<RuntimeData>, wind
   })
 }
 
-export function providerTone(provider: DashboardRuntimeProviderSnapshot): string {
+// Current-reachability axis: does the provider respond right now?
+// Orthogonal to cascade-config-panel.ts:providerTone which scores historical
+// performance (success_rate, cooldown). Both signals can be shown together
+// without being duplicates.
+export function runtimeProviderTone(provider: DashboardRuntimeProviderSnapshot): string {
   if (provider.available === false) return 'bad'
   if (provider.discovery?.healthy === false) return 'warn'
   if (provider.available === true) return 'ok'
@@ -221,7 +225,7 @@ export function RuntimeMonitor() {
                     </div>
                     <${StatusChip}
                       label=${provider.status ?? (provider.available ? 'available' : 'unknown')}
-                      tone=${providerTone(provider)}
+                      tone=${runtimeProviderTone(provider)}
                     />
                   </div>
                   <div class="grid grid-cols-2 gap-3 text-[12px] text-text-body">

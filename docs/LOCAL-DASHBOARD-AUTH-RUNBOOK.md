@@ -14,6 +14,65 @@ Those routes are stricter than normal local `/mcp` calls:
 
 If the dashboard can read state but keeper boot/config/shutdown fails, use this runbook.
 
+## 0. Copy-Paste Example
+
+Start the server on loopback:
+
+```bash
+cd ~/me/workspace/yousleepwhen/masc-mcp
+BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+MASC_BASE_PATH="$BASE_PATH" \
+  dune exec --root . ./bin/main_eio.exe -- \
+  --host 127.0.0.1 \
+  --port 8935 \
+  --base-path "$BASE_PATH"
+```
+
+In another shell, mint or rotate a local admin bearer and extract the values:
+
+```bash
+LOGIN_JSON="$(~/me/scripts/masc login --json --agent codex-local-admin)"
+TOKEN="$(printf '%s\n' "$LOGIN_JSON" | jq -r '.bearer_token')"
+URL="$(printf '%s\n' "$LOGIN_JSON" | jq -r '.dashboard_url')"
+printf 'token=%s\nurl=%s\n' "$TOKEN" "$URL"
+```
+
+Open the dashboard as admin:
+
+```bash
+open "$URL"
+```
+
+Verify the admin session:
+
+```bash
+curl -sS http://127.0.0.1:8935/api/v1/dashboard/shell \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-MASC-Agent: codex-local-admin" \
+  | jq '.auth'
+```
+
+Expected quick checks:
+
+- `enabled=true`
+- `require_token=true`
+- `effective_role="admin"`
+
+Common next actions:
+
+```bash
+# boot a keeper
+curl -sS -X POST http://127.0.0.1:8935/api/v1/keepers/<keeper>/boot \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-MASC-Agent: codex-local-admin"
+
+# rotate the same admin token
+~/me/scripts/masc login --json --agent codex-local-admin
+
+# mint a separate admin identity
+~/me/scripts/masc login --json --agent ops-admin
+```
+
 ## 1. Confirm the Real Base Path
 
 Always check which `.masc` root the server is actually using before editing auth state.

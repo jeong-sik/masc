@@ -314,13 +314,17 @@ Fast local auth bootstrap:
 dune exec --root . ./bin/main_eio.exe -- login --json --agent codex-local-admin
 ```
 
-Typical use:
+Copy-paste example:
 
 ```bash
 LOGIN_JSON="$(dune exec --root . ./bin/main_eio.exe -- login --json --agent codex-local-admin)"
 TOKEN="$(printf '%s\n' "$LOGIN_JSON" | jq -r '.bearer_token')"
 URL="$(printf '%s\n' "$LOGIN_JSON" | jq -r '.dashboard_url')"
 printf 'token=%s\nurl=%s\n' "$TOKEN" "$URL"
+curl -sS http://127.0.0.1:8935/api/v1/dashboard/shell \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-MASC-Agent: codex-local-admin" \
+  | jq '.auth'
 ```
 
 ## Verification

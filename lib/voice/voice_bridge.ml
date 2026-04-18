@@ -42,6 +42,18 @@ let resolve_api_key endpoint =
                adapter.canonical_name endpoint.id env_name) )
   | None -> Ok ""
 
+let exec_gate_raw_source argv =
+  String.concat " " (List.map Filename.quote argv)
+
+let run_voice_status ?(timeout_sec = 35.0) ?(stdin_content = "") argv =
+  Masc_exec.Exec_gate.run_argv_with_stdin_and_status
+    ~actor:"voice/bridge"
+    ~raw_source:(exec_gate_raw_source argv)
+    ~summary:"voice bridge exec"
+    ~timeout_sec
+    ~stdin_content
+    argv
+
 let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
   let body_file = Filename.temp_file "masc_voice_request" ".json" in
   Fun.protect
@@ -67,8 +79,7 @@ let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
         @ [ "--data-binary"; "@" ^ body_file; "-o"; output_file; "-w"; "%{http_code}" ]
       in
       let status, http_code_str =
-        Process_eio.run_argv_with_stdin_and_status ~timeout_sec:35.0
-          ~stdin_content:"" argv
+        run_voice_status ~timeout_sec:35.0 argv
       in
       match status with
       | Unix.WEXITED 0 ->
@@ -125,8 +136,7 @@ let run_stt_multipart_request (req : Provider_adapter.voice_stt_request) =
     @ header_args @ form_args @ file_arg
   in
   let status, body =
-    Process_eio.run_argv_with_stdin_and_status ~timeout_sec:35.0
-      ~stdin_content:"" argv
+    run_voice_status ~timeout_sec:35.0 argv
   in
   match status with
   | Unix.WEXITED 0 -> (
@@ -880,10 +890,10 @@ let health_check ~sw:_ ~clock:_ ~net () =
 
 let play_tone freq =
   try
-    ignore (Process_eio.run_argv_with_stdin_and_status
-      ~timeout_sec:2.0 ~stdin_content:""
-      [ "play"; "-qn"; "synth"; "0.15"; "sine";
-        Printf.sprintf "%.0f" freq ])
+    ignore
+      (run_voice_status ~timeout_sec:2.0
+         [ "play"; "-qn"; "synth"; "0.15"; "sine";
+           Printf.sprintf "%.0f" freq ])
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> ()
@@ -906,9 +916,7 @@ let record_and_transcribe ~agent_id ?(timeout_sec = 15.0)
     let record_result =
       try
         let status, _output =
-          Process_eio.run_argv_with_stdin_and_status
-            ~timeout_sec:(timeout_sec +. 5.0)
-            ~stdin_content:"" rec_argv
+          run_voice_status ~timeout_sec:(timeout_sec +. 5.0) rec_argv
         in
         match status with
         | Unix.WEXITED 0 -> Ok ()

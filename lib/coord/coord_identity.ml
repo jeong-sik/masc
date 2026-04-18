@@ -18,7 +18,14 @@ let get_tty () =
     | None ->
         try
           if Unix.isatty Unix.stdin then
-            let output = Process_eio.run_argv ~timeout_sec:5.0 ["tty"] in
+            let output =
+              Masc_exec.Exec_gate.run_argv
+                ~actor:"coord/identity"
+                ~raw_source:"tty"
+                ~summary:"coord tty probe"
+                ~timeout_sec:5.0
+                [ "tty" ]
+            in
             let trimmed = String.trim output in
             if String.length trimmed > 0 then Some trimmed else None
           else None

@@ -102,10 +102,6 @@ let is_spawnable mention =
 
 (* --- CLI spawn (Spawn mode) --- *)
 
-let has_timeout =
-  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    String.trim (Process_eio.run_argv ~timeout_sec:2.0 ["which"; "timeout"]) <> "")
-
 let build_response_prompt ~from_agent ~content ~mention =
   Printf.sprintf {|You received a mention in the MASC room from %s.
 
@@ -134,11 +130,15 @@ let run_cli_agent ~agent_type ~prompt =
     debug_log (Provider_adapter.bare_ollama_migration_message ())
   else
     let base = cli_argv_of_agent_type agent_type in
-    let argv = if Eio.Lazy.force has_timeout then ["timeout"; "120"] @ base else base in
+    let argv = base in
+    let raw_source = String.concat " " (List.map Filename.quote argv) in
     debug_log (Printf.sprintf "SPAWN argv=%s" (String.concat " " (List.map Filename.quote argv)));
     let (status, output) =
-      Process_eio.run_argv_with_stdin_and_status
-        ~timeout_sec:140.0
+      Masc_exec.Exec_gate.run_argv_with_stdin_and_status
+        ~actor:"system/auto_responder"
+        ~raw_source
+        ~summary:"auto responder cli spawn"
+        ~timeout_sec:120.0
         ~stdin_content:prompt
         argv
     in

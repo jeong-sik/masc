@@ -9,25 +9,31 @@
     notably the exec gate — refuses anything that is not a
     [Trusted_argv.t], so forgery is rejected at the type level.
 
-    This initial A3-PR-1 module ships the decision skeleton with the
-    baseline rules below.  The per-agent TOML overlay and the
-    [Approval_context.t] threading come in a follow-up PR. *)
+    The decision is overlay-aware: the caller supplies the
+    per-actor [Approval_config.agent_overlay] chosen for this exec. *)
 
 type t = {
   raw_source : string;  (** original pre-parse string, for the Ask UI *)
   summary : string;     (** human-readable one-liner, for the Ask UI *)
 }
 
-val decide : t -> caps:Capability.t list -> simple:Shell_ir.simple -> Verdict.t
+val decide :
+  t ->
+  overlay:Approval_config.agent_overlay ->
+  caps:Capability.t list ->
+  simple:Shell_ir.simple ->
+  Verdict.t
 (** Pure policy decision.  The rule cascade (checked top to bottom):
 
-    - [Destructive] git op anywhere in the cap list → [Deny Destructive_git].
+    - [Destructive] git op anywhere in the cap list + overlay deny on →
+      [Deny Destructive_git].
     - [Write_path] whose scope is [Outside_worktree] or
       [Absolute_unknown] → [Deny Path_escape].
     - [Exec_bin] on a [Privileged] [Bin.t] (also the unknown-bin path) →
       [Ask].
-    - [Exec_bin] on an [Audited] [Bin.t] → [Ask].
+    - [Exec_bin] on an [Audited] [Bin.t] →
+      [Ask] when [overlay.ask_audited], otherwise [Allow].
     - Any construct we explicitly match but do not have a rule for →
       [Ask] (never [Allow]).
     - Otherwise (all-Safe caps under the worktree) →
-      [Allow (Verdict.trust ~caps simple)]. *)
+      [Allow] when [overlay.allow_safe_in_worktree], otherwise [Ask]. *)

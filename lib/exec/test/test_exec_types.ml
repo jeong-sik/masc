@@ -34,6 +34,11 @@ let test_git_op_read () =
   | Ok (Git_op.Read _) -> ()
   | _ -> failwith "status must be Read"
 
+let test_git_op_read_with_cwd_flag () =
+  match Git_op.of_argv [ "git"; "-C"; "/tmp/repo"; "status" ] with
+  | Ok (Git_op.Read _) -> ()
+  | _ -> failwith "git -C /tmp/repo status must be Read"
+
 let test_git_op_unknown () =
   match Git_op.of_argv [ "git"; "exotic-subcmd" ] with
   | Error (`Unknown_subcmd _) -> ()
@@ -83,6 +88,7 @@ let () =
   test_bin_empty_rejected ();
   test_git_op_destructive_detection ();
   test_git_op_read ();
+  test_git_op_read_with_cwd_flag ();
   test_git_op_unknown ();
   test_parsed_polymorphic ();
   test_path_scope_classify ();

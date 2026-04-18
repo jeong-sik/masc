@@ -9,15 +9,30 @@
 open Types
 open Coord_utils
 
+let exec_gate_raw_source argv =
+  String.concat " " (List.map Filename.quote argv)
+
 (** Run argv and get lines (Eio-native, no shell) *)
 let run_argv_lines argv =
-  Process_eio.run_argv ~timeout_sec:30.0 argv
+  Masc_exec.Exec_gate.run_argv
+    ~actor:"coord/worktree"
+    ~raw_source:(exec_gate_raw_source argv)
+    ~summary:"coord_worktree argv"
+    ~timeout_sec:30.0
+    argv
   |> String.split_on_char '\n'
   |> List.filter (fun s -> s <> "")
 
 (** Run argv and get exit code (Eio-native, no shell) *)
 let run_argv_exit argv =
-  match Process_eio.run_argv_with_status ~timeout_sec:30.0 argv with
+  match
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"coord/worktree"
+      ~raw_source:(exec_gate_raw_source argv)
+      ~summary:"coord_worktree argv"
+      ~timeout_sec:30.0
+      argv
+  with
   | Unix.WEXITED n, _ -> n
   | Unix.WSIGNALED _, _ -> 128
   | Unix.WSTOPPED _, _ -> 128
@@ -271,7 +286,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                    check-delete-create and the permanent failure when keeper
                    branches are not cleaned up after worktree removal. *)
                 let exit_code, git_output =
-                  Process_eio.run_argv_with_status ~timeout_sec:30.0
+                  let argv =
                     [
                       "git";
                       "-C";
@@ -283,6 +298,13 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                       branch_name;
                       Printf.sprintf "origin/%s" resolved_base;
                     ]
+                  in
+                  Masc_exec.Exec_gate.run_argv_with_status
+                    ~actor:"coord/worktree"
+                    ~raw_source:(exec_gate_raw_source argv)
+                    ~summary:"coord_worktree worktree add"
+                    ~timeout_sec:30.0
+                    argv
                 in
 
                 if exit_code = Unix.WEXITED 0 then begin

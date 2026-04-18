@@ -199,9 +199,16 @@ let persist_discard_record
     ]
 
 let git_diff_patch ~workdir =
+  let argv =
+    [ "git"; "-C"; workdir; "diff"; "--no-ext-diff"; "--binary"; "--relative" ]
+  in
   let status, output =
-    Process_eio.run_argv_with_status ~timeout_sec:30.0
-      [ "git"; "-C"; workdir; "diff"; "--no-ext-diff"; "--binary"; "--relative" ]
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"tool/autoresearch_cycle"
+      ~raw_source:(String.concat " " (List.map Filename.quote argv))
+      ~summary:"autoresearch cycle git diff"
+      ~timeout_sec:30.0
+      argv
   in
   match status with
   | Unix.WEXITED 0 -> Ok output
@@ -212,9 +219,14 @@ let git_diff_patch ~workdir =
     Error (Printf.sprintf "git diff terminated with signal %d" signal)
 
 let sync_target_file_to_index ~workdir ~target_file =
+  let argv = [ "git"; "-C"; workdir; "add"; "--"; target_file ] in
   let status, output =
-    Process_eio.run_argv_with_status ~timeout_sec:10.0
-      [ "git"; "-C"; workdir; "add"; "--"; target_file ]
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"tool/autoresearch_cycle"
+      ~raw_source:(String.concat " " (List.map Filename.quote argv))
+      ~summary:"autoresearch cycle git add"
+      ~timeout_sec:10.0
+      argv
   in
   match status with
   | Unix.WEXITED 0 -> ()

@@ -16,17 +16,34 @@ type focus_payload = {
   task_id: string option;
 }
 
+let exec_gate_raw_source argv =
+  String.concat " " (List.map Filename.quote argv)
+
 (** {1 Non-blocking Shell Execution} *)
 
 (** Run argv and get single line (Eio-native, no shell) *)
 let run_argv_line argv =
-  let output = Process_eio.run_argv ~timeout_sec:10.0 argv in
+  let output =
+    Masc_exec.Exec_gate.run_argv
+      ~actor:"system/notify"
+      ~raw_source:(exec_gate_raw_source argv)
+      ~summary:"notify argv"
+      ~timeout_sec:10.0
+      argv
+  in
   match String.split_on_char '\n' output with
   | [] -> ""
   | h :: _ -> String.trim h
 
 let run_argv_ignore argv =
-  (try ignore (Process_eio.run_argv_with_status ~timeout_sec:60.0 argv)
+  (try
+     ignore
+       (Masc_exec.Exec_gate.run_argv_with_status
+          ~actor:"system/notify"
+          ~raw_source:(exec_gate_raw_source argv)
+          ~summary:"notify argv"
+          ~timeout_sec:60.0
+          argv)
    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Misc.error "run_argv_ignore failed: %s" (Printexc.to_string exn))
 
 (** Get non-empty environment variable *)

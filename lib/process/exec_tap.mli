@@ -16,6 +16,7 @@
 (** Source of an exec call.  Report generator uses this to distinguish
     Process_eio wrappers from direct Unix.* callsites. *)
 type call_kind =
+  | Exec_gate_decision
   | Process_eio_run_argv
   | Process_eio_run_argv_with_stdin
   | Process_eio_run_argv_with_stdin_and_status
@@ -56,3 +57,20 @@ val record :
 (** Emit one JSONL line when enabled, no-op otherwise.  [env] is reduced
     to its keys (values stripped — avoids secret leakage).  [cwd] is the
     caller-provided working directory, not the process cwd. *)
+
+val record_gate_decision :
+  actor:string ->
+  raw_source:string ->
+  summary:string ->
+  gate_mode:string ->
+  gate_verdict:string ->
+  gate_enforced:bool ->
+  argv:string list ->
+  ?env:string array ->
+  ?cwd:string ->
+  unit ->
+  unit
+(** Emit one JSONL line describing an exec-gate decision.  This is
+    separate from the eventual [Process_eio.*] spawn record so shadow
+    mode can publish verdict evidence without mutating the actual spawn
+    path or double-counting spawns in downstream reports. *)

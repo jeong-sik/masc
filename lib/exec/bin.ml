@@ -13,12 +13,13 @@ let safe_bins =
   [ "ls"; "cat"; "pwd"; "echo"; "head"; "tail"; "grep"; "rg"; "find";
     "which"; "test"; "basename"; "dirname"; "stat"; "du"; "df";
     "sort"; "uniq"; "wc"; "cut"; "tr"; "date"; "env"; "printenv";
-    "hostname"; "whoami" ]
+    "hostname"; "whoami"; "uname"; "ps"; "tty" ]
 
 let audited_bins =
   [ "git"; "docker"; "curl"; "wget"; "ssh"; "scp"; "tar"; "rsync";
     "make"; "cmake"; "npm"; "yarn"; "pnpm"; "pip"; "opam"; "cargo";
-    "gh"; "glab" ]
+    "gh"; "glab"; "terminal-notifier"; "osascript"; "play"; "rec";
+    "ffplay"; "mpg123"; "open"; "claude"; "gemini"; "codex" ]
 
 let privileged_bins =
   [ "sudo"; "su"; "chmod"; "chown"; "rm"; "dd"; "mkfs" ]

@@ -46,9 +46,20 @@ val run_argv_with_stdin : ?timeout_sec:float -> ?env:string array -> stdin_conte
 val run_argv_with_stdin_and_status :
   ?timeout_sec:float ->
   ?env:string array ->
+  ?cwd:string ->
   stdin_content:string ->
   string list ->
   (Unix.process_status * string)
+
+val run_argv_with_stdin_and_status_split :
+  ?timeout_sec:float ->
+  ?env:string array ->
+  ?cwd:string ->
+  stdin_content:string ->
+  string list ->
+  (Unix.process_status * string * string)
+(** Like [run_argv_with_stdin_and_status], but returns
+    [(status, stdout, stderr)] without combining stderr into stdout. *)
 
 (** Run command with explicit argv, return (Unix.process_status, stdout).
     Uses spawn + await to get exit status without raising.
@@ -59,3 +70,12 @@ val run_argv_with_stdin_and_status :
            Ignored when falling back to Unix process execution.
     @since 2.45.0 *)
 val run_argv_with_status : ?timeout_sec:float -> ?env:string array -> ?cwd:string -> string list -> (Unix.process_status * string)
+
+val run_argv_with_status_split :
+  ?timeout_sec:float ->
+  ?env:string array ->
+  ?cwd:string ->
+  string list ->
+  (Unix.process_status * string * string)
+(** Like [run_argv_with_status], but returns
+    [(status, stdout, stderr)] without combining stderr into stdout. *)

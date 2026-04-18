@@ -19,12 +19,29 @@ let lit s = Shell_ir.Lit s
 let default_policy : Approval_policy.t =
   { raw_source = "(test)"; summary = "(test summary)" }
 
+let strict_overlay = Approval_config.strict_default
+
+let internal_overlay : Approval_config.agent_overlay =
+  {
+    allow_safe_in_worktree = true;
+    ask_audited = false;
+    deny_destructive_git = false;
+  }
+
 (* -- policy decide -------------------------------------------------- *)
 
-let test_safe_bin_allowed () =
+let test_safe_bin_strict_asks () =
   let s = simple (bin_ok "ls") in
   let caps = Capability_check.of_simple s in
-  match Approval_policy.decide default_policy ~caps ~simple:s with
+  match Approval_policy.decide default_policy ~overlay:strict_overlay ~caps ~simple:s with
+  | Verdict.Ask req ->
+    assert (Bin.to_string req.bin = "ls")
+  | _ -> assert false
+
+let test_safe_bin_allowed_with_overlay () =
+  let s = simple (bin_ok "ls") in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:internal_overlay ~caps ~simple:s with
   | Verdict.Allow t ->
     assert (Bin.to_string (Verdict.Trusted_argv.bin t) = "ls")
   | _ -> assert false
@@ -32,7 +49,7 @@ let test_safe_bin_allowed () =
 let test_privileged_bin_asks () =
   let s = simple (bin_ok "sudo") in
   let caps = Capability_check.of_simple s in
-  match Approval_policy.decide default_policy ~caps ~simple:s with
+  match Approval_policy.decide default_policy ~overlay:strict_overlay ~caps ~simple:s with
   | Verdict.Ask req ->
     assert (Bin.to_string req.bin = "sudo")
   | _ -> assert false
@@ -40,8 +57,27 @@ let test_privileged_bin_asks () =
 let test_audited_bin_asks () =
   let s = simple (bin_ok "git") ~args:[ lit "status" ] in
   let caps = Capability_check.of_simple s in
-  match Approval_policy.decide default_policy ~caps ~simple:s with
+  match Approval_policy.decide default_policy ~overlay:strict_overlay ~caps ~simple:s with
   | Verdict.Ask _ -> ()
+  | _ -> assert false
+
+let test_audited_bin_allowed_with_overlay () =
+  let s = simple (bin_ok "git") ~args:[ lit "status" ] in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:internal_overlay ~caps ~simple:s with
+  | Verdict.Allow t ->
+    assert (Bin.to_string (Verdict.Trusted_argv.bin t) = "git")
+  | _ -> assert false
+
+let test_audited_bin_with_cwd_flag_allowed_with_overlay () =
+  let s =
+    simple (bin_ok "git")
+      ~args:[ lit "-C"; lit "/tmp/repo"; lit "status" ]
+  in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:internal_overlay ~caps ~simple:s with
+  | Verdict.Allow t ->
+    assert (Bin.to_string (Verdict.Trusted_argv.bin t) = "git")
   | _ -> assert false
 
 let test_destructive_git_denies () =
@@ -50,9 +86,20 @@ let test_destructive_git_denies () =
       ~args:[ lit "push"; lit "--force"; lit "origin"; lit "main" ]
   in
   let caps = Capability_check.of_simple s in
-  match Approval_policy.decide default_policy ~caps ~simple:s with
+  match Approval_policy.decide default_policy ~overlay:strict_overlay ~caps ~simple:s with
   | Verdict.Deny { reason = Destructive_git (Git_op.Destructive `Push_force); _ } ->
     ()
+  | _ -> assert false
+
+let test_destructive_git_allowed_with_overlay () =
+  let s =
+    simple (bin_ok "git")
+      ~args:[ lit "push"; lit "--force"; lit "origin"; lit "main" ]
+  in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:internal_overlay ~caps ~simple:s with
+  | Verdict.Allow t ->
+    assert (Bin.to_string (Verdict.Trusted_argv.bin t) = "git")
   | _ -> assert false
 
 let test_write_outside_denies () =
@@ -63,7 +110,7 @@ let test_write_outside_denies () =
   in
   let s = simple (bin_ok "echo") ~redirects:[ redir ] in
   let caps = Capability_check.of_simple s in
-  match Approval_policy.decide default_policy ~caps ~simple:s with
+  match Approval_policy.decide default_policy ~overlay:internal_overlay ~caps ~simple:s with
   | Verdict.Deny { reason = Path_escape _; _ } -> ()
   | _ -> assert false
 
@@ -72,7 +119,7 @@ let test_write_outside_denies () =
 let test_gate_allow_returns_trusted_argv () =
   let s = simple (bin_ok "ls") in
   let caps = Capability_check.of_simple s in
-  match Approval_policy.decide default_policy ~caps ~simple:s with
+  match Approval_policy.decide default_policy ~overlay:internal_overlay ~caps ~simple:s with
   | Verdict.Allow _ as v ->
     (match Exec_gate.run v with
      | Ok t ->
@@ -83,7 +130,7 @@ let test_gate_allow_returns_trusted_argv () =
 let test_gate_ask_surfaces_as_error () =
   let s = simple (bin_ok "sudo") in
   let caps = Capability_check.of_simple s in
-  let v = Approval_policy.decide default_policy ~caps ~simple:s in
+  let v = Approval_policy.decide default_policy ~overlay:strict_overlay ~caps ~simple:s in
   match Exec_gate.run v with
   | Error (`Ask_required _) -> ()
   | _ -> assert false
@@ -94,16 +141,20 @@ let test_gate_deny_surfaces_as_error () =
       ~args:[ lit "push"; lit "--force"; lit "origin"; lit "main" ]
   in
   let caps = Capability_check.of_simple s in
-  let v = Approval_policy.decide default_policy ~caps ~simple:s in
+  let v = Approval_policy.decide default_policy ~overlay:strict_overlay ~caps ~simple:s in
   match Exec_gate.run v with
   | Error (`Denied (Destructive_git _)) -> ()
   | _ -> assert false
 
 let () =
-  test_safe_bin_allowed ();
+  test_safe_bin_strict_asks ();
+  test_safe_bin_allowed_with_overlay ();
   test_privileged_bin_asks ();
   test_audited_bin_asks ();
+  test_audited_bin_allowed_with_overlay ();
+  test_audited_bin_with_cwd_flag_allowed_with_overlay ();
   test_destructive_git_denies ();
+  test_destructive_git_allowed_with_overlay ();
   test_write_outside_denies ();
   test_gate_allow_returns_trusted_argv ();
   test_gate_ask_surfaces_as_error ();

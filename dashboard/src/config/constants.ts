@@ -44,11 +44,17 @@ export const KEEPER_HISTORY_TAIL_MESSAGES = 200
 export const KEEPER_STREAM_IDLE_TIMEOUT_MS = 120_000
 export const KEEPER_STREAM_IDLE_POLL_MS = 5_000
 
-// --- Buffer & cache sizes ---
-export const MAX_JOURNAL_ENTRIES = 200
-export const OAS_AGENT_EVENT_BUFFER = 50
-export const OAS_KEEPER_SNAPSHOT_MAX = 20
-export const OAS_TELEMETRY_REPLAY_LIMIT = 500
+// --- Buffer & cache sizes (Vite env overridable) ---
+// Defaults balance memory/render cost against available history. Users who
+// want deeper replay (e.g. OAS telemetry) can raise the ceiling at build
+// time without editing this file:
+//   VITE_OAS_TELEMETRY_REPLAY_LIMIT=2000 pnpm --filter masc-dashboard build
+import { envInt } from './env'
+
+export const MAX_JOURNAL_ENTRIES = envInt('VITE_MAX_JOURNAL_ENTRIES', 200)
+export const OAS_AGENT_EVENT_BUFFER = envInt('VITE_OAS_AGENT_EVENT_BUFFER', 50)
+export const OAS_KEEPER_SNAPSHOT_MAX = envInt('VITE_OAS_KEEPER_SNAPSHOT_MAX', 20)
+export const OAS_TELEMETRY_REPLAY_LIMIT = envInt('VITE_OAS_TELEMETRY_REPLAY_LIMIT', 500)
 
 // --- Text truncation (characters) ---
 export const TRIM_TEXT_DEFAULT = 120

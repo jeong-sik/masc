@@ -84,7 +84,7 @@ function AuthPopover({ authenticated }: { authenticated: boolean }) {
             onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') handleSetToken() }}
           />
           <button type="button"
-            class="w-full py-1.5 px-3 rounded text-[11px] border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[rgba(71,184,255,0.15)] cursor-pointer transition-colors"
+            class="w-full py-1.5 px-3 rounded text-[11px] border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
             onClick=${handleSetToken}
           >토큰 설정</button>
         </div>
@@ -101,7 +101,7 @@ export function RemoteWarningBanner() {
       <span>원격 접속이 감지되었습니다. Mutation 작업을 위해 Bearer token을 설정하세요.</span>
       <div class="flex items-center gap-2 shrink-0">
         <button type="button"
-          class="px-2 py-0.5 rounded text-[11px] border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[rgba(71,184,255,0.15)] cursor-pointer transition-colors"
+          class="px-2 py-0.5 rounded text-[11px] border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
           onClick=${() => { popoverOpen.value = true }}
         >토큰 입력</button>
         <button type="button"

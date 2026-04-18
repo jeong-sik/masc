@@ -142,11 +142,11 @@ export function AgentTimelineSection() {
     <${Card} title="활동 타임라인 (${summary?.total_events ?? 0}건)">
       ${summary ? html`
         <div class="flex gap-1.5 flex-wrap mb-2">
-          ${summary.tasks_completed > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">완료 ${summary.tasks_completed}</span>` : null}
-          ${summary.tasks_claimed > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">수임 ${summary.tasks_claimed}</span>` : null}
-          ${summary.messages_sent > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">메시지 ${summary.messages_sent}</span>` : null}
-          ${(summary.tool_calls ?? 0) > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">도구 ${summary.tool_calls}</span>` : null}
-          ${summary.active_duration_minutes > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">${Math.round(summary.active_duration_minutes)}분 활동</span>` : null}
+          ${summary.tasks_completed > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">완료 ${summary.tasks_completed}</span>` : null}
+          ${summary.tasks_claimed > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">수임 ${summary.tasks_claimed}</span>` : null}
+          ${summary.messages_sent > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">메시지 ${summary.messages_sent}</span>` : null}
+          ${(summary.tool_calls ?? 0) > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">도구 ${summary.tool_calls}</span>` : null}
+          ${summary.active_duration_minutes > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">${Math.round(summary.active_duration_minutes)}분 활동</span>` : null}
         </div>
       ` : null}
       ${events.length === 0

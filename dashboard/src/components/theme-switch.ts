@@ -56,7 +56,7 @@ export function ThemeSwitch() {
   return html`
     <button
       type="button"
-      class="cursor-pointer rounded-sm border border-[var(--white-10)] bg-[var(--white-4)] px-[10px] py-[5px] text-[10px] font-mono uppercase tracking-[0.14em] text-[var(--text-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
+      class="cursor-pointer rounded-sm border border-[var(--white-10)] bg-[var(--white-4)] px-[10px] py-[5px] text-[10px] font-mono uppercase tracking-[0.14em] text-[var(--text-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
       aria-label=${TITLE[key]}
       title=${TITLE[key]}
       onClick=${toggleTheme}

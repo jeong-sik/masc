@@ -70,7 +70,7 @@ export function ScrollToTopButton({
 
   return html`<button
     type="button"
-    class=${`fixed bottom-6 right-6 z-[var(--z-overlay-toast,3070)] flex h-10 w-10 items-center justify-center rounded-sm border border-[var(--white-10)] bg-[var(--bg-1)]/90 text-[var(--text-body)] shadow-[0_6px_18px_rgba(0,0,0,0.32)] backdrop-blur transition-all duration-150 hover:border-[var(--accent-30)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)] cursor-pointer ${cx ?? ''}`}
+    class=${`fixed bottom-6 right-6 z-[var(--z-overlay-toast,3070)] flex h-10 w-10 items-center justify-center rounded-sm border border-[var(--white-10)] bg-[var(--bg-1)]/90 text-[var(--text-body)] shadow-[0_6px_18px_rgba(0,0,0,0.32)] backdrop-blur transition-all duration-150 hover:border-[var(--accent-30)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)] cursor-pointer ${cx ?? ''}`}
     aria-label="맨 위로"
     title="맨 위로 (Home)"
     data-scroll-to-top

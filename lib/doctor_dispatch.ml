@@ -13,3 +13,47 @@ let known_summary = String.concat "|" known_sidecars
 let aggregate_exit_code rcs =
   let normalise rc = if rc < 0 || rc > 2 then 2 else rc in
   List.fold_left (fun acc rc -> max acc (normalise rc)) 0 rcs
+
+let python_bin () =
+  try Sys.getenv "MASC_PYTHON" with Not_found -> "python3"
+
+let capture_sidecar_json name =
+  match sidecar_dir name with
+  | None -> Error (Printf.sprintf "unknown sidecar: %s" name)
+  | Some rel_dir ->
+    let abs_dir =
+      if Filename.is_relative rel_dir
+      then Filename.concat (Sys.getcwd ()) rel_dir
+      else rel_dir
+    in
+    if not (Sys.file_exists abs_dir)
+    then Error (Printf.sprintf "sidecar directory not found: %s" abs_dir)
+    else begin
+      let prev = Sys.getcwd () in
+      Sys.chdir abs_dir;
+      let result =
+        try
+          let python = python_bin () in
+          let ic =
+            Unix.open_process_args_in
+              python
+              [| python; "-m"; "src"; "doctor"; "--json" |]
+          in
+          let buf = Buffer.create 4096 in
+          (try
+             while true do
+               Buffer.add_channel buf ic 4096
+             done
+           with End_of_file -> ());
+          let status = Unix.close_process_in ic in
+          let rc =
+            match status with
+            | Unix.WEXITED n -> n
+            | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 2
+          in
+          Ok (Buffer.contents buf, rc)
+        with e -> Error (Printexc.to_string e)
+      in
+      Sys.chdir prev;
+      result
+    end

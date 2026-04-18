@@ -21,3 +21,15 @@ val known_summary : string
     Doctor renderer (ok=0, warn=1, error=2, anything else treated as at
     least error=2). Empty list returns 0 (nothing ran → nothing to report). *)
 val aggregate_exit_code : int list -> int
+
+(** Resolve the python interpreter, honouring [MASC_PYTHON] env override,
+    defaulting to ["python3"]. *)
+val python_bin : unit -> string
+
+(** [capture_sidecar_json name] spawns [python -m src doctor --json] inside
+    the sidecar's directory and captures its stdout verbatim. Returns
+    [(payload, exit_code)] on success, or an explanatory string in [Error]
+    for pre-spawn failures (unknown sidecar name, missing directory,
+    subprocess crash). Used by [doctor all --json] to assemble an envelope
+    of all doctor outputs without losing the raw per-doctor JSON shape. *)
+val capture_sidecar_json : string -> (string * int, string) result

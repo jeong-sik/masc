@@ -33,7 +33,7 @@ function sourceBadgeClass(source: PromptSource): string {
     case 'override':
       return 'text-[var(--warn)] bg-[rgba(250,204,21,0.12)] border-[var(--yellow-bright-28)]'
     case 'file':
-      return 'text-[var(--ok-20)] bg-[rgba(34,197,94,0.12)] border-[var(--emerald-28)]'
+      return 'text-[var(--ok-20)] bg-[var(--emerald-12)] border-[var(--emerald-28)]'
     case 'missing':
       return 'text-[var(--bad-light)] bg-[rgba(244,63,94,0.12)] border-[var(--rose-28)]'
     default:
@@ -172,7 +172,7 @@ export function PromptRegistryPanel() {
       </div>
 
       ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}
-      ${status ? html`<div class="mb-4 rounded border border-[rgba(56,189,248,0.28)] bg-[rgba(56,189,248,0.08)] px-3 py-2 text-[12px] text-[#bae6fd]">${status}</div>` : null}
+      ${status ? html`<div class="mb-4 rounded border border-[var(--sky-28)] bg-[var(--sky-8)] px-3 py-2 text-[12px] text-[#bae6fd]">${status}</div>` : null}
 
       <div class="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div class="min-h-[260px] rounded border border-[var(--card-border)] bg-[var(--white-3)] p-2">

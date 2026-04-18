@@ -31,7 +31,7 @@ export interface FsmGraphSpec {
 
 // Color palette matching dashboard dark theme
 const NODE_COLORS: Record<FsmNode['type'], { bg: string; border: string; text: string }> = {
-  state:    { bg: 'var(--slate-800)', border: '#475569', text: 'var(--frost-100)' },
+  state:    { bg: 'var(--slate-800)', border: 'var(--slate-600)', text: 'var(--frost-100)' },
   active:   { bg: '#065f46', border: 'var(--emerald)', text: 'var(--white-pure)' },
   buffer:   { bg: '#78350f', border: 'var(--amber-bright)', text: 'var(--white-pure)' },
   terminal: { bg: '#7f1d1d', border: 'var(--bad)', text: 'var(--white-pure)' },
@@ -104,7 +104,7 @@ function buildStylesheet() {
         color: 'var(--frost-100)',
         'background-color': 'var(--slate-800)',
         'border-width': 2,
-        'border-color': '#475569',
+        'border-color': 'var(--slate-600)',
         shape: 'roundrectangle',
         width: 'label',
         height: 'label',

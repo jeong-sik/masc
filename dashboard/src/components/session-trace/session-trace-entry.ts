@@ -353,7 +353,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const ratio = before != null && after != null && before > 0 ? ((saved ?? 0) / before * 100) : null
     const compactPhase = typeof d.phase === 'string' ? d.phase : ''
     return html`
-      <div class="mt-2 px-3 py-2 rounded bg-[rgba(56,189,248,0.04)] border border-[rgba(56,189,248,0.15)] space-y-2">
+      <div class="mt-2 px-3 py-2 rounded bg-[var(--sky-4)] border border-[rgba(56,189,248,0.15)] space-y-2">
         <div class="flex items-center gap-3 text-[12px]">
           ${before != null ? html`<span><span class="text-[var(--text-dim)]">Before:</span> <span class="font-mono">${before.toLocaleString()}</span></span>` : null}
           <span class="text-[var(--text-dim)]">→</span>
@@ -384,7 +384,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const inputTokens = typeof d.input_tokens === 'number' ? d.input_tokens : 0
     const turn = d.turn
     return html`
-      <div class="mt-2 px-3 py-2 rounded bg-[rgba(56,189,248,0.04)] border border-[rgba(56,189,248,0.12)] space-y-1">
+      <div class="mt-2 px-3 py-2 rounded bg-[var(--sky-4)] border border-[rgba(56,189,248,0.12)] space-y-1">
         <div class="flex items-center gap-3 text-[12px]">
           <span><span class="text-[var(--text-dim)]">모델:</span> <span class="font-mono">${model}</span></span>
           <span><span class="text-[var(--text-dim)]">입력:</span> <span class="font-mono">${inputTokens.toLocaleString()}tok</span></span>

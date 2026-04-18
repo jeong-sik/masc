@@ -75,7 +75,7 @@ function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: '
   const onCls =
     tone === 'warn'
       ? 'text-[var(--amber-bright)] border-[rgba(251,191,36,0.3)] bg-[var(--warn-8)]'
-      : 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[rgba(34,197,94,0.08)]'
+      : 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]'
   return html`
     <span
       class=${`rounded-sm border px-2 py-0.5 text-[10px] cursor-help ${on ? onCls : offCls}`}
@@ -125,7 +125,7 @@ export function InvariantsPanel({
         <span
           class=${`rounded-sm border px-2 py-0.5 text-[10px] font-mono tabular-nums ${
             allOk
-              ? 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[rgba(34,197,94,0.08)]'
+              ? 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]'
               : 'text-[var(--bad)] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]'
           }`}
           title=${allOk

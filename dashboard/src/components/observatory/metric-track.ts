@@ -90,7 +90,7 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
                   y="0"
                   width="${(halfW * 2).toFixed(1)}"
                   height="${viewBoxHeight}"
-                  fill="${r.zScore < 0 ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.10)'}"
+                  fill="${r.zScore < 0 ? 'var(--bad-12)' : 'rgba(245,158,11,0.10)'}"
                   key=${`anomaly-${i}`}
                 >
                   <title>z=${r.zScore.toFixed(2)} · ${r.point.success_rate.toFixed(1)}%</title>

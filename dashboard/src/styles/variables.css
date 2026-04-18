@@ -30,7 +30,9 @@
 
   /* Semantic - Accent (Blue) */
   --accent-soft: rgba(71, 184, 255, 0.16);
+  --accent-8: rgba(71, 184, 255, 0.08);
   --accent-10: rgba(71, 184, 255, 0.10);
+  --accent-12: rgba(71, 184, 255, 0.12);
   --accent-20: rgba(71, 184, 255, 0.20);
   --accent-30: rgba(71, 184, 255, 0.30);
   /* Off-alpha accent tokens absorbed from Phase B inline-rgba sweep.
@@ -94,6 +96,27 @@
      --backdrop-* (which carry a subtle navy tint matching --bg-root). */
   --black-20: rgba(0, 0, 0, 0.20);
   --black-50: rgba(0, 0, 0, 0.50);
+
+  /* Sky family — light blue, distinct from --accent (cyan-leaning).
+     Used for "neutral info" badges that shouldn't compete with accent
+     for primary interactive emphasis. */
+  --sky-4: rgba(56, 189, 248, 0.04);
+  --sky-8: rgba(56, 189, 248, 0.08);
+  --sky-28: rgba(56, 189, 248, 0.28);
+
+  /* Emerald extensions */
+  --emerald-8: rgba(34, 197, 94, 0.08);
+  --emerald-12: rgba(34, 197, 94, 0.12);
+
+  /* Bad extension — covers .12 mid-bucket between -10 and -soft */
+  --bad-12: rgba(239, 68, 68, 0.12);
+
+  /* Brick-soft — desaturated red distinct from --bad and --rose. */
+  --brick-soft: rgba(224, 80, 80, 0.12);
+
+  /* Additional Tailwind-aligned base tokens (Phase H): */
+  --slate-600: #475569;
+  --yellow-100: #fde68a;
 
   /* Semantic - Yellow Bright. Pure spectrum yellow (#facc15), distinct
      from --warn (251,191,36 = #fbbf24, slightly muted gold). Used for

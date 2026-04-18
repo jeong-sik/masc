@@ -20,13 +20,13 @@ const TONE_PALETTES: Record<DistributionTone, TonePalette> = {
   accent: {
     fill: 'var(--accent)',
     text: 'var(--accent)',
-    chipBg: 'rgba(71,184,255,0.12)',
+    chipBg: 'var(--accent-12)',
     chipBorder: 'rgba(71,184,255,0.24)',
   },
   ok: {
     fill: 'var(--ok)',
     text: 'var(--ok)',
-    chipBg: 'rgba(34,197,94,0.12)',
+    chipBg: 'var(--emerald-12)',
     chipBorder: 'rgba(34,197,94,0.24)',
   },
   warn: {

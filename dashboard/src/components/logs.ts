@@ -174,7 +174,7 @@ function sourceTone(source: string): string {
     case 'client_tool_host':
       return 'text-[#dff3ff] bg-[var(--accent-10)] border-[var(--accent-22)]'
     case 'legacy_stderr':
-      return 'text-[var(--bad-light)] bg-[rgba(224,80,80,0.12)] border-[rgba(224,80,80,0.18)]'
+      return 'text-[var(--bad-light)] bg-[var(--brick-soft)] border-[rgba(224,80,80,0.18)]'
     case 'legacy_traceln':
       return 'text-[#ffd88a] bg-[rgba(230,167,0,0.12)] border-[rgba(230,167,0,0.18)]'
     default:
@@ -285,7 +285,7 @@ function renderLogRow(entry: LogEntry) {
           ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">session ${sessionId}</span>`
           : null}
         ${failure
-          ? html`<span class="rounded-sm border border-[rgba(224,80,80,0.24)] bg-[rgba(224,80,80,0.12)] px-2 py-0.5 text-[10px] text-[var(--bad-light)]">${failure.cause_code}</span>`
+          ? html`<span class="rounded-sm border border-[rgba(224,80,80,0.24)] bg-[var(--brick-soft)] px-2 py-0.5 text-[10px] text-[var(--bad-light)]">${failure.cause_code}</span>`
           : null}
         ${failure
           ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">${failure.recoverability}</span>`
@@ -447,7 +447,7 @@ export function LogViewer() {
         </div>
 
         ${logError ? html`
-          <div class="mx-4 mt-4 rounded border border-solid border-[#e05050] bg-[rgba(224,80,80,0.12)] px-4 py-3 text-[12px] text-[#ffb3b3]">${logError}</div>
+          <div class="mx-4 mt-4 rounded border border-solid border-[#e05050] bg-[var(--brick-soft)] px-4 py-3 text-[12px] text-[#ffb3b3]">${logError}</div>
         ` : null}
 
         <div class="px-3 pt-3">

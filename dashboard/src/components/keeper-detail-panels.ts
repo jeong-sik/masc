@@ -53,7 +53,7 @@ const CTX_SEGMENT_COLORS: Record<string, string> = {
   history_tool_use: '#84cc16',
   history_tool_result: 'var(--bad-light)',
   history_other: 'var(--slate-400)',
-  unattributed: '#475569',
+  unattributed: 'var(--slate-600)',
 }
 
 export function ctxSegmentLabel(key: string): string {

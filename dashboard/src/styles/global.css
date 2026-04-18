@@ -122,16 +122,16 @@
   color: var(--text-muted);
   &.active { background: var(--ok-22); color: var(--ok); }
   &.busy { background: var(--warn-15); color: var(--warn); }
-  &.listening { background: rgba(56,189,248,0.15); color: #38bdf8; }
+  &.listening { background: rgba(56,189,248,0.15); color: var(--sky-400); }
   &.idle { background: rgba(136,136,136,0.22); color: #b8c0cc; }
   &.offline { background: rgba(85,85,85,0.22); color: #7a8494; }
   &.todo { background: rgba(136,136,136,0.22); color: #b8c0cc; }
   &.in-progress, &.in_progress { background: var(--warn-15); color: var(--warn); }
   &.done, &.completed { background: var(--ok-22); color: var(--ok); }
   &.running { background: var(--warn-15); color: var(--warn); }
-  &.interrupted { background: rgba(56,189,248,0.15); color: #38bdf8; }
+  &.interrupted { background: rgba(56,189,248,0.15); color: var(--sky-400); }
   &.stopped { background: var(--slate-gray-15); color: var(--text-slate); }
-  &.error { background: rgba(251,113,133,0.15); color: #fb7185; }
+  &.error { background: rgba(251,113,133,0.15); color: var(--rose-light); }
 }
 
 @utility control-textarea {

@@ -67,6 +67,10 @@ let test_register_offline_and_start () =
   let entry = R.register_offline ~base_path:bp "k1-offline" (make_meta "k1-offline") in
   check string "offline phase" "offline" (KSM.phase_to_string entry.phase);
   check bool "not running yet" false (R.is_running ~base_path:bp "k1-offline");
+  (* #7889: register_offline must make is_registered true synchronously even
+     before the keepalive fiber has transitioned the entry to running. *)
+  check bool "registered synchronously after register_offline" true
+    (R.is_registered ~base_path:bp "k1-offline");
   ignore (R.dispatch_event ~base_path:bp "k1-offline" KSM.Fiber_started);
   match R.get ~base_path:bp "k1-offline" with
   | None -> fail "expected k1-offline"

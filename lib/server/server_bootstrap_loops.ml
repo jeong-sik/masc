@@ -348,12 +348,26 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
                 net = state.net;
               } in
               Keeper_keepalive.start_keepalive ~proactive_warmup_sec:warmup ctx m;
-              let running = Keeper_registry.is_running ~base_path:config.base_path m.name in
-              if running then
+              (* start_keepalive registers the keeper synchronously via
+                 register_offline and then forks the keepalive fiber.  The
+                 fiber flips the registry to running asynchronously on the
+                 next Eio tick, so querying is_running here is a race that
+                 keepers with a larger proactive-warmup idx lose
+                 deterministically (verdict=165s / sojin=150s / sangsu=135s
+                 produced the bulk of the false-positive "not in registry"
+                 WARNs).  Check the synchronous is_registered predicate
+                 instead — the running transition is observed later by the
+                 retry loop.  See #7889. *)
+              let registered =
+                Keeper_registry.is_registered ~base_path:config.base_path m.name
+              in
+              if registered then
                 Log.Keeper.info "autoboot: started keepalive for %s" m.name
               else
-                Log.Keeper.warn "autoboot: start_keepalive returned but %s not in registry" m.name;
-              running
+                Log.Keeper.warn
+                  "autoboot: start_keepalive returned but %s not registered"
+                  m.name;
+              registered
             end
         with
         | Eio.Cancel.Cancelled _ as e -> raise e

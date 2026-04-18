@@ -244,6 +244,7 @@
    planning_eio
    post_verifier
    provider_adapter
+   provider_kind_resolver
    progress
    relay
    goal_store

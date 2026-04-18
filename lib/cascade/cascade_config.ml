@@ -177,19 +177,34 @@ let parse_model_string
     ?system_prompt ?(api_key_env_overrides = [])
     ?supports_tool_choice_override
     (s : string) : Llm_provider.Provider_config.t option =
-  match split_provider_model (String.trim s) with
-  | None -> None
-  | Some ("custom", model_id) ->
-    make_custom_config ~temperature ~max_tokens ?system_prompt
-      ?supports_tool_choice_override model_id
-  | Some (provider_name, model_id) ->
+  (* Kind classification goes through [Provider_kind_resolver] — a sum-typed
+     resolver that consults Provider_registry as SSOT and never flattens
+     unknown specs to [OpenAI_compat]. This keeps ["gemini:gemini-2.5-flash"]
+     from being misclassified by any downstream substring heuristic
+     (issue #8159). *)
+  match Provider_kind_resolver.resolve s with
+  | Unknown _ -> None
+  | Custom_url _ ->
+    (* Delegate to the existing custom-URL constructor; it produces the
+       OpenAI_compat kind *by contract* for self-hosted endpoints. *)
+    (match split_provider_model (String.trim s) with
+     | Some ("custom", model_id) ->
+       make_custom_config ~temperature ~max_tokens ?system_prompt
+         ?supports_tool_choice_override model_id
+     | _ -> None)
+  | Registered { provider_name; model_id; kind = resolved_kind } ->
     match Llm_provider.Provider_registry.find default_registry provider_name with
-    | None -> None
+    | None -> None  (* registry lookup race or unloaded entry *)
     | Some entry when not (entry.is_available ()) -> None
     | Some entry ->
-      Some (make_registry_config ~temperature ~max_tokens ?system_prompt
-              ~api_key_env_overrides ?supports_tool_choice_override
-              ~provider_name ~model_id entry)
+      (* Defensive invariant: the resolver and the registry must agree on
+         the kind. If they diverge we have a registry bug or a resolver
+         bug; fail closed rather than emit a degraded config. *)
+      if entry.defaults.kind <> resolved_kind then None
+      else
+        Some (make_registry_config ~temperature ~max_tokens ?system_prompt
+                ~api_key_env_overrides ?supports_tool_choice_override
+                ~provider_name ~model_id entry)
 
 (** Parse a {!Cascade_config_loader.weighted_entry} into a
     {!Llm_provider.Provider_config.t}, forwarding the entry's

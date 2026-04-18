@@ -114,7 +114,7 @@ export function KeeperConditionsDivergent({ keeper }: { keeper: Keeper }) {
   if (!first) return null
 
   return html`
-    <section class="rounded border border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.05)] p-3 mb-3">
+    <section class="rounded border border-[var(--warn-24)] bg-[rgba(251,191,36,0.05)] p-3 mb-3">
       <header class="mb-2 flex items-baseline justify-between gap-2">
         <h3 class="text-[11px] font-semibold tracking-[0.08em] uppercase text-[var(--warn)]">
           ⚠️ 조건-Phase 불일치
@@ -124,7 +124,7 @@ export function KeeperConditionsDivergent({ keeper }: { keeper: Keeper }) {
       <div class="flex flex-wrap gap-1.5">
         ${divs.map(d => html`
           <span
-            class="px-2 py-0.5 rounded-sm border border-[rgba(251,191,36,0.3)] bg-[rgba(251,191,36,0.08)] text-[var(--warn)] text-[11px] font-mono tabular-nums"
+            class="px-2 py-0.5 rounded-sm border border-[rgba(251,191,36,0.3)] bg-[var(--warn-8)] text-[var(--warn)] text-[11px] font-mono tabular-nums"
             title=${d.reason}
           >
             ${d.field}=${String(d.value)}

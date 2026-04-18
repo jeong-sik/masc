@@ -355,7 +355,7 @@ function ToolSearchPicker({
 
         <ul ...${getMenuProps({
           class: showMenu && filtered.length > 0
-            ? 'absolute z-10 top-full left-0 right-0 mt-1 max-h-[220px] overflow-y-auto rounded border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] shadow-sm backdrop-blur-sm list-none m-0 p-0'
+            ? 'absolute z-10 top-full left-0 right-0 mt-1 max-h-[220px] overflow-y-auto rounded border border-[var(--card-border)] bg-[var(--backdrop-modal)] shadow-sm backdrop-blur-sm list-none m-0 p-0'
             : 'hidden',
         })}>
           ${showMenu && filtered.length > 0
@@ -388,7 +388,7 @@ function ToolSearchPicker({
         </ul>
         ${showMenu && filtered.length === 0
           ? html`
-            <div class="absolute z-10 top-full left-0 right-0 mt-1 px-3 py-2 rounded border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] text-[11px] text-[var(--text-muted)]">
+            <div class="absolute z-10 top-full left-0 right-0 mt-1 px-3 py-2 rounded border border-[var(--card-border)] bg-[var(--backdrop-modal)] text-[11px] text-[var(--text-muted)]">
               ${allNames.length === 0
                 ? '도구 목록 로딩 중... Enter로 직접 추가 가능'
                 : '일치하는 도구 없음. Enter로 직접 추가 가능'}

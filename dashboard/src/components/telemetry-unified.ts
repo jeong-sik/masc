@@ -544,14 +544,14 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
             const entryMeta = sourceMeta(entry.source)
             const ts = entryTimestamp(entry)
             return html`
-              <div class="flex items-center gap-2 rounded bg-[rgba(0,0,0,0.2)] px-2 py-1.5 text-[10px]" key=${`${item.key}:${index}`}>
+              <div class="flex items-center gap-2 rounded bg-[var(--black-20)] px-2 py-1.5 text-[10px]" key=${`${item.key}:${index}`}>
                 <span class="font-mono font-bold ${entryMeta.color} w-4 text-center flex-shrink-0">${entryMeta.icon}</span>
                 <span class="font-mono text-[var(--text-dim)] w-24 flex-shrink-0" title=${formatTs(ts)}>${timeAgoSafe(ts)}</span>
                 <span class="font-mono text-[var(--text-strong)] truncate flex-1" title=${entryPreview(entry)}>${entryPreview(entry)}</span>
               </div>
             `
           })}
-          <details class="rounded bg-[rgba(0,0,0,0.2)] px-2 py-1.5">
+          <details class="rounded bg-[var(--black-20)] px-2 py-1.5">
             <summary class="cursor-pointer text-[10px] text-[var(--text-dim)]">Raw JSON</summary>
             <pre class="mt-2 text-[10px] font-mono text-[var(--text-muted)] overflow-x-auto max-h-[280px] overflow-y-auto whitespace-pre-wrap break-all">
 ${JSON.stringify(item.entries, null, 2)}</pre>

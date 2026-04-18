@@ -436,7 +436,7 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
       title=${primary}
     >
       <div class="mb-2.5 flex items-start gap-3">
-        <span class="w-2.5 h-2.5 rounded-full shrink-0 mt-1 shadow-[0_0_8px_rgba(0,0,0,0.5)] ${statusDotColor(s.status)}"></span>
+        <span class="w-2.5 h-2.5 rounded-full shrink-0 mt-1 shadow-[0_0_8px_var(--black-50)] ${statusDotColor(s.status)}"></span>
         <div class="min-w-0 flex-1">
           <div class="text-[14px] font-bold text-text-strong leading-snug truncate group-hover:text-accent transition-colors">${primary}</div>
           ${secondary ? html`<div class="text-[12px] text-text-muted mt-1 truncate">${secondary}</div>` : null}
@@ -571,7 +571,7 @@ function AgentPulse() {
             <${AgentAvatar} name=${a.name} emoji=${a.emoji} size=${40} />
             <div class="flex flex-col min-w-0 flex-1 gap-1.5">
               <div class="flex items-center gap-2">
-                <span class="w-2.5 h-2.5 rounded-full shrink-0 shadow-[0_0_8px_rgba(0,0,0,0.5)] ${agentStateDot(a.state)}"></span>
+                <span class="w-2.5 h-2.5 rounded-full shrink-0 shadow-[0_0_8px_var(--black-50)] ${agentStateDot(a.state)}"></span>
                 <span class="text-[14px] font-bold text-text-strong group-hover:text-accent transition-colors">${a.koreanName ?? a.name}</span>
               </div>
               ${a.koreanName && a.koreanName !== a.name ? html`

@@ -59,8 +59,41 @@
   /* Semantic - Critical (Red) */
   --bad-light: #f87171;
   --bad-soft: rgba(239, 68, 68, 0.15);
+  --bad-6: rgba(239, 68, 68, 0.06);
   --bad-10: rgba(239, 68, 68, 0.10);
   --bad-20: rgba(239, 68, 68, 0.20);
+
+  /* Semantic - Critical Sister (Rose). Pink-red distinct from --bad
+     (which leans toward warm red); used for "this provider failed"
+     diff badges where the brand-style rose differentiates from the
+     generic critical signal. */
+  --rose: #f43f5e;
+  --rose-10: rgba(244, 63, 94, 0.10);
+  --rose-28: rgba(244, 63, 94, 0.28);
+
+  /* Extended warn off-alpha — covers densely-stacked warning chips
+     where -10/-20 buckets felt either too pale or too saturated. */
+  --warn-8: rgba(251, 191, 36, 0.08);
+  --warn-14: rgba(251, 191, 36, 0.14);
+  --warn-24: rgba(251, 191, 36, 0.24);
+
+  /* Semantic - Emerald. Brighter green than --ok (4ade80); used for
+     "all healthy" diff badges in the config resolution panel where
+     emerald reads as a more confident pass-state. */
+  --emerald: #22c55e;
+  --emerald-10: rgba(34, 197, 94, 0.10);
+  --emerald-28: rgba(34, 197, 94, 0.28);
+
+  /* Semantic - Plum (157,139,250 = #a78bfa = existing --purple). Used
+     for FSM "considering / select" rows where the cool purple separates
+     them from accent (decision in progress) and ok (committed). */
+  --purple-12: rgba(167, 139, 250, 0.12);
+  --purple-50: rgba(167, 139, 250, 0.50);
+
+  /* Pure black overlays — heaviest scrim option, distinct from
+     --backdrop-* (which carry a subtle navy tint matching --bg-root). */
+  --black-20: rgba(0, 0, 0, 0.20);
+  --black-50: rgba(0, 0, 0, 0.50);
 
   /* Semantic - Paused (Plum). Introduced for the 12-keeper-state spec
      in the Anyang Sleepers design system. On dark theme a lightened

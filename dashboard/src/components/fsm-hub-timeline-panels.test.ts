@@ -30,7 +30,7 @@ describe('swimlaneSegmentColor', () => {
   })
 
   it('returns handoff color for HandingOff', () => {
-    expect(swimlaneSegmentColor('HandingOff')).toBe('bg-[rgba(167,139,250,0.5)]')
+    expect(swimlaneSegmentColor('HandingOff')).toBe('bg-[var(--purple-50)]')
   })
 
   it('returns default active color for unknown values', () => {

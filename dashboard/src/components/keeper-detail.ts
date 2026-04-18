@@ -157,7 +157,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   }
 
   const toneClass = keeper.paused || socialFallbackActive || runtimeBlocker || blocker || hbStale
-    ? 'border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)]'
+    ? 'border-[var(--warn-24)] bg-[var(--warn-8)]'
     : 'border-[var(--card-border)] bg-[var(--white-3)]'
   const runtimeBlockerLabel = runtimeBlockerClass
     ? {
@@ -175,7 +175,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     <div class="px-6 pt-4">
       <div class="rounded border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[12px] text-[var(--text-body)]">
         ${keeper.paused
-          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">일시정지</span>
+          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[var(--warn-14)] text-[var(--warn)]">일시정지</span>
             <button
               class="inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition-colors disabled:opacity-50"
               disabled=${directiveLoading.value}
@@ -192,24 +192,24 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
             ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
           : null}
         ${hbStale
-          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">Heartbeat stale</span>
+          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[var(--bad-soft)] text-[var(--bad)]">Heartbeat stale</span>
             <span>마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>`
           : null}
         ${continueGate
           ? html`
-              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">
+              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[var(--warn-14)] text-[var(--warn)]">
                 계속 진행 승인 대기
               </span>
             `
           : socialFallbackActive
           ? html`
-              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">
+              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[var(--warn-14)] text-[var(--warn)]">
                 Social fallback
               </span>
             `
           : runtimeBlockerClass
           ? html`
-              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">
+              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold bg-[var(--bad-soft)] text-[var(--bad)]">
                 ${runtimeBlockerLabel ?? 'Runtime blocker'}
               </span>
             `
@@ -356,7 +356,7 @@ function KeeperClearContextDialog({
           </span>
         </label>
 
-        <div class="rounded border border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
+        <div class="rounded border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
           마지막 수단용 액션입니다. 잘못된 continuity가 재주입될 때만 쓰고, 실행 후 즉시 상태를 다시 확인하세요.
         </div>
 
@@ -1233,7 +1233,7 @@ export function KeeperDetailOverlay() {
       onClose=${closeKeeperDetail}
       initialFocusRef=${closeButtonRef}
       overlayClass="keeper-detail-overlay fixed inset-0 z-[60] bg-[var(--white-5)]/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
-      panelClass="w-full max-w-[1100px] max-h-[90vh] overflow-y-auto bg-[#0d1526] rounded border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.5)]"
+      panelClass="w-full max-w-[1100px] max-h-[90vh] overflow-y-auto bg-[#0d1526] rounded border border-[var(--card-border)] shadow-[0_24px_64px_var(--black-50)]"
     >
 
         ${'' /* ── Sticky Header ── */}
@@ -1375,7 +1375,7 @@ export function KeeperDetailOverlay() {
                   </span>`
                 : null}
               ${keeper.social_model_recognized === false
-                ? html`<span class="inline-flex items-center gap-1.5 text-[11px] text-[var(--warn)] px-2.5 py-1 rounded border border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)]">
+                ? html`<span class="inline-flex items-center gap-1.5 text-[11px] text-[var(--warn)] px-2.5 py-1 rounded border border-[var(--warn-24)] bg-[var(--warn-8)]">
                     소셜 모델
                     ${keeper.configured_social_model
                       ? html`<span class="font-mono text-[var(--text-body)]">${keeper.configured_social_model}</span>`

@@ -74,7 +74,7 @@ function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: '
   const offCls = 'text-[var(--text-dim)] border-[var(--white-8)]'
   const onCls =
     tone === 'warn'
-      ? 'text-[#f59e0b] border-[rgba(251,191,36,0.3)] bg-[rgba(251,191,36,0.08)]'
+      ? 'text-[#f59e0b] border-[rgba(251,191,36,0.3)] bg-[var(--warn-8)]'
       : 'text-[#22c55e] border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.08)]'
   return html`
     <span

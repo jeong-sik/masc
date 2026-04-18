@@ -54,11 +54,11 @@ export function filterDiagnostics(
 function toneClass(status: string): string {
   switch (status) {
     case 'ready':
-      return 'border-[rgba(34,197,94,0.28)] bg-[rgba(34,197,94,0.10)] text-[#bbf7d0]'
+      return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[#bbf7d0]'
     case 'warn':
       return 'border-[rgba(250,204,21,0.28)] bg-[rgba(250,204,21,0.10)] text-[#fde68a]'
     case 'invalid_env':
-      return 'border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.10)] text-[#fecdd3]'
+      return 'border-[var(--rose-28)] bg-[var(--rose-10)] text-[#fecdd3]'
     default:
       return 'border-[var(--card-border)] bg-[var(--white-6)] text-[var(--text-muted)]'
   }
@@ -253,10 +253,10 @@ function fmtBoolean(value: boolean | null | undefined): string {
 }
 
 function probeTone(signal: string | null | undefined, probeOk: boolean | null | undefined): string {
-  if (probeOk === false) return 'border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.10)] text-[#fecdd3]'
+  if (probeOk === false) return 'border-[var(--rose-28)] bg-[var(--rose-10)] text-[#fecdd3]'
   switch (signal) {
     case 'likely_reused':
-      return 'border-[rgba(34,197,94,0.28)] bg-[rgba(34,197,94,0.10)] text-[#bbf7d0]'
+      return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[#bbf7d0]'
     case 'possible_reuse':
       return 'border-[rgba(250,204,21,0.28)] bg-[rgba(250,204,21,0.10)] text-[#fde68a]'
     case 'no_visible_reuse':
@@ -335,7 +335,7 @@ function RuntimeProbePanel() {
 
       ${state.value.error
         ? html`
-            <div class="rounded border border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.10)] px-3 py-3 text-[12px] text-[#fecdd3]">
+            <div class="rounded border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-3 text-[12px] text-[#fecdd3]">
               ${state.value.error}
             </div>
           `
@@ -403,7 +403,7 @@ function RuntimeProbePanel() {
               ? html`
                   <div class="mt-3 flex flex-col gap-2">
                     ${probe.errors?.map(item => html`
-                      <div class="rounded border border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.10)] px-3 py-2 text-[12px] text-[#fecdd3]">
+                      <div class="rounded border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-2 text-[12px] text-[#fecdd3]">
                         ${item}
                       </div>
                     `)}

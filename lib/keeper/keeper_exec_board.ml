@@ -35,7 +35,11 @@ let ensure_keeper_board_post_args ~author ~source = function
     in
     `Assoc
       ([ "author", `String author
-       ; "post_kind", `String "automation"
+       (* Variant SSOT: bind the literal to the Variant constructor so a
+          rename of [Automation_post] forces this site to update too.
+          Same pattern family as #8354 / #8392. *)
+       ; "post_kind", `String
+           (Board_core_classify.post_kind_to_string Board_types.Automation_post)
        ; "meta", keeper_board_meta ~source raw_meta
        ]
        @ fields)

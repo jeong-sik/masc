@@ -21,6 +21,13 @@
     No action classification — metrics are derived from the run result.
 
     Exposed for testing. *)
+(** Cheap persona-derived predicate: returns [true] when the keeper's
+    [mention_targets] include one of the verifier role tokens
+    (["verifier"; "검증자"]). Used by the dashboard decision-record JSON and
+    prompt builder to distinguish verification-authority keepers from the
+    rest of the fleet. Pure — does not re-read the persona profile. *)
+val is_verifier_role_keeper : Keeper_types.keeper_meta -> bool
+
 val update_metrics_from_result :
   Keeper_types.keeper_meta ->
   latency_ms:int ->

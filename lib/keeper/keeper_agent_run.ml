@@ -1451,8 +1451,14 @@ let run_turn
                        "[LAST TURN] Turn %d/%d. This is your final turn. You MUST emit a \
                         [STATE]...[/STATE] block now summarizing what you accomplished \
                         and what the next generation should do. Do NOT start new tool \
-                        work. If you need more turns, call extend_turns. If you claimed \
-                        a task, call keeper_task_done NOW before session ends."
+                        work. Three escape hatches, in priority order: \
+                        (1) call extend_turns if the task is almost finished and more \
+                        turns will close it out; \
+                        (2) call masc_board_post to hand off the current task and ask \
+                        another keeper or operator for judgment when the work needs a \
+                        decision you cannot make alone; \
+                        (3) if you claimed a task, call keeper_task_done NOW before \
+                        session ends."
                        turn
                        max_turns)
                 else if is_retry
@@ -1471,7 +1477,11 @@ let run_turn
                     ctx
                     (Printf.sprintf
                        "[BUDGET] %d/%d turns used. Wrap up current work and emit a \
-                        [STATE] block. Call extend_turns if you need more time."
+                        [STATE] block. If more turns will genuinely finish the task, \
+                        call extend_turns. If you are blocked on a decision or \
+                        external input, post a question to the board via \
+                        masc_board_post rather than burning turns retrying — that is \
+                        the intended judgment-escalation path."
                        turn
                        max_turns)
                 else ctx

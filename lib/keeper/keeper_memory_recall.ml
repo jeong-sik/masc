@@ -53,6 +53,65 @@ let read_keeper_memory_summary
   in
   summarize_memory_bank_lines lines ~recent_limit
 
+let read_memory_horizon_counts
+    (config : Coord.config)
+    ~(name : string)
+    ~(max_bytes : int)
+    ~(max_lines : int) : (string * int) list =
+  let lines =
+    read_file_tail_lines
+      (keeper_memory_bank_path config name)
+      ~max_bytes
+      ~max_lines
+  in
+  let counts : (string, int) Hashtbl.t = Hashtbl.create 8 in
+  List.iter
+    (fun line ->
+      match parse_memory_bank_row line with
+      | None -> ()
+      | Some row ->
+          let cur =
+            Option.value ~default:0
+              (Hashtbl.find_opt counts row.horizon)
+          in
+          Hashtbl.replace counts row.horizon (cur + 1))
+    lines;
+  counts
+  |> Hashtbl.to_seq
+  |> List.of_seq
+  |> List.sort (fun (ka, va) (kb, vb) ->
+         let c = compare vb va in
+         if c <> 0 then c else String.compare ka kb)
+
+let read_recent_memory_texts
+    (config : Coord.config)
+    ~(name : string)
+    ~(horizon : string)
+    ~(max_bytes : int)
+    ~(max_lines : int)
+    ~(limit : int) : string list =
+  let lines =
+    read_file_tail_lines
+      (keeper_memory_bank_path config name)
+      ~max_bytes
+      ~max_lines
+  in
+  lines
+  |> List.filter_map parse_memory_bank_row
+  |> List.filter (fun row ->
+         let row_horizon =
+           if String.trim row.horizon = ""
+           then memory_horizon_of_kind row.kind
+           else row.horizon
+         in
+         String.equal row_horizon horizon)
+  |> List.sort (fun a b ->
+         let c = compare b.priority a.priority in
+         if c <> 0 then c else compare b.ts_unix a.ts_unix)
+  |> dedup_by_key (fun row -> normalize_memory_text_key row.text)
+  |> take (max 0 limit)
+  |> List.map (fun row -> row.text)
+
 (** Detect whether a query is asking about past conversation memory.
 
     Keywords are split by language for maintainability.

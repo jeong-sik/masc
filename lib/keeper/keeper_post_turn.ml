@@ -63,6 +63,11 @@ let apply_post_turn_lifecycle
       ~(meta : keeper_meta)
       ~(ctx : working_context)
       ~(oas_checkpoint : Agent_sdk.Checkpoint.t option) : keeper_meta =
+    let progress_path =
+      Filename.concat
+        (Filename.concat (Filename.concat (Filename.dirname base_dir) "keepers") meta.name)
+        "progress.md"
+    in
     (* RFC-MASC-001 Phase 1: try structured working_context first,
        then fall back to text-based [STATE] parsing from messages. *)
     let structured_snapshot =
@@ -87,6 +92,21 @@ let apply_post_turn_lifecycle
            cannot grow unboundedly even when the LLM produces a longer
            [STATE] block each turn. *)
         let snapshot = Keeper_memory_policy.cap_snapshot snapshot in
+        let progress_snapshot =
+          Keeper_memory_policy.forward_looking_snapshot snapshot
+        in
+        (match
+           Keeper_memory_policy.write_progress_snapshot_path
+             ~path:progress_path
+             ~generation:meta.runtime.generation
+             ~updated_at:(now_iso ())
+             progress_snapshot
+         with
+         | Ok () -> ()
+         | Error err ->
+             Log.Keeper.warn
+               "keeper:%s progress snapshot write failed: %s"
+               meta.name err);
         {
           meta with
           continuity_summary = keeper_state_snapshot_to_summary_text snapshot;

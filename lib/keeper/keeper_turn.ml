@@ -227,20 +227,81 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             let build_turn_prompt ~base_system_prompt ~messages
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
-              (* 1. Continuity snapshot *)
+              (* 1. Recovery + tiered memory context *)
               let continuity_snapshot = latest_state_snapshot_from_messages messages in
+              let progress_cache =
+                Keeper_memory_policy.read_progress_snapshot_cache
+                  ~config:ctx.config ~name:meta.name
+              in
+              let recovery_snapshot, recovery_generation, recovery_source =
+                match
+                  progress_cache
+                with
+                | Some cache ->
+                    (Some cache.snapshot, cache.generation, "progress_log")
+                | None ->
+                    (match continuity_snapshot with
+                     | Some snapshot -> (Some snapshot, Some meta.runtime.generation, "checkpoint")
+                     | None ->
+                         (match
+                            Keeper_memory_policy.state_snapshot_of_summary_text
+                              meta.continuity_summary
+                          with
+                          | Some snapshot ->
+                              (Some snapshot, None, "meta_summary")
+                          | None -> (None, None, "none")))
+              in
               let continuity_text =
-                let summary =
-                  match continuity_snapshot with
-                  | Some s -> keeper_state_snapshot_to_summary_text s
-                  | None ->
-                    continuity_fallback_summary_text
-                      ~continuity_summary:meta.continuity_summary
-                      ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
+                let recovery_sections =
+                  match recovery_snapshot with
+                  | None -> []
+                  | Some snapshot ->
+                      Keeper_memory_policy.prompt_memory_sections_of_snapshot
+                        ~current_generation:meta.runtime.generation
+                        ?source_generation:recovery_generation
+                        snapshot
                 in
-                if summary = "" || summary = "No continuity snapshot available."
-                then ""
-                else "Recent continuity snapshot:\n" ^ summary
+                let durable_memory =
+                  read_recent_memory_texts ctx.config
+                    ~name:meta.name
+                    ~horizon:Keeper_memory_policy.long_term_horizon
+                    ~max_bytes:(128 * 1024)
+                    ~max_lines:200
+                    ~limit:3
+                in
+                let durable_text =
+                  match durable_memory with
+                  | [] -> ""
+                  | items ->
+                      "Long-term memory:\n- "
+                      ^ String.concat "\n- " (List.map String.trim items)
+                in
+                let recovery_fallback =
+                  if recovery_sections <> [] then []
+                  else
+                    let summary =
+                      match continuity_snapshot with
+                      | Some s -> keeper_state_snapshot_to_summary_text s
+                      | None ->
+                          continuity_fallback_summary_text
+                            ~continuity_summary:meta.continuity_summary
+                            ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
+                    in
+                    if summary = "" || summary = "No continuity snapshot available."
+                    then []
+                    else [ summary ]
+                in
+                let blocks =
+                  (if recovery_sections = [] then recovery_fallback else recovery_sections)
+                  @ (if String.trim durable_text = "" then [] else [ durable_text ])
+                in
+                match blocks with
+                | [] -> ""
+                | _ ->
+                    Printf.sprintf
+                      "Recent continuity snapshot (%s):\n%s"
+                      recovery_source
+                      (String.concat "\n\n" blocks)
               in
               (* 2. Skill route *)
               let skill_route_text =

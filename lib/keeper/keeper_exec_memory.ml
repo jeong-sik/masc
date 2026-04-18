@@ -8,6 +8,8 @@ let contains_ci = String_util.contains_substring_ci
 
 type memory_match = {
   kind: string;
+  horizon: string;
+  source: string option;
   text: string;
   priority: int;
   generation: int;
@@ -31,6 +33,13 @@ let search_memory_bank
          try
            let j = Yojson.Safe.from_string line in
            let kind = Safe_ops.json_string ~default:"" "kind" j |> String.trim in
+           let horizon =
+             Keeper_memory_policy.memory_horizon_of_json ~kind j
+           in
+           let source =
+             Safe_ops.json_string ~default:"" "source" j
+             |> String.trim
+           in
            let text = Safe_ops.json_string ~default:"" "text" j |> String.trim in
            let priority = Safe_ops.json_int ~default:0 "priority" j in
            let generation = Safe_ops.json_int ~default:0 "generation" j in
@@ -38,7 +47,18 @@ let search_memory_bank
            let ts = Safe_ops.json_string ~default:"" "ts" j in
            let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
            if kind = "" || text = "" then None
-           else Some { kind; text; priority; generation; turn; ts; score = ts_unix }
+           else
+             Some {
+               kind;
+               horizon;
+               source = if source = "" then None else Some source;
+               text;
+               priority;
+               generation;
+               turn;
+               ts;
+               score = ts_unix;
+             }
          with Yojson.Json_error _ -> None)
   in
   let total_candidates = List.length parsed in
@@ -69,11 +89,26 @@ let search_memory_bank
          let recency_weight =
            max 0.0 (min 1.0 (1.0 -. (0.3 *. (age /. max_age))))
          in
+         let horizon_weight =
+           match m.horizon with
+           | h when h = Keeper_memory_policy.long_term_horizon -> 1.10
+           | h when h = Keeper_memory_policy.short_term_horizon ->
+               if m.generation >= meta.runtime.generation then 1.05 else 0.65
+           | _ -> 1.0
+         in
+         let source_bonus =
+           match m.source with
+           | Some "cross_trace_recurrence" -> 0.04
+           | Some "progress_consolidation" -> 0.02
+           | _ -> 0.0
+         in
          let synthetic_penalty =
            if contains_ci m.text "[SYNTHETIC]" then -0.1 else 0.0
          in
          let score =
-           (float_of_int m.priority /. 100.0) *. recency_weight +. synthetic_penalty
+           ((float_of_int m.priority /. 100.0) *. recency_weight *. horizon_weight)
+           +. synthetic_penalty
+           +. source_bonus
          in
          let rounded = Float.round (score *. 1000.0) /. 1000.0 in
          { m with score = rounded })
@@ -88,6 +123,11 @@ let search_memory_bank
 let memory_match_to_json (m : memory_match) : Yojson.Safe.t =
   `Assoc [
     "kind", `String m.kind;
+    "horizon", `String m.horizon;
+    ( "source",
+      match m.source with
+      | Some source -> `String source
+      | None -> `Null );
     "text", `String m.text;
     "priority", `Int m.priority;
     "generation", `Int m.generation;
@@ -242,10 +282,30 @@ let keeper_memory_search_json
   Yojson.Safe.to_string result
 ;;
 
-let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_context) =
-  let continuity =
+let keeper_context_status_json
+    ~(config : Coord.config)
+    ~(meta : keeper_meta)
+    ~(ctx_work : working_context) =
+  let progress_snapshot =
+    Keeper_memory_policy.read_progress_snapshot ~config ~name:meta.name
+  in
+  let checkpoint_snapshot =
     Keeper_memory_policy.latest_state_snapshot_from_messages
       (messages_of_context ctx_work)
+  in
+  let continuity, recovery_source =
+    match progress_snapshot with
+    | Some snapshot -> (Some snapshot, "progress_log")
+    | None ->
+        (match checkpoint_snapshot with
+         | Some snapshot -> (Some snapshot, "checkpoint")
+         | None ->
+             (match
+                Keeper_memory_policy.state_snapshot_of_summary_text
+                  meta.continuity_summary
+              with
+              | Some snapshot -> (Some snapshot, "meta_summary")
+              | None -> (None, "none")))
   in
   let continuity_summary =
     match continuity with
@@ -260,6 +320,15 @@ let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_contex
     if ctx_work.max_tokens = 0
     then 0.0
     else float_of_int ctx_tokens /. float_of_int ctx_work.max_tokens
+  in
+  let memory_tier_summary =
+    Keeper_memory_recall.read_memory_horizon_counts config
+      ~name:meta.name
+      ~max_bytes:(128 * 1024)
+      ~max_lines:300
+    |> List.map (fun (horizon, count) ->
+           horizon,
+           `Int count)
   in
   (* Give the keeper the three canonical playground paths from the SSOT
      so it does not need to re-interpolate ".masc/playground/<name>/..."
@@ -293,6 +362,8 @@ let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_contex
             | None -> `Null
             | Some snapshot -> Keeper_memory_policy.keeper_state_snapshot_to_json snapshot )
         ; "continuity_summary", `String continuity_summary
+        ; "recovery_source", `String recovery_source
+        ; "memory_tier_summary", `Assoc memory_tier_summary
         ])
 ;;
 

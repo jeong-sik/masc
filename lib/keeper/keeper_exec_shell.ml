@@ -1083,8 +1083,15 @@ let handle_keeper_shell
       (* Non-overridable deny layer (runs after preset gate).
          First match wins — specific patterns before generic. *)
       let hint_of_category = function
-        | "chaining"        -> "Call the tool multiple times instead of chaining commands."
-        | "redirect"        -> "Redirects are not allowed. Use keeper_fs_edit to write files."
+        | "chaining"        ->
+          "`&&`, `||`, and `;` chaining are blocked in readonly shell. \
+           Issue one command per keeper_shell call, or use a dedicated \
+           sub-op: git_log, git_status, git_diff, git_worktree, find, \
+           ls, rg, head, tail, wc, tree, cat, pwd."
+        | "redirect"        ->
+          "Redirects (`>`, `>>`, `| tee`) are blocked in readonly shell. \
+           Use keeper_fs_edit to write files, or keeper_bash with the \
+           coding preset for write operations."
         | "git_write"       -> "Use keeper_bash with coding preset for git write operations."
         | "package_install" -> "Package installation requires keeper_bash with coding preset."
         | "destructive"     -> "Use keeper_bash for write operations, not readonly shell."

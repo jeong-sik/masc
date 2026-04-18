@@ -390,6 +390,84 @@ let test_playground_guard_traversal () =
   Alcotest.(check bool) "raw traversal WOULD match prefix (proves canonicalization needed)"
     true would_match_raw
 
+(* ── keeper_shell readonly hints teach the model about alternatives ───── *)
+
+let make_readonly_meta name =
+  let json =
+    `Assoc
+      [
+        ("name", `String name);
+        ("agent_name", `String ("agent-" ^ name));
+        ("trace_id", `String ("trace-" ^ name));
+        ("goal", `String "readonly hint test");
+      ]
+  in
+  match Keeper_types.meta_of_json json with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("make_readonly_meta failed: " ^ err)
+
+let parse_hint raw =
+  Yojson.Safe.from_string raw
+  |> Json.member "hint"
+  |> Json.to_string_option
+
+let parse_category raw =
+  Yojson.Safe.from_string raw
+  |> Json.member "category"
+  |> Json.to_string_option
+
+(* task-238: terse "X blocked" error caused model retry loops. Hint must
+   redirect the model to either separate calls or a specific sub-op. *)
+let test_readonly_chaining_hint_lists_subops () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "chain-hint" in
+  let raw =
+    Keeper_exec_shell.handle_keeper_shell
+      ~config ~meta
+      ~args:(`Assoc [
+        ("op", `String "bash");
+        ("command", `String "git status && git log --oneline -5");
+      ])
+  in
+  Alcotest.(check (option string)) "category is chaining"
+    (Some "chaining") (parse_category raw);
+  (match parse_hint raw with
+   | None -> Alcotest.fail ("expected hint field, got: " ^ raw)
+   | Some hint ->
+     Alcotest.(check bool) "hint names the separate-call alternative" true
+       (String_util.contains_substring hint "one command per keeper_shell call");
+     (* A concrete list of sub-ops prevents the model from guessing. *)
+     List.iter (fun sub_op ->
+       Alcotest.(check bool)
+         (Printf.sprintf "hint lists %s sub-op" sub_op) true
+         (String_util.contains_substring hint sub_op)
+     ) [ "git_log"; "git_status"; "git_diff"; "rg"; "ls"; "cat" ])
+
+let test_readonly_redirect_hint_points_at_fs_edit () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "redirect-hint" in
+  let raw =
+    Keeper_exec_shell.handle_keeper_shell
+      ~config ~meta
+      ~args:(`Assoc [
+        ("op", `String "bash");
+        ("command", `String "echo hi > out.txt");
+      ])
+  in
+  Alcotest.(check (option string)) "category is redirect"
+    (Some "redirect") (parse_category raw);
+  match parse_hint raw with
+  | None -> Alcotest.fail ("expected hint field, got: " ^ raw)
+  | Some hint ->
+    Alcotest.(check bool) "hint mentions keeper_fs_edit" true
+      (String_util.contains_substring hint "keeper_fs_edit")
+
 let test_git_write_classification () =
   let is_branch_switch = Masc_mcp.Worker_dev_tools.is_git_branch_switch in
   let is_destructive = Masc_mcp.Worker_dev_tools.is_destructive_bash_operation in
@@ -440,6 +518,12 @@ let () =
         test_docker_hardened_blocks_docker_socket_reference;
       Alcotest.test_case "docker_hardened missing seccomp fails closed" `Quick
         test_docker_hardened_missing_seccomp_profile_fails_closed;
+    ]);
+    ("readonly_hints", [
+      Alcotest.test_case "chaining hint lists sub-ops (task-238)" `Quick
+        test_readonly_chaining_hint_lists_subops;
+      Alcotest.test_case "redirect hint points at keeper_fs_edit" `Quick
+        test_readonly_redirect_hint_points_at_fs_edit;
     ]);
     ("rg_exit_code", [
       Alcotest.test_case "rg exit semantics (0=ok, 1=ok, 2+=error)" `Quick test_rg_exit_code_semantics;

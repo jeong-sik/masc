@@ -1,4 +1,4 @@
-import { get, post, fetchWithTimeout } from './core'
+import { get, post } from './core'
 import { ACTIVITY_TIMEOUT_MS } from '../config/constants'
 import { callMcpTool } from './mcp'
 import {
@@ -46,11 +46,11 @@ export function fetchTaskEvents(taskId: string, limit = 50): Promise<unknown[]> 
 export async function fetchActivityGraph(since?: string): Promise<ActivityGraphResponse | null> {
   const params = since ? `?since=${since}` : ''
   try {
-    const resp = await fetchWithTimeout(`/api/v1/activity/graph${params}`, {}, ACTIVITY_TIMEOUT_MS)
-    if (!resp.ok) {
-      throw new Error(`GET /api/v1/activity/graph failed: ${resp.status} ${resp.statusText}`)
-    }
-    return parseActivityGraphResponse(await resp.json())
+    const raw = await get<unknown>(`/api/v1/activity/graph${params}`, {
+      timeoutMs: ACTIVITY_TIMEOUT_MS,
+      includeActorHeader: false,
+    })
+    return parseActivityGraphResponse(raw)
   } catch (err) {
     if (err instanceof ActionsActivitySchemaDriftError) throw err
     console.debug('[activity] graph fetch failed', err instanceof Error ? err.message : err)
@@ -61,11 +61,11 @@ export async function fetchActivityGraph(since?: string): Promise<ActivityGraphR
 export async function fetchSwimlane(since?: string): Promise<SwimlaneResponse | null> {
   const params = since ? `?since=${since}` : ''
   try {
-    const resp = await fetchWithTimeout(`/api/v1/activity/swimlane${params}`, {}, ACTIVITY_TIMEOUT_MS)
-    if (!resp.ok) {
-      throw new Error(`GET /api/v1/activity/swimlane failed: ${resp.status} ${resp.statusText}`)
-    }
-    return parseSwimlaneResponse(await resp.json())
+    const raw = await get<unknown>(`/api/v1/activity/swimlane${params}`, {
+      timeoutMs: ACTIVITY_TIMEOUT_MS,
+      includeActorHeader: false,
+    })
+    return parseSwimlaneResponse(raw)
   } catch (err) {
     if (err instanceof ActionsActivitySchemaDriftError) throw err
     console.debug('[activity] swimlane fetch failed', err instanceof Error ? err.message : err)

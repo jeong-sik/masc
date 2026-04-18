@@ -23,6 +23,7 @@ type state = {
   mutable expires_at : string option;
   mutable model_used : string option;
   mutable last_error : string option;
+  mutable last_disk_load_unix : float option;
   mutable judgments : (string, Yojson.Safe.t) Hashtbl.t;
 }
 
@@ -70,6 +71,8 @@ let interval_sec () = Env_config.Dashboard_config.governance_judge_interval_sec
 let cache_ttl_sec () =
   float_of_int (max (interval_sec () * 4) 600)
 
+let empty_judgment_reload_cooldown_sec = 30.0
+
 let enabled () = Env_config.Dashboard_config.governance_judge_enabled
 
 let keeper_name = "governance-judge"
@@ -92,6 +95,7 @@ let get_state base_path =
             expires_at = None;
             model_used = None;
             last_error = None;
+            last_disk_load_unix = None;
           judgments = Hashtbl.create 32;
         }
       in
@@ -151,7 +155,18 @@ let load_latest_from_disk base_path =
 let latest_judgments base_path =
   let st = get_state base_path in
   with_lock st (fun () ->
-      if Hashtbl.length st.judgments = 0 then st.judgments <- load_latest_from_disk base_path;
+      if Hashtbl.length st.judgments = 0 then begin
+        let should_reload =
+          match st.last_disk_load_unix with
+          | None -> true
+          | Some last_load ->
+              Unix.gettimeofday () -. last_load >= empty_judgment_reload_cooldown_sec
+        in
+        if should_reload then begin
+          st.judgments <- load_latest_from_disk base_path;
+          st.last_disk_load_unix <- Some (Unix.gettimeofday ())
+        end
+      end;
       Hashtbl.to_seq_values st.judgments |> List.of_seq)
 
 let fresh_judgments_json ~base_path ~limit =
@@ -404,6 +419,7 @@ let refresh_once ~sw ~net
             st.expires_at_unix <- Some (Types.parse_iso8601 expires_at);
             st.model_used <- Some model_used;
             st.last_error <- None;
+            st.last_disk_load_unix <- Some (Unix.gettimeofday ());
             List.iter
               (fun json -> Hashtbl.replace st.judgments (judgment_key json) json)
               judgments)

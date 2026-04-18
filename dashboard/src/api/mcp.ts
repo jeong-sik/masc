@@ -1,6 +1,7 @@
 // MASC Dashboard — MCP-over-HTTP client with session lifecycle
 
 import {
+  apiRequestErrorFromResponse,
   fetchWithTimeout,
   DEFAULT_MCP_TIMEOUT_MS,
   authHeaders,
@@ -103,10 +104,37 @@ function mcpHeaders(extra?: Record<string, string>): Record<string, string> {
   return headers
 }
 
-async function mcpPost(body: unknown, timeoutMs = DEFAULT_MCP_TIMEOUT_MS): Promise<string> {
+function explicitToolActor(args: Record<string, unknown>): string | null {
+  const raw =
+    (typeof args._agent_name === 'string' && args._agent_name.trim() !== '' ? args._agent_name : null)
+    ?? (typeof args.agent_name === 'string' && args.agent_name.trim() !== '' ? args.agent_name : null)
+  return raw?.trim() ?? null
+}
+
+function mcpHeadersForActor(
+  actorName?: string | null,
+  extra?: Record<string, string>,
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    ...authHeaders({ actorName }),
+    'Content-Type': 'application/json',
+    Accept: 'application/json, text/event-stream',
+    ...(extra ?? {}),
+  }
+  if (mcpSessionId) {
+    headers['Mcp-Session-Id'] = mcpSessionId
+  }
+  return headers
+}
+
+async function mcpPost(
+  body: unknown,
+  timeoutMs = DEFAULT_MCP_TIMEOUT_MS,
+  actorName?: string | null,
+): Promise<string> {
   const res = await fetchWithTimeout('/mcp', {
     method: 'POST',
-    headers: mcpHeaders(),
+    headers: mcpHeadersForActor(actorName),
     body: JSON.stringify(body),
   }, timeoutMs)
   // Capture session ID from response
@@ -117,7 +145,7 @@ async function mcpPost(body: unknown, timeoutMs = DEFAULT_MCP_TIMEOUT_MS): Promi
       mcpSessionId = MCP_SESSION_BLOCKED
       throw new Error(MCP_BLOCKED_MESSAGE)
     }
-    throw new Error(`POST /mcp: ${res.status} ${res.statusText}`)
+    throw await apiRequestErrorFromResponse('POST', '/mcp', res)
   }
   return res.text()
 }
@@ -161,7 +189,7 @@ async function ensureSession(): Promise<void> {
           mcpSessionId = MCP_SESSION_BLOCKED
           throw new Error(MCP_BLOCKED_MESSAGE)
         }
-        throw new Error(`POST /mcp initialize: ${res.status} ${res.statusText}`)
+        throw await apiRequestErrorFromResponse('POST', '/mcp initialize', res)
       }
       const sid = res.headers.get('Mcp-Session-Id')
       if (sid) mcpSessionId = sid
@@ -233,9 +261,10 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
   try {
     await ensureSession()
     phase = 'tools/call'
-    const actor = currentDashboardActor()
+    const explicitActor = explicitToolActor(args)
+    const actor = explicitActor ?? currentDashboardActor()
     const toolArgs =
-      args._agent_name == null && args.agent_name == null && actor
+      explicitActor == null && actor
         ? { ...args, _agent_name: actor }
         : args
     const text = await mcpPost({
@@ -246,7 +275,7 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
         arguments: toolArgs,
       },
       id: Number.parseInt(requestId, 10),
-    })
+    }, DEFAULT_MCP_TIMEOUT_MS, actor)
     const parsed = parseMcpHttpResponse(text)
     return extractMcpText(parsed)
   } catch (err) {
@@ -335,4 +364,3 @@ function parseMcpJsonText(text: string): Record<string, unknown> {
   if (!trimmed) return {}
   return JSON.parse(trimmed) as Record<string, unknown>
 }
-

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchDashboardTools, fetchKeeperConfig, fetchToolQuality } from './dashboard'
+import {
+  fetchDashboardGovernance,
+  fetchDashboardTools,
+  fetchKeeperConfig,
+  fetchToolQuality,
+} from './dashboard'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -137,6 +142,29 @@ describe('fetchToolQuality', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/tool-quality?window_hours=24')
     expect(result.window_hours).toBe(24)
     expect(result.sampling_mode).toBe('window_hours')
+  })
+})
+
+describe('fetchDashboardGovernance', () => {
+  it('does not retry structured computation timeouts', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        error: 'computation_timeout',
+        message: 'Dashboard governance timed out after 30s',
+      }), {
+        status: 504,
+        statusText: 'Gateway Timeout',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchDashboardGovernance()).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      status: 504,
+      errorCode: 'computation_timeout',
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
 

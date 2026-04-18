@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
+  apiRequestErrorFromResponse,
   fetchWithTimeout,
   reportToolHostFailure,
   authHeaders,
@@ -8,6 +9,8 @@ const {
   getStoredToken,
   setStoredToken,
 } = vi.hoisted(() => ({
+  apiRequestErrorFromResponse: vi.fn(async (method: string, path: string, res: Response) =>
+    new Error(`${method} ${path}: ${res.status} ${res.statusText}`.trim())),
   fetchWithTimeout: vi.fn(),
   reportToolHostFailure: vi.fn().mockResolvedValue({ ok: true }),
   authHeaders: vi.fn().mockReturnValue({}),
@@ -20,6 +23,7 @@ const {
 }))
 
 vi.mock('./core', () => ({
+  apiRequestErrorFromResponse,
   fetchWithTimeout,
   DEFAULT_MCP_TIMEOUT_MS: 30000,
   authHeaders,
@@ -177,6 +181,9 @@ describe('callMcpTool', () => {
   }, 60_000)
 
   it('preserves an explicit agent_name field when the caller already set one', async () => {
+    authHeaders.mockImplementation((opts?: { actorName?: string | null }) => (
+      opts?.actorName ? { 'X-MASC-Agent': opts.actorName } : {}
+    ))
     setupMcpSessionMocks('sess-explicit')
 
     const { callMcpTool } = await import('./mcp')
@@ -188,6 +195,8 @@ describe('callMcpTool', () => {
     expect(body.params.arguments).toEqual({
       agent_name: 'codex-tool-matrix',
     })
+    const headers = toolCall![1].headers as Record<string, string>
+    expect(headers['X-MASC-Agent']).toBe('codex-tool-matrix')
   }, 60_000)
 
   it('reports tool-host failures after the MCP session is established', async () => {

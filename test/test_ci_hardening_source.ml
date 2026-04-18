@@ -247,6 +247,21 @@ let test_http_write_auth_contracts () =
   check bool "provider runs post requires admin permission" true
     (file_contains_pattern "lib/server/server_routes_http_routes_provider_runs.ml"
        {|with_token_permission_auth ~permission:Types.CanAdmin|});
+  check bool "dashboard delete actions require token-bound admin permission" true
+    (file_contains_pattern "lib/server/server_dashboard_http_delete_actions.ml"
+       {|with_token_permission_auth ~permission:Types.CanAdmin|});
+  check bool "server auth defines public-read cors origin helper" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       "let public_read_cors_origin_opt");
+  check bool "server auth exposes public-read json responder" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       "let respond_public_read_json");
+  check bool "channel gate public reads use constrained cors responder" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_channel_gate.ml"
+       "respond_public_read_json");
+  check bool "artifacts endpoint uses constrained cors responder" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_artifacts.ml"
+       "respond_public_read_json");
   check bool "provider runs route threads state net into dashboard single-run" true
     (file_contains_pattern "lib/server/server_routes_http_routes_provider_runs.ml"
        "~net:state.Mcp_server.net");
@@ -544,6 +559,9 @@ let test_transport_route_contracts () =
   check bool "frontend exposes ws discovery route" true
     (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
        {|Http.Router.get "/ws" websocket_discovery_handler|});
+  check bool "mcp http agent injection preserves explicit legacy agent_name" true
+    (file_contains_pattern "lib/server/server_mcp_transport_http.ml"
+       {|Option.is_some existing_agent || Option.is_some existing_legacy_agent|});
   check bool "common http deps prefer runtime captured in server_state" true
     (file_contains_pattern "lib/server/server_routes_http_common.ml"
        "state.Mcp_server.sw");

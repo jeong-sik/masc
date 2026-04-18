@@ -66,7 +66,7 @@ describe('LivePulseDot component', () => {
     )
     const el = container.querySelector('[data-live-pulse-dot]') as HTMLElement
     expect(el.getAttribute('data-live-pulse-state')).toBe('live')
-    expect(el.className).toContain('emerald')
+    expect(el.className).toContain('var(--ok')
     expect(el.className).toContain('animate-pulse')
   })
 
@@ -77,7 +77,7 @@ describe('LivePulseDot component', () => {
     )
     const el = container.querySelector('[data-live-pulse-dot]') as HTMLElement
     expect(el.getAttribute('data-live-pulse-state')).toBe('stale')
-    expect(el.className).toContain('amber')
+    expect(el.className).toContain('var(--warn')
     // Regression guard: pulse animation MUST be off when stale — a
     // frozen sampler must not look identical to a live one.
     expect(el.className).not.toContain('animate-pulse')

@@ -413,7 +413,7 @@ describe('TilePrimaryAction component (rendered inside ConnectorOverviewStrip)',
     expect(btn).toBeTruthy()
     expect(btn.getAttribute('data-tile-primary-action-tone')).toBe('start')
     expect(btn.textContent?.trim()).toBe('▶ Start')
-    expect(btn.className).toContain('emerald')
+    expect(btn.className).toContain('var(--ok')
   })
 
   it('renders a Stop button (rose) for an up sidecar', () => {
@@ -427,7 +427,7 @@ describe('TilePrimaryAction component (rendered inside ConnectorOverviewStrip)',
     const btn = container.querySelector('[data-tile-primary-action="discord"]') as HTMLButtonElement
     expect(btn.getAttribute('data-tile-primary-action-tone')).toBe('stop')
     expect(btn.textContent?.trim()).toBe('■ Stop')
-    expect(btn.className).toContain('rose')
+    expect(btn.className).toContain('var(--bad')
   })
 
   it('aria-label names the connector + action (screen-reader parity)', () => {
@@ -747,7 +747,7 @@ describe('TileErrorNotice component (rendered inside ConnectorOverviewStrip)', (
     expect(notice).toBeTruthy()
     expect(notice.textContent).toContain('Error')
     expect(notice.textContent).toContain('WebSocket closed 4004')
-    expect(notice.className).toContain('rose')
+    expect(notice.className).toContain('var(--bad')
     expect(notice.getAttribute('role')).toBe('alert')
   })
 
@@ -767,7 +767,7 @@ describe('TileErrorNotice component (rendered inside ConnectorOverviewStrip)', (
     )
     const notice = container.querySelector('[data-tile-notice="stale"]') as HTMLElement
     expect(notice.textContent).toContain('Stale')
-    expect(notice.className).toContain('amber')
+    expect(notice.className).toContain('var(--warn')
   })
 
   it('renders nothing when connector is clean (no ribbon clutter)', () => {

@@ -102,12 +102,12 @@ describe('HeartbeatStreakChip component', () => {
   it('tone class reflects state — emerald for up, rose for down, muted for unknown', () => {
     render(html`<${HeartbeatStreakChip} history=${['up', 'up']} />`, container)
     let el = container.querySelector('[data-heartbeat-streak-chip]')!
-    expect(el.className).toContain('emerald')
+    expect(el.className).toContain('var(--ok')
     render(null, container)
 
     render(html`<${HeartbeatStreakChip} history=${['down']} />`, container)
     el = container.querySelector('[data-heartbeat-streak-chip]')!
-    expect(el.className).toContain('rose')
+    expect(el.className).toContain('var(--bad')
     render(null, container)
 
     render(html`<${HeartbeatStreakChip} history=${['unknown']} />`, container)

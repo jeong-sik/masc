@@ -389,6 +389,16 @@ let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
   | Compute_timeout (key, waiting) ->
       timeout_error_json ~waiting key timeout_sec
 
+let seed_stale_if_missing key ~stale_for value =
+  let ts = now () in
+  atomic_update table (fun map ->
+      match SMap.find_opt key map with
+      | Some _ -> map
+      | None ->
+          SMap.add key
+            (Ready { value; expires_at = ts; stale_until = ts +. stale_for })
+            map)
+
 let invalidate key =
   atomic_update table (fun map -> SMap.remove key map)
 

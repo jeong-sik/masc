@@ -660,6 +660,15 @@ let test_dashboard_timeout_guard_contracts () =
   check bool "server dashboard transport health helper uses cached surface" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        {|cached_surface_json _transport_health_cache|});
+  check bool "shell timeout detector recognizes computation_timeout" true
+    (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
+       {|Some (`String ("Compute timeout" | "computation_timeout"))|});
+  check bool "shell meta cognition seeds stale fallback before refresh" true
+    (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
+       "Dashboard_cache.seed_stale_if_missing key");
+  check bool "namespace-truth pending confirm seeds stale fallback" true
+    (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth_support.ml"
+       "Dashboard_cache.seed_stale_if_missing key");
   check bool "mission refresh dedupes inflight fetches" true
     (file_contains_pattern "dashboard/src/mission-actions.ts"
        "let inflightMissionSnapshotRefresh: Promise<void> | null = null");

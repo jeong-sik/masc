@@ -68,6 +68,25 @@ let test_peek_returns_cached_value () =
   check_json "peeked value" seeded
     (Option.value ~default:`Null peeked)
 
+let test_seed_stale_if_missing_refreshes_in_background ~clock () =
+  Dashboard_cache.invalidate_all ();
+  Dashboard_cache.seed_stale_if_missing "seeded" ~stale_for:30.0
+    (`String "fallback");
+  let immediate =
+    Dashboard_cache.get_or_compute "seeded" ~ttl:1.0 (fun () ->
+        Eio.Time.sleep clock 0.05;
+        `String "fresh")
+  in
+  check_json "seeded cache returns fallback immediately"
+    (`String "fallback") immediate;
+  Eio.Time.sleep clock 0.1;
+  let refreshed =
+    Dashboard_cache.get_or_compute "seeded" ~ttl:1.0 (fun () ->
+        `String "unexpected_recompute")
+  in
+  check_json "background refresh stores fresh value"
+    (`String "fresh") refreshed
+
 (* -- 4. Invalidate removes entry -------------------------------------------- *)
 
 let test_invalidate () =
@@ -320,6 +339,8 @@ let () =
       ( "correctness",
         [
           test_case "cache hit" `Quick test_cache_hit;
+          test_case "seed stale if missing refreshes in background" `Quick
+            (test_seed_stale_if_missing_refreshes_in_background ~clock);
           test_case "peek returns cached value" `Quick
             test_peek_returns_cached_value;
           test_case "invalidate" `Quick test_invalidate;

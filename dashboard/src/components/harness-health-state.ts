@@ -11,7 +11,7 @@ export interface GateDistribution {
   [gate: string]: number
 }
 
-export interface CalibrationStats {
+interface CalibrationStats {
   total_verdicts: number
   approve_count: number
   reject_count: number
@@ -24,7 +24,7 @@ export interface CalibrationStats {
   recent_fallback_reasons?: string[]
 }
 
-export interface HarnessOverview {
+interface HarnessOverview {
   evaluator_status: RailStatus
   pre_compact_status: RailStatus
   handoff_status: RailStatus

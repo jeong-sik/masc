@@ -20,7 +20,7 @@
 
 import { signal, effect, type Signal } from '@preact/signals'
 
-export interface PersistentSignalOptions<T> {
+interface PersistentSignalOptions<T> {
   /** localStorage key. Choose something namespaced like \"dashboard:sidebar-collapsed\". */
   key: string
   /** Value to use when the key is absent / unparseable / storage

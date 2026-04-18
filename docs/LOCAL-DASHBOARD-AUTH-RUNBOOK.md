@@ -202,6 +202,13 @@ Field meanings:
 
 Notes:
 
+- `credential_path` is the persistent on-disk credential file under `<base_path>/.masc/auth/agents/<agent>.json`
+- restarting the server does not require rerunning `login` as long as that credential file still exists
+- the credential file is written with mode `0600` and stores only the SHA256 token hash plus metadata, never the raw bearer
+- `--agent` is just the local operator identity label for this bootstrap flow; `local-admin` is a default example, not a magic suffix
+- the granted power comes from the stored `role="admin"` credential, not from the string `local-admin`
+- rerunning `login` with the same `agent_name` replaces the stored hash immediately, so old raw tokens fail on the next request and the dashboard must log in again
+- `login` is a local CLI bootstrap path, not a remote HTTP endpoint; use it only on a trusted loopback/dev machine
 - the server stores only the SHA256 hash, not the raw bearer
 - keep the raw bearer outside the repo
 - rerunning `login` is the supported local rotation path

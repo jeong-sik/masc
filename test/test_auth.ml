@@ -364,6 +364,75 @@ let test_bootstrap_local_admin_reuses_existing_auth_and_escalates_require_token
                 (Types.show_agent_role cred.role)
           | Error e -> fail (Types.masc_error_to_string e))
 
+let test_bootstrap_local_admin_rotation_invalidates_previous_token () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      let first =
+        match
+          Auth.bootstrap_local_admin dir ~agent_name:"local-admin"
+            ~host:"127.0.0.1" ~port:8935
+        with
+        | Ok bootstrap -> bootstrap
+        | Error e -> fail (Types.masc_error_to_string e)
+      in
+      let second =
+        match
+          Auth.bootstrap_local_admin dir ~agent_name:"local-admin"
+            ~host:"127.0.0.1" ~port:8935
+        with
+        | Ok bootstrap -> bootstrap
+        | Error e -> fail (Types.masc_error_to_string e)
+      in
+      check bool "second bootstrap reuses auth" true second.reused_auth;
+      check bool "rotation changes raw token" true
+        (first.bearer_token <> second.bearer_token);
+      (match
+         Auth.verify_token dir ~agent_name:"local-admin"
+           ~token:first.bearer_token
+       with
+       | Error (Types.InvalidToken _) -> ()
+       | Ok _ -> fail "old token should be invalid after rotation"
+       | Error e -> fail (Types.masc_error_to_string e));
+      match
+        Auth.verify_token dir ~agent_name:"local-admin"
+          ~token:second.bearer_token
+      with
+      | Ok cred ->
+          check string "rotated token stays admin"
+            (Types.show_agent_role Types.Admin)
+            (Types.show_agent_role cred.role)
+      | Error e -> fail (Types.masc_error_to_string e))
+
+let test_bootstrap_local_admin_uses_requested_agent_identity () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      match
+        Auth.bootstrap_local_admin dir ~agent_name:"ops-admin"
+          ~host:"127.0.0.1" ~port:8935
+      with
+      | Error e -> fail (Types.masc_error_to_string e)
+      | Ok bootstrap ->
+          check string "agent name echoed" "ops-admin" bootstrap.agent_name;
+          check string "credential path keyed by agent"
+            (Auth.credential_file dir "ops-admin")
+            bootstrap.credential_path;
+          check bool "dashboard url contains requested agent" true
+            (contains_substring ~needle:"agent=ops-admin"
+               bootstrap.dashboard_url);
+          match
+            Auth.verify_token dir ~agent_name:"ops-admin"
+              ~token:bootstrap.bearer_token
+          with
+          | Ok cred ->
+              check string "requested agent is admin"
+                (Types.show_agent_role Types.Admin)
+                (Types.show_agent_role cred.role)
+          | Error e -> fail (Types.masc_error_to_string e))
+
 let test_permission_denied_for_reader () =
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
@@ -566,6 +635,10 @@ let () =
         test_bootstrap_local_admin_enables_auth_and_returns_login_url;
       test_case "bootstrap local admin reuses existing auth" `Quick
         test_bootstrap_local_admin_reuses_existing_auth_and_escalates_require_token;
+      test_case "bootstrap local admin rotation invalidates previous token"
+        `Quick test_bootstrap_local_admin_rotation_invalidates_previous_token;
+      test_case "bootstrap local admin uses requested agent identity"
+        `Quick test_bootstrap_local_admin_uses_requested_agent_identity;
       test_case "permission denied for reader" `Quick test_permission_denied_for_reader;
       test_case "optional token overrides reader default role"
         `Quick test_optional_token_overrides_reader_default_role;

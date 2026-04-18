@@ -346,6 +346,8 @@ curl -sS http://127.0.0.1:8935/api/v1/dashboard/shell \
   | jq '.auth'
 ```
 
+`--agent` is the persisted admin identity label for this local bootstrap flow. `local-admin` is only the default example: `ops-admin` works the same way, writes `<base_path>/.masc/auth/agents/<agent>.json` with mode `0600`, stores only the SHA256 token hash, survives server restarts, and invalidates the old raw token immediately when you rerun `login` for the same name.
+
 ## Verification
 
 ```bash

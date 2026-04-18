@@ -31,7 +31,7 @@ const SOURCE_LABELS: Record<PromptSourceFilter, string> = {
 function sourceBadgeClass(source: PromptSource): string {
   switch (source) {
     case 'override':
-      return 'text-[var(--warn)] bg-[rgba(250,204,21,0.12)] border-[rgba(250,204,21,0.28)]'
+      return 'text-[var(--warn)] bg-[rgba(250,204,21,0.12)] border-[var(--yellow-bright-28)]'
     case 'file':
       return 'text-[var(--ok-20)] bg-[rgba(34,197,94,0.12)] border-[var(--emerald-28)]'
     case 'missing':

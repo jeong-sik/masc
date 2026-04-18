@@ -57,7 +57,7 @@ function coverageColor(coverage: number): string {
 }
 
 function coverageTone(coverage: number): string {
-  if (coverage >= 0.9) return 'border-[var(--ok-20)] bg-[rgba(74,222,128,0.06)]'
+  if (coverage >= 0.9) return 'border-[var(--ok-20)] bg-[var(--ok-6)]'
   if (coverage >= 0.6) return 'border-[var(--warn-20)] bg-[var(--warn-8)]'
   return 'border-[var(--bad-20)] bg-[var(--bad-6)]'
 }

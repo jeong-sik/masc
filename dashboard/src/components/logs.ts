@@ -172,7 +172,7 @@ export function renderLogMessage(entry: LogEntry): string {
 function sourceTone(source: string): string {
   switch (source) {
     case 'client_tool_host':
-      return 'text-[#dff3ff] bg-[var(--accent-10)] border-[rgba(71,184,255,0.22)]'
+      return 'text-[#dff3ff] bg-[var(--accent-10)] border-[var(--accent-22)]'
     case 'legacy_stderr':
       return 'text-[var(--bad-light)] bg-[rgba(224,80,80,0.12)] border-[rgba(224,80,80,0.18)]'
     case 'legacy_traceln':
@@ -433,7 +433,7 @@ export function LogViewer() {
             </label>
             <button
               type="button"
-              class="logs-refresh-btn rounded border border-[rgba(71,184,255,0.22)] bg-[var(--accent-10)] px-3 py-2 text-[11px] font-medium text-[#dff3ff]"
+              class="logs-refresh-btn rounded border border-[var(--accent-22)] bg-[var(--accent-10)] px-3 py-2 text-[11px] font-medium text-[#dff3ff]"
               onClick=${() => {
                 latestSeq.value = null
                 logResource.reset()

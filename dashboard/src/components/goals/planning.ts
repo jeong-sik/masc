@@ -138,7 +138,7 @@ function KeeperToolActivity() {
   }, [keeperList])
 
   return html`
-    <details class="overview-section-collapsible group overflow-hidden rounded border border-card-border/60 bg-[rgba(9,14,24,0.82)]" open=${true}>
+    <details class="overview-section-collapsible group overflow-hidden rounded border border-card-border/60 bg-[var(--backdrop-deep)]" open=${true}>
       <summary class="flex items-center gap-3 border-b border-card-border/60 px-4 py-3.5 cursor-pointer text-[14px] font-bold text-text-strong transition-colors hover:bg-white/3">
         <div class="min-w-0">
           <div>도구 활동 요약</div>
@@ -265,7 +265,7 @@ export function Planning() {
 
       <${KeeperToolActivity} />
 
-      <section class="rounded border border-card-border/60 bg-[rgba(9,14,24,0.82)] p-4">
+      <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
         <div class="flex items-center justify-between gap-3">
           <div>
             <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">Goal Pipeline</div>

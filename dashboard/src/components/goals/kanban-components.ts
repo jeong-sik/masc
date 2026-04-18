@@ -188,7 +188,7 @@ function TaskColumn({
   }, [listRef])
 
   return html`
-    <section class="flex min-h-[240px] flex-col gap-4 rounded border border-card-border/60 bg-[rgba(9,14,24,0.82)] p-4">
+    <section class="flex min-h-[240px] flex-col gap-4 rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
       <div class="flex items-start justify-between gap-3 border-b border-card-border/50 pb-3">
         <div>
           <h3 class="text-[15px] font-semibold text-text-strong">${title}</h3>

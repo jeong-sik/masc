@@ -56,7 +56,7 @@ function toneClass(status: string): string {
     case 'ready':
       return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[#bbf7d0]'
     case 'warn':
-      return 'border-[rgba(250,204,21,0.28)] bg-[rgba(250,204,21,0.10)] text-[#fde68a]'
+      return 'border-[var(--yellow-bright-28)] bg-[var(--yellow-bright-10)] text-[#fde68a]'
     case 'invalid_env':
       return 'border-[var(--rose-28)] bg-[var(--rose-10)] text-[#fecdd3]'
     default:
@@ -195,7 +195,7 @@ function WarningBlock({
   if (warnings.length === 0) return null
 
   return html`
-    <div class="rounded border border-[rgba(250,204,21,0.28)] bg-[var(--warn-10)] px-3 py-3">
+    <div class="rounded border border-[var(--yellow-bright-28)] bg-[var(--warn-10)] px-3 py-3">
       <div class="mb-2 text-[11px] uppercase tracking-[0.08em] text-[#fde68a]">${title}</div>
       <div class="flex flex-col gap-2">
         ${warnings.map(warning => html`
@@ -258,7 +258,7 @@ function probeTone(signal: string | null | undefined, probeOk: boolean | null | 
     case 'likely_reused':
       return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[#bbf7d0]'
     case 'possible_reuse':
-      return 'border-[rgba(250,204,21,0.28)] bg-[rgba(250,204,21,0.10)] text-[#fde68a]'
+      return 'border-[var(--yellow-bright-28)] bg-[var(--yellow-bright-10)] text-[#fde68a]'
     case 'no_visible_reuse':
       return 'border-[var(--card-border)] bg-[var(--white-6)] text-[var(--text-muted)]'
     default:

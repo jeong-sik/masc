@@ -25,8 +25,8 @@ describe('swimlaneSegmentColor', () => {
   })
 
   it('returns warn color for Compacting', () => {
-    expect(swimlaneSegmentColor('Compacting')).toBe('bg-[rgba(245,158,11,0.45)]')
-    expect(swimlaneSegmentColor('compacting')).toBe('bg-[rgba(245,158,11,0.45)]')
+    expect(swimlaneSegmentColor('Compacting')).toBe('bg-[var(--amber-bright-45)]')
+    expect(swimlaneSegmentColor('compacting')).toBe('bg-[var(--amber-bright-45)]')
   })
 
   it('returns handoff color for HandingOff', () => {
@@ -34,8 +34,8 @@ describe('swimlaneSegmentColor', () => {
   })
 
   it('returns default active color for unknown values', () => {
-    expect(swimlaneSegmentColor('Running')).toBe('bg-[rgba(129,140,248,0.45)]')
-    expect(swimlaneSegmentColor('thinking')).toBe('bg-[rgba(129,140,248,0.45)]')
+    expect(swimlaneSegmentColor('Running')).toBe('bg-[var(--indigo-45)]')
+    expect(swimlaneSegmentColor('thinking')).toBe('bg-[var(--indigo-45)]')
   })
 })
 

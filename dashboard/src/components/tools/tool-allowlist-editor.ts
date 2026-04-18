@@ -608,7 +608,7 @@ export function ToolAllowlistEditor({
                   ${resolvedAllowlist.length > 0
                     ? html`
                       <button type="button"
-                        class="self-start py-1 px-3 rounded text-[10px] font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[rgba(71,184,255,0.22)] cursor-pointer transition-colors"
+                        class="self-start py-1 px-3 rounded text-[10px] font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-22)] cursor-pointer transition-colors"
                         onClick=${() => { customAllowItems.value = [...resolvedAllowlist] }}
                       >현재 resolved list에서 복사 (${resolvedAllowlist.length}개)</button>
                     `

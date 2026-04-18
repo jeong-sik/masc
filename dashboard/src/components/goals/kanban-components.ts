@@ -144,13 +144,15 @@ function KanbanCard({ task }: { task: Task }) {
       `}
 
       <div class="flex flex-wrap items-center gap-2 text-2xs text-text-muted">
-        ${task.completed_at && task.status === 'done'
-          ? html`<span class="rounded border border-ok/25 bg-ok/10 px-2 py-1 text-ok">완�� <${TimeAgo} timestamp=${task.completed_at} /></span>`
-          : task.completed_at && task.status === 'cancelled'
-            ? html`<span class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-2 py-1 text-[var(--bad-light)]">취소 <${TimeAgo} timestamp=${task.completed_at} /></span>`
-            : task.created_at
-              ? html`<span class="rounded border border-card-border/70 bg-white/4 px-2 py-1"><${TimeAgo} timestamp=${task.created_at} /></span>`
-              : null}
+        ${task.status === 'awaiting_verification'
+          ? html`<span class="rounded border border-accent/30 bg-[var(--accent-10)] px-2 py-1 text-accent" title="verifier keeper의 독립 실측을 기다리는 중">검증 대기${task.updated_at ? html` <${TimeAgo} timestamp=${task.updated_at} />` : null}</span>`
+          : task.completed_at && task.status === 'done'
+            ? html`<span class="rounded border border-ok/25 bg-ok/10 px-2 py-1 text-ok">완�� <${TimeAgo} timestamp=${task.completed_at} /></span>`
+            : task.completed_at && task.status === 'cancelled'
+              ? html`<span class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-2 py-1 text-[var(--bad-light)]">취소 <${TimeAgo} timestamp=${task.completed_at} /></span>`
+              : task.created_at
+                ? html`<span class="rounded border border-card-border/70 bg-white/4 px-2 py-1"><${TimeAgo} timestamp=${task.created_at} /></span>`
+                : null}
         ${task.assignee ? html`<span class="rounded border border-accent/20 bg-[var(--accent-10)] px-2 py-1 text-accent">@${task.assignee}</span>` : null}
         <a
           href=${link.href}
@@ -204,16 +206,22 @@ function TaskColumn({
 }
 
 export function TaskBacklog() {
-  const { todo, inProgress, done } = tasksByStatus.value
-  const totalTasks = todo.length + inProgress.length + done.length
+  const { todo, inProgress, awaitingVerification, done } = tasksByStatus.value
+  const totalTasks = todo.length + inProgress.length + awaitingVerification.length + done.length
   const query = taskSearchQuery.value
   const hasSearch = query.trim().length > 0
   const filteredTodo = filterTasksByQuery(todo, query)
   const filteredInProgress = filterTasksByQuery(inProgress, query)
+  const filteredAwaitingVerification = filterTasksByQuery(awaitingVerification, query)
   const filteredDone = filterTasksByQuery(done, query)
-  const filteredTotal = filteredTodo.length + filteredInProgress.length + filteredDone.length
+  const filteredTotal =
+    filteredTodo.length +
+    filteredInProgress.length +
+    filteredAwaitingVerification.length +
+    filteredDone.length
   const sortedTodo = [...filteredTodo].sort(sortByPriority)
   const sortedInProgress = [...filteredInProgress].sort(sortByPriority)
+  const sortedAwaitingVerification = [...filteredAwaitingVerification].sort(sortByPriority)
   const sortedDone = [...filteredDone].sort(sortByTimeDesc)
   const activeDoneVisibleCount = hasSearch ? searchDoneVisibleCount.value : doneVisibleCount.value
   const effectiveDoneVisibleCount = Math.min(activeDoneVisibleCount, sortedDone.length)
@@ -309,6 +317,16 @@ export function TaskBacklog() {
           ${sortedInProgress.length === 0
             ? html`<${EmptyState} message=${emptyColumnMessage ?? '진행 중인 태스크가 없습니다'} compact />`
             : sortedInProgress.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
+        <//>
+        <${TaskColumn}
+          title="검증 대기"
+          count=${sortedAwaitingVerification.length}
+          description="verifier keeper가 completion_contract 정량 기준을 독립 실측 중인 태스크입니다."
+          badgeClass="border border-accent/30 bg-[var(--accent-10)] text-accent"
+        >
+          ${sortedAwaitingVerification.length === 0
+            ? html`<${EmptyState} message=${emptyColumnMessage ?? '검증 대기 중인 태스크가 없습니다'} compact />`
+            : sortedAwaitingVerification.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
         <//>
         <${TaskColumn}
           title="완료"

@@ -74,4 +74,29 @@ describe('TaskBacklog', () => {
       expect(screen.queryByRole('button', { name: /완료 태스크 .*더 보기/ })).not.toBeInTheDocument()
     })
   })
+
+  it('renders awaiting_verification column with task card and pill', async () => {
+    const awaitingTask: Task = {
+      id: 'task-awaiting-001',
+      title: 'Awaiting verification task',
+      status: 'awaiting_verification',
+      priority: 2,
+      description: 'Verifier keeper is measuring completion contract.',
+      created_at: '2026-04-18T00:00:00Z',
+      updated_at: '2026-04-18T00:05:00Z',
+    }
+    tasks.value = [awaitingTask]
+
+    render(h(TaskBacklog, {}))
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: '검증 대기' })).toBeInTheDocument()
+      expect(screen.getByText('Awaiting verification task')).toBeInTheDocument()
+    })
+
+    // Both the column header and the card pill include "검증 대기"; assert two
+    // occurrences so a regression that drops either surface fails loudly.
+    const matches = screen.getAllByText(/검증 대기/)
+    expect(matches.length).toBeGreaterThanOrEqual(2)
+  })
 })

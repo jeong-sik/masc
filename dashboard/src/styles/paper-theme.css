@@ -74,15 +74,48 @@
   --color-text-body: var(--ink-2);
   --color-text-muted: var(--ink-4);
 
-  /* Accents (brass replaces FF gold per design system "selected" role) */
-  --color-accent: var(--forest);
-  --color-accent-soft: var(--forest-fill);
+  /* ───── Semantic tokens used by the component sweeps
+     (#8271 #8273 #8278 #8281 #8284 #8285 #8288)
+     ────────────────────────────────────────────────────────────
+     The sweeps migrated every Tailwind arbitrary-color class to
+     `var(--token)` references drawn from variables.css. Under
+     [data-theme="paper"] each one must map to the design-system
+     warm-paper equivalent so the cascade rerenders correctly
+     without touching any component. Ordered by role. */
+
+  /* ok — Running, emerald-group */
+  --ok: var(--forest);
+  --ok-10: var(--forest-fill);
+  --ok-20: var(--forest-fill);
+
+  /* warn — Failing / Overflowed, amber-group */
+  --warn: var(--ember);
+  --warn-10: var(--ember-fill);
+  --warn-20: var(--ember-fill);
+  --warn-bright: var(--ember-line);
+
+  /* bad — Crashed / Dead, red-group */
+  --bad: var(--brick);
+  --bad-10: var(--brick-fill);
+  --bad-20: var(--brick-fill);
+  --bad-light: var(--brick);
+  --bad-soft: var(--brick-fill);
+
+  /* accent — Working / Info, slate-group.
+     #8284 sweep collapsed sky/blue/cyan/teal/indigo/violet/... here. */
+  --accent: var(--slate);
+  --accent-10: var(--slate-fill);
+  --accent-20: var(--slate-fill);
+  --accent-soft: var(--slate-fill);
+
+  /* Legacy FF-namespaced tokens — kept for any component the
+     sweeps haven't reached yet. */
+  --color-accent: var(--slate);
+  --color-accent-soft: var(--slate-fill);
   --color-ff-gold: var(--brass);
   --color-ff-gold-bright: var(--brass-line);
   --color-ff-gold-dim: var(--brass-fill);
   --color-ff-crystal: var(--slate);
-
-  /* Status roles — keeper FSM mapping from design system */
   --color-ok: var(--forest);
   --color-warn: var(--ember);
   --color-bad: var(--brick);
@@ -90,9 +123,6 @@
   --color-agent-idle: var(--ink-4);
   --color-agent-offline: var(--ink-5);
   --color-agent-busy: var(--brass);
-
-  --bad-light: var(--brick-line);
-  --warn-bright: var(--ember-line);
 
   /* Paused (plum) + selected (brass) — under paper theme both map
      to the design system's solid accent, letting the 20% fill sit

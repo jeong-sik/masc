@@ -51,6 +51,21 @@
   --bad-10: rgba(239, 68, 68, 0.10);
   --bad-20: rgba(239, 68, 68, 0.20);
 
+  /* Semantic - Paused (Plum). Introduced for the 12-keeper-state spec
+     in the Anyang Sleepers design system. On dark theme a lightened
+     plum keeps the chip legible against navy; the paper theme
+     overrides this to the solid plum #5C3E56 via paper-theme.css. */
+  --paused: #a789a2;
+  --paused-10: rgba(167, 137, 162, 0.10);
+  --paused-20: rgba(167, 137, 162, 0.22);
+
+  /* Semantic - Selected (Brass). Reuses the existing FF gold hue as
+     the "selected / highlighted" role the design system reserves for
+     brass. Paper theme overrides to #8C6A1E. */
+  --select: #c8a84e;
+  --select-10: rgba(200, 168, 78, 0.10);
+  --select-20: rgba(200, 168, 78, 0.22);
+
   /* Overlays (White Alpha) — bumped from 3/5 to 4/6 for clearer surface elevation */
   --white-3: rgba(255, 255, 255, 0.04);
   --white-5: rgba(255, 255, 255, 0.06);

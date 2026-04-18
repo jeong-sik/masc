@@ -28,7 +28,15 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
-type StatusChipTone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral' | ''
+type StatusChipTone =
+  | 'ok'
+  | 'warn'
+  | 'bad'
+  | 'info'
+  | 'neutral'
+  | 'paused'
+  | 'select'
+  | ''
 
 const BASE =
   'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider'
@@ -39,7 +47,48 @@ const SEMANTIC_TONE: Record<StatusChipTone, string> = {
   bad: 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]',
   info: 'border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--accent)]',
   neutral: 'border-[var(--white-10)] bg-[var(--white-5)] text-[var(--text-muted)]',
+  paused: 'border-[var(--paused-20)] bg-[var(--paused-10)] text-[var(--paused)]',
+  select: 'border-[var(--select-20)] bg-[var(--select-10)] text-[var(--select)]',
   '': 'border-[var(--white-10)] bg-[var(--white-5)] text-[var(--text-muted)]',
+}
+
+/** 12 keeper lifecycle states → StatusChip tone.
+ *
+ * Mapping follows the Anyang Sleepers design system: twelve runtime
+ * states collapse into five visual groups because an operator
+ * reading a row doesn't need crashed vs. dead separated in color —
+ * both read as "error". Compaction / handing_off / draining all
+ * read as "working", which is the slate/info tone.
+ *
+ * Exported so every surface that renders keeper status uses the
+ * same palette. Takes an unknown string and returns 'neutral' for
+ * unrecognised input rather than throwing — a new state added to
+ * the backend FSM will render as neutral until this map is updated,
+ * which beats a runtime error in a row of 40 keepers.
+ */
+export function keeperStateTone(state: string): StatusChipTone {
+  switch (state) {
+    case 'running':
+      return 'ok'
+    case 'compacting':
+    case 'handing_off':
+    case 'draining':
+      return 'info'
+    case 'failing':
+    case 'overflowed':
+    case 'restarting':
+      return 'warn'
+    case 'paused':
+      return 'paused'
+    case 'crashed':
+    case 'dead':
+      return 'bad'
+    case 'stopped':
+    case 'offline':
+      return 'neutral'
+    default:
+      return 'neutral'
+  }
 }
 
 /** Pure: true when `tone` is one of the semantic enum members. Raw

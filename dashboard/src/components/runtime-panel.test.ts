@@ -93,8 +93,9 @@ describe('RuntimePanel', () => {
       'runtime-details-verification',
     ]
     for (const id of detailIds) {
-      const el = container.querySelector(`[data-testid="${id}"]`)
-      expect(el, `missing ${id}`).not.toBeNull()
+      const el = container.querySelector(`#${id}`)
+      expect(el, `missing #${id}`).not.toBeNull()
+      expect(el?.tagName.toLowerCase()).toBe('details')
       expect((el as HTMLDetailsElement).open).toBe(false)
     }
   })

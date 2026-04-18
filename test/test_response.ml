@@ -372,7 +372,9 @@ let test_task_completed () =
   assert_equal_string "task_id" "task-001" (json_get_string resp.data "task_id");
   assert_equal_string "completed_by" "claude" (json_get_string resp.data "completed_by");
   assert_equal_string "notes" "All tests pass" (json_get_string resp.data "notes");
-  assert_equal_string "status" "completed" (json_get_string resp.data "status");
+  (* Issue #8412: status string comes from Types.task_status_to_string Done = "done",
+     not the cosmetic "completed" hand-rolled previously. *)
+  assert_equal_string "status" "done" (json_get_string resp.data "status");
   Printf.printf "  test_task_completed passed\n"
 
 (* ========================================

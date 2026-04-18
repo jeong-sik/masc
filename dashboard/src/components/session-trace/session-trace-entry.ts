@@ -203,7 +203,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
       <div class="flex items-center justify-between mb-1">
         <span class="text-[10px] font-semibold uppercase tracking-wider ${titleColor}">${titleLabel}</span>
         ${hint !== 'plain' ? html`
-          <span class="text-[9px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] uppercase">${hint}</span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] uppercase">${hint}</span>
         ` : null}
       </div>
       <div class="rounded-lg border ${borderColor} ${bgColor} overflow-hidden">

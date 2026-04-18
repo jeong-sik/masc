@@ -175,14 +175,14 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
         <div class="flex items-center gap-2">
           <span class="text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">Eval Quality</span>
           ${allPassed
-            ? html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-[9px] font-semibold bg-[rgba(74,222,128,0.12)] text-[var(--ok)]">ALL PASS</span>`
-            : html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-[9px] font-semibold bg-[rgba(239,68,68,0.12)] text-[var(--bad)]">FAIL</span>`
+            ? html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-[10px] font-semibold bg-[rgba(74,222,128,0.12)] text-[var(--ok)]">ALL PASS</span>`
+            : html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-[10px] font-semibold bg-[rgba(239,68,68,0.12)] text-[var(--bad)]">FAIL</span>`
           }
           ${baseline ? html`<span class="text-[10px] font-medium ${baseline.cls}">${baseline.text}</span>` : null}
         </div>
         <button
           type="button"
-          class="text-[9px] text-[var(--text-dim)] hover:text-[var(--text-muted)] cursor-pointer bg-transparent border-0 p-0"
+          class="text-[10px] text-[var(--text-dim)] hover:text-[var(--text-muted)] cursor-pointer bg-transparent border-0 p-0"
           onClick=${() => void loadEvalData(keeperName)}
           title="새로고침"
         >${loading ? '...' : '\u21bb'}</button>
@@ -203,7 +203,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* Layer Results */}
       ${layers.length > 0 ? html`
         <div class="mb-3">
-          <div class="text-[9px] uppercase tracking-wider text-[var(--text-dim)] mb-1.5">Layer Results</div>
+          <div class="text-[10px] uppercase tracking-wider text-[var(--text-dim)] mb-1.5">Layer Results</div>
           <div class="flex flex-col gap-0.5">
             ${layers.map((layer: EvalLayerResult) => html`<${LayerResultRow} layer=${layer} />`)}
           </div>
@@ -213,7 +213,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* 24h Trend */}
       ${trend ? html`
         <div class="flex items-center gap-2 pt-2 border-t border-[var(--white-8)]">
-          <span class="text-[9px] uppercase tracking-wider text-[var(--text-dim)]">Trend (24h)</span>
+          <span class="text-[10px] uppercase tracking-wider text-[var(--text-dim)]">Trend (24h)</span>
           <span class="text-[11px] font-mono tabular-nums text-[var(--text-muted)]">
             ${trend.oldCoverage.toFixed(2)} \u2192 ${trend.newCoverage.toFixed(2)}
           </span>
@@ -224,7 +224,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ` : null}
 
       ${'' /* Snapshot count */}
-      <div class="mt-2 text-[9px] text-[var(--text-dim)]">${data.count} eval snapshot${data.count !== 1 ? 's' : ''}</div>
+      <div class="mt-2 text-[10px] text-[var(--text-dim)]">${data.count} eval snapshot${data.count !== 1 ? 's' : ''}</div>
     </div>
   `
 }

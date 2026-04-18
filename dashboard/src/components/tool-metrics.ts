@@ -74,7 +74,7 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
         return html`
           <div class="tool-bar-row" key=${item.name}>
             <div class="flex items-center gap-1.5 overflow-hidden">
-              <span class="flex-shrink-0 size-4 rounded text-[9px] font-mono font-bold flex items-center justify-center bg-[var(--white-5)] ${cat.color}">${cat.icon}</span>
+              <span class="flex-shrink-0 size-4 rounded text-[10px] font-mono font-bold flex items-center justify-center bg-[var(--white-5)] ${cat.color}">${cat.icon}</span>
               <span class="text-[var(--text-body)] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px]" title=${item.name}>${item.name}</span>
             </div>
             <span class="px-1.5 py-px rounded-[3px] text-[10px] font-medium text-center text-[var(--text-dim)] bg-[var(--white-4)]">${cat.label}</span>

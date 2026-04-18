@@ -200,7 +200,7 @@ function TrendCell({ name, metric, value, valueClass }: {
     <td class="py-1.5 text-right">
       <div class="flex items-center justify-end gap-1">
         <span class="font-mono ${valueClass}">${value}</span>
-        ${arrow ? html`<span class="text-[9px] ${colorClass}">${arrow}</span>` : null}
+        ${arrow ? html`<span class="text-[10px] ${colorClass}">${arrow}</span>` : null}
       </div>
       ${trend && trend.values.length >= 2
         ? html`<div class="mt-0.5 flex justify-end"><${Sparkline} values=${trend.values} width=${48} height=${14} color=${sColor} /></div>`
@@ -278,10 +278,10 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
               <td class="py-1.5 text-right text-[10px] text-[var(--text-dim)]">${row.model}</td>
               <td class="py-1.5 text-center">
                 ${row.budget_source === 'override_invalid'
-                  ? html`<span class="rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-red-300" title="TOML override가 범위를 벗어남">ERR</span>`
+                  ? html`<span class="rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-300" title="TOML override가 범위를 벗어남">ERR</span>`
                   : row.budget_source === 'override'
-                    ? html`<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-300" title="TOML override 적용됨">OVR</span>`
-                    : html`<span class="text-[9px] text-[var(--text-dim)]">\u2014</span>`}
+                    ? html`<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300" title="TOML override 적용됨">OVR</span>`
+                    : html`<span class="text-[10px] text-[var(--text-dim)]">\u2014</span>`}
               </td>
               <td class="py-1.5 text-center">
                 <button

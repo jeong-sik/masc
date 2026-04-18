@@ -16,9 +16,9 @@ describe('kbdClasses (pure)', () => {
     expect(cls).toContain('text-[var(--text-body)]')
   })
 
-  it('sm variant: 9px text + 1px horizontal padding + dimmed color', () => {
+  it('sm variant: 10px text + tight padding (px-1 py-0) + dimmed color', () => {
     const cls = kbdClasses('sm')
-    expect(cls).toContain('text-[9px]')
+    expect(cls).toContain('text-[10px]')
     expect(cls).toContain('px-1')
     expect(cls).toContain('text-[var(--text-dim)]')
   })

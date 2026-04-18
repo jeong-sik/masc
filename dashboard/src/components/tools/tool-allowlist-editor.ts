@@ -230,7 +230,7 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
               const hiddenToolCount = Math.max(0, group.names.length - visibleNames.length)
               return html`
               <div class="flex flex-col gap-1">
-                <span class="text-[9px] font-bold uppercase tracking-widest text-[var(--text-muted)]">${group.category} (${group.names.length})</span>
+                <span class="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">${group.category} (${group.names.length})</span>
                 <div class="flex flex-wrap gap-1">
                   ${visibleNames.map(name => html`<${ReadOnlyChip} name=${name} />`)}
                   ${!expanded && hiddenToolCount > 0
@@ -361,7 +361,7 @@ function ToolSearchPicker({
           ${showMenu && filtered.length > 0
             ? Array.from(groupedFiltered.entries()).map(([cat, names]) => html`
               ${groupedFiltered.size > 1
-                ? html`<li class="px-3 pt-2 pb-0.5 text-[9px] font-bold uppercase tracking-widest text-[var(--text-muted)] select-none" aria-hidden="true">${cat}</li>`
+                ? html`<li class="px-3 pt-2 pb-0.5 text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] select-none" aria-hidden="true">${cat}</li>`
                 : null}
               ${names.map(name => {
                 const idx = filtered.indexOf(name)
@@ -376,7 +376,7 @@ function ToolSearchPicker({
                     }`}
                   >
                     <span class="text-[11px] text-[var(--text-body)] font-medium shrink-0">${name}</span>
-                    ${usage ? html`<span class="text-[9px] text-[var(--text-muted)] shrink-0 tabular-nums">${usage}x</span>` : null}
+                    ${usage ? html`<span class="text-[10px] text-[var(--text-muted)] shrink-0 tabular-nums">${usage}x</span>` : null}
                     ${descMap.has(name)
                       ? html`<span class="text-[10px] text-[var(--text-muted)] truncate">${descMap.get(name)}</span>`
                       : null}

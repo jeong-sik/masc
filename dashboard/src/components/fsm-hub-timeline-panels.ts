@@ -172,7 +172,7 @@ export function SwimlaneTimeline({
             const isBusiest = busiestLane === lane.short && count > 0
             return html`
               <span
-                class=${`rounded-full border px-1.5 py-0.5 text-[9px] font-mono tabular-nums ${
+                class=${`rounded-full border px-1.5 py-0.5 text-[10px] font-mono tabular-nums ${
                   count === 0
                     ? 'text-[var(--text-dim)] border-[var(--white-8)]'
                     : isBusiest
@@ -184,7 +184,7 @@ export function SwimlaneTimeline({
             `
           })}
         </div>
-        <div class="text-[9px] font-mono text-[var(--text-dim)]">
+        <div class="text-[10px] font-mono text-[var(--text-dim)]">
           <span>${fmtAbs(spanStart)}</span>
           <span class="mx-1 text-[var(--text-muted)]">→</span>
           <span>${fmtAbs(spanEnd)}</span>
@@ -197,7 +197,7 @@ export function SwimlaneTimeline({
           const segments = deriveSwimlaneSegments(observations, lane.key, spanEnd)
           return html`
             <div class="flex items-center gap-2">
-              <div class="w-[44px] shrink-0 text-[9px] font-mono font-semibold text-[var(--text-muted)]">
+              <div class="w-[44px] shrink-0 text-[10px] font-mono font-semibold text-[var(--text-muted)]">
                 ${lane.short}
               </div>
               <div class="flex h-4 flex-1 overflow-hidden rounded border border-[var(--white-8)]" role="group" aria-label=${`${lane.label} swimlane with ${segments.length} segments`}>
@@ -290,7 +290,7 @@ export function SwimlaneTimeline({
           </div>
         </div>
       ` : null}
-      <div class="mt-2 flex flex-wrap items-center gap-2 text-[9px] text-[var(--text-dim)]">
+      <div class="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-dim)]">
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(129,140,248,0.45)]"></span>active</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(245,158,11,0.45)]"></span>compact</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(167,139,250,0.5)]"></span>handoff</span>
@@ -386,7 +386,7 @@ export function TransitionTrail({
   return html`
     <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
       <div class="mb-1.5 flex items-center justify-between gap-2">
-        <div class="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+        <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
           Transition History (${isFiltering ? `${visibleHistory.length}/${history.length}` : history.length})
         </div>
         <input
@@ -458,7 +458,7 @@ export function TopTransitionsPanel({
 
   return html`
     <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
-      <div class="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+      <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
         Top Transitions (${transitions.length})
       </div>
       <div class="flex flex-col gap-0.5">
@@ -522,7 +522,7 @@ export function DwellHistogramPanel({
 
   return html`
     <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
-      <div class="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+      <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
         State Dwell Time
       </div>
       <div class="flex flex-col gap-2">
@@ -534,8 +534,8 @@ export function DwellHistogramPanel({
           return html`
             <div class=${`transition-opacity duration-150 ${dimmed ? 'opacity-40' : ''}`}>
               <div class="flex items-center gap-1.5 mb-0.5">
-                <span class=${`text-[9px] font-semibold ${color}`}>${lane.field}</span>
-                <span class="text-[9px] text-[var(--text-dim)]">${fmtDuration(lane.totalSeconds)}</span>
+                <span class=${`text-[10px] font-semibold ${color}`}>${lane.field}</span>
+                <span class="text-[10px] text-[var(--text-dim)]">${fmtDuration(lane.totalSeconds)}</span>
               </div>
               <div class="flex flex-col gap-px">
                 ${lane.entries.map((entry) => {
@@ -557,7 +557,7 @@ export function DwellHistogramPanel({
                           style=${`width: ${Math.max(2, entry.pct)}%`}
                         ></span>
                       </span>
-                      <span class="w-[36px] shrink-0 text-right text-[9px] text-[var(--text-dim)]">${entry.pct.toFixed(0)}%</span>
+                      <span class="w-[36px] shrink-0 text-right text-[10px] text-[var(--text-dim)]">${entry.pct.toFixed(0)}%</span>
                     </div>
                   `
                 })}

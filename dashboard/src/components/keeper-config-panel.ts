@@ -760,7 +760,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
                     ${(slot.gates ?? slot.effects ?? slot.features ?? []).length > 0 ? html`
                       <div class="flex flex-wrap gap-1 mt-1">
                         ${(slot.gates ?? slot.effects ?? slot.features ?? []).map((d: string) => html`
-                          <span class="text-[9px] px-1.5 py-0.5 rounded-md ${d.endsWith('_off') ? 'bg-[var(--white-10)] text-[var(--text-dim)]' : 'bg-[var(--accent-10)] text-[var(--accent)] opacity-80'}">${d}</span>
+                          <span class="text-[10px] px-1.5 py-0.5 rounded-md ${d.endsWith('_off') ? 'bg-[var(--white-10)] text-[var(--text-dim)]' : 'bg-[var(--accent-10)] text-[var(--accent)] opacity-80'}">${d}</span>
                         `)}
                       </div>
                     ` : null}

@@ -12,7 +12,9 @@
 //  - `md` (default) — shortcut-sheet rows, inline hints beside actions.
 //                     16-18px tall pill, matches 13px body text baseline.
 //  - `sm`           — dense inline hints (\"press ?\" micro-badge, status
-//                     bar). 11-12px tall, sits without pushing text lines.
+//                     bar). Same 10px text as `md` (P5 density sweep
+//                     upgraded `sm` from 9px → 10px for legibility),
+//                     but tighter padding (px-1 py-0 vs px-1.5 py-[1px]).
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
@@ -27,7 +29,7 @@ const BASE = 'inline-flex items-center justify-center rounded border font-mono t
 export function kbdClasses(size: KbdSize = 'md', extra?: string): string {
   const sized =
     size === 'sm'
-      ? 'text-[9px] px-1 py-0 border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)]'
+      ? 'text-[10px] px-1 py-0 border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)]'
       : 'text-[10px] px-1.5 py-[1px] border-[var(--white-10)] bg-[var(--bg-0)] text-[var(--text-body)]'
   return extra === undefined || extra === ''
     ? `${BASE} ${sized}`

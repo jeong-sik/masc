@@ -60,7 +60,7 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
           </div>
         ` : html`<div class="text-[10px] text-text-dim">데이터 없음</div>`}
         ${anomalyCount > 0 ? html`
-          <div class="text-[9px] font-mono text-red-400">${anomalyCount} anomaly</div>
+          <div class="text-[10px] font-mono text-red-400">${anomalyCount} anomaly</div>
         ` : null}
       </div>
       <div

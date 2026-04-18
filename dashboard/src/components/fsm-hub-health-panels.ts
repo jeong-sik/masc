@@ -54,7 +54,7 @@ export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapsho
             >drift ${m.auto_rules.goal_drift.toFixed(2)}</span>
           </div>
           ${m.auto_rules.guardrail_reason ? html`
-            <div class="text-[9px] text-[#f59e0b] mt-0.5">사유: ${m.auto_rules.guardrail_reason}</div>
+            <div class="text-[10px] text-[#f59e0b] mt-0.5">사유: ${m.auto_rules.guardrail_reason}</div>
           ` : null}
         </div>
       ` : html`
@@ -123,7 +123,7 @@ export function InvariantsPanel({
           Safety
         </div>
         <span
-          class=${`rounded-full border px-2 py-0.5 text-[9px] font-mono tabular-nums ${
+          class=${`rounded-full border px-2 py-0.5 text-[10px] font-mono tabular-nums ${
             allOk
               ? 'text-[#22c55e] border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.08)]'
               : 'text-[#ef4444] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]'

@@ -242,7 +242,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           const barWidth = (stat.call_count / maxCount) * 100
           return html`
             <div class="flex items-center gap-2 py-1 group">
-              <div class="size-5 rounded flex-shrink-0 bg-[var(--white-5)] flex items-center justify-center text-[9px] font-mono font-bold ${cat.color}">
+              <div class="size-5 rounded flex-shrink-0 bg-[var(--white-5)] flex items-center justify-center text-[10px] font-mono font-bold ${cat.color}">
                 ${cat.icon}
               </div>
               <div class="w-28 flex-shrink-0 text-[11px] font-mono text-[var(--text-muted)] truncate" title=${stat.name}>

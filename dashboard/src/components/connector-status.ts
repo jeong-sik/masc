@@ -320,7 +320,7 @@ export function HeaderMiniStat({
       data-testid=${testId}
     >
       <span class=${`text-sm font-semibold tabular-nums leading-tight ${valueTone}`}>${value}</span>
-      <span class="mt-0.5 text-[9px] uppercase tracking-[0.16em] text-[var(--text-dim)]">${label}</span>
+      <span class="mt-0.5 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">${label}</span>
     </div>
   `
 }
@@ -946,7 +946,7 @@ function ConnectorLivePanel({
               data-keeper-directory-error-panel
             >
               <span
-                class="mr-2 inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-200"
+                class="mr-2 inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-200"
                 aria-label="Keeper directory status: unavailable"
               >
                 <span aria-hidden="true">⚠</span>
@@ -965,7 +965,7 @@ function ConnectorLivePanel({
             >
               <div class="mb-1 flex items-center gap-2">
                 <span
-                  class="inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-200"
+                  class="inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-200"
                   aria-label="Keeper configuration status: none configured"
                   data-no-keepers-status-chip
                 >
@@ -1000,7 +1000,7 @@ function ConnectorLivePanel({
                 <div class="mb-1 flex items-center justify-between gap-2">
                   <div class="flex items-center gap-2">
                     <span
-                      class="inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-200"
+                      class="inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-200"
                       aria-label="Sidecar process status: not running"
                       data-sidecar-status-chip
                     >
@@ -1026,7 +1026,7 @@ function ConnectorLivePanel({
                   <${CopyableCode} label="start" command=${cmds.start} variant="primary" />
                 </div>
                 <div class="mt-2">
-                  <div class="mb-1 text-[9px] uppercase tracking-[0.14em] text-[var(--text-dim)]">
+                  <div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">
                     Or for diagnostics
                   </div>
                   <div class="grid grid-cols-1 gap-1.5" data-sidecar-secondary-cmds>

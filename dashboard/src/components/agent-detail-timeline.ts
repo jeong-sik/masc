@@ -102,7 +102,7 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
           ${cat.icon}
         </div>
         <span class="text-xs font-mono font-medium ${cat.color} truncate max-w-[200px]" title=${toolName}>${toolName}</span>
-        <span class="text-[9px] px-1 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)]">${cat.label}</span>
+        <span class="text-[10px] px-1 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)]">${cat.label}</span>
         ${durationMs != null
           ? html`<span class="text-[11px] font-mono ${durationColor(durationMs)}">${formatDuration(durationMs)}</span>`
           : null}

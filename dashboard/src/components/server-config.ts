@@ -61,10 +61,10 @@ function EntryRow({ entry }: { entry: ConfigEntry }) {
         <div class="flex items-center gap-2">
           <code class="text-xs font-mono text-[var(--text-primary)]">${entry.env}</code>
           ${!isDefault ? html`
-            <span class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">custom</span>
+            <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">custom</span>
           ` : null}
           ${entry.sensitive ? html`
-            <span class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400">sensitive</span>
+            <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400">sensitive</span>
           ` : null}
         </div>
         <div class="text-xs text-[var(--text-muted)] mt-0.5">${entry.description}</div>

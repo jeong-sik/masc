@@ -144,6 +144,7 @@ let health_json () =
     ("window_sec", `Float Health.window_sec);
     ("cooldown_threshold", `Int Health.cooldown_threshold);
     ("cooldown_sec", `Float Health.cooldown_sec);
+    ("hard_quota_cooldown_sec", `Float Health.hard_quota_cooldown_sec);
     ("providers", `List (List.map provider_info_to_json providers));
   ]
 

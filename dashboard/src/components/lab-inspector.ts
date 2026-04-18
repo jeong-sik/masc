@@ -1,12 +1,13 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { Card } from './common/card'
+import { DoctorPanel } from './doctor-panel'
 import { FeatureHealth } from './feature-health'
 import { ServerConfig } from './server-config'
 import { ExcusePatterns } from './excuse-patterns'
 import { navigate } from '../router'
 
-type InspectorSection = 'overview' | 'features' | 'config'
+type InspectorSection = 'overview' | 'features' | 'config' | 'doctor'
 
 const inspectorSection = signal<InspectorSection>('overview')
 
@@ -119,6 +120,7 @@ export function LabInspector() {
             <${InspectorTabButton} id="overview" label="개요" />
             <${InspectorTabButton} id="features" label="피처 플래그" />
             <${InspectorTabButton} id="config" label="서버 설정" />
+            <${InspectorTabButton} id="doctor" label="Doctor" />
           </div>
         </div>
       <//>
@@ -127,12 +129,14 @@ export function LabInspector() {
         ? html`<${InspectorOverview} />`
         : current === 'features'
           ? html`<${FeatureHealth} />`
-          : html`
-              <div class="flex flex-col gap-4">
-                <${ServerConfig} />
-                <${ExcusePatterns} />
-              </div>
-            `}
+          : current === 'doctor'
+            ? html`<${DoctorPanel} />`
+            : html`
+                <div class="flex flex-col gap-4">
+                  <${ServerConfig} />
+                  <${ExcusePatterns} />
+                </div>
+              `}
     </div>
   `
 }

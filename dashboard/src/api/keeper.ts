@@ -52,7 +52,7 @@ export { KeeperTransitionsSchemaDriftError } from './schemas/keeper-transitions'
 
 // --- Types ---
 
-export interface KeeperToolReply {
+interface KeeperToolReply {
   text: string
   details: KeeperConversationDetails | null
 }
@@ -251,7 +251,7 @@ export async function fetchKeeperChatHistory(
 
 // --- Keeper lifecycle (boot / shutdown) ---
 
-export interface KeeperLifecycleResponse {
+interface KeeperLifecycleResponse {
   ok: boolean
   action?: 'boot' | 'shutdown' | 'reset' | 'clear'
   name?: string
@@ -363,7 +363,7 @@ export function resetKeeper(name: string): Promise<KeeperLifecycleResponse> {
   )
 }
 
-export interface KeeperClearRequest {
+interface KeeperClearRequest {
   reason: string
   preserve_system_prompt?: boolean
 }
@@ -407,7 +407,7 @@ export interface KeeperCheckpointInventory {
   legacy_shadow_count: number
 }
 
-export interface KeeperCheckpointDeleteResponse {
+interface KeeperCheckpointDeleteResponse {
   ok: boolean
   action: 'delete_history' | string
   keeper: string
@@ -473,7 +473,7 @@ export function resumeKeeper(name: string): Promise<KeeperLifecycleResponse> {
 }
 // --- Keeper tool policy editing ---
 
-export interface KeeperToolPolicyInput {
+interface KeeperToolPolicyInput {
   action: 'set_policy'
   mode: 'preset' | 'custom' | 'full'
   preset?: 'minimal' | 'messaging' | 'coding' | 'research' | 'full'
@@ -523,7 +523,7 @@ export interface MemoryKindUsageEntry {
   priority: number
 }
 
-export interface KeeperStateDiagramResponse {
+interface KeeperStateDiagramResponse {
   keeper: string
   current_phase: string
   mermaid: string

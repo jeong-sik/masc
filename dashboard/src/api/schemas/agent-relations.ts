@@ -37,7 +37,7 @@ const AgentRelationSchema = object({
   participants: array(AgentRelationParticipantSchema),
 })
 
-export const AgentRelationsResponseSchema = object({
+const AgentRelationsResponseSchema = object({
   agent_name: string(),
   collaborators: array(AgentCollaboratorSchema),
   interests: array(string()),

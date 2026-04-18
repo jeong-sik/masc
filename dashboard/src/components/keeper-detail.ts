@@ -849,6 +849,11 @@ interface GenerationLineageEntry {
   identity_dropped_fields?: string[]
 }
 
+interface LineageVerdictMeta {
+  badgeLabel: string
+  detail: string
+}
+
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(item => typeof item === 'string')
 }
@@ -903,6 +908,35 @@ function formatLineageRatio(value: number | undefined): string {
   return typeof value === 'number' ? `${(value * 100).toFixed(1)}%` : '-'
 }
 
+export function lineageVerdictMeta(verdict: string | undefined): LineageVerdictMeta {
+  switch (verdict) {
+    case 'verified':
+      return {
+        badgeLabel: 'state preserved',
+        detail: 'Continuity checks whether the keeper goal, instructions, and saved state summary carried across the handoff.',
+      }
+    case 'drift_detected':
+      return {
+        badgeLabel: 'review drift',
+        detail: 'The handoff completed, but the saved continuity summary changed enough that an operator should review it.',
+      }
+    case 'unavailable':
+      return {
+        badgeLabel: 'needs evidence',
+        detail: 'The handoff completed, but there was not enough saved continuity data to compare generations.',
+      }
+    default:
+      return {
+        badgeLabel: 'unknown',
+        detail: 'A continuity signal exists, but this verdict is not yet mapped to an operator-facing explanation.',
+      }
+  }
+}
+
+export function lineageTransitionLabel(parentGeneration: number | null | undefined, generation: number): string {
+  return `${parentGeneration != null ? `gen ${parentGeneration}` : 'root'} -> gen ${generation}`
+}
+
 function verdictBadgeClass(verdict: string | undefined): string {
   switch (verdict) {
     case 'verified':
@@ -936,13 +970,41 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
 
   const delta = manifest?.inheritance_delta ?? null
   const continuity = manifest?.continuity_judgment
+  const continuityMeta = lineageVerdictMeta(continuity?.verdict)
+  const latestEntry = recent[0] ?? null
+  const latestEntryMeta = latestEntry ? lineageVerdictMeta(latestEntry.continuity_verdict) : null
 
   return html`
     <div class="md:col-span-2">
       <${SectionCard} title="Generation Lineage">
         <div class="text-[11px] text-[var(--text-muted)] mb-3">
-          handoff telemetry. same keeper identity, new trace.
+          Track keeper state transfer across successful handoffs. Lineage telemetry is append-only, shows the latest rollover first, and helps explain whether the same keeper identity carried into the new trace.
         </div>
+
+        ${latestEntry
+          ? html`
+            <div class="rounded-lg border border-[rgba(71,184,255,0.2)] bg-[rgba(71,184,255,0.08)] p-3 mb-3">
+              <div class="flex flex-wrap items-center gap-2 mb-1">
+                <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]">Latest Handoff</span>
+                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">
+                  ${lineageTransitionLabel(latestEntry.parent_generation, latestEntry.generation)}
+                </span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded ${verdictBadgeClass(latestEntry.continuity_verdict)}">
+                  ${latestEntryMeta?.badgeLabel}
+                </span>
+                ${latestEntry.created_at
+                  ? html`<span class="text-[10px] text-[var(--text-dim)]">recorded <${TimeAgo} timestamp=${latestEntry.created_at} /></span>`
+                  : null}
+              </div>
+              <div class="text-[11px] text-[var(--text-body)]">
+                ${latestEntry.trigger_reason ? `trigger ${latestEntry.trigger_reason} · ` : ''}context ratio ${formatLineageRatio(latestEntry.context_ratio)}
+              </div>
+              <div class="mt-1 text-[11px] text-[var(--text-dim)]">
+                ${latestEntryMeta?.detail}
+              </div>
+            </div>
+          `
+          : null}
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
           <div class="px-3 py-2 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
@@ -969,7 +1031,7 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                 <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Current Manifest</span>
                 <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">gen ${manifest.generation}</span>
                 ${continuity?.verdict
-                  ? html`<span class="text-[10px] px-1.5 py-0.5 rounded ${verdictBadgeClass(continuity.verdict)}">${continuity.verdict}</span>`
+                  ? html`<span class="text-[10px] px-1.5 py-0.5 rounded ${verdictBadgeClass(continuity.verdict)}">${continuityMeta.badgeLabel}</span>`
                   : null}
                 ${manifest.created_at
                   ? html`<span class="text-[10px] text-[var(--text-dim)]">created <${TimeAgo} timestamp=${manifest.created_at} /></span>`
@@ -1007,6 +1069,9 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                   ? html`<span class="text-[10px] px-2 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">similarity ${(continuity.similarity * 100).toFixed(1)}%</span>`
                   : null}
               </div>
+              ${continuity?.verdict
+                ? html`<div class="mt-2 text-[11px] text-[var(--text-dim)]">${continuityMeta.detail}</div>`
+                : null}
               ${delta && delta.changed_fields.length === 0 && delta.dropped_fields.length === 0
                 ? html`<div class="mt-2 text-[11px] text-[var(--text-dim)]">identity-only inheritance stayed intact across the rollover.</div>`
                 : null}
@@ -1019,29 +1084,39 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
           `}
 
         <div>
-          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">Recent Handoffs</div>
+          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Recent Handoffs</div>
+          <div class="text-[11px] text-[var(--text-dim)] mb-2">Latest recorded rollover appears first so operators can compare the current trace against recent history.</div>
           ${recent.length > 0
             ? html`
               <div class="flex flex-col gap-2">
-                ${recent.map(entry => html`
-                  <div class="px-3 py-2 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+                ${recent.map((entry, index) => {
+                  const isLatest = index === 0
+                  const entryMeta = lineageVerdictMeta(entry.continuity_verdict)
+                  return html`
+                  <div class=${`px-3 py-2 rounded-lg border ${isLatest ? 'border-[rgba(71,184,255,0.22)] bg-[rgba(71,184,255,0.08)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}>
                     <div class="flex flex-wrap items-center gap-2">
                       <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">gen ${entry.generation}</span>
+                      ${isLatest
+                        ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-[rgba(71,184,255,0.18)] bg-[rgba(71,184,255,0.12)] text-[var(--accent)]">latest</span>`
+                        : null}
                       ${entry.continuity_verdict
-                        ? html`<span class="text-[10px] px-1.5 py-0.5 rounded ${verdictBadgeClass(entry.continuity_verdict)}">${entry.continuity_verdict}</span>`
+                        ? html`<span class="text-[10px] px-1.5 py-0.5 rounded ${verdictBadgeClass(entry.continuity_verdict)}">${entryMeta.badgeLabel}</span>`
                         : null}
                       ${entry.created_at
                         ? html`<span class="text-[10px] text-[var(--text-dim)]"><${TimeAgo} timestamp=${entry.created_at} /></span>`
                         : null}
                     </div>
                     <div class="mt-1 text-[11px] text-[var(--text-body)]">
-                      ${entry.parent_generation != null ? `gen ${entry.parent_generation}` : 'root'} -> gen ${entry.generation}
+                      ${lineageTransitionLabel(entry.parent_generation, entry.generation)}
                       ${entry.trigger_reason ? ` · ${entry.trigger_reason}` : ''}
                       ${entry.context_ratio != null ? ` · ratio ${formatLineageRatio(entry.context_ratio)}` : ''}
                     </div>
                     <div class="mt-1 text-[10px] font-mono text-[var(--text-dim)] truncate" title=${entry.trace_id}>
                       ${compactTraceId(entry.trace_id)}
                     </div>
+                    ${entry.continuity_verdict
+                      ? html`<div class="mt-1 text-[10px] text-[var(--text-dim)]">${entryMeta.detail}</div>`
+                      : null}
                     ${(entry.identity_changed_fields?.length ?? 0) > 0 || (entry.identity_dropped_fields?.length ?? 0) > 0
                       ? html`
                         <div class="mt-1 text-[10px] text-[var(--text-dim)]">
@@ -1052,7 +1127,7 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                       `
                       : null}
                   </div>
-                `)}
+                `})}
               </div>
             `
             : html`<div class="text-[11px] text-[var(--text-muted)]">No recorded handoff entries yet.</div>`}

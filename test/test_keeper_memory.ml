@@ -4,8 +4,11 @@ module Mention = Mention
 module Keeper_execution = Masc_mcp.Keeper_execution
 module Keeper_memory = Masc_mcp.Keeper_memory
 module Keeper_memory_recall = Masc_mcp.Keeper_memory_recall
+module Keeper_world_observation = Masc_mcp.Keeper_world_observation
 module Meas = Masc_mcp.Keeper_measurement
 module Keeper_types = Masc_mcp.Keeper_types
+module KET = Masc_mcp.Keeper_exec_tools
+module KEC = Masc_mcp.Keeper_exec_context
 module Types = Types
 
 let keeper_meta ?(trace_id = "trace-1") ?(trace_history = []) ~name ~mention_targets () =
@@ -287,6 +290,16 @@ let cleanup_tmpdir dir =
      Unix.rmdir dir
    with _ -> ())
 
+let rec cleanup_tmpdir_recursive dir =
+  if Sys.file_exists dir && Sys.is_directory dir then begin
+    Array.iter (fun f ->
+      let path = Filename.concat dir f in
+      if Sys.is_directory path then cleanup_tmpdir_recursive path
+      else (try Sys.remove path with _ -> ()))
+      (Sys.readdir dir);
+    (try Unix.rmdir dir with _ -> ())
+  end
+
 let test_load_history_user_messages () =
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
@@ -442,8 +455,188 @@ let test_memory_write_then_recall_meta_fallback () =
     in
     check bool "recall finds fallback notes" true (summary.total_notes > 0))
 
-module KET = Masc_mcp.Keeper_exec_tools
-module KEC = Masc_mcp.Keeper_exec_context
+let read_memory_bank_entries config name =
+  let path = Keeper_types.keeper_memory_bank_path config name in
+  if not (Sys.file_exists path) then []
+  else
+    let ic = open_in path in
+    Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+      let rec loop acc =
+        match input_line ic with
+        | line when String.trim line = "" -> loop acc
+        | line -> loop (Yojson.Safe.from_string line :: acc)
+        | exception End_of_file -> List.rev acc
+      in
+      loop [])
+
+let test_memory_write_persists_horizon_and_source () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"meta-keeper" ~mention_targets:["meta-keeper"] () in
+    let reply =
+      "[STATE]\n\
+       Goal: keep provenance\n\
+       NEXT: verify continuity via filesystem evidence\n\
+       [/STATE]"
+    in
+    let (_notes_written, _kinds) =
+      Keeper_memory_bank.append_memory_notes_from_reply config meta ~turn:2 ~reply
+    in
+    let entries = read_memory_bank_entries config "meta-keeper" in
+    check bool "entries persisted" true (entries <> []);
+    let next_entry =
+      List.find_opt
+        (fun json ->
+          Yojson.Safe.Util.(json |> member "kind" |> to_string = "next"))
+        entries
+    in
+    match next_entry with
+    | None -> fail "expected next memory entry"
+    | Some json ->
+        check string "horizon persisted" "short_term"
+          Yojson.Safe.Util.(json |> member "horizon" |> to_string);
+        check string "source persisted" "reply_state_block"
+          Yojson.Safe.Util.(json |> member "source" |> to_string);
+        check int "schema version persisted" 2
+          Yojson.Safe.Util.(json |> member "schema_version" |> to_int))
+
+let test_memory_candidates_capture_next_summary () =
+  let snapshot =
+    {
+      Masc_mcp.Keeper_memory_policy.empty_keeper_state_snapshot with
+      goal = Some "preserve next plan";
+      next_summary = Some "verify harness output and update docs";
+    }
+  in
+  let candidates = Keeper_memory_bank.memory_candidates_from_snapshot snapshot in
+  check bool "next summary becomes a next candidate" true
+    (List.exists
+       (fun (kind, text, _) ->
+         kind = "next"
+         && String.equal text "verify harness output and update docs")
+       candidates)
+
+let test_priority_for_kind_long_term () =
+  check int "long_term gets durable priority" 95
+    (Masc_mcp.Keeper_memory_policy.priority_for_kind ~kind:"long_term")
+
+let test_read_continuity_summary_prefers_progress_log () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_recursive dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"progress-pref-keeper" ~mention_targets:["progress-pref-keeper"] () in
+    let progress_path = Keeper_types.keeper_progress_path config "progress-pref-keeper" in
+    Keeper_types.mkdir_p (Filename.dirname progress_path);
+    (match
+       Fs_compat.save_file_atomic progress_path
+         "# Keeper Progress\nGoal: recover from progress file\nNEXT: verify only progress path is used\n"
+     with
+     | Ok () -> ()
+     | Error err -> fail ("failed to seed progress log: " ^ err));
+    let continuity =
+      Keeper_world_observation.read_continuity_summary ~config ~meta
+    in
+    check bool "reads goal from progress log" true
+      (String.contains continuity 'r' && Astring.String.is_infix ~affix:"recover from progress file" continuity);
+    check bool "reads next plan from progress log" true
+      (Astring.String.is_infix ~affix:"verify only progress path is used" continuity))
+
+let test_keeper_context_status_reports_recovery_source_and_tiers () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_recursive dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"status-keeper" ~mention_targets:["status-keeper"] () in
+    let progress_path = Keeper_types.keeper_progress_path config "status-keeper" in
+    Keeper_types.mkdir_p (Filename.dirname progress_path);
+    (match
+       Fs_compat.save_file_atomic progress_path
+         "# Keeper Progress\nGoal: status recovery\nNEXT: emit recovery source\n"
+     with
+     | Ok () -> ()
+     | Error err -> fail ("failed to seed progress log: " ^ err));
+    let bank_path = Keeper_types.keeper_memory_bank_path config "status-keeper" in
+    (match
+       Fs_compat.save_file_atomic bank_path
+         (Yojson.Safe.to_string
+            (`Assoc
+               [
+                 "kind", `String "long_term";
+                 "horizon", `String "long_term";
+                 "source", `String "cross_trace_recurrence";
+                 "schema_version", `Int 2;
+                 "text", `String "durable note";
+                 "priority", `Int 95;
+                 "generation", `Int 1;
+                 "turn", `Int 1;
+                 "ts_unix", `Float 1000.0;
+                 "ts", `String "2026-01-01T00:00:00Z";
+               ])
+          ^ "\n")
+     with
+     | Ok () -> ()
+     | Error err -> fail ("failed to seed memory bank: " ^ err));
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let json =
+      Masc_mcp.Keeper_exec_memory.keeper_context_status_json
+        ~config ~meta ~ctx_work
+      |> Yojson.Safe.from_string
+    in
+    check string "recovery source exposed" "progress_log"
+      Yojson.Safe.Util.(json |> member "recovery_source" |> to_string);
+    check int "long-term count exposed" 1
+      Yojson.Safe.Util.(json |> member "memory_tier_summary" |> member "long_term" |> to_int))
+
+let test_progress_snapshot_cache_tracks_generation () =
+  let snapshot =
+    {
+      Masc_mcp.Keeper_memory_policy.empty_keeper_state_snapshot with
+      goal = Some "stabilize recovery";
+      next_summary = Some "verify generation gating";
+    }
+  in
+  let text =
+    Masc_mcp.Keeper_memory_policy.progress_markdown_of_snapshot
+      ~generation:7 snapshot
+  in
+  match Masc_mcp.Keeper_memory_policy.progress_snapshot_cache_of_text text with
+  | None -> fail "expected progress cache to parse"
+  | Some cache ->
+      check (option int) "generation parsed from progress header" (Some 7)
+        cache.generation;
+      check (option string) "snapshot goal preserved"
+        (Some "stabilize recovery")
+        cache.snapshot.goal
+
+let test_prompt_memory_sections_drop_stale_short_term () =
+  let snapshot =
+    {
+      Masc_mcp.Keeper_memory_policy.empty_keeper_state_snapshot with
+      goal = Some "durable keeper goal";
+      next_summary = Some "stale next step";
+      next_items = [ "old action item" ];
+    }
+  in
+  let stale_text =
+    Masc_mcp.Keeper_memory_policy.prompt_memory_sections_of_snapshot
+      ~current_generation:3
+      ~source_generation:2
+      snapshot
+    |> String.concat "\n\n"
+  in
+  let fresh_text =
+    Masc_mcp.Keeper_memory_policy.prompt_memory_sections_of_snapshot
+      ~current_generation:3
+      ~source_generation:3
+      snapshot
+    |> String.concat "\n\n"
+  in
+  check bool "stale progress hides short-term memory" false
+    (Astring.String.is_infix ~affix:"Short-term memory" stale_text);
+  check bool "stale progress keeps mid-term memory" true
+    (Astring.String.is_infix ~affix:"Mid-term memory" stale_text);
+  check bool "fresh progress keeps short-term memory" true
+    (Astring.String.is_infix ~affix:"Short-term memory" fresh_text)
 
 (** Recursive cleanup for nested temp dirs (traces/<id>/history.jsonl). *)
 let rec cleanup_tmpdir_r dir =
@@ -597,19 +790,29 @@ let write_memory_bank config name lines =
   let path = Keeper_types.keeper_memory_bank_path config name in
   write_lines path lines
 
-let memory_note ~kind ~text ~priority ~generation ~turn ~ts_unix =
+let memory_note ?horizon ?source ~kind ~text ~priority ~generation ~turn ~ts_unix () =
+  let extra_fields =
+    (match horizon with
+     | Some value -> [ ("horizon", `String value) ]
+     | None -> [])
+    @
+    (match source with
+     | Some value -> [ ("source", `String value) ]
+     | None -> [])
+  in
   Yojson.Safe.to_string
-    (`Assoc [
-      ("ts", `String "2026-04-06T00:00:00Z");
-      ("ts_unix", `Float ts_unix);
-      ("name", `String "test");
-      ("trace_id", `String "t1");
-      ("generation", `Int generation);
-      ("turn", `Int turn);
-      ("kind", `String kind);
-      ("priority", `Int priority);
-      ("text", `String text);
-    ])
+    (`Assoc
+      ([
+         ("ts", `String "2026-04-06T00:00:00Z");
+         ("ts_unix", `Float ts_unix);
+         ("name", `String "test");
+         ("trace_id", `String "t1");
+         ("generation", `Int generation);
+         ("turn", `Int turn);
+         ("kind", `String kind);
+         ("priority", `Int priority);
+         ("text", `String text);
+       ] @ extra_fields))
 
 (** Test: memory bank search returns structured results with scoring. *)
 let test_memory_search_bank_basic () =
@@ -619,11 +822,11 @@ let test_memory_search_bank_basic () =
     let meta = keeper_meta ~name:"bank-keeper" ~mention_targets:["bank-keeper"] () in
     write_memory_bank config "bank-keeper" [
       memory_note ~kind:"decision" ~text:"Switched to Postgres for persistence"
-        ~priority:86 ~generation:1 ~turn:3 ~ts_unix:1000.0;
+        ~priority:86 ~generation:1 ~turn:3 ~ts_unix:1000.0 ();
       memory_note ~kind:"goal" ~text:"Improve search quality"
-        ~priority:72 ~generation:1 ~turn:1 ~ts_unix:900.0;
+        ~priority:72 ~generation:1 ~turn:1 ~ts_unix:900.0 ();
       memory_note ~kind:"progress" ~text:"Implemented basic keyword matching"
-        ~priority:66 ~generation:2 ~turn:5 ~ts_unix:1100.0;
+        ~priority:66 ~generation:2 ~turn:5 ~ts_unix:1100.0 ();
     ];
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
@@ -648,9 +851,9 @@ let test_memory_search_bank_kind_filter () =
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:"filter-keeper" ~mention_targets:["filter-keeper"] () in
     write_memory_bank config "filter-keeper" [
-      memory_note ~kind:"decision" ~text:"use Postgres" ~priority:86 ~generation:1 ~turn:1 ~ts_unix:1000.0;
-      memory_note ~kind:"goal" ~text:"use Redis" ~priority:72 ~generation:1 ~turn:2 ~ts_unix:1100.0;
-      memory_note ~kind:"progress" ~text:"use Postgres done" ~priority:66 ~generation:1 ~turn:3 ~ts_unix:1200.0;
+      memory_note ~kind:"decision" ~text:"use Postgres" ~priority:86 ~generation:1 ~turn:1 ~ts_unix:1000.0 ();
+      memory_note ~kind:"goal" ~text:"use Redis" ~priority:72 ~generation:1 ~turn:2 ~ts_unix:1100.0 ();
+      memory_note ~kind:"progress" ~text:"use Postgres done" ~priority:66 ~generation:1 ~turn:3 ~ts_unix:1200.0 ();
     ];
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     (* Search with kind=goal — should only return "use Redis" *)
@@ -672,8 +875,8 @@ let test_memory_search_bank_scored_order () =
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:"score-keeper" ~mention_targets:["score-keeper"] () in
     write_memory_bank config "score-keeper" [
-      memory_note ~kind:"progress" ~text:"task alpha" ~priority:50 ~generation:1 ~turn:1 ~ts_unix:100.0;
-      memory_note ~kind:"decision" ~text:"task alpha upgrade" ~priority:90 ~generation:2 ~turn:3 ~ts_unix:200.0;
+      memory_note ~kind:"progress" ~text:"task alpha" ~priority:50 ~generation:1 ~turn:1 ~ts_unix:100.0 ();
+      memory_note ~kind:"decision" ~text:"task alpha upgrade" ~priority:90 ~generation:2 ~turn:3 ~ts_unix:200.0 ();
     ];
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
@@ -686,6 +889,43 @@ let test_memory_search_bank_scored_order () =
     let s1 = Yojson.Safe.Util.(List.nth matches 0 |> member "score" |> to_float) in
     let s2 = Yojson.Safe.Util.(List.nth matches 1 |> member "score" |> to_float) in
     check bool "first score >= second score" true (s1 >= s2))
+
+let test_memory_search_bank_prefers_long_term_over_stale_short_term () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let base_meta =
+      keeper_meta ~name:"horizon-keeper" ~mention_targets:["horizon-keeper"] ()
+    in
+    let meta =
+      { base_meta with
+        runtime = { base_meta.runtime with generation = 4 } }
+    in
+    write_memory_bank config "horizon-keeper" [
+      memory_note
+        ~kind:"next"
+        ~horizon:"short_term"
+        ~source:"reply_state_block"
+        ~text:"postgres evidence trail"
+        ~priority:80 ~generation:1 ~turn:1 ~ts_unix:2000.0 ();
+      memory_note
+        ~kind:"long_term"
+        ~horizon:"long_term"
+        ~source:"cross_trace_recurrence"
+        ~text:"postgres evidence trail"
+        ~priority:95 ~generation:1 ~turn:2 ~ts_unix:1000.0 ();
+    ];
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
+      ~name:"keeper_memory_search"
+      ~input:(`Assoc [ ("query", `String "postgres evidence trail") ])
+      () in
+    let json = Yojson.Safe.from_string result in
+    let first = Yojson.Safe.Util.(json |> member "matches" |> to_list |> List.hd) in
+    check string "long_term ranked first" "long_term"
+      Yojson.Safe.Util.(first |> member "kind" |> to_string);
+    check string "long_term horizon surfaced" "long_term"
+      Yojson.Safe.Util.(first |> member "horizon" |> to_string))
 
 (** Test: empty memory bank returns no_match: true *)
 let test_memory_search_bank_empty () =
@@ -711,7 +951,7 @@ let test_memory_search_bank_no_match () =
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:"nomatch-keeper" ~mention_targets:["nomatch-keeper"] () in
     write_memory_bank config "nomatch-keeper" [
-      memory_note ~kind:"decision" ~text:"deploy to staging" ~priority:86 ~generation:1 ~turn:1 ~ts_unix:1000.0;
+      memory_note ~kind:"decision" ~text:"deploy to staging" ~priority:86 ~generation:1 ~turn:1 ~ts_unix:1000.0 ();
     ];
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work
@@ -752,7 +992,7 @@ let test_memory_search_source_all () =
     let meta = keeper_meta ~name:"all-keeper" ~mention_targets:["all-keeper"] () in
     (* Memory bank has structured note *)
     write_memory_bank config "all-keeper" [
-      memory_note ~kind:"decision" ~text:"alpha from bank" ~priority:86 ~generation:1 ~turn:1 ~ts_unix:1000.0;
+      memory_note ~kind:"decision" ~text:"alpha from bank" ~priority:86 ~generation:1 ~turn:1 ~ts_unix:1000.0 ();
     ];
     (* History has raw message *)
     let trace_id = meta.runtime.trace_id in
@@ -823,6 +1063,12 @@ let () =
             test_memory_write_then_recall_with_state_block;
           test_case "write via meta fallback then recall" `Quick
             test_memory_write_then_recall_meta_fallback;
+          test_case "memory note persists horizon + source" `Quick
+            test_memory_write_persists_horizon_and_source;
+          test_case "next summary is preserved as memory" `Quick
+            test_memory_candidates_capture_next_summary;
+          test_case "long_term priority matches durable tier" `Quick
+            test_priority_for_kind_long_term;
         ] );
       ( "cross_generation_search",
         [
@@ -835,6 +1081,17 @@ let () =
           test_case "finds messages from previous generation via trace_history" `Quick
             test_memory_search_prev_generation;
         ] );
+      ( "recovery_context",
+        [
+          test_case "continuity prefers progress log" `Quick
+            test_read_continuity_summary_prefers_progress_log;
+          test_case "context status reports recovery source + tiers" `Quick
+            test_keeper_context_status_reports_recovery_source_and_tiers;
+          test_case "progress cache tracks generation" `Quick
+            test_progress_snapshot_cache_tracks_generation;
+          test_case "stale progress drops short-term prompt memory" `Quick
+            test_prompt_memory_sections_drop_stale_short_term;
+        ] );
       ( "memory_bank_search",
         [
           test_case "basic keyword search in memory bank" `Quick
@@ -843,6 +1100,8 @@ let () =
             test_memory_search_bank_kind_filter;
           test_case "results sorted by score descending" `Quick
             test_memory_search_bank_scored_order;
+          test_case "long_term outranks stale short-term" `Quick
+            test_memory_search_bank_prefers_long_term_over_stale_short_term;
           test_case "empty bank returns no_match" `Quick
             test_memory_search_bank_empty;
           test_case "no matching query returns no_match" `Quick

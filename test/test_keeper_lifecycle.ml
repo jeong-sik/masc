@@ -286,6 +286,17 @@ let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
            "Goal: preserve continuity");
       check bool "continuity ts updated" true
         (lifecycle.updated_meta.runtime.last_continuity_update_ts > 0.0);
+      let progress_path =
+        Filename.concat
+          (Filename.concat (Filename.concat (Filename.dirname base_dir) "keepers") meta.name)
+          "progress.md"
+      in
+      check bool "progress log written" true (Sys.file_exists progress_path);
+      let progress_body = Fs_compat.load_file progress_path in
+      check bool "progress log keeps goal" true
+        (contains_substring progress_body "Goal: preserve continuity");
+      check bool "progress log is forward-looking" false
+        (contains_substring progress_body "Done:");
       match
         load_context ~base_dir ~trace_id:(Masc_mcp.Keeper_id.Trace_id.to_string lifecycle.updated_meta.runtime.trace_id)
           ~max_tokens:320

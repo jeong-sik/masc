@@ -8,6 +8,7 @@ val keeper_memory_search_json :
   string
 
 val keeper_context_status_json :
+  config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   ctx_work:Keeper_types.working_context ->
   string

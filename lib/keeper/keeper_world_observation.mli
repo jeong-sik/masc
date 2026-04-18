@@ -173,6 +173,13 @@ val board_signal_match :
   signal:Board_dispatch.keeper_board_signal ->
   board_signal_match
 
+(** Read the best available continuity summary for a keeper.
+    Recovery order is progress log -> checkpoint snapshot -> meta summary. *)
+val read_continuity_summary :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  string
+
 (** Build a world observation from room state and keeper metadata.
 
     Reads room backlog, agent list, checkpoint context, economy state,

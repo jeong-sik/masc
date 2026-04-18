@@ -150,6 +150,30 @@ let no_memory_bank_compaction = {
   invalid_dropped = 0;
 }
 
+let keeper_memory_schema_version = 2
+
+let short_term_horizon = "short_term"
+let mid_term_horizon = "mid_term"
+let long_term_horizon = "long_term"
+
+let memory_horizon_of_kind (kind : string) : string =
+  match String.lowercase_ascii (String.trim kind) with
+  | "next" | "open_question" | "progress" -> short_term_horizon
+  | "goal" | "decision" | "constraints" -> mid_term_horizon
+  | "long_term" -> long_term_horizon
+  | _ -> mid_term_horizon
+
+let memory_horizon_of_json ~(kind : string) (json : Yojson.Safe.t) : string =
+  match
+    Safe_ops.json_string ~default:"" "horizon" json
+    |> String.trim
+    |> String.lowercase_ascii
+  with
+  | "short_term" -> short_term_horizon
+  | "mid_term" -> mid_term_horizon
+  | "long_term" -> long_term_horizon
+  | _ -> memory_horizon_of_kind kind
+
 let trim_nonempty (s : string) : string option =
   let t = String.trim s in
   if t = "" then None else Some t
@@ -187,6 +211,57 @@ let find_state_block (reply : string) : string option =
        if end_idx <= body_start then None
        else Some (String.sub reply body_start (end_idx - body_start)))
 
+let state_snapshot_of_lines (lines : string list) : keeper_state_snapshot option =
+  let snapshot =
+    List.fold_left
+      (fun acc line ->
+        match strip_prefix_ci ~prefix:"Goal:" line with
+        | Some v -> { acc with goal = trim_nonempty v }
+        | None ->
+            (match strip_prefix_ci ~prefix:"DONE:" line with
+            | Some v -> { acc with done_summary = trim_nonempty v;
+                                   progress = (match acc.progress with
+                                               | None -> trim_nonempty v
+                                               | existing -> existing) }
+            | None ->
+            (match strip_prefix_ci ~prefix:"Progress:" line with
+            | Some v -> { acc with progress = trim_nonempty v }
+            | None ->
+                (match strip_prefix_ci ~prefix:"NEXT:" line with
+                | Some v -> { acc with next_summary = trim_nonempty v;
+                                       next_items = (match acc.next_items with
+                                                     | [] -> split_state_items v
+                                                     | existing -> existing) }
+                | None ->
+                (match strip_prefix_ci ~prefix:"Next:" line with
+                | Some v -> { acc with next_items = split_state_items v }
+                | None ->
+                    (match strip_prefix_ci ~prefix:"Decisions:" line with
+                    | Some v -> { acc with decisions = split_state_items v }
+                    | None ->
+                        (match strip_prefix_ci ~prefix:"OpenQuestions:" line with
+                        | Some v ->
+                            { acc with open_questions = split_state_items v }
+                        | None ->
+                            (match strip_prefix_ci
+                                     ~prefix:"Constraints:" line
+                             with
+                            | Some v ->
+                                { acc with constraints = split_state_items v }
+                            | None -> acc))))))))
+      empty_keeper_state_snapshot lines
+  in
+  if snapshot.goal = None
+     && snapshot.progress = None
+     && snapshot.next_items = []
+     && snapshot.decisions = []
+     && snapshot.open_questions = []
+     && snapshot.constraints = []
+  then
+    None
+  else
+    Some snapshot
+
 let parse_state_snapshot_from_reply (reply : string) : keeper_state_snapshot option =
   match find_state_block reply with
   | None -> None
@@ -197,55 +272,18 @@ let parse_state_snapshot_from_reply (reply : string) : keeper_state_snapshot opt
         |> List.map String.trim
         |> List.filter (fun line -> line <> "")
       in
-      let snapshot =
-        List.fold_left
-          (fun acc line ->
-            match strip_prefix_ci ~prefix:"Goal:" line with
-            | Some v -> { acc with goal = trim_nonempty v }
-            | None ->
-                (match strip_prefix_ci ~prefix:"DONE:" line with
-                | Some v -> { acc with done_summary = trim_nonempty v;
-                                       progress = (match acc.progress with
-                                                   | None -> trim_nonempty v
-                                                   | existing -> existing) }
-                | None ->
-                (match strip_prefix_ci ~prefix:"Progress:" line with
-                | Some v -> { acc with progress = trim_nonempty v }
-                | None ->
-                    (match strip_prefix_ci ~prefix:"NEXT:" line with
-                    | Some v -> { acc with next_summary = trim_nonempty v;
-                                           next_items = (match acc.next_items with
-                                                         | [] -> split_state_items v
-                                                         | existing -> existing) }
-                    | None ->
-                    (match strip_prefix_ci ~prefix:"Next:" line with
-                    | Some v -> { acc with next_items = split_state_items v }
-                    | None ->
-                        (match strip_prefix_ci ~prefix:"Decisions:" line with
-                        | Some v -> { acc with decisions = split_state_items v }
-                        | None ->
-                            (match strip_prefix_ci ~prefix:"OpenQuestions:" line with
-                            | Some v ->
-                                { acc with open_questions = split_state_items v }
-                            | None ->
-                                (match strip_prefix_ci
-                                         ~prefix:"Constraints:" line
-                                 with
-                                | Some v ->
-                                    { acc with constraints = split_state_items v }
-                                | None -> acc))))))))
-          empty_keeper_state_snapshot lines
-      in
-      if snapshot.goal = None
-         && snapshot.progress = None
-         && snapshot.next_items = []
-         && snapshot.decisions = []
-         && snapshot.open_questions = []
-         && snapshot.constraints = []
-      then
-        None
-      else
-        Some snapshot
+      state_snapshot_of_lines lines
+
+let state_snapshot_of_summary_text (text : string) : keeper_state_snapshot option =
+  text
+  |> String.split_on_char '\n'
+  |> List.map String.trim
+  |> List.filter (fun line -> line <> "")
+  |> state_snapshot_of_lines
+
+let forward_looking_snapshot
+    (snapshot : keeper_state_snapshot) : keeper_state_snapshot =
+  { snapshot with progress = None; done_summary = None }
 
 let keeper_state_snapshot_to_summary_text (snapshot : keeper_state_snapshot) : string =
   let maybe_line match_fn label =
@@ -431,6 +469,150 @@ let filter_forward_looking_summary (summary : string) : string =
   | [] -> ""
   | _ -> String.concat "\n" kept
 
+let progress_markdown_of_snapshot
+    ?generation
+    ?updated_at
+    (snapshot : keeper_state_snapshot) : string =
+  let snapshot = forward_looking_snapshot snapshot in
+  let body = keeper_state_snapshot_to_summary_text snapshot in
+  let header =
+    [
+      "# Keeper Progress";
+      (match generation with
+       | Some g when g >= 0 -> Printf.sprintf "Generation: %d" g
+       | _ -> "");
+      (match updated_at with
+       | Some ts when String.trim ts <> "" -> "Updated: " ^ String.trim ts
+       | _ -> "");
+      "This file is a filesystem-first recovery cache. Re-verify live world state before acting.";
+    ]
+    |> List.filter (fun line -> String.trim line <> "")
+  in
+  match String.trim body with
+  | "" -> String.concat "\n" (header @ [ "No forward-looking state available." ]) ^ "\n"
+  | body -> String.concat "\n" (header @ [ ""; body ]) ^ "\n"
+
+let short_term_prompt_text_of_snapshot
+    (snapshot : keeper_state_snapshot) : string =
+  let parts =
+    [
+      (match snapshot.next_summary with
+       | Some text when String.trim text <> "" ->
+           Some ("Next plan: " ^ String.trim text)
+       | _ -> None);
+      (match snapshot.next_items with
+       | [] -> None
+       | items ->
+           Some ("Next steps: " ^ String.concat "; " (List.map String.trim items)));
+      (match snapshot.open_questions with
+       | [] -> None
+       | items ->
+           Some ("Open questions: " ^ String.concat "; " (List.map String.trim items)));
+    ]
+    |> List.filter_map Fun.id
+  in
+  match parts with
+  | [] -> ""
+  | _ -> "Short-term memory:\n" ^ String.concat "\n" parts
+
+let mid_term_prompt_text_of_snapshot
+    (snapshot : keeper_state_snapshot) : string =
+  let parts =
+    [
+      (match snapshot.goal with
+       | Some text when String.trim text <> "" ->
+           Some ("Goal: " ^ String.trim text)
+       | _ -> None);
+      (match snapshot.decisions with
+       | [] -> None
+       | items ->
+           Some ("Decisions: " ^ String.concat "; " (List.map String.trim items)));
+      (match snapshot.constraints with
+       | [] -> None
+       | items ->
+           Some ("Constraints: " ^ String.concat "; " (List.map String.trim items)));
+    ]
+    |> List.filter_map Fun.id
+  in
+  match parts with
+  | [] -> ""
+  | _ -> "Mid-term memory:\n" ^ String.concat "\n" parts
+
+type progress_snapshot_cache = {
+  generation : int option;
+  snapshot : keeper_state_snapshot;
+}
+
+let progress_generation_of_text (text : string) : int option =
+  text
+  |> String.split_on_char '\n'
+  |> List.find_map (fun line ->
+         match strip_prefix_ci ~prefix:"Generation:" line with
+         | None -> None
+         | Some raw -> (try Some (int_of_string (String.trim raw)) with _ -> None))
+
+let progress_snapshot_cache_of_text (text : string) : progress_snapshot_cache option =
+  match state_snapshot_of_summary_text text with
+  | None -> None
+  | Some snapshot ->
+      Some {
+        generation = progress_generation_of_text text;
+        snapshot;
+      }
+
+let prompt_memory_sections_of_snapshot
+    ~(current_generation : int)
+    ?source_generation
+    (snapshot : keeper_state_snapshot) : string list =
+  let allow_short_term =
+    match source_generation with
+    | Some generation -> generation = current_generation
+    | None -> true
+  in
+  [
+    (if allow_short_term
+     then short_term_prompt_text_of_snapshot snapshot
+     else "");
+    mid_term_prompt_text_of_snapshot snapshot;
+  ]
+  |> List.filter (fun text -> String.trim text <> "")
+
+let read_progress_snapshot ~(config : Coord.config) ~(name : string)
+    : keeper_state_snapshot option =
+  match
+    let path = keeper_progress_path config name in
+    if not (Fs_compat.file_exists path) then
+      None
+    else
+      try progress_snapshot_cache_of_text (Fs_compat.load_file path)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | _ -> None
+  with
+  | None -> None
+  | Some cache -> Some cache.snapshot
+
+let read_progress_snapshot_cache ~(config : Coord.config) ~(name : string)
+    : progress_snapshot_cache option =
+  let path = keeper_progress_path config name in
+  if not (Fs_compat.file_exists path) then
+    None
+  else
+    try
+      progress_snapshot_cache_of_text (Fs_compat.load_file path)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> None
+
+let write_progress_snapshot_path
+    ~(path : string)
+    ?generation
+    ?updated_at
+    (snapshot : keeper_state_snapshot) : (unit, string) result =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file_atomic path
+    (progress_markdown_of_snapshot ?generation ?updated_at snapshot)
+
 let continuity_fallback_summary_text
     ~(continuity_summary : string)
     ~(last_continuity_update_ts : float) : string =
@@ -546,6 +728,7 @@ let priority_for_kind ~(kind : string) : int =
   match kind with
   | "constraints" -> 90
   | "decision" -> 86
+  | "long_term" -> 95
   | "next" -> 80
   | "open_question" -> 76
   | "goal" -> 72

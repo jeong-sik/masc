@@ -108,6 +108,8 @@ let memory_candidates_from_snapshot
     []
     |> add_opt "goal" snapshot.goal
     |> add_opt "progress" snapshot.progress
+    |> add_opt "progress" snapshot.done_summary
+    |> add_opt "next" snapshot.next_summary
     |> add_list "next" snapshot.next_items
     |> add_list "decision" snapshot.decisions
     |> add_list "open_question" snapshot.open_questions
@@ -122,6 +124,9 @@ let memory_candidates_from_snapshot
 type keeper_memory_row_raw = {
   json: Yojson.Safe.t;
   kind: string;
+  horizon: string;
+  source: string;
+  generation: int;
   text: string;
   priority: int;
   ts_unix: float;
@@ -131,13 +136,16 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
   try
     let j = Yojson.Safe.from_string line in
     let kind = Safe_ops.json_string ~default:"" "kind" j |> String.trim in
+    let horizon = memory_horizon_of_json ~kind j in
+    let source = Safe_ops.json_string ~default:"" "source" j |> String.trim in
+    let generation = Safe_ops.json_int ~default:0 "generation" j in
     let text = Safe_ops.json_string ~default:"" "text" j |> String.trim in
     let priority = Safe_ops.json_int ~default:0 "priority" j in
     let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
     if kind = "" || text = "" || not (is_meaningful_memory_text text) then
       None
     else
-      Some { json = j; kind; text; priority; ts_unix }
+      Some { json = j; kind; horizon; source; generation; text; priority; ts_unix }
   with Yojson.Json_error _ ->
     None
 
@@ -176,6 +184,11 @@ let consolidate_memory_notes (rows : keeper_memory_row_raw list)
         List.map (fun (r : keeper_memory_row_raw) -> r.text) group
         |> List.sort_uniq String.compare
       in
+      let generation =
+        List.fold_left
+          (fun acc (row : keeper_memory_row_raw) -> max acc row.generation)
+          0 group
+      in
       let summary_text =
         Printf.sprintf "[consolidated:%d] %s"
           (List.length group)
@@ -185,14 +198,21 @@ let consolidate_memory_notes (rows : keeper_memory_row_raw list)
         ("ts", `String (now_iso ()));
         ("ts_unix", `Float now);
         ("kind", `String "long_term");
+        ("horizon", `String long_term_horizon);
+        ("source", `String "progress_consolidation");
+        ("schema_version", `Int keeper_memory_schema_version);
         ("priority", `Int 90);
         ("text", `String summary_text);
         ("trace_id", `String tid);
+        ("generation", `Int generation);
         ("consolidated_from", `Int (List.length group));
       ] in
       consolidated := {
         json = summary_json;
         kind = "long_term";
+        horizon = long_term_horizon;
+        source = "progress_consolidation";
+        generation;
         text = summary_text;
         priority = 90;
         ts_unix = now;
@@ -231,13 +251,20 @@ let consolidate_memory_notes (rows : keeper_memory_row_raw list)
           ("ts", `String (now_iso ()));
           ("ts_unix", `Float now);
           ("kind", `String "long_term");
+          ("horizon", `String long_term_horizon);
+          ("source", `String "cross_trace_recurrence");
+          ("schema_version", `Int keeper_memory_schema_version);
           ("priority", `Int 95);
           ("text", `String row.text);
+          ("generation", `Int row.generation);
           ("recurring_across", `Int (List.length tids));
         ] in
         consolidated := {
           json = lt_json;
           kind = "long_term";
+          horizon = long_term_horizon;
+          source = "cross_trace_recurrence";
+          generation = row.generation;
           text = row.text;
           priority = 95;
           ts_unix = now;
@@ -282,6 +309,24 @@ let memory_row_key (row : keeper_memory_row_raw) : string =
   String.lowercase_ascii (String.trim row.kind)
   ^ ":"
   ^ normalize_memory_text_key row.text
+
+let compaction_priority
+    ~(current_generation : int)
+    (row : keeper_memory_row_raw) : int =
+  let horizon_bonus =
+    match row.horizon with
+    | h when h = long_term_horizon -> 12
+    | h when h = short_term_horizon ->
+        if row.generation >= current_generation then 4 else -18
+    | _ -> 0
+  in
+  let source_bonus =
+    match row.source with
+    | "cross_trace_recurrence" -> 4
+    | "progress_consolidation" -> 2
+    | _ -> 0
+  in
+  max 1 (min 120 (row.priority + horizon_bonus + source_bonus))
 
 let write_memory_bank_rows
     (path : string)
@@ -354,11 +399,16 @@ let compact_memory_bank_if_needed
               consolidate_memory_notes parsed
             in
             let _ = consolidated_count in
+            let current_generation = meta.runtime.generation in
             let by_recency =
               List.sort
                 (fun (a : keeper_memory_row_raw) (b : keeper_memory_row_raw) ->
                   let c = compare b.ts_unix a.ts_unix in
-                  if c <> 0 then c else compare b.priority a.priority)
+                  if c <> 0 then c
+                  else
+                    compare
+                      (compaction_priority ~current_generation b)
+                      (compaction_priority ~current_generation a))
                 consolidated_parsed
             in
             let deduped = dedup_by_key memory_row_key by_recency in
@@ -408,7 +458,11 @@ let compact_memory_bank_if_needed
               let by_priority =
                 List.sort
                   (fun (a : keeper_memory_row_raw) (b : keeper_memory_row_raw) ->
-                    let c = compare b.priority a.priority in
+                    let c =
+                      compare
+                        (compaction_priority ~current_generation b)
+                        (compaction_priority ~current_generation a)
+                    in
                     if c <> 0 then c else compare b.ts_unix a.ts_unix)
                   deduped
               in
@@ -461,24 +515,25 @@ let append_memory_notes_from_reply
     (meta : keeper_meta)
     ~(turn : int)
     ~(reply : string) : (int * string list) =
-  let snapshot =
+  let (snapshot, source) =
     match parse_state_snapshot_from_reply reply with
-    | Some s -> s
+    | Some s -> (s, "reply_state_block")
     | None ->
         (* Deterministic fallback: use keeper meta fields as memory source.
            This guarantees memory write regardless of LLM output format.
            See RFC #3646 Section 3: Det/NonDet boundary principle. *)
-        {
-          Keeper_memory_policy.goal =
-            (if meta.goal <> "" then Some meta.goal else None);
-          progress = None;
-          done_summary = None;
-          next_summary = None;
-          next_items = [];
-          decisions = [];
-          open_questions = [];
-          constraints = [];
-        }
+        ( {
+            Keeper_memory_policy.goal =
+              (if meta.goal <> "" then Some meta.goal else None);
+            progress = None;
+            done_summary = None;
+            next_summary = None;
+            next_items = [];
+            decisions = [];
+            open_questions = [];
+            constraints = [];
+          },
+          "meta_goal_fallback" )
   in
   let notes =
     memory_candidates_from_snapshot snapshot
@@ -492,6 +547,7 @@ let append_memory_notes_from_reply
     let seen_kinds : (string, unit) Hashtbl.t = Hashtbl.create 8 in
     List.iter
       (fun (kind, text, priority) ->
+        let horizon = memory_horizon_of_kind kind in
         if not (Hashtbl.mem seen_kinds kind) then begin
           Hashtbl.add seen_kinds kind ();
           kinds_acc := kind :: !kinds_acc
@@ -506,6 +562,9 @@ let append_memory_notes_from_reply
               ("generation", `Int meta.runtime.generation);
               ("turn", `Int turn);
               ("kind", `String kind);
+              ("horizon", `String horizon);
+              ("source", `String source);
+              ("schema_version", `Int keeper_memory_schema_version);
               ("priority", `Int priority);
               ("text", `String text);
             ]))
@@ -608,4 +667,3 @@ let memory_summary_to_json (summary : keeper_memory_summary) : Yojson.Safe.t =
                  ])
              summary.recent_notes) );
     ]
-

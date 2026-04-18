@@ -436,6 +436,63 @@ let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun 
   | _ -> failwith "expected exactly one task"
 )
 
+let () = test "handle_transition_release_on_todo_points_at_claim_first" (fun () ->
+  (* Field evidence 2026-04-17/18: ~30 [Invalid transition: todo ->
+     release] rejections from keepers that never claimed the task. The
+     original error named the rule but not the recovery — small-LLM
+     keepers retried the same action. The enriched error must name
+     masc_transition action=claim as the next concrete call. *)
+  let ctx = make_test_ctx () in
+  let _ =
+    Tool_task.handle_add_task ctx
+      (`Assoc [ ("title", `String "Release-without-claim") ])
+  in
+  let success, result =
+    Tool_task.handle_transition ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "release");
+        ])
+  in
+  assert (not success);
+  assert (str_contains result "Invalid transition");
+  assert (str_contains result "todo");
+  assert (str_contains result "Remediation");
+  assert (str_contains result "action=claim")
+)
+
+let () = test "handle_transition_claim_on_done_points_at_add_task" (fun () ->
+  (* [Done -> claim] must redirect to masc_add_task rather than
+     leaving the keeper to guess a terminal state is recoverable. *)
+  let ctx = make_test_ctx () in
+  let _ =
+    Tool_task.handle_add_task ctx
+      (`Assoc [ ("title", `String "Terminal-state-task") ])
+  in
+  let _ = Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let _ =
+    Tool_task.handle_transition ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "done");
+          ("notes", `String "finished");
+        ])
+  in
+  let success, result =
+    Tool_task.handle_transition ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "claim");
+        ])
+  in
+  assert (not success);
+  assert (str_contains result "Remediation");
+  assert (str_contains result "masc_add_task")
+)
+
 let () = test "handle_transition_release_synthesizes_summary_from_notes" (fun () ->
   (* Field evidence (2026-04-17/18): 76/132 masc_transition failures were
      empty/missing handoff_context.summary while the caller still supplied a

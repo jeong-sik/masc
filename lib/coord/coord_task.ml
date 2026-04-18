@@ -908,10 +908,54 @@ let transition_task_r config ~agent_name ~task_id ~action
               if assignee_hint <> "" then ""
               else next_actions_hint task.task_status
             in
+            (* Concrete remediation. Field evidence 2026-04-17/18 showed
+               ~30 [todo -> release] rejections — keepers called release
+               on tasks they never claimed, got a terse FSM error, and
+               retried with the same action rather than claiming first.
+               Name the exact next call to make so small-LLM keepers can
+               recover on the next turn. *)
+            let remediation =
+              let own_assignee =
+                match task_assignee_of_status task.task_status with
+                | Some a when a = agent_name -> true
+                | _ -> false
+              in
+              match task.task_status, action with
+              | Types.Todo, Types.Release ->
+                " Remediation: task is still in 'todo'. Call \
+                 masc_transition action=claim first, then action=release \
+                 once you own it."
+              | Types.Todo, (Types.Done_action | Types.Cancel) ->
+                " Remediation: task is still in 'todo'. Call \
+                 masc_transition action=claim then action=start before \
+                 trying to finish or cancel it."
+              | Types.Todo, Types.Start ->
+                " Remediation: task is still in 'todo'. Call \
+                 masc_transition action=claim first — start needs ownership."
+              | Types.Claimed _, Types.Release when not own_assignee ->
+                " Remediation: this task is claimed by another keeper. \
+                 Use masc_board_post to ask that agent to release/hand off, \
+                 or claim a different task with masc_claim_next."
+              | Types.Claimed _, Types.Done_action when not own_assignee ->
+                " Remediation: only the current assignee can mark a task \
+                 done. Pick a different task or coordinate via \
+                 masc_board_post."
+              | Types.InProgress _, Types.Claim ->
+                " Remediation: task is already in_progress under someone. \
+                 Use masc_claim_next for unclaimed work."
+              | Types.Done _, _ ->
+                " Remediation: task is already in a terminal state (done). \
+                 Use masc_add_task for new work or masc_tasks to find \
+                 claimable items."
+              | Types.Cancelled _, _ ->
+                " Remediation: task is already cancelled. Use masc_add_task \
+                 for new work or masc_tasks to find claimable items."
+              | _ -> ""
+            in
             Error (Types.TaskInvalidState
-              (Printf.sprintf "Invalid transition: %s -> %s (%s, agent=%s%s%s)"
+              (Printf.sprintf "Invalid transition: %s -> %s (%s, agent=%s%s%s).%s"
                 (task_status_to_string task.task_status) action_s task_id agent_name
-                assignee_hint actions_hint))
+                assignee_hint actions_hint remediation))
       in
       if new_status = task.task_status && set_current = None then
         (* Idempotent no-op: status unchanged, skip write/events.

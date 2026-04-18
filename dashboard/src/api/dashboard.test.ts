@@ -151,6 +151,20 @@ describe('fetchKeeperConfig', () => {
       sandbox_last_error: 'sandbox docker exec failed',
       effective_sandbox_image: 'ubuntu:24.04@sha256:test',
       private_workspace_root: '.masc/playground/keeper-sangsu',
+      sandbox_environment: {
+        base_path: '/tmp/project-root/.masc',
+        project_root: '/tmp/project-root',
+        docker_playground_enabled: 'true',
+        docker_container_name: 'keeper-playground',
+        container_playground_root: '/home/keeper/playground',
+        docker_image: 'ubuntu:24.04@sha256:test',
+        pids_limit: '128',
+        memory: '2g',
+        tmpfs_size: '256m',
+        seccomp_profile: '',
+        require_rootless: 'false',
+        require_userns: 'true',
+      },
       allowed_paths: '/tmp/workspace',
       effective_allowed_paths: ['/tmp/workspace'],
       prompt: {
@@ -287,6 +301,18 @@ describe('fetchKeeperConfig', () => {
     expect(result.sandbox_last_error).toBe('sandbox docker exec failed')
     expect(result.effective_sandbox_image).toBe('ubuntu:24.04@sha256:test')
     expect(result.private_workspace_root).toBe('.masc/playground/keeper-sangsu')
+    expect(result.sandbox_environment?.base_path).toBe('/tmp/project-root/.masc')
+    expect(result.sandbox_environment?.project_root).toBe('/tmp/project-root')
+    expect(result.sandbox_environment?.docker_playground_enabled).toBe(true)
+    expect(result.sandbox_environment?.docker_container_name).toBe('keeper-playground')
+    expect(result.sandbox_environment?.container_playground_root).toBe('/home/keeper/playground')
+    expect(result.sandbox_environment?.docker_image).toBe('ubuntu:24.04@sha256:test')
+    expect(result.sandbox_environment?.pids_limit).toBe(128)
+    expect(result.sandbox_environment?.memory).toBe('2g')
+    expect(result.sandbox_environment?.tmpfs_size).toBe('256m')
+    expect(result.sandbox_environment?.seccomp_profile).toBeNull()
+    expect(result.sandbox_environment?.require_rootless).toBe(false)
+    expect(result.sandbox_environment?.require_userns).toBe(true)
     expect(result.execution.models).toEqual(['llama:test-balanced'])
     expect(result.execution.verify).toBe(true)
     expect(result.hooks?.destructive_check_tools).toEqual(['dynamic_boundary (Tool_dispatch.is_destructive)'])

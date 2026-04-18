@@ -1112,6 +1112,38 @@ let keeper_config_json (config : Coord.config) (name : string)
           (Keeper_alerting_path.project_root_of_config config)
           (Keeper_alerting_path.playground_path_of_keeper m.name)
       in
+      let sandbox_environment =
+        let string_or_null value =
+          let trimmed = String.trim value in
+          if trimmed = "" then `Null else `String trimmed
+        in
+        `Assoc [
+          ("base_path", `String config.base_path);
+          ("project_root",
+            `String (Keeper_alerting_path.project_root_of_config config));
+          ("docker_playground_enabled",
+            `Bool Env_config_keeper.DockerPlayground.enabled);
+          ("docker_container_name",
+            string_or_null Env_config_keeper.DockerPlayground.container_name);
+          ("container_playground_root",
+            string_or_null
+              Env_config_keeper.DockerPlayground.container_playground_root);
+          ("docker_image",
+            string_or_null (Env_config_keeper.KeeperSandbox.docker_image ()));
+          ("pids_limit", `Int (Env_config_keeper.KeeperSandbox.pids_limit ()));
+          ("memory",
+            string_or_null (Env_config_keeper.KeeperSandbox.memory ()));
+          ("tmpfs_size",
+            string_or_null (Env_config_keeper.KeeperSandbox.tmpfs_size ()));
+          ("seccomp_profile",
+            string_or_null
+              (Env_config_keeper.KeeperSandbox.seccomp_profile ()));
+          ("require_rootless",
+            `Bool (Env_config_keeper.KeeperSandbox.require_rootless ()));
+          ("require_userns",
+            `Bool (Env_config_keeper.KeeperSandbox.require_userns ()));
+        ]
+      in
       (`OK,
        `Assoc [
          ("name", `String m.name);
@@ -1124,6 +1156,7 @@ let keeper_config_json (config : Coord.config) (name : string)
          ("effective_sandbox_image",
            Json_util.string_opt_to_json effective_sandbox_image);
          ("private_workspace_root", `String private_workspace_root);
+         ("sandbox_environment", sandbox_environment);
          ("allowed_paths",
            `List (List.map (fun s -> `String s) m.allowed_paths));
          ("effective_allowed_paths",

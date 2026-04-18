@@ -869,6 +869,21 @@ interface KeeperConfigMetrics {
   compaction_count: number
 }
 
+export interface KeeperSandboxEnvironment {
+  base_path?: string | null
+  project_root?: string | null
+  docker_playground_enabled: boolean
+  docker_container_name?: string | null
+  container_playground_root?: string | null
+  docker_image?: string | null
+  pids_limit?: number | null
+  memory?: string | null
+  tmpfs_size?: string | null
+  seccomp_profile?: string | null
+  require_rootless: boolean
+  require_userns: boolean
+}
+
 export interface KeeperHookSlot {
   active: boolean
   source: string
@@ -894,6 +909,7 @@ export interface KeeperConfig {
   sandbox_last_error?: string | null
   effective_sandbox_image?: string | null
   private_workspace_root?: string | null
+  sandbox_environment?: KeeperSandboxEnvironment
   allowed_paths: string[]
   effective_allowed_paths: string[]
   prompt: KeeperConfigPrompt

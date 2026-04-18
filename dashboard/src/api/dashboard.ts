@@ -1022,6 +1022,26 @@ function normalizeRuntimeBlockerClass(value: unknown): KeeperConfig['runtime']['
   }
 }
 
+function normalizeKeeperSandboxEnvironment(
+  raw: unknown,
+): KeeperConfig['sandbox_environment'] {
+  if (!isRecord(raw)) return undefined
+  return {
+    base_path: asNullableString(raw.base_path),
+    project_root: asNullableString(raw.project_root),
+    docker_playground_enabled: asLooseBoolean(raw.docker_playground_enabled),
+    docker_container_name: asNullableString(raw.docker_container_name),
+    container_playground_root: asNullableString(raw.container_playground_root),
+    docker_image: asNullableString(raw.docker_image),
+    pids_limit: asInt(raw.pids_limit),
+    memory: asNullableString(raw.memory),
+    tmpfs_size: asNullableString(raw.tmpfs_size),
+    seccomp_profile: asNullableString(raw.seccomp_profile),
+    require_rootless: asLooseBoolean(raw.require_rootless),
+    require_userns: asLooseBoolean(raw.require_userns),
+  }
+}
+
 function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfig {
   const data = isRecord(raw) ? raw : {}
   const prompt = isRecord(data.prompt) ? data.prompt : {}
@@ -1038,6 +1058,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const tools = isRecord(data.tools) ? data.tools : {}
   const sources = isRecord(data.sources) ? data.sources : {}
   const metrics = isRecord(data.metrics) ? data.metrics : {}
+  const sandboxEnvironment = normalizeKeeperSandboxEnvironment(data.sandbox_environment)
 
   return {
     name: asNullableString(data.name) ?? requestedName,
@@ -1048,6 +1069,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     sandbox_last_error: asNullableString(data.sandbox_last_error),
     effective_sandbox_image: asNullableString(data.effective_sandbox_image),
     private_workspace_root: asNullableString(data.private_workspace_root),
+    sandbox_environment: sandboxEnvironment,
     allowed_paths: normalizeStringList(data.allowed_paths),
     effective_allowed_paths: normalizeStringList(data.effective_allowed_paths),
     prompt: {
@@ -1193,6 +1215,9 @@ export type KeeperConfigUpdatePayload = {
   // Scope
   execution_scope?: 'observe_only' | 'workspace' | 'local'
   allowed_paths?: string[]
+  sandbox_profile?: 'legacy_local' | 'docker_hardened'
+  network_mode?: 'none' | 'inherit'
+  shared_memory_scope?: 'disabled' | 'room'
   // Prompt fields
   goal?: string
   short_goal?: string

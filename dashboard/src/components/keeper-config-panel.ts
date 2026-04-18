@@ -98,9 +98,15 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
 
 // Runtime config draft for proactive/compaction/handoff inline editing
 type ExecutionScope = 'observe_only' | 'workspace' | 'local'
+type SandboxProfile = 'legacy_local' | 'docker_hardened'
+type NetworkMode = 'inherit' | 'none'
+type SharedMemoryScope = 'disabled' | 'room'
 
 type RuntimeDraft = {
   execution_scope: ExecutionScope
+  sandbox_profile: SandboxProfile
+  network_mode: NetworkMode
+  shared_memory_scope: SharedMemoryScope
   allowed_paths_text: string
   proactive_enabled: boolean
   proactive_idle_sec: number
@@ -120,6 +126,9 @@ const runtimeSaving = signal(false)
 function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     execution_scope: (c.execution_scope as ExecutionScope) ?? 'workspace',
+    sandbox_profile: (c.sandbox_profile as SandboxProfile) ?? 'legacy_local',
+    network_mode: (c.network_mode as NetworkMode) ?? 'inherit',
+    shared_memory_scope: (c.shared_memory_scope as SharedMemoryScope) ?? 'disabled',
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
     proactive_enabled: c.proactive.enabled,
     proactive_idle_sec: c.proactive.idle_sec,
@@ -137,6 +146,9 @@ function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
 function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
   const payload: KeeperConfigUpdatePayload = {}
   if (draft.execution_scope !== (orig.execution_scope ?? 'workspace')) payload.execution_scope = draft.execution_scope
+  if (draft.sandbox_profile !== (orig.sandbox_profile ?? 'legacy_local')) payload.sandbox_profile = draft.sandbox_profile
+  if (draft.network_mode !== (orig.network_mode ?? 'inherit')) payload.network_mode = draft.network_mode
+  if (draft.shared_memory_scope !== (orig.shared_memory_scope ?? 'disabled')) payload.shared_memory_scope = draft.shared_memory_scope
   const newPaths = draft.allowed_paths_text.split('\n').map(s => s.trim()).filter(Boolean)
   const origPaths = orig.allowed_paths ?? []
   if (JSON.stringify(newPaths) !== JSON.stringify(origPaths)) payload.allowed_paths = newPaths
@@ -156,7 +168,14 @@ function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperCon
 function updateRuntimeDraft(field: keyof RuntimeDraft, value: boolean | number | string) {
   const d = runtimeDraft.value
   if (!d) return
-  runtimeDraft.value = { ...d, [field]: value }
+  const next = { ...d, [field]: value } as RuntimeDraft
+  if (field === 'sandbox_profile' && next.sandbox_profile !== 'docker_hardened' && next.network_mode === 'none') {
+    next.network_mode = 'inherit'
+  }
+  if (field === 'network_mode' && next.sandbox_profile !== 'docker_hardened' && next.network_mode === 'none') {
+    next.network_mode = 'inherit'
+  }
+  runtimeDraft.value = next
 }
 
 export async function loadKeeperConfig(
@@ -345,6 +364,32 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix }: {
   `
 }
 
+function InlineSelectRow({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: string
+  options: readonly string[]
+  onChange: (v: string) => void
+}) {
+  return html`
+    <div class="flex items-center justify-between py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5 gap-3">
+      <span class="text-[12px] font-medium text-text-muted">${label}</span>
+      <select
+        aria-label=${label}
+        class="text-xs bg-card/60 border border-card-border rounded-lg px-2 py-1 text-text-strong"
+        value=${value}
+        onChange=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}
+      >
+        ${options.map(option => html`<option value=${option}>${option}</option>`)}
+      </select>
+    </div>
+  `
+}
+
 // ── Edit field components ────────────────────────────────
 
 function updateDraft(field: keyof EditDraft, value: string | boolean | number) {
@@ -368,6 +413,18 @@ function EditTextarea({ field, label, rows = 3 }: { field: keyof EditDraft; labe
       />
     </div>
   `
+}
+
+function sandboxAnchorText(c: KeeperConfig): string {
+  const basePath = c.sandbox_environment?.base_path ?? '--'
+  const projectRoot = c.sandbox_environment?.project_root ?? '--'
+  return `상대 allowed_paths는 project root ${projectRoot} 기준으로 해석됩니다. config base path는 ${basePath} 입니다.`
+}
+
+function dockerStatusLabel(c: KeeperConfig): string {
+  if (c.sandbox_profile === 'docker_hardened') return 'docker_hardened'
+  if (c.sandbox_environment?.docker_playground_enabled) return 'legacy_local + docker_playground'
+  return 'legacy_local'
 }
 
 // ── Main component ───────────────────────────────────────
@@ -540,7 +597,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <div class="mt-2">
         <${Callout}
           title="런타임 설정"
-          body="프로액티브, 컴팩션, 핸드오프 섹션은 인라인 편집이 가능합니다. 소스/실행/런타임/조율은 읽기 전용입니다."
+          body="실행 범위 섹션에서 execution_scope, sandbox_profile, network_mode, shared_memory_scope, allowed_paths를 저장할 수 있습니다. 프로액티브, 컴팩션, 핸드오프도 인라인 편집 가능하고, 소스/실행/런타임/조율은 읽기 전용입니다."
         />
       </div>
 
@@ -598,16 +655,30 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       <${SectionHeader} title="실행 범위" />
       ${rd ? html`
-        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-          <span class="text-xs text-[var(--text-body)]">execution_scope</span>
-          <select class="text-xs bg-[var(--white-6)] border border-[var(--card-border)] rounded px-2 py-1 text-[var(--text-body)]"
-            value=${rd.execution_scope}
-            onChange=${(e: Event) => updateRuntimeDraft('execution_scope', (e.target as HTMLSelectElement).value as ExecutionScope)}>
-            <option value="observe_only">observe_only</option>
-            <option value="workspace">workspace</option>
-            <option value="local">local</option>
-          </select>
-        </div>
+        <${InlineSelectRow}
+          label="execution_scope"
+          value=${rd.execution_scope}
+          options=${['observe_only', 'workspace', 'local'] as const}
+          onChange=${(value: string) => updateRuntimeDraft('execution_scope', value as ExecutionScope)}
+        />
+        <${InlineSelectRow}
+          label="sandbox_profile"
+          value=${rd.sandbox_profile}
+          options=${['legacy_local', 'docker_hardened'] as const}
+          onChange=${(value: string) => updateRuntimeDraft('sandbox_profile', value as SandboxProfile)}
+        />
+        <${InlineSelectRow}
+          label="network_mode"
+          value=${rd.network_mode}
+          options=${rd.sandbox_profile === 'docker_hardened' ? ['inherit', 'none'] as const : ['inherit'] as const}
+          onChange=${(value: string) => updateRuntimeDraft('network_mode', value as NetworkMode)}
+        />
+        <${InlineSelectRow}
+          label="shared_memory_scope"
+          value=${rd.shared_memory_scope}
+          options=${['disabled', 'room'] as const}
+          onChange=${(value: string) => updateRuntimeDraft('shared_memory_scope', value as SharedMemoryScope)}
+        />
         <div class="py-2 px-3 rounded-lg bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1">
             <span class="text-xs text-[var(--text-body)]">allowed_paths</span>
@@ -625,6 +696,10 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}
           </div>
         ` : null}
+        <${Callout}
+          title="Base Path Anchor"
+          body=${sandboxAnchorText(c)}
+        />
       ` : html`
         <${ConfigRow} label="execution_scope" value=${c.execution_scope ?? 'workspace'} />
         <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'legacy_local'} />
@@ -634,6 +709,32 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${ConfigRow} label="allowed_paths" value=${(c.allowed_paths ?? []).join(', ') || '(computed default)'} />
         <${ConfigRow} label="effective_paths" value=${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'} />
         <${ConfigRow} label="private_workspace_root" value=${c.private_workspace_root || '--'} />
+      `}
+
+      ${c.sandbox_environment ? html`
+        <${SectionHeader} title="샌드박스 환경" />
+        <${ConfigRow} label="docker_status" value=${dockerStatusLabel(c)} />
+        <${ConfigRow} label="config_base_path" value=${c.sandbox_environment.base_path || '--'} />
+        <${ConfigRow} label="project_root" value=${c.sandbox_environment.project_root || '--'} />
+        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+          <span class="text-xs text-[var(--text-muted)]">docker_playground</span>
+          <${BoolBadge} value=${c.sandbox_environment.docker_playground_enabled} />
+        </div>
+        <${ConfigRow} label="docker_container" value=${c.sandbox_environment.docker_container_name || '--'} />
+        <${ConfigRow} label="container_playground_root" value=${c.sandbox_environment.container_playground_root || '--'} />
+        <${ConfigRow} label="sandbox_docker_image" value=${c.sandbox_environment.docker_image || '--'} />
+        <${ConfigRow} label="sandbox_memory" value=${c.sandbox_environment.memory || '--'} />
+        <${ConfigRow} label="sandbox_pids_limit" value=${String(c.sandbox_environment.pids_limit ?? '--')} />
+        <${ConfigRow} label="sandbox_tmpfs_size" value=${c.sandbox_environment.tmpfs_size || '--'} />
+        <${ConfigRow} label="sandbox_seccomp_profile" value=${c.sandbox_environment.seccomp_profile || '--'} />
+        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+          <span class="text-xs text-[var(--text-muted)]">require_rootless</span>
+          <${BoolBadge} value=${c.sandbox_environment.require_rootless} />
+        </div>
+        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+          <span class="text-xs text-[var(--text-muted)]">require_userns</span>
+          <${BoolBadge} value=${c.sandbox_environment.require_userns} />
+        </div>
         ${c.sandbox_last_error ? html`
           <${Callout}
             title="Sandbox Error"
@@ -641,7 +742,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             tone="warn"
           />
         ` : null}
-      `}
+      ` : null}
 
       <${SectionHeader} title="프로액티브" />
       ${rd ? html`

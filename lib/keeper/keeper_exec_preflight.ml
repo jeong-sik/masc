@@ -62,7 +62,16 @@ let handle_keeper_preflight_check
     | None -> "custom"
   in
   let () = add_check "preset" preset_ok preset_name in
-  (* Check 5: playground clone target *)
+  (* Check 5: accountability risk *)
+  let accountability_risk =
+    Keeper_accountability.accountability_risk_is_high config ~keeper_name:meta.name
+      ~agent_name:meta.name
+  in
+  let () =
+    add_check "accountability_risk" (not accountability_risk)
+      (if accountability_risk then "RISK_HIGH" else "ok")
+  in
+  (* Check 6: playground clone target *)
   let clone_target =
     let repos_path = Keeper_alerting_path.playground_repos_path meta.name in
     if repo <> "" then
@@ -79,6 +88,7 @@ let handle_keeper_preflight_check
         ; "identity", `Assoc [ "name", `String author; "email", `String email ]
         ; "preset", `String preset_name
         ; "preset_sufficient", `Bool preset_ok
+        ; "accountability_risk", `Bool accountability_risk
         ; "clone_target", `String clone_target
         ; "keeper", `String meta.name
         ])

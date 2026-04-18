@@ -49,6 +49,17 @@
   - Sidecar honours configured runtime paths (#8267).
   - `oas_sse_bridge` surfaces `keeper_name` on envelope `agent_name` (#8261).
 
+- **OAS pin bump → `v0.159.0`.** `agent_sdk` floor raised from `0.158.0`
+  to `0.159.0` (dune-project + masc_mcp.opam + pin script SHA
+  `28b3f14c1b0572dc4ce15255a6f0d097fe31275a`). Picks up env-driven CLI
+  flags for the three non-interactive transports (`OAS_CLAUDE_STRICT_MCP`,
+  `OAS_CLAUDE_MCP_CONFIG`, `OAS_CLAUDE_DISALLOWED_TOOLS`, `OAS_CODEX_CONFIG`,
+  `OAS_CODEX_SANDBOX`, `OAS_CODEX_PROFILE`, `OAS_CODEX_SKIP_GIT`,
+  `OAS_GEMINI_NO_MCP`, `OAS_GEMINI_ALLOWED_MCP`, `OAS_GEMINI_APPROVAL_MODE`,
+  `OAS_GEMINI_EXTENSIONS`). Keeper operators can now lock down MCP /
+  tighten approval surface per-deployment without an SDK change. See
+  `docs/KEEPER-USER-MANUAL.md` §1.1.1 for the full table.
+
 - **Tool-task schema.**
   - `handoff_context.summary` declared required; runtime error surfaces
     example payload (#8293).

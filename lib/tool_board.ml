@@ -708,7 +708,14 @@ let tool_post_list : Types.tool_schema = {
       ("hearth", `Assoc [("type", `String "string"); ("maxLength", `Int 100); ("description", `String "Filter by hearth topic (e.g. webrtc, code-review)")]);
       ("random", `Assoc [("type", `String "boolean"); ("description", `String "Shuffle posts randomly (default: false)")]);
       ("offset", `Assoc [("type", `String "integer"); ("description", `String "Skip first N posts (default: 0)"); ("minimum", `Int 0); ("maximum", `Int 1000)]);
-      ("sort_by", `Assoc [("type", `String "string"); ("enum", `List [`String "hot"; `String "trending"; `String "recent"; `String "updated"; `String "discussed"]); ("description", `String "Sort order (default: hot)")]);
+      ("sort_by", `Assoc [
+        ("type", `String "string");
+        (* Issue #8449 PR A: derived from Board_dispatch.sort_order Variant SSOT.
+           Hand-rolled enum had 5 values that happened to be in sync; future
+           constructor would silently miss this site. *)
+        ("enum", `List (List.map (fun s -> `String s) Board_dispatch.valid_sort_order_strings));
+        ("description", `String "Sort order (default: hot)");
+      ]);
       ("exclude_system", `Assoc [("type", `String "boolean"); ("description", `String "Exclude system posts like Activity Reports (default: false)")]);
       ("exclude_automation", `Assoc [("type", `String "boolean"); ("description", `String "Exclude automation posts (heartbeat, probes, etc.) (default: false)")]);
       ("author", `Assoc [("type", `String "string"); ("maxLength", `Int 100); ("description", `String "Filter posts by author name (case-insensitive substring match)")]);

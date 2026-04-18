@@ -1196,20 +1196,6 @@ let handle_keeper_status ctx args : tool_result =
                    "path", `String (Filename.concat ".worktrees" name);
                  ]) matching)
                with Sys_error _ -> `List []);
-             ("last_evidence",
-               match Keeper_evidence.latest_evidence
-                 ~base_path:ctx.config.base_path
-                 ~keeper_name:m.name
-                 ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id) with
-               | Some ev -> ev
-               | None -> `Null);
-             ("evidence_chain_valid",
-               match Keeper_evidence.verify_evidence_chain
-                 ~base_path:ctx.config.base_path
-                 ~keeper_name:m.name
-                 ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id) with
-               | Ok () -> `Bool true
-               | Error _ -> `Bool false);
            ]);
          ]) in
          let response = Yojson.Safe.pretty_to_string json in

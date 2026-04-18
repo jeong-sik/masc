@@ -195,10 +195,6 @@ let metric_keeper_heartbeat_failures =
 let metric_keeper_write_meta_failures =
   "masc_keeper_write_meta_failures_total"
 
-(* Keeper evidence (keeper_evidence.ml). *)
-let metric_keeper_collision_detected =
-  "masc_keeper_collision_detected_total"
-
 (* MCP tool schema budget (set once at boot from mcp_server_eio.ml
    via [set_tool_schema_stats]). *)
 let metric_mcp_tool_schema_count = "masc_mcp_tool_schema_count"
@@ -286,9 +282,6 @@ let init () =
      first observation. *)
   add metric_keeper_write_meta_failures
     "Total keeper meta-file write failures, labeled by keeper and phase"
-    Counter;
-  add metric_keeper_collision_detected
-    "Total keeper-name collision detections during evidence assembly"
     Counter;
   add "masc_board_truncated_posts_total"
     "Total board posts truncated due to size limits"

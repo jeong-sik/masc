@@ -35,16 +35,27 @@ let validate_name = function
 let parse_name request =
   validate_name (Server_utils.query_param request "name")
 
+let starts_with ~prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.equal (String.sub value 0 prefix_len) prefix
+
 let trim_opt = function
   | Some raw ->
       let trimmed = String.trim raw in
       if trimmed = "" then None else Some trimmed
   | None -> None
 
-let base_path () =
-  match Sys.getenv_opt "MASC_BASE_PATH" with
-  | Some p when String.length (String.trim p) > 0 -> String.trim p
-  | _ -> Sys.getcwd ()
+let runtime_base_path ?base_path () =
+  match trim_opt base_path with
+  | Some path -> path
+  | None -> (
+      match Sys.getenv_opt "MASC_BASE_PATH" with
+      | Some p when String.length (String.trim p) > 0 -> String.trim p
+      | _ -> Sys.getcwd ())
+
+let request_base_path state =
+  state.Mcp_server.room_config.base_path
 
 let dir_exists path =
   Sys.file_exists path && Sys.is_directory path
@@ -115,8 +126,178 @@ let missing_sidecar_dir_message ?sidecar_root ?project_root ~base_path id =
      `start-masc-mcp.sh --sidecar-root /path/to/masc-mcp`."
     id searched_text
 
-let runtime_sidecar_dir_result id =
-  let runtime_base_path = base_path () in
+let today_yyyymmdd () =
+  let tm = Unix.localtime (Unix.time ()) in
+  Printf.sprintf "%04d%02d%02d"
+    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+
+let legacy_status_rel id =
+  Printf.sprintf ".masc/connectors/%s/status.json" id
+
+type sidecar_status_config = {
+  env_names : string list;
+  toml_keys : string list;
+}
+
+let sidecar_status_config = function
+  | "discord" ->
+      {
+        env_names = [ "DISCORD_STATUS_PATH"; "discord_status_path" ];
+        toml_keys = [ "discord_status_path"; "status_path" ];
+      }
+  | "imessage" ->
+      {
+        env_names = [ "IMESSAGE_STATUS_PATH"; "status_path" ];
+        toml_keys = [ "status_path" ];
+      }
+  | "slack" ->
+      {
+        env_names = [ "SLACK_STATUS_PATH"; "MASC_SLACK_STATUS_PATH"; "status_path" ];
+        toml_keys = [ "status_path" ];
+      }
+  | "telegram" ->
+      {
+        env_names =
+          [ "TELEGRAM_STATUS_PATH"; "MASC_TELEGRAM_STATUS_PATH"; "status_path" ];
+        toml_keys = [ "status_path" ];
+      }
+  | id -> invalid_arg (Printf.sprintf "unknown sidecar id: %s" id)
+
+let read_file path =
+  In_channel.with_open_text path In_channel.input_all
+
+let strip_matching_quotes value =
+  let len = String.length value in
+  if len >= 2 then
+    let first = value.[0] in
+    let last = value.[len - 1] in
+    if (first = '"' && last = '"') || (first = '\'' && last = '\'') then
+      String.sub value 1 (len - 2)
+    else
+      value
+  else
+    value
+
+let parse_env_assignment line =
+  let trimmed = String.trim line in
+  if trimmed = "" || starts_with ~prefix:"#" trimmed then
+    None
+  else
+    let body =
+      if starts_with ~prefix:"export " trimmed then
+        String.sub trimmed 7 (String.length trimmed - 7) |> String.trim
+      else
+        trimmed
+    in
+    match String.index_opt body '=' with
+    | None -> None
+    | Some idx ->
+        let key = String.sub body 0 idx |> String.trim in
+        let raw_value =
+          String.sub body (idx + 1) (String.length body - idx - 1) |> String.trim
+        in
+        trim_opt (Some key)
+        |> Option.map (fun normalized_key ->
+               (normalized_key, strip_matching_quotes raw_value))
+
+let env_file_lookup path names =
+  if not (Sys.file_exists path) then
+    None
+  else
+    let pairs =
+      read_file path
+      |> String.split_on_char '\n'
+      |> List.filter_map parse_env_assignment
+    in
+    names |> List.find_map (fun name -> List.assoc_opt name pairs |> trim_opt)
+
+let toml_lookup path keys =
+  if not (Sys.file_exists path) then
+    None
+  else
+    match Keeper_toml_loader.parse_toml (read_file path) with
+    | Error _ -> None
+    | Ok doc ->
+        keys
+        |> List.find_map (fun key ->
+               match List.assoc_opt key doc with
+               | Some (Keeper_toml_loader.Toml_string value) -> trim_opt (Some value)
+               | _ -> None)
+
+let resolve_relative_path ~roots raw_path =
+  let path = String.trim raw_path in
+  if path = "" then []
+  else if Filename.is_relative path then
+    roots |> List.map (fun root -> Filename.concat root path)
+  else
+    [ path ]
+
+let first_existing_or_first = function
+  | [] -> None
+  | candidates -> (
+      match List.find_opt Sys.file_exists candidates with
+      | Some path -> Some path
+      | None ->
+          match candidates with
+          | first :: _ -> Some first
+          | [] -> None)
+
+let runtime_toml_path ~base_path id =
+  Filename.concat base_path (Printf.sprintf ".gate/runtime/%s/config.toml" id)
+
+let status_file_candidates ?sidecar_root ?project_root ?sidecar_dir ~base_path id =
+  let roots = sidecar_root_candidates ?sidecar_root ?project_root ~base_path () in
+  let cfg = sidecar_status_config id in
+  let env_paths =
+    cfg.env_names
+    |> List.find_map (fun name -> trim_opt (Sys.getenv_opt name))
+    |> Option.map (resolve_relative_path ~roots)
+    |> Option.value ~default:[]
+  in
+  let dotenv_paths =
+    match sidecar_dir with
+    | None -> []
+    | Some dir ->
+        env_file_lookup (Filename.concat dir ".env") cfg.env_names
+        |> Option.map (resolve_relative_path ~roots)
+        |> Option.value ~default:[]
+  in
+  let toml_paths =
+    roots
+    |> List.filter_map (fun root ->
+           toml_lookup (runtime_toml_path ~base_path:root id) cfg.toml_keys
+           |> Option.map (fun raw -> resolve_relative_path ~roots:[ root ] raw))
+    |> List.concat
+  in
+  let default_paths =
+    resolve_relative_path ~roots (Printf.sprintf ".gate/runtime/%s/status.json" id)
+  in
+  let legacy_paths = resolve_relative_path ~roots (legacy_status_rel id) in
+  dedupe_keep_order (env_paths @ dotenv_paths @ toml_paths @ default_paths @ legacy_paths)
+
+let status_file ?sidecar_root ?project_root ?sidecar_dir ~base_path id =
+  status_file_candidates ?sidecar_root ?project_root ?sidecar_dir ~base_path id
+  |> first_existing_or_first
+  |> Option.value ~default:(Filename.concat base_path (legacy_status_rel id))
+
+let log_file_candidates ?sidecar_root ?project_root ~base_path id =
+  let roots = sidecar_root_candidates ?sidecar_root ?project_root ~base_path () in
+  roots
+  |> List.map (fun root ->
+         Filename.concat root
+           (Printf.sprintf ".masc/logs/%s-sidecar-%s.log" id (today_yyyymmdd ())))
+  |> dedupe_keep_order
+
+let today_log_file ?sidecar_root ?project_root ~base_path id =
+  log_file_candidates ?sidecar_root ?project_root ~base_path id
+  |> first_existing_or_first
+  |> Option.value
+       ~default:
+         (Filename.concat base_path
+            (Printf.sprintf ".masc/logs/%s-sidecar-%s.log" id (today_yyyymmdd ())))
+
+let runtime_sidecar_dir_result ?base_path id =
+  let runtime_base_path = runtime_base_path ?base_path () in
   let configured_sidecar_root = sidecar_root () in
   let project_root = project_root_from_executable () in
   match
@@ -135,8 +316,8 @@ let runtime_sidecar_dir_result id =
            ~base_path:runtime_base_path
            id)
 
-let runtime_sidecar_script_result id =
-  match runtime_sidecar_dir_result id with
+let runtime_sidecar_script_result ?base_path id =
+  match runtime_sidecar_dir_result ?base_path id with
   | Error _ as error -> error
   | Ok dir ->
       let script = Filename.concat dir "run.sh" in
@@ -149,22 +330,6 @@ let runtime_sidecar_script_result id =
               MASC_SIDECAR_ROOT=/path/to/masc-mcp or start the server with \
               `start-masc-mcp.sh --sidecar-root /path/to/masc-mcp`."
              id script)
-
-let status_file id =
-  Filename.concat (base_path ()) (Printf.sprintf ".gate/runtime/%s/status.json" id)
-
-let today_yyyymmdd () =
-  let tm = Unix.localtime (Unix.time ()) in
-  Printf.sprintf "%04d%02d%02d"
-    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-
-(** Today's log file path. Wrapper writes to this exact filename:
-    [LOG_DIR/<id>-sidecar-YYYYMMDD.log] (see sidecars/<id>-bot/run.sh).
-    If the operator started the sidecar yesterday and never rolled the
-    process, today's file may not exist yet — handled by the caller. *)
-let today_log_file id =
-  Filename.concat (base_path ())
-    (Printf.sprintf ".masc/logs/%s-sidecar-%s.log" id (today_yyyymmdd ()))
 
 (** Clamp the [?lines=N] query param to [1, 1000]. Pure so unit tests
     can pin the upper bound without a request mock. *)
@@ -179,32 +344,53 @@ let bad_request request reqd msg =
   respond_json request reqd ~status:`Bad_request
     (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
 
-let read_status_json id =
-  let path = status_file id in
+let read_status_json ~base_path id =
+  let configured_sidecar_root = sidecar_root () in
+  let project_root = project_root_from_executable () in
+  let sidecar_dir =
+    resolve_existing_sidecar_dir
+      ?sidecar_root:configured_sidecar_root
+      ?project_root
+      ~base_path
+      id
+  in
+  let path =
+    status_file
+      ?sidecar_root:configured_sidecar_root
+      ?project_root
+      ?sidecar_dir
+      ~base_path
+      id
+  in
   if Sys.file_exists path then
-    let body = In_channel.with_open_text path In_channel.input_all in
+    let body = read_file path in
     let parsed = try Some (Yojson.Safe.from_string body) with _ -> None in
     `Assoc [
       ("ok", `Bool true);
       ("available", `Bool true);
+      ("status_path", `String path);
       ("status", Option.value parsed ~default:`Null);
     ]
   else
     `Assoc [
       ("ok", `Bool true);
       ("available", `Bool false);
+      ("status_path", `String path);
     ]
 
-let handle_status _state request reqd =
-  match parse_name request with
-  | Error msg -> bad_request request reqd msg
-  | Ok id -> respond_json request reqd ~status:`OK (read_status_json id)
-
-let handle_stop _state request reqd =
+let handle_status state request reqd =
   match parse_name request with
   | Error msg -> bad_request request reqd msg
   | Ok id ->
-      (match runtime_sidecar_script_result id with
+      let base_path = request_base_path state in
+      respond_json request reqd ~status:`OK (read_status_json ~base_path id)
+
+let handle_stop state request reqd =
+  match parse_name request with
+  | Error msg -> bad_request request reqd msg
+  | Ok id ->
+      let base_path = request_base_path state in
+      (match runtime_sidecar_script_result ~base_path id with
        | Error msg ->
            respond_json request reqd ~status:`Service_unavailable
              (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
@@ -233,16 +419,25 @@ let handle_stop _state request reqd =
                 ("note", `String trimmed);
               ]))
 
-let handle_logs _state request reqd =
+let handle_logs state request reqd =
   match parse_name request with
   | Error msg -> bad_request request reqd msg
   | Ok id ->
+      let base_path = request_base_path state in
+      let configured_sidecar_root = sidecar_root () in
+      let project_root = project_root_from_executable () in
       let lines =
         clamp_lines (Server_utils.query_param request "lines"
                      |> Option.map int_of_string_opt
                      |> Option.join)
       in
-      let path = today_log_file id in
+      let path =
+        today_log_file
+          ?sidecar_root:configured_sidecar_root
+          ?project_root
+          ~base_path
+          id
+      in
       if not (Sys.file_exists path) then
         respond_json request reqd ~status:`OK
           (`Assoc [
@@ -291,11 +486,11 @@ let python_argv_for sidecar_dir =
   else
     [ "uv"; "run"; "--directory"; sidecar_dir; "python"; "-m"; "src.schema_dump" ]
 
-let fetch_schema id =
+let fetch_schema ?base_path id =
   match Hashtbl.find_opt schema_cache id with
   | Some cached -> Ok cached
   | None ->
-      (match runtime_sidecar_dir_result id with
+      (match runtime_sidecar_dir_result ?base_path id with
        | Error _ as error -> error
        | Ok sidecar_dir ->
            let argv = python_argv_for sidecar_dir in
@@ -374,8 +569,8 @@ let parse_declared_type json : declared_type =
        | _ -> `String)
   | _ -> `String
 
-let schema_field_types id : (string * declared_type) list =
-  match fetch_schema id with
+let schema_field_types ?base_path id : (string * declared_type) list =
+  match fetch_schema ?base_path id with
   | Error _ -> []
   | Ok json_str ->
       (match Yojson.Safe.from_string json_str with
@@ -404,8 +599,8 @@ let coerce_value (typ : declared_type) (raw : string) : (toml_value, string) res
          | "false" | "0" -> Ok (Tbool false)
          | _ -> Error (Printf.sprintf "expected true/false, got %S" raw))
 
-let config_toml_path id =
-  Filename.concat (base_path ())
+let config_toml_path ~base_path id =
+  Filename.concat base_path
     (Printf.sprintf ".gate/runtime/%s/config.toml" id)
 
 (** Atomic write: tmp file + rename. POSIX rename is atomic so a
@@ -475,7 +670,7 @@ let handle_get_config _state request reqd =
   match parse_name request with
   | Error msg -> bad_request request reqd msg
   | Ok id ->
-      let path = config_toml_path id in
+      let path = config_toml_path ~base_path:(request_base_path _state) id in
       if not (Sys.file_exists path) then
         respond_json request reqd ~status:`OK
           (`Assoc [
@@ -523,7 +718,8 @@ let handle_put_config _state request reqd =
         match parse_body_pairs body_str with
         | Error msg -> bad_request request reqd msg
         | Ok pairs ->
-            let types = schema_field_types id in
+            let base_path = request_base_path _state in
+            let types = schema_field_types ~base_path id in
             if types = [] then
               respond_json request reqd ~status:`Service_unavailable
                 (`Assoc [
@@ -546,7 +742,7 @@ let handle_put_config _state request reqd =
               (match collect [] [] pairs with
                | Error msg -> bad_request request reqd msg
                | Ok (accepted, rejected) ->
-                   let path = config_toml_path id in
+                   let path = config_toml_path ~base_path id in
                    ensure_parent_dir path;
                    let toml_str = render_toml accepted in
                    (match atomic_write_file ~path toml_str with
@@ -571,7 +767,7 @@ let handle_schema _state request reqd =
   match parse_name request with
   | Error msg -> bad_request request reqd msg
   | Ok id ->
-      (match fetch_schema id with
+      (match fetch_schema ~base_path:(request_base_path _state) id with
        | Error msg ->
            respond_json request reqd ~status:`Service_unavailable
              (`Assoc [
@@ -594,11 +790,12 @@ let handle_schema _state request reqd =
                      ("error", `String "schema_dump returned invalid JSON");
                    ])))
 
-let handle_start _state request reqd =
+let handle_start state request reqd =
   match parse_name request with
   | Error msg -> bad_request request reqd msg
   | Ok id ->
-      (match runtime_sidecar_script_result id with
+      let base_path = request_base_path state in
+      (match runtime_sidecar_script_result ~base_path id with
        | Error msg ->
            respond_json request reqd ~status:`Service_unavailable
              (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
@@ -609,7 +806,8 @@ let handle_start _state request reqd =
               a closed-shell injection surface. *)
            let cmd =
              Printf.sprintf
-               "setsid nohup %s start </dev/null >/dev/null 2>&1 &"
+               "MASC_BASE_PATH=%s setsid nohup %s start </dev/null >/dev/null 2>&1 &"
+               (Filename.quote base_path)
                (Filename.quote script)
            in
            let _ = Sys.command cmd in

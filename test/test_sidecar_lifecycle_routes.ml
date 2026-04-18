@@ -48,6 +48,10 @@ let rec rm_rf path =
     end else
       Sys.remove path
 
+let write_file path content =
+  mkdir_p (Filename.dirname path);
+  Out_channel.with_open_text path (fun oc -> output_string oc content)
+
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Sys.remove dir;
@@ -181,6 +185,35 @@ let test_missing_sidecar_dir_message_mentions_sidecar_root_hint () =
   check bool "includes searched project path" true
     (contains_substring message "/tmp/project-root/sidecars/discord-bot")
 
+let test_status_file_prefers_existing_project_root_candidate () =
+  with_temp_dir "sidecar-status-project-fallback" (fun dir ->
+      let base_path = Filename.concat dir "runtime-root" in
+      let project_root = Filename.concat dir "project-root" in
+      let sidecar_dir = Filename.concat project_root "sidecars/discord-bot" in
+      let project_status =
+        Filename.concat project_root ".masc/connectors/discord/status.json"
+      in
+      mkdir_p sidecar_dir;
+      write_file (Filename.concat sidecar_dir ".env")
+        "DISCORD_STATUS_PATH=.masc/connectors/discord/status.json\n";
+      write_file project_status {|{"connected":true}|};
+      check string "existing project-root status wins when runtime-root path is absent"
+        project_status
+        (Routes.status_file ~base_path ~project_root ~sidecar_dir "discord"))
+
+let test_today_log_file_falls_back_to_project_root_log () =
+  with_temp_dir "sidecar-log-project-fallback" (fun dir ->
+      let base_path = Filename.concat dir "runtime-root" in
+      let project_root = Filename.concat dir "project-root" in
+      let log_path =
+        Filename.concat project_root
+          (Printf.sprintf ".masc/logs/discord-sidecar-%s.log" (Routes.today_yyyymmdd ()))
+      in
+      write_file log_path "[INFO] started\n";
+      check string "project-root log found when runtime-root log is absent"
+        log_path
+        (Routes.today_log_file ~base_path ~project_root "discord"))
+
 (* ---- Config write helpers (PUT /api/v1/sidecar/config). ---- *)
 
 let test_escape_quotes_and_backslash () =
@@ -283,6 +316,10 @@ let () =
             test_resolve_existing_sidecar_dir_falls_back_to_project_root;
           test_case "missing directory message includes setup hint" `Quick
             test_missing_sidecar_dir_message_mentions_sidecar_root_hint;
+          test_case "status file falls back to project root candidate" `Quick
+            test_status_file_prefers_existing_project_root_candidate;
+          test_case "today log falls back to project root candidate" `Quick
+            test_today_log_file_falls_back_to_project_root_log;
         ] );
       ( "invariants",
         [

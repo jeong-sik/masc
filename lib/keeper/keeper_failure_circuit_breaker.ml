@@ -100,7 +100,7 @@ let fingerprint_of_error ?(max_len = 120) (error_msg : string) : string =
     let n = String.length s in
     if n > 0 && s.[n - 1] = ' ' then String.sub s 0 (n - 1) else s
   in
-  if len > max_len then s ^ "…" else s
+  if !i < len then s ^ "…" else s
 
 (** Mutex protecting [states] and every per-keeper [breaker_state].
     Every production path goes through [Keeper_exec_tools.apply_circuit_breaker]

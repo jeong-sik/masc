@@ -209,6 +209,12 @@ let test_fingerprint_truncates () =
   check bool "truncated length bounded" true (String.length fp <= 60);
   check bool "has ellipsis" true (contains fp "…")
 
+let test_fingerprint_does_not_fake_truncation_after_space_collapse () =
+  let padded = (String.make 200 ' ') ^ "keeper_shell failed" in
+  let fp = CB.fingerprint_of_error ~max_len:50 padded in
+  check bool "keeps content" true (contains fp "keeper_shell failed");
+  check bool "no fake ellipsis" false (contains fp "…")
+
 let test_recent_failures_empty_for_unknown () =
   let r = CB.recent_failures_of ~keeper_name:"never-touched-sig-xyz" in
   check int "empty list" 0 (List.length r)
@@ -282,6 +288,8 @@ let () =
         `Quick test_fingerprint_collapses_whitespace;
       test_case "fingerprint truncates with ellipsis"
         `Quick test_fingerprint_truncates;
+      test_case "fingerprint does not fake truncation after space collapse"
+        `Quick test_fingerprint_does_not_fake_truncation_after_space_collapse;
       test_case "recent_failures empty for unknown"
         `Quick test_recent_failures_empty_for_unknown;
       test_case "recent_failures bounded, newest first"

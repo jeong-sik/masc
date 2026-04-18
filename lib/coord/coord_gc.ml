@@ -69,16 +69,30 @@ let cleanup_zombies
               zombie_entries := (agent.name, path) :: !zombie_entries
           | Ok _ -> () (* not a zombie, skip *)
           | Error err ->
-              Log.Gc.warn "removing broken agent file %s: %s" name err;
+              (* #7947: previously deleted the file outright, losing
+                 current_task/meta with no postmortem trail.  Quarantine
+                 to path.broken-<unix_ms> so operators can inspect the
+                 parse failure.  The .json suffix guard above already
+                 makes the next scan skip .broken-* siblings. *)
+              let ts_ms =
+                int_of_float (Unix.gettimeofday () *. 1000.0)
+              in
+              let quarantine_path =
+                Printf.sprintf "%s.broken-%d" path ts_ms
+              in
+              Log.Gc.warn
+                "quarantining broken agent file %s: %s -> %s"
+                name err
+                (Filename.basename quarantine_path);
               (try
-                 delete_path config path;
-                 (* delete_path removes the entry from the configured backend.
-                    For non-filesystem backends that dual-write a local mirror
-                    (should_dual_write_local), explicitly remove the local file
-                    as well to avoid repeated GC warnings on each scan cycle. *)
-                 (try Sys.remove path with Sys_error _ -> ())
+                 (try Sys.rename path quarantine_path
+                  with Sys_error _ ->
+                    (* Non-filesystem backend: fall back to delete so the
+                       scan does not loop forever on an unreadable entry. *)
+                    delete_path config path);
+                 ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                 Log.Gc.warn "failed to remove broken agent %s: %s"
+                 Log.Gc.warn "failed to quarantine broken agent %s: %s"
                    path (Printexc.to_string exn))
         end
       )

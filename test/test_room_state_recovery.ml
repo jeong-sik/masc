@@ -146,6 +146,63 @@ let test_agent_of_yojson_accepts_numeric_last_seen () =
         (String.length agent.last_seen > 0 && String.contains agent.last_seen 'T')
   | Error msg -> fail ("expected numeric last_seen compatibility: " ^ msg)
 
+let test_agent_of_yojson_bootstraps_null_last_seen_from_joined_at () =
+  (* #7947 Layer 2: null last_seen must be repaired from joined_at rather than
+     dropping the whole agent record (which loses current_task/meta). *)
+  let json =
+    `Assoc
+      [
+        ("name", `String "gemini-cool-whale");
+        ("agent_type", `String "gemini");
+        ("status", `String "busy");
+        ("capabilities", `List []);
+        ("current_task", `String "task-208");
+        ("joined_at", `String "2026-04-15T03:00:00Z");
+        ("last_seen", `Null);
+      ]
+  in
+  match Types.agent_of_yojson json with
+  | Ok agent ->
+      check string "agent parsed" "gemini-cool-whale" agent.name;
+      check (option string) "current_task preserved"
+        (Some "task-208") agent.current_task;
+      check string "last_seen bootstrapped from joined_at"
+        "2026-04-15T03:00:00Z" agent.last_seen
+  | Error msg ->
+      fail ("null last_seen should bootstrap from joined_at: " ^ msg)
+
+let test_agent_of_yojson_annotates_invalid_last_seen () =
+  (* #7947 Layer 1: when repair is not possible, the error message must
+     include the actual offending value so operators can diagnose the
+     schema drift instead of seeing only the field path. *)
+  let json =
+    `Assoc
+      [
+        ("name", `String "gemini-cool-whale");
+        ("agent_type", `String "gemini");
+        ("status", `String "busy");
+        ("capabilities", `List []);
+        ("current_task", `Null);
+        ("joined_at", `Bool true);
+        ("last_seen", `Bool false);
+      ]
+  in
+  match Types.agent_of_yojson json with
+  | Ok _ -> fail "bool last_seen should not succeed without a usable joined_at"
+  | Error msg ->
+      let contains needle =
+        let n = String.length needle in
+        let h = String.length msg in
+        let rec loop i =
+          if i + n > h then false
+          else if String.sub msg i n = needle then true
+          else loop (i + 1)
+        in
+        loop 0
+      in
+      check bool "error mentions last_seen value" true
+        (contains "last_seen=")
+
 let test_heartbeat_repairs_legacy_agent_last_seen () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -198,6 +255,10 @@ let () =
             test_read_state_filters_invalid_active_agent_entries;
           test_case "agent parser accepts numeric last_seen" `Quick
             test_agent_of_yojson_accepts_numeric_last_seen;
+          test_case "agent parser bootstraps null last_seen from joined_at (#7947)" `Quick
+            test_agent_of_yojson_bootstraps_null_last_seen_from_joined_at;
+          test_case "agent parser error annotates invalid last_seen (#7947)" `Quick
+            test_agent_of_yojson_annotates_invalid_last_seen;
           test_case "heartbeat repairs legacy agent last_seen" `Quick
             test_heartbeat_repairs_legacy_agent_last_seen;
         ] );

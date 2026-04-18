@@ -351,6 +351,56 @@ let () =
           Masc_mcp.Keeper_types_profile.valid_shared_memory_scope_strings
           Masc_mcp.Keeper_schema.shared_memory_scope_enum_strings);
     ];
+    "fsm_transition_matrix", [
+      (* Issue #8474: schema transition matrix had drifted from
+         [Coord_task.valid_next_actions_for_status] — submit/approve/
+         reject_verification missing. This test asserts every action
+         declared valid for any reachable status appears in the
+         published [task_fsm_transitions] list. *)
+      Alcotest.test_case "every valid action appears in transitions" `Quick (fun () ->
+        let reachable_statuses : Types.task_status list = [
+          Todo;
+          Claimed { assignee = "a"; claimed_at = "" };
+          InProgress { assignee = "a"; started_at = "" };
+          AwaitingVerification {
+            assignee = "a"; submitted_at = "";
+            verification_id = "v"; required_verifier_role = Reviewer;
+            deadline = None;
+          };
+          Done { assignee = "a"; completed_at = ""; notes = None };
+          Cancelled { cancelled_by = "a"; cancelled_at = ""; reason = None };
+        ] in
+        let valid_actions =
+          reachable_statuses
+          |> List.concat_map Coord_task.valid_next_actions_for_status
+          |> List.map task_action_to_string
+          |> List.sort_uniq String.compare
+        in
+        let published_actions =
+          Masc_mcp.Mcp_server.task_fsm_transitions
+          |> List.map (fun (a, _, _, _) -> a)
+          |> List.sort_uniq String.compare
+        in
+        List.iter (fun action ->
+          if not (List.mem action published_actions) then
+            Alcotest.failf
+              "action %S valid per Coord_task.valid_next_actions_for_status \
+               but missing from Mcp_server.task_fsm_transitions" action
+        ) valid_actions);
+      Alcotest.test_case "verifier-FSM transitions present" `Quick (fun () ->
+        let actions =
+          Masc_mcp.Mcp_server.task_fsm_transitions
+          |> List.map (fun (a, _, _, _) -> a)
+        in
+        List.iter (fun expected ->
+          Alcotest.(check bool) (Printf.sprintf "%s present" expected) true
+            (List.mem expected actions)
+        ) [
+          "submit_for_verification";
+          "approve";
+          "reject";
+        ]);
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

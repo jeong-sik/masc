@@ -84,28 +84,29 @@ let test_visibility_of_string () =
     (match Tool_board.visibility_of_string "garbage" with
      | None -> "none" | _ -> "other")
 
+(* Issue #8449 PR B: [Tool_board.sort_order_of_string] removed —
+   replaced by [parse_sort_order] (Result-returning) which delegates to
+   [Board_dispatch.sort_order_of_string_opt]. The previous silent
+   "unknown defaults to Hot" behavior is now an explicit Error so
+   garbage input is surfaced instead of swallowed. *)
 let test_sort_order_of_string () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  Alcotest.(check string) "hot" "hot"
-    (match Tool_board.sort_order_of_string "hot" with
-     | Tool_board.Hot -> "hot" | _ -> "x");
-  Alcotest.(check string) "trending" "trending"
-    (match Tool_board.sort_order_of_string "trending" with
-     | Tool_board.Trending -> "trending" | _ -> "x");
-  Alcotest.(check string) "recent" "recent"
-    (match Tool_board.sort_order_of_string "recent" with
-     | Tool_board.Recent -> "recent" | _ -> "x");
-  Alcotest.(check string) "updated" "updated"
-    (match Tool_board.sort_order_of_string "updated" with
-     | Tool_board.Updated -> "updated" | _ -> "x");
-  Alcotest.(check string) "discussed" "discussed"
-    (match Tool_board.sort_order_of_string "discussed" with
-     | Tool_board.Discussed -> "discussed" | _ -> "x");
-  Alcotest.(check string) "unknown defaults to hot" "hot"
-    (match Tool_board.sort_order_of_string "xyz" with
-     | Tool_board.Hot -> "hot" | _ -> "x")
+  let check name expected input =
+    match Tool_board.parse_sort_order input with
+    | Ok v when v = expected -> Alcotest.(check string) name name name
+    | Ok _ -> Alcotest.failf "%s: parsed wrong variant" name
+    | Error e -> Alcotest.failf "%s: expected Ok, got Error: %s" name e
+  in
+  check "hot" Tool_board.Hot "hot";
+  check "trending" Tool_board.Trending "trending";
+  check "recent" Tool_board.Recent "recent";
+  check "updated" Tool_board.Updated "updated";
+  check "discussed" Tool_board.Discussed "discussed";
+  (* Garbage input is now an explicit Error, not a silent Hot default. *)
+  Alcotest.(check bool) "garbage rejected" true
+    (match Tool_board.parse_sort_order "xyz" with Error _ -> true | Ok _ -> false)
 
 let test_board_error_to_string () =
   Eio_main.run @@ fun env ->

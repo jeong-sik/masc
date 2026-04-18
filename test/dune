@@ -84,6 +84,7 @@
         test_exec_core
         test_keeper_bash_safety
         test_hitl_approval
+        test_approval_callback_wired
         test_keeper_discovered_tools
         test_keeper_tool_affinity
         test_keeper_github_read_only
@@ -188,6 +189,7 @@
           test_exec_core
           test_keeper_bash_safety
           test_hitl_approval
+          test_approval_callback_wired
           test_keeper_discovered_tools
           test_keeper_tool_affinity
           test_keeper_github_read_only

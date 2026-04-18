@@ -94,6 +94,7 @@ let verify (req : verification_request) : (verdict, string) result =
         ~max_turns:1
         ~temperature:Oas_worker_cascade.deterministic_temperature
         ~max_tokens:200
+        ~approval:Approval_callbacks.auto_approve
         ()
     with
     | Ok result ->

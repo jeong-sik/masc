@@ -404,13 +404,46 @@ let has_path_rewrite_syntax cmd =
       | _ -> false)
     cmd
 
+(* When a path-bearing keeper command carries path-rewrite syntax, tell the
+   keeper which specific character tripped the block and what the supported
+   alternative is. Otherwise small-LLM keepers retry the same glob/quote
+   pattern (observed 62x on 2026-04-17/18). *)
+let path_rewrite_redirect_hint cmd =
+  let has ch = String.contains cmd ch in
+  let suggestions = [
+    (has '*' || has '?' || has '[' || has ']'),
+      "Glob expansion ('*' / '?' / '[]') — use masc_code_search with \
+       file_pattern (e.g. file_pattern='*.ml') or rg with --glob instead \
+       of letting the shell expand.";
+    (has '{' || has '}'),
+      "Brace expansion ('{a,b}') — run one command per target, or use \
+       masc_code_search / rg which accept multiple patterns natively.";
+    (has '\\'),
+      "Backslash escaping — the keeper shell does not interpret escapes. \
+       Use masc_code_search with is_regex=true for pattern work that \
+       would need \\. / \\w / etc.";
+    (has '\'' || has '"'),
+      "Quoting — path args must be unquoted plain strings. Move any \
+       pattern into masc_code_search.query with is_regex appropriately set.";
+  ] in
+  let active =
+    List.filter_map (fun (cond, msg) -> if cond then Some msg else None)
+      suggestions
+  in
+  match active with
+  | [] -> ""
+  | msgs -> " " ^ String.concat " " msgs
+
 let validate_command_paths ?workdir cmd =
   match workdir with
   | None -> Ok ()
   | Some _ ->
     if String.contains cmd '/' && has_path_rewrite_syntax cmd then
       Error
-        "Path syntax blocked: shell quoting, globbing, brace expansion, and backslash escapes are not allowed for path-bearing keeper commands. Use plain unquoted paths and explicit cwd."
+        ("Path syntax blocked: shell quoting, globbing, brace expansion, \
+          and backslash escapes are not allowed for path-bearing keeper \
+          commands. Use plain unquoted paths and explicit cwd."
+         ^ path_rewrite_redirect_hint cmd)
     else
     let rec loop expect_path_value = function
       | [] -> Ok ()

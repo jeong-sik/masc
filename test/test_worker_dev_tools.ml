@@ -872,6 +872,49 @@ let () =
              "api graphql -f query=mutation{transferRepository(input:{}){clientMutationId}}"
            = Worker_dev_tools.R2_Irreversible));
     ];
+    "validate_command_paths_redirect", [
+      (* Field evidence (2026-04-17/18): 62 keeper_bash calls were rejected
+         because the command mixed '/' paths with glob/brace/backslash/
+         quote syntax. The terse rejection did not name the offending
+         character or the correct tool, so small-LLM keepers retried the
+         same pattern. Each new branch must point the keeper at the
+         concrete replacement. *)
+      Alcotest.test_case "glob path suggests masc_code_search file_pattern"
+        `Quick (fun () ->
+          match Worker_dev_tools.validate_command_paths
+                  ~workdir:"/tmp" "ls repos/*.ml" with
+          | Error msg ->
+            Alcotest.(check bool) "names glob char" true
+              (contains_substring msg "Glob expansion");
+            Alcotest.(check bool) "names masc_code_search" true
+              (contains_substring msg "masc_code_search")
+          | Ok () -> Alcotest.fail "glob with path must be blocked");
+      Alcotest.test_case "brace path suggests per-target / rg" `Quick
+        (fun () ->
+          match Worker_dev_tools.validate_command_paths
+                  ~workdir:"/tmp" "cat lib/{a,b}.ml" with
+          | Error msg ->
+            Alcotest.(check bool) "names brace" true
+              (contains_substring msg "Brace expansion")
+          | Ok () -> Alcotest.fail "brace with path must be blocked");
+      Alcotest.test_case "backslash path names masc_code_search is_regex"
+        `Quick (fun () ->
+          match Worker_dev_tools.validate_command_paths
+                  ~workdir:"/tmp" "grep '\\.ml$' repos/" with
+          | Error msg ->
+            Alcotest.(check bool) "names escape" true
+              (contains_substring msg "Backslash escaping");
+            Alcotest.(check bool) "points at is_regex" true
+              (contains_substring msg "is_regex")
+          | Ok () -> Alcotest.fail "backslash with path must be blocked");
+      Alcotest.test_case "plain path with no rewrite syntax is allowed"
+        `Quick (fun () ->
+          match Worker_dev_tools.validate_command_paths
+                  ~workdir:"/tmp" "cat lib/foo.ml" with
+          | Ok () -> ()
+          | Error msg ->
+            Alcotest.fail ("plain path unexpectedly rejected: " ^ msg));
+    ];
     "command_blocked_hint_redirects", [
       (* Field evidence (2026-04-17/18): keeper_bash rejected `gh`, `docker`,
          `kubectl`, `ssh` calls with no redirect hint, which kept small-LLM

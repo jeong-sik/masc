@@ -205,8 +205,12 @@ After masc_tool_admin_snapshot to review current state before making changes.";
         ]);
         ("default_role", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "reader"; `String "worker"; `String "admin"]);
-          ("description", `String "Default role for unauthenticated agents");
+          (* Issue #8386: derived from Types.agent_role Variant SSOT.
+             Hand-rolled enum risks dropping a constructor on extension. *)
+          ("enum", `List (List.map (fun s -> `String s) Types.valid_agent_role_strings));
+          ("description", `String
+            (Printf.sprintf "Default role for unauthenticated agents (%s)"
+               (String.concat " | " Types.valid_agent_role_strings)));
         ]);
         ("token_expiry_hours", `Assoc [
           ("type", `String "integer");

@@ -182,4 +182,21 @@ let () =
       Alcotest.test_case "awaiting_verification in enum" `Quick test_awaiting_verification_in_enum;
       Alcotest.test_case "actions enum has verification actions" `Quick test_actions_enum_has_verification_actions;
     ];
+    "agent_role_ssot", [
+      Alcotest.test_case "witness covers all variants" `Quick (fun () ->
+        let open Types_auth in
+        let witness s =
+          let actual = agent_role_to_string s in
+          if not (List.mem actual valid_agent_role_strings) then
+            Alcotest.failf "agent_role_to_string %S not in valid_agent_role_strings" actual
+        in
+        witness Reader; witness Worker; witness Admin;
+        Alcotest.(check int) "count" 3 (List.length valid_agent_role_strings));
+      Alcotest.test_case "all 3 strings present" `Quick (fun () ->
+        let open Types_auth in
+        List.iter (fun expected ->
+          Alcotest.(check bool) (Printf.sprintf "%s present" expected) true
+            (List.mem expected valid_agent_role_strings)
+        ) ["reader"; "worker"; "admin"]);
+    ];
   ]

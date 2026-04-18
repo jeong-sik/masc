@@ -205,11 +205,15 @@ def render_pretty(
 
     레이아웃은 ``flutter doctor`` / ``brew doctor`` 외형을 참고:
 
-    1. 제목 (``# Discord Sidecar Doctor``)
+    1. 제목 (전통적 underline 스타일 — ``Discord Sidecar Doctor`` + ``====``)
     2. 배너 — 전체 상태 한 줄 요약
     3. 검사 목록 — 등록 순서 유지 (검진 흐름이 곧 읽는 순서)
     4. 조치 항목 — warn/error 에서 나온 hint + auto-fix 를 번호 목록으로
     5. 합계 — 한글 카운트
+
+    Note: `masc-mcp doctor all` 이 섹션마다 ``====`` divider 를 넣으므로,
+    사이드카 제목도 동일한 underline 을 써서 단독/통합 실행 양쪽에서
+    시각적으로 자연스럽게 이어지도록 한다 (이전의 markdown ``#`` 접두 제거).
     """
 
     if use_color is None:
@@ -218,7 +222,8 @@ def render_pretty(
     counts = _tally(checks)
 
     lines: list[str] = []
-    lines.append(f"# {title}")
+    lines.append(title)
+    lines.append("=" * len(title))
     lines.append("")
     lines.append(_banner(counts, use_color=use_color))
     lines.append("")

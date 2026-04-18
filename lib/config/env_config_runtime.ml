@@ -213,14 +213,6 @@ module Timeout = struct
     get_float ~default:15.0 "MASC_TIMEOUT_GCLOUD_AUTH_SEC"
 end
 
-(** {1 Control Plane Cleanup Configuration} *)
-
-module Cp = struct
-  (** Number of days before dead/stale CP data is eligible for cleanup (default 14) *)
-  let cleanup_days =
-    get_int ~default:14 "MASC_CP_CLEANUP_DAYS"
-end
-
 (** {1 Message GC Configuration} *)
 
 module Message = struct

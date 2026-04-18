@@ -1865,7 +1865,20 @@ let run_turn
            ~allowed_tool_names:all_tool_names
            ~tool_names
        in
-       if unexpected_tool_names <> [] then
+       (* Partial tolerance (#8471): when a turn mixes valid tool calls
+          with unexpected ones (LLM hallucinating Claude Code built-ins
+          like Bash/Read/Skill outside the keeper surface), do not nuke
+          the whole turn. OAS already returns tool_result="error" for the
+          unknown calls so the LLM can recover on the next step. We still
+          hard-fail when EVERY tool call is unexpected — that means the
+          turn produced no valid work. See feedback memory
+          feedback_tool-error-messages-teach-llm.md. *)
+       let valid_tool_calls_present =
+         Keeper_tool_disclosure.has_valid_tool_call
+           ~unexpected_tool_names
+           ~tool_names
+       in
+       if unexpected_tool_names <> [] && not valid_tool_calls_present then
          let reason =
            Printf.sprintf
              "keeper turn reported unexpected tool names outside keeper surface: %s"
@@ -1874,6 +1887,11 @@ let run_turn
          Log.Keeper.error "keeper:%s %s" meta.name reason;
          Error (Oas.Error.Internal reason)
        else (
+         if unexpected_tool_names <> [] then
+           Log.Keeper.warn
+             "keeper:%s unexpected_tool_partial_tolerance tools=%s (cycle continues; valid tools present)"
+             meta.name
+             (String.concat ", " unexpected_tool_names);
          let usage = Keeper_exec_context.usage_of_response result.response in
          let ctx_composition =
            build_ctx_composition_metrics

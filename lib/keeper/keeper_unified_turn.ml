@@ -1657,22 +1657,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
          produce duplicates. In that case, we propagate the error instead of
          retrying.
 
-         Uses a per-turn observer via [add_tool_call_observer] instead of
-         wrapping the global [on_keeper_tool_call] ref. Observer delivery is
-         process-global, so the callback must filter on [keeper_name] to avoid
-         cross-turn contamination when multiple keepers execute concurrently. *)
+         Uses the OAS Event_bus (ToolCalled + ToolCompleted) rather than
+         MASC-side observers. The per-turn subscription is scoped by
+         [filter_agent meta.name], so no cross-keeper contamination. *)
       let mutating_tools_committed = ref [] in
       let post_commit_failure_reason = ref None in
       let paused_meta_override = ref None in
       let current_turn_overflow_blocker = ref None in
-      let side_effect_observer ~keeper_name ~tool_name ~input ~success =
-        if success
-           && String.equal keeper_name meta.name
-           && Keeper_exec_tools.has_mutating_side_effect_with_input
-                ~tool_name ~input
-        then
-          mutating_tools_committed := tool_name :: !mutating_tools_committed
-      in
       let mark_paused_after_overflow ~run_meta ~reason =
         let paused_meta =
           pause_keeper_for_overflow
@@ -1682,7 +1673,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         in
         paused_meta_override := Some paused_meta
       in
-      Keeper_exec_tools.add_tool_call_observer side_effect_observer;
+      (* Side-effect tracking is driven by the OAS Event_bus (ToolCalled +
+         ToolCompleted) rather than MASC-side observers. Pairing is by
+         tool_name order within the per-turn subscription, which is safe
+         because the turn is single-fibered and filter_agent restricts to
+         this keeper. *)
       let event_bus_sub =
         match Keeper_event_bus.get () with
         | Some bus ->
@@ -1692,13 +1687,62 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         | None -> None
       in
       let turn_event_bus = ref empty_turn_event_bus_summary in
-      let drain_turn_event_bus () =
-        let summary =
-          match event_bus_sub, Keeper_event_bus.get () with
-          | Some sub, Some _bus ->
-              summarize_turn_event_bus (Oas_bus_instrument.drain sub)
-          | _ -> empty_turn_event_bus_summary
+      (* Per-tool-name queue of pending inputs from ToolCalled events.
+         ToolCompleted pops the oldest input for that tool_name. *)
+      let pending_tool_inputs : (string, Yojson.Safe.t Queue.t) Hashtbl.t =
+        Hashtbl.create 8
+      in
+      let push_pending_input tool_name input =
+        let q =
+          match Hashtbl.find_opt pending_tool_inputs tool_name with
+          | Some q -> q
+          | None ->
+              let q = Queue.create () in
+              Hashtbl.add pending_tool_inputs tool_name q;
+              q
         in
+        Queue.add input q
+      in
+      let pop_pending_input tool_name =
+        match Hashtbl.find_opt pending_tool_inputs tool_name with
+        | Some q when not (Queue.is_empty q) -> Some (Queue.pop q)
+        | _ -> None
+      in
+      let process_tool_events_for_side_effects
+          (events : Agent_sdk.Event_bus.event list) : unit =
+        List.iter
+          (fun (evt : Agent_sdk.Event_bus.event) ->
+            match evt.payload with
+            | Agent_sdk.Event_bus.ToolCalled { tool_name; input; _ } ->
+                push_pending_input tool_name input
+            | Agent_sdk.Event_bus.ToolCompleted
+                { tool_name; output = Ok _; _ } ->
+                let input_opt = pop_pending_input tool_name in
+                let input =
+                  match input_opt with Some i -> i | None -> `Null
+                in
+                if
+                  Keeper_exec_tools.has_mutating_side_effect_with_input
+                    ~tool_name ~input
+                then
+                  mutating_tools_committed :=
+                    tool_name :: !mutating_tools_committed
+            | Agent_sdk.Event_bus.ToolCompleted
+                { tool_name; output = Error _; _ } ->
+                (* Failed tool: drop the matching pending input. *)
+                let _ = pop_pending_input tool_name in
+                ignore tool_name
+            | _ -> ())
+          events
+      in
+      let drain_turn_event_bus () =
+        let events =
+          match event_bus_sub, Keeper_event_bus.get () with
+          | Some sub, Some _bus -> Oas_bus_instrument.drain sub
+          | _ -> []
+        in
+        process_tool_events_for_side_effects events;
+        let summary = summarize_turn_event_bus events in
         turn_event_bus :=
           merge_turn_event_bus_summary !turn_event_bus summary;
         !turn_event_bus
@@ -1725,7 +1769,6 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
        | _ -> ());
       let run_result, latency_ms =
         Fun.protect ~finally:(fun () ->
-          Keeper_exec_tools.remove_tool_call_observer side_effect_observer;
           unsubscribe_event_bus ();
           Keeper_registry.mark_turn_finished
             ~base_path:config.base_path meta.name)
@@ -1836,6 +1879,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   Keeper_registry.Cascade_done;
                 Ok result
             | Error err ->
+                let _ = drain_turn_event_bus () in
                 let committed_tools =
                   committed_mutating_tools !mutating_tools_committed
                 in
@@ -2011,6 +2055,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 timeout_sec
             in
             Log.Keeper.error "%s: %s" meta.name msg;
+            let _ = drain_turn_event_bus () in
             let committed_tools =
               committed_mutating_tools !mutating_tools_committed
             in

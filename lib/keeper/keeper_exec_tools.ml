@@ -21,25 +21,6 @@ let on_keeper_tool_call
   =
   ref (fun ~tool_name:_ ~success:_ ~duration_ms:_ -> ())
 
-let tool_call_observers
-  : (keeper_name:string ->
-     tool_name:string ->
-     input:Yojson.Safe.t ->
-     success:bool ->
-     unit) list ref
-  = ref []
-
-let add_tool_call_observer fn =
-  tool_call_observers := fn :: !tool_call_observers
-
-let remove_tool_call_observer fn =
-  tool_call_observers := List.filter (fun f -> f != fn) !tool_call_observers
-
-let notify_tool_call_observers ~keeper_name ~tool_name ~input ~success =
-  List.iter
-    (fun f -> f ~keeper_name ~tool_name ~input ~success)
-    !tool_call_observers
-
 let tool_search_fn
   : (query:string -> max_results:int -> Yojson.Safe.t) ref
   =

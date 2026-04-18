@@ -101,34 +101,6 @@ val is_keeper_denied : string -> bool
 val on_keeper_tool_call :
   (tool_name:string -> success:bool -> duration_ms:int -> unit) ref
 
-(** Register a per-turn observer for tool call events.
-    Notifications are process-global, so observers that care about a specific
-    keeper turn must filter on [keeper_name]. *)
-val add_tool_call_observer :
-  (keeper_name:string ->
-   tool_name:string ->
-   input:Yojson.Safe.t ->
-   success:bool ->
-   unit) ->
-  unit
-
-(** Remove a previously registered observer (physical equality). *)
-val remove_tool_call_observer :
-  (keeper_name:string ->
-   tool_name:string ->
-   input:Yojson.Safe.t ->
-   success:bool ->
-   unit) ->
-  unit
-
-(** Notify all registered observers of a tool call event. *)
-val notify_tool_call_observers :
-  keeper_name:string ->
-  tool_name:string ->
-  input:Yojson.Safe.t ->
-  success:bool ->
-  unit
-
 (** Callback for keeper_tool_search BM25 search.
     Process-global fallback; prefer passing [~search_fn] to
     [execute_keeper_tool_call] for session-scoped, race-free search. *)

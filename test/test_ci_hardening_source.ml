@@ -69,7 +69,16 @@ let test_health_and_ci_runner_diagnostics () =
     (file_contains_pattern "scripts/ci-run-tests.sh"
        "detected dune RPC/lock failure; retrying once with isolated build dir");
   check bool "ci runner tracks active build dir for diagnostics" true
-    (file_contains_pattern "scripts/ci-run-tests.sh" "ACTIVE_TEST_BUILD_DIR")
+    (file_contains_pattern "scripts/ci-run-tests.sh" "ACTIVE_TEST_BUILD_DIR");
+  check bool "quick suite excludes operator control from monolithic dune test" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "MASC_INCLUDE_OPERATOR_CONTROL: \"false\"");
+  check bool "ci workflow runs operator control in dedicated step" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "dune exec ./test/test_operator_control.exe");
+  check bool "operator control test is env-gated in dune" true
+    (file_contains_pattern "test/dune"
+       "(enabled_if (= %{env:MASC_INCLUDE_OPERATOR_CONTROL=true} \"true\"))")
 
 let test_release_truth_contracts () =
   check bool "ci workflow defines doc truth job" true

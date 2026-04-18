@@ -390,6 +390,7 @@ jobs:
         env:
           ME_ROOT: /tmp/me
           ALCOTEST_QUICK_TESTS: "1"
+          MASC_INCLUDE_OPERATOR_CONTROL: "false"
           CI_TEST_TIMEOUT_SEC: 1200
           CI_TEST_HEARTBEAT_SEC: 30
           MASC_LOCAL_RUNTIMES_JSON: '[{"base_url":"http://127.0.0.1:8085","max_concurrency":4}]'
@@ -399,6 +400,20 @@ jobs:
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune test"
+
+      - name: Run operator control suite
+        env:
+          ME_ROOT: /tmp/me
+          ALCOTEST_QUICK_TESTS: "1"
+          CI_TEST_TIMEOUT_SEC: 600
+          CI_TEST_HEARTBEAT_SEC: 15
+          MASC_LOCAL_RUNTIMES_JSON: '[{"base_url":"http://127.0.0.1:8085","max_concurrency":4}]'
+          MASC_KEEPER_MSG_TIMEOUT_MAX_SEC: "10"
+          MASC_E2E_TESTS: "true"
+        run: |
+          mkdir -p /tmp/me
+          chmod +x scripts/ci-run-tests.sh
+          scripts/ci-run-tests.sh "opam exec -- dune exec ./test/test_operator_control.exe"
 
       - name: Run SSE reconnect e2e
         env:

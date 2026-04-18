@@ -607,6 +607,16 @@ let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in
   Arg.(value & flag & info ["force"] ~doc)
 
+let login_agent =
+  let doc =
+    "Admin agent name to mint a local bearer for. Defaults to `local-admin`."
+  in
+  Arg.(value & opt string "local-admin" & info ["agent"] ~docv:"NAME" ~doc)
+
+let login_json =
+  let doc = "Emit machine-readable JSON instead of text output" in
+  Arg.(value & flag & info ["json"] ~doc)
+
 type init_tally = { written : int; skipped : int; failed : int }
 
 let seed_one ~target_root ~force tally rel =
@@ -648,10 +658,68 @@ let init_cmd =
   let info = Cmd.info "init" ~doc in
   Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force)
 
+let dashboard_login_host host =
+  match String.trim host with
+  | "" -> "127.0.0.1"
+  | "0.0.0.0" -> "127.0.0.1"
+  | "::" -> "localhost"
+  | value -> value
+
+let render_login_text
+    (bootstrap : Auth.local_admin_bootstrap) =
+  let room_secret_line =
+    match bootstrap.room_secret with
+    | Some secret -> secret
+    | None -> "(already configured; raw room secret unavailable)"
+  in
+  String.concat "\n"
+    [
+      Printf.sprintf "login: admin bearer ready for %s" bootstrap.agent_name;
+      Printf.sprintf "base_path=%s" bootstrap.base_path;
+      Printf.sprintf "auth_root=%s" bootstrap.auth_root;
+      Printf.sprintf "require_token=%b" bootstrap.require_token;
+      Printf.sprintf "reused_auth=%b" bootstrap.reused_auth;
+      Printf.sprintf "room_secret=%s" room_secret_line;
+      Printf.sprintf "bearer_token=%s" bootstrap.bearer_token;
+      Printf.sprintf "dashboard_url=%s" bootstrap.dashboard_url;
+      Printf.sprintf "authorization_header=Authorization: Bearer %s"
+        bootstrap.bearer_token;
+      Printf.sprintf "agent_header=X-MASC-Agent: %s" bootstrap.agent_name;
+    ]
+
+let login_cmd_exit host port base_path agent_name as_json =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  match
+    Auth.bootstrap_local_admin
+      ~host:(dashboard_login_host host)
+      ~port base_path ~agent_name
+  with
+  | Error err ->
+      Printf.eprintf "login: %s\n" (Types.masc_error_to_string err);
+      1
+  | Ok bootstrap ->
+      let output =
+        if as_json then
+          Auth.local_admin_bootstrap_to_yojson bootstrap
+          |> Yojson.Safe.pretty_to_string
+        else
+          render_login_text bootstrap
+      in
+      print_endline output;
+      0
+
+let login_cmd =
+  let doc =
+    "Enable local admin bearer auth (require_token=true) and print a dashboard login URL"
+  in
+  let info = Cmd.info "login" ~doc in
+  Cmd.v info
+    Term.(const login_cmd_exit $ host $ port $ base_path $ login_agent $ login_json)
+
 let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
   let info = Cmd.info "masc-mcp" ~version:Masc_mcp.Version.version ~doc in
   Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
-    info [ doctor_cmd; init_cmd ]
+    info [ doctor_cmd; init_cmd; login_cmd ]
 
 let () = exit (Cmd.eval' cmd)

@@ -420,6 +420,88 @@ let enable_auth config ~require_token ~agent_name : string * string option =
   in
   (secret, bootstrap_token)
 
+type local_admin_bootstrap = {
+  base_path : string;
+  auth_root : string;
+  auth_config_path : string;
+  agents_root : string;
+  credential_path : string;
+  agent_name : string;
+  require_token : bool;
+  reused_auth : bool;
+  room_secret : string option;
+  bearer_token : string;
+  dashboard_url : string;
+}
+
+let dashboard_login_url ~host ~port ~agent_name ~token =
+  Printf.sprintf "http://%s:%d/dashboard?agent=%s&token=%s"
+    host port agent_name token
+
+let local_admin_bootstrap_to_yojson (bootstrap : local_admin_bootstrap) =
+  `Assoc [
+    ("base_path", `String bootstrap.base_path);
+    ("auth_root", `String bootstrap.auth_root);
+    ("auth_config_path", `String bootstrap.auth_config_path);
+    ("agents_root", `String bootstrap.agents_root);
+    ("credential_path", `String bootstrap.credential_path);
+    ("agent_name", `String bootstrap.agent_name);
+    ("require_token", `Bool bootstrap.require_token);
+    ("reused_auth", `Bool bootstrap.reused_auth);
+    ( "room_secret",
+      match bootstrap.room_secret with
+      | Some value -> `String value
+      | None -> `Null );
+    ("bearer_token", `String bootstrap.bearer_token);
+    ("dashboard_url", `String bootstrap.dashboard_url);
+  ]
+
+let bootstrap_local_admin ?(host = "127.0.0.1") ?(port = 8935) config
+    ~agent_name : (local_admin_bootstrap, masc_error) result =
+  let base_path = Env_config.normalize_masc_base_path_input config in
+  let existing_cfg = load_auth_config base_path in
+  let room_secret, reused_auth, bearer_token_result =
+    if existing_cfg.enabled then begin
+      if not existing_cfg.require_token then
+        save_auth_config base_path { existing_cfg with enabled = true; require_token = true };
+      (None, true, create_token base_path ~agent_name ~role:Admin)
+    end else begin
+      let secret, bootstrap_token =
+        enable_auth base_path ~require_token:true ~agent_name
+      in
+      let token_result =
+        match bootstrap_token with
+        | Some token ->
+            (match verify_token base_path ~agent_name ~token with
+             | Ok _ -> (
+                 match load_credential base_path agent_name with
+                 | Some cred -> Ok (token, cred)
+                 | None -> create_token base_path ~agent_name ~role:Admin)
+             | Error _ -> create_token base_path ~agent_name ~role:Admin)
+        | None -> create_token base_path ~agent_name ~role:Admin
+      in
+      (Some secret, false, token_result)
+    end
+  in
+  match bearer_token_result with
+  | Error _ as err -> err
+  | Ok (bearer_token, _cred) ->
+      Ok
+        {
+          base_path;
+          auth_root = auth_dir base_path;
+          auth_config_path = auth_config_file base_path;
+          agents_root = agents_dir base_path;
+          credential_path = credential_file base_path agent_name;
+          agent_name;
+          require_token = true;
+          reused_auth;
+          room_secret;
+          bearer_token;
+          dashboard_url =
+            dashboard_login_url ~host ~port ~agent_name ~token:bearer_token;
+        }
+
 (** Disable authentication *)
 let disable_auth config =
   let cfg = load_auth_config config in

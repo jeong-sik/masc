@@ -44,6 +44,13 @@ include_bisect=false
 include_compact_protocol=false
 do_install=false
 agent_sdk_pin_source="${AGENT_SDK_PIN_URL:-${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}}"
+agent_sdk_pin_args=(-n -y)
+install_args=(--yes)
+
+if [[ -d "${agent_sdk_pin_source}" ]]; then
+  agent_sdk_pin_args=(--working-dir -n -y)
+  install_args=(--yes --working-dir)
+fi
 
 for arg in "$@"; do
   case "$arg" in
@@ -76,7 +83,7 @@ fi
 # as sub-libraries (mcp-protocol-sdk#60). Pin the released single-package line.
 opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#v1.3.0 -n -y
 pinned_pkgs+=("mcp_protocol")
-opam pin add agent_sdk "${agent_sdk_pin_source}" -n -y
+opam pin add agent_sdk "${agent_sdk_pin_source}" "${agent_sdk_pin_args[@]}"
 pinned_pkgs+=("agent_sdk")
 opam pin add ocaml-webrtc "https://github.com/jeong-sik/ocaml-webrtc.git#${WEBRTC_SHA}" -n -y
 pinned_pkgs+=("ocaml-webrtc")
@@ -102,7 +109,7 @@ fi
 if $do_install; then
   echo ""
   echo "[opam-pin] --install set; rebuilding ${#pinned_pkgs[@]} pinned packages..."
-  opam install --yes "${pinned_pkgs[@]}"
+  opam install "${install_args[@]}" "${pinned_pkgs[@]}"
   echo "[opam-pin] install complete. Installed binaries now match the pins above."
 else
   echo ""

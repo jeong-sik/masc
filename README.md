@@ -308,6 +308,21 @@ cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:${PORT}" pnpm run 
 - For manual rebuilds, run `cd dashboard && pnpm run build`.
 - For local admin bearer bootstrap and dashboard keeper lifecycle control, see [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md).
 
+Fast local auth bootstrap:
+
+```bash
+dune exec --root . ./bin/main_eio.exe -- login --json --agent codex-local-admin
+```
+
+Typical use:
+
+```bash
+LOGIN_JSON="$(dune exec --root . ./bin/main_eio.exe -- login --json --agent codex-local-admin)"
+TOKEN="$(printf '%s\n' "$LOGIN_JSON" | jq -r '.bearer_token')"
+URL="$(printf '%s\n' "$LOGIN_JSON" | jq -r '.dashboard_url')"
+printf 'token=%s\nurl=%s\n' "$TOKEN" "$URL"
+```
+
 ## Verification
 
 ```bash
@@ -336,6 +351,7 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 - Legacy `/sse` and `/messages` endpoints are deprecated.
 - Binding to `0.0.0.0` or `::` enables strict auth; local `/mcp` fails closed unless `require_token=true`.
 - `/mcp/operator` is bearer-token only with a remote-safe surface. Do not expose full `/mcp` externally.
+- Local dashboard/admin auth bootstrap: `dune exec --root . ./bin/main_eio.exe -- login --json --agent codex-local-admin`
 - Command-plane compatibility is retired from the supported product contract. Historical docs may still mention it, but new callers must not depend on it.
 - See [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) and [docs/spec/09-server-transport.md](docs/spec/09-server-transport.md).
 

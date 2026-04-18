@@ -74,11 +74,141 @@ MASC_BASE_PATH="$BASE_PATH" \
 
 Then run `./_build/default/bin/main_eio.exe doctor --base-path "$BASE_PATH"` and re-check `/health` to confirm the effective base path is the path you intended.
 
-## 4. Bootstrap an Admin Bearer
+## 4. Fast Path: Mint an Admin Bearer with `login`
 
 If you already have an admin bearer, skip to step 5.
 
-If you do not, the reliable local fallback is to seed the auth store directly.
+Preferred path:
+
+```bash
+~/me/scripts/masc login --json --agent codex-local-admin
+```
+
+If you are inside the repo and do not have the wrapper yet:
+
+```bash
+dune exec --root . ./bin/main_eio.exe -- login --json --agent codex-local-admin
+```
+
+What this does:
+
+- enables room auth if it is still off
+- forces `require_token=true`
+- creates or rotates an admin bearer for the requested `agent_name`
+- prints a one-shot dashboard URL and the raw bearer token
+
+Typical JSON output:
+
+```json
+{
+  "base_path": "/Users/you/me",
+  "auth_root": "/Users/you/me/.masc/auth",
+  "auth_config_path": "/Users/you/me/.masc/auth/config.json",
+  "agents_root": "/Users/you/me/.masc/auth/agents",
+  "credential_path": "/Users/you/me/.masc/auth/agents/codex-local-admin.json",
+  "agent_name": "codex-local-admin",
+  "require_token": true,
+  "reused_auth": true,
+  "room_secret": null,
+  "bearer_token": "<raw-token>",
+  "dashboard_url": "http://127.0.0.1:8935/dashboard?agent=codex-local-admin&token=<raw-token>"
+}
+```
+
+Recommended shell flow:
+
+```bash
+LOGIN_JSON="$(~/me/scripts/masc login --json --agent codex-local-admin)"
+TOKEN="$(printf '%s\n' "$LOGIN_JSON" | jq -r '.bearer_token')"
+URL="$(printf '%s\n' "$LOGIN_JSON" | jq -r '.dashboard_url')"
+printf 'token=%s\nurl=%s\n' "$TOKEN" "$URL"
+```
+
+Field meanings:
+
+- `reused_auth=true`: auth was already enabled; only the admin bearer was minted or rotated
+- `reused_auth=false`: auth was just bootstrapped now
+- `room_secret!=null`: a brand-new room secret was created during bootstrap
+- `room_secret=null`: auth already existed, so the raw room secret cannot be shown again
+
+Notes:
+
+- the server stores only the SHA256 hash, not the raw bearer
+- keep the raw bearer outside the repo
+- rerunning `login` is the supported local rotation path
+- this is for trusted local operator use, not a remote/public bootstrap path
+
+## 5. Open the Dashboard as Admin
+
+Pass the token once via query string. The dashboard moves it into `sessionStorage` and removes it from the URL.
+
+```text
+http://127.0.0.1:8935/dashboard?agent=codex-local-admin&token=<raw-token>
+```
+
+You can verify the session with:
+
+```bash
+curl -sS http://127.0.0.1:8935/api/v1/dashboard/shell \
+  -H "Authorization: Bearer <raw-token>" \
+  -H "X-MASC-Agent: codex-local-admin" \
+  | jq '.auth'
+```
+
+Expected:
+
+- `token_present=true`
+- `effective_agent="codex-local-admin"`
+- `effective_role="admin"`
+
+## 6. Verify Keeper Lifecycle Routes
+
+Use a low-risk keeper first.
+
+Boot:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8935/api/v1/keepers/<keeper>/boot \
+  -H "Authorization: Bearer <raw-token>" \
+  -H "X-MASC-Agent: codex-local-admin"
+```
+
+Shutdown:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8935/api/v1/keepers/<keeper>/shutdown \
+  -H "Authorization: Bearer <raw-token>" \
+  -H "X-MASC-Agent: codex-local-admin"
+```
+
+Then inspect the execution snapshot:
+
+```bash
+curl -sS http://127.0.0.1:8935/api/v1/dashboard/execution \
+  -H "Authorization: Bearer <raw-token>" \
+  -H "X-MASC-Agent: codex-local-admin" \
+  | jq '.keepers[] | select(.name=="<keeper>") | {name,status,paused,trace_id,active_model}'
+```
+
+## 7. Rotate or Mint Another Admin Token
+
+Rotate the same admin identity:
+
+```bash
+~/me/scripts/masc login --json --agent codex-local-admin
+```
+
+Mint a second admin identity for a different operator:
+
+```bash
+~/me/scripts/masc login --json --agent ops-admin
+```
+
+Old raw tokens remain unusable once you rotate the same `agent_name`, because the stored hash in `.masc/auth/agents/<agent>.json` is replaced.
+
+## 8. Manual Fallback: Seed the Auth Store Directly
+
+Use this only if the `login` command is unavailable.
 
 1. Back up the auth config:
 
@@ -103,7 +233,7 @@ printf 'token=%s\nhash=%s\n' "$TOKEN" "$HASH"
 
 ```json
 {
-  "agent_name": "codex-tool-matrix",
+  "agent_name": "codex-local-admin",
   "token": "<sha256 hash>",
   "role": "admin",
   "created_at": "<created_at>",
@@ -114,7 +244,7 @@ printf 'token=%s\nhash=%s\n' "$TOKEN" "$HASH"
 Path:
 
 ```text
-<effective_base_path>/.masc/auth/agents/codex-tool-matrix.json
+<effective_base_path>/.masc/auth/agents/codex-local-admin.json
 ```
 
 4. Set `require_token=true` in the live auth config:
@@ -133,65 +263,7 @@ Path:
 <effective_base_path>/.masc/auth/config.json
 ```
 
-Notes:
-
-- the server stores only the SHA256 hash, not the raw bearer
-- keep the raw bearer outside the repo
-- this is for trusted local operator use, not a remote/public bootstrap path
-
-## 5. Open the Dashboard as Admin
-
-Pass the token once via query string. The dashboard moves it into `sessionStorage` and removes it from the URL.
-
-```text
-http://127.0.0.1:8935/dashboard?agent=codex-tool-matrix&token=<raw-token>
-```
-
-You can verify the session with:
-
-```bash
-curl -sS http://127.0.0.1:8935/api/v1/dashboard/shell \
-  -H "Authorization: Bearer <raw-token>" \
-  -H "X-MASC-Agent: codex-tool-matrix" \
-  | jq '.auth'
-```
-
-Expected:
-
-- `token_present=true`
-- `effective_agent="codex-tool-matrix"`
-- `effective_role="admin"`
-
-## 6. Verify Keeper Lifecycle Routes
-
-Use a low-risk keeper first.
-
-Boot:
-
-```bash
-curl -sS -X POST http://127.0.0.1:8935/api/v1/keepers/<keeper>/boot \
-  -H "Authorization: Bearer <raw-token>" \
-  -H "X-MASC-Agent: codex-tool-matrix"
-```
-
-Shutdown:
-
-```bash
-curl -sS -X POST http://127.0.0.1:8935/api/v1/keepers/<keeper>/shutdown \
-  -H "Authorization: Bearer <raw-token>" \
-  -H "X-MASC-Agent: codex-tool-matrix"
-```
-
-Then inspect the execution snapshot:
-
-```bash
-curl -sS http://127.0.0.1:8935/api/v1/dashboard/execution \
-  -H "Authorization: Bearer <raw-token>" \
-  -H "X-MASC-Agent: codex-tool-matrix" \
-  | jq '.keepers[] | select(.name=="<keeper>") | {name,status,paused,trace_id,active_model}'
-```
-
-## 7. Rollback
+## 9. Rollback
 
 If you need to go back to anonymous loopback behavior:
 
@@ -204,10 +276,10 @@ Example:
 ```bash
 BASE_PATH="${MASC_BASE_PATH:-$HOME}"
 mv "$BASE_PATH/.masc/auth/config.json.bak" "$BASE_PATH/.masc/auth/config.json"
-rm -f "$BASE_PATH/.masc/auth/agents/codex-tool-matrix.json"
+rm -f "$BASE_PATH/.masc/auth/agents/codex-local-admin.json"
 ```
 
-## 8. Known Failure Modes
+## 10. Known Failure Modes
 
 - `effective_base_path` points somewhere else:
   you edited the wrong `.masc/auth` tree

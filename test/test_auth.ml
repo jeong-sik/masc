@@ -30,6 +30,17 @@ let cleanup_test_room dir =
   in
   try rm_rf dir with _ -> ()
 
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop idx =
+    if needle_len = 0 then true
+    else if idx + needle_len > haystack_len then false
+    else if String.sub haystack idx needle_len = needle then true
+    else loop (idx + 1)
+  in
+  loop 0
+
 let permission_bits path =
   (Unix.stat path).Unix.st_perm land 0o777
 
@@ -292,6 +303,67 @@ let test_auth_enabled_with_valid_token () =
   | Ok () -> ()
   | Error e -> fail (Types.masc_error_to_string e)
 
+let test_bootstrap_local_admin_enables_auth_and_returns_login_url () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      match
+        Auth.bootstrap_local_admin dir ~agent_name:"local-admin"
+          ~host:"127.0.0.1" ~port:8935
+      with
+      | Error e -> fail (Types.masc_error_to_string e)
+      | Ok bootstrap ->
+          let cfg = Auth.load_auth_config dir in
+          check bool "auth enabled" true cfg.enabled;
+          check bool "require_token enabled" true cfg.require_token;
+          check bool "fresh auth" false bootstrap.reused_auth;
+          check bool "room secret returned" true
+            (match bootstrap.room_secret with Some _ -> true | None -> false);
+          check bool "dashboard url contains agent" true
+            (contains_substring ~needle:"agent=local-admin"
+               bootstrap.dashboard_url);
+          check bool "dashboard url contains token" true
+            (contains_substring ~needle:bootstrap.bearer_token
+               bootstrap.dashboard_url);
+          match
+            Auth.verify_token dir ~agent_name:"local-admin"
+              ~token:bootstrap.bearer_token
+          with
+          | Ok cred ->
+              check string "admin role"
+                (Types.show_agent_role Types.Admin)
+                (Types.show_agent_role cred.role)
+          | Error e -> fail (Types.masc_error_to_string e))
+
+let test_bootstrap_local_admin_reuses_existing_auth_and_escalates_require_token
+    () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      let _ = Auth.enable_auth dir ~require_token:false ~agent_name:"bootstrap-admin" in
+      match
+        Auth.bootstrap_local_admin dir ~agent_name:"local-admin"
+          ~host:"127.0.0.1" ~port:8935
+      with
+      | Error e -> fail (Types.masc_error_to_string e)
+      | Ok bootstrap ->
+          let cfg = Auth.load_auth_config dir in
+          check bool "reused auth" true bootstrap.reused_auth;
+          check bool "raw room secret omitted on reuse" true
+            (bootstrap.room_secret = None);
+          check bool "require_token escalated" true cfg.require_token;
+          match
+            Auth.verify_token dir ~agent_name:"local-admin"
+              ~token:bootstrap.bearer_token
+          with
+          | Ok cred ->
+              check string "admin role on reuse"
+                (Types.show_agent_role Types.Admin)
+                (Types.show_agent_role cred.role)
+          | Error e -> fail (Types.masc_error_to_string e))
+
 let test_permission_denied_for_reader () =
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
@@ -490,6 +562,10 @@ let () =
       test_case "auth disabled allows all" `Quick test_auth_disabled_allows_all;
       test_case "auth enabled requires token" `Quick test_auth_enabled_requires_token;
       test_case "auth enabled with valid token" `Quick test_auth_enabled_with_valid_token;
+      test_case "bootstrap local admin enables auth" `Quick
+        test_bootstrap_local_admin_enables_auth_and_returns_login_url;
+      test_case "bootstrap local admin reuses existing auth" `Quick
+        test_bootstrap_local_admin_reuses_existing_auth_and_escalates_require_token;
       test_case "permission denied for reader" `Quick test_permission_denied_for_reader;
       test_case "optional token overrides reader default role"
         `Quick test_optional_token_overrides_reader_default_role;

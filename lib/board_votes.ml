@@ -2,6 +2,25 @@ include Board_core
 
 let vote_direction_to_string = function Up -> "up" | Down -> "down"
 
+(* Issue #8506: Variant SSOT for vote_direction. Adding a constructor
+   forces [vote_direction_to_string] exhaustiveness AND extends
+   [valid_vote_direction_strings]; the schema in [tool_shard.ml]
+   mirrors this list (cycle-aware, sync test). Previously
+   server_bootstrap_loops.ml re-implemented the same match inline 4
+   times — those call sites now use this helper. *)
+let all_vote_directions = [ Up; Down ]
+let valid_vote_direction_strings =
+  List.map vote_direction_to_string all_vote_directions
+
+(* Sound partial parser — case-insensitive, trims whitespace, accepts
+   empty as default Up for back-compat with [tool_board.ml] which
+   defaults to "up" when the field is missing. *)
+let vote_direction_of_string_opt raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "up" | "" -> Some Up
+  | "down" -> Some Down
+  | _ -> None
+
 let vote_log_path () =
   let base = board_base_path () in
   Filename.concat base ".masc/board_votes.jsonl"

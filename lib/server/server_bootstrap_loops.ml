@@ -144,13 +144,13 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
                   ("comment_id", `String comment_id);
                   ("author", `String author)]
       | Board_dispatch.Post_voted { post_id; voter; direction } ->
-          let dir = match direction with Board.Up -> "up" | Board.Down -> "down" in
+          let dir = Board_votes.vote_direction_to_string direction in
           `Assoc [("type", `String "post_voted");
                   ("post_id", `String post_id);
                   ("voter", `String voter);
                   ("direction", `String dir)]
       | Board_dispatch.Comment_voted { comment_id; voter; direction } ->
-          let dir = match direction with Board.Up -> "up" | Board.Down -> "down" in
+          let dir = Board_votes.vote_direction_to_string direction in
           `Assoc [("type", `String "comment_voted");
                   ("comment_id", `String comment_id);
                   ("voter", `String voter);
@@ -181,13 +181,13 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
            `Assoc [("post_id", `String post_id); ("comment_id", `String comment_id);
                    ("author", `String author)])
       | Board_dispatch.Post_voted { post_id; voter; direction } ->
-          let dir = match direction with Board.Up -> "up" | Board.Down -> "down" in
+          let dir = Board_votes.vote_direction_to_string direction in
           ("board.voted",
            Activity_graph.entity ~kind:"agent" voter,
            Some (Activity_graph.entity ~kind:"post" post_id),
            `Assoc [("post_id", `String post_id); ("direction", `String dir)])
       | Board_dispatch.Comment_voted { comment_id; voter; direction } ->
-          let dir = match direction with Board.Up -> "up" | Board.Down -> "down" in
+          let dir = Board_votes.vote_direction_to_string direction in
           ("board.voted",
            Activity_graph.entity ~kind:"agent" voter,
            Some (Activity_graph.entity ~kind:"comment" comment_id),

@@ -595,6 +595,34 @@ let () =
           Masc_mcp.Keeper_exec_fs.valid_fs_write_mode_strings
           Masc_mcp.Tool_shard.fs_write_mode_enum_strings);
     ];
+    "vote_direction_ssot", [
+      (* Issue #8506: Variant + to_string already existed (board_types/
+         board_votes), but 4 inline matches in server_bootstrap_loops.ml
+         re-implemented the same thing AND tool_shard.ml hardcoded the
+         schema enum. This test asserts the [Tool_shard] mirror stays
+         in sync with the SSOT and the witness covers both Variants. *)
+      Alcotest.test_case "witness covers both variants" `Quick (fun () ->
+        let module B = Masc_mcp.Board_votes in
+        let witness d =
+          let actual = B.vote_direction_to_string d in
+          if not (List.mem actual B.valid_vote_direction_strings) then
+            Alcotest.failf "vote_direction_to_string %S not in valid_vote_direction_strings" actual
+        in
+        witness Masc_mcp.Board_votes.Up; witness Masc_mcp.Board_votes.Down;
+        Alcotest.(check int) "count" 2 (List.length B.valid_vote_direction_strings));
+      Alcotest.test_case "of_string_opt sound partial + back-compat" `Quick (fun () ->
+        let module B = Masc_mcp.Board_votes in
+        Alcotest.(check bool) "up" true (B.vote_direction_of_string_opt "up" <> None);
+        Alcotest.(check bool) "DOWN (case)" true (B.vote_direction_of_string_opt "DOWN" <> None);
+        Alcotest.(check bool) "  empty -> Up back-compat" true
+          (B.vote_direction_of_string_opt "" = Some Masc_mcp.Board_votes.Up);
+        Alcotest.(check bool) "garbage rejected" true
+          (B.vote_direction_of_string_opt "left" = None));
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        Alcotest.(check (list string)) "tool_shard mirror == SSOT"
+          Masc_mcp.Board_votes.valid_vote_direction_strings
+          Masc_mcp.Tool_shard.vote_direction_enum_strings);
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

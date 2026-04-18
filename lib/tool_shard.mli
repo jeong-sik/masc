@@ -21,6 +21,11 @@ val memory_search_source_enum_strings : string list
 val fs_write_mode_enum_strings : string list
 
 
+(** Issue #8506: hand-mirrored from
+    [Board_votes.valid_vote_direction_strings]. Sync regression test
+    in [test_types.ml :: vote_direction_ssot] catches drift. *)
+val vote_direction_enum_strings : string list
+
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;

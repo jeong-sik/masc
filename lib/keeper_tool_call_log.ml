@@ -102,13 +102,18 @@ let reset_for_testing () =
   Hashtbl.reset pending_truncation;
   Hashtbl.reset pending_turn_context
 
-let suffix = "...(truncated)"
-let suffix_len = String.length suffix
-
 let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
+  (* Per-leaf sentinel-aware truncation. Previously
+     [String.sub (Yojson.Safe.to_string input) 0 (max - suffix)] chopped
+     through a [masc:blob ...] marker embedded in a nested JSON string
+     value and stranded sha256/bytes/mime halfway, breaking the keeper
+     artifact hydrator on replay. *)
+  let input =
+    Observability_redact.preview_json_strings ~max_len:max_output_len input
+  in
   let s = Yojson.Safe.to_string input in
   if String.length s > max_output_len then
-    `String (String.sub s 0 (max_output_len - suffix_len) ^ suffix)
+    `String (Observability_redact.redact_preview ~max_len:max_output_len s)
   else input
 
 let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)

@@ -71,6 +71,16 @@ let redact_preview ?(max_len = default_max_len) (s : string) : string =
         s |> truncate ~max_len |> redact_patterns
   else s |> truncate ~max_len |> redact_patterns
 
+let rec preview_json_strings ?(max_len = default_max_len) (json : Yojson.Safe.t)
+    : Yojson.Safe.t =
+  match json with
+  | `String s -> `String (redact_preview ~max_len s)
+  | `Assoc fields ->
+      `Assoc
+        (List.map (fun (k, v) -> (k, preview_json_strings ~max_len v)) fields)
+  | `List items -> `List (List.map (preview_json_strings ~max_len) items)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as j -> j
+
 let rec redact_json_value = function
   | `Assoc fields ->
       `Assoc

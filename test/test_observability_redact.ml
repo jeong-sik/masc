@@ -82,6 +82,34 @@ let test_blob_sentinel_redacts_preview_body () =
   Alcotest.(check bool) "sha256 still present as structural field" true
     (Observability_redact.contains_substring ~sub:("sha256=" ^ sha) redacted)
 
+(* Regression: a sentinel embedded inside a JSON string field used to be
+   corrupted by callers that did [Yojson.Safe.to_string |> String.sub]
+   because the top-level value looks like [{...}] not [\[masc:blob ...\]],
+   so [redact_preview] took the else-branch and the 24+ alnum scrubber
+   ate sha256. [preview_json_strings] walks leaves instead. *)
+let test_preview_json_strings_preserves_embedded_sentinel () =
+  let sha = String.make 64 'c' in
+  let marker =
+    Tool_output.encode_for_oas
+      (Tool_output.Stored
+         { sha256 = sha; bytes = 500; preview = "hi"; mime = "text/plain" })
+  in
+  let json = `Assoc [("content", `String marker); ("meta", `Int 1)] in
+  let out = Observability_redact.preview_json_strings json in
+  match out with
+  | `Assoc fields ->
+      (match List.assoc_opt "content" fields with
+       | Some (`String s) ->
+           (match Tool_output.decode_from_oas s with
+            | Tool_output.Stored { sha256; bytes; mime; _ } ->
+                Alcotest.(check string) "sha256 preserved in leaf" sha sha256;
+                Alcotest.(check int) "bytes preserved in leaf" 500 bytes;
+                Alcotest.(check string) "mime preserved in leaf" "text/plain" mime
+            | Tool_output.Inline _ ->
+                Alcotest.fail "sentinel in JSON leaf was corrupted")
+       | _ -> Alcotest.fail "content field missing or not a string")
+  | _ -> Alcotest.fail "expected Assoc root"
+
 let () =
   Alcotest.run "observability_redact"
     [
@@ -95,6 +123,8 @@ let () =
             test_blob_sentinel_preserves_structure;
           Alcotest.test_case "blob sentinel redacts preview body" `Quick
             test_blob_sentinel_redacts_preview_body;
+          Alcotest.test_case "preview_json_strings preserves embedded sentinel"
+            `Quick test_preview_json_strings_preserves_embedded_sentinel;
         ] );
       ( "deny_list",
         [

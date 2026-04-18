@@ -80,7 +80,7 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   Stopped:      'bg-zinc-800 text-zinc-400 border-zinc-700',
   Crashed:      'bg-red-950 text-red-300 border-red-800',
   Restarting:   'bg-violet-900/50 text-violet-200 border-violet-700',
-  Dead:         'bg-black text-red-400 border-red-900',
+  Dead:         'bg-black text-[var(--bad-light)] border-red-900',
   Offline:      'bg-zinc-900 text-zinc-500 border-zinc-800',
   // KTC
   idle:         'bg-zinc-800 text-zinc-400 border-zinc-700',

@@ -359,8 +359,8 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
               </div>
               <span class="text-zinc-300 w-10 text-right">${pct}%</span>
               <${WeightSparkline} history=${s.weight_history} />
-              <span class="text-emerald-400 w-8 text-right">${s.success_count}</span>
-              <span class="text-red-400 w-8 text-right">${s.failure_count}</span>
+              <span class="text-[var(--ok)] w-8 text-right">${s.success_count}</span>
+              <span class="text-[var(--bad-light)] w-8 text-right">${s.failure_count}</span>
             </div>
           `
         })}
@@ -394,8 +394,8 @@ function SynapseRow({ s }: { s: MemorySubsystemsSynapse }) {
           <span class="text-zinc-300 w-10 text-right">${pct}%</span>
         </div>
       </td>
-      <td class="py-1.5 px-2 text-sm text-emerald-400 text-center">${s.success_count}</td>
-      <td class="py-1.5 px-2 text-sm text-red-400 text-center">${s.failure_count}</td>
+      <td class="py-1.5 px-2 text-sm text-[var(--ok)] text-center">${s.success_count}</td>
+      <td class="py-1.5 px-2 text-sm text-[var(--bad-light)] text-center">${s.failure_count}</td>
       <td class="py-1.5 px-2 text-xs text-zinc-500">${formatTimeAgo(s.last_updated * 1000)}</td>
     </tr>
   `
@@ -404,10 +404,10 @@ function SynapseRow({ s }: { s: MemorySubsystemsSynapse }) {
 function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
   const outcomeColor =
     ep.outcome === 'success'
-      ? 'text-emerald-400'
+      ? 'text-[var(--ok)]'
       : ep.outcome === 'partial'
-        ? 'text-amber-400'
-        : 'text-red-400'
+        ? 'text-[var(--warn)]'
+        : 'text-[var(--bad-light)]'
   const outcomeIcon =
     ep.outcome === 'success' ? '●' : ep.outcome === 'partial' ? '◐' : '○'
   return html`
@@ -504,7 +504,7 @@ export function MemorySubsystems() {
   const { loading, error, data } = state.value
   if (loading && !data) return html`<${LoadingState} label="기억 서브시스템 로드 중..." />`
   if (error && !data)
-    return html`<div class="p-4 text-red-400">Error: ${error}</div>`
+    return html`<div class="p-4 text-[var(--bad-light)]">Error: ${error}</div>`
 
   const synapses = data?.hebbian?.synapses ?? []
   const lastConsolidation = data?.hebbian?.last_consolidation ?? 0

@@ -94,9 +94,9 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
       <div class="w-24 shrink-0">
         <div class="text-[11px] font-semibold text-text-muted">도구 호출</div>
         <div class="text-[10px] text-text-dim">
-          <span class="text-emerald-400">${successCount}</span>
+          <span class="text-[var(--ok)]">${successCount}</span>
           <span class="text-text-dim/60 mx-0.5">·</span>
-          <span class="text-red-400">${failureCount}</span>
+          <span class="text-[var(--bad-light)]">${failureCount}</span>
         </div>
       </div>
       <div

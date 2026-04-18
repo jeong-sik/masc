@@ -283,7 +283,7 @@ export function Observatory() {
               type="button"
               class="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
                 liveMode.value
-                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                  ? 'border-emerald-500/40 bg-emerald-500/10 text-[var(--ok)]'
                   : 'border-card-border text-text-muted hover:text-text-strong hover:bg-white/5'
               }"
               onClick=${() => {

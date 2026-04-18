@@ -321,7 +321,7 @@ export function HandoffTimeline({
         />
       </div>
       ${error !== null
-        ? html`<p class="text-[11px] text-red-400">오류: ${error}</p>`
+        ? html`<p class="text-[11px] text-[var(--bad-light)]">오류: ${error}</p>`
         : rows.length === 0
           ? html`<p class="text-[11px] text-text-dim">이 시간 범위에 A2A 이벤트 없음.</p>`
           : isFiltering && visibleRows.length === 0

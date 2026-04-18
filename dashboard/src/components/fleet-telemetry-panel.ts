@@ -88,7 +88,7 @@ function trendArrow(direction: TrendDirection): string {
 function trendColorClass(direction: TrendDirection, metric: MetricKey): string {
   if (direction === 'flat') return 'text-[var(--text-dim)]'
   const bad = (direction === 'up' && isUpBad(metric)) || (direction === 'down' && !isUpBad(metric))
-  return bad ? 'text-red-400' : 'text-emerald-400'
+  return bad ? 'text-[var(--bad-light)]' : 'text-[var(--ok)]'
 }
 
 function sparklineColor(metric: MetricKey, direction: TrendDirection): string {
@@ -285,7 +285,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
               </td>
               <td class="py-1.5 text-center">
                 <button
-                  class="rounded p-0.5 text-[var(--text-dim)] hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                  class="rounded p-0.5 text-[var(--text-dim)] hover:text-[var(--bad-light)] hover:bg-red-400/10 transition-colors"
                   onClick=${() => onReset(row.name)}
                   title="초기화"
                   aria-label=${`${row.name} 초기화`}
@@ -466,7 +466,7 @@ export function FleetTelemetryPanel() {
   }
 
   if (value.error) {
-    return html`<div class="p-4 text-[11px] text-red-400">${value.error}</div>`
+    return html`<div class="p-4 text-[11px] text-[var(--bad-light)]">${value.error}</div>`
   }
 
   const handleReset = async (name: string) => {
@@ -499,8 +499,8 @@ export function FleetTelemetryPanel() {
         <div class="flex items-center gap-3">
           <h2 class="text-sm font-medium">Keeper 텔레메트리</h2>
           <div class="flex items-center gap-2 text-[10px]">
-            ${activeCount > 0 ? html`<span class="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-emerald-400">${activeCount} 가동</span>` : null}
-            ${attentionCount > 0 ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-amber-400">${attentionCount} 주의</span>` : null}
+            ${activeCount > 0 ? html`<span class="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[var(--ok)]">${activeCount} 가동</span>` : null}
+            ${attentionCount > 0 ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[var(--warn)]">${attentionCount} 주의</span>` : null}
             ${offlineCount > 0 ? html`<span class="rounded-full bg-[var(--white-8)] px-1.5 py-0.5 text-[var(--text-dim)]">${offlineCount} 오프라인</span>` : null}
             ${budgetOverrideCount > 0 ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-amber-300">${budgetOverrideCount} 예산 재정의</span>` : null}
           </div>

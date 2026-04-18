@@ -274,7 +274,7 @@ function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
           ? html`<span class="rounded-full bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-red-300">invalid override</span>`
           : hasOverride
             ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-300">override</span>`
-            : html`<span class="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-emerald-400">inherited</span>`}
+            : html`<span class="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--ok)]">inherited</span>`}
       </div>
       <${BudgetRow}
         label="반응형"

@@ -514,7 +514,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
           <div class="flex flex-col gap-1">
             <label class="flex items-center gap-1.5 text-[11px] font-medium text-[var(--text-body)]" for=${`field-${connectorId}-${field.name}`}>
               <span>${field.name}</span>
-              ${field.required ? html`<span class="text-rose-400" aria-label="required">*</span>` : null}
+              ${field.required ? html`<span class="text-[var(--bad-light)]" aria-label="required">*</span>` : null}
               <span class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">${field.type}</span>
             </label>
             <${FieldWidget}

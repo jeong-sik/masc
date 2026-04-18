@@ -357,7 +357,7 @@ export function PrometheusMetrics() {
                   ${catMetrics.length} metrics
                 </span>
                 ${activeSamples > 0 && html`
-                  <span class="rounded-full bg-emerald-900/30 px-2 py-0.5 text-[10px] text-emerald-400">
+                  <span class="rounded-full bg-emerald-900/30 px-2 py-0.5 text-[10px] text-[var(--ok)]">
                     ${activeSamples} active
                   </span>
                 `}
@@ -394,7 +394,7 @@ export function PrometheusMetrics() {
                                 ${i === 0 && html`<div class="text-[10px] text-[var(--text-muted)] font-sans">${m.help}</div>`}
                               </td>
                               <td class="py-1.5">${i === 0 ? typeBadge(m.type) : null}</td>
-                              <td class="py-1.5 text-right font-mono tabular-nums ${s.value !== 0 ? 'text-emerald-400' : 'text-[var(--text-muted)]'}">
+                              <td class="py-1.5 text-right font-mono tabular-nums ${s.value !== 0 ? 'text-[var(--ok)]' : 'text-[var(--text-muted)]'}">
                                 ${fmtValue(s.value, m.type, s.name)}
                               </td>
                             </tr>

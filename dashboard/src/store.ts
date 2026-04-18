@@ -275,6 +275,7 @@ export const tasksByStatus = computed(() => {
   return {
     todo: all.filter(t => t.status === 'todo'),
     inProgress: all.filter(t => t.status === 'in_progress' || t.status === 'claimed'),
+    awaitingVerification: all.filter(t => t.status === 'awaiting_verification'),
     done: all.filter(t => t.status === 'done'),
   }
 })

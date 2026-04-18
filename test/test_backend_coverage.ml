@@ -401,6 +401,11 @@ let test_lock_info_invalid_json () =
   | None -> ()
   | Some _ -> fail "invalid json should return None"
 
+let test_lock_info_blank_json () =
+  match Backend.FileSystem.lock_info_of_json "   \n\t  " with
+  | None -> ()
+  | Some _ -> fail "blank json should return None"
+
 let test_lock_info_missing_field () =
   match Backend.FileSystem.lock_info_of_json {|{"owner": "test"}|} with
   | None -> ()
@@ -510,6 +515,7 @@ let () =
     "eio_lock_info", [
       test_case "json roundtrip" `Quick test_lock_info_json_roundtrip;
       test_case "invalid json" `Quick test_lock_info_invalid_json;
+      test_case "blank json" `Quick test_lock_info_blank_json;
       test_case "missing field" `Quick test_lock_info_missing_field;
     ];
     "eio_fs_edge", [

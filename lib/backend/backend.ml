@@ -419,9 +419,13 @@ module FileSystem = struct
     ])
 
   let lock_info_of_json json =
+    let trimmed = String.trim json in
+    if trimmed = "" then
+      None
+    else
     try
       let module U = Yojson.Safe.Util in
-      let j = Yojson.Safe.from_string json in
+      let j = Yojson.Safe.from_string trimmed in
       let parse_float = function
         | `Float f -> Some f
         | `Int i -> Some (float_of_int i)

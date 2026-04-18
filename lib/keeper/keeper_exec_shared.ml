@@ -153,7 +153,10 @@ let playground_relative_unless_allowed_root ~(config : Coord.config)
           "/base/.masc/playground/X/repos" *)
   let trimmed =
     if not (Filename.is_relative trimmed) then
-      let pg_root = keeper_playground_root ~config ~meta in
+      let pg_root =
+        keeper_playground_root ~config ~meta
+        |> Keeper_alerting_path.strip_trailing_slashes
+      in
       let doubled_prefix = pg_root ^ "/" ^ pg_bundle in
       if String.starts_with ~prefix:doubled_prefix trimmed then
         let rest = String.sub trimmed

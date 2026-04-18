@@ -271,14 +271,24 @@ let handoff_verified ~similarity : t =
    Task-Specific Responses
    ======================================== *)
 
-(** Task claimed *)
+(** Task claimed.
+
+    Issue #8364: previously emitted [status="in_progress"], which is the
+    state AFTER the [Start] action. The [Claim] FSM transition is
+    [Todo -> Claimed] (see [lib/coord/coord_task.ml:752]); a separate
+    [Start] is required to reach [InProgress]. Routing through the
+    Variant SSOT prevents this from drifting again. *)
 let task_claimed ~task_id ~agent : t =
+  let claimed_status =
+    Types.task_status_to_string
+      (Types.Claimed { assignee = agent; claimed_at = Types.now_iso () })
+  in
   ok
     ~message:(Printf.sprintf "Task '%s' claimed by '%s'" task_id agent)
     (`Assoc [
       ("task_id", `String task_id);
       ("claimed_by", `String agent);
-      ("status", `String "in_progress");
+      ("status", `String claimed_status);
     ])
 
 (** Task already claimed *)

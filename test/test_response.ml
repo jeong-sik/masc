@@ -332,7 +332,9 @@ let test_task_claimed () =
   (* Verify ACTUAL values *)
   assert_equal_string "task_id value" "task-001" (json_get_string resp.data "task_id");
   assert_equal_string "claimed_by value" "claude" (json_get_string resp.data "claimed_by");
-  assert_equal_string "status value" "in_progress" (json_get_string resp.data "status");
+  (* Issue #8364: status after Claim is "claimed" (Variant: Types.Claimed),
+     not "in_progress" (which requires a separate Start action). *)
+  assert_equal_string "status value" "claimed" (json_get_string resp.data "status");
   (* Verify message mentions task and agent *)
   assert_true "message mentions task-001" (
     try Str.search_forward (Str.regexp "task-001") resp.message 0 >= 0

@@ -1,5 +1,15 @@
 open Types
 
+(** Issue #8501: hand-mirrored from
+    [Tool_agent.valid_agent_card_action_strings] and
+    [Tool_agent.valid_collaboration_format_strings]. masc_tool_schemas
+    only depends on masc_types so it cannot derive directly. The sync
+    regression test [test_types.ml :: agent_tool_variants_ssot] catches
+    drift. Same shape as #8467/#8480/#8484/#8490/#8493 mirror+sync
+    pattern. *)
+let agent_card_action_enum_strings = [ "get"; "refresh" ]
+let collaboration_format_enum_strings = [ "text"; "json" ]
+
 let schemas : tool_schema list = [
   {
     name = "masc_agents";
@@ -48,7 +58,9 @@ let schemas : tool_schema list = [
       ("properties", `Assoc [
         ("action", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "get"; `String "refresh"]);
+          (* Issue #8501: derive from local mirror that tracks
+             [Tool_agent.valid_agent_card_action_strings]. *)
+          ("enum", `List (List.map (fun s -> `String s) agent_card_action_enum_strings));
           ("description", `String "Action: 'get' returns current card, 'refresh' regenerates it");
         ]);
       ]);
@@ -100,7 +112,9 @@ let schemas : tool_schema list = [
       ("properties", `Assoc [
         ("format", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "text"; `String "json"]);
+          (* Issue #8501: derive from local mirror that tracks
+             [Tool_agent.valid_collaboration_format_strings]. *)
+          ("enum", `List (List.map (fun s -> `String s) collaboration_format_enum_strings));
           ("description", `String "Output format (default: text)");
           ("default", `String "text");
         ]);

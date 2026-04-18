@@ -154,10 +154,10 @@ function OverviewFreshnessStrip() {
             />
             <span class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Overview Freshness</span>
             ${tier === 'warn'
-              ? html`<span class="rounded-full border border-warn/25 bg-warn/10 px-2 py-0.5 text-[11px] font-medium text-warn">1분 이상 경과</span>`
+              ? html`<span class="rounded-sm border border-warn/25 bg-warn/10 px-2 py-0.5 text-[11px] font-medium text-warn">1분 이상 경과</span>`
               : null}
             ${isStale
-              ? html`<span class="rounded-full border border-warn/30 bg-warn/15 px-2 py-0.5 text-[11px] font-semibold text-warn">5분 이상 stale</span>`
+              ? html`<span class="rounded-sm border border-warn/30 bg-warn/15 px-2 py-0.5 text-[11px] font-semibold text-warn">5분 이상 stale</span>`
               : null}
           </div>
           <div class="mt-1 text-[13px] text-[var(--text-body)]">
@@ -343,15 +343,15 @@ function MetaCognitionCard() {
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <span class="rounded-full border px-2.5 py-1 text-[11px] font-semibold ${tone.className}">
+          <span class="rounded-sm border px-2.5 py-1 text-[11px] font-semibold ${tone.className}">
             ${tone.label}
           </span>
-          <span class="rounded-full border border-card-border/60 bg-card/55 px-2.5 py-1 text-[11px] font-semibold text-[var(--text-strong)]">
+          <span class="rounded-sm border border-card-border/60 bg-card/55 px-2.5 py-1 text-[11px] font-semibold text-[var(--text-strong)]">
             정체 ${stagnationPct}%
           </span>
           ${summary.contested_belief_count > 0
             ? html`
-                <span class="rounded-full border border-[var(--warn-20)] bg-[var(--warn-10)] px-2.5 py-1 text-[11px] font-semibold text-[var(--warn-bright)]">
+                <span class="rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-2.5 py-1 text-[11px] font-semibold text-[var(--warn-bright)]">
                   이견 ${summary.contested_belief_count}
                 </span>
               `
@@ -638,8 +638,8 @@ function ToolCallHealthPanel() {
         <${CompactKpi} value=${ratePct} valueClass=${rateColor} label="실패율" />
       </div>
       ${successRate != null ? html`
-        <div class="mt-2 h-1.5 rounded-full overflow-hidden bg-[var(--white-6)]">
-          <div class="${barColor} h-full rounded-full transition-all" style="width:${Math.min(successRate, 100)}%" />
+        <div class="mt-2 h-1.5 rounded-sm overflow-hidden bg-[var(--white-6)]">
+          <div class="${barColor} h-full rounded-sm transition-all" style="width:${Math.min(successRate, 100)}%" />
         </div>
       ` : null}
     </div>
@@ -839,10 +839,10 @@ function PathTruthBlock({
     <div class="rounded-lg border border-card-border/35 bg-card/45 p-3">
       <div class="flex flex-wrap items-center gap-2">
         <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">${label}</div>
-        <span class="rounded-full border px-2 py-0.5 text-[10px] font-semibold ${item.exists ? 'border-ok/25 bg-ok/10 text-ok' : 'border-bad/25 bg-bad/10 text-bad-light'}">
+        <span class="rounded-sm border px-2 py-0.5 text-[10px] font-semibold ${item.exists ? 'border-ok/25 bg-ok/10 text-ok' : 'border-bad/25 bg-bad/10 text-bad-light'}">
           ${item.exists ? 'present' : 'missing'}
         </span>
-        <span class="rounded-full border border-card-border/50 bg-card/55 px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
+        <span class="rounded-sm border border-card-border/50 bg-card/55 px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
           ${sourceSummaryLabel(item.source)}
         </span>
       </div>
@@ -874,26 +874,26 @@ function ConfigTruthCard() {
           <div class="flex flex-wrap items-center gap-2">
             ${configResolution
               ? html`
-                  <span class="rounded-full border px-2.5 py-1 text-[11px] font-semibold ${resolutionTone(configResolution.status)}">
+                  <span class="rounded-sm border px-2.5 py-1 text-[11px] font-semibold ${resolutionTone(configResolution.status)}">
                     config ${configResolution.status}
                   </span>
                 `
               : null}
             ${runtimeResolution
               ? html`
-                  <span class="rounded-full border px-2.5 py-1 text-[11px] font-semibold ${resolutionTone(runtimeResolution.status)}">
+                  <span class="rounded-sm border px-2.5 py-1 text-[11px] font-semibold ${resolutionTone(runtimeResolution.status)}">
                     runtime ${runtimeResolution.status}
                   </span>
                 `
               : null}
             ${warningCount > 0
               ? html`
-                  <span class="rounded-full border border-warn/25 bg-warn/12 px-2.5 py-1 text-[11px] font-semibold text-warn">
+                  <span class="rounded-sm border border-warn/25 bg-warn/12 px-2.5 py-1 text-[11px] font-semibold text-warn">
                     warning ${warningCount}
                   </span>
                 `
               : html`
-                  <span class="rounded-full border border-ok/25 bg-ok/10 px-2.5 py-1 text-[11px] font-semibold text-ok">
+                  <span class="rounded-sm border border-ok/25 bg-ok/10 px-2.5 py-1 text-[11px] font-semibold text-ok">
                     drift 없음
                   </span>
                 `}

@@ -122,8 +122,8 @@ function RateGauge({ rate, label }: { rate: number; label: string }) {
     <div class="flex flex-col gap-1">
       <div class="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">${label}</div>
       <div class="flex items-center gap-2">
-        <div class="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-full overflow-hidden">
-          <div class="${color} h-full rounded-full transition-all" style="width: ${Math.min(rate, 100)}%" />
+        <div class="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-sm overflow-hidden">
+          <div class="${color} h-full rounded-sm transition-all" style="width: ${Math.min(rate, 100)}%" />
         </div>
         <span class="text-xs font-mono ${rate >= 95 ? 'text-[var(--ok)]' : rate >= 90 ? 'text-[var(--warn)]' : 'text-[var(--bad-light)]'}">${rate.toFixed(1)}%</span>
       </div>
@@ -247,8 +247,8 @@ function KeeperRateBars({ keepers }: { keepers: KeeperStat[] }) {
         return html`
           <div class="flex items-center gap-2 text-[11px]">
             <span class="w-24 truncate text-[var(--text-dim)] font-mono" title=${k.name}>${k.name}</span>
-            <div class="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-full overflow-hidden">
-              <div class="${color} h-full rounded-full transition-all" style="width:${Math.min(k.success_pct, 100)}%" />
+            <div class="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-sm overflow-hidden">
+              <div class="${color} h-full rounded-sm transition-all" style="width:${Math.min(k.success_pct, 100)}%" />
             </div>
             <span class="w-12 text-right font-mono ${textColor}">${k.success_pct.toFixed(1)}%</span>
             <span class="w-10 text-right text-[var(--text-dim)]">${k.calls}</span>

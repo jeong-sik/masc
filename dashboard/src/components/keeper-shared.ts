@@ -151,7 +151,7 @@ function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnosti
 
 function DiagChip({ label }: { label: string }) {
   return html`
-    <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">${label}</span>
+    <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">${label}</span>
   `
 }
 
@@ -296,7 +296,7 @@ export function KeeperConversationPanel({
             <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 대화</div>
             <div class="mt-2 flex flex-wrap items-center gap-2">
               <div class="text-[15px] font-semibold text-[var(--text-strong)]">@${keeperName}</div>
-              <span class=${`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] ${conversationStateClass(sending, hydrating)}`}>
+              <span class=${`inline-flex items-center rounded-sm border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] ${conversationStateClass(sending, hydrating)}`}>
                 ${conversationStateLabel(sending, hydrating)}
               </span>
             </div>

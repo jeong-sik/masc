@@ -102,12 +102,12 @@ export function ConnectionStatus() {
       class="flex items-center gap-1.5 whitespace-nowrap text-[12px] ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}"
       title=${titleAttr || undefined}
     >
-      <span class="inline-block size-[8px] rounded-full ${isConnected ? 'bg-[var(--ok)] shadow-[0_0_7px_rgba(74,222,128,0.75)]' : 'bg-[var(--bad)]'}"></span>
+      <span class="inline-block size-[8px] rounded-sm ${isConnected ? 'bg-[var(--ok)] shadow-[0_0_7px_rgba(74,222,128,0.75)]' : 'bg-[var(--bad)]'}"></span>
       <span class="status-text">${statusLabel}</span>
       ${attentionCount > 0 ? html`
         <${RouteLink}
           tab="overview"
-          class="inline-flex items-center justify-center rounded-full border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 tabular-nums attention-badge"
+          class="inline-flex items-center justify-center rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 tabular-nums attention-badge"
         >주의 ${attentionCount}건<//>
       ` : null}
     </div>
@@ -197,7 +197,7 @@ export function BuildIdentityBadge() {
   return html`
     <div class="relative">
       <button type="button"
-        class="cursor-pointer rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-[10px] py-[5px] text-[10px] text-[var(--text-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
+        class="cursor-pointer rounded-sm border border-[var(--white-10)] bg-[var(--white-4)] px-[10px] py-[5px] text-[10px] text-[var(--text-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
         aria-expanded=${buildIdentityOpen.value}
         aria-label=${`서버 빌드 정보 ${label}`}
         title=${hoverTitle}
@@ -327,7 +327,7 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   const attentionLines = attentionCount > 0 ? summarizeAttentionPreview(attentionQueue) : []
   const titleText = composeHealthIndicatorTitle(label, attentionLines)
 
-  const dot = html`<span class="block size-2 shrink-0 rounded-full ${dotClass} shadow-[0_0_6px_rgba(0,0,0,0.4)]"></span>`
+  const dot = html`<span class="block size-2 shrink-0 rounded-sm ${dotClass} shadow-[0_0_6px_rgba(0,0,0,0.4)]"></span>`
 
   if (collapsed) {
     return html`<div class="flex justify-center" title=${titleText} role="img" aria-label=${label}>${dot}</div>`

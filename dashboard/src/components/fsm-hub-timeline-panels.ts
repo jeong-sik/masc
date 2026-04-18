@@ -172,7 +172,7 @@ export function SwimlaneTimeline({
             const isBusiest = busiestLane === lane.short && count > 0
             return html`
               <span
-                class=${`rounded-full border px-1.5 py-0.5 text-[10px] font-mono tabular-nums ${
+                class=${`rounded-sm border px-1.5 py-0.5 text-[10px] font-mono tabular-nums ${
                   count === 0
                     ? 'text-[var(--text-dim)] border-[var(--white-8)]'
                     : isBusiest
@@ -481,7 +481,7 @@ export function TopTransitionsPanel({
               <span class="text-[var(--text-muted)]">→</span>
               <span class="text-[var(--text-strong)]">${displayState(entry.to)}</span>
               <span class="ml-auto flex items-center gap-1.5 shrink-0">
-                <span class="h-1 w-12 rounded-full bg-[var(--white-8)] overflow-hidden">
+                <span class="h-1 w-12 rounded-sm bg-[var(--white-8)] overflow-hidden">
                   <span
                     class="block h-full bg-[var(--accent)]"
                     style=${`width: ${widthPct}%`}
@@ -551,7 +551,7 @@ export function DwellHistogramPanel({
                       title=${`${displayState(entry.value)}: ${fmtDuration(entry.seconds)} (${entry.pct.toFixed(1)}%)`}
                     >
                       <span class="w-[60px] shrink-0 text-[var(--text-body)] truncate">${displayState(entry.value)}</span>
-                      <span class="flex-1 h-1.5 rounded-full bg-[var(--white-8)] overflow-hidden">
+                      <span class="flex-1 h-1.5 rounded-sm bg-[var(--white-8)] overflow-hidden">
                         <span
                           class=${`block h-full ${barColor}`}
                           style=${`width: ${Math.max(2, entry.pct)}%`}

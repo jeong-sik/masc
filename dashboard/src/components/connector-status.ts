@@ -834,7 +834,7 @@ function ConnectorLivePanel({
           ? html`<span class="text-[var(--text-dim)]">· ${connector.bot_user_name}</span>`
           : null}
         <span class="text-[var(--text-dim)]">·</span>
-        <span class=${`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] ${directTone}`}>
+        <span class=${`inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] ${directTone}`}>
           <span class=${`inline-block h-2 w-2 rounded-full ${dotClassForLabel(directLabel)}`}></span>
           <span>${directLabel}</span>
         </span>
@@ -946,7 +946,7 @@ function ConnectorLivePanel({
               data-keeper-directory-error-panel
             >
               <span
-                class="mr-2 inline-flex items-center gap-1 rounded-full border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
+                class="mr-2 inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
                 aria-label="Keeper directory status: unavailable"
               >
                 <span aria-hidden="true">⚠</span>
@@ -965,7 +965,7 @@ function ConnectorLivePanel({
             >
               <div class="mb-1 flex items-center gap-2">
                 <span
-                  class="inline-flex items-center gap-1 rounded-full border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
+                  class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
                   aria-label="Keeper configuration status: none configured"
                   data-no-keepers-status-chip
                 >
@@ -1000,7 +1000,7 @@ function ConnectorLivePanel({
                 <div class="mb-1 flex items-center justify-between gap-2">
                   <div class="flex items-center gap-2">
                     <span
-                      class="inline-flex items-center gap-1 rounded-full border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
+                      class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
                       aria-label="Sidecar process status: not running"
                       data-sidecar-status-chip
                     >
@@ -1148,7 +1148,7 @@ function ConnectorLivePanel({
                                             return html`
                                               <button
                                                 type="button"
-                                                class="cursor-pointer rounded-full border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-body)] hover:bg-[var(--white-8)]"
+                                                class="cursor-pointer rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-body)] hover:bg-[var(--white-8)]"
                                                 title=${roomId}
                                                 onClick=${() => { patchConnectorUiState(connectorId, { channelDraft: roomId }) }}
                                               >${humanized
@@ -1258,7 +1258,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
         </div>
         <div class="flex items-center gap-2">
           <div class="h-2 w-2 rounded-full" style="background: ${tone.dot}"></div>
-          <span class=${`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${tone.badge}`}>
+          <span class=${`rounded-sm px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${tone.badge}`}>
             ${tone.label}
           </span>
         </div>
@@ -1339,7 +1339,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
             ${binding.keeper ? `keeper ${binding.keeper}` : 'keeper pending'}
           </div>
         </div>
-        <span class=${`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${tone.badge}`}>
+        <span class=${`rounded-sm px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${tone.badge}`}>
           ${tone.label}
         </span>
       </div>
@@ -1388,7 +1388,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
               : null}
           </div>
         </div>
-        <span class=${`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${badgeClass}`}>
+        <span class=${`rounded-sm px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${badgeClass}`}>
           ${event.outcome}
         </span>
       </div>

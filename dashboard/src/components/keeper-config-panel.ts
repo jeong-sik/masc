@@ -330,10 +330,10 @@ function InlineToggleRow({ label, value, onChange }: { label: string; value: boo
     <div class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
       <span class="text-[12px] font-medium text-text-muted">${label}</span>
       <button type="button"
-        class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-white/10'}"
+        class="relative inline-flex h-5 w-9 items-center rounded-sm transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-white/10'}"
         onClick=${() => onChange(!value)}
       >
-        <span class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${value ? 'translate-x-[18px]' : 'translate-x-[3px]'}" />
+        <span class="inline-block h-3.5 w-3.5 rounded-sm bg-white shadow-sm transition-transform ${value ? 'translate-x-[18px]' : 'translate-x-[3px]'}" />
       </button>
     </div>
   `

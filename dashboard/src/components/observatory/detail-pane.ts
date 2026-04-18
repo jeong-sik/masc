@@ -72,7 +72,7 @@ export function DetailPane() {
           <span class="text-[10px] uppercase tracking-widest text-accent font-semibold">상세</span>
           <span class="text-[12px] font-semibold text-text-strong">${selectionTitle(selection)}</span>
           ${outcome ? html`
-            <span class="rounded-full border px-2 py-0.5 text-[10px] font-mono ${toneClass(outcome.tone)}">
+            <span class="rounded-sm border px-2 py-0.5 text-[10px] font-mono ${toneClass(outcome.tone)}">
               ${outcome.label}
             </span>
           ` : null}

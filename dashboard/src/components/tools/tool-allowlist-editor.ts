@@ -104,7 +104,7 @@ function removeFromList(listSig: typeof alsoAllowItems, name: string) {
 
 function RemovableChip({ name, onRemove }: { name: string; onRemove: () => void }) {
   return html`
-    <span class="inline-flex items-center gap-0.5 py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">
+    <span class="inline-flex items-center gap-0.5 py-0.5 px-2 rounded-sm text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">
       ${name}
       <button type="button"
         class="text-[var(--accent)]/50 hover:text-[#ff6b6b] cursor-pointer text-[11px] leading-none transition-colors"
@@ -117,7 +117,7 @@ function RemovableChip({ name, onRemove }: { name: string; onRemove: () => void 
 
 function ReadOnlyChip({ name }: { name: string }) {
   return html`
-    <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">
+    <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">
       ${name}
     </span>
   `
@@ -235,7 +235,7 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
                   ${visibleNames.map(name => html`<${ReadOnlyChip} name=${name} />`)}
                   ${!expanded && hiddenToolCount > 0
                     ? html`
-                        <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium border border-dashed border-[var(--card-border)] text-[var(--text-muted)]">
+                        <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-[10px] font-medium border border-dashed border-[var(--card-border)] text-[var(--text-muted)]">
                           +${hiddenToolCount}
                         </span>
                       `

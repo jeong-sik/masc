@@ -136,8 +136,8 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
   const h = size === 'sm' ? 'h-1.5' : 'h-2.5'
   return html`
     <div class="flex items-center gap-2">
-      <div class="flex-1 ${h} rounded-full bg-white/10 overflow-hidden">
-        <div class="${h} rounded-full transition-all duration-500" style="width:${clamped}%;background:${barColor}"></div>
+      <div class="flex-1 ${h} rounded-sm bg-white/10 overflow-hidden">
+        <div class="${h} rounded-sm transition-all duration-500" style="width:${clamped}%;background:${barColor}"></div>
       </div>
       <span class="text-[11px] font-semibold tabular-nums text-text-muted w-[36px] text-right">${clamped}%</span>
     </div>
@@ -178,7 +178,7 @@ function TreeSummary({ summary }: { summary: GoalTreeSummary }) {
 function TreeTask({ task }: { task: GoalTreeTask }) {
   return html`
     <div class="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-white/3 text-[12px]">
-      <span class="size-2 rounded-full shrink-0" style="background:${task.status_color}"></span>
+      <span class="size-2 rounded-sm shrink-0" style="background:${task.status_color}"></span>
       <span class="flex-1 min-w-0 truncate text-text-body">${task.title}</span>
       ${task.assignee ? html`
         <span class="shrink-0 rounded-md border border-accent/20 bg-[var(--accent-10)] px-1.5 py-0.5 text-[10px] font-medium text-accent">${task.assignee}</span>

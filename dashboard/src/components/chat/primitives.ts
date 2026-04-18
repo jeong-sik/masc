@@ -157,7 +157,7 @@ function ChatMessageBubble({
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
-                            class="inline-flex items-center rounded-full border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--text-muted)]"
+                            class="inline-flex items-center rounded-sm border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--text-muted)]"
                             data-chat-delivery=${delivery}
                           >
                             ${delivery}
@@ -169,14 +169,14 @@ function ChatMessageBubble({
               : html`
                   <div class="flex flex-wrap items-center gap-1.5">
                     <span
-                      class=${`chat-role-chip ${tone} inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]`}
+                      class=${`chat-role-chip ${tone} inline-flex items-center rounded-sm border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]`}
                     >
                       ${entry.label}
                     </span>
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
-                            class="inline-flex items-center rounded-full border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)]"
+                            class="inline-flex items-center rounded-sm border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)]"
                             data-chat-delivery=${delivery}
                           >
                             ${delivery}
@@ -185,7 +185,7 @@ function ChatMessageBubble({
                       : null}
                     ${timestamp
                       ? html`
-                          <span class="inline-flex items-center rounded-full border border-[rgba(148,163,184,0.16)] bg-[rgba(148,163,184,0.08)] px-2.5 py-1 text-[10px] font-medium tabular-nums text-[var(--text-muted)]">
+                          <span class="inline-flex items-center rounded-sm border border-[rgba(148,163,184,0.16)] bg-[rgba(148,163,184,0.08)] px-2.5 py-1 text-[10px] font-medium tabular-nums text-[var(--text-muted)]">
                             ${timestamp}
                           </span>
                         `
@@ -202,7 +202,7 @@ function ChatMessageBubble({
               <button
                 type="button"
                 class=${`border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--text-body)] ${
-                  isMessenger ? 'rounded px-2.5 py-1' : 'rounded-full px-3 py-1'
+                  isMessenger ? 'rounded px-2.5 py-1' : 'rounded-sm px-3 py-1'
                 }`}
                 onClick=${() => { setExpandedRaw(!expandedRaw) }}
               >
@@ -215,7 +215,7 @@ function ChatMessageBubble({
       ${showMetadata && detailItems.length > 0
         ? html`<div class=${`flex flex-wrap gap-1.5 ${isMessenger ? 'pt-0.5' : ''}`}>
             ${detailItems.map(item => html`
-              <span class="inline-flex items-center rounded-full border border-[rgba(71,184,255,0.16)] bg-[var(--accent-10)] px-2.5 py-1 text-[10px] font-medium text-[var(--text-strong)]">
+              <span class="inline-flex items-center rounded-sm border border-[rgba(71,184,255,0.16)] bg-[var(--accent-10)] px-2.5 py-1 text-[10px] font-medium text-[var(--text-strong)]">
                 ${item}
               </span>
             `)}
@@ -279,7 +279,7 @@ function ChatMessageBubble({
                     <div class="flex flex-col gap-2">
                       <button
                         type="button"
-                        class="self-start rounded-full border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] px-3 py-1 text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--text-body)]"
+                        class="self-start rounded-sm border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] px-3 py-1 text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--text-body)]"
                         onClick=${() => { setRawExpandedRaw(!rawExpandedRaw) }}
                       >
                         ${rawExpanded ? '원본 숨기기' : '원본 보기'}

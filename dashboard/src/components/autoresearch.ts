@@ -216,7 +216,7 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
             <span class="text-[var(--text-muted)] text-xs ml-1">(${keepPct}% keep)</span>
           </div>
           ${totalCycles > 0 ? html`
-            <div class="mt-1.5 h-2 rounded-full bg-[var(--white-6)] overflow-hidden flex">
+            <div class="mt-1.5 h-2 rounded-sm bg-[var(--white-6)] overflow-hidden flex">
               <div
                 class="h-full bg-[var(--ok-48)] transition-[width] duration-300"
                 style=${{ width: `${(loop.total_keeps / totalCycles) * 100}%` }}

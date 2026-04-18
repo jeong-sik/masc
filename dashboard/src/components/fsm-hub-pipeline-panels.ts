@@ -97,7 +97,7 @@ export function OperationalMeaningPanel({
           <div class="mt-1 text-[18px] font-semibold text-[var(--text-strong)]">${insight.headline}</div>
           <div class="mt-1 text-[11px] text-[var(--text-dim)] leading-relaxed">${insight.detail}</div>
         </div>
-        <span class=${`rounded-full border px-2.5 py-0.5 text-[10px] font-mono ${INSIGHT_BADGE_CLS[insight.tone]}`}>
+        <span class=${`rounded-sm border px-2.5 py-0.5 text-[10px] font-mono ${INSIGHT_BADGE_CLS[insight.tone]}`}>
           ${insight.tone}
         </span>
       </div>
@@ -108,7 +108,7 @@ export function OperationalMeaningPanel({
 
       <div class="mt-2 flex flex-wrap gap-1.5">
         ${insight.evidence.map(item => html`
-          <span class="rounded-full border border-[var(--white-8)] px-2 py-0.5 text-[10px] font-mono text-[var(--text-dim)]">
+          <span class="rounded-sm border border-[var(--white-8)] px-2 py-0.5 text-[10px] font-mono text-[var(--text-dim)]">
             ${item}
           </span>
         `)}
@@ -136,7 +136,7 @@ export function OperationalMeaningPanel({
               <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
                 <div class="flex items-center justify-between gap-2">
                   <span class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${lane.field}</span>
-                  <span class=${`rounded-full border px-1.5 py-0.5 text-[8px] font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
+                  <span class=${`rounded-sm border px-1.5 py-0.5 text-[8px] font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
                     ${fmtDuration(lane.observedForSec)}
                   </span>
                 </div>

@@ -1,6 +1,6 @@
 // IdPill — rounded-md accent pill for identifier-style tokens
 // (task ids, agent run tokens, object handles). Distinct from
-// StatusChip (rounded-full semantic status badge) and Kbd (keyboard
+// StatusChip (rounded-sm semantic status badge) and Kbd (keyboard
 // shortcut pill): IdPill is *flat value surface* — the reader sees
 // it and knows "this is the ID of the thing", not its status.
 //
@@ -28,7 +28,7 @@
 //   belong in P6 color normalisation.
 // • agent-detail:230 (agent.model) — mono neutral pill with
 //   reversed opacities to 228. P6.
-// • agent-detail-worker:45 (signal_truth) — `rounded-full` with
+// • agent-detail-worker:45 (signal_truth) — `rounded-sm` with
 //   raw `rgba(71,184,255,0.36)` border. That is StatusChip
 //   shape with an untypeable border, not IdPill shape. P6 when
 //   raw rgba colors resolve to CSS vars.

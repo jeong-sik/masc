@@ -63,7 +63,7 @@ export function HeartbeatStreakChip({
   const label = formatStreakLabel(streak)
   const chipClass = cx ?? ''
   return html`<span
-    class=${`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] tabular-nums ${tone} ${chipClass}`}
+    class=${`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] tabular-nums ${tone} ${chipClass}`}
     title=${label}
     aria-label=${label}
     data-heartbeat-streak-chip

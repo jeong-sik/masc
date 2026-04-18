@@ -264,8 +264,8 @@ function CharacterPlate({ name }: { name: string }) {
         ${ctxPct != null ? html`
           <div class="flex items-center gap-2 mt-0.5">
             <span class="text-[11px] font-bold text-[var(--ff-gold)] tracking-[1px] w-7">CTX</span>
-            <div class="h-1.5 mt-1.5 rounded-full overflow-hidden bg-[var(--white-10)]" style="flex:1">
-              <div class="h-full rounded-full transition-[width] duration-[250ms] ease-[ease] motion-reduce:transition-none ${ctxBarClass(ctxRatio) === 'warn' ? 'bg-linear-to-r from-[var(--warn)] to-[var(--warn-bright)]' : ctxBarClass(ctxRatio) === 'bad' ? 'bg-linear-to-r from-[var(--bad)] to-[var(--warn-bright)]' : 'bg-linear-to-r from-[var(--accent)] to-[var(--ok)]'}" style=${{ width: `${ctxPct}%` }}></div>
+            <div class="h-1.5 mt-1.5 rounded-sm overflow-hidden bg-[var(--white-10)]" style="flex:1">
+              <div class="h-full rounded-sm transition-[width] duration-[250ms] ease-[ease] motion-reduce:transition-none ${ctxBarClass(ctxRatio) === 'warn' ? 'bg-linear-to-r from-[var(--warn)] to-[var(--warn-bright)]' : ctxBarClass(ctxRatio) === 'bad' ? 'bg-linear-to-r from-[var(--bad)] to-[var(--warn-bright)]' : 'bg-linear-to-r from-[var(--accent)] to-[var(--ok)]'}" style=${{ width: `${ctxPct}%` }}></div>
             </div>
             <span class="text-[13px] tabular-nums text-[var(--text-strong)] min-w-9 text-right">${ctxPct}%</span>
             ${keeper?.context_tokens != null && keeper?.context_max != null
@@ -365,7 +365,7 @@ export function AgentProfile({ name }: { name: string }) {
             ? html`<${EmptyState} message="할당된 태스크 없음" compact />`
             : html`<div class="flex flex-col gap-2">${owned.map(t => html`
                 <div class="flex items-center gap-2 border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 rounded-lg" key=${t.id}>
-                  <span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">${t.id}</span>
+                  <span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">${t.id}</span>
                   <span class="flex-1 text-[var(--text-strong)]">${t.title}</span>
                   <${StatusBadge} status=${t.status} />
                 </div>
@@ -457,7 +457,7 @@ export function AgentProfile({ name }: { name: string }) {
           <${Card} title="태스크 이력" class="ff-card rounded col-span-full">
             <div class="agent-history-list">${(profileData?.taskHistories ?? []).map((row: TaskHistoryRow) => html`
               <div class="border border-[var(--card-border)] rounded-[10px] bg-[var(--white-2)] p-2.5" key=${row.taskId}>
-                <div class="mb-2"><span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">${row.taskId}</span></div>
+                <div class="mb-2"><span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">${row.taskId}</span></div>
                 <pre class="m-0 whitespace-pre-wrap text-[13px] leading-[1.5] text-[var(--text-strong)] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || '이력 없음'}</pre>
               </div>
             `)}</div>

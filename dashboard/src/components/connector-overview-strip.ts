@@ -255,11 +255,11 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
         <span class="min-w-0 flex-1">
           <span class="flex items-center gap-2">
             <span class="block truncate text-[13px] font-semibold text-[var(--text-body)]">${displayName}</span>
-            <span class=${`rounded-full border px-2 py-0.5 text-[10px] font-medium ${summary.badgeClass}`}>${summary.badge}</span>
+            <span class=${`rounded-sm border px-2 py-0.5 text-[10px] font-medium ${summary.badgeClass}`}>${summary.badge}</span>
             ${uptimeLabel !== null
               ? html`
                   <span
-                    class="rounded-full border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-[1px] text-[10px] font-normal text-[var(--ok)]/80"
+                    class="rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-[1px] text-[10px] font-normal text-[var(--ok)]/80"
                     data-uptime-chip
                     title="last_ready_at 기준 경과 시간"
                   >${uptimeLabel}</span>

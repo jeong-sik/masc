@@ -648,8 +648,8 @@ function StatusBar({
     && (now - (snapshot.last_outcome?.ended_at ?? snapshot.ts)) > 300
   const liveBadge = snapshot
     ? snapshot.is_live
-      ? html`<span class="px-2 py-0.5 rounded-full border text-[10px] font-mono text-[var(--ok)] border-[var(--ok-20)] bg-[var(--ok-10)] animate-pulse">● 실행 중</span>`
-      : html`<span class="px-2 py-0.5 rounded-full border text-[10px] font-mono ${idleIsLong ? 'text-[var(--text-muted)] border-[var(--warn-20)]' : 'text-[var(--text-dim)] border-white/10'}">○ 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-[8px] opacity-70">· 턴 #${snapshot.last_outcome.turn_id}</span>` : ''}</span>`
+      ? html`<span class="px-2 py-0.5 rounded-sm border text-[10px] font-mono text-[var(--ok)] border-[var(--ok-20)] bg-[var(--ok-10)] animate-pulse">● 실행 중</span>`
+      : html`<span class="px-2 py-0.5 rounded-sm border text-[10px] font-mono ${idleIsLong ? 'text-[var(--text-muted)] border-[var(--warn-20)]' : 'text-[var(--text-dim)] border-white/10'}">○ 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-[8px] opacity-70">· 턴 #${snapshot.last_outcome.turn_id}</span>` : ''}</span>`
     : null
 
   const staleSec = lastFetchAt > 0 ? Math.max(0, now - lastFetchAt) : 0
@@ -721,7 +721,7 @@ function StatusBar({
               placeholder="keeper 이름 필터"
               aria-label="Keeper 이름 필터"
               onInput=${(e: Event) => onKeeperFilterChange((e.target as HTMLInputElement).value)}
-              class="min-w-[120px] max-w-[180px] rounded-full border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-0.5 text-[10px] font-mono text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent-30)]"
+              class="min-w-[120px] max-w-[180px] rounded-sm border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-0.5 text-[10px] font-mono text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent-30)]"
             />
           ` : null}
           ${keeperFilterHasNoMatch ? html`
@@ -738,7 +738,7 @@ function StatusBar({
                 role="tab"
                 aria-selected=${active}
                 tabindex=${active ? 0 : -1}
-                class=${`rounded-full border px-2.5 py-0.5 text-[10px] font-mono transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg-0)] ${cls}`}
+                class=${`rounded-sm border px-2.5 py-0.5 text-[10px] font-mono transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg-0)] ${cls}`}
                 onClick=${() => onSelect(name)}
                 title=${i < 9 ? `${name} — 단축키 ${i + 1}` : name}
                 onKeyDown=${(e: KeyboardEvent) => {

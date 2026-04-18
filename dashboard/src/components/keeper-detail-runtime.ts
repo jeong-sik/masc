@@ -67,7 +67,7 @@ function ToolChip({ name }: { name: string }) {
   const cat = toolCategory(name)
   return html`
     <button type="button"
-      class="inline-flex items-center gap-1 py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)] hover:bg-[var(--accent-20)] cursor-pointer transition-colors"
+      class="inline-flex items-center gap-1 py-0.5 px-2 rounded-sm text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)] hover:bg-[var(--accent-20)] cursor-pointer transition-colors"
       title=${`${cat.label}: ${name}`}
       onClick=${() => openToolsInventory(name)}
     >
@@ -120,7 +120,7 @@ export function AllowlistPreview({
         ${visibleTools.map(tool => html`<${ToolChip} name=${tool} />`)}
         ${!expanded && hiddenCount > 0
           ? html`
-              <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium border border-dashed border-[var(--card-border)] text-[var(--text-muted)]">
+              <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-[10px] font-medium border border-dashed border-[var(--card-border)] text-[var(--text-muted)]">
                 +${hiddenCount}
               </span>
             `
@@ -271,10 +271,10 @@ function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
           턴 예산 (OAS 호출당)
         </span>
         ${hasInvalid
-          ? html`<span class="rounded-full bg-[var(--bad-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--bad-light)]">invalid override</span>`
+          ? html`<span class="rounded-sm bg-[var(--bad-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--bad-light)]">invalid override</span>`
           : hasOverride
-            ? html`<span class="rounded-full bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--warn)]">override</span>`
-            : html`<span class="rounded-full bg-[var(--ok-10)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--ok)]">inherited</span>`}
+            ? html`<span class="rounded-sm bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--warn)]">override</span>`
+            : html`<span class="rounded-sm bg-[var(--ok-10)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--ok)]">inherited</span>`}
       </div>
       <${BudgetRow}
         label="반응형"

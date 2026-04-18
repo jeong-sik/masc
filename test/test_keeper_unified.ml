@@ -1783,8 +1783,55 @@ let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
        "ignore (Cascade_runtime.refresh_local_discovery_if_possible model_labels)");
   check bool "activity graph emit is not silently ignored" false
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
-       "ignore (Activity_graph.emit config")
+       "ignore (Activity_graph.emit config");
+  check bool "discovery helper guards keeper setup" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "ensure_local_discovery_ready model_labels")
 
+let test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_registry () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let meta = make_meta "paused-sync-failure" in
+      ignore (KR.register ~base_path:base_dir meta.name meta);
+      let masc_root = Masc_mcp.Coord.masc_root_dir config in
+      Masc_mcp.Keeper_types.mkdir_p masc_root;
+      let keepers_path = Filename.concat masc_root "keepers" in
+      let oc = open_out_bin keepers_path in
+      close_out oc;
+      match UT.sync_keeper_paused_state ~config ~meta ~paused:true with
+      | Ok _ -> fail "expected paused-state sync failure"
+      | Error msg ->
+          check bool "write failure surfaced" true
+            (contains_substring msg "failed to write meta");
+          let latest =
+            match KR.get ~base_path:base_dir meta.name with
+            | Some entry -> entry.meta
+            | None -> fail "expected registered keeper entry"
+          in
+          check bool "registry meta unchanged" false latest.paused;
+          check (option string) "phase unchanged" (Some "running")
+            (Option.map KP.phase_to_string
+               (KR.get_phase ~base_path:base_dir meta.name)))
+
+let test_ensure_local_discovery_ready_surfaces_refresh_failure () =
+  let refresh_calls = ref 0 in
+  match
+    UT.ensure_local_discovery_ready
+      ~refresh:(fun _labels ->
+        incr refresh_calls;
+        false)
+      [ "llama:auto" ]
+  with
+  | Ok () -> fail "expected local discovery refresh failure"
+  | Error msg ->
+      check int "refresh called once" 1 !refresh_calls;
+      check bool "error includes label" true
+        (contains_substring msg "llama:auto")
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
 let test_context_overflow_limit_parses_common_oas_errors () =
@@ -3603,6 +3650,10 @@ let () =
           test_case "run_keeper_cycle surfaces side-effect failures contract"
             `Quick
             test_run_keeper_cycle_surfaces_side_effect_failures_source_contract;
+          test_case "paused-state sync surfaces write failure" `Quick
+            test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_registry;
+          test_case "local discovery guard surfaces refresh failure" `Quick
+            test_ensure_local_discovery_ready_surfaces_refresh_failure;
         ] );
       ( "tool_classification",
         [

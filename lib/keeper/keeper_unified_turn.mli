@@ -161,6 +161,22 @@ val resolved_max_context_for_turn :
   string list ->
   int
 
+(** Persist paused/resumed state before mutating the live registry/phase.
+    Returns [Error] when disk sync fails so callers can surface the failure
+    instead of silently diverging runtime vs persisted state. *)
+val sync_keeper_paused_state :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  paused:bool ->
+  (Keeper_types.keeper_meta, string) result
+
+(** Ensure local-provider discovery is refreshed before a turn when the
+    selected labels depend on runtime discovery. Exposed for targeted tests. *)
+val ensure_local_discovery_ready :
+  ?refresh:(string list -> bool) ->
+  string list ->
+  (unit, string) result
+
 val run_keeper_cycle :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

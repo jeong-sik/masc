@@ -87,6 +87,35 @@ let finalize_trajectory_acc
         ~severity:`Error
         (Printexc.to_string exn)
 
+let ensure_local_discovery_ready
+    ?refresh
+    (labels : string list) : (unit, string) result =
+  let refresh =
+    match refresh with
+    | Some f -> f
+    | None -> fun labels ->
+        Cascade_runtime.refresh_local_discovery_if_possible labels
+  in
+  if not (Cascade_runtime.labels_require_local_discovery labels)
+  then Ok ()
+  else
+    try
+      if refresh labels
+      then Ok ()
+      else
+        Error
+          (Printf.sprintf
+             "local discovery refresh required for labels [%s] but refresh failed"
+             (String.concat ", " labels))
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        Error
+          (Printf.sprintf
+             "local discovery refresh raised for labels [%s]: %s"
+             (String.concat ", " labels)
+             (Printexc.to_string exn))
+
 (** {1 Retry & Side-Effect Safety}
 
     @boundary-contract
@@ -460,7 +489,7 @@ let pause_keeper_for_overflow
 let sync_keeper_paused_state
     ~(config : Coord.config)
     ~(meta : keeper_meta)
-    ~(paused : bool) : keeper_meta =
+    ~(paused : bool) : (keeper_meta, string) result =
   let synced_meta =
     {
       meta with
@@ -468,35 +497,36 @@ let sync_keeper_paused_state
       updated_at = now_iso ();
     }
   in
-  (match write_meta config synced_meta with
-   | Ok () -> ()
-   | Error err ->
-       report_keeper_cycle_side_effect_issue
-         ~config
-         ~keeper_name:meta.name
-         ~side_effect:(Printf.sprintf "%s sync write_meta"
-                         (if paused then "pause" else "resume"))
-         ~severity:`Error
-         err);
-  Keeper_registry.update_meta ~base_path:config.base_path meta.name synced_meta;
-  dispatch_keeper_phase_event_checked
-    ~config
-    ~keeper_name:meta.name
-    ~side_effect:(Printf.sprintf "%s sync phase update"
-                    (if paused then "pause" else "resume"))
-    (if paused
-     then Keeper_state_machine.Operator_pause
-     else Keeper_state_machine.Operator_resume);
-  (if not paused then
-    match Keeper_registry.get ~base_path:config.base_path meta.name with
-    | Some entry -> Atomic.set entry.fiber_wakeup true
-    | None ->
-        report_keeper_cycle_side_effect_issue
-          ~config
-          ~keeper_name:meta.name
-          ~side_effect:"resume sync fiber wakeup"
-          "registry entry missing after metadata update");
-  synced_meta
+  match write_meta config synced_meta with
+  | Error err ->
+      report_keeper_cycle_side_effect_issue
+        ~config
+        ~keeper_name:meta.name
+        ~side_effect:(Printf.sprintf "%s sync write_meta"
+                        (if paused then "pause" else "resume"))
+        ~severity:`Error
+        err;
+      Error (Printf.sprintf "failed to write meta: %s" err)
+  | Ok () ->
+      Keeper_registry.update_meta ~base_path:config.base_path meta.name synced_meta;
+      dispatch_keeper_phase_event_checked
+        ~config
+        ~keeper_name:meta.name
+        ~side_effect:(Printf.sprintf "%s sync phase update"
+                        (if paused then "pause" else "resume"))
+        (if paused
+         then Keeper_state_machine.Operator_pause
+         else Keeper_state_machine.Operator_resume);
+      (if not paused then
+         match Keeper_registry.get ~base_path:config.base_path meta.name with
+         | Some entry -> Atomic.set entry.fiber_wakeup true
+         | None ->
+             report_keeper_cycle_side_effect_issue
+               ~config
+               ~keeper_name:meta.name
+               ~side_effect:"resume sync fiber wakeup"
+               "registry entry missing after metadata update");
+      Ok synced_meta
 
 let current_keeper_meta ~(config : Coord.config) ~(fallback_meta : keeper_meta) =
   match Keeper_registry.get ~base_path:config.base_path fallback_meta.name with
@@ -529,24 +559,30 @@ let enqueue_partial_commit_continue_gate
       match decision with
       | Agent_sdk.Hooks.Approve
       | Agent_sdk.Hooks.Edit _ ->
-        let resumed_meta =
-          sync_keeper_paused_state ~config ~meta:latest_meta ~paused:false
-        in
-        Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name None;
-        Keeper_registry.reset_turn_failures ~base_path:config.base_path meta.name;
-        Log.Keeper.info
-          "%s: partial-commit continue gate approved; auto-resumed keeper"
-          resumed_meta.name
+        (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:false with
+         | Ok resumed_meta ->
+             Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name None;
+             Keeper_registry.reset_turn_failures ~base_path:config.base_path meta.name;
+             Log.Keeper.info
+               "%s: partial-commit continue gate approved; auto-resumed keeper"
+               resumed_meta.name
+         | Error err ->
+             Log.Keeper.error
+               "%s: partial-commit continue gate approved but keeper resume sync failed: %s"
+               meta.name err)
       | Agent_sdk.Hooks.Reject reason ->
-        let paused_meta =
-          sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true
-        in
-        Keeper_registry.set_failure_reason
-          ~base_path:config.base_path meta.name
-          (Some failure_reason);
-        Log.Keeper.warn
-          "%s: partial-commit continue gate rejected; keeper remains paused (%s)"
-          paused_meta.name reason)
+        (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
+         | Ok paused_meta ->
+             Keeper_registry.set_failure_reason
+               ~base_path:config.base_path meta.name
+               (Some failure_reason);
+             Log.Keeper.warn
+               "%s: partial-commit continue gate rejected; keeper remains paused (%s)"
+               paused_meta.name reason
+         | Error err ->
+             Log.Keeper.error
+               "%s: partial-commit continue gate rejected but keeper pause sync failed: %s (reason=%s)"
+               meta.name err reason))
 
 (* Dedupe "mixed cascade context budget" log: the values are constant
    per (keeper_name, model_labels) because cascade config is static at
@@ -1570,19 +1606,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let model_labels = Keeper_coordination.effective_model_labels_for_turn meta_for_cascade in
       match ensure_api_keys_for_labels model_labels with
       | Error e -> Error (Oas.Error.Internal e)
+      | Ok () -> (
+      match ensure_local_discovery_ready model_labels with
+      | Error e -> Error (Oas.Error.Internal e)
       | Ok () ->
-      let () =
-        if Cascade_runtime.labels_require_local_discovery model_labels then
-          let refreshed =
-            Cascade_runtime.refresh_local_discovery_if_possible model_labels
-          in
-          if not refreshed then
-            report_keeper_cycle_side_effect_issue
-              ~config
-              ~keeper_name:meta.name
-              ~side_effect:"local discovery refresh"
-              "required discovery refresh unavailable; continuing with existing provider registry"
-      in
       let max_context =
         resolved_max_context_for_turn ~meta model_labels
       in
@@ -2112,7 +2139,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 (Social.transition_reason_to_string social_transition_reason)
               ()
           in
-          let updated_meta =
+          let err, updated_meta =
             if is_ambiguous_partial then begin
               (* Ambiguous partial commit must not auto-resume silently.
                  The keeper is paused and an explicit continue gate is
@@ -2133,31 +2160,43 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               Keeper_registry.set_failure_reason ~base_path:config.base_path
                 meta.name
                 (Some failure_reason);
-              let paused_meta =
+              match
                 sync_keeper_paused_state
                   ~config
                   ~meta:updated_meta
                   ~paused:true
-              in
-              let approval_id =
-                enqueue_partial_commit_continue_gate
-                  ~config
-                  ~meta:paused_meta
-                  ~failure_reason
-                  ~committed_tools
-                  ~error_detail:e_str
-              in
-              Log.Keeper.warn
-                "%s: ambiguous partial commit (tools=[%s], reason=%s); \
-                 paused keeper and opened continue gate id=%s"
-                meta.name
-                (String.concat ", " committed_tools)
-                (Keeper_registry.failure_reason_to_string failure_reason)
-                approval_id;
-              paused_meta
+              with
+              | Ok paused_meta ->
+                  let approval_id =
+                    enqueue_partial_commit_continue_gate
+                      ~config
+                      ~meta:paused_meta
+                      ~failure_reason
+                      ~committed_tools
+                      ~error_detail:e_str
+                  in
+                  Log.Keeper.warn
+                    "%s: ambiguous partial commit (tools=[%s], reason=%s); \
+                     paused keeper and opened continue gate id=%s"
+                    meta.name
+                    (String.concat ", " committed_tools)
+                    (Keeper_registry.failure_reason_to_string failure_reason)
+                    approval_id;
+                  (err, paused_meta)
+              | Error sync_err ->
+                  let combined_err =
+                    Oas.Error.Internal
+                      (Printf.sprintf
+                         "%s: ambiguous partial commit pause sync failed: %s \
+                          (original_error=%s)"
+                         meta.name sync_err (short_preview e_str))
+                  in
+                  Log.Keeper.error "%s" (Oas.Error.to_string combined_err);
+                  (combined_err, updated_meta)
             end else
-              updated_meta
+              (err, updated_meta)
           in
+          let e_str = Oas.Error.to_string err in
           append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms
             ~outcome:(if is_ambiguous_partial then "partial" else "error")
@@ -2302,12 +2341,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                ~compaction:lifecycle.compaction
                ~handoff_json:lifecycle.handoff_json
                ()
-           with
+          with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
                Log.Keeper.error
                  "write metrics snapshot failed after keeper cycle: %s"
                  (Printexc.to_string exn));
+          let selected_mode = selected_mode_of_result result in
           (* Emit turn-completed event to Activity Graph for timeline token visibility *)
           (try
             let event =
@@ -2354,7 +2394,6 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~turn_generation:lifecycle.turn_generation
             ~compaction:lifecycle.compaction
             ~handoff_json:lifecycle.handoff_json;
-          let selected_mode = selected_mode_of_result result in
           append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms ~outcome:"success"
             ~selected_mode
@@ -2491,6 +2530,6 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            | Oas_worker.Completed ->
              Keeper_registry.reset_turn_failures ~base_path:config.base_path
                updated_meta.name);
-          Ok updated_meta
+          Ok updated_meta)
 
 let run_unified_turn = run_keeper_cycle

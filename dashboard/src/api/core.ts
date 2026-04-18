@@ -103,6 +103,7 @@ export class ApiRequestError extends Error {
   statusText?: string
   timeout: boolean
   detail?: string
+  errorCode?: string
 
   constructor(opts: {
     method: string
@@ -112,6 +113,7 @@ export class ApiRequestError extends Error {
     timeout?: boolean
     timeoutMs?: number
     detail?: string
+    errorCode?: string
   }) {
     const method = opts.method.toUpperCase()
     const timeout = opts.timeout === true
@@ -129,6 +131,7 @@ export class ApiRequestError extends Error {
     this.statusText = opts.statusText
     this.timeout = timeout
     this.detail = detail
+    this.errorCode = opts.errorCode?.trim() || undefined
   }
 }
 
@@ -206,26 +209,42 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-export async function errorDetailFromResponse(res: Response): Promise<string | undefined> {
+interface ErrorResponseInfo {
+  detail?: string
+  errorCode?: string
+}
+
+async function errorResponseInfoFromResponse(res: Response): Promise<ErrorResponseInfo> {
   let rawText = ''
   try {
     rawText = (await res.text()).trim()
   } catch {
-    return undefined
+    return {}
   }
-  if (!rawText) return undefined
+  if (!rawText) return {}
   try {
     const parsed = JSON.parse(rawText) as unknown
     if (isRecord(parsed)) {
+      const errorCode =
+        (typeof parsed.error === 'string' ? parsed.error.trim() : '')
+        || (typeof parsed.status === 'string' ? parsed.status.trim() : '')
       const message = typeof parsed.message === 'string' ? parsed.message.trim() : ''
-      if (message) return message
-      const error = typeof parsed.error === 'string' ? parsed.error.trim() : ''
-      if (error) return error
+      if (message || errorCode) {
+        return {
+          detail: message || errorCode || undefined,
+          errorCode: errorCode || undefined,
+        }
+      }
     }
   } catch {
     // Fall through to plain-text body.
   }
-  return rawText
+  return { detail: rawText }
+}
+
+export async function errorDetailFromResponse(res: Response): Promise<string | undefined> {
+  const info = await errorResponseInfoFromResponse(res)
+  return info.detail
 }
 
 export async function apiRequestErrorFromResponse(
@@ -233,13 +252,14 @@ export async function apiRequestErrorFromResponse(
   path: string,
   res: Response,
 ): Promise<ApiRequestError> {
-  const detail = await errorDetailFromResponse(res)
+  const info = await errorResponseInfoFromResponse(res)
   return new ApiRequestError({
     method,
     path,
     status: res.status,
     statusText: res.statusText,
-    detail,
+    detail: info.detail,
+    errorCode: info.errorCode,
   })
 }
 
@@ -399,6 +419,9 @@ function parseStatusFromMessage(message: string): number | null {
 
 function isRetryableError(err: unknown): boolean {
   if (err instanceof ApiRequestError) {
+    if (err.errorCode === 'computation_timeout' || err.errorCode === 'timeout') {
+      return false
+    }
     return err.timeout || (typeof err.status === 'number' && RETRYABLE_STATUS_CODES.has(err.status))
   }
 

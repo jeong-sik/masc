@@ -167,6 +167,52 @@ let test_runtime_status_and_judgments_are_live () =
       check string "judgment tool" "masc_operator_confirm"
         (first |> member "recommended_action" |> member "resolved_tool" |> to_string))
 
+let test_empty_judgment_disk_scan_uses_cooldown () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let json0 =
+        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+          ~status_filter:None
+      in
+      let open Yojson.Safe.Util in
+      check int "initially empty" 0
+        (json0 |> member "judgments" |> to_list |> List.length);
+      let now = Unix.gettimeofday () in
+      let generated_at = iso8601_of_unix now in
+      let expires_at = iso8601_of_unix (now +. 3600.0) in
+      write_legacy_judgment ~base_path:dir
+        (`Assoc
+          [
+            ("target_kind", `String "agent_health");
+            ("target_id", `String "cooldown-check");
+            ("status", `String "active");
+            ("summary", `String "disk cooldown regression guard");
+            ("confidence", `Float 0.75);
+            ("generated_at", `String generated_at);
+            ("expires_at", `String expires_at);
+            ("model_used", `String "llama:test");
+            ("keeper_name", `String Lib.Dashboard_governance_judge.keeper_name);
+          ]);
+      let json1 =
+        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+          ~status_filter:None
+      in
+      check int "cooldown suppresses immediate reload" 0
+        (json1 |> member "judgments" |> to_list |> List.length);
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+        st.last_disk_load_unix <- Some (Unix.gettimeofday () -. 31.0));
+      let json2 =
+        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+          ~status_filter:None
+      in
+      check int "reload resumes after cooldown" 1
+        (json2 |> member "judgments" |> to_list |> List.length))
+
 let test_runtime_timestamps_fallback_to_unix_values () =
   let dir = test_dir () in
   Fun.protect
@@ -375,6 +421,8 @@ let () =
             test_empty_governance_structure;
           test_case "runtime status and judgments are live" `Quick
             test_runtime_status_and_judgments_are_live;
+          test_case "empty judgment disk scan uses cooldown" `Quick
+            test_empty_judgment_disk_scan_uses_cooldown;
           test_case "runtime timestamps fallback to unix values" `Quick
             test_runtime_timestamps_fallback_to_unix_values;
           test_case "monitoring uses live runtime" `Quick

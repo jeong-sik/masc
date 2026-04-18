@@ -122,14 +122,16 @@ let inject_agent_name_into_body ~agent_name body_str =
         let params = member "params" json in
         let args = member "arguments" params in
         let existing_agent =
-          (member "_agent_name" args |> to_string_option)
-          |> Option.bind (fun value ->
+          Option.bind
+            (member "_agent_name" args |> to_string_option)
+            (fun value ->
                let trimmed = String.trim value in
                if String.equal trimmed "" then None else Some trimmed)
         in
         let existing_legacy_agent =
-          (member "agent_name" args |> to_string_option)
-          |> Option.bind (fun value ->
+          Option.bind
+            (member "agent_name" args |> to_string_option)
+            (fun value ->
                let trimmed = String.trim value in
                if String.equal trimmed "" then None else Some trimmed)
         in

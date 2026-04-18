@@ -98,10 +98,16 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
 
 // Runtime config draft for proactive/compaction/handoff inline editing
 type ExecutionScope = 'observe_only' | 'workspace' | 'local'
+export type SandboxProfile = 'legacy_local' | 'docker_hardened'
+export type SandboxNetworkMode = 'none' | 'inherit'
+export type SharedMemoryScope = 'disabled' | 'room'
 
-type RuntimeDraft = {
+export type RuntimeDraft = {
   execution_scope: ExecutionScope
   allowed_paths_text: string
+  sandbox_profile: SandboxProfile
+  network_mode: SandboxNetworkMode
+  shared_memory_scope: SharedMemoryScope
   proactive_enabled: boolean
   proactive_idle_sec: number
   proactive_cooldown_sec: number
@@ -117,10 +123,25 @@ type RuntimeDraft = {
 const runtimeDraft = signal<RuntimeDraft | null>(null)
 const runtimeSaving = signal(false)
 
-function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
+export function coerceSandboxProfile(raw: string | undefined): SandboxProfile {
+  return raw === 'docker_hardened' ? 'docker_hardened' : 'legacy_local'
+}
+
+export function coerceNetworkMode(raw: string | undefined): SandboxNetworkMode {
+  return raw === 'none' ? 'none' : 'inherit'
+}
+
+export function coerceSharedMemoryScope(raw: string | undefined): SharedMemoryScope {
+  return raw === 'room' ? 'room' : 'disabled'
+}
+
+export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     execution_scope: (c.execution_scope as ExecutionScope) ?? 'workspace',
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
+    sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
+    network_mode: coerceNetworkMode(c.network_mode),
+    shared_memory_scope: coerceSharedMemoryScope(c.shared_memory_scope),
     proactive_enabled: c.proactive.enabled,
     proactive_idle_sec: c.proactive.idle_sec,
     proactive_cooldown_sec: c.proactive.cooldown_sec,
@@ -134,12 +155,15 @@ function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   }
 }
 
-function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
+export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
   const payload: KeeperConfigUpdatePayload = {}
   if (draft.execution_scope !== (orig.execution_scope ?? 'workspace')) payload.execution_scope = draft.execution_scope
   const newPaths = draft.allowed_paths_text.split('\n').map(s => s.trim()).filter(Boolean)
   const origPaths = orig.allowed_paths ?? []
   if (JSON.stringify(newPaths) !== JSON.stringify(origPaths)) payload.allowed_paths = newPaths
+  if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
+  if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
+  if (draft.shared_memory_scope !== coerceSharedMemoryScope(orig.shared_memory_scope)) payload.shared_memory_scope = draft.shared_memory_scope
   if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
   if (draft.proactive_idle_sec !== orig.proactive.idle_sec) payload.proactive_idle_sec = draft.proactive_idle_sec
   if (draft.proactive_cooldown_sec !== orig.proactive.cooldown_sec) payload.proactive_cooldown_sec = draft.proactive_cooldown_sec
@@ -625,6 +649,53 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}
           </div>
         ` : null}
+        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+          <div class="flex flex-col">
+            <span class="text-xs text-[var(--text-body)]">sandbox_profile</span>
+            <span class="text-[10px] text-[var(--text-muted)]">
+              ${rd.sandbox_profile === 'docker_hardened'
+                ? 'Docker container 안에서 keeper_bash 실행 (cap-drop=ALL, read-only rootfs)'
+                : '호스트에서 직접 실행 (기본)'}
+            </span>
+          </div>
+          <select class="text-xs bg-[var(--white-6)] border border-[var(--card-border)] rounded px-2 py-1 text-[var(--text-body)]"
+            value=${rd.sandbox_profile}
+            onChange=${(e: Event) => {
+              const next = (e.target as HTMLSelectElement).value as SandboxProfile
+              updateRuntimeDraft('sandbox_profile', next)
+              if (next === 'docker_hardened' && rd.network_mode === 'inherit') {
+                updateRuntimeDraft('network_mode', 'none')
+              }
+            }}>
+            <option value="legacy_local">legacy_local</option>
+            <option value="docker_hardened">docker_hardened</option>
+          </select>
+        </div>
+        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+          <div class="flex flex-col">
+            <span class="text-xs text-[var(--text-body)]">network_mode</span>
+            <span class="text-[10px] text-[var(--text-muted)]">
+              ${rd.sandbox_profile === 'docker_hardened'
+                ? "'none'은 hardened sandbox 전용. 'inherit'은 host 네트워크 공유."
+                : "'none'은 docker_hardened일 때만 유효"}
+            </span>
+          </div>
+          <select class="text-xs bg-[var(--white-6)] border border-[var(--card-border)] rounded px-2 py-1 text-[var(--text-body)]"
+            value=${rd.network_mode}
+            onChange=${(e: Event) => updateRuntimeDraft('network_mode', (e.target as HTMLSelectElement).value as SandboxNetworkMode)}>
+            <option value="inherit">inherit</option>
+            <option value="none" disabled=${rd.sandbox_profile !== 'docker_hardened'}>none</option>
+          </select>
+        </div>
+        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+          <span class="text-xs text-[var(--text-body)]">shared_memory_scope</span>
+          <select class="text-xs bg-[var(--white-6)] border border-[var(--card-border)] rounded px-2 py-1 text-[var(--text-body)]"
+            value=${rd.shared_memory_scope}
+            onChange=${(e: Event) => updateRuntimeDraft('shared_memory_scope', (e.target as HTMLSelectElement).value as SharedMemoryScope)}>
+            <option value="disabled">disabled</option>
+            <option value="room">room</option>
+          </select>
+        </div>
       ` : html`
         <${ConfigRow} label="execution_scope" value=${c.execution_scope ?? 'workspace'} />
         <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'legacy_local'} />

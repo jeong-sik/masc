@@ -179,8 +179,7 @@ let flush_if_needed ~base_path ~keeper_name =
             (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
         in
         let parent = Filename.dirname dir in
-        (try Fs_compat.mkdir_p parent
-         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+        Safe_ops.protect ~default:() (fun () -> Fs_compat.mkdir_p parent);
         let cap = Array.length ring.buf in
         let start = ((ring.pos - ring.unflushed) mod cap + cap) mod cap in
         let flush_lines =

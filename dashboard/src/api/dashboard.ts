@@ -82,7 +82,7 @@ export async function fetchLogs(opts?: {
   return parseLogsResponse(raw)
 }
 
-export interface ToolHostFailureReport {
+interface ToolHostFailureReport {
   agent_name?: string
   client_name?: string
   tool_name: string
@@ -163,7 +163,7 @@ export function fetchDashboardExecution(opts?: AbortableRequestOptions): Promise
   return get('/api/v1/dashboard/execution', { signal: opts?.signal })
 }
 
-export type ToolQualityToolStat = {
+type ToolQualityToolStat = {
   name: string
   calls: number
   success_pct: number
@@ -172,13 +172,13 @@ export type ToolQualityToolStat = {
   avg_output_chars?: number
 }
 
-export type ToolQualityKeeperStat = {
+type ToolQualityKeeperStat = {
   name: string
   calls: number
   success_pct: number
 }
 
-export type ToolQualityFailureCategory = {
+type ToolQualityFailureCategory = {
   category: string
   count: number
 }
@@ -276,7 +276,7 @@ export function fetchDashboardPerf(): Promise<DashboardPerfResponse> {
   return get('/api/v1/dashboard/perf')
 }
 
-export interface FetchDashboardMemoryOptions {
+interface FetchDashboardMemoryOptions {
   excludeSystem?: boolean
   excludeAutomation?: boolean
   author?: string
@@ -418,7 +418,7 @@ export function fetchDashboardMissionSession(
   return get(`/api/v1/dashboard/session${query}`, { signal: opts?.signal })
 }
 
-export interface DashboardRuntimeProviderDiscovery {
+interface DashboardRuntimeProviderDiscovery {
   healthy?: boolean
   discovered_model?: string | null
   ctx_size?: number | null
@@ -710,12 +710,12 @@ export interface DashboardToolInventoryItem {
   reason?: string | null
 }
 
-export interface SurfaceSummaryEntry {
+interface SurfaceSummaryEntry {
   count: number
   tools: string[]
 }
 
-export interface DashboardToolInventoryResponse {
+interface DashboardToolInventoryResponse {
   count: number
   tools: DashboardToolInventoryItem[]
   surface_summary?: Record<string, SurfaceSummaryEntry>

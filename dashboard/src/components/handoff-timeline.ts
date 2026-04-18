@@ -26,7 +26,7 @@
 // `pointer-events: none` on the overlay so chips remain clickable.
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { fetchTelemetry, type TelemetryEntry } from '../api/dashboard'
 import { useSavedSignal } from '../lib/saved-signal'
 
@@ -277,10 +277,7 @@ export function HandoffTimeline({
   const windowStart = now - windowMs
   const rows = deriveTimelineRows(entries, windowStart, windowEnd)
   const span = windowEnd - windowStart
-  const visibleRows = useMemo(
-    () => filterTimelineRows(rows, query.value),
-    [rows, query.value],
-  )
+  const visibleRows = filterTimelineRows(rows, query.value)
   const isFiltering = query.value.trim() !== ''
 
   return html`

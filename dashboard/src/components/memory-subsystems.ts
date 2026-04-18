@@ -338,21 +338,23 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
           const pct = Math.round(s.weight * 100)
           const active = isActivePair(s.from_agent, s.to_agent)
           return html`
-            <div
-              class="flex items-center gap-2 text-xs font-mono px-1 py-0.5 rounded cursor-pointer ${active ? 'ring-1 ring-[var(--white-10)] bg-[var(--white-5)]' : 'hover:bg-[var(--white-5)]'}"
-              role="button"
-              aria-pressed=${active ? 'true' : 'false'}
-              title="클릭: 이 쌍의 에피소드만 필터"
-              onClick=${() => toggleSynapsePairFilter(s.from_agent, s.to_agent)}
-            >
+            <div class="flex items-center gap-2 text-xs font-mono px-1 py-0.5 rounded ${active ? 'ring-1 ring-[var(--white-10)] bg-[var(--white-5)]' : 'hover:bg-[var(--white-5)]'}">
               <button
-                class="text-[var(--text-muted)] hover:text-[var(--accent)] truncate w-32 text-right"
-                onClick=${(e: Event) => { e.stopPropagation(); openAgentDetail(s.from_agent) }}
+                type="button"
+                class="text-[var(--text-muted)] hover:text-[var(--accent)] truncate w-32 text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                onClick=${() => openAgentDetail(s.from_agent)}
               >${shortAgentLabel(s.from_agent)}</button>
-              <span class="text-[var(--text-muted)]">→</span>
               <button
-                class="text-[var(--text-muted)] hover:text-[var(--accent)] truncate w-32 text-left"
-                onClick=${(e: Event) => { e.stopPropagation(); openAgentDetail(s.to_agent) }}
+                type="button"
+                aria-pressed=${active ? 'true' : 'false'}
+                title="이 쌍의 에피소드만 필터"
+                class="text-[var(--text-muted)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${active ? 'text-[var(--accent)]' : ''}"
+                onClick=${() => toggleSynapsePairFilter(s.from_agent, s.to_agent)}
+              >→</button>
+              <button
+                type="button"
+                class="text-[var(--text-muted)] hover:text-[var(--accent)] truncate w-32 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                onClick=${() => openAgentDetail(s.to_agent)}
               >${shortAgentLabel(s.to_agent)}</button>
               <div class="flex-1 bg-[var(--white-5)] rounded h-1.5 min-w-[60px]">
                 <div class="${weightBarClass(s.weight)} rounded h-1.5" style="width:${pct}%"></div>

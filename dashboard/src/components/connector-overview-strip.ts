@@ -316,7 +316,7 @@ export function formatTileIdentityLine(
 /** Pure: derive the primary-action button label/tone from the sidecar
     state + inflight flag. Exposed so tests pin the four combinations
     without mounting the component. */
-export interface TilePrimaryActionView {
+interface TilePrimaryActionView {
   label: string
   tone: 'start' | 'stop'
   busy: boolean
@@ -382,7 +382,7 @@ function TilePrimaryAction({ id, sidecarUp }: { id: KnownConnectorId; sidecarUp:
     error (non-empty) > stale (stale=true). Error beats stale because
     an explicit error message is strictly more diagnostic than a
     \"data is old\" flag; callers that want both must render both. */
-export interface TileNoticeView {
+interface TileNoticeView {
   tone: 'error' | 'stale'
   label: string
   detail: string

@@ -1390,7 +1390,7 @@ export function KeeperDetailOverlay() {
                 : null}
               ${(keeper.k2k_count ?? 0) > 0
                 ? html`<span class="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded bg-[rgba(167,139,250,0.08)] border border-[rgba(167,139,250,0.15)] text-[var(--text-muted)]">
-                    K2K <span class="font-mono font-medium text-[#a78bfa]">${keeper.k2k_count}</span>
+                    K2K <span class="font-mono font-medium text-[var(--purple)]">${keeper.k2k_count}</span>
                   </span>`
                 : null}
               ${keeper.memory_recent_note

@@ -215,7 +215,7 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
   })
 
   const lastRate = points[points.length - 1]?.success_rate ?? 0
-  const lineColor = lastRate >= 95 ? '#4ade80' : lastRate >= 90 ? '#fbbf24' : '#ef4444'
+  const lineColor = lastRate >= 95 ? 'var(--ok)' : lastRate >= 90 ? 'var(--warn)' : 'var(--bad)'
 
   return html`
     <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] p-3">

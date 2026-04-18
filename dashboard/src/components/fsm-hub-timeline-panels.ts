@@ -21,10 +21,10 @@ import {
 
 const FIELD_COLOR: Record<string, string> = {
   KSM: 'text-[var(--accent)]',
-  KTC: 'text-[#818cf8]',
-  KDP: 'text-[#818cf8]',
-  KCL: 'text-[#818cf8]',
-  KMC: 'text-[#f59e0b]',
+  KTC: 'text-[var(--indigo)]',
+  KDP: 'text-[var(--indigo)]',
+  KCL: 'text-[var(--indigo)]',
+  KMC: 'text-[var(--amber-bright)]',
 }
 
 const SWIMLANE_LANES: Array<{
@@ -176,7 +176,7 @@ export function SwimlaneTimeline({
                   count === 0
                     ? 'text-[var(--text-dim)] border-[var(--white-8)]'
                     : isBusiest
-                      ? 'text-[#818cf8] border-[var(--indigo-40)] bg-[rgba(129,140,248,0.08)]'
+                      ? 'text-[var(--indigo)] border-[var(--indigo-40)] bg-[rgba(129,140,248,0.08)]'
                       : 'text-[var(--text-body)] border-[var(--white-10)]'
                 }`}
                 title=${`${lane.label} · ${count} transition${count === 1 ? '' : 's'} in this window`}
@@ -269,7 +269,7 @@ export function SwimlaneTimeline({
                 prev.compaction !== obs.compaction
               )
               const dotCls = hasTransition
-                ? 'bg-[#818cf8] ring-1 ring-[var(--indigo-40)]'
+                ? 'bg-[var(--indigo)] ring-1 ring-[var(--indigo-40)]'
                 : 'bg-[var(--white-10)]'
               const changedLanes = prev == null ? [] : [
                 ...(prev.phase !== obs.phase ? ['KSM'] : []),
@@ -499,10 +499,10 @@ export function TopTransitionsPanel({
 
 const BAR_COLOR: Record<string, string> = {
   KSM: 'bg-[var(--accent)]',
-  KTC: 'bg-[#818cf8]',
-  KDP: 'bg-[#818cf8]',
-  KCL: 'bg-[#818cf8]',
-  KMC: 'bg-[#f59e0b]',
+  KTC: 'bg-[var(--indigo)]',
+  KDP: 'bg-[var(--indigo)]',
+  KCL: 'bg-[var(--indigo)]',
+  KMC: 'bg-[var(--amber-bright)]',
 }
 
 export function DwellHistogramPanel({

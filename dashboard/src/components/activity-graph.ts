@@ -106,9 +106,9 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
     <div class="stats-grid grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-4">
       ${statCard('노드', s.node_count ?? 0, [], '#94a3b8')}
       ${statCard('엣지', s.edge_count ?? 0, [], '#64748b')}
-      ${statCard('활성 에이전트', s.active_agents ?? 0, agSeries, '#4ade80', true)}
-      ${statCard('작업', s.task_count ?? 0, tdSeries, '#fbbf24')}
-      ${statCard('이벤트', s.event_count ?? 0, evSeries, '#a78bfa')}
+      ${statCard('활성 에이전트', s.active_agents ?? 0, agSeries, 'var(--ok)', true)}
+      ${statCard('작업', s.task_count ?? 0, tdSeries, 'var(--warn)')}
+      ${statCard('이벤트', s.event_count ?? 0, evSeries, 'var(--purple)')}
     </div>
   `
 }
@@ -116,11 +116,11 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
 function actionCategoryClass(group: ActionTimelineGroup): string {
   switch (group.category) {
     case 'task':
-      return 'border-[#fbbf24]/35 bg-[#fbbf24]/10 text-[var(--warn)]'
+      return 'border-[var(--warn)]/35 bg-[var(--warn)]/10 text-[var(--warn)]'
     case 'session':
-      return 'border-[#4ade80]/35 bg-[var(--ok)]/10 text-[var(--ok-20)]'
+      return 'border-[var(--ok)]/35 bg-[var(--ok)]/10 text-[var(--ok-20)]'
     case 'message':
-      return 'border-[#22d3ee]/35 bg-[#22d3ee]/10 text-[var(--cyan)]'
+      return 'border-[var(--cyan)]/35 bg-[var(--cyan)]/10 text-[var(--cyan)]'
     case 'board':
       return 'border-[#c084fc]/35 bg-[#c084fc]/10 text-[var(--purple)]'
     case 'governance':

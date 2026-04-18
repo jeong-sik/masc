@@ -70,7 +70,7 @@ export function Sparkline({
   values,
   width = 120,
   height = 28,
-  color = '#22d3ee',
+  color = 'var(--cyan)',
   class: cx,
   ariaLabel,
   ariaHidden,

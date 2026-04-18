@@ -758,7 +758,7 @@ function StatusBar({
                 }}
               >
                 ${i < 9 ? html`<span class="opacity-50 mr-0.5">${i + 1}</span>` : null}${name.replace(/^keeper-|-agent$/g, '')}${active && hasAnomaly ? html`
-                  <span class="ml-1 text-[#f87171]" title=${anomalyTitle} aria-label="이상 신호">⚠</span>
+                  <span class="ml-1 text-[var(--bad-light)]" title=${anomalyTitle} aria-label="이상 신호">⚠</span>
                 ` : null}
               </button>
             `
@@ -771,13 +771,13 @@ function StatusBar({
           <span class="px-1.5 py-0.5 rounded border border-[var(--white-8)] text-[var(--text-body)]">
             턴 ${snapshot.last_outcome ? `#${snapshot.last_outcome.turn_id}` : '—'}
           </span>
-          <span class=${`px-1.5 py-0.5 rounded border ${transitionCount > 0 ? 'border-[rgba(129,140,248,0.3)] text-[#818cf8]' : 'border-[var(--white-8)] text-[var(--text-dim)]'}`}>
+          <span class=${`px-1.5 py-0.5 rounded border ${transitionCount > 0 ? 'border-[rgba(129,140,248,0.3)] text-[var(--indigo)]' : 'border-[var(--white-8)] text-[var(--text-dim)]'}`}>
             ${transitionCount} 전환
           </span>
           <span
             class=${`relative px-1.5 py-0.5 rounded border overflow-hidden ${
               observationCount >= MAX_OBSERVATIONS
-                ? 'border-[rgba(245,158,11,0.4)] text-[#f59e0b]'
+                ? 'border-[rgba(245,158,11,0.4)] text-[var(--amber-bright)]'
                 : 'border-[var(--white-8)] text-[var(--text-dim)]'
             }`}
             title=${`관측 버퍼 ${observationCount}/${MAX_OBSERVATIONS} — 가득 차면 오래된 관측부터 순환 교체됩니다`}

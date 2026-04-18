@@ -32,22 +32,22 @@ export interface FsmGraphSpec {
 // Color palette matching dashboard dark theme
 const NODE_COLORS: Record<FsmNode['type'], { bg: string; border: string; text: string }> = {
   state:    { bg: '#1e293b', border: '#475569', text: '#e2e8f0' },
-  active:   { bg: '#065f46', border: '#22c55e', text: '#ffffff' },
-  buffer:   { bg: '#78350f', border: '#f59e0b', text: '#ffffff' },
-  terminal: { bg: '#7f1d1d', border: '#ef4444', text: '#ffffff' },
+  active:   { bg: '#065f46', border: 'var(--emerald)', text: '#ffffff' },
+  buffer:   { bg: '#78350f', border: 'var(--amber-bright)', text: '#ffffff' },
+  terminal: { bg: '#7f1d1d', border: 'var(--bad)', text: '#ffffff' },
   start:    { bg: '#1e293b', border: '#6366f1', text: '#c7d2fe' },
   end:      { bg: '#1e293b', border: '#6b7280', text: '#9ca3af' },
-  ok:       { bg: '#065f46', border: '#22c55e', text: '#ffffff' },
-  warn:     { bg: '#78350f', border: '#f59e0b', text: '#ffffff' },
-  err:      { bg: '#7f1d1d', border: '#ef4444', text: '#ffffff' },
+  ok:       { bg: '#065f46', border: 'var(--emerald)', text: '#ffffff' },
+  warn:     { bg: '#78350f', border: 'var(--amber-bright)', text: '#ffffff' },
+  err:      { bg: '#7f1d1d', border: 'var(--bad)', text: '#ffffff' },
   dim:      { bg: '#1e293b', border: '#374151', text: '#6b7280' },
 }
 
 const EDGE_COLORS: Record<string, string> = {
   normal: '#64748b',
-  error: '#ef4444',
-  recovery: '#22c55e',
-  cascade: '#f59e0b',
+  error: 'var(--bad)',
+  recovery: 'var(--emerald)',
+  cascade: 'var(--amber-bright)',
 }
 
 interface CytoscapeFsmProps {
@@ -167,7 +167,7 @@ function buildStylesheet() {
     style: {
       'border-width': 3,
       'shadow-blur': 12,
-      'shadow-color': '#22c55e',
+      'shadow-color': 'var(--emerald)',
       'shadow-opacity': 0.6,
       'shadow-offset-x': 0,
       'shadow-offset-y': 0,

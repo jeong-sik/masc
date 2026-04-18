@@ -48,8 +48,8 @@ function registryStateBadge(state: string | null) {
 }
 
 const COHORT_COLORS: Record<CrashCategory, string> = {
-  heartbeat: '#f59e0b',
-  turn: '#ef4444',
+  heartbeat: 'var(--amber-bright)',
+  turn: 'var(--bad)',
   fiber: '#8b5cf6',
   exception: '#ec4899',
   other: '#6b7280',
@@ -125,9 +125,9 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
     dead_eta_sec,
   } = diag
   const budgetPct = max_restarts > 0 ? Math.min(100, (restart_count / max_restarts) * 100) : 0
-  const budgetColor = budgetPct >= 80 ? '#ef4444' : budgetPct >= 50 ? '#f59e0b' : '#4ade80'
+  const budgetColor = budgetPct >= 80 ? 'var(--bad)' : budgetPct >= 50 ? 'var(--amber-bright)' : 'var(--ok)'
   const hs = typeof health_score === 'number' ? health_score : 100
-  const hsColor = hs >= 80 ? '#4ade80' : hs >= 50 ? '#f59e0b' : '#ef4444'
+  const hsColor = hs >= 80 ? 'var(--ok)' : hs >= 50 ? 'var(--amber-bright)' : 'var(--bad)'
   return html`
     <${SectionCard} title="감독 진단">
       <div class="space-y-3">
@@ -151,7 +151,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
         ${typeof dead_eta_sec === 'number' && dead_eta_sec > 0 && dead_since == null ? html`
           <div class="flex items-center justify-between">
             <span class="text-xs text-[var(--text-muted)]">종료 예상</span>
-            <span class="text-[11px] font-mono" style="color: ${budgetPct >= 50 ? '#f59e0b' : 'var(--text-body)'}">${dead_eta_sec >= 3600 ? (dead_eta_sec / 3600).toFixed(1) + 'h' : (dead_eta_sec / 60).toFixed(0) + 'm'} 후</span>
+            <span class="text-[11px] font-mono" style="color: ${budgetPct >= 50 ? 'var(--amber-bright)' : 'var(--text-body)'}">${dead_eta_sec >= 3600 ? (dead_eta_sec / 3600).toFixed(1) + 'h' : (dead_eta_sec / 60).toFixed(0) + 'm'} 후</span>
           </div>
         ` : null}
         ${last_failure_reason ? html`

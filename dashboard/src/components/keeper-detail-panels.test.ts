@@ -16,23 +16,23 @@ import {
 
 describe('ctxColor', () => {
   it('returns OK color for low pressure', () => {
-    expect(ctxColor(10)).toBe('#22c55e')
-    expect(ctxColor(50)).toBe('#22c55e')
-    expect(ctxColor(0)).toBe('#22c55e')
+    expect(ctxColor(10)).toBe('var(--emerald)')
+    expect(ctxColor(50)).toBe('var(--emerald)')
+    expect(ctxColor(0)).toBe('var(--emerald)')
   })
 
   it('returns warn color for 70-85 range', () => {
-    expect(ctxColor(71)).toBe('#f59e0b')
-    expect(ctxColor(85)).toBe('#f59e0b')
+    expect(ctxColor(71)).toBe('var(--amber-bright)')
+    expect(ctxColor(85)).toBe('var(--amber-bright)')
   })
 
   it('returns critical color above 85', () => {
-    expect(ctxColor(86)).toBe('#ef4444')
-    expect(ctxColor(100)).toBe('#ef4444')
+    expect(ctxColor(86)).toBe('var(--bad)')
+    expect(ctxColor(100)).toBe('var(--bad)')
   })
 
   it('boundary at exactly 70', () => {
-    expect(ctxColor(70)).toBe('#22c55e')
+    expect(ctxColor(70)).toBe('var(--emerald)')
   })
 })
 
@@ -64,7 +64,7 @@ describe('ctxSegmentLabel', () => {
 
 describe('ctxSegmentColor', () => {
   it('returns known color for system_prompt', () => {
-    expect(ctxSegmentColor('system_prompt')).toBe('#f59e0b')
+    expect(ctxSegmentColor('system_prompt')).toBe('var(--amber-bright)')
   })
 
   it('returns known color for memory_context', () => {

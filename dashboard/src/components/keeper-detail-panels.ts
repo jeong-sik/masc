@@ -13,9 +13,9 @@ import type { Keeper, KeeperMetricPoint, PromptSegmentTelemetry } from '../types
 // ── Context pressure thresholds (shared across KPIs, charts) ─
 const CTX_CRITICAL_PCT = 85
 const CTX_WARN_PCT = 70
-const CTX_COLOR_CRITICAL = '#ef4444'
-const CTX_COLOR_WARN = '#f59e0b'
-const CTX_COLOR_OK = '#22c55e'
+const CTX_COLOR_CRITICAL = 'var(--bad)'
+const CTX_COLOR_WARN = 'var(--amber-bright)'
+const CTX_COLOR_OK = 'var(--emerald)'
 
 export function ctxColor(pct: number): string {
   return pct > CTX_CRITICAL_PCT ? CTX_COLOR_CRITICAL : pct > CTX_WARN_PCT ? CTX_COLOR_WARN : CTX_COLOR_OK
@@ -43,15 +43,15 @@ const CTX_SEGMENT_LABELS: Record<string, string> = {
 }
 
 const CTX_SEGMENT_COLORS: Record<string, string> = {
-  system_prompt: '#f59e0b',
+  system_prompt: 'var(--amber-bright)',
   dynamic_context: '#8b5cf6',
   memory_context: '#fb7185',
   temporal_context: '#14b8a6',
   user_message: '#38bdf8',
-  history_user: '#a78bfa',
+  history_user: 'var(--purple)',
   history_assistant_text: '#60a5fa',
   history_tool_use: '#84cc16',
-  history_tool_result: '#f87171',
+  history_tool_result: 'var(--bad-light)',
   history_other: '#94a3b8',
   unattributed: '#475569',
 }
@@ -534,7 +534,7 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
         <line x1="${pad}" y1="${(H - pad - (CTX_WARN_PCT / 100) * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - (CTX_WARN_PCT / 100) * (H - 2 * pad)).toFixed(1)}" stroke="#444" stroke-dasharray="3,3" stroke-width="0.5"/>
         <line x1="${pad}" y1="${(H - pad - (CTX_CRITICAL_PCT / 100) * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - (CTX_CRITICAL_PCT / 100) * (H - 2 * pad)).toFixed(1)}" stroke="${CTX_COLOR_WARN}" stroke-dasharray="3,3" stroke-width="0.5"/>
         ${pts.filter(({ p }) => p.is_handoff).map(({ x }) => html`
-          <line x1="${x.toFixed(1)}" y1="${pad}" x2="${x.toFixed(1)}" y2="${H - pad}" stroke="#ef4444" stroke-width="1.5" opacity="0.7"/>
+          <line x1="${x.toFixed(1)}" y1="${pad}" x2="${x.toFixed(1)}" y2="${H - pad}" stroke="var(--bad)" stroke-width="1.5" opacity="0.7"/>
         `)}
         <polyline points="${polyline}" fill="none" stroke="${lineColor}" stroke-width="1.5"/>
         ${pts.filter(({ p }) => p.is_compaction).map(({ x, y, p }) => {
@@ -607,13 +607,13 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
               <span class="font-mono text-[var(--cyan)]">${formatTokens(lastInput)}</span>
             </span>
             <span class="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
-              <span class="inline-block w-2.5 h-0.5 rounded bg-[#4ade80]"></span> output
+              <span class="inline-block w-2.5 h-0.5 rounded bg-[var(--ok)]"></span> output
               <span class="font-mono text-[var(--good)]">${formatTokens(lastOutput)}</span>
             </span>
           </div>
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
             ${inputLine ? html`<polyline points="${inputLine}" fill="none" stroke="#67e8f9" stroke-width="1.5" opacity="0.8"/>` : null}
-            ${outputLine ? html`<polyline points="${outputLine}" fill="none" stroke="#4ade80" stroke-width="1.5" opacity="0.8"/>` : null}
+            ${outputLine ? html`<polyline points="${outputLine}" fill="none" stroke="var(--ok)" stroke-width="1.5" opacity="0.8"/>` : null}
           </svg>
         </div>
 
@@ -691,7 +691,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-xs font-mono tabular-nums text-[var(--accent)]">${latestTotal != null ? formatTokens(latestTotal) : '-'}</span>
           </div>
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
-            ${totalLine ? html`<polyline points="${totalLine}" fill="none" stroke="#f59e0b" stroke-width="1.5"/>` : null}
+            ${totalLine ? html`<polyline points="${totalLine}" fill="none" stroke="var(--amber-bright)" stroke-width="1.5"/>` : null}
           </svg>
           <div class="mt-1 flex flex-wrap gap-2 text-[10px] text-[var(--text-dim)]">
             <span>latest ${latestTotal != null ? formatTokens(latestTotal) : '-'}</span>
@@ -971,7 +971,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-xs font-mono tabular-nums text-[var(--good)]">${lastTps.toFixed(1)}</span>
           </div>
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
-            ${tpsLine ? html`<polyline points="${tpsLine}" fill="none" stroke="#4ade80" stroke-width="1.5"/>` : null}
+            ${tpsLine ? html`<polyline points="${tpsLine}" fill="none" stroke="var(--ok)" stroke-width="1.5"/>` : null}
           </svg>
           <div class="text-[10px] text-[var(--text-dim)] mt-1">avg ${avgTps.toFixed(1)}</div>
         </div>
@@ -1047,7 +1047,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
         <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
           ${fallbackIndices.map((idx: number) => {
             const x = SPARKLINE_PAD + (idx / Math.max(n - 1, 1)) * (W - 2 * SPARKLINE_PAD)
-            return html`<line x1="${x.toFixed(1)}" y1="${SPARKLINE_PAD}" x2="${x.toFixed(1)}" y2="${H - SPARKLINE_PAD}" stroke="#ef4444" stroke-width="1.5" opacity="0.6"/>`
+            return html`<line x1="${x.toFixed(1)}" y1="${SPARKLINE_PAD}" x2="${x.toFixed(1)}" y2="${H - SPARKLINE_PAD}" stroke="var(--bad)" stroke-width="1.5" opacity="0.6"/>`
           })}
           ${latencyLine ? html`<polyline points="${latencyLine}" fill="none" stroke="#9ad9ff" stroke-width="1.5"/>` : null}
         </svg>
@@ -1060,7 +1060,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
           <span class="text-xs font-mono tabular-nums text-[var(--purple)]">$${totalCost.toFixed(4)}</span>
         </div>
         <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
-          ${costLine ? html`<polyline points="${costLine}" fill="none" stroke="#a78bfa" stroke-width="1.5"/>` : null}
+          ${costLine ? html`<polyline points="${costLine}" fill="none" stroke="var(--purple)" stroke-width="1.5"/>` : null}
         </svg>
       </div>
 

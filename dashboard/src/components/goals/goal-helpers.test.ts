@@ -67,15 +67,15 @@ describe('horizonLabel', () => {
 
 describe('horizonColor', () => {
   it('returns green for short', () => {
-    expect(horizonColor('short')).toBe('#4ade80')
+    expect(horizonColor('short')).toBe('var(--ok)')
   })
 
   it('returns amber for mid', () => {
-    expect(horizonColor('mid')).toBe('#f59e0b')
+    expect(horizonColor('mid')).toBe('var(--amber-bright)')
   })
 
   it('returns indigo for long', () => {
-    expect(horizonColor('long')).toBe('#818cf8')
+    expect(horizonColor('long')).toBe('var(--indigo)')
   })
 
   it('returns gray for unknown', () => {

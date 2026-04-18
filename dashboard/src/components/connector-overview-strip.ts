@@ -505,7 +505,7 @@ function deriveTrendColor(series: readonly number[]): string {
   // Tailwind emerald-400 / amber-400 / rose-400 hex codes — matches
   // the border-*-400 tones used on HeartbeatUptimeChip.
   if (last >= 99) return '#34d399'
-  if (last >= 95) return '#fbbf24'
+  if (last >= 95) return 'var(--warn)'
   return '#fb7185'
 }
 

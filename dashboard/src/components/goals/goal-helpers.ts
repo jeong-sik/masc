@@ -94,9 +94,9 @@ export function horizonLabel(h: string): string {
 
 export function horizonColor(h: string): string {
   switch (h) {
-    case 'short': return '#4ade80'
-    case 'mid': return '#f59e0b'
-    case 'long': return '#818cf8'
+    case 'short': return 'var(--ok)'
+    case 'mid': return 'var(--amber-bright)'
+    case 'long': return 'var(--indigo)'
     default: return '#888'
   }
 }

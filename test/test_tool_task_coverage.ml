@@ -348,6 +348,46 @@ let () = test "handle_done_uses_persisted_contract_gate" (fun () ->
       (Printf.sprintf "expected CDAL gate rejection message, got: %s" result_done)
 )
 
+(* Advisory contract (strict=false): CDAL gate must still record an attribution
+   event so the dashboard has a verification trace, but must NOT block the
+   transition. Regression guard for the user-reported gap "검증 흔적이 UI에서
+   안 보인다" — strict=false tasks used to bypass the gate entirely, leaving
+   no audit trail. *)
+let () = test "handle_done_advisory_contract_records_attribution" (fun () ->
+  Dashboard_attribution.reset ();
+  let ctx = make_test_ctx_with_agent "advisory-agent" in
+  let _ =
+    Tool_task.handle_add_task ctx
+      (`Assoc
+        [
+          ("title", `String "Advisory deliverable task");
+          ( "contract",
+            `Assoc
+              [
+                ("strict", `Bool false);
+                ( "completion_contract",
+                  `List [ `String "deliverable-ready" ] );
+              ] );
+        ])
+  in
+  let _ = Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let success_done, _result_done =
+    Tool_task.handle_done ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("notes", `String "deliverable-ready");
+        ])
+  in
+  if not success_done then
+    failwith "advisory contract (strict=false) must not block handle_done";
+  let recent = Dashboard_attribution.recent ~gate:"cdal_verdict" ~limit:20 () in
+  if recent = [] then
+    failwith
+      "expected Dashboard_attribution to record a cdal_verdict entry for \
+       advisory contract (audit trail regression)"
+)
+
 let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ =

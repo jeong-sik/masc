@@ -80,8 +80,8 @@
 
 /* ── Think Block (collapsible) ─────────────────────────────── */
 @utility think-block {
-  background: rgba(167,139,250,0.06);
-  border: 1px solid rgba(167,139,250,0.15);
+  background: var(--purple-12);
+  border: 1px solid var(--purple-12);
   padding: 10px 14px;
   margin: 8px 0;
   & summary { cursor: pointer; color: var(--purple); font-size: var(--fs-sm); }
@@ -132,8 +132,8 @@ button.monitor-row {
 @utility agent-event-badge--heartbeat { background: var(--ok-12); color: var(--ok); }
 @utility agent-event-badge--lifecycle { background: var(--accent-12); color: var(--accent); }
 @utility agent-event-badge--keeper { background: var(--ff-gold-15); color: var(--ff-gold-bright); }
-@utility agent-event-badge--error { background: rgba(248, 113, 113, 0.14); color: var(--bad-light); }
-@utility agent-event-badge--broadcast { background: rgba(167, 139, 250, 0.12); color: var(--purple); }
+@utility agent-event-badge--error { background: var(--bad-soft); color: var(--bad-light); }
+@utility agent-event-badge--broadcast { background: var(--purple-12); color: var(--purple); }
 @utility agent-event-badge--task { background: var(--warn-12); color: var(--warn); }
 @utility agent-event-badge--board { background: var(--cyan-12); color: var(--cyan); }
 @utility agent-event-badge--default { background: var(--border-slate-12); color: var(--text-muted); }

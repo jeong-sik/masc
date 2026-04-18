@@ -59,9 +59,9 @@ export function kindOfEventType(eventType: string): A2aEventKind {
 export const CHIP_CLASS_BY_KIND: Record<A2aEventKind, string> = {
   lifecycle: 'bg-[var(--ok-10)]',
   failure: 'bg-[var(--bad-10)]',
-  tool: 'bg-sky-400',
+  tool: 'bg-[var(--accent-10)]',
   handoff: 'bg-orange-400',
-  context: 'bg-purple-400',
+  context: 'bg-[var(--accent-10)]',
   unknown: 'bg-[var(--white-5)]0',
 }
 
@@ -297,13 +297,13 @@ export function HandoffTimeline({
             <span class="w-2 h-2 rounded-full bg-[var(--ok-10)]"></span>lifecycle
           </span>
           <span class="flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-sky-400"></span>tool
+            <span class="w-2 h-2 rounded-full bg-[var(--accent-10)]"></span>tool
           </span>
           <span class="flex items-center gap-1">
             <span class="w-2 h-2 rounded-full bg-orange-400"></span>handoff
           </span>
           <span class="flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-purple-400"></span>context
+            <span class="w-2 h-2 rounded-full bg-[var(--accent-10)]"></span>context
           </span>
           <span class="flex items-center gap-1">
             <span class="w-2 h-2 rounded-full bg-[var(--bad-10)]"></span>failure

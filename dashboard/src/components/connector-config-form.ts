@@ -530,7 +530,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
               const hint = getFieldHint(field.name)
               if (hint === null) return null
               return html`
-                <div class="rounded border border-sky-400/20 bg-sky-500/5 px-2 py-1 text-[10px] text-sky-200" data-field-hint=${field.name}>
+                <div class="rounded border border-[var(--accent-20)] bg-[var(--accent-10)]0/5 px-2 py-1 text-[10px] text-[var(--accent)]" data-field-hint=${field.name}>
                   <span class="mr-1" aria-hidden="true">📍</span>
                   <span>${hint.where}</span>
                   ${hint.url
@@ -539,7 +539,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
                           href=${hint.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          class="ml-1 underline hover:text-sky-100"
+                          class="ml-1 underline hover:text-[var(--accent)]"
                         >열기 ↗</a>
                       `
                     : null}

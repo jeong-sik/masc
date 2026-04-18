@@ -86,12 +86,12 @@ const CONDENSED_CATEGORY_META: Record<TelemetryCondensedCategory, {
   heartbeat: {
     label: 'Heartbeat',
     icon: 'H',
-    color: 'text-sky-400',
+    color: 'text-[var(--accent)]',
   },
   polling: {
     label: 'Polling / no-op',
     icon: 'P',
-    color: 'text-fuchsia-400',
+    color: 'text-[var(--accent)]',
   },
 }
 

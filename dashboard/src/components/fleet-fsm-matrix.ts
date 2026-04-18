@@ -74,27 +74,27 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   Failing:      'bg-red-900/50 text-[var(--bad-light)] border-[var(--bad-20)]',
   Overflowed:   'bg-orange-900/50 text-orange-200 border-orange-700',
   Compacting:   'bg-amber-900/50 text-[var(--warn)] border-[var(--warn-20)]',
-  HandingOff:   'bg-blue-900/50 text-blue-200 border-blue-700',
-  Draining:     'bg-sky-900/40 text-sky-200 border-sky-700',
+  HandingOff:   'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
+  Draining:     'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
   Paused:       'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
   Stopped:      'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
   Crashed:      'bg-red-950 text-[var(--bad-light)] border-red-800',
-  Restarting:   'bg-violet-900/50 text-violet-200 border-violet-700',
+  Restarting:   'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
   Dead:         'bg-black text-[var(--bad-light)] border-red-900',
   Offline:      'bg-[var(--white-5)] text-[var(--text-muted)]0 border-[var(--white-10)]',
   // KTC
   idle:         'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
-  prompting:    'bg-blue-900/40 text-blue-200 border-blue-700',
+  prompting:    'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
   executing:    'bg-emerald-900/40 text-[var(--ok)] border-[var(--ok-20)]',
   compacting:   'bg-amber-900/50 text-[var(--warn)] border-[var(--warn-20)]',
-  finalizing:   'bg-sky-900/40 text-sky-200 border-sky-700',
+  finalizing:   'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
   // KDP
   undecided:          'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
   guard_ok:           'bg-emerald-900/40 text-[var(--ok)] border-[var(--ok-20)]',
   gate_rejected:      'bg-red-900/40 text-[var(--bad-light)] border-[var(--bad-20)]',
-  tool_policy_selected: 'bg-indigo-900/50 text-indigo-200 border-indigo-700',
+  tool_policy_selected: 'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
   // KCL
-  selecting:    'bg-blue-900/40 text-blue-200 border-blue-700',
+  selecting:    'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
   trying:       'bg-amber-900/50 text-[var(--warn)] border-[var(--warn-20)]',
   done:         'bg-emerald-900/40 text-[var(--ok)] border-[var(--ok-20)]',
   exhausted:    'bg-red-900/50 text-[var(--bad-light)] border-[var(--bad-20)]',
@@ -108,7 +108,7 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   // observer can see it.
   clean:   'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
   warning: 'bg-amber-900/50 text-[var(--warn)] border-[var(--warn-20)]',
-  cooling: 'bg-sky-900/40 text-sky-200 border-sky-700',
+  cooling: 'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
 }
 
 const DEFAULT_CHIP = 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]'

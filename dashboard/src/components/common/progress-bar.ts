@@ -49,7 +49,7 @@ export function progressBarToneClass(tone: ProgressBarTone): string {
     case 'emerald': return 'bg-[var(--ok-10)]'
     case 'amber': return 'bg-[var(--warn-10)]'
     case 'rose': return 'bg-[var(--bad-10)]'
-    case 'sky': return 'bg-sky-500'
+    case 'sky': return 'bg-[var(--accent-10)]0'
   }
 }
 

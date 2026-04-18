@@ -56,8 +56,8 @@ function outcomeToneClass(kind: Attribution['outcome']['kind']): string {
 
 function originBadgeClass(origin: Attribution['origin']): string {
   return origin === 'det'
-    ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
-    : 'bg-violet-500/20 text-violet-300 border border-violet-500/40'
+    ? 'bg-[var(--accent-10)]0/20 text-[var(--accent)] border border-[var(--accent-20)]0/40'
+    : 'bg-[var(--accent-10)]0/20 text-[var(--accent)] border border-[var(--accent-20)]0/40'
 }
 
 function formatTs(recordedAt: number): string {
@@ -133,7 +133,7 @@ function GateCard({
   return html`
     <button
       type="button"
-      class="text-left w-full focus:outline-none focus:ring-2 focus:ring-sky-500/50 rounded-xl ${toneClass}"
+      class="text-left w-full focus:outline-none focus:ring-2 focus:ring-[var(--accent-20)]0/50 rounded-xl ${toneClass}"
       onClick=${onSelect}
     >
       <${SurfaceCard} variant="compact">
@@ -337,7 +337,7 @@ export function AttributionPanel() {
             query.value = (e.target as HTMLInputElement).value
             selectedEventIdx.value = null
           }}
-          class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--card-border)] bg-black/20 px-2 py-1 text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+          class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--card-border)] bg-black/20 px-2 py-1 text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-20)]0/50"
         />
       </div>
 

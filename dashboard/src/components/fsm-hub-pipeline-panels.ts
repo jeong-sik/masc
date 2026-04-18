@@ -278,7 +278,7 @@ export function HeroPhase({
     Running: 'text-[var(--ok)]',
     Overflowed: 'text-[var(--warn)]',
     Compacting: 'text-[var(--warn)]',
-    HandingOff: 'text-violet-400',
+    HandingOff: 'text-[var(--accent)]',
     Failing: 'text-[var(--bad-light)]',
     Stable: 'text-[var(--text-dim)]',
   }

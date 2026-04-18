@@ -152,7 +152,7 @@ function fmtValue(value: number, type: string, name: string): string {
 
 function typeBadge(type: string): ReturnType<typeof html> {
   const colors: Record<string, string> = {
-    counter: 'bg-blue-900/40 text-blue-300',
+    counter: 'bg-[var(--accent-10)] text-[var(--accent)]',
     gauge: 'bg-emerald-900/40 text-[var(--ok)]',
     summary: 'bg-amber-900/40 text-[var(--warn)]',
   }
@@ -165,7 +165,7 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
   return html`<span class="ml-2 inline-flex gap-1 flex-wrap">${entries.map(([k, v]) => {
     if (k === 'keeper') {
       return html`<button
-        class="rounded bg-blue-900/40 px-1 py-0.5 text-[10px] text-blue-300 font-mono hover:bg-blue-800/60 hover:text-blue-200 transition-colors cursor-pointer"
+        class="rounded bg-[var(--accent-10)] px-1 py-0.5 text-[10px] text-[var(--accent)] font-mono hover:bg-[var(--accent-10)] hover:text-[var(--accent)] transition-colors cursor-pointer"
         title="View keeper detail"
         onClick=${(e: Event) => {
           e.stopPropagation()

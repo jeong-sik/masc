@@ -1,6 +1,41 @@
 (** MCP HTTP Session ID management
     MCP Spec 2025-03-26: Session IDs must be visible ASCII (0x21-0x7E) *)
 
+(* Issue #8520: Variant SSOT for masc_mcp_session tool action.  Adding
+   a constructor forces compilation in [action_to_string] AND extends
+   [valid_action_strings]; the schema in [tool_schemas_inline_infra.ml]
+   mirrors the SSOT (cycle-aware, sync test) and the dispatcher in
+   [tool_inline_dispatch.ml] consumes the Variant via
+   [action_of_string_opt]. The previous code had two independent
+   string lists (schema enum + match arms) with no compile-time
+   linkage. *)
+type action =
+  | Get
+  | Create
+  | List
+  | Cleanup
+  | Remove
+
+let action_to_string = function
+  | Get -> "get"
+  | Create -> "create"
+  | List -> "list"
+  | Cleanup -> "cleanup"
+  | Remove -> "remove"
+
+let action_of_string_opt raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "get" -> Some Get
+  | "create" -> Some Create
+  | "list" -> Some List
+  | "cleanup" -> Some Cleanup
+  | "remove" -> Some Remove
+  | _ -> None
+
+let all_actions = [ Get; Create; List; Cleanup; Remove ]
+
+let valid_action_strings = List.map action_to_string all_actions
+
 (* Fiber-safe random state for session ID generation *)
 let session_rng = Random.State.make_self_init ()
 

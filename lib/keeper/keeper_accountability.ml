@@ -5,8 +5,6 @@
     explicit completion claims, then derives trust/risk summaries from
     deterministic evidence. *)
 
-open Types
-
 type claim_kind =
   | Task_commitment
   | Completion_claim

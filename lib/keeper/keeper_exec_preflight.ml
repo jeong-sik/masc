@@ -37,14 +37,13 @@ let handle_keeper_preflight_check
       let ok = st = Unix.WEXITED 0 in
       (* Extract default branch from JSON if available *)
       (if ok then
-         try
+         Safe_ops.protect ~default:() (fun () ->
            let json = Yojson.Safe.from_string out in
            let branch_ref =
              Yojson.Safe.Util.(
                json |> member "defaultBranchRef" |> member "name" |> to_string)
            in
-           default_branch := branch_ref
-         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+           default_branch := branch_ref));
       add_check "repo_access" ok out
   in
   (* Check 3: keeper identity *)

@@ -69,7 +69,7 @@ let append_to_sink ~keeper_name (rec_ : transition_record) =
   match sink_path () with
   | None -> ()
   | Some path ->
-    (try
+    Safe_ops.protect ~default:() (fun () ->
        let line =
          Yojson.Safe.to_string
            (`Assoc [
@@ -82,12 +82,8 @@ let append_to_sink ~keeper_name (rec_ : transition_record) =
        in
        Fun.protect
          ~finally:(fun () ->
-           try close_out oc
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | _ -> ())
-         (fun () -> output_string oc (line ^ "\n"))
-     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+           Safe_ops.protect ~default:() (fun () -> close_out oc))
+         (fun () -> output_string oc (line ^ "\n")))
 
 let record_transition ~keeper_name (rec_ : transition_record) =
   let ring = get_or_create_ring keeper_name in

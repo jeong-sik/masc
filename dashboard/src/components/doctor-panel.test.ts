@@ -136,6 +136,51 @@ describe('extractSidecarChecks', () => {
     })
     expect(out[0]).toEqual({ name: 'a', severity: 'ok' })
   })
+  it('extracts autofix_available from auto_fix.callback_available', () => {
+    const out = extractSidecarChecks({
+      checks: [
+        {
+          name: 'with-fix',
+          severity: 'error',
+          auto_fix: {
+            description: 'chmod 0755',
+            command: null,
+            callback_available: true,
+          },
+        },
+        {
+          name: 'no-callback',
+          severity: 'warn',
+          auto_fix: {
+            description: 'manual step',
+            command: null,
+            callback_available: false,
+          },
+        },
+      ],
+    })
+    expect(out[0]).toMatchObject({
+      name: 'with-fix',
+      autofix_available: true,
+      autofix_description: 'chmod 0755',
+    })
+    expect(out[1]).toMatchObject({
+      name: 'no-callback',
+      severity: 'warn',
+      autofix_description: 'manual step',
+    })
+    expect(out[1]?.autofix_available).toBeUndefined()
+  })
+  it('ignores malformed auto_fix field', () => {
+    const out = extractSidecarChecks({
+      checks: [
+        { name: 'a', severity: 'ok', auto_fix: null },
+        { name: 'b', severity: 'ok', auto_fix: 'bad' },
+        { name: 'c', severity: 'ok', auto_fix: {} },
+      ],
+    })
+    expect(out.every((c) => c.autofix_available === undefined)).toBe(true)
+  })
 })
 
 describe('extractConfigNotes', () => {

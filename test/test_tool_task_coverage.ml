@@ -688,7 +688,10 @@ let () = test "handle_done_already_done_guidance" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Done test")]) in
   let _ = Coord.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
-  let _ = Coord.complete_task_r ctx.config ~agent_name:"other-agent" ~task_id:"task-001" ~notes:"done" in
+  let _ =
+    Coord.transition_task_r ctx.config ~agent_name:"other-agent"
+      ~task_id:"task-001" ~action:Types.Done_action ~notes:"done" ()
+  in
   let success, result =
     Tool_task.handle_done ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in

@@ -194,59 +194,72 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
   const isExpanded = expandedNodes.value.has(node.id)
   const hasContent = node.children.length > 0 || node.tasks.length > 0
   const indent = depth * 20
+  const headerBase = 'group flex items-start gap-3 rounded border border-card-border/60 bg-[rgba(8,13,22,0.86)] p-3 transition-colors hover:border-card-border/90 w-full text-left'
+
+  const headerContent = html`
+    ${hasContent ? html`
+      <span class="shrink-0 mt-0.5 text-[12px] text-text-dim transition-transform ${isExpanded ? 'rotate-90' : ''}">\u25B6</span>
+    ` : html`
+      <span class="shrink-0 mt-0.5 text-[12px] text-text-dim/30">\u25CB</span>
+    `}
+
+    <div class="flex-1 min-w-0">
+      <div class="flex flex-wrap items-center gap-2 mb-1">
+        <span class="shrink-0 rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest" style="color:${horizonColor(node.horizon)}">
+          ${horizonLabel(node.horizon)}
+        </span>
+        <span class="text-[14px] font-semibold text-text-strong break-words line-clamp-2">${node.title}</span>
+        <span class="text-[11px] text-text-dim">${priorityStars(node.priority)}</span>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3 text-[11px] text-text-muted">
+        ${node.metric ? html`
+          <span class="rounded-md border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-accent">
+            ${node.metric}${node.target_value ? ` \u2192 ${node.target_value}` : ''}
+          </span>
+        ` : null}
+        ${node.due_date ? html`
+          <span class="rounded-md border border-bad/20 bg-bad/10 px-2 py-0.5 text-bad">
+            마감 <${TimeAgo} timestamp=${node.due_date} />
+          </span>
+        ` : null}
+        ${node.task_count > 0 ? html`
+          <span class="font-medium">${node.task_done_count}/${node.task_count} 태스크</span>
+        ` : null}
+        ${node.child_count > 0 ? html`
+          <span class="font-medium">${node.child_count} 하위 목표</span>
+        ` : null}
+      </div>
+
+      <div class="mt-2 max-w-[400px]">
+        <${ConvergenceBar} pct=${node.convergence_pct} size="sm" />
+      </div>
+    </div>
+
+    <div class="flex flex-col items-end gap-1 shrink-0">
+      <${StatusBadge} status=${node.status} />
+      <span class="text-[10px] text-text-dim">
+        <${TimeAgo} timestamp=${node.updated_at} />
+      </span>
+    </div>
+  `
 
   return html`
     <div class="flex flex-col" style="margin-left:${indent}px">
-      <div
-        class="group flex items-start gap-3 rounded border border-card-border/60 bg-[rgba(8,13,22,0.86)] p-3 transition-colors hover:border-card-border/90 ${hasContent ? 'cursor-pointer' : ''}"
-        onClick=${hasContent ? () => toggleNode(node.id) : undefined}
-      >
-        ${hasContent ? html`
-          <span class="shrink-0 mt-0.5 text-[12px] text-text-dim transition-transform ${isExpanded ? 'rotate-90' : ''}">\u25B6</span>
-        ` : html`
-          <span class="shrink-0 mt-0.5 text-[12px] text-text-dim/30">\u25CB</span>
-        `}
-
-        <div class="flex-1 min-w-0">
-          <div class="flex flex-wrap items-center gap-2 mb-1">
-            <span class="shrink-0 rounded border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest" style="color:${horizonColor(node.horizon)}">
-              ${horizonLabel(node.horizon)}
-            </span>
-            <span class="text-[14px] font-semibold text-text-strong break-words line-clamp-2">${node.title}</span>
-            <span class="text-[11px] text-text-dim">${priorityStars(node.priority)}</span>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-3 text-[11px] text-text-muted">
-            ${node.metric ? html`
-              <span class="rounded border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-accent">
-                ${node.metric}${node.target_value ? ` \u2192 ${node.target_value}` : ''}
-              </span>
-            ` : null}
-            ${node.due_date ? html`
-              <span class="rounded border border-bad/20 bg-bad/10 px-2 py-0.5 text-bad">
-                마감 <${TimeAgo} timestamp=${node.due_date} />
-              </span>
-            ` : null}
-            ${node.task_count > 0 ? html`
-              <span class="font-medium">${node.task_done_count}/${node.task_count} 태스크</span>
-            ` : null}
-            ${node.child_count > 0 ? html`
-              <span class="font-medium">${node.child_count} 하위 목표</span>
-            ` : null}
-          </div>
-
-          <div class="mt-2 max-w-[400px]">
-            <${ConvergenceBar} pct=${node.convergence_pct} size="sm" />
-          </div>
+      ${hasContent ? html`
+        <button
+          type="button"
+          class="${headerBase} cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          onClick=${() => toggleNode(node.id)}
+          aria-expanded=${isExpanded}
+        >
+          ${headerContent}
+        </button>
+      ` : html`
+        <div class=${headerBase}>
+          ${headerContent}
         </div>
-
-        <div class="flex flex-col items-end gap-1 shrink-0">
-          <${StatusBadge} status=${node.status} />
-          <span class="text-[10px] text-text-dim">
-            <${TimeAgo} timestamp=${node.updated_at} />
-          </span>
-        </div>
-      </div>
+      `}
 
       ${isExpanded ? html`
         <div class="mt-1.5 flex flex-col gap-1.5">

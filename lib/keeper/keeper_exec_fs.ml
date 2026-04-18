@@ -1,6 +1,37 @@
 open Keeper_types
 open Keeper_exec_shared
 
+(* Issue #8490: Variant SSOT for fs write mode. Adding a constructor
+   forces compilation in [fs_write_mode_to_string] and
+   [fs_write_mode_dispatch] AND extends [valid_fs_write_mode_strings];
+   the schema in [tool_shard.ml] mirrors the SSOT (cycle avoidance
+   per #8480/#8484 pattern). The previous code used 5 hardcoded sites
+   (parse default, validate, dispatch, label normalisation, schema)
+   with an empty-string-as-overwrite back-compat — now expressed
+   explicitly via [Option.value ~default:Overwrite]. *)
+type fs_write_mode =
+  | Overwrite
+  | Append
+
+let fs_write_mode_to_string = function
+  | Overwrite -> "overwrite"
+  | Append -> "append"
+
+(* Sound partial parser: canonical strings AND the back-compat empty
+   string both decode to a real Variant. Whitespace-only treated as
+   empty for the same back-compat reason. Anything else returns None
+   so the caller decides the rejection message. *)
+let fs_write_mode_of_string_opt raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "overwrite" | "" -> Some Overwrite
+  | "append" -> Some Append
+  | _ -> None
+
+let all_fs_write_modes = [ Overwrite; Append ]
+
+let valid_fs_write_mode_strings =
+  List.map fs_write_mode_to_string all_fs_write_modes
+
 (** keeper_fs_read max_bytes clamp. [fs_read_default_max_bytes] is the
     canonical default; [Tool_shard_limits.keeper_fs_read_default_max_bytes]
     re-exports it at a leaf module so the tool schema in tool_shard.ml
@@ -59,18 +90,22 @@ let handle_keeper_fs_edit
   =
   let path = Safe_ops.json_string ~default:"" "path" args in
   let content = Safe_ops.json_string ~default:"" "content" args in
-  let mode =
-    Safe_ops.json_string ~default:"overwrite" "mode" args |> String.lowercase_ascii
+  let mode_raw =
+    Safe_ops.json_string ~default:"overwrite" "mode" args
   in
+  let mode_opt = fs_write_mode_of_string_opt mode_raw in
   (* Early validation for 9B models that send empty/missing params *)
   if String.trim path = "" then
     error_json "path is required. Good: path='lib/foo.ml'. Bad: path=''."
   else if String.trim content = "" then
     error_json "content is required (non-empty). Writing 0 bytes is usually unintended."
-  else if mode <> "overwrite" && mode <> "append" && mode <> "" then
+  else match mode_opt with
+  | None ->
     error_json (Printf.sprintf
-      "mode must be 'overwrite' or 'append', got '%s'." mode)
-  else
+      "mode must be one of [%s], got %S."
+      (String.concat ", " valid_fs_write_mode_strings) mode_raw)
+  | Some mode ->
+  let mode_label = fs_write_mode_to_string mode in
   match resolve_keeper_path ~config ~meta ~raw_path:path with
   | Error e -> error_json e
   | Ok target ->
@@ -78,17 +113,16 @@ let handle_keeper_fs_edit
        let parent = Filename.dirname target in
        Fs_compat.mkdir_p parent;
        (match mode with
-        | "append" -> Fs_compat.append_file target content
-        | "overwrite" | "" -> Fs_compat.save_file target content
-        | other -> raise (Invalid_argument ("unsupported_mode:" ^ other)));
+        | Append -> Fs_compat.append_file target content
+        | Overwrite -> Fs_compat.save_file target content);
        Log.Keeper.info "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d"
-         meta.name target (if mode = "" then "overwrite" else mode)
+         meta.name target mode_label
          (String.length content);
        Yojson.Safe.to_string
          (`Assoc
              [ "ok", `Bool true
              ; "path", `String target
-             ; "mode", `String (if mode = "" then "overwrite" else mode)
+             ; "mode", `String mode_label
              ; "bytes_written", `Int (String.length content)
              ])
      with

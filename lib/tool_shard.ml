@@ -23,6 +23,15 @@ let pr_review_event_enum_strings =
 let memory_search_source_enum_strings =
   [ "memory"; "history"; "all" ]
 
+(** Issue #8490: hand-mirrored from
+    [Keeper_exec_fs.valid_fs_write_mode_strings]. Direct dependency
+    would risk a Tool_shard -> Keeper_* -> Tool_shard cycle (same
+    shape as #8467 / #8480 / #8484). Sync regression test in
+    [test_types.ml :: fs_write_mode_ssot] catches drift. *)
+let fs_write_mode_enum_strings =
+  [ "overwrite"; "append" ]
+
+
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;
@@ -288,7 +297,9 @@ Creates parent dirs.";
       ("properties", `Assoc [
         ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path to write")]);
         ("content", `Assoc [("type", `String "string"); ("description", `String "File content to write")]);
-        ("mode", `Assoc [("type", `String "string"); ("enum", `List [`String "overwrite"; `String "append"]); ("description", `String "Write mode (default: overwrite)")]);
+        (* Issue #8490: derive from local mirror that tracks
+           [Keeper_exec_fs.valid_fs_write_mode_strings]. *)
+        ("mode", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) fs_write_mode_enum_strings)); ("description", `String "Write mode (default: overwrite)")]);
       ]);
       ("required", `List [`String "path"; `String "content"]);
     ];

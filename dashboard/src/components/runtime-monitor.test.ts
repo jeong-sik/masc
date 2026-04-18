@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { providerTone, modelMetricTone, fmtCost, fmtSuccessRate, fmtNumber, filterModelMetrics, sortModelMetricsByUrgency } from './runtime-monitor'
+import { runtimeProviderTone, modelMetricTone, fmtCost, fmtSuccessRate, fmtNumber, filterModelMetrics, sortModelMetricsByUrgency } from './runtime-monitor'
 import type { DashboardRuntimeProviderSnapshot, DashboardRuntimeModelMetric } from '../api/dashboard'
 
 function makeProvider(overrides: Partial<DashboardRuntimeProviderSnapshot> = {}): DashboardRuntimeProviderSnapshot {
@@ -17,31 +17,31 @@ function makeMetric(overrides: Partial<DashboardRuntimeModelMetric> = {}): Dashb
   }
 }
 
-// ── providerTone ──
+// ── runtimeProviderTone ──
 
-describe('providerTone', () => {
+describe('runtimeProviderTone', () => {
   it('returns bad when available is false', () => {
-    expect(providerTone(makeProvider({ available: false }))).toBe('bad')
+    expect(runtimeProviderTone(makeProvider({ available: false }))).toBe('bad')
   })
 
   it('returns warn when discovery is not healthy', () => {
-    expect(providerTone(makeProvider({ available: true, discovery: { healthy: false } }))).toBe('warn')
+    expect(runtimeProviderTone(makeProvider({ available: true, discovery: { healthy: false } }))).toBe('warn')
   })
 
   it('returns ok when available is true and healthy', () => {
-    expect(providerTone(makeProvider({ available: true, discovery: { healthy: true } }))).toBe('ok')
+    expect(runtimeProviderTone(makeProvider({ available: true, discovery: { healthy: true } }))).toBe('ok')
   })
 
   it('returns ok when available is true without discovery', () => {
-    expect(providerTone(makeProvider({ available: true }))).toBe('ok')
+    expect(runtimeProviderTone(makeProvider({ available: true }))).toBe('ok')
   })
 
   it('returns warn when available is undefined', () => {
-    expect(providerTone(makeProvider())).toBe('warn')
+    expect(runtimeProviderTone(makeProvider())).toBe('warn')
   })
 
   it('returns warn when available is true but discovery is null', () => {
-    expect(providerTone(makeProvider({ available: true, discovery: null }))).toBe('ok')
+    expect(runtimeProviderTone(makeProvider({ available: true, discovery: null }))).toBe('ok')
   })
 })
 

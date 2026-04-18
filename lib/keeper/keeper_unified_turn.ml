@@ -37,14 +37,54 @@ let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
       ~needle:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
 
-let finalize_trajectory_acc (trajectory_acc : Trajectory.accumulator)
+let report_keeper_cycle_side_effect_issue
+    ~(config : Coord.config)
+    ~(keeper_name : string)
+    ~(side_effect : string)
+    ?(severity = `Warn)
+    (detail : string) : unit =
+  let message =
+    Printf.sprintf "keeper cycle %s failed: %s" side_effect detail
+  in
+  Keeper_registry.record_error ~base_path:config.base_path keeper_name message;
+  match severity with
+  | `Warn -> Log.Keeper.warn "%s: %s" keeper_name message
+  | `Error -> Log.Keeper.error "%s: %s" keeper_name message
+
+let dispatch_keeper_phase_event_checked
+    ~(config : Coord.config)
+    ~(keeper_name : string)
+    ~(side_effect : string)
+    (event : Keeper_state_machine.event) : unit =
+  match
+    Keeper_registry.dispatch_event ~base_path:config.base_path keeper_name event
+  with
+  | Ok _ -> ()
+  | Error err ->
+      report_keeper_cycle_side_effect_issue
+        ~config ~keeper_name ~side_effect
+        (Printf.sprintf "phase dispatch %s failed: %s"
+           (Keeper_state_machine.event_to_string event)
+           (Keeper_state_machine.transition_error_to_string err))
+
+let finalize_trajectory_acc
+    ~(config : Coord.config)
+    ~(keeper_name : string)
+    (trajectory_acc : Trajectory.accumulator)
     (outcome : Trajectory.trajectory_outcome) : unit =
   try
-    ignore (Trajectory.finalize trajectory_acc outcome)
+    let trajectory = Trajectory.finalize trajectory_acc outcome in
+    Log.Keeper.debug
+      "%s: trajectory finalized outcome=%s total_tool_calls=%d"
+      keeper_name
+      (Trajectory.outcome_to_string trajectory.outcome)
+      trajectory.total_tool_calls
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-      Log.Keeper.error "trajectory finalize failed (keeper cycle): %s"
+      report_keeper_cycle_side_effect_issue
+        ~config ~keeper_name ~side_effect:"trajectory finalize"
+        ~severity:`Error
         (Printexc.to_string exn)
 
 (** {1 Retry & Side-Effect Safety}
@@ -369,22 +409,31 @@ let sync_keeper_paused_state
   (match write_meta config synced_meta with
    | Ok () -> ()
    | Error err ->
-     Log.Keeper.error
-       "%s: keeper %s write_meta failed: %s"
-       meta.name
-       (if paused then "pause" else "resume")
-       err);
+       report_keeper_cycle_side_effect_issue
+         ~config
+         ~keeper_name:meta.name
+         ~side_effect:(Printf.sprintf "%s sync write_meta"
+                         (if paused then "pause" else "resume"))
+         ~severity:`Error
+         err);
   Keeper_registry.update_meta ~base_path:config.base_path meta.name synced_meta;
-  dispatch_keeper_phase_event
+  dispatch_keeper_phase_event_checked
     ~config
     ~keeper_name:meta.name
+    ~side_effect:(Printf.sprintf "%s sync phase update"
+                    (if paused then "pause" else "resume"))
     (if paused
      then Keeper_state_machine.Operator_pause
      else Keeper_state_machine.Operator_resume);
   (if not paused then
     match Keeper_registry.get ~base_path:config.base_path meta.name with
     | Some entry -> Atomic.set entry.fiber_wakeup true
-    | None -> ());
+    | None ->
+        report_keeper_cycle_side_effect_issue
+          ~config
+          ~keeper_name:meta.name
+          ~side_effect:"resume sync fiber wakeup"
+          "registry entry missing after metadata update");
   synced_meta
 
 let current_keeper_meta ~(config : Coord.config) ~(fallback_meta : keeper_meta) =
@@ -418,20 +467,24 @@ let enqueue_partial_commit_continue_gate
       match decision with
       | Agent_sdk.Hooks.Approve
       | Agent_sdk.Hooks.Edit _ ->
-        let _ = sync_keeper_paused_state ~config ~meta:latest_meta ~paused:false in
+        let resumed_meta =
+          sync_keeper_paused_state ~config ~meta:latest_meta ~paused:false
+        in
         Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name None;
         Keeper_registry.reset_turn_failures ~base_path:config.base_path meta.name;
         Log.Keeper.info
           "%s: partial-commit continue gate approved; auto-resumed keeper"
-          meta.name
+          resumed_meta.name
       | Agent_sdk.Hooks.Reject reason ->
-        let _ = sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true in
+        let paused_meta =
+          sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true
+        in
         Keeper_registry.set_failure_reason
           ~base_path:config.base_path meta.name
           (Some failure_reason);
         Log.Keeper.warn
           "%s: partial-commit continue gate rejected; keeper remains paused (%s)"
-          meta.name reason)
+          paused_meta.name reason)
 
 (* Dedupe "mixed cascade context budget" log: the values are constant
    per (keeper_name, model_labels) because cascade config is static at
@@ -1456,7 +1509,18 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       match ensure_api_keys_for_labels model_labels with
       | Error e -> Error (Oas.Error.Internal e)
       | Ok () ->
-      ignore (Cascade_runtime.refresh_local_discovery_if_possible model_labels);
+      let () =
+        if Cascade_runtime.labels_require_local_discovery model_labels then
+          let refreshed =
+            Cascade_runtime.refresh_local_discovery_if_possible model_labels
+          in
+          if not refreshed then
+            report_keeper_cycle_side_effect_issue
+              ~config
+              ~keeper_name:meta.name
+              ~side_effect:"local discovery refresh"
+              "required discovery refresh unavailable; continuing with existing provider registry"
+      in
       let max_context =
         resolved_max_context_for_turn ~meta model_labels
       in
@@ -1936,7 +2000,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
        | _ -> ());
       match run_result with
       | Error err ->
-          finalize_trajectory_acc trajectory_acc
+          finalize_trajectory_acc ~config ~keeper_name:meta.name trajectory_acc
             (Trajectory.Failed (Oas.Error.to_string err));
           let e_str = Oas.Error.to_string err in
           let is_transient = is_transient_network_error err in
@@ -2088,7 +2152,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           end;
           Error err
       | Ok result ->
-          finalize_trajectory_acc trajectory_acc Trajectory.Completed;
+          finalize_trajectory_acc ~config ~keeper_name:meta.name trajectory_acc
+            Trajectory.Completed;
           let explicit_accountability_claim =
             Social.extract_accountability_claim result
           in
@@ -2174,38 +2239,45 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                  (Printexc.to_string exn));
           (* Emit turn-completed event to Activity Graph for timeline token visibility *)
           (try
-            ignore (Activity_graph.emit config
-              ~actor:{ kind = "agent"; id = updated_meta.agent_name }
-              ~kind:"keeper.turn_completed"
-              ~payload:(`Assoc
-                ([
-                  ("keeper_name", `String updated_meta.name);
-                  ("input_tokens", `Int result.usage.input_tokens);
-                  ("output_tokens", `Int result.usage.output_tokens);
-                  ("cache_creation_tokens", `Int result.usage.cache_creation_input_tokens);
-                  ("cache_read_tokens", `Int result.usage.cache_read_input_tokens);
-                  ("cost_usd", `Float turn_cost);
-                  ("latency_ms", `Int latency_ms);
-                  ("model_used", `String (Keeper_agent_run.surface_model_used result));
-                  ("work_kind", `String (work_kind_of_selected_mode (selected_mode_of_result result)));
-                  ("context_ratio", `Float lifecycle.context_ratio);
-                  ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
-                ]
-                @ (match result.inference_telemetry with
-                   | Some t ->
-                     (match t.reasoning_tokens with Some n -> [("reasoning_tokens", `Int n)] | None -> [])
-                     @ (match t.timings with
-                        | Some ti ->
-                          (match ti.predicted_per_second with Some v -> [("tokens_per_second", `Float v)] | None -> [])
-                        | None -> [])
-                   | None -> [])))
-              ~tags:["keeper"; "turn"; "metrics"]
-              ())
+            let event =
+              Activity_graph.emit config
+                ~actor:{ kind = "agent"; id = updated_meta.agent_name }
+                ~kind:"keeper.turn_completed"
+                ~payload:(`Assoc
+                  ([
+                    ("keeper_name", `String updated_meta.name);
+                    ("input_tokens", `Int result.usage.input_tokens);
+                    ("output_tokens", `Int result.usage.output_tokens);
+                    ("cache_creation_tokens", `Int result.usage.cache_creation_input_tokens);
+                    ("cache_read_tokens", `Int result.usage.cache_read_input_tokens);
+                    ("cost_usd", `Float turn_cost);
+                    ("latency_ms", `Int latency_ms);
+                    ("model_used", `String (Keeper_agent_run.surface_model_used result));
+                    ("work_kind", `String (work_kind_of_selected_mode (selected_mode_of_result result)));
+                    ("context_ratio", `Float lifecycle.context_ratio);
+                    ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
+                  ]
+                  @ (match result.inference_telemetry with
+                     | Some t ->
+                       (match t.reasoning_tokens with Some n -> [("reasoning_tokens", `Int n)] | None -> [])
+                       @ (match t.timings with
+                          | Some ti ->
+                            (match ti.predicted_per_second with Some v -> [("tokens_per_second", `Float v)] | None -> [])
+                          | None -> [])
+                     | None -> [])))
+                ~tags:["keeper"; "turn"; "metrics"]
+                ()
+            in
+            Log.Keeper.debug
+              "%s: activity graph turn_completed emitted seq=%d"
+              updated_meta.name event.seq
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
-              Log.Keeper.warn
-                "activity graph turn_completed emit failed: %s"
+              report_keeper_cycle_side_effect_issue
+                ~config
+                ~keeper_name:updated_meta.name
+                ~side_effect:"activity graph turn_completed emit"
                 (Printexc.to_string exn));
           broadcast_lifecycle_events ~name:updated_meta.name
             ~turn_generation:lifecycle.turn_generation

@@ -156,7 +156,6 @@ let () = test "task_history_events_json_returns_empty_for_missing_task" (fun () 
   | `List _ -> failwith "missing task should have no history events"
   | _ -> failwith "task history payload must be a JSON list"
 )
-
 let () = test "masc_oas_bridge_runs_without_eio_env" (fun () ->
   match Masc_eio_env.get_opt () with
   | Some _ ->

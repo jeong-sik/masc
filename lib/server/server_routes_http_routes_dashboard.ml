@@ -108,7 +108,6 @@ let handle_dashboard_task_history state req reqd =
       Tool_task.task_history_events_json state.Mcp_server.room_config ~task_id ~limit
     in
     Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
-
 let rec add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->

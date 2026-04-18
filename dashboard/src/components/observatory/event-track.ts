@@ -14,7 +14,7 @@ import { bucketTelemetryEntries, entryTimestampMs, useTrackBucketCount } from '.
 function sourceColor(source: string | undefined): string {
   switch (source) {
     case 'oas_event': return 'bg-accent'
-    case 'agent_event': return 'bg-emerald-400'
+    case 'agent_event': return 'bg-[var(--ok-10)]'
     case 'tool_call_io': return 'bg-blue-400'
     case 'tool_usage': return 'bg-sky-400'
     case 'keeper_metrics': return 'bg-purple-400'

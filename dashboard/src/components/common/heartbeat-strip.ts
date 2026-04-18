@@ -10,8 +10,8 @@ import type { HeartbeatState } from '../../lib/heartbeat-history'
 
 const COLOR: Record<HeartbeatState, string> = {
   // Emerald 500 / Rose 500 / Zinc 700 — matches the dashboard token palette.
-  up: 'bg-emerald-500',
-  down: 'bg-rose-500',
+  up: 'bg-[var(--ok-10)]',
+  down: 'bg-[var(--bad-10)]',
   unknown: 'bg-[var(--white-8)]',
 }
 

@@ -220,10 +220,10 @@ function BudgetRow({ label, slot, manifest, clamp }: {
   let pill
   if (isInvalid) {
     valueClass = 'text-[var(--bad-light)] underline decoration-wavy decoration-red-400 underline-offset-4 cursor-help'
-    pill = html`<span class="rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--bad-light)]">invalid</span>`
+    pill = html`<span class="rounded bg-[var(--bad-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--bad-light)]">invalid</span>`
   } else if (isOverride) {
     valueClass = 'text-[var(--text-strong)] underline decoration-dotted decoration-amber-300/60 underline-offset-4 cursor-help'
-    pill = html`<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--warn)]">override</span>`
+    pill = html`<span class="rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--warn)]">override</span>`
   } else {
     valueClass = 'text-[var(--text-muted)] cursor-help'
     pill = html`<span class="rounded bg-[var(--white-6)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">env</span>`
@@ -271,10 +271,10 @@ function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
           턴 예산 (OAS 호출당)
         </span>
         ${hasInvalid
-          ? html`<span class="rounded-full bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--bad-light)]">invalid override</span>`
+          ? html`<span class="rounded-full bg-[var(--bad-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--bad-light)]">invalid override</span>`
           : hasOverride
-            ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--warn)]">override</span>`
-            : html`<span class="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--ok)]">inherited</span>`}
+            ? html`<span class="rounded-full bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--warn)]">override</span>`
+            : html`<span class="rounded-full bg-[var(--ok-10)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--ok)]">inherited</span>`}
       </div>
       <${BudgetRow}
         label="반응형"
@@ -301,7 +301,7 @@ export function TurnBudgetSection({ keeper }: { keeper: Keeper }) {
   return html`
     <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm" open=${diverges}>
       <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
-        <span class="w-1.5 h-1.5 rounded-full ${diverges ? 'bg-amber-400' : 'bg-accent/50'}"></span>
+        <span class="w-1.5 h-1.5 rounded-full ${diverges ? 'bg-[var(--warn-10)]' : 'bg-accent/50'}"></span>
         턴 예산
         ${diverges ? html`<span class="text-[10px] text-[var(--warn)] font-normal normal-case tracking-normal">(재정의됨)</span>` : null}
       </summary>

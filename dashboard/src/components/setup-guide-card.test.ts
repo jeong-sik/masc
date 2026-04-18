@@ -152,7 +152,7 @@ describe('SetupGuideCard', () => {
     await flushUi()
     const firstCircle = container.querySelector('[data-setup-step-circle="discord:0"]') as HTMLElement
     expect(firstCircle.textContent).toBe('✓')
-    expect(firstCircle.className).toContain('border-emerald-400')
+    expect(firstCircle.className).toContain('border-[var(--ok-20)]')
   })
 
   it('Complete badge appears + tone flips to complete when all steps done', async () => {

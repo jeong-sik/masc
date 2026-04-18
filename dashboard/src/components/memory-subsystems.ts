@@ -91,9 +91,9 @@ const WEIGHT_RAMP: ReadonlyArray<{
   tw: string
   label: string
 }> = [
-  { floor: 0.7, svg: '#10b981', tw: 'bg-emerald-500', label: '70%+' },
-  { floor: 0.4, svg: '#f59e0b', tw: 'bg-amber-500', label: '40%+' },
-  { floor: 0,   svg: '#f87171', tw: 'bg-red-400',    label: '<40%' },
+  { floor: 0.7, svg: '#10b981', tw: 'bg-[var(--ok-10)]', label: '70%+' },
+  { floor: 0.4, svg: '#f59e0b', tw: 'bg-[var(--warn-10)]', label: '40%+' },
+  { floor: 0,   svg: '#f87171', tw: 'bg-[var(--bad-10)]',    label: '<40%' },
 ]
 
 const LEGEND_STOPS = [1.0, 0.75, 0.5, 0.25, 0.05] as const

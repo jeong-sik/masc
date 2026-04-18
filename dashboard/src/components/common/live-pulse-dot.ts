@@ -50,8 +50,8 @@ export function classifyLivePulse(
 const DOT_BASE = 'inline-block h-2 w-2 rounded-full'
 
 const DOT_TONE: Record<LivePulseState, string> = {
-  live: 'bg-emerald-400 animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.6)]',
-  stale: 'bg-amber-400',
+  live: 'bg-[var(--ok-10)] animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.6)]',
+  stale: 'bg-[var(--warn-10)]',
   idle: 'bg-[var(--white-10)]',
 }
 

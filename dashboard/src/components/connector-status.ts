@@ -331,19 +331,19 @@ function healthTone(health: string): { dot: string; badge: string; label: string
     case 'healthy':
       return {
         dot: 'var(--green)',
-        badge: 'border border-emerald-400/30 bg-emerald-500/12 text-[var(--ok)]',
+        badge: 'border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]',
         label: 'healthy',
       }
     case 'degraded':
       return {
         dot: 'var(--yellow)',
-        badge: 'border border-amber-400/30 bg-amber-500/12 text-[var(--warn)]',
+        badge: 'border border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn)]',
         label: 'degraded',
       }
     case 'failing':
       return {
         dot: 'var(--red)',
-        badge: 'border border-rose-400/35 bg-rose-500/12 text-[var(--bad-light)]',
+        badge: 'border border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]',
         label: 'failing',
       }
     default:
@@ -395,11 +395,11 @@ interface LivenessDot {
 function dotClass(state: LivenessState): string {
   switch (state) {
     case 'ok':
-      return 'bg-emerald-400'
+      return 'bg-[var(--ok-10)]'
     case 'warn':
-      return 'bg-amber-400'
+      return 'bg-[var(--warn-10)]'
     case 'down':
-      return 'bg-rose-400'
+      return 'bg-[var(--bad-10)]'
     default:
       return 'bg-[var(--text-dim)]'
   }
@@ -408,11 +408,11 @@ function dotClass(state: LivenessState): string {
 function dotClassForLabel(label: string): string {
   switch (label) {
     case 'connected':
-      return 'bg-emerald-400'
+      return 'bg-[var(--ok-10)]'
     case 'stale':
-      return 'bg-amber-400'
+      return 'bg-[var(--warn-10)]'
     case 'disconnected':
-      return 'bg-rose-400'
+      return 'bg-[var(--bad-10)]'
     default:
       return 'bg-[var(--text-dim)]'
   }
@@ -477,12 +477,12 @@ export function connectorCardBorderClass(label: string): string {
 function connectorStateTone(connector: GateConnectorInfo | null): string {
   const label = connectorStateLabel(connector)
   if (label === 'connected') {
-    return 'border-emerald-400/30 bg-emerald-500/12 text-[var(--ok)]'
+    return 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]'
   }
   if (label === 'disconnected') {
-    return 'border-rose-400/30 bg-rose-500/12 text-[var(--bad-light)]'
+    return 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]'
   }
-  return 'border-amber-400/30 bg-amber-500/12 text-[var(--warn)]'
+  return 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn)]'
 }
 
 function findKnownConnector(connectors: GateConnectorInfo[], connectorId: KnownConnectorId): GateConnectorInfo | null {
@@ -850,7 +850,7 @@ function ConnectorLivePanel({
             ? html`
                 <button
                   type="button"
-                  class="cursor-pointer rounded border border-rose-400/30 bg-rose-500/12 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-[var(--bad-light)] hover:bg-rose-500/20 disabled:opacity-50"
+                  class="cursor-pointer rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:opacity-50"
                   disabled=${isActionLoading}
                   aria-label=${`stop ${connectorName} sidecar`}
                   onClick=${() => { void stopSidecar(connectorId) }}
@@ -933,7 +933,7 @@ function ConnectorLivePanel({
         : null}
 
       ${connectorError || connector?.error
-        ? html`<div class="mt-3 rounded-md border border-amber-400/20 bg-amber-500/8 px-3 py-2 text-[11px] text-[var(--warn)]">${connectorError ?? connector?.error}</div>`
+        ? html`<div class="mt-3 rounded-md border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]">${connectorError ?? connector?.error}</div>`
         : null}
 
       <${SidecarLogViewer} connectorId=${connectorId} />
@@ -942,11 +942,11 @@ function ConnectorLivePanel({
       ${keeperDirectoryError && keepers.length === 0
         ? html`
             <div
-              class="mt-3 rounded-md border border-amber-400/30 border-l-4 border-l-amber-500 bg-amber-500/5 px-3 py-2 text-[11px] text-[var(--warn)]"
+              class="mt-3 rounded-md border border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]"
               data-keeper-directory-error-panel
             >
               <span
-                class="mr-2 inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
+                class="mr-2 inline-flex items-center gap-1 rounded-full border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
                 aria-label="Keeper directory status: unavailable"
               >
                 <span aria-hidden="true">⚠</span>
@@ -960,12 +960,12 @@ function ConnectorLivePanel({
       ${showNoKeeperEmpty
         ? html`
             <div
-              class="mt-3 rounded-md border border-dashed border-amber-400/30 border-l-4 border-l-amber-500 bg-amber-500/5 px-3 py-3 text-[12px]"
+              class="mt-3 rounded-md border border-dashed border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-3 text-[12px]"
               data-no-keepers-empty-panel
             >
               <div class="mb-1 flex items-center gap-2">
                 <span
-                  class="inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
+                  class="inline-flex items-center gap-1 rounded-full border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
                   aria-label="Keeper configuration status: none configured"
                   data-no-keepers-status-chip
                 >
@@ -994,13 +994,13 @@ function ConnectorLivePanel({
             // on the outer card for vertical scannability.
             return html`
               <div
-                class="mt-3 rounded-md border border-dashed border-amber-400/30 border-l-4 border-l-amber-500 bg-amber-500/5 px-3 py-3 text-[12px]"
+                class="mt-3 rounded-md border border-dashed border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-3 text-[12px]"
                 data-sidecar-not-started-panel
               >
                 <div class="mb-1 flex items-center justify-between gap-2">
                   <div class="flex items-center gap-2">
                     <span
-                      class="inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
+                      class="inline-flex items-center gap-1 rounded-full border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
                       aria-label="Sidecar process status: not running"
                       data-sidecar-status-chip
                     >
@@ -1183,7 +1183,7 @@ function ConnectorLivePanel({
         ? html`
             <div class="mt-3 space-y-2">
               ${unknownGroups.map(group => html`
-                <div class="rounded-md border border-amber-400/30 bg-amber-500/8 px-3 py-2" data-keeper=${group.name}>
+                <div class="rounded-md border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2" data-keeper=${group.name}>
                   <div class="flex items-baseline gap-2">
                     <span class="text-[var(--warn)]">⚠</span>
                     <div class="min-w-0">
@@ -1312,7 +1312,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
 
       ${lastError
         ? html`
-            <div class="mt-3 rounded-md border border-rose-400/20 bg-rose-500/8 px-3 py-2 text-[11px] text-[var(--bad-light)]">
+            <div class="mt-3 rounded-md border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-[11px] text-[var(--bad-light)]">
               <div class="mb-1 uppercase tracking-[0.16em] text-[var(--bad-light)]/80">
                 ${ch.last_error_kind || 'error'} · ${timeAgo(ch.last_error_at)}
               </div>
@@ -1359,7 +1359,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
       </div>
       ${lastError
         ? html`
-            <div class="mt-2 rounded border border-rose-400/20 bg-rose-500/8 px-2 py-1 text-[10px] text-[var(--bad-light)]">
+            <div class="mt-2 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-[10px] text-[var(--bad-light)]">
               ${binding.last_error_kind || 'error'} · ${lastError}
             </div>
           `
@@ -1371,7 +1371,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
 function EventRow({ event }: { event: GateEventInfo }) {
   const isError = Boolean(event.error)
   const badgeClass = isError
-    ? 'border border-rose-400/30 bg-rose-500/12 text-[var(--bad-light)]'
+    ? 'border border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]'
     : 'border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-dim)]'
 
   return html`

@@ -117,7 +117,7 @@ export function filterTools<T extends Pick<ToolStat, 'name'>>(tools: T[], query:
 }
 
 function RateGauge({ rate, label }: { rate: number; label: string }) {
-  const color = rate >= 95 ? 'bg-emerald-500' : rate >= 90 ? 'bg-yellow-500' : 'bg-red-500'
+  const color = rate >= 95 ? 'bg-[var(--ok-10)]' : rate >= 90 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'
   return html`
     <div class="flex flex-col gap-1">
       <div class="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">${label}</div>
@@ -171,7 +171,7 @@ function ToolTable({
               : t.success_pct >= 80 ? 'text-[var(--warn)]' : 'text-[var(--bad-light)]'
             const isHighlighted = highlightTool && t.name === highlightTool
             const rowClass = isHighlighted
-              ? 'border-b border-amber-500/60 bg-amber-900/20 ring-1 ring-amber-500/40'
+              ? 'border-b border-[var(--warn-20)] bg-amber-900/20 ring-1 ring-amber-500/40'
               : 'border-b border-[var(--card-border)] border-opacity-30'
             return html`
               <tr class=${rowClass} ref=${isHighlighted ? ((el: HTMLElement | null) => el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })) : undefined}>
@@ -242,7 +242,7 @@ function KeeperRateBars({ keepers }: { keepers: KeeperStat[] }) {
   return html`
     <div class="flex flex-col gap-1.5">
       ${keepers.map(k => {
-        const color = k.success_pct >= 95 ? 'bg-emerald-500' : k.success_pct >= 90 ? 'bg-yellow-500' : 'bg-red-500'
+        const color = k.success_pct >= 95 ? 'bg-[var(--ok-10)]' : k.success_pct >= 90 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'
         const textColor = k.success_pct >= 95 ? 'text-[var(--ok)]' : k.success_pct >= 90 ? 'text-[var(--warn)]' : 'text-[var(--bad-light)]'
         return html`
           <div class="flex items-center gap-2 text-[11px]">

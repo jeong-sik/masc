@@ -239,7 +239,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
           `
         : null}
       ${entry.error
-        ? html`<div class="rounded border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[11px] text-[var(--bad-light)]">${entry.error}</div>`
+        ? html`<div class="rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-[11px] text-[var(--bad-light)]">${entry.error}</div>`
         : entry.loading && entry.lines.length === 0
           ? html`
               <div class="rounded bg-[var(--bg-0)] p-2">

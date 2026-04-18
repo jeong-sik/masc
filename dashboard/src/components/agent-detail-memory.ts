@@ -141,7 +141,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                                     <span class="font-mono flex-1 truncate">${normalizeKeeperName(s.to_agent)}</span>
                                     <div class="w-16 bg-zinc-800 rounded h-1.5">
                                       <div
-                                        class="${s.weight >= 0.7 ? 'bg-emerald-500' : s.weight >= 0.4 ? 'bg-amber-500' : 'bg-red-400'} rounded h-1.5"
+                                        class="${s.weight >= 0.7 ? 'bg-[var(--ok-10)]' : s.weight >= 0.4 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'} rounded h-1.5"
                                         style="width:${Math.round(s.weight * 100)}%"
                                       ></div>
                                     </div>
@@ -166,7 +166,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                                     <span class="font-mono flex-1 truncate">${normalizeKeeperName(s.from_agent)}</span>
                                     <div class="w-16 bg-zinc-800 rounded h-1.5">
                                       <div
-                                        class="${s.weight >= 0.7 ? 'bg-emerald-500' : s.weight >= 0.4 ? 'bg-amber-500' : 'bg-red-400'} rounded h-1.5"
+                                        class="${s.weight >= 0.7 ? 'bg-[var(--ok-10)]' : s.weight >= 0.4 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'} rounded h-1.5"
                                         style="width:${Math.round(s.weight * 100)}%"
                                       ></div>
                                     </div>

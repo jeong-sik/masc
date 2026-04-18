@@ -52,39 +52,59 @@ const SEMANTIC_TONE: Record<StatusChipTone, string> = {
   '': 'border-[var(--white-10)] bg-[var(--white-5)] text-[var(--text-muted)]',
 }
 
-/** 12 keeper lifecycle states → StatusChip tone.
+/** Keeper lifecycle state → StatusChip tone.
  *
- * Mapping follows the Anyang Sleepers design system: twelve runtime
- * states collapse into five visual groups because an operator
- * reading a row doesn't need crashed vs. dead separated in color —
- * both read as "error". Compaction / handing_off / draining all
- * read as "working", which is the slate/info tone.
+ * Accepts both vocabularies in use across the codebase:
  *
- * Exported so every surface that renders keeper status uses the
- * same palette. Takes an unknown string and returns 'neutral' for
- * unrecognised input rather than throwing — a new state added to
- * the backend FSM will render as neutral until this map is updated,
- * which beats a runtime error in a row of 40 keepers.
+ *   1. Design-system / backend FSM names from the Anyang Sleepers
+ *      spec: running, compacting, handing_off, draining, failing,
+ *      overflowed, restarting, paused, stopped, crashed, dead,
+ *      offline.
+ *
+ *   2. Dashboard-layer names defined in `types/core.ts#KeeperLifecycleState`
+ *      and the live agent `status` union: active, preparing,
+ *      handoff-imminent, idle, unbooted, busy, listening, inactive.
+ *
+ * Both collapse into the same five visual groups the design system
+ * prescribes (ok / working / warn / paused / error), with inactive
+ * variants landing in neutral. Unknown strings return 'neutral'
+ * rather than throwing so a backend-added state renders as muted
+ * until this map is updated — a row of 40 keepers should not crash
+ * on vocabulary drift.
  */
 export function keeperStateTone(state: string): StatusChipTone {
   switch (state) {
+    // ok — live and serving
     case 'running':
+    case 'active':
       return 'ok'
+    // working — in flight, not actionable
     case 'compacting':
     case 'handing_off':
+    case 'handoff-imminent':
     case 'draining':
+    case 'preparing':
+    case 'listening':
       return 'info'
+    // warn — degraded but not yet dead
     case 'failing':
     case 'overflowed':
     case 'restarting':
+    case 'busy':
       return 'warn'
+    // paused — human or governor paused
     case 'paused':
       return 'paused'
+    // error — crash / lost
     case 'crashed':
     case 'dead':
       return 'bad'
+    // inactive — offline / stopped / never started
     case 'stopped':
     case 'offline':
+    case 'idle':
+    case 'unbooted':
+    case 'inactive':
       return 'neutral'
     default:
       return 'neutral'

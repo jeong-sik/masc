@@ -236,6 +236,8 @@ let build_agent
     ?(gate_config : Eval_gate.gate_config option)
     ?context_injector
     ?context
+    ?(approval : Oas.Hooks.approval_callback =
+      Approval_callbacks.reject_by_default)
     () : (Oas.Agent.t, string) result =
   let config = agent_config_of_worker_meta meta ~system_prompt in
   let tool_names =
@@ -274,6 +276,11 @@ let build_agent
     |> Oas.Builder.with_raw_trace raw_trace
     |> Oas.Builder.with_periodic_callbacks heartbeat_callbacks
     |> Oas.Builder.with_description (description_of_meta meta)
+    (* #7883: fail-closed by default. Worker OAS runs execute MASC-issued
+       tools without a human gate; if the caller does not supply an
+       explicit approval source, reject every ApprovalRequired tool call
+       rather than letting OAS log-and-execute. *)
+    |> Oas.Builder.with_approval approval
   in
   let builder = match context_injector with
     | Some ci -> Oas.Builder.with_context_injector ci builder
@@ -605,7 +612,12 @@ and resume_worker_via_oas
       ~tool_retry_policy:default_internal_tool_retry_policy ()
   in
   let options = { options with
-    Oas.Agent_types.context_injector = Some context_injector } in
+    Oas.Agent_types.context_injector = Some context_injector;
+    (* #7883: resume path must install fail-closed approval callback.
+       Without this, OAS would see approval=None on resume and log
+       "ApprovalRequired but no approval callback — executing" while
+       running the tool anyway. *)
+    approval = Some Approval_callbacks.reject_by_default } in
   Fun.protect
     ~finally:(fun () ->
       ignore

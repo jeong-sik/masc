@@ -21,3 +21,35 @@
     silences the stray WARN line. *)
 let auto_approve : Oas.Hooks.approval_callback =
   fun ~tool_name:_ ~input:_ -> Oas.Hooks.Approve
+
+(** Fail-closed default callback for OAS Agent builder sites that do
+    not have an explicit human-in-the-loop or MASC-trusted-system
+    decision source.
+
+    Every OAS [Agent.t] constructed by MASC must install an
+    approval_callback. Without one, OAS logs [WARN] "ApprovalRequired
+    but no approval callback — executing" and executes the tool
+    anyway (fail-open). [oas_log_bridge] promotes that WARN to ERROR
+    for visibility, but promotion is not a gate — the tool still
+    runs. See #7883.
+
+    Use this callback at the Builder / run_named site when neither
+    [Governance_pipeline.to_oas_approval_callback] (keepers with HITL
+    queue) nor [auto_approve] (explicitly trusted system runs) is
+    wired. It rejects every ApprovalRequired tool call with a
+    structured reason so the caller fails loudly rather than
+    executing silently.
+
+    Callers wanting auto-approval must opt in explicitly by passing
+    [auto_approve]. This changes the default from fail-open to
+    fail-closed. *)
+let reject_by_default : Oas.Hooks.approval_callback =
+  fun ~tool_name ~input:_ ->
+    Oas.Hooks.Reject
+      (Printf.sprintf
+         "MASC approval fail-closed: tool %s requires approval but no \
+          approval_callback was wired at this Agent builder site. \
+          Install Governance_pipeline.to_oas_approval_callback (keeper \
+          HITL) or Approval_callbacks.auto_approve (trusted system run) \
+          at the construction site. See #7883."
+         tool_name)

@@ -14,3 +14,15 @@ val auto_approve : Oas.Hooks.approval_callback
     See the .ml file for the full rationale. TL;DR: keeper runs should
     use [Governance_pipeline.to_oas_approval_callback]; system runs
     that have already decided the caller is trusted should use this. *)
+
+val reject_by_default : Oas.Hooks.approval_callback
+(** Fail-closed default callback for OAS Agent builder sites that do
+    not have an explicit human-in-the-loop or MASC-trusted-system
+    decision source. Returns [Reject _] on every ApprovalRequired
+    tool call with a structured reason naming the tool.
+
+    Closes the fail-open gap described in #7883: previously, Agent
+    builder sites with [approval = None] logged "ApprovalRequired
+    but no approval callback — executing" and executed the tool
+    anyway. Install this (or an explicit callback) at every builder
+    site to make the decision explicit. *)

@@ -844,11 +844,9 @@ let handle_tasks ctx args =
   in
   (true, Coord.list_tasks ctx.config ~include_done ~include_cancelled ?status)
 
-let handle_task_history ctx args =
-  let task_id = get_string args "task_id" "" in
-  let limit = get_int args "limit" 50 in
+let task_history_events_json (config : Coord.config) ~task_id ~limit =
   let scan_limit = min 500 (limit * 5) in
-  let lines = Mcp_server.read_event_lines ctx.config ~limit:scan_limit in
+  let lines = Mcp_server.read_event_lines config ~limit:scan_limit in
   let (parsed, _malformed) =
     Fs_compat.parse_jsonl_lines ~source:"task_events" lines
   in
@@ -867,7 +865,12 @@ let handle_task_history ctx args =
     | x :: rest -> x :: take (n - 1) rest
   in
   let events = parsed |> List.filter matches_task |> take limit in
-  (true, Yojson.Safe.to_string (`List events))
+  `List events
+
+let handle_task_history ctx args =
+  let task_id = get_string args "task_id" "" in
+  let limit = get_int args "limit" 50 in
+  (true, Yojson.Safe.to_string (task_history_events_json ctx.config ~task_id ~limit))
 
 include Tool_task_schemas
 (* Dispatch function *)

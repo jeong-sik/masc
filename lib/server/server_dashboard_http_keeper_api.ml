@@ -541,6 +541,21 @@ let extract_keeper_name_for_post req_path suffix =
   in
   if is_valid_keeper_name raw then raw else ""
 
+let refresh_keeper_execution_surfaces ~name event =
+  Operator_control_snapshot.invalidate_snapshot_cache ();
+  (try Dashboard_cache.invalidate "execution:default:light" with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+       Log.Dashboard.warn
+         "keeper %s %s: execution dashboard cache invalidate failed: %s"
+         name event (Printexc.to_string exn));
+  Server_dashboard_http_execution_surfaces.patch_keeper_dependent_caches
+    ~keeper_name:name ~event
+
+let invalidate_keeper_execution_surfaces () =
+  Operator_control_snapshot.invalidate_snapshot_cache ();
+  Server_dashboard_http_execution_surfaces.invalidate_execution_cache ()
+
 let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_post req_path keeper_suffix_config in
@@ -654,6 +669,52 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
       {|{"error":"keeper name is required"}|} reqd
   else
     let config = state.Mcp_server.room_config in
+    let resolve_keeper_agent_name () =
+      match Keeper_registry.find_by_name name with
+      | Some entry -> Some entry.meta.agent_name
+      | None -> (
+          match Keeper_types.read_meta config name with
+          | Ok (Some meta) -> Some meta.agent_name
+          | Ok None | Error _ -> None)
+    in
+    let persist_keeper_paused_state paused =
+      match Keeper_types.read_meta config name with
+      | Ok (Some meta) when Bool.equal meta.paused paused -> ()
+      | Ok (Some meta) ->
+          let updated_meta =
+            {
+              meta with
+              paused;
+              updated_at = Keeper_types.now_iso ();
+            }
+          in
+          (match Keeper_types.write_meta ~force:true config updated_meta with
+           | Ok () -> ()
+           | Error err ->
+               Log.Keeper.warn
+                 "keeper %s %s: write_meta failed: %s"
+                 name
+                 (if paused then "pause" else "resume")
+                 err)
+      | Ok None | Error _ -> ()
+    in
+    let resume_booted_keeper_if_needed () =
+      match Keeper_types.read_meta config name with
+      | Ok (Some meta) when meta.paused ->
+          persist_keeper_paused_state false;
+          (match resolve_keeper_agent_name () with
+           | Some keeper_agent_name ->
+               Keeper_keepalive.process_directive
+                 ~agent_name:keeper_agent_name
+                 "resume"
+           | None ->
+               Log.Keeper.warn
+                 "keeper boot: agent_name not found for paused keeper %s"
+                 name)
+      | Ok (Some _)
+      | Ok None
+      | Error _ -> ()
+    in
     let keeper_ctx : _ Tool_keeper.context =
       {
         config;
@@ -691,6 +752,11 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     | Ok args ->
     match Tool_keeper.dispatch keeper_ctx ~name:tool_name ~args with
     | Some (true, body) when String.equal action "boot" || String.equal action "clear" ->
+        if String.equal action "boot"
+        then (
+          resume_booted_keeper_if_needed ();
+          refresh_keeper_execution_surfaces ~name "started")
+        else invalidate_keeper_execution_surfaces ();
         Http.Response.json ~compress:true ~request:req
           (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s","detail":%s}|}
              (String.escaped action)
@@ -698,6 +764,9 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
              body)
           reqd
     | Some (true, _body) ->
+        (match action with
+         | "shutdown" -> refresh_keeper_execution_surfaces ~name "stopped"
+         | _ -> invalidate_keeper_execution_surfaces ());
         Http.Response.json ~compress:true ~request:req
           (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s"}|}
              (String.escaped action)
@@ -718,7 +787,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     Delegates to [Keeper_keepalive.process_directive] which updates
     registry state, dispatches a state-machine event, and optionally
     wakes up the keeper fiber. *)
-let handle_keeper_directive_post _state _agent_name req reqd body_str =
+let handle_keeper_directive_post state _agent_name req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_post req_path keeper_suffix_directive in
   if String.length name = 0 then
@@ -745,7 +814,51 @@ let handle_keeper_directive_post _state _agent_name req reqd body_str =
              (Yojson.Safe.to_string (`String msg)))
           reqd
     | Ok action_str ->
-        Keeper_keepalive.process_directive ~agent_name:name action_str;
+        let config = state.Mcp_server.room_config in
+        let meta_opt =
+          match Keeper_types.read_meta config name with
+          | Ok (Some meta) -> Some meta
+          | Ok None | Error _ -> None
+        in
+        let persist_paused_state paused =
+          match meta_opt with
+          | Some meta when not (Bool.equal meta.paused paused) ->
+              let updated_meta =
+                {
+                  meta with
+                  paused;
+                  updated_at = Keeper_types.now_iso ();
+                }
+              in
+              (match Keeper_types.write_meta ~force:true config updated_meta with
+               | Ok () -> ()
+               | Error err ->
+                   Log.Keeper.warn
+                     "directive %s: write_meta failed for %s: %s"
+                     action_str
+                     name
+                     err)
+          | Some _ | None -> ()
+        in
+        (match action_str with
+         | "pause" -> persist_paused_state true
+         | "resume" -> persist_paused_state false
+         | "wakeup"
+         | _ -> ());
+        let resolved_agent_name =
+          match Keeper_registry.find_by_name name with
+          | Some entry -> entry.meta.agent_name
+          | None -> (
+              match meta_opt with
+              | Some meta -> meta.agent_name
+              | None -> Keeper_types.keeper_agent_name name)
+        in
+        Keeper_keepalive.process_directive ~agent_name:resolved_agent_name action_str;
+        (match action_str with
+         | "pause" -> refresh_keeper_execution_surfaces ~name "paused"
+         | "resume" -> refresh_keeper_execution_surfaces ~name "resumed"
+         | "wakeup" -> invalidate_keeper_execution_surfaces ()
+         | _ -> invalidate_keeper_execution_surfaces ());
         Http.Response.json ~compress:true ~request:req
           (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s"}|}
              (String.escaped action_str) (String.escaped name))

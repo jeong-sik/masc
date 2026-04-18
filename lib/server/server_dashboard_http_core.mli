@@ -35,6 +35,9 @@ val run_dashboard_compute :
     Exposed for the facade module [Server_dashboard_http]. *)
 val _operator_snapshot_cache : cached_surface
 val _operator_digest_cache : cached_surface
+val _shell_warmed : bool Atomic.t
+val _shell_warming : bool Atomic.t
+val _last_good_shell : Yojson.Safe.t Atomic.t
 
 (** Late-bound broadcast callbacks — set by [Server_dashboard_http]
     after [Sse] module is in scope. *)
@@ -145,3 +148,9 @@ val dashboard_shell_http_json :
   ?request:Httpun.Request.t ->
   Coord.config ->
   Yojson.Safe.t
+
+val dashboard_shell_payload_json :
+  Coord.config -> Yojson.Safe.t
+
+val is_dashboard_cache_timeout_json :
+  Yojson.Safe.t -> bool

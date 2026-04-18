@@ -96,6 +96,67 @@ let () = test "dispatch_tasks" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "task_history_events_json_filters_by_task_id" (fun () ->
+  let ctx = make_test_ctx () in
+  let rec mkdir_p path =
+    if path = "" || path = "." || path = "/" then ()
+    else if Sys.file_exists path then ()
+    else begin
+      mkdir_p (Filename.dirname path);
+      Unix.mkdir path 0o755
+    end
+  in
+  let open Unix in
+  let tm = gmtime (gettimeofday ()) in
+  let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
+  let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
+  let events_dir = Filename.concat (Coord.masc_dir ctx.config) "events" in
+  let month_dir = Filename.concat events_dir month in
+  let log_file = Filename.concat month_dir day in
+  mkdir_p month_dir;
+  let event task_id action =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("type", `String "task_transition");
+          ("task_id", `String task_id);
+          ("action", `String action);
+          ("agent", `String ctx.agent_name);
+          ("ts", `String "2026-04-18T00:00:00Z");
+        ])
+  in
+  Fs_compat.append_file log_file (event "task-001" "claim" ^ "\n");
+  Fs_compat.append_file log_file (event "task-002" "done" ^ "\n");
+  let json = Tool_task.task_history_events_json ctx.config ~task_id:"task-001" ~limit:20 in
+  let events =
+    match json with
+    | `List rows -> rows
+    | _ -> failwith "task history payload must be a JSON list"
+  in
+  assert (List.length events = 1);
+  List.iter (fun row ->
+    let open Yojson.Safe.Util in
+    let task =
+      match row |> member "task" with
+      | `String value -> Some value
+      | _ ->
+          (match row |> member "task_id" with
+           | `String value -> Some value
+           | _ -> None)
+    in
+    assert (task = Some "task-001")
+  ) events
+)
+
+let () = test "task_history_events_json_returns_empty_for_missing_task" (fun () ->
+  let ctx = make_test_ctx () in
+  let json = Tool_task.task_history_events_json ctx.config ~task_id:"task-404" ~limit:20 in
+  match json with
+  | `List [] -> ()
+  | `List _ -> failwith "missing task should have no history events"
+  | _ -> failwith "task history payload must be a JSON list"
+)
+
 let () = test "masc_oas_bridge_runs_without_eio_env" (fun () ->
   match Masc_eio_env.get_opt () with
   | Some _ ->

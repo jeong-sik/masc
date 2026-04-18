@@ -1,4 +1,4 @@
-import { post, fetchWithTimeout } from './core'
+import { get, post, fetchWithTimeout } from './core'
 import { ACTIVITY_TIMEOUT_MS } from '../config/constants'
 import { callMcpTool } from './mcp'
 import {
@@ -31,6 +31,14 @@ export async function fetchTaskHistory(taskId: string, limit = 20): Promise<stri
     task_id: taskId,
     limit,
   })
+}
+
+export function fetchTaskEvents(taskId: string, limit = 50): Promise<unknown[]> {
+  const params = new URLSearchParams({
+    task_id: taskId,
+    limit: String(limit),
+  })
+  return get<unknown[]>(`/api/v1/dashboard/tasks/history?${params.toString()}`)
 }
 
 // --- Activity Graph ---

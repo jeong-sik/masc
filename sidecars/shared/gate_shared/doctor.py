@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import json
 import sys
 from collections.abc import Awaitable, Callable, Iterable, Sequence
@@ -34,6 +35,7 @@ __all__ = [
     "Doctor",
     "NETWORK_TIMEOUT_SEC",
     "Severity",
+    "check_dependencies_installed",
     "render_pretty",
     "render_json",
 ]
@@ -220,3 +222,40 @@ class Doctor:
                 continue
             await c.auto_fix.callback()
         return await self.run()
+
+
+def check_dependencies_installed(packages: Sequence[str]) -> CheckFn:
+    """Return a CheckFn that reports any missing packages by name.
+
+    Uses importlib.metadata (stdlib) so the check itself has zero runtime
+    dependencies — critical for diagnosing "nothing is installed yet"
+    states where importing the sidecar's own config module would crash.
+
+    Register this first in a Doctor so the operator sees a single clear
+    'missing deps' check instead of a raw ImportError traceback.
+    """
+
+    async def _check() -> Check:
+        missing: list[str] = []
+        for pkg in packages:
+            try:
+                importlib.metadata.version(pkg)
+            except importlib.metadata.PackageNotFoundError:
+                missing.append(pkg)
+        if not missing:
+            return Check(
+                name="dependencies installed",
+                severity=Severity.ok,
+                detail=f"{len(packages)} packages",
+                message="",
+            )
+        return Check(
+            name="dependencies installed",
+            severity=Severity.error,
+            detail=", ".join(missing),
+            message="필수 패키지가 설치돼 있지 않습니다. 다음 체크들이 연쇄 실패할 수 있습니다.",
+            hint="uv sync 또는 pip install -r requirements.txt",
+        )
+
+    _check.__name__ = "check_dependencies_installed"
+    return _check

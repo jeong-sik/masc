@@ -97,12 +97,29 @@ let save_file (path : string) (content : string) : unit =
       let eio_path = Eio.Path.(fs / path) in
       Eio.Path.save ~create:(`Or_truncate 0o644) eio_path content)
 
+(* Durable atomic write: tmp → fsync(tmp) → rename → fsync(parent dir).
+   Without the fsync pair, a crash between the rename and the kernel's
+   dirty-page flush can leave the target truncated or zero-length — exactly
+   what we observed on backlog.json after an abrupt shutdown (2026-04-18). *)
+let fsync_path path =
+  let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
+  Fun.protect
+    ~finally:(fun () -> try Unix.close fd with _ -> ())
+    (fun () ->
+      try Unix.fsync fd
+      with Unix.Unix_error ((Unix.EINVAL | Unix.EOPNOTSUPP), _, _) ->
+        (* Some filesystems (tmpfs on some kernels) reject fsync. The data
+           is still durable to the extent the underlying FS offers. *)
+        ())
+
 let save_file_atomic (path : string) (content : string) : (unit, string) result =
   let dir = Filename.dirname path in
   let tmp = Filename.temp_file ~temp_dir:dir ".atomic_" ".tmp" in
   try
     save_file tmp content;
+    fsync_path tmp;
     Sys.rename tmp path;
+    (try fsync_path dir with Unix.Unix_error _ -> ());
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e ->

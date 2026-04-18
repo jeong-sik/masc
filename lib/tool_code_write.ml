@@ -100,6 +100,7 @@ let allowed_worktree_prefixes config =
    so legacy server operations that need to touch repo worktrees
    continue to work. *)
 let validate_writable_path ~(agent_name : string) config path =
+  let path = Tool_code.normalize_agent_relative_path ~config ~agent_name path in
   match Tool_code.validate_path config path with
   | Error e -> Error e
   | Ok canonical_path ->
@@ -272,6 +273,7 @@ let validate_clone_url ~base_path url =
     #6527 iter 6 scoped this per-agent so agent A cannot drop a clone
     into agent B's playground/repos/ via masc_code_git action=clone. *)
 let validate_clone_cwd ~(agent_name : string) config cwd =
+  let cwd = Tool_code.normalize_agent_relative_path ~config ~agent_name cwd in
   match Tool_code.validate_path config cwd with
   | Error e -> Error e
   | Ok canonical_path ->

@@ -30,8 +30,9 @@ describe('statusDotClasses (pure)', () => {
   })
 
   it('tone class is appended after size (caller controls color)', () => {
-    const cls = statusDotClasses('sm', 'bg-emerald-500')
-    expect(cls).toMatch(/w-2 h-2.*bg-emerald-500/)
+    const cls = statusDotClasses('sm', 'bg-[var(--ok-10)]')
+    expect(cls).toContain('w-2 h-2')
+    expect(cls).toContain('bg-[var(--ok-10)]')
   })
 
   it('empty / undefined tone does not leave trailing whitespace', () => {
@@ -40,8 +41,10 @@ describe('statusDotClasses (pure)', () => {
   })
 
   it('extra class appended after tone (margin, ring, etc.)', () => {
-    expect(statusDotClasses('sm', 'bg-rose-500', 'ml-1'))
-      .toMatch(/bg-rose-500.*ml-1/)
+    const cls = statusDotClasses('sm', 'bg-[var(--bad-10)]', 'ml-1')
+    expect(cls).toContain('bg-[var(--bad-10)]')
+    expect(cls).toContain('ml-1')
+    expect(cls.indexOf('bg-[var(--bad-10)]')).toBeLessThan(cls.indexOf('ml-1'))
   })
 })
 
@@ -64,8 +67,8 @@ describe('StatusDot component', () => {
   })
 
   it('tone class (passed via `class`) ends up on the span', () => {
-    render(html`<${StatusDot} class="bg-emerald-500" />`, container)
-    expect(container.querySelector('[data-status-dot]')!.className).toContain('bg-emerald-500')
+    render(html`<${StatusDot} class="bg-[var(--ok-10)]" />`, container)
+    expect(container.querySelector('[data-status-dot]')!.className).toContain('bg-[var(--ok-10)]')
   })
 
   it('default (no ariaLabel) is decorative — aria-hidden=true, no role', () => {
@@ -80,7 +83,7 @@ describe('StatusDot component', () => {
 
   it('ariaLabel promotes to semantic mode: role=img, no aria-hidden', () => {
     render(
-      html`<${StatusDot} ariaLabel="running" class="bg-emerald-500" />`,
+      html`<${StatusDot} ariaLabel="running" class="bg-[var(--ok-10)]" />`,
       container,
     )
     const el = container.querySelector('[data-status-dot]')!
@@ -100,7 +103,7 @@ describe('StatusDot component', () => {
 
   it('testId renders as data-testid', () => {
     render(
-      html`<${StatusDot} testId="transport-sse-dot" class="bg-emerald-500" />`,
+      html`<${StatusDot} testId="transport-sse-dot" class="bg-[var(--ok-10)]" />`,
       container,
     )
     expect(container.querySelector('[data-testid="transport-sse-dot"]')).toBeTruthy()

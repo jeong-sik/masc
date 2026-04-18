@@ -104,7 +104,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
     tone === 'in-progress' ? 'text-[var(--accent)]' :
     'text-[var(--text-dim)]'
   const progressBarToneClass =
-    tone === 'complete' ? 'bg-emerald-400' :
+    tone === 'complete' ? 'bg-[var(--ok-10)]' :
     tone === 'in-progress' ? 'bg-[var(--accent)]' :
     'bg-[var(--white-10)]'
 
@@ -128,7 +128,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
           ${tone === 'complete'
             ? html`
                 <span
-                  class="inline-flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--ok)]"
+                  class="inline-flex items-center gap-1 rounded-full border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--ok)]"
                   aria-label="Setup guide complete"
                   data-setup-complete-badge
                 >
@@ -177,7 +177,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
                   // even before checkboxes are ticked. Circle turns
                   // emerald-filled when the step is complete.
                   const circleToneClass = done
-                    ? 'border-emerald-400 bg-emerald-500/20 text-[var(--ok)]'
+                    ? 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]'
                     : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)]'
                   return html`
                     <li class="flex items-start gap-2.5" data-setup-step-item=${idx}>

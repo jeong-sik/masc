@@ -95,7 +95,7 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
 
   return html`
     <div
-      class="mt-2 flex items-center gap-2 rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[11px] text-[var(--warn)]"
+      class="mt-2 flex items-center gap-2 rounded-md border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]"
       data-startup-warning=${connectorId}
     >
       <span class="text-base leading-none" aria-hidden="true">⚠</span>
@@ -108,7 +108,7 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
       </div>
       <button
         type="button"
-        class="shrink-0 cursor-pointer rounded border border-amber-400/30 bg-amber-500/15 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--warn)] hover:bg-amber-500/25"
+        class="shrink-0 cursor-pointer rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--warn)] hover:bg-[var(--warn-10)]"
         onClick=${() => {
           openSidecarLogs(connectorId)
           // Don't clear startAt yet — operator might toggle logs back closed
@@ -118,7 +118,7 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
       >📋 로그 열기</button>
       <button
         type="button"
-        class="shrink-0 cursor-pointer rounded border border-amber-400/20 px-1.5 py-0.5 text-[14px] leading-none text-[var(--warn)]/70 hover:text-[var(--warn)]"
+        class="shrink-0 cursor-pointer rounded border border-[var(--warn-20)] px-1.5 py-0.5 text-[14px] leading-none text-[var(--warn)]/70 hover:text-[var(--warn)]"
         aria-label="dismiss startup warning"
         onClick=${() => clearStartAttempt(connectorId)}
       >×</button>

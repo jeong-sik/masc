@@ -150,10 +150,10 @@ export function deriveMatrix(
 }
 
 const CELL_TONE: Record<MatrixCellState, { dot: string; text: string; bg: string }> = {
-  bound:   { dot: 'bg-emerald-400',     text: 'text-[var(--ok)]',        bg: 'bg-emerald-500/10' },
+  bound:   { dot: 'bg-[var(--ok-10)]',     text: 'text-[var(--ok)]',        bg: 'bg-[var(--ok-10)]' },
   unbound: { dot: 'bg-[var(--white-8)]', text: 'text-[var(--text-dim)]', bg: 'bg-transparent'    },
   na:      { dot: 'bg-[var(--white-4)]', text: 'text-[var(--text-dim)]', bg: 'bg-transparent'    },
-  unknown: { dot: 'bg-amber-400',       text: 'text-[var(--warn)]',          bg: 'bg-amber-500/10'   },
+  unknown: { dot: 'bg-[var(--warn-10)]',       text: 'text-[var(--warn)]',          bg: 'bg-[var(--warn-10)]'   },
 }
 
 const CELL_GLYPH: Record<MatrixCellState, string> = {
@@ -242,10 +242,10 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
           </p>
         </div>
         <div class="text-[10px] text-[var(--text-dim)]">
-          <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-400"></span>bound</span>
+          <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--ok-10)]"></span>bound</span>
           <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--white-8)]"></span>unbound</span>
           <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--white-4)]"></span>n/a</span>
-          <span><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-amber-400"></span>unknown</span>
+          <span><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--warn-10)]"></span>unknown</span>
         </div>
       </header>
 

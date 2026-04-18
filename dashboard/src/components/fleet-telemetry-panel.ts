@@ -118,9 +118,9 @@ function SummaryCard({
 }) {
   const toneClass =
     tone === 'ok'
-      ? 'border-emerald-500/20 bg-emerald-500/5'
+      ? 'border-[var(--ok-20)] bg-[var(--ok-10)]'
       : tone === 'warn'
-        ? 'border-amber-500/20 bg-amber-500/5'
+        ? 'border-[var(--warn-20)] bg-[var(--warn-10)]'
         : 'border-[var(--card-border)] bg-[rgba(255,255,255,0.02)]'
 
   return html`
@@ -135,7 +135,7 @@ function SummaryCard({
 function WarningBanner({ warnings }: { warnings: string[] }) {
   if (warnings.length === 0) return null
   return html`
-    <div class="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] text-[var(--warn)]">
+    <div class="rounded-lg border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]">
       <div class="font-medium text-[var(--warn)]">Partial telemetry</div>
       <div class="mt-1 flex flex-col gap-1">
         ${warnings.map(warning => html`<div>${warning}</div>`)}
@@ -278,14 +278,14 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
               <td class="py-1.5 text-right text-[10px] text-[var(--text-dim)]">${row.model}</td>
               <td class="py-1.5 text-center">
                 ${row.budget_source === 'override_invalid'
-                  ? html`<span class="rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--bad-light)]" title="TOML override가 범위를 벗어남">ERR</span>`
+                  ? html`<span class="rounded bg-[var(--bad-10)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--bad-light)]" title="TOML override가 범위를 벗어남">ERR</span>`
                   : row.budget_source === 'override'
-                    ? html`<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--warn)]" title="TOML override 적용됨">OVR</span>`
+                    ? html`<span class="rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--warn)]" title="TOML override 적용됨">OVR</span>`
                     : html`<span class="text-[10px] text-[var(--text-dim)]">\u2014</span>`}
               </td>
               <td class="py-1.5 text-center">
                 <button
-                  class="rounded p-0.5 text-[var(--text-dim)] hover:text-[var(--bad-light)] hover:bg-red-400/10 transition-colors"
+                  class="rounded p-0.5 text-[var(--text-dim)] hover:text-[var(--bad-light)] hover:bg-[var(--bad-10)] transition-colors"
                   onClick=${() => onReset(row.name)}
                   title="초기화"
                   aria-label=${`${row.name} 초기화`}
@@ -338,7 +338,7 @@ function FailureCategoryPanel({ toolQuality }: { toolQuality: ToolQualityRespons
         <div class="flex items-center gap-2 text-[11px]">
           <div class="flex min-w-0 flex-1 items-center gap-1.5">
             <div
-              class="h-1.5 rounded-full bg-red-500/60"
+              class="h-1.5 rounded-full bg-[var(--bad-10)]"
               style="width: ${Math.max(6, (category.count / maxCount) * 100)}%"
             ></div>
             <span class="truncate font-mono text-[var(--bad-light)]" title=${category.category}>${category.category}</span>
@@ -499,10 +499,10 @@ export function FleetTelemetryPanel() {
         <div class="flex items-center gap-3">
           <h2 class="text-sm font-medium">Keeper 텔레메트리</h2>
           <div class="flex items-center gap-2 text-[10px]">
-            ${activeCount > 0 ? html`<span class="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[var(--ok)]">${activeCount} 가동</span>` : null}
-            ${attentionCount > 0 ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[var(--warn)]">${attentionCount} 주의</span>` : null}
+            ${activeCount > 0 ? html`<span class="rounded-full bg-[var(--ok-10)] px-1.5 py-0.5 text-[var(--ok)]">${activeCount} 가동</span>` : null}
+            ${attentionCount > 0 ? html`<span class="rounded-full bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--warn)]">${attentionCount} 주의</span>` : null}
             ${offlineCount > 0 ? html`<span class="rounded-full bg-[var(--white-8)] px-1.5 py-0.5 text-[var(--text-dim)]">${offlineCount} 오프라인</span>` : null}
-            ${budgetOverrideCount > 0 ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[var(--warn)]">${budgetOverrideCount} 예산 재정의</span>` : null}
+            ${budgetOverrideCount > 0 ? html`<span class="rounded-full bg-[var(--warn-10)] px-1.5 py-0.5 text-[var(--warn)]">${budgetOverrideCount} 예산 재정의</span>` : null}
           </div>
         </div>
         <div class="flex items-center gap-2">

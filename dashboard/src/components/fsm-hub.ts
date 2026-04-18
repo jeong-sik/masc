@@ -648,8 +648,8 @@ function StatusBar({
     && (now - (snapshot.last_outcome?.ended_at ?? snapshot.ts)) > 300
   const liveBadge = snapshot
     ? snapshot.is_live
-      ? html`<span class="px-2 py-0.5 rounded-full border text-[10px] font-mono text-[var(--ok)] border-emerald-500/40 bg-emerald-500/10 animate-pulse">● 실행 중</span>`
-      : html`<span class="px-2 py-0.5 rounded-full border text-[10px] font-mono ${idleIsLong ? 'text-[var(--text-muted)] border-amber-500/30' : 'text-[var(--text-dim)] border-white/10'}">○ 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-[8px] opacity-70">· 턴 #${snapshot.last_outcome.turn_id}</span>` : ''}</span>`
+      ? html`<span class="px-2 py-0.5 rounded-full border text-[10px] font-mono text-[var(--ok)] border-[var(--ok-20)] bg-[var(--ok-10)] animate-pulse">● 실행 중</span>`
+      : html`<span class="px-2 py-0.5 rounded-full border text-[10px] font-mono ${idleIsLong ? 'text-[var(--text-muted)] border-[var(--warn-20)]' : 'text-[var(--text-dim)] border-white/10'}">○ 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-[8px] opacity-70">· 턴 #${snapshot.last_outcome.turn_id}</span>` : ''}</span>`
     : null
 
   const staleSec = lastFetchAt > 0 ? Math.max(0, now - lastFetchAt) : 0

@@ -38,9 +38,9 @@ export function formatUptimeChip(summary: HeartbeatSummary): UptimeChipView | nu
 }
 
 const TONE_CLASS: Record<UptimeTone, string> = {
-  operational: 'text-[var(--ok)] border-emerald-400/30 bg-emerald-500/10',
-  degraded: 'text-[var(--warn)] border-amber-400/30 bg-amber-500/10',
-  unhealthy: 'text-[var(--bad-light)] border-rose-400/30 bg-rose-500/10',
+  operational: 'text-[var(--ok)] border-[var(--ok-20)] bg-[var(--ok-10)]',
+  degraded: 'text-[var(--warn)] border-[var(--warn-20)] bg-[var(--warn-10)]',
+  unhealthy: 'text-[var(--bad-light)] border-[var(--bad-20)] bg-[var(--bad-10)]',
 }
 
 interface HeartbeatUptimeChipProps {

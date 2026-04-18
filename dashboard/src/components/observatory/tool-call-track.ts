@@ -20,8 +20,8 @@ function toolCallOutcome(entry: TelemetryEntry): 'success' | 'failure' | 'unknow
 
 function outcomeColor(outcome: ReturnType<typeof toolCallOutcome>): string {
   switch (outcome) {
-    case 'success': return 'bg-emerald-400'
-    case 'failure': return 'bg-red-400'
+    case 'success': return 'bg-[var(--ok-10)]'
+    case 'failure': return 'bg-[var(--bad-10)]'
     default: return 'bg-text-dim'
   }
 }

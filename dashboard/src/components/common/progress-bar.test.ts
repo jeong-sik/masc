@@ -63,8 +63,8 @@ describe('progressBarToneClass (pure)', () => {
   })
 
   it('raw Tailwind tones route to their bg-500 class', () => {
-    expect(progressBarToneClass('emerald')).toBe('bg-emerald-500')
-    expect(progressBarToneClass('rose')).toBe('bg-rose-500')
+    expect(progressBarToneClass('emerald')).toBe('bg-[var(--ok-10)]')
+    expect(progressBarToneClass('rose')).toBe('bg-[var(--bad-10)]')
   })
 })
 

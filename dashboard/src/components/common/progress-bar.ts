@@ -46,9 +46,9 @@ export function progressBarToneClass(tone: ProgressBarTone): string {
     case 'ok': return 'bg-[var(--ok)]'
     case 'warn': return 'bg-[var(--warn)]'
     case 'bad': return 'bg-[var(--bad)]'
-    case 'emerald': return 'bg-emerald-500'
-    case 'amber': return 'bg-amber-500'
-    case 'rose': return 'bg-rose-500'
+    case 'emerald': return 'bg-[var(--ok-10)]'
+    case 'amber': return 'bg-[var(--warn-10)]'
+    case 'rose': return 'bg-[var(--bad-10)]'
     case 'sky': return 'bg-sky-500'
   }
 }

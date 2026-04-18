@@ -419,7 +419,7 @@ describe('ConnectorStatusPanel', () => {
     // treatment from #8038 for cross-panel consistency.
     const dirPanel = container.querySelector('[data-keeper-directory-error-panel]') as HTMLElement | null
     expect(dirPanel).toBeTruthy()
-    expect(dirPanel!.className).toContain('bg-amber-500/5')
+    expect(dirPanel!.className).toContain('bg-[var(--warn-10)]')
     expect(dirPanel!.className).toContain('border-l-amber-500')
     // Named chip: "Directory error" is what AT hears.
     const dirChip = dirPanel!.querySelector('[aria-label]')
@@ -642,7 +642,7 @@ describe('ConnectorStatusPanel', () => {
     // parent connector's brand color.
     const panel = container.querySelector('[data-sidecar-not-started-panel]') as HTMLElement | null
     expect(panel).toBeTruthy()
-    expect(panel!.className).toContain('bg-amber-500/5')
+    expect(panel!.className).toContain('bg-[var(--warn-10)]')
     expect(panel!.className).toContain('border-l-amber-500')
     // And the explicit "Not running" status chip is the one AT users hear.
     const chip = panel!.querySelector('[data-sidecar-status-chip]')
@@ -682,7 +682,7 @@ describe('ConnectorStatusPanel', () => {
     // green) doesn't paint a "no keepers" panel as success.
     const emptyPanel = container.querySelector('[data-no-keepers-empty-panel]') as HTMLElement | null
     expect(emptyPanel).toBeTruthy()
-    expect(emptyPanel!.className).toContain('bg-amber-500/5')
+    expect(emptyPanel!.className).toContain('bg-[var(--warn-10)]')
     expect(emptyPanel!.className).toContain('border-l-amber-500')
     const chip = emptyPanel!.querySelector('[data-no-keepers-status-chip]')
     expect(chip).toBeTruthy()

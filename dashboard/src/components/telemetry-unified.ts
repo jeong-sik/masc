@@ -841,7 +841,7 @@ export function TelemetryUnified() {
       </div>
 
       ${error ? html`
-        <div class="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-[var(--bad-light)]">
+        <div class="rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--bad-light)]">
           ${error}
         </div>
       ` : null}

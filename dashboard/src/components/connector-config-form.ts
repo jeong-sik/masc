@@ -402,7 +402,7 @@ function FieldWidget({ id, field, value, revealed }: {
       `
     default:
       return html`
-        <div class="rounded border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-[10px] text-[var(--warn)]">
+        <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-[10px] text-[var(--warn)]">
           unsupported type — refactor BotConfig?
         </div>
       `
@@ -429,12 +429,12 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.error !== null) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded-md border border-rose-400/30 bg-rose-500/10 p-3 text-[11px] text-[var(--bad-light)]">
+      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded-md border border-[var(--bad-20)] bg-[var(--bad-10)] p-3 text-[11px] text-[var(--bad-light)]">
         <div class="font-semibold">schema 가져오기 실패</div>
         <div class="mt-1 text-[10px] opacity-80">${entry.error}</div>
         <button
           type="button"
-          class="mt-2 cursor-pointer rounded border border-rose-400/40 px-2 py-1 text-[10px] hover:bg-rose-500/20"
+          class="mt-2 cursor-pointer rounded border border-[var(--bad-20)] px-2 py-1 text-[10px] hover:bg-[var(--bad-10)]"
           onClick=${() => fetchSchema(connectorId)}
         >다시 시도</button>
       </div>
@@ -461,7 +461,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
                 <span class="ml-2 text-[var(--ok)]">· 저장됨 ${new Date(entry.lastSavedAt).toLocaleTimeString()}</span>
                 <button
                   type="button"
-                  class="ml-2 cursor-pointer rounded border border-emerald-400/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-[var(--ok)] hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  class="ml-2 cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-[10px] text-[var(--ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-50"
                   disabled=${entry.restarting}
                   title="POST /sidecar/stop → 800ms → POST /sidecar/start"
                   onClick=${() => { void restartSidecar(connectorId) }}

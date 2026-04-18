@@ -70,10 +70,10 @@ const INVARIANT_KEYS = Object.keys(INVARIANT_LABELS) as Array<
 // recommendation: stable=gray, in-motion=amber/blue, terminal=red.
 const CHIP_CLASS_BY_STATE: Record<string, string> = {
   // KSM
-  Running:      'bg-emerald-900/40 text-[var(--ok)] border-emerald-700',
-  Failing:      'bg-red-900/50 text-[var(--bad-light)] border-red-700',
+  Running:      'bg-emerald-900/40 text-[var(--ok)] border-[var(--ok-20)]',
+  Failing:      'bg-red-900/50 text-[var(--bad-light)] border-[var(--bad-20)]',
   Overflowed:   'bg-orange-900/50 text-orange-200 border-orange-700',
-  Compacting:   'bg-amber-900/50 text-[var(--warn)] border-amber-700',
+  Compacting:   'bg-amber-900/50 text-[var(--warn)] border-[var(--warn-20)]',
   HandingOff:   'bg-blue-900/50 text-blue-200 border-blue-700',
   Draining:     'bg-sky-900/40 text-sky-200 border-sky-700',
   Paused:       'bg-zinc-800 text-zinc-300 border-zinc-600',
@@ -85,19 +85,19 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   // KTC
   idle:         'bg-zinc-800 text-zinc-400 border-zinc-700',
   prompting:    'bg-blue-900/40 text-blue-200 border-blue-700',
-  executing:    'bg-emerald-900/40 text-[var(--ok)] border-emerald-700',
-  compacting:   'bg-amber-900/50 text-[var(--warn)] border-amber-700',
+  executing:    'bg-emerald-900/40 text-[var(--ok)] border-[var(--ok-20)]',
+  compacting:   'bg-amber-900/50 text-[var(--warn)] border-[var(--warn-20)]',
   finalizing:   'bg-sky-900/40 text-sky-200 border-sky-700',
   // KDP
   undecided:          'bg-zinc-800 text-zinc-400 border-zinc-700',
-  guard_ok:           'bg-emerald-900/40 text-[var(--ok)] border-emerald-700',
-  gate_rejected:      'bg-red-900/40 text-[var(--bad-light)] border-red-700',
+  guard_ok:           'bg-emerald-900/40 text-[var(--ok)] border-[var(--ok-20)]',
+  gate_rejected:      'bg-red-900/40 text-[var(--bad-light)] border-[var(--bad-20)]',
   tool_policy_selected: 'bg-indigo-900/50 text-indigo-200 border-indigo-700',
   // KCL
   selecting:    'bg-blue-900/40 text-blue-200 border-blue-700',
-  trying:       'bg-amber-900/50 text-[var(--warn)] border-amber-700',
-  done:         'bg-emerald-900/40 text-[var(--ok)] border-emerald-700',
-  exhausted:    'bg-red-900/50 text-[var(--bad-light)] border-red-700',
+  trying:       'bg-amber-900/50 text-[var(--warn)] border-[var(--warn-20)]',
+  done:         'bg-emerald-900/40 text-[var(--ok)] border-[var(--ok-20)]',
+  exhausted:    'bg-red-900/50 text-[var(--bad-light)] border-[var(--bad-20)]',
   // KMC
   accumulating: 'bg-zinc-800 text-zinc-400 border-zinc-700',
   // KCB (LT-16-KCB Phase 3). Clean = baseline grey same as any other
@@ -107,7 +107,7 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   // chip colour by design — the mutator resets the count before any
   // observer can see it.
   clean:   'bg-zinc-800 text-zinc-400 border-zinc-700',
-  warning: 'bg-amber-900/50 text-[var(--warn)] border-amber-700',
+  warning: 'bg-amber-900/50 text-[var(--warn)] border-[var(--warn-20)]',
   cooling: 'bg-sky-900/40 text-sky-200 border-sky-700',
 }
 
@@ -347,7 +347,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                   const count = tallies[k]
                   const tone = count === 0
                     ? 'bg-emerald-900/30 text-[var(--ok)] border-emerald-800'
-                    : 'bg-red-900/40 text-[var(--bad-light)] border-red-700'
+                    : 'bg-red-900/40 text-[var(--bad-light)] border-[var(--bad-20)]'
                   return html`
                     <span
                       data-invariant=${k}
@@ -387,7 +387,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
           <tbody>
             ${visibleSnapshots.map(snap => {
               const anyViolated = INVARIANT_KEYS.some(k => !snap.invariants[k])
-              const rowTone = anyViolated ? 'border-l-2 border-red-500' : ''
+              const rowTone = anyViolated ? 'border-l-2 border-[var(--bad-20)]' : ''
               const name = inferKeeperNameFrom(snap)
               return html`
                 <tr

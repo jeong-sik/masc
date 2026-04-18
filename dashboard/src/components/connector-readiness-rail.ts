@@ -69,10 +69,10 @@ export interface RailPill {
 
 const TONE: Record<RailState, { bg: string; border: string; text: string; dot: string; icon: string; gradient: string }> = {
   ok: {
-    bg: 'bg-emerald-500/10',
-    border: 'border-emerald-400/40',
+    bg: 'bg-[var(--ok-10)]',
+    border: 'border-[var(--ok-20)]',
     text: 'text-[var(--ok)]',
-    dot: 'bg-emerald-400',
+    dot: 'bg-[var(--ok-10)]',
     icon: '✓',
     // Grafana Stat panel "Background Gradient" mode — subtle vertical
     // fade from the state's tone into the card surface so the pill
@@ -80,18 +80,18 @@ const TONE: Record<RailState, { bg: string; border: string; text: string; dot: s
     gradient: 'bg-gradient-to-b from-emerald-500/15 to-emerald-500/0',
   },
   warn: {
-    bg: 'bg-amber-500/10',
-    border: 'border-amber-400/40',
+    bg: 'bg-[var(--warn-10)]',
+    border: 'border-[var(--warn-20)]',
     text: 'text-[var(--warn)]',
-    dot: 'bg-amber-400',
+    dot: 'bg-[var(--warn-10)]',
     icon: '!',
     gradient: 'bg-gradient-to-b from-amber-500/15 to-amber-500/0',
   },
   bad: {
-    bg: 'bg-rose-500/10',
-    border: 'border-rose-400/40',
+    bg: 'bg-[var(--bad-10)]',
+    border: 'border-[var(--bad-20)]',
     text: 'text-[var(--bad-light)]',
-    dot: 'bg-rose-400',
+    dot: 'bg-[var(--bad-10)]',
     icon: '⊘',
     gradient: 'bg-gradient-to-b from-rose-500/15 to-rose-500/0',
   },

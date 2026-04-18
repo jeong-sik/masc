@@ -269,6 +269,16 @@ let test_background_pending_callback_and_keeper_lookup () =
     (AQ.has_pending_for_keeper ~keeper_name:"gate-keeper");
   Alcotest.(check int) "background entry added"
     (initial_count + 1) (AQ.pending_count ());
+  let pending_preview =
+    match AQ.list_pending_json () with
+    | `List (`Assoc kvs :: _) ->
+        (match List.assoc_opt "input_preview" kvs with
+         | Some (`String value) -> value
+         | _ -> "")
+    | _ -> ""
+  in
+  Alcotest.(check bool) "pending json includes input preview" true
+    (String.length pending_preview > 0);
   (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve () with
    | Ok () -> ()
    | Error msg -> Alcotest.fail ("resolve failed: " ^ msg));

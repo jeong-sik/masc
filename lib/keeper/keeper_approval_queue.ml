@@ -361,6 +361,7 @@ let list_pending_json () : Yojson.Safe.t =
       ("risk_level", `String (risk_level_to_string entry.risk_level));
       ("input_kind", Json_util.option_to_yojson (fun value -> `String value)
          (input_kind_opt entry.input));
+      ("input_preview", `String (input_preview_of_json entry.input));
       ("requested_at", `Float entry.requested_at);
       ("waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at));
     ] :: acc

@@ -388,6 +388,31 @@ let test_masc_spawn_schema () =
           Alcotest.(check bool) "has prompt" true (List.mem_assoc "prompt" props)
       | None -> Alcotest.fail "masc_spawn missing properties"
 
+let test_masc_approval_pending_schema () =
+  match find_tool "masc_approval_pending" with
+  | None -> Alcotest.fail "masc_approval_pending not found"
+  | Some schema ->
+      Alcotest.(check string) "approval_pending schema type" "object"
+        (Option.value ~default:""
+           (get_json_string "type" schema.input_schema))
+
+let test_masc_approval_resolve_schema () =
+  match find_tool "masc_approval_resolve" with
+  | None -> Alcotest.fail "masc_approval_resolve not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has id" true (List.mem_assoc "id" props);
+          Alcotest.(check bool) "has decision" true (List.mem_assoc "decision" props);
+          Alcotest.(check bool) "has reason" true (List.mem_assoc "reason" props);
+          Alcotest.(check bool) "has keeper_name fallback" true
+            (List.mem_assoc "keeper_name" props);
+          Alcotest.(check bool) "has tool_name fallback" true
+            (List.mem_assoc "tool_name" props);
+          Alcotest.(check bool) "has input_kind fallback" true
+            (List.mem_assoc "input_kind" props)
+      | None -> Alcotest.fail "masc_approval_resolve missing properties"
+
 (* test_masc_runtime_verify_schema removed: tool pruned *)
 
 (* test_masc_persona_list_schema removed: persona list coverage is trivial. *)
@@ -735,6 +760,8 @@ let () =
     (* auth_tools, a2a_tools (poll_events/heartbeat_result), handover_tools,
        bounded_run removed: pruned from registry *)
     "spawn_runtime_tools", [
+      Alcotest.test_case "approval-pending" `Quick test_masc_approval_pending_schema;
+      Alcotest.test_case "approval-resolve" `Quick test_masc_approval_resolve_schema;
       Alcotest.test_case "spawn" `Quick test_masc_spawn_schema;
     ];
     "keeper_runtime_tools", [

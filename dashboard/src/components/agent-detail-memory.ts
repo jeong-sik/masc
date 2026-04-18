@@ -139,13 +139,13 @@ export function AgentDetailMemory({ agentName }: Props) {
                                 (s: MemorySubsystemsSynapse) => html`
                                   <div class="flex items-center gap-2 text-xs">
                                     <span class="font-mono flex-1 truncate">${normalizeKeeperName(s.to_agent)}</span>
-                                    <div class="w-16 bg-zinc-800 rounded h-1.5">
+                                    <div class="w-16 bg-[var(--white-5)] rounded h-1.5">
                                       <div
                                         class="${s.weight >= 0.7 ? 'bg-[var(--ok-10)]' : s.weight >= 0.4 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'} rounded h-1.5"
                                         style="width:${Math.round(s.weight * 100)}%"
                                       ></div>
                                     </div>
-                                    <span class="text-zinc-400 w-10 text-right">${Math.round(s.weight * 100)}%</span>
+                                    <span class="text-[var(--text-muted)] w-10 text-right">${Math.round(s.weight * 100)}%</span>
                                   </div>
                                 `,
                               )}
@@ -164,13 +164,13 @@ export function AgentDetailMemory({ agentName }: Props) {
                                 (s: MemorySubsystemsSynapse) => html`
                                   <div class="flex items-center gap-2 text-xs">
                                     <span class="font-mono flex-1 truncate">${normalizeKeeperName(s.from_agent)}</span>
-                                    <div class="w-16 bg-zinc-800 rounded h-1.5">
+                                    <div class="w-16 bg-[var(--white-5)] rounded h-1.5">
                                       <div
                                         class="${s.weight >= 0.7 ? 'bg-[var(--ok-10)]' : s.weight >= 0.4 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'} rounded h-1.5"
                                         style="width:${Math.round(s.weight * 100)}%"
                                       ></div>
                                     </div>
-                                    <span class="text-zinc-400 w-10 text-right">${Math.round(s.weight * 100)}%</span>
+                                    <span class="text-[var(--text-muted)] w-10 text-right">${Math.round(s.weight * 100)}%</span>
                                   </div>
                                 `,
                               )}
@@ -234,16 +234,16 @@ export function AgentDetailMemory({ agentName }: Props) {
                               ? 'text-[var(--warn)]'
                               : 'text-[var(--bad-light)]'
                         return html`
-                          <div class="border border-zinc-800 rounded px-2 py-1.5 text-xs">
+                          <div class="border border-[var(--white-10)] rounded px-2 py-1.5 text-xs">
                             <div class="flex items-center justify-between gap-2">
                               <div class="flex items-center gap-2 min-w-0">
                                 <span class="${outcomeColor}">${outcomeIcon}</span>
-                                <span class="truncate text-zinc-300">${highlightMatch(ep.summary, episodeQuery.value)}</span>
+                                <span class="truncate text-[var(--text-muted)]">${highlightMatch(ep.summary, episodeQuery.value)}</span>
                               </div>
-                              <span class="text-[10px] text-zinc-500 shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
+                              <span class="text-[10px] text-[var(--text-muted)]0 shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
                             </div>
                             ${ep.learnings.length > 0
-                              ? html`<div class="mt-1 text-[11px] text-zinc-400 pl-3 border-l border-zinc-700">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`
+                              ? html`<div class="mt-1 text-[11px] text-[var(--text-muted)] pl-3 border-l border-[var(--white-10)]">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`
                               : null}
                           </div>
                         `

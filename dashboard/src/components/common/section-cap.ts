@@ -22,7 +22,7 @@
 //   text-text-dim   → var(--color-text-dim)
 // Using the generated utility instead of `text-[var(--text-muted)]`
 // keeps purge predictable, autocomplete honest, and fixes the
-// `text-text-muted` / `text-[var(--text-muted)]` / `text-zinc-400`
+// `text-text-muted` / `text-[var(--text-muted)]` / `text-[var(--text-muted)]`
 // trident drift the audit surfaced.
 //
 // NOT a replacement for:

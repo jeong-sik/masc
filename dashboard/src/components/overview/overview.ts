@@ -619,7 +619,7 @@ function ToolCallHealthPanel() {
     : 'text-text-dim'
   const barColor = successRate != null
     ? (successRate >= 95 ? 'bg-[var(--ok-10)]' : successRate >= 90 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]')
-    : 'bg-gray-500'
+    : 'bg-[var(--white-5)]0'
 
   return html`
     <div>

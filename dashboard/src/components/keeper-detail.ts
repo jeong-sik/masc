@@ -259,7 +259,7 @@ function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; e
 
   if (isRunning) return html`
     <button type="button"
-      class="py-1 px-3 rounded text-[11px] font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] transition-colors"
+      class="py-1 px-3 rounded text-[11px] font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[var(--bad-soft)] transition-colors"
       onClick=${() => {
         void (async () => {
           const confirmed = await requestConfirm({
@@ -565,7 +565,7 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
           >새로고침</button>
           <button
             type="button"
-            class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-1.5 text-[11px] font-semibold text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-1.5 text-[11px] font-semibold text-[#fb7185] hover:bg-[var(--bad-soft)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
             disabled=${deleting || selectedIds.length === 0}
             onClick=${deleteSelected}
           >${deleting ? '삭제 중...' : `선택 삭제 (${selectedIds.length})`}</button>
@@ -983,7 +983,7 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
 
         ${latestEntry
           ? html`
-            <div class="rounded border border-[rgba(71,184,255,0.2)] bg-[rgba(71,184,255,0.08)] p-3 mb-3">
+            <div class="rounded border border-[var(--accent-20)] bg-[rgba(71,184,255,0.08)] p-3 mb-3">
               <div class="flex flex-wrap items-center gap-2 mb-1">
                 <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]">Latest Handoff</span>
                 <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">
@@ -1249,7 +1249,7 @@ export function KeeperDetailOverlay() {
                   const lastUsed = series.length > 0 ? series[series.length - 1]?.model_used : null
                   const display = lastUsed || keeper.active_model || keeper.model
                   return display ? html`
-                    <span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-mono bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.2)]"
+                    <span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-mono bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-20)]"
                       title=${lastUsed && keeper.model ? `마지막 호출: ${lastUsed}\n설정: ${keeper.model}` : ''}
                     >${display}</span>
                   ` : null
@@ -1305,7 +1305,7 @@ export function KeeperDetailOverlay() {
           <div class="flex items-center gap-2">
             <button
               type="button"
-              class="py-1 px-3 rounded text-[11px] font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] transition-colors"
+              class="py-1 px-3 rounded text-[11px] font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[var(--bad-soft)] transition-colors"
               onClick=${() => setClearDialogOpen(true)}
             >비우기</button>
             <${KeeperLifecycleButtons} keeper=${keeper} effectiveStatus=${effectiveStatus} />

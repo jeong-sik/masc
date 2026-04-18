@@ -143,7 +143,7 @@ export function KeeperMemoryTierPanel({
           KMC ${compactionStage}
         </span>
         ${isCompacting ? html`
-          <span class="inline-flex items-center rounded-sm border border-[rgba(251,191,36,0.3)] bg-[rgba(251,191,36,0.1)] px-2 py-0.5 text-[#f59e0b]">
+          <span class="inline-flex items-center rounded-sm border border-[rgba(251,191,36,0.3)] bg-[var(--warn-10)] px-2 py-0.5 text-[#f59e0b]">
             compacting
           </span>
         ` : null}

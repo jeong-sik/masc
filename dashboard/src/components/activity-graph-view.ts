@@ -40,7 +40,7 @@ function edgeColor(kind: string, active: boolean): string {
     case 'governs': return 'rgba(251, 146, 60, 0.4)'
     case 'operates_on': return 'rgba(74, 222, 128, 0.45)'
     case 'participates_in': return 'rgba(251, 191, 36, 0.35)'
-    case 'belongs_to': return 'rgba(148, 163, 184, 0.12)'
+    case 'belongs_to': return 'var(--slate-gray-12)'
     default: return 'rgba(148, 163, 184, 0.25)'
   }
 }

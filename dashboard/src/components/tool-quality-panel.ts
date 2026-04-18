@@ -225,7 +225,7 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
       </div>
       <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
         ${bars.map(b => html`
-          <rect x="${b.x.toFixed(1)}" y="${b.y.toFixed(1)}" width="${b.w.toFixed(1)}" height="${b.h.toFixed(1)}" fill="${b.failures > 0 ? 'rgba(239,68,68,0.3)' : 'rgba(74,222,128,0.15)'}" rx="0.5" />
+          <rect x="${b.x.toFixed(1)}" y="${b.y.toFixed(1)}" width="${b.w.toFixed(1)}" height="${b.h.toFixed(1)}" fill="${b.failures > 0 ? 'rgba(239,68,68,0.3)' : 'var(--ok-soft)'}" rx="0.5" />
         `)}
         <polyline points="${rateLine}" fill="none" stroke="${lineColor}" stroke-width="1.5"/>
       </svg>

@@ -51,7 +51,7 @@ type StatusFilter = 'all' | RuntimeBand
 
 export function runtimeBadgeClass(band: RuntimeBand): string {
   if (band === 'active') return 'border-[rgba(52,211,153,0.2)] bg-[rgba(52,211,153,0.12)] text-[var(--ok)]'
-  if (band === 'attention') return 'border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.12)] text-[var(--warn)]'
+  if (band === 'attention') return 'border-[var(--warn-20)] bg-[rgba(251,191,36,0.12)] text-[var(--warn)]'
   if (band === 'paused') return 'border-[rgba(167,139,250,0.2)] bg-[rgba(167,139,250,0.12)] text-[#a78bfa]'
   return 'border-[var(--white-8)] bg-[var(--white-4)] text-[var(--text-dim)]'
 }
@@ -710,7 +710,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               <p class="m-0 text-[13px] leading-[1.55] text-[var(--text-body)] break-words line-clamp-2" title=${summaryText}>${summaryText}</p>
 
               ${isKeeper ? html`
-                <div class="rounded-[16px] border border-[var(--border-slate-12)] bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] px-3 py-2.5">
+                <div class="rounded-[16px] border border-[var(--border-slate-12)] bg-[linear-gradient(180deg,var(--white-3),rgba(255,255,255,0.02))] px-3 py-2.5">
                   <div class="flex flex-wrap items-center gap-2">
                     <span class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">FSM</span>
                     ${fsmPhaseKey

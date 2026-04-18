@@ -31,6 +31,8 @@ import { FlowControlPanel } from '../flow-control/flow-control-panel'
 
 type ActivityTone = 'default' | 'warn' | 'ok' | 'bad' | 'accent'
 
+export const ACTIVITY_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000
+
 interface OpsActivityTimelineEntry {
   key: string
   kind: 'review' | 'intervention'
@@ -120,7 +122,9 @@ function timelineEntries(limit = 10): OpsActivityTimelineEntry[] {
     tone: actionLogTone(entry),
   }))
 
+  const cutoff = Date.now() - ACTIVITY_MAX_AGE_MS
   return [...reviews, ...interventions]
+    .filter(entry => parseTimestamp(entry.at) >= cutoff)
     .sort((left, right) => parseTimestamp(right.at) - parseTimestamp(left.at))
     .slice(0, limit)
 }
@@ -137,7 +141,7 @@ export function activityTimelineEmptyState(): { message: string; hint: string | 
     }
   }
   return {
-    message: '최근 운영 활동이 없습니다. 개입이 실행되거나 검토가 처리되면 자동 기록됩니다.',
+    message: '최근 3일 내 운영 활동이 없습니다. 개입이 실행되거나 검토가 처리되면 자동 기록됩니다.',
     hint: null,
   }
 }

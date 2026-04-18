@@ -41,11 +41,14 @@ describe('Ops surface', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-31T11:00:00Z'))
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
+    vi.useRealTimers()
     vi.resetModules()
     vi.clearAllMocks()
     vi.doUnmock('./quick-intervene')
@@ -262,7 +265,69 @@ describe('Ops surface', () => {
 
     const empty = container.querySelector('[data-testid="ops-activity-timeline-empty"]')
     expect(empty).toBeTruthy()
-    expect(empty?.textContent).toContain('최근 운영 활동이 없습니다')
+    expect(empty?.textContent).toContain('최근 3일 내 운영 활동이 없습니다')
     expect(empty?.textContent).not.toContain('일시정지')
+  }, 60000)
+
+  it('filters out entries older than 3 days so stale reviews stop showing', async () => {
+    const {
+      Ops,
+      route,
+      operatorActionLog,
+      operatorDigestError,
+      operatorError,
+      operatorRoomDigest,
+      operatorSnapshot,
+      hydratedWorkflowId,
+    } = await loadOps()
+
+    vi.setSystemTime(new Date('2026-04-18T10:00:00Z'))
+
+    route.value = { tab: 'command', params: { section: 'operations' }, postId: null } as RouteState
+    hydratedWorkflowId.value = null
+    operatorError.value = null
+    operatorDigestError.value = null
+    operatorSnapshot.value = {
+      root: { paused: false, namespace: 'default' },
+      sessions: [],
+      keepers: [],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+    operatorRoomDigest.value = {
+      target_type: 'namespace',
+      attention_items: [],
+      recommended_actions: [],
+      recent_reviews: [
+        {
+          item_id: 'review-stale',
+          fingerprint: 'fp-stale',
+          decision: 'deferred',
+          actor: 'reviewer-1',
+          reason: '18일 전 보류',
+          at: '2026-03-31T10:05:00Z',
+          target_type: 'namespace',
+        },
+        {
+          item_id: 'review-fresh',
+          fingerprint: 'fp-fresh',
+          decision: 'resolved',
+          actor: 'reviewer-2',
+          reason: '방금 전 해결',
+          at: '2026-04-18T09:30:00Z',
+          target_type: 'namespace',
+        },
+      ],
+    } as unknown as OperatorDigest
+    operatorActionLog.value = []
+
+    render(html`<${Ops} />`, container)
+    await flushUi()
+
+    const items = Array.from(container.querySelectorAll('[data-testid="ops-activity-item"]'))
+    expect(items).toHaveLength(1)
+    expect(items[0]?.textContent).toContain('방금 전 해결')
+    expect(container.textContent).not.toContain('18일 전 보류')
   }, 60000)
 })

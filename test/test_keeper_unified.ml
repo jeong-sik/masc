@@ -1768,6 +1768,23 @@ let test_run_keeper_cycle_records_trajectory_source_contract () =
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "Trajectory.finalize trajectory_acc")
 
+let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
+  check bool "keeper cycle records side-effect issues in registry" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "Keeper_registry.record_error ~base_path:config.base_path");
+  check bool "trajectory finalize is not silently ignored" false
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "ignore (Trajectory.finalize trajectory_acc outcome)");
+  check bool "paused-state sync result is not discarded" false
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "let _ = sync_keeper_paused_state");
+  check bool "local discovery refresh is not silently ignored" false
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "ignore (Cascade_runtime.refresh_local_discovery_if_possible model_labels)");
+  check bool "activity graph emit is not silently ignored" false
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "ignore (Activity_graph.emit config")
+
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
 let test_context_overflow_limit_parses_common_oas_errors () =
@@ -3583,6 +3600,9 @@ let () =
             test_run_keeper_cycle_skips_non_executable_phase;
           test_case "run_keeper_cycle records trajectory contract" `Quick
             test_run_keeper_cycle_records_trajectory_source_contract;
+          test_case "run_keeper_cycle surfaces side-effect failures contract"
+            `Quick
+            test_run_keeper_cycle_surfaces_side_effect_failures_source_contract;
         ] );
       ( "tool_classification",
         [

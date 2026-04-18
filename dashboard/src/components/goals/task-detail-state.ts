@@ -53,6 +53,23 @@ function normalizeTaskHistory(raw: TaskHistoryRow[]): NormalizedTaskEvent[] {
   }))
 }
 
+export function describeTaskEventsError(err: unknown): string {
+  const api = extractApiError(err, '태스크 이벤트를 불러오지 못했습니다')
+  if (api.timeout) {
+    return '태스크 이벤트 요청이 시간 초과되었습니다. 다시 시도해 주세요'
+  }
+  if (api.status === 403) {
+    return '태스크 이벤트를 읽을 권한이 없습니다'
+  }
+  if (api.status === 404) {
+    return '태스크 이벤트 경로를 찾지 못했습니다'
+  }
+  if (api.message && api.message !== '태스크 이벤트를 불러오지 못했습니다') {
+    return `태스크 이벤트를 불러오지 못했습니다: ${api.message}`
+  }
+  return '태스크 이벤트를 불러오지 못했습니다'
+}
+
 /**
  * Pure filter for task event rows.
  *
@@ -75,23 +92,6 @@ export function filterTaskEvents(
     if (e.notes && e.notes.toLowerCase().includes(needle)) return true
     return false
   })
-}
-
-export function describeTaskEventsError(err: unknown): string {
-  const api = extractApiError(err, '태스크 이벤트를 불러오지 못했습니다')
-  if (api.timeout) {
-    return '태스크 이벤트 요청이 시간 초과되었습니다. 다시 시도해 주세요'
-  }
-  if (api.status === 403) {
-    return '태스크 이벤트를 읽을 권한이 없습니다'
-  }
-  if (api.status === 404) {
-    return '태스크 이벤트 경로를 찾지 못했습니다'
-  }
-  if (api.message && api.message !== '태스크 이벤트를 불러오지 못했습니다') {
-    return `태스크 이벤트를 불러오지 못했습니다: ${api.message}`
-  }
-  return '태스크 이벤트를 불러오지 못했습니다'
 }
 
 /**

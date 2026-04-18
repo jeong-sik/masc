@@ -57,12 +57,15 @@ export function currentDashboardActor(): string {
 
 type HeaderOptions = {
   includeActor?: boolean
+  actorName?: string | null
 }
 
 export function authHeaders(options: HeaderOptions = {}): Record<string, string> {
   const headers: Record<string, string> = {}
   const token = getStoredToken()
-  const agent = resolveDashboardActorName(window.location.search)
+  const agent = options.actorName !== undefined
+    ? sanitizeDashboardActorName(options.actorName)
+    : resolveDashboardActorName(window.location.search)
   if (token) headers['Authorization'] = `Bearer ${token}`
   if (options.includeActor !== false && agent) {
     headers['X-MASC-Agent'] = agent
@@ -99,6 +102,7 @@ export class ApiRequestError extends Error {
   status?: number
   statusText?: string
   timeout: boolean
+  detail?: string
 
   constructor(opts: {
     method: string
@@ -107,12 +111,16 @@ export class ApiRequestError extends Error {
     statusText?: string
     timeout?: boolean
     timeoutMs?: number
+    detail?: string
   }) {
     const method = opts.method.toUpperCase()
     const timeout = opts.timeout === true
+    const detail = opts.detail?.trim()
     const message = timeout
       ? `${method} ${opts.path}: timeout after ${opts.timeoutMs ?? 0}ms`
-      : `${method} ${opts.path}: ${opts.status ?? 'unknown'} ${opts.statusText ?? ''}`.trim()
+      : detail
+        ? `${method} ${opts.path}: ${detail}`
+        : `${method} ${opts.path}: ${opts.status ?? 'unknown'} ${opts.statusText ?? ''}`.trim()
     super(message)
     this.name = 'ApiRequestError'
     this.method = method
@@ -120,6 +128,7 @@ export class ApiRequestError extends Error {
     this.status = opts.status
     this.statusText = opts.statusText
     this.timeout = timeout
+    this.detail = detail
   }
 }
 
@@ -195,6 +204,28 @@ const DASHBOARD_BOOTSTRAP_WARM_PATHS = new Set([
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+async function errorDetailFromResponse(res: Response): Promise<string | undefined> {
+  let rawText = ''
+  try {
+    rawText = (await res.text()).trim()
+  } catch {
+    return undefined
+  }
+  if (!rawText) return undefined
+  try {
+    const parsed = JSON.parse(rawText) as unknown
+    if (isRecord(parsed)) {
+      const message = typeof parsed.message === 'string' ? parsed.message.trim() : ''
+      if (message) return message
+      const error = typeof parsed.error === 'string' ? parsed.error.trim() : ''
+      if (error) return error
+    }
+  } catch {
+    // Fall through to plain-text body.
+  }
+  return rawText
 }
 
 function isNotInitializedEnvelope(raw: unknown): boolean {
@@ -323,15 +354,17 @@ export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
     opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS,
   )
   if (!res.ok) {
-    const warmPayload = await bootstrapWarmPayload(path, res)
+    const warmPayload = await bootstrapWarmPayload(path, res.clone())
     if (warmPayload !== null) {
       return warmPayload as T
     }
+    const detail = await errorDetailFromResponse(res)
     throw new ApiRequestError({
       method: 'GET',
       path,
       status: res.status,
       statusText: res.statusText,
+      detail,
     })
   }
   const data = await res.json()
@@ -409,11 +442,13 @@ export async function post<T>(
     body: JSON.stringify(body),
   }, timeoutMs)
   if (!res.ok) {
+    const detail = await errorDetailFromResponse(res)
     throw new ApiRequestError({
       method: 'POST',
       path,
       status: res.status,
       statusText: res.statusText,
+      detail,
     })
   }
   return res.json() as Promise<T>
@@ -435,11 +470,13 @@ export async function patch<T>(
     body: JSON.stringify(body),
   }, timeoutMs)
   if (!res.ok) {
+    const detail = await errorDetailFromResponse(res)
     throw new ApiRequestError({
       method: 'PATCH',
       path,
       status: res.status,
       statusText: res.statusText,
+      detail,
     })
   }
   return res.json() as Promise<T>
@@ -460,11 +497,13 @@ export async function postRaw(
     body: JSON.stringify(body),
   }, timeoutMs)
   if (!res.ok) {
+    const detail = await errorDetailFromResponse(res)
     throw new ApiRequestError({
       method: 'POST',
       path,
       status: res.status,
       statusText: res.statusText,
+      detail,
     })
   }
   return res.text()
@@ -488,7 +527,7 @@ export async function runOperatorAction(body: OperatorActionRequest): Promise<Op
   const raw = await post<unknown>(
     '/api/v1/operator/action',
     body,
-    undefined,
+    authHeaders({ actorName: body.actor }),
     operatorActionTimeoutMs(body),
   )
   return parseOperatorActionResult(raw)
@@ -499,11 +538,15 @@ export async function confirmOperatorAction(
   confirmToken: string,
   decision: 'confirm' | 'deny' = 'confirm',
 ): Promise<OperatorActionResult> {
-  const raw = await post<unknown>('/api/v1/operator/confirm', {
-    actor,
-    confirm_token: confirmToken,
-    decision,
-  })
+  const raw = await post<unknown>(
+    '/api/v1/operator/confirm',
+    {
+      actor,
+      confirm_token: confirmToken,
+      decision,
+    },
+    authHeaders({ actorName: actor }),
+  )
   return parseOperatorActionResult(raw)
 }
 

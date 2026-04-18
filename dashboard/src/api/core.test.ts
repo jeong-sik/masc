@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiRequestError, defaultBoardVoter, extractApiError, get, post } from './core'
+import {
+  ApiRequestError,
+  confirmOperatorAction,
+  defaultBoardVoter,
+  extractApiError,
+  get,
+  post,
+  runOperatorAction,
+} from './core'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -37,6 +45,66 @@ describe('post', () => {
     window.history.replaceState({}, '', '/')
 
     expect(defaultBoardVoter()).toBe('dashboard-user')
+  })
+
+  it('surfaces JSON error messages from failed POST responses', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"status":"error","message":"actor mismatch: payload actor must match authenticated actor"}', {
+        status: 400,
+        statusText: 'Bad Request',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(post('/api/v1/operator/action', { actor: 'ops-user' })).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      status: 400,
+      detail: 'actor mismatch: payload actor must match authenticated actor',
+      message: 'POST /api/v1/operator/action: actor mismatch: payload actor must match authenticated actor',
+    })
+  })
+
+  it('uses the request actor for operator action headers when query agent differs', async () => {
+    window.history.replaceState({}, '', '/?agent=dashboard-url-actor')
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"status":"ok","result":{}}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await runOperatorAction({
+      actor: 'dashboard-manual-actor',
+      action_type: 'keeper_probe',
+      target_type: 'keeper',
+      target_id: 'keeper-one',
+      payload: {},
+    })
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const headers = init.headers as Record<string, string>
+    expect(headers['X-MASC-Agent'] ?? headers['x-masc-agent']).toBe('dashboard-manual-actor')
+  })
+
+  it('uses the confirmation actor for operator confirm headers when query agent differs', async () => {
+    window.history.replaceState({}, '', '/?agent=dashboard-url-actor')
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"status":"ok","result":{}}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await confirmOperatorAction('dashboard-manual-actor', 'opc_test_token')
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const headers = init.headers as Record<string, string>
+    expect(headers['X-MASC-Agent'] ?? headers['x-masc-agent']).toBe('dashboard-manual-actor')
   })
 })
 
@@ -107,6 +175,24 @@ describe('get bootstrap warm-up mapping', () => {
       name: 'ApiRequestError',
       status: 500,
       path: '/api/v1/board',
+    })
+  })
+
+  it('surfaces JSON error messages from failed GET responses', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"error":"computation_timeout","message":"Dashboard governance timed out after 30s"}', {
+        status: 504,
+        statusText: 'Gateway Timeout',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(get('/api/v1/dashboard/governance')).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      status: 504,
+      detail: 'Dashboard governance timed out after 30s',
+      message: 'GET /api/v1/dashboard/governance: Dashboard governance timed out after 30s',
     })
   })
 

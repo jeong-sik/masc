@@ -1801,6 +1801,87 @@ let test_is_context_overflow_only_for_overflow_errors () =
     (UT.is_context_overflow
        (Agent_sdk.Error.Agent (TokenBudgetExceeded { kind = "Total"; used = 300000; limit = 250000 })))
 
+let test_summarize_turn_event_bus_extracts_overflow_signal () =
+  let events =
+    [
+      Agent_sdk.Event_bus.mk_event
+        ~correlation_id:"cid-123"
+        ~run_id:"run-1"
+        (Agent_sdk.Event_bus.TurnStarted
+           { agent_name = minimal_meta.name; turn = 1 });
+      Agent_sdk.Event_bus.mk_event
+        ~correlation_id:"cid-123"
+        ~run_id:"run-1"
+        (Agent_sdk.Event_bus.ContextOverflowImminent
+           {
+             agent_name = minimal_meta.name;
+             estimated_tokens = 205_000;
+             limit_tokens = 200_000;
+             ratio = 1.025;
+           });
+    ]
+  in
+  let summary = UT.summarize_turn_event_bus events in
+  check (option string) "correlation id from first event" (Some "cid-123")
+    summary.correlation_id;
+  match summary.overflow_imminent with
+  | Some overflow ->
+      check int "estimated tokens" 205_000 overflow.estimated_tokens;
+      check int "limit tokens" 200_000 overflow.limit_tokens
+  | None -> fail "expected overflow_imminent summary"
+
+let test_context_overflow_event_prefers_event_bus_signal () =
+  let turn_event_bus : UT.turn_event_bus_summary =
+    {
+      correlation_id = Some "cid-123";
+      overflow_imminent =
+        Some
+          {
+            estimated_tokens = 205_000;
+            limit_tokens = 200_000;
+          };
+    }
+  in
+  match
+    UT.context_overflow_event_of_error
+      ~fallback_tokens:32_768
+      ~turn_event_bus
+      (Agent_sdk.Error.Api
+         (ContextOverflow { message = "prompt exceeds context"; limit = Some 32_768 }))
+  with
+  | KP.Context_overflow_detected
+      {
+        source = `Oas_signal;
+        token_count;
+        limit_tokens = Some limit_tokens;
+      } ->
+      check int "estimated tokens win" 205_000 token_count;
+      check int "event bus limit wins" 200_000 limit_tokens
+  | event ->
+      fail
+        ("expected oas_signal overflow event, got "
+        ^ KP.event_to_string event)
+
+let test_context_overflow_event_falls_back_without_event_bus_signal () =
+  match
+    UT.context_overflow_event_of_error
+      ~fallback_tokens:32_768
+      (Agent_sdk.Error.Api
+         (ContextOverflow { message = "prompt exceeds context"; limit = Some 32_768 }))
+  with
+  | KP.Context_overflow_detected
+      {
+        source = `Prompt_rejected;
+        token_count;
+        limit_tokens = Some limit_tokens;
+      } ->
+      check int "fallback uses error limit" 32_768 token_count;
+      check int "fallback preserves limit" 32_768 limit_tokens
+  | event ->
+      fail
+        ("expected prompt_rejected overflow event, got "
+        ^ KP.event_to_string event)
+
 let test_metrics_persist_social_state_fields () =
   let result =
     make_run_result
@@ -3489,6 +3570,12 @@ let () =
             test_context_overflow_limit_parses_common_oas_errors;
           test_case "is_context_overflow only matches ContextOverflow" `Quick
             test_is_context_overflow_only_for_overflow_errors;
+          test_case "summarize_turn_event_bus extracts overflow signal" `Quick
+            test_summarize_turn_event_bus_extracts_overflow_signal;
+          test_case "context_overflow_event prefers event bus signal" `Quick
+            test_context_overflow_event_prefers_event_bus_signal;
+          test_case "context_overflow_event falls back without event bus signal" `Quick
+            test_context_overflow_event_falls_back_without_event_bus_signal;
         ] );
       ( "phase_gate",
         [

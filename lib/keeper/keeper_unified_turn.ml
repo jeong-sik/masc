@@ -246,6 +246,36 @@ type overflow_retry_plan = {
   compaction : compaction_event;
 }
 
+type turn_event_bus_overflow = {
+  estimated_tokens : int;
+  limit_tokens : int;
+}
+
+type turn_event_bus_summary = {
+  correlation_id : string option;
+  overflow_imminent : turn_event_bus_overflow option;
+}
+
+let empty_turn_event_bus_summary =
+  {
+    correlation_id = None;
+    overflow_imminent = None;
+  }
+
+let merge_turn_event_bus_summary
+    (left : turn_event_bus_summary)
+    (right : turn_event_bus_summary) : turn_event_bus_summary =
+  {
+    correlation_id =
+      (match left.correlation_id with
+       | Some _ -> left.correlation_id
+       | None -> right.correlation_id);
+    overflow_imminent =
+      (match right.overflow_imminent with
+       | Some _ -> right.overflow_imminent
+       | None -> left.overflow_imminent);
+  }
+
 (** Recover from context overflow by compacting and reducing max_context.
 
     Extracts the token limit directly from the structured [ContextOverflow]
@@ -302,31 +332,63 @@ let recover_context_overflow_retry
         meta.name (short_preview (Oas.Error.to_string error));
       None
 
+let summarize_turn_event_bus
+    (events : Agent_sdk.Event_bus.event list) : turn_event_bus_summary =
+  List.fold_left
+    (fun acc (evt : Agent_sdk.Event_bus.event) ->
+      let correlation_id =
+        match acc.correlation_id with
+        | Some _ -> acc.correlation_id
+        | None -> Some evt.meta.correlation_id
+      in
+      match evt.payload with
+      | Agent_sdk.Event_bus.ContextOverflowImminent
+          { estimated_tokens; limit_tokens; _ } ->
+          {
+            correlation_id;
+            overflow_imminent =
+              Some { estimated_tokens; limit_tokens };
+          }
+      | _ -> { acc with correlation_id })
+    empty_turn_event_bus_summary
+    events
+
 let context_overflow_event_of_error
     ~(fallback_tokens : int)
+    ?(turn_event_bus : turn_event_bus_summary =
+      { correlation_id = None; overflow_imminent = None })
     (err : Oas.Error.sdk_error) : Keeper_state_machine.event =
-  match err with
-  | Oas.Error.Agent (TokenBudgetExceeded { kind = "Input"; used; limit }) ->
+  match turn_event_bus.overflow_imminent with
+  | Some { estimated_tokens; limit_tokens } ->
       Keeper_state_machine.Context_overflow_detected
         {
           source = `Oas_signal;
-          token_count = used;
-          limit_tokens = Some limit;
+          token_count = max 0 estimated_tokens;
+          limit_tokens = Some limit_tokens;
         }
-  | Oas.Error.Api (ContextOverflow { limit; _ }) ->
-      Keeper_state_machine.Context_overflow_detected
-        {
-          source = `Prompt_rejected;
-          token_count = Option.value ~default:(max 0 fallback_tokens) limit;
-          limit_tokens = limit;
-        }
-  | _ ->
-      Keeper_state_machine.Context_overflow_detected
-        {
-          source = `Oas_signal;
-          token_count = max 0 fallback_tokens;
-          limit_tokens = None;
-        }
+  | None ->
+      match err with
+      | Oas.Error.Agent (TokenBudgetExceeded { kind = "Input"; used; limit }) ->
+          Keeper_state_machine.Context_overflow_detected
+            {
+              source = `Oas_signal;
+              token_count = used;
+              limit_tokens = Some limit;
+            }
+      | Oas.Error.Api (ContextOverflow { limit; _ }) ->
+          Keeper_state_machine.Context_overflow_detected
+            {
+              source = `Prompt_rejected;
+              token_count = Option.value ~default:(max 0 fallback_tokens) limit;
+              limit_tokens = limit;
+            }
+      | _ ->
+          Keeper_state_machine.Context_overflow_detected
+            {
+              source = `Oas_signal;
+              token_count = max 0 fallback_tokens;
+              limit_tokens = None;
+            }
 
 let pause_keeper_for_overflow
     ~(config : Coord.config)
@@ -1547,10 +1609,22 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   ~filter:(Agent_sdk.Event_bus.filter_agent meta.name) bus)
         | None -> None
       in
+      let turn_event_bus = ref empty_turn_event_bus_summary in
       let evidence_before_hash =
         try Keeper_evidence.snapshot_before_turn
           ~base_path:config.base_path ~keeper_name:meta.name
         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+      in
+      let drain_turn_event_bus () =
+        let summary =
+          match event_bus_sub, Keeper_event_bus.get () with
+          | Some sub, Some _bus ->
+              summarize_turn_event_bus (Agent_sdk.Event_bus.drain sub)
+          | _ -> empty_turn_event_bus_summary
+        in
+        turn_event_bus :=
+          merge_turn_event_bus_summary !turn_event_bus summary;
+        !turn_event_bus
       in
       let unsubscribe_event_bus () =
         match event_bus_sub, Keeper_event_bus.get () with
@@ -1763,11 +1837,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     ~attempt:(attempt + 1)
                     ~is_retry:true ~overflow_retry_used
                 end else if is_context_overflow err then begin
+                  let current_turn_event_bus = drain_turn_event_bus () in
                   dispatch_keeper_phase_event
                     ~config
                     ~keeper_name:meta.name
                     (context_overflow_event_of_error
                        ~fallback_tokens:max_context
+                       ~turn_event_bus:current_turn_event_bus
                        err);
                   if not overflow_retry_used then
                     match
@@ -1922,18 +1998,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               Error (Oas.Error.Internal msg)
             end)))
       in
-      (* Drain correlation_id from the subscription created before the
-         turn. Unsubscribe is handled by [unsubscribe_event_bus] in the
-         Fun.protect ~finally above, so this path only drains. *)
-      (match event_bus_sub, Keeper_event_bus.get () with
-       | Some sub, Some _bus ->
-         (match Agent_sdk.Event_bus.drain sub with
-          | ev :: _ ->
-            Keeper_registry.set_last_correlation_id
-              ~base_path:config.base_path meta.name
-              ev.Agent_sdk.Event_bus.meta.correlation_id
-          | [] -> ())
-       | _ -> ());
+      let turn_event_bus = drain_turn_event_bus () in
+      (match turn_event_bus.correlation_id with
+       | Some correlation_id ->
+           Keeper_registry.set_last_correlation_id
+             ~base_path:config.base_path meta.name
+             correlation_id
+       | None -> ());
       match run_result with
       | Error err ->
           finalize_trajectory_acc trajectory_acc

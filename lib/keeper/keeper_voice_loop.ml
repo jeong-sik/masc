@@ -13,25 +13,23 @@
 (** Extract transcribed text from STT JSON response.
     Returns None if no text or if status is "no_audio". *)
 let extract_text_from_stt (json : Yojson.Safe.t) : string option =
-  try
+  Safe_ops.protect ~default:None (fun () ->
     let open Yojson.Safe.Util in
     match member "status" json with
     | `String "no_audio" -> None
     | _ ->
         (match member "text" json with
         | `String s when String.trim s <> "" -> Some (String.trim s)
-        | _ -> None)
-  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+        | _ -> None))
 
 (** Extract reply text from keeper_msg tool_result.
     The result_str is JSON with ["reply"]. *)
 let extract_reply_text (result_str : string) : string option =
-  try
+  Safe_ops.protect ~default:None (fun () ->
     let json = Yojson.Safe.from_string result_str in
     match Yojson.Safe.Util.member "reply" json with
     | `String s when String.trim s <> "" -> Some (String.trim s)
-    | _ -> None
-  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+    | _ -> None)
 
 let parse_reply_text (result_str : string) : (string, string) result =
   try

@@ -15,6 +15,14 @@
 let pr_review_event_enum_strings =
   [ "COMMENT"; "APPROVE"; "REQUEST_CHANGES" ]
 
+(** Issue #8484: hand-mirrored from
+    [Keeper_exec_memory.valid_memory_search_source_strings]. Direct
+    dependency would risk a Tool_shard -> Keeper_* -> Tool_shard cycle
+    (same shape as #8467 / #8480), so this stays a local mirror with a
+    sync regression test in [test_types.ml :: memory_search_source_ssot]. *)
+let memory_search_source_enum_strings =
+  [ "memory"; "history"; "all" ]
+
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;
@@ -80,7 +88,9 @@ Use source='history' for raw user messages, source='all' for both.";
         ("query", `Assoc [("type", `String "string"); ("description", `String "keyword to search for")]);
         ("kind", `Assoc [("type", `String "string"); ("enum", `List [`String "goal"; `String "decision"; `String "progress"; `String "next"; `String "open_question"; `String "constraints"]); ("description", `String "Filter by memory kind")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "max results (1-10, default 5)")]);
-        ("source", `Assoc [("type", `String "string"); ("enum", `List [`String "memory"; `String "history"; `String "all"]); ("description", `String "Search scope: memory (default, structured notes), history (raw messages), or all")]);
+        (* Issue #8484: derive from local mirror that tracks
+           [Keeper_exec_memory.valid_memory_search_source_strings]. *)
+        ("source", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) memory_search_source_enum_strings)); ("description", `String "Search scope: memory (default, structured notes), history (raw messages), or all")]);
       ]);
       ("required", `List [`String "query"]);
     ];

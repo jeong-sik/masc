@@ -118,6 +118,16 @@ let agent_status_to_string = function
 (* Alias for dashboard compatibility *)
 let string_of_agent_status = agent_status_to_string
 
+(** Issue #8372: schema enum sites used to hand-roll [agent_status] strings,
+    matching the same drift class as #8354 (task_status) and #8364 (Response).
+    [agent_status] has only nullary constructors, so a list literal is safe.
+    Adding a 5th constructor will fail compilation in [agent_status_to_string]
+    (the witness) — the test in [test_types.ml] checks that every result of
+    that function appears in [valid_agent_status_strings]. *)
+let all_agent_statuses = [ Active; Busy; Listening; Inactive ]
+let valid_agent_status_strings =
+  List.map agent_status_to_string all_agent_statuses
+
 let agent_status_of_string_opt = function
   | "active" -> Some Active
   | "busy" -> Some Busy

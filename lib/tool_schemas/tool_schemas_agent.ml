@@ -25,8 +25,12 @@ let schemas : tool_schema list = [
       ("properties", `Assoc [
         ("status", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "active"; `String "busy"; `String "listening"; `String "inactive"]);
-          ("description", `String "Optional status: active | busy | listening | inactive");
+          (* Issue #8372: derived from Types.agent_status Variant SSOT.
+             Hand-rolled enum risks dropping a constructor on extension. *)
+          ("enum", `List (List.map (fun s -> `String s) Types.valid_agent_status_strings));
+          ("description", `String
+            (Printf.sprintf "Optional status: %s"
+               (String.concat " | " Types.valid_agent_status_strings)));
         ]);
         ("capabilities", `Assoc [
           ("type", `String "array");

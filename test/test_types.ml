@@ -94,6 +94,28 @@ let test_strict_parser_unchanged () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "strict parser must reject aliases; lenient owns aliases"
 
+(* Issue #8372: schema enums for [agent_status] used to be hand-rolled.
+   The witness function ensures every variant produces a string that
+   appears in [valid_agent_status_strings]. A 5th constructor forces
+   the witness match to fail compilation. *)
+let test_agent_status_witness_in_enum () =
+  let witness s =
+    let actual = agent_status_to_string s in
+    if not (List.mem actual valid_agent_status_strings) then
+      Alcotest.failf "agent_status_to_string %S not in valid_agent_status_strings" actual
+  in
+  witness Active;
+  witness Busy;
+  witness Listening;
+  witness Inactive;
+  Alcotest.(check int) "count" 4 (List.length valid_agent_status_strings)
+
+let test_agent_status_strings_complete () =
+  List.iter (fun expected ->
+    Alcotest.(check bool) (Printf.sprintf "%s present" expected) true
+      (List.mem expected valid_agent_status_strings)
+  ) ["active"; "busy"; "listening"; "inactive"]
+
 let () =
   Alcotest.run "Types" [
     "agent_status", [
@@ -120,5 +142,9 @@ let () =
       Alcotest.test_case "case insensitive" `Quick test_action_case_insensitive;
       Alcotest.test_case "garbage still rejected" `Quick test_action_unknown_still_rejected;
       Alcotest.test_case "strict parser ssot preserved" `Quick test_strict_parser_unchanged;
+    ];
+    "agent_status_ssot", [
+      Alcotest.test_case "witness covers all variants" `Quick test_agent_status_witness_in_enum;
+      Alcotest.test_case "all 4 strings present" `Quick test_agent_status_strings_complete;
     ];
   ]

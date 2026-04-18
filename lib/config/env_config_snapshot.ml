@@ -988,6 +988,9 @@ let all_categories () =
     category "session" (session_entries @ team_session_entries @ tempo_entries);
   ]
 
+let valid_config_category_strings =
+  all_categories () |> List.map fst
+
 let to_json ?server_meta ?generated_at ?cat () =
   let categories =
     match cat with

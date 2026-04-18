@@ -8,6 +8,7 @@ import {
   post,
   runOperatorAction,
 } from './core'
+import { OperatorActionSchemaDriftError } from './schemas/operator-action'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -106,6 +107,70 @@ describe('post', () => {
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     const headers = init.headers as Record<string, string>
     expect(headers['X-MASC-Agent'] ?? headers['x-masc-agent']).toBe('dashboard-manual-actor')
+  })
+  it('surfaces invalid JSON in 200 operator action responses as ApiRequestError', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('not-json', {
+        status: 200,
+        statusText: 'OK',
+        headers: { 'Content-Type': 'text/plain' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(runOperatorAction({
+      actor: 'dashboard-manual-actor',
+      action_type: 'keeper_probe',
+      target_type: 'keeper',
+      target_id: 'keeper-one',
+      payload: {},
+    })).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      status: 200,
+      detail: 'invalid JSON response',
+      message: 'POST /api/v1/operator/action: invalid JSON response',
+    })
+  })
+
+  it('surfaces empty JSON in 200 operator confirm responses as ApiRequestError', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('', {
+        status: 200,
+        statusText: 'OK',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(confirmOperatorAction(
+      'dashboard-manual-actor',
+      'opc_test_token',
+      'deny',
+    )).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      status: 200,
+      detail: 'empty JSON response',
+      message: 'POST /api/v1/operator/confirm: empty JSON response',
+    })
+  })
+
+  it('rejects 200 operator action payloads whose JSON body is still missing the status contract', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"result":{"ok":true}}', {
+        status: 200,
+        statusText: 'OK',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(runOperatorAction({
+      actor: 'dashboard-manual-actor',
+      action_type: 'keeper_probe',
+      target_type: 'keeper',
+      target_id: 'keeper-one',
+      payload: {},
+    })).rejects.toBeInstanceOf(OperatorActionSchemaDriftError)
   })
 })
 

@@ -436,23 +436,23 @@ let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun 
   | _ -> failwith "expected exactly one task"
 )
 
-let () = test "handle_transition_release_on_todo_points_at_claim_first" (fun () ->
-  (* Field evidence 2026-04-17/18: ~30 [Invalid transition: todo ->
-     release] rejections from keepers that never claimed the task. The
-     original error named the rule but not the recovery — small-LLM
-     keepers retried the same action. The enriched error must name
-     masc_transition action=claim as the next concrete call. *)
+let () = test "handle_transition_start_on_todo_points_at_claim_first" (fun () ->
+  (* Field evidence 2026-04-17/18: keepers attempted transitions on
+     tasks they had not claimed. The FSM rejects [Start] on [Todo]
+     because Start requires Claimed ownership, landing in the
+     fallthrough branch. The enriched error must name masc_transition
+     action=claim as the next concrete call. *)
   let ctx = make_test_ctx () in
   let _ =
     Tool_task.handle_add_task ctx
-      (`Assoc [ ("title", `String "Release-without-claim") ])
+      (`Assoc [ ("title", `String "Start-without-claim") ])
   in
   let success, result =
     Tool_task.handle_transition ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
-          ("action", `String "release");
+          ("action", `String "start");
         ])
   in
   assert (not success);
@@ -462,35 +462,37 @@ let () = test "handle_transition_release_on_todo_points_at_claim_first" (fun () 
   assert (str_contains result "action=claim")
 )
 
-let () = test "handle_transition_claim_on_done_points_at_add_task" (fun () ->
-  (* [Done -> claim] must redirect to masc_add_task rather than
-     leaving the keeper to guess a terminal state is recoverable. *)
-  let ctx = make_test_ctx () in
+let () = test "handle_transition_release_by_nonowner_redirects_to_board_post"
+    (fun () ->
+  (* When a different agent claims the task, a release attempt by the
+     non-owner must land in the fallthrough branch with ownership-mismatch
+     and redirect to masc_board_post rather than reflexive retry. *)
+  let ctx_owner = make_test_ctx_with_agent "owner-agent" in
   let _ =
-    Tool_task.handle_add_task ctx
-      (`Assoc [ ("title", `String "Terminal-state-task") ])
+    Tool_task.handle_add_task ctx_owner
+      (`Assoc [ ("title", `String "Owned-by-other") ])
   in
-  let _ = Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ]) in
   let _ =
-    Tool_task.handle_transition ctx
-      (`Assoc
-        [
-          ("task_id", `String "task-001");
-          ("action", `String "done");
-          ("notes", `String "finished");
-        ])
+    Tool_task.handle_claim ctx_owner
+      (`Assoc [ ("task_id", `String "task-001") ])
+  in
+  (* A separate context for a different agent against the SAME config,
+     so the backlog/task state is shared. *)
+  let ctx_other =
+    { ctx_owner with Tool_task.agent_name = "other-agent" }
   in
   let success, result =
-    Tool_task.handle_transition ctx
+    Tool_task.handle_transition ctx_other
       (`Assoc
         [
           ("task_id", `String "task-001");
-          ("action", `String "claim");
+          ("action", `String "release");
         ])
   in
   assert (not success);
+  assert (str_contains result "Invalid transition");
   assert (str_contains result "Remediation");
-  assert (str_contains result "masc_add_task")
+  assert (str_contains result "masc_board_post")
 )
 
 let () = test "handle_transition_release_synthesizes_summary_from_notes" (fun () ->

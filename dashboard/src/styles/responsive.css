@@ -22,11 +22,16 @@
 }
 
 @media (max-width: 768px) {
+  /* Mobile font-size scale-down — overrides the canonical @theme tokens
+     so BOTH Tailwind utilities (text-sm, text-base, ...) AND legacy CSS
+     `var(--fs-*)` consumers (which now alias to --font-size-* in
+     variables.css) shrink. Pre-consolidation only --fs-* shrank;
+     Tailwind utilities bypassed the override. */
   :root {
-    --fs-base: 13px;
-    --fs-sm: 12px;
-    --fs-xs: 11px;
-    --fs-2xs: 10px;
+    --font-size-base: 13px;
+    --font-size-sm: 12px;
+    --font-size-xs: 11px;
+    --font-size-2xs: 10px;
   }
 
   .header-title-wrap h1 {

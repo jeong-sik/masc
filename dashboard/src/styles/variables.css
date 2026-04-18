@@ -235,13 +235,17 @@
   --radius-sm: 6px;
   --header-h: 94px;
 
-  /* Font-size scale */
-  --fs-2xs: 11px;
-  --fs-xs: 12px;
-  --fs-sm: 13px;
-  --fs-base: 14px;
-  --fs-md: 15px;
-  --fs-lg: 16px;
+  /* Font-size scale — aliases to the canonical Tailwind v4 @theme tokens
+     in tokens.css. Single SSOT: change values there, both Tailwind utilities
+     (text-sm, text-base, ...) and direct CSS consumers (var(--fs-sm)) stay
+     in lockstep. Mobile responsive scaling now overrides --font-size-* at
+     :root (see responsive.css), reaching both code paths. */
+  --fs-2xs: var(--font-size-2xs);
+  --fs-xs: var(--font-size-xs);
+  --fs-sm: var(--font-size-sm);
+  --fs-base: var(--font-size-base);
+  --fs-md: var(--font-size-md);
+  --fs-lg: var(--font-size-lg);
 
   /* Extended palette */
   --cyan: #22d3ee;

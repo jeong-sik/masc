@@ -44,7 +44,7 @@ const TONE_PALETTES: Record<DistributionTone, TonePalette> = {
   muted: {
     fill: 'rgba(148,163,184,0.85)',
     text: 'var(--text-muted)',
-    chipBg: 'rgba(148,163,184,0.12)',
+    chipBg: 'var(--slate-gray-12)',
     chipBorder: 'rgba(148,163,184,0.24)',
   },
 }

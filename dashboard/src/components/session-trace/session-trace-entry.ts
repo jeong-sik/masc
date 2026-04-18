@@ -191,7 +191,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
 
   const titleLabel = isErr ? 'Error' : 'Result'
   const titleColor = isErr ? 'text-[var(--bad)]' : 'text-[var(--text-muted)]'
-  const borderColor = isErr ? 'border-[rgba(239,68,68,0.2)]' : 'border-[var(--white-8)]'
+  const borderColor = isErr ? 'border-[var(--bad-20)]' : 'border-[var(--white-8)]'
   const bgColor = isErr ? 'bg-[rgba(239,68,68,0.04)]' : 'bg-[var(--white-3)]'
 
   const MAX_TEXT_LEN = 100000
@@ -402,7 +402,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const responseText = typeof d.response_text === 'string' ? d.response_text : ''
     const stopColor = stopReason === 'end_turn' || stopReason === 'stop' ? 'text-[var(--ok)]' : 'text-[var(--warn)]'
     return html`
-      <div class="mt-2 px-3 py-2 rounded bg-[rgba(34,211,238,0.04)] border border-[rgba(34,211,238,0.12)] space-y-1">
+      <div class="mt-2 px-3 py-2 rounded bg-[rgba(34,211,238,0.04)] border border-[var(--cyan-12)] space-y-1">
         <div class="flex items-center gap-3 text-[12px] flex-wrap">
           <span><span class="text-[var(--text-dim)]">출력:</span> <span class="font-mono">${outputTokens.toLocaleString()}tok</span></span>
           <span><span class="text-[var(--text-dim)]">종료:</span> <span class="font-mono ${stopColor}">${stopReason}</span></span>
@@ -423,7 +423,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const domain = typeof d.error_domain === 'string' ? d.error_domain : 'unknown'
     const errorDetail = typeof d.detail === 'string' ? d.detail : ''
     return html`
-      <div class="mt-2 px-3 py-2 rounded bg-[rgba(239,68,68,0.04)] border border-[rgba(239,68,68,0.15)] space-y-1">
+      <div class="mt-2 px-3 py-2 rounded bg-[rgba(239,68,68,0.04)] border border-[var(--bad-soft)] space-y-1">
         <div class="text-[12px]"><span class="text-[var(--text-dim)]">도메인:</span> <span class="font-mono text-[var(--bad)]">${domain}</span></div>
         ${errorDetail ? html`<div class="text-[11px] font-mono text-[var(--text-body)] break-all">${errorDetail}</div>` : null}
       </div>

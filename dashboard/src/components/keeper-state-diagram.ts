@@ -70,7 +70,7 @@ function transitionType(selectedEvent: unknown): string {
 function badgeTone(ok: boolean): string {
   return ok
     ? 'border-[rgba(34,197,94,0.24)] bg-[rgba(34,197,94,0.08)] text-[var(--ok)]'
-    : 'border-[rgba(239,68,68,0.24)] bg-[rgba(239,68,68,0.10)] text-[var(--bad)]'
+    : 'border-[rgba(239,68,68,0.24)] bg-[var(--bad-10)] text-[var(--bad)]'
 }
 
 export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStateDiagramProps) {

@@ -61,7 +61,7 @@ const INSIGHT_PANEL_CLS: Record<InsightTone, string> = {
   ok: 'border-[var(--white-8)] bg-[var(--white-2)]',
   info: 'border-[var(--white-8)] bg-[var(--white-2)]',
   warn: 'border-[rgba(245,158,11,0.45)] bg-[rgba(245,158,11,0.04)] shadow-[0_0_0_1px_rgba(245,158,11,0.15)_inset]',
-  error: 'border-[rgba(239,68,68,0.55)] bg-[rgba(239,68,68,0.05)] shadow-[0_0_0_1px_rgba(239,68,68,0.2)_inset]',
+  error: 'border-[rgba(239,68,68,0.55)] bg-[rgba(239,68,68,0.05)] shadow-[0_0_0_1px_var(--bad-20)_inset]',
 }
 
 export function OperationalMeaningPanel({
@@ -286,7 +286,7 @@ export function HeroPhase({
   const heldFor = phaseSince != null ? fmtDuration(Math.max(0, now - phaseSince)) : null
 
   return html`
-    <div class=${`rounded border p-5 transition-all duration-700 ${flash ? 'border-[var(--accent)] bg-[rgba(71,184,255,0.06)] shadow-[0_0_16px_rgba(71,184,255,0.2)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}
+    <div class=${`rounded border p-5 transition-all duration-700 ${flash ? 'border-[var(--accent)] bg-[rgba(71,184,255,0.06)] shadow-[0_0_16px_var(--accent-20)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}
       role="status" aria-live="polite" aria-label=${`Keeper 상태: ${displayState(snapshot.phase)}${heldFor ? `, ${heldFor}` : ''}`}
       title=${STATE_DESCRIPTIONS[snapshot.phase] ?? snapshot.phase}
     >

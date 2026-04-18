@@ -295,7 +295,7 @@ export function SwimlaneTimeline({
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(245,158,11,0.45)]"></span>compact</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(167,139,250,0.5)]"></span>handoff</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(239,68,68,0.5)]"></span>alarm</span>
-        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm border border-[var(--white-8)] bg-[rgba(255,255,255,0.04)]"></span>idle</span>
+        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm border border-[var(--white-8)] bg-[var(--white-3)]"></span>idle</span>
       </div>
     </div>
   `
@@ -408,7 +408,7 @@ export function TransitionTrail({
           const inSegment = isTransitionInSegment(entry, hoveredSegment)
           const dimmed = hoveredSegment != null && !inSegment
           const rowCls = inSegment
-            ? 'bg-[rgba(71,184,255,0.1)] ring-1 ring-[rgba(71,184,255,0.3)] rounded px-1'
+            ? 'bg-[var(--accent-10)] ring-1 ring-[var(--accent-30)] rounded px-1'
             : ''
           const reason = inferTransitionReason(entry.field, entry.from, entry.to)
           const tooltip = reason
@@ -469,7 +469,7 @@ export function TopTransitionsPanel({
           const dimmed = hoveredSegment != null && !matchesHover
           const widthPct = Math.max(4, Math.round((entry.count / maxCount) * 100))
           const rowCls = matchesHover
-            ? 'bg-[rgba(71,184,255,0.1)] ring-1 ring-[rgba(71,184,255,0.3)] rounded px-1'
+            ? 'bg-[var(--accent-10)] ring-1 ring-[var(--accent-30)] rounded px-1'
             : ''
           return html`
             <div
@@ -543,7 +543,7 @@ export function DwellHistogramPanel({
                     && hoveredSegment.field === lane.field
                     && hoveredSegment.value === entry.value
                   const rowCls = highlighted
-                    ? 'bg-[rgba(71,184,255,0.1)] ring-1 ring-[rgba(71,184,255,0.3)] rounded px-0.5'
+                    ? 'bg-[var(--accent-10)] ring-1 ring-[var(--accent-30)] rounded px-0.5'
                     : ''
                   return html`
                     <div

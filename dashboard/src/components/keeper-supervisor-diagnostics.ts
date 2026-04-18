@@ -38,7 +38,7 @@ function registryStateBadge(state: string | null) {
   if (!state) return null
   const colors: Record<string, { bg: string; text: string }> = {
     Running: { bg: 'bg-[rgba(34,197,94,0.12)]', text: 'text-[var(--ok)]' },
-    Crashed: { bg: 'bg-[rgba(239,68,68,0.15)]', text: 'text-[var(--bad)]' },
+    Crashed: { bg: 'bg-[var(--bad-soft)]', text: 'text-[var(--bad)]' },
     Dead: { bg: 'bg-[rgba(100,116,139,0.15)]', text: 'text-[#94a3b8]' },
     Stopped: { bg: 'bg-[rgba(234,179,8,0.12)]', text: 'text-[var(--warn)]' },
     Paused: { bg: 'bg-[var(--white-10)]', text: 'text-[var(--purple)]' },
@@ -161,7 +161,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
           </div>
         ` : null}
         ${dead_since ? html`
-          <div class="py-2 px-3 rounded bg-[rgba(239,68,68,0.06)] border border-[rgba(239,68,68,0.15)] text-xs text-[#fb7185]">
+          <div class="py-2 px-3 rounded bg-[rgba(239,68,68,0.06)] border border-[var(--bad-soft)] text-xs text-[#fb7185]">
             ${formatTimeAgo(dead_since)} 이후 중단됨. 재기동 필요.
           </div>
         ` : null}

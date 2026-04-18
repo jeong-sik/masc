@@ -107,6 +107,64 @@ let test_event_bus_keeper_lifecycle_includes_phase () =
     Alcotest.(check string) "event" "started" event
   | _ -> Alcotest.fail "expected Custom masc:keeper:lifecycle event"
 
+let test_keeper_snapshot_envelope_agent_name () =
+  (* #7827: publish_keeper_snapshot stores the keeper's identity as
+     [keeper_name] inside the Custom payload.  native_event_to_json must
+     still populate the top-level envelope [agent_name] so that
+     [.masc/oas-events/*.jsonl] consumers can filter/group by agent
+     instead of silently dropping 9%+ of daily events. *)
+  Eio_main.run @@ fun _env ->
+  let bus = Event_bus.create () in
+  let sub = Event_bus.subscribe bus in
+  Oas_events.publish_keeper_snapshot bus
+    ~keeper_name:"sojin"
+    ~generation:4
+    ~context_ratio:0.25
+    ~message_count:47;
+  let events = Event_bus.drain sub in
+  Alcotest.(check int) "one event" 1 (List.length events);
+  match Oas_sse_bridge.native_event_to_json (List.hd events) with
+  | None -> Alcotest.fail "expected native_event_to_json to emit"
+  | Some (`Assoc fields) ->
+    let field_string name =
+      match List.assoc_opt name fields with
+      | Some (`String value) -> value
+      | Some `Null -> "<null>"
+      | _ -> ""
+    in
+    Alcotest.(check string) "event_type"
+      "masc:keeper:snapshot" (field_string "event_type");
+    Alcotest.(check string) "envelope agent_name"
+      "sojin" (field_string "agent_name")
+  | Some _ -> Alcotest.fail "unexpected JSON shape"
+
+let test_keeper_lifecycle_envelope_agent_name () =
+  (* #7827 sibling: masc:keeper:lifecycle carries the same attribution
+     through keeper_name. *)
+  Eio_main.run @@ fun _env ->
+  let bus = Event_bus.create () in
+  let sub = Event_bus.subscribe bus in
+  Oas_events.publish_keeper_lifecycle bus
+    ~event:"started"
+    ~keeper_name:"masc-improver"
+    ~phase:Masc_mcp.Keeper_state_machine.Running
+    ~detail:"supervised"
+    ();
+  let events = Event_bus.drain sub in
+  Alcotest.(check int) "one event" 1 (List.length events);
+  match Oas_sse_bridge.native_event_to_json (List.hd events) with
+  | None -> Alcotest.fail "expected native_event_to_json to emit"
+  | Some (`Assoc fields) ->
+    let field_string name =
+      match List.assoc_opt name fields with
+      | Some (`String value) -> value
+      | Some `Null -> "<null>"
+      | _ -> ""
+    in
+    Alcotest.(check string) "envelope agent_name"
+      "masc-improver" (field_string "agent_name")
+  | Some _ -> Alcotest.fail "unexpected JSON shape"
+
 let test_oas_sse_bridge_persists_native_events () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -520,6 +578,10 @@ let () =
         test_event_bus_task_transition;
       Alcotest.test_case "keeper lifecycle includes phase" `Quick
         test_event_bus_keeper_lifecycle_includes_phase;
+      Alcotest.test_case "keeper snapshot envelope carries agent_name (#7827)" `Quick
+        test_keeper_snapshot_envelope_agent_name;
+      Alcotest.test_case "keeper lifecycle envelope carries agent_name (#7827)" `Quick
+        test_keeper_lifecycle_envelope_agent_name;
       Alcotest.test_case "sse bridge persists native events" `Quick
         test_oas_sse_bridge_persists_native_events;
       Alcotest.test_case "sse bridge sends lifecycle to observers" `Quick

@@ -42,9 +42,18 @@ let payload_int_opt key = function
   | _ -> None
 
 let payload_agent_name payload =
+  (* Check [agent_name], [agent], then [keeper_name] for Custom events
+     whose publisher stores the per-agent attribution under the
+     keeper-specific key (e.g. [masc:keeper:snapshot],
+     [masc:keeper:lifecycle]).  Without this fallback the top-level
+     envelope [agent_name] is Null for 9%+ of daily events, breaking
+     per-agent filters on [.masc/oas-events/*.jsonl].  See #7827. *)
   match payload_string_opt "agent_name" payload with
   | Some _ as value -> value
-  | None -> payload_string_opt "agent" payload
+  | None ->
+    (match payload_string_opt "agent" payload with
+     | Some _ as value -> value
+     | None -> payload_string_opt "keeper_name" payload)
 
 let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.t) =
   let log message =

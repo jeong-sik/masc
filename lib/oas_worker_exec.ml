@@ -222,7 +222,7 @@ let non_http_transport_of_provider
 (* ================================================================ *)
 
 let publish_lifecycle bus ~name ~event ~detail =
-  Oas.Event_bus.publish bus
+  Oas_bus_instrument.publish bus
     (Oas.Event_bus.mk_event
       (Custom
         (Printf.sprintf "masc:oas_worker:%s" event,

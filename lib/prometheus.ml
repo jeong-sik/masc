@@ -342,7 +342,26 @@ let init () =
     "Number of tool schemas exposed to MCP clients" Gauge;
   add metric_mcp_tool_schema_tokens_approx
     "Approximate token count of all tool schemas combined (chars/4)"
-    Gauge
+    Gauge;
+  (* OAS Event_bus backpressure observability (see oas_bus_instrument.ml).
+     Label series are populated dynamically per subscriber_purpose. *)
+  add "masc_oas_bus_subscriber_stream_depth"
+    "Estimated OAS Event_bus per-subscriber stream depth, labeled by \
+     subscriber_purpose. Indirect measure: publishes_matching_filter - \
+     events_drained, tracked MASC-side for subscriptions created via \
+     Oas_bus_instrument. OAS uses bounded Eio.Stream (default 256); values \
+     approaching this cap indicate impending publish blocking."
+    Gauge;
+  add "masc_oas_bus_publish_block_seconds_total"
+    "Cumulative seconds spent inside Agent_sdk.Event_bus.publish when routed \
+     through Oas_bus_instrument.publish. A sustained ramp indicates a \
+     subscriber drain loop has fallen behind and publishers are blocking \
+     on Eio.Stream.add."
+    Counter;
+  add "masc_oas_bus_publish_total"
+    "Total Agent_sdk.Event_bus.publish calls routed through \
+     Oas_bus_instrument.publish."
+    Counter
 
 let metric_open_fds = "masc_process_open_fds"
 

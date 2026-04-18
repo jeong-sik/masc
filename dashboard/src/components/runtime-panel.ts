@@ -1,11 +1,19 @@
 // RuntimePanel — Phase 4 runtime section with FilterChips toggle.
-// Wraps OasHealthChip, RuntimeMonitor, CascadeConfigPanel, PrometheusMetrics
-// with view switching.
-// Views:
-//   default    — all (cascade config + providers + prometheus)
+// Wraps OasHealthChip, RuntimeMonitor, CascadeConfigPanel, PrometheusMetrics,
+// VerificationSpecsPanel with view switching.
+//
+// Progressive-disclosure default view (density reduction, 2026-04):
+//   Signal layer     — OasHealthChip always expanded (summary StatCells)
+//   Diagnostic layer — Cascade, Providers & Models in <details> (closed)
+//   Raw layer        — Prometheus metrics, Formal specs in <details> (closed)
+// NN/g progressive disclosure: respect working-memory limits, defer detail.
+//
+// Explicit drill-down via FilterChips remains unchanged:
+//   default    — Signal strip + collapsed diagnostic/raw accordions
 //   cascade    — cascade config + health only (설정 ↔ 실측)
 //   providers  — OAS health chip + runtime monitor only
 //   prometheus — raw Prometheus metrics only
+//   verification — formal specs only
 // Pattern: mirrors fleet-health-panel.ts (unidirectional flow via URL).
 
 import { html } from 'htm/preact'
@@ -47,6 +55,11 @@ function updateViewParam(view: RuntimeView): void {
   window.dispatchEvent(new HashChangeEvent('hashchange'))
 }
 
+const SUMMARY_CLASS =
+  'cursor-pointer select-none rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-2 text-sm font-medium text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)] marker:text-[var(--text-muted)]'
+
+const DETAILS_CLASS = 'group rounded border border-[var(--card-border)] bg-transparent'
+
 export function RuntimePanel() {
   const view = activeView.value
 
@@ -70,11 +83,31 @@ export function RuntimePanel() {
         : view === 'verification'
           ? html`<${VerificationSpecsPanel} />`
         : html`
-            <${CascadeConfigPanel} />
             <${OasHealthChip} />
-            <${RuntimeMonitor} />
-            <${PrometheusMetrics} />
-            <${VerificationSpecsPanel} />
+            <details class=${DETAILS_CLASS} data-testid="runtime-details-cascade">
+              <summary class=${SUMMARY_CLASS}>Cascade</summary>
+              <div class="p-3 border-t border-[var(--card-border)]">
+                <${CascadeConfigPanel} />
+              </div>
+            </details>
+            <details class=${DETAILS_CLASS} data-testid="runtime-details-providers">
+              <summary class=${SUMMARY_CLASS}>프로바이더</summary>
+              <div class="p-3 border-t border-[var(--card-border)]">
+                <${RuntimeMonitor} />
+              </div>
+            </details>
+            <details class=${DETAILS_CLASS} data-testid="runtime-details-prometheus">
+              <summary class=${SUMMARY_CLASS}>메트릭</summary>
+              <div class="p-3 border-t border-[var(--card-border)]">
+                <${PrometheusMetrics} />
+              </div>
+            </details>
+            <details class=${DETAILS_CLASS} data-testid="runtime-details-verification">
+              <summary class=${SUMMARY_CLASS}>형식검증</summary>
+              <div class="p-3 border-t border-[var(--card-border)]">
+                <${VerificationSpecsPanel} />
+              </div>
+            </details>
           `}
       </div>
     </div>

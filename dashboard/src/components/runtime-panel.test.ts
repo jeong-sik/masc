@@ -63,15 +63,51 @@ describe('RuntimePanel', () => {
     vi.doUnmock('./common/filter-chips')
   })
 
-  it('renders all 3 panels by default', async () => {
+  it('renders all 5 panels by default (Signal + collapsed Diagnostic/Raw)', async () => {
     route.value.params = {}
     const { RuntimePanel } = await loadRuntimePanel()
     render(html`<${RuntimePanel} />`, container)
     await flushUi()
 
     expect(container.textContent).toContain('OasHealthChip')
+    expect(container.textContent).toContain('CascadeConfigPanel')
     expect(container.textContent).toContain('RuntimeMonitor')
     expect(container.textContent).toContain('PrometheusMetrics')
+    expect(container.textContent).toContain('VerificationSpecsPanel')
+  })
+
+  it('default view uses progressive disclosure: Signal open, Diagnostic/Raw in collapsed <details>', async () => {
+    route.value.params = {}
+    const { RuntimePanel } = await loadRuntimePanel()
+    render(html`<${RuntimePanel} />`, container)
+    await flushUi()
+
+    const oas = container.querySelector('[data-testid="oas-health"]')
+    expect(oas).not.toBeNull()
+    expect(oas?.closest('details')).toBeNull()
+
+    const detailIds = [
+      'runtime-details-cascade',
+      'runtime-details-providers',
+      'runtime-details-prometheus',
+      'runtime-details-verification',
+    ]
+    for (const id of detailIds) {
+      const el = container.querySelector(`[data-testid="${id}"]`)
+      expect(el, `missing ${id}`).not.toBeNull()
+      expect((el as HTMLDetailsElement).open).toBe(false)
+    }
+  })
+
+  it('explicit drill-down views bypass progressive disclosure', async () => {
+    route.value.params = { view: 'cascade' }
+    const { RuntimePanel } = await loadRuntimePanel()
+    render(html`<${RuntimePanel} />`, container)
+    await flushUi()
+
+    const cascade = container.querySelector('[data-testid="cascade-config"]')
+    expect(cascade).not.toBeNull()
+    expect(cascade?.closest('details')).toBeNull()
   })
 
   it('renders only OasHealthChip and RuntimeMonitor for providers view', async () => {

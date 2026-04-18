@@ -347,10 +347,10 @@ let test_cascade_observation_json_includes_fallback_fields () =
   let observation : Oas_worker.cascade_observation =
     {
       cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
-      configured_labels = [ "glm:auto"; "llama:auto" ];
-      candidate_models = [ "glm:glm-5.1"; "openai:qwen3.5-35b" ];
-      primary_model = Some "glm:glm-5.1";
-      selected_model = Some "openai:qwen3.5-35b";
+      configured_labels = [ "glm-api:auto"; "llama:auto" ];
+      candidate_models = [ "glm-api:glm-5.1"; "llama:qwen3.5-35b" ];
+      primary_model = Some "glm-api:glm-5.1";
+      selected_model = Some "llama:qwen3.5-35b";
       selected_model_raw = Some "qwen3.5-35b";
       selected_index = Some 1;
       fallback_hops = Some 1;
@@ -360,14 +360,14 @@ let test_cascade_observation_json_includes_fallback_fields () =
           {
             attempt_index = 0;
             model_id = "glm-5.1";
-            model_label = Some "glm:glm-5.1";
+            model_label = Some "glm-api:glm-5.1";
             latency_ms = None;
             error = Some "HTTP 503";
           };
           {
             attempt_index = 1;
             model_id = "qwen3.5-35b";
-            model_label = Some "openai:qwen3.5-35b";
+            model_label = Some "llama:qwen3.5-35b";
             latency_ms = Some 212;
             error = None;
           };
@@ -376,9 +376,9 @@ let test_cascade_observation_json_includes_fallback_fields () =
         [
           {
             from_model_id = "glm-5.1";
-            from_model_label = Some "glm:glm-5.1";
+            from_model_label = Some "glm-api:glm-5.1";
             to_model_id = "qwen3.5-35b";
-            to_model_label = Some "openai:qwen3.5-35b";
+            to_model_label = Some "llama:qwen3.5-35b";
             reason = "HTTP 503";
           };
         ];
@@ -393,7 +393,7 @@ let test_cascade_observation_json_includes_fallback_fields () =
     Yojson.Safe.Util.(json |> member "fallback_applied" |> to_bool);
   Alcotest.(check int) "fallback hops preserved" 1
     Yojson.Safe.Util.(json |> member "fallback_hops" |> to_int);
-  Alcotest.(check string) "selected model preserved" "openai:qwen3.5-35b"
+  Alcotest.(check string) "selected model preserved" "llama:qwen3.5-35b"
     Yojson.Safe.Util.(json |> member "selected_model" |> to_string);
   Alcotest.(check int) "attempt count preserved" 2
     Yojson.Safe.Util.(json |> member "attempts" |> to_list |> List.length);
@@ -502,10 +502,10 @@ let test_cascade_audit_persists_observation () =
       let observation : Masc_mcp.Oas_worker_cascade.cascade_observation =
         {
           cascade_name = "audit-cascade";
-          configured_labels = [ "glm:auto"; "openai:auto" ];
-          candidate_models = [ "glm:glm-5.1"; "openai:qwen3.5-35b" ];
-          primary_model = Some "glm:glm-5.1";
-          selected_model = Some "openai:qwen3.5-35b";
+          configured_labels = [ "glm-api:auto"; "llama:auto" ];
+          candidate_models = [ "glm-api:glm-5.1"; "llama:qwen3.5-35b" ];
+          primary_model = Some "glm-api:glm-5.1";
+          selected_model = Some "llama:qwen3.5-35b";
           selected_model_raw = Some "qwen3.5-35b";
           selected_index = Some 1;
           fallback_hops = Some 1;
@@ -515,14 +515,14 @@ let test_cascade_audit_persists_observation () =
               {
                 attempt_index = 0;
                 model_id = "glm-5.1";
-                model_label = Some "glm:glm-5.1";
+                model_label = Some "glm-api:glm-5.1";
                 latency_ms = Some 120;
                 error = Some "HTTP 503";
               };
               {
                 attempt_index = 1;
                 model_id = "qwen3.5-35b";
-                model_label = Some "openai:qwen3.5-35b";
+                model_label = Some "llama:qwen3.5-35b";
                 latency_ms = Some 90;
                 error = None;
               };
@@ -531,9 +531,9 @@ let test_cascade_audit_persists_observation () =
             [
               {
                 from_model_id = "glm-5.1";
-                from_model_label = Some "glm:glm-5.1";
+                from_model_label = Some "glm-api:glm-5.1";
                 to_model_id = "qwen3.5-35b";
-                to_model_label = Some "openai:qwen3.5-35b";
+                to_model_label = Some "llama:qwen3.5-35b";
                 reason = "HTTP 503";
               };
             ];
@@ -557,7 +557,7 @@ let test_cascade_audit_persists_observation () =
           Alcotest.(check string) "outcome persisted" "failure"
             Yojson.Safe.Util.(json |> member "outcome" |> to_string);
           Alcotest.(check string) "selected model persisted"
-            "openai:qwen3.5-35b"
+            "llama:qwen3.5-35b"
             Yojson.Safe.Util.(
               json |> member "observation" |> member "selected_model" |> to_string);
           Alcotest.(check bool) "fallback flag persisted" true

@@ -1,19 +1,19 @@
 {
   "_comment": "Known cascade profiles (SSOT: lib/keeper/keeper_cascade_profile.ml). Every <name>_models key here must correspond to a known cascade in that module, and vice versa. Personal/playground-only cascades belong in $MASC_BASE_PATH/.masc/playground/<persona>/.../cascade.json, not in this repo config.",
   "default_models": [
-    {"model": "glm-coding:glm-5.1", "weight": 50},
+    {"model": "glm-coding-plan:glm-5.1", "weight": 50},
     {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 30},
     {"model": "ollama:gemma4:26b", "weight": 20}
   ],
   "default_temperature": 0.3,
   "default_max_tokens": 4096,
   "default_api_key_env": {
-    "glm-coding": "ZAI_API_KEY_SB",
-    "glm": "ZAI_API_KEY_SB"
+    "glm-coding-plan": "ZAI_API_KEY_SB",
+    "glm-api": "ZAI_API_KEY_SB"
   },
 
   "keeper_unified_models": [
-    {"model": "glm-coding:glm-5.1", "weight": 50},
+    {"model": "glm-coding-plan:glm-5.1", "weight": 50},
     {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 30},
     {"model": "ollama:gemma4:26b", "weight": 20}
   ],
@@ -36,10 +36,10 @@
   "tool_rerank_temperature": 0.0,
   "tool_rerank_max_tokens": 200,
 
-  "_comment_sangsu": "sangsu is a persona keeper (홍상수-style 40대 남자) whose conversational turns rarely need tool calls.  Bias heavily toward local ollama to keep cost near zero, but include glm-coding as the second link in the cascade so [require_tool_use] turns auto-failover to a tool-capable cloud model instead of leaving the keeper idle.  Lower temperature (0.1) tightens ollama tool-call obedience per memory/reference_ollama-config-2026-04.  Cascade weight ordering acts as a fallback chain: 90% of orderings put ollama first (then glm), 10% put glm first (then ollama).",
+  "_comment_sangsu": "sangsu is a persona keeper (홍상수-style 40대 남자) whose conversational turns rarely need tool calls.  Bias heavily toward local ollama to keep cost near zero, but include glm-coding-plan as the second link in the cascade so [require_tool_use] turns auto-failover to a tool-capable cloud model instead of leaving the keeper idle.  Lower temperature (0.1) tightens ollama tool-call obedience per memory/reference_ollama-config-2026-04.  Cascade weight ordering acts as a fallback chain: 90% of orderings put ollama first (then glm-coding-plan), 10% put glm-coding-plan first (then ollama).",
   "sangsu_models": [
     {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 90, "supports_tool_choice": true},
-    {"model": "glm-coding:glm-5.1", "weight": 10}
+    {"model": "glm-coding-plan:glm-5.1", "weight": 10}
   ],
   "sangsu_temperature": 0.1,
   "sangsu_max_tokens": 16384

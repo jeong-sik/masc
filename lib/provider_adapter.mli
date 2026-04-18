@@ -87,6 +87,8 @@ val cn_claude_api : string
 val cn_codex_api : string
 val cn_gemini_api : string
 val cn_glm : string
+val cn_glm_api : string
+val cn_glm_coding_plan : string
 val cn_openrouter : string
 val cn_custom : string
 
@@ -133,6 +135,12 @@ val all_auth_env_keys : unit -> string list
 
 (** Resolve an adapter by canonical name or alias. *)
 val resolve_direct_adapter : string -> adapter option
+
+(** Map a cascade/provider alias to the underlying Provider_registry name. *)
+val registry_provider_name : string -> string
+
+(** All acceptable override keys for a provider in api_key_env mappings. *)
+val provider_override_keys : string -> string list
 
 (** Resolve the canonical name for a provider label. *)
 val resolve_direct_canonical_name : string -> string option
@@ -272,6 +280,10 @@ val endpoint_url_of_adapter : adapter -> string option
     MASC cascade prefix. *)
 val cascade_prefix_of_provider_kind :
   Llm_provider.Provider_config.provider_kind -> string
+
+(** Endpoint-aware mapping from provider config to a disambiguated cascade prefix. *)
+val cascade_prefix_of_provider_config :
+  Llm_provider.Provider_config.t -> string
 
 (** {1 Gemini Auth} *)
 

@@ -52,7 +52,7 @@ let resolve_glm_coding_model_id model_id =
     resolve the model_id before invoking [Llm_provider.Discovery.endpoint_for_model]
     to avoid routing mismatches. *)
 let resolve_auto_model_id provider_name model_id =
-  match provider_name with
+  match Provider_adapter.registry_provider_name provider_name with
   | "llama" | "ollama" ->
     (* Local providers: "auto" resolved earlier via Discovery in
        cascade_config.ml.  If still "auto" here, try discovery then env var. *)

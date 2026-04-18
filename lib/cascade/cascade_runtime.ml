@@ -264,9 +264,14 @@ let default_model_strings_from_config () : string list =
   models_of_cascade_name "default"
 
 let resolve_providers_from_model_strings ?provider_filter
+    ?(api_key_env_overrides = [])
     (model_strings : string list)
     : Llm_provider.Provider_config.t list =
-  let specs = Cascade_config.parse_model_strings model_strings in
+  let specs =
+    Cascade_config.parse_model_strings
+      ~api_key_env_overrides
+      model_strings
+  in
   let filtered =
     Cascade_config.apply_provider_filter
       ~provider_filter
@@ -284,6 +289,11 @@ let resolve_named_providers ?provider_filter ~cascade_name ()
   let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
   let defaults = default_model_strings ~cascade_name in
   let config_path = cascade_config_path () in
+  let api_key_env_overrides =
+    match config_path with
+    | Some path -> Cascade_config.resolve_api_key_env ~config_path:path ~name:cascade_name
+    | None -> []
+  in
   let weighted =
     match config_path with
     | Some path ->
@@ -293,9 +303,13 @@ let resolve_named_providers ?provider_filter ~cascade_name ()
   in
   let specs =
     (if weighted <> [] then
-       Cascade_config.parse_weighted_entries ~cascade_name weighted
+       Cascade_config.parse_weighted_entries
+         ~api_key_env_overrides
+         ~cascade_name
+         weighted
      else
        Cascade_config.parse_model_strings
+         ~api_key_env_overrides
          (models_of_cascade_name cascade_name))
     |> Cascade_config.apply_provider_filter ~provider_filter ~label:cascade_name
   in
@@ -308,4 +322,7 @@ let resolve_named_providers ?provider_filter ~cascade_name ()
     Log.Misc.warn
       "cascade %s: configured models unavailable — retrying built-in defaults"
       cascade_name;
-    resolve_providers_from_model_strings ?provider_filter defaults)
+    resolve_providers_from_model_strings
+      ?provider_filter
+      ~api_key_env_overrides
+      defaults)

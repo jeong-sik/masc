@@ -38,4 +38,5 @@ val resolve_named_providers :
   cascade_name:string -> unit -> Llm_provider.Provider_config.t list
 val resolve_providers_from_model_strings :
   ?provider_filter:string list ->
+  ?api_key_env_overrides:(string * string) list ->
   string list -> Llm_provider.Provider_config.t list

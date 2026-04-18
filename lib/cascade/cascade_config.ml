@@ -55,7 +55,9 @@ let split_provider_model (s : string) : (string * string) option =
     if idx = 0 || idx >= String.length s - 1 then None
     else
       let provider_name =
-        String.sub s 0 idx |> String.trim |> String.lowercase_ascii
+        String.sub s 0 idx
+        |> String.trim
+        |> Provider_adapter.registry_provider_name
       in
       let model_id =
         String.sub s (idx + 1) (String.length s - idx - 1) |> String.trim
@@ -98,12 +100,34 @@ let resolve_effective_api_key_env
     | Some v when v <> "" -> Some v
     | _ -> None
   in
-  match find_non_empty provider_name with
+  match
+    Provider_adapter.provider_override_keys provider_name
+    |> List.find_map find_non_empty
+  with
   | Some env -> env
-  | None ->
+  | None -> (
     match find_non_empty "*" with
     | Some env -> env
-    | None -> registry_default
+    | None -> registry_default)
+
+let api_key_env_present env_name =
+  env_name = ""
+  ||
+  match Sys.getenv_opt env_name with
+  | Some value -> String.trim value <> ""
+  | None -> false
+
+let provider_entry_is_available
+    ~(api_key_env_overrides : (string * string) list)
+    ~(provider_name : string)
+    (entry : Llm_provider.Provider_registry.entry) =
+  let effective_api_key_env =
+    resolve_effective_api_key_env
+      ~api_key_env_overrides
+      ~provider_name
+      ~registry_default:entry.defaults.api_key_env
+  in
+  api_key_env_present effective_api_key_env
 
 (** Build a {!Llm_provider.Provider_config.t} from a registry entry. *)
 let make_registry_config ~temperature ~max_tokens ?system_prompt
@@ -195,7 +219,13 @@ let parse_model_string
   | Registered { provider_name; model_id; kind = resolved_kind } ->
     match Llm_provider.Provider_registry.find default_registry provider_name with
     | None -> None  (* registry lookup race or unloaded entry *)
-    | Some entry when not (entry.is_available ()) -> None
+    | Some entry
+      when not
+             (provider_entry_is_available
+                ~api_key_env_overrides
+                ~provider_name
+                entry) ->
+      None
     | Some entry ->
       (* Defensive invariant: the resolver and the registry must agree on
          the kind. If they diverge we have a registry bug or a resolver
@@ -249,7 +279,12 @@ let parse_weighted_entry_diag
     match Llm_provider.Provider_registry.find default_registry provider_name with
     | None ->
       Error (Drop_unregistered_scheme { model = raw; scheme = provider_name })
-    | Some reg_entry when not (reg_entry.is_available ()) ->
+    | Some reg_entry
+      when not
+             (provider_entry_is_available
+                ~api_key_env_overrides
+                ~provider_name
+                reg_entry) ->
       Error (Drop_unavailable_scheme { model = raw; scheme = provider_name })
     | Some reg_entry ->
       Ok (make_registry_config ~temperature ~max_tokens ?system_prompt
@@ -318,7 +353,8 @@ let parse_weighted_entries
 let parse_model_string_exn
     ?(temperature = Llm_provider.Constants.Inference.default_temperature)
     ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
-    ?system_prompt (s : string) : (Llm_provider.Provider_config.t, string) result =
+    ?system_prompt ?(api_key_env_overrides = [])
+    (s : string) : (Llm_provider.Provider_config.t, string) result =
   let s = String.trim s in
   match split_provider_model s with
   | None ->
@@ -332,12 +368,23 @@ let parse_model_string_exn
     match Llm_provider.Provider_registry.find default_registry provider_name with
     | None ->
       Error (Printf.sprintf "unknown provider %S in model spec %S" provider_name s)
-    | Some entry when not (entry.is_available ()) ->
+    | Some entry
+      when not
+             (provider_entry_is_available
+                ~api_key_env_overrides
+                ~provider_name
+                entry) ->
+      let effective_api_key_env =
+        resolve_effective_api_key_env
+          ~api_key_env_overrides
+          ~provider_name
+          ~registry_default:entry.defaults.api_key_env
+      in
       Error (Printf.sprintf "provider %S unavailable (missing env var %S)"
-               provider_name entry.defaults.api_key_env)
+               provider_name effective_api_key_env)
     | Some entry ->
       Ok (make_registry_config ~temperature ~max_tokens ?system_prompt
-            ~provider_name ~model_id entry)
+            ~api_key_env_overrides ~provider_name ~model_id entry)
 
 (** Expand provider:auto specs that map to multiple models.
     "glm:auto" expands to ["glm:glm-5.1"; "glm:glm-5-turbo"; ...].

@@ -78,6 +78,8 @@ module Llama : sig
 end
 
 module Glm : sig
+  val api_server_url : string
+  val coding_plan_server_url : string
   val server_url : string
 end
 

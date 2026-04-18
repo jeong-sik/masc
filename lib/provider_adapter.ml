@@ -93,7 +93,9 @@ let cn_gemini = "gemini"
 let cn_claude_api = "claude-api"
 let cn_codex_api = "codex-api"
 let cn_gemini_api = "gemini-api"
-let cn_glm = "glm"
+let cn_glm_api = "glm-api"
+let cn_glm_coding_plan = "glm-coding-plan"
+let cn_glm = cn_glm_api
 let cn_openrouter = "openrouter"
 
 (** Default API base URLs — overridable via env var for proxying/testing. *)
@@ -125,6 +127,20 @@ let local_cascade_prefix = cn_llama
 let make_local_label (model_id : string) : string =
   local_cascade_prefix ^ ":" ^ model_id
 
+let registry_provider_name label =
+  match normalize_label label with
+  | "glm" | "glm-api" -> "glm"
+  | "glm-coding" | "glm-coding-plan" | "glm-coding-plan-api" -> "glm-coding"
+  | other -> other
+
+let provider_override_keys provider_name =
+  let normalized = normalize_label provider_name in
+  match registry_provider_name normalized with
+  | "glm" -> [ normalized; cn_glm_api; "glm" ]
+  | "glm-coding" ->
+    [ normalized; cn_glm_coding_plan; "glm-coding"; "glm-coding-plan-api" ]
+  | _ -> [ normalized ]
+
 (** Map OAS Provider_config.provider_kind to MASC adapter canonical_name.
     Note: OpenAI_compat maps to codex-api (cloud); llama (local) uses the
     same provider_kind but is identified by endpoint, not by this function. *)
@@ -136,7 +152,7 @@ let string_of_provider_kind
   | Ollama -> cn_ollama
   | Gemini -> cn_gemini_api
   | Gemini_cli -> cn_gemini
-  | Glm -> cn_glm
+  | Glm -> cn_glm_api
   | Claude_code -> cn_claude
   | Codex_cli -> cn_codex
 
@@ -243,14 +259,25 @@ let direct_adapters =
       default_model_id = Some "auto";
     };
     {
-      canonical_name = cn_glm;
+      canonical_name = cn_glm_coding_plan;
       runtime_kind = Direct_api;
       auth_mode = Api_key "ZAI_API_KEY";
-      aliases = [ cn_glm; "glm_cloud"; "zai" ];
+      aliases = [ cn_glm_coding_plan; "glm-coding"; "glm-coding-plan-api" ];
       spawn_key = None;
-      cascade_prefix = "glm";
+      cascade_prefix = cn_glm_coding_plan;
       default_voice = None;
-      endpoint_url = Some Env_config_runtime.Glm.server_url;
+      endpoint_url = Some Env_config_runtime.Glm.coding_plan_server_url;
+      default_model_id = Some "auto";
+    };
+    {
+      canonical_name = cn_glm_api;
+      runtime_kind = Direct_api;
+      auth_mode = Api_key "ZAI_API_KEY";
+      aliases = [ cn_glm_api; "glm"; "glm_cloud"; "zai" ];
+      spawn_key = None;
+      cascade_prefix = cn_glm_api;
+      default_voice = None;
+      endpoint_url = Some Env_config_runtime.Glm.api_server_url;
       default_model_id = Some "auto";
     };
     {
@@ -960,6 +987,11 @@ let cascade_prefix_of_adapter (adapter : adapter) = adapter.cascade_prefix
 
 let endpoint_url_of_adapter (adapter : adapter) = adapter.endpoint_url
 
+let base_url_matches expected actual =
+  String.equal
+    (normalize_label expected)
+    (normalize_label actual)
+
 (** Best-effort mapping from Provider_registry/OAS [provider_kind] to a cascade prefix via the
     adapter registry.
 
@@ -977,6 +1009,23 @@ let cascade_prefix_of_provider_kind (kind : Llm_provider.Provider_config.provide
   match resolve_direct_adapter cn with
   | Some a -> a.cascade_prefix
   | None -> cn
+
+let cascade_prefix_of_provider_config
+    (cfg : Llm_provider.Provider_config.t) : string =
+  match cfg.kind with
+  | Llm_provider.Provider_config.Glm ->
+    if Llm_provider.Zai_catalog.is_coding_base_url cfg.base_url then
+      cn_glm_coding_plan
+    else
+      cn_glm_api
+  | Llm_provider.Provider_config.OpenAI_compat ->
+    if Llm_provider.Provider_config.is_local cfg then
+      cn_llama
+    else if base_url_matches (openrouter_api_url ()) cfg.base_url then
+      cn_openrouter
+    else
+      "openai"
+  | _ -> cascade_prefix_of_provider_kind cfg.kind
 
 (** Resolve auth detail for any provider by canonical name or alias.
     Gemini-specific Vertex ADC vs API Key logic is internal. *)

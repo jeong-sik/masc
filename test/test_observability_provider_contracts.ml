@@ -11,13 +11,48 @@ open Alcotest
 
 module Adapter = Masc_mcp.Provider_adapter
 
+let with_env name value_opt f =
+  let prior = Sys.getenv_opt name in
+  Fun.protect
+    ~finally:(fun () ->
+      match prior with
+      | Some value -> Unix.putenv name value
+      | None -> Unix.putenv name "")
+    (fun () ->
+      (match value_opt with
+       | Some value -> Unix.putenv name value
+       | None -> Unix.putenv name "");
+      f ())
+
+let with_temp_dir prefix f =
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "%s-%d-%d" prefix (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1000.0)))
+  in
+  Unix.mkdir dir 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists dir then (
+        Array.iter
+          (fun name ->
+            let path = Filename.concat dir name in
+            if Sys.file_exists path then Sys.remove path)
+          (Sys.readdir dir);
+        Unix.rmdir dir))
+    (fun () -> f dir)
+
 let test_alias_roundtrip () =
   let cases =
     [ ("anthropic", "claude-api"); ("Claude", "claude");
       ("google", "gemini-api"); ("Gemini", "gemini");
       ("openai", "codex-api"); ("OpenAI", "codex-api");
       ("llama", "llama"); ("llamacpp", "llama");
-      ("glm", "glm"); ("zai", "glm");
+      ("glm", "glm-api"); ("glm-api", "glm-api");
+      ("glm-coding", "glm-coding-plan");
+      ("glm-coding-plan", "glm-coding-plan");
+      ("zai", "glm-api");
       ("openrouter", "openrouter") ]
   in
   List.iter (fun (input, expected) ->
@@ -64,7 +99,10 @@ let test_runtime_kind_strings () =
 (* ── Section 2: OAS model resolve contracts ── *)
 
 let test_resolve_canonical_wraps_adapter () =
-  let labels = [ "claude"; "anthropic"; "gemini"; "google"; "openai"; "llama" ] in
+  let labels =
+    [ "claude"; "anthropic"; "gemini"; "google"; "openai"; "llama";
+      "glm"; "glm-api"; "glm-coding"; "glm-coding-plan" ]
+  in
   List.iter (fun label ->
     let via_fn = Adapter.resolve_direct_canonical_name label in
     let via_adapter =
@@ -154,6 +192,68 @@ let test_labels_require_local_discovery () =
   check bool "malformed labels skip refresh" false
     (Masc_mcp.Oas_model_resolve.labels_require_local_discovery
        [ "default"; "glm:auto" ])
+
+let test_registry_provider_name_normalizes_glm_aliases () =
+  check string "glm-api -> glm registry key" "glm"
+    (Adapter.registry_provider_name "glm-api");
+  check string "glm-coding-plan -> glm-coding registry key" "glm-coding"
+    (Adapter.registry_provider_name "glm-coding-plan");
+  check string "legacy glm stays glm" "glm"
+    (Adapter.registry_provider_name "glm");
+  check string "legacy glm-coding stays glm-coding" "glm-coding"
+    (Adapter.registry_provider_name "glm-coding")
+
+let test_cascade_prefix_of_provider_config_disambiguates_glm_and_llama () =
+  let coding_cfg =
+    match Masc_mcp.Cascade_config.parse_model_string_exn "glm-coding-plan:glm-5.1" with
+    | Ok cfg -> cfg
+    | Error err -> fail err
+  in
+  let api_cfg =
+    match Masc_mcp.Cascade_config.parse_model_string_exn "glm-api:glm-5.1" with
+    | Ok cfg -> cfg
+    | Error err -> fail err
+  in
+  let llama_cfg =
+    match Masc_mcp.Cascade_config.parse_model_string_exn "llama:qwen3.5:27b-nvfp4" with
+    | Ok cfg -> cfg
+    | Error err -> fail err
+  in
+  check string "coding-plan prefix preserved" "glm-coding-plan"
+    (Adapter.cascade_prefix_of_provider_config coding_cfg);
+  check string "glm-api prefix preserved" "glm-api"
+    (Adapter.cascade_prefix_of_provider_config api_cfg);
+  check string "local openai-compat rendered as llama" "llama"
+    (Adapter.cascade_prefix_of_provider_config llama_cfg)
+
+let test_resolve_named_providers_honors_api_key_override_for_glm_coding_plan () =
+  with_temp_dir "glm-coding-provider" @@ fun config_dir ->
+  let cascade_path = Filename.concat config_dir "cascade.json" in
+  let oc = open_out cascade_path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      output_string oc
+        {|{
+  "default_models": [{"model":"glm-coding-plan:glm-5.1","weight":1}],
+  "default_api_key_env": {"glm-coding-plan":"ZAI_API_KEY_SB"}
+}|});
+  with_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
+  with_env "ZAI_API_KEY" None @@ fun () ->
+  with_env "ZAI_API_KEY_SB" (Some "sb-key") @@ fun () ->
+    let providers =
+      Masc_mcp.Oas_model_resolve.resolve_named_providers ~cascade_name:"default" ()
+    in
+    match providers with
+    | [ cfg ] ->
+      check string "coding-plan base url"
+        "https://api.z.ai/api/coding/paas/v4"
+        cfg.Llm_provider.Provider_config.base_url;
+      check string "resolved model"
+        "glm-5.1"
+        cfg.Llm_provider.Provider_config.model_id
+    | _ ->
+      fail (Printf.sprintf "expected one provider, got %d" (List.length providers))
 
 (* ── Section 3: Dashboard schema contracts ── *)
 
@@ -253,6 +353,12 @@ let () =
             test_effective_discovered_ctx;
           test_case "local discovery label detection" `Quick
             test_labels_require_local_discovery;
+          test_case "registry provider aliases normalize" `Quick
+            test_registry_provider_name_normalizes_glm_aliases;
+          test_case "provider config prefixes stay disambiguated" `Quick
+            test_cascade_prefix_of_provider_config_disambiguates_glm_and_llama;
+          test_case "named providers honor glm coding override" `Quick
+            test_resolve_named_providers_honors_api_key_override_for_glm_coding_plan;
           test_case "resolve max cascade context" `Quick
             test_resolve_max_cascade_context;
         ] );

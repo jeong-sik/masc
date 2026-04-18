@@ -182,7 +182,17 @@ module Ollama = struct
 end
 
 module Glm = struct
-  let server_url = Env_config_core.get_string ~default:"https://api.z.ai" "ZAI_BASE_URL"
+  let api_server_url =
+    Env_config_core.get_string
+      ~default:"https://api.z.ai/api/paas/v4"
+      "ZAI_BASE_URL"
+
+  let coding_plan_server_url =
+    Env_config_core.get_string
+      ~default:"https://api.z.ai/api/coding/paas/v4"
+      "ZAI_CODING_BASE_URL"
+
+  let server_url = api_server_url
 end
 
 (** {1 Cancellation Token Configuration} *)

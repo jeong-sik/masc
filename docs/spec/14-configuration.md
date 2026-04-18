@@ -151,8 +151,8 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 | `MASC_INFERENCE_CACHE_MAX_TEMP` | float | 0.0 | 캐시 허용 최대 온도 |
 | `MASC_INFERENCE_CACHE_L1_MAX_ENTRIES` | int | 512 | L1 인메모리 캐시 상한 |
 | `MASC_SPAWN_CACHE_POLICY` | string | `"safe_only"` | Spawn 캐시 정책 (`off`/`safe_only`) |
-| `ZAI_DEFAULT_MODEL` | string | `"glm-5.1"` | `glm` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:38) |
-| `ZAI_CODING_DEFAULT_MODEL` | string | `"glm-4.7"` | `glm-coding` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:43) |
+| `ZAI_DEFAULT_MODEL` | string | `"glm-5.1"` | `glm-api` provider `auto` 기본 모델 (legacy alias: `glm`) |
+| `ZAI_CODING_DEFAULT_MODEL` | string | `"glm-4.7"` | `glm-coding-plan` provider `auto` 기본 모델 (legacy alias: `glm-coding`) |
 | `GEMINI_DEFAULT_MODEL` | string | `"gemini-3-flash-preview"` | `gemini` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:67) |
 | `ANTHROPIC_DEFAULT_MODEL` | string | `"claude-sonnet-4-6-20250514"` | `claude` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:70) |
 | `OPENAI_DEFAULT_MODEL` | string | `"gpt-4.1"` | `openai` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:73) |
@@ -341,8 +341,8 @@ JSON 파일로 CASCADE별 모델 순서를 정의한다. 키 패턴: `{cascade_n
 |----------|----------------|----------|
 | `ollama` | `Local_runtime` | `OLLAMA_DEFAULT_MODEL` (port 11434, 262k context) |
 | `llama` | `Local_runtime` | `LLAMA_DEFAULT_MODEL` (legacy local OpenAI-compatible runtime) |
-| `glm` | `Glm` | `ZAI_DEFAULT_MODEL` |
-| `glm-coding` | `Glm` | `ZAI_CODING_DEFAULT_MODEL` |
+| `glm-api` | `Glm` | `ZAI_DEFAULT_MODEL` |
+| `glm-coding-plan` | `Glm` | `ZAI_CODING_DEFAULT_MODEL` |
 | `gemini` | `Gemini` | `GEMINI_DEFAULT_MODEL` |
 | `claude` | `Claude` | `ANTHROPIC_DEFAULT_MODEL` |
 | `openai` | `OpenAI` | `OPENAI_DEFAULT_MODEL` |
@@ -404,7 +404,7 @@ capacity 조회 순서: `Cascade_throttle` (llama-server /slots 기반) → `Cas
 ```json
 {
   "keeper_unified_models": [
-    "glm-coding:auto",
+    "glm-coding-plan:auto",
     "ollama:qwen3.5:35b-a3b-nvfp4",
     "gemini_cli:auto"
   ],

@@ -151,13 +151,11 @@ let reset_cascade_counters_for_test () =
 (* ================================================================ *)
 
 (** Map provider_kind to cascade-label prefix (e.g. "claude", "gemini").
-    Delegates to Provider_adapter.cascade_prefix_of_provider_kind.
-    Note: reverse-mapping from provider_kind is inherently lossy —
-    OpenAI_compat conflates codex/openrouter/llama into one kind.
-    TODO: pass the provider name from cascade config parsing instead of
-    reverse-mapping from provider_kind to avoid this ambiguity. *)
+    Delegates to Provider_adapter.cascade_prefix_of_provider_config so
+    endpoint-sensitive families (glm-api vs glm-coding-plan, llama vs openai)
+    stay distinct in observability. *)
 let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
-  Provider_adapter.cascade_prefix_of_provider_kind cfg.kind
+  Provider_adapter.cascade_prefix_of_provider_config cfg
 
 let model_label_of_config (cfg : Llm_provider.Provider_config.t) =
   Printf.sprintf "%s:%s" (provider_name_of_config cfg) cfg.model_id

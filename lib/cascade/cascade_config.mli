@@ -107,6 +107,7 @@ val parse_model_string_exn :
   ?temperature:float ->
   ?max_tokens:int ->
   ?system_prompt:string ->
+  ?api_key_env_overrides:(string * string) list ->
   string -> (Llm_provider.Provider_config.t, string) result
 
 (** Expand provider:auto specs that map to multiple models.

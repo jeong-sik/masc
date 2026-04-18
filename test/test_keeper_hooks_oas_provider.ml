@@ -7,9 +7,10 @@ module Hooks = Masc_mcp.Keeper_hooks_oas
    transports, and truly unrecognised strings (should route to "unknown"
    rather than guess). *)
 let cases_prefix = [
-  "glm-coding:glm-5-turbo",                "glm-coding";
-  "glm-coding:glm-5.1",                    "glm-coding";
-  "glm:glm-5-turbo",                       "glm";
+  "glm-coding-plan:glm-5-turbo",           "glm-coding-plan";
+  "glm-coding:glm-5.1",                    "glm-coding-plan";
+  "glm-api:glm-5-turbo",                   "glm-api";
+  "glm:glm-5-turbo",                       "glm-api";
   "claude:claude-haiku-4-5-20251001",      "claude";
   "claude_code:haiku",                     "claude_code";
   "gemini:gemini-2.5-flash",               "gemini";
@@ -19,8 +20,8 @@ let cases_prefix = [
 ]
 
 let cases_bare = [
-  "glm-5-turbo",                           "glm-coding";
-  "glm-4.7",                               "glm-coding";
+  "glm-5-turbo",                           "glm-coding-plan";
+  "glm-4.7",                               "glm-coding-plan";
   "claude-haiku-4-5-20251001",             "claude";
   "gemini-2.5-flash",                      "gemini";
   "gpt-5.4",                               "openai";

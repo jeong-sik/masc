@@ -42,7 +42,7 @@ let keeper_denied_tools =
     than guessing when no rule fits, so analysis queries can filter
     those rows out rather than miscount them. *)
 let known_providers = [
-  "glm-coding"; "glm"; "claude"; "claude_code";
+  "glm-coding-plan"; "glm-api"; "glm-coding"; "glm"; "claude"; "claude_code";
   "gemini"; "gemini_cli"; "codex_cli"; "ollama";
 ]
 
@@ -52,7 +52,7 @@ let provider_of_model (model : string) : string =
       String.length model >= String.length prefix
       && String.sub model 0 (String.length prefix) = prefix
     in
-    if starts_with "glm-" then "glm-coding"
+    if starts_with "glm-" then "glm-coding-plan"
     else if starts_with "claude-" then "claude"
     else if starts_with "gemini-" then "gemini"
     else if starts_with "gpt-" then "openai"
@@ -61,8 +61,12 @@ let provider_of_model (model : string) : string =
   in
   match String.index_opt model ':' with
   | Some i ->
-    let prefix = String.sub model 0 i in
-    if List.mem prefix known_providers then prefix
+    let prefix = String.sub model 0 i |> Provider_adapter.normalize_label in
+    if List.mem prefix known_providers then
+      (match prefix with
+       | "glm-coding" -> "glm-coding-plan"
+       | "glm" -> "glm-api"
+       | other -> other)
     else bare_heuristic ()
   | None -> bare_heuristic ()
 

@@ -7,7 +7,7 @@ import { SectionCap, sectionCapClasses } from './section-cap'
 describe('sectionCapClasses (pure)', () => {
   it('default (muted, normal) includes base tokens + muted tone + no weight', () => {
     const cls = sectionCapClasses()
-    expect(cls).toContain('text-[10px]')
+    expect(cls).toContain('text-3xs')
     expect(cls).toContain('uppercase')
     expect(cls).toContain('tracking-wider')
     expect(cls).toContain('text-text-muted')
@@ -39,7 +39,7 @@ describe('sectionCapClasses (pure)', () => {
     for (const tone of ['muted', 'dim'] as const) {
       for (const weight of ['normal', 'semibold'] as const) {
         const cls = sectionCapClasses(tone, weight)
-        for (const token of ['text-[10px]', 'uppercase', 'tracking-wider']) {
+        for (const token of ['text-3xs', 'uppercase', 'tracking-wider']) {
           expect(cls).toContain(token)
         }
       }
@@ -87,7 +87,7 @@ describe('SectionCap component', () => {
     render(html`<${SectionCap} class="mb-1 flex items-center gap-2">tag<//>`, container)
     const el = container.querySelector('[data-section-cap]')!
     const cls = el.getAttribute('class') ?? ''
-    expect(cls).toContain('text-[10px]')
+    expect(cls).toContain('text-3xs')
     expect(cls).toContain('mb-1')
     expect(cls).toContain('flex')
   })

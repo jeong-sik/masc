@@ -77,12 +77,12 @@ export function DistributionBars({
     <div class="rounded border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3">
       ${title
         ? html`
-            <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">${title}</div>
-            ${subtitle ? html`<div class="mt-1 text-[11px] text-[var(--text-muted)]">${subtitle}</div>` : null}
+            <div class="text-3xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">${title}</div>
+            ${subtitle ? html`<div class="mt-1 text-2xs text-[var(--text-muted)]">${subtitle}</div>` : null}
           `
         : null}
       ${visibleItems.length === 0
-        ? html`<div class="${title ? 'mt-3 ' : ''}text-[11px] italic text-[var(--text-muted)]">${emptyLabel}</div>`
+        ? html`<div class="${title ? 'mt-3 ' : ''}text-2xs italic text-[var(--text-muted)]">${emptyLabel}</div>`
         : html`
             <div class="${title ? 'mt-3 ' : ''}flex flex-col gap-2.5">
               ${visibleItems.map(item => {
@@ -92,11 +92,11 @@ export function DistributionBars({
                   <div class="flex flex-col gap-1">
                     <div class="flex items-center justify-between gap-2">
                       <div class="min-w-0">
-                        <div class="truncate text-[12px] font-semibold text-[var(--text-strong)]">${item.label}</div>
-                        ${item.detail ? html`<div class="truncate text-[10px] text-[var(--text-muted)]">${item.detail}</div>` : null}
+                        <div class="truncate text-xs font-semibold text-[var(--text-strong)]">${item.label}</div>
+                        ${item.detail ? html`<div class="truncate text-3xs text-[var(--text-muted)]">${item.detail}</div>` : null}
                       </div>
                       <span
-                        class="shrink-0 rounded-sm border px-2 py-0.5 text-[10px] font-semibold"
+                        class="shrink-0 rounded-sm border px-2 py-0.5 text-3xs font-semibold"
                         style=${`color:${palette.text};background:${palette.chipBg};border-color:${palette.chipBorder};`}
                       >
                         ${valueFormatter(item.value)}
@@ -135,12 +135,12 @@ export function SegmentedBar({
     <div class="rounded border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3">
       ${title
         ? html`
-            <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">${title}</div>
-            ${subtitle ? html`<div class="mt-1 text-[11px] text-[var(--text-muted)]">${subtitle}</div>` : null}
+            <div class="text-3xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">${title}</div>
+            ${subtitle ? html`<div class="mt-1 text-2xs text-[var(--text-muted)]">${subtitle}</div>` : null}
           `
         : null}
       ${total === 0
-        ? html`<div class="${title ? 'mt-3 ' : ''}text-[11px] italic text-[var(--text-muted)]">표시할 데이터가 없습니다.</div>`
+        ? html`<div class="${title ? 'mt-3 ' : ''}text-2xs italic text-[var(--text-muted)]">표시할 데이터가 없습니다.</div>`
         : html`
             <div class="${title ? 'mt-3 ' : ''}flex flex-col gap-2.5">
               <div class="flex h-3 overflow-hidden rounded-sm bg-[var(--white-5)]">
@@ -165,7 +165,7 @@ export function SegmentedBar({
                     <span
                       aria-label=${`${item.label}: ${formattedValue}`}
                       title=${`${item.label}: ${formattedValue}`}
-                      class="inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-[10px] font-medium"
+                      class="inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-3xs font-medium"
                       style=${`color:${palette.text};background:${palette.chipBg};border-color:${palette.chipBorder};`}
                     >
                       <span class="inline-block h-1.5 w-1.5 rounded-full" style=${`background:${palette.fill};`}></span>

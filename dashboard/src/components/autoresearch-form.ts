@@ -130,7 +130,7 @@ export function StartAutoresearchForm() {
 
       <div class="flex flex-col gap-3">
         <label class="flex flex-col gap-1">
-          <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-medium">목표 *</span>
+          <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)] font-medium">목표 *</span>
           <${TextArea}
             value=${formGoal.value}
             placeholder="최적화 목표 (예: Reduce inference latency by optimizing hot path)"
@@ -140,7 +140,7 @@ export function StartAutoresearchForm() {
         </label>
 
         <label class="flex flex-col gap-1">
-          <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-medium">메트릭 명령어 *</span>
+          <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)] font-medium">메트릭 명령어 *</span>
           <${TextInput}
             value=${formMetricFn.value}
             placeholder="마지막 줄에 float를 출력하는 명령어 (예: python eval.py --metric accuracy)"
@@ -149,7 +149,7 @@ export function StartAutoresearchForm() {
         </label>
 
         <label class="flex flex-col gap-1">
-          <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-medium">대상 파일 *</span>
+          <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)] font-medium">대상 파일 *</span>
           <${TextInput}
             value=${formTargetFile.value}
             placeholder="수정할 파일 경로 (예: lib/optimizer.ml)"
@@ -158,7 +158,7 @@ export function StartAutoresearchForm() {
         </label>
 
         <button type="button"
-          class="self-start text-[11px] text-[var(--text-muted)] hover:text-[var(--text-body)] transition-colors"
+          class="self-start text-2xs text-[var(--text-muted)] hover:text-[var(--text-body)] transition-colors"
           onClick=${() => { formShowAdvanced.value = !formShowAdvanced.value }}
         >
           ${formShowAdvanced.value ? '고급 설정 접기 \u25B2' : '고급 설정 \u25BC'}
@@ -167,7 +167,7 @@ export function StartAutoresearchForm() {
         ${formShowAdvanced.value ? html`
           <div class="grid grid-cols-2 gap-3 border-t border-card-border pt-3">
             <label class="flex flex-col gap-1">
-              <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">작업 디렉토리</span>
+              <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">작업 디렉토리</span>
               <${TextInput}
                 value=${formWorkdir.value}
                 placeholder="기본: 프로젝트 루트"
@@ -175,7 +175,7 @@ export function StartAutoresearchForm() {
               />
             </label>
             <label class="flex flex-col gap-1">
-              <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">모델</span>
+              <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">모델</span>
               <${TextInput}
                 value=${formModelModel.value}
                 placeholder="glm"
@@ -183,7 +183,7 @@ export function StartAutoresearchForm() {
               />
             </label>
             <label class="flex flex-col gap-1">
-              <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">최대 사이클</span>
+              <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">최대 사이클</span>
               <${TextInput}
                 type="number"
                 value=${formMaxCycles.value}
@@ -192,7 +192,7 @@ export function StartAutoresearchForm() {
               />
             </label>
             <label class="flex flex-col gap-1">
-              <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">사이클 타임아웃 (초)</span>
+              <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">사이클 타임아웃 (초)</span>
               <${TextInput}
                 type="number"
                 value=${formCycleTimeoutS.value}
@@ -201,7 +201,7 @@ export function StartAutoresearchForm() {
               />
             </label>
             <label class="flex flex-col gap-1">
-              <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">기준선 (baseline)</span>
+              <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">기준선 (baseline)</span>
               <${TextInput}
                 type="number"
                 value=${formBaseline.value}
@@ -210,7 +210,7 @@ export function StartAutoresearchForm() {
               />
             </label>
             <label class="flex flex-col gap-1">
-              <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">인내 (patience)</span>
+              <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">인내 (patience)</span>
               <${TextInput}
                 type="number"
                 value=${formPatience.value}
@@ -219,7 +219,7 @@ export function StartAutoresearchForm() {
               />
             </label>
             <label class="col-span-2 flex flex-col gap-1">
-              <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">빌드 검증 명령어</span>
+              <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">빌드 검증 명령어</span>
               <${TextInput}
                 value=${formBuildVerifyFn.value}
                 placeholder="선택 (예: dune build)"

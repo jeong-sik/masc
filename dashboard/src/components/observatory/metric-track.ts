@@ -53,14 +53,14 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
   return html`
     <div class="flex items-center gap-3">
       <div class="w-24 shrink-0">
-        <div class="text-[11px] font-semibold text-text-muted">도구 성공률</div>
+        <div class="text-2xs font-semibold text-text-muted">도구 성공률</div>
         ${lastRate != null ? html`
-          <div class="text-[13px] font-mono font-semibold ${lastRateColor}">
+          <div class="text-sm font-mono font-semibold ${lastRateColor}">
             ${lastRate.toFixed(1)}%
           </div>
-        ` : html`<div class="text-[10px] text-text-dim">데이터 없음</div>`}
+        ` : html`<div class="text-3xs text-text-dim">데이터 없음</div>`}
         ${anomalyCount > 0 ? html`
-          <div class="text-[10px] font-mono text-[var(--bad-light)]">${anomalyCount} anomaly</div>
+          <div class="text-3xs font-mono text-[var(--bad-light)]">${anomalyCount} anomaly</div>
         ` : null}
       </div>
       <div
@@ -72,7 +72,7 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
         onMouseLeave=${clearCursor}
       >
         ${windowed.length === 0 ? html`
-          <div class="absolute inset-0 flex items-center justify-center text-[10px] text-text-dim">
+          <div class="absolute inset-0 flex items-center justify-center text-3xs text-text-dim">
             hourly_trend 데이터 부족
           </div>
         ` : html`

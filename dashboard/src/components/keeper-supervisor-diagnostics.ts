@@ -25,7 +25,7 @@ const crashShowAll = signal<boolean>(false)
 function SectionCard({ title, children }: { title: string; children: preact.ComponentChildren }) {
   return html`
     <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/30 hover:shadow-sm">
-      <div class="text-[11px] font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
+      <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
         <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
         ${title}
       </div>
@@ -44,7 +44,7 @@ function registryStateBadge(state: string | null) {
     Paused: { bg: 'bg-[var(--white-10)]', text: 'text-[var(--purple)]' },
   }
   const c = colors[state] ?? { bg: 'bg-[rgba(138,163,211,0.1)]', text: 'text-[#86a0cf]' }
-  return html`<span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-semibold ${c.bg} ${c.text}">${state}</span>`
+  return html`<span class="inline-flex items-center py-0.5 px-2 rounded text-3xs font-semibold ${c.bg} ${c.text}">${state}</span>`
 }
 
 const COHORT_COLORS: Record<CrashCategory, string> = {
@@ -64,7 +64,7 @@ function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntr
     .filter(([, count]) => count > 0)
   return html`
     <div>
-      <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">장애 유형 분포</div>
+      <div class="text-3xs font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">장애 유형 분포</div>
       <div class="flex w-full h-3 rounded-sm overflow-hidden bg-[var(--white-5)]">
         ${entries.map(([key, count]) => html`
           <div style="width: ${(count / total * 100).toFixed(1)}%; background: ${COHORT_COLORS[key]}"
@@ -74,7 +74,7 @@ function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntr
       </div>
       <div class="flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
         ${entries.map(([key, count]) => html`
-          <span class="text-[10px] text-[var(--text-muted)] flex items-center gap-1">
+          <span class="text-3xs text-[var(--text-muted)] flex items-center gap-1">
             <span class="inline-block w-2 h-2 rounded-full" style="background: ${COHORT_COLORS[key]}"></span>
             ${key} ${count}
           </span>
@@ -96,10 +96,10 @@ function SpEventsPanel({ sp_events }: { sp_events?: unknown[] }) {
   const entries = sp_events.slice(0, 10) as SpEventLike[]
   return html`
     <div>
-      <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">자기 보호 발동 이력</div>
+      <div class="text-3xs font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">자기 보호 발동 이력</div>
       <div class="space-y-1 max-h-28 overflow-y-auto">
         ${entries.map((e) => html`
-          <div class="flex items-center justify-between py-1 px-2 rounded text-[11px] bg-[rgba(139,92,246,0.06)]">
+          <div class="flex items-center justify-between py-1 px-2 rounded text-2xs bg-[rgba(139,92,246,0.06)]">
             <span class="font-mono text-[var(--text-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
             <span class="text-[#8b5cf6]">${e.suppressed_count ?? 0}/${e.total ?? 0} 억제 (${e.dominant_cohort ?? '--'})</span>
           </div>
@@ -151,13 +151,13 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
         ${typeof dead_eta_sec === 'number' && dead_eta_sec > 0 && dead_since == null ? html`
           <div class="flex items-center justify-between">
             <span class="text-xs text-[var(--text-muted)]">종료 예상</span>
-            <span class="text-[11px] font-mono" style="color: ${budgetPct >= 50 ? 'var(--amber-bright)' : 'var(--text-body)'}">${dead_eta_sec >= 3600 ? (dead_eta_sec / 3600).toFixed(1) + 'h' : (dead_eta_sec / 60).toFixed(0) + 'm'} 후</span>
+            <span class="text-2xs font-mono" style="color: ${budgetPct >= 50 ? 'var(--amber-bright)' : 'var(--text-body)'}">${dead_eta_sec >= 3600 ? (dead_eta_sec / 3600).toFixed(1) + 'h' : (dead_eta_sec / 60).toFixed(0) + 'm'} 후</span>
           </div>
         ` : null}
         ${last_failure_reason ? html`
           <div class="flex items-center justify-between">
             <span class="text-xs text-[var(--text-muted)]">마지막 실패 원인</span>
-            <span class="text-[11px] font-mono text-[var(--rose-light)]">${last_failure_reason}</span>
+            <span class="text-2xs font-mono text-[var(--rose-light)]">${last_failure_reason}</span>
           </div>
         ` : null}
         ${dead_since ? html`
@@ -179,10 +179,10 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
           return html`
             <div>
               <div class="flex items-center justify-between mb-2">
-                <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)]">장애 이력</div>
+                <div class="text-3xs font-semibold uppercase tracking-widest text-[var(--text-muted)]">장애 이력</div>
                 ${filtered.length > 10 ? html`
                   <button type="button"
-                    class="text-[10px] font-medium px-2 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)] transition-colors"
+                    class="text-3xs font-medium px-2 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)] transition-colors"
                     onClick=${() => { crashShowAll.value = !crashShowAll.value }}
                     aria-pressed=${crashShowAll.value}>
                     ${crashShowAll.value ? `최근 10건 보기` : `전체 ${filtered.length}건 보기`}
@@ -200,9 +200,9 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
               ` : null}
               <div class="space-y-1 ${crashShowAll.value ? 'max-h-64' : 'max-h-32'} overflow-y-auto">
                 ${visible.length === 0 ? html`
-                  <div class="py-2 px-2 text-[11px] text-[var(--text-muted)] italic">선택된 카테고리에 해당하는 장애가 없습니다.</div>
+                  <div class="py-2 px-2 text-2xs text-[var(--text-muted)] italic">선택된 카테고리에 해당하는 장애가 없습니다.</div>
                 ` : visible.map((e) => html`
-                  <div class="flex items-center justify-between py-1 px-2 rounded text-[11px] bg-[var(--white-3)]">
+                  <div class="flex items-center justify-between py-1 px-2 rounded text-2xs bg-[var(--white-3)]">
                     <span class="font-mono text-[var(--text-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
                     <span class="text-[var(--rose-light)]">${e.reason ?? 'unknown'}</span>
                   </div>

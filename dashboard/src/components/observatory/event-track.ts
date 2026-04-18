@@ -49,7 +49,7 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
 
   return html`
     <div class="flex items-center gap-3">
-      <div class="w-24 shrink-0 text-[11px] font-semibold text-text-muted">
+      <div class="w-24 shrink-0 text-2xs font-semibold text-text-muted">
         이벤트 (${windowedEvents.length})
       </div>
       <div
@@ -61,7 +61,7 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
         onMouseLeave=${clearCursor}
       >
         ${markers.length === 0
-          ? html`<div class="absolute inset-0 flex items-center justify-center text-[10px] text-text-dim">이 시간 범위에 이벤트 없음</div>`
+          ? html`<div class="absolute inset-0 flex items-center justify-center text-3xs text-text-dim">이 시간 범위에 이벤트 없음</div>`
           : markers.map(({ entry, ts, count }) => {
               const pct = ((ts - windowStart) / span) * 100
               const color = sourceColor(typeof entry.source === 'string' ? entry.source : undefined)
@@ -81,7 +81,7 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
                     selectEntity({ kind: 'event', entry, ts, bucketCount: count })
                   }}
                 >${count > 1 ? html`
-                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 rounded bg-bg-0/90 px-1 py-0.5 text-[8px] font-mono text-text-dim">
+                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 rounded bg-bg-0/90 px-1 py-0.5 text-4xs font-mono text-text-dim">
                     ${count}
                   </span>
                 ` : null}</span>

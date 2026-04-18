@@ -19,7 +19,7 @@ export function PulseStrip() {
   if (pulses.length === 0) {
     return html`
       <div class="pulse-strip rounded">
-        <span class="text-[var(--text-dim)] text-[13px]">연결된 에이전트 없음. masc_join으로 에이전트가 접속하면 여기에 표시됩니다.</span>
+        <span class="text-[var(--text-dim)] text-sm">연결된 에이전트 없음. masc_join으로 에이전트가 접속하면 여기에 표시됩니다.</span>
       </div>
     `
   }

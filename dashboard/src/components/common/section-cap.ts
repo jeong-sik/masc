@@ -39,7 +39,7 @@ import type { ComponentChildren } from 'preact'
 type SectionCapTone = 'muted' | 'dim'
 type SectionCapWeight = 'normal' | 'semibold'
 
-const BASE = 'text-[10px] uppercase tracking-wider'
+const BASE = 'text-3xs uppercase tracking-wider'
 
 const TONE: Record<SectionCapTone, string> = {
   muted: 'text-text-muted',

@@ -167,7 +167,7 @@ function KeeperChip({ row }: { row: KeeperCascadeRow }) {
     >
       <span class="font-semibold">${row.keeper}</span>
       ${row.drift
-        ? html`<code class="text-[10px] text-[var(--text-muted)]">${row.raw_cascade_name}</code>`
+        ? html`<code class="text-3xs text-[var(--text-muted)]">${row.raw_cascade_name}</code>`
         : null}
     </span>
   `
@@ -308,7 +308,7 @@ function HealthTable({
         : null}
     </div>
     ${isFiltering && filtered.length === 0
-      ? html`<div class="py-4 text-center text-[11px] text-[var(--text-muted)]">필터 결과 없음 (${health.providers.length} providers)</div>`
+      ? html`<div class="py-4 text-center text-2xs text-[var(--text-muted)]">필터 결과 없음 (${health.providers.length} providers)</div>`
       : html`
         <table class="w-full text-xs">
           <thead>

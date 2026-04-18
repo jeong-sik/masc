@@ -201,10 +201,10 @@ async function submitResolve(
 // ── Row actions (approve/reject UI) ───────────────────
 
 const BTN_PRIMARY =
-  'rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-[11px] text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
+  'rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-2xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
 
 const BTN_SECONDARY =
-  'rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-[11px] text-[var(--text-body)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
+  'rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-2xs text-[var(--text-body)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
 
 function RowActions({
   row,
@@ -219,7 +219,7 @@ function RowActions({
 
   if (state.kind === 'pending') {
     return html`
-      <span class="text-[11px] text-[var(--text-muted)]">
+      <span class="text-2xs text-[var(--text-muted)]">
         ${state.decision === 'approve' ? '승인 중…' : '반려 중…'}
       </span>
     `
@@ -228,7 +228,7 @@ function RowActions({
   if (state.kind === 'confirm-approve') {
     return html`
       <div class="flex items-center gap-1 flex-wrap">
-        <span class="text-[11px] text-[var(--text-strong)]">승인 확정?</span>
+        <span class="text-2xs text-[var(--text-strong)]">승인 확정?</span>
         <button
           class=${BTN_PRIMARY}
           onClick=${() => void submitResolve(row, 'approve', '', refresh)}
@@ -248,7 +248,7 @@ function RowActions({
       <div class="flex items-center gap-1 flex-wrap">
         <input
           type="text"
-          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-[11px] text-[var(--text-body)] w-[200px]"
+          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-2xs text-[var(--text-body)] w-[200px]"
           placeholder="반려 사유 (필수)"
           value=${reason}
           autofocus
@@ -289,7 +289,7 @@ function RowActions({
         onClick=${() => setRowAction(requestId, { kind: 'compose-reject', reason: '' })}
       >반려</button>
       ${state.kind === 'error'
-        ? html`<span class="text-[10px] text-[var(--text-bad)]" title=${state.message}>
+        ? html`<span class="text-3xs text-[var(--text-bad)]" title=${state.message}>
             실패 · 다시 시도
           </span>`
         : null}
@@ -352,7 +352,7 @@ function VerificationRow({
       <td class="py-2">
         ${hasDetails
           ? html`
-              <details class="text-[11px]">
+              <details class="text-2xs">
                 <summary class="cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-body)]">
                   자세히
                 </summary>
@@ -360,7 +360,7 @@ function VerificationRow({
                   ${hasTaskTitle
                     ? html`
                         <div>
-                          <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] mb-1">
+                          <div class="text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] mb-1">
                             Task Title
                           </div>
                           <div class="text-[var(--text-body)]">${row.task_title}</div>
@@ -370,7 +370,7 @@ function VerificationRow({
                   ${hasContract
                     ? html`
                         <div>
-                          <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] mb-1">
+                          <div class="text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] mb-1">
                             Completion Contract
                           </div>
                           <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--text-body)]">
@@ -382,7 +382,7 @@ function VerificationRow({
                   ${hasEvidence
                     ? html`
                         <div>
-                          <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] mb-1">
+                          <div class="text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] mb-1">
                             Required Evidence
                           </div>
                           <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--text-body)]">
@@ -394,7 +394,7 @@ function VerificationRow({
                   ${row.verdict_reason !== ''
                     ? html`
                         <div>
-                          <div class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] mb-1">
+                          <div class="text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] mb-1">
                             Verdict Reason
                           </div>
                           <div class="text-[var(--text-body)]">${row.verdict_reason}</div>
@@ -561,7 +561,7 @@ export function VerificationRequestsPanel() {
         ? html`
             <div
               role="note"
-              class="rounded border border-[var(--card-border)] bg-[var(--bg-panel)] px-3 py-2 text-[11px] text-[var(--text-muted)]"
+              class="rounded border border-[var(--card-border)] bg-[var(--bg-panel)] px-3 py-2 text-2xs text-[var(--text-muted)]"
             >
               검증 대기(pending) 요청이 없어 액션 컬럼이 비어 있습니다. 승인/반려 버튼은
               <code class="text-[var(--text-strong)]">pending</code> 상태에서만 표시됩니다.

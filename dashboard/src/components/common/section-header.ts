@@ -1,5 +1,5 @@
 // SectionHeader — consistent section labels across dashboard
-// Replaces 34+ inline patterns: `text-[10px] uppercase tracking-[0.08em] text-[var(--text-muted)] font-medium`
+// Replaces 34+ inline patterns: `text-3xs uppercase tracking-[0.08em] text-[var(--text-muted)] font-medium`
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
@@ -7,9 +7,9 @@ import type { ComponentChildren } from 'preact'
 type HeaderSize = 'xs' | 'sm' | 'md'
 
 const SIZE_CLASSES: Record<HeaderSize, string> = {
-  xs: 'text-[10px]',
-  sm: 'text-[11px]',
-  md: 'text-[13px]',
+  xs: 'text-3xs',
+  sm: 'text-2xs',
+  md: 'text-sm',
 }
 
 interface SectionHeaderProps {

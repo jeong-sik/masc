@@ -71,7 +71,7 @@ function getPhaseStyle(phase: KeeperPhase | string | null | undefined): PhaseSty
 export function KeeperPhaseBadge({ phase, compact }: { phase?: KeeperPhase | string | null; compact?: boolean }) {
   const style = getPhaseStyle(phase)
   const isBuffer = BUFFER_PHASES.has(phase ?? '')
-  const size = compact ? 'px-1.5 py-px text-[10px]' : 'px-2 py-0.5 text-[11px]'
+  const size = compact ? 'px-1.5 py-px text-3xs' : 'px-2 py-0.5 text-2xs'
 
   return html`
     <span
@@ -81,7 +81,7 @@ export function KeeperPhaseBadge({ phase, compact }: { phase?: KeeperPhase | str
       role="status"
       aria-label="${style.label}"
     >
-      <span class="text-[8px] leading-none" aria-hidden="true">${style.icon}</span>
+      <span class="text-4xs leading-none" aria-hidden="true">${style.icon}</span>
       ${style.label}
     </span>
   `
@@ -117,10 +117,10 @@ export function KeeperPhaseAndStage({
     <div class="flex items-center gap-2">
       <${KeeperPhaseBadge} phase=${phase} />
       ${dwellText ? html`
-        <span class="text-[10px] text-[var(--text-muted)] font-mono tracking-tight" title="현재 phase에 머문 시간">· ${dwellText}</span>
+        <span class="text-3xs text-[var(--text-muted)] font-mono tracking-tight" title="현재 phase에 머문 시간">· ${dwellText}</span>
       ` : null}
       ${stageLabel ? html`
-        <span class="text-[10px] text-[var(--text-dim)] font-mono tracking-tight opacity-80">${stageLabel}</span>
+        <span class="text-3xs text-[var(--text-dim)] font-mono tracking-tight opacity-80">${stageLabel}</span>
       ` : null}
     </div>
   `

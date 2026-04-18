@@ -181,11 +181,11 @@ export function ToastContainer() {
           data-toast-id=${t.id}
         >
           <span class="shrink-0 flex items-center ${ICON_COLOR[t.type]}">${ICON[t.type]()}</span>
-          <span class="flex-1 text-[13px] text-[var(--text-body)] leading-[1.4]">${t.message}</span>
+          <span class="flex-1 text-sm text-[var(--text-body)] leading-[1.4]">${t.message}</span>
           ${t.action ? html`
             <button
               type="button"
-              class="shrink-0 text-[11px] px-2 py-1 rounded border border-[var(--card-border)] bg-[var(--white-5)] text-[var(--accent)] hover:bg-[var(--white-10)] cursor-pointer transition-colors duration-150"
+              class="shrink-0 text-2xs px-2 py-1 rounded border border-[var(--card-border)] bg-[var(--white-5)] text-[var(--accent)] hover:bg-[var(--white-10)] cursor-pointer transition-colors duration-150"
               onClick=${(e: Event) => {
                 e.stopPropagation()
                 t.action!.onClick()

@@ -243,7 +243,7 @@ function CharacterPlate({ name }: { name: string }) {
           activityAge=${lastActivity}
           signalTruth=${signalTruth}
         />
-        ${isKeeper ? html`<div class="text-[10px] font-bold tracking-[1.5px] text-[var(--ff-gold)] uppercase text-center">KEEPER</div>` : null}
+        ${isKeeper ? html`<div class="text-3xs font-bold tracking-[1.5px] text-[var(--ff-gold)] uppercase text-center">KEEPER</div>` : null}
       </div>
 
       <div class="flex flex-col gap-1.5 min-w-0">
@@ -258,18 +258,18 @@ function CharacterPlate({ name }: { name: string }) {
 
         <div class="flex items-center gap-1.5 flex-wrap">
           <${StatusBadge} status=${headerStatus} />
-          ${model ? html`<span class="font-[family-name:'IBM_Plex_Mono',monospace] text-[11px] text-[var(--text-muted)] bg-[var(--accent-8)] border border-[var(--accent-10)] px-[5px] py-px rounded">${model}</span>` : null}
+          ${model ? html`<span class="font-[family-name:'IBM_Plex_Mono',monospace] text-2xs text-[var(--text-muted)] bg-[var(--accent-8)] border border-[var(--accent-10)] px-[5px] py-px rounded">${model}</span>` : null}
         </div>
 
         ${ctxPct != null ? html`
           <div class="flex items-center gap-2 mt-0.5">
-            <span class="text-[11px] font-bold text-[var(--ff-gold)] tracking-[1px] w-7">CTX</span>
+            <span class="text-2xs font-bold text-[var(--ff-gold)] tracking-[1px] w-7">CTX</span>
             <div class="h-1.5 mt-1.5 rounded-sm overflow-hidden bg-[var(--white-10)]" style="flex:1">
               <div class="h-full rounded-sm transition-[width] duration-[250ms] ease-[ease] motion-reduce:transition-none ${ctxBarClass(ctxRatio) === 'warn' ? 'bg-linear-to-r from-[var(--warn)] to-[var(--warn-bright)]' : ctxBarClass(ctxRatio) === 'bad' ? 'bg-linear-to-r from-[var(--bad)] to-[var(--warn-bright)]' : 'bg-linear-to-r from-[var(--accent)] to-[var(--ok)]'}" style=${{ width: `${ctxPct}%` }}></div>
             </div>
-            <span class="text-[13px] tabular-nums text-[var(--text-strong)] min-w-9 text-right">${ctxPct}%</span>
+            <span class="text-sm tabular-nums text-[var(--text-strong)] min-w-9 text-right">${ctxPct}%</span>
             ${keeper?.context_tokens != null && keeper?.context_max != null
-              ? html`<span class="text-[11px] tabular-nums text-[var(--text-muted)] font-mono ml-1">${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}</span>`
+              ? html`<span class="text-2xs tabular-nums text-[var(--text-muted)] font-mono ml-1">${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}</span>`
               : null}
           </div>
         ` : null}
@@ -279,19 +279,19 @@ function CharacterPlate({ name }: { name: string }) {
             ? html`<span class="text-base text-[var(--text-body)]">${currentWork}</span>`
             : html`<span class="text-base text-[var(--text-dim)] italic">대기 중</span>`
           }
-          ${workerState ? html`<span class="text-[11px] text-[var(--accent)] bg-[var(--accent-8)] px-[5px] py-px rounded-xs">${workerState}</span>` : null}
-          ${workerFocus ? html`<span class="text-[11px] text-[var(--text-muted)]">${workerFocus}</span>` : null}
+          ${workerState ? html`<span class="text-2xs text-[var(--accent)] bg-[var(--accent-8)] px-[5px] py-px rounded-xs">${workerState}</span>` : null}
+          ${workerFocus ? html`<span class="text-2xs text-[var(--text-muted)]">${workerFocus}</span>` : null}
         </div>
 
         ${lastSeenAt || lastActivity != null ? html`
-          <div class="flex gap-3 flex-wrap text-[13px] text-[var(--text-muted)]">
+          <div class="flex gap-3 flex-wrap text-sm text-[var(--text-muted)]">
             ${lastSeenAt ? html`<span>마지막 확인: <${TimeAgo} timestamp=${lastSeenAt} /></span>` : null}
             ${lastActivity != null ? html`<span>${formatDuration(lastActivity)} 전 활동</span>` : null}
           </div>
         ` : null}
 
         ${keeperIdent || continuitySummary || brief?.related_session_id ? html`
-          <div class="flex gap-3 flex-wrap text-[13px] text-[var(--text-muted)]">
+          <div class="flex gap-3 flex-wrap text-sm text-[var(--text-muted)]">
             ${keeperIdent ? html`<span>${keeperIdent}</span>` : null}
             ${brief?.related_session_id ? html`<span>세션 ${brief.related_session_id}</span>` : null}
             ${continuitySummary ? html`<span>${continuitySummary}</span>` : null}
@@ -365,7 +365,7 @@ export function AgentProfile({ name }: { name: string }) {
             ? html`<${EmptyState} message="할당된 태스크 없음" compact />`
             : html`<div class="flex flex-col gap-2">${owned.map(t => html`
                 <div class="flex items-center gap-2 border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 rounded" key=${t.id}>
-                  <span class="text-[10px] py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">${t.id}</span>
+                  <span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">${t.id}</span>
                   <span class="flex-1 text-[var(--text-strong)]">${t.title}</span>
                   <${StatusBadge} status=${t.status} />
                 </div>
@@ -389,7 +389,7 @@ export function AgentProfile({ name }: { name: string }) {
                       onClick=${() => navigate('monitoring', { section: 'agents', agent: c.name })}
                     >
                       <span class="text-[var(--ff-gold)] font-semibold text-base flex-1">${c.name}</span>
-                      <span class="text-[var(--white-50)] text-[13px] tabular-nums">${c.collaborations}회</span>
+                      <span class="text-[var(--white-50)] text-sm tabular-nums">${c.collaborations}회</span>
                       ${c.last_collab ? html`<span class="ff-relation-time"><${TimeAgo} timestamp=${c.last_collab} /></span>` : null}
                     </button>
                   `)}
@@ -399,8 +399,8 @@ export function AgentProfile({ name }: { name: string }) {
                 <div class="border-t border-[var(--white-6)] pt-2 mt-2">
                   <span class="ff-interests-label">관심사</span>
                   <div class="flex flex-wrap gap-1 mt-1.5">
-                    ${interests.slice(0, 12).map(t => html`<span class="bg-[var(--gold-10)] text-[var(--white-70)] px-2 py-0.5 rounded-xs text-[11px] border border-[var(--gold-15)]" key=${t}>${t}</span>`)}
-                    ${interests.length > 12 ? html`<span class="bg-[var(--gold-10)] text-[var(--white-70)] px-2 py-0.5 rounded-xs text-[11px] border border-[var(--gold-15)]">+${interests.length - 12}</span>` : null}
+                    ${interests.slice(0, 12).map(t => html`<span class="bg-[var(--gold-10)] text-[var(--white-70)] px-2 py-0.5 rounded-xs text-2xs border border-[var(--gold-15)]" key=${t}>${t}</span>`)}
+                    ${interests.length > 12 ? html`<span class="bg-[var(--gold-10)] text-[var(--white-70)] px-2 py-0.5 rounded-xs text-2xs border border-[var(--gold-15)]">+${interests.length - 12}</span>` : null}
                   </div>
                 </div>
               ` : null}
@@ -415,9 +415,9 @@ export function AgentProfile({ name }: { name: string }) {
                 const detail = evt.detail as Record<string, string | undefined>
                 const title = detail.title ?? detail.content ?? ''
                 return html`
-                  <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-[13px] transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
-                    <span class="text-[11px] font-semibold text-[var(--ff-gold)] min-w-8">${timelineEventLabel(evt.type)}</span>
-                    ${title ? html`<span class="flex-1 text-[13px] text-[var(--text-body)]">${trimText(title, 80)}</span>` : null}
+                  <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
+                    <span class="text-2xs font-semibold text-[var(--ff-gold)] min-w-8">${timelineEventLabel(evt.type)}</span>
+                    ${title ? html`<span class="flex-1 text-sm text-[var(--text-body)]">${trimText(title, 80)}</span>` : null}
                     ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
                   </div>
                 `
@@ -442,12 +442,12 @@ export function AgentProfile({ name }: { name: string }) {
                       placeholder="활동 필터 (메시지 본문)"
                       aria-label="프로젝트 활동 필터"
                       onInput=${(e: Event) => { activityQuery.value = (e.target as HTMLInputElement).value }}
-                      class="w-full rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                      class="w-full rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
                     />
                     ${isFiltering && visible.length === 0
-                      ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${lines.length} items)</div>`
+                      ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${lines.length} items)</div>`
                       : html`<div class="max-h-[210px] overflow-y-auto flex flex-col gap-1.5">${visible.map((line: string, idx: number) =>
-                          html`<div key=${idx} class="border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-[13px] text-[var(--text-body)] leading-[1.4] rounded">${line}</div>`)}</div>`}
+                          html`<div key=${idx} class="border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-sm text-[var(--text-body)] leading-[1.4] rounded">${line}</div>`)}</div>`}
                   </div>
                 `
               })()}
@@ -457,8 +457,8 @@ export function AgentProfile({ name }: { name: string }) {
           <${Card} title="태스크 이력" class="ff-card rounded col-span-full">
             <div class="agent-history-list">${(profileData?.taskHistories ?? []).map((row: TaskHistoryRow) => html`
               <div class="border border-[var(--card-border)] rounded-[10px] bg-[var(--white-2)] p-2.5" key=${row.taskId}>
-                <div class="mb-2"><span class="text-[10px] py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">${row.taskId}</span></div>
-                <pre class="m-0 whitespace-pre-wrap text-[13px] leading-[1.5] text-[var(--text-strong)] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || '이력 없음'}</pre>
+                <div class="mb-2"><span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-sm">${row.taskId}</span></div>
+                <pre class="m-0 whitespace-pre-wrap text-sm leading-[1.5] text-[var(--text-strong)] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || '이력 없음'}</pre>
               </div>
             `)}</div>
           <//>
@@ -469,7 +469,7 @@ export function AgentProfile({ name }: { name: string }) {
         <${KeeperChatPanel} name=${keeperChatName} />
       ` : html`
         <div class="flex gap-2 items-center px-3.5 py-2.5 bg-[rgba(10,22,40,0.8)] border border-[var(--ff-gold-15)] rounded">
-          <span class="text-[13px] font-semibold text-[var(--ff-gold)] whitespace-nowrap">@${name}</span>
+          <span class="text-sm font-semibold text-[var(--ff-gold)] whitespace-nowrap">@${name}</span>
           <${TextInput}
             placeholder="메시지 입력..."
             value=${mentionText.value}

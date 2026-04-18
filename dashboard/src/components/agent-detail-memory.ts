@@ -131,7 +131,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                     ${outgoing.length > 0
                       ? html`
                           <div>
-                            <div class="text-[11px] text-[var(--text-muted)] mb-1">
+                            <div class="text-2xs text-[var(--text-muted)] mb-1">
                               내가 강화한 파트너 (out, ${outgoing.length})
                             </div>
                             <div class="space-y-1">
@@ -156,7 +156,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                     ${incoming.length > 0
                       ? html`
                           <div>
-                            <div class="text-[11px] text-[var(--text-muted)] mb-1">
+                            <div class="text-2xs text-[var(--text-muted)] mb-1">
                               나를 강화한 파트너 (in, ${incoming.length})
                             </div>
                             <div class="space-y-1">
@@ -202,7 +202,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                   onInput=${(e: Event) => {
                     episodeQuery.value = (e.target as HTMLInputElement).value
                   }}
-                  class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                  class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
                 />`
               : null}
           </div>
@@ -212,7 +212,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                   이 키퍼의 에피소드 기록이 없습니다.
                 </div>`
               : visibleEpisodes.length === 0
-                ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">
+                ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">
                     필터 결과 없음 (${episodes.length}개 중 0)
                   </div>`
                 : html`
@@ -240,10 +240,10 @@ export function AgentDetailMemory({ agentName }: Props) {
                                 <span class="${outcomeColor}">${outcomeIcon}</span>
                                 <span class="truncate text-[var(--text-muted)]">${highlightMatch(ep.summary, episodeQuery.value)}</span>
                               </div>
-                              <span class="text-[10px] text-[var(--text-muted)]0 shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
+                              <span class="text-3xs text-[var(--text-muted)]0 shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
                             </div>
                             ${ep.learnings.length > 0
-                              ? html`<div class="mt-1 text-[11px] text-[var(--text-muted)] pl-3 border-l border-[var(--white-10)]">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`
+                              ? html`<div class="mt-1 text-2xs text-[var(--text-muted)] pl-3 border-l border-[var(--white-10)]">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`
                               : null}
                           </div>
                         `

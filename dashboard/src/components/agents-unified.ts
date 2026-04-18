@@ -87,13 +87,13 @@ export function AgentsUnified() {
       />
 
       ${currentView !== 'fsm' ? html`
-        <div class="monitor-muted-panel flex flex-wrap items-center gap-2 px-4 py-3 text-[12px] text-[var(--text-muted)]">
-          <span class="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">이 화면 밖</span>
+        <div class="monitor-muted-panel flex flex-wrap items-center gap-2 px-4 py-3 text-xs text-[var(--text-muted)]">
+          <span class="text-2xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">이 화면 밖</span>
           <span>이벤트 로그, 도구 품질, 거버넌스</span>
           <${RouteLink}
             tab="monitoring"
             params=${{ section: 'fleet-health' }}
-            class="inline-flex shrink-0 items-center justify-center rounded-sm border border-[var(--accent-20)] bg-[var(--accent-10)] px-3 py-1.5 text-[12px] font-medium text-[var(--text-strong)] transition-colors hover:bg-[var(--accent-20)]"
+            class="inline-flex shrink-0 items-center justify-center rounded-sm border border-[var(--accent-20)] bg-[var(--accent-10)] px-3 py-1.5 text-xs font-medium text-[var(--text-strong)] transition-colors hover:bg-[var(--accent-20)]"
           >
             플릿 텔레메트리 열기
           <//>

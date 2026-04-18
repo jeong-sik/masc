@@ -116,7 +116,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
       id: agent,
       content: agent.length > 16 ? agent.slice(0, 15) + '..' : agent,
       title: agent,
-      className: 'agent-swimlane-group text-[11px] font-system text-[var(--slate-400)]',
+      className: 'agent-swimlane-group text-2xs font-system text-[var(--slate-400)]',
       order: i
     })))
 
@@ -232,12 +232,12 @@ export function ActivitySwimlane({ since }: { since?: string }) {
   return html`
     <${Card} title="활동 타임라인" testId="activity_swimlane">
       <div class="mb-2">
-        <p class="text-[13px] text-[var(--text-muted)]">에이전트별 활동 구간을 시간축으로 보여줍니다. 마우스 휠로 줌인/아웃, 드래그로 이동이 가능합니다.</p>
+        <p class="text-sm text-[var(--text-muted)]">에이전트별 활동 구간을 시간축으로 보여줍니다. 마우스 휠로 줌인/아웃, 드래그로 이동이 가능합니다.</p>
       </div>
       <div class="w-full bg-[#0f1117] rounded border border-[var(--card-border)] overflow-hidden swimlane-vis-container">
         <div ref=${containerRef} class="w-full"></div>
       </div>
-      <div class="flex flex-wrap gap-3 mt-3 text-[11px] text-[var(--text-muted)]">
+      <div class="flex flex-wrap gap-3 mt-3 text-2xs text-[var(--text-muted)]">
         <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[var(--warn)] inline-block"></span>작업</span>
         <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[var(--ok)] inline-block"></span>운영</span>
         <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[var(--cyan)] inline-block"></span>자율</span>

@@ -75,7 +75,7 @@ function ExternalLinkChip({ href, label }: { href: string; label: string }) {
       href=${href}
       target="_blank"
       rel="noopener noreferrer"
-      class="inline-flex items-center gap-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] px-1.5 py-0.5 text-[10px] text-[var(--text-body)] transition-colors hover:bg-[var(--white-8)]"
+      class="inline-flex items-center gap-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] px-1.5 py-0.5 text-3xs text-[var(--text-body)] transition-colors hover:bg-[var(--white-8)]"
     >
       ${label}
       <${ExternalLink} size=${10} />
@@ -115,7 +115,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
     >
       <button
         type="button"
-        class="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-[12px] text-[var(--text-body)] hover:bg-[var(--white-4)]"
+        class="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-xs text-[var(--text-body)] hover:bg-[var(--white-4)]"
         aria-expanded=${isOpen}
         aria-controls=${`setup-guide-${connectorId}`}
         onClick=${toggle}
@@ -128,7 +128,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
           ${tone === 'complete'
             ? html`
                 <span
-                  class="inline-flex items-center gap-1 rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--ok)]"
+                  class="inline-flex items-center gap-1 rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--ok)]"
                   aria-label="Setup guide complete"
                   data-setup-complete-badge
                 >
@@ -139,7 +139,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
             : null}
         </div>
         <span
-          class=${`text-[10px] uppercase tracking-[0.14em] tabular-nums ${countToneClass}`}
+          class=${`text-3xs uppercase tracking-[0.14em] tabular-nums ${countToneClass}`}
           data-setup-progress=${connectorId}
           data-setup-progress-pct=${pct}
         >${stepCompletionSummary(doneCount, guide.steps.length)}</span>
@@ -166,7 +166,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
 
       ${isOpen
         ? html`
-            <div id=${`setup-guide-${connectorId}`} class="border-t border-[var(--white-8)] px-3 py-2.5 text-[11px] text-[var(--text-body)]">
+            <div id=${`setup-guide-${connectorId}`} class="border-t border-[var(--white-8)] px-3 py-2.5 text-2xs text-[var(--text-body)]">
               <p class="mb-2 text-[var(--text-dim)]">${guide.intro}</p>
               <ol class="list-none space-y-2" data-setup-step-list>
                 ${guide.steps.map((step, idx) => {
@@ -182,7 +182,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
                   return html`
                     <li class="flex items-start gap-2.5" data-setup-step-item=${idx}>
                       <span
-                        class=${`mt-[2px] inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border text-[10px] font-semibold tabular-nums transition-colors ${circleToneClass}`}
+                        class=${`mt-[2px] inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border text-3xs font-semibold tabular-nums transition-colors ${circleToneClass}`}
                         aria-hidden="true"
                         data-setup-step-circle=${`${connectorId}:${idx}`}
                       >${done ? '✓' : idx + 1}</span>
@@ -214,7 +214,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
               ${guide.references.length > 0
                 ? html`
                     <div class="mt-3 flex flex-wrap items-center gap-1.5 border-t border-[var(--white-8)] pt-2">
-                      <span class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">refs</span>
+                      <span class="text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]">refs</span>
                       ${guide.references.map(ref => html`<${ExternalLinkChip} href=${ref.href} label=${ref.label} />`)}
                     </div>
                   `

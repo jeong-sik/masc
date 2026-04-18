@@ -36,10 +36,10 @@ export function KeeperHealthStrip() {
   return html`
     <div class="flex items-center gap-4 rounded border border-[var(--border-slate-12)] bg-[var(--white-3)] px-4 py-2.5">
       <div class="flex items-center gap-2 min-w-0">
-        <span class="text-[13px] font-medium text-[var(--text-strong)] whitespace-nowrap">
+        <span class="text-sm font-medium text-[var(--text-strong)] whitespace-nowrap">
           Keeper
         </span>
-        <span class="text-[13px] text-[var(--text-body)] whitespace-nowrap">
+        <span class="text-sm text-[var(--text-body)] whitespace-nowrap">
           ${summary.activeCount} 활성
           <span class="text-[var(--text-muted)]">/ ${summary.totalCount}</span>
         </span>
@@ -53,11 +53,11 @@ export function KeeperHealthStrip() {
 
       <div class="flex items-center gap-2 ml-auto whitespace-nowrap">
         ${alertCount > 0
-          ? html`<span class="text-[12px] font-medium text-[var(--warn)]">${alertCount} 주의</span>`
-          : html`<span class="text-[12px] text-[var(--text-muted)]">정상</span>`
+          ? html`<span class="text-xs font-medium text-[var(--warn)]">${alertCount} 주의</span>`
+          : html`<span class="text-xs text-[var(--text-muted)]">정상</span>`
         }
         ${summary.criticalCount > 0 && html`
-          <span class="text-[12px] font-medium text-[var(--bad)]">${summary.criticalCount} 위험</span>
+          <span class="text-xs font-medium text-[var(--bad)]">${summary.criticalCount} 위험</span>
         `}
       </div>
     </div>

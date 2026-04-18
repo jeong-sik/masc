@@ -61,7 +61,7 @@ export function Select({
     <select
       id=${id}
       name=${name}
-      class="${SELECT_BASE} px-3 py-2 text-[13px] ${cx ?? ''}"
+      class="${SELECT_BASE} px-3 py-2 text-sm ${cx ?? ''}"
       value=${currentValue}
       disabled=${disabled}
       aria-label=${ariaLabel}

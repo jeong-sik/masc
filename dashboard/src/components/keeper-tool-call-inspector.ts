@@ -58,7 +58,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
       ${expanded.value ? html`
         <div class="px-3 pb-3 space-y-2">
           ${entry.model ? html`
-            <div class="text-[10px] text-[var(--text-muted)]">model: <span class="text-[var(--text-strong)] font-mono">${entry.model}</span></div>
+            <div class="text-3xs text-[var(--text-muted)]">model: <span class="text-[var(--text-strong)] font-mono">${entry.model}</span></div>
           ` : null}
           <div>
             <${SectionCap} class="mb-1">Input<//>

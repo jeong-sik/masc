@@ -195,10 +195,10 @@ export function GovernanceMonitor() {
           ${allRejections.length === 0
             ? html`<${EmptyState} message="선택한 시간 범위에 tool rejection이 없습니다." compact />`
             : isFiltering && visibleRejections.length === 0
-              ? html`<div class="py-4 text-center text-[11px] text-[var(--text-muted)]">필터 결과 없음 (${allRejections.length} items)</div>`
+              ? html`<div class="py-4 text-center text-2xs text-[var(--text-muted)]">필터 결과 없음 (${allRejections.length} items)</div>`
               : html`
                 <div class="overflow-x-auto">
-                  <table class="w-full text-[12px]">
+                  <table class="w-full text-xs">
                     <thead>
                       <tr class="text-left text-[var(--text-muted)] border-b border-[var(--card-border)]">
                         <th class="py-1.5 pr-4 font-medium">Tool</th>
@@ -209,9 +209,9 @@ export function GovernanceMonitor() {
                     <tbody>
                       ${visibleRejections.map(r => html`
                         <tr class="border-b border-[var(--card-border)]/30 text-[var(--text-body)]">
-                          <td class="py-1.5 pr-4 font-mono text-[11px]">${r.tool}</td>
+                          <td class="py-1.5 pr-4 font-mono text-2xs">${r.tool}</td>
                           <td class="py-1.5 pr-4">
-                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-[var(--bg-panel-hover)]">${r.reason}</span>
+                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-3xs bg-[var(--bg-panel-hover)]">${r.reason}</span>
                           </td>
                           <td class="py-1.5 text-right font-medium text-[var(--text-strong)]">${r.count}</td>
                         </tr>

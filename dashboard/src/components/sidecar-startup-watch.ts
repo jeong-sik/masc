@@ -95,20 +95,20 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
 
   return html`
     <div
-      class="mt-2 flex items-center gap-2 rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]"
+      class="mt-2 flex items-center gap-2 rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]"
       data-startup-warning=${connectorId}
     >
       <span class="text-base leading-none" aria-hidden="true">⚠</span>
       <div class="min-w-0 flex-1">
         <div class="font-semibold" data-startup-warning-elapsed=${String(elapsedSec)}>기동 응답 없음 (${elapsedSec}s 경과)</div>
-        <div class="text-[10px] opacity-90">
+        <div class="text-3xs opacity-90">
           Start 요청은 보냈지만 sidecar가 online으로 올라오지 않았습니다.
           토큰 검증 실패 / 의존성 누락이 가장 흔한 원인 — 로그를 확인하세요.
         </div>
       </div>
       <button
         type="button"
-        class="shrink-0 cursor-pointer rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--warn)] hover:bg-[var(--warn-10)]"
+        class="shrink-0 cursor-pointer rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-3xs uppercase tracking-[0.14em] text-[var(--warn)] hover:bg-[var(--warn-10)]"
         onClick=${() => {
           openSidecarLogs(connectorId)
           // Don't clear startAt yet — operator might toggle logs back closed
@@ -118,7 +118,7 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
       >📋 로그 열기</button>
       <button
         type="button"
-        class="shrink-0 cursor-pointer rounded border border-[var(--warn-20)] px-1.5 py-0.5 text-[14px] leading-none text-[var(--warn)]/70 hover:text-[var(--warn)]"
+        class="shrink-0 cursor-pointer rounded border border-[var(--warn-20)] px-1.5 py-0.5 text-base leading-none text-[var(--warn)]/70 hover:text-[var(--warn)]"
         aria-label="dismiss startup warning"
         onClick=${() => clearStartAttempt(connectorId)}
       >×</button>

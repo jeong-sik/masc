@@ -524,16 +524,16 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-end">
             <div class="flex min-w-0 flex-col gap-2">
               <div class="flex flex-wrap items-center gap-3">
-                <span class="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">디렉터리 필터</span>
-                <span class="inline-flex items-center rounded-sm border border-[var(--border-slate-22)] bg-[var(--accent-soft)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-strong)]">${resultCountLabel}</span>
+                <span class="text-2xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">디렉터리 필터</span>
+                <span class="inline-flex items-center rounded-sm border border-[var(--border-slate-22)] bg-[var(--accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--text-strong)]">${resultCountLabel}</span>
               </div>
-              <p class="m-0 max-w-[720px] text-[13px] leading-[1.6] text-[var(--text-body)]">${pageDescription}</p>
+              <p class="m-0 max-w-[720px] text-sm leading-[1.6] text-[var(--text-body)]">${pageDescription}</p>
             </div>
 
-            <label class="flex w-full flex-col gap-2 text-[11px] font-semibold tracking-[0.08em] text-[var(--text-muted)] uppercase">
+            <label class="flex w-full flex-col gap-2 text-2xs font-semibold tracking-[0.08em] text-[var(--text-muted)] uppercase">
               <span>이름 / model / 작업</span>
               <${TextInput}
-                class="rounded bg-[var(--white-3)] px-4 py-3 text-[14px] text-[var(--text-body)] shadow-[inset_0_1px_0_var(--white-3)] focus:border-[var(--accent)] focus:shadow-[0_0_0_2px_var(--accent-soft)]"
+                class="rounded bg-[var(--white-3)] px-4 py-3 text-base text-[var(--text-body)] shadow-[inset_0_1px_0_var(--white-3)] focus:border-[var(--accent)] focus:shadow-[0_0_0_2px_var(--accent-soft)]"
                 name="agent_search"
                 ariaLabel="에이전트 이름 · 모델 · 작업 검색"
                 autoComplete="off"
@@ -547,8 +547,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           <div class="monitor-muted-panel p-3.5 md:p-4">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div class="flex flex-col gap-1">
-                <div class="text-[11px] font-semibold tracking-[0.08em] text-[var(--text-strong)] uppercase">운영 상태</div>
-                <p class="m-0 text-[12px] leading-[1.5] text-[var(--text-muted)]">먼저 운영 상태로 걸러 보고, 필요할 때만 세부 상태와 최근 근거를 확인합니다.</p>
+                <div class="text-2xs font-semibold tracking-[0.08em] text-[var(--text-strong)] uppercase">운영 상태</div>
+                <p class="m-0 text-xs leading-[1.5] text-[var(--text-muted)]">먼저 운영 상태로 걸러 보고, 필요할 때만 세부 상태와 최근 근거를 확인합니다.</p>
               </div>
               <${FilterChips}
                 chips=${statusChips}
@@ -565,11 +565,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 <div class="rounded border ${executionError.value ? 'border-[rgba(251,191,36,0.28)] bg-[var(--warn-10)]' : 'border-[var(--accent-20)] bg-[var(--accent-10)]'} px-4 py-3 shadow-[0_10px_28px_rgba(0,0,0,0.12)]">
                   <div class="flex flex-col gap-2">
                     <div class="flex flex-wrap items-center gap-2">
-                      <strong class="text-[12px] font-semibold text-[var(--text-strong)]">${fallbackStateTitle}</strong>
-                      <span class="inline-flex items-center rounded-sm border border-[var(--white-10)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">${countSourceLabel}</span>
+                      <strong class="text-xs font-semibold text-[var(--text-strong)]">${fallbackStateTitle}</strong>
+                      <span class="inline-flex items-center rounded-sm border border-[var(--white-10)] bg-[var(--white-6)] px-2 py-0.5 text-3xs font-medium text-[var(--text-muted)]">${countSourceLabel}</span>
                     </div>
-                    <p class="m-0 text-[12px] leading-[1.55] text-[var(--text-body)]">${fallbackStateMessage}</p>
-                    <div class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
+                    <p class="m-0 text-xs leading-[1.55] text-[var(--text-body)]">${fallbackStateMessage}</p>
+                    <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--text-muted)]">
                       <span class="rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">scope ${namespaceName}</span>
                       ${configuredKeeperHint ? html`<span class="rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">${configuredKeeperHint}</span>` : null}
                     </div>
@@ -686,45 +686,45 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     <div class="flex flex-wrap items-center gap-2">
                       <strong class="min-w-0 overflow-hidden text-[17px] font-semibold leading-[1.3] text-[var(--text-strong)] transition-colors group-hover:text-[var(--accent)] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] [overflow-wrap:anywhere]">${displayName}</strong>
                       ${agent.synthetic ? html`
-                        <span class="inline-flex items-center rounded-sm border border-dashed border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] italic text-[var(--text-muted)]" title="키퍼 데이터에서 파생된 합성 엔트리입니다.">
+                        <span class="inline-flex items-center rounded-sm border border-dashed border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-3xs italic text-[var(--text-muted)]" title="키퍼 데이터에서 파생된 합성 엔트리입니다.">
                           파생
                         </span>
                       ` : null}
                     </div>
 
-                    <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+                    <div class="mt-1 flex flex-wrap items-center gap-1.5 text-2xs text-[var(--text-muted)]">
                       <span class="uppercase tracking-[0.08em]">${identityLabel}</span>
                       ${runtimeName ? html`
                         <span class="text-[var(--text-dim)]">/</span>
-                        <span class="font-mono text-[10px]" translate="no">${runtimeName}</span>
+                        <span class="font-mono text-3xs" translate="no">${runtimeName}</span>
                       ` : null}
                     </div>
                   </div>
                 </div>
 
                 <div class="flex shrink-0 items-start">
-                  <span class="inline-flex items-center rounded-sm border px-2.5 py-1 text-[11px] font-semibold ${runtimeBadgeClass(band.key)}" title=${band.description}>${band.label}</span>
+                  <span class="inline-flex items-center rounded-sm border px-2.5 py-1 text-2xs font-semibold ${runtimeBadgeClass(band.key)}" title=${band.description}>${band.label}</span>
                 </div>
               </div>
 
-              <p class="m-0 text-[13px] leading-[1.55] text-[var(--text-body)] break-words line-clamp-2" title=${summaryText}>${summaryText}</p>
+              <p class="m-0 text-sm leading-[1.55] text-[var(--text-body)] break-words line-clamp-2" title=${summaryText}>${summaryText}</p>
 
               ${isKeeper ? html`
                 <div class="rounded-[16px] border border-[var(--border-slate-12)] bg-[linear-gradient(180deg,var(--white-3),var(--white-1))] px-3 py-2.5">
                   <div class="flex flex-wrap items-center gap-2">
-                    <span class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">FSM</span>
+                    <span class="text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">FSM</span>
                     ${fsmPhaseKey
                       ? html`<${KeeperPhaseBadge} phase=${fsmPhaseKey} compact />`
                       : html`
-                        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-3)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">
+                        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-medium text-[var(--text-muted)]">
                           생명주기 확인 필요
                         </span>
                       `}
-                    <span class="inline-flex items-center rounded-sm border px-2 py-0.5 text-[10px] font-medium ${stageBadgeClass(fsmStageKey)}" title=${keeperMonitoring?.stage.description ?? '활동 단계 정보가 없습니다.'}>
+                    <span class="inline-flex items-center rounded-sm border px-2 py-0.5 text-3xs font-medium ${stageBadgeClass(fsmStageKey)}" title=${keeperMonitoring?.stage.description ?? '활동 단계 정보가 없습니다.'}>
                       ${fsmStageText}
                     </span>
                     ${generation != null && generation > 0 ? html`
-                      <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-3)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
+                      <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-3)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">
                         세대 ${generation}
                       </span>
                     ` : null}
@@ -732,7 +732,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 </div>
               ` : null}
 
-              <div class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
+              <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--text-muted)]">
                 <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
                   최근 활동
                   <span class="ml-1 text-[var(--text-body)]">
@@ -755,36 +755,36 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 ${compactModel ? html`
                   <span class="inline-flex items-center gap-1.5 rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
                     <span>model</span>
-                    <span class="font-mono text-[10px] text-[var(--text-body)]" translate="no" title=${model ?? undefined}>${compactModel}</span>
+                    <span class="font-mono text-3xs text-[var(--text-body)]" translate="no" title=${model ?? undefined}>${compactModel}</span>
                   </span>
                 ` : null}
               </div>
 
               ${(primaryTool || toolCallCount != null || toolAuditAt) ? html`
-                <div class="flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+                <div class="flex flex-wrap items-center gap-1.5 text-2xs text-[var(--text-muted)]">
                   <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5">최근 도구</span>
                   ${primaryTool ? html`
-                    <span class="inline-flex items-center rounded-sm border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 font-mono text-[10px] text-[var(--text-body)]" translate="no">
+                    <span class="inline-flex items-center rounded-sm border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 font-mono text-3xs text-[var(--text-body)]" translate="no">
                       ${primaryTool}
                     </span>
                   ` : null}
                   ${extraToolCount > 0 ? html`
-                    <span class="inline-flex items-center rounded-sm border border-dashed border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-[10px]">
+                    <span class="inline-flex items-center rounded-sm border border-dashed border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
                       +${extraToolCount}
                     </span>
                   ` : null}
                   ${!primaryTool && toolCallCount === 0 ? html`
-                    <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-[10px]">
+                    <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
                       최근 도구 없음
                     </span>
                   ` : null}
                   ${!primaryTool && toolCallCount != null && toolCallCount > 0 ? html`
-                    <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-[10px]">
+                    <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
                       ${toolCallCount}회 관찰됨
                     </span>
                   ` : null}
                   ${toolAuditAt ? html`
-                    <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-[10px]">
+                    <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
                       감사 <${TimeAgo} timestamp=${toolAuditAt} />
                     </span>
                   ` : null}

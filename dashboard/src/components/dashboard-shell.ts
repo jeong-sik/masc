@@ -99,7 +99,7 @@ export function ConnectionStatus() {
 
   return html`
     <div
-      class="flex items-center gap-1.5 whitespace-nowrap text-[12px] ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}"
+      class="flex items-center gap-1.5 whitespace-nowrap text-xs ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}"
       title=${titleAttr || undefined}
     >
       <span class="inline-block size-[8px] rounded-sm ${isConnected ? 'bg-[var(--ok)] shadow-[0_0_7px_rgba(74,222,128,0.75)]' : 'bg-[var(--bad)]'}"></span>
@@ -197,7 +197,7 @@ export function BuildIdentityBadge() {
   return html`
     <div class="relative">
       <button type="button"
-        class="cursor-pointer rounded-sm border border-[var(--white-10)] bg-[var(--white-4)] px-[10px] py-[5px] text-[10px] text-[var(--text-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
+        class="cursor-pointer rounded-sm border border-[var(--white-10)] bg-[var(--white-4)] px-[10px] py-[5px] text-3xs text-[var(--text-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
         aria-expanded=${buildIdentityOpen.value}
         aria-label=${`서버 빌드 정보 ${label}`}
         title=${hoverTitle}
@@ -336,7 +336,7 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   return html`
     <div class="flex items-center gap-2 px-1" role="status" aria-label=${label} title=${titleText}>
       ${dot}
-      <span class="text-[11px] text-[var(--text-muted)] truncate">${label}</span>
+      <span class="text-2xs text-[var(--text-muted)] truncate">${label}</span>
     </div>
   `
 }
@@ -351,8 +351,8 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
       <div class="flex items-center ${collapsed ? 'justify-center' : 'justify-between'} px-2 pt-2 pb-1">
         ${!collapsed ? html`
           <div class="px-1">
-            <div class="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--text-muted)]">내비게이션</div>
-            <div class="mt-0.5 text-[13px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">MASC Core</div>
+            <div class="text-3xs font-bold uppercase tracking-[0.2em] text-[var(--text-muted)]">내비게이션</div>
+            <div class="mt-0.5 text-sm font-semibold tracking-[-0.02em] text-[var(--text-strong)]">MASC Core</div>
           </div>
         ` : null}
         <button type="button"
@@ -394,11 +394,11 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                   class="flex items-center gap-2 w-full rounded border px-2 py-1.5 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive && sections.length === 0 ? 'bg-[linear-gradient(135deg,rgba(71,184,255,0.14),rgba(71,184,255,0.04))] text-[var(--text-strong)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'bg-transparent border-transparent text-[var(--text-strong)] hover:bg-[var(--white-5)]'}"
                   ariaCurrent=${isSurfaceActive && sections.length === 0 ? 'page' : undefined}
                 >
-                  <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[14px]" aria-hidden="true">
+                  <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-[var(--white-10)] bg-[var(--white-3)] text-base" aria-hidden="true">
                     ${surface.icon}
                   </span>
                   <div class="flex-1 min-w-0">
-                    <div class="text-[14px] font-medium truncate leading-none ${isSurfaceActive ? 'text-[var(--accent)]' : ''}">${surface.label}</div>
+                    <div class="text-base font-medium truncate leading-none ${isSurfaceActive ? 'text-[var(--accent)]' : ''}">${surface.label}</div>
                   </div>
                 <//>
 
@@ -411,7 +411,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                           role="listitem"
                           tab=${surface.id}
                           params=${item.params}
-                          class="w-full rounded border px-2 py-1 text-left cursor-pointer text-[13px] transition-[background-color,border-color,color,box-shadow] duration-200 ${isSectionActive ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-medium shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-soft)]' : 'border-transparent text-[var(--text-muted)] hover:bg-[var(--white-5)] hover:text-[var(--text-body)]'}"
+                          class="w-full rounded border px-2 py-1 text-left cursor-pointer text-sm transition-[background-color,border-color,color,box-shadow] duration-200 ${isSectionActive ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-medium shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-soft)]' : 'border-transparent text-[var(--text-muted)] hover:bg-[var(--white-5)] hover:text-[var(--text-body)]'}"
                           ariaCurrent=${isSectionActive ? 'page' : undefined}
                         >
                           <div class="truncate">${item.label}</div>
@@ -577,7 +577,7 @@ function SurfaceLead() {
     <div class="mb-3 flex flex-col gap-1.5">
       ${trail.length > 0
         ? html`<nav
-            class="flex items-center gap-1 text-[11px] text-[var(--text-dim)]"
+            class="flex items-center gap-1 text-2xs text-[var(--text-dim)]"
             aria-label="페이지 경로"
             data-surface-breadcrumb
           >
@@ -612,7 +612,7 @@ function SurfaceLead() {
             />`
           : null}
       </div>
-      ${description ? html`<p class="m-0 text-[13px] leading-[1.5] text-[var(--text-dim)]">${description}</p>` : null}
+      ${description ? html`<p class="m-0 text-sm leading-[1.5] text-[var(--text-dim)]">${description}</p>` : null}
     </div>
   `
 }

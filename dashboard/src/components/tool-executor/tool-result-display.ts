@@ -70,12 +70,12 @@ function StoredBlobView({
       <div class="flex flex-col gap-2 mt-3">
         <div class="flex items-center gap-2">
           <${CountBadge} tone=${success ? 'ok' : 'bad'}>${success ? 'OK' : 'ERR'}<//>
-          <span class="text-[11px] text-[var(--text-muted)]">${toolName}</span>
-          <span class="text-[10px] text-[var(--text-muted)] ml-auto">${timeStr}</span>
+          <span class="text-2xs text-[var(--text-muted)]">${toolName}</span>
+          <span class="text-3xs text-[var(--text-muted)] ml-auto">${timeStr}</span>
         </div>
         <div class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] overflow-hidden">
           <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--card-border)]">
-            <button type="button" class="text-[10px] text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-body)]"
+            <button type="button" class="text-3xs text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-body)]"
               onClick=${() => { expanded.value = false }}>
               접기 (${marker.bytes.toLocaleString()}B)
             </button>
@@ -87,7 +87,7 @@ function StoredBlobView({
               const { isJson, parsed } = tryParseJson(fullText.value ?? '')
               return isJson
                 ? html`<${JsonViewer} data=${parsed} />`
-                : html`<pre class="text-[12px] font-mono ${success ? 'text-[var(--text-body)]' : 'text-[var(--bad-light)]'}">${fullText.value}</pre>`
+                : html`<pre class="text-xs font-mono ${success ? 'text-[var(--text-body)]' : 'text-[var(--bad-light)]'}">${fullText.value}</pre>`
             })()}
           </div>
         </div>
@@ -100,12 +100,12 @@ function StoredBlobView({
     <div class="flex flex-col gap-2 mt-3" data-testid="tool-blob-marker">
       <div class="flex items-center gap-2">
         <${CountBadge} tone=${success ? 'ok' : 'bad'}>${success ? 'OK' : 'ERR'}<//>
-        <span class="text-[11px] text-[var(--text-muted)]">${toolName}</span>
-        <span class="text-[10px] text-[var(--text-muted)] ml-auto">${timeStr}</span>
+        <span class="text-2xs text-[var(--text-muted)]">${toolName}</span>
+        <span class="text-3xs text-[var(--text-muted)] ml-auto">${timeStr}</span>
       </div>
       <div class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] overflow-hidden">
         <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--card-border)]">
-          <span class="text-[10px] text-[var(--text-muted)]">
+          <span class="text-3xs text-[var(--text-muted)]">
             저장된 출력 · ${marker.bytes.toLocaleString()}B · sha ${marker.sha256.slice(0, 12)}\u2026
           </span>
           <${ActionButton}
@@ -116,10 +116,10 @@ function StoredBlobView({
           <//>
         </div>
         <div class="px-3 py-2 overflow-x-auto max-h-[200px] overflow-y-auto">
-          <pre class="text-[12px] font-mono text-[var(--text-muted)] whitespace-pre-wrap">${marker.preview}</pre>
+          <pre class="text-xs font-mono text-[var(--text-muted)] whitespace-pre-wrap">${marker.preview}</pre>
         </div>
         ${error.value ? html`
-          <div class="px-3 py-1.5 border-t border-[var(--card-border)] text-[11px] text-[var(--bad-light)]">
+          <div class="px-3 py-1.5 border-t border-[var(--card-border)] text-2xs text-[var(--bad-light)]">
             ${error.value}
           </div>
         ` : null}
@@ -149,12 +149,12 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
     <div class="flex flex-col gap-2 mt-3">
       <div class="flex items-center gap-2">
         <${CountBadge} tone=${success ? 'ok' : 'bad'}>${success ? 'OK' : 'ERR'}<//>
-        <span class="text-[11px] text-[var(--text-muted)]">${toolName}</span>
-        <span class="text-[10px] text-[var(--text-muted)] ml-auto">${timeStr}</span>
+        <span class="text-2xs text-[var(--text-muted)]">${toolName}</span>
+        <span class="text-3xs text-[var(--text-muted)] ml-auto">${timeStr}</span>
       </div>
       <div class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] overflow-hidden">
         <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--card-border)]">
-          <button type="button" class="text-[10px] text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-body)]"
+          <button type="button" class="text-3xs text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-body)]"
             onClick=${() => { expanded.value = !expanded.value }}>
             ${expanded.value ? '접기' : '펼치기'} (${lines}줄)
           </button>
@@ -164,7 +164,7 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
           <div class="px-3 py-2 overflow-x-auto max-h-[400px] overflow-y-auto">
             ${isJson
               ? html`<${JsonViewer} data=${parsed} />`
-              : html`<pre class="text-[12px] font-mono ${success ? 'text-[var(--text-body)]' : 'text-[var(--bad-light)]'}">${text}</pre>`
+              : html`<pre class="text-xs font-mono ${success ? 'text-[var(--text-body)]' : 'text-[var(--bad-light)]'}">${text}</pre>`
             }
           </div>
         ` : null}

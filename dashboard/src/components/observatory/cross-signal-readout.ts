@@ -59,7 +59,7 @@ function Row({
       : tone === 'bad' ? 'text-[var(--bad-light)]'
       : 'text-text-strong'
   return html`
-    <div class="flex items-center justify-between gap-4 text-[11px]">
+    <div class="flex items-center justify-between gap-4 text-2xs">
       <span class="text-text-dim">${label}</span>
       <span class="font-mono font-semibold ${toneClass}">${value}</span>
     </div>
@@ -93,8 +93,8 @@ export function CrossSignalReadout({ events, hourlyTrend, eventWindowMs }: Props
   return html`
     <div class="rounded border border-accent/20 bg-accent/5 px-3 py-2 shadow-sm">
       <div class="mb-1.5 flex items-center justify-between">
-        <span class="text-[10px] uppercase tracking-widest text-accent font-semibold">cursor</span>
-        <span class="text-[11px] font-mono text-text-strong">
+        <span class="text-3xs uppercase tracking-widest text-accent font-semibold">cursor</span>
+        <span class="text-2xs font-mono text-text-strong">
           ${new Date(cursor.ts).toLocaleTimeString()}
         </span>
       </div>

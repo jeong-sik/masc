@@ -133,7 +133,7 @@ function statusChipClass(status: FeatureStatus): string {
 
 function StatusPill({ status }: { status: FeatureStatus }) {
   return html`
-    <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusChipClass(status)}`}>
+    <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 text-3xs font-semibold uppercase tracking-wide ${statusChipClass(status)}`}>
       ${statusLabel(status)}
     </span>
   `
@@ -148,11 +148,11 @@ function FeatureItem({ item }: { item: FeatureHealthItem }) {
             <code class="text-xs font-medium text-[var(--text-strong)]">${item.env_name}</code>
             <${StatusPill} status=${item.status} />
             ${item.is_enabled ? html`
-              <span class="inline-flex items-center rounded border border-[var(--ok-30)] bg-[var(--ok-12)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--ok)]">
+              <span class="inline-flex items-center rounded border border-[var(--ok-30)] bg-[var(--ok-12)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--ok)]">
                 ON
               </span>
             ` : html`
-              <span class="inline-flex items-center rounded border border-[var(--white-12)] bg-[var(--white-4)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--text-muted)]">
+              <span class="inline-flex items-center rounded border border-[var(--white-12)] bg-[var(--white-4)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--text-muted)]">
                 OFF
               </span>
             `}
@@ -222,7 +222,7 @@ export function FeatureHealth() {
                     </div>
                     <button
                       type="button"
-                      class="rounded border border-[var(--white-8)] px-2.5 py-1 text-[11px] text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
+                      class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
                       onClick=${() => { void loadFeatureHealth() }}
                     >새로고침</button>
                   </div>

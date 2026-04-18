@@ -42,7 +42,7 @@ function keeperOf(entry: TelemetryEntry): string | null {
 
 function MetaRow({ label, value }: { label: string; value: string }) {
   return html`
-    <div class="flex items-baseline gap-2 text-[11px]">
+    <div class="flex items-baseline gap-2 text-2xs">
       <span class="w-20 shrink-0 text-text-dim">${label}</span>
       <span class="font-mono text-text-strong break-all">${value}</span>
     </div>
@@ -69,17 +69,17 @@ export function DetailPane() {
     <div class="rounded border border-accent/30 bg-bg-0/60 shadow-sm">
       <div class="flex items-center justify-between border-b border-card-border px-3 py-2">
         <div class="flex items-center gap-2">
-          <span class="text-[10px] uppercase tracking-widest text-accent font-semibold">상세</span>
-          <span class="text-[12px] font-semibold text-text-strong">${selectionTitle(selection)}</span>
+          <span class="text-3xs uppercase tracking-widest text-accent font-semibold">상세</span>
+          <span class="text-xs font-semibold text-text-strong">${selectionTitle(selection)}</span>
           ${outcome ? html`
-            <span class="rounded-sm border px-2 py-0.5 text-[10px] font-mono ${toneClass(outcome.tone)}">
+            <span class="rounded-sm border px-2 py-0.5 text-3xs font-mono ${toneClass(outcome.tone)}">
               ${outcome.label}
             </span>
           ` : null}
         </div>
         <button
           type="button"
-          class="rounded px-2 py-0.5 text-[11px] text-text-dim hover:text-text-strong hover:bg-white/5"
+          class="rounded px-2 py-0.5 text-2xs text-text-dim hover:text-text-strong hover:bg-white/5"
           onClick=${clearSelection}
           aria-label="상세 패널 닫기"
         >
@@ -101,10 +101,10 @@ export function DetailPane() {
         ` : null}
       </div>
       <details class="border-t border-card-border">
-        <summary class="cursor-pointer px-3 py-1.5 text-[11px] text-text-dim hover:text-text-strong">
+        <summary class="cursor-pointer px-3 py-1.5 text-2xs text-text-dim hover:text-text-strong">
           raw entry (JSON)
         </summary>
-        <pre class="max-h-64 overflow-auto px-3 py-2 text-[10px] font-mono text-text-strong bg-[var(--white-5)]/30">${formatJson(selection.entry)}</pre>
+        <pre class="max-h-64 overflow-auto px-3 py-2 text-3xs font-mono text-text-strong bg-[var(--white-5)]/30">${formatJson(selection.entry)}</pre>
       </details>
     </div>
   `

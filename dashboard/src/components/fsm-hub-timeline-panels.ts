@@ -163,7 +163,7 @@ export function SwimlaneTimeline({
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3" data-fsm-swimlane-root="true">
       <div class="mb-2 flex items-baseline justify-between gap-3 flex-wrap">
-        <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+        <div class="text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
           상태 타임라인
         </div>
         <div class="flex items-center gap-1 flex-wrap">
@@ -172,7 +172,7 @@ export function SwimlaneTimeline({
             const isBusiest = busiestLane === lane.short && count > 0
             return html`
               <span
-                class=${`rounded-sm border px-1.5 py-0.5 text-[10px] font-mono tabular-nums ${
+                class=${`rounded-sm border px-1.5 py-0.5 text-3xs font-mono tabular-nums ${
                   count === 0
                     ? 'text-[var(--text-dim)] border-[var(--white-8)]'
                     : isBusiest
@@ -184,7 +184,7 @@ export function SwimlaneTimeline({
             `
           })}
         </div>
-        <div class="text-[10px] font-mono text-[var(--text-dim)]">
+        <div class="text-3xs font-mono text-[var(--text-dim)]">
           <span>${fmtAbs(spanStart)}</span>
           <span class="mx-1 text-[var(--text-muted)]">→</span>
           <span>${fmtAbs(spanEnd)}</span>
@@ -197,7 +197,7 @@ export function SwimlaneTimeline({
           const segments = deriveSwimlaneSegments(observations, lane.key, spanEnd)
           return html`
             <div class="flex items-center gap-2">
-              <div class="w-[44px] shrink-0 text-[10px] font-mono font-semibold text-[var(--text-muted)]">
+              <div class="w-[44px] shrink-0 text-3xs font-mono font-semibold text-[var(--text-muted)]">
                 ${lane.short}
               </div>
               <div class="flex h-4 flex-1 overflow-hidden rounded border border-[var(--white-8)]" role="group" aria-label=${`${lane.label} swimlane with ${segments.length} segments`}>
@@ -247,7 +247,7 @@ export function SwimlaneTimeline({
                   style=${`left: ${leftPct.toFixed(2)}%; transform: translateX(-50%)`}
                 >
                   <div class="h-1 w-px bg-[var(--white-10)]"></div>
-                  <div class="text-[8px] font-mono leading-none mt-0.5">${tick.label}</div>
+                  <div class="text-4xs font-mono leading-none mt-0.5">${tick.label}</div>
                 </div>
               `
             })}
@@ -256,7 +256,7 @@ export function SwimlaneTimeline({
       ` : null}
       ${observations.length > 1 ? html`
         <div class="mt-0.5 flex items-center gap-2" aria-hidden="true">
-          <div class="w-[44px] shrink-0 text-[8px] text-[var(--text-dim)] text-right">obs</div>
+          <div class="w-[44px] shrink-0 text-4xs text-[var(--text-dim)] text-right">obs</div>
           <div class="relative flex-1 h-2.5">
             ${observations.map((obs, obsIndex) => {
               const leftPct = ((obs.ts - spanStart) / spanWidth) * 100
@@ -290,7 +290,7 @@ export function SwimlaneTimeline({
           </div>
         </div>
       ` : null}
-      <div class="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-dim)]">
+      <div class="mt-2 flex flex-wrap items-center gap-2 text-3xs text-[var(--text-dim)]">
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--indigo-45)]"></span>active</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--amber-bright-45)]"></span>compact</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--purple-50)]"></span>handoff</span>
@@ -386,7 +386,7 @@ export function TransitionTrail({
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
       <div class="mb-1.5 flex items-center justify-between gap-2">
-        <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+        <div class="text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
           Transition History (${isFiltering ? `${visibleHistory.length}/${history.length}` : history.length})
         </div>
         <input
@@ -395,11 +395,11 @@ export function TransitionTrail({
           placeholder="field / from / to 필터"
           aria-label="전이 이력 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[120px] max-w-[200px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[120px] max-w-[200px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && visibleHistory.length === 0
-        ? html`<div class="py-3 text-center text-[10px] text-[var(--text-dim)]">필터 결과 없음 (${history.length} items)</div>`
+        ? html`<div class="py-3 text-center text-3xs text-[var(--text-dim)]">필터 결과 없음 (${history.length} items)</div>`
         : html`
       <div ref=${scrollRef} class="flex flex-col gap-0.5 max-h-[120px] overflow-y-auto">
         ${visibleHistory.map((entry, trailIndex) => {
@@ -418,14 +418,14 @@ export function TransitionTrail({
             <div
               data-trail-index=${trailIndex}
               title=${tooltip}
-              class=${`flex items-center gap-2 text-[10px] font-mono leading-tight transition-opacity duration-150 cursor-help ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
+              class=${`flex items-center gap-2 text-3xs font-mono leading-tight transition-opacity duration-150 cursor-help ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
             >
               <span class="w-[52px] shrink-0 text-right text-[var(--text-dim)]">${ago} ago</span>
               <span class=${`w-[28px] shrink-0 font-semibold ${color}`}>${entry.field}</span>
               <span class="text-[var(--text-dim)]">${entry.from}</span>
               <span class="text-[var(--text-muted)]">→</span>
               <span class="text-[var(--text-strong)]">${entry.to}</span>
-              ${reason ? html`<span class="ml-1 text-[8px] text-[var(--text-dim)] opacity-50">ⓘ</span>` : null}
+              ${reason ? html`<span class="ml-1 text-4xs text-[var(--text-dim)] opacity-50">ⓘ</span>` : null}
             </div>
           `
         })}
@@ -458,7 +458,7 @@ export function TopTransitionsPanel({
 
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
-      <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+      <div class="mb-1.5 text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
         Top Transitions (${transitions.length})
       </div>
       <div class="flex flex-col gap-0.5">
@@ -473,7 +473,7 @@ export function TopTransitionsPanel({
             : ''
           return html`
             <div
-              class=${`flex items-center gap-2 text-[10px] font-mono leading-tight transition-opacity duration-150 ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
+              class=${`flex items-center gap-2 text-3xs font-mono leading-tight transition-opacity duration-150 ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
               title=${`${entry.field}: ${entry.from} → ${entry.to} (관측 ${entry.count}회)`}
             >
               <span class=${`w-[28px] shrink-0 font-semibold ${color}`}>${entry.field}</span>
@@ -522,7 +522,7 @@ export function DwellHistogramPanel({
 
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
-      <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+      <div class="mb-1.5 text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
         State Dwell Time
       </div>
       <div class="flex flex-col gap-2">
@@ -534,8 +534,8 @@ export function DwellHistogramPanel({
           return html`
             <div class=${`transition-opacity duration-150 ${dimmed ? 'opacity-40' : ''}`}>
               <div class="flex items-center gap-1.5 mb-0.5">
-                <span class=${`text-[10px] font-semibold ${color}`}>${lane.field}</span>
-                <span class="text-[10px] text-[var(--text-dim)]">${fmtDuration(lane.totalSeconds)}</span>
+                <span class=${`text-3xs font-semibold ${color}`}>${lane.field}</span>
+                <span class="text-3xs text-[var(--text-dim)]">${fmtDuration(lane.totalSeconds)}</span>
               </div>
               <div class="flex flex-col gap-px">
                 ${lane.entries.map((entry) => {
@@ -547,7 +547,7 @@ export function DwellHistogramPanel({
                     : ''
                   return html`
                     <div
-                      class=${`flex items-center gap-1.5 text-[10px] font-mono leading-tight ${rowCls}`}
+                      class=${`flex items-center gap-1.5 text-3xs font-mono leading-tight ${rowCls}`}
                       title=${`${displayState(entry.value)}: ${fmtDuration(entry.seconds)} (${entry.pct.toFixed(1)}%)`}
                     >
                       <span class="w-[60px] shrink-0 text-[var(--text-body)] truncate">${displayState(entry.value)}</span>
@@ -557,7 +557,7 @@ export function DwellHistogramPanel({
                           style=${`width: ${Math.max(2, entry.pct)}%`}
                         ></span>
                       </span>
-                      <span class="w-[36px] shrink-0 text-right text-[10px] text-[var(--text-dim)]">${entry.pct.toFixed(0)}%</span>
+                      <span class="w-[36px] shrink-0 text-right text-3xs text-[var(--text-dim)]">${entry.pct.toFixed(0)}%</span>
                     </div>
                   `
                 })}

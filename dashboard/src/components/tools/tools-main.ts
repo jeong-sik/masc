@@ -58,7 +58,7 @@ export function Tools() {
       <${Card} title="도구 사용 현황" class="section mb-4">
         ${usage
           ? html`
-              <div class="text-[12px] text-[var(--text-muted)] mb-2">
+              <div class="text-xs text-[var(--text-muted)] mb-2">
                 등록됨 ${usage.registered_count} (모든 MCP 서버 합산) · 사용된 ${usage.distinct_tools_called} · 미사용 ${usage.never_called_count}
               </div>
             `
@@ -66,7 +66,7 @@ export function Tools() {
         <${ToolMetrics} />
       <//>
       ${data?.generated_at
-        ? html`<div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--text-muted)] text-[12px]">
+        ? html`<div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--text-muted)] text-xs">
             <span>생성 시각: ${data.generated_at}</span>
             <span>metrics 기준: 최근 1시간</span>
           </div>`

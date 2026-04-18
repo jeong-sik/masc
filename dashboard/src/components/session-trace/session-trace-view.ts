@@ -54,7 +54,7 @@ function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
   if (s.total_cost_usd > 0) items.push(`$${s.total_cost_usd.toFixed(3)}`)
 
   return html`
-    <div class="flex flex-wrap gap-2 text-[10px] text-[var(--text-muted)]">
+    <div class="flex flex-wrap gap-2 text-3xs text-[var(--text-muted)]">
       ${items.map(item => html`
         <span class="inline-flex items-center bg-[var(--white-4)] border border-[var(--white-6)] px-2 py-1 rounded font-medium">
           ${item}
@@ -75,7 +75,7 @@ function LiveIndicator({ events }: { events: readonly { ts: number }[] }) {
   if (!isRecent) return null
 
   return html`
-    <div class="flex items-center gap-2 px-3 py-2 text-[11px] text-[var(--text-muted)]">
+    <div class="flex items-center gap-2 px-3 py-2 text-2xs text-[var(--text-muted)]">
       <span class="relative flex size-2">
         <span class="animate-ping absolute inline-flex h-full w-full rounded-sm bg-[var(--ok)] opacity-75"></span>
         <span class="relative inline-flex size-2 rounded-sm bg-[var(--ok)]"></span>
@@ -190,7 +190,7 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
       </div>
 
       ${'' /* Footer: event count */}
-      <div class="text-[10px] text-[var(--text-dim)] text-right">
+      <div class="text-3xs text-[var(--text-dim)] text-right">
         ${events.length}건 표시
       </div>
     </div>

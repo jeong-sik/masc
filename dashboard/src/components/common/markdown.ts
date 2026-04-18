@@ -260,7 +260,7 @@ function MarkdownContent({ text, class: className }: { text: string; class?: str
 
           if (shikiPre && shikiPre.tagName === 'PRE') {
             // Apply dashboard specific classes to match existing UI
-            shikiPre.classList.add('shiki-rendered', 'rounded', 'my-3', 'text-[13px]', 'leading-relaxed')
+            shikiPre.classList.add('shiki-rendered', 'rounded', 'my-3', 'text-sm', 'leading-relaxed')
 
             pre.replaceWith(shikiPre)
           }

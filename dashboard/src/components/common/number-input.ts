@@ -72,7 +72,7 @@ export function NumberInput({
       type="number"
       id=${id}
       name=${name}
-      class="${INPUT_BASE} px-3 py-2 text-[13px] ${cx ?? ''}"
+      class="${INPUT_BASE} px-3 py-2 text-sm ${cx ?? ''}"
       value=${value}
       placeholder=${placeholder}
       disabled=${disabled}

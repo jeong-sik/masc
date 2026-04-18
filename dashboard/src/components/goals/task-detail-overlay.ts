@@ -79,9 +79,9 @@ function TaskEventsSection() {
           placeholder="이벤트 검색 (label/agent/notes)"
           ariaLabel="이벤트 검색"
           onInput=${(e: Event) => { taskEventsSearchQuery.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[180px] flex-1 !py-1 !text-[11px]"
+          class="min-w-[180px] flex-1 !py-1 !text-2xs"
         />
-        <span class="text-[10px] text-[var(--text-muted)] tabular-nums">
+        <span class="text-3xs text-[var(--text-muted)] tabular-nums">
           ${trimmed
             ? `${visible.length} / ${events.length}`
             : `${events.length}개`}
@@ -96,17 +96,17 @@ function TaskEventsSection() {
         const key = evt.ts ? `${evt.ts}-${i}` : `${evt.label}-${i}`
         return html`
           <div key=${key} class="flex items-start gap-3 py-2 px-3 rounded hover:bg-[var(--white-3)] transition-colors">
-            <div class="size-7 shrink-0 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-[11px] font-mono font-bold ${color}">
+            <div class="size-7 shrink-0 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xs font-mono font-bold ${color}">
               ${icon}
             </div>
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
-                <span class="text-[12px] font-medium text-text-strong">${evt.label}</span>
-                ${evt.agent ? html`<span class="text-[10px] text-accent">@${evt.agent}${evt.actorKind ? ` · ${evt.actorKind}` : ''}</span>` : null}
+                <span class="text-xs font-medium text-text-strong">${evt.label}</span>
+                ${evt.agent ? html`<span class="text-3xs text-accent">@${evt.agent}${evt.actorKind ? ` · ${evt.actorKind}` : ''}</span>` : null}
               </div>
-              ${evt.notes ? html`<div class="mt-1 text-[11px] text-text-muted"><${RichContent} text=${evt.notes} previewLimit=${1} /></div>` : null}
+              ${evt.notes ? html`<div class="mt-1 text-2xs text-text-muted"><${RichContent} text=${evt.notes} previewLimit=${1} /></div>` : null}
             </div>
-            ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} class="text-[10px] text-text-dim shrink-0" />` : null}
+            ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} class="text-3xs text-text-dim shrink-0" />` : null}
           </div>
         `
       })}
@@ -137,13 +137,13 @@ function GateSection({
   return html`
     <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
       <div class="flex items-center justify-between gap-3">
-        <div class="text-[12px] font-medium text-text-strong">${title}</div>
-        <span class=${`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${gateTone(gate.status)}`}>${gate.status}</span>
+        <div class="text-xs font-medium text-text-strong">${title}</div>
+        <span class=${`rounded border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[0.08em] ${gateTone(gate.status)}`}>${gate.status}</span>
       </div>
       ${gate.reasons && gate.reasons.length > 0 ? html`
         <div class="mt-2 flex flex-col gap-1">
           ${gate.reasons.slice(0, 4).map(reason => html`
-            <div key=${reason} class="text-[11px] leading-relaxed text-text-muted">${reason}</div>
+            <div key=${reason} class="text-2xs leading-relaxed text-text-muted">${reason}</div>
           `)}
         </div>
       ` : null}
@@ -165,10 +165,10 @@ function ContractSection({ task }: { task: Task }) {
   return html`
     <div class="flex flex-col gap-3">
       <div class="flex items-center gap-2">
-        <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">계약 게이트</div>
-        <span class=${`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${contract?.strict ? 'text-accent border-accent/25 bg-[var(--accent-10)]' : 'text-text-muted border-[var(--white-10)] bg-[var(--white-5)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
+        <div class="text-2xs font-semibold uppercase tracking-[0.12em] text-text-muted">계약 게이트</div>
+        <span class=${`rounded border px-2 py-0.5 text-3xs font-semibold uppercase tracking-[0.08em] ${contract?.strict ? 'text-accent border-accent/25 bg-[var(--accent-10)]' : 'text-text-muted border-[var(--white-10)] bg-[var(--white-5)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
         ${isAwaitingVerification ? html`
-          <span class="rounded border border-accent/40 bg-[var(--accent-10)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-accent">
+          <span class="rounded border border-accent/40 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[0.08em] text-accent">
             검증 대기
           </span>
         ` : null}
@@ -176,11 +176,11 @@ function ContractSection({ task }: { task: Task }) {
 
       ${isAwaitingVerification ? html`
         <div class="rounded border border-accent/30 bg-[var(--accent-5)] px-4 py-3">
-          <div class="text-[12px] font-medium text-accent">Verifier Keeper 검증 중</div>
-          <div class="mt-1 text-[11px] text-text-body">
+          <div class="text-xs font-medium text-accent">Verifier Keeper 검증 중</div>
+          <div class="mt-1 text-2xs text-text-body">
             Submitter: <span class="font-mono">${verifierAssignee ?? '(unknown)'}</span>
           </div>
-          <div class="mt-0.5 text-[11px] text-text-muted">
+          <div class="mt-0.5 text-2xs text-text-muted">
             다른 keeper가 completion_contract의 정량 기준을 독립 실측 중입니다.
             통과 시 approve_verification → done, 미충족 시 reject_verification → in_progress로 복귀.
           </div>
@@ -193,10 +193,10 @@ function ContractSection({ task }: { task: Task }) {
 
       ${completionItems.length > 0 ? html`
         <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
-          <div class="text-[12px] font-medium text-text-strong">Completion Contract</div>
+          <div class="text-xs font-medium text-text-strong">Completion Contract</div>
           <div class="mt-2 flex flex-col gap-1">
             ${completionItems.map((item: string) => html`
-              <div key=${item} class=${`text-[11px] ${unmetItems.includes(item) ? 'text-bad' : 'text-text-body'}`}>${item}</div>
+              <div key=${item} class=${`text-2xs ${unmetItems.includes(item) ? 'text-bad' : 'text-text-body'}`}>${item}</div>
             `)}
           </div>
         </div>
@@ -204,10 +204,10 @@ function ContractSection({ task }: { task: Task }) {
 
       ${requiredEvidence.length > 0 ? html`
         <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
-          <div class="text-[12px] font-medium text-text-strong">Required Evidence</div>
+          <div class="text-xs font-medium text-text-strong">Required Evidence</div>
           <div class="mt-2 flex flex-wrap gap-1.5">
             ${requiredEvidence.map((item: string) => html`
-              <span key=${item} class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-[10px] font-mono text-text-body">${item}</span>
+              <span key=${item} class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-mono text-text-body">${item}</span>
             `)}
           </div>
         </div>
@@ -228,12 +228,12 @@ function ExecutionLinksSection({ task }: { task: Task }) {
 
   return html`
     <div>
-      <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">연결된 실행</div>
+      <div class="text-2xs font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">연결된 실행</div>
       <div class="flex flex-col gap-2">
         ${items.map(([label, value]) => html`
           <div key=${label} class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
-            <div class="text-[10px] uppercase tracking-[0.12em] text-text-dim">${label}</div>
-            <div class="mt-1 text-[12px] font-mono text-text-body break-all">${value}</div>
+            <div class="text-3xs uppercase tracking-[0.12em] text-text-dim">${label}</div>
+            <div class="mt-1 text-xs font-mono text-text-body break-all">${value}</div>
           </div>
         `)}
       </div>
@@ -247,16 +247,16 @@ function HandoffSection({ task }: { task: Task }) {
 
   return html`
     <div>
-      <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">최근 Handoff</div>
+      <div class="text-2xs font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">최근 Handoff</div>
       <div class="rounded border border-warn/20 bg-warn/8 px-4 py-3">
-        <div class="text-[13px] leading-relaxed text-text-body"><${RichContent} text=${handoff.summary} previewLimit=${2} /></div>
-        ${handoff.reason ? html`<div class="mt-2 text-[11px] text-text-muted">reason: ${handoff.reason}</div>` : null}
-        ${handoff.next_step ? html`<div class="mt-1 text-[11px] text-text-muted">next: ${handoff.next_step}</div>` : null}
-        ${handoff.failure_mode ? html`<div class="mt-1 text-[11px] text-text-muted">failure: ${handoff.failure_mode}</div>` : null}
+        <div class="text-sm leading-relaxed text-text-body"><${RichContent} text=${handoff.summary} previewLimit=${2} /></div>
+        ${handoff.reason ? html`<div class="mt-2 text-2xs text-text-muted">reason: ${handoff.reason}</div>` : null}
+        ${handoff.next_step ? html`<div class="mt-1 text-2xs text-text-muted">next: ${handoff.next_step}</div>` : null}
+        ${handoff.failure_mode ? html`<div class="mt-1 text-2xs text-text-muted">failure: ${handoff.failure_mode}</div>` : null}
         ${handoff.evidence_refs && handoff.evidence_refs.length > 0 ? html`
           <div class="mt-2 flex flex-wrap gap-1.5">
             ${handoff.evidence_refs.map((item: string) => html`
-              <span key=${item} class="rounded border border-warn/20 bg-[var(--white-5)] px-2 py-0.5 text-[10px] font-mono text-text-body">${item}</span>
+              <span key=${item} class="rounded border border-warn/20 bg-[var(--white-5)] px-2 py-0.5 text-3xs font-mono text-text-body">${item}</span>
             `)}
           </div>
         ` : null}
@@ -278,7 +278,7 @@ function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex flex-wrap items-center gap-2">
-        <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">담당 키퍼의 활성 목표</div>
+        <div class="text-2xs font-semibold uppercase tracking-[0.12em] text-text-muted">담당 키퍼의 활성 목표</div>
         ${goalIds.length > 1 ? html`
           <input
             type="search"
@@ -286,9 +286,9 @@ function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
             placeholder="목표 검색 (title/status/metric)"
             aria-label="목표 검색"
             onInput=${(e: Event) => { goalRelationSearchQuery.value = (e.target as HTMLInputElement).value }}
-            class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
           />
-          <span class="text-[10px] text-[var(--text-muted)] tabular-nums">
+          <span class="text-3xs text-[var(--text-muted)] tabular-nums">
             ${isFiltering
               ? `${visibleIds.length} / ${goalIds.length}`
               : `${goalIds.length}개`}
@@ -296,14 +296,14 @@ function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
         ` : null}
       </div>
       ${isFiltering && visibleIds.length === 0
-        ? html`<div class="py-3 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${goalIds.length} goals)</div>`
+        ? html`<div class="py-3 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${goalIds.length} goals)</div>`
         : html`
       <div class="flex flex-col gap-1">
         ${visibleIds.map(id => {
           const goal = goalById(id)
           return html`
             <div key=${id} class="flex items-center gap-2 rounded border border-card-border/50 bg-[var(--white-3)] px-3 py-2">
-              <span class="text-[12px] text-text-body">${goal?.title ?? id}</span>
+              <span class="text-xs text-text-body">${goal?.title ?? id}</span>
               ${goal?.status ? html`<${StatusBadge} status=${goal.status} />` : null}
             </div>
           `
@@ -338,11 +338,11 @@ export function TaskDetailOverlay() {
       ${'' /* Sticky Header */}
       <div class="sticky top-0 z-10 flex items-center justify-between gap-4 px-6 py-4 border-b border-[var(--card-border)] bg-[rgba(13,21,38,0.97)] backdrop-blur-sm rounded-t-2xl">
         <div class="flex-1 min-w-0">
-          <h2 id=${titleId} class="text-[16px] font-semibold text-text-strong break-words">${task.title}</h2>
+          <h2 id=${titleId} class="text-lg font-semibold text-text-strong break-words">${task.title}</h2>
           <div class="mt-1.5 flex flex-wrap items-center gap-2">
             <${StatusBadge} status=${task.status ?? 'todo'} />
-            <span class="rounded border border-current/20 bg-[var(--white-5)] px-2 py-0.5 text-[11px] font-semibold text-text-body">${priorityLabel(p)}</span>
-            ${task.assignee ? html`<span class="text-[11px] text-accent">@${task.assignee}${assigneeKind ? ` (${assigneeKind})` : ''}</span>` : null}
+            <span class="rounded border border-current/20 bg-[var(--white-5)] px-2 py-0.5 text-2xs font-semibold text-text-body">${priorityLabel(p)}</span>
+            ${task.assignee ? html`<span class="text-2xs text-accent">@${task.assignee}${assigneeKind ? ` (${assigneeKind})` : ''}</span>` : null}
           </div>
         </div>
         <button
@@ -361,7 +361,7 @@ export function TaskDetailOverlay() {
             <button
               key=${tab}
               type="button"
-              class="px-3 py-1.5 rounded text-[12px] font-medium border cursor-pointer transition-colors ${
+              class="px-3 py-1.5 rounded text-xs font-medium border cursor-pointer transition-colors ${
                 activeTab.value === tab
                   ? 'border-accent/40 bg-accent/12 text-[var(--accent)]'
                   : 'border-transparent text-text-muted hover:bg-[var(--white-8)]'
@@ -378,8 +378,8 @@ export function TaskDetailOverlay() {
           ${'' /* Description */}
           ${task.description ? html`
             <div>
-              <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">설명</div>
-              <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3 text-[13px] leading-relaxed text-text-body">
+              <div class="text-2xs font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">설명</div>
+              <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3 text-sm leading-relaxed text-text-body">
                 <${RichContent} text=${task.description} previewLimit=${2} />
               </div>
             </div>
@@ -394,12 +394,12 @@ export function TaskDetailOverlay() {
 
           ${'' /* Recent task events */}
           <div>
-            <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">최근 태스크 이벤트</div>
+            <div class="text-2xs font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">최근 태스크 이벤트</div>
             <${TaskEventsSection} />
           </div>
 
           ${'' /* Metadata */}
-          <div class="flex flex-wrap items-center gap-3 text-[11px] text-text-dim border-t border-[var(--card-border)] pt-4">
+          <div class="flex flex-wrap items-center gap-3 text-2xs text-text-dim border-t border-[var(--card-border)] pt-4">
             ${task.created_at ? html`<span>생성: <${TimeAgo} timestamp=${task.created_at} /></span>` : null}
             <span class="font-mono">${task.id}</span>
           </div>

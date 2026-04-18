@@ -148,7 +148,7 @@ function renderCategorySection(
   if (posts.length === 0 && hidden === 0) return null
   if (posts.length === 0 && hidden > 0) {
     return html`
-      <div class="mb-3 px-3 py-2 rounded border border-dashed border-[var(--border-slate-16)] text-[12px] text-[var(--text-muted)]">
+      <div class="mb-3 px-3 py-2 rounded border border-dashed border-[var(--border-slate-16)] text-xs text-[var(--text-muted)]">
         ${label} — ${hidden}건 숨김
       </div>
     `
@@ -166,7 +166,7 @@ function renderCategorySection(
         }} />
         <div class="text-center py-3">
           <button type="button"
-            class="px-4 py-2 rounded text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer disabled:opacity-50"
+            class="px-4 py-2 rounded text-xs font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer disabled:opacity-50"
             disabled=${loadingMore}
             onClick=${() => {
               expandCategory(category, limits, limit, posts.length)
@@ -189,7 +189,7 @@ function NewPostForm() {
   if (!showNewPostForm.value) {
     return html`
       <button type="button"
-        class="w-full py-2.5 rounded border border-dashed border-[var(--card-border)] text-[13px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-4)] hover:text-[var(--text-body)] transition-colors bg-transparent"
+        class="w-full py-2.5 rounded border border-dashed border-[var(--card-border)] text-sm text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-4)] hover:text-[var(--text-body)] transition-colors bg-transparent"
         onClick=${() => { showNewPostForm.value = true }}
       >+ 새 글 작성</button>
     `
@@ -215,11 +215,11 @@ function NewPostForm() {
       />
       <div class="flex gap-2 justify-end">
         <button type="button"
-          class="px-3 py-1.5 rounded text-[13px] border border-[var(--card-border)] bg-transparent text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]"
+          class="px-3 py-1.5 rounded text-sm border border-[var(--card-border)] bg-transparent text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]"
           onClick=${() => { showNewPostForm.value = false; newPostTitle.value = ''; newPostContent.value = '' }}
         >취소</button>
         <button type="button"
-          class="px-4 py-1.5 rounded text-[13px] font-medium border border-[rgba(71,184,255,0.4)] bg-[var(--accent-soft)] text-[var(--accent)] cursor-pointer hover:bg-[var(--accent-20)] disabled:opacity-50"
+          class="px-4 py-1.5 rounded text-sm font-medium border border-[rgba(71,184,255,0.4)] bg-[var(--accent-soft)] text-[var(--accent)] cursor-pointer hover:bg-[var(--accent-20)] disabled:opacity-50"
           disabled=${newPostSubmitting.value || !newPostTitle.value.trim() || !newPostContent.value.trim()}
           onClick=${() => { void submitNewPost() }}
         >${newPostSubmitting.value ? '등록 중...' : '등록'}</button>
@@ -237,7 +237,7 @@ function SortBar() {
       <div class="flex items-center gap-1.5 flex-wrap">
         ${SORT_MODES.map(mode => html`
           <button type="button"
-            class="px-3 py-1.5 rounded text-[12px] font-medium transition-all duration-150 border cursor-pointer
+            class="px-3 py-1.5 rounded text-xs font-medium transition-all duration-150 border cursor-pointer
               ${current === mode.id
                 ? 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)]'
                 : 'bg-transparent text-[var(--text-muted)] border-transparent hover:bg-[var(--white-8)] hover:text-[var(--text-body)]'
@@ -260,7 +260,7 @@ function SortBar() {
           const isHidden = boardHiddenCategories.value.has(g.category)
           return html`
             <button type="button"
-              class="px-2.5 py-1 rounded text-[11px] font-medium transition-all duration-150 border cursor-pointer
+              class="px-2.5 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer
                 ${isHidden
                   ? 'bg-[var(--accent-12)] text-[var(--accent)] border-[var(--accent-18)] line-through opacity-60'
                   : 'bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]'
@@ -281,7 +281,7 @@ function SortBar() {
           placeholder="작성자"
           aria-label="작성자 필터"
           value=${boardAuthorFilter.value}
-          class="px-2.5 py-1 rounded text-[11px] font-medium border bg-transparent text-[var(--text)] border-[var(--border-slate-16)] placeholder:text-[var(--text-muted)] w-28 focus:outline-none focus:border-[var(--accent)]"
+          class="px-2.5 py-1 rounded text-2xs font-medium border bg-transparent text-[var(--text)] border-[var(--border-slate-16)] placeholder:text-[var(--text-muted)] w-28 focus:outline-none focus:border-[var(--accent)]"
           onKeyDown=${(e: KeyboardEvent) => {
             if (e.key === 'Enter') {
               boardAuthorFilter.value = (e.target as HTMLInputElement).value.trim()
@@ -299,19 +299,19 @@ function SortBar() {
         <div class="ml-auto flex items-center gap-2">
           ${selectedPostIds.value.size > 0 ? html`
             <button type="button"
-              class="px-3 py-1 rounded text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-30)] hover:bg-[var(--bad-20)] disabled:opacity-50 disabled:cursor-not-allowed"
+              class="px-3 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-30)] hover:bg-[var(--bad-20)] disabled:opacity-50 disabled:cursor-not-allowed"
               onClick=${bulkDeleteSelected}
               disabled=${bulkDeleting.value}
             >
               ${bulkDeleting.value ? '삭제 중...' : `선택 삭제 (${selectedPostIds.value.size})`}
             </button>
             <button type="button"
-              class="px-2 py-1 rounded text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]"
+              class="px-2 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]"
               onClick=${() => { selectedPostIds.value = new Set() }}
             >선택 해제</button>
           ` : null}
           <button type="button"
-            class="px-3 py-1 rounded text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-3 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] disabled:opacity-50 disabled:cursor-not-allowed"
             onClick=${refreshBoard}
             disabled=${boardLoading.value}
           >
@@ -328,8 +328,8 @@ function MemorySummary() {
   const grouped = splitVisiblePosts(boardPosts.value)
   const visibleCount = grouped.groups.reduce((sum, g) => sum + g.posts.length, 0)
   return html`
-    <div class="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded border border-[var(--card-border)] bg-[var(--card)] text-[12px] text-[var(--text-muted)]">
-      <span class="font-semibold text-[var(--text-strong)] tabular-nums text-[15px]">${visibleCount}</span>
+    <div class="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded border border-[var(--card-border)] bg-[var(--card)] text-xs text-[var(--text-muted)]">
+      <span class="font-semibold text-[var(--text-strong)] tabular-nums text-md">${visibleCount}</span>
       <span>개 표시 중</span>
       ${grouped.groups.map(g => {
         const meta = CONTENT_CATEGORIES.find(c => c.id === g.category)
@@ -339,7 +339,7 @@ function MemorySummary() {
         `
       })}
       ${lastBoardRefreshAt.value ? html`
-        <span class="ml-auto text-[11px]">갱신 <${TimeAgo} timestamp=${lastBoardRefreshAt.value} /></span>
+        <span class="ml-auto text-2xs">갱신 <${TimeAgo} timestamp=${lastBoardRefreshAt.value} /></span>
       ` : null}
     </div>
   `
@@ -403,12 +403,12 @@ function PostCard({ post }: { post: BoardPost }) {
       <!-- Vote column -->
       <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-[36px]">
         <button type="button"
-          class="vote-btn upvote w-7 h-5 flex items-center justify-center rounded text-[11px] text-[var(--text-muted)] hover:text-[var(--warn-bright)] hover:bg-[var(--warn-10)] transition-colors cursor-pointer border-0 bg-transparent"
+          class="vote-btn upvote w-7 h-5 flex items-center justify-center rounded text-2xs text-[var(--text-muted)] hover:text-[var(--warn-bright)] hover:bg-[var(--warn-10)] transition-colors cursor-pointer border-0 bg-transparent"
           onClick=${(event: Event) => handleVote('up', event)}
         >▲</button>
-        <span class="text-[13px] font-semibold tabular-nums text-[var(--text-strong)]">${post.votes ?? 0}</span>
+        <span class="text-sm font-semibold tabular-nums text-[var(--text-strong)]">${post.votes ?? 0}</span>
         <button type="button"
-          class="vote-btn downvote w-7 h-5 flex items-center justify-center rounded text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--accent-10)] transition-colors cursor-pointer border-0 bg-transparent"
+          class="vote-btn downvote w-7 h-5 flex items-center justify-center rounded text-2xs text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--accent-10)] transition-colors cursor-pointer border-0 bg-transparent"
           onClick=${(event: Event) => handleVote('down', event)}
         >▼</button>
       </div>
@@ -416,10 +416,10 @@ function PostCard({ post }: { post: BoardPost }) {
       <!-- Post body -->
       <div class="flex-1 min-w-0">
         <!-- Title -->
-        <div class="text-[15px] font-semibold text-[var(--text-strong)] leading-snug mb-1.5 group-hover:text-[var(--accent)] transition-colors">${stripInlineMarkdown(post.title)}</div>
+        <div class="text-md font-semibold text-[var(--text-strong)] leading-snug mb-1.5 group-hover:text-[var(--accent)] transition-colors">${stripInlineMarkdown(post.title)}</div>
 
         <!-- Content preview: rendered markdown, height-capped -->
-        <div class="board-post-preview text-[13px] text-[var(--text-body)] leading-[1.55] mb-2.5 overflow-hidden relative ${richPreview ? 'max-h-[12rem]' : 'max-h-[4.8em]'}">
+        <div class="board-post-preview text-sm text-[var(--text-body)] leading-[1.55] mb-2.5 overflow-hidden relative ${richPreview ? 'max-h-[12rem]' : 'max-h-[4.8em]'}">
           <${RichContent} text=${previewBody} class="board-post-preview__content" previewLimit=${1} />
           <div class="absolute bottom-0 left-0 right-0 ${richPreview ? 'h-10' : 'h-6'} bg-gradient-to-t from-[var(--card)] to-transparent pointer-events-none" />
         </div>
@@ -427,28 +427,28 @@ function PostCard({ post }: { post: BoardPost }) {
         <!-- Footer: author + meta + badges -->
         <div class="flex items-center gap-2 flex-wrap">
           <!-- Author line -->
-          <span class="text-[12px] text-[var(--text-muted)]">${authorAvatar(post.author)}</span>
+          <span class="text-xs text-[var(--text-muted)]">${authorAvatar(post.author)}</span>
           <a
-            class="text-[12px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors cursor-pointer"
+            class="text-xs text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors cursor-pointer"
             onClick=${(e: Event) => navigateToAuthor(post.author, e)}
           >${post.author}</a>
-          <span class="text-[11px] text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${post.created_at} /></span>
-          ${isUpdated(post) ? html`<span class="text-[10px] text-[var(--text-muted)] opacity-50">(수정됨)</span>` : null}
+          <span class="text-2xs text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${post.created_at} /></span>
+          ${isUpdated(post) ? html`<span class="text-3xs text-[var(--text-muted)] opacity-50">(수정됨)</span>` : null}
 
           <!-- Separator -->
           <span class="text-[var(--text-muted)] opacity-30">|</span>
 
           <!-- Counts -->
-          <span class="text-[11px] text-[var(--text-muted)]">댓글 ${post.comment_count}</span>
+          <span class="text-2xs text-[var(--text-muted)]">댓글 ${post.comment_count}</span>
 
           <!-- Category badges -->
-          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${categoryBadgeColor(cat)}">${categoryLabel(cat)}</span>
-          ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
-          ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-3xs font-medium border ${categoryBadgeColor(cat)}">${categoryLabel(cat)}</span>
+          ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-3xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
+          ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
 
           <!-- Delete button -->
           <button type="button"
-            class="ml-auto px-2 py-0.5 rounded text-[10px] font-semibold border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[var(--bad-20)] transition-all cursor-pointer opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="ml-auto px-2 py-0.5 rounded text-3xs font-semibold border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[var(--bad-20)] transition-all cursor-pointer opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick=${handleDelete}
             disabled=${isDeleting}
           >
@@ -492,7 +492,7 @@ export function Memory() {
           <div>
             <${MemorySummary} />
             <button type="button"
-              class="mb-4 px-3 py-1.5 rounded text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
+              class="mb-4 px-3 py-1.5 rounded text-xs font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
               onClick=${() => navigate('workspace', { section: 'board' })}
             >← 게시판으로 돌아가기</button>
             ${detailLoading.value
@@ -507,7 +507,7 @@ export function Memory() {
       <${MemorySummary} />
       <${SortBar} />
       ${hint ? html`
-        <div class="mb-4 px-3 py-2 rounded border border-[var(--border-slate-16)] bg-[var(--white-3)] text-[12px] text-[var(--text-muted)]">
+        <div class="mb-4 px-3 py-2 rounded border border-[var(--border-slate-16)] bg-[var(--white-3)] text-xs text-[var(--text-muted)]">
           ${hint}
         </div>
       ` : null}
@@ -521,17 +521,17 @@ export function Memory() {
           placeholder="제목/본문에서 검색"
           aria-label="게시글 본문 필터"
           onInput=${(e: Event) => setContentQuery((e.target as HTMLInputElement).value)}
-          class="min-w-[180px] max-w-[320px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[12px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[180px] max-w-[320px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && posts.length === 0 && rawPosts.length > 0
-        ? html`<div class="py-4 text-center text-[12px] text-[var(--text-dim)]">필터 결과 없음 (${rawPosts.length} items)</div>`
+        ? html`<div class="py-4 text-center text-xs text-[var(--text-dim)]">필터 결과 없음 (${rawPosts.length} items)</div>`
         : posts.length === 0 && boardLoading.value
           ? html`<${LoadingState}>메모리 피드 불러오는 중...<//>`
           : posts.length === 0
             ? html`<${EmptyState} message="아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
             : html`
-                ${boardLoading.value ? html`<div class="mb-2 text-[11px] text-[var(--text-muted)] animate-pulse">업데이트 중...</div>` : null}
+                ${boardLoading.value ? html`<div class="mb-2 text-2xs text-[var(--text-muted)] animate-pulse">업데이트 중...</div>` : null}
                 ${grouped.groups.map(g => html`
                   <${CategorySection} key=${g.category} group=${g} />
                 `)}

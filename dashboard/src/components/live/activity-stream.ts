@@ -28,7 +28,7 @@ function FilterBar() {
       ${FILTER_OPTIONS.map(opt => html`
         <button type="button"
           key=${opt.kind}
-          class="px-3 py-1.5 text-[11px] rounded-sm border cursor-pointer transition-all duration-150 ${active.has(opt.kind)
+          class="px-3 py-1.5 text-2xs rounded-sm border cursor-pointer transition-all duration-150 ${active.has(opt.kind)
             ? 'border-[var(--border-slate-22)] bg-[var(--accent-soft)] text-[var(--text-strong)]'
             : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[var(--border-slate-22)] hover:text-[var(--text-body)]'}"
           onClick=${() => toggleLiveFilter(opt.kind)}
@@ -63,11 +63,11 @@ export function ActivityStream() {
               class="activity-item rounded border border-[var(--border-slate-12)] border-l-2 bg-[var(--white-2)] px-3.5 py-3 ${eventKindColor(entry)} ${i === 0 ? 'activity-item-new' : ''}"
             >
               <div class="activity-item-head flex items-center gap-2">
-                <span class="activity-kind-chip rounded px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.04em] ${eventKindColor(entry)}">${eventKindLabel(entry)}</span>
+                <span class="activity-kind-chip rounded px-2 py-0.5 text-3xs font-medium uppercase tracking-[0.04em] ${eventKindColor(entry)}">${eventKindLabel(entry)}</span>
                 <span class="text-[0.75rem] text-[var(--text-body)] font-medium">${entry.agent}</span>
                 <span class="text-[0.7rem] text-[var(--text-muted)] ml-auto">${formatTimeAgo(entry.timestamp)}</span>
               </div>
-              <div class="text-[13px] text-[var(--text-body)] leading-[1.5] break-words">${entry.text}</div>
+              <div class="text-sm text-[var(--text-body)] leading-[1.5] break-words">${entry.text}</div>
             </div>
           `)}
       </div>

@@ -249,29 +249,29 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
         aria-pressed=${selected ? 'true' : 'false'}
       >
         <span
-          class="flex h-7 w-7 shrink-0 items-center justify-center rounded text-[14px]"
+          class="flex h-7 w-7 shrink-0 items-center justify-center rounded text-base"
           style=${accent}
         >${channelIcon(id)}</span>
         <span class="min-w-0 flex-1">
           <span class="flex items-center gap-2">
-            <span class="block truncate text-[13px] font-semibold text-[var(--text-body)]">${displayName}</span>
-            <span class=${`rounded-sm border px-2 py-0.5 text-[10px] font-medium ${summary.badgeClass}`}>${summary.badge}</span>
+            <span class="block truncate text-sm font-semibold text-[var(--text-body)]">${displayName}</span>
+            <span class=${`rounded-sm border px-2 py-0.5 text-3xs font-medium ${summary.badgeClass}`}>${summary.badge}</span>
             ${uptimeLabel !== null
               ? html`
                   <span
-                    class="rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-[1px] text-[10px] font-normal text-[var(--ok)]/80"
+                    class="rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-[1px] text-3xs font-normal text-[var(--ok)]/80"
                     data-uptime-chip
                     title="last_ready_at 기준 경과 시간"
                   >${uptimeLabel}</span>
                 `
               : null}
           </span>
-          <span class="mt-1 block text-[11px] leading-5 text-[var(--text-dim)]" data-overview-summary>${summary.detail}</span>
+          <span class="mt-1 block text-2xs leading-5 text-[var(--text-dim)]" data-overview-summary>${summary.detail}</span>
           ${(() => {
             const identity = formatTileIdentityLine(connector)
             return identity !== null
               ? html`<span
-                  class="mt-1 block truncate text-[10px] text-[var(--text-dim)]"
+                  class="mt-1 block truncate text-3xs text-[var(--text-dim)]"
                   data-tile-identity=${id}
                   title=${identity}
                 >${identity}</span>`
@@ -280,7 +280,7 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
         </span>
       </button>
       <${ConnectorReadinessRail} pills=${pills} />
-      <span class=${`text-[10px] uppercase tracking-[0.14em] ${selected ? 'text-[var(--accent-1)]' : 'text-[var(--text-dim)]'}`}>
+      <span class=${`text-3xs uppercase tracking-[0.14em] ${selected ? 'text-[var(--accent-1)]' : 'text-[var(--text-dim)]'}`}>
         ${selected ? 'Selected' : 'View Details'}
       </span>
       <${TilePrimaryAction} id=${id} sidecarUp=${sidecarUp} />
@@ -342,7 +342,7 @@ export function tilePrimaryActionView(
 const TILE_ACTION_TONE_CLASS: Record<'start' | 'stop', string> = {
   // Emerald tokens match BulkActions "Start All" — one color vocabulary
   // across per-tile + bulk controls. The per-tile button is deliberately
-  // block-width and text-[12px] so it reads as the primary action of the
+  // block-width and text-xs so it reads as the primary action of the
   // tile, distinct from the smaller pill row above.
   start: 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)] hover:bg-[var(--ok-10)]',
   stop: 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[var(--bad-10)]',
@@ -362,7 +362,7 @@ function TilePrimaryAction({ id, sidecarUp }: { id: KnownConnectorId; sidecarUp:
   return html`
     <button
       type="button"
-      class=${`w-full cursor-pointer rounded border px-2 py-1.5 text-[12px] font-semibold tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${tone}`}
+      class=${`w-full cursor-pointer rounded border px-2 py-1.5 text-xs font-semibold tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${tone}`}
       disabled=${view.busy}
       aria-busy=${view.busy ? 'true' : 'false'}
       aria-label=${sidecarUp ? `${id} sidecar 정지` : `${id} sidecar 시작`}
@@ -435,7 +435,7 @@ function TileErrorNotice({ connector }: { connector: GateConnectorInfo | null })
   const glyph = TILE_NOTICE_GLYPH[notice.tone]
   return html`
     <div
-      class=${`flex min-w-0 items-center gap-1.5 rounded border px-2 py-1 text-[10px] ${tone}`}
+      class=${`flex min-w-0 items-center gap-1.5 rounded border px-2 py-1 text-3xs ${tone}`}
       role="alert"
       aria-label=${`${notice.label}: ${notice.detail}`}
       title=${notice.detail}
@@ -522,10 +522,10 @@ function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
   const startBusy = bulkInflight.value.start
   const stopBusy = bulkInflight.value.stop
   return html`
-    <div class="flex items-center gap-2 text-[11px] text-[var(--text-dim)]">
+    <div class="flex items-center gap-2 text-2xs text-[var(--text-dim)]">
       <button
         type="button"
-        class="cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-2 py-1 text-[11px] text-[var(--ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-40"
+        class="cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-2 py-1 text-2xs text-[var(--ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-40"
         disabled=${startBusy || downCount === 0}
         title=${downCount === 0 ? '모두 이미 실행 중' : `${downCount} 개 sidecar 시작`}
         onClick=${() => { void runBulk('start', c => c?.available !== true, connectors) }}
@@ -535,7 +535,7 @@ function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
       </button>
       <button
         type="button"
-        class="cursor-pointer rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-[11px] text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:cursor-not-allowed disabled:opacity-40"
+        class="cursor-pointer rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-2xs text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:cursor-not-allowed disabled:opacity-40"
         disabled=${stopBusy || upCount === 0}
         title=${upCount === 0 ? '실행 중인 sidecar 없음' : `${upCount} 개 sidecar 정지`}
         onClick=${() => { void runBulk('stop', c => c?.available === true, connectors) }}
@@ -635,7 +635,7 @@ function StatusSummaryLine({ summary, connectors }: { summary: ConnectorStripSum
   const offlineLabel = formatOfflineConnectorLabel(offlineConnectorNames(connectors))
   return html`
     <div
-      class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-[var(--text-dim)]"
+      class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-2xs text-[var(--text-dim)]"
       data-strip-summary
     >
       <${LivePulseDot}
@@ -676,13 +676,13 @@ function IncidentBanner({ droppedIds }: { droppedIds: string[] }) {
     .join(', ')
   return html`
     <div
-      class="mb-2 flex items-center gap-2 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-1.5 text-[11px] font-semibold text-[var(--bad-light)]"
+      class="mb-2 flex items-center gap-2 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-1.5 text-2xs font-semibold text-[var(--bad-light)]"
       data-incident-banner
       role="alert"
     >
       <span aria-hidden="true">⚠</span>
       <span>최근 5분 내 연결 끊김 — ${names}</span>
-      <span class="ml-auto text-[10px] font-normal text-[var(--bad-light)]/80">아래 Start 버튼으로 복구</span>
+      <span class="ml-auto text-3xs font-normal text-[var(--bad-light)]/80">아래 Start 버튼으로 복구</span>
     </div>
   `
 }

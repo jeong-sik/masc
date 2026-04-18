@@ -33,7 +33,7 @@ export function FlowControlPanel() {
   return html`
     <${SurfaceCard} variant="compact" class="mb-4">
       <div class="flex items-center gap-3 mb-3">
-        <h3 class="text-[13px] text-[var(--text-strong)] font-medium">흐름 제어</h3>
+        <h3 class="text-sm text-[var(--text-strong)] font-medium">흐름 제어</h3>
         <${CountBadge} tone=${stateTone(state)}>${stateLabel(state)}<//>
       </div>
       <div class="flex flex-wrap gap-2">
@@ -47,7 +47,7 @@ export function FlowControlPanel() {
     ${'' /* ── Maintenance ── */}
     <${SurfaceCard} variant="compact">
       <details>
-        <summary class="cursor-pointer text-[13px] text-[var(--text-strong)] font-medium select-none py-1">유지보수</summary>
+        <summary class="cursor-pointer text-sm text-[var(--text-strong)] font-medium select-none py-1">유지보수</summary>
         <div class="mt-3 flex flex-wrap gap-2">
           <${ActionButton} variant="ghost" size="md" disabled=${maintenanceLoading.value}
             onClick=${async () => {
@@ -63,7 +63,7 @@ export function FlowControlPanel() {
             ${maintenanceLoading.value ? '...' : '좀비 정리'}<//>
         </div>
         ${maintenanceResult.value ? html`
-          <pre class="mt-3 p-3 rounded border border-card-border/50 bg-card/30 text-[11px] text-text-body font-mono max-h-[160px] overflow-auto custom-scrollbar whitespace-pre-wrap">${maintenanceResult.value}</pre>
+          <pre class="mt-3 p-3 rounded border border-card-border/50 bg-card/30 text-2xs text-text-body font-mono max-h-[160px] overflow-auto custom-scrollbar whitespace-pre-wrap">${maintenanceResult.value}</pre>
         ` : null}
       </details>
     <//>

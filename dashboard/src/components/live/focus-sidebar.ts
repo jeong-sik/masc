@@ -41,7 +41,7 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
           `}
       <div class="grid content-start gap-1.5 overflow-y-auto pr-1 ${compact ? 'max-h-[32vh]' : 'max-h-[560px]'}">
         ${list.length === 0
-          ? html`<div class="py-6 text-center text-[var(--text-muted)] text-[13px]">활성 에이전트 없음. masc_join으로 접속하면 여기에 표시됩니다.</div>`
+          ? html`<div class="py-6 text-center text-[var(--text-muted)] text-sm">활성 에이전트 없음. masc_join으로 접속하면 여기에 표시됩니다.</div>`
           : list.map(agent => html`
             <button
               type="button"
@@ -64,8 +64,8 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
                 : null}
               <div class="flex items-center gap-2 mt-1">
                 ${agent.lastActivityText
-                  ? html`<span class="text-[11px] text-[var(--text-muted)] whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0">${agent.lastActivityText}</span>`
-                  : html`<span class="text-[11px] text-[var(--text-muted)] whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0 italic">최근 활동 없음</span>`}
+                  ? html`<span class="text-2xs text-[var(--text-muted)] whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0">${agent.lastActivityText}</span>`
+                  : html`<span class="text-2xs text-[var(--text-muted)] whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0 italic">최근 활동 없음</span>`}
                 ${agent.lastActivityAt
                   ? html`<${TimeAgo} timestamp=${agent.lastActivityAt} />`
                   : null}

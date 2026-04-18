@@ -1,5 +1,5 @@
 // CountBadge / StatusBadge — small pill indicators
-// Replaces 20+ inline badge patterns (text-[10px] px-1.5 py-px rounded)
+// Replaces 20+ inline badge patterns (text-3xs px-1.5 py-px rounded)
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
@@ -14,7 +14,7 @@ const TONE_CLASSES: Record<BadgeTone, string> = {
   accent: 'bg-[var(--accent-12)] text-[var(--accent)]',
 }
 
-const BASE = 'inline-flex items-center text-[10px] px-1.5 py-px rounded tabular-nums font-medium'
+const BASE = 'inline-flex items-center text-3xs px-1.5 py-px rounded tabular-nums font-medium'
 
 interface CountBadgeProps {
   tone?: BadgeTone

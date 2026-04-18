@@ -60,7 +60,7 @@ describe('statusChipClasses (pure)', () => {
     expect(cls).toContain('border')
     expect(cls).toContain('px-2')
     expect(cls).toContain('py-0.5')
-    expect(cls).toContain('text-[10px]')
+    expect(cls).toContain('text-3xs')
     expect(cls).toContain('uppercase')
     expect(cls).toContain('tracking-wider')
     // neutral fallback
@@ -97,7 +97,7 @@ describe('statusChipClasses (pure)', () => {
   it('base shape tokens present for every tone (regression guard, uppercase=true default)', () => {
     for (const tone of ['ok', 'warn', 'bad', 'info', 'neutral', '', 'bg-[var(--ok)]']) {
       const cls = statusChipClasses(tone)
-      for (const token of ['rounded-sm', 'text-[10px]', 'uppercase', 'tracking-wider']) {
+      for (const token of ['rounded-sm', 'text-3xs', 'uppercase', 'tracking-wider']) {
         expect(cls).toContain(token)
       }
     }
@@ -111,7 +111,7 @@ describe('statusChipClasses uppercase flag', () => {
     expect(cls).not.toContain('tracking-wider')
     // shape + tone still present
     expect(cls).toContain('rounded-sm')
-    expect(cls).toContain('text-[10px]')
+    expect(cls).toContain('text-3xs')
     expect(cls).toContain('text-[var(--text-muted)]')
   })
 
@@ -122,7 +122,7 @@ describe('statusChipClasses uppercase flag', () => {
   it('shape tokens always present regardless of uppercase flag', () => {
     for (const uppercase of [true, false]) {
       const cls = statusChipClasses('warn', undefined, uppercase)
-      for (const token of ['inline-flex', 'rounded-sm', 'border', 'px-2', 'py-0.5', 'text-[10px]']) {
+      for (const token of ['inline-flex', 'rounded-sm', 'border', 'px-2', 'py-0.5', 'text-3xs']) {
         expect(cls).toContain(token)
       }
     }

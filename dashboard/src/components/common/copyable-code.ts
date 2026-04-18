@@ -69,8 +69,8 @@ export function copyableWrapperClasses(variant: CopyableVariant): string {
     at the left edge and starts leading the reader's eye into the command. */
 export function copyableLabelClasses(variant: CopyableVariant): string {
   return variant === 'primary'
-    ? 'shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--accent)]'
-    : 'shrink-0 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]'
+    ? 'shrink-0 text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--accent)]'
+    : 'shrink-0 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]'
 }
 
 export function CopyableCode({
@@ -108,9 +108,9 @@ export function CopyableCode({
       ${label
         ? html`<span class=${labelTone}>${label}</span>`
         : null}
-      <code class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-[11px] text-[var(--text-body)]">${command}</code>
+      <code class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-2xs text-[var(--text-body)]">${command}</code>
       ${justCopied
-        ? html`<span class="shrink-0 text-[10px] font-semibold text-[var(--ok)]" data-copied-badge aria-live="polite">✓ Copied</span>`
+        ? html`<span class="shrink-0 text-3xs font-semibold text-[var(--ok)]" data-copied-badge aria-live="polite">✓ Copied</span>`
         : null}
       <button
         type="button"

@@ -67,7 +67,7 @@ function PathRow({ label, value, hint }: { label: string; value: string; hint: s
   return html`
     <div class="flex items-center gap-2" data-paths-row=${label}>
       <span
-        class="w-[100px] shrink-0 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]"
+        class="w-[100px] shrink-0 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]"
         title=${hint}
       >${label}</span>
       <div class="min-w-0 flex-1">
@@ -87,13 +87,13 @@ export function ConnectorPathsStrip({ connectors }: { connectors: GateConnectorI
     >
       <button
         type="button"
-        class="flex w-full cursor-pointer items-center justify-between gap-3 px-3 py-2 text-left text-[11px] text-[var(--text-dim)] hover:text-[var(--text-body)]"
+        class="flex w-full cursor-pointer items-center justify-between gap-3 px-3 py-2 text-left text-2xs text-[var(--text-dim)] hover:text-[var(--text-body)]"
         onClick=${() => { pathsExpanded.value = !open }}
         aria-expanded=${open}
         aria-controls="connector-paths-body"
       >
         <span>
-          <span class="mr-2 text-[10px] uppercase tracking-[0.14em]">Paths</span>
+          <span class="mr-2 text-3xs uppercase tracking-[0.14em]">Paths</span>
           <span class="font-mono">${paths.connectorsDir ?? paths.sidecarsDir}</span>
           <span class="ml-2 text-[var(--text-dim)]">${paths.connectorsDir ? '' : '(런타임 미관찰 · sidecar 경로만 표시)'}</span>
         </span>

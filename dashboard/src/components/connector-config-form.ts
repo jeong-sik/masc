@@ -316,7 +316,7 @@ export function ConnectorConfigToggle({ connectorId }: { connectorId: string }) 
   return html`
     <button
       type="button"
-      class="cursor-pointer rounded border border-[var(--white-8)] px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
+      class="cursor-pointer rounded border border-[var(--white-8)] px-2 py-0.5 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
       aria-expanded=${entry.open}
       aria-controls=${`connector-config-${connectorId}`}
       onClick=${onClick}
@@ -342,12 +342,12 @@ function FieldWidget({ id, field, value, revealed }: {
     setEntry(id, { reveal: { ...getEntry(id).reveal, [field.name]: !revealed } })
   }
 
-  const baseInput = 'w-full rounded border border-[var(--white-8)] bg-[var(--bg-0)] px-2 py-1 font-mono text-[11px] text-[var(--text-body)] focus:border-[var(--accent-1)] focus:outline-none'
+  const baseInput = 'w-full rounded border border-[var(--white-8)] bg-[var(--bg-0)] px-2 py-1 font-mono text-2xs text-[var(--text-body)] focus:border-[var(--accent-1)] focus:outline-none'
 
   switch (field.type) {
     case 'boolean':
       return html`
-        <label class="flex items-center gap-2 text-[11px] text-[var(--text-body)]">
+        <label class="flex items-center gap-2 text-2xs text-[var(--text-body)]">
           <input
             type="checkbox"
             checked=${value === 'true'}
@@ -402,7 +402,7 @@ function FieldWidget({ id, field, value, revealed }: {
       `
     default:
       return html`
-        <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-[10px] text-[var(--warn)]">
+        <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-3xs text-[var(--warn)]">
           unsupported type — refactor BotConfig?
         </div>
       `
@@ -429,12 +429,12 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.error !== null) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] p-3 text-[11px] text-[var(--bad-light)]">
+      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] p-3 text-2xs text-[var(--bad-light)]">
         <div class="font-semibold">schema 가져오기 실패</div>
-        <div class="mt-1 text-[10px] opacity-80">${entry.error}</div>
+        <div class="mt-1 text-3xs opacity-80">${entry.error}</div>
         <button
           type="button"
-          class="mt-2 cursor-pointer rounded border border-[var(--bad-20)] px-2 py-1 text-[10px] hover:bg-[var(--bad-10)]"
+          class="mt-2 cursor-pointer rounded border border-[var(--bad-20)] px-2 py-1 text-3xs hover:bg-[var(--bad-10)]"
           onClick=${() => fetchSchema(connectorId)}
         >다시 시도</button>
       </div>
@@ -443,7 +443,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.fields.length === 0) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-3 text-[11px] text-[var(--text-dim)]">
+      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-3 text-2xs text-[var(--text-dim)]">
         schema가 비어있습니다. backend가 sidecar venv를 못 찾았을 수 있어요.
       </div>
     `
@@ -454,14 +454,14 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
   return html`
     <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-3">
       <div class="mb-2 flex items-center justify-between">
-        <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">
+        <div class="text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]">
           ${entry.fields.length} fields · ${entry.fields.filter(f => f.required).length} required
           ${entry.lastSavedAt
             ? html`
                 <span class="ml-2 text-[var(--ok)]">· 저장됨 ${new Date(entry.lastSavedAt).toLocaleTimeString()}</span>
                 <button
                   type="button"
-                  class="ml-2 cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-[10px] text-[var(--ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-50"
+                  class="ml-2 cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-50"
                   disabled=${entry.restarting}
                   title="POST /sidecar/stop → 800ms → POST /sidecar/start"
                   onClick=${() => { void restartSidecar(connectorId) }}
@@ -473,7 +473,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
         </div>
         <div class="flex items-center gap-2">
           <label
-            class="flex cursor-pointer items-center gap-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)] hover:text-[var(--text-body)]"
+            class="flex cursor-pointer items-center gap-1 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)] hover:text-[var(--text-body)]"
             title="저장 직후 자동으로 sidecar 재시작 (stop → 800ms → start)"
           >
             <input
@@ -512,10 +512,10 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
       <div class="space-y-2.5">
         ${entry.fields.map(field => html`
           <div class="flex flex-col gap-1">
-            <label class="flex items-center gap-1.5 text-[11px] font-medium text-[var(--text-body)]" for=${`field-${connectorId}-${field.name}`}>
+            <label class="flex items-center gap-1.5 text-2xs font-medium text-[var(--text-body)]" for=${`field-${connectorId}-${field.name}`}>
               <span>${field.name}</span>
               ${field.required ? html`<span class="text-[var(--bad-light)]" aria-label="required">*</span>` : null}
-              <span class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">${field.type}</span>
+              <span class="text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]">${field.type}</span>
             </label>
             <${FieldWidget}
               id=${connectorId}
@@ -524,13 +524,13 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
               revealed=${entry.reveal[field.name] === true}
             />
             ${field.description
-              ? html`<div class="text-[10px] text-[var(--text-dim)]">${field.description}</div>`
+              ? html`<div class="text-3xs text-[var(--text-dim)]">${field.description}</div>`
               : null}
             ${(() => {
               const hint = getFieldHint(field.name)
               if (hint === null) return null
               return html`
-                <div class="rounded border border-[var(--accent-20)] bg-[var(--accent-10)]0/5 px-2 py-1 text-[10px] text-[var(--accent)]" data-field-hint=${field.name}>
+                <div class="rounded border border-[var(--accent-20)] bg-[var(--accent-10)]0/5 px-2 py-1 text-3xs text-[var(--accent)]" data-field-hint=${field.name}>
                   <span class="mr-1" aria-hidden="true">📍</span>
                   <span>${hint.where}</span>
                   ${hint.url
@@ -551,11 +551,11 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
       </div>
 
       <div class="mt-3 border-t border-[var(--white-8)] pt-2.5">
-        <div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">
+        <div class="mb-1 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]">
           .env 블록 (현재 입력값)
         </div>
         ${envBlock === ''
-          ? html`<div class="text-[10px] text-[var(--text-dim)]">(필수 필드를 채우면 여기에 표시됩니다)</div>`
+          ? html`<div class="text-3xs text-[var(--text-dim)]">(필수 필드를 채우면 여기에 표시됩니다)</div>`
           : html`<${CopyableCode} command=${envBlock} ariaLabel=${`Copy ${connectorId} .env block`} />`}
       </div>
     </div>

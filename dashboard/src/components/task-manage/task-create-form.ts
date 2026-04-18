@@ -22,8 +22,8 @@ export function TaskCreateForm() {
   if (!showTaskCreate.value) {
     return html`
       <div class="flex flex-col gap-3">
-        <div class="text-[12px] leading-relaxed text-text-muted">
-          이 프로젝트의 백로그에 바로 추가됩니다. 우선순위는 <code class="rounded bg-white/5 px-1 py-0.5 text-[11px] text-text-strong">P1</code>이 가장 높습니다.
+        <div class="text-xs leading-relaxed text-text-muted">
+          이 프로젝트의 백로그에 바로 추가됩니다. 우선순위는 <code class="rounded bg-white/5 px-1 py-0.5 text-2xs text-text-strong">P1</code>이 가장 높습니다.
         </div>
         <${ActionButton}
           variant="primary"
@@ -39,8 +39,8 @@ export function TaskCreateForm() {
     <div class="rounded border border-card-border/70 bg-[rgba(8,13,22,0.88)] p-4">
       <div class="mb-3 flex items-start justify-between gap-3">
         <div>
-          <h3 class="text-[14px] font-semibold text-text-strong">새 태스크</h3>
-          <p class="mt-1 text-[12px] leading-relaxed text-text-muted">
+          <h3 class="text-base font-semibold text-text-strong">새 태스크</h3>
+          <p class="mt-1 text-xs leading-relaxed text-text-muted">
             간단한 제목만 있어도 backlog에 등록됩니다. 설명은 나중에 보강해도 됩니다.
           </p>
         </div>
@@ -48,7 +48,7 @@ export function TaskCreateForm() {
 
       <div class="flex flex-col gap-3">
         <div class="flex flex-col gap-1.5">
-          <label class="text-[11px] font-medium text-text-muted">
+          <label class="text-2xs font-medium text-text-muted">
             제목<span class="ml-0.5 text-[var(--bad)]">*</span>
           </label>
           <${TextInput}
@@ -60,7 +60,7 @@ export function TaskCreateForm() {
 
         <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
           <div class="flex flex-col gap-1.5">
-            <label class="text-[11px] font-medium text-text-muted">설명</label>
+            <label class="text-2xs font-medium text-text-muted">설명</label>
             <${RichComposer}
               value=${description.value}
               placeholder="배경, 재현 조건, 원하는 결과를 적으면 backlog 카드와 Task 상세에서 그대로 렌더링됩니다."
@@ -72,13 +72,13 @@ export function TaskCreateForm() {
           </div>
 
           <div class="flex flex-col gap-1.5">
-            <label class="text-[11px] font-medium text-text-muted">우선순위</label>
+            <label class="text-2xs font-medium text-text-muted">우선순위</label>
             <${Select}
               value=${String(priority.value)}
               options=${PRIORITY_OPTIONS}
               onInput=${(v: string) => { priority.value = Number(v) }}
             />
-            <div class="rounded border border-card-border/60 bg-white/3 px-3 py-2 text-[11px] leading-relaxed text-text-muted">
+            <div class="rounded border border-card-border/60 bg-white/3 px-3 py-2 text-2xs leading-relaxed text-text-muted">
               backlog 카드와 동일하게 <strong class="text-text-strong">P1 → P4</strong> 순으로 표시됩니다.
             </div>
           </div>

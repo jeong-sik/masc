@@ -36,8 +36,8 @@ function expiryChip(post: BoardPost) {
   if (!post.expires_at) return null
   const expiresAtMs = Date.parse(post.expires_at)
   if (!Number.isFinite(expiresAtMs)) return null
-  if (expiresAtMs <= Date.now()) return html`<span class="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] tracking-wide uppercase bg-[var(--bad-15)] text-[var(--bad-light)] border border-[var(--bad-30)]">만료됨</span>`
-  return html`<span class="inline-flex items-center px-2 py-0.5 rounded-sm text-[10px] tracking-wide uppercase bg-[var(--warn-15)] text-[var(--warn)] border border-[var(--warn-30)]">만료까지 <${TimeAgo} timestamp=${post.expires_at} /></span>`
+  if (expiresAtMs <= Date.now()) return html`<span class="inline-flex items-center px-2 py-0.5 rounded-sm text-3xs tracking-wide uppercase bg-[var(--bad-15)] text-[var(--bad-light)] border border-[var(--bad-30)]">만료됨</span>`
+  return html`<span class="inline-flex items-center px-2 py-0.5 rounded-sm text-3xs tracking-wide uppercase bg-[var(--warn-15)] text-[var(--warn)] border border-[var(--warn-30)]">만료까지 <${TimeAgo} timestamp=${post.expires_at} /></span>`
 }
 
 // ── Comment tree building ──────────────────────────────────────────
@@ -134,18 +134,18 @@ function CommentItem({
     <div class="${indent}">
       <div class="board-comment rounded p-3 bg-[var(--white-3)] border border-[var(--border-slate-12)] ${depth > 0 ? 'border-l-2 border-l-[var(--accent-20)]' : ''}">
         <div class="flex items-center gap-2 mb-1.5">
-          <span class="text-[12px]">${authorAvatar(comment.author)}</span>
-          <button type="button" class="text-[12px] font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer bg-transparent border-none p-0" onClick=${() => navigateToAuthor(comment.author)}>${comment.author}</button>
-          <span class="text-[11px] text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
+          <span class="text-xs">${authorAvatar(comment.author)}</span>
+          <button type="button" class="text-xs font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer bg-transparent border-none p-0" onClick=${() => navigateToAuthor(comment.author)}>${comment.author}</button>
+          <span class="text-2xs text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
           <button type="button"
-            class="text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 ml-auto"
+            class="text-2xs text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 ml-auto"
             onClick=${() => { replyingTo.value = isReplying ? null : comment.id; commentText.value = '' }}
           >${isReplying ? '취소' : '답글'}</button>
         </div>
-        <div class="text-[13px] text-[var(--text-body)] leading-[1.55]"><${RichContent} text=${displayText} previewLimit=${1} /></div>
+        <div class="text-sm text-[var(--text-body)] leading-[1.55]"><${RichContent} text=${displayText} previewLimit=${1} /></div>
         ${needsTruncation ? html`
           <button type="button"
-            class="mt-1 text-[11px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0"
+            class="mt-1 text-2xs text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0"
             onClick=${() => setExpanded(!expanded)}
           >${expanded ? '접기' : '더 보기...'}</button>
         ` : null}
@@ -162,7 +162,7 @@ function CommentItem({
             />
             <div class="mt-2 flex justify-end">
               <button type="button"
-                class="py-1.5 px-3 rounded text-[12px] font-medium font-[inherit] cursor-pointer transition-all duration-150 border
+                class="py-1.5 px-3 rounded text-xs font-medium font-[inherit] cursor-pointer transition-all duration-150 border
                   ${commentSubmitting.value || commentText.value.trim() === ''
                     ? 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)] opacity-50 cursor-not-allowed'
                     : 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]'
@@ -208,14 +208,14 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex items-center gap-2 mb-1">
-        <div class="text-[11px] text-[var(--text-muted)]">댓글 ${comments.length}개${isFiltering ? ` · 일치 ${filteredRoots.length}` : ''}</div>
+        <div class="text-2xs text-[var(--text-muted)]">댓글 ${comments.length}개${isFiltering ? ` · 일치 ${filteredRoots.length}` : ''}</div>
         <input
           type="search"
           value=${query.value}
           placeholder="댓글 내용 검색"
           aria-label="댓글 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="ml-auto min-w-[140px] max-w-[220px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="ml-auto min-w-[140px] max-w-[220px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && filteredRoots.length === 0 ? html`
@@ -223,14 +223,14 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
       ` : null}
       ${!expanded && hiddenCount > 0 ? html`
         <button type="button"
-          class="text-[12px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0 text-left py-1"
+          class="text-xs text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0 text-left py-1"
           onClick=${() => setExpanded(true)}
         >이전 댓글 ${hiddenCount}개 더 보기</button>
       ` : null}
       ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} childrenMap=${filteredChildrenMap} />`)}
       ${expanded && hiddenCount > 0 ? html`
         <button type="button"
-          class="text-[12px] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 text-left py-1"
+          class="text-xs text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 text-left py-1"
           onClick=${() => setExpanded(false)}
         >접기</button>
       ` : null}
@@ -253,7 +253,7 @@ function CommentForm({ postId }: { postId: string }) {
       />
       <div class="mt-2 flex justify-end">
         <button type="button"
-          class="py-2 px-4 rounded text-[13px] font-medium font-[inherit] cursor-pointer transition-all duration-150 border
+          class="py-2 px-4 rounded text-sm font-medium font-[inherit] cursor-pointer transition-all duration-150 border
             ${commentSubmitting.value || commentText.value.trim() === ''
               ? 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)] opacity-50 cursor-not-allowed'
               : 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]'
@@ -289,7 +289,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
   return html`
     <div>
       <button type="button"
-        class="mb-4 px-3 py-1.5 rounded text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
+        class="mb-4 px-3 py-1.5 rounded text-xs font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
         onClick=${() => navigate('workspace', { section: 'board' })}
       >← 게시판으로 돌아가기</button>
 
@@ -299,16 +299,16 @@ export function PostDetail({ post }: { post: BoardPost }) {
             <h1 class="m-0 text-[20px] font-semibold leading-tight text-[var(--text-strong)]">${post.title}</h1>
           </div>
 
-          <div class="text-[13px] text-[var(--text-body)] leading-[1.65]">
+          <div class="text-sm text-[var(--text-body)] leading-[1.65]">
             <${RichContent} text=${stripStateBlocks(post.body)} previewLimit=${4} />
           </div>
 
           <!-- Author and meta -->
           <div class="flex gap-2.5 items-center flex-wrap pt-3 border-t border-[var(--border-slate-12)]">
-            <span class="text-[13px]">${authorAvatar(post.author)}</span>
-            <button type="button" class="text-[12px] text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer bg-transparent border-none p-0" onClick=${() => navigateToAuthor(post.author)}>${post.author}</button>
-            <span class="text-[11px] text-[var(--text-muted)]"><${TimeAgo} timestamp=${post.created_at} /></span>
-            <span class="text-[11px] text-[var(--text-muted)]">${post.votes ?? 0} votes</span>
+            <span class="text-sm">${authorAvatar(post.author)}</span>
+            <button type="button" class="text-xs text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer bg-transparent border-none p-0" onClick=${() => navigateToAuthor(post.author)}>${post.author}</button>
+            <span class="text-2xs text-[var(--text-muted)]"><${TimeAgo} timestamp=${post.created_at} /></span>
+            <span class="text-2xs text-[var(--text-muted)]">${post.votes ?? 0} votes</span>
           </div>
 
           <!-- Badges -->
@@ -316,13 +316,13 @@ export function PostDetail({ post }: { post: BoardPost }) {
             ? html`
                 <div class="flex flex-col gap-2">
                   <div class="flex gap-1.5 flex-wrap">
-                    ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
-                    ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
-                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(boardPostKind(post))}">${kindLabel(boardPostKind(post))}</span>
+                    ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-3xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
+                    ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-3xs font-medium border ${kindBadgeColor(boardPostKind(post))}">${kindLabel(boardPostKind(post))}</span>
                     ${expiryChip(post)}
                   </div>
                   ${post.classification_reason
-                    ? html`<div class="text-[11px] text-[var(--text-muted)]">분류 근거: ${post.classification_reason}</div>`
+                    ? html`<div class="text-2xs text-[var(--text-muted)]">분류 근거: ${post.classification_reason}</div>`
                     : null}
                 </div>
               `
@@ -332,11 +332,11 @@ export function PostDetail({ post }: { post: BoardPost }) {
           ${post.meta
             ? html`
                 <details class="mt-1">
-                  <summary class="cursor-pointer text-[12px] text-[var(--text-muted)] py-1.5 hover:text-[var(--text-body)] transition-colors">운영 메타</summary>
+                  <summary class="cursor-pointer text-xs text-[var(--text-muted)] py-1.5 hover:text-[var(--text-body)] transition-colors">운영 메타</summary>
                   <div class="mt-2 p-3 rounded bg-[var(--white-3)] border border-[var(--border-slate-12)]">
-                    ${post.meta.source ? html`<div class="text-[12px] text-[var(--text-body)]"><span class="text-[var(--text-muted)]">출처:</span> ${post.meta.source}</div>` : null}
+                    ${post.meta.source ? html`<div class="text-xs text-[var(--text-body)]"><span class="text-[var(--text-muted)]">출처:</span> ${post.meta.source}</div>` : null}
                     ${post.meta.state_block
-                      ? html`<pre class="whitespace-pre-wrap mt-2 text-[11px] text-[var(--text-muted)] leading-relaxed">${post.meta.state_block}</pre>`
+                      ? html`<pre class="whitespace-pre-wrap mt-2 text-2xs text-[var(--text-muted)] leading-relaxed">${post.meta.state_block}</pre>`
                       : null}
                   </div>
                 </details>
@@ -346,11 +346,11 @@ export function PostDetail({ post }: { post: BoardPost }) {
           <!-- Vote buttons -->
           <div class="flex gap-2">
             <button type="button"
-              class="vote-btn upvote px-3 py-1.5 rounded text-[12px] font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[var(--warn-bright)] hover:border-[var(--warn-30)] hover:bg-[var(--warn-10)] transition-all cursor-pointer"
+              class="vote-btn upvote px-3 py-1.5 rounded text-xs font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[var(--warn-bright)] hover:border-[var(--warn-30)] hover:bg-[var(--warn-10)] transition-all cursor-pointer"
               onClick=${() => handleVote('up')}
             >▲ 추천</button>
             <button type="button"
-              class="vote-btn downvote px-3 py-1.5 rounded text-[12px] font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent-30)] hover:bg-[var(--accent-10)] transition-all cursor-pointer"
+              class="vote-btn downvote px-3 py-1.5 rounded text-xs font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent-30)] hover:bg-[var(--accent-10)] transition-all cursor-pointer"
               onClick=${() => handleVote('down')}
             >▼ 비추천</button>
           </div>

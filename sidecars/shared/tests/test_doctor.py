@@ -228,5 +228,81 @@ async def test_auto_fix_callback_invoked_only_for_warn_or_error() -> None:
     d = Doctor("unit")
     d.register_many([emit_ok, emit_bad])
     initial = await d.run()
-    await d.run_auto_fixes(initial)
+    rerun, outcomes = await d.run_auto_fixes(initial)
     assert calls == ["bad-fix"]
+    assert len(rerun) == 2
+    # outcome 은 실제로 실행된 fix 에 대해서만 기록된다 — ok 는 skip
+    assert [o.check_name for o in outcomes] == ["bad"]
+    assert outcomes[0].success is True
+
+
+@pytest.mark.asyncio
+async def test_run_auto_fixes_captures_failure_and_continues() -> None:
+    """한 fix 가 예외를 던져도 나머지 fix 가 계속 실행돼야 한다."""
+
+    calls: list[str] = []
+
+    async def fix_raises() -> None:
+        calls.append("first")
+        raise OSError("boom")
+
+    async def fix_succeeds() -> None:
+        calls.append("second")
+
+    c1 = Check(
+        name="first",
+        severity=Severity.error,
+        message="x",
+        auto_fix=AutoFix(description="do first", callback=fix_raises),
+    )
+    c2 = Check(
+        name="second",
+        severity=Severity.error,
+        message="y",
+        auto_fix=AutoFix(description="do second", callback=fix_succeeds),
+    )
+
+    async def emit_c1() -> Check:
+        return c1
+
+    async def emit_c2() -> Check:
+        return c2
+
+    d = Doctor("unit")
+    d.register_many([emit_c1, emit_c2])
+    initial = await d.run()
+    _, outcomes = await d.run_auto_fixes(initial)
+    # 첫 실패가 두 번째 실행을 막지 않아야 한다
+    assert calls == ["first", "second"]
+    assert [o.success for o in outcomes] == [False, True]
+    assert "OSError: boom" in outcomes[0].message
+
+
+def test_render_fix_outcomes_empty_returns_empty_string() -> None:
+    from gate_shared.doctor import render_fix_outcomes  # noqa: PLC0415
+
+    assert render_fix_outcomes([], use_color=False) == ""
+
+
+def test_render_fix_outcomes_shows_success_and_failure() -> None:
+    from gate_shared.doctor import FixOutcome, render_fix_outcomes  # noqa: PLC0415
+
+    outcomes = [
+        FixOutcome(
+            check_name="binding paths writable",
+            description="0755 적용",
+            success=True,
+        ),
+        FixOutcome(
+            check_name="stale lock",
+            description="lock 파일 삭제",
+            success=False,
+            message="PermissionError: read-only",
+        ),
+    ]
+    text = render_fix_outcomes(outcomes, use_color=False)
+    assert "자가 치유 실행:" in text
+    assert "[✓] binding paths writable — 0755 적용" in text
+    assert "[✗] stale lock — lock 파일 삭제" in text
+    # 실패한 fix 의 에러 메시지는 하위 들여쓰기로 노출
+    assert "↳ PermissionError: read-only" in text

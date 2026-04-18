@@ -17,7 +17,13 @@ _shared_root = Path(__file__).resolve().parent.parent.parent / "shared"
 if str(_shared_root) not in sys.path:
     sys.path.insert(0, str(_shared_root))
 
-from gate_shared import exit_code_for, render_json, render_pretty  # noqa: E402
+from gate_shared import (  # noqa: E402
+    FixOutcome,
+    exit_code_for,
+    render_fix_outcomes,
+    render_json,
+    render_pretty,
+)
 
 
 def _run_doctor(argv: list[str]) -> int:
@@ -33,12 +39,16 @@ def _run_doctor(argv: list[str]) -> int:
     async def run() -> int:
         doctor = await run_doctor()
         checks = await doctor.run()
+        outcomes: list[FixOutcome] = []
         if auto_fix:
-            checks = await doctor.run_auto_fixes(checks)
+            checks, outcomes = await doctor.run_auto_fixes(checks)
         if as_json:
             sys.stdout.write(render_json(doctor.title, checks))
             sys.stdout.write("\n")
         else:
+            fix_block = render_fix_outcomes(outcomes)
+            if fix_block:
+                sys.stdout.write(fix_block + "\n")
             sys.stdout.write(render_pretty(doctor.title, checks))
             sys.stdout.write("\n")
         return exit_code_for(checks)

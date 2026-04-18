@@ -33,9 +33,12 @@ __all__ = [
     "Check",
     "CheckFn",
     "Doctor",
+    "FixOutcome",
     "NETWORK_TIMEOUT_SEC",
     "Severity",
     "check_dependencies_installed",
+    "exit_code_for",
+    "render_fix_outcomes",
     "render_pretty",
     "render_json",
 ]
@@ -57,6 +60,21 @@ class AutoFix:
     description: str
     command: str | None = None
     callback: Callable[[], Awaitable[None]] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FixOutcome:
+    """``auto_fix.callback`` 실행 결과.
+
+    fire-and-forget 가 아니라 어떤 fix 가 시도됐고, 성공·실패했는지를
+    렌더러에 전달해 운영자가 "--fix 이후 여전히 실패" 와 "--fix 가 에러로
+    멈춤" 을 구분할 수 있게 한다.
+    """
+
+    check_name: str
+    description: str
+    success: bool
+    message: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,6 +250,37 @@ def render_pretty(
     return "\n".join(lines)
 
 
+def render_fix_outcomes(
+    outcomes: Sequence[FixOutcome],
+    *,
+    use_color: bool | None = None,
+) -> str:
+    """``run_auto_fixes`` 결과를 사람이 읽기 좋은 "자가 치유 실행:" 블록으로.
+
+    빈 리스트면 빈 문자열을 반환 — 호출자가 조건부로 출력하기 쉽게.
+    재점검 결과 (rerun) 앞에 prepend 하도록 설계됨.
+    """
+
+    if not outcomes:
+        return ""
+
+    if use_color is None:
+        use_color = sys.stdout.isatty()
+
+    ok_sym = _colorize("[✓]", Severity.ok, use_color=use_color)
+    err_sym = _colorize("[✗]", Severity.error, use_color=use_color)
+
+    lines: list[str] = []
+    lines.append("자가 치유 실행:")
+    for o in outcomes:
+        sym = ok_sym if o.success else err_sym
+        lines.append(f"  {sym} {o.check_name} — {o.description}")
+        if not o.success and o.message:
+            lines.append(f"      ↳ {o.message}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def render_json(title: str, checks: Sequence[Check]) -> str:
     payload = {
         "title": title,
@@ -307,14 +356,47 @@ class Doctor:
                 message=f"check raised: {exc.__class__.__name__}: {exc}",
             )
 
-    async def run_auto_fixes(self, checks: Sequence[Check]) -> list[Check]:
+    async def run_auto_fixes(
+        self, checks: Sequence[Check]
+    ) -> tuple[list[Check], list[FixOutcome]]:
+        """auto-fix callback 을 실행하고 결과를 함께 반환한다.
+
+        반환값:
+          (재점검_결과, fix_실행_결과_목록)
+
+        - fix 가 예외를 던져도 다음 fix 는 계속 실행한다. 한 치유가 실패했다고
+          나머지 치유까지 막히면 "--fix 실행 했는데 아무것도 안 변했다" 처럼
+          보인다.
+        - outcomes 는 렌더러 ("자가 치유 실행:" 블록) 에서 성공/실패를
+          운영자에게 명시적으로 노출하는 데 쓴다.
+        """
+
+        outcomes: list[FixOutcome] = []
         for c in checks:
             if c.auto_fix is None or c.auto_fix.callback is None:
                 continue
             if not c.severity.needs_action():
                 continue
-            await c.auto_fix.callback()
-        return await self.run()
+            try:
+                await c.auto_fix.callback()
+                outcomes.append(
+                    FixOutcome(
+                        check_name=c.name,
+                        description=c.auto_fix.description,
+                        success=True,
+                    )
+                )
+            except Exception as exc:  # 한 fix 실패가 나머지를 막지 않도록
+                outcomes.append(
+                    FixOutcome(
+                        check_name=c.name,
+                        description=c.auto_fix.description,
+                        success=False,
+                        message=f"{exc.__class__.__name__}: {exc}",
+                    )
+                )
+        rerun = await self.run()
+        return rerun, outcomes
 
 
 def check_dependencies_installed(packages: Sequence[str]) -> CheckFn:

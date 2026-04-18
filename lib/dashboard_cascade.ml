@@ -2,6 +2,7 @@
 
 module CC = Cascade_config
 module Health = Cascade_health_tracker
+module StringSet = Set.Make (String)
 
 (* ── Shared helpers ─────────────────────────────────── *)
 
@@ -75,12 +76,12 @@ let keeper_profile_json (entry : Keeper_registry.registry_entry) : Yojson.Safe.t
 
 let config_json () =
   let config_path = Cascade_runtime.cascade_config_path () in
-  let seen = Hashtbl.create 16 in
+  let seen = ref StringSet.empty in
   let add_profile acc name =
     let canonical = Keeper_cascade_profile.canonicalize name in
-    if Hashtbl.mem seen canonical then acc
+    if StringSet.mem canonical !seen then acc
     else begin
-      Hashtbl.add seen canonical ();
+      seen := StringSet.add canonical !seen;
       profile_json ~config_path canonical :: acc
     end
   in

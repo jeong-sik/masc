@@ -179,17 +179,36 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
 let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
   : Yojson.Safe.t * bool =
   let runtime = Dashboard_governance_judge.runtime_status_at ~now_ts base_path in
-  let alert_level = if runtime.judge_online then "ok" else "warn" in
-  (* Governance case tracking is retired, but judge runtime status is still live. *)
+  (* The ruling/execution pipeline is retired, so [ready_auto_execute],
+     [executed], and [blocked] stay zero by design.  [pending_ruling]
+     must still reflect disk truth: stale cases from before the
+     retirement remain under [.masc/governance_v2/cases/] and hiding
+     them previously turned a 16-day-old high-risk case invisible
+     (#7815). *)
+  let pending_ruling =
+    Governance_cases_snapshot.pending_ruling_count ~base_path
+  in
+  let oldest_pending_age_s =
+    Governance_cases_snapshot.oldest_pending_ruling_age_s
+      ~base_path ~now_ts
+  in
+  let alert_level =
+    if pending_ruling > 0 then "warn"
+    else if runtime.judge_online then "ok"
+    else "warn"
+  in
+  let oldest_json =
+    Option.fold ~none:`Null ~some:(fun v -> `Float v) oldest_pending_age_s
+  in
   (`Assoc [
     ("alert_level", `String alert_level);
-    ("cases_open", `Int 0);
-    ("pending_ruling", `Int 0);
+    ("cases_open", `Int pending_ruling);
+    ("pending_ruling", `Int pending_ruling);
     ("ready_auto_execute", `Int 0);
     ("needs_human_gate", `Int 0);
     ("executed", `Int 0);
     ("blocked", `Int 0);
-    ("oldest_open_case_age_s", `Null);
+    ("oldest_open_case_age_s", oldest_json);
     ("last_activity_age_s", `Null);
     ("slo_target_case_age_s", `Int 0);
     ("slo_breached", `Bool false);

@@ -223,6 +223,65 @@ let test_governance_monitoring_uses_live_runtime () =
       check bool "monitoring exposes live judge_online" true
         (json |> member "judge_online" |> to_bool))
 
+let test_pending_ruling_reflects_disk_truth () =
+  (* #7815: the dashboard previously hardcoded pending_ruling=0 even
+     when .masc/governance_v2/cases/ held stale pending cases.  Seed
+     one case and assert both dashboard surfaces surface it. *)
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let cases_dir =
+        Filename.concat (Filename.concat dir ".masc") "governance_v2/cases"
+      in
+      Fs_compat.mkdir_p cases_dir;
+      let now = Unix.gettimeofday () in
+      let case_json =
+        `Assoc
+          [
+            ("id", `String "case-7815-regression");
+            ("title", `String "High-risk tool: stale fixture");
+            ("status", `String "pending_ruling");
+            ("risk_class", `String "high");
+            ("created_at", `Float (now -. 3600.0));
+          ]
+      in
+      let oc =
+        open_out (Filename.concat cases_dir "case-7815-regression.json")
+      in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc (Yojson.Safe.to_string case_json));
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      let json =
+        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20
+          ~offset:0 ~status_filter:None
+      in
+      let open Yojson.Safe.Util in
+      let summary = json |> member "summary" in
+      check int "dashboard pending_ruling counts disk" 1
+        (summary |> member "pending_ruling" |> to_int);
+      check int "dashboard cases_open mirrors pending_ruling" 1
+        (summary |> member "cases_open" |> to_int);
+      (match summary |> member "oldest_open_case_age_s" with
+       | `Float age ->
+         check bool "oldest_open_case_age_s > 0" true (age > 0.0)
+       | other ->
+         failf "expected float age, got %s" (Yojson.Safe.to_string other));
+      let (monitoring, ok) =
+        Lib.Dashboard_http_monitoring.governance_monitoring_json ~now_ts:now
+          ~base_path:dir
+      in
+      check bool "monitoring call succeeds" true ok;
+      check int "monitoring pending_ruling counts disk" 1
+        (monitoring |> member "pending_ruling" |> to_int);
+      check string "monitoring alert_level escalates to warn"
+        "warn"
+        (monitoring |> member "alert_level" |> to_string))
+
 let test_governance_dir_created_before_read () =
   let dir = test_dir () in
   Fun.protect
@@ -322,6 +381,8 @@ let () =
             test_governance_monitoring_uses_live_runtime;
           test_case "dashboard exposes keeper approval queue" `Quick
             test_dashboard_exposes_keeper_approval_queue;
+          test_case "pending_ruling reflects disk truth (#7815)" `Quick
+            test_pending_ruling_reflects_disk_truth;
         ] );
       ( "init",
         [

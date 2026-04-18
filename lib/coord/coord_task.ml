@@ -789,7 +789,12 @@ let transition_task_r config ~agent_name ~task_id ~action
         | Types.Release, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
             Ok (Types.Todo, None)
         | Types.Release, Types.Todo ->
-            (* Idempotent: already in backlog, nothing to release. *)
+            (* Idempotent: already in backlog, nothing to release.
+               Logged at debug so that callers passing a wrong task_id
+               (e.g. confused the target of a multi-task release) can
+               still detect the no-op without seeing it as an error. *)
+            Log.RoomTask.debug
+              "release on already-todo task %s — no-op" task_id;
             Ok (task.task_status, None)
         | Types.Start, Types.Claimed { assignee; _ } when assignee = agent_name || force ->
             Ok (Types.InProgress {

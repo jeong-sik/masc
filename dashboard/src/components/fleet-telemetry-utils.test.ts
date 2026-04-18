@@ -125,19 +125,19 @@ describe('uniqueStrings', () => {
 })
 
 describe('successClass', () => {
-  it('returns emerald for >=97', () => {
-    expect(successClass(97)).toContain('emerald')
-    expect(successClass(100)).toContain('emerald')
+  it('returns ok for >=97', () => {
+    expect(successClass(97)).toContain('var(--ok)')
+    expect(successClass(100)).toContain('var(--ok)')
   })
 
-  it('returns yellow for 90-96', () => {
-    expect(successClass(90)).toContain('yellow')
-    expect(successClass(96)).toContain('yellow')
+  it('returns warn for 90-96', () => {
+    expect(successClass(90)).toContain('var(--warn)')
+    expect(successClass(96)).toContain('var(--warn)')
   })
 
-  it('returns red for <90', () => {
-    expect(successClass(89)).toContain('red')
-    expect(successClass(50)).toContain('red')
+  it('returns bad-light for <90', () => {
+    expect(successClass(89)).toContain('var(--bad-light)')
+    expect(successClass(50)).toContain('var(--bad-light)')
   })
 
   it('returns dim for null/non-finite', () => {
@@ -224,31 +224,35 @@ describe('compareFleetRows', () => {
 })
 
 describe('pressureClass', () => {
-  it('returns red for hot ratio', () => {
-    expect(pressureClass(PRESSURE_HOT_RATIO)).toContain('red')
+  // After the Anyang Sleepers token migration, pressureClass returns
+  // semantic design-system tokens (--bad-light / --warn / --ok)
+  // rather than hardcoded Tailwind colors, so the chip recolors
+  // automatically under [data-theme="paper"].
+  it('returns bad-light for hot ratio', () => {
+    expect(pressureClass(PRESSURE_HOT_RATIO)).toContain('var(--bad-light)')
   })
 
-  it('returns yellow for warn ratio', () => {
-    expect(pressureClass(PRESSURE_WARN_RATIO)).toContain('yellow')
+  it('returns warn for warn ratio', () => {
+    expect(pressureClass(PRESSURE_WARN_RATIO)).toContain('var(--warn)')
   })
 
-  it('returns emerald for low ratio', () => {
-    expect(pressureClass(0.1)).toContain('emerald')
+  it('returns ok for low ratio', () => {
+    expect(pressureClass(0.1)).toContain('var(--ok)')
   })
 })
 
 describe('statusClass', () => {
-  it('returns red for offline/stopped', () => {
-    expect(statusClass(makeRow({ keepalive_running: false }))).toContain('red')
-    expect(statusClass(makeRow({ status: 'stopped' }))).toContain('red')
+  it('returns bad-light for offline/stopped', () => {
+    expect(statusClass(makeRow({ keepalive_running: false }))).toContain('var(--bad-light)')
+    expect(statusClass(makeRow({ status: 'stopped' }))).toContain('var(--bad-light)')
   })
 
-  it('returns yellow for runtime blocker', () => {
-    expect(statusClass(makeRow({ runtime_blocker_class: 'turn_timeout' }))).toContain('yellow')
+  it('returns warn for runtime blocker', () => {
+    expect(statusClass(makeRow({ runtime_blocker_class: 'turn_timeout' }))).toContain('var(--warn)')
   })
 
-  it('returns emerald for healthy', () => {
-    expect(statusClass(makeRow())).toContain('emerald')
+  it('returns ok for healthy', () => {
+    expect(statusClass(makeRow())).toContain('var(--ok)')
   })
 })
 

@@ -143,9 +143,9 @@ function keeperLastLatencyMs(keeper: Keeper): number {
 
 export function successClass(rate: number | null): string {
   if (rate == null || !Number.isFinite(rate)) return 'text-[var(--text-dim)]'
-  if (rate >= 97) return 'text-emerald-400'
-  if (rate >= 90) return 'text-yellow-400'
-  return 'text-red-400'
+  if (rate >= 97) return 'text-[var(--ok)]'
+  if (rate >= 90) return 'text-[var(--warn)]'
+  return 'text-[var(--bad-light)]'
 }
 
 function keeperMetricsWindowTools(keeper: Keeper): string[] {
@@ -358,16 +358,16 @@ export function toneForPressure(hot: number, warn: number): 'neutral' | 'ok' | '
 }
 
 export function pressureClass(ratio: number): string {
-  if (ratio >= PRESSURE_HOT_RATIO) return 'text-red-400'
-  if (ratio >= PRESSURE_WARN_RATIO) return 'text-yellow-400'
-  return 'text-emerald-400'
+  if (ratio >= PRESSURE_HOT_RATIO) return 'text-[var(--bad-light)]'
+  if (ratio >= PRESSURE_WARN_RATIO) return 'text-[var(--warn)]'
+  return 'text-[var(--ok)]'
 }
 
 export function statusClass(row: FleetRow): string {
-  if (!row.keepalive_running || row.status === 'offline' || row.status === 'stopped') return 'text-red-400'
-  if (row.runtime_blocker_class != null) return 'text-yellow-400'
-  if (row.context_ratio >= PRESSURE_HOT_RATIO) return 'text-yellow-400'
-  return 'text-emerald-400'
+  if (!row.keepalive_running || row.status === 'offline' || row.status === 'stopped') return 'text-[var(--bad-light)]'
+  if (row.runtime_blocker_class != null) return 'text-[var(--warn)]'
+  if (row.context_ratio >= PRESSURE_HOT_RATIO) return 'text-[var(--warn)]'
+  return 'text-[var(--ok)]'
 }
 
 export function formatPercent(value: number | null, digits = 0): string {
@@ -396,11 +396,11 @@ function formatSourceAge(seconds: number | null | undefined): string | null {
 }
 
 export function sourceCountClass(source: TelemetrySourceSummary): string {
-  if (source.exists === false) return 'text-red-400'
+  if (source.exists === false) return 'text-[var(--bad-light)]'
   if (source.entry_count <= 0) return 'text-[var(--text-dim)]'
   const age = numericAge(source.latest_age_s)
-  if (age != null && age >= TELEMETRY_SOURCE_STALE_SEC) return 'text-amber-300'
-  return 'text-emerald-400'
+  if (age != null && age >= TELEMETRY_SOURCE_STALE_SEC) return 'text-[var(--warn)]'
+  return 'text-[var(--ok)]'
 }
 
 export function sourceDetail(source: TelemetrySourceSummary): string {

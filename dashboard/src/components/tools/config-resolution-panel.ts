@@ -161,16 +161,12 @@ function ConfigRow({
         <${StatusChip} tone=${toneClass(item.exists ? 'ready' : item.source === 'invalid_env' ? 'invalid_env' : 'warn')}>${item.exists ? 'present' : 'missing'}<//>
         ${showSourceBadge
           ? html`
-              <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] tracking-[0.08em] text-[var(--text-muted)]">
-                ${sourceLabel(item.source)}
-              </span>
+              <${StatusChip} tone="neutral" uppercase=${false}>${sourceLabel(item.source)}<//>
             `
           : null}
         ${pathInfo.kind
           ? html`
-              <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] tracking-[0.08em] text-[var(--text-muted)]">
-                ${pathInfo.kind}
-              </span>
+              <${StatusChip} tone="neutral" uppercase=${false}>${pathInfo.kind}<//>
             `
           : null}
       </div>
@@ -326,9 +322,7 @@ function RuntimeProbePanel() {
         <${StatusChip} tone=${probeTone(signal, probe?.probe_ok)}>${probeSignalLabel(signal)}<//>
         ${state.value.data?.cache_hit !== undefined
           ? html`
-              <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] tracking-[0.08em] text-[var(--text-muted)]">
-                ${state.value.data.cache_hit ? 'cached' : 'fresh'} · age ${fmtNumber(state.value.data.cache_age_sec, 1)}s
-              </span>
+              <${StatusChip} tone="neutral" uppercase=${false}>${state.value.data.cache_hit ? 'cached' : 'fresh'} · age ${fmtNumber(state.value.data.cache_age_sec, 1)}s<//>
             `
           : null}
         <button
@@ -453,9 +447,7 @@ export function ConfigResolutionPanel({
             <div class="mb-6">
               <div class="mb-3 flex flex-wrap items-center gap-2">
                 <${StatusChip} tone=${toneClass(resolution.status)}>${resolution.status}<//>
-                <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
-                  ${sourceLabel(resolution.config_root.source)}
-                </span>
+                <${StatusChip} tone="neutral" uppercase=${false}>${sourceLabel(resolution.config_root.source)}<//>
                 <span class="text-[12px] text-[var(--text-muted)]">resolved config root</span>
               </div>
 

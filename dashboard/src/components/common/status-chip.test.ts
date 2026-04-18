@@ -59,10 +59,35 @@ describe('statusChipClasses (pure)', () => {
     expect(statusChipClasses('ok', undefined)).not.toMatch(/\s$/)
   })
 
-  it('base tokens present for every tone (regression guard)', () => {
+  it('base shape tokens present for every tone (regression guard, uppercase=true default)', () => {
     for (const tone of ['ok', 'warn', 'bad', 'info', 'neutral', '', 'bg-[var(--ok)]']) {
       const cls = statusChipClasses(tone)
       for (const token of ['rounded-full', 'text-[10px]', 'uppercase', 'tracking-wider']) {
+        expect(cls).toContain(token)
+      }
+    }
+  })
+})
+
+describe('statusChipClasses uppercase flag', () => {
+  it('uppercase=false drops uppercase + tracking-wider (plain pill)', () => {
+    const cls = statusChipClasses('neutral', undefined, false)
+    expect(cls).not.toContain('uppercase')
+    expect(cls).not.toContain('tracking-wider')
+    // shape + tone still present
+    expect(cls).toContain('rounded-full')
+    expect(cls).toContain('text-[10px]')
+    expect(cls).toContain('text-[var(--text-muted)]')
+  })
+
+  it('uppercase=true (explicit) matches the default', () => {
+    expect(statusChipClasses('ok', undefined, true)).toBe(statusChipClasses('ok'))
+  })
+
+  it('shape tokens always present regardless of uppercase flag', () => {
+    for (const uppercase of [true, false]) {
+      const cls = statusChipClasses('warn', undefined, uppercase)
+      for (const token of ['inline-flex', 'rounded-full', 'border', 'px-2', 'py-0.5', 'text-[10px]']) {
         expect(cls).toContain(token)
       }
     }
@@ -105,5 +130,14 @@ describe('StatusChip component', () => {
   it('testId renders as data-testid', () => {
     render(html`<${StatusChip} testId="approve-chip">ok<//>`, container)
     expect(container.querySelector('[data-testid="approve-chip"]')).toBeTruthy()
+  })
+
+  it('uppercase prop reflects on data-status-chip-uppercase (default true)', () => {
+    render(html`<${StatusChip}>ok<//>`, container)
+    expect(container.querySelector('[data-status-chip]')!.getAttribute('data-status-chip-uppercase')).toBe('true')
+
+    render(null, container)
+    render(html`<${StatusChip} uppercase=${false} tone="neutral">path.kind<//>`, container)
+    expect(container.querySelector('[data-status-chip]')!.getAttribute('data-status-chip-uppercase')).toBe('false')
   })
 })

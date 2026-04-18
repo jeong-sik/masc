@@ -44,7 +44,8 @@ let parse_status header_raw =
   in
   find_http lines
 
-let run_curl_post ?(max_time_sec = 8) ~port ~path ~session_id ~payload () =
+let run_curl_post ?(max_time_sec = 8) ?(extra_headers = []) ~port ~path
+    ~session_id ~payload () =
   let header_file = Filename.temp_file "mcp-post-sse-header-" ".txt" in
   let body_file = Filename.temp_file "mcp-post-sse-body-" ".txt" in
   let data_file = Filename.temp_file "mcp-post-sse-request-" ".json" in
@@ -53,32 +54,39 @@ let run_curl_post ?(max_time_sec = 8) ~port ~path ~session_id ~payload () =
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc payload);
+  let extra_header_args =
+    List.concat_map (fun header -> [ "-H"; header ]) extra_headers
+  in
   let args =
-    [|
-      "curl";
-      "-sS";
-      "-N";
-      "--http1.1";
-      "--max-time";
-      string_of_int max_time_sec;
-      "-X";
-      "POST";
-      "-H";
-      "Content-Type: application/json";
-      "-H";
-      "Accept: application/json, text/event-stream";
-      "-H";
-      Printf.sprintf "Mcp-Session-Id: %s" session_id;
-      "-H";
-      "Mcp-Protocol-Version: 2025-11-25";
-      "-o";
-      body_file;
-      "-D";
-      header_file;
-      "--data-binary";
-      "@" ^ data_file;
-      url;
-    |]
+    Array.of_list
+      ([
+         "curl";
+         "-sS";
+         "-N";
+         "--http1.1";
+         "--max-time";
+         string_of_int max_time_sec;
+         "-X";
+         "POST";
+         "-H";
+         "Content-Type: application/json";
+         "-H";
+         "Accept: application/json, text/event-stream";
+         "-H";
+         Printf.sprintf "Mcp-Session-Id: %s" session_id;
+         "-H";
+         "Mcp-Protocol-Version: 2025-11-25";
+       ]
+      @ extra_header_args
+      @ [
+          "-o";
+          body_file;
+          "-D";
+          header_file;
+          "--data-binary";
+          "@" ^ data_file;
+          url;
+        ])
   in
   let (ic, oc2, ec) =
     Unix.open_process_args_full "curl" args (Unix.environment ())
@@ -375,6 +383,47 @@ let test_post_tools_call_streams_sse_framing () =
   in
   check bool "status text present" true (String.length text > 0)
 
+let rec join_until_ready ~port ~retries_left =
+  let result =
+    run_curl_post ~max_time_sec:8 ~port ~path:"/mcp"
+      ~session_id:"legacy-agent-name-preservation"
+      ~extra_headers:[ "X-MASC-Agent: dashboard-header-actor" ]
+      ~payload:
+        (tool_payload ~id:202 ~name:"masc_join"
+           ~arguments:(`Assoc [ ("agent_name", `String "gemini") ]))
+      ()
+  in
+  match (result.status, retries_left) with
+  | Some 500, retries
+    when retries > 0
+         && contains_substr "Server state not initialized" result.body ->
+      Unix.sleepf 0.5;
+      join_until_ready ~port ~retries_left:(retries - 1)
+  | Some 503, retries
+    when retries > 0
+         && contains_substr "Server is starting up, not ready yet" result.body ->
+      Unix.sleepf 0.5;
+      join_until_ready ~port ~retries_left:(retries - 1)
+  | _ -> result
+
+let test_post_tools_call_preserves_explicit_legacy_agent_name () =
+  with_server @@ fun ~port ->
+  let result = join_until_ready ~port ~retries_left:40 in
+  require_http_ok "legacy agent_name preservation tools/call" result;
+  check int "curl exits cleanly" 0 result.curl_exit;
+  let json = parse_json_body "legacy agent_name preservation tools/call" result in
+  check bool "json-rpc error absent" true (json |> U.member "error" = `Null);
+  check bool "tool succeeded" false
+    (json |> U.member "result" |> U.member "isError" |> U.to_bool);
+  let text =
+    json |> U.member "result" |> U.member "content" |> U.index 0
+    |> U.member "text" |> U.to_string
+  in
+  check bool "explicit legacy agent_name preserved" true
+    (contains_substr "Type: gemini" text);
+  check bool "header actor not injected over explicit legacy agent_name" false
+    (contains_substr "Type: dashboard-header-actor" text)
+
 let () =
   run "mcp_post_sse_e2e"
     [
@@ -382,5 +431,7 @@ let () =
         [
           test_case "post tools/call streams sse framing" `Slow
             test_post_tools_call_streams_sse_framing;
+          test_case "post tools/call preserves explicit legacy agent_name"
+            `Slow test_post_tools_call_preserves_explicit_legacy_agent_name;
         ] );
     ]

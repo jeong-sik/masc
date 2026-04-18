@@ -73,6 +73,21 @@ let verdict_to_string = function
   | Warn reason -> sprintf "WARN: %s" reason
   | Fail reason -> sprintf "FAIL: %s" reason
 
+(** Issue #8436: schema enum for [verdict] used to be hand-rolled as
+    a 3-element string list. Payload-bearing variants ([Warn _],
+    [Fail _]) prevent the simple [List.map verdict_to_string list]
+    trick (it would emit [WARN: <reason>] etc.). Instead we expose the
+    canonical constructor names directly + a witness function that
+    [test_types.ml] uses to assert every variant maps to a name in
+    [valid_verdict_strings]. Adding a 4th constructor will fail
+    compilation in [verdict_to_string] and in [verdict_constructor_name]. *)
+let verdict_constructor_name = function
+  | Pass -> "PASS"
+  | Warn _ -> "WARN"
+  | Fail _ -> "FAIL"
+
+let valid_verdict_strings = [ "PASS"; "WARN"; "FAIL" ]
+
 let has_keyword_boundary upper len =
   let tlen = String.length upper in
   len >= tlen || not (is_word_char upper.[len])
@@ -119,7 +134,9 @@ let report_verdict_schema : Types.tool_schema =
       "properties", `Assoc [
         "verdict", `Assoc [
           "type", `String "string";
-          "enum", `List [`String "PASS"; `String "WARN"; `String "FAIL"];
+          (* Issue #8436: derived from Variant SSOT. Hand-rolled enum
+             risks dropping a constructor on extension. *)
+          "enum", `List (List.map (fun s -> `String s) valid_verdict_strings);
           "description", `String "PASS if correct, WARN if acceptable with concerns, FAIL if wrong or harmful";
         ];
         "reason", `Assoc [

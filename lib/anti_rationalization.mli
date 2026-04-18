@@ -28,6 +28,15 @@ type verdict =
   | Approve
   | Reject of string
 
+val verdict_constructor_name : verdict -> string
+(** Issue #8436: canonical UPPERCASE name (without payload) for a
+    [verdict] — used as the witness function for schema enum SSOT. *)
+
+val valid_verdict_strings : string list
+(** Issue #8436: complete list of canonical [verdict] strings the
+    schema enum advertises. Adding a 3rd constructor will fail
+    compilation in [verdict_constructor_name]. *)
+
 (** Which gate produced the verdict. Variant type prevents typos that
     would silently compile with a stringly-typed field. *)
 type gate =

@@ -277,4 +277,31 @@ let () =
         Alcotest.(check bool) "delivery present" true
           (List.mem "delivery" valid_tool_preset_strings));
     ];
+    "verdict_ssot", [
+      (* Issue #8436: payload-bearing variants need a witness function
+         (not List.map verdict_to_string list, which would emit "WARN: "
+         etc). Adding a new constructor will fail compilation in the
+         witness inside the impl. *)
+      Alcotest.test_case "verifier_core covers Pass/Warn/Fail" `Quick (fun () ->
+        let open Masc_mcp.Verifier_core in
+        let witness v =
+          let n = verdict_constructor_name v in
+          if not (List.mem n valid_verdict_strings) then
+            Alcotest.failf "verdict_constructor_name %S not in valid_verdict_strings" n
+        in
+        witness Pass;
+        witness (Warn "x");
+        witness (Fail "y");
+        Alcotest.(check int) "count" 3 (List.length valid_verdict_strings));
+      Alcotest.test_case "anti_rationalization covers Approve/Reject" `Quick (fun () ->
+        let open Masc_mcp.Anti_rationalization in
+        let witness v =
+          let n = verdict_constructor_name v in
+          if not (List.mem n valid_verdict_strings) then
+            Alcotest.failf "verdict_constructor_name %S not in valid_verdict_strings" n
+        in
+        witness Approve;
+        witness (Reject "x");
+        Alcotest.(check int) "count" 2 (List.length valid_verdict_strings));
+    ];
   ]

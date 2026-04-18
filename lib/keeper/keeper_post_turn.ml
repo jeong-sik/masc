@@ -5,6 +5,12 @@
     the context, roll over to a new generation, and update the continuity
     summary from the latest state snapshot.
 
+    This module owns only the checkpoint/lineage tail of a keeper turn.
+    Memory bank append, episode flush, and Hebbian learning are recorded
+    elsewhere:
+    - memory bank / episodes: [Keeper_agent_run] tail after [Agent.run]
+    - hebbian: task lifecycle in [Coord_task]
+
     Extracted from Keeper_exec_context as part of #4955 god-file split. *)
 
 open Keeper_types

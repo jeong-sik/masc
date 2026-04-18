@@ -49,6 +49,33 @@ type rollover_gate_decision =
   | Skip of string
   | Go of string
 
+let append_lineage_artifacts_best_effort
+    ~(config : Coord.config)
+    ~(parent : keeper_meta)
+    ~(child : keeper_meta)
+    ~(parent_trace_id : string)
+    ~(trigger_reason : string)
+    ~(context_ratio : float)
+    ~(model : string) =
+  try
+    Keeper_generation_lineage.record_handoff_artifacts
+      ~config
+      ~parent
+      ~child
+      ~parent_trace_id
+      ~trigger_reason
+      ~context_ratio
+      ~model
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Keeper.warn
+        "keeper:%s lineage append skipped after rollover trace=%s->%s: %s"
+        child.name
+        parent_trace_id
+        (Keeper_id.Trace_id.to_string child.runtime.trace_id)
+        (Printexc.to_string exn)
+
 (** [classify_rollover_gate] returns the gate verdict without any side effects.
 
     The ratio gate reflects the *checkpoint* history. The signal gate reflects
@@ -223,6 +250,20 @@ let maybe_rollover_oas_handoff
                    "keeper:%s OAS handoff rollover trace=%s->%s gen=%d->%d ratio=%.3f trigger=%s"
                    base_meta.name (Keeper_id.Trace_id.to_string prev_trace_id) new_trace_id current_generation
                    next_generation ratio trigger_reason;
+                 (* OAS owns checkpoint/session continuity.
+                    MASC lineage telemetry is append-only best-effort data and
+                    must never roll back a successful rollover. *)
+                 let lineage_config =
+                   Coord.default_config (Filename.dirname (Filename.dirname base_dir))
+                 in
+                 append_lineage_artifacts_best_effort
+                   ~config:lineage_config
+                   ~parent:base_meta
+                   ~child:updated_meta
+                   ~parent_trace_id:(Keeper_id.Trace_id.to_string prev_trace_id)
+                   ~trigger_reason
+                   ~context_ratio:ratio
+                   ~model;
                  { rollover_base with
                    updated_meta;
                    handoff_json = Some handoff_json;

@@ -6,6 +6,12 @@
 \* Modeled from: keeper_agent_run.ml, keeper_unified_turn.ml,
 \*               keeper_compact_policy.ml, oas/context.ml, oas/agent_checkpoint.ml
 \*
+\* This module intentionally stops at context/checkpoint/compaction identity.
+\* Successful handoff rollover (generation increment, trace_id replacement,
+\* trace_history append) is modeled separately in
+\* [KeeperGenerationLineage.tla] so the lineage contract can stay 1:1 with
+\* keeper_rollover.ml without inflating this context-lifecycle state space.
+\*
 \* Properties verified:
 \*   Safety:  ContextIsolation, CompactionPairIntegrity, ResumeIdentity,
 \*            TurnMonotonicity, CheckpointConsistency

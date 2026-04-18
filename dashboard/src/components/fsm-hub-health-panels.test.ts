@@ -33,7 +33,7 @@ describe('flagTooltip', () => {
     const result = flagTooltip('handoff', true)
     expect(result).toContain('handoff')
     expect(result).toContain('active')
-    expect(result).toContain('handover capsule')
+    expect(result).toContain('new trace/generation')
   })
 
   it('returns guardrail active tooltip', () => {

@@ -18,6 +18,11 @@ code_refs:
 Keeper handoff 정보가 3개 경로에 분산 저장되어 있다.
 Delta entry 포맷(P2-2)을 도입하려면 "어느 것이 SSOT인가"를 먼저 결정해야 한다.
 
+> Note
+> 이 ADR은 **세션 handoff artifact SSOT**를 다룬다. keeper runtime의 `generation/trace_id/trace_history` lineage 계약은
+> [keeper-generation-lineage-parity-adr.md](./keeper-generation-lineage-parity-adr.md)와
+> `specs/keeper-state-machine/KeeperGenerationLineage.tla`를 canonical reference로 본다.
+
 ## 경로 비교
 
 ### Path 1: `keeper_state_snapshot`

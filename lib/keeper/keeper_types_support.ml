@@ -51,8 +51,14 @@ let keeper_metrics_store config name : Dated_jsonl.t =
 let keeper_memory_bank_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".memory.jsonl")
 
+let keeper_generation_index_path config name =
+  Filename.concat (keeper_dir_ config) (name ^ ".generation_index.jsonl")
+
 let keeper_session_dir config trace_id =
   Filename.concat (session_base_dir_ config) trace_id
+
+let keeper_generation_manifest_path config trace_id =
+  Filename.concat (keeper_session_dir config trace_id) "generation_manifest.json"
 
 let keeper_history_path config trace_id =
   Filename.concat (keeper_session_dir config trace_id) "history.jsonl"

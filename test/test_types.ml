@@ -564,6 +564,37 @@ let () =
           Masc_mcp.Keeper_exec_memory.valid_memory_search_source_strings
           Masc_mcp.Tool_shard.memory_search_source_enum_strings);
     ];
+    "fs_write_mode_ssot", [
+      (* Issue #8490: introduces [fs_write_mode] Variant where 5 sites
+         previously hand-validated raw strings + relied on an
+         empty-string-as-overwrite back-compat. Witness covers both
+         constructors; mirror sync test asserts [Tool_shard]'s
+         hand-mirrored enum stays in lock-step with the SSOT
+         (cycle-avoidance pattern from #8467/#8480/#8484). *)
+      Alcotest.test_case "witness covers both variants" `Quick (fun () ->
+        let module F = Masc_mcp.Keeper_exec_fs in
+        let witness m =
+          let actual = F.fs_write_mode_to_string m in
+          if not (List.mem actual F.valid_fs_write_mode_strings) then
+            Alcotest.failf "fs_write_mode_to_string %S not in valid_fs_write_mode_strings" actual
+        in
+        witness F.Overwrite; witness F.Append;
+        Alcotest.(check int) "count" 2 (List.length F.valid_fs_write_mode_strings));
+      Alcotest.test_case "of_string_opt sound partial + empty back-compat" `Quick (fun () ->
+        let module F = Masc_mcp.Keeper_exec_fs in
+        Alcotest.(check bool) "overwrite" true (F.fs_write_mode_of_string_opt "overwrite" <> None);
+        Alcotest.(check bool) "APPEND (case)" true (F.fs_write_mode_of_string_opt "APPEND" <> None);
+        Alcotest.(check bool) "  empty -> Overwrite (back-compat)" true
+          (F.fs_write_mode_of_string_opt "" = Some F.Overwrite);
+        Alcotest.(check bool) "whitespace-only -> Overwrite" true
+          (F.fs_write_mode_of_string_opt "   " = Some F.Overwrite);
+        Alcotest.(check bool) "garbage rejected" true
+          (F.fs_write_mode_of_string_opt "definitely-not-a-mode" = None));
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        Alcotest.(check (list string)) "tool_shard mirror == SSOT"
+          Masc_mcp.Keeper_exec_fs.valid_fs_write_mode_strings
+          Masc_mcp.Tool_shard.fs_write_mode_enum_strings);
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

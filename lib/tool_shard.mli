@@ -15,6 +15,12 @@ val pr_review_event_enum_strings : string list
     catches drift. *)
 val memory_search_source_enum_strings : string list
 
+(** Issue #8490: hand-mirrored from
+    [Keeper_exec_fs.valid_fs_write_mode_strings]. Sync regression test
+    in [test_types.ml :: fs_write_mode_ssot] catches drift. *)
+val fs_write_mode_enum_strings : string list
+
+
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;

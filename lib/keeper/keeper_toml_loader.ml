@@ -506,10 +506,10 @@ let atomic_write_file ~(path : string) (content : string) : (unit, string) resul
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e ->
-      (try Sys.remove tmp with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+      Safe_ops.protect ~default:() (fun () -> Sys.remove tmp);
       raise e
   | exn ->
-      (try Sys.remove tmp with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+      Safe_ops.protect ~default:() (fun () -> Sys.remove tmp);
       Error (Printf.sprintf "atomic write failed: %s" (Printexc.to_string exn))
 
 (** Update a field in a keeper TOML file on disk.

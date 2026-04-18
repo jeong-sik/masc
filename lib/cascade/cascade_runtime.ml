@@ -293,7 +293,7 @@ let resolve_named_providers ?provider_filter ~cascade_name ()
   in
   let specs =
     (if weighted <> [] then
-       Cascade_config.parse_weighted_entries weighted
+       Cascade_config.parse_weighted_entries ~cascade_name weighted
      else
        Cascade_config.parse_model_strings
          (models_of_cascade_name cascade_name))

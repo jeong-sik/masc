@@ -720,14 +720,19 @@ let run
       let detail =
         enrich_idle_detail detail (Oas.Agent.state agent).messages
       in
+      (* Demoted from WARN to DEBUG (task-239): this fires once per tier,
+         but a cascade caller (Oas_worker_named.run_named) retries on the
+         next provider.  Emitting WARN/ERROR here creates noise on
+         recovered cascades.  The cascade layer logs [cascade-fallback] at
+         INFO when it retries and emits ERROR only on full exhaustion. *)
       (match proof with
        | Some p ->
-         Log.Misc.warn "oas_worker: agent errored with CDAL proof: run_id=%s status=%s error=%s"
+         Log.Misc.debug "oas_worker: agent errored with CDAL proof: run_id=%s status=%s error=%s"
            p.run_id
            (proof_result_status_to_string p.result_status)
            detail
        | None ->
-         Log.Misc.warn "oas_worker: agent errored (no proof): %s" detail);
+         Log.Misc.debug "oas_worker: agent errored (no proof): %s" detail);
       Error err)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

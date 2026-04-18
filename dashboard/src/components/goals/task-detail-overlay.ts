@@ -79,7 +79,7 @@ function TaskEventsSection() {
           placeholder="이벤트 검색 (label/agent/notes)"
           ariaLabel="이벤트 검색"
           onInput=${(e: Event) => { taskEventsSearchQuery.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[180px] flex-1 !py-1 !text-2xs"
+          class="min-w-45 flex-1 !py-1 !text-2xs"
         />
         <span class="text-3xs text-[var(--text-muted)] tabular-nums">
           ${trimmed
@@ -286,7 +286,7 @@ function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
             placeholder="목표 검색 (title/status/metric)"
             aria-label="목표 검색"
             onInput=${(e: Event) => { goalRelationSearchQuery.value = (e.target as HTMLInputElement).value }}
-            class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
           />
           <span class="text-3xs text-[var(--text-muted)] tabular-nums">
             ${isFiltering

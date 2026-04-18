@@ -401,7 +401,7 @@ function PostCard({ post }: { post: BoardPost }) {
       </div>
 
       <!-- Vote column -->
-      <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-[36px]">
+      <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-9">
         <button type="button"
           class="vote-btn upvote w-7 h-5 flex items-center justify-center rounded text-2xs text-[var(--text-muted)] hover:text-[var(--warn-bright)] hover:bg-[var(--warn-10)] transition-colors cursor-pointer border-0 bg-transparent"
           onClick=${(event: Event) => handleVote('up', event)}
@@ -521,7 +521,7 @@ export function Memory() {
           placeholder="제목/본문에서 검색"
           aria-label="게시글 본문 필터"
           onInput=${(e: Event) => setContentQuery((e.target as HTMLInputElement).value)}
-          class="min-w-[180px] max-w-[320px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-45 max-w-80 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && posts.length === 0 && rawPosts.length > 0

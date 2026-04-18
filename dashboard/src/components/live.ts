@@ -46,10 +46,10 @@ export function Live({ variant = 'full' }: LiveProps) {
         <//>
       ` : html`
         <div class="live-panels grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.9fr)]">
-          <section class="live-panel-main monitor-surface-card monitor-surface-card-medium min-h-[420px] xl:min-h-[520px] p-4">
+          <section class="live-panel-main monitor-surface-card monitor-surface-card-medium min-h-[420px] xl:min-h-130 p-4">
             <${ActivityStream} />
           </section>
-          <section class="live-panel-side monitor-surface-card monitor-surface-card-medium min-h-[420px] xl:min-h-[520px] p-4">
+          <section class="live-panel-side monitor-surface-card monitor-surface-card-medium min-h-[420px] xl:min-h-130 p-4">
             <${FocusSidebar} />
           </section>
         </div>

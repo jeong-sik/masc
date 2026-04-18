@@ -197,7 +197,7 @@ export function BuildIdentityBadge() {
   return html`
     <div class="relative">
       <button type="button"
-        class="cursor-pointer rounded-sm border border-[var(--white-10)] bg-[var(--white-4)] px-[10px] py-[5px] text-3xs text-[var(--text-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
+        class="cursor-pointer rounded-sm border border-[var(--white-10)] bg-[var(--white-4)] px-2.5 py-[5px] text-3xs text-[var(--text-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
         aria-expanded=${buildIdentityOpen.value}
         aria-label=${`서버 빌드 정보 ${label}`}
         title=${hoverTitle}
@@ -209,7 +209,7 @@ export function BuildIdentityBadge() {
       </button>
       ${buildIdentityOpen.value
         ? html`
-            <div class="absolute top-[calc(100%+8px)] right-0 min-w-[280px] rounded border border-solid border-[var(--card-border)] bg-[var(--bg-panel)] px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.22)] grid gap-1.5">
+            <div class="absolute top-[calc(100%+8px)] right-0 min-w-70 rounded border border-solid border-[var(--card-border)] bg-[var(--bg-panel)] px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.22)] grid gap-1.5">
               <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>릴리즈</span>
                 <strong class="text-[color:var(--text-strong)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>

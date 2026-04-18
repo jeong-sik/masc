@@ -482,7 +482,7 @@ export function TransportHealthPanel() {
                   <div class="text-2xs text-text-muted">SSE 세션 중 메시지 큐가 쌓여 있는 세션입니다. 큐 depth가 높으면 해당 클라이언트가 이벤트 처리를 따라가지 못하고 있습니다.</div>
                   <${TextInput}
                     type="search"
-                    class="min-w-[180px] flex-1 !py-1 !text-2xs"
+                    class="min-w-45 flex-1 !py-1 !text-2xs"
                     name="hot_sessions_search"
                     ariaLabel="핫 세션 검색 (session id, kind, last event id)"
                     autoComplete="off"

@@ -174,7 +174,7 @@ export function VerificationSpecsPanel() {
           tone="accent"
         />
         <${TextInput}
-          class="max-w-[200px]"
+          class="max-w-50"
           name="spec_search"
           ariaLabel="스펙 검색"
           autoComplete="off"

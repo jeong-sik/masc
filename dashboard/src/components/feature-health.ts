@@ -254,7 +254,7 @@ export function FeatureHealth() {
                     active=${statusFilter}
                   />
                   <${TextInput}
-                    class="sm:max-w-[260px]"
+                    class="sm:max-w-65"
                     name="feature_health_search"
                     ariaLabel="기능 플래그 검색"
                     autoComplete="off"

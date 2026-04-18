@@ -38,7 +38,7 @@ function PersonaCard({ persona }: { persona: PersonaSummary }) {
   const isSpawning = spawning.value && isConfirming
   const title = persona.displayName ?? persona.name
   return html`
-    <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] p-4 flex flex-col gap-2 min-w-[180px]">
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] p-4 flex flex-col gap-2 min-w-45">
       <div class="text-base text-[var(--text-strong)] font-medium">${title}</div>
       ${persona.role ? html`<div class="text-2xs text-[var(--text-muted)]">${persona.role}</div>` : null}
       ${persona.mode ? html`<div class="text-3xs text-[var(--text-muted)]">모드: ${persona.mode}</div>` : null}
@@ -81,7 +81,7 @@ export function PersonaBrowser() {
           placeholder="페르소나 검색 (이름/역할/모드/설명)"
           aria-label="페르소나 검색"
           onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[180px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-45 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
         <span class="text-3xs text-[var(--text-muted)] tabular-nums">
           ${searchQuery.value.trim()
@@ -98,7 +98,7 @@ export function PersonaBrowser() {
         `}
       ${spawnResult.value ? html`
         <${SurfaceCard} class="mt-3" variant="compact">
-          <pre class="text-2xs font-mono overflow-x-auto max-h-[200px] overflow-y-auto
+          <pre class="text-2xs font-mono overflow-x-auto max-h-50 overflow-y-auto
             ${spawnResult.value.success ? 'text-[var(--text-body)]' : 'text-[var(--bad)]'}">${spawnResult.value.message}</pre>
         <//>` : null}
     </div>

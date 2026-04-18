@@ -91,7 +91,7 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
           ${getPhaseStyle(toPascalPhase(phase)).icon} ${getPhaseStyle(toPascalPhase(phase)).label}
         </div>
       </div>
-      <div class="flex-1 flex items-center gap-1.5 overflow-x-auto min-h-[24px]">
+      <div class="flex-1 flex items-center gap-1.5 overflow-x-auto min-h-6">
         ${transitions.length === 0
           ? html`<span class="text-2xs text-[var(--text-muted)]">전환 없음</span>`
           : transitions.map((t, i) => html`

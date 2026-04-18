@@ -171,7 +171,7 @@ export function TaskActivityList({
         `)}
         <span class="ml-auto text-3xs text-text-dim tabular-nums">${filtered.length}건</span>
       </div>
-      <div class="flex flex-col gap-0.5 max-h-[400px] overflow-y-auto">
+      <div class="flex flex-col gap-0.5 max-h-100 overflow-y-auto">
         ${filtered.map((evt, i) => {
           const stable = evt.id ?? evt.ts_iso ?? evt.summary
           return html`<${ActivityEntry} key=${`${stable}-${i}`} event=${evt} />`

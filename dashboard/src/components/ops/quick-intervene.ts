@@ -68,7 +68,7 @@ export function QuickIntervene() {
 
       <div class="flex gap-2 items-stretch flex-wrap">
         <select
-          class="shrink-0 rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-sm text-[var(--text-body)] transition-colors cursor-pointer min-w-[120px] focus-visible:outline-none focus-visible:border-[rgba(71,184,255,0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(71,184,255,0.35)]"
+          class="shrink-0 rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-sm text-[var(--text-body)] transition-colors cursor-pointer min-w-30 focus-visible:outline-none focus-visible:border-[rgba(71,184,255,0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(71,184,255,0.35)]"
           value=${quickTarget.value}
           aria-label="개입 대상"
           onChange=${(e: Event) => { quickTarget.value = (e.target as HTMLSelectElement).value }}
@@ -82,7 +82,7 @@ export function QuickIntervene() {
           `)}
         </select>
         <${TextInput}
-          class="min-w-[200px] flex-1 border-[var(--white-8)] bg-[var(--white-3)]"
+          class="min-w-50 flex-1 border-[var(--white-8)] bg-[var(--white-3)]"
           placeholder="메시지"
           value=${quickMessage.value}
           name="quick_intervene_message"
@@ -105,7 +105,7 @@ export function QuickIntervene() {
               </label>
               <p class="mt-1 text-xs leading-[1.45] text-[var(--text-muted)]">개입과 승인 요청은 이 이름으로 기록됩니다.</p>
               <${TextInput}
-                class="mt-3 max-w-[260px] border-[var(--white-8)] bg-[var(--white-3)]"
+                class="mt-3 max-w-65 border-[var(--white-8)] bg-[var(--white-3)]"
                 value=${actorName.value.trim() || 'dashboard'}
                 name="quick_intervene_actor"
                 ariaLabel="개입 기록 주체"

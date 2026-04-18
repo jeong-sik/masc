@@ -381,7 +381,7 @@ export function LogViewer() {
             </select>
 
             <${TextInput}
-              class="min-w-[220px]"
+              class="min-w-55"
               name="log-module-filter"
               ariaLabel="모듈 필터"
               placeholder="모듈 필터"

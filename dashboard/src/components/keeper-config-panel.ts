@@ -299,7 +299,7 @@ function LongText({ text, truncateAt = 200 }: { text: string; truncateAt?: numbe
     truncateAt !== null && truncateAt >= 0 && text.length > truncateAt
       ? text.slice(0, truncateAt) + '...'
       : text
-  return html`<div class="text-xs text-text-body whitespace-pre-wrap max-h-[140px] overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-sm p-3 rounded mt-1.5 leading-relaxed shadow-inner hover:bg-card/60 transition-colors">${truncated}</div>`
+  return html`<div class="text-xs text-text-body whitespace-pre-wrap max-h-35 overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-sm p-3 rounded mt-1.5 leading-relaxed shadow-inner hover:bg-card/60 transition-colors">${truncated}</div>`
 }
 
 
@@ -864,7 +864,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
               placeholder="슬롯 이름 / source / gate 필터"
               aria-label="훅 슬롯 필터"
               onInput=${(e: Event) => { hookFilterQuery.value = (e.target as HTMLInputElement).value }}
-              class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+              class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
             />
           </div>
           ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0

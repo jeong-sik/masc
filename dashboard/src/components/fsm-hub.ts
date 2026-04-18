@@ -571,7 +571,7 @@ function ShortcutsOverlay({
       aria-label="키보드 단축키"
     >
       <div
-        class="rounded border border-[var(--white-10)] bg-[var(--bg-0)] p-5 min-w-[280px] shadow-sm"
+        class="rounded border border-[var(--white-10)] bg-[var(--bg-0)] p-5 min-w-70 shadow-sm"
         onClick=${(e: MouseEvent) => e.stopPropagation()}
       >
         <div class="flex items-center justify-between mb-3">
@@ -587,7 +587,7 @@ function ShortcutsOverlay({
         <div class="flex flex-col gap-1.5">
           ${rows.map(r => html`
             <div class="flex items-center gap-3 text-2xs">
-              <kbd class="font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-body)] min-w-[64px] text-center">
+              <kbd class="font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-body)] min-w-16 text-center">
                 ${r.keys}
               </kbd>
               <span class="text-[var(--text-body)]">${r.desc}</span>
@@ -721,7 +721,7 @@ function StatusBar({
               placeholder="keeper 이름 필터"
               aria-label="Keeper 이름 필터"
               onInput=${(e: Event) => onKeeperFilterChange((e.target as HTMLInputElement).value)}
-              class="min-w-[120px] max-w-[180px] rounded-sm border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-0.5 text-3xs font-mono text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent-30)]"
+              class="min-w-30 max-w-45 rounded-sm border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-0.5 text-3xs font-mono text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent-30)]"
             />
           ` : null}
           ${keeperFilterHasNoMatch ? html`

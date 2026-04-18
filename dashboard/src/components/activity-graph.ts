@@ -188,7 +188,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
             placeholder="액션 필터 (title, actor, subject...)"
             aria-label="액션 타임라인 필터"
             onInput=${(e: Event) => { actionQuery.value = (e.target as HTMLInputElement).value }}
-            class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
           />
           <button
             type="button"
@@ -257,7 +257,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                   <div class="mt-3 flex flex-col gap-2 rounded border border-[var(--white-8)] bg-[rgba(15,23,42,0.42)] p-3">
                     ${group.rawEvents.map(event => html`
                       <div class="flex items-start gap-3 rounded border border-[var(--white-6)] bg-[var(--white-3)] px-3 py-2" key=${event.seq}>
-                        <span class="inline-flex min-w-[72px] items-center rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">
+                        <span class="inline-flex min-w-18 items-center rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">
                           ${activityEventKindLabel(event.kind)}
                         </span>
                         <div class="min-w-0 flex-1">
@@ -302,7 +302,7 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
         const score = nodeScore(node)
         const pct = maxScore > 0 ? (score / maxScore) * 100 : 0
         return html`
-          <div class="flex items-center gap-[10px] py-2 px-3 rounded-[10px] bg-[rgba(15,23,42,0.5)] border border-solid border-[var(--slate-gray-8)]" key=${node.id}>
+          <div class="flex items-center gap-2.5 py-2 px-3 rounded-[10px] bg-[rgba(15,23,42,0.5)] border border-solid border-[var(--slate-gray-8)]" key=${node.id}>
             <span class="w-[22px] text-center text-sm font-bold text-text-slate">${i + 1}</span>
             <div class="flex-1 flex flex-col gap-1 min-w-0">
               <div class="flex items-center gap-2">
@@ -313,7 +313,7 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
                 <div class="h-full rounded-sm bg-[var(--cyan)] transition-[width] duration-300 ease-in-out" style="width:${pct}%"></div>
               </div>
             </div>
-            <span class="text-sm font-semibold text-text-slate-light min-w-[32px] text-right">${score.toFixed(1)}</span>
+            <span class="text-sm font-semibold text-text-slate-light min-w-8 text-right">${score.toFixed(1)}</span>
             <span class="text-2xs py-0.5 px-[7px] rounded ${node.status === 'offline' || node.status === 'retired' ? 'text-[var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[var(--ok)] bg-[var(--ok-10)]'}">${node.status}</span>
           </div>
         `
@@ -355,7 +355,7 @@ function useActivityGraphState() {
 function ActivityTimelinePanel({ data }: { data: ActivityGraphResponse }) {
   return html`
     <${Card} title="액션 타임라인" class="section" testId="activity_graph.timeline">
-      <div class="max-h-[360px] overflow-y-auto">
+      <div class="max-h-90 overflow-y-auto">
         <${ActionTimeline} data=${data} />
       </div>
     <//>

@@ -139,7 +139,7 @@ function renderOwnedTasks(
   isFiltering: boolean,
 ) {
   if (allTasks.length === 0) {
-    return html`<div class="h-full min-h-[120px]"><${EmptyState} message="할당된 작업이 없습니다" compact /></div>`
+    return html`<div class="h-full min-h-30"><${EmptyState} message="할당된 작업이 없습니다" compact /></div>`
   }
   if (isFiltering && visibleTasks.length === 0) {
     return html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${allTasks.length} tasks)</div>`
@@ -304,7 +304,7 @@ export function AgentDetailOverlay() {
             placeholder="id / title / status 필터"
             aria-label="작업 필터"
             onInput=${(e: Event) => { taskQuery.value = (e.target as HTMLInputElement).value }}
-            class="min-w-[160px] max-w-[280px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-40 max-w-70 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
           />
         </div>
 
@@ -315,8 +315,8 @@ export function AgentDetailOverlay() {
 
           <${Card} title="최근 활동">
             ${lines.length === 0
-              ? html`<div class="h-full min-h-[120px]"><${EmptyState} message="최근 활동 메시지가 없습니다" compact /></div>`
-              : html`<div class="max-h-[240px] overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-card-border bg-card/40 px-3 py-2.5 font-mono text-xs text-text-body leading-relaxed rounded shadow-sm hover:bg-card/60 transition-colors">${line}</div>`)}</div>`}
+              ? html`<div class="h-full min-h-30"><${EmptyState} message="최근 활동 메시지가 없습니다" compact /></div>`
+              : html`<div class="max-h-60 overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-card-border bg-card/40 px-3 py-2.5 font-mono text-xs text-text-body leading-relaxed rounded shadow-sm hover:bg-card/60 transition-colors">${line}</div>`)}</div>`}
           <//>
         </div>
 

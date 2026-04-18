@@ -62,7 +62,7 @@ function AuthPopover({ authenticated }: { authenticated: boolean }) {
   }
 
   return html`
-    <div class="absolute right-0 top-full mt-1.5 w-[280px] rounded border border-[var(--card-border)] bg-[rgba(10,18,34,0.97)] shadow-sm backdrop-blur-sm p-3 z-50">
+    <div class="absolute right-0 top-full mt-1.5 w-70 rounded border border-[var(--card-border)] bg-[rgba(10,18,34,0.97)] shadow-sm backdrop-blur-sm p-3 z-50">
       ${authenticated ? html`
         <div class="flex flex-col gap-2">
           <div class="text-2xs text-[var(--text-muted)]">Bearer token이 설정되어 있습니다.</div>

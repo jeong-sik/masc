@@ -62,7 +62,7 @@ export function MermaidGraph({
   prefix = 'mermaid-graph',
   class: className = '',
   diagramClass = '',
-  minHeightClass = 'min-h-[160px]',
+  minHeightClass = 'min-h-40',
   fallbackText,
 }: MermaidGraphProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)

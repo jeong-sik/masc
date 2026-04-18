@@ -527,7 +527,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 <span class="text-2xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">디렉터리 필터</span>
                 <span class="inline-flex items-center rounded-sm border border-[var(--border-slate-22)] bg-[var(--accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--text-strong)]">${resultCountLabel}</span>
               </div>
-              <p class="m-0 max-w-[720px] text-sm leading-[1.6] text-[var(--text-body)]">${pageDescription}</p>
+              <p class="m-0 max-w-180 text-sm leading-[1.6] text-[var(--text-body)]">${pageDescription}</p>
             </div>
 
             <label class="flex w-full flex-col gap-2 text-2xs font-semibold tracking-[0.08em] text-[var(--text-muted)] uppercase">

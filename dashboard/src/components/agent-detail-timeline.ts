@@ -101,7 +101,7 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
         <div class="flex-shrink-0 size-6 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-3xs font-mono font-bold ${cat.color}">
           ${cat.icon}
         </div>
-        <span class="text-xs font-mono font-medium ${cat.color} truncate max-w-[200px]" title=${toolName}>${toolName}</span>
+        <span class="text-xs font-mono font-medium ${cat.color} truncate max-w-50" title=${toolName}>${toolName}</span>
         <span class="text-3xs px-1 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)]">${cat.label}</span>
         ${durationMs != null
           ? html`<span class="text-2xs font-mono ${durationColor(durationMs)}">${formatDuration(durationMs)}</span>`
@@ -167,7 +167,7 @@ export function AgentTimelineSection() {
                 tone="accent"
               />
               <${TextInput}
-                class="max-w-[220px]"
+                class="max-w-55"
                 name="agent_timeline_search"
                 ariaLabel="타임라인 검색"
                 autoComplete="off"
@@ -182,7 +182,7 @@ export function AgentTimelineSection() {
             ${filtered.length === 0
               ? html`<${EmptyState} message="조건에 맞는 이벤트가 없습니다" compact />`
               : html`
-                  <div class="flex flex-col gap-0.5 max-h-[400px] overflow-y-auto">
+                  <div class="flex flex-col gap-0.5 max-h-100 overflow-y-auto">
                     ${filtered.map((evt: AgentTimelineEvent, idx: number) => {
                       if (evt.type === 'tool_call') {
                         return html`<${ToolCallEventRow} evt=${evt} idx=${idx} />`

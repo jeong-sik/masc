@@ -320,7 +320,7 @@ function KeeperClearContextDialog({
       onClose=${pending ? () => {} : onClose}
       initialFocusRef=${reasonRef}
       overlayClass="fixed inset-0 z-[80] bg-[var(--white-5)]/70 backdrop-blur-sm isolate flex items-center justify-center p-4"
-      panelClass="w-full max-w-[520px] rounded border border-[var(--bad-30)] bg-[rgba(13,21,38,0.98)] shadow-[0_24px_64px_rgba(0,0,0,0.6)]"
+      panelClass="w-full max-w-130 rounded border border-[var(--bad-30)] bg-[rgba(13,21,38,0.98)] shadow-[0_24px_64px_rgba(0,0,0,0.6)]"
     >
       <div class="p-5 flex flex-col gap-4">
         <div class="flex flex-col gap-1">
@@ -591,7 +591,7 @@ function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: strin
             placeholder="snapshot id / preview / 요약 필터"
             aria-label="OAS snapshot history 필터"
             onInput=${(e: Event) => { setHistoryQuery((e.target as HTMLInputElement).value) }}
-            class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
           />
         </div>
         ${!inventory || inventory.history.length === 0
@@ -1394,7 +1394,7 @@ export function KeeperDetailOverlay() {
                   </span>`
                 : null}
               ${keeper.memory_recent_note
-                ? html`<span class="text-2xs text-[var(--text-muted)] px-2.5 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] truncate max-w-[360px]" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
+                ? html`<span class="text-2xs text-[var(--text-muted)] px-2.5 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] truncate max-w-90" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
                 : null}
             </div>
             ${keeper.recent_output_preview

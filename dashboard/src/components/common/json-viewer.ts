@@ -93,7 +93,7 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
 
 export function JsonViewerCard({ data, title }: { data: unknown; title?: string }) {
   return html`
-    <div class="bg-[var(--bg-0)] border border-[var(--card-border)] rounded overflow-hidden flex flex-col max-h-[400px]" data-testid="json-viewer-card" data-title=${title ?? ''}>
+    <div class="bg-[var(--bg-0)] border border-[var(--card-border)] rounded overflow-hidden flex flex-col max-h-100" data-testid="json-viewer-card" data-title=${title ?? ''}>
       ${title ? html`<div class="px-3 py-2 border-b border-[var(--card-border)] bg-[var(--white-3)] text-2xs uppercase tracking-wider font-semibold text-[var(--text-muted)]">${title}</div>` : null}
       <div class="p-3 overflow-y-auto min-h-0 w-full">
         <${JsonViewer} data=${data} />

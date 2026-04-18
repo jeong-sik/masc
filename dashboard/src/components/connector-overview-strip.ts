@@ -259,7 +259,7 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
             ${uptimeLabel !== null
               ? html`
                   <span
-                    class="rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-[1px] text-3xs font-normal text-[var(--ok)]/80"
+                    class="rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-px text-3xs font-normal text-[var(--ok)]/80"
                     data-uptime-chip
                     title="last_ready_at 기준 경과 시간"
                   >${uptimeLabel}</span>
@@ -486,7 +486,7 @@ function TileHeartbeatStrip({ id }: { id: KnownConnectorId }) {
       <${HeartbeatStrip}
         history=${history}
         slots=${45}
-        class="-ml-[1px]"
+        class="-ml-px"
         testId=${`heartbeat-strip-${id}`}
       />
     </div>

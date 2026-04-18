@@ -70,9 +70,9 @@ export function ToolExecutor() {
     </div><//>`
   }
   return html`
-    <${SurfaceCard} class="h-[calc(100vh-240px)] min-h-[400px]">
+    <${SurfaceCard} class="h-[calc(100vh-240px)] min-h-100">
       <div class="flex gap-4 h-full">
-        <div class="w-[280px] flex-shrink-0 border-r border-[var(--card-border)] pr-4"><${ToolPicker} /></div>
+        <div class="w-70 flex-shrink-0 border-r border-[var(--card-border)] pr-4"><${ToolPicker} /></div>
         <div class="flex-1 min-w-0"><${ToolDetail} /></div>
       </div>
     <//>

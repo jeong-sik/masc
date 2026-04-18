@@ -268,13 +268,13 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
           placeholder="가설 / 판정 / # 필터"
           aria-label="사이클 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && visibleCycles.length === 0
         ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${cycles.length} cycles)</div>`
         : html`
-          <div class="overflow-x-auto overflow-y-auto max-h-[400px] custom-scrollbar rounded border border-[var(--white-6)] bg-[rgba(0,0,0,0.1)]">
+          <div class="overflow-x-auto overflow-y-auto max-h-100 custom-scrollbar rounded border border-[var(--white-6)] bg-[rgba(0,0,0,0.1)]">
             <table class="w-full text-xs">
               <thead>
                 <tr class="text-[var(--text-muted)] text-3xs uppercase tracking-wider border-b border-[var(--white-10)]">
@@ -291,7 +291,7 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
                 ${visibleCycles.map(c => html`
                   <tr key=${c.cycle} class="border-b border-[var(--white-5)] hover:bg-[var(--white-4)] transition-colors duration-150">
                     <td class="py-2 px-3 font-mono text-[var(--text-muted)]">${c.cycle}</td>
-                    <td class="py-2 px-3 text-[var(--text-body)] max-w-[200px] truncate" title=${c.hypothesis}>${c.hypothesis}</td>
+                    <td class="py-2 px-3 text-[var(--text-body)] max-w-50 truncate" title=${c.hypothesis}>${c.hypothesis}</td>
                     <td class="py-2 px-3 text-right font-mono text-[var(--text-body)]">${c.score_before.toFixed(4)}</td>
                     <td class="py-2 px-3 text-right font-mono text-[var(--text-body)]">${c.score_after.toFixed(4)}</td>
                     <td class="py-2 px-3 text-right font-mono ${c.delta >= 0 ? 'text-[var(--ok)]' : 'text-[var(--bad)]'}">${formatDelta(c.delta)}</td>

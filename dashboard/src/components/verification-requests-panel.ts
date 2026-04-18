@@ -248,7 +248,7 @@ function RowActions({
       <div class="flex items-center gap-1 flex-wrap">
         <input
           type="text"
-          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-2xs text-[var(--text-body)] w-[200px]"
+          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-2xs text-[var(--text-body)] w-50"
           placeholder="반려 사유 (필수)"
           value=${reason}
           autofocus
@@ -544,7 +544,7 @@ export function VerificationRequestsPanel() {
 
       <${TextInput}
         type="search"
-        class="max-w-[260px]"
+        class="max-w-65"
         placeholder="request / task / 제출자 / 승인자 필터"
         ariaLabel="검증 요청 필터"
         value=${searchQuery.value}

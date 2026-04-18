@@ -322,7 +322,7 @@ export function ChatTranscript({
 
   return html`
     <div
-      class=${`chat-transcript flex min-h-[300px] max-h-[520px] flex-col overflow-y-auto border border-[var(--slate-gray-14)] shadow-[inset_0_1px_0_var(--white-3)] ${
+      class=${`chat-transcript flex min-h-75 max-h-130 flex-col overflow-y-auto border border-[var(--slate-gray-14)] shadow-[inset_0_1px_0_var(--white-3)] ${
         variant === 'messenger'
           ? 'gap-4 rounded-[26px] px-4 py-5 sm:px-5'
           : 'gap-3 rounded-[var(--radius-xl)] px-3 py-4'
@@ -332,7 +332,7 @@ export function ChatTranscript({
     >
       ${entries.length === 0
         ? html`
-            <div class="flex min-h-[220px] flex-col items-center justify-center rounded-card border border-dashed border-[rgba(148,163,184,0.18)] bg-[var(--white-3)] px-6 text-center">
+            <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[rgba(148,163,184,0.18)] bg-[var(--white-3)] px-6 text-center">
               <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 메시지 없음</div>
               <div class="mt-3 max-w-[34rem] text-sm leading-[1.7] text-[var(--text-secondary)]">${emptyText}</div>
             </div>
@@ -386,7 +386,7 @@ export function ChatComposer({
         <div class="text-2xs text-[var(--text-muted)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
       </div>
       <textarea
-        class="control-textarea min-h-[96px] rounded-card border border-[var(--slate-gray-16)] bg-[var(--white-3)] px-3 py-3 text-base leading-[1.6]"
+        class="control-textarea min-h-24 rounded-card border border-[var(--slate-gray-16)] bg-[var(--white-3)] px-3 py-3 text-base leading-[1.6]"
         placeholder=${placeholder}
         value=${draft}
         onInput=${(event: Event) => { onDraftChange((event.target as HTMLTextAreaElement).value) }}

@@ -279,7 +279,7 @@ export function RuntimeMonitor() {
             type="search"
             ariaLabel="모델 ID 검색"
             placeholder="model_id 또는 도구 이름"
-            class="min-w-[220px] flex-1 !py-1 !text-2xs"
+            class="min-w-55 flex-1 !py-1 !text-2xs"
             value=${modelSearch.value}
             onInput=${(e: Event) => { modelSearch.value = (e.target as HTMLInputElement).value }}
           />

@@ -341,7 +341,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
           aria-label="Keeper 필터"
           data-testid="fleet-fsm-matrix-filter"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-          class="min-w-[160px] max-w-[260px] rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-xs text-[var(--text-muted)] placeholder:text-[var(--text-muted)]0 focus:border-[var(--white-10)]0 focus:outline-none"
+          class="min-w-40 max-w-65 rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-xs text-[var(--text-muted)] placeholder:text-[var(--text-muted)]0 focus:border-[var(--white-10)]0 focus:outline-none"
         />
         ${tallies
           ? html`

@@ -97,17 +97,17 @@ function ToolDistribution({ dist }: { dist: { total: number; public: number; vis
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-[72px] px-2 py-0.5 text-2xs font-semibold text-center rounded badge-essential">공개 MCP</span>
+        <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded badge-essential">공개 MCP</span>
         <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${dist.public}</span>
         <span class="text-[var(--text-muted)] text-sm min-w-12 text-right">${pct(dist.public)}%</span>
       </div>
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-[72px] px-2 py-0.5 text-2xs font-semibold text-center rounded badge-standard">내부 전용</span>
+        <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded badge-standard">내부 전용</span>
         <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${visibleExclusive}</span>
         <span class="text-[var(--text-muted)] text-sm min-w-12 text-right">${pct(visibleExclusive)}%</span>
       </div>
       <div class="flex items-center gap-3">
-        <span class="inline-block min-w-[72px] px-2 py-0.5 text-2xs font-semibold text-center rounded badge-full">숨김</span>
+        <span class="inline-block min-w-18 px-2 py-0.5 text-2xs font-semibold text-center rounded badge-full">숨김</span>
         <span class="text-[var(--text-strong)] text-sm font-semibold min-w-9 text-right">${dist.hidden}</span>
         <span class="text-[var(--text-muted)] text-sm min-w-12 text-right">${pct(dist.hidden)}%</span>
       </div>
@@ -199,7 +199,7 @@ export function ToolMetrics() {
                     active=${categoryFilter}
                   />
                   <${TextInput}
-                    class="sm:max-w-[240px]"
+                    class="sm:max-w-60"
                     name="tool_metrics_search"
                     ariaLabel="도구 이름 검색"
                     autoComplete="off"

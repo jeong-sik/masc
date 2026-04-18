@@ -241,12 +241,12 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                 <div class="font-mono text-[var(--text)]">${row.name}</div>
                 ${row.runtime_blocker_summary
                   ? html`
-                    <div class="max-w-[240px] truncate text-3xs text-[var(--warn)]" title=${row.runtime_blocker_summary}>
+                    <div class="max-w-60 truncate text-3xs text-[var(--warn)]" title=${row.runtime_blocker_summary}>
                       ${row.runtime_blocker_summary}
                     </div>
                   `
                   : null}
-                <div class="max-w-[240px] truncate text-3xs text-[var(--text-dim)]" title=${toolInfo.title}>
+                <div class="max-w-60 truncate text-3xs text-[var(--text-dim)]" title=${toolInfo.title}>
                   ${toolInfo.label}
                 </div>
               </td>
@@ -565,7 +565,7 @@ export function FleetTelemetryPanel() {
             placeholder="name / model / blocker 필터"
             aria-label="Keeper 필터"
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-            class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
           />
         </div>
         ${isFiltering && visibleRows.length === 0 && value.rows.length > 0

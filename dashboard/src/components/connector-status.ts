@@ -314,7 +314,7 @@ export function HeaderMiniStat({
   const valueTone = headerStatToneClass(tone)
   return html`
     <div
-      class="flex min-w-[60px] flex-col items-end justify-center rounded border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-1 text-right"
+      class="flex min-w-15 flex-col items-end justify-center rounded border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-1 text-right"
       data-header-mini-stat=${label}
       data-header-mini-stat-tone=${tone}
       data-testid=${testId}
@@ -1052,7 +1052,7 @@ function ConnectorLivePanel({
                   aria-label="Keeper 필터"
                   data-testid=${`keeper-filter-${connectorId}`}
                   onInput=${(e: Event) => { patchConnectorUiState(connectorId, { keeperGroupQuery: (e.target as HTMLInputElement).value }) }}
-                  class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                  class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
                 />
               </div>
               ${isFilteringKeepers && visibleKnownGroups.length === 0

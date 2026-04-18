@@ -120,7 +120,7 @@ function JudgeStatusBar() {
                 ? html`<span class="text-text-dim"><${TimeAgo} timestamp=${judge.generated_at} /></span>`
                 : null}
               ${judge.last_error
-                ? html`<span class="text-bad/80 truncate max-w-[300px]">${judge.last_error}</span>`
+                ? html`<span class="text-bad/80 truncate max-w-75">${judge.last_error}</span>`
                 : null}
             </span>
           `
@@ -416,7 +416,7 @@ function KeeperApprovalQueueSection() {
             aria-label="Keeper HITL 승인 필터"
             data-testid="keeper-hitl-approval-filter"
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-            class="min-w-[160px] max-w-[280px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-40 max-w-70 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
           />
         </div>
       ` : null}

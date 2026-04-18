@@ -196,7 +196,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
   return html`
     <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(11,18,34,0.95),rgba(6,11,22,0.92))] shadow-[0_24px_56px_rgba(0,0,0,0.24)]">
       <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--slate-gray-12)] px-4 py-4">
-        <div class="min-w-[220px] flex-1">
+        <div class="min-w-55 flex-1">
           <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 대화</div>
           <div class="mt-2 text-md font-semibold text-[var(--text-strong)]">@${name}</div>
           <div class="mt-1 text-sm leading-[1.65] text-[var(--text-secondary)]">
@@ -205,7 +205,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
         </div>
         <div class="flex items-center gap-2">
           <${TextInput}
-            class="max-w-[220px]"
+            class="max-w-55"
             name="keeper_chat_search"
             ariaLabel="대화 내용 검색"
             autoComplete="off"

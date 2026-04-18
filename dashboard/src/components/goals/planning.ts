@@ -213,7 +213,7 @@ export function Planning() {
     <div class="flex flex-col gap-6">
       <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
         <div class="flex flex-wrap items-start justify-between gap-4">
-          <div class="max-w-[760px]">
+          <div class="max-w-190">
             <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Planning Status</div>
             <h3 class="mt-2 text-[22px] font-semibold tracking-[-0.02em] text-text-strong">${planStatusHeadline}</h3>
             <p class="mt-2 text-sm leading-relaxed text-text-muted whitespace-pre-wrap">${planStatusBody}</p>

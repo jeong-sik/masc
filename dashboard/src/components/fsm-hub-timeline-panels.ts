@@ -197,7 +197,7 @@ export function SwimlaneTimeline({
           const segments = deriveSwimlaneSegments(observations, lane.key, spanEnd)
           return html`
             <div class="flex items-center gap-2">
-              <div class="w-[44px] shrink-0 text-3xs font-mono font-semibold text-[var(--text-muted)]">
+              <div class="w-11 shrink-0 text-3xs font-mono font-semibold text-[var(--text-muted)]">
                 ${lane.short}
               </div>
               <div class="flex h-4 flex-1 overflow-hidden rounded border border-[var(--white-8)]" role="group" aria-label=${`${lane.label} swimlane with ${segments.length} segments`}>
@@ -237,7 +237,7 @@ export function SwimlaneTimeline({
       </div>
       ${ticks.length > 0 ? html`
         <div class="mt-1 flex items-center gap-2" aria-hidden="true">
-          <div class="w-[44px] shrink-0"></div>
+          <div class="w-11 shrink-0"></div>
           <div class="relative flex-1 h-3">
             ${ticks.map(tick => {
               const leftPct = ((tick.ts - spanStart) / spanWidth) * 100
@@ -256,7 +256,7 @@ export function SwimlaneTimeline({
       ` : null}
       ${observations.length > 1 ? html`
         <div class="mt-0.5 flex items-center gap-2" aria-hidden="true">
-          <div class="w-[44px] shrink-0 text-4xs text-[var(--text-dim)] text-right">obs</div>
+          <div class="w-11 shrink-0 text-4xs text-[var(--text-dim)] text-right">obs</div>
           <div class="relative flex-1 h-2.5">
             ${observations.map((obs, obsIndex) => {
               const leftPct = ((obs.ts - spanStart) / spanWidth) * 100
@@ -395,13 +395,13 @@ export function TransitionTrail({
           placeholder="field / from / to 필터"
           aria-label="전이 이력 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[120px] max-w-[200px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-30 max-w-50 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && visibleHistory.length === 0
         ? html`<div class="py-3 text-center text-3xs text-[var(--text-dim)]">필터 결과 없음 (${history.length} items)</div>`
         : html`
-      <div ref=${scrollRef} class="flex flex-col gap-0.5 max-h-[120px] overflow-y-auto">
+      <div ref=${scrollRef} class="flex flex-col gap-0.5 max-h-30 overflow-y-auto">
         ${visibleHistory.map((entry, trailIndex) => {
           const ago = fmtDuration(Math.max(0, now - entry.ts))
           const color = FIELD_COLOR[entry.field] ?? 'text-[var(--text-body)]'
@@ -550,14 +550,14 @@ export function DwellHistogramPanel({
                       class=${`flex items-center gap-1.5 text-3xs font-mono leading-tight ${rowCls}`}
                       title=${`${displayState(entry.value)}: ${fmtDuration(entry.seconds)} (${entry.pct.toFixed(1)}%)`}
                     >
-                      <span class="w-[60px] shrink-0 text-[var(--text-body)] truncate">${displayState(entry.value)}</span>
+                      <span class="w-15 shrink-0 text-[var(--text-body)] truncate">${displayState(entry.value)}</span>
                       <span class="flex-1 h-1.5 rounded-sm bg-[var(--white-8)] overflow-hidden">
                         <span
                           class=${`block h-full ${barColor}`}
                           style=${`width: ${Math.max(2, entry.pct)}%`}
                         ></span>
                       </span>
-                      <span class="w-[36px] shrink-0 text-right text-3xs text-[var(--text-dim)]">${entry.pct.toFixed(0)}%</span>
+                      <span class="w-9 shrink-0 text-right text-3xs text-[var(--text-dim)]">${entry.pct.toFixed(0)}%</span>
                     </div>
                   `
                 })}

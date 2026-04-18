@@ -89,7 +89,7 @@ function LayerResultRow({ layer }: { layer: EvalLayerResult }) {
   return html`
     <div class="flex items-center gap-3 py-1.5 px-2 rounded hover:bg-[var(--white-3)] transition-colors">
       <span class="flex-shrink-0 w-4 text-center font-bold text-sm ${iconCls}">${icon}</span>
-      <span class="flex-shrink-0 w-[120px] text-2xs font-mono text-[var(--accent)] truncate" title=${layer.layer_name}>${layer.layer_name}</span>
+      <span class="flex-shrink-0 w-30 text-2xs font-mono text-[var(--accent)] truncate" title=${layer.layer_name}>${layer.layer_name}</span>
       <span class="flex-shrink-0 w-10 text-right text-2xs font-mono tabular-nums text-[var(--text-strong)]">${scoreText}</span>
       <span class="flex-1 text-3xs text-[var(--text-muted)] truncate" title=${detail}>${detail}</span>
     </div>

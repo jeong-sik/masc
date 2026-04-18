@@ -82,7 +82,7 @@ export function TextArea({
   return html`
     <textarea
       id=${id}
-      class="${INPUT_BASE} px-3 py-2 text-sm min-h-[80px] resize-y ${cx ?? ''}"
+      class="${INPUT_BASE} px-3 py-2 text-sm min-h-20 resize-y ${cx ?? ''}"
       placeholder=${placeholder}
       rows=${rows}
       name=${name}

@@ -182,7 +182,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
                   return html`
                     <li class="flex items-start gap-2.5" data-setup-step-item=${idx}>
                       <span
-                        class=${`mt-[2px] inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border text-3xs font-semibold tabular-nums transition-colors ${circleToneClass}`}
+                        class=${`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border text-3xs font-semibold tabular-nums transition-colors ${circleToneClass}`}
                         aria-hidden="true"
                         data-setup-step-circle=${`${connectorId}:${idx}`}
                       >${done ? '✓' : idx + 1}</span>

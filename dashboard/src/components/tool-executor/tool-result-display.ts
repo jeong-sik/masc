@@ -82,7 +82,7 @@ function StoredBlobView({
             <${ActionButton} variant="subtle" size="sm"
               onClick=${() => void navigator.clipboard.writeText(fullText.value ?? '')}>복사<//>
           </div>
-          <div class="px-3 py-2 overflow-x-auto max-h-[400px] overflow-y-auto">
+          <div class="px-3 py-2 overflow-x-auto max-h-100 overflow-y-auto">
             ${(() => {
               const { isJson, parsed } = tryParseJson(fullText.value ?? '')
               return isJson
@@ -115,7 +115,7 @@ function StoredBlobView({
             ${loading.value ? '\uad6c\uac00\uc624\ub294 \uc911\u2026' : '\uc804\uccb4 \ucd9c\ub825 \uc5f4\uae30'}
           <//>
         </div>
-        <div class="px-3 py-2 overflow-x-auto max-h-[200px] overflow-y-auto">
+        <div class="px-3 py-2 overflow-x-auto max-h-50 overflow-y-auto">
           <pre class="text-xs font-mono text-[var(--text-muted)] whitespace-pre-wrap">${marker.preview}</pre>
         </div>
         ${error.value ? html`
@@ -161,7 +161,7 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
           <${ActionButton} variant="subtle" size="sm" onClick=${() => void navigator.clipboard.writeText(text)}>복사<//>
         </div>
         ${expanded.value ? html`
-          <div class="px-3 py-2 overflow-x-auto max-h-[400px] overflow-y-auto">
+          <div class="px-3 py-2 overflow-x-auto max-h-100 overflow-y-auto">
             ${isJson
               ? html`<${JsonViewer} data=${parsed} />`
               : html`<pre class="text-xs font-mono ${success ? 'text-[var(--text-body)]' : 'text-[var(--bad-light)]'}">${text}</pre>`

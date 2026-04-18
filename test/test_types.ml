@@ -277,6 +277,34 @@ let () =
         Alcotest.(check bool) "delivery present" true
           (List.mem "delivery" valid_tool_preset_strings));
     ];
+    "operator_view_ssot", [
+      (* Issue #8471: tool_operator view enum was missing 'sessions'
+         while parser+impl supported all 5. This test catches schema
+         drift by deriving the asserted list from the Variant SSOT. *)
+      Alcotest.test_case "witness covers all 5 variants" `Quick (fun () ->
+        let open Masc_mcp.Operator_control_snapshot in
+        let witness v =
+          let actual = snapshot_view_to_string v in
+          if not (List.mem actual valid_snapshot_view_strings) then
+            Alcotest.failf "snapshot_view_to_string %S not in valid_snapshot_view_strings" actual
+        in
+        witness Summary; witness Sessions; witness Keepers;
+        witness Messages; witness Full;
+        Alcotest.(check int) "count" 5 (List.length valid_snapshot_view_strings));
+      Alcotest.test_case "all 5 strings present" `Quick (fun () ->
+        let strs = Masc_mcp.Operator_control_snapshot.valid_snapshot_view_strings in
+        List.iter (fun expected ->
+          Alcotest.(check bool) (Printf.sprintf "%s present" expected) true
+            (List.mem expected strs)
+        ) ["summary"; "sessions"; "keepers"; "messages"; "full"]);
+      Alcotest.test_case "of_string_opt rejects garbage" `Quick (fun () ->
+        Alcotest.(check bool) "garbage" true
+          (Masc_mcp.Operator_control_snapshot.snapshot_view_of_string_opt
+             "definitely-not-a-view" = None);
+        Alcotest.(check bool) "sessions accepted" true
+          (Masc_mcp.Operator_control_snapshot.snapshot_view_of_string_opt
+             "sessions" <> None));
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

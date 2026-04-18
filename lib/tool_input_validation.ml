@@ -40,6 +40,15 @@ let canonical_transition_action_string (raw : string) : string option =
 let upsert_assoc key value fields =
   (key, value) :: List.remove_assoc key fields
 
+let strip_internal_marker_args (args : Yojson.Safe.t) : Yojson.Safe.t =
+  match args with
+  | `Assoc fields ->
+      `Assoc
+        (List.filter
+           (fun (key, _) -> String.length key = 0 || key.[0] <> '_')
+           fields)
+  | _ -> args
+
 let normalize_transition_args (args : Yojson.Safe.t) : Yojson.Safe.t =
   match args with
   | `Assoc fields ->
@@ -100,6 +109,7 @@ let register_pre_hook () =
   let hook = Agent_sdk.Tool_middleware.make_validation_hook ~lookup in
   Tool_dispatch.register_pre_hook (fun ~name ~args ->
     let compat_args =
+      let args = strip_internal_marker_args args in
       if String.equal name "masc_transition" then
         normalize_transition_args args
       else

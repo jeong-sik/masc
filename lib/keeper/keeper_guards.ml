@@ -119,7 +119,7 @@ let emit_gate_event
    | "override" | "approval_required" ->
        Keeper_registry.mark_turn_gate_rejected_by_name agent_name
    | _ -> ());
-  match Keeper_event_bus.get () with
+  match Masc_event_bus.get () with
   | None -> ()
   | Some bus ->
     let payload = `Assoc [
@@ -137,7 +137,7 @@ let emit_gate_event
     (try
       Oas_bus_instrument.publish bus
         (Agent_sdk.Event_bus.mk_event
-           (Agent_sdk.Event_bus.Custom ("masc:keeper_gate", payload)))
+           (Agent_sdk.Event_bus.Custom ("masc.keeper_gate", payload)))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->

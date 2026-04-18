@@ -47,49 +47,53 @@ let test_event_bus_broadcast () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let bus = Event_bus.create () in
+  Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
   Oas_events.publish_broadcast bus ~agent_name:"test-agent" ~content:"hello";
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
   match (List.hd events : Event_bus.event).payload with
-  | Event_bus.Custom ("masc:broadcast", payload) ->
+  | Event_bus.Custom ("masc.broadcast", payload) ->
     let agent = Yojson.Safe.Util.(member "agent_name" payload |> to_string) in
     Alcotest.(check string) "agent name" "test-agent" agent
-  | _ -> Alcotest.fail "expected Custom masc:broadcast event"
+  | _ -> Alcotest.fail "expected Custom masc.broadcast event"
 
 let test_event_bus_heartbeat () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let bus = Event_bus.create () in
+  Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
   Oas_events.publish_heartbeat bus ~agent_name:"keeper-runtime" ~turn:5 ~context_pct:0.42;
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
   match (List.hd events : Event_bus.event).payload with
-  | Event_bus.Custom ("masc:heartbeat", payload) ->
+  | Event_bus.Custom ("masc.heartbeat", payload) ->
     let turn = Yojson.Safe.Util.(member "turn" payload |> to_int) in
     Alcotest.(check int) "turn" 5 turn
-  | _ -> Alcotest.fail "expected Custom masc:heartbeat event"
+  | _ -> Alcotest.fail "expected Custom masc.heartbeat event"
 
 let test_event_bus_task_transition () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let bus = Event_bus.create () in
+  Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
   Oas_events.publish_task_transition bus ~agent_name:"worker"
     ~task_id:"task-1" ~transition:"done";
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
   match (List.hd events : Event_bus.event).payload with
-  | Event_bus.Custom ("masc:task_transition", payload) ->
+  | Event_bus.Custom ("masc.task_transition", payload) ->
     let tid = Yojson.Safe.Util.(member "task_id" payload |> to_string) in
     Alcotest.(check string) "task id" "task-1" tid
-  | _ -> Alcotest.fail "expected Custom masc:task_transition event"
+  | _ -> Alcotest.fail "expected Custom masc.task_transition event"
 
 let test_event_bus_keeper_lifecycle_includes_phase () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let bus = Event_bus.create () in
+  Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
   Oas_events.publish_keeper_lifecycle bus
     ~event:"started"
@@ -100,12 +104,12 @@ let test_event_bus_keeper_lifecycle_includes_phase () =
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
   match (List.hd events : Event_bus.event).payload with
-  | Event_bus.Custom ("masc:keeper:lifecycle", payload) ->
+  | Event_bus.Custom ("masc.keeper.lifecycle", payload) ->
     let phase = Yojson.Safe.Util.(member "phase" payload |> to_string) in
     let event = Yojson.Safe.Util.(member "event" payload |> to_string) in
     Alcotest.(check string) "phase" "running" phase;
     Alcotest.(check string) "event" "started" event
-  | _ -> Alcotest.fail "expected Custom masc:keeper:lifecycle event"
+  | _ -> Alcotest.fail "expected Custom masc.keeper:lifecycle event"
 
 let test_keeper_snapshot_envelope_agent_name () =
   (* #7827: publish_keeper_snapshot stores the keeper's identity as
@@ -115,6 +119,7 @@ let test_keeper_snapshot_envelope_agent_name () =
      instead of silently dropping 9%+ of daily events. *)
   Eio_main.run @@ fun _env ->
   let bus = Event_bus.create () in
+  Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
   Oas_events.publish_keeper_snapshot bus
     ~keeper_name:"sojin"
@@ -143,6 +148,7 @@ let test_keeper_lifecycle_envelope_agent_name () =
      through keeper_name. *)
   Eio_main.run @@ fun _env ->
   let bus = Event_bus.create () in
+  Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
   Oas_events.publish_keeper_lifecycle bus
     ~event:"started"
@@ -225,6 +231,7 @@ let test_oas_sse_bridge_broadcasts_lifecycle_to_observers () =
     (fun () ->
       let config = Coord.default_config dir in
       let bus = Event_bus.create () in
+      Masc_event_bus.set bus;
       Masc_mcp.Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->

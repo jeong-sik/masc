@@ -302,8 +302,19 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       in
       Some (wrap ~event_type:"slot_scheduler_observed" ~payload ())
   | Agent_sdk.Event_bus.Custom (name, payload) ->
+      (* Wire compatibility: dashboard consumers historically decoded
+         [masc:broadcast] / [masc:keeper:snapshot] (all colons).
+         Internally MASC now emits dot-separated names per OAS Custom
+         convention ([masc.broadcast], [masc.keeper.snapshot]).
+         Translate EVERY dot to colon for [masc.*] events so existing
+         SSE consumers continue to decode the full multi-segment name. *)
+      let event_type =
+        if String.length name > 5 && String.sub name 0 5 = "masc."
+        then String.map (fun c -> if c = '.' then ':' else c) name
+        else name
+      in
       Some
-        (wrap ~event_type:name ~payload
+        (wrap ~event_type ~payload
            ?agent_name:(payload_agent_name payload)
            ?task_id:(payload_string_opt "task_id" payload)
            ?turn:(payload_int_opt "turn" payload)

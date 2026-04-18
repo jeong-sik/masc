@@ -221,16 +221,19 @@ let non_http_transport_of_provider
 (* Internal: event publishing                                        *)
 (* ================================================================ *)
 
-let publish_lifecycle bus ~name ~event ~detail =
-  Oas_bus_instrument.publish bus
-    (Oas.Event_bus.mk_event
-      (Custom
-        (Printf.sprintf "masc:oas_worker:%s" event,
-         `Assoc [
-           ("agent", `String name);
-           ("detail", `String detail);
-           ("timestamp", `Float (Time_compat.now ()));
-         ])))
+let publish_lifecycle _bus ~name ~event ~detail =
+  match Masc_event_bus.get () with
+  | None -> ()
+  | Some mb ->
+    Oas_bus_instrument.publish mb
+      (Oas.Event_bus.mk_event
+        (Custom
+          (Printf.sprintf "masc.oas_worker.%s" event,
+           `Assoc [
+             ("agent", `String name);
+             ("detail", `String detail);
+             ("timestamp", `Float (Time_compat.now ()));
+           ])))
 
 (* ================================================================ *)
 (* Internal: checkpoint persistence                                  *)

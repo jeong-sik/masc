@@ -385,14 +385,13 @@ export function AgentProfile({ name }: { name: string }) {
               ${collabs.length > 0 ? html`
                 <div class="flex flex-col gap-1">
                   ${collabs.map(c => html`
-                    <div class="flex items-center gap-2 px-2 py-1.5 transition-colors duration-150 hover:bg-[rgba(255,215,0,0.08)] rounded" key=${c.name}
+                    <button type="button" class="w-full flex items-center gap-2 px-2 py-1.5 transition-colors duration-150 hover:bg-[rgba(255,215,0,0.08)] rounded text-left cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent" key=${c.name}
                       onClick=${() => navigate('monitoring', { section: 'agents', agent: c.name })}
-                      style="cursor:pointer;"
                     >
                       <span class="text-[var(--ff-gold)] font-semibold text-base flex-1">${c.name}</span>
                       <span class="text-[var(--white-50)] text-[13px] tabular-nums">${c.collaborations}회</span>
                       ${c.last_collab ? html`<span class="ff-relation-time"><${TimeAgo} timestamp=${c.last_collab} /></span>` : null}
-                    </div>
+                    </button>
                   `)}
                 </div>
               ` : null}

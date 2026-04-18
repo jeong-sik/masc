@@ -459,17 +459,11 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
 
   return html`
     <div class="border-b border-[var(--card-border)] hover:bg-[var(--bg-panel-hover)] transition-colors">
-      <div
-        class="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none"
-        role="button"
-        tabIndex=${0}
+      <button
+        type="button"
+        class="w-full flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         onClick=${() => { expanded.value = !expanded.value }}
-        onKeyDown=${(e: KeyboardEvent) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            expanded.value = !expanded.value
-          }
-        }}
+        aria-expanded=${expanded.value}
       >
         <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
         <span class="font-mono text-[var(--text-muted)] w-28 flex-shrink-0" title=${formatTs(ts)}>
@@ -489,7 +483,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
           </span>
         ` : null}
         <span class="flex-shrink-0 w-4 text-[var(--text-muted)]">${expanded.value ? '-' : '+'}</span>
-      </div>
+      </button>
       ${expanded.value ? html`
         <div class="px-3 pb-3 flex flex-col gap-2">
           ${scopeBadges.length > 0 ? html`
@@ -514,19 +508,12 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
 
   return html`
     <div class="border-b border-[var(--card-border)] bg-[rgba(255,255,255,0.015)] hover:bg-[var(--bg-panel-hover)] transition-colors">
-      <div
-        class="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none"
-        role="button"
-        tabIndex=${0}
+      <button
+        type="button"
+        class="w-full flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         aria-expanded=${expanded.value}
         aria-controls=${contentId}
         onClick=${() => { expanded.value = !expanded.value }}
-        onKeyDown=${(e: KeyboardEvent) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            expanded.value = !expanded.value
-          }
-        }}
       >
         <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
         <span class="font-mono text-[var(--text-muted)] w-28 flex-shrink-0" title=${`${formatTs(item.oldestTs)} → ${formatTs(item.latestTs)}`}>
@@ -547,7 +534,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
           </span>
         ` : null}
         <span class="flex-shrink-0 w-4 text-[var(--text-muted)]">${expanded.value ? '-' : '+'}</span>
-      </div>
+      </button>
       <div id=${contentId} class=${expanded.value ? 'px-3 pb-3 flex flex-col gap-2' : 'hidden'} role="region">
         ${expanded.value ? html`
           <div class="rounded bg-[var(--white-3)] px-2 py-1.5 text-[11px] text-[var(--text-dim)]">

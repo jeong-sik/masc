@@ -48,7 +48,7 @@ export function filterObservedLanes(
 }
 
 const INSIGHT_BADGE_CLS: Record<InsightTone, string> = {
-  ok: 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[rgba(34,197,94,0.08)]',
+  ok: 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]',
   info: 'text-[var(--accent)] border-[var(--accent-30)] bg-[var(--accent-10)]',
   warn: 'text-[var(--amber-bright)] border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.08)]',
   error: 'text-[var(--bad)] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]',

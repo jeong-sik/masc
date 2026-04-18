@@ -98,7 +98,7 @@ export function GraphView({ data }: GraphViewProps) {
         value: n.semantic_weight ?? n.weight,
         color: {
           background: color,
-          border: (n.status === 'offline' || n.status === 'retired') ? '#475569' : color,
+          border: (n.status === 'offline' || n.status === 'retired') ? 'var(--slate-600)' : color,
           highlight: {
             background: color,
             border: 'var(--warn)'

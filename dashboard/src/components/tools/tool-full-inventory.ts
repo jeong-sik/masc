@@ -82,7 +82,7 @@ export function FullInventoryView({
   const directCallCount = inventory.filter(item => item.direct_call_allowed).length
 
   return html`
-    <div class="sticky top-[var(--header-h)] z-[var(--z-tab-sticky)] bg-[rgba(11,18,32,0.95)] backdrop-blur-[8px] py-3 border-b border-[var(--card-border)]">
+    <div class="sticky top-[var(--header-h)] z-[var(--z-tab-sticky)] bg-[var(--backdrop-modal)] backdrop-blur-[8px] py-3 border-b border-[var(--card-border)]">
       <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 my-4">
         <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
           <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${totalCount}</span>

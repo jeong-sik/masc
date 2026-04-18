@@ -239,7 +239,7 @@ function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; e
 
   if (isOffline) return html`
     <button type="button"
-      class="py-1 px-3 rounded text-[11px] font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.08)] text-[var(--ok)] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
+      class="py-1 px-3 rounded text-[11px] font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[var(--emerald-8)] text-[var(--ok)] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
       onClick=${() => {
         void (async () => {
           try {
@@ -983,7 +983,7 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
 
         ${latestEntry
           ? html`
-            <div class="rounded border border-[var(--accent-20)] bg-[rgba(71,184,255,0.08)] p-3 mb-3">
+            <div class="rounded border border-[var(--accent-20)] bg-[var(--accent-8)] p-3 mb-3">
               <div class="flex flex-wrap items-center gap-2 mb-1">
                 <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]">Latest Handoff</span>
                 <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">
@@ -1093,11 +1093,11 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                   const isLatest = index === 0
                   const entryMeta = lineageVerdictMeta(entry.continuity_verdict)
                   return html`
-                  <div class=${`px-3 py-2 rounded border ${isLatest ? 'border-[var(--accent-22)] bg-[rgba(71,184,255,0.08)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}>
+                  <div class=${`px-3 py-2 rounded border ${isLatest ? 'border-[var(--accent-22)] bg-[var(--accent-8)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}>
                     <div class="flex flex-wrap items-center gap-2">
                       <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-15)]">gen ${entry.generation}</span>
                       ${isLatest
-                        ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-[var(--accent-18)] bg-[rgba(71,184,255,0.12)] text-[var(--accent)]">latest</span>`
+                        ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-[var(--accent-18)] bg-[var(--accent-12)] text-[var(--accent)]">latest</span>`
                         : null}
                       ${entry.continuity_verdict
                         ? html`<span class="text-[10px] px-1.5 py-0.5 rounded ${verdictBadgeClass(entry.continuity_verdict)}">${entryMeta.badgeLabel}</span>`
@@ -1398,7 +1398,7 @@ export function KeeperDetailOverlay() {
                 : null}
             </div>
             ${keeper.recent_output_preview
-              ? html`<div class="py-2 px-3 rounded bg-[rgba(71,184,255,0.06)] border border-[rgba(71,184,255,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
+              ? html`<div class="py-2 px-3 rounded bg-[rgba(71,184,255,0.06)] border border-[var(--accent-12)] text-xs text-[var(--text-body)] leading-relaxed">
                   <div class="line-clamp-2">${keeper.recent_output_preview}</div>
                 </div>`
               : null}

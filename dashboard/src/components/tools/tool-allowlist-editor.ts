@@ -526,7 +526,7 @@ export function ToolAllowlistEditor({
   }
 
   return html`
-    <div class="flex flex-col gap-3 mt-2 p-3 rounded border border-[var(--card-border)] bg-[rgba(11,18,32,0.6)]">
+    <div class="flex flex-col gap-3 mt-2 p-3 rounded border border-[var(--card-border)] bg-[var(--panel-dark-60)]">
       <div class="flex items-center justify-between">
         <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">도구 정책 편집</span>
         <button type="button"
@@ -598,7 +598,7 @@ export function ToolAllowlistEditor({
 
             ${isCustomEmpty
               ? html`
-                <div class="flex flex-col gap-2 px-3 py-2 rounded bg-[rgba(239,68,68,0.12)] border border-[var(--bad-30)]">
+                <div class="flex flex-col gap-2 px-3 py-2 rounded bg-[var(--bad-12)] border border-[var(--bad-30)]">
                   <div class="flex items-start gap-2">
                     <span class="text-[var(--bad)] text-[13px] shrink-0 font-bold">0</span>
                     <span class="text-[11px] text-[var(--bad)] leading-snug">

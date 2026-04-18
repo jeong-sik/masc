@@ -34,6 +34,6 @@ describe('paletteFor', () => {
   it('returns accent palette for explicit accent', () => {
     const p = paletteFor('accent')
     expect(p.fill).toBe('var(--accent)')
-    expect(p.chipBg).toContain('71,184,255')
+    expect(p.chipBg).toContain('--accent-')
   })
 })

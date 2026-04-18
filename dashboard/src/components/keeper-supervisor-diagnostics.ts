@@ -37,7 +37,7 @@ function SectionCard({ title, children }: { title: string; children: preact.Comp
 function registryStateBadge(state: string | null) {
   if (!state) return null
   const colors: Record<string, { bg: string; text: string }> = {
-    Running: { bg: 'bg-[rgba(34,197,94,0.12)]', text: 'text-[var(--ok)]' },
+    Running: { bg: 'bg-[var(--emerald-12)]', text: 'text-[var(--ok)]' },
     Crashed: { bg: 'bg-[var(--bad-soft)]', text: 'text-[var(--bad)]' },
     Dead: { bg: 'bg-[rgba(100,116,139,0.15)]', text: 'text-[var(--slate-400)]' },
     Stopped: { bg: 'bg-[rgba(234,179,8,0.12)]', text: 'text-[var(--warn)]' },

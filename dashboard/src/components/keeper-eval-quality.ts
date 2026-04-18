@@ -176,7 +176,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
           <span class="text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">Eval Quality</span>
           ${allPassed
             ? html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-[10px] font-semibold bg-[rgba(74,222,128,0.12)] text-[var(--ok)]">ALL PASS</span>`
-            : html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-[10px] font-semibold bg-[rgba(239,68,68,0.12)] text-[var(--bad)]">FAIL</span>`
+            : html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-[10px] font-semibold bg-[var(--bad-12)] text-[var(--bad)]">FAIL</span>`
           }
           ${baseline ? html`<span class="text-[10px] font-medium ${baseline.cls}">${baseline.text}</span>` : null}
         </div>

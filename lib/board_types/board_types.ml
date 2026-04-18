@@ -139,10 +139,7 @@ type comment = {
 (** {1 Limits - Enforced, Not Optional} *)
 
 module Limits = struct
-  let env_int name default =
-    match Sys.getenv_opt name with
-    | Some s -> (match int_of_string_opt s with Some n -> n | None -> default)
-    | None -> default
+  let env_int name default = Env_config_core.get_int ~default name
 
   let max_posts = env_int "MASC_BOARD_MAX_POSTS" 10_000
   let max_comments_per_post = env_int "MASC_BOARD_MAX_COMMENTS_PER_POST" 1_000

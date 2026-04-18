@@ -77,9 +77,9 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
               <span class="flex-shrink-0 size-4 rounded text-[10px] font-mono font-bold flex items-center justify-center bg-[var(--white-5)] ${cat.color}">${cat.icon}</span>
               <span class="text-[var(--text-body)] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px]" title=${item.name}>${item.name}</span>
             </div>
-            <span class="px-1.5 py-px rounded-[3px] text-[10px] font-medium text-center text-[var(--text-dim)] bg-[var(--white-4)]">${cat.label}</span>
-            <div class="h-3.5 rounded-[3px] bg-[var(--white-6)] overflow-hidden">
-              <div class="h-full rounded-[3px] min-w-0.5 transition-[width] duration-300 ease-in-out" style=${{ width: `${pct}%`, backgroundColor: barBg }} />
+            <span class="px-1.5 py-px rounded-xs text-[10px] font-medium text-center text-[var(--text-dim)] bg-[var(--white-4)]">${cat.label}</span>
+            <div class="h-3.5 rounded-xs bg-[var(--white-6)] overflow-hidden">
+              <div class="h-full rounded-xs min-w-0.5 transition-[width] duration-300 ease-in-out" style=${{ width: `${pct}%`, backgroundColor: barBg }} />
             </div>
             <span class="text-[var(--text-muted)] text-[11px] text-right font-mono">${item.call_count}</span>
           </div>

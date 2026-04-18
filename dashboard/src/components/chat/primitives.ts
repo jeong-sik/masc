@@ -139,7 +139,7 @@ function ChatMessageBubble({
         <div class=${`flex min-w-0 flex-1 gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
           <div
             class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center border text-[11px] font-semibold uppercase tracking-[0.08em] ${
-              isMessenger ? 'size-8 rounded-[18px]' : 'size-10 rounded'
+              isMessenger ? 'size-8 rounded-card' : 'size-10 rounded'
             }`}
           >
             ${avatarMonogram(entry)}
@@ -235,7 +235,7 @@ function ChatMessageBubble({
 
       ${expanded && entry.details
         ? html`
-            <div class="chat-detail-panel rounded-[18px] border border-[rgba(148,163,184,0.14)] px-3 py-3">
+            <div class="chat-detail-panel rounded-card border border-[rgba(148,163,184,0.14)] px-3 py-3">
               ${overview.length > 0
                 ? html`
                     <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
@@ -332,7 +332,7 @@ export function ChatTranscript({
     >
       ${entries.length === 0
         ? html`
-            <div class="flex min-h-[220px] flex-col items-center justify-center rounded-[18px] border border-dashed border-[rgba(148,163,184,0.18)] bg-[var(--white-3)] px-6 text-center">
+            <div class="flex min-h-[220px] flex-col items-center justify-center rounded-card border border-dashed border-[rgba(148,163,184,0.18)] bg-[var(--white-3)] px-6 text-center">
               <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 메시지 없음</div>
               <div class="mt-3 max-w-[34rem] text-[13px] leading-[1.7] text-[var(--text-secondary)]">${emptyText}</div>
             </div>
@@ -386,7 +386,7 @@ export function ChatComposer({
         <div class="text-[11px] text-[var(--text-muted)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
       </div>
       <textarea
-        class="control-textarea min-h-[96px] rounded-[18px] border border-[rgba(148,163,184,0.16)] bg-[rgba(255,255,255,0.04)] px-3 py-3 text-[14px] leading-[1.6]"
+        class="control-textarea min-h-[96px] rounded-card border border-[rgba(148,163,184,0.16)] bg-[rgba(255,255,255,0.04)] px-3 py-3 text-[14px] leading-[1.6]"
         placeholder=${placeholder}
         value=${draft}
         onInput=${(event: Event) => { onDraftChange((event.target as HTMLTextAreaElement).value) }}

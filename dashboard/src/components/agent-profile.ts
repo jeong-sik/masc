@@ -279,7 +279,7 @@ function CharacterPlate({ name }: { name: string }) {
             ? html`<span class="text-base text-[var(--text-body)]">${currentWork}</span>`
             : html`<span class="text-base text-[var(--text-dim)] italic">대기 중</span>`
           }
-          ${workerState ? html`<span class="text-[11px] text-[var(--accent)] bg-[var(--accent-8)] px-[5px] py-px rounded-[3px]">${workerState}</span>` : null}
+          ${workerState ? html`<span class="text-[11px] text-[var(--accent)] bg-[var(--accent-8)] px-[5px] py-px rounded-xs">${workerState}</span>` : null}
           ${workerFocus ? html`<span class="text-[11px] text-[var(--text-muted)]">${workerFocus}</span>` : null}
         </div>
 
@@ -400,8 +400,8 @@ export function AgentProfile({ name }: { name: string }) {
                 <div class="border-t border-[var(--white-6)] pt-2 mt-2">
                   <span class="ff-interests-label">관심사</span>
                   <div class="flex flex-wrap gap-1 mt-1.5">
-                    ${interests.slice(0, 12).map(t => html`<span class="bg-[rgba(255,215,0,0.1)] text-[var(--white-70)] px-2 py-0.5 rounded-[3px] text-[11px] border border-[rgba(255,215,0,0.15)]" key=${t}>${t}</span>`)}
-                    ${interests.length > 12 ? html`<span class="bg-[rgba(255,215,0,0.1)] text-[var(--white-70)] px-2 py-0.5 rounded-[3px] text-[11px] border border-[rgba(255,215,0,0.15)]">+${interests.length - 12}</span>` : null}
+                    ${interests.slice(0, 12).map(t => html`<span class="bg-[rgba(255,215,0,0.1)] text-[var(--white-70)] px-2 py-0.5 rounded-xs text-[11px] border border-[rgba(255,215,0,0.15)]" key=${t}>${t}</span>`)}
+                    ${interests.length > 12 ? html`<span class="bg-[rgba(255,215,0,0.1)] text-[var(--white-70)] px-2 py-0.5 rounded-xs text-[11px] border border-[rgba(255,215,0,0.15)]">+${interests.length - 12}</span>` : null}
                   </div>
                 </div>
               ` : null}

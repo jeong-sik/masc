@@ -15,10 +15,10 @@ export const highlightedAgentId = signal<string | null>(null)
 function nodeColor(kind: string, status: string): string {
   if (status === 'offline' || status === 'retired') return '#64748b'
   switch (kind) {
-    case 'agent': return '#22d3ee'
-    case 'task': return '#fbbf24'
-    case 'decision': return '#a78bfa'
-    case 'operation': return '#4ade80'
+    case 'agent': return 'var(--cyan)'
+    case 'task': return 'var(--warn)'
+    case 'decision': return 'var(--purple)'
+    case 'operation': return 'var(--ok)'
     case 'debate': return '#fb923c'
     case 'post': return '#f472b6'
     default: return '#94a3b8'
@@ -101,7 +101,7 @@ export function GraphView({ data }: GraphViewProps) {
           border: (n.status === 'offline' || n.status === 'retired') ? '#475569' : color,
           highlight: {
             background: color,
-            border: '#fbbf24'
+            border: 'var(--warn)'
           },
           hover: {
             background: color,
@@ -246,10 +246,10 @@ export function GraphView({ data }: GraphViewProps) {
     </div>
     <div class="flex flex-wrap gap-x-4 gap-y-1 mt-1 px-1">
       ${[
-        { label: '에이전트', color: '#22d3ee' },
-        { label: '작업', color: '#fbbf24' },
-        { label: '결정', color: '#a78bfa' },
-        { label: '작전', color: '#4ade80' },
+        { label: '에이전트', color: 'var(--cyan)' },
+        { label: '작업', color: 'var(--warn)' },
+        { label: '결정', color: 'var(--purple)' },
+        { label: '작전', color: 'var(--ok)' },
         { label: '게시글', color: '#f472b6' },
       ].map(({ label, color }) => html`
         <div class="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]" key=${label}>

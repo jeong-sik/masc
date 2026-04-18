@@ -29,7 +29,7 @@ describe('runtimeBadgeClass', () => {
   })
 
   it('returns purple classes for paused', () => {
-    expect(runtimeBadgeClass('paused')).toContain('#a78bfa')
+    expect(runtimeBadgeClass('paused')).toContain('var(--purple)')
   })
 
   it('returns dim classes for unknown band', () => {
@@ -67,7 +67,7 @@ describe('stageBadgeClass', () => {
   })
 
   it('returns purple classes for paused stage', () => {
-    expect(stageBadgeClass('paused')).toContain('#a78bfa')
+    expect(stageBadgeClass('paused')).toContain('var(--purple)')
   })
 
   it('returns muted classes for unknown stage', () => {

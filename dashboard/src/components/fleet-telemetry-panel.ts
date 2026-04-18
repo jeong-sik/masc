@@ -94,7 +94,7 @@ function trendColorClass(direction: TrendDirection, metric: MetricKey): string {
 function sparklineColor(metric: MetricKey, direction: TrendDirection): string {
   if (direction === 'flat') return '#64748b'
   const bad = (direction === 'up' && isUpBad(metric)) || (direction === 'down' && !isUpBad(metric))
-  return bad ? '#f87171' : '#34d399'
+  return bad ? 'var(--bad-light)' : '#34d399'
 }
 
 function auditFreshnessClass(isoTimestamp: string | null): string {

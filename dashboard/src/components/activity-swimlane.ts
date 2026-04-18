@@ -78,9 +78,9 @@ function syncTimelineSelection(
 }
 
 const SPAN_STYLES: Record<string, { bg: string; text: string }> = {
-  task:      { bg: '#fbbf24', text: '#0f172a' },
-  operation: { bg: '#4ade80', text: '#0f172a' },
-  autonomy:  { bg: '#22d3ee', text: '#0f172a' },
+  task:      { bg: 'var(--warn)', text: '#0f172a' },
+  operation: { bg: 'var(--ok)', text: '#0f172a' },
+  autonomy:  { bg: 'var(--cyan)', text: '#0f172a' },
   presence:  { bg: 'rgba(148, 163, 184, 0.25)', text: '#e2e8f0' },
 }
 const SPAN_DEFAULT = { bg: '#94a3b8', text: '#0f172a' } as const
@@ -238,9 +238,9 @@ export function ActivitySwimlane({ since }: { since?: string }) {
         <div ref=${containerRef} class="w-full"></div>
       </div>
       <div class="flex flex-wrap gap-3 mt-3 text-[11px] text-[var(--text-muted)]">
-        <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[#fbbf24] inline-block"></span>작업</span>
+        <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[var(--warn)] inline-block"></span>작업</span>
         <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[var(--ok)] inline-block"></span>운영</span>
-        <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[#22d3ee] inline-block"></span>자율</span>
+        <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[var(--cyan)] inline-block"></span>자율</span>
         <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[rgba(148,163,184,0.5)] inline-block"></span>접속</span>
       </div>
     <//>

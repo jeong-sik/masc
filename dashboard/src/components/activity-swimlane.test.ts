@@ -51,17 +51,17 @@ describe('truncateLabel', () => {
 describe('spanStyle', () => {
   it('returns task style', () => {
     const style = spanStyle('task')
-    expect(style).toEqual({ bg: '#fbbf24', text: '#0f172a' })
+    expect(style).toEqual({ bg: 'var(--warn)', text: '#0f172a' })
   })
 
   it('returns operation style', () => {
     const style = spanStyle('operation')
-    expect(style).toEqual({ bg: '#4ade80', text: '#0f172a' })
+    expect(style).toEqual({ bg: 'var(--ok)', text: '#0f172a' })
   })
 
   it('returns autonomy style', () => {
     const style = spanStyle('autonomy')
-    expect(style).toEqual({ bg: '#22d3ee', text: '#0f172a' })
+    expect(style).toEqual({ bg: 'var(--cyan)', text: '#0f172a' })
   })
 
   it('returns presence style with rgba', () => {

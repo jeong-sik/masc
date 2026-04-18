@@ -128,10 +128,10 @@ async function refreshTree() {
 function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' }) {
   const clamped = Math.max(0, Math.min(100, pct))
   const barColor =
-    clamped >= 80 ? '#4ade80'
-    : clamped >= 50 ? '#f59e0b'
+    clamped >= 80 ? 'var(--ok)'
+    : clamped >= 50 ? 'var(--amber-bright)'
     : clamped >= 20 ? '#fb923c'
-    : '#ef4444'
+    : 'var(--bad)'
 
   const h = size === 'sm' ? 'h-1.5' : 'h-2.5'
   return html`

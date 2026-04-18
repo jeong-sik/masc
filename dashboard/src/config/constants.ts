@@ -66,7 +66,7 @@ export const HEATMAP_COLORS = [
   '#0e4a5c', // 1-25%
   '#0e6e7e', // 26-50%
   '#14919b', // 51-75%
-  '#22d3ee', // 76-100%
+  'var(--cyan)', // 76-100%
 ] as const
 
 // --- Autoresearch form defaults ---

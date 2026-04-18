@@ -54,7 +54,7 @@ export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapsho
             >drift ${m.auto_rules.goal_drift.toFixed(2)}</span>
           </div>
           ${m.auto_rules.guardrail_reason ? html`
-            <div class="text-[10px] text-[#f59e0b] mt-0.5">사유: ${m.auto_rules.guardrail_reason}</div>
+            <div class="text-[10px] text-[var(--amber-bright)] mt-0.5">사유: ${m.auto_rules.guardrail_reason}</div>
           ` : null}
         </div>
       ` : html`
@@ -74,8 +74,8 @@ function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: '
   const offCls = 'text-[var(--text-dim)] border-[var(--white-8)]'
   const onCls =
     tone === 'warn'
-      ? 'text-[#f59e0b] border-[rgba(251,191,36,0.3)] bg-[var(--warn-8)]'
-      : 'text-[#22c55e] border-[var(--emerald-30)] bg-[rgba(34,197,94,0.08)]'
+      ? 'text-[var(--amber-bright)] border-[rgba(251,191,36,0.3)] bg-[var(--warn-8)]'
+      : 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[rgba(34,197,94,0.08)]'
   return html`
     <span
       class=${`rounded-sm border px-2 py-0.5 text-[10px] cursor-help ${on ? onCls : offCls}`}
@@ -125,8 +125,8 @@ export function InvariantsPanel({
         <span
           class=${`rounded-sm border px-2 py-0.5 text-[10px] font-mono tabular-nums ${
             allOk
-              ? 'text-[#22c55e] border-[var(--emerald-30)] bg-[rgba(34,197,94,0.08)]'
-              : 'text-[#ef4444] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]'
+              ? 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[rgba(34,197,94,0.08)]'
+              : 'text-[var(--bad)] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]'
           }`}
           title=${allOk
             ? `All ${total} keeper composite invariants hold.`
@@ -145,14 +145,14 @@ export function InvariantsPanel({
           const tooltip = `${entry.label} — ${entry.ok ? 'holds' : 'BROKEN'}\n${desc}${rate ? `\n누적: ${rate}` : ''}`
           return html`
             <li class="flex gap-2 text-[10px] cursor-help" title=${tooltip}>
-              <span class=${`mt-[5px] h-1.5 w-1.5 rounded-full shrink-0 ${entry.ok ? 'bg-[#22c55e]' : 'bg-[#ef4444]'}`}></span>
+              <span class=${`mt-[5px] h-1.5 w-1.5 rounded-full shrink-0 ${entry.ok ? 'bg-[var(--emerald)]' : 'bg-[var(--bad)]'}`}></span>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5">
-                  <span class=${entry.ok ? 'text-[var(--text-body)]' : 'text-[#f87171] font-semibold'}>
+                  <span class=${entry.ok ? 'text-[var(--text-body)]' : 'text-[var(--bad-light)] font-semibold'}>
                     ${entry.label}
                   </span>
                   ${vCount > 0 ? html`
-                    <span class="ml-auto text-[8px] font-mono tabular-nums text-[#f87171]">
+                    <span class="ml-auto text-[8px] font-mono tabular-nums text-[var(--bad-light)]">
                       ${vCount}/${sampleCount}
                     </span>
                   ` : null}

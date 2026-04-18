@@ -74,7 +74,7 @@ const KIND_STYLES: Record<TraceEventKind, KindStyle> = {
   heartbeat:  { icon: 'H', color: 'text-[#94a3b8]', label: '하트비트' },
   lifecycle:  { icon: 'L', color: 'text-[var(--warn)]', label: '생명주기' },
   thinking:   { icon: '\u{1F4AD}', color: 'text-[#c084fc]', label: '내부 사고' },
-  oas_tool:   { icon: 'O', color: 'text-[#f59e0b]', label: 'OAS 도구' },
+  oas_tool:   { icon: 'O', color: 'text-[var(--amber-bright)]', label: 'OAS 도구' },
   oas_turn:   { icon: 'R', color: 'text-[#fb7185]', label: 'OAS 턴' },
   oas_context: { icon: 'C', color: 'text-[#38bdf8]', label: 'OAS 압축' },
 }
@@ -90,7 +90,7 @@ function toolStyle(name: string): { icon: string; color: string } {
 function durableStyle(kind: unknown): { icon: string; color: string } | null {
   switch (kind) {
     case 'llm_request':      return { icon: '>', color: 'text-[#38bdf8]' }
-    case 'llm_response':     return { icon: '<', color: 'text-[#22d3ee]' }
+    case 'llm_response':     return { icon: '<', color: 'text-[var(--cyan)]' }
     case 'error_occurred':   return { icon: '!', color: 'text-[var(--bad)]' }
     case 'tool_called':      return { icon: 't', color: 'text-[var(--ok)]' }
     case 'tool_completed':   return { icon: 'x', color: 'text-[var(--ok)]' }

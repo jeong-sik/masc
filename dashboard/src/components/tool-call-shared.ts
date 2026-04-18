@@ -34,7 +34,7 @@ const TOOL_CATEGORIES: ToolCategoryEntry[] = [
     icon: 'E', color: 'text-[var(--warn)]', label: 'edit' },
   // File read / filesystem
   { match: n => n.includes('fs_read') || n.includes('code_read'),
-    icon: 'F', color: 'text-[#a78bfa]', label: 'file' },
+    icon: 'F', color: 'text-[var(--purple)]', label: 'file' },
   // Board / Social — community interaction
   { match: n => n.includes('board') || n.includes('social'),
     icon: 'B', color: 'text-[var(--purple)]', label: 'board' },
@@ -49,7 +49,7 @@ const TOOL_CATEGORIES: ToolCategoryEntry[] = [
     icon: 'W', color: 'text-[#38bdf8]', label: 'web' },
   // Coordination — tasks, transitions, heartbeat
   { match: n => n.includes('task') || n.includes('transition') || n.includes('claim') || n.includes('heartbeat') || n.includes('broadcast'),
-    icon: 'C', color: 'text-[#fbbf24]', label: 'coord' },
+    icon: 'C', color: 'text-[var(--warn)]', label: 'coord' },
   // Memory — recall, context, memory search
   { match: n => n.includes('memory') || n.includes('recall') || n.includes('context'),
     icon: 'M', color: 'text-[#34d399]', label: 'memory' },

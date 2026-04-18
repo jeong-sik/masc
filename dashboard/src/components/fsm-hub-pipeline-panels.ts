@@ -48,10 +48,10 @@ export function filterObservedLanes(
 }
 
 const INSIGHT_BADGE_CLS: Record<InsightTone, string> = {
-  ok: 'text-[#22c55e] border-[var(--emerald-30)] bg-[rgba(34,197,94,0.08)]',
+  ok: 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[rgba(34,197,94,0.08)]',
   info: 'text-[var(--accent)] border-[var(--accent-30)] bg-[var(--accent-10)]',
-  warn: 'text-[#f59e0b] border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.08)]',
-  error: 'text-[#ef4444] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]',
+  warn: 'text-[var(--amber-bright)] border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.08)]',
+  error: 'text-[var(--bad)] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]',
 }
 
 /** Panel-level accent -- border + subtle tinted overlay -- so that the
@@ -155,12 +155,12 @@ export function OperationalMeaningPanel({
 }
 
 const PHASE_BAR_FILL: Record<string, string> = {
-  Running: '#22c55e',
-  Overflowed: '#f59e0b',
-  Compacting: '#f59e0b',
-  HandingOff: '#a78bfa',
-  Failing: '#ef4444',
-  Draining: '#fbbf24',
+  Running: 'var(--emerald)',
+  Overflowed: 'var(--amber-bright)',
+  Compacting: 'var(--amber-bright)',
+  HandingOff: 'var(--purple)',
+  Failing: 'var(--bad)',
+  Draining: 'var(--warn)',
   Stable: '#71717a',
 }
 
@@ -187,7 +187,7 @@ function PhaseSparkline({
   const bars = segments.map((seg, i) => {
     const dur = Math.max(0, seg.to - seg.from)
     const w = Math.max(1, (dur / totalDuration) * (W - (segments.length - 1) * gap))
-    const fill = PHASE_BAR_FILL[seg.value] ?? '#47b8ff'
+    const fill = PHASE_BAR_FILL[seg.value] ?? 'var(--accent)'
     const barX = x
     x += w + gap
     const isLast = i === segments.length - 1
@@ -365,9 +365,9 @@ export function PipelineStep({
       if (ageSec > 600) return 'text-[var(--text-muted)]'
       return 'text-[var(--text-dim)]'
     }
-    if (ageSec > 60) return 'text-[#f59e0b]'
-    if (ageSec > 20) return 'text-[#facc15]'
-    return 'text-[#818cf8]'
+    if (ageSec > 60) return 'text-[var(--amber-bright)]'
+    if (ageSec > 20) return 'text-[var(--yellow-bright)]'
+    return 'text-[var(--indigo)]'
   })()
 
   return html`
@@ -377,7 +377,7 @@ export function PipelineStep({
       <div class=${`flex-1 rounded border px-3 py-2 transition-all duration-500 ${borderCls} ${bgCls} ${limited && !isActive ? 'opacity-60' : ''}`}>
         <div class="flex items-center justify-between gap-1.5">
           <div class="flex items-center gap-1.5 min-w-0">
-            ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[#818cf8] ${activePulse} shrink-0"></span>` : null}
+            ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[var(--indigo)] ${activePulse} shrink-0"></span>` : null}
             <span class="text-[10px] font-semibold tracking-[0.04em] text-[var(--text-muted)]">${label}</span>
             ${limited ? html`<span class="text-[7px] font-mono text-[var(--text-dim)] border border-[var(--white-10)] rounded px-1" title="Event_bus 구독 미구현으로 일부 상태만 관찰 가능">제한</span>` : null}
           </div>

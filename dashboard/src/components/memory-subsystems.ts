@@ -47,7 +47,7 @@ const ARCHITECTURE_FLOW = `graph LR
 
     classDef store fill:#1e293b,stroke:#334155,color:#f1f5f9
     classDef action fill:#0f766e,stroke:#14b8a6,color:#f0fdfa
-    classDef ui fill:#7c2d12,stroke:#f97316,color:#ffedd5
+    classDef ui fill:#7c2d12,stroke:var(--warn-bright),color:#ffedd5
     class F1,G1 store
     class M1,M3,H1,H2,T2 action
     class UI ui`
@@ -92,8 +92,8 @@ const WEIGHT_RAMP: ReadonlyArray<{
   label: string
 }> = [
   { floor: 0.7, svg: '#10b981', tw: 'bg-[var(--ok-10)]', label: '70%+' },
-  { floor: 0.4, svg: '#f59e0b', tw: 'bg-[var(--warn-10)]', label: '40%+' },
-  { floor: 0,   svg: '#f87171', tw: 'bg-[var(--bad-10)]',    label: '<40%' },
+  { floor: 0.4, svg: 'var(--amber-bright)', tw: 'bg-[var(--warn-10)]', label: '40%+' },
+  { floor: 0,   svg: 'var(--bad-light)', tw: 'bg-[var(--bad-10)]',    label: '<40%' },
 ]
 
 const LEGEND_STOPS = [1.0, 0.75, 0.5, 0.25, 0.05] as const
@@ -313,7 +313,7 @@ function WeightSparkline({ history }: { history?: Array<[number, number]> }) {
   const last = chronological[n - 1]?.[1] ?? 0
   const trendColor =
     last > first + TREND_DEAD_ZONE ? '#10b981' :
-    last < first - TREND_DEAD_ZONE ? '#f87171' : '#94a3b8'
+    last < first - TREND_DEAD_ZONE ? 'var(--bad-light)' : '#94a3b8'
   return html`
     <svg
       viewBox="0 0 ${sw} ${sh}"

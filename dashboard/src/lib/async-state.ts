@@ -57,7 +57,7 @@ export interface AsyncResource<T> {
   reset(): void
 }
 
-export interface ManagedAsyncState<T> {
+interface ManagedAsyncState<T> {
   readonly data: T | null
   readonly loading: boolean
   readonly error: string | null

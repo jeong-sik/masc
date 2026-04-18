@@ -92,14 +92,14 @@ export const selectedPostIds = signal<Set<string>>(new Set())
 export const bulkDeleting = signal(false)
 
 // ── Helper: default comment author ─────────────────────────────────
-export function defaultCommentAuthor(): string {
+function defaultCommentAuthor(): string {
   const params = new URLSearchParams(window.location.search)
   return params.get('agent')?.trim()
     || params.get('agent_name')?.trim()
     || 'dashboard-user'
 }
 
-export const commentAuthor = signal(defaultCommentAuthor())
+const commentAuthor = signal(defaultCommentAuthor())
 
 // ── Utility functions ──────────────────────────────────────────────
 export function isUpdated(post: BoardPost): boolean {
@@ -161,7 +161,7 @@ export function categoryBadgeColor(cat: ContentCategory): string {
 }
 
 // ── Grouped posts by content category ─────────────────────────────
-export type CategoryGroup = { category: ContentCategory; posts: BoardPost[]; total: number; hidden: number }
+type CategoryGroup = { category: ContentCategory; posts: BoardPost[]; total: number; hidden: number }
 
 export type VisibleBoardGroups = {
   groups: CategoryGroup[]

@@ -13,7 +13,7 @@
 type FetchFn = () => Promise<void>
 type Priority = 'none' | 'normal' | 'urgent'
 
-export interface FetchSchedulerConfig {
+interface FetchSchedulerConfig {
   /** Minimum ms between consecutive fetches. Prevents burst after rapid events. */
   cooldownMs: number
   /** Trailing-edge debounce window. Batches rapid invalidations into one fetch. */

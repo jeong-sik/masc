@@ -30,7 +30,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { fetchTelemetry, type TelemetryEntry } from '../api/dashboard'
 import { useSavedSignal } from '../lib/saved-signal'
 
-export type A2aEventKind = 'lifecycle' | 'failure' | 'tool' | 'handoff' | 'context' | 'unknown'
+type A2aEventKind = 'lifecycle' | 'failure' | 'tool' | 'handoff' | 'context' | 'unknown'
 
 export const A2A_EVENT_TYPES = [
   'agent_started',
@@ -65,7 +65,7 @@ export const CHIP_CLASS_BY_KIND: Record<A2aEventKind, string> = {
   unknown: 'bg-zinc-500',
 }
 
-export interface TimelineChip {
+interface TimelineChip {
   ts: number
   eventType: string
   kind: A2aEventKind

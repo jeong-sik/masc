@@ -15,7 +15,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 
-export type RailState = 'ok' | 'warn' | 'bad' | 'idle'
+type RailState = 'ok' | 'warn' | 'bad' | 'idle'
 export type RailKey = 'token' | 'process' | 'gate' | 'bindings'
 
 /** Per-connector × per-pill in-flight tracker. Subscribed by deriveRail
@@ -185,7 +185,7 @@ export function ConnectorReadinessRail({ pills }: { pills: RailPill[] }) {
  * Inputs are passed in flat instead of taking a GateConnectorInfo so
  * the helper stays unit-testable without the full Gate API shape.
  */
-export interface RailInputs {
+interface RailInputs {
   /** Sidecar process is up and reachable. */
   sidecarUp: boolean
   /** Channel Gate /health responded healthy. null = unknown. */

@@ -307,13 +307,27 @@ let task_already_claimed ~task_id ~claimed_by : t =
     ]
     ()
 
-(** Task completed *)
+(** Task completed.
+
+    Issue #8412: previously emitted [status="completed"], but
+    [Types.task_status_to_string Done = "done"] — the string "completed"
+    is never produced by the Variant SSOT. Sister bug to #8364
+    (task_claimed). Routing through the Variant guarantees the string
+    matches what every other emitter and parser sees. *)
 let task_completed ~task_id ~agent ~notes : t =
+  let done_status =
+    Types.task_status_to_string
+      (Types.Done {
+        assignee = agent;
+        completed_at = Types.now_iso ();
+        notes = if notes = "" then None else Some notes;
+      })
+  in
   ok
     ~message:(Printf.sprintf "Task '%s' completed" task_id)
     (`Assoc [
       ("task_id", `String task_id);
       ("completed_by", `String agent);
       ("notes", `String notes);
-      ("status", `String "completed");
+      ("status", `String done_status);
     ])

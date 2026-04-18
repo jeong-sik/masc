@@ -87,7 +87,7 @@ export function ConfirmDialogOverlay() {
 
   return html`
     <div class="fixed inset-0 z-[100] bg-[var(--white-5)]/60 backdrop-blur-sm isolate flex items-center justify-center p-4 animate-in fade-in duration-200" onClick=${handleClose}>
-      <div class="w-full max-w-[400px] bg-[rgba(13,21,38,0.98)] rounded border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.6)] overflow-hidden" onClick=${stopPropagation} role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
+      <div class="w-full max-w-[400px] bg-[rgba(13,21,38,0.98)] rounded-md border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.6)] overflow-hidden" onClick=${stopPropagation} role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
         <div class="p-5">
           <div class="flex items-start gap-4">
             <div class="shrink-0 size-10 rounded-sm border flex items-center justify-center ${iconBg} ${iconColor}">

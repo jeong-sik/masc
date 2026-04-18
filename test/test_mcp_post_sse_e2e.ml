@@ -332,14 +332,12 @@ let tool_payload ~id ~name ~arguments =
             [ ("name", `String name); ("arguments", arguments) ] );
       ])
 
-let rec call_until_ready ~port ~retries_left =
+let rec call_status_until_ready ~port ~retries_left =
   let result =
     run_curl_post ~max_time_sec:8 ~port ~path:"/mcp"
       ~session_id:"post-sse-keepalive"
       ~payload:
-        (tool_payload ~id:201 ~name:"masc_listen"
-           ~arguments:
-             (`Assoc [ ("agent_name", `String "slowpoke"); ("timeout", `Int 4) ]))
+        (tool_payload ~id:201 ~name:"masc_status" ~arguments:(`Assoc []))
       ()
   in
   match (result.status, retries_left) with
@@ -347,21 +345,24 @@ let rec call_until_ready ~port ~retries_left =
     when retries > 0
          && contains_substr "Server state not initialized" result.body ->
       Unix.sleepf 0.5;
-      call_until_ready ~port ~retries_left:(retries - 1)
+      call_status_until_ready ~port ~retries_left:(retries - 1)
   | Some 503, retries
     when retries > 0
          && contains_substr "Server is starting up, not ready yet" result.body ->
       Unix.sleepf 0.5;
-      call_until_ready ~port ~retries_left:(retries - 1)
+      call_status_until_ready ~port ~retries_left:(retries - 1)
   | _ -> result
 
-let test_post_tools_call_streams_keepalive_before_result () =
+(* Issue #8446: public /mcp streamable POST guarantees SSE framing for
+   tools/call, but not a 30s transport keepalive inside an 8s E2E window.
+   Use a valid public tool and assert prime-event + message framing instead
+   of a stale keepalive contract tied to removed masc_listen. *)
+let test_post_tools_call_streams_sse_framing () =
   with_server @@ fun ~port ->
-  let result = call_until_ready ~port ~retries_left:40 in
+  let result = call_status_until_ready ~port ~retries_left:40 in
   require_http_ok "streaming tools/call" result;
   check int "curl exits cleanly" 0 result.curl_exit;
   check bool "prime event sent" true (contains_substr "retry: 3000" result.body);
-  check bool "keepalive sent" true (contains_substr ": keepalive" result.body);
   check bool "message event sent" true
     (contains_substr "event: message" result.body);
   let json = parse_json_body "streaming tools/call" result in
@@ -372,15 +373,14 @@ let test_post_tools_call_streams_keepalive_before_result () =
     json |> U.member "result" |> U.member "content" |> U.index 0
     |> U.member "text" |> U.to_string
   in
-  check bool "listen timeout surfaced" true
-    (contains_substr "Listening timed out after 4s" text)
+  check bool "status text present" true (String.length text > 0)
 
 let () =
   run "mcp_post_sse_e2e"
     [
       ( "mcp",
         [
-          test_case "post tools/call streams keepalive before result" `Slow
-            test_post_tools_call_streams_keepalive_before_result;
+          test_case "post tools/call streams sse framing" `Slow
+            test_post_tools_call_streams_sse_framing;
         ] );
     ]

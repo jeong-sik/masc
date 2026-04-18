@@ -12,6 +12,7 @@ import { formatTokens } from '../lib/format-number'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { createAsyncResource, loaded } from '../lib/async-state'
+import { SetupGuideCard } from './setup-guide-card'
 
 // ── State ────────────────────────────────────────────────
 
@@ -695,6 +696,9 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           <div class="py-1.5 px-3 text-[10px] text-[var(--text-muted)]">
             effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}
           </div>
+        ` : null}
+        ${rd.sandbox_profile === 'docker_hardened' ? html`
+          <${SetupGuideCard} connectorId="sandbox_hardened" />
         ` : null}
         <${Callout}
           title="Base Path Anchor"

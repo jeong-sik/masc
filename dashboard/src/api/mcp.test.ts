@@ -134,8 +134,9 @@ describe('dev-token bootstrap', () => {
 
     expect(setStoredToken).toHaveBeenCalledWith('loopback-dev-token')
     const calls = fetchWithTimeout.mock.calls as Array<[string, RequestInit]>
-    expect(calls[0][0]).toBe('/api/v1/dashboard/dev-token')
-    expect(calls[1][0]).toBe('/mcp')
+    expect(calls.length).toBeGreaterThanOrEqual(2)
+    expect(calls[0]?.[0]).toBe('/api/v1/dashboard/dev-token')
+    expect(calls[1]?.[0]).toBe('/mcp')
   }, 60_000)
 
   it('swallows dev-token fetch failures so strict-auth servers still reach the 401 path', async () => {

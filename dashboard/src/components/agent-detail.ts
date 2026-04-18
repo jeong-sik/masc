@@ -210,7 +210,7 @@ export function AgentDetailOverlay() {
       labelledBy=${titleId}
       onClose=${closeAgentDetail}
       initialFocusRef=${closeButtonRef}
-      overlayClass="agent-detail-overlay fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
+      overlayClass="agent-detail-overlay fixed inset-0 z-[60] bg-[var(--white-5)]/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
       panelClass="w-[min(1080px,100%)] max-h-[90vh] overflow-y-auto rounded-2xl border border-card-border bg-bg-1/95 backdrop-blur-2xl shadow-2xl shadow-black/50 ring-1 ring-white/5"
     >
       <div class="p-6 flex flex-col gap-5">

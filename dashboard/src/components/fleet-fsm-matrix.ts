@@ -70,34 +70,34 @@ const INVARIANT_KEYS = Object.keys(INVARIANT_LABELS) as Array<
 // recommendation: stable=gray, in-motion=amber/blue, terminal=red.
 const CHIP_CLASS_BY_STATE: Record<string, string> = {
   // KSM
-  Running:      'bg-emerald-900/40 text-[var(--ok)] border-[var(--ok-20)]',
-  Failing:      'bg-red-900/50 text-[var(--bad-light)] border-[var(--bad-20)]',
+  Running:      'bg-[var(--ok-10)] text-[var(--ok)] border-[var(--ok-20)]',
+  Failing:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   Overflowed:   'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
-  Compacting:   'bg-amber-900/50 text-[var(--warn)] border-[var(--warn-20)]',
+  Compacting:   'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
   HandingOff:   'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
   Draining:     'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
   Paused:       'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
   Stopped:      'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
-  Crashed:      'bg-red-950 text-[var(--bad-light)] border-red-800',
+  Crashed:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   Restarting:   'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
-  Dead:         'bg-black text-[var(--bad-light)] border-red-900',
+  Dead:         'bg-[var(--white-5)] text-[var(--bad-light)] border-[var(--bad-20)]',
   Offline:      'bg-[var(--white-5)] text-[var(--text-muted)]0 border-[var(--white-10)]',
   // KTC
   idle:         'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
   prompting:    'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
-  executing:    'bg-emerald-900/40 text-[var(--ok)] border-[var(--ok-20)]',
-  compacting:   'bg-amber-900/50 text-[var(--warn)] border-[var(--warn-20)]',
+  executing:    'bg-[var(--ok-10)] text-[var(--ok)] border-[var(--ok-20)]',
+  compacting:   'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
   finalizing:   'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
   // KDP
   undecided:          'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
-  guard_ok:           'bg-emerald-900/40 text-[var(--ok)] border-[var(--ok-20)]',
-  gate_rejected:      'bg-red-900/40 text-[var(--bad-light)] border-[var(--bad-20)]',
+  guard_ok:           'bg-[var(--ok-10)] text-[var(--ok)] border-[var(--ok-20)]',
+  gate_rejected:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   tool_policy_selected: 'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
   // KCL
   selecting:    'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
-  trying:       'bg-amber-900/50 text-[var(--warn)] border-[var(--warn-20)]',
-  done:         'bg-emerald-900/40 text-[var(--ok)] border-[var(--ok-20)]',
-  exhausted:    'bg-red-900/50 text-[var(--bad-light)] border-[var(--bad-20)]',
+  trying:       'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
+  done:         'bg-[var(--ok-10)] text-[var(--ok)] border-[var(--ok-20)]',
+  exhausted:    'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   // KMC
   accumulating: 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
   // KCB (LT-16-KCB Phase 3). Clean = baseline grey same as any other
@@ -107,7 +107,7 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   // chip colour by design — the mutator resets the count before any
   // observer can see it.
   clean:   'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--white-10)]',
-  warning: 'bg-amber-900/50 text-[var(--warn)] border-[var(--warn-20)]',
+  warning: 'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]',
   cooling: 'bg-[var(--accent-10)] text-[var(--accent)] border-[var(--accent-20)]',
 }
 
@@ -124,7 +124,10 @@ export function chipClassFor(value: string): string {
  */
 export function sparkClassFor(value: string): string {
   const full = chipClassFor(value)
-  const m = /\bbg-[a-z0-9/-]+/i.exec(full)
+  // Chip strings mix semantic tokens (`bg-[var(--ok-10)]`) with size /
+  // border utilities. Extract just the bg-* token, whether it uses
+  // Tailwind's arbitrary-value bracket syntax or a plain palette class.
+  const m = /\bbg-(?:\[[^\]]+\]|[a-z0-9/-]+)/i.exec(full)
   return m?.[0] ?? 'bg-[var(--white-5)]'
 }
 
@@ -303,7 +306,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     return html`
       <div
         data-testid="fleet-fsm-matrix"
-        class="rounded border border-red-800 bg-red-950/40 p-4 text-sm text-[var(--bad-light)]"
+        class="rounded border border-[var(--bad-20)] bg-[var(--bad-10)] p-4 text-sm text-[var(--bad-light)]"
       >
         Fleet snapshot failed: ${error}
       </div>
@@ -346,8 +349,8 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                 ${INVARIANT_KEYS.map(k => {
                   const count = tallies[k]
                   const tone = count === 0
-                    ? 'bg-emerald-900/30 text-[var(--ok)] border-emerald-800'
-                    : 'bg-red-900/40 text-[var(--bad-light)] border-[var(--bad-20)]'
+                    ? 'bg-[var(--ok-10)] text-[var(--ok)] border-[var(--ok-20)]'
+                    : 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]'
                   return html`
                     <span
                       data-invariant=${k}

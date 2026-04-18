@@ -216,7 +216,7 @@ function EvidenceDetail({ event }: { event: AttributionEvent | null }) {
         ${reasonOf(a)
           ? html`<div class="text-[12px] text-[var(--text-muted)]">${reasonOf(a)}</div>`
           : null}
-        <pre class="text-[11px] font-mono bg-black/30 rounded p-3 overflow-x-auto max-h-64 whitespace-pre-wrap">${evidenceJson}</pre>
+        <pre class="text-[11px] font-mono bg-[var(--white-5)]/30 rounded p-3 overflow-x-auto max-h-64 whitespace-pre-wrap">${evidenceJson}</pre>
       </div>
     </${SurfaceCard}>
   `
@@ -337,7 +337,7 @@ export function AttributionPanel() {
             query.value = (e.target as HTMLInputElement).value
             selectedEventIdx.value = null
           }}
-          class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--card-border)] bg-black/20 px-2 py-1 text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-20)]0/50"
+          class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--card-border)] bg-[var(--white-5)]/20 px-2 py-1 text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-20)]0/50"
         />
       </div>
 

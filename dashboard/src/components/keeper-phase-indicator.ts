@@ -1,6 +1,16 @@
 // Keeper phase indicator — shows the 12-state lifecycle phase
 // as a color-coded badge with Korean label.
 // Phase = lifecycle health (생명주기), complementary to pipeline_stage (활동).
+//
+// Color mapping follows the Anyang Sleepers design system (#8177,
+// #8235): the 12 phases collapse into 6 visual groups so that across
+// a row of 40 keepers the palette reads as 6 semantic categories
+// rather than 12 similar-but-subtly-different hues. Individual phase
+// is still distinguished by its icon and Korean label — the color
+// carries the health meaning, the icon carries the identity.
+//
+// Values use CSS custom properties so the same palette swaps under
+// [data-theme="paper"] without a branch in this file.
 
 import { html } from 'htm/preact'
 import type { KeeperPhase } from '../types'
@@ -8,26 +18,46 @@ import { formatDuration } from '../lib/format-time'
 
 interface PhaseStyle {
   label: string
+  /** `var(--token)` string for the text + icon hue. */
   color: string
+  /** `var(--token)` for the badge fill (10% alpha variant). */
   bg: string
+  /** `var(--token)` for the border (20% alpha variant). */
   border: string
+  /** `none` or a `0 0 Xpx color-mix(...)` string. Static by design —
+      the token resolves at paint time, so a single literal works for
+      both dark and paper palettes. */
   glow: string
   icon: string
 }
 
+// 6 visual groups per design system README:
+//   ok      running                                          → --ok
+//   working compacting · handing_off · draining · restarting → --accent (slate)
+//   warn    failing · overflowed                             → --warn
+//   paused  paused                                           → --paused
+//   inactive offline · stopped · dead                        → --text-muted / --bad-light
+//
+// Restarting sits with "working" — operators read a restart as
+// recovery-in-progress, not a fresh failure. Dead keeps the bad-light
+// hue (brick) because it indicates a terminated agent, distinct from
+// Stopped (intentional) and Offline (never connected).
+const SOFT_GLOW = '0 0 8px color-mix(in srgb, currentColor 25%, transparent)'
+const STRONG_GLOW = '0 0 10px color-mix(in srgb, currentColor 32%, transparent)'
+
 const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
-  Offline:    { label: '오프라인',   color: '#6b7280', bg: 'rgba(107,114,128,0.08)', border: 'rgba(107,114,128,0.18)', glow: 'none',                             icon: '○' },
-  Running:    { label: '실행중',     color: '#34d399', bg: 'rgba(52,211,153,0.08)',  border: 'rgba(52,211,153,0.22)',  glow: '0 0 8px rgba(52,211,153,0.25)',    icon: '●' },
-  Failing:    { label: '오류중',     color: '#f97316', bg: 'rgba(249,115,22,0.08)',  border: 'rgba(249,115,22,0.22)',  glow: '0 0 8px rgba(249,115,22,0.25)',    icon: '▲' },
-  Overflowed: { label: '컨텍스트초과', color: '#f59e0b', bg: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.24)', glow: '0 0 8px rgba(245,158,11,0.24)',    icon: '⚠' },
-  Compacting: { label: '압축중',     color: '#a855f7', bg: 'rgba(168,85,247,0.08)',  border: 'rgba(168,85,247,0.22)',  glow: '0 0 8px rgba(168,85,247,0.20)',    icon: '◆' },
-  HandingOff: { label: '승계중',     color: '#f472b6', bg: 'rgba(244,114,182,0.08)', border: 'rgba(244,114,182,0.22)', glow: '0 0 8px rgba(244,114,182,0.20)',   icon: '⟳' },
-  Draining:   { label: '종료중',     color: '#fb923c', bg: 'rgba(251,146,60,0.08)',  border: 'rgba(251,146,60,0.22)',  glow: '0 0 8px rgba(251,146,60,0.20)',    icon: '▽' },
-  Paused:     { label: '일시정지',   color: '#a78bfa', bg: 'rgba(167,139,250,0.08)', border: 'rgba(167,139,250,0.22)', glow: 'none',                             icon: '⏸' },
-  Stopped:    { label: '정지',       color: '#6b7280', bg: 'rgba(107,114,128,0.08)', border: 'rgba(107,114,128,0.22)', glow: 'none',                             icon: '■' },
-  Crashed:    { label: '비정상종료', color: '#ef4444', bg: 'rgba(239,68,68,0.10)',   border: 'rgba(239,68,68,0.28)',   glow: '0 0 10px rgba(239,68,68,0.30)',    icon: '✕' },
-  Restarting: { label: '재시작중',   color: '#38bdf8', bg: 'rgba(56,189,248,0.08)',  border: 'rgba(56,189,248,0.22)',  glow: '0 0 8px rgba(56,189,248,0.20)',    icon: '↺' },
-  Dead:       { label: '종료',       color: '#4b5563', bg: 'rgba(75,85,99,0.06)',    border: 'rgba(75,85,99,0.18)',    glow: 'none',                             icon: '✦' },
+  Offline:    { label: '오프라인',     color: 'var(--text-muted)', bg: 'var(--white-5)',   border: 'var(--white-10)',   glow: 'none',        icon: '○' },
+  Running:    { label: '실행중',       color: 'var(--ok)',         bg: 'var(--ok-10)',     border: 'var(--ok-20)',      glow: SOFT_GLOW,     icon: '●' },
+  Failing:    { label: '오류중',       color: 'var(--warn)',       bg: 'var(--warn-10)',   border: 'var(--warn-20)',    glow: SOFT_GLOW,     icon: '▲' },
+  Overflowed: { label: '컨텍스트초과', color: 'var(--warn)',       bg: 'var(--warn-10)',   border: 'var(--warn-20)',    glow: SOFT_GLOW,     icon: '⚠' },
+  Compacting: { label: '압축중',       color: 'var(--accent)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '◆' },
+  HandingOff: { label: '승계중',       color: 'var(--accent)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '⟳' },
+  Draining:   { label: '종료중',       color: 'var(--accent)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '▽' },
+  Paused:     { label: '일시정지',     color: 'var(--paused)',     bg: 'var(--paused-10)', border: 'var(--paused-20)',  glow: 'none',        icon: '⏸' },
+  Stopped:    { label: '정지',         color: 'var(--text-muted)', bg: 'var(--white-5)',   border: 'var(--white-10)',   glow: 'none',        icon: '■' },
+  Crashed:    { label: '비정상종료',   color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: STRONG_GLOW,   icon: '✕' },
+  Restarting: { label: '재시작중',     color: 'var(--accent)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '↺' },
+  Dead:       { label: '종료',         color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: 'none',        icon: '✦' },
 }
 
 const BUFFER_PHASES = new Set<string>(['Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Restarting'])

@@ -29,9 +29,9 @@ import {
   type SafeParseResult,
 } from 'valibot'
 
-export const LinkPreviewKindSchema = picklist(['link', 'image'])
+const LinkPreviewKindSchema = picklist(['link', 'image'])
 
-export const LinkPreviewSchema = object({
+const LinkPreviewSchema = object({
   url: string(),
   kind: LinkPreviewKindSchema,
   canonical_url: optional(nullable(string())),

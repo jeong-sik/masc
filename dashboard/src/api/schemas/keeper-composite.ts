@@ -99,19 +99,19 @@ const KeeperCompositeAutoRulesSchema = object({
   goal_drift: number(),
 })
 
-export const KeeperCompositeMeasurementSchema = object({
+const KeeperCompositeMeasurementSchema = object({
   captured: boolean(),
   auto_rules: optional(KeeperCompositeAutoRulesSchema),
 })
 
-export const KeeperCompositeInvariantsSchema = object({
+const KeeperCompositeInvariantsSchema = object({
   phase_turn_alignment: boolean(),
   no_cascade_before_measurement: boolean(),
   compaction_atomicity: boolean(),
   event_priority_monotone: boolean(),
 })
 
-export const KeeperLastOutcomeSchema = object({
+const KeeperLastOutcomeSchema = object({
   turn_id: number(),
   ended_at: number(),
   decision_stage: KeeperCompositeDecisionStageSchema,

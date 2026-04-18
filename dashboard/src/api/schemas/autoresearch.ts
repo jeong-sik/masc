@@ -45,7 +45,7 @@ const AutoresearchCycleDecisionSchema = fallback(
   'discard',
 )
 
-export const AutoresearchCycleRecordSchema = object({
+const AutoresearchCycleRecordSchema = object({
   cycle: number(),
   hypothesis: string(),
   score_before: number(),
@@ -58,7 +58,7 @@ export const AutoresearchCycleRecordSchema = object({
   timestamp: number(),
 })
 
-export const AutoresearchLoopSummarySchema = object({
+const AutoresearchLoopSummarySchema = object({
   loop_id: string(),
   author: nullable(string()),
   goal: string(),
@@ -91,14 +91,14 @@ export const AutoresearchLoopSummarySchema = object({
   queued_hypothesis: nullable(string()),
 })
 
-export const AutoresearchLoopsResponseSchema = object({
+const AutoresearchLoopsResponseSchema = object({
   loops: array(AutoresearchLoopSummarySchema),
   total: number(),
   offset: number(),
   limit: number(),
 })
 
-export const AutoresearchLoopDetailSchema = object({
+const AutoresearchLoopDetailSchema = object({
   ...AutoresearchLoopSummarySchema.entries,
   history: array(AutoresearchCycleRecordSchema),
   history_count: number(),
@@ -107,7 +107,7 @@ export const AutoresearchLoopDetailSchema = object({
 // Action responses are heterogeneous (retry/delete/start each set a
 // different subset of fields). Every field past `ok` is optional on
 // purpose — the backend contract documents that.
-export const AutoresearchLoopActionResponseSchema = object({
+const AutoresearchLoopActionResponseSchema = object({
   ok: fallback(boolean(), false),
   action: optional(picklist(['retry', 'delete', 'start'])),
   loop_id: optional(string()),

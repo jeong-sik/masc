@@ -32,6 +32,15 @@ let fs_write_mode_enum_strings =
   [ "overwrite"; "append" ]
 
 
+(** Issue #8506: hand-mirrored from
+    [Board_votes.valid_vote_direction_strings]. Direct dependency
+    would risk a Tool_shard -> Board_* -> Tool_shard cycle.  Sync
+    regression test in [test_types.ml :: vote_direction_ssot] catches
+    drift. Same shape as #8467 / #8480 / #8484 / #8490 mirror+sync
+    pattern. *)
+let vote_direction_enum_strings =
+  [ "up"; "down" ]
+
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;
@@ -185,7 +194,9 @@ or disagreement with a proposal or finding.";
       ("type", `String "object");
       ("properties", `Assoc [
         ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID (format: p-xxxx...). Get from keeper_board_list results.")]);
-        ("direction", `Assoc [("type", `String "string"); ("enum", `List [`String "up"; `String "down"]); ("description", `String "Vote direction (default: up)")]);
+        (* Issue #8506: derive from local mirror that tracks
+           [Board_votes.valid_vote_direction_strings]. *)
+        ("direction", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) vote_direction_enum_strings)); ("description", `String "Vote direction (default: up)")]);
       ]);
       ("required", `List [`String "post_id"]);
     ];

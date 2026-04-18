@@ -61,6 +61,7 @@ val keeper_profile_fields :
         "window_sec": 300.0,
         "cooldown_threshold": 3,
         "cooldown_sec": 60.0,
+        "hard_quota_cooldown_sec": 3600.0,
         "providers": [
           { "provider_key": "glm:glm-5.1",
             "success_rate": 0.87,

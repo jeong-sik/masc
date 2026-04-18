@@ -515,6 +515,35 @@ let () =
           Masc_mcp.Keeper_tool_pr_review.valid_pr_review_event_strings
           Masc_mcp.Tool_shard.pr_review_event_enum_strings);
     ];
+    "memory_search_source_ssot", [
+      (* Issue #8484: introduces [memory_search_source] Variant where 3
+         sites previously hand-validated raw strings + relied on a silent
+         _ -> memory wildcard fallback. Witness covers all 3 constructors;
+         mirror sync test asserts [Tool_shard]'s hand-mirrored enum stays
+         in lock-step with the SSOT (cycle-avoidance pattern from #8467/
+         #8480). *)
+      Alcotest.test_case "witness covers all 3 variants" `Quick (fun () ->
+        let module M = Masc_mcp.Keeper_exec_memory in
+        let witness s =
+          let actual = M.memory_search_source_to_string s in
+          if not (List.mem actual M.valid_memory_search_source_strings) then
+            Alcotest.failf "memory_search_source_to_string %S not in valid_memory_search_source_strings" actual
+        in
+        witness M.Memory; witness M.History; witness M.All;
+        Alcotest.(check int) "count" 3 (List.length M.valid_memory_search_source_strings));
+      Alcotest.test_case "of_string_opt sound partial" `Quick (fun () ->
+        let module M = Masc_mcp.Keeper_exec_memory in
+        Alcotest.(check bool) "memory" true (M.memory_search_source_of_string_opt "memory" <> None);
+        Alcotest.(check bool) "HISTORY (case)" true (M.memory_search_source_of_string_opt "HISTORY" <> None);
+        Alcotest.(check bool) "  all  (trim)" true
+          (M.memory_search_source_of_string_opt "  all  " <> None);
+        Alcotest.(check bool) "garbage rejected" true
+          (M.memory_search_source_of_string_opt "definitely-not-a-source" = None));
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        Alcotest.(check (list string)) "tool_shard mirror == SSOT"
+          Masc_mcp.Keeper_exec_memory.valid_memory_search_source_strings
+          Masc_mcp.Tool_shard.memory_search_source_enum_strings);
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

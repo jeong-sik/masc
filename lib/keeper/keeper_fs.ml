@@ -16,19 +16,25 @@ let dir_mu = Eio.Mutex.create ()
 let ensured_dirs : (string, unit) Hashtbl.t = Hashtbl.create 16
 
 let ensure_dir (path : string) : string =
+  (* Capture exceptions inside the mutex body so the lock exits normally,
+     then re-raise after release. Escaping an exception from
+     Eio.Mutex.use_rw poisons the mutex and breaks all subsequent
+     ensure_dir calls in the same process (Issue #8475: fleet-test
+     isolation cascade failures). *)
+  let deferred_exn = ref None in
   Eio_guard.with_mutex dir_mu (fun () ->
     if not (Hashtbl.mem ensured_dirs path) || not (Fs_compat.file_exists path) then begin
-      (try Fs_compat.mkdir_p path
-       with
-       | Eio.Cancel.Cancelled _ as exn ->
-           Log.Keeper.warn "keeper_fs: ensure_dir cancelled path=%s" path;
-           raise exn
-       | exn ->
-           Log.Keeper.warn "keeper_fs: ensure_dir failed path=%s: %s"
-             path (Printexc.to_string exn);
-           raise exn);
-      Hashtbl.replace ensured_dirs path ()
+      match Fs_compat.mkdir_p path with
+      | () -> Hashtbl.replace ensured_dirs path ()
+      | exception (Eio.Cancel.Cancelled _ as exn) ->
+          Log.Keeper.warn "keeper_fs: ensure_dir cancelled path=%s" path;
+          deferred_exn := Some exn
+      | exception exn ->
+          Log.Keeper.warn "keeper_fs: ensure_dir failed path=%s: %s"
+            path (Printexc.to_string exn);
+          deferred_exn := Some exn
     end);
+  (match !deferred_exn with Some exn -> raise exn | None -> ());
   path
 
 let invalidate_dir (path : string) : unit =

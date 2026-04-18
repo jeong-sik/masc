@@ -234,7 +234,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
       <div class="mb-2">
         <p class="text-[13px] text-[var(--text-muted)]">에이전트별 활동 구간을 시간축으로 보여줍니다. 마우스 휠로 줌인/아웃, 드래그로 이동이 가능합니다.</p>
       </div>
-      <div class="w-full bg-[#0f1117] rounded-xl border border-[var(--card-border)] overflow-hidden swimlane-vis-container">
+      <div class="w-full bg-[#0f1117] rounded border border-[var(--card-border)] overflow-hidden swimlane-vis-container">
         <div ref=${containerRef} class="w-full"></div>
       </div>
       <div class="flex flex-wrap gap-3 mt-3 text-[11px] text-[var(--text-muted)]">

@@ -181,12 +181,12 @@ export function KeeperDiagnosticSummary({
   }
 
   return html`
-    <div class="py-3 px-4 rounded-xl border border-[var(--card-border)] bg-[rgba(5,14,31,0.55)]">
+    <div class="py-3 px-4 rounded border border-[var(--card-border)] bg-[rgba(5,14,31,0.55)]">
       <div class="mb-3 flex items-center justify-between gap-3">
         <div class="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">명시적 상태 조회</div>
         <button
           type="button"
-          class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
+          class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
           disabled=${busy}
           onClick=${() => { void refreshStatus() }}
         >
@@ -307,14 +307,14 @@ export function KeeperConversationPanel({
           <div class="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
+              class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
               onClick=${toggleMetadata}
             >
               ${showMetadata ? '메타데이터 숨김' : '메타데이터 표시'}
             </button>
             <button
               type="button"
-              class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)] ${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[var(--purple)]' : ''}"
+              class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)] ${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[var(--purple)]' : ''}"
               onClick=${toggleInternal}
             >
               ${showInternal ? '내부 메시지 숨김' : '내부 메시지 표시'}
@@ -323,7 +323,7 @@ export function KeeperConversationPanel({
               ? html`
                   <button
                     type="button"
-                    class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
+                    class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
                     disabled=${hydrating}
                     onClick=${() => { void expandHistory() }}
                   >

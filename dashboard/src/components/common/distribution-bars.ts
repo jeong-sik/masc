@@ -74,7 +74,7 @@ export function DistributionBars({
   const maxValue = Math.max(...visibleItems.map(item => item.value), 1)
 
   return html`
-    <div class="rounded-xl border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3">
+    <div class="rounded border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3">
       ${title
         ? html`
             <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">${title}</div>
@@ -132,7 +132,7 @@ export function SegmentedBar({
   const total = visibleItems.reduce((sum, item) => sum + item.value, 0)
 
   return html`
-    <div class="rounded-xl border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3">
+    <div class="rounded border border-card-border/35 bg-[var(--white-5)]/10 px-3 py-3">
       ${title
         ? html`
             <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">${title}</div>

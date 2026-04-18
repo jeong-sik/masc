@@ -360,7 +360,7 @@ export function AgentProfile({ name }: { name: string }) {
 
       <div class="grid grid-cols-2 gap-4 mb-4">
         ${!isKeeper ? html`
-        <${Card} title="태스크 (${owned.length})" class="ff-card rounded-xl">
+        <${Card} title="태스크 (${owned.length})" class="ff-card rounded">
           ${owned.length === 0
             ? html`<${EmptyState} message="할당된 태스크 없음" compact />`
             : html`<div class="flex flex-col gap-2">${owned.map(t => html`
@@ -381,7 +381,7 @@ export function AgentProfile({ name }: { name: string }) {
           const hasData = collabs.length > 0 || interests.length > 0
           if (!hasData) return null
           return html`
-            <${Card} title="관계 (${collabs.length})" class="ff-card rounded-xl">
+            <${Card} title="관계 (${collabs.length})" class="ff-card rounded">
               ${collabs.length > 0 ? html`
                 <div class="flex flex-col gap-1">
                   ${collabs.map(c => html`
@@ -409,7 +409,7 @@ export function AgentProfile({ name }: { name: string }) {
           `
         })()}
 
-        <${Card} title="타임라인" class="ff-card rounded-xl">
+        <${Card} title="타임라인" class="ff-card rounded">
           ${!timeline || (timeline.events ?? []).length === 0
             ? html`<${EmptyState} message="이벤트 없음" compact />`
             : html`<div class="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto">${(timeline.events ?? []).map((evt: AgentTimelineEvent, idx: number) => {
@@ -425,11 +425,11 @@ export function AgentProfile({ name }: { name: string }) {
               })}</div>`}
         <//>
 
-        <${Card} title="실시간" class="ff-card rounded-xl">
+        <${Card} title="실시간" class="ff-card rounded">
           <${AgentLiveTimeline} name=${name} />
         <//>
 
-        <${Card} title="프로젝트 활동" class="ff-card rounded-xl">
+        <${Card} title="프로젝트 활동" class="ff-card rounded">
           ${lines.length === 0
             ? html`<${EmptyState} message="관련 활동 없음" compact />`
             : (() => {
@@ -455,7 +455,7 @@ export function AgentProfile({ name }: { name: string }) {
         <//>
 
         ${(profileData?.taskHistories ?? []).length > 0 ? html`
-          <${Card} title="태스크 이력" class="ff-card rounded-xl col-span-full">
+          <${Card} title="태스크 이력" class="ff-card rounded col-span-full">
             <div class="agent-history-list">${(profileData?.taskHistories ?? []).map((row: TaskHistoryRow) => html`
               <div class="border border-[var(--card-border)] rounded-[10px] bg-[var(--white-2)] p-2.5" key=${row.taskId}>
                 <div class="mb-2"><span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">${row.taskId}</span></div>

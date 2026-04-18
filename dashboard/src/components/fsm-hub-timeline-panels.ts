@@ -161,7 +161,7 @@ export function SwimlaneTimeline({
   }
 
   return html`
-    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3" data-fsm-swimlane-root="true">
+    <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3" data-fsm-swimlane-root="true">
       <div class="mb-2 flex items-baseline justify-between gap-3 flex-wrap">
         <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
           상태 타임라인
@@ -384,7 +384,7 @@ export function TransitionTrail({
   }
 
   return html`
-    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
+    <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
       <div class="mb-1.5 flex items-center justify-between gap-2">
         <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
           Transition History (${isFiltering ? `${visibleHistory.length}/${history.length}` : history.length})
@@ -457,7 +457,7 @@ export function TopTransitionsPanel({
   const maxCount = transitions[0]?.count ?? 1
 
   return html`
-    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
+    <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
       <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
         Top Transitions (${transitions.length})
       </div>
@@ -521,7 +521,7 @@ export function DwellHistogramPanel({
   }
 
   return html`
-    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
+    <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
       <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
         State Dwell Time
       </div>

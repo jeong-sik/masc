@@ -218,7 +218,7 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
   const lineColor = lastRate >= 95 ? '#4ade80' : lastRate >= 90 ? '#fbbf24' : '#ef4444'
 
   return html`
-    <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] p-3">
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] p-3">
       <div class="flex items-center justify-between mb-1.5">
         <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">성공률 추이</span>
         <span class="text-xs font-mono" style="color:${lineColor}">${lastRate.toFixed(1)}%</span>

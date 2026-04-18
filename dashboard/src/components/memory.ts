@@ -148,7 +148,7 @@ function renderCategorySection(
   if (posts.length === 0 && hidden === 0) return null
   if (posts.length === 0 && hidden > 0) {
     return html`
-      <div class="mb-3 px-3 py-2 rounded-xl border border-dashed border-[var(--border-slate-16)] text-[12px] text-[var(--text-muted)]">
+      <div class="mb-3 px-3 py-2 rounded border border-dashed border-[var(--border-slate-16)] text-[12px] text-[var(--text-muted)]">
         ${label} — ${hidden}건 숨김
       </div>
     `
@@ -196,7 +196,7 @@ function NewPostForm() {
   }
 
   return html`
-    <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] grid gap-3">
+    <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] grid gap-3">
       <${TextInput}
         name="board_post_title"
         ariaLabel="새 글 제목"
@@ -233,7 +233,7 @@ function SortBar() {
   const current = boardSortMode.value
   const grouped = splitVisiblePosts(boardPosts.value)
   return html`
-    <div class="flex flex-col gap-3 mb-4 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+    <div class="flex flex-col gap-3 mb-4 p-3 rounded border border-[var(--card-border)] bg-[var(--card)]">
       <div class="flex items-center gap-1.5 flex-wrap">
         ${SORT_MODES.map(mode => html`
           <button type="button"
@@ -328,7 +328,7 @@ function MemorySummary() {
   const grouped = splitVisiblePosts(boardPosts.value)
   const visibleCount = grouped.groups.reduce((sum, g) => sum + g.posts.length, 0)
   return html`
-    <div class="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] text-[12px] text-[var(--text-muted)]">
+    <div class="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded border border-[var(--card-border)] bg-[var(--card)] text-[12px] text-[var(--text-muted)]">
       <span class="font-semibold text-[var(--text-strong)] tabular-nums text-[15px]">${visibleCount}</span>
       <span>개 표시 중</span>
       ${grouped.groups.map(g => {
@@ -386,7 +386,7 @@ function PostCard({ post }: { post: BoardPost }) {
 
   return html`
     <div
-      class="board-post group flex gap-3 rounded-xl p-4 border border-[var(--card-border)] bg-[var(--card)] hover:bg-[var(--white-6)] hover:border-[var(--accent-20)] transition-all duration-200 cursor-pointer"
+      class="board-post group flex gap-3 rounded p-4 border border-[var(--card-border)] bg-[var(--card)] hover:bg-[var(--white-6)] hover:border-[var(--accent-20)] transition-all duration-200 cursor-pointer"
       onClick=${() => navigateToPost(post.id)}
     >
       <!-- Select checkbox -->
@@ -506,7 +506,7 @@ export function Memory() {
       <${MemorySummary} />
       <${SortBar} />
       ${hint ? html`
-        <div class="mb-4 px-3 py-2 rounded-xl border border-[var(--border-slate-16)] bg-[var(--white-3)] text-[12px] text-[var(--text-muted)]">
+        <div class="mb-4 px-3 py-2 rounded border border-[var(--border-slate-16)] bg-[var(--white-3)] text-[12px] text-[var(--text-muted)]">
           ${hint}
         </div>
       ` : null}

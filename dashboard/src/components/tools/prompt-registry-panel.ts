@@ -175,7 +175,7 @@ export function PromptRegistryPanel() {
       ${status ? html`<div class="mb-4 rounded-lg border border-[rgba(56,189,248,0.28)] bg-[rgba(56,189,248,0.08)] px-3 py-2 text-[12px] text-[#bae6fd]">${status}</div>` : null}
 
       <div class="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-        <div class="min-h-[260px] rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] p-2">
+        <div class="min-h-[260px] rounded border border-[var(--card-border)] bg-[var(--white-3)] p-2">
           <div class="mb-2 flex items-center justify-between gap-2 px-2">
             <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">
               등록된 프롬프트
@@ -234,7 +234,7 @@ export function PromptRegistryPanel() {
           </div>
         </div>
 
-        <div class="min-w-0 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] p-4">
+        <div class="min-w-0 rounded border border-[var(--card-border)] bg-[var(--white-3)] p-4">
           ${selectedPrompt ? html`
             <div class="mb-4 flex flex-wrap items-center gap-2">
               <div class="font-mono text-[13px] text-[var(--text-strong)]">${selectedPrompt.key}</div>

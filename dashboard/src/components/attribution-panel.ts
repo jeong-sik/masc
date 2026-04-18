@@ -133,7 +133,7 @@ function GateCard({
   return html`
     <button
       type="button"
-      class="text-left w-full focus:outline-none focus:ring-2 focus:ring-[var(--accent-20)]0/50 rounded-xl ${toneClass}"
+      class="text-left w-full focus:outline-none focus:ring-2 focus:ring-[var(--accent-20)]0/50 rounded ${toneClass}"
       onClick=${onSelect}
     >
       <${SurfaceCard} variant="compact">

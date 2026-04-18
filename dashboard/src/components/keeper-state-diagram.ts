@@ -176,7 +176,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
       </div>
 
       ${phaseMismatch ? html`
-        <div class="rounded-xl border border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)] px-3 py-2 text-[11px] leading-[1.5] text-[var(--text-body)]">
+        <div class="rounded border border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)] px-3 py-2 text-[11px] leading-[1.5] text-[var(--text-body)]">
           keeper row phase와 composite snapshot phase가 다릅니다. composite snapshot을 authoritative runtime-truth로 사용합니다.
         </div>
       ` : null}
@@ -190,7 +190,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
         ${INVARIANT_LABELS.map(([key, label]) => {
           const ok = snapshot.invariants[key]
           return html`
-            <div class=${`rounded-xl border px-3 py-2 text-[11px] leading-[1.5] ${badgeTone(ok)}`}>
+            <div class=${`rounded border px-3 py-2 text-[11px] leading-[1.5] ${badgeTone(ok)}`}>
               <div class="font-semibold">${label}</div>
               <div class="mt-1 font-mono">${ok ? 'ok' : 'violated'}</div>
             </div>
@@ -202,7 +202,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
         <div class="grid gap-2">
           <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Observed transitions</div>
           ${transitions.map(transition => html`
-            <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[11px] leading-[1.5] text-[var(--text-body)]">
+            <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[11px] leading-[1.5] text-[var(--text-body)]">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="font-mono text-[var(--text-strong)]">${normalizePhase(transition.prev_phase) ?? transition.prev_phase}</span>
                 <span class="text-[var(--text-dim)]">→</span>

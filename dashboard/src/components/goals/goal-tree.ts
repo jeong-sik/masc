@@ -14,7 +14,13 @@ import type {
   GoalTreeTask,
   GoalTreeSummary,
 } from '../../types'
-import { horizonLabel, horizonColor, priorityStars } from './goal-helpers'
+import {
+  horizonLabel,
+  horizonColor,
+  priorityStars,
+  countAwaitingVerificationTasks,
+  countAwaitingVerificationInTree,
+} from './goal-helpers'
 
 /**
  * Pure hierarchy filter for goal tree nodes.
@@ -146,7 +152,13 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
 
 // --- Summary stats ---
 
-function TreeSummary({ summary }: { summary: GoalTreeSummary }) {
+function TreeSummary({
+  summary,
+  awaitingVerificationCount,
+}: {
+  summary: GoalTreeSummary
+  awaitingVerificationCount: number
+}) {
   return html`
     <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3">
       <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
@@ -165,6 +177,12 @@ function TreeSummary({ summary }: { summary: GoalTreeSummary }) {
         <div class="text-2xl font-bold text-ok tabular-nums">${summary.done_tasks}</div>
         <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted mt-1">완료</div>
       </div>
+      ${awaitingVerificationCount > 0 ? html`
+        <div class="rounded border border-accent/30 bg-[var(--accent-10)] p-3 text-center">
+          <div class="text-2xl font-bold text-accent tabular-nums">${awaitingVerificationCount}</div>
+          <div class="text-3xs font-semibold uppercase tracking-widest text-accent/80 mt-1">검증 대기</div>
+        </div>
+      ` : null}
       <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
         <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted mb-2">전체 수렴도</div>
         <${ConvergenceBar} pct=${summary.overall_convergence_pct} />
@@ -226,6 +244,14 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
         ${node.task_count > 0 ? html`
           <span class="font-medium">${node.task_done_count}/${node.task_count} 태스크</span>
         ` : null}
+        ${(() => {
+          const awaiting = countAwaitingVerificationTasks(node.tasks)
+          return awaiting > 0 ? html`
+            <span class="rounded border border-accent/30 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-medium text-accent" title="verifier keeper의 독립 실측을 기다리는 task">
+              검증 대기 ${awaiting}
+            </span>
+          ` : null
+        })()}
         ${node.child_count > 0 ? html`
           <span class="font-medium">${node.child_count} 하위 목표</span>
         ` : null}
@@ -337,7 +363,10 @@ export function GoalTree() {
 
         ${error ? html`<${ErrorState} message=${error} />` : null}
 
-        ${data ? html`<${TreeSummary} summary=${data.summary} />` : null}
+        ${data ? html`<${TreeSummary}
+          summary=${data.summary}
+          awaitingVerificationCount=${countAwaitingVerificationInTree(data.tree)}
+        />` : null}
       </section>
 
       ${loading && !data ? html`

@@ -116,6 +116,80 @@ function TaskEventsSection() {
   `
 }
 
+// -- Verdict Lineage (compact timeline of the verification pipeline) ---
+
+const VERDICT_LINEAGE_LABELS = new Set([
+  'submit_for_verification',
+  'awaiting_verification',
+  'approve',
+  'approved',
+  'reject',
+  'rejected',
+])
+
+function verdictStageLabel(label: string): string {
+  switch (label) {
+    case 'submit_for_verification':
+    case 'awaiting_verification': return 'Submit'
+    case 'approve':
+    case 'approved': return 'Approve'
+    case 'reject':
+    case 'rejected': return 'Reject'
+    default: return label
+  }
+}
+
+function verdictToneClass(label: string): string {
+  switch (label) {
+    case 'approve':
+    case 'approved': return 'border-ok/30 bg-ok/10 text-ok'
+    case 'reject':
+    case 'rejected': return 'border-warn/30 bg-warn/10 text-warn'
+    default: return 'border-accent/30 bg-[var(--accent-10)] text-accent'
+  }
+}
+
+function VerdictLineageSection() {
+  const events = taskEvents.value
+  const verdictEvents = events
+    .filter((e: NormalizedTaskEvent) => VERDICT_LINEAGE_LABELS.has(e.label))
+    .sort((a: NormalizedTaskEvent, b: NormalizedTaskEvent) => {
+      if (!a.ts) return 1
+      if (!b.ts) return -1
+      return a.ts.localeCompare(b.ts)
+    })
+
+  if (verdictEvents.length === 0) return null
+
+  return html`
+    <div>
+      <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted mb-2">검증 진행 이력</div>
+      <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
+        <div class="flex flex-col gap-2">
+          ${verdictEvents.map((evt: NormalizedTaskEvent, i: number) => {
+            const tone = verdictToneClass(evt.label)
+            const stage = verdictStageLabel(evt.label)
+            const key = evt.ts ? `${evt.ts}-${i}` : `${evt.label}-${i}`
+            return html`
+              <div key=${key} class="flex items-start gap-3">
+                <span class=${`shrink-0 rounded border px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 ${tone}`}>${stage}</span>
+                <div class="flex-1 min-w-0 text-2xs">
+                  <div class="flex flex-wrap items-center gap-2 text-text-body">
+                    ${evt.agent ? html`<span class="font-mono text-accent">@${evt.agent}</span>` : html`<span class="text-text-muted">(unknown)</span>`}
+                    ${evt.actorKind ? html`<span class="text-text-muted">· ${evt.actorKind}</span>` : null}
+                    ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} class="text-3xs text-text-dim" />` : null}
+                  </div>
+                  ${evt.notes ? html`<div class="mt-1 text-3xs text-text-muted break-words"><${RichContent} text=${evt.notes} previewLimit=${1} /></div>` : null}
+                </div>
+              </div>
+            `
+          })}
+        </div>
+      </div>
+    </div>
+  `
+}
+
 function gateTone(status?: string | null): string {
   switch (status) {
     case 'ready': return 'text-ok border-ok/25 bg-ok/10'
@@ -386,6 +460,7 @@ export function TaskDetailOverlay() {
           ` : null}
 
           <${ContractSection} task=${task} />
+          <${VerdictLineageSection} />
           <${ExecutionLinksSection} task=${task} />
           <${HandoffSection} task=${task} />
 

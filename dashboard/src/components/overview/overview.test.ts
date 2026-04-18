@@ -14,7 +14,19 @@ import type {
   DashboardMissionSessionCard,
 } from '../../types/dashboard-mission'
 
-const FIXED_NOW = Date.parse('2026-04-18T10:00:00+09:00')
+const FIXED_NOW = new Date(2026, 3, 18, 10, 0, 0, 0).getTime()
+
+function localIsoAt(
+  hour: number,
+  minute: number = 0,
+  second: number = 0,
+  dayOffset: number = 0,
+): string {
+  const d = new Date(FIXED_NOW)
+  d.setDate(d.getDate() + dayOffset)
+  d.setHours(hour, minute, second, 0)
+  return d.toISOString()
+}
 
 function makeSession(partial: Partial<DashboardMissionSessionCard>): DashboardMissionSessionCard {
   return {
@@ -40,9 +52,9 @@ function makeKeeper(partial: Partial<Keeper>): Keeper {
 describe('computeFunnelCounts', () => {
   it('counts today-created tasks regardless of status', () => {
     const tasks = [
-      makeTask({ id: 'a', created_at: '2026-04-18T01:00:00+09:00', status: 'todo' }),
-      makeTask({ id: 'b', created_at: '2026-04-18T09:59:00+09:00', status: 'in_progress' }),
-      makeTask({ id: 'c', created_at: '2026-04-17T23:59:59+09:00', status: 'todo' }),
+      makeTask({ id: 'a', created_at: localIsoAt(1), status: 'todo' }),
+      makeTask({ id: 'b', created_at: localIsoAt(9, 59), status: 'in_progress' }),
+      makeTask({ id: 'c', created_at: localIsoAt(23, 59, 59, -1), status: 'todo' }),
     ]
     const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
     expect(counts.created).toBe(2)
@@ -61,7 +73,7 @@ describe('computeFunnelCounts', () => {
   it('separates awaiting_verification from other statuses', () => {
     const tasks = [
       makeTask({ id: 'a', status: 'awaiting_verification' }),
-      makeTask({ id: 'b', status: 'done', completed_at: '2026-04-18T05:00:00+09:00' }),
+      makeTask({ id: 'b', status: 'done', completed_at: localIsoAt(5) }),
     ]
     const counts = computeFunnelCounts(tasks, null, FIXED_NOW)
     expect(counts.awaiting).toBe(1)
@@ -70,8 +82,8 @@ describe('computeFunnelCounts', () => {
 
   it('counts only today-completed done tasks', () => {
     const tasks = [
-      makeTask({ id: 'a', status: 'done', completed_at: '2026-04-18T05:00:00+09:00' }),
-      makeTask({ id: 'b', status: 'done', completed_at: '2026-04-17T23:00:00+09:00' }),
+      makeTask({ id: 'a', status: 'done', completed_at: localIsoAt(5) }),
+      makeTask({ id: 'b', status: 'done', completed_at: localIsoAt(23, 0, 0, -1) }),
       makeTask({ id: 'c', status: 'done' }),
     ]
     const counts = computeFunnelCounts(tasks, null, FIXED_NOW)

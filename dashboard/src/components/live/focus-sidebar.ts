@@ -43,9 +43,10 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
         ${list.length === 0
           ? html`<div class="py-6 text-center text-[var(--text-muted)] text-[13px]">활성 에이전트 없음. masc_join으로 접속하면 여기에 표시됩니다.</div>`
           : list.map(agent => html`
-            <div
+            <button
+              type="button"
               key=${agent.name}
-              class="focus-agent-card rounded border border-[var(--border-slate-12)] bg-[var(--white-3)] p-3.5 transition-colors duration-200 ${selected === agent.name ? 'focus-agent-selected' : ''}"
+              class="focus-agent-card w-full rounded border border-[var(--border-slate-12)] bg-[var(--white-3)] p-3.5 transition-colors duration-200 text-left cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${selected === agent.name ? 'focus-agent-selected' : ''}"
               onClick=${() => openAgentDetail(agent.name)}
             >
               <div class="focus-agent-header">
@@ -69,7 +70,7 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
                   ? html`<${TimeAgo} timestamp=${agent.lastActivityAt} />`
                   : null}
               </div>
-            </div>
+            </button>
           `)}
       </div>
     </div>

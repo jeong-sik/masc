@@ -344,7 +344,7 @@ describe('TelemetryUnified', () => {
     })
     await flushUi()
 
-    const groupRow = Array.from(container.querySelectorAll('[role="button"]'))
+    const groupRow = Array.from(container.querySelectorAll('button'))
       .find(node => node.textContent?.includes('Polling / no-op · masc_status · 3 events'))
     expect(groupRow).toBeTruthy()
     expect(groupRow?.getAttribute('aria-expanded')).toBe('false')

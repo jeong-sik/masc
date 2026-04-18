@@ -357,17 +357,20 @@ export function HandoffTimeline({
                     : 'text-text-muted hover:text-text hover:bg-bg-1/60'
                   const clickable = typeof onSelectKeeper === 'function'
                   const rowLabelCls =
-                    `w-32 shrink-0 truncate text-[11px] font-mono rounded px-1 ${labelCls}` +
-                    (clickable ? ' cursor-pointer' : '')
+                    `w-32 shrink-0 truncate text-[11px] font-mono rounded px-1 text-left ${labelCls}` +
+                    (clickable
+                      ? ' cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent'
+                      : '')
                   return html`
                   <div class="flex items-center gap-3">
-                    <div
-                      class=${rowLabelCls}
-                      title=${row.keeper}
-                      onClick=${() => onSelectKeeper?.(row.keeper)}
-                    >
-                      ${row.keeper}
-                    </div>
+                    ${clickable
+                      ? html`<button
+                          type="button"
+                          class=${rowLabelCls}
+                          title=${row.keeper}
+                          onClick=${() => onSelectKeeper?.(row.keeper)}
+                        >${row.keeper}</button>`
+                      : html`<div class=${rowLabelCls} title=${row.keeper}>${row.keeper}</div>`}
                     <div class="relative flex-1 h-6 rounded-md bg-bg-1/40 border border-card-border/50">
                       ${row.chips.map(chip => {
                         const pct = ((chip.ts - windowStart) / span) * 100

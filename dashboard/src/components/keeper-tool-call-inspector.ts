@@ -35,18 +35,11 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
     <div
       class="border-b border-[var(--card-border)] hover:bg-[var(--bg-panel-hover)] transition-colors"
     >
-      <div
-        class="flex items-center gap-2 px-3 py-2 text-xs cursor-pointer"
-        role="button"
-        tabIndex=${0}
+      <button
+        type="button"
+        class="w-full flex items-center gap-2 px-3 py-2 text-xs cursor-pointer text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         aria-expanded=${expanded.value}
         onClick=${() => { expanded.value = !expanded.value }}
-        onKeyDown=${(e: KeyboardEvent) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            expanded.value = !expanded.value
-          }
-        }}
       >
         <span class="font-mono ${cat.color} w-4 text-center flex-shrink-0">${cat.icon}</span>
         <span class="font-mono text-[var(--text-strong)] flex-shrink-0 w-16">${formatTimestamp(entry.ts)}</span>
@@ -60,7 +53,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
         <span class="flex-shrink-0 w-4 text-[var(--text-muted)] text-center">
           ${expanded.value ? '-' : '+'}
         </span>
-      </div>
+      </button>
 
       ${expanded.value ? html`
         <div class="px-3 pb-3 space-y-2">

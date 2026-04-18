@@ -1,9 +1,0 @@
-/* Overview & Home — overview-*, home-* utilities. Extracted from global.css for #3915. */
-
-/* ── Overview / Home (merged from overview.css) ────────── */
-
-@utility narrative-timeline {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(138, 163, 211, 0.15) transparent;
-}
-

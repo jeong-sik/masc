@@ -78,6 +78,9 @@ Canonical label set:
 | Area | `area:coordination`, `area:swarm-execution`, `area:dashboard`, `area:operator`, `area:transport`, `area:config`, `area:ci`, `area:docs`, `area:experimental` |
 | Target | `target:now`, `target:next`, `target:later` |
 | Gates | `release-blocker`, `product-gap` |
+| Root cause | `root-cause:SSOT`, `root-cause:TEL`, `root-cause:BND`, `root-cause:SIL`, `root-cause:VAR`, `root-cause:STR`, `root-cause:DET` |
+
+`root-cause:*` is optional and applied per `docs/spec/16-root-cause-rubric.md`. Multiple labels are allowed: empirical sweep 2026-04-19 found 60% of issues match two or more categories (e.g. a boundary violation that also silently swallows errors). Unlike `type:*` / `area:*` / `target:*`, missing a `root-cause:*` label is not a triage violation — the rubric only applies when a structural marker matches.
 
 Triage defaults:
 

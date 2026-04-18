@@ -438,10 +438,16 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   Tool_metrics_persist.start_flush_fiber ~sw ~clock
     ~base_path:state.room_config.base_path;
   (* System_internal tool usage log: durable JSONL for pruning evidence (#5120) *)
-  Tool_usage_log.init ~base_path:state.room_config.base_path;
+  Tool_usage_log.init
+    ~base_path:state.room_config.base_path
+    ~cluster_name:state.room_config.backend_config.Backend_types.cluster_name
+    ();
   Tool_usage_log.install ();
   (* Keeper tool call I/O log: full input/output for dashboard inspector *)
-  Keeper_tool_call_log.init ~base_path:state.room_config.base_path;
+  Keeper_tool_call_log.init
+    ~base_path:state.room_config.base_path
+    ~cluster_name:state.room_config.backend_config.Backend_types.cluster_name
+    ();
   Otel_dispatch_hook.install ();
   Otel_spans.setup_exporter ~sw env;
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;

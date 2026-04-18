@@ -18,7 +18,7 @@ let with_tmp_log f =
        (int_of_float (Unix.gettimeofday () *. 1000.0))) in
   Fs_compat.mkdir_p dir;
   Keeper_tool_call_log.reset_for_testing ();
-  Keeper_tool_call_log.init ~base_path:dir;
+  Keeper_tool_call_log.init ~base_path:dir ();
   Fun.protect
     ~finally:(fun () ->
       Keeper_tool_call_log.reset_for_testing ();
@@ -33,7 +33,7 @@ let with_tmp_log_dir f =
        (int_of_float (Unix.gettimeofday () *. 1000.0))) in
   Fs_compat.mkdir_p dir;
   Keeper_tool_call_log.reset_for_testing ();
-  Keeper_tool_call_log.init ~base_path:dir;
+  Keeper_tool_call_log.init ~base_path:dir ();
   Fun.protect
     ~finally:(fun () ->
       Keeper_tool_call_log.reset_for_testing ();

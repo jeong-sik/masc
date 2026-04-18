@@ -269,31 +269,165 @@ let test_dangerous_gh_command_classifier () =
       (gh_dangerous_command cmd)
   ) cases
 
-let test_tool_call_observer_receives_keeper_context () =
-  let seen = ref None in
-  let observer ~keeper_name ~tool_name ~input ~success =
-    seen := Some (keeper_name, tool_name, input, success)
+(* Tool-call observability flows through the OAS Event_bus.
+   This test verifies a subscriber can receive the equivalent
+   signal that MASC-side observers previously emitted. *)
+let test_tool_call_observer_via_oas_event_bus () =
+  Eio_main.run @@ fun _env ->
+  let bus = Agent_sdk.Event_bus.create () in
+  let sub =
+    Agent_sdk.Event_bus.subscribe
+      ~filter:(Agent_sdk.Event_bus.filter_agent "keeper-a")
+      bus
   in
-  Keeper_exec_tools.add_tool_call_observer observer;
-  Fun.protect
-    ~finally:(fun () -> Keeper_exec_tools.remove_tool_call_observer observer)
-    (fun () ->
-      let input = mk_cmd "pr list" in
-      Keeper_exec_tools.notify_tool_call_observers
-        ~keeper_name:"keeper-a"
-        ~tool_name:"keeper_shell"
-        ~input
-        ~success:true;
-      match !seen with
-      | Some (keeper_name, tool_name, observed_input, success) ->
-          Alcotest.(check string) "keeper name" "keeper-a" keeper_name;
-          Alcotest.(check string) "tool name" "keeper_shell" tool_name;
-          Alcotest.(check bool) "success flag" true success;
-          Alcotest.(check string) "input payload"
-            (Yojson.Safe.to_string input)
-            (Yojson.Safe.to_string observed_input)
+  let input = mk_cmd "pr list" in
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.mk_event
+       (Agent_sdk.Event_bus.ToolCalled
+          { agent_name = "keeper-a";
+            tool_name = "keeper_shell";
+            input }));
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.mk_event
+       (Agent_sdk.Event_bus.ToolCompleted
+          { agent_name = "keeper-a";
+            tool_name = "keeper_shell";
+            output = Ok { Agent_sdk.Types.content = "ok" } }));
+  let events = Agent_sdk.Event_bus.drain sub in
+  Agent_sdk.Event_bus.unsubscribe bus sub;
+  Alcotest.(check int) "two tool events received" 2 (List.length events);
+  let called =
+    List.find_opt
+      (fun (evt : Agent_sdk.Event_bus.event) ->
+        match evt.payload with
+        | Agent_sdk.Event_bus.ToolCalled _ -> true
+        | _ -> false)
+      events
+  in
+  let completed =
+    List.find_opt
+      (fun (evt : Agent_sdk.Event_bus.event) ->
+        match evt.payload with
+        | Agent_sdk.Event_bus.ToolCompleted _ -> true
+        | _ -> false)
+      events
+  in
+  (match called with
+   | Some { payload = Agent_sdk.Event_bus.ToolCalled
+              { agent_name; tool_name; input = observed_input }; _ } ->
+       Alcotest.(check string) "agent name" "keeper-a" agent_name;
+       Alcotest.(check string) "tool name" "keeper_shell" tool_name;
+       Alcotest.(check string) "input payload"
+         (Yojson.Safe.to_string input)
+         (Yojson.Safe.to_string observed_input)
+   | _ -> Alcotest.fail "expected ToolCalled event");
+  (match completed with
+   | Some { payload = Agent_sdk.Event_bus.ToolCompleted
+              { agent_name; tool_name; output }; _ } ->
+       Alcotest.(check string) "agent name" "keeper-a" agent_name;
+       Alcotest.(check string) "tool name" "keeper_shell" tool_name;
+       Alcotest.(check bool) "output is Ok" true (Result.is_ok output)
+   | _ -> Alcotest.fail "expected ToolCompleted event")
+
+(* Replicate the Keeper_unified_turn side-effect tracking pattern:
+   pair ToolCalled + ToolCompleted (Ok) per tool_name queue, and
+   flag committed mutating tools via [has_mutating_side_effect_with_input]. *)
+let test_side_effect_tracking_via_event_bus () =
+  Eio_main.run @@ fun _env ->
+  let bus = Agent_sdk.Event_bus.create () in
+  let sub =
+    Agent_sdk.Event_bus.subscribe
+      ~filter:(Agent_sdk.Event_bus.filter_agent "keeper-a") bus
+  in
+  let mutating = ref [] in
+  let pending : (string, Yojson.Safe.t Queue.t) Hashtbl.t =
+    Hashtbl.create 4
+  in
+  let push_pending tool_name input =
+    let q =
+      match Hashtbl.find_opt pending tool_name with
+      | Some q -> q
       | None ->
-          Alcotest.fail "expected observer notification")
+          let q = Queue.create () in
+          Hashtbl.add pending tool_name q;
+          q
+    in
+    Queue.add input q
+  in
+  let pop_pending tool_name =
+    match Hashtbl.find_opt pending tool_name with
+    | Some q when not (Queue.is_empty q) -> Some (Queue.pop q)
+    | _ -> None
+  in
+  let process events =
+    List.iter
+      (fun (evt : Agent_sdk.Event_bus.event) ->
+        match evt.payload with
+        | Agent_sdk.Event_bus.ToolCalled { tool_name; input; _ } ->
+            push_pending tool_name input
+        | Agent_sdk.Event_bus.ToolCompleted
+            { tool_name; output = Ok _; _ } ->
+            let input =
+              match pop_pending tool_name with
+              | Some i -> i
+              | None -> `Null
+            in
+            if Keeper_exec_tools.has_mutating_side_effect_with_input
+                 ~tool_name ~input
+            then mutating := tool_name :: !mutating
+        | Agent_sdk.Event_bus.ToolCompleted
+            { tool_name; output = Error _; _ } ->
+            let _ = pop_pending tool_name in
+            ignore tool_name
+        | _ -> ())
+      events
+  in
+  (* A mutating success: keeper_shell gh pr merge *)
+  let mut_input =
+    `Assoc [ ("op", `String "gh"); ("cmd", `String "pr merge 123") ]
+  in
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.mk_event
+       (Agent_sdk.Event_bus.ToolCalled
+          { agent_name = "keeper-a"; tool_name = "keeper_shell";
+            input = mut_input }));
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.mk_event
+       (Agent_sdk.Event_bus.ToolCompleted
+          { agent_name = "keeper-a"; tool_name = "keeper_shell";
+            output = Ok { Agent_sdk.Types.content = "merged" } }));
+  (* A read-only success: keeper_shell gh pr list (should NOT be tracked) *)
+  let ro_input =
+    `Assoc [ ("op", `String "gh"); ("cmd", `String "pr list") ]
+  in
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.mk_event
+       (Agent_sdk.Event_bus.ToolCalled
+          { agent_name = "keeper-a"; tool_name = "keeper_shell";
+            input = ro_input }));
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.mk_event
+       (Agent_sdk.Event_bus.ToolCompleted
+          { agent_name = "keeper-a"; tool_name = "keeper_shell";
+            output = Ok { Agent_sdk.Types.content = "list" } }));
+  (* A failed mutating call: should NOT be tracked *)
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.mk_event
+       (Agent_sdk.Event_bus.ToolCalled
+          { agent_name = "keeper-a"; tool_name = "keeper_shell";
+            input = mut_input }));
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.mk_event
+       (Agent_sdk.Event_bus.ToolCompleted
+          { agent_name = "keeper-a"; tool_name = "keeper_shell";
+            output = Error { Agent_sdk.Types.message = "boom";
+                             recoverable = false } }));
+  let events = Agent_sdk.Event_bus.drain sub in
+  Agent_sdk.Event_bus.unsubscribe bus sub;
+  process events;
+  Alcotest.(check (list string))
+    "exactly one committed mutating tool (merge)"
+    [ "keeper_shell" ] !mutating
 
 (* ================================================================ *)
 (* Main-worktree mutation-boundary exemptions                        *)
@@ -425,8 +559,10 @@ let () =
             test_input_aware_mutation_detection;
           Alcotest.test_case "dangerous gh classifier" `Quick
             test_dangerous_gh_command_classifier;
-          Alcotest.test_case "tool observer receives keeper context" `Quick
-            test_tool_call_observer_receives_keeper_context;
+          Alcotest.test_case "tool observer via OAS event bus" `Quick
+            test_tool_call_observer_via_oas_event_bus;
+          Alcotest.test_case "side-effect tracking via OAS event bus" `Quick
+            test_side_effect_tracking_via_event_bus;
           Alcotest.test_case "task claim mutating but boundary exempt" `Quick
             test_task_claim_is_mutating_but_boundary_exempt;
           Alcotest.test_case "masc_code_git write actions bypass boundary" `Quick

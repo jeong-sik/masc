@@ -222,11 +222,9 @@ let make_tools
                 Hashtbl.replace failure_counts key count;
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:false;
                 !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:false ~duration_ms;
-                Keeper_exec_tools.notify_tool_call_observers
-                  ~keeper_name:meta.name
-                  ~tool_name:td.name
-                  ~input
-                  ~success:false;
+                (* Tool-call observability flows through the OAS Event_bus
+                   (ToolCalled + ToolCompleted). MASC-side observers removed
+                   in refactor/tool-call-single-source. *)
                 (let tr = Tool_result.{ tool_name = td.name; success = false;
                     duration_ms = Float.of_int duration_ms; data = `Null } in
                  ignore (Tool_dispatch.run_post_hooks tr));
@@ -271,11 +269,7 @@ let make_tools
                 Hashtbl.remove failure_counts key;
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:true;
                 !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:true ~duration_ms;
-                Keeper_exec_tools.notify_tool_call_observers
-                  ~keeper_name:meta.name
-                  ~tool_name:td.name
-                  ~input
-                  ~success:true;
+                (* Tool-call observability via OAS Event_bus. See above. *)
                 (let tr = Tool_result.{ tool_name = td.name; success = true;
                     duration_ms = Float.of_int duration_ms; data = `Null } in
                  ignore (Tool_dispatch.run_post_hooks tr));
@@ -358,11 +352,7 @@ let make_tools
               Hashtbl.replace failure_counts key count;
               Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:false;
               !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:false ~duration_ms;
-              Keeper_exec_tools.notify_tool_call_observers
-                ~keeper_name:meta.name
-                ~tool_name:td.name
-                ~input
-                ~success:false;
+              (* Tool-call observability via OAS Event_bus. See above. *)
               (try Sse.broadcast
                 (`Assoc [
                   ("type", `String "keeper_tool_call");

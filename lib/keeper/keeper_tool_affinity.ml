@@ -25,16 +25,16 @@ let recency_lambda = 0.01
    a hand-rolled [try ... with Eio.Cancel.Cancelled -> raise | _ ->
    default] block.  The clamp runs after parsing, so a malformed env
    value returns [default] unmodified. *)
-let configured_max_k () =
-  match Sys.getenv_opt "MASC_KEEPER_TOOL_AFFINITY_K" with
+let configured_max_k ?(getenv = Sys.getenv_opt) () =
+  match getenv "MASC_KEEPER_TOOL_AFFINITY_K" with
   | Some s ->
     max 0
       (min 20
          (Safe_ops.int_of_string_with_default ~default:default_max_k s))
   | None -> default_max_k
 
-let configured_lookback_days () =
-  match Sys.getenv_opt "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" with
+let configured_lookback_days ?(getenv = Sys.getenv_opt) () =
+  match getenv "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" with
   | Some s ->
     max 1
       (min 30

@@ -89,115 +89,134 @@ let test_populates_discovered () =
   Alcotest.(check bool) "board_comment present" true
     (List.mem "keeper_board_comment" active)
 
-(* Environment configuration tests *)
+(* Environment configuration tests — using parameter injection *)
+
 let test_configured_max_k_default () =
-  (* Unset env var to test default *)
-  Unix.unsetenv "MASC_KEEPER_TOOL_AFFINITY_K";
-  let k = Affinity.configured_max_k () in
+  (* Mock getenv that returns None to trigger default *)
+  let mock_getenv _ = None in
+  let k = Affinity.configured_max_k ~getenv:mock_getenv () in
   Alcotest.(check int) "default max_k is 5" 5 k
 
 let test_configured_max_k_clamps_lower () =
   (* Negative values clamp to 0 *)
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_K" "-1";
-  let k = Affinity.configured_max_k () in
-  Alcotest.(check int) "-1 clamps to 0" 0 k
+  let test_value value expected =
+    let mock_getenv key =
+      match key with
+      | "MASC_KEEPER_TOOL_AFFINITY_K" -> Some value
+      | _ -> None
+    in
+    let k = Affinity.configured_max_k ~getenv:mock_getenv () in
+    Alcotest.(check int) (Printf.sprintf "%s clamps to %d" value expected) expected k
+  in
+  test_value "-1" 0
 
 let test_configured_max_k_clamps_upper () =
   (* Values > 20 clamp to 20 *)
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_K" "21";
-  let k = Affinity.configured_max_k () in
-  Alcotest.(check int) "21 clamps to 20" 20 k;
-
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_K" "999";
-  let k = Affinity.configured_max_k () in
-  Alcotest.(check int) "999 clamps to 20" 20 k
+  let test_value value expected =
+    let mock_getenv key =
+      match key with
+      | "MASC_KEEPER_TOOL_AFFINITY_K" -> Some value
+      | _ -> None
+    in
+    let k = Affinity.configured_max_k ~getenv:mock_getenv () in
+    Alcotest.(check int) (Printf.sprintf "%s clamps to %d" value expected) expected k
+  in
+  test_value "21" 20;
+  test_value "999" 20
 
 let test_configured_max_k_boundary_values () =
   (* Exact boundary values *)
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_K" "0";
-  let k = Affinity.configured_max_k () in
-  Alcotest.(check int) "0 stays 0" 0 k;
-
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_K" "20";
-  let k = Affinity.configured_max_k () in
-  Alcotest.(check int) "20 stays 20" 20 k;
-
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_K" "10";
-  let k = Affinity.configured_max_k () in
-  Alcotest.(check int) "10 stays 10" 10 k
+  let test_value value expected =
+    let mock_getenv key =
+      match key with
+      | "MASC_KEEPER_TOOL_AFFINITY_K" -> Some value
+      | _ -> None
+    in
+    let k = Affinity.configured_max_k ~getenv:mock_getenv () in
+    Alcotest.(check int) (Printf.sprintf "%s stays %d" value expected) expected k
+  in
+  test_value "0" 0;
+  test_value "20" 20;
+  test_value "10" 10
 
 let test_configured_max_k_invalid_input () =
   (* Invalid strings fall back to default *)
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_K" "abc";
-  let k = Affinity.configured_max_k () in
-  Alcotest.(check int) "non-numeric 'abc' → default 5" 5 k;
-
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_K" "1.5";
-  let k = Affinity.configured_max_k () in
-  Alcotest.(check int) "float '1.5' → default 5" 5 k;
-
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_K" "";
-  let k = Affinity.configured_max_k () in
-  Alcotest.(check int) "empty string → default 5" 5 k
+  let test_value value expected_msg =
+    let mock_getenv key =
+      match key with
+      | "MASC_KEEPER_TOOL_AFFINITY_K" -> Some value
+      | _ -> None
+    in
+    let k = Affinity.configured_max_k ~getenv:mock_getenv () in
+    Alcotest.(check int) expected_msg 5 k
+  in
+  test_value "abc" "non-numeric 'abc' → default 5";
+  test_value "1.5" "float '1.5' → default 5";
+  test_value "" "empty string → default 5"
 
 let test_configured_lookback_days_default () =
-  (* Unset env var to test default *)
-  Unix.unsetenv "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS";
-  let days = Affinity.configured_lookback_days () in
+  (* Mock getenv that returns None to trigger default *)
+  let mock_getenv _ = None in
+  let days = Affinity.configured_lookback_days ~getenv:mock_getenv () in
   Alcotest.(check int) "default lookback_days is 7" 7 days
 
 let test_configured_lookback_days_clamps_lower () =
   (* Values < 1 clamp to 1 *)
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" "0";
-  let days = Affinity.configured_lookback_days () in
-  Alcotest.(check int) "0 clamps to 1" 1 days;
-
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" "-1";
-  let days = Affinity.configured_lookback_days () in
-  Alcotest.(check int) "-1 clamps to 1" 1 days
+  let test_value value expected =
+    let mock_getenv key =
+      match key with
+      | "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" -> Some value
+      | _ -> None
+    in
+    let days = Affinity.configured_lookback_days ~getenv:mock_getenv () in
+    Alcotest.(check int) (Printf.sprintf "%s clamps to %d" value expected) expected days
+  in
+  test_value "0" 1;
+  test_value "-1" 1
 
 let test_configured_lookback_days_clamps_upper () =
   (* Values > 30 clamp to 30 *)
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" "31";
-  let days = Affinity.configured_lookback_days () in
-  Alcotest.(check int) "31 clamps to 30" 30 days;
-
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" "99";
-  let days = Affinity.configured_lookback_days () in
-  Alcotest.(check int) "99 clamps to 30" 30 days
+  let test_value value expected =
+    let mock_getenv key =
+      match key with
+      | "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" -> Some value
+      | _ -> None
+    in
+    let days = Affinity.configured_lookback_days ~getenv:mock_getenv () in
+    Alcotest.(check int) (Printf.sprintf "%s clamps to %d" value expected) expected days
+  in
+  test_value "31" 30;
+  test_value "99" 30
 
 let test_configured_lookback_days_boundary_values () =
   (* Exact boundary values *)
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" "1";
-  let days = Affinity.configured_lookback_days () in
-  Alcotest.(check int) "1 stays 1" 1 days;
-
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" "30";
-  let days = Affinity.configured_lookback_days () in
-  Alcotest.(check int) "30 stays 30" 30 days;
-
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" "14";
-  let days = Affinity.configured_lookback_days () in
-  Alcotest.(check int) "14 stays 14" 14 days
+  let test_value value expected =
+    let mock_getenv key =
+      match key with
+      | "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" -> Some value
+      | _ -> None
+    in
+    let days = Affinity.configured_lookback_days ~getenv:mock_getenv () in
+    Alcotest.(check int) (Printf.sprintf "%s stays %d" value expected) expected days
+  in
+  test_value "1" 1;
+  test_value "30" 30;
+  test_value "14" 14
 
 let test_configured_lookback_days_invalid_input () =
   (* Invalid strings fall back to default *)
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" "abc";
-  let days = Affinity.configured_lookback_days () in
-  Alcotest.(check int) "non-numeric 'abc' → default 7" 7 days;
-
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" "2.5";
-  let days = Affinity.configured_lookback_days () in
-  Alcotest.(check int) "float '2.5' → default 7" 7 days;
-
-  Unix.putenv "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" "";
-  let days = Affinity.configured_lookback_days () in
-  Alcotest.(check int) "empty string → default 7" 7 days
-
-(* Cleanup: unset env vars after each test *)
-let cleanup () =
-  Unix.unsetenv "MASC_KEEPER_TOOL_AFFINITY_K";
-  Unix.unsetenv "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS"
+  let test_value value expected_msg =
+    let mock_getenv key =
+      match key with
+      | "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" -> Some value
+      | _ -> None
+    in
+    let days = Affinity.configured_lookback_days ~getenv:mock_getenv () in
+    Alcotest.(check int) expected_msg 7 days
+  in
+  test_value "abc" "non-numeric 'abc' → default 7";
+  test_value "2.5" "float '2.5' → default 7";
+  test_value "" "empty string → default 7"
 
 let () =
   Alcotest.run "Keeper tool affinity" [
@@ -213,15 +232,15 @@ let () =
       Alcotest.test_case "populates discovered" `Quick test_populates_discovered;
     ]);
     ("environment_configuration", [
-      Alcotest.test_case "configured_max_k default" `Quick (fun () -> test_configured_max_k_default (); cleanup ());
-      Alcotest.test_case "configured_max_k clamps lower" `Quick (fun () -> test_configured_max_k_clamps_lower (); cleanup ());
-      Alcotest.test_case "configured_max_k clamps upper" `Quick (fun () -> test_configured_max_k_clamps_upper (); cleanup ());
-      Alcotest.test_case "configured_max_k boundary values" `Quick (fun () -> test_configured_max_k_boundary_values (); cleanup ());
-      Alcotest.test_case "configured_max_k invalid input" `Quick (fun () -> test_configured_max_k_invalid_input (); cleanup ());
-      Alcotest.test_case "configured_lookback_days default" `Quick (fun () -> test_configured_lookback_days_default (); cleanup ());
-      Alcotest.test_case "configured_lookback_days clamps lower" `Quick (fun () -> test_configured_lookback_days_clamps_lower (); cleanup ());
-      Alcotest.test_case "configured_lookback_days clamps upper" `Quick (fun () -> test_configured_lookback_days_clamps_upper (); cleanup ());
-      Alcotest.test_case "configured_lookback_days boundary values" `Quick (fun () -> test_configured_lookback_days_boundary_values (); cleanup ());
-      Alcotest.test_case "configured_lookback_days invalid input" `Quick (fun () -> test_configured_lookback_days_invalid_input (); cleanup ());
+      Alcotest.test_case "configured_max_k default" `Quick test_configured_max_k_default;
+      Alcotest.test_case "configured_max_k clamps lower" `Quick test_configured_max_k_clamps_lower;
+      Alcotest.test_case "configured_max_k clamps upper" `Quick test_configured_max_k_clamps_upper;
+      Alcotest.test_case "configured_max_k boundary values" `Quick test_configured_max_k_boundary_values;
+      Alcotest.test_case "configured_max_k invalid input" `Quick test_configured_max_k_invalid_input;
+      Alcotest.test_case "configured_lookback_days default" `Quick test_configured_lookback_days_default;
+      Alcotest.test_case "configured_lookback_days clamps lower" `Quick test_configured_lookback_days_clamps_lower;
+      Alcotest.test_case "configured_lookback_days clamps upper" `Quick test_configured_lookback_days_clamps_upper;
+      Alcotest.test_case "configured_lookback_days boundary values" `Quick test_configured_lookback_days_boundary_values;
+      Alcotest.test_case "configured_lookback_days invalid input" `Quick test_configured_lookback_days_invalid_input;
     ]);
   ]

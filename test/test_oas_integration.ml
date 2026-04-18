@@ -373,6 +373,53 @@ let test_oas_sse_bridge_drop_marker_on_exhausted_append_failure () =
                 raise Exit)
       with Exit -> ())
 
+let test_oas_sse_bridge_broadcast_retry_does_not_duplicate_append () =
+  let append_count = ref 0 in
+  let broadcast_count = ref 0 in
+  let pending =
+    Oas_sse_bridge.For_testing.make_pending
+      (`Assoc
+         [
+           ("type", `String "oas:tool_called");
+           ("event_type", `String "tool_called");
+           ("correlation_id", `String "sess-broadcast");
+           ("run_id", `String "run-broadcast");
+         ])
+  in
+  let first =
+    Oas_sse_bridge.For_testing.deliver_pending_with
+      ~append_json:(fun _json -> incr append_count)
+      ~broadcast_json:(fun _json ->
+        incr broadcast_count;
+        if !broadcast_count = 1 then failwith "synthetic broadcast failure")
+      pending
+  in
+  let pending_after_failure =
+    match first with
+    | Oas_sse_bridge.For_testing.Retryable_failure
+        (pending, Oas_sse_bridge.For_testing.Broadcast, _) ->
+        pending
+    | Oas_sse_bridge.For_testing.Retryable_failure _ ->
+        Alcotest.fail "expected broadcast-stage retryable failure"
+    | Oas_sse_bridge.For_testing.Delivered ->
+        Alcotest.fail "expected first delivery to fail on broadcast"
+  in
+  Alcotest.(check int) "append happens exactly once before retry" 1 !append_count;
+  Alcotest.(check bool) "pending remembers durable append" true
+    pending_after_failure.appended;
+  let second =
+    Oas_sse_bridge.For_testing.deliver_pending_with
+      ~append_json:(fun _json -> incr append_count)
+      ~broadcast_json:(fun _json -> incr broadcast_count)
+      pending_after_failure
+  in
+  (match second with
+   | Oas_sse_bridge.For_testing.Delivered -> ()
+   | Oas_sse_bridge.For_testing.Retryable_failure _ ->
+       Alcotest.fail "expected retry to deliver after broadcast recovery");
+  Alcotest.(check int) "retry does not duplicate durable append" 1 !append_count;
+  Alcotest.(check int) "broadcast retried once" 2 !broadcast_count
+
 (* ================================================================ *)
 (* Message conversion tests (formerly oas_checkpoint_bridge)         *)
 (* ================================================================ *)
@@ -714,6 +761,8 @@ let () =
         test_oas_sse_bridge_retries_append_failure_then_recovers;
       Alcotest.test_case "sse bridge emits drop marker on exhausted append failure" `Quick
         test_oas_sse_bridge_drop_marker_on_exhausted_append_failure;
+      Alcotest.test_case "sse bridge retry avoids duplicate append after broadcast failure" `Quick
+        test_oas_sse_bridge_broadcast_retry_does_not_duplicate_append;
       Alcotest.test_case "agent_completed includes usage" `Quick
         test_agent_completed_includes_usage;
       Alcotest.test_case "agent_completed no usage on error" `Quick

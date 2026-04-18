@@ -184,9 +184,10 @@ let primary_path ~webrtc_channels ~grpc_subscribers ~ws_sessions ~sse_sessions =
   else if sse_sessions > 0 then "sse"
   else "streamable_http"
 
-let queue_pressure max_queue_depth =
+let queue_pressure ~sse_queue_max ~relay_queue_depth =
+  let max_queue_depth = max sse_queue_max relay_queue_depth in
   if max_queue_depth >= 32 then "high"
-  else if max_queue_depth >= 8 then "watch"
+  else if max_queue_depth >= 8 || relay_queue_depth > 0 then "watch"
   else "steady"
 
 let ws_enabled () = Env_config.Transport.ws_enabled ()
@@ -218,6 +219,40 @@ let transport_health_json ~config =
   in
   let sse_queue_avg = v "masc_sse_queue_depth_avg" () in
   let sse_queue_max = int_of_float (v "masc_sse_queue_depth_max" ()) in
+  let relay_queue_depth =
+    int_of_float (v Prometheus.metric_oas_sse_relay_queue_depth ())
+  in
+  let relay_retry_append =
+    int_of_float
+      (v Prometheus.metric_oas_sse_relay_retries
+         ~labels:[ ("stage", "append") ] ())
+  in
+  let relay_retry_broadcast =
+    int_of_float
+      (v Prometheus.metric_oas_sse_relay_retries
+         ~labels:[ ("stage", "broadcast") ] ())
+  in
+  let relay_retry_total =
+    int_of_float (Prometheus.metric_total Prometheus.metric_oas_sse_relay_retries)
+  in
+  let relay_drop_queue =
+    int_of_float
+      (v Prometheus.metric_oas_sse_relay_drops
+         ~labels:[ ("stage", "queue") ] ())
+  in
+  let relay_drop_append =
+    int_of_float
+      (v Prometheus.metric_oas_sse_relay_drops
+         ~labels:[ ("stage", "append") ] ())
+  in
+  let relay_drop_broadcast =
+    int_of_float
+      (v Prometheus.metric_oas_sse_relay_drops
+         ~labels:[ ("stage", "broadcast") ] ())
+  in
+  let relay_drop_total =
+    int_of_float (Prometheus.metric_total Prometheus.metric_oas_sse_relay_drops)
+  in
   let broadcast_sum = v "masc_sse_broadcast_duration_seconds" () in
   let broadcast_count = v "masc_sse_broadcast_duration_seconds_count" () in
   let broadcast_avg =
@@ -233,6 +268,11 @@ let transport_health_json ~config =
   in
   let grpc_events = v "masc_grpc_events_delivered_total" () in
   let stale_agents = v "masc_agent_stale_total" () in
+  let lifecycle_dispatch_rejections =
+    int_of_float
+      (Prometheus.metric_total
+         Prometheus.metric_keeper_lifecycle_dispatch_rejections)
+  in
   let ws_sessions = int_of_float (v "masc_ws_sessions_total" ()) in
   let grpc_configured = grpc_enabled () in
   let grpc_live = grpc_listening () in
@@ -263,7 +303,9 @@ let transport_health_json ~config =
   `Assoc [
     ("summary", `Assoc [
       ("primary_path", `String primary_path);
-      ("queue_pressure", `String (queue_pressure sse_queue_max));
+      ("queue_pressure",
+       `String
+         (queue_pressure ~sse_queue_max ~relay_queue_depth));
       ("recent_messages", int_option_json recent_messages);
       ("recent_messages_available", `Bool recent_messages_available);
       ("recent_messages_source", `String degraded_source);
@@ -278,6 +320,14 @@ let transport_health_json ~config =
       ("broadcast_count", `Int (int_of_float broadcast_count));
       ("queue_avg_depth", `Float sse_queue_avg);
       ("queue_max_depth", `Int sse_queue_max);
+      ("relay_queue_depth", `Int relay_queue_depth);
+      ("relay_retry_total", `Int relay_retry_total);
+      ("relay_retry_append", `Int relay_retry_append);
+      ("relay_retry_broadcast", `Int relay_retry_broadcast);
+      ("relay_drop_total", `Int relay_drop_total);
+      ("relay_drop_queue", `Int relay_drop_queue);
+      ("relay_drop_append", `Int relay_drop_append);
+      ("relay_drop_broadcast", `Int relay_drop_broadcast);
       ("hot_sessions", `List (List.map hot_session_json (Atomic.get sse_hot_sessions)));
     ]);
     ("grpc", `Assoc [
@@ -344,6 +394,8 @@ let transport_health_json ~config =
     ]);
     ("agent_health", `Assoc [
       ("stale_total", `Int (int_of_float stale_agents));
+      ("lifecycle_dispatch_rejections_total",
+       `Int lifecycle_dispatch_rejections);
     ]);
     ("generated_at", `String (Types.now_iso ()));
   ]

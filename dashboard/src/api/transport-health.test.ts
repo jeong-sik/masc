@@ -83,6 +83,9 @@ describe('decodeTransportHealthData', () => {
     expect(result!.summary.external_fanout_targets).toBe(0)
     // sse defaults
     expect(result!.sse.sessions_total).toBe(0)
+    expect(result!.sse.relay_queue_depth).toBe(0)
+    expect(result!.sse.relay_retry_total).toBe(0)
+    expect(result!.sse.relay_drop_total).toBe(0)
     expect(result!.sse.hot_sessions).toEqual([])
     // grpc defaults
     expect(result!.grpc.enabled).toBe(false)
@@ -100,6 +103,7 @@ describe('decodeTransportHealthData', () => {
     expect(result!.cluster.total_units).toBeNull()
     // agent_health defaults
     expect(result!.agent_health.stale_total).toBe(0)
+    expect(result!.agent_health.lifecycle_dispatch_rejections_total).toBe(0)
     // projection_diagnostics not present
     expect(result!.projection_diagnostics).toBeUndefined()
   })
@@ -123,6 +127,14 @@ describe('decodeTransportHealthData', () => {
         broadcast_count: 100,
         queue_avg_depth: 2,
         queue_max_depth: 10,
+        relay_queue_depth: 4,
+        relay_retry_total: 6,
+        relay_retry_append: 2,
+        relay_retry_broadcast: 4,
+        relay_drop_total: 3,
+        relay_drop_queue: 1,
+        relay_drop_append: 1,
+        relay_drop_broadcast: 1,
         hot_sessions: [
           { session_id: 'sess-1', kind: 'observer', queue_depth: 5, last_event_id: 99, idle_seconds: 3 },
           { session_id: 'sess-2', kind: 'coordinator', queue_depth: 0, last_event_id: 50, idle_seconds: 30 },
@@ -187,12 +199,15 @@ describe('decodeTransportHealthData', () => {
         active_operations: 1,
         stale_units: 0,
       },
-      agent_health: { stale_total: 2 },
+      agent_health: { stale_total: 2, lifecycle_dispatch_rejections_total: 5 },
     })
     const result = decodeTransportHealthData(raw)
     expect(result!.summary.primary_path).toBe('grpc')
     expect(result!.summary.recent_messages).toBe(42)
     expect(result!.sse.sessions_total).toBe(3)
+    expect(result!.sse.relay_queue_depth).toBe(4)
+    expect(result!.sse.relay_retry_total).toBe(6)
+    expect(result!.sse.relay_drop_total).toBe(3)
     expect(result!.sse.hot_sessions).toHaveLength(2)
     expect(result!.sse.hot_sessions[0]!.session_id).toBe('sess-1')
     expect(result!.sse.hot_sessions[0]!.kind).toBe('observer')
@@ -205,6 +220,7 @@ describe('decodeTransportHealthData', () => {
     expect(result!.cluster.total_units).toBe(5)
     expect(result!.cluster.live_agents).toBe(3)
     expect(result!.agent_health.stale_total).toBe(2)
+    expect(result!.agent_health.lifecycle_dispatch_rejections_total).toBe(5)
   })
 
   it('decodes hot_sessions with defaults', () => {

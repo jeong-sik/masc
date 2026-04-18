@@ -74,14 +74,22 @@ let parse_decision_line (line : string) : parsed_decision option =
 let tail_limit_for ~window_hours =
   max 500 (min 10_000 (window_hours * 180 + 200))
 
+let load_decision_lines ~decision_log_path ~window_hours =
+  try
+    Dated_jsonl.load_tail_lines decision_log_path
+      ~max_lines:(tail_limit_for ~window_hours)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Keeper.warn
+      "telemetry_feedback: failed to load decision log %s: %s"
+      decision_log_path (Printexc.to_string exn);
+    []
+
 let compute_stats ~decision_log_path ~window_hours =
   let now_ts = Unix.gettimeofday () in
   let window_start = now_ts -. (float_of_int window_hours *. 3600.0) in
-  let lines =
-    try Dated_jsonl.load_tail_lines decision_log_path
-          ~max_lines:(tail_limit_for ~window_hours)
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
-  in
+  let lines = load_decision_lines ~decision_log_path ~window_hours in
   let decisions =
     lines
     |> List.filter_map parse_decision_line

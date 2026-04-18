@@ -14,6 +14,14 @@ let service_name = "masc.coordination.v1.MascCoordination"
 (** Current timestamp in milliseconds. *)
 let now_ms () = Int64.of_float (Unix.gettimeofday () *. 1000.0)
 
+let decode_request_or_raise ~rpc decode bytes =
+  match decode bytes with
+  | Ok req -> req
+  | Error msg ->
+    Log.Transport.warn "gRPC %s decode failed: %s" rpc msg;
+    Grpc_core.Status.raise_error Grpc_core.Status.Invalid_argument
+      (Printf.sprintf "%s request decode failed: %s" rpc msg)
+
 (** Read a file to string. Returns [""] on non-cancellation errors.
     Propagates [Eio.Cancel.Cancelled] so cooperative cancellation is preserved. *)
 let read_file_safe path =
@@ -51,7 +59,9 @@ let task_info_of_task (task : Types.task) : T.task_info =
 
 (** Join handler: agent joins the coordination room. *)
 let handle_join (room_config : Coord_utils_backend_setup.config) (bytes : string) : string =
-  let req = T.JoinRequest.of_bytes bytes in
+  let req =
+    decode_request_or_raise ~rpc:"Join" T.JoinRequest.of_bytes_result bytes
+  in
   let result =
     try
       let msg =
@@ -108,7 +118,9 @@ let handle_join (room_config : Coord_utils_backend_setup.config) (bytes : string
 
 (** Leave handler: agent leaves the coordination room. *)
 let handle_leave (room_config : Coord_utils_backend_setup.config) (bytes : string) : string =
-  let req = T.LeaveRequest.of_bytes bytes in
+  let req =
+    decode_request_or_raise ~rpc:"Leave" T.LeaveRequest.of_bytes_result bytes
+  in
   let result =
     try
       let msg = Coord.leave room_config ~agent_name:req.agent_name in
@@ -123,7 +135,9 @@ let handle_leave (room_config : Coord_utils_backend_setup.config) (bytes : strin
 
 (** Broadcast handler: send a message to all agents. *)
 let handle_broadcast (room_config : Coord_utils_backend_setup.config) (bytes : string) : string =
-  let req = T.BroadcastRequest.of_bytes bytes in
+  let req =
+    decode_request_or_raise ~rpc:"Broadcast" T.BroadcastRequest.of_bytes_result bytes
+  in
   let result =
     try
       let content =
@@ -190,7 +204,9 @@ let handle_get_status (room_config : Coord_utils_backend_setup.config) (_bytes :
 let handle_tool_call
     (tool_dispatcher : string -> string -> (string, string) result)
     (bytes : string) : string =
-  let req = T.ToolCallRequest.of_bytes bytes in
+  let req =
+    decode_request_or_raise ~rpc:"ToolCall" T.ToolCallRequest.of_bytes_result bytes
+  in
   let result =
     match tool_dispatcher req.tool_name req.arguments_json with
     | Ok result_json ->
@@ -377,7 +393,9 @@ let handle_subscribe
     (room_config : Coord_utils_backend_setup.config)
     (bytes : string)
   : string Grpc_eio.Stream.t =
-  let req = T.SubscribeRequest.of_bytes bytes in
+  let req =
+    decode_request_or_raise ~rpc:"Subscribe" T.SubscribeRequest.of_bytes_result bytes
+  in
   let stream = Grpc_eio.Stream.create 64 in
   Atomic.incr active_subscribe_streams;
   Transport_metrics.set_grpc_subscribers (Atomic.get active_subscribe_streams);

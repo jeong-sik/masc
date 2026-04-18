@@ -34,6 +34,7 @@ module JoinRequest : sig
     capabilities : string list;
     metadata : (string * string) list;
   }
+  val of_bytes_result : string -> (t, string) result
   val of_bytes : string -> t
   val to_bytes : t -> string
 end
@@ -54,6 +55,7 @@ module LeaveRequest : sig
     agent_name : string;
     session_id : string;
   }
+  val of_bytes_result : string -> (t, string) result
   val of_bytes : string -> t
   val to_bytes : t -> string
 end
@@ -76,6 +78,7 @@ module HeartbeatPing : sig
     timestamp_ms : int64;
     current_task_id : string;
   }
+  val of_bytes_result : string -> (t, string) result
   val of_bytes : string -> t
   val to_bytes : t -> string
 end
@@ -100,6 +103,7 @@ module SubscribeRequest : sig
     event_types : string list;
     since_seq : int64;
   }
+  val of_bytes_result : string -> (t, string) result
   val of_bytes : string -> t
 end
 
@@ -129,6 +133,7 @@ module ToolCallRequest : sig
     tool_name : string;
     arguments_json : string;
   }
+  val of_bytes_result : string -> (t, string) result
   val of_bytes : string -> t
   val to_bytes : t -> string
 end
@@ -152,6 +157,7 @@ module BroadcastRequest : sig
     message : string;
     mentions : string list;
   }
+  val of_bytes_result : string -> (t, string) result
   val of_bytes : string -> t
   val to_bytes : t -> string
 end

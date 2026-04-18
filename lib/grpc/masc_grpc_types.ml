@@ -16,15 +16,22 @@ module P = Masc_proto.Masc_coordination.Masc.Coordination.V1
 let encode to_proto msg =
   Ocaml_protoc_plugin.Writer.contents (to_proto msg)
 
+(** Deserialize a protobuf message from a binary string. *)
+let decode_result from_proto bytes =
+  let reader = Ocaml_protoc_plugin.Reader.create bytes in
+  match from_proto reader with
+  | Ok v -> Ok v
+  | Error e ->
+    Error
+      (Printf.sprintf "protobuf decode error: %s"
+         (Ocaml_protoc_plugin.Result.show_error e))
+
 (** Deserialize a protobuf message from a binary string.
     Raises [Invalid_argument] on parse error. *)
 let decode from_proto bytes =
-  let reader = Ocaml_protoc_plugin.Reader.create bytes in
-  match from_proto reader with
+  match decode_result from_proto bytes with
   | Ok v -> v
-  | Error e ->
-    invalid_arg (Printf.sprintf "protobuf decode error: %s"
-      (Ocaml_protoc_plugin.Result.show_error e))
+  | Error msg -> invalid_arg msg
 
 (** {1 Shared Types} *)
 
@@ -90,12 +97,20 @@ module JoinRequest = struct
     metadata : (string * string) list;
   }
 
+  let of_bytes_result bytes =
+    match decode_result P.JoinRequest.from_proto bytes with
+    | Ok p ->
+        Ok
+          ({ agent_name = p.agent_name;
+             capabilities = p.capabilities;
+             metadata = p.metadata;
+           } : t)
+    | Error _ as err -> err
+
   let of_bytes bytes =
-    let p = decode P.JoinRequest.from_proto bytes in
-    { agent_name = p.agent_name;
-      capabilities = p.capabilities;
-      metadata = p.metadata;
-    }
+    match of_bytes_result bytes with
+    | Ok req -> req
+    | Error msg -> invalid_arg msg
 
   let to_bytes (t : t) =
     encode P.JoinRequest.to_proto
@@ -136,11 +151,19 @@ module LeaveRequest = struct
     session_id : string;
   }
 
+  let of_bytes_result bytes =
+    match decode_result P.LeaveRequest.from_proto bytes with
+    | Ok p ->
+        Ok
+          ({ agent_name = p.agent_name;
+             session_id = p.session_id;
+           } : t)
+    | Error _ as err -> err
+
   let of_bytes bytes =
-    let p = decode P.LeaveRequest.from_proto bytes in
-    { agent_name = p.agent_name;
-      session_id = p.session_id;
-    }
+    match of_bytes_result bytes with
+    | Ok req -> req
+    | Error msg -> invalid_arg msg
 
   let to_bytes (t : t) =
     encode P.LeaveRequest.to_proto
@@ -178,13 +201,21 @@ module HeartbeatPing = struct
     current_task_id : string;
   }
 
+  let of_bytes_result bytes =
+    match decode_result P.HeartbeatPing.from_proto bytes with
+    | Ok p ->
+        Ok
+          ({ agent_name = p.agent_name;
+             session_id = p.session_id;
+             timestamp_ms = p.timestamp_ms;
+             current_task_id = p.current_task_id;
+           } : t)
+    | Error _ as err -> err
+
   let of_bytes bytes =
-    let p = decode P.HeartbeatPing.from_proto bytes in
-    { agent_name = p.agent_name;
-      session_id = p.session_id;
-      timestamp_ms = p.timestamp_ms;
-      current_task_id = p.current_task_id;
-    }
+    match of_bytes_result bytes with
+    | Ok ping -> ping
+    | Error msg -> invalid_arg msg
 
   let to_bytes (t : t) =
     encode P.HeartbeatPing.to_proto
@@ -230,13 +261,21 @@ module SubscribeRequest = struct
     since_seq : int64;
   }
 
+  let of_bytes_result bytes =
+    match decode_result P.SubscribeRequest.from_proto bytes with
+    | Ok p ->
+        Ok
+          ({ agent_name = p.agent_name;
+             session_id = p.session_id;
+             event_types = p.event_types;
+             since_seq = p.since_seq;
+           } : t)
+    | Error _ as err -> err
+
   let of_bytes bytes =
-    let p = decode P.SubscribeRequest.from_proto bytes in
-    { agent_name = p.agent_name;
-      session_id = p.session_id;
-      event_types = p.event_types;
-      since_seq = p.since_seq;
-    }
+    match of_bytes_result bytes with
+    | Ok req -> req
+    | Error msg -> invalid_arg msg
 end
 
 module SubscribeRequest_serde = struct
@@ -287,13 +326,21 @@ module ToolCallRequest = struct
     arguments_json : string;
   }
 
+  let of_bytes_result bytes =
+    match decode_result P.ToolCallRequest.from_proto bytes with
+    | Ok p ->
+        Ok
+          ({ agent_name = p.agent_name;
+             session_id = p.session_id;
+             tool_name = p.tool_name;
+             arguments_json = p.arguments_json;
+           } : t)
+    | Error _ as err -> err
+
   let of_bytes bytes =
-    let p = decode P.ToolCallRequest.from_proto bytes in
-    { agent_name = p.agent_name;
-      session_id = p.session_id;
-      tool_name = p.tool_name;
-      arguments_json = p.arguments_json;
-    }
+    match of_bytes_result bytes with
+    | Ok req -> req
+    | Error msg -> invalid_arg msg
 
   let to_bytes (t : t) =
     encode P.ToolCallRequest.to_proto
@@ -338,12 +385,20 @@ module BroadcastRequest = struct
     mentions : string list;
   }
 
+  let of_bytes_result bytes =
+    match decode_result P.BroadcastRequest.from_proto bytes with
+    | Ok p ->
+        Ok
+          ({ agent_name = p.agent_name;
+             message = p.message;
+             mentions = p.mentions;
+           } : t)
+    | Error _ as err -> err
+
   let of_bytes bytes =
-    let p = decode P.BroadcastRequest.from_proto bytes in
-    { agent_name = p.agent_name;
-      message = p.message;
-      mentions = p.mentions;
-    }
+    match of_bytes_result bytes with
+    | Ok req -> req
+    | Error msg -> invalid_arg msg
 
   let to_bytes (t : t) =
     encode P.BroadcastRequest.to_proto

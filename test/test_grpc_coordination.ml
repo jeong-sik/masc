@@ -7,6 +7,7 @@
     serialization/deserialization via of_bytes/to_bytes. *)
 
 module T = Masc_mcp.Masc_grpc_types
+let malformed_protobuf = "\x0a\x05ab"
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -328,6 +329,60 @@ let test_protobuf_binary_format () =
     true
     (String.length bytes = 0 || bytes.[0] <> '{')
 
+let test_join_request_invalid_bytes_result () =
+  match T.JoinRequest.of_bytes_result malformed_protobuf with
+  | Ok _ -> Alcotest.fail "expected decode failure"
+  | Error msg ->
+      Alcotest.(check bool) "error mentions decode" true
+        (String.starts_with ~prefix:"protobuf decode error:" msg)
+
+let test_tool_call_request_invalid_bytes_result () =
+  match T.ToolCallRequest.of_bytes_result malformed_protobuf with
+  | Ok _ -> Alcotest.fail "expected decode failure"
+  | Error msg ->
+      Alcotest.(check bool) "error mentions decode" true
+        (String.starts_with ~prefix:"protobuf decode error:" msg)
+
+let test_join_handler_invalid_bytes_raise_grpc_status () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_temp_dir "masc-grpc-invalid-join" (fun dir ->
+      let room_config = Coord_utils.default_config dir in
+      let service =
+        Masc_mcp.Masc_grpc_service.create_service
+          ~room_config
+          ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+      in
+      match Grpc_eio.Service.get_method service "Join" with
+      | Some { handler = `Unary handler; _ } ->
+          (match handler malformed_protobuf with
+           | _ -> Alcotest.fail "expected typed gRPC decode error"
+           | exception exn ->
+               Alcotest.(check bool) "invalid_argument grpc error" true
+                 (String.starts_with
+                    ~prefix:"Grpc_error(INVALID_ARGUMENT:"
+                    (Printexc.to_string exn)))
+      | _ -> Alcotest.fail "Join unary handler missing")
+
+let test_subscribe_handler_invalid_bytes_raise_grpc_status () =
+  with_temp_dir "masc-grpc-invalid-subscribe" (fun dir ->
+      let room_config = Coord_utils.default_config dir in
+      let service =
+        Masc_mcp.Masc_grpc_service.create_service
+          ~room_config
+          ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+      in
+      match Grpc_eio.Service.get_method service "Subscribe" with
+      | Some { handler = `ServerStreaming handler; _ } ->
+          (match handler malformed_protobuf with
+           | _ -> Alcotest.fail "expected typed gRPC decode error"
+           | exception exn ->
+               Alcotest.(check bool) "invalid_argument grpc error" true
+                 (String.starts_with
+                    ~prefix:"Grpc_error(INVALID_ARGUMENT:"
+                    (Printexc.to_string exn)))
+      | _ -> Alcotest.fail "Subscribe server-streaming handler missing")
+
 (* ====== Test suite ====== *)
 
 let () =
@@ -349,12 +404,20 @@ let () =
           Alcotest.test_case "StatusResponse" `Quick test_status_response_roundtrip;
           Alcotest.test_case "empty_request" `Quick test_empty_request_handling;
           Alcotest.test_case "protobuf_binary" `Quick test_protobuf_binary_format;
+          Alcotest.test_case "JoinRequest invalid bytes result" `Quick
+            test_join_request_invalid_bytes_result;
+          Alcotest.test_case "ToolCallRequest invalid bytes result" `Quick
+            test_tool_call_request_invalid_bytes_result;
         ] );
       ( "service",
         [
           Alcotest.test_case "service_name" `Quick test_service_name;
           Alcotest.test_case "get_status_projects_backlog_tasks" `Quick
             test_get_status_projects_backlog_tasks;
+          Alcotest.test_case "join invalid bytes raise grpc status" `Quick
+            test_join_handler_invalid_bytes_raise_grpc_status;
+          Alcotest.test_case "subscribe invalid bytes raise grpc status" `Quick
+            test_subscribe_handler_invalid_bytes_raise_grpc_status;
         ] );
       ( "server_config",
         [

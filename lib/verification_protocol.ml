@@ -22,6 +22,23 @@
 let on_submit_for_verification ~(config : Coord.config)
     ~(task : Types.task) ~assignee ~verification_id ~evidence_refs =
   let base_path = config.Coord.base_path in
+  (* Observability for #8272: tasks submitted without a contract land in
+     storage with empty completion_contract + empty evidence, which the
+     dashboard renders as "—". Surface this as a warn so operators can
+     trace the gap back to the task creation site instead of only
+     noticing it in the UI. No behavior change. *)
+  (match task.contract with
+   | None ->
+     Log.Task.warn
+       "[verification-submit] task=%s has no contract — completion_contract \
+        and evidence will be empty in the verification record"
+       task.id
+   | Some c when c.completion_contract = [] && c.verify_gate_evidence = [] ->
+     Log.Task.warn
+       "[verification-submit] task=%s has a contract but both \
+        completion_contract and verify_gate_evidence are empty"
+       task.id
+   | Some _ -> ());
   let criteria = List.map (fun s -> Verification.Custom s)
     (match task.contract with
      | Some c -> c.completion_contract

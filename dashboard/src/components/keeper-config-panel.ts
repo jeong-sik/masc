@@ -99,14 +99,14 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
 
 // Runtime config draft for proactive/compaction/handoff inline editing
 type ExecutionScope = 'observe_only' | 'workspace' | 'local'
-type SandboxProfile = 'legacy_local' | 'docker_hardened'
-type NetworkMode = 'inherit' | 'none'
-type SharedMemoryScope = 'disabled' | 'room'
+export type SandboxProfile = 'legacy_local' | 'docker_hardened'
+export type SandboxNetworkMode = 'none' | 'inherit'
+export type SharedMemoryScope = 'disabled' | 'room'
 
-type RuntimeDraft = {
+export type RuntimeDraft = {
   execution_scope: ExecutionScope
   sandbox_profile: SandboxProfile
-  network_mode: NetworkMode
+  network_mode: SandboxNetworkMode
   shared_memory_scope: SharedMemoryScope
   allowed_paths_text: string
   proactive_enabled: boolean
@@ -124,12 +124,24 @@ type RuntimeDraft = {
 const runtimeDraft = signal<RuntimeDraft | null>(null)
 const runtimeSaving = signal(false)
 
-function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
+export function coerceSandboxProfile(raw: string | undefined): SandboxProfile {
+  return raw === 'docker_hardened' ? 'docker_hardened' : 'legacy_local'
+}
+
+export function coerceNetworkMode(raw: string | undefined): SandboxNetworkMode {
+  return raw === 'none' ? 'none' : 'inherit'
+}
+
+export function coerceSharedMemoryScope(raw: string | undefined): SharedMemoryScope {
+  return raw === 'room' ? 'room' : 'disabled'
+}
+
+export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     execution_scope: (c.execution_scope as ExecutionScope) ?? 'workspace',
-    sandbox_profile: (c.sandbox_profile as SandboxProfile) ?? 'legacy_local',
-    network_mode: (c.network_mode as NetworkMode) ?? 'inherit',
-    shared_memory_scope: (c.shared_memory_scope as SharedMemoryScope) ?? 'disabled',
+    sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
+    network_mode: coerceNetworkMode(c.network_mode),
+    shared_memory_scope: coerceSharedMemoryScope(c.shared_memory_scope),
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
     proactive_enabled: c.proactive.enabled,
     proactive_idle_sec: c.proactive.idle_sec,
@@ -144,15 +156,15 @@ function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   }
 }
 
-function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
+export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
   const payload: KeeperConfigUpdatePayload = {}
   if (draft.execution_scope !== (orig.execution_scope ?? 'workspace')) payload.execution_scope = draft.execution_scope
-  if (draft.sandbox_profile !== (orig.sandbox_profile ?? 'legacy_local')) payload.sandbox_profile = draft.sandbox_profile
-  if (draft.network_mode !== (orig.network_mode ?? 'inherit')) payload.network_mode = draft.network_mode
-  if (draft.shared_memory_scope !== (orig.shared_memory_scope ?? 'disabled')) payload.shared_memory_scope = draft.shared_memory_scope
   const newPaths = draft.allowed_paths_text.split('\n').map(s => s.trim()).filter(Boolean)
   const origPaths = orig.allowed_paths ?? []
   if (JSON.stringify(newPaths) !== JSON.stringify(origPaths)) payload.allowed_paths = newPaths
+  if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
+  if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
+  if (draft.shared_memory_scope !== coerceSharedMemoryScope(orig.shared_memory_scope)) payload.shared_memory_scope = draft.shared_memory_scope
   if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
   if (draft.proactive_idle_sec !== orig.proactive.idle_sec) payload.proactive_idle_sec = draft.proactive_idle_sec
   if (draft.proactive_cooldown_sec !== orig.proactive.cooldown_sec) payload.proactive_cooldown_sec = draft.proactive_cooldown_sec
@@ -672,7 +684,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           label="network_mode"
           value=${rd.network_mode}
           options=${rd.sandbox_profile === 'docker_hardened' ? ['inherit', 'none'] as const : ['inherit'] as const}
-          onChange=${(value: string) => updateRuntimeDraft('network_mode', value as NetworkMode)}
+          onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
         />
         <${InlineSelectRow}
           label="shared_memory_scope"
@@ -704,6 +716,9 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           title="Base Path Anchor"
           body=${sandboxAnchorText(c)}
         />
+        ${rd.sandbox_profile === 'docker_hardened' ? html`
+          <${SetupGuideCard} connectorId="sandbox_hardened" />
+        ` : null}
       ` : html`
         <${ConfigRow} label="execution_scope" value=${c.execution_scope ?? 'workspace'} />
         <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'legacy_local'} />

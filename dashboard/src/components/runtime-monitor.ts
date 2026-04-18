@@ -220,29 +220,29 @@ export function RuntimeMonitor() {
                 <article class="p-4 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm flex flex-col gap-2">
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
-                      <strong class="text-[13px] text-text-strong">${provider.provider}</strong>
-                      <span class="text-[12px] text-text-muted">${provider.runtime_kind ?? 'runtime'} · ${provider.auth_kind ?? 'auth'} · ${provider.source ?? 'source unknown'}</span>
+                      <strong class="text-sm text-text-strong">${provider.provider}</strong>
+                      <span class="text-xs text-text-muted">${provider.runtime_kind ?? 'runtime'} · ${provider.auth_kind ?? 'auth'} · ${provider.source ?? 'source unknown'}</span>
                     </div>
                     <${StatusChip}
                       label=${provider.status ?? (provider.available ? 'available' : 'unknown')}
                       tone=${runtimeProviderTone(provider)}
                     />
                   </div>
-                  <div class="grid grid-cols-2 gap-3 text-[12px] text-text-body">
+                  <div class="grid grid-cols-2 gap-3 text-xs text-text-body">
                     <div>default model · ${provider.default_model ?? '없음'}</div>
                     <div>catalog · ${provider.models.join(', ') || '없음'}</div>
                     <div>single-run · ${provider.supports_single_agent_run ? 'yes' : 'no'}</div>
                     <div>endpoint · ${provider.endpoint_url ?? '없음'}</div>
                   </div>
                   ${provider.discovery
-                    ? html`<div class="grid grid-cols-2 gap-3 text-[12px] text-text-body pt-2 border-t border-card-border/50">
+                    ? html`<div class="grid grid-cols-2 gap-3 text-xs text-text-body pt-2 border-t border-card-border/50">
                         <div>discovery · ${provider.discovery.healthy ? 'healthy' : 'degraded'}</div>
                         <div>ctx · ${fmtNumber(provider.discovery.ctx_size)}</div>
                         <div>slots · ${fmtNumber(provider.discovery.busy_slots)}/${fmtNumber(provider.discovery.total_slots)}</div>
                         <div>model · ${provider.discovery.discovered_model ?? '없음'}</div>
                       </div>`
                     : null}
-                  ${provider.note ? html`<div class="text-[12px] text-text-muted">${provider.note}</div>` : null}
+                  ${provider.note ? html`<div class="text-xs text-text-muted">${provider.note}</div>` : null}
                 </article>
               `)
             : html`<${EmptyState} message="provider runtime snapshot이 없습니다." compact />`}
@@ -272,13 +272,13 @@ export function RuntimeMonitor() {
             type="search"
             ariaLabel="모델 ID 검색"
             placeholder="model_id 또는 도구 이름"
-            class="min-w-[220px] flex-1 !py-1 !text-[11px]"
+            class="min-w-[220px] flex-1 !py-1 !text-2xs"
             value=${modelSearch.value}
             onInput=${(e: Event) => { modelSearch.value = (e.target as HTMLInputElement).value }}
           />
         </div>
         ${(metrics?.models ?? []).length > 0 && filterModelMetrics(metrics?.models ?? [], modelSearch.value).length === 0
-          ? html`<div class="text-[11px] text-[var(--text-muted)] mb-2">검색 결과 없음 (${metrics?.models.length ?? 0}개 중)</div>`
+          ? html`<div class="text-2xs text-[var(--text-muted)] mb-2">검색 결과 없음 (${metrics?.models.length ?? 0}개 중)</div>`
           : null}
         <div class="flex flex-col gap-3">
           ${(metrics?.models ?? []).length > 0
@@ -299,8 +299,8 @@ export function RuntimeMonitor() {
                 >
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
-                      <strong class="text-[13px] text-text-strong">${metric.model_id}</strong>
-                      <span class="text-[12px] text-text-muted">entries ${fmtNumber(metric.entry_count)} · fallback ${fmtNumber(metric.fallback_count)}</span>
+                      <strong class="text-sm text-text-strong">${metric.model_id}</strong>
+                      <span class="text-xs text-text-muted">entries ${fmtNumber(metric.entry_count)} · fallback ${fmtNumber(metric.fallback_count)}</span>
                     </div>
                     <div class="flex gap-2 items-center">
                       <${StatusChip}
@@ -325,7 +325,7 @@ export function RuntimeMonitor() {
                         : null}
                     </div>
                   </div>
-                  <div class="grid grid-cols-3 gap-3 text-[12px] text-text-body">
+                  <div class="grid grid-cols-3 gap-3 text-xs text-text-body">
                     <div>latency avg/p95 · ${fmtNumber(metric.avg_latency_ms, 1)} / ${fmtNumber(metric.p95_latency_ms, 1)} ms</div>
                     <div>wall tok/s p50/p95 · ${fmtNumber(metric.p50_tok_per_sec, 1)} / ${fmtNumber(metric.p95_tok_per_sec, 1)}</div>
                     <div>cost · ${fmtCost(metric.total_cost_usd)}</div>
@@ -337,7 +337,7 @@ export function RuntimeMonitor() {
                       : null}
                   </div>
                   ${(metric.buckets ?? []).length >= 2
-                    ? html`<div class="flex items-center gap-4 mt-1 text-[11px] text-[var(--text-muted)]">
+                    ? html`<div class="flex items-center gap-4 mt-1 text-2xs text-[var(--text-muted)]">
                         <span>p95 latency</span>
                         <span dangerouslySetInnerHTML=${{ __html: sparklineSvg((metric.buckets as BucketMetric[]).map(b => b.p95_latency_ms), 'var(--status-warn)', 80, 18) }}></span>
                         <span>error rate</span>
@@ -348,17 +348,17 @@ export function RuntimeMonitor() {
                     const cacheRead = metric.total_cache_read_tokens ?? 0
                     const totalIn = cacheRead + (metric.total_input_tokens ?? 0)
                     const cacheRatio = totalIn > 0 ? cacheRead / totalIn : 0
-                    return html`<div class="text-[11px] text-[var(--text-muted)] mt-1">
+                    return html`<div class="text-2xs text-[var(--text-muted)] mt-1">
                       cost ${fmtCost(metric.total_cost_usd)} · cache savings ${fmtPct(cacheRatio)} (${fmtNumber(cacheRead)} / ${fmtNumber(totalIn)} tokens)
                     </div>`
                   })()}
                   ${(metric.error_count ?? 0) > 0
-                    ? html`<div class="text-[11px] text-[var(--status-bad)] mt-1">errors ${fmtNumber(metric.error_count)} / success ${fmtNumber(metric.success_count)}</div>`
+                    ? html`<div class="text-2xs text-[var(--status-bad)] mt-1">errors ${fmtNumber(metric.error_count)} / success ${fmtNumber(metric.success_count)}</div>`
                     : null}
                   ${(metric.top_tools ?? []).length > 0
                     ? html`<div class="flex flex-wrap gap-1 mt-1">
                         ${metric.top_tools?.slice(0, 5).map(t => html`
-                          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-[var(--bg-panel-hover)] text-[var(--text-muted)]">
+                          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-3xs bg-[var(--bg-panel-hover)] text-[var(--text-muted)]">
                             ${t.tool} <span class="ml-0.5 text-[var(--text-strong)]">${t.count}</span>
                           </span>
                         `)}
@@ -367,18 +367,18 @@ export function RuntimeMonitor() {
                   ${(metric.recent_entries ?? []).length > 0
                     ? html`
                       <button
-                        class="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-strong)] mt-1 text-left"
+                        class="text-2xs text-[var(--text-muted)] hover:text-[var(--text-strong)] mt-1 text-left"
                         onClick=${() => { expandedModel.value = expandedModel.value === metric.model_id ? null : metric.model_id }}
                       >
                         ${expandedModel.value === metric.model_id ? '▾' : '▸'} recent ${metric.recent_entries?.length ?? 0} turns
                       </button>
                       ${expandedModel.value === metric.model_id
                         ? html`<div class="mt-1 border-t border-card-border/50 pt-2">
-                            <div class="grid grid-cols-6 gap-1 text-[10px] text-[var(--text-muted)] font-medium mb-1">
+                            <div class="grid grid-cols-6 gap-1 text-3xs text-[var(--text-muted)] font-medium mb-1">
                               <div>time</div><div>in tok</div><div>out tok</div><div>latency</div><div>cost</div><div>tools</div>
                             </div>
                             ${metric.recent_entries?.map(re => html`
-                              <div class="grid grid-cols-6 gap-1 text-[11px] text-[var(--text-body)]">
+                              <div class="grid grid-cols-6 gap-1 text-2xs text-[var(--text-body)]">
                                 <div>${fmtTime(re.ts_unix)}</div>
                                 <div>${fmtNumber(re.input_tokens)}</div>
                                 <div>${fmtNumber(re.output_tokens)}</div>

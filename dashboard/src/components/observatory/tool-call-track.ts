@@ -92,8 +92,8 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
   return html`
     <div class="flex items-center gap-3">
       <div class="w-24 shrink-0">
-        <div class="text-[11px] font-semibold text-text-muted">도구 호출</div>
-        <div class="text-[10px] text-text-dim">
+        <div class="text-2xs font-semibold text-text-muted">도구 호출</div>
+        <div class="text-3xs text-text-dim">
           <span class="text-[var(--ok)]">${successCount}</span>
           <span class="text-text-dim/60 mx-0.5">·</span>
           <span class="text-[var(--bad-light)]">${failureCount}</span>
@@ -108,7 +108,7 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
         onMouseLeave=${clearCursor}
       >
         ${markers.length === 0
-          ? html`<div class="absolute inset-0 flex items-center justify-center text-[10px] text-text-dim">이 시간 범위에 도구 호출 없음</div>`
+          ? html`<div class="absolute inset-0 flex items-center justify-center text-3xs text-text-dim">이 시간 범위에 도구 호출 없음</div>`
           : markers.map(({ entry, ts, count, failureCount: bucketFailures }) => {
               const pct = ((ts - windowStart) / span) * 100
               const outcome = bucketFailures > 0 ? 'failure' : toolCallOutcome(entry)
@@ -129,7 +129,7 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
                     selectEntity({ kind: 'tool_call', entry, ts, bucketCount: count })
                   }}
                 >${count > 1 ? html`
-                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 rounded bg-bg-0/90 px-1 py-0.5 text-[8px] font-mono text-text-dim">
+                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 rounded bg-bg-0/90 px-1 py-0.5 text-4xs font-mono text-text-dim">
                     ${count}
                   </span>
                 ` : null}</span>

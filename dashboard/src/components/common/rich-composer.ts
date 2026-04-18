@@ -32,7 +32,7 @@ export function RichComposer({
             <button
               key=${tab}
               type="button"
-              class=${`rounded border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              class=${`rounded border px-2.5 py-1 text-2xs font-medium transition-colors ${
                 mode === tab
                   ? 'border-[rgba(71,184,255,0.35)] bg-[var(--accent-12)] text-[var(--accent)]'
                   : 'border-transparent bg-transparent text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]'
@@ -44,7 +44,7 @@ export function RichComposer({
             </button>
           `)}
         </div>
-        <div class="text-[10px] text-[var(--text-muted)]">
+        <div class="text-3xs text-[var(--text-muted)]">
           Markdown, code fence, URL, image link
         </div>
       </div>
@@ -68,12 +68,12 @@ export function RichComposer({
                 </div>
               `
             : html`
-                <div class="rounded border border-dashed border-[var(--card-border)] bg-[var(--white-3)] px-3 py-6 text-center text-[12px] text-[var(--text-muted)]">
+                <div class="rounded border border-dashed border-[var(--card-border)] bg-[var(--white-3)] px-3 py-6 text-center text-xs text-[var(--text-muted)]">
                   미리볼 내용이 아직 없습니다.
                 </div>
               `}
         ${helpText
-          ? html`<div class="mt-2 text-[11px] leading-relaxed text-[var(--text-muted)]">${helpText}</div>`
+          ? html`<div class="mt-2 text-2xs leading-relaxed text-[var(--text-muted)]">${helpText}</div>`
           : null}
       </div>
     </div>

@@ -166,18 +166,18 @@ export function PromptRegistryPanel() {
 
   return html`
     <${Card} title="프롬프트 레지스트리" class="section mb-4">
-      <div class="mb-4 text-[12px] text-[var(--text-muted)] leading-relaxed">
+      <div class="mb-4 text-xs text-[var(--text-muted)] leading-relaxed">
         <div>기준 원문은 resolved config root의 <code>prompts/*.md</code>입니다. 경로는 설정 경로 상세 패널에서 확인할 수 있습니다.</div>
         <div>이 화면에서는 현재 effective 값 확인과 runtime override 적용/해제만 합니다.</div>
       </div>
 
       ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}
-      ${status ? html`<div class="mb-4 rounded border border-[var(--sky-28)] bg-[var(--sky-8)] px-3 py-2 text-[12px] text-[#bae6fd]">${status}</div>` : null}
+      ${status ? html`<div class="mb-4 rounded border border-[var(--sky-28)] bg-[var(--sky-8)] px-3 py-2 text-xs text-[#bae6fd]">${status}</div>` : null}
 
       <div class="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div class="min-h-[260px] rounded border border-[var(--card-border)] bg-[var(--white-3)] p-2">
           <div class="mb-2 flex items-center justify-between gap-2 px-2">
-            <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">
+            <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">
               등록된 프롬프트
               ${sourceFilter.value !== 'all' || searchQuery.value
                 ? html`<span class="ml-1 normal-case tracking-normal text-[var(--text-muted)]">${visiblePrompts.length} / ${prompts.length}</span>`
@@ -207,7 +207,7 @@ export function PromptRegistryPanel() {
           </div>
           <div class="flex max-h-[520px] flex-col gap-2 overflow-y-auto pr-1">
             ${visiblePrompts.length === 0 ? html`
-              <div class="rounded border border-dashed border-[var(--card-border)] px-3 py-6 text-center text-[11px] text-[var(--text-muted)]">
+              <div class="rounded border border-dashed border-[var(--card-border)] px-3 py-6 text-center text-2xs text-[var(--text-muted)]">
                 조건에 맞는 프롬프트가 없습니다.
               </div>
             ` : null}
@@ -224,11 +224,11 @@ export function PromptRegistryPanel() {
                 }}
               >
                 <div class="mb-1 flex items-start justify-between gap-2">
-                  <div class="font-mono text-[12px] text-[var(--text-strong)]">${prompt.key}</div>
+                  <div class="font-mono text-xs text-[var(--text-strong)]">${prompt.key}</div>
                   <${StatusChip} tone=${sourceBadgeClass(prompt.source)}>${prompt.source}<//>
                 </div>
-                <div class="mb-1 text-[11px] text-[var(--text-muted)]">${prompt.category}</div>
-                <div class="text-[12px] text-[var(--text-body)] leading-relaxed">${prompt.description}</div>
+                <div class="mb-1 text-2xs text-[var(--text-muted)]">${prompt.category}</div>
+                <div class="text-xs text-[var(--text-body)] leading-relaxed">${prompt.description}</div>
               </button>
             `)}
           </div>
@@ -237,7 +237,7 @@ export function PromptRegistryPanel() {
         <div class="min-w-0 rounded border border-[var(--card-border)] bg-[var(--white-3)] p-4">
           ${selectedPrompt ? html`
             <div class="mb-4 flex flex-wrap items-center gap-2">
-              <div class="font-mono text-[13px] text-[var(--text-strong)]">${selectedPrompt.key}</div>
+              <div class="font-mono text-sm text-[var(--text-strong)]">${selectedPrompt.key}</div>
               <${StatusChip} tone=${sourceBadgeClass(selectedPrompt.source)}>${selectedPrompt.source}<//>
               ${selectedPrompt.has_override
                 ? html`<${StatusChip} tone="warn">오버라이드 활성<//>`
@@ -246,39 +246,39 @@ export function PromptRegistryPanel() {
 
             <div class="mb-4 grid gap-3 md:grid-cols-2">
               <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
-                <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">마크다운 파일</div>
-                <div class="mt-1 break-all font-mono text-[12px] text-[var(--text-body)]">${selectedPrompt.file_path ?? '미설정'}</div>
+                <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">마크다운 파일</div>
+                <div class="mt-1 break-all font-mono text-xs text-[var(--text-body)]">${selectedPrompt.file_path ?? '미설정'}</div>
               </div>
               <div class="rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
-                <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">문자 수</div>
-                <div class="mt-1 font-mono text-[12px] text-[var(--text-body)]">${selectedPrompt.char_count}</div>
+                <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">문자 수</div>
+                <div class="mt-1 font-mono text-xs text-[var(--text-body)]">${selectedPrompt.char_count}</div>
               </div>
             </div>
 
             ${selectedPrompt.template_variables.length > 0 ? html`
               <div class="mb-4 rounded border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
-                <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">허용된 플레이스홀더</div>
+                <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">허용된 플레이스홀더</div>
                 <div class="mt-2 flex flex-wrap gap-2">
                   ${selectedPrompt.template_variables.map(variable => html`
-                    <span class="rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 font-mono text-[11px] text-[var(--text-body)]">${`{{${variable}}}`}</span>
+                    <span class="rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 font-mono text-2xs text-[var(--text-body)]">${`{{${variable}}}`}</span>
                   `)}
                 </div>
               </div>
             ` : null}
 
             <div class="mb-4">
-              <div class="mb-2 text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">파일 기준값</div>
+              <div class="mb-2 text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">파일 기준값</div>
               <div class="max-h-[220px] overflow-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```markdown\n' + (selectedPrompt.file_value ?? '없음') + '\n```'} /></div>
             </div>
 
             <div class="mb-2 flex items-center justify-between gap-2">
-              <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">런타임 오버라이드</div>
-              <div class="text-[11px] text-[var(--text-muted)]">저장 후 effective 미리보기가 오버라이드를 반영합니다</div>
+              <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">런타임 오버라이드</div>
+              <div class="text-2xs text-[var(--text-muted)]">저장 후 effective 미리보기가 오버라이드를 반영합니다</div>
             </div>
             <${TextArea}
               rows=${18}
               value=${draft}
-              class="min-h-[320px] font-mono text-[12px]"
+              class="min-h-[320px] font-mono text-xs"
               onInput=${(event: Event) => {
                 setDraft((event.target as HTMLTextAreaElement).value)
                 setStatus(null)
@@ -300,7 +300,7 @@ export function PromptRegistryPanel() {
               <//>
             </div>
           ` : html`
-            <div class="rounded border border-dashed border-[var(--card-border)] px-4 py-10 text-center text-[12px] text-[var(--text-muted)]">
+            <div class="rounded border border-dashed border-[var(--card-border)] px-4 py-10 text-center text-xs text-[var(--text-muted)]">
               ${loading ? '프롬프트 목록을 불러오는 중입니다.' : '표시할 프롬프트가 없습니다.'}
             </div>
           `}

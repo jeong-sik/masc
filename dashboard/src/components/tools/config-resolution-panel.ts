@@ -157,7 +157,7 @@ function ConfigRow({
   return html`
     <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3" title=${item.path}>
       <div class="mb-2 flex flex-wrap items-center gap-2">
-        <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">${label}</div>
+        <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">${label}</div>
         <${StatusChip} tone=${toneClass(item.exists ? 'ready' : item.source === 'invalid_env' ? 'invalid_env' : 'warn')}>${item.exists ? 'present' : 'missing'}<//>
         ${showSourceBadge
           ? html`
@@ -171,14 +171,14 @@ function ConfigRow({
           : null}
       </div>
       <div class="flex items-start gap-1.5">
-        <div class="min-w-0 flex-1 break-all font-mono text-[12px] leading-relaxed text-[var(--text-body)]">${pathInfo.primary}</div>
+        <div class="min-w-0 flex-1 break-all font-mono text-xs leading-relaxed text-[var(--text-body)]">${pathInfo.primary}</div>
         ${item.path
           ? html`<${CopyIdButton} value=${copyablePath(item)} label=${label} ariaLabel=${`${label} 경로 복사`} />`
           : null}
       </div>
       ${pathInfo.context
         ? html`
-            <div class="mt-2 text-[11px] text-[var(--text-muted)]">${pathInfo.context}</div>
+            <div class="mt-2 text-2xs text-[var(--text-muted)]">${pathInfo.context}</div>
           `
         : null}
     </div>
@@ -196,10 +196,10 @@ function WarningBlock({
 
   return html`
     <div class="rounded border border-[var(--yellow-bright-28)] bg-[var(--warn-10)] px-3 py-3">
-      <div class="mb-2 text-[11px] uppercase tracking-[0.08em] text-[var(--yellow-100)]">${title}</div>
+      <div class="mb-2 text-2xs uppercase tracking-[0.08em] text-[var(--yellow-100)]">${title}</div>
       <div class="flex flex-col gap-2">
         ${warnings.map(warning => html`
-          <div class="text-[12px] leading-relaxed text-[var(--text-body)]">${warning}</div>
+          <div class="text-xs leading-relaxed text-[var(--text-body)]">${warning}</div>
         `)}
       </div>
     </div>
@@ -215,8 +215,8 @@ function RuntimeMetaRow({
 }) {
   return html`
     <div class="flex items-center justify-between gap-3 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-2">
-      <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">${label}</div>
-      <div class="break-all text-right font-mono text-[12px] text-[var(--text-body)]">${value}</div>
+      <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">${label}</div>
+      <div class="break-all text-right font-mono text-xs text-[var(--text-body)]">${value}</div>
     </div>
   `
 }
@@ -231,9 +231,9 @@ function DiagnosticRow({ item }: { item: DashboardRuntimeDiagnostic }) {
               <${StatusChip} tone="warn">${item.signal}<//>
             `
           : null}
-        <span class="text-[11px] text-[var(--text-muted)]">${item.ts}</span>
+        <span class="text-2xs text-[var(--text-muted)]">${item.ts}</span>
       </div>
-      <div class="text-[12px] leading-relaxed text-[var(--text-body)]">${item.message}</div>
+      <div class="text-xs leading-relaxed text-[var(--text-body)]">${item.message}</div>
     </div>
   `
 }
@@ -318,7 +318,7 @@ function RuntimeProbePanel() {
   return html`
     <div class="mt-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-4 py-4">
       <div class="mb-3 flex flex-wrap items-center gap-2">
-        <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">ollama warm / kv probe</div>
+        <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">ollama warm / kv probe</div>
         <${StatusChip} tone=${probeTone(signal, probe?.probe_ok)}>${probeSignalLabel(signal)}<//>
         ${state.value.data?.cache_hit !== undefined
           ? html`
@@ -326,7 +326,7 @@ function RuntimeProbePanel() {
             `
           : null}
         <button
-          class="ml-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-[11px] text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
+          class="ml-auto rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-2xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
           onClick=${() => void load(true)}
         >
           ${state.value.loading ? 'probing...' : 'refresh probe'}
@@ -335,7 +335,7 @@ function RuntimeProbePanel() {
 
       ${state.value.error
         ? html`
-            <div class="rounded border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-3 text-[12px] text-[#fecdd3]">
+            <div class="rounded border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-3 text-xs text-[#fecdd3]">
               ${state.value.error}
             </div>
           `
@@ -343,7 +343,7 @@ function RuntimeProbePanel() {
 
       ${!state.value.error && !probe
         ? html`
-            <div class="text-[12px] text-[var(--text-muted)]">
+            <div class="text-xs text-[var(--text-muted)]">
               ${state.value.loading ? 'runtime probe를 불러오는 중입니다.' : 'probe result가 아직 없습니다.'}
             </div>
           `
@@ -381,7 +381,7 @@ function RuntimeProbePanel() {
 
             ${assessment?.note
               ? html`
-                  <div class="mt-3 text-[12px] leading-relaxed text-[var(--text-muted)]">
+                  <div class="mt-3 text-xs leading-relaxed text-[var(--text-muted)]">
                     ${assessment.note}
                   </div>
                 `
@@ -391,7 +391,7 @@ function RuntimeProbePanel() {
               ? html`
                   <div class="mt-3 flex flex-col gap-2">
                     ${probe.observations?.map(item => html`
-                      <div class="rounded border border-[var(--card-border)] bg-[var(--white-6)] px-3 py-2 text-[12px] text-[var(--text-body)]">
+                      <div class="rounded border border-[var(--card-border)] bg-[var(--white-6)] px-3 py-2 text-xs text-[var(--text-body)]">
                         ${item}
                       </div>
                     `)}
@@ -403,7 +403,7 @@ function RuntimeProbePanel() {
               ? html`
                   <div class="mt-3 flex flex-col gap-2">
                     ${probe.errors?.map(item => html`
-                      <div class="rounded border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-2 text-[12px] text-[#fecdd3]">
+                      <div class="rounded border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-2 text-xs text-[#fecdd3]">
                         ${item}
                       </div>
                     `)}
@@ -438,7 +438,7 @@ export function ConfigResolutionPanel({
 
   return html`
     <${Card} title="설정 경로" class="section mb-4">
-      <div class="mb-4 text-[12px] leading-relaxed text-[var(--text-muted)]">
+      <div class="mb-4 text-xs leading-relaxed text-[var(--text-muted)]">
         서버가 실제로 해석한 config root와 runtime/data root를 함께 보여줍니다. 체크인된 repo config는 fallback/default source일 뿐이며, 현재 실행이 바라보는 경로와는 다를 수 있습니다.
       </div>
 
@@ -448,7 +448,7 @@ export function ConfigResolutionPanel({
               <div class="mb-3 flex flex-wrap items-center gap-2">
                 <${StatusChip} tone=${toneClass(resolution.status)}>${resolution.status}<//>
                 <${StatusChip} tone="neutral" uppercase=${false}>${sourceLabel(resolution.config_root.source)}<//>
-                <span class="text-[12px] text-[var(--text-muted)]">resolved config root</span>
+                <span class="text-xs text-[var(--text-muted)]">resolved config root</span>
               </div>
 
               <div class="mb-4">
@@ -497,7 +497,7 @@ export function ConfigResolutionPanel({
             <div>
               <div class="mb-3 flex flex-wrap items-center gap-2">
                 <${StatusChip} tone=${toneClass(runtimeResolution.status)}>${runtimeResolution.status}<//>
-                <span class="text-[12px] text-[var(--text-muted)]">runtime path resolution</span>
+                <span class="text-xs text-[var(--text-muted)]">runtime path resolution</span>
                 ${runtimeResolution.source_mismatch
                   ? html`
                       <${StatusChip} tone="bad">source mismatch<//>
@@ -526,7 +526,7 @@ export function ConfigResolutionPanel({
 
               <div class="mt-4">
                 <div class="mb-2 flex items-center justify-between gap-2">
-                  <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                  <div class="text-2xs uppercase tracking-[0.08em] text-[var(--text-muted)]">
                     recent diagnostics
                   </div>
                   ${runtimeResolution.diagnostics.length > 0
@@ -537,7 +537,7 @@ export function ConfigResolutionPanel({
                           placeholder="kind / signal / message 필터"
                           aria-label="Diagnostics 필터"
                           onInput=${(e: Event) => { diagnosticsQuery.value = (e.target as HTMLInputElement).value }}
-                          class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                          class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
                         />
                       `
                     : null}
@@ -545,13 +545,13 @@ export function ConfigResolutionPanel({
                 <div class="flex flex-col gap-3">
                   ${runtimeResolution.diagnostics.length === 0
                     ? html`
-                        <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3 text-[12px] text-[var(--text-muted)]">
+                        <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3 text-xs text-[var(--text-muted)]">
                           최근 runtime warning이 없습니다.
                         </div>
                       `
                     : isFilteringDiagnostics && visibleDiagnostics.length === 0
                       ? html`
-                          <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3 text-center text-[12px] text-[var(--text-muted)]">
+                          <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3 text-center text-xs text-[var(--text-muted)]">
                             필터 결과 없음 (${runtimeResolution.diagnostics.length} diagnostics)
                           </div>
                         `

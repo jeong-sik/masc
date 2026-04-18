@@ -110,7 +110,7 @@ function SuccessRateBar({ stat }: { stat: ToolStat }) {
       <div class="flex-1 h-1.5 rounded-sm bg-[var(--white-5)] overflow-hidden">
         <div class="h-full rounded-sm transition-all duration-300" style="width: ${successPct}%; background: ${barColor}"></div>
       </div>
-      <span class="text-[10px] font-mono w-10 text-right" style="color: ${barColor}">
+      <span class="text-3xs font-mono w-10 text-right" style="color: ${barColor}">
         ${successPct === 100 ? '100%' : `${successPct.toFixed(0)}%`}
       </span>
     </div>
@@ -179,14 +179,14 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
 
   return html`
     <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/30 hover:shadow-sm">
-      <div class="text-[11px] font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
+      <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
         <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
         도구 텔레메트리
       </div>
       <div class="flex flex-col gap-4">
 
       ${'' /* Summary row */}
-      <div class="flex gap-3 flex-wrap text-[11px]">
+      <div class="flex gap-3 flex-wrap text-2xs">
         <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--text-muted)]">
           <span class="font-mono font-medium text-[var(--text-strong)]">${s.tools.length}</span> 도구
         </span>
@@ -224,9 +224,9 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
               placeholder="도구 검색 (이름/카테고리)"
               aria-label="도구 텔레메트리 검색"
               onInput=${(e: Event) => { setQuery((e.target as HTMLInputElement).value) }}
-              class="min-w-[160px] rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+              class="min-w-[160px] rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
             />
-            <span class="text-[10px] text-[var(--text-muted)] tabular-nums">
+            <span class="text-3xs text-[var(--text-muted)] tabular-nums">
               ${trimmedQuery
                 ? `${visibleTools.length} / ${s.tools.length}`
                 : `${s.tools.length}개`}
@@ -234,7 +234,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           </div>
         </div>
         ${visibleTools.length === 0 ? html`
-          <div class="text-[11px] text-[var(--text-muted)] py-2 px-2">
+          <div class="text-2xs text-[var(--text-muted)] py-2 px-2">
             필터 결과 없음 (${s.tools.length} items)
           </div>
         ` : visibleTools.slice(0, 15).map(stat => {
@@ -242,10 +242,10 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           const barWidth = (stat.call_count / maxCount) * 100
           return html`
             <div class="flex items-center gap-2 py-1 group">
-              <div class="size-5 rounded flex-shrink-0 bg-[var(--white-5)] flex items-center justify-center text-[10px] font-mono font-bold ${cat.color}">
+              <div class="size-5 rounded flex-shrink-0 bg-[var(--white-5)] flex items-center justify-center text-3xs font-mono font-bold ${cat.color}">
                 ${cat.icon}
               </div>
-              <div class="w-28 flex-shrink-0 text-[11px] font-mono text-[var(--text-muted)] truncate" title=${stat.name}>
+              <div class="w-28 flex-shrink-0 text-2xs font-mono text-[var(--text-muted)] truncate" title=${stat.name}>
                 ${stat.name.replace(/^(keeper_|masc_)/, '')}
               </div>
               <div class="flex-1 h-3 rounded bg-[var(--white-5)] overflow-hidden">
@@ -253,8 +253,8 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
                   style="width: ${barWidth}%; background: ${stat.failure_count > 0 ? 'var(--warn)' : 'var(--accent)'}; opacity: 0.7">
                 </div>
               </div>
-              <span class="w-8 text-right text-[11px] font-mono text-[var(--text-muted)]">${stat.call_count}</span>
-              <span class="w-14 text-right text-[10px] font-mono ${durationColor(stat.avg_duration_ms)}">
+              <span class="w-8 text-right text-2xs font-mono text-[var(--text-muted)]">${stat.call_count}</span>
+              <span class="w-14 text-right text-3xs font-mono ${durationColor(stat.avg_duration_ms)}">
                 ${formatDuration(stat.avg_duration_ms)}
               </span>
             </div>
@@ -268,11 +268,11 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           <${SectionCap} tone="dim" weight="semibold" class="mb-1">성공률<//>
           ${s.tools.filter(st => st.failure_count > 0).map(stat => html`
             <div class="flex items-center gap-2">
-              <span class="w-28 flex-shrink-0 text-[11px] font-mono text-[var(--text-muted)] truncate">
+              <span class="w-28 flex-shrink-0 text-2xs font-mono text-[var(--text-muted)] truncate">
                 ${stat.name.replace(/^(keeper_|masc_)/, '')}
               </span>
               <${SuccessRateBar} stat=${stat} />
-              <span class="text-[10px] text-[var(--bad)] w-10 text-right">${stat.failure_count}err</span>
+              <span class="text-3xs text-[var(--bad)] w-10 text-right">${stat.failure_count}err</span>
             </div>
           `)}
         </div>
@@ -284,10 +284,10 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           <${SectionCap} tone="dim" weight="semibold" class="mb-1">P95 지연 시간<//>
           ${slowest.map(stat => html`
             <div class="flex items-center justify-between py-1 px-2 rounded bg-[var(--white-3)]">
-              <span class="text-[11px] font-mono text-[var(--text-muted)]">${stat.name.replace(/^(keeper_|masc_)/, '')}</span>
+              <span class="text-2xs font-mono text-[var(--text-muted)]">${stat.name.replace(/^(keeper_|masc_)/, '')}</span>
               <div class="flex items-center gap-3">
-                <span class="text-[10px] text-[var(--text-dim)]">avg ${formatDuration(stat.avg_duration_ms)}</span>
-                <span class="text-[11px] font-mono font-medium ${durationColor(stat.p95_duration_ms)}">p95 ${formatDuration(stat.p95_duration_ms)}</span>
+                <span class="text-3xs text-[var(--text-dim)]">avg ${formatDuration(stat.avg_duration_ms)}</span>
+                <span class="text-2xs font-mono font-medium ${durationColor(stat.p95_duration_ms)}">p95 ${formatDuration(stat.p95_duration_ms)}</span>
               </div>
             </div>
           `)}

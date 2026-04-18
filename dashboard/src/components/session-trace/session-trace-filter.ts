@@ -66,12 +66,12 @@ export function SessionTraceFilter({ agentName }: { agentName: string }) {
             const v = (e.target as HTMLInputElement).value
             setTraceSearchQuery(agentName, v)
           }}
-          class="w-full px-3 py-1.5 text-[12px] rounded bg-[var(--white-3)] border border-[var(--white-6)] text-[var(--text-body)] placeholder:text-[var(--text-dim)] outline-none focus:border-[var(--accent)]"
+          class="w-full px-3 py-1.5 text-xs rounded bg-[var(--white-3)] border border-[var(--white-6)] text-[var(--text-body)] placeholder:text-[var(--text-dim)] outline-none focus:border-[var(--accent)]"
         />
         ${searchQuery ? html`
           <button
             onClick=${() => setTraceSearchQuery(agentName, '')}
-            class="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-dim)] hover:text-[var(--text-body)] text-[14px] leading-none"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-dim)] hover:text-[var(--text-body)] text-base leading-none"
           >\u00d7</button>
         ` : null}
       </div>
@@ -88,7 +88,7 @@ export function SessionTraceFilter({ agentName }: { agentName: string }) {
       <!-- Status chips -->
       ${statusCounts.all > 0 ? html`
         <div>
-          <div class="text-[10px] text-[var(--text-dim)] mb-1">상태</div>
+          <div class="text-3xs text-[var(--text-dim)] mb-1">상태</div>
           <${FilterChips}
             chips=${statusChips}
             value=${currentStatus}

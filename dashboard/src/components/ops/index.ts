@@ -153,7 +153,7 @@ function renderActivityTimeline() {
     return html`
       <div data-testid="ops-activity-timeline-empty">
         <${EmptyState} message=${message} compact />
-        ${hint ? html`<div class="mt-0.5 text-center text-[11px] text-text-dim">${hint}</div>` : null}
+        ${hint ? html`<div class="mt-0.5 text-center text-2xs text-text-dim">${hint}</div>` : null}
       </div>
     `
   }
@@ -167,13 +167,13 @@ function renderActivityTimeline() {
           data-activity-kind=${entry.kind}
           class="rounded border border-[var(--card-border)] bg-[var(--white-3)] p-3"
         >
-          <div class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
+          <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--text-muted)]">
             <${CountBadge} tone=${entry.tone}>${entry.label}<//>
             <span>${entry.target}</span>
             <span>${entry.actor}</span>
             <span><${TimeAgo} timestamp=${entry.at} /></span>
           </div>
-          <div class="mt-2 text-[13px] leading-[1.55] text-[var(--text-body)]">${entry.detail}</div>
+          <div class="mt-2 text-sm leading-[1.55] text-[var(--text-body)]">${entry.detail}</div>
         </article>
       `)}
     </div>
@@ -220,8 +220,8 @@ export function Ops() {
             <span>${workflowTargetLabel(workflowContext)}</span>
           </div>
           <div class="text-[var(--text-strong)] leading-relaxed">${workflowContext.summary}</div>
-          ${workflowContext.payload_preview ? html`<div class="mt-1 p-2 rounded bg-[var(--white-3)] text-[12px] font-mono">${workflowContext.payload_preview}</div>` : null}
-          <div class="text-[var(--text-muted)] text-[12px]">
+          ${workflowContext.payload_preview ? html`<div class="mt-1 p-2 rounded bg-[var(--white-3)] text-xs font-mono">${workflowContext.payload_preview}</div>` : null}
+          <div class="text-[var(--text-muted)] text-xs">
             ${workflowReady
               ? '추천 액션 기준으로 대상 선택과 입력값을 미리 맞춰 두었습니다.'
               : '대상이 현재 snapshot에 없습니다. 일반 개입 화면으로 열렸고, 실제 대상 선택은 수동으로 해야 합니다.'}
@@ -238,7 +238,7 @@ export function Ops() {
         <section class="${CARD_STANDARD} grid gap-3 order-2 max-[1200px]:order-1">
           <div>
             <h2 class="text-sm font-semibold text-[var(--text-strong)]">최근 운영 활동</h2>
-            <p class="mt-1 text-[12px] text-[var(--text-muted)]">최근 처리와 직접 개입을 시간순으로 함께 보여줍니다. 검토 큐와 Live Judge 판단은 거버넌스 페이지에서 처리합니다.</p>
+            <p class="mt-1 text-xs text-[var(--text-muted)]">최근 처리와 직접 개입을 시간순으로 함께 보여줍니다. 검토 큐와 Live Judge 판단은 거버넌스 페이지에서 처리합니다.</p>
           </div>
           <${renderActivityTimeline} />
         </section>

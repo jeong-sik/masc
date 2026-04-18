@@ -103,7 +103,7 @@ export function QuickBindForm({ connectorId, keepers }: {
       data-quick-bind=${connectorId}
     >
       <div class="min-w-0 flex-1 basis-[160px]">
-        <label class="mb-1 block text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]" for=${`qb-channel-${connectorId}`}>
+        <label class="mb-1 block text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]" for=${`qb-channel-${connectorId}`}>
           채널 ID
         </label>
         <${TextInput}
@@ -125,12 +125,12 @@ export function QuickBindForm({ connectorId, keepers }: {
         />
       </div>
       <div class="min-w-0 basis-[140px]">
-        <label class="mb-1 block text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]" for=${`qb-keeper-${connectorId}`}>
+        <label class="mb-1 block text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]" for=${`qb-keeper-${connectorId}`}>
           Keeper
         </label>
         <select
           id=${`qb-keeper-${connectorId}`}
-          class="w-full rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 font-mono text-[11px] text-[var(--text-body)] focus:border-[var(--accent-1)] focus:outline-none"
+          class="w-full rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 font-mono text-2xs text-[var(--text-body)] focus:border-[var(--accent-1)] focus:outline-none"
           onChange=${(ev: Event) => {
             const target = ev.currentTarget as HTMLSelectElement
             setEntry(connectorId, { keeperName: target.value })

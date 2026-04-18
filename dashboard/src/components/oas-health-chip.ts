@@ -130,12 +130,12 @@ export function OasHealthChip() {
         <div class="mt-3 pt-3 border-t border-[var(--white-6)] grid md:grid-cols-2 gap-4">
           ${recentEvents.value.length > 0 ? html`
             <div>
-              <div class="text-[10px] text-[var(--text-muted)] tracking-wider uppercase font-medium mb-2">
+              <div class="text-3xs text-[var(--text-muted)] tracking-wider uppercase font-medium mb-2">
                 최근 자율성 이벤트
               </div>
               <ul class="space-y-1">
                 ${recentEvents.value.map(evt => html`
-                  <li class="flex items-baseline justify-between gap-2 text-[11px]">
+                  <li class="flex items-baseline justify-between gap-2 text-2xs">
                     <span class="text-[var(--text-body)] truncate">
                       <span class="font-mono text-[var(--text-dim)]">${evt.agent_name}</span>
                       <span class="text-[var(--text-muted)]"> · </span>
@@ -151,12 +151,12 @@ export function OasHealthChip() {
           ` : null}
           ${recentKeepers.value.length > 0 ? html`
             <div>
-              <div class="text-[10px] text-[var(--text-muted)] tracking-wider uppercase font-medium mb-2">
+              <div class="text-3xs text-[var(--text-muted)] tracking-wider uppercase font-medium mb-2">
                 활성 Keeper
               </div>
               <ul class="space-y-1">
                 ${recentKeepers.value.map(snap => html`
-                  <li class="flex items-baseline justify-between gap-2 text-[11px]">
+                  <li class="flex items-baseline justify-between gap-2 text-2xs">
                     <span class="text-[var(--text-body)] truncate">
                       <span class="font-mono text-[var(--text-dim)]">${snap.keeper_name}</span>
                       <span class="text-[var(--text-muted)]"> · gen ${snap.generation} · ${Math.round(snap.context_ratio * 100)}%</span>

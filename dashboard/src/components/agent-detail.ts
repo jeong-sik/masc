@@ -116,7 +116,7 @@ function TaskSummary({ task }: { task: Task }) {
   return html`
     <div class="flex items-center gap-3 border border-card-border bg-card/40 hover:bg-card/60 transition-colors px-3 py-2.5 rounded shadow-sm">
       <${IdPill}>${task.id}<//>
-      <span class="flex-1 text-[13px] text-text-strong font-medium truncate">${task.title}</span>
+      <span class="flex-1 text-sm text-text-strong font-medium truncate">${task.title}</span>
       <${StatusBadge} status=${task.status} />
     </div>
   `
@@ -128,7 +128,7 @@ function TaskHistoryPanel({ row }: { row: TaskHistoryRow }) {
       <div class="mb-3">
         <${IdPill} class="group-hover:bg-accent/20 transition-colors">${row.taskId}<//>
       </div>
-      <pre class="m-0 whitespace-pre-wrap text-[12px] leading-relaxed text-text-body font-mono opacity-90">${row.text || '작업 이력 없음'}</pre>
+      <pre class="m-0 whitespace-pre-wrap text-xs leading-relaxed text-text-body font-mono opacity-90">${row.text || '작업 이력 없음'}</pre>
     </div>
   `
 }
@@ -142,7 +142,7 @@ function renderOwnedTasks(
     return html`<div class="h-full min-h-[120px]"><${EmptyState} message="할당된 작업이 없습니다" compact /></div>`
   }
   if (isFiltering && visibleTasks.length === 0) {
-    return html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${allTasks.length} tasks)</div>`
+    return html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${allTasks.length} tasks)</div>`
   }
   return html`<div class="flex flex-col gap-3">${visibleTasks.map(t => html`<${TaskSummary} key=${t.id} task=${t} />`)}</div>`
 }
@@ -156,7 +156,7 @@ function renderTaskHistories(
     return html`<${EmptyState} message="작업 이력이 없습니다" compact />`
   }
   if (isFiltering && visibleRows.length === 0) {
-    return html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${allRows.length} rows)</div>`
+    return html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${allRows.length} rows)</div>`
   }
   return html`<div class="flex flex-col gap-3">${visibleRows.map(row => html`<${TaskHistoryPanel} key=${row.taskId} row=${row} />`)}</div>`
 }
@@ -226,16 +226,16 @@ export function AgentDetailOverlay() {
                 </h2>
                 <div class="flex items-center gap-2 mt-2 flex-wrap">
                   <${StatusBadge} status=${unified.canonical} />
-                  ${unified.description !== unified.label ? html`<span class="text-[10px] font-medium py-1 px-2 border border-white/10 bg-white/5 text-text-muted whitespace-nowrap rounded" title=${unified.description}>${unified.description}</span>` : null}
+                  ${unified.description !== unified.label ? html`<span class="text-3xs font-medium py-1 px-2 border border-white/10 bg-white/5 text-text-muted whitespace-nowrap rounded" title=${unified.description}>${unified.description}</span>` : null}
                   ${isArchivedParticipant ? html`<${IdPill}>이전 세션 참여자<//>` : null}
-                  ${agent?.model ? html`<span class="font-mono text-[10px] font-medium bg-white/10 border border-white/5 px-2 py-1 rounded text-text-muted shadow-sm">${agent.model}</span>` : ''}
+                  ${agent?.model ? html`<span class="font-mono text-3xs font-medium bg-white/10 border border-white/5 px-2 py-1 rounded text-text-muted shadow-sm">${agent.model}</span>` : ''}
                   ${!agent && missionBrief?.archived_reason
                     ? html`<span class="text-xs text-text-dim italic">${missionBrief.archived_reason}</span>`
                     : null}
                 </div>
               </div>
             </div>
-            <div class="mt-2 flex gap-3 flex-wrap text-text-muted text-[13px] font-medium">
+            <div class="mt-2 flex gap-3 flex-wrap text-text-muted text-sm font-medium">
               ${agent?.current_task || missionBrief?.current_work
                 ? html`<span class="bg-card/40 px-3 py-1.5 rounded border border-card-border shadow-sm">태스크: <span class="text-text-strong">${agent?.current_task ?? missionBrief?.current_work}</span></span>`
                 : null}
@@ -243,7 +243,7 @@ export function AgentDetailOverlay() {
             </div>
             ${keeper || continuitySummary || missionBrief?.related_session_id
               ? html`
-                  <div class="mt-1 flex gap-3 flex-wrap text-text-muted text-[13px] font-medium">
+                  <div class="mt-1 flex gap-3 flex-wrap text-text-muted text-sm font-medium">
                     ${keeper
                       ? html`<span class="flex items-center gap-1.5">연결된 키퍼:
                           <button
@@ -266,7 +266,7 @@ export function AgentDetailOverlay() {
             <${ActionButton}
               variant="ghost"
               size="lg"
-              class="px-4 py-2 text-[13px] rounded bg-card/60 shadow-sm"
+              class="px-4 py-2 text-sm rounded bg-card/60 shadow-sm"
               onClick=${() => { void refreshAgentDetail() }}
               disabled=${loading.value}
             >
@@ -275,7 +275,7 @@ export function AgentDetailOverlay() {
             <button
               ref=${closeButtonRef}
               type="button"
-              class="px-4 py-2 text-[13px] font-semibold rounded border border-transparent bg-white/10 text-text-strong hover:bg-white/20 transition-colors duration-200 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]"
+              class="px-4 py-2 text-sm font-semibold rounded border border-transparent bg-white/10 text-text-strong hover:bg-white/20 transition-colors duration-200 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]"
               onClick=${closeAgentDetail}
             >
               닫기
@@ -287,12 +287,12 @@ export function AgentDetailOverlay() {
 
         <${AgentSessionReport} agentName=${agentName} />
 
-        <${CollapsibleSection} title="활동 추적" badge=${html`<span class="text-[10px] text-[var(--text-dim)] font-normal ml-1">통합 타임라인</span>`}>
+        <${CollapsibleSection} title="활동 추적" badge=${html`<span class="text-3xs text-[var(--text-dim)] font-normal ml-1">통합 타임라인</span>`}>
           <${SessionTraceView} agentName=${agentName} isKeeper=${!!keeper} />
         <//>
 
         <div class="flex items-center justify-between gap-2">
-          <div class="text-[10px] uppercase tracking-wider text-[var(--text-dim)]">
+          <div class="text-3xs uppercase tracking-wider text-[var(--text-dim)]">
             작업 필터
             ${isFilteringTasks
               ? html`<span class="ml-2 normal-case tracking-normal text-text-muted">할당 ${visibleOwnedTasks.length}/${ownedTasks.length} · 이력 ${visibleHistories.length}/${historyRows.length}</span>`
@@ -304,7 +304,7 @@ export function AgentDetailOverlay() {
             placeholder="id / title / status 필터"
             aria-label="작업 필터"
             onInput=${(e: Event) => { taskQuery.value = (e.target as HTMLInputElement).value }}
-            class="min-w-[160px] max-w-[280px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-[160px] max-w-[280px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
           />
         </div>
 
@@ -316,7 +316,7 @@ export function AgentDetailOverlay() {
           <${Card} title="최근 활동">
             ${lines.length === 0
               ? html`<div class="h-full min-h-[120px]"><${EmptyState} message="최근 활동 메시지가 없습니다" compact /></div>`
-              : html`<div class="max-h-[240px] overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-card-border bg-card/40 px-3 py-2.5 font-mono text-[12px] text-text-body leading-relaxed rounded shadow-sm hover:bg-card/60 transition-colors">${line}</div>`)}</div>`}
+              : html`<div class="max-h-[240px] overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-card-border bg-card/40 px-3 py-2.5 font-mono text-xs text-text-body leading-relaxed rounded shadow-sm hover:bg-card/60 transition-colors">${line}</div>`)}</div>`}
           <//>
         </div>
 
@@ -335,7 +335,7 @@ export function AgentDetailOverlay() {
                   ['종합', agentFitness.value.overall_fitness],
                 ].map(([label, val]) => html`
                   <div class="rounded border border-card-border/50 bg-card/30 p-3 text-center">
-                    <div class="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1">${label}</div>
+                    <div class="text-3xs font-semibold uppercase tracking-wider text-text-muted mb-1">${label}</div>
                     <div class="text-lg font-bold ${(val as number) >= 0.7 ? 'text-ok' : (val as number) >= 0.4 ? 'text-[var(--warn)]' : 'text-bad'}">${val != null ? ((val as number) * 100).toFixed(0) + '%' : '-'}</div>
                   </div>
                 `)}
@@ -350,7 +350,7 @@ export function AgentDetailOverlay() {
           <${Card} title="직접 멘션">
             <div class="grid grid-cols-[1fr_auto] gap-3">
               <${TextInput}
-                class="px-4 py-2.5 rounded bg-card/60 text-text-strong text-[13px] placeholder:text-text-dim shadow-inner"
+                class="px-4 py-2.5 rounded bg-card/60 text-text-strong text-sm placeholder:text-text-dim shadow-inner"
                 value=${mentionText.value}
                 name="agent_direct_mention"
                 ariaLabel="직접 멘션 메시지"
@@ -363,7 +363,7 @@ export function AgentDetailOverlay() {
               <${ActionButton}
                 variant="primary"
                 size="lg"
-                class="px-5 py-2.5 text-[13px] shadow-sm shadow-accent/20"
+                class="px-5 py-2.5 text-sm shadow-sm shadow-accent/20"
                 onClick=${() => { void submitMention() }}
                 disabled=${sendingMention.value || mentionText.value.trim() === ''}
               >

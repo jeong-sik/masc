@@ -54,7 +54,7 @@ export function QuickIntervene() {
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <h3 class="text-sm font-semibold text-[var(--text-strong)]">빠른 개입</h3>
-          <p class="mt-1 text-[12px] leading-[1.45] text-[var(--text-muted)]">메시지나 메모를 방 또는 키퍼에 바로 보냅니다.</p>
+          <p class="mt-1 text-xs leading-[1.45] text-[var(--text-muted)]">메시지나 메모를 방 또는 키퍼에 바로 보냅니다.</p>
         </div>
         <${ActionButton}
           variant="subtle"
@@ -68,7 +68,7 @@ export function QuickIntervene() {
 
       <div class="flex gap-2 items-stretch flex-wrap">
         <select
-          class="shrink-0 rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[13px] text-[var(--text-body)] transition-colors cursor-pointer min-w-[120px] focus-visible:outline-none focus-visible:border-[rgba(71,184,255,0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(71,184,255,0.35)]"
+          class="shrink-0 rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-sm text-[var(--text-body)] transition-colors cursor-pointer min-w-[120px] focus-visible:outline-none focus-visible:border-[rgba(71,184,255,0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(71,184,255,0.35)]"
           value=${quickTarget.value}
           aria-label="개입 대상"
           onChange=${(e: Event) => { quickTarget.value = (e.target as HTMLSelectElement).value }}
@@ -100,10 +100,10 @@ export function QuickIntervene() {
       ${showAdvanced
         ? html`
             <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
-              <label class="block text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--text-muted)]" for="quick-intervene-actor">
+              <label class="block text-2xs font-medium uppercase tracking-[0.08em] text-[var(--text-muted)]" for="quick-intervene-actor">
                 기록 주체
               </label>
-              <p class="mt-1 text-[12px] leading-[1.45] text-[var(--text-muted)]">개입과 승인 요청은 이 이름으로 기록됩니다.</p>
+              <p class="mt-1 text-xs leading-[1.45] text-[var(--text-muted)]">개입과 승인 요청은 이 이름으로 기록됩니다.</p>
               <${TextInput}
                 class="mt-3 max-w-[260px] border-[var(--white-8)] bg-[var(--white-3)]"
                 value=${actorName.value.trim() || 'dashboard'}

@@ -46,7 +46,7 @@ function GovernanceSummaryStrip() {
 
   return html`
     ${isStale ? html`
-      <div class="mb-3.5 flex items-center gap-3 rounded border border-warn/30 bg-warn/10 p-3.5 text-[13px] font-medium text-warn shadow-sm">
+      <div class="mb-3.5 flex items-center gap-3 rounded border border-warn/30 bg-warn/10 p-3.5 text-sm font-medium text-warn shadow-sm">
         <div class="shrink-0"><${AlertTriangle} size=${18} aria-hidden="true" /></div>
         <div>
           모든 열린 케이스가 ${formatAgeSummary(oldestAge)} 이상 경과됨.
@@ -58,16 +58,16 @@ function GovernanceSummaryStrip() {
     <div class="mb-2.5 flex items-center justify-between gap-3 px-0.5">
       <div class="flex items-center gap-3 min-w-0">
         <h2 class="text-lg font-bold text-text-strong tracking-wide">Live Judge</h2>
-        <span class="rounded border border-white/5 bg-[var(--white-3)] px-2 py-0.5 text-[11px] font-medium text-text-muted">
+        <span class="rounded border border-white/5 bg-[var(--white-3)] px-2 py-0.5 text-2xs font-medium text-text-muted">
           ${judgeOnlyLabel}
         </span>
       </div>
       <div class="flex items-center gap-3 shrink-0">
-        ${data?.generated_at ? html`<span class="text-[11px] text-text-dim font-mono">${data.generated_at}</span>` : null}
+        ${data?.generated_at ? html`<span class="text-2xs text-text-dim font-mono">${data.generated_at}</span>` : null}
         <${ActionButton}
           variant="ghost"
           size="sm"
-          class="rounded border-transparent bg-[var(--white-3)] px-2.5 py-1 text-[12px] font-semibold text-text-muted hover:bg-white/10 hover:text-text-strong"
+          class="rounded border-transparent bg-[var(--white-3)] px-2.5 py-1 text-xs font-semibold text-text-muted hover:bg-white/10 hover:text-text-strong"
           onClick=${refreshGovernance}
           disabled=${governanceLoading.value}
         >
@@ -94,7 +94,7 @@ function GovernanceSummaryStrip() {
       />
     </div>
     <${JudgeStatusBar} />
-    ${governanceError.value ? html`<div class="mb-5 rounded border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-[12px] text-[#f7b6b6]">${governanceError.value}</div>` : null}
+    ${governanceError.value ? html`<div class="mb-5 rounded border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-xs text-[#f7b6b6]">${governanceError.value}</div>` : null}
   `
 }
 
@@ -107,7 +107,7 @@ function JudgeStatusBar() {
     ? (judge.refreshing ? '갱신 중' : '온라인')
     : (judge.last_error ? '오류' : '오프라인')
   return html`
-    <div class="mb-4 flex items-center gap-3 rounded border border-white/5 bg-white/3 px-3.5 py-2 text-[12px]" data-testid="judge-status">
+    <div class="mb-4 flex items-center gap-3 rounded border border-white/5 bg-white/3 px-3.5 py-2 text-xs" data-testid="judge-status">
       <span class="flex items-center gap-1.5">
         <${StatusDot} size="sm" class=${dotClass} />
         <span class="font-medium text-text-muted">평가 모델 ${label}</span>
@@ -164,7 +164,7 @@ function JudgmentsSection() {
         <${Card} title=${title} class="section mb-5" variant="compact">
           <${EmptyState} message=${message} compact />
           ${lastSeen || meta ? html`
-            <div class="mt-1 flex flex-wrap items-center justify-center gap-2 text-[11px] ${tone === 'warn' ? 'text-warn' : 'text-text-dim'}">
+            <div class="mt-1 flex flex-wrap items-center justify-center gap-2 text-2xs ${tone === 'warn' ? 'text-warn' : 'text-text-dim'}">
               ${lastSeen ? html`<span class="inline-flex items-center rounded border ${chipClass} px-2 py-0.5 font-medium">
                 마지막 판단 <${TimeAgo} timestamp=${lastSeen} />
               </span>` : null}
@@ -180,24 +180,24 @@ function JudgmentsSection() {
     <${Card} title=${title} class="section mb-5" variant="compact">
       <div class="flex flex-col gap-2.5">
         ${judgments.map(j => html`
-          <div class="rounded border border-card-border bg-card/34 p-3.5 text-[13px]" data-testid="judgment-item">
+          <div class="rounded border border-card-border bg-card/34 p-3.5 text-sm" data-testid="judgment-item">
             <div class="flex items-center gap-2 mb-1.5">
-              <span class="inline-flex items-center rounded border border-accent/20 bg-[var(--accent-10)] px-1.5 py-0.5 text-[10px] font-bold text-accent">${j.target_kind ?? 'unknown'}</span>
+              <span class="inline-flex items-center rounded border border-accent/20 bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-bold text-accent">${j.target_kind ?? 'unknown'}</span>
               <span class="font-medium text-text-strong">${j.target_id ?? ''}</span>
-              ${j.confidence != null ? html`<span class="ml-auto text-[11px] text-text-muted">신뢰도 ${Math.round(j.confidence * 100)}%</span>` : null}
+              ${j.confidence != null ? html`<span class="ml-auto text-2xs text-text-muted">신뢰도 ${Math.round(j.confidence * 100)}%</span>` : null}
             </div>
             <div class="text-text-muted/90 leading-relaxed">${j.summary ?? ''}</div>
             ${j.recommended_action ? html`
-              <div class="mt-2 flex items-center gap-1.5 text-[11px]">
+              <div class="mt-2 flex items-center gap-1.5 text-2xs">
                 <span class="rounded border border-accent/20 bg-accent/8 px-1.5 py-0.5 font-medium text-accent">${j.recommended_action.action_kind ?? 'action'}</span>
                 ${j.recommended_action.resolved_tool ? html`<span class="text-text-dim font-mono">${j.recommended_action.resolved_tool}</span>` : null}
                 ${j.recommended_action.reason ? html`<span class="text-text-muted/80 truncate max-w-[250px]">${j.recommended_action.reason}</span>` : null}
               </div>
             ` : null}
             ${j.guardrail_state?.requires_human_gate ? html`
-              <div class="mt-1.5 inline-flex items-center rounded border border-warn/30 bg-warn/10 px-2 py-0.5 text-[10px] font-bold text-warn">승인 필요</div>
+              <div class="mt-1.5 inline-flex items-center rounded border border-warn/30 bg-warn/10 px-2 py-0.5 text-3xs font-bold text-warn">승인 필요</div>
             ` : null}
-            ${j.generated_at ? html`<div class="mt-1.5 text-[11px] text-text-dim"><${TimeAgo} timestamp=${j.generated_at} /></div>` : null}
+            ${j.generated_at ? html`<div class="mt-1.5 text-2xs text-text-dim"><${TimeAgo} timestamp=${j.generated_at} /></div>` : null}
           </div>
         `)}
       </div>
@@ -291,10 +291,10 @@ function KeeperApprovalAlertBanner() {
       <div class="flex-1 min-w-0">
         <div class="flex items-baseline gap-2 flex-wrap">
           <span class="text-[20px] font-extrabold leading-none">${items.length}건</span>
-          <span class="text-[13px] font-semibold">Keeper HITL 승인 대기</span>
-          ${maxRisk ? html`<span class="text-[11px] font-bold uppercase tracking-wider opacity-80">최고 ${maxRisk}</span>` : null}
+          <span class="text-sm font-semibold">Keeper HITL 승인 대기</span>
+          ${maxRisk ? html`<span class="text-2xs font-bold uppercase tracking-wider opacity-80">최고 ${maxRisk}</span>` : null}
         </div>
-        <div class="mt-1 text-[12px] opacity-85">
+        <div class="mt-1 text-xs opacity-85">
           위험도 threshold를 넘은 keeper tool call이 사용자 판단을 기다리고 있습니다.
         </div>
       </div>
@@ -324,9 +324,9 @@ function KeeperApprovalEmptyState() {
   return html`
     <div data-testid="keeper-hitl-empty">
       <${EmptyState} message=${ctx.primary} compact />
-      ${ctx.secondary ? html`<div class="mt-0.5 text-center text-[11px] text-text-dim">${ctx.secondary}</div>` : null}
+      ${ctx.secondary ? html`<div class="mt-0.5 text-center text-2xs text-text-dim">${ctx.secondary}</div>` : null}
       ${ctx.lastActivity || meta ? html`
-        <div class="mt-1.5 flex flex-wrap items-center justify-center gap-2 text-[11px] ${ctx.tone === 'warn' ? 'text-warn' : 'text-text-dim'}">
+        <div class="mt-1.5 flex flex-wrap items-center justify-center gap-2 text-2xs ${ctx.tone === 'warn' ? 'text-warn' : 'text-text-dim'}">
           ${ctx.lastActivity ? html`<span class="inline-flex items-center rounded border ${chipClass} px-2 py-0.5 font-medium">
             마지막 judge 활동 <${TimeAgo} timestamp=${ctx.lastActivity} />
           </span>` : null}
@@ -393,14 +393,14 @@ function KeeperApprovalQueueSection() {
   const isFiltering = query.value.trim() !== ''
   const countBadgeClass = hasItems
     ? (maxRisk === 'critical' || maxRisk === 'high'
-        ? 'border-bad/40 bg-bad/15 text-bad text-[13px] px-3 py-1 font-extrabold'
-        : 'border-warn/40 bg-warn/15 text-warn text-[13px] px-3 py-1 font-extrabold')
-    : 'border-white/10 bg-[var(--white-3)] text-text-muted text-[11px] px-2 py-0.5 font-bold'
+        ? 'border-bad/40 bg-bad/15 text-bad text-sm px-3 py-1 font-extrabold'
+        : 'border-warn/40 bg-warn/15 text-warn text-sm px-3 py-1 font-extrabold')
+    : 'border-white/10 bg-[var(--white-3)] text-text-muted text-2xs px-2 py-0.5 font-bold'
   return html`
     <div id="keeper-hitl-approval" data-testid="keeper-hitl-approval">
     <${Card} title="Keeper HITL 승인 대기" class="section mb-5" variant="compact">
       <div class="mb-3 flex items-center justify-between gap-3">
-        <div class="text-[12px] text-text-muted">
+        <div class="text-xs text-text-muted">
           위험도가 threshold를 넘은 keeper tool call이 여기서 대기합니다.
         </div>
         <span class="rounded border ${countBadgeClass}">
@@ -416,7 +416,7 @@ function KeeperApprovalQueueSection() {
             aria-label="Keeper HITL 승인 필터"
             data-testid="keeper-hitl-approval-filter"
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-            class="min-w-[160px] max-w-[280px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            class="min-w-[160px] max-w-[280px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
           />
         </div>
       ` : null}
@@ -424,7 +424,7 @@ function KeeperApprovalQueueSection() {
         ? html`<${KeeperApprovalEmptyState} />`
         : isFiltering && visibleItems.length === 0
           ? html`
-              <div class="py-4 text-center text-[11px] text-[var(--text-dim)]" data-testid="keeper-hitl-approval-empty-filter">
+              <div class="py-4 text-center text-2xs text-[var(--text-dim)]" data-testid="keeper-hitl-approval-empty-filter">
                 필터 결과 없음 (${items.length} items)
               </div>
             `
@@ -435,22 +435,22 @@ function KeeperApprovalQueueSection() {
                 return html`
                   <div class="rounded border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-item">
                     <div class="flex flex-wrap items-start gap-2.5">
-                      <span class="inline-flex items-center rounded border border-white/10 bg-[var(--white-3)] px-2 py-0.5 text-[10px] font-bold text-text-muted">
+                      <span class="inline-flex items-center rounded border border-white/10 bg-[var(--white-3)] px-2 py-0.5 text-3xs font-bold text-text-muted">
                         keeper ${item.keeper_name}
                       </span>
-                      <span class="inline-flex items-center rounded border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-[10px] font-bold text-accent">
+                      <span class="inline-flex items-center rounded border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-bold text-accent">
                         ${item.tool_name}
                       </span>
-                      <span class="inline-flex items-center rounded border px-2 py-0.5 text-[10px] font-bold ${approvalRiskToneClass(item.risk_level)}">
+                      <span class="inline-flex items-center rounded border px-2 py-0.5 text-3xs font-bold ${approvalRiskToneClass(item.risk_level)}">
                         ${item.risk_level}
                       </span>
-                      <span class="ml-auto text-[11px] text-text-dim">
+                      <span class="ml-auto text-2xs text-text-dim">
                         ${item.requested_at ? html`요청 <${TimeAgo} timestamp=${item.requested_at} />` : null}
                         ${item.waiting_s != null ? ` · 대기 ${Math.max(0, Math.round(item.waiting_s))}s` : ''}
                       </span>
                     </div>
                     ${item.input_preview
-                      ? html`<div class="mt-2 text-[12px] leading-relaxed text-text-muted break-words">${item.input_preview}</div>`
+                      ? html`<div class="mt-2 text-xs leading-relaxed text-text-muted break-words">${item.input_preview}</div>`
                       : null}
                     <div class="mt-3 grid gap-3 min-[1100px]:grid-cols-[minmax(0,1fr)_auto]">
                       <${JsonViewerCard} data=${item.input ?? {}} title="Approval Input" />

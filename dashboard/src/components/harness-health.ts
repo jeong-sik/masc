@@ -189,7 +189,7 @@ function HarnessFlowCard({ data }: { data: HarnessHealthData }) {
         </div>
       </div>
 
-      <div class="flex flex-wrap gap-2 text-[11px] text-[var(--text-dim)]">
+      <div class="flex flex-wrap gap-2 text-2xs text-[var(--text-dim)]">
         <span class="rounded-sm border border-[var(--white-8)] px-2 py-1">실선: 실시간 신호</span>
         <span class="rounded-sm border border-[var(--white-8)] px-2 py-1">점선: 스냅샷 갱신</span>
         <span class="rounded-sm border border-[var(--accent)] px-2 py-1 text-[var(--text-body)]">강조: 가장 최근 채널</span>
@@ -252,12 +252,12 @@ export function HarnessHealth() {
             <div class="flex items-center gap-2">
               <button
                 type="button"
-                class="rounded border border-[var(--white-8)] px-2.5 py-1 text-[11px] text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
+                class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
                 onClick=${() => { void loadHarnessHealth() }}
               >새로고침</button>
               <button
                 type="button"
-                class="rounded border border-[var(--white-8)] px-2.5 py-1 text-[11px] text-[var(--text-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--text-body)]"
+                class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--text-body)]"
                 onClick=${() => navigate('lab', { section: 'autoresearch' })}
               >오토리서치 보기</button>
             </div>

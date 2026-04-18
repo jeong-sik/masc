@@ -21,7 +21,7 @@ describe('dashedNoticeClasses (pure)', () => {
 
   it('sm size: 10px text + rounded + tight padding (matches fsm-hub timeline panels)', () => {
     const cls = dashedNoticeClasses('sm')
-    expect(cls).toContain('text-[10px]')
+    expect(cls).toContain('text-3xs')
     expect(cls).toContain('rounded')
     expect(cls).toContain('px-4')
     expect(cls).toContain('py-2')
@@ -29,7 +29,7 @@ describe('dashedNoticeClasses (pure)', () => {
 
   it('md size: 12px text + rounded + generous padding', () => {
     const cls = dashedNoticeClasses('md')
-    expect(cls).toContain('text-[12px]')
+    expect(cls).toContain('text-xs')
     expect(cls).toContain('rounded')
     expect(cls).toContain('px-4')
     expect(cls).toContain('py-6')

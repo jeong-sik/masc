@@ -111,7 +111,7 @@ function LoopSelector() {
   return html`
     <div class="flex flex-col gap-3">
       <div class="flex items-center gap-2">
-        <label class="text-[11px] text-[var(--text-muted)] font-medium">실행자 필터</label>
+        <label class="text-2xs text-[var(--text-muted)] font-medium">실행자 필터</label>
         <select
           class="bg-card border border-card-border text-[var(--text-body)] text-xs rounded px-2 py-1 outline-none focus:border-accent"
           value=${authorFilter.value}
@@ -161,36 +161,36 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div class="flex flex-col gap-3">
         <div>
-          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1">목표</div>
+          <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] mb-1">목표</div>
           <div class="text-[var(--text-body)] text-sm leading-relaxed">${loop.goal}</div>
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">상태</div>
+            <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] mb-0.5">상태</div>
             <div class="text-sm font-medium ${statusColor(loop.status)}">${statusLabel(loop.status)}</div>
           </div>
           <div>
-            <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">사이클</div>
+            <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] mb-0.5">사이클</div>
             <div class="text-[var(--text-strong)] text-sm font-mono">${loop.current_cycle} / ${loop.max_cycles}</div>
           </div>
           <div>
-            <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">경과 시간</div>
+            <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] mb-0.5">경과 시간</div>
             <div class="text-[var(--text-body)] text-sm font-mono">${formatElapsedCompact(loop.elapsed_s)}</div>
           </div>
           <div>
-            <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">실행자</div>
+            <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] mb-0.5">실행자</div>
             <div class="text-[var(--text-body)] text-sm font-mono">${loop.author ?? '알 수 없음'}</div>
           </div>
           <div>
-            <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">모델</div>
+            <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] mb-0.5">모델</div>
             <div class="text-[var(--text-body)] text-sm font-mono">${loop.model_model}</div>
           </div>
           <div>
-            <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">소스</div>
+            <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] mb-0.5">소스</div>
             <div class="text-[var(--text-body)] text-sm">${liveLabel(loop)}</div>
           </div>
           <div>
-            <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">최근 갱신</div>
+            <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] mb-0.5">최근 갱신</div>
             <div class="text-[var(--text-body)] text-sm font-mono">${loop.updated_at != null ? formatTimestampKo(loop.updated_at) : '알 수 없음'}</div>
           </div>
         </div>
@@ -199,16 +199,16 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
       <div class="flex flex-col gap-3">
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">기준선</div>
+            <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] mb-0.5">기준선</div>
             <div class="text-[var(--text-body)] text-sm font-mono">${loop.baseline.toFixed(4)}</div>
           </div>
           <div>
-            <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">최고 점수</div>
+            <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] mb-0.5">최고 점수</div>
             <div class="text-[var(--ok)] text-sm font-mono font-semibold">${loop.best_score.toFixed(4)}</div>
           </div>
         </div>
         <div>
-          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1">유지 / 삭제</div>
+          <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] mb-1">유지 / 삭제</div>
           <div class="flex items-center gap-2">
             <span class="text-[var(--ok)] text-sm font-mono font-semibold">${loop.total_keeps}</span>
             <span class="text-[var(--text-muted)] text-xs">/</span>
@@ -229,11 +229,11 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
           ` : null}
         </div>
         <div>
-          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">대상 파일</div>
+          <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] mb-0.5">대상 파일</div>
           <div class="text-[var(--text-body)] text-xs font-mono truncate" title=${loop.target_file}>${loop.target_file}</div>
         </div>
         <div>
-          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">메트릭</div>
+          <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] mb-0.5">메트릭</div>
           <div class="text-[var(--text-body)] text-xs font-mono truncate" title=${loop.metric_fn}>${loop.metric_fn}</div>
         </div>
       </div>
@@ -268,16 +268,16 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
           placeholder="가설 / 판정 / # 필터"
           aria-label="사이클 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[160px] max-w-[240px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && visibleCycles.length === 0
-        ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${cycles.length} cycles)</div>`
+        ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${cycles.length} cycles)</div>`
         : html`
           <div class="overflow-x-auto overflow-y-auto max-h-[400px] custom-scrollbar rounded border border-[var(--white-6)] bg-[rgba(0,0,0,0.1)]">
             <table class="w-full text-xs">
               <thead>
-                <tr class="text-[var(--text-muted)] text-[10px] uppercase tracking-wider border-b border-[var(--white-10)]">
+                <tr class="text-[var(--text-muted)] text-3xs uppercase tracking-wider border-b border-[var(--white-10)]">
                   <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-left py-2.5 px-3 font-medium">#</th>
                   <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-left py-2.5 px-3 font-medium">가설</th>
                   <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-right py-2.5 px-3 font-medium">이전</th>
@@ -296,7 +296,7 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
                     <td class="py-2 px-3 text-right font-mono text-[var(--text-body)]">${c.score_after.toFixed(4)}</td>
                     <td class="py-2 px-3 text-right font-mono ${c.delta >= 0 ? 'text-[var(--ok)]' : 'text-[var(--bad)]'}">${formatDelta(c.delta)}</td>
                     <td class="py-2 px-3 text-center">
-                      <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                      <span class="px-1.5 py-0.5 rounded text-3xs font-semibold ${
                         c.decision === 'keep'
                           ? 'bg-[var(--ok-soft)] text-[var(--ok)] border border-[var(--ok-20)]'
                           : 'bg-[var(--bad-soft)] text-[var(--bad)] border border-[var(--bad-20)]'
@@ -351,8 +351,8 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
     <${SurfaceCard} variant="compact">
       <div class="flex flex-col gap-3">
         <div>
-          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1 font-medium">Research Brief</div>
-          <div class="text-[13px] leading-[1.55] text-[var(--text-body)]">
+          <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] mb-1 font-medium">Research Brief</div>
+          <div class="text-sm leading-[1.55] text-[var(--text-body)]">
             이 루프는 <span class="font-semibold text-[var(--text-strong)]">${loop.goal}</span> 를 목표로
             <span class="font-mono text-[var(--text-strong)]"> ${loop.target_file} </span>
             변경을 시도하고,
@@ -363,16 +363,16 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
-            <div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">무엇을 연구하나</div>
+            <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-muted)]">무엇을 연구하나</div>
             <div class="leading-relaxed text-[var(--text-body)]">${loop.goal}</div>
           </div>
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
-            <div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">무엇으로 성공을 보나</div>
+            <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-muted)]">무엇으로 성공을 보나</div>
             <div class="font-mono text-[var(--text-body)]">${loop.metric_fn}</div>
             <div class="mt-1 text-[var(--text-dim)]">baseline ${loop.baseline.toFixed(4)} -> best ${loop.best_score.toFixed(4)}</div>
           </div>
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
-            <div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">연결된 실행 컨텍스트</div>
+            <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-muted)]">연결된 실행 컨텍스트</div>
             <div class="flex flex-col gap-1 text-[var(--text-body)]">
               <span>session ${loop.session_id ?? '없음'}</span>
               <span>operation ${loop.operation_id ?? '없음'}</span>
@@ -380,7 +380,7 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
             </div>
           </div>
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
-            <div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">현재 가설 / 메모</div>
+            <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-muted)]">현재 가설 / 메모</div>
             <div class="flex flex-col gap-1 text-[var(--text-body)] leading-relaxed">
               <span>${loop.queued_hypothesis ?? '대기 가설 없음'}</span>
               <span class="text-[var(--text-dim)]">${loop.program_note ?? 'program note 없음'}</span>
@@ -388,7 +388,7 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
           </div>
         </div>
 
-        <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[12px] leading-[1.5] text-[var(--text-muted)]">
+        <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-xs leading-[1.5] text-[var(--text-muted)]">
           이 화면은 generator loop 자체를 설명합니다. Safety Harness는 evaluator와 장기 실행 safety rail을 보여주며,
           각 cycle의 keep/discard 판정을 직접 대체하지 않습니다.
         </div>
@@ -402,7 +402,7 @@ function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
     <${SurfaceCard} variant="compact">
       <div class="grid grid-cols-1 gap-3 md:grid-cols-[1.3fr_1fr]">
         <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
-          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Experiment Outcomes</div>
+          <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Experiment Outcomes</div>
           <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">이 화면은 keep/discard 루프를 봅니다.</div>
           <div class="mt-2 text-sm leading-[1.6] text-[var(--text-body)]">
             어떤 파일을 바꾸고 어떤 metric을 밀어 올리려는지, 그리고 현재 ${loopCount}개 루프가 어떤 cycle에 있는지 직접 봅니다.
@@ -410,14 +410,14 @@ function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
         </div>
 
         <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-3">
-          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Safety Harness</div>
+          <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Safety Harness</div>
           <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">심판 기계의 건강도는 별도로 봅니다.</div>
           <div class="mt-2 text-sm leading-[1.6] text-[var(--text-body)]">
             평가 모델, 압축 전 상태, 세대 교체 rail 상태는 하네스에서 봅니다.
           </div>
           <button
             type="button"
-            class="mt-3 rounded border border-[var(--white-8)] px-2.5 py-1 text-[11px] text-[var(--text-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--text-body)]"
+            class="mt-3 rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--text-body)]"
             onClick=${() => navigate('lab', { section: 'harness' })}
           >하네스 열기</button>
         </div>
@@ -459,12 +459,12 @@ function LoopDetailView() {
 
       <${SurfaceCard} variant="compact">
         <div class="flex items-start justify-between gap-3 mb-3">
-          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-medium">루프 개요</div>
+          <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] font-medium">루프 개요</div>
           ${canRepairErrorLoop ? html`
             <div class="flex items-center gap-2">
               <button
                 type="button"
-                class="px-2.5 py-1 rounded text-[11px] text-[var(--text-body)] border border-card-border hover:border-accent/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                class="px-2.5 py-1 rounded text-2xs text-[var(--text-body)] border border-card-border hover:border-accent/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled=${loopActionBusy.value}
                 onClick=${() => { void retrySelectedLoop() }}
               >
@@ -472,7 +472,7 @@ function LoopDetailView() {
               </button>
               <button
                 type="button"
-                class="px-2.5 py-1 rounded text-[11px] text-[var(--bad)] border border-[var(--bad-30)] hover:border-[var(--bad)] opacity-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                class="px-2.5 py-1 rounded text-2xs text-[var(--bad)] border border-[var(--bad-30)] hover:border-[var(--bad)] opacity-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled=${loopActionBusy.value}
                 onClick=${() => { void deleteSelectedLoop() }}
               >
@@ -491,14 +491,14 @@ function LoopDetailView() {
 
       ${warnings.length > 0 ? html`
         <${SurfaceCard} variant="compact">
-          <div class="text-[10px] uppercase tracking-wider text-[var(--warn)]/80 mb-3 font-medium">경고</div>
+          <div class="text-3xs uppercase tracking-wider text-[var(--warn)]/80 mb-3 font-medium">경고</div>
           <${WarningsList} warnings=${warnings} />
         <//>
       ` : null}
 
       <${SurfaceCard} variant="compact">
         <div class="flex items-center justify-between mb-3">
-          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-medium">
+          <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] font-medium">
             사이클 이력 ${detail ? `(${detail.history_count}건)` : ''}
           </div>
         </div>
@@ -506,7 +506,7 @@ function LoopDetailView() {
       <//>
 
       <${SurfaceCard} variant="compact">
-        <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-3 font-medium">인사이트</div>
+        <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] mb-3 font-medium">인사이트</div>
         <${InsightsList} insights=${insights} />
       <//>
     </div>
@@ -563,20 +563,20 @@ export function Autoresearch() {
       <${OutcomeVsHarnessCallout} loopCount=${loops.length} />
 
       <div class="flex items-center justify-between">
-        <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] font-medium">
+        <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)] font-medium">
           전체 ${loops.length}개 루프
         </div>
         <div class="flex items-center gap-2">
           <${StartFormButton}
-            class="px-2.5 py-1 rounded text-[11px] text-accent border border-accent/40 hover:bg-[var(--accent-10)] transition-colors"
+            class="px-2.5 py-1 rounded text-2xs text-accent border border-accent/40 hover:bg-[var(--accent-10)] transition-colors"
           />
           <a href="/api/v1/autoresearch/loops/csv" download="autoresearch_loops.csv"
-            class="px-2.5 py-1 rounded text-[11px] text-[var(--text-muted)] border border-card-border hover:text-[var(--text-body)] hover:border-accent/40 transition-colors no-underline"
+            class="px-2.5 py-1 rounded text-2xs text-[var(--text-muted)] border border-card-border hover:text-[var(--text-body)] hover:border-accent/40 transition-colors no-underline"
           >
             CSV 다운로드
           </a>
           <button type="button"
-            class="px-2.5 py-1 rounded text-[11px] text-[var(--text-muted)] border border-card-border hover:text-[var(--text-body)] hover:border-accent/40 transition-colors"
+            class="px-2.5 py-1 rounded text-2xs text-[var(--text-muted)] border border-card-border hover:text-[var(--text-body)] hover:border-accent/40 transition-colors"
             onClick=${() => { void refreshAutoresearchSurface() }}
           >
             새로고침

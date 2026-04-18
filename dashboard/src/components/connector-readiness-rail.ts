@@ -152,13 +152,13 @@ function Pill({ pill }: { pill: RailPill }) {
     >
       <span
         aria-hidden="true"
-        class=${`flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-[12px] font-bold ${inflight ? 'bg-[var(--white-10)]' : tone.dot} text-[var(--bg-0)]`}
+        class=${`flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-xs font-bold ${inflight ? 'bg-[var(--white-10)]' : tone.dot} text-[var(--bg-0)]`}
       >
         ${inflight ? '…' : tone.icon}
       </span>
       <span
         aria-hidden="true"
-        class=${`block text-[10px] uppercase tracking-[0.14em] ${tone.text}`}
+        class=${`block text-3xs uppercase tracking-[0.14em] ${tone.text}`}
       >${pill.label}</span>
     </button>
   `

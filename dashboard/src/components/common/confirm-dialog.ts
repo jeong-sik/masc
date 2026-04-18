@@ -94,17 +94,17 @@ export function ConfirmDialogOverlay() {
               <${IconComponent} size=${20} />
             </div>
             <div class="flex-1 min-w-0 pt-0.5">
-              <h2 id="confirm-dialog-title" class="text-[16px] font-semibold text-text-strong mb-1 leading-snug">${state.title}</h2>
-              <p class="text-[13px] text-text-body leading-relaxed opacity-90 whitespace-pre-wrap">${state.message}</p>
+              <h2 id="confirm-dialog-title" class="text-lg font-semibold text-text-strong mb-1 leading-snug">${state.title}</h2>
+              <p class="text-sm text-text-body leading-relaxed opacity-90 whitespace-pre-wrap">${state.message}</p>
             </div>
           </div>
           <div class="mt-6 flex items-center justify-end gap-2">
             <button type="button"
-              class="px-4 py-2 rounded text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] text-text-body hover:bg-[var(--white-8)] transition-colors cursor-pointer"
+              class="px-4 py-2 rounded text-sm font-medium border border-[var(--card-border)] bg-[var(--white-4)] text-text-body hover:bg-[var(--white-8)] transition-colors cursor-pointer"
               onClick=${state.onCancel}
             >${state.cancelText}</button>
             <button type="button"
-              class="px-4 py-2 rounded text-[13px] font-medium border border-transparent transition-colors cursor-pointer ${confirmBtnClass}"
+              class="px-4 py-2 rounded text-sm font-medium border border-transparent transition-colors cursor-pointer ${confirmBtnClass}"
               onClick=${state.onConfirm}
             >${state.confirmText}</button>
           </div>

@@ -72,10 +72,10 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
   if (!hasDetail) {
     return html`
       <div class="flex items-center gap-3 py-1.5 px-3 rounded hover:bg-[var(--white-3)] transition-colors">
-        <span class="text-[13px] ${kindColor(event.kind)}">${kindIcon(event.kind)}</span>
-        <span class="flex-1 text-[12px] text-text-body truncate">${event.summary}</span>
-        ${event.duration_ms != null ? html`<span class="text-[10px] tabular-nums ${durationColor(event.duration_ms)}">${event.duration_ms}ms</span>` : null}
-        ${event.ts_iso ? html`<${TimeAgo} timestamp=${event.ts_iso} class="text-[10px] text-text-dim shrink-0" />` : null}
+        <span class="text-sm ${kindColor(event.kind)}">${kindIcon(event.kind)}</span>
+        <span class="flex-1 text-xs text-text-body truncate">${event.summary}</span>
+        ${event.duration_ms != null ? html`<span class="text-3xs tabular-nums ${durationColor(event.duration_ms)}">${event.duration_ms}ms</span>` : null}
+        ${event.ts_iso ? html`<${TimeAgo} timestamp=${event.ts_iso} class="text-3xs text-text-dim shrink-0" />` : null}
       </div>
     `
   }
@@ -88,11 +88,11 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
       }}
     >
       <summary class="flex items-center gap-3 py-1.5 px-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-        <span class="text-[13px] ${kindColor(event.kind)}">${kindIcon(event.kind)}</span>
-        <span class="flex-1 text-[12px] text-text-body truncate">${event.summary}</span>
-        ${event.duration_ms != null ? html`<span class="text-[10px] tabular-nums ${durationColor(event.duration_ms)}">${event.duration_ms}ms</span>` : null}
-        ${event.ts_iso ? html`<${TimeAgo} timestamp=${event.ts_iso} class="text-[10px] text-text-dim shrink-0" />` : null}
-        <span class="text-[10px] text-text-dim flex items-center justify-center"><${ChevronRight} size=${14} aria-hidden="true" focusable="false" /></span>
+        <span class="text-sm ${kindColor(event.kind)}">${kindIcon(event.kind)}</span>
+        <span class="flex-1 text-xs text-text-body truncate">${event.summary}</span>
+        ${event.duration_ms != null ? html`<span class="text-3xs tabular-nums ${durationColor(event.duration_ms)}">${event.duration_ms}ms</span>` : null}
+        ${event.ts_iso ? html`<${TimeAgo} timestamp=${event.ts_iso} class="text-3xs text-text-dim shrink-0" />` : null}
+        <span class="text-3xs text-text-dim flex items-center justify-center"><${ChevronRight} size=${14} aria-hidden="true" focusable="false" /></span>
       </summary>
       ${isOpen ? html`
         <div class="px-3 pb-2 pt-1 ml-7">
@@ -111,8 +111,8 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
               <${JsonViewerCard} data=${event.detail} title="Detail" />
             </div>
           ` : null}
-          ${event.error ? html`<div class="text-[11px] text-[var(--bad-light)] mt-1">${event.error}</div>` : null}
-          ${event.cost_usd != null ? html`<div class="text-[10px] text-text-dim mt-1">cost: $${event.cost_usd.toFixed(4)}</div>` : null}
+          ${event.error ? html`<div class="text-2xs text-[var(--bad-light)] mt-1">${event.error}</div>` : null}
+          ${event.cost_usd != null ? html`<div class="text-3xs text-text-dim mt-1">cost: $${event.cost_usd.toFixed(4)}</div>` : null}
         </div>
       ` : null}
     </details>
@@ -161,7 +161,7 @@ export function TaskActivityList({
           <button
             key=${chip.key}
             type="button"
-            class="px-2 py-1 rounded text-[11px] font-medium border cursor-pointer transition-colors ${
+            class="px-2 py-1 rounded text-2xs font-medium border cursor-pointer transition-colors ${
               filter === chip.key
                 ? 'border-accent/40 bg-accent/12 text-[var(--accent)]'
                 : 'border-[var(--white-10)] bg-[var(--white-4)] text-text-muted hover:bg-[var(--white-8)]'
@@ -169,7 +169,7 @@ export function TaskActivityList({
             onClick=${() => { activeFilter.value = chip.key }}
           >${chip.label}</button>
         `)}
-        <span class="ml-auto text-[10px] text-text-dim tabular-nums">${filtered.length}건</span>
+        <span class="ml-auto text-3xs text-text-dim tabular-nums">${filtered.length}건</span>
       </div>
       <div class="flex flex-col gap-0.5 max-h-[400px] overflow-y-auto">
         ${filtered.map((evt, i) => {

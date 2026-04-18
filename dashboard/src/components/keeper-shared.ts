@@ -151,7 +151,7 @@ function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnosti
 
 function DiagChip({ label }: { label: string }) {
   return html`
-    <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">${label}</span>
+    <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-3xs font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">${label}</span>
   `
 }
 
@@ -183,10 +183,10 @@ export function KeeperDiagnosticSummary({
   return html`
     <div class="py-3 px-4 rounded border border-[var(--card-border)] bg-[rgba(5,14,31,0.55)]">
       <div class="mb-3 flex items-center justify-between gap-3">
-        <div class="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">명시적 상태 조회</div>
+        <div class="text-2xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">명시적 상태 조회</div>
         <button
           type="button"
-          class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
+          class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
           disabled=${busy}
           onClick=${() => { void refreshStatus() }}
         >
@@ -293,28 +293,28 @@ export function KeeperConversationPanel({
       <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(9,15,28,0.96),rgba(5,10,20,0.94))] shadow-[0_24px_56px_rgba(0,0,0,0.28)]">
         <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--slate-gray-12)] px-4 py-4">
           <div class="min-w-[220px] flex-1">
-            <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 대화</div>
+            <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 대화</div>
             <div class="mt-2 flex flex-wrap items-center gap-2">
-              <div class="text-[15px] font-semibold text-[var(--text-strong)]">@${keeperName}</div>
-              <span class=${`inline-flex items-center rounded-sm border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] ${conversationStateClass(sending, hydrating)}`}>
+              <div class="text-md font-semibold text-[var(--text-strong)]">@${keeperName}</div>
+              <span class=${`inline-flex items-center rounded-sm border px-2.5 py-1 text-3xs font-medium uppercase tracking-[0.1em] ${conversationStateClass(sending, hydrating)}`}>
                 ${conversationStateLabel(sending, hydrating)}
               </span>
             </div>
-            <div class="mt-1 text-[13px] leading-[1.65] text-[var(--text-secondary)]">
+            <div class="mt-1 text-sm leading-[1.65] text-[var(--text-secondary)]">
               Keeper 상세 안에서 직접 대화와 내부 메시지를 함께 봅니다. 필요하면 토글로 내부 프롬프트와 tool chatter를 숨길 수 있습니다.
             </div>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
+              class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
               onClick=${toggleMetadata}
             >
               ${showMetadata ? '메타데이터 숨김' : '메타데이터 표시'}
             </button>
             <button
               type="button"
-              class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)] ${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[var(--purple)]' : ''}"
+              class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)] ${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[var(--purple)]' : ''}"
               onClick=${toggleInternal}
             >
               ${showInternal ? '내부 메시지 숨김' : '내부 메시지 표시'}
@@ -323,7 +323,7 @@ export function KeeperConversationPanel({
               ? html`
                   <button
                     type="button"
-                    class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
+                    class="rounded border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
                     disabled=${hydrating}
                     onClick=${() => { void expandHistory() }}
                   >
@@ -341,7 +341,7 @@ export function KeeperConversationPanel({
         <div class="px-4 py-4">
           ${chatAccess.message
             ? html`
-                <div class="mb-4 rounded-[16px] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-[12px] leading-[1.6] text-[var(--warn-bright)]">
+                <div class="mb-4 rounded-[16px] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-[1.6] text-[var(--warn-bright)]">
                   ${chatAccess.message}
                 </div>
               `
@@ -356,7 +356,7 @@ export function KeeperConversationPanel({
 
         ${!showInternal && hiddenCount > 0
           ? html`
-              <div class="mx-4 mb-4 rounded-[16px] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-[11px] leading-[1.55] text-[var(--warn-bright)]">
+              <div class="mx-4 mb-4 rounded-[16px] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-[1.55] text-[var(--warn-bright)]">
                 ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지 표시"로 볼 수 있습니다.
               </div>
             `

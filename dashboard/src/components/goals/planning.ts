@@ -41,7 +41,7 @@ function PlanningStat({
 
   return html`
     <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
-      <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">${label}</div>
+      <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-text-muted">${label}</div>
       <div class="mt-2 text-[30px] font-bold leading-none tabular-nums ${toneClass}">${value}</div>
     </div>
   `
@@ -53,7 +53,7 @@ function ExternalDocLink({ href, label }: { href: string; label: string }) {
       href=${href}
       target="_blank"
       rel="noreferrer"
-      class="inline-flex items-center gap-1 rounded border border-card-border/70 bg-white/3 px-2.5 py-1.5 text-[11px] font-medium text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
+      class="inline-flex items-center gap-1 rounded border border-card-border/70 bg-white/3 px-2.5 py-1.5 text-2xs font-medium text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
     >
       ${label}
       <span aria-hidden="true">\u2197</span>
@@ -84,17 +84,17 @@ function GuideCard({
     <section class="flex flex-col gap-3 rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
       <div class="flex items-start justify-between gap-3">
         <div>
-          <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">${eyebrow}</div>
-          <h3 class="mt-1 text-[15px] font-semibold text-text-strong">${title}</h3>
+          <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-text-muted">${eyebrow}</div>
+          <h3 class="mt-1 text-md font-semibold text-text-strong">${title}</h3>
         </div>
-        <span class="rounded border border-card-border/70 bg-white/4 px-2.5 py-1 text-[11px] font-semibold text-text-body">
+        <span class="rounded border border-card-border/70 bg-white/4 px-2.5 py-1 text-2xs font-semibold text-text-body">
           ${count}
         </span>
       </div>
-      <p class="text-[13px] leading-relaxed text-text-muted whitespace-pre-wrap">${summary}</p>
+      <p class="text-sm leading-relaxed text-text-muted whitespace-pre-wrap">${summary}</p>
       ${command ? html`
-        <div class="rounded border border-card-border/60 bg-white/3 px-3 py-2 text-[12px] leading-relaxed text-text-body">
-          <code class="text-[11px] text-text-strong">${command}</code>
+        <div class="rounded border border-card-border/60 bg-white/3 px-3 py-2 text-xs leading-relaxed text-text-body">
+          <code class="text-2xs text-text-strong">${command}</code>
         </div>
       ` : null}
       ${children}
@@ -139,31 +139,31 @@ function KeeperToolActivity() {
 
   return html`
     <details class="overview-section-collapsible group overflow-hidden rounded border border-card-border/60 bg-[var(--backdrop-deep)]" open=${true}>
-      <summary class="flex items-center gap-3 border-b border-card-border/60 px-4 py-3.5 cursor-pointer text-[14px] font-bold text-text-strong transition-colors hover:bg-white/3">
+      <summary class="flex items-center gap-3 border-b border-card-border/60 px-4 py-3.5 cursor-pointer text-base font-bold text-text-strong transition-colors hover:bg-white/3">
         <div class="min-w-0">
           <div>도구 활동 요약</div>
-          <div class="mt-1 text-[12px] font-normal text-text-muted">
+          <div class="mt-1 text-xs font-normal text-text-muted">
             keeper가 최근 사용한 도구와 활동 현황. 상세는 keeper 클릭.
           </div>
         </div>
-        <span class="ml-auto inline-flex items-center rounded border border-card-border/70 bg-white/4 px-2.5 py-1 text-[10px] uppercase tracking-wider text-text-body font-semibold">
+        <span class="ml-auto inline-flex items-center rounded border border-card-border/70 bg-white/4 px-2.5 py-1 text-3xs uppercase tracking-wider text-text-body font-semibold">
           ${totalToolTurns} calls
         </span>
       </summary>
       <div class="p-5">
         ${activeKeepers.length > 0 ? html`
           <div class="mb-4">
-            <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted mb-2">활성 keeper</div>
+            <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-text-muted mb-2">활성 keeper</div>
             <div class="flex flex-wrap gap-2">
               ${activeKeepers.map(k => html`
                 <button
                   key=${k.name}
                   type="button"
-                  class="inline-flex items-center gap-1.5 rounded border border-card-border/60 bg-white/4 px-3 py-1.5 text-[12px] text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
+                  class="inline-flex items-center gap-1.5 rounded border border-card-border/60 bg-white/4 px-3 py-1.5 text-xs text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
                   onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
                 >
                   ${k.emoji ?? ''} ${k.koreanName ?? k.name}
-                  <span class="text-[10px] font-mono text-text-dim">${k.turn_count ?? 0}t</span>
+                  <span class="text-3xs font-mono text-text-dim">${k.turn_count ?? 0}t</span>
                 </button>
               `)}
             </div>
@@ -172,10 +172,10 @@ function KeeperToolActivity() {
 
         ${topTools.length > 0 ? html`
           <div>
-            <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted mb-2">최근 자주 사용된 도구</div>
+            <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-text-muted mb-2">최근 자주 사용된 도구</div>
             <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1.5">
               ${topTools.map(([name, count]) => html`
-                <div key=${name} class="flex items-center justify-between rounded bg-white/3 px-3 py-1.5 text-[12px]">
+                <div key=${name} class="flex items-center justify-between rounded bg-white/3 px-3 py-1.5 text-xs">
                   <span class="font-mono text-text-body truncate">${name.replace(/^(keeper_|masc_)/, '')}</span>
                   <span class="ml-2 flex-shrink-0 font-mono text-text-dim">${count}</span>
                 </div>
@@ -214,9 +214,9 @@ export function Planning() {
       <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-[760px]">
-            <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">Planning Status</div>
+            <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Planning Status</div>
             <h3 class="mt-2 text-[22px] font-semibold tracking-[-0.02em] text-text-strong">${planStatusHeadline}</h3>
-            <p class="mt-2 text-[13px] leading-relaxed text-text-muted whitespace-pre-wrap">${planStatusBody}</p>
+            <p class="mt-2 text-sm leading-relaxed text-text-muted whitespace-pre-wrap">${planStatusBody}</p>
           </div>
           <${ActionButton}
             variant="ghost"
@@ -239,8 +239,8 @@ export function Planning() {
         <div class="mt-5 grid gap-4 xl:grid-cols-2">
           <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
             <div class="mb-3">
-              <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">Backlog Entry</div>
-              <h3 class="mt-1 text-[15px] font-semibold text-text-strong">태스크 추가</h3>
+              <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-text-muted">Backlog Entry</div>
+              <h3 class="mt-1 text-md font-semibold text-text-strong">태스크 추가</h3>
             </div>
             <${TaskCreateForm} />
             <div class="mt-3 flex items-center gap-2">
@@ -268,14 +268,14 @@ export function Planning() {
       <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
         <div class="flex items-center justify-between gap-3">
           <div>
-            <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">Goal Pipeline</div>
-            <h3 class="mt-1 text-[15px] font-semibold text-text-strong">
+            <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-text-muted">Goal Pipeline</div>
+            <h3 class="mt-1 text-md font-semibold text-text-strong">
               장기 목표 ${hasGoals ? `(${goals.value.length})` : ''}
             </h3>
           </div>
           <button
             type="button"
-            class="inline-flex items-center gap-1.5 rounded border border-accent/25 bg-[var(--accent-12)] px-3 py-1.5 text-[12px] font-medium text-accent transition-colors hover:border-accent/40 hover:bg-[var(--accent-15)]"
+            class="inline-flex items-center gap-1.5 rounded border border-accent/25 bg-[var(--accent-12)] px-3 py-1.5 text-xs font-medium text-accent transition-colors hover:border-accent/40 hover:bg-[var(--accent-15)]"
             onClick=${() => navigate('workspace', { section: 'planning', view: 'goal-tree' })}
           >
             목표 트리에서 보기
@@ -285,23 +285,23 @@ export function Planning() {
         ${hasGoals ? html`
           <div class="mt-3 flex flex-wrap gap-2">
             ${(grouped.short ?? []).length > 0 ? html`
-              <span class="rounded border border-ok/25 bg-ok/10 px-2 py-0.5 text-[11px] text-ok">
+              <span class="rounded border border-ok/25 bg-ok/10 px-2 py-0.5 text-2xs text-ok">
                 단기 ${(grouped.short ?? []).length}
               </span>
             ` : null}
             ${(grouped.mid ?? []).length > 0 ? html`
-              <span class="rounded border border-warn/25 bg-warn/10 px-2 py-0.5 text-[11px] text-warn">
+              <span class="rounded border border-warn/25 bg-warn/10 px-2 py-0.5 text-2xs text-warn">
                 중기 ${(grouped.mid ?? []).length}
               </span>
             ` : null}
             ${(grouped.long ?? []).length > 0 ? html`
-              <span class="rounded border border-accent/25 bg-[var(--accent-10)] px-2 py-0.5 text-[11px] text-accent">
+              <span class="rounded border border-accent/25 bg-[var(--accent-10)] px-2 py-0.5 text-2xs text-accent">
                 장기 ${(grouped.long ?? []).length}
               </span>
             ` : null}
           </div>
         ` : html`
-          <p class="mt-2 text-[13px] text-text-muted">등록된 목표가 없습니다. 목표 트리에서 추가할 수 있습니다.</p>
+          <p class="mt-2 text-sm text-text-muted">등록된 목표가 없습니다. 목표 트리에서 추가할 수 있습니다.</p>
         `}
       </section>
     </div>

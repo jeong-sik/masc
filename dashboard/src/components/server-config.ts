@@ -61,10 +61,10 @@ function EntryRow({ entry }: { entry: ConfigEntry }) {
         <div class="flex items-center gap-2">
           <code class="text-xs font-mono text-[var(--text-primary)]">${entry.env}</code>
           ${!isDefault ? html`
-            <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">custom</span>
+            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">custom</span>
           ` : null}
           ${entry.sensitive ? html`
-            <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--warn-10)] text-[var(--warn)]">sensitive</span>
+            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--warn-10)] text-[var(--warn)]">sensitive</span>
           ` : null}
         </div>
         <div class="text-xs text-[var(--text-muted)] mt-0.5">${entry.description}</div>
@@ -74,7 +74,7 @@ function EntryRow({ entry }: { entry: ConfigEntry }) {
           ${entry.value ?? entry.default}
         </div>
         ${!isDefault && entry.default ? html`
-          <div class="text-[10px] text-[var(--text-muted)] mt-0.5">
+          <div class="text-3xs text-[var(--text-muted)] mt-0.5">
             default: ${entry.default}
           </div>
         ` : null}
@@ -103,7 +103,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
           <span class="text-xs text-[var(--text-muted)]">(${filtered.length})</span>
         </div>
         ${customCount > 0 ? html`
-          <span class="text-[10px] px-2 py-0.5 rounded-sm bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
+          <span class="text-3xs px-2 py-0.5 rounded-sm bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
             ${customCount} custom
           </span>
         ` : null}
@@ -126,19 +126,19 @@ function ServerMeta() {
   return html`
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
       <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
-        <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Version</div>
+        <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Version</div>
         <div class="text-sm font-mono text-[var(--text-primary)]">${server.version}</div>
       </div>
       <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
-        <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Uptime</div>
+        <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Uptime</div>
         <div class="text-sm font-mono text-[var(--text-primary)]">${formatUptime(server.uptime_seconds)}</div>
       </div>
       <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
-        <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">OCaml</div>
+        <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">OCaml</div>
         <div class="text-sm font-mono text-[var(--text-primary)]">${server.ocaml_version}</div>
       </div>
       <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)]">
-        <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">PID</div>
+        <div class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">PID</div>
         <div class="text-sm font-mono text-[var(--text-primary)]">${server.pid}</div>
       </div>
     </div>

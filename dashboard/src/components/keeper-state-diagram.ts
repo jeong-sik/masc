@@ -134,7 +134,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
 
   if (loading) {
     return html`
-      <div class="flex items-center justify-center gap-2 py-6 text-[11px] text-[var(--text-dim)]">
+      <div class="flex items-center justify-center gap-2 py-6 text-2xs text-[var(--text-dim)]">
         <${InlineSpinner} />
         composite lifecycle 로딩중
       </div>
@@ -147,7 +147,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
 
   return html`
     <div class="flex flex-col gap-3">
-      <div class="flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-dim)]">
+      <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--text-dim)]">
         <span class="inline-flex items-center rounded-sm border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-[var(--accent)]">
           composite ${snapshot.phase}
         </span>
@@ -176,13 +176,13 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
       </div>
 
       ${phaseMismatch ? html`
-        <div class="rounded border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-[11px] leading-[1.5] text-[var(--text-body)]">
+        <div class="rounded border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-[1.5] text-[var(--text-body)]">
           keeper row phase와 composite snapshot phase가 다릅니다. composite snapshot을 authoritative runtime-truth로 사용합니다.
         </div>
       ` : null}
 
       <div>
-        <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">Composite Lifecycle (KSM · KTC · KDP · KCL · KMC)</div>
+        <div class="text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">Composite Lifecycle (KSM · KTC · KDP · KCL · KMC)</div>
         <${CytoscapeFsm} spec=${compositeSpec} height="320px" />
       </div>
 
@@ -190,7 +190,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
         ${INVARIANT_LABELS.map(([key, label]) => {
           const ok = snapshot.invariants[key]
           return html`
-            <div class=${`rounded border px-3 py-2 text-[11px] leading-[1.5] ${badgeTone(ok)}`}>
+            <div class=${`rounded border px-3 py-2 text-2xs leading-[1.5] ${badgeTone(ok)}`}>
               <div class="font-semibold">${label}</div>
               <div class="mt-1 font-mono">${ok ? 'ok' : 'violated'}</div>
             </div>
@@ -200,14 +200,14 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
 
       ${transitions.length > 0 ? html`
         <div class="grid gap-2">
-          <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Observed transitions</div>
+          <div class="text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Observed transitions</div>
           ${transitions.map(transition => html`
-            <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[11px] leading-[1.5] text-[var(--text-body)]">
+            <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-[1.5] text-[var(--text-body)]">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="font-mono text-[var(--text-strong)]">${normalizePhase(transition.prev_phase) ?? transition.prev_phase}</span>
                 <span class="text-[var(--text-dim)]">→</span>
                 <span class="font-mono text-[var(--accent)]">${normalizePhase(transition.new_phase) ?? transition.new_phase}</span>
-                <span class="rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
+                <span class="rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">
                   ${transitionType(transition.selected_event)}
                 </span>
               </div>

@@ -35,11 +35,11 @@ export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapsho
   const m = snapshot.measurement
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
-      <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">
+      <div class="text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">
         Measurement
       </div>
       ${m.captured && m.auto_rules ? html`
-        <div class="flex flex-col gap-1.5 text-[11px] text-[var(--text-body)]">
+        <div class="flex flex-col gap-1.5 text-2xs text-[var(--text-body)]">
           <div class="flex flex-wrap gap-1.5 font-mono">
             <${Flag} label="reflect" on=${m.auto_rules.reflect} />
             <${Flag} label="plan" on=${m.auto_rules.plan} />
@@ -49,16 +49,16 @@ export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapsho
           <div class="flex items-center gap-2 font-mono">
             <${Flag} label="guardrail" on=${m.auto_rules.guardrail_stop} tone="warn" />
             <span
-              class="text-[10px] text-[var(--text-dim)] cursor-help"
+              class="text-3xs text-[var(--text-dim)] cursor-help"
               title="Goal drift: 0 = keeper is on-target; higher = keeper output is diverging from its declared goal. Values above ~0.5 typically trigger the guardrail."
             >drift ${m.auto_rules.goal_drift.toFixed(2)}</span>
           </div>
           ${m.auto_rules.guardrail_reason ? html`
-            <div class="text-[10px] text-[var(--amber-bright)] mt-0.5">사유: ${m.auto_rules.guardrail_reason}</div>
+            <div class="text-3xs text-[var(--amber-bright)] mt-0.5">사유: ${m.auto_rules.guardrail_reason}</div>
           ` : null}
         </div>
       ` : html`
-        <div class="text-[10px] text-[var(--text-dim)]">키퍼가 첫 턴을 완료하면 auto-rules가 여기 표시됩니다</div>
+        <div class="text-3xs text-[var(--text-dim)]">키퍼가 첫 턴을 완료하면 auto-rules가 여기 표시됩니다</div>
       `}
     </div>
   `
@@ -78,7 +78,7 @@ function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: '
       : 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]'
   return html`
     <span
-      class=${`rounded-sm border px-2 py-0.5 text-[10px] cursor-help ${on ? onCls : offCls}`}
+      class=${`rounded-sm border px-2 py-0.5 text-3xs cursor-help ${on ? onCls : offCls}`}
       title=${flagTooltip(label, on)}
     >
       ${label}
@@ -119,11 +119,11 @@ export function InvariantsPanel({
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
       <div class="flex items-center justify-between mb-2">
-        <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+        <div class="text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
           Safety
         </div>
         <span
-          class=${`rounded-sm border px-2 py-0.5 text-[10px] font-mono tabular-nums ${
+          class=${`rounded-sm border px-2 py-0.5 text-3xs font-mono tabular-nums ${
             allOk
               ? 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]'
               : 'text-[var(--bad)] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]'
@@ -144,7 +144,7 @@ export function InvariantsPanel({
             : ''
           const tooltip = `${entry.label} — ${entry.ok ? 'holds' : 'BROKEN'}\n${desc}${rate ? `\n누적: ${rate}` : ''}`
           return html`
-            <li class="flex gap-2 text-[10px] cursor-help" title=${tooltip}>
+            <li class="flex gap-2 text-3xs cursor-help" title=${tooltip}>
               <span class=${`mt-[5px] h-1.5 w-1.5 rounded-full shrink-0 ${entry.ok ? 'bg-[var(--emerald)]' : 'bg-[var(--bad)]'}`}></span>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5">
@@ -152,12 +152,12 @@ export function InvariantsPanel({
                     ${entry.label}
                   </span>
                   ${vCount > 0 ? html`
-                    <span class="ml-auto text-[8px] font-mono tabular-nums text-[var(--bad-light)]">
+                    <span class="ml-auto text-4xs font-mono tabular-nums text-[var(--bad-light)]">
                       ${vCount}/${sampleCount}
                     </span>
                   ` : null}
                 </div>
-                <div class="text-[8px] leading-relaxed text-[var(--text-dim)]">
+                <div class="text-4xs leading-relaxed text-[var(--text-dim)]">
                   ${entry.detail}
                 </div>
               </div>

@@ -120,7 +120,7 @@ function RateGauge({ rate, label }: { rate: number; label: string }) {
   const color = rate >= 95 ? 'bg-[var(--ok-10)]' : rate >= 90 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'
   return html`
     <div class="flex flex-col gap-1">
-      <div class="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">${label}</div>
+      <div class="text-3xs text-[var(--text-dim)] uppercase tracking-wider">${label}</div>
       <div class="flex items-center gap-2">
         <div class="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-sm overflow-hidden">
           <div class="${color} h-full rounded-sm transition-all" style="width: ${Math.min(rate, 100)}%" />
@@ -150,12 +150,12 @@ function ToolTable({
   const hasQuery = query.trim() !== ''
   if (hasQuery && filtered.length === 0) {
     return html`
-      <div class="text-[11px] text-[var(--text-dim)] py-2">조건에 맞는 도구가 없습니다.</div>
+      <div class="text-2xs text-[var(--text-dim)] py-2">조건에 맞는 도구가 없습니다.</div>
     `
   }
   return html`
     <div class="overflow-x-auto">
-      <table class="w-full text-[11px]">
+      <table class="w-full text-2xs">
         <thead>
           <tr class="text-[var(--text-dim)] border-b border-[var(--card-border)]">
             <th class="text-left py-1 font-normal">Tool</th>
@@ -175,7 +175,7 @@ function ToolTable({
               : 'border-b border-[var(--card-border)] border-opacity-30'
             return html`
               <tr class=${rowClass} ref=${isHighlighted ? ((el: HTMLElement | null) => el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })) : undefined}>
-                <td class="py-0.5 font-mono">${t.name.replace('keeper_', '').replace('masc_', 'm:')}${isHighlighted ? html`<span class="ml-1 text-[10px] text-[var(--warn)]">◀ selected</span>` : null}</td>
+                <td class="py-0.5 font-mono">${t.name.replace('keeper_', '').replace('masc_', 'm:')}${isHighlighted ? html`<span class="ml-1 text-3xs text-[var(--warn)]">◀ selected</span>` : null}</td>
                 <td class="text-right py-0.5 text-[var(--text-dim)]">${t.calls}</td>
                 <td class="text-right py-0.5 font-mono ${color}">${t.success_pct.toFixed(0)}%</td>
                 <td class="text-right py-0.5 text-[var(--text-dim)]">${t.avg_ms.toFixed(0)}</td>
@@ -220,7 +220,7 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
   return html`
     <div class="rounded border border-[var(--card-border)] bg-[var(--white-3)] p-3">
       <div class="flex items-center justify-between mb-1.5">
-        <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">성공률 추이</span>
+        <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">성공률 추이</span>
         <span class="text-xs font-mono" style="color:${lineColor}">${lastRate.toFixed(1)}%</span>
       </div>
       <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
@@ -229,7 +229,7 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
         `)}
         <polyline points="${rateLine}" fill="none" stroke="${lineColor}" stroke-width="1.5"/>
       </svg>
-      <div class="flex justify-between mt-1 text-[8px] text-[var(--text-dim)] font-mono">
+      <div class="flex justify-between mt-1 text-4xs text-[var(--text-dim)] font-mono">
         <span>${points[0]?.hour?.slice(5) ?? ''}</span>
         <span>${points[points.length - 1]?.hour?.slice(5) ?? ''}</span>
       </div>
@@ -245,7 +245,7 @@ function KeeperRateBars({ keepers }: { keepers: KeeperStat[] }) {
         const color = k.success_pct >= 95 ? 'bg-[var(--ok-10)]' : k.success_pct >= 90 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'
         const textColor = k.success_pct >= 95 ? 'text-[var(--ok)]' : k.success_pct >= 90 ? 'text-[var(--warn)]' : 'text-[var(--bad-light)]'
         return html`
-          <div class="flex items-center gap-2 text-[11px]">
+          <div class="flex items-center gap-2 text-2xs">
             <span class="w-24 truncate text-[var(--text-dim)] font-mono" title=${k.name}>${k.name}</span>
             <div class="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-sm overflow-hidden">
               <div class="${color} h-full rounded-sm transition-all" style="width:${Math.min(k.success_pct, 100)}%" />
@@ -261,11 +261,11 @@ function KeeperRateBars({ keepers }: { keepers: KeeperStat[] }) {
 
 function FailureList({ categories }: { categories: FailureCategory[] }) {
   const top = categories.slice(0, 8)
-  if (top.length === 0) return html`<div class="text-[11px] text-[var(--text-dim)]">실패 없음</div>`
+  if (top.length === 0) return html`<div class="text-2xs text-[var(--text-dim)]">실패 없음</div>`
   return html`
     <div class="flex flex-col gap-1">
       ${top.map(c => html`
-        <div class="flex items-center justify-between text-[11px]">
+        <div class="flex items-center justify-between text-2xs">
           <span class="font-mono text-[var(--bad-light)]/80 truncate flex-1 mr-2">${c.category}</span>
           <span class="text-[var(--text-dim)] shrink-0">${c.count}x</span>
         </div>
@@ -299,41 +299,41 @@ export function ToolQualityPanel() {
   const d = data.value
   if (loading.value && !d) return html`<${LoadingState}>도구 품질 불러오는 중...<//>`
   if (error.value) return html`<${ErrorState} message=${error.value} class="m-4" />`
-  if (!d || d.total === 0) return html`<div class="p-4 text-[11px] text-[var(--text-dim)]">도구 호출 데이터 없음</div>`
+  if (!d || d.total === 0) return html`<div class="p-4 text-2xs text-[var(--text-dim)]">도구 호출 데이터 없음</div>`
 
   return html`
     <div class="flex flex-col gap-4 p-4">
       <div class="flex items-center justify-between">
         <div>
           <h2 class="text-sm font-medium">도구 호출 품질</h2>
-          <div class="text-[10px] text-[var(--text-dim)]">
+          <div class="text-3xs text-[var(--text-dim)]">
             ${d.sampling_mode === 'recent_n'
               ? `최근 ${d.sample_limit.toLocaleString()}건 기준 집계`
               : `최근 ${(d.window_hours ?? TOOL_QUALITY_WINDOW_HOURS).toLocaleString()}시간 기준 집계`}
           </div>
         </div>
         <button
-          class="text-[10px] px-2 py-0.5 rounded bg-[var(--bg-subtle)] text-[var(--text-dim)] hover:text-[var(--text)]"
+          class="text-3xs px-2 py-0.5 rounded bg-[var(--bg-subtle)] text-[var(--text-dim)] hover:text-[var(--text)]"
           onClick=${handleRefreshToolQualityClick}
           aria-label="도구 품질 새로고침"
         >새로고침</button>
-        <span class="text-[10px] text-[var(--text-dim)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
+        <span class="text-3xs text-[var(--text-dim)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div class="text-center">
           <div class="text-lg font-mono ${successColor.value}">${d.success_rate.toFixed(1)}%</div>
-          <div class="text-[10px] text-[var(--text-dim)] uppercase">성공률</div>
+          <div class="text-3xs text-[var(--text-dim)] uppercase">성공률</div>
         </div>
         <div class="text-center">
           <div class="text-lg font-mono text-[var(--text)]">${d.total.toLocaleString()}</div>
-          <div class="text-[10px] text-[var(--text-dim)] uppercase">
+          <div class="text-3xs text-[var(--text-dim)] uppercase">
             ${d.sampling_mode === 'recent_n' ? 'Sampled Calls' : 'Window Calls'}
           </div>
         </div>
         <div class="text-center">
           <div class="text-lg font-mono text-[var(--bad-light)]/80">${d.failure}</div>
-          <div class="text-[10px] text-[var(--text-dim)] uppercase">Failures</div>
+          <div class="text-3xs text-[var(--text-dim)] uppercase">Failures</div>
         </div>
       </div>
 
@@ -344,13 +344,13 @@ export function ToolQualityPanel() {
       ` : null}
 
       <div>
-        <div class="text-[10px] text-[var(--text-dim)] uppercase tracking-wider mb-1">Per Keeper</div>
+        <div class="text-3xs text-[var(--text-dim)] uppercase tracking-wider mb-1">Per Keeper</div>
         <${KeeperRateBars} keepers=${d.by_keeper} />
       </div>
 
       <div>
         <div class="flex items-center justify-between mb-1 gap-2">
-          <div class="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">도구별 성공률</div>
+          <div class="text-3xs text-[var(--text-dim)] uppercase tracking-wider">도구별 성공률</div>
           <${TextInput}
             class="max-w-[180px]"
             name="tool_quality_search"
@@ -369,7 +369,7 @@ export function ToolQualityPanel() {
       </div>
 
       <div>
-        <div class="text-[10px] text-[var(--text-dim)] uppercase tracking-wider mb-1">Failure Categories</div>
+        <div class="text-3xs text-[var(--text-dim)] uppercase tracking-wider mb-1">Failure Categories</div>
         <${FailureList} categories=${d.failure_categories} />
       </div>
     </div>

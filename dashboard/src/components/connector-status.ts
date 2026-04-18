@@ -320,7 +320,7 @@ export function HeaderMiniStat({
       data-testid=${testId}
     >
       <span class=${`text-sm font-semibold tabular-nums leading-tight ${valueTone}`}>${value}</span>
-      <span class="mt-0.5 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">${label}</span>
+      <span class="mt-0.5 text-3xs uppercase tracking-[0.16em] text-[var(--text-dim)]">${label}</span>
     </div>
   `
 }
@@ -827,14 +827,14 @@ function ConnectorLivePanel({
 
   return html`
     <div id=${`connector-card-${connectorId}`} class=${`mb-4 scroll-mt-4 rounded border border-[var(--card-border)] ${connectorCardBorderClass(directLabel)} p-4`} data-connector-card-state=${directLabel} style=${connectorAccentStyle(connectorId)}>
-      <div class="flex flex-wrap items-center gap-2 text-[12px]">
+      <div class="flex flex-wrap items-center gap-2 text-xs">
         <span class="text-base leading-none" aria-hidden="true">${headerIcon}</span>
         <span class="text-sm font-semibold text-[var(--text-body)]">${connectorName}</span>
         ${connector?.bot_user_name
           ? html`<span class="text-[var(--text-dim)]">· ${connector.bot_user_name}</span>`
           : null}
         <span class="text-[var(--text-dim)]">·</span>
-        <span class=${`inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] ${directTone}`}>
+        <span class=${`inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-3xs uppercase tracking-[0.14em] ${directTone}`}>
           <span class=${`inline-block h-2 w-2 rounded-full ${dotClassForLabel(directLabel)}`}></span>
           <span>${directLabel}</span>
         </span>
@@ -850,7 +850,7 @@ function ConnectorLivePanel({
             ? html`
                 <button
                   type="button"
-                  class="cursor-pointer rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:opacity-50"
+                  class="cursor-pointer rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-0.5 text-3xs uppercase tracking-[0.14em] text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:opacity-50"
                   disabled=${isActionLoading}
                   aria-label=${`stop ${connectorName} sidecar`}
                   onClick=${() => { void stopSidecar(connectorId) }}
@@ -860,11 +860,11 @@ function ConnectorLivePanel({
           <${SidecarLogToggle} connectorId=${connectorId} />
           <${ConnectorConfigToggle} connectorId=${connectorId} />
           ${sidecarLogPath
-            ? html`<span class="cursor-help text-[10px] text-[var(--text-dim)]" title=${sidecarLogPath}>↗</span>`
+            ? html`<span class="cursor-help text-3xs text-[var(--text-dim)]" title=${sidecarLogPath}>↗</span>`
             : null}
           <button
             type="button"
-            class="cursor-pointer rounded border border-[var(--card-border)] px-1.5 text-[11px] text-[var(--text-dim)] hover:text-[var(--text-body)]"
+            class="cursor-pointer rounded border border-[var(--card-border)] px-1.5 text-2xs text-[var(--text-dim)] hover:text-[var(--text-body)]"
             aria-label="toggle header details"
             onClick=${() => { patchConnectorUiState(connectorId, { headerExpanded: !ui.headerExpanded }) }}
           >${ui.headerExpanded ? '▴' : '▾'}</button>
@@ -905,7 +905,7 @@ function ConnectorLivePanel({
 
       ${ui.headerExpanded
         ? html`
-            <div class="mt-2 rounded border border-[var(--card-border)] bg-[var(--white-4)] p-3 text-[11px]">
+            <div class="mt-2 rounded border border-[var(--card-border)] bg-[var(--white-4)] p-3 text-2xs">
               <div class="space-y-1.5">
                 ${livenessDots.map(dot => html`
                   <div class="flex min-w-0 flex-wrap items-center gap-2">
@@ -918,7 +918,7 @@ function ConnectorLivePanel({
                   </div>
                 `)}
               </div>
-              <div class="mt-3 flex flex-wrap gap-3 text-[10px] text-[var(--text-dim)]">
+              <div class="mt-3 flex flex-wrap gap-3 text-3xs text-[var(--text-dim)]">
                 <span>guilds ${connector?.guild_count ?? 0}</span>
                 <span>gate ${gateHealthLabel}</span>
                 <span>source ${connector?.binding_source || 'unknown'}</span>
@@ -933,7 +933,7 @@ function ConnectorLivePanel({
         : null}
 
       ${connectorError || connector?.error
-        ? html`<div class="mt-3 rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]">${connectorError ?? connector?.error}</div>`
+        ? html`<div class="mt-3 rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]">${connectorError ?? connector?.error}</div>`
         : null}
 
       <${SidecarLogViewer} connectorId=${connectorId} />
@@ -942,11 +942,11 @@ function ConnectorLivePanel({
       ${keeperDirectoryError && keepers.length === 0
         ? html`
             <div
-              class="mt-3 rounded border border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]"
+              class="mt-3 rounded border border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]"
               data-keeper-directory-error-panel
             >
               <span
-                class="mr-2 inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
+                class="mr-2 inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
                 aria-label="Keeper directory status: unavailable"
               >
                 <span aria-hidden="true">⚠</span>
@@ -960,12 +960,12 @@ function ConnectorLivePanel({
       ${showNoKeeperEmpty
         ? html`
             <div
-              class="mt-3 rounded border border-dashed border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-3 text-[12px]"
+              class="mt-3 rounded border border-dashed border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-3 text-xs"
               data-no-keepers-empty-panel
             >
               <div class="mb-1 flex items-center gap-2">
                 <span
-                  class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
+                  class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
                   aria-label="Keeper configuration status: none configured"
                   data-no-keepers-status-chip
                 >
@@ -974,7 +974,7 @@ function ConnectorLivePanel({
                 </span>
                 <span class="font-medium text-[var(--text-body)]">No keepers configured</span>
               </div>
-              <div class="text-[10px] text-[var(--warn)]/80">
+              <div class="text-3xs text-[var(--warn)]/80">
                 Add keeper config files under <code class="rounded bg-[var(--white-4)] px-1">config/keepers/</code> and restart the server.
               </div>
             </div>
@@ -994,13 +994,13 @@ function ConnectorLivePanel({
             // on the outer card for vertical scannability.
             return html`
               <div
-                class="mt-3 rounded border border-dashed border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-3 text-[12px]"
+                class="mt-3 rounded border border-dashed border-[var(--warn-20)] border-l-4 border-l-amber-500 bg-[var(--warn-10)] px-3 py-3 text-xs"
                 data-sidecar-not-started-panel
               >
                 <div class="mb-1 flex items-center justify-between gap-2">
                   <div class="flex items-center gap-2">
                     <span
-                      class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
+                      class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--warn)]"
                       aria-label="Sidecar process status: not running"
                       data-sidecar-status-chip
                     >
@@ -1016,17 +1016,17 @@ function ConnectorLivePanel({
                       disabled=${isActionLoading}
                       onClick=${() => { void startSidecar(connectorId) }}
                     >${isActionLoading ? '...' : 'Start'}<//>
-                    <span class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">${connectorName}</span>
+                    <span class="text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]">${connectorName}</span>
                   </div>
                 </div>
-                <div class="text-[11px] text-[var(--warn)]/80">
+                <div class="text-2xs text-[var(--warn)]/80">
                   Click <strong>Start</strong> to spawn via the backend, or copy the command below to run it from a terminal.
                 </div>
                 <div class="mt-2 grid grid-cols-1 gap-1.5">
                   <${CopyableCode} label="start" command=${cmds.start} variant="primary" />
                 </div>
                 <div class="mt-2">
-                  <div class="mb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">
+                  <div class="mb-1 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]">
                     Or for diagnostics
                   </div>
                   <div class="grid grid-cols-1 gap-1.5" data-sidecar-secondary-cmds>
@@ -1052,11 +1052,11 @@ function ConnectorLivePanel({
                   aria-label="Keeper 필터"
                   data-testid=${`keeper-filter-${connectorId}`}
                   onInput=${(e: Event) => { patchConnectorUiState(connectorId, { keeperGroupQuery: (e.target as HTMLInputElement).value }) }}
-                  class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                  class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
                 />
               </div>
               ${isFilteringKeepers && visibleKnownGroups.length === 0
-                ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${knownGroups.length} keepers)</div>`
+                ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${knownGroups.length} keepers)</div>`
                 : null}
               ${visibleKnownGroups.map(group => {
                 const keeper = group.keeper
@@ -1077,7 +1077,7 @@ function ConnectorLivePanel({
                       <div class="text-sm font-medium text-[var(--text-body)]">${group.name}</div>
                       ${keeper
                         ? html`
-                            <div class="text-[10px] text-[var(--text-dim)]">
+                            <div class="text-3xs text-[var(--text-dim)]">
                               status ${keeper.status || 'unknown'}
                               ${modelLabelForKeeper(keeper) ? ` · model ${modelLabelForKeeper(keeper)}` : ''}
                               ${runtimeLabelForKeeper(keeper) ? ` · runtime ${runtimeLabelForKeeper(keeper)}` : ''}
@@ -1087,19 +1087,19 @@ function ConnectorLivePanel({
                     </div>
 
                     ${group.bindings.length === 0
-                      ? html`<div class="mt-1 text-[11px] text-[var(--text-dim)]">(no channels)</div>`
+                      ? html`<div class="mt-1 text-2xs text-[var(--text-dim)]">(no channels)</div>`
                       : html`
                           <div class="mt-2 space-y-1">
                             ${group.bindings.map(binding => {
                               const humanized = humanizeChannel(names, binding.channel_id)
                               return html`
-                                <div class="flex items-center justify-between gap-3 text-[12px]" data-channel-id=${binding.channel_id}>
+                                <div class="flex items-center justify-between gap-3 text-xs" data-channel-id=${binding.channel_id}>
                                   <div class="min-w-0 text-[var(--text-body)]">
                                     <span class="mr-1 text-[var(--text-dim)]">·</span>
                                     ${humanized
                                       ? html`<span>${humanized}</span>`
                                       : html`<span class="text-[var(--text-dim)]" title="sidecar has not sent names yet">names pending</span>`}
-                                    <span class="ml-2 text-[10px] text-[var(--text-dim)]">(${truncateMiddle(binding.channel_id, 14)})</span>
+                                    <span class="ml-2 text-3xs text-[var(--text-dim)]">(${truncateMiddle(binding.channel_id, 14)})</span>
                                   </div>
                                   ${bindingActionsEnabled
                                     ? html`
@@ -1123,7 +1123,7 @@ function ConnectorLivePanel({
                           <div class="mt-2">
                             <button
                               type="button"
-                              class="cursor-pointer text-[11px] text-[var(--text-dim)] hover:text-[var(--text-body)]"
+                              class="cursor-pointer text-2xs text-[var(--text-dim)] hover:text-[var(--text-body)]"
                               aria-label=${`add channel to ${group.name}`}
                               onClick=${toggleExpand}
                             >${expanded ? '− close' : '+ add channel'}</button>
@@ -1138,7 +1138,7 @@ function ConnectorLivePanel({
                                     onInput=${(e: Event) => { patchConnectorUiState(connectorId, { channelDraft: (e.target as HTMLInputElement).value }) }}
                                   />
                                   ${ui.channelDraft.trim() && humanizeChannel(names, ui.channelDraft.trim())
-                                    ? html`<div class="mt-1 text-[10px] text-[var(--text-dim)]">resolves to ${humanizeChannel(names, ui.channelDraft.trim())}</div>`
+                                    ? html`<div class="mt-1 text-3xs text-[var(--text-dim)]">resolves to ${humanizeChannel(names, ui.channelDraft.trim())}</div>`
                                     : null}
                                   ${observedRooms.length > 0
                                     ? html`
@@ -1148,7 +1148,7 @@ function ConnectorLivePanel({
                                             return html`
                                               <button
                                                 type="button"
-                                                class="cursor-pointer rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-body)] hover:bg-[var(--white-8)]"
+                                                class="cursor-pointer rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--text-body)] hover:bg-[var(--white-8)]"
                                                 title=${roomId}
                                                 onClick=${() => { patchConnectorUiState(connectorId, { channelDraft: roomId }) }}
                                               >${humanized
@@ -1188,20 +1188,20 @@ function ConnectorLivePanel({
                     <span class="text-[var(--warn)]">⚠</span>
                     <div class="min-w-0">
                       <div class="text-sm font-medium text-[var(--text-body)]">${group.name}</div>
-                      <div class="text-[10px] text-[var(--warn)]/90">binding references undefined keeper</div>
+                      <div class="text-3xs text-[var(--warn)]/90">binding references undefined keeper</div>
                     </div>
                   </div>
                   <div class="mt-2 space-y-1">
                     ${group.bindings.map(binding => {
                       const humanized = humanizeChannel(names, binding.channel_id)
                       return html`
-                        <div class="flex items-center justify-between gap-3 text-[12px]" data-channel-id=${binding.channel_id}>
+                        <div class="flex items-center justify-between gap-3 text-xs" data-channel-id=${binding.channel_id}>
                           <div class="min-w-0 text-[var(--text-body)]">
                             <span class="mr-1 text-[var(--text-dim)]">·</span>
                             ${humanized
                               ? html`<span>${humanized}</span>`
                               : html`<span class="text-[var(--text-dim)]">names pending</span>`}
-                            <span class="ml-2 text-[10px] text-[var(--text-dim)]">(${truncateMiddle(binding.channel_id, 14)})</span>
+                            <span class="ml-2 text-3xs text-[var(--text-dim)]">(${truncateMiddle(binding.channel_id, 14)})</span>
                           </div>
                           ${bindingActionsEnabled
                             ? html`
@@ -1226,7 +1226,7 @@ function ConnectorLivePanel({
 
       ${connector
         ? html`
-            <div class="mt-4 flex flex-wrap gap-3 text-[10px] text-[var(--text-dim)]">
+            <div class="mt-4 flex flex-wrap gap-3 text-3xs text-[var(--text-dim)]">
               ${connector.status_path
                 ? html`<span title=${connector.status_path}>runtime ${truncateMiddle(connector.status_path, 50)}</span>`
                 : null}
@@ -1251,14 +1251,14 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
           <span class="text-lg">${channelIcon(ch.channel)}</span>
           <div>
             <div class="text-sm font-medium text-[var(--text-body)]">${ch.channel}</div>
-            <div class="text-[10px] uppercase tracking-[0.18em] text-[var(--text-dim)]">
+            <div class="text-3xs uppercase tracking-[0.18em] text-[var(--text-dim)]">
               ${ch.last_keeper ? `keeper ${ch.last_keeper}` : 'no keeper yet'}
             </div>
           </div>
         </div>
         <div class="flex items-center gap-2">
           <div class="h-2 w-2 rounded-full" style="background: ${tone.dot}"></div>
-          <span class=${`rounded-sm px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${tone.badge}`}>
+          <span class=${`rounded-sm px-2 py-1 text-3xs uppercase tracking-[0.16em] ${tone.badge}`}>
             ${tone.label}
           </span>
         </div>
@@ -1291,7 +1291,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
         </div>
       </div>
 
-      <div class="mt-3 grid grid-cols-2 gap-2 text-[11px] text-[var(--text-dim)]">
+      <div class="mt-3 grid grid-cols-2 gap-2 text-2xs text-[var(--text-dim)]">
         <div>
           avg ${(ch.avg_duration_ms / 1000).toFixed(1)}s
           <span class="text-[var(--text-dim)]"> / max ${(ch.max_duration_ms / 1000).toFixed(1)}s</span>
@@ -1312,7 +1312,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
 
       ${lastError
         ? html`
-            <div class="mt-3 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-[11px] text-[var(--bad-light)]">
+            <div class="mt-3 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-2xs text-[var(--bad-light)]">
               <div class="mb-1 uppercase tracking-[0.16em] text-[var(--bad-light)]/80">
                 ${ch.last_error_kind || 'error'} · ${timeAgo(ch.last_error_at)}
               </div>
@@ -1335,15 +1335,15 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
           <div class="text-xs font-medium text-[var(--text-body)]">
             ${binding.channel} · room ${truncateMiddle(binding.room_id)}
           </div>
-          <div class="text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
+          <div class="text-3xs uppercase tracking-[0.16em] text-[var(--text-dim)]">
             ${binding.keeper ? `keeper ${binding.keeper}` : 'keeper pending'}
           </div>
         </div>
-        <span class=${`rounded-sm px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${tone.badge}`}>
+        <span class=${`rounded-sm px-2 py-1 text-3xs uppercase tracking-[0.16em] ${tone.badge}`}>
           ${tone.label}
         </span>
       </div>
-      <div class="mt-2 grid grid-cols-3 gap-2 text-[11px] text-[var(--text-dim)]">
+      <div class="mt-2 grid grid-cols-3 gap-2 text-2xs text-[var(--text-dim)]">
         <div>
           msgs <span class="font-mono text-[var(--text-body)]">${binding.message_count}</span>
         </div>
@@ -1354,12 +1354,12 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
           last <span class="font-mono text-[var(--text-body)]">${binding.last_outcome}</span>
         </div>
       </div>
-      <div class="mt-1 text-[11px] text-[var(--text-dim)]">
+      <div class="mt-1 text-2xs text-[var(--text-dim)]">
         recent activity <span class="font-mono text-[var(--text-body)]">${timeAgo(binding.last_activity)}</span>
       </div>
       ${lastError
         ? html`
-            <div class="mt-2 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-[10px] text-[var(--bad-light)]">
+            <div class="mt-2 rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-3xs text-[var(--bad-light)]">
               ${binding.last_error_kind || 'error'} · ${lastError}
             </div>
           `
@@ -1377,7 +1377,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
   return html`
     <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
       <div class="flex items-start justify-between gap-3">
-        <div class="min-w-0 text-[11px] text-[var(--text-dim)]">
+        <div class="min-w-0 text-2xs text-[var(--text-dim)]">
           <div class="font-medium text-[var(--text-body)]">
             ${event.channel} · ${event.keeper || 'unassigned'} · room ${truncateMiddle(event.room_id)}
           </div>
@@ -1388,13 +1388,13 @@ function EventRow({ event }: { event: GateEventInfo }) {
               : null}
           </div>
         </div>
-        <span class=${`rounded-sm px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${badgeClass}`}>
+        <span class=${`rounded-sm px-2 py-1 text-3xs uppercase tracking-[0.16em] ${badgeClass}`}>
           ${event.outcome}
         </span>
       </div>
       ${event.error
         ? html`
-            <div class="mt-2 text-[10px] text-[var(--bad-light)]">
+            <div class="mt-2 text-3xs text-[var(--bad-light)]">
               ${event.error_kind || 'error'} · ${shortText(event.error, 96)}
             </div>
           `
@@ -1419,10 +1419,10 @@ function DisclosurePanel({
       <summary class="cursor-pointer list-none px-3 py-2.5">
         <div class="flex items-center justify-between gap-3">
           <div>
-            <div class="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-body)]">${title}</div>
-            <div class="mt-1 text-[11px] text-[var(--text-dim)]">${subtitle}</div>
+            <div class="text-2xs font-semibold uppercase tracking-[0.14em] text-[var(--text-body)]">${title}</div>
+            <div class="mt-1 text-2xs text-[var(--text-dim)]">${subtitle}</div>
           </div>
-          <span class="text-[11px] text-[var(--text-dim)]">펴기</span>
+          <span class="text-2xs text-[var(--text-dim)]">펴기</span>
         </div>
       </summary>
       <div class="border-t border-[var(--card-border)] px-3 py-3">
@@ -1467,7 +1467,7 @@ function GateAnalyticsSection({
                 <${StatCard} label="Dedup Keys" value=${gate.dedup_table_size} />
               </div>
 
-              <div class="mb-4 grid grid-cols-2 gap-2 text-[11px] text-[var(--text-dim)] max-[720px]:grid-cols-1">
+              <div class="mb-4 grid grid-cols-2 gap-2 text-2xs text-[var(--text-dim)] max-[720px]:grid-cols-1">
                 <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
                   duplicate suppressions
                   <span class="ml-2 font-mono text-[var(--text-body)]">${gate.total_duplicates}</span>
@@ -1480,7 +1480,7 @@ function GateAnalyticsSection({
 
               <div class="mb-4 grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
                 <div>
-                  <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
+                  <div class="mb-2 text-3xs uppercase tracking-[0.16em] text-[var(--text-dim)]">
                     Observed room bindings
                   </div>
                   ${gate.bindings.length === 0
@@ -1493,7 +1493,7 @@ function GateAnalyticsSection({
                 </div>
 
                 <div>
-                  <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
+                  <div class="mb-2 text-3xs uppercase tracking-[0.16em] text-[var(--text-dim)]">
                     Recent gate events
                   </div>
                   ${gate.recent_events.length === 0
@@ -1588,7 +1588,7 @@ export function ConnectorStatusPanel() {
       <div class="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 class="text-sm font-semibold text-[var(--text-body)]">${filterId ? CONNECTOR_DISPLAY_NAMES[filterId as KnownConnectorId] ?? '커넥터' : '커넥터'}</h3>
-          <div class="mt-1 text-[11px] text-[var(--text-dim)]">
+          <div class="mt-1 text-2xs text-[var(--text-dim)]">
             ${filterId
               ? `${CONNECTOR_DISPLAY_NAMES[filterId as KnownConnectorId] ?? filterId} sidecar의 라이브 상태와 keeper 바인딩.`
               : '4종 채널 sidecar overview 카드에서 커넥터를 고르면 아래 상세 패널이 교체됩니다.'}
@@ -1596,7 +1596,7 @@ export function ConnectorStatusPanel() {
         </div>
         ${filterId
           ? html`
-              <div class="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
+              <div class="text-right text-3xs uppercase tracking-[0.16em] text-[var(--text-dim)]">
                 <div>${d ? `success ${d.success_rate_pct}%` : `${visibleConnectors.length} connector${visibleConnectors.length !== 1 ? 's' : ''}`}</div>
                 <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : 'gate metrics unavailable'}</div>
               </div>
@@ -1623,7 +1623,7 @@ export function ConnectorStatusPanel() {
               class="mb-4 rounded border border-[var(--card-border)] bg-[var(--bg-0)]/40 p-3"
               data-testid="connector-detail-panel"
             >
-              <div class="mb-3 flex items-center justify-between gap-3 text-[11px]">
+              <div class="mb-3 flex items-center justify-between gap-3 text-2xs">
                 <div>
                   <span class="font-semibold text-[var(--text-body)]">${CONNECTOR_DISPLAY_NAMES[focusedConnectorId]}</span>
                   <span class="ml-2 text-[var(--text-dim)]">선택한 커넥터의 상세와 액션만 보여줍니다.</span>

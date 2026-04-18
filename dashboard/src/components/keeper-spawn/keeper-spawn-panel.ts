@@ -16,7 +16,7 @@ export function KeeperSpawnPanel() {
   return html`
     <div class="mb-4 rounded border border-[var(--card-border)] bg-[var(--bg-1)] p-4">
       <div class="flex items-center justify-between mb-3">
-        <h3 class="text-[13px] text-[var(--text-strong)] font-medium">키퍼 생성</h3>
+        <h3 class="text-sm text-[var(--text-strong)] font-medium">키퍼 생성</h3>
         <${ActionButton} variant="subtle" size="sm" onClick=${() => { showSpawnPanel.value = false }}>닫기<//>
       </div>
       <div class="flex gap-2 mb-3">
@@ -27,7 +27,7 @@ export function KeeperSpawnPanel() {
       </div>
       ${spawnMode.value === 'persona'
         ? html`<${PersonaBrowser} />`
-        : html`<p class="text-[12px] text-[var(--text-muted)]">직접 생성은 도구 실행기에서 <code class="text-[var(--accent)]">masc_keeper_up</code>을 사용하세요.</p>`}
+        : html`<p class="text-xs text-[var(--text-muted)]">직접 생성은 도구 실행기에서 <code class="text-[var(--accent)]">masc_keeper_up</code>을 사용하세요.</p>`}
     </div>
   `
 }

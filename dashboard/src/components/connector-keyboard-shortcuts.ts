@@ -87,12 +87,12 @@ export function ConnectorKeyboardShortcuts() {
   if (!cheatsheetOpen.value) return null
   return html`
     <div
-      class="fixed bottom-4 right-4 z-50 rounded border border-[var(--white-10)] bg-[var(--bg-1)] p-3 text-[11px] text-[var(--text-body)] shadow-sm"
+      class="fixed bottom-4 right-4 z-50 rounded border border-[var(--white-10)] bg-[var(--bg-1)] p-3 text-2xs text-[var(--text-body)] shadow-sm"
       data-connector-shortcut-cheatsheet
       role="dialog"
       aria-label="커넥터 단축키"
     >
-      <div class="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-dim)]">Shortcuts</div>
+      <div class="mb-1.5 text-3xs font-semibold uppercase tracking-[0.14em] text-[var(--text-dim)]">Shortcuts</div>
       ${KNOWN_CONNECTOR_IDS.map((id, i) => html`
         <div class="flex items-center justify-between gap-4">
           <${Kbd}>${i + 1}<//>

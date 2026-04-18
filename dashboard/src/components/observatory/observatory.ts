@@ -95,7 +95,7 @@ function TimeAxis({ windowStart, windowEnd }: { windowStart: number; windowEnd: 
   }
 
   return html`
-    <div class="relative h-6 border-b border-card-border text-[10px] text-text-dim font-mono">
+    <div class="relative h-6 border-b border-card-border text-3xs text-text-dim font-mono">
       ${ticks.map(tick => html`
         <span
           class="absolute top-0 -translate-x-1/2 whitespace-nowrap"
@@ -113,7 +113,7 @@ function TimeAxis({ windowStart, windowEnd }: { windowStart: number; windowEnd: 
 function RangeSelector() {
   const current = currentTimeRangeFilter() ?? DEFAULT_RANGE
   return html`
-    <div class="inline-flex items-center gap-0.5 rounded border border-card-border p-0.5 text-[11px]">
+    <div class="inline-flex items-center gap-0.5 rounded border border-card-border p-0.5 text-2xs">
       ${TIME_RANGE_PRESETS.map((preset: TimeRangePreset) => html`
         <button
           type="button"
@@ -140,7 +140,7 @@ function ViewSelector({
   onSelect: (view: ObservatoryView) => void
 }) {
   return html`
-    <div class="inline-flex items-center gap-0.5 rounded border border-card-border p-0.5 text-[11px]">
+    <div class="inline-flex items-center gap-0.5 rounded border border-card-border p-0.5 text-2xs">
       ${([
         { key: 'timeline', label: '타임라인' },
         { key: 'live', label: '라이브' },
@@ -259,8 +259,8 @@ export function Observatory() {
     <div class="flex flex-col gap-5">
       <div class="flex items-center justify-between">
         <div class="flex flex-col gap-0.5">
-          <h3 class="text-[13px] font-semibold text-text-strong">관찰소 (Observatory)</h3>
-          <p class="text-[11px] text-text-dim">
+          <h3 class="text-sm font-semibold text-text-strong">관찰소 (Observatory)</h3>
+          <p class="text-2xs text-text-dim">
             ${activeView.value === 'timeline'
               ? html`
                   ${currentKeeperFilter() ? `keeper=${currentKeeperFilter()}` : '전체 keeper'}
@@ -281,7 +281,7 @@ export function Observatory() {
             <${RangeSelector} />
             <button
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-2xs font-medium transition-colors ${
                 liveMode.value
                   ? 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--ok)]'
                   : 'border-card-border text-text-muted hover:text-text-strong hover:bg-white/5'
@@ -305,7 +305,7 @@ export function Observatory() {
       </div>
 
       ${activeView.value === 'timeline' && data.error ? html`
-        <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-[11px] text-[var(--warn)]">
+        <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]">
           일부 데이터 불러오기 실패: ${data.error}
         </div>
       ` : null}
@@ -333,7 +333,7 @@ export function Observatory() {
                 windowEnd=${data.windowEnd}
               />
               ${cursorPosition.value === null ? html`
-                <div class="mt-1 text-[10px] text-text-dim italic">
+                <div class="mt-1 text-3xs text-text-dim italic">
                   hover any track for cross-signal readout
                 </div>
               ` : null}
@@ -351,7 +351,7 @@ export function Observatory() {
       ${activeView.value === 'timeline' ? html`<${ObservatoryActivityPanels} />` : null}
 
       ${activeView.value === 'timeline' ? html`
-        <p class="text-[10px] text-text-dim italic">
+        <p class="text-3xs text-text-dim italic">
         Phase 3a — anomaly highlight. 추가 track(메모리, autoresearch)과 compare mode는 이후 단계에서.
         </p>
       ` : null}

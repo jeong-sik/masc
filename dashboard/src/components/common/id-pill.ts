@@ -41,7 +41,7 @@ import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
 const BASE =
-  'inline-flex items-center text-[10px] font-medium py-1 px-2.5 rounded whitespace-nowrap shadow-sm border'
+  'inline-flex items-center text-3xs font-medium py-1 px-2.5 rounded whitespace-nowrap shadow-sm border'
 const TONE_ACCENT =
   'border-accent/20 bg-[var(--accent-10)] text-accent'
 const MONO_CLASS = 'font-mono'

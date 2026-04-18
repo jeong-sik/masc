@@ -29,8 +29,8 @@ const BASE = 'inline-flex items-center justify-center rounded border font-mono t
 export function kbdClasses(size: KbdSize = 'md', extra?: string): string {
   const sized =
     size === 'sm'
-      ? 'text-[10px] px-1 py-0 border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)]'
-      : 'text-[10px] px-1.5 py-[1px] border-[var(--white-10)] bg-[var(--bg-0)] text-[var(--text-body)]'
+      ? 'text-3xs px-1 py-0 border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)]'
+      : 'text-3xs px-1.5 py-[1px] border-[var(--white-10)] bg-[var(--bg-0)] text-[var(--text-body)]'
   return extra === undefined || extra === ''
     ? `${BASE} ${sized}`
     : `${BASE} ${sized} ${extra}`

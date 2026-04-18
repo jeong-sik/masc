@@ -89,9 +89,9 @@ function LayerResultRow({ layer }: { layer: EvalLayerResult }) {
   return html`
     <div class="flex items-center gap-3 py-1.5 px-2 rounded hover:bg-[var(--white-3)] transition-colors">
       <span class="flex-shrink-0 w-4 text-center font-bold text-sm ${iconCls}">${icon}</span>
-      <span class="flex-shrink-0 w-[120px] text-[11px] font-mono text-[var(--accent)] truncate" title=${layer.layer_name}>${layer.layer_name}</span>
-      <span class="flex-shrink-0 w-10 text-right text-[11px] font-mono tabular-nums text-[var(--text-strong)]">${scoreText}</span>
-      <span class="flex-1 text-[10px] text-[var(--text-muted)] truncate" title=${detail}>${detail}</span>
+      <span class="flex-shrink-0 w-[120px] text-2xs font-mono text-[var(--accent)] truncate" title=${layer.layer_name}>${layer.layer_name}</span>
+      <span class="flex-shrink-0 w-10 text-right text-2xs font-mono tabular-nums text-[var(--text-strong)]">${scoreText}</span>
+      <span class="flex-1 text-3xs text-[var(--text-muted)] truncate" title=${detail}>${detail}</span>
     </div>
   `
 }
@@ -134,8 +134,8 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
   if (loading && !data) {
     return html`
       <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-2)]">
-        <div class="text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)] mb-2">Eval Quality</div>
-        <div class="text-[11px] text-[var(--text-dim)] animate-pulse">데이터 로딩 중...</div>
+        <div class="text-3xs font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)] mb-2">Eval Quality</div>
+        <div class="text-2xs text-[var(--text-dim)] animate-pulse">데이터 로딩 중...</div>
       </div>
     `
   }
@@ -143,8 +143,8 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
   if (error && !data) {
     return html`
       <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-2)]">
-        <div class="text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)] mb-2">Eval Quality</div>
-        <div class="text-[11px] text-[var(--text-dim)]">eval 데이터 없음</div>
+        <div class="text-3xs font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)] mb-2">Eval Quality</div>
+        <div class="text-2xs text-[var(--text-dim)]">eval 데이터 없음</div>
       </div>
     `
   }
@@ -152,8 +152,8 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
   if (!data || data.count === 0) {
     return html`
       <div class="p-4 rounded border border-[var(--card-border)] bg-[var(--white-2)]">
-        <div class="text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)] mb-2">Eval Quality</div>
-        <div class="text-[11px] text-[var(--text-dim)]">eval 결과 없음. OAS harness가 verdict를 생성하면 여기에 표시됩니다.</div>
+        <div class="text-3xs font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)] mb-2">Eval Quality</div>
+        <div class="text-2xs text-[var(--text-dim)]">eval 결과 없음. OAS harness가 verdict를 생성하면 여기에 표시됩니다.</div>
       </div>
     `
   }
@@ -173,16 +173,16 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* Header */}
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
-          <span class="text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">Eval Quality</span>
+          <span class="text-3xs font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">Eval Quality</span>
           ${allPassed
-            ? html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-[10px] font-semibold bg-[rgba(74,222,128,0.12)] text-[var(--ok)]">ALL PASS</span>`
-            : html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-[10px] font-semibold bg-[var(--bad-12)] text-[var(--bad)]">FAIL</span>`
+            ? html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-3xs font-semibold bg-[rgba(74,222,128,0.12)] text-[var(--ok)]">ALL PASS</span>`
+            : html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-3xs font-semibold bg-[var(--bad-12)] text-[var(--bad)]">FAIL</span>`
           }
-          ${baseline ? html`<span class="text-[10px] font-medium ${baseline.cls}">${baseline.text}</span>` : null}
+          ${baseline ? html`<span class="text-3xs font-medium ${baseline.cls}">${baseline.text}</span>` : null}
         </div>
         <button
           type="button"
-          class="text-[10px] text-[var(--text-dim)] hover:text-[var(--text-muted)] cursor-pointer bg-transparent border-0 p-0"
+          class="text-3xs text-[var(--text-dim)] hover:text-[var(--text-muted)] cursor-pointer bg-transparent border-0 p-0"
           onClick=${() => void loadEvalData(keeperName)}
           title="새로고침"
         >${loading ? '...' : '\u21bb'}</button>
@@ -190,7 +190,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
 
       ${'' /* Coverage bar */}
       <div class="flex items-center gap-3 mb-3">
-        <span class="text-[10px] text-[var(--text-muted)] flex-shrink-0 w-16">Coverage</span>
+        <span class="text-3xs text-[var(--text-muted)] flex-shrink-0 w-16">Coverage</span>
         <div class="flex-1 h-2 bg-[var(--white-6)] rounded-sm overflow-hidden">
           <div
             class="h-full rounded-sm transition-all duration-500"
@@ -203,7 +203,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* Layer Results */}
       ${layers.length > 0 ? html`
         <div class="mb-3">
-          <div class="text-[10px] uppercase tracking-wider text-[var(--text-dim)] mb-1.5">Layer Results</div>
+          <div class="text-3xs uppercase tracking-wider text-[var(--text-dim)] mb-1.5">Layer Results</div>
           <div class="flex flex-col gap-0.5">
             ${layers.map((layer: EvalLayerResult) => html`<${LayerResultRow} layer=${layer} />`)}
           </div>
@@ -213,18 +213,18 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* 24h Trend */}
       ${trend ? html`
         <div class="flex items-center gap-2 pt-2 border-t border-[var(--white-8)]">
-          <span class="text-[10px] uppercase tracking-wider text-[var(--text-dim)]">Trend (24h)</span>
-          <span class="text-[11px] font-mono tabular-nums text-[var(--text-muted)]">
+          <span class="text-3xs uppercase tracking-wider text-[var(--text-dim)]">Trend (24h)</span>
+          <span class="text-2xs font-mono tabular-nums text-[var(--text-muted)]">
             ${trend.oldCoverage.toFixed(2)} \u2192 ${trend.newCoverage.toFixed(2)}
           </span>
-          <span class="text-[11px] font-mono tabular-nums font-semibold ${trend.deltaPercent >= 0 ? 'text-[var(--ok)]' : 'text-[var(--bad)]'}">
+          <span class="text-2xs font-mono tabular-nums font-semibold ${trend.deltaPercent >= 0 ? 'text-[var(--ok)]' : 'text-[var(--bad)]'}">
             (${trend.deltaPercent >= 0 ? '+' : ''}${trend.deltaPercent.toFixed(1)}%)
           </span>
         </div>
       ` : null}
 
       ${'' /* Snapshot count */}
-      <div class="mt-2 text-[10px] text-[var(--text-dim)]">${data.count} eval snapshot${data.count !== 1 ? 's' : ''}</div>
+      <div class="mt-2 text-3xs text-[var(--text-dim)]">${data.count} eval snapshot${data.count !== 1 ? 's' : ''}</div>
     </div>
   `
 }

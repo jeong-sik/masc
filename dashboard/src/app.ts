@@ -114,7 +114,7 @@ export function App() {
               >
                 ${mobileMenuOpen.value ? html`<${X} size=${20} />` : html`<${Menu} size=${20} />`}
               </button>
-              <div class="flex size-7 shrink-0 items-center justify-center rounded border border-[var(--white-10)] bg-[var(--white-4)] text-[13px] text-[var(--text-strong)]">
+              <div class="flex size-7 shrink-0 items-center justify-center rounded border border-[var(--white-10)] bg-[var(--white-4)] text-sm text-[var(--text-strong)]">
                 ${currentView?.icon ?? 'M'}
               </div>
             </div>
@@ -122,7 +122,7 @@ export function App() {
             <div class="min-w-0 flex flex-col justify-center">
               ${currentSection && currentSection.label !== currentView?.label
                 ? html`
-                    <div class="mb-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+                    <div class="mb-0.5 flex flex-wrap items-center gap-1.5 text-2xs text-[var(--text-muted)]">
                       <span>${currentView?.label ?? '홈'}</span>
                       <span>/</span>
                     </div>

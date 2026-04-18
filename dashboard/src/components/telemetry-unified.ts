@@ -425,7 +425,7 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
         <span class="font-mono font-bold ${meta.color}">${meta.icon}</span>
         <span class="text-xs font-medium text-[var(--text-strong)]">${meta.label}</span>
       </div>
-      ${meta.sublabel ? html`<div class="text-[10px] text-[var(--text-dim)] mb-1">${meta.sublabel}</div>` : null}
+      ${meta.sublabel ? html`<div class="text-3xs text-[var(--text-dim)] mb-1">${meta.sublabel}</div>` : null}
       <div class="text-2xl font-bold ${hasData ? 'text-[var(--text-strong)]' : 'text-[var(--text-muted)]'}">
         ${src.entry_count.toLocaleString()}
       </div>
@@ -445,7 +445,7 @@ function DiagnosisCard({ title, value, detail, tone }: { title: string; value: s
     <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 min-w-[140px]">
       <div class="text-xs font-medium text-[var(--text-muted)] mb-1">${title}</div>
       <div class="text-2xl font-bold ${toneColor}">${value}</div>
-      <div class="text-[10px] text-[var(--text-dim)]">${detail}</div>
+      <div class="text-3xs text-[var(--text-dim)]">${detail}</div>
     </div>
   `
 }
@@ -479,7 +479,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
         </span>
         ${scopeBadges.length > 0 ? html`
           <span class="hidden xl:flex items-center gap-1 flex-shrink-0">
-            ${scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-1.5 py-0.5 text-[10px] text-[var(--text-dim)] font-mono">${badge}</span>`)}
+            ${scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-[var(--text-dim)] font-mono">${badge}</span>`)}
           </span>
         ` : null}
         <span class="flex-shrink-0 w-4 text-[var(--text-muted)]">${expanded.value ? '-' : '+'}</span>
@@ -488,10 +488,10 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
         <div class="px-3 pb-3 flex flex-col gap-2">
           ${scopeBadges.length > 0 ? html`
             <div class="flex flex-wrap gap-1.5">
-              ${scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-[10px] text-[var(--text-dim)] font-mono">${badge}</span>`)}
+              ${scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-3xs text-[var(--text-dim)] font-mono">${badge}</span>`)}
             </div>
           ` : null}
-          <pre class="text-[10px] font-mono text-[var(--text-muted)] bg-[rgba(0,0,0,0.3)] rounded p-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-all">
+          <pre class="text-3xs font-mono text-[var(--text-muted)] bg-[rgba(0,0,0,0.3)] rounded p-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-all">
 ${JSON.stringify(entry, null, 2)}</pre>
         </div>
       ` : null}
@@ -524,27 +524,27 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
           ${meta.label} · ${item.label} · ${item.count} events
         </span>
         ${sourceIcons.length > 0 ? html`
-          <span class="hidden lg:flex items-center gap-1 flex-shrink-0 text-[10px] text-[var(--text-dim)] font-mono">
+          <span class="hidden lg:flex items-center gap-1 flex-shrink-0 text-3xs text-[var(--text-dim)] font-mono">
             ${sourceIcons.join('/')}
           </span>
         ` : null}
         ${item.scopeBadges.length > 0 ? html`
           <span class="hidden xl:flex items-center gap-1 flex-shrink-0">
-            ${item.scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-1.5 py-0.5 text-[10px] text-[var(--text-dim)] font-mono">${badge}</span>`)}
+            ${item.scopeBadges.map(badge => html`<span class="rounded bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-[var(--text-dim)] font-mono">${badge}</span>`)}
           </span>
         ` : null}
         <span class="flex-shrink-0 w-4 text-[var(--text-muted)]">${expanded.value ? '-' : '+'}</span>
       </button>
       <div id=${contentId} class=${expanded.value ? 'px-3 pb-3 flex flex-col gap-2' : 'hidden'} role="region">
         ${expanded.value ? html`
-          <div class="rounded bg-[var(--white-3)] px-2 py-1.5 text-[11px] text-[var(--text-dim)]">
+          <div class="rounded bg-[var(--white-3)] px-2 py-1.5 text-2xs text-[var(--text-dim)]">
             Latest: <span class="font-mono text-[var(--text-strong)]">${latestPreview}</span>
           </div>
           ${item.entries.map((entry, index) => {
             const entryMeta = sourceMeta(entry.source)
             const ts = entryTimestamp(entry)
             return html`
-              <div class="flex items-center gap-2 rounded bg-[var(--black-20)] px-2 py-1.5 text-[10px]" key=${`${item.key}:${index}`}>
+              <div class="flex items-center gap-2 rounded bg-[var(--black-20)] px-2 py-1.5 text-3xs" key=${`${item.key}:${index}`}>
                 <span class="font-mono font-bold ${entryMeta.color} w-4 text-center flex-shrink-0">${entryMeta.icon}</span>
                 <span class="font-mono text-[var(--text-dim)] w-24 flex-shrink-0" title=${formatTs(ts)}>${timeAgoSafe(ts)}</span>
                 <span class="font-mono text-[var(--text-strong)] truncate flex-1" title=${entryPreview(entry)}>${entryPreview(entry)}</span>
@@ -552,8 +552,8 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
             `
           })}
           <details class="rounded bg-[var(--black-20)] px-2 py-1.5">
-            <summary class="cursor-pointer text-[10px] text-[var(--text-dim)]">Raw JSON</summary>
-            <pre class="mt-2 text-[10px] font-mono text-[var(--text-muted)] overflow-x-auto max-h-[280px] overflow-y-auto whitespace-pre-wrap break-all">
+            <summary class="cursor-pointer text-3xs text-[var(--text-dim)]">Raw JSON</summary>
+            <pre class="mt-2 text-3xs font-mono text-[var(--text-muted)] overflow-x-auto max-h-[280px] overflow-y-auto whitespace-pre-wrap break-all">
 ${JSON.stringify(item.entries, null, 2)}</pre>
           </details>
         ` : null}
@@ -708,15 +708,15 @@ export function TelemetryUnified() {
   return html`
     <div class="flex flex-col gap-4">
       <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-4">
-        <div class="text-[12px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Runtime Diagnosis</div>
-        <div class="mt-1 text-[14px] leading-relaxed text-[var(--text-body)]">
+        <div class="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Runtime Diagnosis</div>
+        <div class="mt-1 text-base leading-relaxed text-[var(--text-body)]">
           MASC telemetry store (keeper/tool/agent) 진단 뷰.
         </div>
         <div class="mt-3 flex flex-wrap gap-2">
-          <span class="rounded bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-dim)]">MASC: keeper/tool/agent store</span>
-          ${sessionFilter.value ? html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-[11px] font-mono text-[var(--text-dim)]">session ${sessionFilter.value}</span>` : null}
-          ${operationFilter.value ? html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-[11px] font-mono text-[var(--text-dim)]">operation ${operationFilter.value}</span>` : null}
-          ${workerRunFilter.value ? html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-[11px] font-mono text-[var(--text-dim)]">worker_run ${workerRunFilter.value}</span>` : null}
+          <span class="rounded bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-dim)]">MASC: keeper/tool/agent store</span>
+          ${sessionFilter.value ? html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-2xs font-mono text-[var(--text-dim)]">session ${sessionFilter.value}</span>` : null}
+          ${operationFilter.value ? html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-2xs font-mono text-[var(--text-dim)]">operation ${operationFilter.value}</span>` : null}
+          ${workerRunFilter.value ? html`<span class="rounded bg-[var(--white-4)] px-2 py-1 text-2xs font-mono text-[var(--text-dim)]">worker_run ${workerRunFilter.value}</span>` : null}
         </div>
       </div>
 
@@ -844,7 +844,7 @@ export function TelemetryUnified() {
             : ''}
         </div>
         ${condensed.groups > 0 ? html`
-          <div class="px-3 py-2 border-b border-[var(--card-border)] bg-[var(--white-1)] flex flex-wrap gap-2 text-[11px]">
+          <div class="px-3 py-2 border-b border-[var(--card-border)] bg-[var(--white-1)] flex flex-wrap gap-2 text-2xs">
             ${Array.from(condensed.byCategory.entries()).map(([category, count]) => {
               const meta = CONDENSED_CATEGORY_META[category]
               return html`

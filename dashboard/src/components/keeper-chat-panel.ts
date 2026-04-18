@@ -197,9 +197,9 @@ export function KeeperChatPanel({ name }: { name: string }) {
     <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(11,18,34,0.95),rgba(6,11,22,0.92))] shadow-[0_24px_56px_rgba(0,0,0,0.24)]">
       <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--slate-gray-12)] px-4 py-4">
         <div class="min-w-[220px] flex-1">
-          <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 대화</div>
-          <div class="mt-2 text-[15px] font-semibold text-[var(--text-strong)]">@${name}</div>
-          <div class="mt-1 text-[13px] leading-[1.65] text-[var(--text-secondary)]">
+          <div class="text-2xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 대화</div>
+          <div class="mt-2 text-md font-semibold text-[var(--text-strong)]">@${name}</div>
+          <div class="mt-1 text-sm leading-[1.65] text-[var(--text-secondary)]">
             이 키퍼와의 실시간 직접 대화입니다. 스트리밍 응답은 동일한 대화 레인에 표시됩니다.
           </div>
         </div>
@@ -213,7 +213,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
             value=${query}
             onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
           />
-          <span class="inline-flex items-center rounded-sm border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-strong)]">
+          <span class="inline-flex items-center rounded-sm border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-medium text-[var(--text-strong)]">
             ${hasQuery ? `${filteredMessages.length} / ${messages.length}개 메시지` : `${messages.length}개 메시지`}
           </span>
         </div>
@@ -221,7 +221,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
 
       <div class="px-4 py-4">
         ${chatAccess.message
-          ? html`<div class="mb-4 rounded-card border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-[12px] leading-[1.6] text-[var(--warn-bright)]">${chatAccess.message}</div>`
+          ? html`<div class="mb-4 rounded-card border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-[1.6] text-[var(--warn-bright)]">${chatAccess.message}</div>`
           : null}
         <${ChatTranscript}
           entries=${transcriptEntries}
@@ -233,7 +233,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
       </div>
 
       ${chatError.value
-        ? html`<div class="mx-4 mb-4 rounded-card border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.24)] px-3 py-2.5 text-[12px] leading-[1.6] text-[var(--bad-light)]">${chatError.value}</div>`
+        ? html`<div class="mx-4 mb-4 rounded-card border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.24)] px-3 py-2.5 text-xs leading-[1.6] text-[var(--bad-light)]">${chatError.value}</div>`
         : null}
 
       <div class="border-t border-[var(--slate-gray-12)] bg-[var(--white-3)] px-4 py-4">

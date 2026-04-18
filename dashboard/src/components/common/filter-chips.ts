@@ -33,7 +33,7 @@ export function FilterChips<T extends string>({
 }: FilterChipsProps<T>) {
   const activeKey = active?.value ?? value
   const chipClass = size === 'md'
-    ? 'inline-flex min-h-9 items-center gap-1.5 rounded border px-3 py-2 text-[11px] font-medium'
+    ? 'inline-flex min-h-9 items-center gap-1.5 rounded border px-3 py-2 text-2xs font-medium'
     : 'inline-flex items-center gap-1.5 rounded border px-2 py-1 text-[length:var(--fs-xs)]'
   const activeToneClass = tone === 'accent'
     ? 'border-[var(--border-slate-22)] bg-[var(--accent-soft)] text-[var(--text-strong)]'

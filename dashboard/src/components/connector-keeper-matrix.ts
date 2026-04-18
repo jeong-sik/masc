@@ -203,7 +203,7 @@ function MatrixCellButton({ cell }: { cell: MatrixCell }) {
   return html`
     <button
       type="button"
-      class=${`flex h-full w-full cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-[11px] transition-colors ${tone.bg} ${tone.text} hover:brightness-125 disabled:cursor-not-allowed disabled:opacity-40`}
+      class=${`flex h-full w-full cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-2xs transition-colors ${tone.bg} ${tone.text} hover:brightness-125 disabled:cursor-not-allowed disabled:opacity-40`}
       onClick=${onClick}
       disabled=${disabled}
       title=${title}
@@ -229,10 +229,10 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
     <section class="mb-4 rounded border border-[var(--card-border)] bg-[var(--bg-1)] p-3" data-panel="connector-keeper-matrix">
       <header class="mb-2 flex items-baseline justify-between gap-3">
         <div>
-          <h4 class="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--text-body)]">
+          <h4 class="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-body)]">
             Keeper × Connector Matrix
           </h4>
-          <p class="mt-0.5 text-[10px] text-[var(--text-dim)]">
+          <p class="mt-0.5 text-3xs text-[var(--text-dim)]">
             ${matrix.totals.knownKeepers} keeper${matrix.totals.knownKeepers === 1 ? '' : 's'}
             · ${matrix.totals.liveConnectors}/${matrix.columns.length} connector
             · ${matrix.totals.totalBindings} binding${matrix.totals.totalBindings === 1 ? '' : 's'}
@@ -241,7 +241,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
               : null}
           </p>
         </div>
-        <div class="text-[10px] text-[var(--text-dim)]">
+        <div class="text-3xs text-[var(--text-dim)]">
           <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--ok-10)]"></span>bound</span>
           <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--white-8)]"></span>unbound</span>
           <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--white-4)]"></span>n/a</span>
@@ -251,18 +251,18 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
 
       ${!hasKeepers
         ? html`
-            <div class="rounded border border-dashed border-[var(--card-border)] px-3 py-4 text-center text-[11px] text-[var(--text-dim)]">
+            <div class="rounded border border-dashed border-[var(--card-border)] px-3 py-4 text-center text-2xs text-[var(--text-dim)]">
               No keepers yet — add one under <code class="rounded bg-[var(--white-4)] px-1">config/keepers/</code> and restart.
             </div>
           `
         : html`
             <div class="overflow-x-auto">
-              <div class="grid gap-1 text-[11px]" style=${gridCols} data-matrix-grid>
-                <div class="px-1 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">Keeper ↓ / Connector →</div>
+              <div class="grid gap-1 text-2xs" style=${gridCols} data-matrix-grid>
+                <div class="px-1 py-1 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]">Keeper ↓ / Connector →</div>
                 ${matrix.columns.map(colId => html`
                   <button
                     type="button"
-                    class="flex cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-dim)] hover:text-[var(--text-body)]"
+                    class="flex cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-3xs uppercase tracking-[0.12em] text-[var(--text-dim)] hover:text-[var(--text-body)]"
                     onClick=${() => scrollToConnectorRow(colId)}
                     title=${`${CONNECTOR_DISPLAY_NAMES[colId] ?? colId} — 행으로 이동`}
                   >
@@ -271,7 +271,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
                   </button>
                 `)}
                 <div
-                  class="px-1 py-1 text-center text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]"
+                  class="px-1 py-1 text-center text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]"
                   title="Per-keeper coverage totals (bound / unbound / n·a)"
                   data-matrix-coverage-header
                 >Coverage</div>
@@ -304,14 +304,14 @@ function MatrixColumnTotalsRow({ matrix }: { matrix: MatrixData }) {
       data-matrix-column-totals-divider
     ></div>
     <div
-      class="flex items-center gap-1 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]"
+      class="flex items-center gap-1 px-2 py-1 text-3xs uppercase tracking-[0.14em] text-[var(--text-dim)]"
       data-matrix-column-totals-label
     >Totals →</div>
     ${matrix.columns.map((_, idx) => html`
       <${ColumnTotalsCell} counts=${summarizeMatrixColumn(matrix, idx)} />
     `)}
     <div
-      class=${`flex items-center justify-end gap-1 px-1 py-1 text-[10px] tabular-nums ${totalBound > 0 ? 'text-[var(--ok)]' : 'text-[var(--text-dim)]'}`}
+      class=${`flex items-center justify-end gap-1 px-1 py-1 text-3xs tabular-nums ${totalBound > 0 ? 'text-[var(--ok)]' : 'text-[var(--text-dim)]'}`}
       title=${`Grand total: ${totalBound} bound cells across all keepers × connectors`}
       data-matrix-grand-total
       data-matrix-grand-total-bound=${totalBound}
@@ -335,7 +335,7 @@ function ColumnTotalsCell({ counts }: { counts: MatrixStateCounts }) {
   const title = `${bound} bound · ${unbound} unbound · ${unknown} unknown · ${counts.na} n/a`
   return html`
     <div
-      class=${`flex items-center justify-center gap-1 px-1 py-1 text-[10px] tabular-nums ${tone}`}
+      class=${`flex items-center justify-center gap-1 px-1 py-1 text-3xs tabular-nums ${tone}`}
       title=${title}
       data-matrix-column-total-bound=${bound}
       data-matrix-column-total-unknown=${unknown}
@@ -351,7 +351,7 @@ function MatrixRowRender({ row }: { row: MatrixRow }) {
   return html`
     <button
       type="button"
-      class=${`flex cursor-pointer items-center gap-2 truncate rounded px-2 py-1 text-left text-[12px] hover:bg-[var(--white-4)] ${row.known ? 'text-[var(--text-body)]' : 'text-[var(--warn)]'}`}
+      class=${`flex cursor-pointer items-center gap-2 truncate rounded px-2 py-1 text-left text-xs hover:bg-[var(--white-4)] ${row.known ? 'text-[var(--text-body)]' : 'text-[var(--warn)]'}`}
       onClick=${() => scrollToKeeper(row.keeperName)}
       title=${row.known ? row.keeperName : `${row.keeperName} — directory 밖 keeper`}
     >
@@ -382,7 +382,7 @@ function RowCoverageChip({
     'text-[var(--text-dim)]'
   return html`
     <div
-      class=${`flex items-center justify-end gap-1 px-1 py-1 text-[10px] tabular-nums ${tone}`}
+      class=${`flex items-center justify-end gap-1 px-1 py-1 text-3xs tabular-nums ${tone}`}
       title=${title}
       data-matrix-row-coverage=${keeperName}
       data-matrix-row-bound=${bound}

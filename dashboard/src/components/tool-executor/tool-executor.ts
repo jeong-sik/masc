@@ -14,7 +14,7 @@ import {
 function ConfirmDialog({ toolName, onConfirm, onCancel }: { toolName: string; onConfirm: () => void; onCancel: () => void }) {
   return html`
     <div class="rounded border border-[rgba(251,113,133,0.4)] bg-[var(--bad-10)] p-3">
-      <p class="text-[12px] text-[var(--bad-light)] mb-2"><strong>${toolName}</strong> 은 파괴적(destructive) 도구입니다. 실행하시겠습니까?</p>
+      <p class="text-xs text-[var(--bad-light)] mb-2"><strong>${toolName}</strong> 은 파괴적(destructive) 도구입니다. 실행하시겠습니까?</p>
       <div class="flex gap-2">
         <${ActionButton} variant="danger" size="sm" onClick=${onConfirm}>실행<//>
         <${ActionButton} variant="ghost" size="sm" onClick=${onCancel}>취소<//>
@@ -26,7 +26,7 @@ function ConfirmDialog({ toolName, onConfirm, onCancel }: { toolName: string; on
 function ToolDetail() {
   const showConfirm = useSignal(false)
   const tool = selectedTool.value
-  if (!tool) return html`<div class="flex items-center justify-center h-full text-[var(--text-muted)] text-[13px]">좌측에서 도구를 선택하세요.</div>`
+  if (!tool) return html`<div class="flex items-center justify-center h-full text-[var(--text-muted)] text-sm">좌측에서 도구를 선택하세요.</div>`
 
   const isDestructive = tool.annotations?.destructiveHint === true
   const missing = validationErrors.value
@@ -36,15 +36,15 @@ function ToolDetail() {
   return html`
     <div class="flex flex-col gap-3 h-full overflow-y-auto">
       <div>
-        <h3 class="text-[14px] text-[var(--text-strong)] font-mono font-medium">${tool.name}</h3>
-        <p class="text-[12px] text-[var(--text-muted)] mt-1">${tool.description}</p>
-        ${tool.annotations?.readOnlyHint === true ? html`<span class="text-[10px] text-[var(--ok)] mt-1">읽기 전용</span>` : null}
-        ${isDestructive ? html`<span class="text-[10px] text-[var(--bad)] mt-1 ml-2">파괴적</span>` : null}
+        <h3 class="text-base text-[var(--text-strong)] font-mono font-medium">${tool.name}</h3>
+        <p class="text-xs text-[var(--text-muted)] mt-1">${tool.description}</p>
+        ${tool.annotations?.readOnlyHint === true ? html`<span class="text-3xs text-[var(--ok)] mt-1">읽기 전용</span>` : null}
+        ${isDestructive ? html`<span class="text-3xs text-[var(--bad)] mt-1 ml-2">파괴적</span>` : null}
       </div>
       <div class="border-t border-[var(--card-border)] pt-3">
         <${SchemaForm} schema=${tool.inputSchema} values=${formValues.value} onChange=${updateFormValues} />
       </div>
-      ${missing.length > 0 ? html`<p class="text-[11px] text-[var(--bad)]">필수 필드 누락: ${missing.join(', ')}</p>` : null}
+      ${missing.length > 0 ? html`<p class="text-2xs text-[var(--bad)]">필수 필드 누락: ${missing.join(', ')}</p>` : null}
       ${showConfirm.value
         ? html`<${ConfirmDialog} toolName=${tool.name} onConfirm=${handleConfirmedExecute} onCancel=${() => { showConfirm.value = false }} />`
         : html`
@@ -61,11 +61,11 @@ function ToolDetail() {
 export function ToolExecutor() {
   useEffect(() => { void loadToolSchemas() }, [])
   if (schemasLoading.value && !selectedTool.value) {
-    return html`<${SurfaceCard}><p class="text-[12px] text-[var(--text-muted)] py-8 text-center">도구 스키마 로딩 중...</p><//>`
+    return html`<${SurfaceCard}><p class="text-xs text-[var(--text-muted)] py-8 text-center">도구 스키마 로딩 중...</p><//>`
   }
   if (schemasError.value) {
     return html`<${SurfaceCard}><div class="py-4 text-center">
-      <p class="text-[12px] text-[var(--bad)] mb-2">${schemasError.value}</p>
+      <p class="text-xs text-[var(--bad)] mb-2">${schemasError.value}</p>
       <${ActionButton} variant="ghost" size="sm" onClick=${() => void loadToolSchemas(true)}>재시도<//>
     </div><//>`
   }

@@ -20,11 +20,11 @@ function ToolRow({ tool, isSelected }: { tool: McpToolSchema; isSelected: boolea
       ${isSelected ? 'bg-[var(--accent-12)] border border-[var(--accent-30)]' : 'hover:bg-[var(--white-6)] border border-transparent'}
       ${isDeprecated ? 'opacity-50' : ''}" onClick=${() => selectTool(tool)}>
       <div class="flex items-center gap-1.5">
-        <span class="text-[12px] text-[var(--text-strong)] font-mono truncate flex-1">${tool.name}</span>
+        <span class="text-xs text-[var(--text-strong)] font-mono truncate flex-1">${tool.name}</span>
         ${isDestructive ? html`<${CountBadge} tone="bad">D<//>` : null}
         ${isReadOnly ? html`<${CountBadge} tone="ok">R<//>` : null}
       </div>
-      <div class="text-[10px] text-[var(--text-muted)] mt-0.5 line-clamp-1">${tool.description}</div>
+      <div class="text-3xs text-[var(--text-muted)] mt-0.5 line-clamp-1">${tool.description}</div>
     </button>
   `
 }
@@ -38,17 +38,17 @@ export function ToolPicker() {
         onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }} />
       <div class="flex gap-1">
         ${TIER_OPTIONS.map(opt => html`
-          <button type="button" class="text-[10px] px-2 py-0.5 rounded transition-colors cursor-pointer
+          <button type="button" class="text-3xs px-2 py-0.5 rounded transition-colors cursor-pointer
             ${tierFilter.value === opt.value
               ? 'bg-[var(--accent-12)] text-[var(--text-strong)] border border-[var(--accent-30)]'
               : 'text-[var(--text-muted)] hover:text-[var(--text-body)] border border-transparent hover:bg-[var(--white-6)]'}"
             onClick=${() => { tierFilter.value = opt.value }}>${opt.label}</button>
         `)}
-        <span class="text-[10px] text-[var(--text-muted)] ml-auto self-center">${tools.length}개</span>
+        <span class="text-3xs text-[var(--text-muted)] ml-auto self-center">${tools.length}개</span>
       </div>
       <div class="flex flex-col gap-0.5 overflow-y-auto flex-1 min-h-0 pr-1">
         ${tools.length === 0
-          ? html`<p class="text-[12px] text-[var(--text-muted)] py-4 text-center">결과 없음</p>`
+          ? html`<p class="text-xs text-[var(--text-muted)] py-4 text-center">결과 없음</p>`
           : tools.map(tool => html`<${ToolRow} key=${tool.name} tool=${tool} isSelected=${selected?.name === tool.name} />`)}
       </div>
     </div>

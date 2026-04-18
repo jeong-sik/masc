@@ -234,15 +234,15 @@ export function peekKeeperConfigLoadStatus(
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return html`
     <div class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
-      <span class="text-[12px] font-medium text-text-muted">${label}</span>
-      <span class="text-[12px] font-semibold text-text-strong">${value}</span>
+      <span class="text-xs font-medium text-text-muted">${label}</span>
+      <span class="text-xs font-semibold text-text-strong">${value}</span>
     </div>
   `
 }
 
 function SectionHeader({ title }: { title: string }) {
   return html`
-    <div class="text-[11px] font-bold uppercase tracking-widest text-accent mt-6 mb-3 pb-1.5 border-b border-accent/20 flex items-center gap-2">
+    <div class="text-2xs font-bold uppercase tracking-widest text-accent mt-6 mb-3 pb-1.5 border-b border-accent/20 flex items-center gap-2">
       <span class="w-1.5 h-1.5 rounded-full bg-accent/50 shadow-[0_0_8px_rgba(71,184,255,0.6)]"></span>
       ${title}
     </div>
@@ -264,16 +264,16 @@ function Callout({
       : 'border-card-border/60 bg-card/35 text-text-body'
   return html`
     <div class="rounded border px-3 py-3 shadow-sm ${toneClass}">
-      <div class="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-1">${title}</div>
-      <div class="text-[12px] leading-relaxed">${body}</div>
+      <div class="text-2xs font-bold uppercase tracking-widest text-text-muted mb-1">${title}</div>
+      <div class="text-xs leading-relaxed">${body}</div>
     </div>
   `
 }
 
 function BoolBadge({ value }: { value: boolean }) {
   return value
-    ? html`<span class="text-[11px] font-bold px-2 py-0.5 rounded bg-ok/10 text-ok border border-ok/20 shadow-sm shadow-ok/5">ON</span>`
-    : html`<span class="text-[11px] font-bold px-2 py-0.5 rounded bg-white/5 text-text-dim border border-white/10 shadow-sm">OFF</span>`
+    ? html`<span class="text-2xs font-bold px-2 py-0.5 rounded bg-ok/10 text-ok border border-ok/20 shadow-sm shadow-ok/5">ON</span>`
+    : html`<span class="text-2xs font-bold px-2 py-0.5 rounded bg-white/5 text-text-dim border border-white/10 shadow-sm">OFF</span>`
 }
 
 function formatHookDestructiveTools(value: string[] | string): string {
@@ -285,21 +285,21 @@ function formatHookDestructiveTools(value: string[] | string): string {
 }
 
 function ModelList({ models }: { models: string[] }) {
-  if (models.length === 0) return html`<span class="text-[11px] text-text-muted italic">none</span>`
+  if (models.length === 0) return html`<span class="text-2xs text-text-muted italic">none</span>`
   return html`
     <div class="flex flex-wrap gap-1.5">
-      ${models.map(m => html`<span class="inline-flex items-center py-1 px-2.5 rounded text-[11px] font-semibold bg-[var(--accent-10)] text-accent border border-accent/20 shadow-sm hover:bg-accent/20 transition-colors cursor-default">${m}</span>`)}
+      ${models.map(m => html`<span class="inline-flex items-center py-1 px-2.5 rounded text-2xs font-semibold bg-[var(--accent-10)] text-accent border border-accent/20 shadow-sm hover:bg-accent/20 transition-colors cursor-default">${m}</span>`)}
     </div>
   `
 }
 
 function LongText({ text, truncateAt = 200 }: { text: string; truncateAt?: number | null }) {
-  if (!text || text.trim() === '') return html`<span class="text-[11px] text-text-muted italic">--</span>`
+  if (!text || text.trim() === '') return html`<span class="text-2xs text-text-muted italic">--</span>`
   const truncated =
     truncateAt !== null && truncateAt >= 0 && text.length > truncateAt
       ? text.slice(0, truncateAt) + '...'
       : text
-  return html`<div class="text-[12px] text-text-body whitespace-pre-wrap max-h-[140px] overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-sm p-3 rounded mt-1.5 leading-relaxed shadow-inner hover:bg-card/60 transition-colors">${truncated}</div>`
+  return html`<div class="text-xs text-text-body whitespace-pre-wrap max-h-[140px] overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-sm p-3 rounded mt-1.5 leading-relaxed shadow-inner hover:bg-card/60 transition-colors">${truncated}</div>`
 }
 
 
@@ -310,7 +310,7 @@ function PromptSourceBadge({ source }: { source: string }) {
       : source === 'file'
         ? 'bg-[var(--ok-10)] text-[var(--ok)] border-[var(--ok-20)]'
         : 'bg-white/5 text-text-dim border-white/10'
-  return html`<span class="text-[10px] font-bold px-2 py-0.5 rounded border ${tone} shadow-sm">${source.toUpperCase()}</span>`
+  return html`<span class="text-3xs font-bold px-2 py-0.5 rounded border ${tone} shadow-sm">${source.toUpperCase()}</span>`
 }
 
 function PromptBlock({
@@ -323,9 +323,9 @@ function PromptBlock({
   return html`
     <div class="mt-2">
       <div class="flex items-center justify-between gap-2 mb-1">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">${title}</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">${title}</div>
         <div class="flex items-center gap-2">
-          <span class="text-[10px] text-text-dim">${block.key}</span>
+          <span class="text-3xs text-text-dim">${block.key}</span>
           <${PromptSourceBadge} source=${block.source} />
         </div>
       </div>
@@ -334,14 +334,14 @@ function PromptBlock({
   `
 }
 
-const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-[13px] border border-card-border rounded py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all duration-200 shadow-inner'
+const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all duration-200 shadow-inner'
 
 // ── Inline editing components for runtime config ────────
 
 function InlineToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
   return html`
     <div class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
-      <span class="text-[12px] font-medium text-text-muted">${label}</span>
+      <span class="text-xs font-medium text-text-muted">${label}</span>
       <button type="button"
         class="relative inline-flex h-5 w-9 items-center rounded-sm transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-white/10'}"
         onClick=${() => onChange(!value)}
@@ -358,10 +358,10 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix }: {
 }) {
   return html`
     <div class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
-      <span class="text-[12px] font-medium text-text-muted">${label}</span>
+      <span class="text-xs font-medium text-text-muted">${label}</span>
       <div class="flex items-center gap-1.5">
         <input type="number"
-          class="w-20 text-right bg-card/60 text-text-strong text-[12px] font-semibold border border-card-border rounded py-1 px-2 focus:outline-none focus:border-accent/50 transition-colors"
+          class="w-20 text-right bg-card/60 text-text-strong text-xs font-semibold border border-card-border rounded py-1 px-2 focus:outline-none focus:border-accent/50 transition-colors"
           value=${value}
           min=${min}
           max=${max}
@@ -371,7 +371,7 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix }: {
             if (!isNaN(v)) onChange(v)
           }}
         />
-        ${suffix ? html`<span class="text-[10px] text-text-dim w-4">${suffix}</span>` : null}
+        ${suffix ? html`<span class="text-3xs text-text-dim w-4">${suffix}</span>` : null}
       </div>
     </div>
   `
@@ -390,7 +390,7 @@ function InlineSelectRow({
 }) {
   return html`
     <div class="flex items-center justify-between py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5 gap-3">
-      <span class="text-[12px] font-medium text-text-muted">${label}</span>
+      <span class="text-xs font-medium text-text-muted">${label}</span>
       <select
         aria-label=${label}
         class="text-xs bg-card/60 border border-card-border rounded px-2 py-1 text-text-strong"
@@ -417,7 +417,7 @@ function EditTextarea({ field, label, rows = 3 }: { field: keyof EditDraft; labe
   const val = d[field] as string
   return html`
     <div class="mt-3">
-      <div class="text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-1.5">${label}</div>
+      <div class="text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">${label}</div>
       <textarea
         class="${fieldStyle} resize-y custom-scrollbar"
         rows=${rows}
@@ -568,30 +568,30 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     <${EditTextarea} field="instructions" label="지시사항" rows=${4} />
   ` : html`
     <${SectionHeader} title="프롬프트" />
-    <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-0.5">목표</div>
+    <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-0.5">목표</div>
     <${LongText} text=${c.prompt.goal} />
     ${c.prompt.short_goal ? html`
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">단기 목표</div>
+      <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">단기 목표</div>
       <${LongText} text=${c.prompt.short_goal} />
     ` : null}
     ${c.prompt.mid_goal ? html`
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">중기 목표</div>
+      <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">중기 목표</div>
       <${LongText} text=${c.prompt.mid_goal} />
     ` : null}
     ${c.prompt.long_goal ? html`
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">장기 목표</div>
+      <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">장기 목표</div>
       <${LongText} text=${c.prompt.long_goal} />
     ` : null}
     ${c.prompt.instructions ? html`
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">지시사항</div>
+      <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">지시사항</div>
       <${LongText} text=${c.prompt.instructions} />
     ` : null}
-    <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-3 mb-0.5">시스템 프롬프트 블록</div>
+    <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-3 mb-0.5">시스템 프롬프트 블록</div>
     <${PromptBlock} title="헌법" block=${c.prompt.system_prompt_blocks.constitution} />
     <${PromptBlock} title="세계관" block=${c.prompt.system_prompt_blocks.world} />
     <${PromptBlock} title="능력" block=${c.prompt.system_prompt_blocks.capabilities} />
     <details class="mt-3">
-      <summary class="cursor-pointer py-2 px-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] list-none select-none rounded hover:bg-[var(--white-3)] transition-colors">컴파일된 시스템 프롬프트 보기</summary>
+      <summary class="cursor-pointer py-2 px-3 text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] list-none select-none rounded hover:bg-[var(--white-3)] transition-colors">컴파일된 시스템 프롬프트 보기</summary>
       <${LongText} text=${c.prompt.effective_system_prompt} truncateAt=${null} />
     </details>
   `
@@ -620,18 +620,18 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <span class="text-xs text-[var(--text-muted)]">라이브 오버라이드</span>
         <${BoolBadge} value=${c.sources.has_live_override} />
       </div>
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">라이브 메타 경로</div>
+      <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">라이브 메타 경로</div>
       <${LongText} text=${c.sources.live_meta_path} />
       ${c.sources.default_manifest_path ? html`
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">기본 매니페스트 경로</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">기본 매니페스트 경로</div>
         <${LongText} text=${c.sources.default_manifest_path} />
       ` : null}
       <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">우선순위</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">우선순위</div>
         <${ModelList} models=${c.sources.precedence} />
       </div>
       <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">오버라이드 필드</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">오버라이드 필드</div>
         <${ModelList} models=${c.sources.override_fields} />
       </div>
 
@@ -642,7 +642,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${BoolBadge} value=${c.execution.verify} />
       </div>
       <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">모델</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">모델</div>
         <${ModelList} models=${c.execution.models} />
       </div>
 
@@ -695,7 +695,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <div class="py-2 px-3 rounded bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1">
             <span class="text-xs text-[var(--text-body)]">allowed_paths</span>
-            <span class="text-[10px] text-[var(--text-muted)]">한 줄에 하나씩. * = 전체 허용</span>
+            <span class="text-3xs text-[var(--text-muted)]">한 줄에 하나씩. * = 전체 허용</span>
           </div>
           <textarea class="w-full text-xs font-mono bg-[var(--white-6)] border border-[var(--card-border)] rounded px-2 py-1.5 text-[var(--text-body)] resize-y"
             rows=${3}
@@ -705,7 +705,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           ></textarea>
         </div>
         ${(c.effective_allowed_paths ?? []).length > 0 ? html`
-          <div class="py-1.5 px-3 text-[10px] text-[var(--text-muted)]">
+          <div class="py-1.5 px-3 text-3xs text-[var(--text-muted)]">
             effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}
           </div>
         ` : null}
@@ -807,12 +807,12 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="프로젝트 범위" value=${c.coordination.room_scope || '--'} />
       ${c.coordination.mention_targets.length > 0 ? html`
       <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">멘션 대상</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">멘션 대상</div>
         <${ModelList} models=${c.coordination.mention_targets} />
       </div>
       ` : null}
       <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">참여 네임스페이스</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">참여 네임스페이스</div>
         <${ModelList} models=${c.coordination.joined_room_ids} />
       </div>
 
@@ -846,7 +846,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             class="${btnBase} bg-[var(--white-10)] text-[var(--text-body)]"
             onClick=${resetRuntimeDraft}
           >초기화</button>
-          <span class="text-[10px] text-accent">변경된 설정이 있습니다</span>
+          <span class="text-3xs text-accent">변경된 설정이 있습니다</span>
         </div>
       ` : null}
 
@@ -857,30 +857,30 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         return html`
           <${SectionHeader} title="훅 슬롯" />
           <div class="flex items-center justify-between gap-2 mb-2">
-            <span class="text-[10px] text-text-muted">${allEntries.length} slots</span>
+            <span class="text-3xs text-text-muted">${allEntries.length} slots</span>
             <input
               type="search"
               value=${hookFilterQuery.value}
               placeholder="슬롯 이름 / source / gate 필터"
               aria-label="훅 슬롯 필터"
               onInput=${(e: Event) => { hookFilterQuery.value = (e.target as HTMLInputElement).value }}
-              class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+              class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
             />
           </div>
           ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0
-            ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${allEntries.length} slots)</div>`
+            ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${allEntries.length} slots)</div>`
             : visibleEntries.map(([name, slot]) => html`
                 <div class="flex items-start gap-2 py-2 px-3 rounded border border-card-border/50 bg-card/20 mb-1.5">
                   <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--text-dim)]'}"></span>
                   <div class="flex-1 min-w-0">
                     <div class="flex justify-between">
-                      <span class="text-[12px] font-semibold text-text-strong">${name}</span>
-                      <span class="text-[10px] text-text-muted">${slot.source}</span>
+                      <span class="text-xs font-semibold text-text-strong">${name}</span>
+                      <span class="text-3xs text-text-muted">${slot.source}</span>
                     </div>
                     ${(slot.gates ?? slot.effects ?? slot.features ?? []).length > 0 ? html`
                       <div class="flex flex-wrap gap-1 mt-1">
                         ${(slot.gates ?? slot.effects ?? slot.features ?? []).map((d: string) => html`
-                          <span class="text-[10px] px-1.5 py-0.5 rounded ${d.endsWith('_off') ? 'bg-[var(--white-10)] text-[var(--text-dim)]' : 'bg-[var(--accent-10)] text-[var(--accent)] opacity-80'}">${d}</span>
+                          <span class="text-3xs px-1.5 py-0.5 rounded ${d.endsWith('_off') ? 'bg-[var(--white-10)] text-[var(--text-dim)]' : 'bg-[var(--accent-10)] text-[var(--accent)] opacity-80'}">${d}</span>
                         `)}
                       </div>
                     ` : null}

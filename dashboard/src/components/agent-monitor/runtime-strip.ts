@@ -31,41 +31,41 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
 
   return html`
     <div class="agent-runtime-strip">
-      <div class="flex items-center gap-1.5 text-[13px]">
+      <div class="flex items-center gap-1.5 text-sm">
         <${PipelineStageBadge} stage=${stage} />
       </div>
 
       ${ctxPct != null ? html`
-        <div class="flex items-center gap-1.5 text-[13px]">
-          <span class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">CTX</span>
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="text-3xs text-[var(--text-muted)] uppercase tracking-wider">CTX</span>
           <div class="w-16 h-1.5 bg-[#1a1a2e] rounded-sm overflow-hidden">
             <div
               class="agent-runtime-ctx-fill rounded-sm ${ctxBarClass(ctxRatio)}"
               style=${{ width: `${ctxPct}%` }}
             ></div>
           </div>
-          <span class="text-[13px] text-[var(--text-body)] tabular-nums">${ctxPct}%</span>
+          <span class="text-sm text-[var(--text-body)] tabular-nums">${ctxPct}%</span>
         </div>
       ` : null}
 
       ${generation != null ? html`
-        <div class="flex items-center gap-1.5 text-[13px]">
-          <span class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">GEN</span>
-          <span class="text-[13px] text-[var(--text-body)] tabular-nums">${generation}</span>
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="text-3xs text-[var(--text-muted)] uppercase tracking-wider">GEN</span>
+          <span class="text-sm text-[var(--text-body)] tabular-nums">${generation}</span>
         </div>
       ` : null}
 
       ${model ? html`
-        <div class="flex items-center gap-1.5 text-[13px]">
-          <span class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">MODEL</span>
-          <span class="text-[13px] text-[var(--text-body)] font-mono truncate max-w-[200px]">${model}</span>
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="text-3xs text-[var(--text-muted)] uppercase tracking-wider">MODEL</span>
+          <span class="text-sm text-[var(--text-body)] font-mono truncate max-w-[200px]">${model}</span>
         </div>
       ` : null}
 
       ${lastTurnAge != null ? html`
-        <div class="flex items-center gap-1.5 text-[13px]">
-          <span class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">TURN</span>
-          <span class="text-[13px] text-[var(--text-body)] tabular-nums">${formatDuration(lastTurnAge)} ago</span>
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="text-3xs text-[var(--text-muted)] uppercase tracking-wider">TURN</span>
+          <span class="text-sm text-[var(--text-body)] tabular-nums">${formatDuration(lastTurnAge)} ago</span>
         </div>
       ` : null}
     </div>

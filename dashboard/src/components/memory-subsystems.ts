@@ -297,7 +297,7 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
 // the backend; reverse for chronological left-to-right rendering.
 function WeightSparkline({ history }: { history?: Array<[number, number]> }) {
   if (!history || history.length < 2) {
-    return html`<span class="text-[var(--text-muted)] text-[10px] w-20 text-center">—</span>`
+    return html`<span class="text-[var(--text-muted)] text-3xs w-20 text-center">—</span>`
   }
   const chronological = [...history].reverse()
   const { width: sw, height: sh, strokeWidth } = SPARKLINE
@@ -426,7 +426,7 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
         ${ep.participants.map(
           (p: string) => html`<span class="font-mono">${p}</span>`,
         )}
-        <span class="text-[var(--text-muted)] font-mono text-[10px]">${ep.id}</span>
+        <span class="text-[var(--text-muted)] font-mono text-3xs">${ep.id}</span>
       </div>
       ${
         ep.learnings.length > 0

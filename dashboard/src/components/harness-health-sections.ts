@@ -300,7 +300,7 @@ export function ScopePairing() {
             </div>
             <button
               type="button"
-              class="rounded border border-[var(--white-8)] px-2.5 py-1 text-[11px] text-[var(--text-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--text-body)]"
+              class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--ok-30)] hover:text-[var(--text-body)]"
               onClick=${() => navigate('lab', { section: 'autoresearch' })}
             >오토리서치 열기</button>
           </div>
@@ -371,11 +371,11 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
           placeholder="task / agent / gate / cascade 필터"
           aria-label="판정 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && visibleItems.length === 0
-        ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${items.length} items)</div>`
+        ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${items.length} items)</div>`
         : visibleItems.map(item => html`
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
             <div class="flex items-start justify-between gap-3">
@@ -418,11 +418,11 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
           placeholder="keeper / trigger / model / strategy 필터"
           aria-label="압축 이벤트 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && visibleItems.length === 0
-        ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
+        ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
         : visibleItems.map(item => html`
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
             <div class="flex items-start justify-between gap-3">
@@ -439,7 +439,7 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
             ${item.strategies.length > 0 ? html`
               <div class="mt-2 flex flex-wrap gap-1">
                 ${item.strategies.map(strategy => html`
-                  <span class="rounded-sm border border-[var(--white-8)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">${strategy}</span>
+                  <span class="rounded-sm border border-[var(--white-8)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">${strategy}</span>
                 `)}
               </div>
             ` : null}
@@ -470,11 +470,11 @@ export function HandoffList({ section }: { section: HarnessSignalSection<Handoff
           placeholder="keeper / model / trace_id 필터"
           aria-label="세대 교체 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          class="min-w-[160px] max-w-[260px] flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
         />
       </div>
       ${isFiltering && visibleItems.length === 0
-        ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
+        ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
         : visibleItems.map(item => html`
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
             <div class="flex items-start justify-between gap-3">

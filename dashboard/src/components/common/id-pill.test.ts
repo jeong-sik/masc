@@ -10,7 +10,7 @@ describe('idPillClasses (pure)', () => {
     for (const token of [
       'inline-flex',
       'items-center',
-      'text-[10px]',
+      'text-3xs',
       'font-medium',
       'py-1',
       'px-2.5',
@@ -50,7 +50,7 @@ describe('idPillClasses (pure)', () => {
   it('shape tokens present regardless of mono flag (regression guard)', () => {
     for (const mono of [true, false]) {
       const cls = idPillClasses(mono)
-      for (const token of ['rounded', 'text-[10px]', 'px-2.5', 'py-1', 'text-accent']) {
+      for (const token of ['rounded', 'text-3xs', 'px-2.5', 'py-1', 'text-accent']) {
         expect(cls).toContain(token)
       }
     }

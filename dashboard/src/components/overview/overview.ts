@@ -94,7 +94,7 @@ function FunnelCell({
 }) {
   return html`
     <div class="flex flex-col gap-1 min-w-0" data-testid=${testId}>
-      <span class="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">${label}</span>
+      <span class="text-2xs uppercase tracking-wider text-[var(--text-muted)]">${label}</span>
       <span class=${`text-2xl font-semibold tabular-nums ${toneClass ?? 'text-[var(--text-strong)]'}`}>${value}</span>
     </div>
   `
@@ -112,7 +112,7 @@ function FunnelCard({ counts }: { counts: FunnelCounts }) {
     <section class=${CARD} aria-label="오늘 상황" data-testid="overview-funnel">
       <header class="flex items-center justify-between mb-3">
         <h2 class="text-xs font-semibold uppercase tracking-wider text-[var(--text-strong)]">오늘 상황</h2>
-        <span class="text-[11px] text-[var(--text-muted)]">task 기준</span>
+        <span class="text-2xs text-[var(--text-muted)]">task 기준</span>
       </header>
       <div class="grid grid-cols-5 gap-4 max-[640px]:grid-cols-3 max-[640px]:gap-y-4">
         <${FunnelCell} label="신규" value=${String(counts.created)} testId="funnel-created" />
@@ -152,7 +152,7 @@ function Highlight({ attention }: { attention: OperatorAttentionItem | null }) {
   return html`
     <section class=${CARD} aria-label="오늘의 하이라이트" data-testid="overview-highlight">
       <div class="flex items-center gap-2 min-w-0">
-        <span class=${`text-[11px] font-semibold uppercase tracking-wider shrink-0 ${severityToneClass(severity)}`}>
+        <span class=${`text-2xs font-semibold uppercase tracking-wider shrink-0 ${severityToneClass(severity)}`}>
           ${severity.toUpperCase()}
         </span>
         <span class="truncate text-sm text-[var(--text-strong)]">${attention.summary}</span>
@@ -202,7 +202,7 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
       <header class="flex items-center justify-between gap-3 mb-3">
         <h2 class="text-xs font-semibold uppercase tracking-wider text-[var(--text-strong)]">진행 중 파티</h2>
         ${startedAt !== null && startedAt !== undefined && startedAt !== ''
-          ? html`<${TimeAgo} timestamp=${startedAt} class="text-[11px] text-[var(--text-muted)]" />`
+          ? html`<${TimeAgo} timestamp=${startedAt} class="text-2xs text-[var(--text-muted)]" />`
           : null}
       </header>
       <p class="text-sm text-[var(--text-strong)] mb-3 line-clamp-2" data-testid="overview-party-goal">
@@ -215,7 +215,7 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
                 name => html`<${AgentAvatar} name=${name} status=${active.health ?? 'idle'} size="sm" />`,
               )}
               ${extra > 0
-                ? html`<span class="text-[11px] text-[var(--text-muted)]">+${extra}</span>`
+                ? html`<span class="text-2xs text-[var(--text-muted)]">+${extra}</span>`
                 : null}
             </div>
           `
@@ -226,14 +226,14 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
               <div class="flex-1 h-2 rounded bg-card-border/40 overflow-hidden">
                 <div class="h-full bg-[var(--ok)]" style=${`width: ${pct}%`}></div>
               </div>
-              <span class="text-[11px] tabular-nums text-[var(--text-muted)]">${pct}%</span>
+              <span class="text-2xs tabular-nums text-[var(--text-muted)]">${pct}%</span>
             </div>
           `
         : null}
       ${blocker !== null && blocker !== undefined && blocker !== ''
         ? html`
             <div
-              class="mt-3 rounded border border-[var(--warn)]/40 bg-[var(--warn)]/10 px-2 py-1 text-[11px] text-[var(--warn)]"
+              class="mt-3 rounded border border-[var(--warn)]/40 bg-[var(--warn)]/10 px-2 py-1 text-2xs text-[var(--warn)]"
               data-testid="overview-party-blocker"
             >
               blocker: ${blocker}
@@ -301,7 +301,7 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
                 ? html`
                     <${TimeAgo}
                       timestamp=${k.last_heartbeat}
-                      class="text-[11px] text-[var(--text-muted)] ml-auto shrink-0"
+                      class="text-2xs text-[var(--text-muted)] ml-auto shrink-0"
                     />
                   `
                 : null}

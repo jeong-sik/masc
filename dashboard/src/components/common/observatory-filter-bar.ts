@@ -28,7 +28,7 @@ function Chip({
   onClear: () => void
 }) {
   return html`
-    <span class="inline-flex items-center gap-1.5 rounded-sm border border-card-border bg-card/50 px-2.5 py-1 text-[11px]">
+    <span class="inline-flex items-center gap-1.5 rounded-sm border border-card-border bg-card/50 px-2.5 py-1 text-2xs">
       <span class="text-text-dim font-medium">${label}:</span>
       <span class="font-mono text-text-strong">${value}</span>
       <button
@@ -57,7 +57,7 @@ export function ObservatoryFilterBar() {
       role="region"
       aria-label="활성 관찰 필터"
     >
-      <span class="text-[10px] uppercase tracking-wider text-text-dim font-semibold">필터</span>
+      <span class="text-3xs uppercase tracking-wider text-text-dim font-semibold">필터</span>
       ${keeper ? html`
         <${Chip}
           label="Keeper"
@@ -88,7 +88,7 @@ export function ObservatoryFilterBar() {
       ` : null}
       <button
         type="button"
-        class="ml-auto rounded text-[11px] font-medium text-text-muted underline decoration-dotted underline-offset-2 hover:text-text-strong transition-colors"
+        class="ml-auto rounded text-2xs font-medium text-text-muted underline decoration-dotted underline-offset-2 hover:text-text-strong transition-colors"
         onClick=${() => clearObservatoryFilters()}
       >
         모두 해제

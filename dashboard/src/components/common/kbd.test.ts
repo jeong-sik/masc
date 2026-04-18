@@ -11,14 +11,14 @@ describe('kbdClasses (pure)', () => {
 
   it('md variant: 10px text + 1.5 horizontal padding + body-text color', () => {
     const cls = kbdClasses('md')
-    expect(cls).toContain('text-[10px]')
+    expect(cls).toContain('text-3xs')
     expect(cls).toContain('px-1.5')
     expect(cls).toContain('text-[var(--text-body)]')
   })
 
   it('sm variant: 10px text + tight padding (px-1 py-0) + dimmed color', () => {
     const cls = kbdClasses('sm')
-    expect(cls).toContain('text-[10px]')
+    expect(cls).toContain('text-3xs')
     expect(cls).toContain('px-1')
     expect(cls).toContain('text-[var(--text-dim)]')
   })

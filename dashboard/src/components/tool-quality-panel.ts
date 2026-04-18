@@ -94,9 +94,9 @@ function handleRefreshToolQualityClick() {
 
 const successColor = computed(() => {
   const rate = data.value?.success_rate ?? 0
-  if (rate >= 95) return 'text-emerald-400'
-  if (rate >= 90) return 'text-yellow-400'
-  return 'text-red-400'
+  if (rate >= 95) return 'text-[var(--ok)]'
+  if (rate >= 90) return 'text-[var(--warn)]'
+  return 'text-[var(--bad-light)]'
 })
 
 // Per-tool search (case-insensitive substring on raw tool name).
@@ -125,7 +125,7 @@ function RateGauge({ rate, label }: { rate: number; label: string }) {
         <div class="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-full overflow-hidden">
           <div class="${color} h-full rounded-full transition-all" style="width: ${Math.min(rate, 100)}%" />
         </div>
-        <span class="text-xs font-mono ${rate >= 95 ? 'text-emerald-400' : rate >= 90 ? 'text-yellow-400' : 'text-red-400'}">${rate.toFixed(1)}%</span>
+        <span class="text-xs font-mono ${rate >= 95 ? 'text-[var(--ok)]' : rate >= 90 ? 'text-[var(--warn)]' : 'text-[var(--bad-light)]'}">${rate.toFixed(1)}%</span>
       </div>
     </div>
   `
@@ -167,19 +167,19 @@ function ToolTable({
         </thead>
         <tbody>
           ${displayed.map(t => {
-            const color = t.success_pct >= 95 ? 'text-emerald-400'
-              : t.success_pct >= 80 ? 'text-yellow-400' : 'text-red-400'
+            const color = t.success_pct >= 95 ? 'text-[var(--ok)]'
+              : t.success_pct >= 80 ? 'text-[var(--warn)]' : 'text-[var(--bad-light)]'
             const isHighlighted = highlightTool && t.name === highlightTool
             const rowClass = isHighlighted
               ? 'border-b border-amber-500/60 bg-amber-900/20 ring-1 ring-amber-500/40'
               : 'border-b border-[var(--card-border)] border-opacity-30'
             return html`
               <tr class=${rowClass} ref=${isHighlighted ? ((el: HTMLElement | null) => el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })) : undefined}>
-                <td class="py-0.5 font-mono">${t.name.replace('keeper_', '').replace('masc_', 'm:')}${isHighlighted ? html`<span class="ml-1 text-[9px] text-amber-400">◀ selected</span>` : null}</td>
+                <td class="py-0.5 font-mono">${t.name.replace('keeper_', '').replace('masc_', 'm:')}${isHighlighted ? html`<span class="ml-1 text-[9px] text-[var(--warn)]">◀ selected</span>` : null}</td>
                 <td class="text-right py-0.5 text-[var(--text-dim)]">${t.calls}</td>
                 <td class="text-right py-0.5 font-mono ${color}">${t.success_pct.toFixed(0)}%</td>
                 <td class="text-right py-0.5 text-[var(--text-dim)]">${t.avg_ms.toFixed(0)}</td>
-                <td class="text-right py-0.5 font-mono ${t.output_truncated_count > 0 ? 'text-amber-400' : 'text-[var(--text-dim)]'}">${
+                <td class="text-right py-0.5 font-mono ${t.output_truncated_count > 0 ? 'text-[var(--warn)]' : 'text-[var(--text-dim)]'}">${
                   t.output_truncated_count > 0
                     ? `${(t.avg_output_chars / 1000).toFixed(1)}k ✂${t.output_truncated_count}`
                     : `${(t.avg_output_chars / 1000).toFixed(1)}k`
@@ -243,7 +243,7 @@ function KeeperRateBars({ keepers }: { keepers: KeeperStat[] }) {
     <div class="flex flex-col gap-1.5">
       ${keepers.map(k => {
         const color = k.success_pct >= 95 ? 'bg-emerald-500' : k.success_pct >= 90 ? 'bg-yellow-500' : 'bg-red-500'
-        const textColor = k.success_pct >= 95 ? 'text-emerald-400' : k.success_pct >= 90 ? 'text-yellow-400' : 'text-red-400'
+        const textColor = k.success_pct >= 95 ? 'text-[var(--ok)]' : k.success_pct >= 90 ? 'text-[var(--warn)]' : 'text-[var(--bad-light)]'
         return html`
           <div class="flex items-center gap-2 text-[11px]">
             <span class="w-24 truncate text-[var(--text-dim)] font-mono" title=${k.name}>${k.name}</span>
@@ -266,7 +266,7 @@ function FailureList({ categories }: { categories: FailureCategory[] }) {
     <div class="flex flex-col gap-1">
       ${top.map(c => html`
         <div class="flex items-center justify-between text-[11px]">
-          <span class="font-mono text-red-400/80 truncate flex-1 mr-2">${c.category}</span>
+          <span class="font-mono text-[var(--bad-light)]/80 truncate flex-1 mr-2">${c.category}</span>
           <span class="text-[var(--text-dim)] shrink-0">${c.count}x</span>
         </div>
       `)}
@@ -332,7 +332,7 @@ export function ToolQualityPanel() {
           </div>
         </div>
         <div class="text-center">
-          <div class="text-lg font-mono text-red-400/80">${d.failure}</div>
+          <div class="text-lg font-mono text-[var(--bad-light)]/80">${d.failure}</div>
           <div class="text-[9px] text-[var(--text-dim)] uppercase">Failures</div>
         </div>
       </div>

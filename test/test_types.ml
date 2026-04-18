@@ -146,6 +146,49 @@ let test_actions_enum_has_verification_actions () =
       (List.mem s valid_task_action_strings)
   ) must
 
+(* Regression for live-basepath decode spike (2026-04-18): backlog.json
+   written without the [last_updated]/[version] metadata fields used to
+   fail parsing with [Type_error("Expected string, got null")], forcing
+   every reader onto the empty fallback and blocking the stale-claims
+   GC for hours. *)
+let test_backlog_parse_missing_metadata_fields () =
+  let json =
+    `Assoc [
+      ("tasks", `List [
+         `Assoc [
+           ("id", `String "t-1");
+           ("title", `String "demo");
+           ("description", `String "");
+           ("files", `List []);
+           ("created_at", `String "2026-04-18T10:00:00Z");
+           ("status", `String "todo");
+         ];
+      ]);
+    ]
+  in
+  match backlog_of_yojson json with
+  | Ok b ->
+    Alcotest.(check int) "one task parsed" 1 (List.length b.tasks);
+    Alcotest.(check string) "last_updated defaulted to empty" "" b.last_updated;
+    Alcotest.(check int) "version defaulted to 1" 1 b.version
+  | Error msg ->
+    Alcotest.fail ("expected Ok, got Error: " ^ msg)
+
+let test_backlog_parse_null_metadata_fields () =
+  let json =
+    `Assoc [
+      ("tasks", `List []);
+      ("last_updated", `Null);
+      ("version", `Null);
+    ]
+  in
+  match backlog_of_yojson json with
+  | Ok b ->
+    Alcotest.(check string) "null last_updated -> empty" "" b.last_updated;
+    Alcotest.(check int) "null version -> 1" 1 b.version
+  | Error msg ->
+    Alcotest.fail ("expected Ok with null metadata, got Error: " ^ msg)
+
 let () =
   Alcotest.run "Types" [
     "agent_status", [
@@ -161,6 +204,12 @@ let () =
     ];
     "timestamp", [
       Alcotest.test_case "parse utc epoch" `Quick test_parse_iso8601_epoch_utc;
+    ];
+    "backlog_lenient_parse", [
+      Alcotest.test_case "missing last_updated/version -> defaults" `Quick
+        test_backlog_parse_missing_metadata_fields;
+      Alcotest.test_case "null last_updated/version -> defaults" `Quick
+        test_backlog_parse_null_metadata_fields;
     ];
     "task_action_lenient", [
       Alcotest.test_case "alias claimed -> claim" `Quick test_action_alias_claimed;

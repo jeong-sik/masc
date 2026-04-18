@@ -248,8 +248,15 @@ let compute_judgments
   | Error err -> Error (Oas.Error.to_string err)
   | Ok result -> (
       let response = result.Oas_worker.response in
-      try Ok (response.model,
-              Yojson.Safe.from_string (Oas_response.text_of_response response))
+      try
+        (* See dashboard_governance_judge.ml for rationale: LLMs frequently
+           wrap JSON in ```json … ``` markdown fences. Lenient_json strips
+           fences and applies other deterministic recovery transforms. *)
+        let raw_text = Oas_response.text_of_response response in
+        match Llm_provider.Lenient_json.parse raw_text with
+        | `Assoc [("raw", `String _)] ->
+            Error "Operator judge returned unparseable response (Lenient_json fallback hit)"
+        | parsed -> Ok (response.model, parsed)
       with
       | Yojson.Json_error msg ->
           Error (Printf.sprintf "Operator judge returned invalid JSON: %s" msg)

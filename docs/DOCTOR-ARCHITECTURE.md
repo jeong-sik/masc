@@ -1,10 +1,11 @@
 ---
 status: design
-last_verified: 2026-04-18
+last_verified: 2026-04-19
 code_refs:
   - sidecars/shared/gate_shared/doctor.py
   - sidecars/discord-bot/src/doctor.py
   - bin/main_eio.ml
+  - lib/doctor_dispatch.ml
 ---
 
 # Doctor 아키텍처
@@ -123,13 +124,29 @@ class AutoFix:
 
 | 계층 | Doctor | 구현 상태 |
 |------|--------|-----------|
-| OCaml 서버 | `main_eio.exe doctor` — 베이스 경로 / 활성 config root | 운영 중 (`docs/CONFIG-DOCTOR.md`) |
-| Discord sidecar | `python -m src doctor` | 이 PR |
-| Slack sidecar | `python -m src doctor` | 후속 |
-| Telegram sidecar | `python -m src doctor` | 후속 |
-| iMessage sidecar | `python -m src doctor` | 후속 |
-| CLI connector | `python -m src doctor` | 후속 |
+| OCaml 서버 | `masc-mcp doctor config` — 베이스 경로 / 활성 config root | 운영 중 (`docs/CONFIG-DOCTOR.md`) |
+| Discord sidecar | `masc-mcp doctor sidecar discord` ↔ `python -m src doctor` | 운영 중 |
+| Slack sidecar | `masc-mcp doctor sidecar slack` ↔ `python -m src doctor` | 운영 중 |
+| Telegram sidecar | `masc-mcp doctor sidecar telegram` ↔ `python -m src doctor` | 운영 중 |
+| iMessage sidecar | `masc-mcp doctor sidecar imessage` ↔ `python -m src doctor` | 운영 중 |
+| CLI connector | `masc-mcp doctor sidecar cli` ↔ `python -m src doctor` | 운영 중 |
 | 대시보드 | `/api/v1/dashboard/doctor` 취합 패널 | 후속 |
+
+### Dispatch
+
+```
+masc-mcp doctor                     # default → config (backward-compat)
+masc-mcp doctor config              # base path / config root 진단
+masc-mcp doctor sidecar <name>      # python -m src doctor 를 해당 sidecar 디렉터리에서 실행
+masc-mcp doctor sidecar <name> --json
+```
+
+지원 sidecar 이름: `discord`, `slack`, `telegram`, `imessage`, `cli`.
+
+구현은 `lib/doctor_dispatch.ml` (pure mapping) + `bin/main_eio.ml` 의
+`doctor_sidecar_exit` (subprocess spawn). Python 실행 파일은 `MASC_PYTHON`
+env 로 override 할 수 있고, 기본값은 `python3`. stdout/stderr 은 그대로
+forward 되며 exit code 도 그대로 전달된다.
 
 ## Discord Sidecar Doctor 체크 목록
 

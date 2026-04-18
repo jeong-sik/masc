@@ -596,12 +596,95 @@ let doctor_cmd_exit base_path as_json =
   print_endline output;
   Config_doctor.exit_code report
 
-let doctor_cmd =
+let doctor_sidecar_exit name as_json =
+  match Masc_mcp.Doctor_dispatch.sidecar_dir name with
+  | None ->
+    Printf.eprintf
+      "unknown sidecar: %s (known: %s)\n"
+      name
+      Masc_mcp.Doctor_dispatch.known_summary;
+    2
+  | Some rel_dir ->
+    let repo_root = Sys.getcwd () in
+    let abs_dir =
+      if Filename.is_relative rel_dir
+      then Filename.concat repo_root rel_dir
+      else rel_dir
+    in
+    if not (Sys.file_exists abs_dir)
+    then begin
+      Printf.eprintf
+        "sidecar directory not found: %s\nhint: run from repository root\n"
+        abs_dir;
+      2
+    end
+    else begin
+      let python =
+        try Sys.getenv "MASC_PYTHON" with Not_found -> "python3"
+      in
+      let args =
+        if as_json
+        then [| python; "-m"; "src"; "doctor"; "--json" |]
+        else [| python; "-m"; "src"; "doctor" |]
+      in
+      let prev = Sys.getcwd () in
+      Sys.chdir abs_dir;
+      let pid =
+        try
+          Some
+            (Unix.create_process
+               python
+               args
+               Unix.stdin
+               Unix.stdout
+               Unix.stderr)
+        with Unix.Unix_error (err, _, _) ->
+          Printf.eprintf
+            "failed to exec %s: %s\nhint: set MASC_PYTHON to a valid interpreter\n"
+            python
+            (Unix.error_message err);
+          None
+      in
+      Sys.chdir prev;
+      match pid with
+      | None -> 2
+      | Some pid ->
+        let _, status = Unix.waitpid [] pid in
+        (match status with
+         | Unix.WEXITED n -> n
+         | Unix.WSIGNALED s -> 128 + s
+         | Unix.WSTOPPED s -> 128 + s)
+    end
+
+let sidecar_name_arg =
+  let doc =
+    Printf.sprintf
+      "Sidecar name (%s)"
+      Masc_mcp.Doctor_dispatch.known_summary
+  in
+  Arg.(required & pos 0 (some string) None & info [] ~docv:"SIDECAR" ~doc)
+
+let doctor_config_cmd =
   let doc =
     "Diagnose config initialization, active config roots, and base-path shadowing"
   in
-  let info = Cmd.info "doctor" ~doc in
+  let info = Cmd.info "config" ~doc in
   Cmd.v info Term.(const doctor_cmd_exit $ base_path $ doctor_json)
+
+let doctor_sidecar_cmd =
+  let doc =
+    "Run a sidecar's doctor and forward its output (spawns python -m src doctor)"
+  in
+  let info = Cmd.info "sidecar" ~doc in
+  Cmd.v info Term.(const doctor_sidecar_exit $ sidecar_name_arg $ doctor_json)
+
+let doctor_cmd =
+  let doc = "Doctor: diagnose MASC server and sidecars" in
+  let info = Cmd.info "doctor" ~doc in
+  Cmd.group
+    ~default:Term.(const doctor_cmd_exit $ base_path $ doctor_json)
+    info
+    [ doctor_config_cmd; doctor_sidecar_cmd ]
 
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in

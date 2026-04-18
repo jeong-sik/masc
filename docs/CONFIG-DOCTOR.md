@@ -32,6 +32,16 @@ JSON output for automation:
 ./_build/default/bin/main_eio.exe doctor --base-path "$PWD" --json
 ```
 
+`doctor` 는 내부적으로 subcommand group 이다. 위 예제처럼 서브 없이 호출하면
+기본 `config` subcommand 가 실행된다. 명시적으로 쓰려면:
+
+```bash
+./_build/default/bin/main_eio.exe doctor config --base-path "$PWD"
+./_build/default/bin/main_eio.exe doctor sidecar <discord|slack|telegram|imessage|cli>
+```
+
+Sidecar dispatch 는 `docs/DOCTOR-ARCHITECTURE.md` 의 "Dispatch" 섹션 참조.
+
 Typical results:
 
 - `status=ok`, `init_state=initialized`

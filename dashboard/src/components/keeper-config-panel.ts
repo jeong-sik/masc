@@ -228,7 +228,7 @@ function Callout({
 }) {
   const toneClass =
     tone === 'warn'
-      ? 'border-amber-400/20 bg-amber-500/10 text-amber-100'
+      ? 'border-amber-400/20 bg-amber-500/10 text-[var(--warn)]'
       : 'border-card-border/60 bg-card/35 text-text-body'
   return html`
     <div class="rounded-xl border px-3 py-3 shadow-sm ${toneClass}">
@@ -274,9 +274,9 @@ function LongText({ text, truncateAt = 200 }: { text: string; truncateAt?: numbe
 function PromptSourceBadge({ source }: { source: string }) {
   const tone =
     source === 'override'
-      ? 'bg-amber-500/10 text-amber-300 border-amber-400/20'
+      ? 'bg-amber-500/10 text-[var(--warn)] border-amber-400/20'
       : source === 'file'
-        ? 'bg-emerald-500/10 text-emerald-300 border-emerald-400/20'
+        ? 'bg-emerald-500/10 text-[var(--ok)] border-emerald-400/20'
         : 'bg-white/5 text-text-dim border-white/10'
   return html`<span class="text-[10px] font-bold px-2 py-0.5 rounded-md border ${tone} shadow-sm">${source.toUpperCase()}</span>`
 }

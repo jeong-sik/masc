@@ -402,7 +402,7 @@ function FieldWidget({ id, field, value, revealed }: {
       `
     default:
       return html`
-        <div class="rounded border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-100">
+        <div class="rounded border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-[10px] text-[var(--warn)]">
           unsupported type — refactor BotConfig?
         </div>
       `
@@ -429,7 +429,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.error !== null) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded-md border border-rose-400/30 bg-rose-500/10 p-3 text-[11px] text-rose-100">
+      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded-md border border-rose-400/30 bg-rose-500/10 p-3 text-[11px] text-[var(--bad-light)]">
         <div class="font-semibold">schema 가져오기 실패</div>
         <div class="mt-1 text-[10px] opacity-80">${entry.error}</div>
         <button
@@ -458,10 +458,10 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
           ${entry.fields.length} fields · ${entry.fields.filter(f => f.required).length} required
           ${entry.lastSavedAt
             ? html`
-                <span class="ml-2 text-emerald-300">· 저장됨 ${new Date(entry.lastSavedAt).toLocaleTimeString()}</span>
+                <span class="ml-2 text-[var(--ok)]">· 저장됨 ${new Date(entry.lastSavedAt).toLocaleTimeString()}</span>
                 <button
                   type="button"
-                  class="ml-2 cursor-pointer rounded border border-emerald-400/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-100 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  class="ml-2 cursor-pointer rounded border border-emerald-400/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-[var(--ok)] hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
                   disabled=${entry.restarting}
                   title="POST /sidecar/stop → 800ms → POST /sidecar/start"
                   onClick=${() => { void restartSidecar(connectorId) }}

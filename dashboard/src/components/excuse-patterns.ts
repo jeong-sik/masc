@@ -60,7 +60,7 @@ export function ExcusePatterns() {
   if (s.status === 'error') {
     return html`
       <${Card} title="Anti-Rationalization Excuse Patterns">
-        <div class="p-4 text-red-500">Failed to load patterns: ${s.message}</div>
+        <div class="p-4 text-[var(--bad-light)]">Failed to load patterns: ${s.message}</div>
       </Card>
     `
   }
@@ -93,7 +93,7 @@ export function ExcusePatterns() {
               ${saving.value ? 'Saving...' : 'Save Patterns'}
             </button>
             ${saveMessage.value ? html`
-              <span class="text-sm ${saveMessage.value.startsWith('Failed') || saveMessage.value.startsWith('Invalid') ? 'text-red-500' : 'text-green-500'}">
+              <span class="text-sm ${saveMessage.value.startsWith('Failed') || saveMessage.value.startsWith('Invalid') ? 'text-[var(--bad-light)]' : 'text-[var(--ok)]'}">
                 ${saveMessage.value}
               </span>
             ` : null}

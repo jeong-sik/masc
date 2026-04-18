@@ -424,7 +424,7 @@ function TextModeToggle({
   return html`
     <div class="flex gap-2">
       <button type="button"
-        class="text-[10px] text-[var(--ok)] hover:text-emerald-300 cursor-pointer transition-colors"
+        class="text-[10px] text-[var(--ok)] hover:text-[var(--ok)] cursor-pointer transition-colors"
         onClick=${() => {
           listSig.value = parseToolList(textInputBuffer.value)
           textInputSection.value = null

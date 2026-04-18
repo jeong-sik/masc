@@ -28,8 +28,8 @@ const STATE_LABEL: Record<HeartbeatState, string> = {
 }
 
 const STATE_TONE: Record<HeartbeatState, string> = {
-  up: 'text-emerald-200 border-emerald-400/30 bg-emerald-500/10',
-  down: 'text-rose-200 border-rose-400/30 bg-rose-500/10',
+  up: 'text-[var(--ok)] border-emerald-400/30 bg-emerald-500/10',
+  down: 'text-[var(--bad-light)] border-rose-400/30 bg-rose-500/10',
   unknown: 'text-[var(--text-dim)] border-[var(--white-8)] bg-[var(--white-2)]',
 }
 

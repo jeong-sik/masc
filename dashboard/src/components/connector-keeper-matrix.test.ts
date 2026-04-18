@@ -196,7 +196,7 @@ describe('ConnectorKeeperMatrix', () => {
     const cells = container.querySelectorAll('[data-matrix-column-total-bound]')
     const discordCell = cells[0] as HTMLElement
     expect(discordCell.getAttribute('data-matrix-column-total-unknown')).toBe('1')
-    expect(discordCell.className).toContain('text-amber-200')
+    expect(discordCell.className).toContain('text-[var(--warn)]')
   })
 
   it('column totals footer dashes empty columns (no bound, no unbound, no unknown)', () => {

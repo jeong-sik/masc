@@ -150,10 +150,10 @@ export function deriveMatrix(
 }
 
 const CELL_TONE: Record<MatrixCellState, { dot: string; text: string; bg: string }> = {
-  bound:   { dot: 'bg-emerald-400',     text: 'text-emerald-100',        bg: 'bg-emerald-500/10' },
+  bound:   { dot: 'bg-emerald-400',     text: 'text-[var(--ok)]',        bg: 'bg-emerald-500/10' },
   unbound: { dot: 'bg-[var(--white-8)]', text: 'text-[var(--text-dim)]', bg: 'bg-transparent'    },
   na:      { dot: 'bg-[var(--white-4)]', text: 'text-[var(--text-dim)]', bg: 'bg-transparent'    },
-  unknown: { dot: 'bg-amber-400',       text: 'text-amber-100',          bg: 'bg-amber-500/10'   },
+  unknown: { dot: 'bg-amber-400',       text: 'text-[var(--warn)]',          bg: 'bg-amber-500/10'   },
 }
 
 const CELL_GLYPH: Record<MatrixCellState, string> = {
@@ -237,7 +237,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
             · ${matrix.totals.liveConnectors}/${matrix.columns.length} connector
             · ${matrix.totals.totalBindings} binding${matrix.totals.totalBindings === 1 ? '' : 's'}
             ${matrix.totals.unknownKeepers > 0
-              ? html`· <span class="text-amber-200">${matrix.totals.unknownKeepers} unknown</span>`
+              ? html`· <span class="text-[var(--warn)]">${matrix.totals.unknownKeepers} unknown</span>`
               : null}
           </p>
         </div>
@@ -311,7 +311,7 @@ function MatrixColumnTotalsRow({ matrix }: { matrix: MatrixData }) {
       <${ColumnTotalsCell} counts=${summarizeMatrixColumn(matrix, idx)} />
     `)}
     <div
-      class=${`flex items-center justify-end gap-1 px-1 py-1 text-[10px] tabular-nums ${totalBound > 0 ? 'text-emerald-200' : 'text-[var(--text-dim)]'}`}
+      class=${`flex items-center justify-end gap-1 px-1 py-1 text-[10px] tabular-nums ${totalBound > 0 ? 'text-[var(--ok)]' : 'text-[var(--text-dim)]'}`}
       title=${`Grand total: ${totalBound} bound cells across all keepers × connectors`}
       data-matrix-grand-total
       data-matrix-grand-total-bound=${totalBound}
@@ -328,8 +328,8 @@ function ColumnTotalsCell({ counts }: { counts: MatrixStateCounts }) {
   // when any unknowns exist. Empty column (0 bound, 0 unbound) → dash.
   const hasAny = bound + unbound + unknown > 0
   const tone =
-    unknown > 0 ? 'text-amber-200' :
-    bound > 0 ? 'text-emerald-200' :
+    unknown > 0 ? 'text-[var(--warn)]' :
+    bound > 0 ? 'text-[var(--ok)]' :
     'text-[var(--text-dim)]'
   const label = hasAny ? `${bound}` : '—'
   const title = `${bound} bound · ${unbound} unbound · ${unknown} unknown · ${counts.na} n/a`
@@ -351,11 +351,11 @@ function MatrixRowRender({ row }: { row: MatrixRow }) {
   return html`
     <button
       type="button"
-      class=${`flex cursor-pointer items-center gap-2 truncate rounded px-2 py-1 text-left text-[12px] hover:bg-[var(--white-4)] ${row.known ? 'text-[var(--text-body)]' : 'text-amber-100'}`}
+      class=${`flex cursor-pointer items-center gap-2 truncate rounded px-2 py-1 text-left text-[12px] hover:bg-[var(--white-4)] ${row.known ? 'text-[var(--text-body)]' : 'text-[var(--warn)]'}`}
       onClick=${() => scrollToKeeper(row.keeperName)}
       title=${row.known ? row.keeperName : `${row.keeperName} — directory 밖 keeper`}
     >
-      ${row.known ? null : html`<span class="text-amber-300" aria-hidden="true">⚠</span>`}
+      ${row.known ? null : html`<span class="text-[var(--warn)]" aria-hidden="true">⚠</span>`}
       <span class="truncate">${row.keeperName}</span>
     </button>
     ${row.cells.map(cell => html`<${MatrixCellButton} cell=${cell} />`)}
@@ -377,8 +377,8 @@ function RowCoverageChip({
   // Tone follows the dominant state: if anything is unknown → amber,
   // else if all live cells are bound → emerald, else muted.
   const tone =
-    unknown > 0 ? 'text-amber-200' :
-    (bound > 0 && unbound === 0) ? 'text-emerald-200' :
+    unknown > 0 ? 'text-[var(--warn)]' :
+    (bound > 0 && unbound === 0) ? 'text-[var(--ok)]' :
     'text-[var(--text-dim)]'
   return html`
     <div

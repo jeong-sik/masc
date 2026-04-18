@@ -156,7 +156,7 @@ export function summarizeOverviewTile(
   if (connector === null || connector.available !== true) {
     return {
       badge: '설정 필요',
-      badgeClass: 'border-amber-400/30 bg-amber-500/10 text-amber-100',
+      badgeClass: 'border-amber-400/30 bg-amber-500/10 text-[var(--warn)]',
       detail: keeperCount > 0
         ? '아직 시작되지 않음 · 시작 후 keeper를 바인딩하세요'
         : '아직 시작되지 않음 · 먼저 Config와 Start가 필요합니다',
@@ -168,7 +168,7 @@ export function summarizeOverviewTile(
   if (stateLabel === 'stale' || stateLabel === 'disconnected' || connector.gate_healthy === false) {
     return {
       badge: '주의',
-      badgeClass: 'border-rose-400/30 bg-rose-500/10 text-rose-100',
+      badgeClass: 'border-rose-400/30 bg-rose-500/10 text-[var(--bad-light)]',
       detail: stateLabel === 'stale'
         ? 'heartbeat가 stale 상태입니다 · 로그와 gate 상태를 확인하세요'
         : stateLabel === 'disconnected'
@@ -180,7 +180,7 @@ export function summarizeOverviewTile(
   if (bindingCount === 0) {
     return {
       badge: '바인딩 필요',
-      badgeClass: 'border-amber-400/30 bg-amber-500/10 text-amber-100',
+      badgeClass: 'border-amber-400/30 bg-amber-500/10 text-[var(--warn)]',
       detail: keeperCount > 0
         ? '실행 중 · 아직 channel binding이 없습니다'
         : '실행 중 · keeper 디렉토리가 비어 있습니다',
@@ -189,7 +189,7 @@ export function summarizeOverviewTile(
 
   return {
     badge: '정상',
-    badgeClass: 'border-emerald-400/30 bg-emerald-500/10 text-emerald-100',
+    badgeClass: 'border-emerald-400/30 bg-emerald-500/10 text-[var(--ok)]',
     detail: `실행 중 · ${bindingCount} ${bindingCount === 1 ? 'binding' : 'bindings'} active`,
   }
 }
@@ -259,7 +259,7 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
             ${uptimeLabel !== null
               ? html`
                   <span
-                    class="rounded-full border border-emerald-400/20 bg-emerald-500/5 px-1.5 py-[1px] text-[10px] font-normal text-emerald-200/80"
+                    class="rounded-full border border-emerald-400/20 bg-emerald-500/5 px-1.5 py-[1px] text-[10px] font-normal text-[var(--ok)]/80"
                     data-uptime-chip
                     title="last_ready_at 기준 경과 시간"
                   >${uptimeLabel}</span>
@@ -344,8 +344,8 @@ const TILE_ACTION_TONE_CLASS: Record<'start' | 'stop', string> = {
   // across per-tile + bulk controls. The per-tile button is deliberately
   // block-width and text-[12px] so it reads as the primary action of the
   // tile, distinct from the smaller pill row above.
-  start: 'border-emerald-400/40 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/25',
-  stop: 'border-rose-400/40 bg-rose-500/15 text-rose-100 hover:bg-rose-500/25',
+  start: 'border-emerald-400/40 bg-emerald-500/15 text-[var(--ok)] hover:bg-emerald-500/25',
+  stop: 'border-rose-400/40 bg-rose-500/15 text-[var(--bad-light)] hover:bg-rose-500/25',
 }
 
 /** The prominent per-tile Start/Stop button. Reference UIs (Vercel
@@ -415,8 +415,8 @@ const TILE_NOTICE_TONE_CLASS: Record<'error' | 'stale', string> = {
   // Rose for hard errors (sidecar reported an explicit failure),
   // amber for stale (data hasn't refreshed but no explicit error).
   // Matches Sentry \"issue\" rose + Vercel \"warning\" amber convention.
-  error: 'border-rose-400/40 bg-rose-500/10 text-rose-100',
-  stale: 'border-amber-400/40 bg-amber-500/10 text-amber-100',
+  error: 'border-rose-400/40 bg-rose-500/10 text-[var(--bad-light)]',
+  stale: 'border-amber-400/40 bg-amber-500/10 text-[var(--warn)]',
 }
 
 const TILE_NOTICE_GLYPH: Record<'error' | 'stale', string> = {
@@ -525,7 +525,7 @@ function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
     <div class="flex items-center gap-2 text-[11px] text-[var(--text-dim)]">
       <button
         type="button"
-        class="cursor-pointer rounded border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-100 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+        class="cursor-pointer rounded border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-[11px] text-[var(--ok)] hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
         disabled=${startBusy || downCount === 0}
         title=${downCount === 0 ? '모두 이미 실행 중' : `${downCount} 개 sidecar 시작`}
         onClick=${() => { void runBulk('start', c => c?.available !== true, connectors) }}
@@ -535,7 +535,7 @@ function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
       </button>
       <button
         type="button"
-        class="cursor-pointer rounded border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[11px] text-rose-100 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+        class="cursor-pointer rounded border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[11px] text-[var(--bad-light)] hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
         disabled=${stopBusy || upCount === 0}
         title=${upCount === 0 ? '실행 중인 sidecar 없음' : `${upCount} 개 sidecar 정지`}
         onClick=${() => { void runBulk('stop', c => c?.available === true, connectors) }}
@@ -649,7 +649,7 @@ function StatusSummaryLine({ summary, connectors }: { summary: ConnectorStripSum
         <span> running</span>
         ${offlineLabel !== null
           ? html`<span
-              class="ml-1 text-rose-300/80"
+              class="ml-1 text-[var(--bad-light)]/80"
               data-strip-summary-offline-names
               title="현재 offline인 커넥터 이름"
             > · ${offlineLabel}</span>`
@@ -676,13 +676,13 @@ function IncidentBanner({ droppedIds }: { droppedIds: string[] }) {
     .join(', ')
   return html`
     <div
-      class="mb-2 flex items-center gap-2 rounded-md border border-rose-400/40 bg-rose-500/10 px-3 py-1.5 text-[11px] font-semibold text-rose-100"
+      class="mb-2 flex items-center gap-2 rounded-md border border-rose-400/40 bg-rose-500/10 px-3 py-1.5 text-[11px] font-semibold text-[var(--bad-light)]"
       data-incident-banner
       role="alert"
     >
       <span aria-hidden="true">⚠</span>
       <span>최근 5분 내 연결 끊김 — ${names}</span>
-      <span class="ml-auto text-[10px] font-normal text-rose-200/80">아래 Start 버튼으로 복구</span>
+      <span class="ml-auto text-[10px] font-normal text-[var(--bad-light)]/80">아래 Start 버튼으로 복구</span>
     </div>
   `
 }

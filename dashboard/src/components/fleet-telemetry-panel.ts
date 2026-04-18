@@ -102,7 +102,7 @@ function auditFreshnessClass(isoTimestamp: string | null): string {
   const ageMs = Date.now() - new Date(isoTimestamp).getTime()
   if (ageMs < 5 * 60 * 1000) return 'text-[var(--text)]'
   if (ageMs < 15 * 60 * 1000) return 'text-[var(--text-dim)]'
-  return 'text-amber-300'
+  return 'text-[var(--warn)]'
 }
 
 function SummaryCard({
@@ -135,8 +135,8 @@ function SummaryCard({
 function WarningBanner({ warnings }: { warnings: string[] }) {
   if (warnings.length === 0) return null
   return html`
-    <div class="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200">
-      <div class="font-medium text-amber-100">Partial telemetry</div>
+    <div class="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] text-[var(--warn)]">
+      <div class="font-medium text-[var(--warn)]">Partial telemetry</div>
       <div class="mt-1 flex flex-col gap-1">
         ${warnings.map(warning => html`<div>${warning}</div>`)}
       </div>
@@ -241,7 +241,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                 <div class="font-mono text-[var(--text)]">${row.name}</div>
                 ${row.runtime_blocker_summary
                   ? html`
-                    <div class="max-w-[240px] truncate text-[10px] text-amber-300" title=${row.runtime_blocker_summary}>
+                    <div class="max-w-[240px] truncate text-[10px] text-[var(--warn)]" title=${row.runtime_blocker_summary}>
                       ${row.runtime_blocker_summary}
                     </div>
                   `
@@ -278,9 +278,9 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
               <td class="py-1.5 text-right text-[10px] text-[var(--text-dim)]">${row.model}</td>
               <td class="py-1.5 text-center">
                 ${row.budget_source === 'override_invalid'
-                  ? html`<span class="rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-300" title="TOML override가 범위를 벗어남">ERR</span>`
+                  ? html`<span class="rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--bad-light)]" title="TOML override가 범위를 벗어남">ERR</span>`
                   : row.budget_source === 'override'
-                    ? html`<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300" title="TOML override 적용됨">OVR</span>`
+                    ? html`<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--warn)]" title="TOML override 적용됨">OVR</span>`
                     : html`<span class="text-[10px] text-[var(--text-dim)]">\u2014</span>`}
               </td>
               <td class="py-1.5 text-center">
@@ -341,7 +341,7 @@ function FailureCategoryPanel({ toolQuality }: { toolQuality: ToolQualityRespons
               class="h-1.5 rounded-full bg-red-500/60"
               style="width: ${Math.max(6, (category.count / maxCount) * 100)}%"
             ></div>
-            <span class="truncate font-mono text-red-300" title=${category.category}>${category.category}</span>
+            <span class="truncate font-mono text-[var(--bad-light)]" title=${category.category}>${category.category}</span>
           </div>
           <span class="text-[var(--text-dim)]">${category.count}</span>
         </div>
@@ -502,7 +502,7 @@ export function FleetTelemetryPanel() {
             ${activeCount > 0 ? html`<span class="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[var(--ok)]">${activeCount} 가동</span>` : null}
             ${attentionCount > 0 ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[var(--warn)]">${attentionCount} 주의</span>` : null}
             ${offlineCount > 0 ? html`<span class="rounded-full bg-[var(--white-8)] px-1.5 py-0.5 text-[var(--text-dim)]">${offlineCount} 오프라인</span>` : null}
-            ${budgetOverrideCount > 0 ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-amber-300">${budgetOverrideCount} 예산 재정의</span>` : null}
+            ${budgetOverrideCount > 0 ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[var(--warn)]">${budgetOverrideCount} 예산 재정의</span>` : null}
           </div>
         </div>
         <div class="flex items-center gap-2">

@@ -2,11 +2,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { StatusChip, statusChipClasses, isSemanticTone } from './status-chip'
+import { StatusChip, statusChipClasses, isSemanticTone, keeperStateTone } from './status-chip'
 
 describe('isSemanticTone (pure)', () => {
-  it('accepts the 6 enum members', () => {
-    for (const tone of ['ok', 'warn', 'bad', 'info', 'neutral', ''] as const) {
+  it('accepts the 8 enum members', () => {
+    for (const tone of ['ok', 'warn', 'bad', 'info', 'neutral', 'paused', 'select', ''] as const) {
       expect(isSemanticTone(tone)).toBe(true)
     }
   })
@@ -14,6 +14,28 @@ describe('isSemanticTone (pure)', () => {
   it('rejects raw Tailwind class strings (they pass through as extras)', () => {
     expect(isSemanticTone('bg-[var(--ok)]')).toBe(false)
     expect(isSemanticTone('text-accent')).toBe(false)
+  })
+})
+
+describe('keeperStateTone (pure)', () => {
+  it('maps the 12 keeper FSM states per Anyang Sleepers spec', () => {
+    expect(keeperStateTone('running')).toBe('ok')
+    expect(keeperStateTone('compacting')).toBe('info')
+    expect(keeperStateTone('handing_off')).toBe('info')
+    expect(keeperStateTone('draining')).toBe('info')
+    expect(keeperStateTone('failing')).toBe('warn')
+    expect(keeperStateTone('overflowed')).toBe('warn')
+    expect(keeperStateTone('restarting')).toBe('warn')
+    expect(keeperStateTone('paused')).toBe('paused')
+    expect(keeperStateTone('crashed')).toBe('bad')
+    expect(keeperStateTone('dead')).toBe('bad')
+    expect(keeperStateTone('stopped')).toBe('neutral')
+    expect(keeperStateTone('offline')).toBe('neutral')
+  })
+
+  it('unknown states fall through to neutral rather than throwing', () => {
+    expect(keeperStateTone('some_future_state')).toBe('neutral')
+    expect(keeperStateTone('')).toBe('neutral')
   })
 })
 

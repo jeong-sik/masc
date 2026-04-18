@@ -93,6 +93,16 @@
 
   --bad-light: var(--brick-line);
   --warn-bright: var(--ember-line);
+
+  /* Paused (plum) + selected (brass) — under paper theme both map
+     to the design system's solid accent, letting the 20% fill sit
+     on warm paper with the intended weight. */
+  --paused: var(--plum);
+  --paused-10: var(--plum-fill);
+  --paused-20: var(--plum-fill);
+  --select: var(--brass);
+  --select-10: var(--brass-fill);
+  --select-20: var(--brass-fill);
 }
 
 /* Base surface + text when paper theme is active.

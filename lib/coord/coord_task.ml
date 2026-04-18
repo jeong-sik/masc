@@ -788,6 +788,9 @@ let transition_task_r config ~agent_name ~task_id ~action
         | Types.Release, Types.Claimed { assignee; _ }
         | Types.Release, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
             Ok (Types.Todo, None)
+        | Types.Release, Types.Todo ->
+            (* Idempotent: already in backlog, nothing to release. *)
+            Ok (task.task_status, None)
         | Types.Start, Types.Claimed { assignee; _ } when assignee = agent_name || force ->
             Ok (Types.InProgress {
               assignee = agent_name;

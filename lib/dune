@@ -499,8 +499,6 @@
    keeper_turn_lifecycle
    keeper_turn
    keeper_msg_async
-   keeper_file_tracker
-   keeper_evidence
    keeper_status_detail
    keeper_status
    keeper_status_bridge
@@ -636,8 +634,6 @@
   keeper_turn_lifecycle
   keeper_msg_async
   keeper_event_bus
-  keeper_file_tracker
-  keeper_evidence
   ;; worker_container sub-modules
   worker_container_types
   worker_container

@@ -26,6 +26,12 @@ val get_or_compute : string -> ttl:float -> (unit -> Yojson.Safe.t) -> Yojson.Sa
     deadlocking.  Concurrent requests for the same key are serialised — only
     one [f] runs; others wait for the result (stampede protection). *)
 
+val peek : string -> Yojson.Safe.t option
+(** [peek key] returns the currently cached value for [key] when a fresh or
+    stale-ready entry exists. Unlike [get_or_compute], it never triggers a
+    synchronous compute. Returns [None] on cache miss or when the key is
+    currently computing without any stale fallback. *)
+
 exception Compute_timeout of string * bool
 (** Raised internally when the compute function exceeds [timeout_sec].
     Callers of [get_or_compute_with_timeout] do not need to handle this —

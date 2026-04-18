@@ -78,6 +78,14 @@ let comment_json ~id ~post_id ~author ~content ?(created_at = 1000.0) () =
       ("votes_down", `Int 0);
     ]
 
+let warm_meta_cognition_summary (config : Lib.Coord.config) =
+  let key = Printf.sprintf "meta_cognition_summary:%s" config.base_path in
+  ignore
+    (Lib.Dashboard_cache.get_or_compute key ~ttl:120.0 (fun () ->
+         Lib.Meta_cognition.summary_json config));
+  Lib.Dashboard_cache.invalidate_prefix
+    (Printf.sprintf "shell:coord=%s:" config.base_path)
+
 let with_execution_cache json f =
   let surface = Lib.Server_dashboard_http._execution_cache in
   let original_json = surface.json in
@@ -348,8 +356,15 @@ let test_dashboard_shell_includes_meta_cognition_summary () =
               "This contradicts the uniform block hypothesis. Access may be per-agent."
             ~created_at:1010.0 ();
         ];
-      let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
+      Lib.Dashboard_cache.invalidate_all ();
+      Atomic.set Lib.Server_dashboard_http._shell_warmed false;
+      Atomic.set Lib.Server_dashboard_http._last_good_shell (`Assoc []);
+      let cold_json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
       let open Yojson.Safe.Util in
+      check bool "cold shell defers meta cognition while warming" true
+        (cold_json |> member "meta_cognition" = `Null);
+      warm_meta_cognition_summary config;
+      let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
       let meta = json |> member "meta_cognition" in
       check int "meta belief count" 2
         (meta |> member "belief_count" |> to_int);

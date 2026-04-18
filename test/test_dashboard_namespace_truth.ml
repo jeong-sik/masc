@@ -97,6 +97,14 @@ let warm_execution_cache () =
     Lib.Server_dashboard_http._execution_cache
     (`Assoc [("status", `String "ok")])
 
+let warm_meta_cognition_summary (config : Lib.Coord.config) =
+  let key = Printf.sprintf "meta_cognition_summary:%s" config.base_path in
+  ignore
+    (Lib.Dashboard_cache.get_or_compute key ~ttl:120.0 (fun () ->
+         Lib.Meta_cognition.summary_json config));
+  Lib.Dashboard_cache.invalidate_prefix
+    (Printf.sprintf "shell:coord=%s:" config.base_path)
+
 let expire_execution_warmup () =
   let surface = Lib.Server_dashboard_http._execution_cache in
   Lib.Server_dashboard_http_cache.invalidate_cached_surface surface;
@@ -358,6 +366,10 @@ let test_dashboard_namespace_truth_promotes_meta_cognition_focus () =
         ];
       warm_execution_cache ();
       Eio.Switch.run (fun sw ->
+        Lib.Dashboard_cache.invalidate_all ();
+        Atomic.set Lib.Server_dashboard_http._shell_warmed false;
+        Atomic.set Lib.Server_dashboard_http._last_good_shell (`Assoc []);
+        warm_meta_cognition_summary config;
         let json =
           Lib.Server_dashboard_http.dashboard_namespace_truth_http_json
             ~state ~sw ~clock:(Eio.Stdenv.clock env)
@@ -384,8 +396,7 @@ let test_dashboard_namespace_truth_promotes_meta_cognition_focus () =
           (json |> member "focus" |> member "suggested_tab" |> to_string);
         check bool "focus params stay empty for overview"
           true
-          (json |> member "focus" |> member "suggested_params" = `Assoc []);
-      ))
+          (json |> member "focus" |> member "suggested_params" = `Assoc [])))
 
 let test_dashboard_namespace_truth_exposes_latest_meta_digest () =
   let dir = test_dir () in
@@ -419,6 +430,10 @@ let test_dashboard_namespace_truth_exposes_latest_meta_digest () =
         ];
       warm_execution_cache ();
       Eio.Switch.run (fun sw ->
+        Lib.Dashboard_cache.invalidate_all ();
+        Atomic.set Lib.Server_dashboard_http._shell_warmed false;
+        Atomic.set Lib.Server_dashboard_http._last_good_shell (`Assoc []);
+        warm_meta_cognition_summary config;
         let first_json =
           Lib.Server_dashboard_http.dashboard_namespace_truth_http_json
             ~state ~sw ~clock:(Eio.Stdenv.clock env)
@@ -448,8 +463,7 @@ let test_dashboard_namespace_truth_exposes_latest_meta_digest () =
            |> member "matches_summary" |> to_bool);
         check string "meta latest digest hearth" "meta-cognition"
           (json |> member "meta_cognition" |> member "latest_digest"
-           |> member "hearth" |> to_string);
-      ))
+           |> member "hearth" |> to_string)))
 
 let test_dashboard_namespace_truth_does_not_auto_post_meta_digest () =
   let dir = test_dir () in

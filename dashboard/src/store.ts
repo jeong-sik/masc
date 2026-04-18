@@ -125,7 +125,9 @@ import {
   HEARTBEAT_STALE_MS,
   SHELL_TTL_MS,
 } from './config/constants'
+import { RingBuffer } from './lib/ring-buffer'
 
+const oasAgentEventsRing = new RingBuffer<OasAgentEvent>(OAS_AGENT_EVENT_BUFFER)
 export const oasAgentEvents = signal<OasAgentEvent[]>([])
 export const oasKeeperSnapshots = signal<Map<string, OasKeeperSnapshot>>(new Map())
 export const oasLastKeeperTick = signal<number | null>(null)
@@ -136,6 +138,7 @@ export const oasLastLlmCallTs = signal<number | null>(null)
 export const oasLastErrorTs = signal<number | null>(null)
 
 export function resetOasRuntimeSignals(): void {
+  oasAgentEventsRing.clear()
   oasAgentEvents.value = []
   oasKeeperSnapshots.value = new Map()
   oasLastKeeperTick.value = null
@@ -202,11 +205,12 @@ function sameOasAgentEvent(left: OasAgentEvent, right: OasAgentEvent): boolean {
 }
 
 export function pushOasAgentEvent(event: OasAgentEvent): void {
-  const head = oasAgentEvents.value[0]
+  const head = oasAgentEventsRing.peek()
   if (head != null && sameOasAgentEvent(head, event)) {
     return
   }
-  oasAgentEvents.value = [event, ...oasAgentEvents.value].slice(0, OAS_AGENT_EVENT_BUFFER)
+  oasAgentEventsRing.push(event)
+  oasAgentEvents.value = oasAgentEventsRing.toArray() as OasAgentEvent[]
 }
 
 /** Record an OAS durable LLM-call event. Increments the global

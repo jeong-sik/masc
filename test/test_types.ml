@@ -189,6 +189,83 @@ let test_backlog_parse_null_metadata_fields () =
   | Error msg ->
     Alcotest.fail ("expected Ok with null metadata, got Error: " ^ msg)
 
+let test_backlog_parse_live_shape_with_null_optional_nested_fields () =
+  let json =
+    `Assoc [
+      ( "tasks",
+        `List
+          [
+            `Assoc
+              [
+                ("id", `String "task-live");
+                ("title", `String "live payload");
+                ("description", `String "");
+                ("files", `List []);
+                ("created_at", `String "2026-04-18T19:24:00Z");
+                ("status", `String "todo");
+                ( "handoff_context",
+                  `Assoc
+                    [
+                      ("summary", `String "partial progress");
+                      ("reason", `Null);
+                      ("next_step", `Null);
+                      ("failure_mode", `Null);
+                      ("evidence_refs", `List []);
+                      ("updated_at", `String "2026-04-18T19:25:00Z");
+                      ("updated_by", `String "keeper-janitor-agent");
+                    ] );
+                ( "contract",
+                  `Assoc
+                    [
+                      ("strict", `Bool false);
+                      ("completion_contract", `List []);
+                      ("required_evidence", `List []);
+                      ("inspect_gate_evidence", `List []);
+                      ("verify_gate_evidence", `List []);
+                      ( "links",
+                        `Assoc
+                          [
+                            ("operation_id", `Null);
+                            ("session_id", `Null);
+                            ("autoresearch_loop_id", `Null);
+                          ] );
+                    ] );
+              ];
+          ] );
+    ]
+  in
+  match backlog_of_yojson json with
+  | Error msg ->
+      Alcotest.fail
+        ("expected Ok for live-shaped backlog payload, got Error: " ^ msg)
+  | Ok backlog ->
+      Alcotest.(check int) "one live-shaped task parsed" 1
+        (List.length backlog.tasks);
+      let task = List.hd backlog.tasks in
+      Alcotest.(check string) "last_updated defaulted to empty for live payload"
+        "" backlog.last_updated;
+      Alcotest.(check int) "version defaulted to 1 for live payload" 1
+        backlog.version;
+      (match task.handoff_context with
+       | None -> Alcotest.fail "expected handoff_context"
+       | Some handoff ->
+           Alcotest.(check (option string)) "reason null -> None" None
+             handoff.reason;
+           Alcotest.(check (option string)) "next_step null -> None" None
+             handoff.next_step;
+           Alcotest.(check (option string)) "failure_mode null -> None" None
+             handoff.failure_mode);
+      (match task.contract with
+       | None -> Alcotest.fail "expected contract"
+       | Some contract ->
+           Alcotest.(check (option string)) "operation_id null -> None" None
+             contract.links.operation_id;
+           Alcotest.(check (option string)) "session_id null -> None" None
+             contract.links.session_id;
+           Alcotest.(check (option string))
+             "autoresearch_loop_id null -> None" None
+             contract.links.autoresearch_loop_id)
+
 let () =
   Alcotest.run "Types" [
     "agent_status", [
@@ -210,6 +287,8 @@ let () =
         test_backlog_parse_missing_metadata_fields;
       Alcotest.test_case "null last_updated/version -> defaults" `Quick
         test_backlog_parse_null_metadata_fields;
+      Alcotest.test_case "live shape with nested null optionals" `Quick
+        test_backlog_parse_live_shape_with_null_optional_nested_fields;
     ];
     "task_action_lenient", [
       Alcotest.test_case "alias claimed -> claim" `Quick test_action_alias_claimed;

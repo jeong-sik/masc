@@ -151,10 +151,9 @@ let evasion_indicators : (string * string) list = [
 let detect_evasion (command : string) : (string * string) option =
   let cmd_lower = String.lowercase_ascii command in
   List.find_opt (fun (pattern, _desc) ->
-    try
+    Safe_ops.protect ~default:false (fun () ->
       let re = Re.Pcre.re pattern |> Re.compile in
-      Re.execp re cmd_lower
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> false
+      Re.execp re cmd_lower)
   ) evasion_indicators
 
 (** Check if a bash command contains destructive patterns.

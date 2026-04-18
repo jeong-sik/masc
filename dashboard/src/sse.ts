@@ -14,6 +14,7 @@ import {
 import { appendLiveToolCall } from './components/session-trace/session-trace-state'
 import { applyOasRuntimeEvent } from './oas-runtime-store'
 import { parseSSEMessage } from './schemas/sse'
+import { RingBuffer } from './lib/ring-buffer'
 
 import {
   RECONNECT_BASE_MS,
@@ -50,7 +51,7 @@ function getOrCreateSessionId(): string {
 
 // --- Journal ---
 
-const MAX_JOURNAL = MAX_JOURNAL_ENTRIES
+const journalRing = new RingBuffer<JournalEntry>(MAX_JOURNAL_ENTRIES)
 
 function addJournalEntry(
   agent: string,
@@ -66,7 +67,8 @@ function addJournalEntry(
     kind,
     ...extra,
   }
-  journal.value = [entry, ...journal.value].slice(0, MAX_JOURNAL)
+  journalRing.push(entry)
+  journal.value = journalRing.toArray() as JournalEntry[]
 }
 
 function normalizePreview(preview: string | undefined, max = 88): string | undefined {

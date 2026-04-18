@@ -154,6 +154,30 @@ let test_code_search_with_file_pattern_finds_matches () =
       Alcotest.(check string) "matched file basename" "match.ml"
         (Filename.basename matched_path))
 
+let test_code_search_treats_dash_prefixed_query_as_literal () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      run_shell_ok ~cwd:base_dir "git init -q -b main";
+      run_shell_ok ~cwd:base_dir "git config user.email test@example.com";
+      run_shell_ok ~cwd:base_dir "git config user.name test";
+      write_text_file (Filename.concat base_dir "sample.txt")
+        "--help should be searched literally\n";
+      let ctx = make_ctx_in_dir base_dir in
+      let args = `Assoc [
+        ("query", `String "--help");
+        ("path", `String ".");
+        ("case_insensitive", `Bool true);
+        ("max_results", `Int 10);
+      ] in
+      let (ok, msg) = dispatch_exn ctx ~name:"masc_code_search" ~args in
+      Alcotest.(check bool) "search succeeds" true ok;
+      let result = Yojson.Safe.from_string msg in
+      let module U = Yojson.Safe.Util in
+      let count = U.(result |> member "count" |> to_int) in
+      Alcotest.(check int) "finds dash-prefixed literal" 1 count)
+
 let test_code_search_schema_requires_path () =
   let schema =
     List.find_opt (fun (schema : Types.tool_schema) ->
@@ -276,6 +300,8 @@ let () =
       Alcotest.test_case "with options" `Quick test_code_search_with_options;
       Alcotest.test_case "file pattern matches files" `Quick
         test_code_search_with_file_pattern_finds_matches;
+      Alcotest.test_case "dash-prefixed query stays literal" `Quick
+        test_code_search_treats_dash_prefixed_query_as_literal;
       Alcotest.test_case "schema requires path" `Quick
         test_code_search_schema_requires_path;
     ]);

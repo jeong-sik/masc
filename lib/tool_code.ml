@@ -267,7 +267,7 @@ let handle_code_search ctx args =
       @ (if case_insensitive then [ "-i" ] else [])
       @ (if not is_regex then [ "--fixed-strings" ] else [])
       @ (if file_pattern <> "" then [ "-g"; file_pattern ] else [])
-      @ [ "-C"; "2"; "--max-count"; string_of_int max_results; query; search_path ]
+      @ [ "-C"; "2"; "--max-count"; string_of_int max_results; "--"; query; search_path ]
     in
     let cmd = "rg" :: rg_args in
 

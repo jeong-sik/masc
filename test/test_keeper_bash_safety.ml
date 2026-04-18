@@ -416,6 +416,35 @@ let parse_category raw =
   |> Json.member "category"
   |> Json.to_string_option
 
+let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "masc-improver" in
+  let playground =
+    Filename.concat base_path (playground_path_of meta.name)
+  in
+  let repos = Filename.concat playground "repos" in
+  ensure_dir repos;
+  ignore (Fs_compat.save_file_atomic (Filename.concat repos "demo.txt") "ok");
+  let doubled_path =
+    Filename.concat playground ((playground_path_of meta.name) ^ "repos")
+  in
+  let raw =
+    Keeper_exec_shell.handle_keeper_shell
+      ~config ~meta
+      ~args:(`Assoc [
+        ("op", `String "ls");
+        ("path", `String doubled_path);
+      ])
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "ls succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check string) "path normalized to repos root" repos
+    (json |> Json.member "path" |> Json.to_string)
+
 (* task-238: terse "X blocked" error caused model retry loops. Hint must
    redirect the model to either separate calls or a specific sub-op. *)
 let test_readonly_chaining_hint_lists_subops () =
@@ -520,6 +549,8 @@ let () =
         test_docker_hardened_missing_seccomp_profile_fails_closed;
     ]);
     ("readonly_hints", [
+      Alcotest.test_case "doubled playground prefix auto-recovers" `Quick
+        test_keeper_shell_ls_recovers_doubled_playground_prefix;
       Alcotest.test_case "chaining hint lists sub-ops (task-238)" `Quick
         test_readonly_chaining_hint_lists_subops;
       Alcotest.test_case "redirect hint points at keeper_fs_edit" `Quick

@@ -4,7 +4,7 @@
 (* ── Keeper response parsing ─────────────────────────────────── *)
 
 let extract_turn_stats (body : string) : Gate_protocol.turn_stats option =
-  try
+  Safe_ops.protect ~default:None (fun () ->
     let json = Yojson.Safe.from_string body in
     let open Yojson.Safe.Util in
     let model =
@@ -19,11 +19,10 @@ let extract_turn_stats (body : string) : Gate_protocol.turn_stats option =
     let tok = json |> member "total_tokens" |> to_int_option
               |> Option.value ~default:0 in
     if model = "" && dur = 0 && tok = 0 then None
-    else Some { Gate_protocol.model_used = model; duration_ms = dur; tokens_used = tok }
-  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+    else Some { Gate_protocol.model_used = model; duration_ms = dur; tokens_used = tok })
 
 let extract_reply_text (body : string) : string =
-  try
+  Safe_ops.protect ~default:body (fun () ->
     let json = Yojson.Safe.from_string body in
     let open Yojson.Safe.Util in
     match json |> member "reply" |> to_string_option with
@@ -31,16 +30,14 @@ let extract_reply_text (body : string) : string =
     | None ->
         (match json |> member "text" |> to_string_option with
          | Some t -> t
-         | None -> body)
-  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> body
+         | None -> body))
 
 let extract_structured (body : string) : Yojson.Safe.t option =
-  try
+  Safe_ops.protect ~default:None (fun () ->
     let json = Yojson.Safe.from_string body in
     match Yojson.Safe.Util.member "structured" json with
     | `Null -> None
-    | v -> Some v
-  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+    | v -> Some v)
 
 (* ── Dispatch ────────────────────────────────────────────────── *)
 

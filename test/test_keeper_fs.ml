@@ -71,6 +71,26 @@ let test_clear_dir_cache () =
   check bool "recreated after cache clear" true (Sys.file_exists dir);
   cleanup_dir base
 
+let test_ensure_dir_failure_does_not_poison_mutex () =
+  let base = temp_dir () in
+  let blocker = Filename.concat base "blocker" in
+  let oc = open_out blocker in
+  close_out oc;
+  let bad = Filename.concat blocker "child" in
+  let good = Filename.concat base "good/nested" in
+  let saw_failure =
+    try
+      ignore (KF.ensure_dir bad);
+      false
+    with _ -> true
+  in
+  check bool "bad path fails" true saw_failure;
+  let result = KF.ensure_dir good in
+  check string "good path returns" good result;
+  check bool "good path exists after prior failure" true (Sys.file_exists good);
+  check bool "good path is directory" true (Sys.is_directory good);
+  cleanup_dir base
+
 (* ================================================================ *)
 (* save_atomic tests                                                *)
 (* ================================================================ *)
@@ -175,6 +195,8 @@ let () =
           test_case "creates and caches" `Quick test_ensure_dir_creates_and_caches;
           test_case "invalidate" `Quick test_ensure_dir_invalidate;
           test_case "clear cache" `Quick test_clear_dir_cache;
+          test_case "failure does not poison mutex" `Quick
+            test_ensure_dir_failure_does_not_poison_mutex;
         ] );
       ( "save_atomic",
         [

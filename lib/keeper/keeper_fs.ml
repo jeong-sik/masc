@@ -16,20 +16,31 @@ let dir_mu = Eio.Mutex.create ()
 let ensured_dirs : (string, unit) Hashtbl.t = Hashtbl.create 16
 
 let ensure_dir (path : string) : string =
-  Eio_guard.with_mutex dir_mu (fun () ->
-    if not (Hashtbl.mem ensured_dirs path) || not (Fs_compat.file_exists path) then begin
-      (try Fs_compat.mkdir_p path
-       with
-       | Eio.Cancel.Cancelled _ as exn ->
-           Log.Keeper.warn "keeper_fs: ensure_dir cancelled path=%s" path;
-           raise exn
-       | exn ->
-           Log.Keeper.warn "keeper_fs: ensure_dir failed path=%s: %s"
-             path (Printexc.to_string exn);
-           raise exn);
-      Hashtbl.replace ensured_dirs path ()
-    end);
-  path
+  let result =
+    Eio_guard.with_mutex dir_mu (fun () ->
+      if not (Hashtbl.mem ensured_dirs path) || not (Fs_compat.file_exists path) then
+        match
+          try
+            Fs_compat.mkdir_p path;
+            Hashtbl.replace ensured_dirs path ();
+            Ok path
+          with
+          | Eio.Cancel.Cancelled _ as exn ->
+              Log.Keeper.warn "keeper_fs: ensure_dir cancelled path=%s" path;
+              Error (exn, Printexc.get_raw_backtrace ())
+          | exn ->
+              Log.Keeper.warn "keeper_fs: ensure_dir failed path=%s: %s"
+                path (Printexc.to_string exn);
+              Error (exn, Printexc.get_raw_backtrace ())
+        with
+        | Ok _ as ok -> ok
+        | Error _ as err -> err
+      else
+        Ok path)
+  in
+  match result with
+  | Ok path -> path
+  | Error (exn, bt) -> Printexc.raise_with_backtrace exn bt
 
 let invalidate_dir (path : string) : unit =
   Eio_guard.with_mutex dir_mu (fun () ->

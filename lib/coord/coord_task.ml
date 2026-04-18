@@ -362,7 +362,7 @@ let add_task ?contract ?required_preset config ~title ~priority ~description =
             ]);
 
       (Atomic.get Coord_hooks.on_task_mutation_fn) ();
-      let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "📋 New quest: %s" title) in
+      ignore (broadcast config ~from_agent:"system" ~content:(Printf.sprintf "📋 New quest: %s" title));
       Printf.sprintf "✅ Added %s: %s" task_id title))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -427,8 +427,8 @@ let add_task_with_role ?contract config ~title ~priority ~description
             ]);
 
       let role_str = Types_core.role_to_string required_role in
-      let _ = broadcast config ~from_agent:"system"
-        ~content:(Printf.sprintf "📋 New quest: %s (requires: %s)" title role_str) in
+      ignore (broadcast config ~from_agent:"system"
+        ~content:(Printf.sprintf "📋 New quest: %s (requires: %s)" title role_str));
       Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -491,7 +491,7 @@ let batch_add_tasks_internal config tasks =
       let summary = String.concat ", " (List.map (fun (t : Types.task) -> t.id) added_tasks) in
       (Atomic.get Coord_hooks.on_task_mutation_fn) ();
       let msg = Printf.sprintf "📋 New batch of %d quests added: %s" (List.length added_tasks) summary in
-      let _ = broadcast config ~from_agent:"system" ~content:msg in
+      ignore (broadcast config ~from_agent:"system" ~content:msg);
       Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -558,7 +558,7 @@ let claim_task config ~agent_name ~task_id =
             write_backlog config new_backlog;
             update_local_agent_state config ~agent_name (fun agent ->
               { agent with status = Busy; current_task = Some task_id });
-            let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
+            ignore (broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id));
             emit_task_activity config ~agent_name ~task_id ~kind:"task.claimed"
               ~payload:(`Assoc [ ("task_id", `String task_id) ]);
             log_event config
@@ -674,7 +674,7 @@ let claim_task_r config ~agent_name ~task_id
             write_backlog config new_backlog;
             update_local_agent_state config ~agent_name (fun agent ->
               { agent with status = Busy; current_task = Some task_id });
-            let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
+            ignore (broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id));
             emit_task_activity config ~agent_name ~task_id ~kind:"task.claimed"
               ~payload:(`Assoc [ ("task_id", `String task_id) ]);
             log_event config
@@ -1070,7 +1070,7 @@ let complete_task config ~agent_name ~task_id ~notes =
               { agent with status = Active; current_task = None });
             let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id
                       else Printf.sprintf "✅ Completed %s - %s" task_id notes in
-            let _ = broadcast config ~from_agent:agent_name ~content:msg in
+            ignore (broadcast config ~from_agent:agent_name ~content:msg);
             emit_task_activity config ~agent_name ~task_id ~kind:"task.done"
               ~payload:
                 (`Assoc
@@ -1189,7 +1189,7 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
               update_local_agent_state config ~agent_name (fun agent ->
                 { agent with status = Active; current_task = None });
               let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id else Printf.sprintf "✅ Completed %s - %s" task_id notes in
-              let _ = broadcast config ~from_agent:agent_name ~content:msg in
+              ignore (broadcast config ~from_agent:agent_name ~content:msg);
               emit_task_activity config ~agent_name ~task_id ~kind:"task.done"
                 ~payload:
                   (`Assoc
@@ -1317,7 +1317,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                 else
                   agent);
               let msg = if reason = "" then Printf.sprintf "🚫 Cancelled %s" task_id else Printf.sprintf "🚫 Cancelled %s - %s" task_id reason in
-              let _ = broadcast config ~from_agent:agent_name ~content:msg in
+              ignore (broadcast config ~from_agent:agent_name ~content:msg);
               emit_task_activity config ~agent_name ~task_id
                 ~kind:"task.cancelled"
                 ~payload:

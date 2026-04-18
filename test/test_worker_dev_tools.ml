@@ -872,6 +872,50 @@ let () =
              "api graphql -f query=mutation{transferRepository(input:{}){clientMutationId}}"
            = Worker_dev_tools.R2_Irreversible));
     ];
+    "command_blocked_hint_redirects", [
+      (* Field evidence (2026-04-17/18): keeper_bash rejected `gh`, `docker`,
+         `kubectl`, `ssh` calls with no redirect hint, which kept small-LLM
+         keepers retrying the same blocked command. The new branches return a
+         concrete alternative tool or an escalation path. *)
+      Alcotest.test_case "gh → keeper_pr_* redirect" `Quick (fun () ->
+        let msg =
+          Worker_dev_tools.block_reason_to_string
+            (Worker_dev_tools.Command_not_allowed "gh")
+        in
+        Alcotest.(check bool) "mentions keeper_pr_*" true
+          (contains_substring msg "keeper_pr_");
+        Alcotest.(check bool) "mentions masc_board_" true
+          (contains_substring msg "masc_board_"));
+      Alcotest.test_case "docker → escalation hint" `Quick (fun () ->
+        let msg =
+          Worker_dev_tools.block_reason_to_string
+            (Worker_dev_tools.Command_not_allowed "docker")
+        in
+        Alcotest.(check bool) "mentions escalation via masc_board_post" true
+          (contains_substring msg "masc_board_post"));
+      Alcotest.test_case "ssh → network-primitive hint" `Quick (fun () ->
+        let msg =
+          Worker_dev_tools.block_reason_to_string
+            (Worker_dev_tools.Command_not_allowed "ssh")
+        in
+        Alcotest.(check bool) "mentions masc_web_search" true
+          (contains_substring msg "masc_web_search"));
+      Alcotest.test_case "unknown command still gets keeper_tools_list pointer" `Quick (fun () ->
+        let msg =
+          Worker_dev_tools.block_reason_to_string
+            (Worker_dev_tools.Command_not_allowed "xyzzy")
+        in
+        Alcotest.(check bool) "mentions keeper_tools_list" true
+          (contains_substring msg "keeper_tools_list"));
+      Alcotest.test_case "preserves existing source-code heuristic" `Quick (fun () ->
+        let msg =
+          Worker_dev_tools.block_reason_to_string
+            (Worker_dev_tools.Command_not_allowed "Foo.bar")
+        in
+        Alcotest.(check bool) "still suggests masc_code_edit for A.B names"
+          true
+          (contains_substring msg "masc_code_"));
+    ];
     "structured_tool_hint_for_r2", [
       Alcotest.test_case "repo delete → board-post hint" `Quick (fun () ->
         match Worker_dev_tools.structured_tool_hint_for_r2 "repo delete x/y" with

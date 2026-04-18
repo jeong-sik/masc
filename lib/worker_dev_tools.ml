@@ -229,15 +229,41 @@ let command_blocked_hint name =
     | "sed" | "awk" -> " Use keeper_fs_edit for in-place edits."
     | "find" -> " Use rg --files or masc_code_search."
     | "curl" | "wget" -> " Use masc_web_search for content fetching."
+    | "gh" ->
+      " 'gh' is NOT available in the keeper sandbox. For pull-request \
+       work use keeper_pr_list / keeper_pr_view / keeper_pr_comment / \
+       keeper_pr_review_read. For issues use masc_board_list / \
+       masc_board_post / masc_board_comment. For commits or branches \
+       just use 'git' directly — it is on the allowlist."
+    | "docker" | "podman" | "kubectl" | "systemctl" | "brew" | "apt"
+    | "apt-get" | "yum" | "dnf" ->
+      Printf.sprintf
+        " '%s' operates on host / cluster state and is deliberately \
+         excluded from the keeper sandbox. If you need this operation, \
+         escalate to an operator via masc_board_post instead of retrying."
+        name
+    | "ssh" | "scp" | "rsync" | "ftp" | "sftp" | "nc" ->
+      Printf.sprintf
+        " '%s' is a network primitive and is not permitted. Keeper \
+         network access goes through masc_web_search or \
+         masc_autoresearch_* tools."
+        name
     | _ when looks_like_source_code name ->
       " This looks like source code, not a shell command — use \
        masc_code_edit / masc_code_write / masc_code_read instead."
     | _ -> ""
   in
+  (* The "Allowed: ..." list below is a hand-curated prefix of
+     [dev_allowed_commands] — kept short so the hint fits in one line of
+     LLM context, but truthful (no stale entries). Keep in sync when
+     dev_allowed_commands changes; the pointer to keeper_tools_list
+     covers anything not in the printed prefix. *)
   Printf.sprintf
-    "Command blocked: '%s' is not allowed. Allowed: dune, git, rg, ls, cat, \
-     make, node, npm, etc.%s For file operations use keeper_fs_read or \
-     keeper_fs_edit."
+    "Command blocked: '%s' is not allowed. Common allowed commands: \
+     dune, git, rg, ls, cat, head, tail, grep, find, make, node, npm, \
+     python3, pytest, cargo, go.%s See keeper_tools_list for the \
+     exhaustive tool surface, and keeper_fs_read / keeper_fs_edit for \
+     file operations."
     name alt
 
 type block_reason =

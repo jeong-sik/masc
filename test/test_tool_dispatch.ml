@@ -133,11 +133,11 @@ let () =
           test_case "known join-required tools" `Quick (fun () ->
               (* Simulate server init: populate the requires_join set *)
               Tool_dispatch.init_requires_join_set
-                [ "masc_broadcast"; "masc_done" ];
+                [ "masc_broadcast"; "masc_transition" ];
               check bool "masc_broadcast" true
                 (Tool_dispatch.is_join_required "masc_broadcast");
-              check bool "masc_done" true
-                (Tool_dispatch.is_join_required "masc_done"));
+              check bool "masc_transition" true
+                (Tool_dispatch.is_join_required "masc_transition"));
           test_case "non-join-required tool returns false" `Quick (fun () ->
               check bool "masc_status" false
                 (Tool_dispatch.is_join_required "masc_status");

@@ -95,6 +95,15 @@ let find_agent_name_by_prefix config prefix =
   | Some agent -> agent.name
   | None -> Alcotest.failf "agent with prefix %s not found" prefix
 
+let transition_done_r config ~agent_name ~task_id ~notes =
+  Coord.transition_task_r config ~agent_name ~task_id
+    ~action:Types.Done_action ~notes ()
+
+let transition_done config ~agent_name ~task_id ~notes =
+  match transition_done_r config ~agent_name ~task_id ~notes with
+  | Ok msg -> msg
+  | Error err -> Types.masc_error_to_string err
+
 let audit_has_entry entries ~agent_id ~action_pred ~details =
   List.exists
     (fun (entry : Audit_log.audit_entry) ->
@@ -214,7 +223,7 @@ let test_claim_next_reconciles_stale_agent_current_task () =
     let _ = Coord.add_task config ~title:"Done already" ~priority:1 ~description:"" in
     let _ = Coord.claim_task config ~agent_name ~task_id:"task-001" in
     (match
-       Coord.complete_task_r config ~agent_name ~task_id:"task-001" ~notes:"done"
+       transition_done_r config ~agent_name ~task_id:"task-001" ~notes:"done"
      with
     | Ok _ -> ()
     | Error e -> Alcotest.fail (Types.masc_error_to_string e));
@@ -396,7 +405,7 @@ let test_cancel_done_task () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
     let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-    let _ = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
+    let _ = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
 
     let result = Coord.cancel_task_r config ~agent_name:"claude" ~task_id:"task-001" ~reason:"" in
     match result with
@@ -592,11 +601,11 @@ let test_task_transitions_emit_observability () =
         Alcotest.failf "transition_task_r start failed: %s"
           (Types.show_masc_error err));
     (match
-       Coord.complete_task_r config ~agent_name:claude ~task_id:"task-001"
+       transition_done_r config ~agent_name:claude ~task_id:"task-001"
          ~notes:"done" with
     | Ok _ -> ()
     | Error err ->
-        Alcotest.failf "complete_task_r failed: %s"
+        Alcotest.failf "transition_task_r done failed: %s"
           (Types.show_masc_error err));
 
     let audit_entries = Audit_log.read_entries ~n:50 config in
@@ -678,23 +687,23 @@ let test_task_transitions_emit_observability () =
              ("task_id", "task-001");
            ]))
 
-let test_complete_task_legacy_emits_observability () =
+let test_transition_done_from_claimed_emits_observability () =
   with_test_env (fun config ->
     let before_seq = latest_ring_seq () in
     let claude = find_agent_name_by_prefix config "claude" in
-    let _ = Coord.add_task config ~title:"Legacy Task" ~priority:1 ~description:"" in
+    let _ = Coord.add_task config ~title:"Claimed Done Task" ~priority:1 ~description:"" in
     let claim_result = Coord.claim_task config ~agent_name:claude ~task_id:"task-001" in
-    Alcotest.(check bool) "legacy claim succeeds" true
+    Alcotest.(check bool) "claim succeeds" true
       (contains_check claim_result);
     let done_result =
-      Coord.complete_task config ~agent_name:claude ~task_id:"task-001"
-        ~notes:"legacy path"
+      transition_done config ~agent_name:claude ~task_id:"task-001"
+        ~notes:"claim-to-done path"
     in
-    Alcotest.(check bool) "legacy complete succeeds" true
+    Alcotest.(check bool) "claimed done succeeds" true
       (contains_check done_result);
 
     let audit_entries = Audit_log.read_entries ~n:50 config in
-    Alcotest.(check bool) "legacy audit done recorded" true
+    Alcotest.(check bool) "claimed done audit recorded" true
       (audit_has_entry audit_entries ~agent_id:claude
          ~action_pred:(function Audit_log.DoneTask -> true | _ -> false)
          ~details:
@@ -714,13 +723,13 @@ let test_complete_task_legacy_emits_observability () =
           | _ -> false)
         telemetry_events
     in
-    Alcotest.(check bool) "legacy telemetry completion recorded" true
+    Alcotest.(check bool) "claimed done telemetry completion recorded" true
       has_completed;
 
     let ring_entries =
       Log.Ring.recent ~limit:50 ~module_filter:"Task" ~since_seq:before_seq ()
     in
-    Alcotest.(check bool) "legacy ring done recorded" true
+    Alcotest.(check bool) "claimed done ring done recorded" true
       (ring_has_entry ring_entries
          ~details:
            [
@@ -862,33 +871,34 @@ let test_is_agent_joined () =
   )
 
 (* ============================================================ *)
-(* Complete Task Result Variant Tests                            *)
+(* Done Transition Result Variant Tests                          *)
 (* ============================================================ *)
 
-let test_complete_task_r_success () =
+let test_transition_done_r_success () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
     let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
 
-    let result = Coord.complete_task_r config ~agent_name:"claude" ~task_id:"task-001" ~notes:"Done!" in
+    let result = transition_done_r config ~agent_name:"claude" ~task_id:"task-001" ~notes:"Done!" in
     match result with
-    | Ok msg -> Alcotest.(check bool) "complete success" true (str_contains msg "completed")
+    | Ok msg -> Alcotest.(check bool) "done success" true (contains_check msg)
     | Error _ -> Alcotest.fail "Expected Ok"
   )
 
-let test_complete_task_r_not_claimed () =
+let test_transition_done_r_not_claimed () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
 
-    let result = Coord.complete_task_r config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
+    let result = transition_done_r config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
     match result with
-    | Error Types.TaskNotClaimed _ -> ()
-    | _ -> Alcotest.fail "Expected TaskNotClaimed"
+    | Error (Types.TaskInvalidState msg) ->
+        Alcotest.(check bool) "mentions todo state" true (str_contains msg "todo")
+    | _ -> Alcotest.fail "Expected TaskInvalidState"
   )
 
-let test_complete_task_r_not_found () =
+let test_transition_done_r_not_found () =
   with_test_env (fun config ->
-    let result = Coord.complete_task_r config ~agent_name:"claude" ~task_id:"task-999" ~notes:"" in
+    let result = transition_done_r config ~agent_name:"claude" ~task_id:"task-999" ~notes:"" in
     match result with
     | Error Types.TaskNotFound _ -> ()
     | _ -> Alcotest.fail "Expected TaskNotFound"
@@ -1103,8 +1113,8 @@ let () =
         test_join_leave_emit_observability;
       Alcotest.test_case "task transitions fan-out" `Quick
         test_task_transitions_emit_observability;
-      Alcotest.test_case "legacy complete fan-out" `Quick
-        test_complete_task_legacy_emits_observability;
+      Alcotest.test_case "claimed done fan-out" `Quick
+        test_transition_done_from_claimed_emits_observability;
       Alcotest.test_case "claim_next auto-release fan-out" `Quick
         test_claim_next_auto_release_emits_release_observability;
     ];
@@ -1129,9 +1139,12 @@ let () =
 
     (* === Result Variants === *)
     "result_variants", [
-      Alcotest.test_case "complete_task_r success" `Quick test_complete_task_r_success;
-      Alcotest.test_case "complete_task_r not claimed" `Quick test_complete_task_r_not_claimed;
-      Alcotest.test_case "complete_task_r not found" `Quick test_complete_task_r_not_found;
+      Alcotest.test_case "transition done success" `Quick
+        test_transition_done_r_success;
+      Alcotest.test_case "transition done not claimed" `Quick
+        test_transition_done_r_not_claimed;
+      Alcotest.test_case "transition done not found" `Quick
+        test_transition_done_r_not_found;
       Alcotest.test_case "claim_task_r success" `Quick test_claim_task_r_success;
       Alcotest.test_case "claim_task_r already claimed" `Quick test_claim_task_r_already_claimed;
     ];

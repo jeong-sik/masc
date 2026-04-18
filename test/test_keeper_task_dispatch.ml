@@ -13,6 +13,48 @@ let make_test_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
 let make_ctx_work () =
   Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000
 
+let rng_initialized = ref false
+
+let ensure_rng () =
+  if not !rng_initialized then begin
+    Mirage_crypto_rng_unix.use_default ();
+    rng_initialized := true
+  end
+
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  (match value with
+   | Some v -> Unix.putenv name v
+   | None -> Unix.putenv name "");
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
+let only_task config =
+  match Coord.get_tasks_raw config with
+  | [ task ] -> task
+  | tasks ->
+    failwith
+      (Printf.sprintf "expected exactly one task, got %d" (List.length tasks))
+
+let strict_contract ?(verify_gate_evidence = []) () : Types.task_contract =
+  {
+    strict = true;
+    completion_contract = [ "tests pass" ];
+    required_evidence = [];
+    inspect_gate_evidence = [];
+    verify_gate_evidence;
+    links =
+      {
+        operation_id = None;
+        session_id = None;
+        autoresearch_loop_id = None;
+      };
+  }
+
 (* Temp directory setup following test_keeper_tools_oas.ml pattern.
    Force filesystem backend by unsetting PG env vars. *)
 let with_room f =
@@ -147,6 +189,59 @@ let test_done_after_claim () =
       | `String _ -> () (* error path also ok for format mismatch *)
       | _ -> fail "expected ok or error in done response")
 
+let test_done_respects_persisted_cdal_gate () =
+  with_env "MASC_CDAL_GATE_ENABLED" (Some "true") (fun () ->
+    with_room (fun config ->
+      let meta = make_test_meta () in
+      let contract = strict_contract () in
+      let _ =
+        Coord.add_task ~contract config ~title:"Strict task" ~priority:1
+          ~description:"needs CDAL verdict"
+      in
+      let task_id = (only_task config).id in
+      ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
+      let result =
+        call_tool config meta "keeper_task_done"
+          (`Assoc [ ("task_id", `String task_id); ("result", `String "tests pass") ])
+      in
+      let json = parse_json result in
+      match Yojson.Safe.Util.member "ok" json with
+      | `Bool false ->
+        let error = Yojson.Safe.Util.(member "error" json |> to_string) in
+        check bool "mentions CDAL verdict" true
+          (Astring.String.is_infix ~affix:"CDAL verdict" error)
+      | _ -> fail "expected strict contract gate rejection"))
+
+let test_done_redirects_to_verification_fsm () =
+  ensure_rng ();
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    with_env "MASC_CDAL_GATE_ENABLED" (Some "false") (fun () ->
+      with_room (fun config ->
+        let meta = make_test_meta () in
+        let contract = strict_contract ~verify_gate_evidence:[ "output.json" ] () in
+        let _ =
+          Coord.add_task ~contract config ~title:"Verification task" ~priority:1
+            ~description:"should enter awaiting verification"
+        in
+        let task_id = (only_task config).id in
+        ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
+        let result =
+          call_tool config meta "keeper_task_done"
+            (`Assoc [ ("task_id", `String task_id); ("result", `String "tests pass") ])
+        in
+        let json = parse_json result in
+        match Yojson.Safe.Util.member "ok" json with
+        | `Bool true ->
+          let task = only_task config in
+          (match task.task_status with
+           | Types.AwaitingVerification _ -> ()
+           | status ->
+             fail
+               (Printf.sprintf
+                  "expected awaiting_verification, got %s"
+                  (Types.string_of_task_status status)))
+        | _ -> fail "expected keeper_task_done to redirect into verification FSM")))
+
 (* --- keeper_tool_search tests --- *)
 
 let test_tool_search_empty_query_returns_error () =
@@ -246,6 +341,10 @@ let () =
       test_case "empty task_id returns error" `Quick test_done_with_empty_task_id;
       test_case "nonexistent id returns error" `Quick test_done_with_nonexistent_id;
       test_case "done after claim" `Quick test_done_after_claim;
+      test_case "strict contract uses CDAL gate" `Quick
+        test_done_respects_persisted_cdal_gate;
+      test_case "done redirects to verification FSM" `Quick
+        test_done_redirects_to_verification_fsm;
     ];
     "keeper_tool_search", [
       test_case "empty query returns error" `Quick test_tool_search_empty_query_returns_error;

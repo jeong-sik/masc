@@ -8,6 +8,15 @@ let keeper_task_result_json = function
       (`Assoc [ "ok", `Bool false; "error", `String (Types.masc_error_to_string e) ])
 ;;
 
+let keeper_tool_result_json ~(ok : bool) ~(message : string) =
+  Yojson.Safe.to_string
+    (`Assoc
+       [
+         "ok", `Bool ok;
+         ((if ok then "result" else "error"), `String message);
+       ])
+;;
+
 let handle_keeper_task_tool
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -153,13 +162,21 @@ let handle_keeper_task_tool
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in
     if task_id = ""
     then error_json "task_id is required. Use the task_id you got from keeper_task_claim."
-    else
-      keeper_task_result_json
-        (Coord.force_done_task_r
-           config
-           ~agent_name:(keeper_agent_sender ~meta)
-           ~task_id
-           ~notes:(if result_text = "" then "" else result_text)
-           ())
+    else (
+      let ok, message =
+        Tool_task.handle_transition
+          {
+            Tool_task.config;
+            agent_name = keeper_agent_sender ~meta;
+            sw = Eio_context.get_switch_opt ();
+          }
+          (`Assoc
+             [
+               "task_id", `String task_id;
+               "action", `String "done";
+               "notes", `String result_text;
+             ])
+      in
+      keeper_tool_result_json ~ok ~message)
   | other -> error_json ~fields:[ "tool", `String other ] "unknown_task_tool"
 ;;

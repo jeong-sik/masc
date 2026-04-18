@@ -114,7 +114,12 @@ let () = test "dispatch_status_done_summary" (fun () ->
   let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
   let _ = Coord.add_task ctx.config ~title:"Done Task" ~priority:2 ~description:"" in
   ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
-  ignore (Coord.complete_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~notes:"ok");
+  (match
+     Coord.transition_task_r ctx.config ~agent_name:"test-agent"
+       ~task_id:"task-001" ~action:Types.Done_action ~notes:"ok" ()
+   with
+  | Ok _ -> ()
+  | Error err -> failwith (Types.masc_error_to_string err));
   let args = `Assoc [] in
   match Tool_coord.dispatch ctx ~name:"masc_status" ~args with
   | Some (success, result) ->

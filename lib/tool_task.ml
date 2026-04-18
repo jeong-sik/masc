@@ -189,6 +189,37 @@ let strict_release_requires_handoff = function
   | Some ({ contract = Some contract; _ } : Types.task) -> contract.strict
   | _ -> false
 
+let completion_state_error ~(task_id : string) ~(agent_name : string)
+    ~(task_opt : Types.task option) =
+  match task_opt with
+  | None -> Some (Types.TaskNotFound task_id)
+  | Some task ->
+    match task.task_status with
+    | Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ } ->
+      if String.equal assignee agent_name then
+        None
+      else
+        Some (Types.TaskAlreadyClaimed { task_id; by = assignee })
+    | Types.Todo -> Some (Types.TaskNotClaimed task_id)
+    | Types.Done { assignee; _ } ->
+      Some
+        (Types.TaskInvalidState
+           (Printf.sprintf
+              "task %s is already done by %s; inspect task history instead of calling masc_transition(action=done) again"
+              task_id assignee))
+    | Types.Cancelled { cancelled_by; _ } ->
+      Some
+        (Types.TaskInvalidState
+           (Printf.sprintf
+              "task %s was cancelled by %s; reopen or create a new task instead of calling masc_transition(action=done)"
+              task_id cancelled_by))
+    | Types.AwaitingVerification { assignee; _ } ->
+      Some
+        (Types.TaskInvalidState
+           (Printf.sprintf
+              "task %s is awaiting verification by %s; approve or reject before marking done"
+              task_id assignee))
+
 let persisted_contract_rejection ~(ctx : context)
     ~(task_opt : Types.task option) ~(notes : string) =
   ignore notes;
@@ -432,105 +463,31 @@ let handle_release ctx args =
            (Coord.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
               ?expected_version ?handoff_context ()))
 
-let handle_done ctx args =
-  let task_id = get_string args "task_id" "" in
-  match validate_task_id task_id with
-  | Error e -> result_to_response (Error e)
-  | Ok task_id ->
-  let notes = get_string args "notes" "" in
-  (* Get task info BEFORE completion to extract actual start time *)
-  let tasks = Coord.get_tasks_raw ctx.config in
-  let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
-  let default_time = Time_compat.now () -. 60.0 in
-  let (started_at_actual, collaborators_from_task) = match task_opt with
-    | Some t -> (match t.task_status with
-        | Types.InProgress { started_at; assignee } ->
-            let ts = Types.parse_iso8601 ~default_time started_at in
-            let collabs = if assignee <> "" && assignee <> ctx.agent_name then [assignee] else [] in
-            (ts, collabs)
-        | Types.Claimed { claimed_at; assignee } ->
-            let ts = Types.parse_iso8601 ~default_time claimed_at in
-            let collabs = if assignee <> "" && assignee <> ctx.agent_name then [assignee] else [] in
-            (ts, collabs)
-        | _ -> (default_time, []))
-    | None -> (default_time, [])
-  in
-  let result =
-    if not (can_review_completion ~task_opt ~agent_name:ctx.agent_name) then
-      Coord.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~notes
-    else if task_has_persisted_contract task_opt then
-      (match
-         persisted_contract_rejection ~ctx ~task_opt ~notes
-       with
-      | Some reason -> Error (Types.TaskInvalidState reason)
-      | None ->
-          Coord.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
-            ~notes)
-    else
-      let gate_rejection =
-        review_completion_notes
-          ~completion_contract:None
-          ~evaluator_cascade:None
-          ~ctx
-          ~task_opt
-          ~task_id
-          ~notes
-      in
-      match gate_rejection with
-      | Some reason ->
-          Error (Types.TaskInvalidState (completion_rejection_message reason))
-      | None ->
-          Coord.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~notes
-  in
-  (* Notify A2A subscribers on successful completion *)
-  (match result with
-   | Ok _ ->
-       A2a_tools.notify_event
-         ~event_type:A2a_tools.TaskUpdate
-         ~agent:ctx.agent_name
-         ~data:(`Assoc [
-           ("task_id", `String task_id);
-           ("action", `String "done");
-           ("notes", `String notes);
-         ]);
-       (* Notification harness: push done event to all active sessions *)
-       Subscriptions.push_event_to_sessions (`Assoc [
-         ("type", `String "masc/task_done");
-         ("task_id", `String task_id);
-         ("agent_name", `String ctx.agent_name);
-         ("timestamp", `Float (Time_compat.now ()));
-       ])
-   | Error err ->
-       Log.Task.error "done transition failed: %s" (Types.masc_error_to_string err));
-  (* Record metrics on successful completion *)
-  (match result with
-   | Ok _ ->
-       let metric : Metrics_store_eio.task_metric = {
-         id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Time_compat.now () *. 1000.));
-         agent_id = ctx.agent_name;
-         task_id;
-         started_at = started_at_actual;
-         completed_at = Some (Time_compat.now ());
-         success = true;
-         error_message = None;
-         collaborators = collaborators_from_task;
-         handoff_from = None;
-         handoff_to = None;
-       } in
-       (try ignore (Metrics_store_eio.record ctx.config metric)
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(done) failed: %s" (Printexc.to_string exn));
-       (* Feed success into Thompson Sampling quality signal *)
-       Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Up;
-       (* Prometheus: record task completion *)
-       Prometheus.record_task_completed ();
-       (* Audit: log done event *)
-       Audit_log.log_done_task ctx.config ~agent_id:ctx.agent_name
-         ~task_id ()
-   | Error err ->
-       Log.Task.error "metrics record failed: %s" (Types.masc_error_to_string err));
-  result_to_response result
+let transition_known_args =
+  [
+    "task_id";
+    "action";
+    "notes";
+    "reason";
+    "expected_version";
+    "agent_name";
+    "force";
+    "completion_contract";
+    "evaluator_cascade";
+    "handoff_context";
+  ]
 
-let handle_cancel_task ctx args =
+let rec handle_done ctx args =
+  let notes = get_string args "notes" "" in
+  handle_transition ctx
+    (`Assoc
+       [
+         ("task_id", args |> member "task_id");
+         ("action", `String "done");
+         ("notes", `String notes);
+       ])
+
+and handle_cancel_task ctx args =
   let task_id = get_string args "task_id" "" in
   match validate_task_id task_id with
   | Error e -> result_to_response (Error e)
@@ -581,21 +538,7 @@ let handle_cancel_task ctx args =
        Log.Task.error "metrics record failed: %s" (Types.masc_error_to_string err));
   result_to_response result
 
-let transition_known_args =
-  [
-    "task_id";
-    "action";
-    "notes";
-    "reason";
-    "expected_version";
-    "agent_name";
-    "force";
-    "completion_contract";
-    "evaluator_cascade";
-    "handoff_context";
-  ]
-
-let handle_transition ctx args =
+and handle_transition ctx args =
   (* Underscore-prefixed keys (e.g. "_agent_name") are internal protocol markers
      injected by the HTTP transport and dashboard client for identity
      propagation. They are consumed upstream in Agent_identity and must not
@@ -661,9 +604,25 @@ let handle_transition ctx args =
   then
     (false, "Strict task release requires handoff_context.summary")
   else
+  let completion_state_error =
+    if action = Types.Done_action && not force then
+      completion_state_error ~task_id ~agent_name:ctx.agent_name ~task_opt
+    else
+      None
+  in
+  match completion_state_error with
+  | Some err ->
+    Log.Task.error "task transition failed: %s" (Types.masc_error_to_string err);
+    result_to_response (Error err)
+  | None ->
+  let completion_owned_by_caller =
+    force || can_review_completion ~task_opt ~agent_name:ctx.agent_name
+  in
   let gate_rejection =
     if action = Types.Done_action && not force then
-      if task_has_persisted_contract task_opt then
+      if not completion_owned_by_caller then
+        None
+      else if task_has_persisted_contract task_opt then
         persisted_contract_rejection ~ctx ~task_opt ~notes
       else if can_review_completion ~task_opt ~agent_name:ctx.agent_name then
         review_completion_notes
@@ -694,7 +653,7 @@ let handle_transition ctx args =
   let action =
     if action = Types.Done_action
        && Env_config_runtime.Verification.fsm_enabled ()
-       && (not force)
+       && completion_owned_by_caller
     then
       match task_opt with
       | Some task ->

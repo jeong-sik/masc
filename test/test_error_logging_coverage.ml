@@ -4,7 +4,7 @@
     stderr logging actually emit the expected log messages when triggered.
 
     Coverage:
-    - tool_task: complete_task on nonexistent task → "[task]" prefix
+    - tool_task: done transition on nonexistent task → "[task]" prefix
     - a2a_tools: submit_heartbeat_result with unknown status → "[a2a]" prefix
 
     Stderr capture approach: Unix.pipe + Unix.dup2 redirect.
@@ -97,11 +97,11 @@ let with_test_room f =
     (fun () -> f config)
 
 (* ============================================================
-   tool_task: complete on nonexistent task → "[task]" on stderr
+   tool_task: done transition on nonexistent task → "[task]" on stderr
    ============================================================ *)
 
 (** handle_done with a task_id that does not exist.
-    Coord.complete_task_r returns Error (TaskNotFound ...) and
+    Coord.transition_task_r returns Error (TaskNotFound ...) and
     the notification path fires the [task] eprintf. *)
 let test_tool_task_done_nonexistent_logs () =
   with_test_room @@ fun config ->

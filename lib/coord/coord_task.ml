@@ -237,17 +237,15 @@ let observe_task_transition config ~agent_name ~task_id ~transition ~details =
     ~task_id ~transition ~details
 
 (** Transition log event taxonomy. Variant instead of free-form string
-    (#7520 Step 4) so typos at call-sites fail to compile. The three
+    (#7520 Step 4) so typos at call-sites fail to compile. The two
     values correspond to the current fire points in this module — add
     a variant when a new transition event is introduced. *)
 type transition_event_type =
   | Task_transition
-  | Task_done
   | Task_cancelled
 
 let transition_event_type_to_string = function
   | Task_transition -> "task_transition"
-  | Task_done -> "task_done"
   | Task_cancelled -> "task_cancelled"
 
 (** SSOT structured event for [log_event] sink. Wraps [task_transition_details]
@@ -801,9 +799,14 @@ let transition_task_r config ~agent_name ~task_id ~action
               assignee = agent_name;
               started_at = now;
             }, None)
+        | Types.Submit_for_verification, Types.Claimed { assignee; _ }
         | Types.Submit_for_verification, Types.InProgress { assignee; _ }
           when assignee = agent_name
                && Env_config_runtime.Verification.fsm_enabled () ->
+            (* Keepers are prompted with Claim -> Work -> Done and do not
+               always emit an explicit Start transition before completing.
+               Allow submission from Claimed so the verifier FSM matches the
+               public task lifecycle instead of requiring a hidden extra step. *)
             (* [Random_id] is the shared leaf helper used by both
                [masc_coord] here and [masc_mcp.Verification.generate_id],
                so the vrf- id algorithm is now defined once (#7544
@@ -1036,228 +1039,6 @@ let force_release_task_r config ~agent_name ~task_id ?handoff_context
 (** Force-done a task regardless of assignee. Keeper privilege. *)
 let force_done_task_r config ~agent_name ~task_id ~notes () : string Types.masc_result =
   transition_task_r config ~agent_name ~task_id ~action:Types.Done_action ~notes ~force:true ()
-
-(** Complete task with file locking *)
-let complete_task config ~agent_name ~task_id ~notes =
-  ensure_initialized config;
-  let agent_name = resolve_agent_name_strict config agent_name in
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock config backlog_path (fun () ->
-    try
-      let backlog = read_backlog_or_raise config in
-      let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
-      match task_opt with
-      | None ->
-          Printf.sprintf "❌ Task %s not found" task_id
-      | Some task ->
-          let can_complete = match task.task_status with
-            | Claimed { assignee; _ } | InProgress { assignee; _ }
-            | AwaitingVerification { assignee; _ } -> assignee = agent_name
-            | Todo | Done _ | Cancelled _ -> false
-          in
-          if not can_complete then
-            Printf.sprintf "⚠ Task %s is not claimed by %s. Claim it first!" task_id agent_name
-          else begin
-            let new_tasks = List.map (fun t ->
-              if t.id = task_id then
-                { t with task_status = Done {
-                    assignee = agent_name;
-                    completed_at = now_iso ();
-                    notes = if notes = "" then None else Some notes
-                  }
-                }
-              else t
-            ) backlog.tasks in
-            let new_backlog = {
-              tasks = new_tasks;
-              last_updated = now_iso ();
-              version = backlog.version + 1;
-            } in
-            write_backlog config new_backlog;
-            update_local_agent_state config ~agent_name (fun agent ->
-              { agent with status = Active; current_task = None });
-            let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id
-                      else Printf.sprintf "✅ Completed %s - %s" task_id notes in
-            ignore (broadcast config ~from_agent:agent_name ~content:msg);
-            emit_task_activity config ~agent_name ~task_id ~kind:"task.done"
-              ~payload:
-                (`Assoc
-                  [
-                    ("task_id", `String task_id);
-                    ("notes", if notes = "" then `Null else `String notes);
-                  ]);
-              log_event config
-                (Yojson.Safe.to_string
-                   (transition_log_event ~event_type:Task_done
-                      ~agent_name ~task_id
-                      ~from_status:task.task_status
-                      ~to_status:
-                        (Types.Done {
-                           assignee = agent_name;
-                           completed_at = now_iso ();
-                           notes = if notes = "" then None else Some notes;
-                         })
-                      ?notes:(if notes = "" then None else Some notes)
-                      ()));
-            observe_task_transition config ~agent_name ~task_id
-              ~transition:"done"
-              ~details:
-                (task_transition_details ~from_status:task.task_status
-                   ~to_status:
-                     (Types.Done
-                        {
-                          assignee = agent_name;
-                          completed_at = now_iso ();
-                          notes = if notes = "" then None else Some notes;
-                        })
-                   ?notes:(if notes = "" then None else Some notes)
-                   ~duration_ms:
-                     (max 0
-                        (int_of_float
-                           ((Time_compat.now ()
-                            -. task_started_at_unix task.task_status)
-                           *. 1000.0)))
-                   ());
-            (* Record task collaboration via hook (async, non-blocking) *)
-            (try
-               let active = (Coord_state.read_state config).active_agents in
-               (Atomic.get Coord_hooks.relation_on_task_done_fn) ~assignee:agent_name ~active_agents:active;
-               (* Hebbian: strengthen only against agents with active tasks *)
-               let workers = working_agents config in
-               (Atomic.get Coord_hooks.hebbian_on_task_done_fn) config
-                 ~assignee:agent_name ~active_agents:workers
-             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-               Log.RoomTask.error "relation/hebbian task hook error: %s"
-                 (Printexc.to_string exn));
-            Printf.sprintf "✅ %s completed %s" agent_name task_id
-          end
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e ->
-      Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
-  )
-
-(** Result-returning version of complete_task for type-safe error handling *)
-let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_result =
-  if not (is_initialized config) then Error Types.NotInitialized
-  else
-    (* BUG-006: Same resolve as transition_task_r — only the exact [-agent]
-       suffix form is accepted to prevent ambiguous prefix matches from mapping
-       the caller to a different agent identity. *)
-    let agent_name = resolve_agent_name_strict config agent_name in
-    let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-    with_file_lock config backlog_path (fun () ->
-      try
-        let backlog = read_backlog_or_raise config in
-        let task_opt = List.find_opt (fun t -> t.id = task_id) backlog.tasks in
-        match task_opt with
-        | None -> Error (Types.TaskNotFound task_id)
-        | Some task ->
-            let completion_error =
-              match task.task_status with
-              | Claimed { assignee; _ } | InProgress { assignee; _ } ->
-                  if assignee = agent_name then
-                    None
-                  else
-                    Some (Types.TaskAlreadyClaimed { task_id; by = assignee })
-              | Todo -> Some (Types.TaskNotClaimed task_id)
-              | Done { assignee; _ } ->
-                  Some
-                    (Types.TaskInvalidState
-                       (Printf.sprintf
-                          "task %s is already done by %s; inspect task history instead of calling masc_transition(action=done) again"
-                          task_id assignee))
-              | Cancelled { cancelled_by; _ } ->
-                  Some
-                    (Types.TaskInvalidState
-                       (Printf.sprintf
-                          "task %s was cancelled by %s; reopen or create a new task instead of calling masc_transition(action=done)"
-                          task_id cancelled_by))
-              | AwaitingVerification { assignee; _ } ->
-                  Some
-                    (Types.TaskInvalidState
-                       (Printf.sprintf
-                          "task %s is awaiting verification by %s; approve or reject before marking done"
-                          task_id assignee))
-            in
-            match completion_error with
-            | Some err -> Error err
-            | None -> begin
-              let new_tasks = List.map (fun t ->
-                if t.id = task_id then
-                  { t with task_status = Done { assignee = agent_name; completed_at = now_iso (); notes = if notes = "" then None else Some notes } }
-                else t
-              ) backlog.tasks in
-              let new_backlog = {
-                tasks = new_tasks;
-                last_updated = now_iso ();
-                version = backlog.version + 1;
-              } in
-              write_backlog config new_backlog;
-              update_local_agent_state config ~agent_name (fun agent ->
-                { agent with status = Active; current_task = None });
-              let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id else Printf.sprintf "✅ Completed %s - %s" task_id notes in
-              ignore (broadcast config ~from_agent:agent_name ~content:msg);
-              emit_task_activity config ~agent_name ~task_id ~kind:"task.done"
-                ~payload:
-                  (`Assoc
-                    [
-                      ("task_id", `String task_id);
-                      ("notes", if notes = "" then `Null else `String notes);
-                    ]);
-              log_event config
-                (Yojson.Safe.to_string
-                   (transition_log_event ~event_type:Task_done
-                      ~agent_name ~task_id
-                      ~from_status:task.task_status
-                      ~to_status:
-                        (Types.Done {
-                           assignee = agent_name;
-                           completed_at = now_iso ();
-                           notes = if notes = "" then None else Some notes;
-                         })
-                      ?notes:(if notes = "" then None else Some notes)
-                      ()));
-              observe_task_transition config ~agent_name ~task_id
-                ~transition:"done"
-                ~details:
-                  (task_transition_details ~from_status:task.task_status
-                     ~to_status:
-                       (Types.Done
-                          {
-                            assignee = agent_name;
-                            completed_at = now_iso ();
-                            notes = if notes = "" then None else Some notes;
-                          })
-                     ?notes:(if notes = "" then None else Some notes)
-                     ~duration_ms:
-                       (max 0
-                          (int_of_float
-                             ((Time_compat.now ()
-                              -. task_started_at_unix task.task_status)
-                             *. 1000.0)))
-                     ());
-              (* Agent Economy: earn credits via hook *)
-              (Atomic.get Coord_hooks.agent_economy_earn_fn)
-                ~base_path:config.base_path ~agent_name
-                ~reason:(Printf.sprintf "completed %s" task_id);
-              Ok (Printf.sprintf "✅ %s completed %s" agent_name task_id)
-            end
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e ->
-          let snapshot =
-            `Assoc [
-              ("op", `String "complete_task_r");
-              ("agent_name", `String agent_name);
-              ("task_id", `String task_id);
-              ("error", `String (Printexc.to_string e));
-            ]
-          in
-          Log.RoomTask.warn "task op failed: %s"
-            (Yojson.Safe.to_string snapshot);
-          Error (Types.IoError (Printexc.to_string e))
-    )
 
 (** Cancel a task - A2A compatible *)
 let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result =

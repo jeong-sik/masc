@@ -2,6 +2,13 @@
 
     @since 2.62.0 *)
 
+(** Issue #8480: hand-mirrored from
+    [Keeper_tool_pr_review.valid_pr_review_event_strings]. Direct
+    dependency would create a cycle (Tool_shard -> Keeper_tool_pr_review
+    -> Keeper_alerting -> Tool_shard). The sync regression test
+    [test_types.ml :: pr_review_event_ssot] catches drift. *)
+val pr_review_event_enum_strings : string list
+
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;

@@ -1,6 +1,62 @@
 # Changelog
 
 
+## [0.10.0] - 2026-04-18
+
+### Changed
+
+- **Dashboard design-system migration.** Multi-wave sweep of raw Tailwind
+  color utilities to semantic CSS var tokens (`var(--ok)`, `var(--warn)`,
+  `var(--bad-light)`, `var(--accent)`) across ~50 files.
+  - Severity hues (emerald/rose/amber/red) collapsed to `--ok`/`--bad-light`/`--warn`
+    (#8271, #8273, #8278, #8279, #8283, #8286).
+  - Working hues (sky/blue/violet/...) folded into `--accent` (#8284).
+  - Orange/lime sweep (#8285). Neutral-gray (zinc/gray/neutral/stone)
+    collapsed to `--text-muted`/`--white-*` (#8281).
+  - Final high-shade/extreme variants cleanup (#8288).
+  - Paper-theme bridges `--accent`/`--ok`/`--warn`/`--bad` (#8290).
+  - Text size hygiene sweep `text-[9px]` → `text-[10px]` (97 instances /
+    29 files, #8260).
+  - Radius tokens absorb `rounded-[3px]`/`rounded-[18px]` drift (#8291).
+  - Sharp corners sweep `rounded-{xl,2xl,3xl}` → `rounded` (#8292).
+  - Flat shadows (`shadow-{md,lg,xl,2xl}` → `shadow-sm`) (#8299).
+
+- **Keeper — critical-path + lifecycle fixes.**
+  - Surface unified turn critical path failures (#8265).
+  - Consume overflow event-bus signal (#8251).
+  - Honour declared `max_checkpoint_messages` default on create (#8256).
+  - Synchronous `is_registered` check after `start_keepalive` (#8247).
+  - Tool-policy validator recognises admin-dispatched keeper tools (#8241).
+  - `coord_gc` quarantines broken agent files instead of deleting (#8253).
+  - `keeper_tool_affinity.configured_max_k`/`lookback_days` treat empty
+    or whitespace-only env values as unset; optional `?getenv` injection
+    seam for tests (#8190).
+
+- **Cascade + verification.**
+  - Hard-quota-aware immediate cooldown in cascade (#8249).
+  - `/api/v1/cascade/health` exposes `hard_quota_cooldown_sec` (#8277).
+  - Verification-protocol warns on missing-contract submit (#8276).
+  - Verification-panel exposes `task_title` + pending-0 hint (#8259).
+  - Dashboard surfaces live `pending_ruling` count instead of hardcoded 0 (#8268).
+
+- **Dashboard runtime + auth.**
+  - Auto-provision shared loopback dev token for `/mcp` (#8258).
+  - Runtime-panel uses `CollapsibleSection` instead of raw `<details>` (#8275).
+  - Ring buffer replaces `spread+slice` for hot-path signals (#8269).
+  - Buffer sizes Vite-env overridable (#8270).
+
+- **Sidecar + bridges.**
+  - Sidecar honours configured runtime paths (#8267).
+  - `oas_sse_bridge` surfaces `keeper_name` on envelope `agent_name` (#8261).
+
+- **Tool-task schema.**
+  - `handoff_context.summary` declared required; runtime error surfaces
+    example payload (#8293).
+  - Ignore underscore-prefixed internal markers in transition schema (#8289).
+
+### Deprecated
+- None.
+
 ## [0.9.13] - 2026-04-17
 
 ### Changed

@@ -336,6 +336,14 @@ let get_or_compute key ~ttl compute =
   if Eio_guard.is_ready () then get_or_compute_eio key ~ttl compute
   else get_or_compute_simple key ~ttl compute
 
+let peek key =
+  let ts = now () in
+  let map = Atomic.get table in
+  match SMap.find_opt key map with
+  | Some (Ready entry) when entry.stale_until > ts -> Some entry.value
+  | Some (Computing { stale = Some stale_value; _ }) -> Some stale_value
+  | _ -> None
+
 let timeout_error_json ?(waiting = false) key timeout_sec =
   let message =
     if waiting then

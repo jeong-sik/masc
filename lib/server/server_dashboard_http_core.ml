@@ -775,14 +775,59 @@ let dashboard_shell_timeout_s = 16.0
    belief/tension/desire rule evaluation. On a room with 450+ posts this
    regularly exceeds 8s, which was the previous shell timeout and caused
    repeat "cache compute timeout: shell:..." + "cache bg-revalidate failed"
-   noise in the log. Give it its own cache with a longer TTL so the shell
-   path does not block on it every refresh cycle. *)
+   noise in the log. Give it its own cache with a longer TTL, and on a cold
+   miss warm it in the background so the shell path never blocks on the
+   initial full JSONL scan. *)
 let meta_cognition_summary_ttl = 120.0
+let meta_cognition_warm_mu = Eio.Mutex.create ()
+let meta_cognition_warm_inflight : (string, unit) Hashtbl.t = Hashtbl.create 4
+
+let meta_cognition_summary_key (config : Coord.config) =
+  Printf.sprintf "meta_cognition_summary:%s" config.base_path
+
+let clear_meta_cognition_warm_flag key =
+  Eio_guard.with_mutex meta_cognition_warm_mu (fun () ->
+      Hashtbl.remove meta_cognition_warm_inflight key)
+
+let schedule_meta_cognition_summary_warm (config : Coord.config) =
+  let key = meta_cognition_summary_key config in
+  let should_start =
+    Eio_guard.with_mutex meta_cognition_warm_mu (fun () ->
+        if Hashtbl.mem meta_cognition_warm_inflight key then
+          false
+        else (
+          Hashtbl.replace meta_cognition_warm_inflight key ();
+          true))
+  in
+  if should_start then
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork ~sw (fun () ->
+            Fun.protect
+              ~finally:(fun () -> clear_meta_cognition_warm_flag key)
+              (fun () ->
+                try
+                  ignore
+                    (Dashboard_cache.get_or_compute key
+                       ~ttl:meta_cognition_summary_ttl
+                       (fun () -> Meta_cognition.summary_json config))
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                    Log.Server.warn
+                      "dashboard shell meta_cognition warm failed: %s"
+                      (Printexc.to_string exn)))
+    | None -> clear_meta_cognition_warm_flag key
 
 let meta_cognition_summary_cached (config : Coord.config) : Yojson.Safe.t =
-  let key = Printf.sprintf "meta_cognition_summary:%s" config.base_path in
-  Dashboard_cache.get_or_compute key ~ttl:meta_cognition_summary_ttl (fun () ->
-    Meta_cognition.summary_json config)
+  let key = meta_cognition_summary_key config in
+  match Dashboard_cache.peek key with
+  | Some _ ->
+      Dashboard_cache.get_or_compute key ~ttl:meta_cognition_summary_ttl
+        (fun () -> Meta_cognition.summary_json config)
+  | None ->
+      schedule_meta_cognition_summary_warm config;
+      `Null
 
 let dashboard_shell_paths_json (config : Coord.config) : Yojson.Safe.t =
   Server_base_path_diagnostics.detect

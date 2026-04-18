@@ -57,6 +57,17 @@ let test_cache_hit () =
   check_json "same value" v1 v2;
   Alcotest.(check int) "compute once" 1 !counter
 
+let test_peek_returns_cached_value () =
+  Dashboard_cache.invalidate_all ();
+  let seeded =
+    Dashboard_cache.get_or_compute "peek-hit" ~ttl:5.0 (fun () ->
+        `String "cached")
+  in
+  let peeked = Dashboard_cache.peek "peek-hit" in
+  Alcotest.(check bool) "peek returns some" true (Option.is_some peeked);
+  check_json "peeked value" seeded
+    (Option.value ~default:`Null peeked)
+
 (* -- 4. Invalidate removes entry -------------------------------------------- *)
 
 let test_invalidate () =
@@ -309,6 +320,8 @@ let () =
       ( "correctness",
         [
           test_case "cache hit" `Quick test_cache_hit;
+          test_case "peek returns cached value" `Quick
+            test_peek_returns_cached_value;
           test_case "invalidate" `Quick test_invalidate;
           test_case "invalidate_prefix" `Quick test_invalidate_prefix;
           test_case "stats" `Quick test_stats;

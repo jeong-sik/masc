@@ -113,6 +113,13 @@ export interface SidecarCheckView {
   message?: string
   detail?: string
   hint?: string
+  /** 백엔드 envelope 의 `auto_fix.callback_available === true` 일 때만 true.
+   * UI 는 "자동 치유 가능" 배지로 노출. 실제 trigger 는 CLI 경유
+   * (`masc-mcp doctor sidecar <name> --fix`). */
+  autofix_available?: boolean
+  /** `auto_fix.description` — 자동 치유가 시도할 동작의 사람용 설명.
+   * 배지 hover/툴팁용. */
+  autofix_description?: string
 }
 
 export function extractSidecarChecks(payload: unknown): SidecarCheckView[] {
@@ -128,6 +135,12 @@ export function extractSidecarChecks(payload: unknown): SidecarCheckView[] {
     if (typeof c.message === 'string' && c.message !== '') view.message = c.message
     if (typeof c.detail === 'string' && c.detail !== '') view.detail = c.detail
     if (typeof c.hint === 'string' && c.hint !== '') view.hint = c.hint
+    if (c.auto_fix && typeof c.auto_fix === 'object') {
+      const af = c.auto_fix as Record<string, unknown>
+      if (af.callback_available === true) view.autofix_available = true
+      if (typeof af.description === 'string' && af.description !== '')
+        view.autofix_description = af.description
+    }
     out.push(view)
   }
   return out
@@ -181,13 +194,30 @@ function SidecarChecksList({ checks }: { checks: SidecarCheckView[] }) {
           <li class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-2">
             <div class="flex items-baseline justify-between gap-2">
               <div class="text-xs font-medium text-[var(--text-strong)]">${c.name}</div>
-              <span class="rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${chip}">
-                ${c.severity}
-              </span>
+              <div class="flex items-center gap-1">
+                ${c.autofix_available
+                  ? html`
+                      <span
+                        class="rounded-full border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] text-[var(--accent)]"
+                        title=${c.autofix_description
+                          ? `자동 치유 시도: ${c.autofix_description} (CLI: masc-mcp doctor --fix)`
+                          : '자동 치유 가능 (CLI: masc-mcp doctor --fix)'}
+                      >
+                        자동 치유
+                      </span>
+                    `
+                  : ''}
+                <span class="rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${chip}">
+                  ${c.severity}
+                </span>
+              </div>
             </div>
             ${c.detail ? html`<div class="mt-1 text-[11px] text-[var(--text-muted)]">${c.detail}</div>` : ''}
             ${c.message ? html`<div class="mt-1 text-[11px] text-[var(--text-body)]">↳ ${c.message}</div>` : ''}
             ${c.hint ? html`<div class="mt-1 text-[11px] text-[var(--text-muted)]">hint: ${c.hint}</div>` : ''}
+            ${c.autofix_available && c.autofix_description
+              ? html`<div class="mt-1 text-[11px] text-[var(--accent)]">fix: ${c.autofix_description}</div>`
+              : ''}
           </li>
         `
       })}

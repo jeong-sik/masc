@@ -12,6 +12,25 @@ open Keeper_turn_up_args
 let preset_of_defaults defaults =
   Option.bind defaults.tool_preset tool_preset_of_string
 
+let resolve_creation_execution_policy (p : parsed_args) =
+  let sandbox_profile =
+    resolve_sandbox_profile
+      ~preferred:p.sandbox_profile_opt
+      ~fallback:p.profile_defaults.sandbox_profile
+  in
+  let network_mode =
+    resolve_network_mode
+      ~sandbox_profile
+      ~preferred:p.network_mode_opt
+      ~fallback:p.profile_defaults.network_mode
+  in
+  let shared_memory_scope =
+    resolve_shared_memory_scope
+      ~preferred:p.shared_memory_scope_opt
+      ~fallback:p.profile_defaults.shared_memory_scope
+  in
+  (sandbox_profile, network_mode, shared_memory_scope)
+
 let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   Log.Keeper.info "create_keeper: starting for name=%s" p.name;
   let task_id = Printf.sprintf "keeper_create_%s" p.name in
@@ -42,21 +61,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     |> first_some p.profile_defaults.execution_scope
     |> Option.value ~default:default_execution_scope
   in
-  let sandbox_profile =
-    resolve_sandbox_profile
-      ~preferred:p.sandbox_profile_opt
-      ~fallback:None
-  in
-  let network_mode =
-    resolve_network_mode
-      ~sandbox_profile
-      ~preferred:p.network_mode_opt
-      ~fallback:None
-  in
-  let shared_memory_scope =
-    resolve_shared_memory_scope
-      ~preferred:p.shared_memory_scope_opt
-      ~fallback:None
+  let sandbox_profile, network_mode, shared_memory_scope =
+    resolve_creation_execution_policy p
   in
   let voice_enabled =
     Option.value ~default:(default_voice_enabled_for p.name) p.voice_enabled_opt

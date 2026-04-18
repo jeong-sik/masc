@@ -752,7 +752,7 @@ export type {
   ServerBuildIdentity as DashboardBuildIdentity,
 }
 
-export interface DashboardRuntimeProbeLoadedModel {
+interface DashboardRuntimeProbeLoadedModel {
   name?: string | null
   model?: string | null
   size_vram_bytes?: number | null
@@ -760,7 +760,7 @@ export interface DashboardRuntimeProbeLoadedModel {
   expires_at?: string | null
 }
 
-export interface DashboardRuntimeProbeRun {
+interface DashboardRuntimeProbeRun {
   run_index: number
   http_status?: number | null
   wall_clock_ms?: number | null
@@ -780,7 +780,7 @@ export interface DashboardRuntimeProbeRun {
   error?: string | null
 }
 
-export interface DashboardRuntimeProbeAssessment {
+interface DashboardRuntimeProbeAssessment {
   signal?: string | null
   baseline_run_index?: number | null
   best_repeat_run_index?: number | null
@@ -791,7 +791,7 @@ export interface DashboardRuntimeProbeAssessment {
   limitation?: string | null
 }
 
-export interface DashboardRuntimeProbePayload {
+interface DashboardRuntimeProbePayload {
   source?: string
   server_url?: string
   ps_endpoint?: string
@@ -878,11 +878,11 @@ export interface DashboardPromptItem {
   template_variables: string[]
 }
 
-export interface DashboardPromptsResponse {
+interface DashboardPromptsResponse {
   prompts: DashboardPromptItem[]
 }
 
-export interface PromptMutationResponse {
+interface PromptMutationResponse {
   ok: boolean
   message?: string
   key?: string
@@ -1229,7 +1229,7 @@ export function patchKeeperConfig(
 
 // --- Keeper trajectory (tool call history) ---
 
-export type TrajectoryGate = {
+type TrajectoryGate = {
   status: 'pass' | 'reject'
   reason?: string
 }
@@ -1388,7 +1388,7 @@ export type ToolCallEntry = {
   model?: string
 }
 
-export type ToolCallsResponse = {
+type ToolCallsResponse = {
   keeper: string
   count: number
   entries: ToolCallEntry[]
@@ -1658,7 +1658,7 @@ export interface MemorySubsystemsResponse {
   }
 }
 
-export interface MemorySubsystemsQuery {
+interface MemorySubsystemsQuery {
   limit?: number
   keeper?: string
   outcome?: string
@@ -1751,7 +1751,7 @@ export function fetchCascadeHealth(opts?: AbortableRequestOptions): Promise<Casc
   return get<CascadeHealthResponse>('/api/v1/cascade/health', { signal: opts?.signal })
 }
 
-export type CascadeCapacityKind = 'cli' | 'ollama' | 'other'
+type CascadeCapacityKind = 'cli' | 'ollama' | 'other'
 
 export interface CascadeClientCapacityEntry {
   key: string
@@ -1841,7 +1841,7 @@ export interface VerificationRequestsResponse {
   requests: VerificationRequest[]
 }
 
-export interface FetchVerificationRequestsOptions {
+interface FetchVerificationRequestsOptions {
   taskId?: string
   limit?: number
   signal?: AbortSignal
@@ -1864,7 +1864,7 @@ export function fetchVerificationRequests(
   return get<VerificationRequestsResponse>(path, { signal: opts?.signal })
 }
 
-export interface ResolveVerificationRequestOptions {
+interface ResolveVerificationRequestOptions {
   task_id: string
   verification_id: string
   decision: 'approve' | 'reject'

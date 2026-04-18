@@ -14,6 +14,8 @@ export interface FleetRow {
   name: string
   status: string
   keepalive_running: boolean
+  diagnostic_health_state?: string | null
+  diagnostic_summary?: string | null
   context_ratio: number
   turn_count: number
   last_latency_ms: number
@@ -208,12 +210,25 @@ export function buildToolQualityMap(toolQuality: ToolQualityResponse): Map<strin
 
 type FleetBand = 'attention' | 'active' | 'paused' | 'offline'
 
+function normalizedDiagnosticHealthState(row: FleetRow): string | null {
+  return normalizeText(row.diagnostic_health_state)?.toLowerCase() ?? null
+}
+
+function isOfflineDiagnosticHealthState(state: string | null): boolean {
+  return state === 'offline' || state === 'dead'
+}
+
+function isAttentionDiagnosticHealthState(state: string | null): boolean {
+  return state === 'stale' || state === 'degraded' || state === 'zombie'
+}
+
 export function fleetBand(row: FleetRow): FleetBand {
   const normalizedStatus = normalizeText(row.status)?.toLowerCase() ?? 'unknown'
+  const diagnosticHealthState = normalizedDiagnosticHealthState(row)
   if (
     !row.keepalive_running
+    || isOfflineDiagnosticHealthState(diagnosticHealthState)
     || normalizedStatus === 'offline'
-    || normalizedStatus === 'inactive'
     || normalizedStatus === 'unbooted'
     || normalizedStatus === 'stopped'
     || normalizedStatus === 'dead'
@@ -223,7 +238,9 @@ export function fleetBand(row: FleetRow): FleetBand {
   }
   if (normalizedStatus === 'paused') return 'paused'
   if (
-    row.runtime_blocker_class != null
+    isAttentionDiagnosticHealthState(diagnosticHealthState)
+    || normalizedStatus === 'inactive'
+    || row.runtime_blocker_class != null
     || row.context_ratio >= PRESSURE_WARN_RATIO
     || (row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC)
     || (row.tool_success_pct != null && row.tool_success_pct < 90)
@@ -298,6 +315,9 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             name: keeper.name,
             status: keeper.status ?? (keeper.keepalive_running ? 'active' : 'offline'),
             keepalive_running: keeper.keepalive_running === true,
+            diagnostic_health_state: keeper.diagnostic?.health_state ?? null,
+            diagnostic_summary:
+              firstNonEmptyString(keeper.diagnostic?.continuity_summary, keeper.diagnostic?.summary) ?? null,
             context_ratio: keeper.context_ratio ?? 0,
             turn_count: keeper.total_turns ?? keeper.turn_count ?? 0,
             last_latency_ms: keeperLastLatencyMs(keeper),
@@ -327,6 +347,8 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
           name: keeper.name,
           status: 'unknown',
           keepalive_running: false,
+          diagnostic_health_state: null,
+          diagnostic_summary: null,
           context_ratio: 0,
           turn_count: 0,
           last_latency_ms: 0,
@@ -364,8 +386,26 @@ export function pressureClass(ratio: number): string {
 }
 
 export function statusClass(row: FleetRow): string {
-  if (!row.keepalive_running || row.status === 'offline' || row.status === 'stopped') return 'text-[var(--bad-light)]'
-  if (row.runtime_blocker_class != null) return 'text-[var(--warn)]'
+  const normalizedStatus = normalizeText(row.status)?.toLowerCase() ?? 'unknown'
+  const diagnosticHealthState = normalizedDiagnosticHealthState(row)
+  if (
+    !row.keepalive_running
+    || isOfflineDiagnosticHealthState(diagnosticHealthState)
+    || normalizedStatus === 'offline'
+    || normalizedStatus === 'stopped'
+    || normalizedStatus === 'unbooted'
+    || normalizedStatus === 'dead'
+    || normalizedStatus === 'crashed'
+  ) {
+    return 'text-[var(--bad-light)]'
+  }
+  if (
+    isAttentionDiagnosticHealthState(diagnosticHealthState)
+    || normalizedStatus === 'inactive'
+    || row.runtime_blocker_class != null
+  ) {
+    return 'text-[var(--warn)]'
+  }
   if (row.context_ratio >= PRESSURE_HOT_RATIO) return 'text-[var(--warn)]'
   return 'text-[var(--ok)]'
 }

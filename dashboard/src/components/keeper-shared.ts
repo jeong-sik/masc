@@ -144,7 +144,7 @@ function conversationStateClass(sending: boolean, hydrating: boolean): string {
 function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnostic | null {
   if (!keeper) return null
   const detail = keeperStatusDetails.value[keeper.name]
-  return detail?.diagnostic ?? null
+  return detail?.diagnostic ?? keeper.diagnostic ?? null
 }
 
 // ── Diagnostic chip ──────────────────────────────────────

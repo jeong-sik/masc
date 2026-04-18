@@ -522,6 +522,7 @@ export interface Keeper {
   presence_keepalive?: boolean
   presence_keepalive_sec?: number
   keepalive_running?: boolean
+  diagnostic?: KeeperDiagnostic | null
   registry_state?: string | null
   proactive_enabled?: boolean
   proactive_idle_sec?: number

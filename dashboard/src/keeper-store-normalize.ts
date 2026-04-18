@@ -11,6 +11,7 @@ import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp 
 import { isOfflineStatus } from './lib/status-utils'
 import { keeperDisplayStatus } from './lib/keeper-runtime-display'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
+import { normalizeKeeperDiagnostic } from './keeper-state'
 
 /** Maps lowercase backend phase strings to PascalCase KeeperPhase values.
  *  Backend (keeper_state_machine.ml) emits lowercase: "offline", "running", "handing_off", etc.
@@ -442,6 +443,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         tool_audit_source: asString(row.tool_audit_source) ?? null,
         tool_audit_at: toIsoTimestamp(row.tool_audit_at) ?? asString(row.tool_audit_at) ?? null,
         turn_budget: normalizeTurnBudget(row.turn_budget),
+        diagnostic: normalizeKeeperDiagnostic(row.diagnostic),
         conversation_tail_count: asNumber(row.conversation_tail_count),
         k2k_count: asNumber(row.k2k_count),
         handoff_count_total: asNumber(row.handoff_count_total) ?? asNumber(row.trace_history_count),

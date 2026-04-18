@@ -430,6 +430,12 @@ let () =
           Masc_mcp.Keeper_types_profile.valid_shared_memory_scope_strings
           Masc_mcp.Keeper_schema.shared_memory_scope_enum_strings);
     ];
+    "keeper_fs_mode_ssot", [
+      Alcotest.test_case "schema keeps canonical mode list" `Quick (fun () ->
+        Alcotest.(check (list string)) "fs_write_mode mirror"
+          [ "overwrite"; "append" ]
+          Masc_mcp.Tool_shard.fs_write_mode_enum_strings);
+    ];
     "fsm_transition_matrix", [
       (* Issue #8474: schema transition matrix had drifted from
          [Coord_task.valid_next_actions_for_status] — submit/approve/

@@ -9,6 +9,26 @@ let fs_read_default_max_bytes = Tool_shard_limits.keeper_fs_read_default_max_byt
 let fs_read_min_max_bytes = 512
 let fs_read_max_max_bytes = 200_000
 
+type fs_write_mode =
+  | Overwrite
+  | Append
+
+let fs_write_mode_to_string = function
+  | Overwrite -> "overwrite"
+  | Append -> "append"
+
+let fs_write_mode_of_string_opt raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "" | "overwrite" -> Some Overwrite
+  | "append" -> Some Append
+  | _ -> None
+
+let all_fs_write_modes =
+  [ Overwrite; Append ]
+
+let valid_fs_write_mode_strings =
+  List.map fs_write_mode_to_string all_fs_write_modes
+
 let is_missing_read_path_error (e : string) =
   String.starts_with ~prefix:"path_not_found:" e
   || String.starts_with ~prefix:"path_not_found_under_allowed_roots:" e
@@ -59,41 +79,40 @@ let handle_keeper_fs_edit
   =
   let path = Safe_ops.json_string ~default:"" "path" args in
   let content = Safe_ops.json_string ~default:"" "content" args in
-  let mode =
-    Safe_ops.json_string ~default:"overwrite" "mode" args |> String.lowercase_ascii
-  in
+  let raw_mode = Safe_ops.json_string ~default:"" "mode" args in
   (* Early validation for 9B models that send empty/missing params *)
   if String.trim path = "" then
     error_json "path is required. Good: path='lib/foo.ml'. Bad: path=''."
   else if String.trim content = "" then
     error_json "content is required (non-empty). Writing 0 bytes is usually unintended."
-  else if mode <> "overwrite" && mode <> "append" && mode <> "" then
-    error_json (Printf.sprintf
-      "mode must be 'overwrite' or 'append', got '%s'." mode)
   else
-  match resolve_keeper_path ~config ~meta ~raw_path:path with
-  | Error e -> error_json e
-  | Ok target ->
-    (try
-       let parent = Filename.dirname target in
-       Fs_compat.mkdir_p parent;
-       (match mode with
-        | "append" -> Fs_compat.append_file target content
-        | "overwrite" | "" -> Fs_compat.save_file target content
-        | other -> raise (Invalid_argument ("unsupported_mode:" ^ other)));
-       Log.Keeper.info "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d"
-         meta.name target (if mode = "" then "overwrite" else mode)
-         (String.length content);
-       Yojson.Safe.to_string
-         (`Assoc
-             [ "ok", `Bool true
-             ; "path", `String target
-             ; "mode", `String (if mode = "" then "overwrite" else mode)
-             ; "bytes_written", `Int (String.length content)
-             ])
-     with
-     | Invalid_argument e -> error_json ~fields:[ "path", `String target ] e
-     | Sys_error e -> error_json ~fields:[ "path", `String target ] e
-     | Unix.Unix_error (err, _, _) ->
-       error_json ~fields:[ "path", `String target ] (Unix.error_message err))
+  match fs_write_mode_of_string_opt raw_mode with
+  | None ->
+    error_json (Printf.sprintf
+      "mode must be 'overwrite' or 'append', got '%s'." raw_mode)
+  | Some mode ->
+    match resolve_keeper_path ~config ~meta ~raw_path:path with
+    | Error e -> error_json e
+    | Ok target ->
+      (try
+         let parent = Filename.dirname target in
+         Fs_compat.mkdir_p parent;
+         (match mode with
+          | Append -> Fs_compat.append_file target content
+          | Overwrite -> Fs_compat.save_file target content);
+         let mode_name = fs_write_mode_to_string mode in
+         Log.Keeper.info "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d"
+           meta.name target mode_name (String.length content);
+         Yojson.Safe.to_string
+           (`Assoc
+               [ "ok", `Bool true
+               ; "path", `String target
+               ; "mode", `String mode_name
+               ; "bytes_written", `Int (String.length content)
+               ])
+       with
+       | Invalid_argument e -> error_json ~fields:[ "path", `String target ] e
+       | Sys_error e -> error_json ~fields:[ "path", `String target ] e
+       | Unix.Unix_error (err, _, _) ->
+         error_json ~fields:[ "path", `String target ] (Unix.error_message err))
 ;;

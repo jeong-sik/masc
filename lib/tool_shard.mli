@@ -2,6 +2,11 @@
 
     @since 2.62.0 *)
 
+(** Issue #8490: hand-mirrored from the keeper_fs_edit runtime mode
+    vocabulary. Tool_shard cannot depend on Keeper_exec_fs without a
+    cycle, so tests keep this list aligned with runtime behavior. *)
+val fs_write_mode_enum_strings : string list
+
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;

@@ -157,6 +157,62 @@ let test_execute_with_outcome_bad_query_is_failure () =
       check string "bad query payload shape" "structured_error"
         (payload_kind result.payload_shape))
 
+let call_keeper_fs_edit ~config ~meta ~ctx_work args =
+  KET.execute_keeper_tool_call_with_outcome
+    ~config ~meta ~ctx_work
+    ~name:"keeper_fs_edit"
+    ~input:(`Assoc args)
+    ()
+
+let parse_result_json (result : KET.executed_tool_result) =
+  Yojson.Safe.from_string result.raw_output
+
+let test_keeper_fs_edit_empty_mode_uses_overwrite () =
+  with_exec_fixture "keeper_exec_tools_fs_empty_mode"
+    (fun ~config ~meta ~ctx_work ->
+      let path = "notes.txt" in
+      let first =
+        call_keeper_fs_edit ~config ~meta ~ctx_work
+          [ ("path", `String path); ("content", `String "old") ]
+      in
+      check string "first outcome" "success"
+        (match first.outcome with `Success -> "success" | `Failure -> "failure");
+      let second =
+        call_keeper_fs_edit ~config ~meta ~ctx_work
+          [ ("path", `String path); ("content", `String "new"); ("mode", `String "") ]
+      in
+      check string "second outcome" "success"
+        (match second.outcome with `Success -> "success" | `Failure -> "failure");
+      let json = parse_result_json second in
+      check string "empty mode reports overwrite" "overwrite"
+        Yojson.Safe.Util.(member "mode" json |> to_string);
+      let target = Yojson.Safe.Util.(member "path" json |> to_string) in
+      check string "content overwritten" "new"
+        (Stdlib.In_channel.with_open_bin target Stdlib.In_channel.input_all))
+
+let test_keeper_fs_edit_append_mode_appends () =
+  with_exec_fixture "keeper_exec_tools_fs_append_mode"
+    (fun ~config ~meta ~ctx_work ->
+      let path = "append.txt" in
+      let first =
+        call_keeper_fs_edit ~config ~meta ~ctx_work
+          [ ("path", `String path); ("content", `String "hello") ]
+      in
+      check string "seed write outcome" "success"
+        (match first.outcome with `Success -> "success" | `Failure -> "failure");
+      let second =
+        call_keeper_fs_edit ~config ~meta ~ctx_work
+          [ ("path", `String path); ("content", `String "\nworld"); ("mode", `String "append") ]
+      in
+      check string "append outcome" "success"
+        (match second.outcome with `Success -> "success" | `Failure -> "failure");
+      let json = parse_result_json second in
+      check string "append mode reported" "append"
+        Yojson.Safe.Util.(member "mode" json |> to_string);
+      let target = Yojson.Safe.Util.(member "path" json |> to_string) in
+      check string "content appended" "hello\nworld"
+        (Stdlib.In_channel.with_open_bin target Stdlib.In_channel.input_all))
+
 let () =
   Masc_test_deps.init_keeper_tool_registry ();
   ignore
@@ -183,5 +239,9 @@ let () =
         test_execute_with_outcome_missing_file_is_failure;
       test_case "bad query is failure" `Quick
         test_execute_with_outcome_bad_query_is_failure;
+      test_case "keeper_fs_edit empty mode overwrites" `Quick
+        test_keeper_fs_edit_empty_mode_uses_overwrite;
+      test_case "keeper_fs_edit append mode appends" `Quick
+        test_keeper_fs_edit_append_mode_appends;
     ]);
   ]

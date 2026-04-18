@@ -18,6 +18,14 @@ module StringMap = Map.Make(String)
 
 (** Predefined shards *)
 
+(** Issue #8490: [keeper_fs_edit.mode] mirrors
+    [Keeper_exec_fs.valid_fs_write_mode_strings]. [Tool_shard] cannot
+    depend on [Keeper_exec_fs] without introducing a cycle, so this
+    stays a local mirror and [test_types.ml :: keeper_fs_mode_ssot]
+    asserts it remains aligned. *)
+let fs_write_mode_enum_strings =
+  [ "overwrite"; "append" ]
+
 let base_tools : Types.tool_schema list = [
   (* Stay silent: no-op tool for tool_choice=Any turns.
      Lets the model explicitly skip a turn without being forced
@@ -268,7 +276,7 @@ Creates parent dirs.";
       ("properties", `Assoc [
         ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path to write")]);
         ("content", `Assoc [("type", `String "string"); ("description", `String "File content to write")]);
-        ("mode", `Assoc [("type", `String "string"); ("enum", `List [`String "overwrite"; `String "append"]); ("description", `String "Write mode (default: overwrite)")]);
+        ("mode", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) fs_write_mode_enum_strings)); ("description", `String "Write mode (default: overwrite)")]);
       ]);
       ("required", `List [`String "path"; `String "content"]);
     ];

@@ -186,7 +186,25 @@ let test_submit_verdict () =
         | Error e -> Alcotest.fail e
         | Ok updated ->
             Alcotest.(check bool) "completed" true
-              (match updated.status with V.Completed V.Pass -> true | _ -> false))
+              (match updated.status with V.Completed V.Pass -> true | _ -> false);
+            (* verifier must be persisted so the dashboard projection never
+               emits "approved with null approved_by" for completed rows. *)
+            Alcotest.(check (option string)) "verifier recorded"
+              (Some "codex") updated.verifier)
+
+let test_submit_verdict_overwrites_unassigned_verifier () =
+  with_temp_dir (fun base_path ->
+    match V.create_request ~base_path ~task_id:"t1"
+        ~output:(`String "good") ~criteria:[] ~worker:"claude" () with
+    | Error e -> Alcotest.fail e
+    | Ok req ->
+        Alcotest.(check (option string)) "starts unassigned" None req.verifier;
+        match V.submit_verdict ~base_path ~req_id:req.id
+            ~verifier:"operator:dashboard" ~verdict:V.Pass with
+        | Error e -> Alcotest.fail e
+        | Ok updated ->
+            Alcotest.(check (option string)) "verifier persisted"
+              (Some "operator:dashboard") updated.verifier)
 
 let test_auto_verify () =
   with_temp_dir (fun base_path ->
@@ -200,7 +218,11 @@ let test_auto_verify () =
         | Error e -> Alcotest.fail e
         | Ok updated ->
             Alcotest.(check bool) "auto-verified pass" true
-              (match updated.status with V.Completed V.Pass -> true | _ -> false))
+              (match updated.status with V.Completed V.Pass -> true | _ -> false);
+            (* auto_verify records an "auto" sentinel so the dashboard can
+               distinguish rule-based passes from peer-agent verdicts. *)
+            Alcotest.(check (option string)) "auto sentinel recorded"
+              (Some "auto") updated.verifier)
 
 let test_auto_verify_with_custom_fails () =
   with_temp_dir (fun base_path ->
@@ -342,6 +364,8 @@ let () =
       Alcotest.test_case "assign verifier" `Quick test_assign_verifier;
       Alcotest.test_case "cross-agent assign fail" `Quick test_assign_verifier_cross_agent_fail;
       Alcotest.test_case "submit verdict" `Quick test_submit_verdict;
+      Alcotest.test_case "submit verdict persists verifier" `Quick
+        test_submit_verdict_overwrites_unassigned_verifier;
       Alcotest.test_case "auto verify" `Quick test_auto_verify;
       Alcotest.test_case "auto verify custom fails" `Quick test_auto_verify_with_custom_fails;
       Alcotest.test_case "pending for agent" `Quick test_pending_for_agent;

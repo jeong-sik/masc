@@ -73,6 +73,41 @@ let test_keeper_msg_async_roundtrip () =
   Alcotest.(check int) "one pending entry" 1
     (List.length (Keeper_msg_async.list_for_keeper ~keeper_name:"alpha"))
 
+let test_file_tracker_extract_path_porcelain_v1 () =
+  let check label expected raw =
+    Alcotest.(check string) label expected
+      (Keeper_file_tracker.extract_path_of_status_line raw)
+  in
+  (* Unstaged-only: leading space must survive status-char slicing. *)
+  check "unstaged modified" "lib/foo.ml" " M lib/foo.ml";
+  (* Staged-only: padding space at position 1. *)
+  check "staged modified"  "lib/bar.ml" "M  lib/bar.ml";
+  (* Both staged and unstaged. *)
+  check "mixed modified"   "lib/baz.ml" "MM lib/baz.ml";
+  (* Untracked. *)
+  check "untracked"        "new.ml"     "?? new.ml";
+  (* Rename: collapse to destination so both keepers key the same path. *)
+  check "rename destination" "after.ml" "R  before.ml -> after.ml"
+
+(* When the same file's status flags change mid-turn (e.g. a pre-existing
+   " M foo" is staged to become "MM foo"), the delta filter must not
+   re-flag it as a new turn write — same path, different flags. *)
+let test_file_tracker_delta_tolerates_status_flag_change () =
+  let before = [ " M lib/foo.ml"; " M lib/bar.ml" ] in
+  let after  = [ "MM lib/foo.ml"; " M lib/bar.ml"; "?? new.ml" ] in
+  let before_paths =
+    List.map Keeper_file_tracker.extract_path_of_status_line before
+  in
+  let delta =
+    List.filter
+      (fun line ->
+        let p = Keeper_file_tracker.extract_path_of_status_line line in
+        p <> "" && not (List.mem p before_paths))
+      after
+  in
+  Alcotest.(check (list string)) "only genuinely new paths"
+    [ "?? new.ml" ] delta
+
 let test_keeper_file_tracker_records_collisions () =
   with_eio_env @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -231,5 +266,9 @@ let () =
           test_keeper_evidence_ignores_preexisting_dirty_state_without_delta;
         test_case "collision detection uses per-turn delta (task-236)" `Quick
           test_keeper_evidence_collision_uses_per_turn_delta;
+        test_case "extract_path handles all porcelain-v1 XY combinations" `Quick
+          test_file_tracker_extract_path_porcelain_v1;
+        test_case "delta compares by path, not by raw status flags" `Quick
+          test_file_tracker_delta_tolerates_status_flag_change;
       ];
     ]

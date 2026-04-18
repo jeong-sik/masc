@@ -105,19 +105,28 @@ let capture_turn_evidence
       else None)
   in
   let files_changed = List.length status_lines in
-  (* Collision detection — only consider lines that this turn actually
-     introduced or changed. Without a before snapshot we can't tell what
-     this keeper touched, so we skip the tracker rather than flag every
-     pre-existing dirty file as a cross-keeper collision. *)
+  (* Collision detection — only consider files this turn actually touched.
+     Compare by PATH (not raw status line): a pre-existing " M foo" that
+     becomes "MM foo" after this turn stages the file is still the same
+     pre-existing dirty file, not a new turn write. Without a before
+     snapshot we can't tell what this keeper touched, so we skip the
+     tracker rather than flag every pre-existing dirty file as a
+     cross-keeper collision. *)
   let turn_delta_lines =
     match before_lines with
     | None -> []
     | Some before ->
-        let before_set = List.fold_left
-          (fun acc l -> (l, ()) :: acc) [] before
+        let before_paths =
+          List.fold_left
+            (fun acc line ->
+              let p = Keeper_file_tracker.extract_path_of_status_line line in
+              if p = "" then acc else p :: acc)
+            [] before
         in
         List.filter
-          (fun l -> not (List.mem_assoc l before_set))
+          (fun line ->
+            let p = Keeper_file_tracker.extract_path_of_status_line line in
+            p <> "" && not (List.mem p before_paths))
           status_lines
   in
   let collision_warnings =

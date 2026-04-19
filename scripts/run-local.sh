@@ -81,10 +81,10 @@ binary_is_stale() {
     if [ -n "$common_root" ] && [ "$common_root" != "$REPO_ROOT" ]; then
       common_head="$(git -C "$common_root" rev-parse HEAD 2>/dev/null || true)"
       if [ -n "$common_head" ] \
-        && git -C "$REPO_ROOT" diff --quiet "${common_head}"...HEAD -- bin lib dune-project 2>/dev/null \
-        && git -C "$REPO_ROOT" diff --quiet -- bin lib dune-project 2>/dev/null \
-        && git -C "$REPO_ROOT" diff --cached --quiet -- bin lib dune-project 2>/dev/null; then
-        if ! git -C "$REPO_ROOT" ls-files --others --exclude-standard -- bin lib dune-project 2>/dev/null \
+        && git -C "$REPO_ROOT" diff --quiet "${common_head}"...HEAD -- bin lib proto dune-project 2>/dev/null \
+        && git -C "$REPO_ROOT" diff --quiet -- bin lib proto dune-project 2>/dev/null \
+        && git -C "$REPO_ROOT" diff --cached --quiet -- bin lib proto dune-project 2>/dev/null; then
+        if ! git -C "$REPO_ROOT" ls-files --others --exclude-standard -- bin lib proto dune-project 2>/dev/null \
           | grep -q .; then
           return 1
         fi
@@ -94,7 +94,7 @@ binary_is_stale() {
   if [ "$REPO_ROOT/dune-project" -nt "$exe" ]; then
     return 0
   fi
-  if find "$REPO_ROOT/bin" "$REPO_ROOT/lib" \
+  if find "$REPO_ROOT/bin" "$REPO_ROOT/lib" "$REPO_ROOT/proto" \
       -type f \( -name '*.ml' -o -name '*.mli' -o -name 'dune' \) \
       -newer "$exe" -print -quit 2>/dev/null \
     | grep -q .; then

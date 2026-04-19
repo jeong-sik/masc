@@ -176,7 +176,6 @@ require_command python3
   echo "FAIL: run-local script not executable: $RUN_LOCAL_SCRIPT" >&2
   exit 1
 }
-SERVER_EXE="$(harness_find_server_exe "$ROOT_DIR" "${SERVER_EXE:-}")"
 
 BASE_URL="http://127.0.0.1:${PORT}"
 MCP_URL="${BASE_URL}/mcp"
@@ -219,7 +218,20 @@ env \
   exit 1
 }
 
-SERVER_PID="$(harness_start_server "$SERVER_EXE" "$PORT" "$BASE_PATH" "$LOG_FILE")"
+(
+  env \
+    -u MASC_BASE_PATH \
+    -u MASC_CONFIG_DIR \
+    -u MASC_PERSONAS_DIR \
+    -u MASC_HOST \
+    -u MASC_MCP_PORT \
+    -u MASC_ALLOW_LEGACY_ACCEPT \
+    -u MASC_FULL_SURFACE \
+    -u MASC_PUBLIC_TOOLS_EXTRA \
+    MASC_KEEPER_BOOTSTRAP_ENABLED=0 \
+    bash "$RUN_LOCAL_SCRIPT" --target-dir "$BASE_PATH" --host 127.0.0.1 --port "$PORT"
+) >"$LOG_FILE" 2>&1 &
+SERVER_PID="$!"
 
 if ! wait_for_ready "$BASE_URL" "$READY_JSON"; then
   echo "FAIL: run-local server did not become ready at ${BASE_URL}" >&2

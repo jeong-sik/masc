@@ -786,6 +786,8 @@
    masc_backend
    ;; Process execution + file locking (extracted sub-library)
    masc_process
+   ;; Typed exec approval substrate (RFC v5)
+   masc_mcp.masc_exec
    ;; Autoresearch leaf modules (types, serde, storage, metric, git, file)
    masc_autoresearch
    ;; Board types (extracted sub-library — first step toward board isolation)

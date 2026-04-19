@@ -72,7 +72,11 @@ let looks_like_server_command command =
 
 let process_command pid =
   match
-    Process_eio.run_argv_with_status ~timeout_sec:1.0
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"system/startup_takeover"
+      ~raw_source:(Printf.sprintf "ps -p %d -o command=" pid)
+      ~summary:"startup takeover ps probe"
+      ~timeout_sec:1.0
       [ "ps"; "-p"; string_of_int pid; "-o"; "command=" ]
   with
   | Unix.WEXITED 0, output -> (

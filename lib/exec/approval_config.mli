@@ -22,9 +22,9 @@ type agent_overlay = {
 
   deny_destructive_git : bool;
   (** If true, [Git_op.Destructive _] emits [Verdict.Deny] outright.
-      If false, the agent may Ask its way through.  Default true; a
-      future operator UI may flip this per-session for planned
-      history rewrites. *)
+      If false, the hard deny is removed and the command falls through
+      to the normal risk-class rules.  Default true; a future operator
+      UI may flip this per-session for planned history rewrites. *)
 }
 (** Per-agent knobs.  Intentionally narrow — add fields only when a
     policy rule actually reads them, not "for future flexibility". *)

@@ -79,16 +79,24 @@ let ask_of policy ~caps ~bin : Verdict.t =
       raw_source = policy.raw_source;
     }
 
-let decide (policy : t) ~(caps : Capability.t list)
+let decide (policy : t)
+    ~(overlay : Approval_config.agent_overlay)
+    ~(caps : Capability.t list)
     ~(simple : Shell_ir.simple) : Verdict.t =
   match find_destructive_git caps with
-  | Some g ->
+  | Some g when overlay.deny_destructive_git ->
     Verdict.Deny { caps; reason = Destructive_git g }
-  | None ->
+  | Some _ | None ->
     match find_write_escape caps with
     | Some ps ->
       Verdict.Deny { caps; reason = Path_escape ps }
     | None ->
       match max_risk caps with
-      | `Privileged | `Audited -> ask_of policy ~caps ~bin:simple.bin
-      | `Safe -> Verdict.Allow (Verdict.trust ~caps simple)
+      | `Privileged -> ask_of policy ~caps ~bin:simple.bin
+      | `Audited ->
+        if overlay.ask_audited then ask_of policy ~caps ~bin:simple.bin
+        else Verdict.Allow (Verdict.trust ~caps simple)
+      | `Safe ->
+        if overlay.allow_safe_in_worktree then
+          Verdict.Allow (Verdict.trust ~caps simple)
+        else ask_of policy ~caps ~bin:simple.bin

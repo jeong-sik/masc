@@ -11,8 +11,22 @@ type t =
 
 let has_flag args flag = List.mem flag args
 
+let rec strip_global_options = function
+  | "-C" :: _path :: rest -> strip_global_options rest
+  | "-c" :: _binding :: rest -> strip_global_options rest
+  | "--git-dir" :: _dir :: rest -> strip_global_options rest
+  | "--work-tree" :: _dir :: rest -> strip_global_options rest
+  | "--namespace" :: _ns :: rest -> strip_global_options rest
+  | "--no-pager" :: rest -> strip_global_options rest
+  | "--literal-pathspecs" :: rest -> strip_global_options rest
+  | args -> args
+
 let of_argv = function
-  | "git" :: sub :: rest ->
+  | "git" :: raw_args ->
+      let normalized = strip_global_options raw_args in
+      (match normalized with
+       | [] -> Error (`Unknown_subcmd "<missing git subcmd>")
+       | sub :: rest ->
       (match sub with
        | "status" -> Ok (Read `Status)
        | "log" -> Ok (Read `Log)
@@ -49,7 +63,7 @@ let of_argv = function
            (match rest with
             | "remove" :: _ -> Ok (Destructive `Worktree_remove)
             | _ -> Error (`Unknown_subcmd ("worktree " ^ String.concat " " rest)))
-       | other -> Error (`Unknown_subcmd other))
+       | other -> Error (`Unknown_subcmd other)))
   | _ -> Error (`Unknown_subcmd "<non-git argv>")
 
 let pp fmt = function

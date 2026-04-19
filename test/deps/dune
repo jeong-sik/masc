@@ -44,6 +44,7 @@
    (re_export masc_mcp.tool_schemas)
    (re_export masc_mcp.masc_tool_blob_store)
    (re_export masc_process)
+   (re_export masc_mcp.masc_exec)
    (re_export masc_coord)
    (re_export masc_types)
    (re_export mirage-crypto)

@@ -16,17 +16,32 @@ type sandbox = {
   created_at : float;
 }
 
+let exec_gate_raw_source argv =
+  String.concat " " (List.map Filename.quote argv)
+
 (** Run git command in the given directory and collect stdout lines. *)
 let git_lines ~cwd args =
   let argv = ["git"; "-C"; cwd] @ args in
-  Process_eio.run_argv ~timeout_sec:30.0 argv
+  Masc_exec.Exec_gate.run_argv
+    ~actor:"system/task_sandbox"
+    ~raw_source:(exec_gate_raw_source argv)
+    ~summary:"task_sandbox git"
+    ~timeout_sec:30.0
+    argv
   |> String.split_on_char '\n'
   |> List.filter (fun s -> String.trim s <> "")
 
 (** Run git command and get exit code. *)
 let git_exit ~cwd args =
   let argv = ["git"; "-C"; cwd] @ args in
-  match Process_eio.run_argv_with_status ~timeout_sec:30.0 argv with
+  match
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"system/task_sandbox"
+      ~raw_source:(exec_gate_raw_source argv)
+      ~summary:"task_sandbox git"
+      ~timeout_sec:30.0
+      argv
+  with
   | Unix.WEXITED n, _ -> n
   | Unix.WSIGNALED _, _ -> 128
   | Unix.WSTOPPED _, _ -> 128

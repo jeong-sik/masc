@@ -67,21 +67,35 @@ let request_curl ~timeout_sec body =
           in
           if Process_eio.is_initialized () then
             (try
-               let output = Process_eio.run_argv ~timeout_sec argv in
+               let output =
+                 Masc_exec.Exec_gate.run_argv
+                   ~actor:"system/graphql_client_eio"
+                   ~raw_source:(String.concat " " (List.map Filename.quote argv))
+                   ~summary:"graphql curl fallback"
+                   ~timeout_sec
+                   argv
+               in
                ensure_json_response output
              with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printf.sprintf "curl: %s" (Printexc.to_string exn)))
           else
             (* Unix fallback when Eio loop not started *)
             (try
-               Exec_tap.record
-                 ~kind:Exec_tap.Unix_open_process_args_in ~argv ();
-               let ic = Unix.open_process_args_in "curl" (Array.of_list argv) in
-               let output =
-                 Fun.protect
-                   ~finally:(fun () -> ignore (Unix.close_process_in ic))
-                   (fun () -> In_channel.input_all ic)
-               in
-               ensure_json_response output
+               match
+                 Masc_exec.Exec_gate.run_argv_with_status
+                   ~actor:"system/graphql_client_eio"
+                   ~raw_source:(String.concat " " (List.map Filename.quote argv))
+                   ~summary:"graphql curl fallback"
+                   ~timeout_sec
+                   argv
+               with
+               | Unix.WEXITED 0, output ->
+                   ensure_json_response output
+               | Unix.WEXITED code, output ->
+                   Error (Printf.sprintf "curl exited %d: %s" code output)
+               | Unix.WSIGNALED code, _ ->
+                   Error (Printf.sprintf "curl signaled: %d" code)
+               | Unix.WSTOPPED code, _ ->
+                   Error (Printf.sprintf "curl stopped: %d" code)
              with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn))))
 
 (** Cohttp_eio primary transport with curl fallback. *)

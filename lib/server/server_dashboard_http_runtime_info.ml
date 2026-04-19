@@ -63,28 +63,17 @@ let git_rev_parse_short path =
   | Some dir when not (Sys.file_exists dir) -> None
   | Some dir ->
       let argv = [ "git"; "-C"; dir; "rev-parse"; "--short"; "HEAD" ] in
-      Exec_tap.record
-        ~kind:Exec_tap.Unix_open_process_args_full
-        ~argv ~cwd:dir ();
-      let channels =
-        Unix.open_process_args_full "git"
-          (Array.of_list argv)
-          (Unix.environment ())
-      in
-      let stdout, stdin, stderr = channels in
-      (try
-         close_out_noerr stdin;
-         let output = In_channel.input_all stdout in
-         ignore (In_channel.input_all stderr);
-         match Unix.close_process_full channels with
-         | Unix.WEXITED 0 -> trim_to_option output
-         | _ -> None
+      let raw_source = String.concat " " (List.map Filename.quote argv) in
+      (match
+         Masc_exec.Exec_gate.run_argv_with_status
+           ~actor:"system/runtime_info"
+           ~raw_source
+           ~summary:"dashboard runtime git probe"
+           ~timeout_sec:5.0
+           argv
        with
-       | Sys_error _ | Unix.Unix_error _ ->
-           ignore
-             (try Unix.close_process_full channels
-              with Unix.Unix_error _ -> Unix.WEXITED 1);
-           None)
+       | Unix.WEXITED 0, output -> trim_to_option output
+       | _ -> None)
 
 let path_item_json ~source path =
   `Assoc

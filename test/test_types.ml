@@ -686,6 +686,36 @@ let () =
         Alcotest.(check bool) "trending present" true (List.mem "trending" actual);
         Alcotest.(check bool) "discussed present" true (List.mem "discussed" actual));
     ];
+    "git_action_ssot", [
+      (* Issue #8522: introduces [Tool_code_write.git_action] Variant
+         where 3 sites within the same file co-validated the same 11-
+         action vocabulary (allowlist + schema enum + 6 inline string
+         comparisons). Witness covers all 11 constructors. *)
+      Alcotest.test_case "witness covers all 11 variants" `Quick (fun () ->
+        let module T = Masc_mcp.Tool_code_write in
+        let witness a =
+          let actual = T.git_action_to_string a in
+          if not (List.mem actual T.valid_git_action_strings) then
+            Alcotest.failf "git_action_to_string %S not in valid_git_action_strings" actual
+        in
+        witness T.Add; witness T.Commit; witness T.Push;
+        witness T.Diff; witness T.Status; witness T.Log;
+        witness T.Branch; witness T.Checkout; witness T.Stash;
+        witness T.Fetch; witness T.Clone;
+        Alcotest.(check int) "count" 11 (List.length T.valid_git_action_strings));
+      Alcotest.test_case "of_string_opt sound partial" `Quick (fun () ->
+        let module T = Masc_mcp.Tool_code_write in
+        Alcotest.(check bool) "commit" true (T.git_action_of_string_opt "commit" <> None);
+        Alcotest.(check bool) "PUSH (case)" true (T.git_action_of_string_opt "PUSH" <> None);
+        Alcotest.(check bool) "  clone  (trim)" true
+          (T.git_action_of_string_opt "  clone  " <> None);
+        Alcotest.(check bool) "garbage rejected" true
+          (T.git_action_of_string_opt "rebase" = None));
+      Alcotest.test_case "allowed_git_actions == SSOT" `Quick (fun () ->
+        Alcotest.(check (list string)) "allowlist == valid_git_action_strings"
+          Masc_mcp.Tool_code_write.valid_git_action_strings
+          Masc_mcp.Tool_code_write.allowed_git_actions);
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

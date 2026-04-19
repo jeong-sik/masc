@@ -547,11 +547,13 @@ module For_testing = struct
       attempts = pending.attempts;
       appended = pending.appended; }
 
-  let of_stage (stage : bridge_relay_stage) =
-    match relay_stage_to_string stage with
-    | "append" -> Append
-    | "broadcast" -> Broadcast
-    | _ -> Broadcast
+  (* Direct match between outer and For_testing variants — no string roundtrip,
+     no permissive default. If a third constructor is added to the outer
+     [relay_stage], OCaml exhaustiveness check fires here so the test mirror
+     stays in sync with the runtime variant. See #8677 / #8605. *)
+  let of_stage : bridge_relay_stage -> relay_stage = function
+    | Append -> Append
+    | Broadcast -> Broadcast
 
   let of_result (result : bridge_relay_result) =
     match result with

@@ -40,6 +40,21 @@ vars ==
     << keeper_phase, generation, current_trace_id, trace_history,
        ckpt_valid, ckpt_generation, ckpt_trace_id, next_trace_id >>
 
+\* Issue #8642/#8701 family: explicit OCaml ↔ TLA+ mapping. SSOT for
+\* OCaml side is lib/keeper/keeper_state_machine.ml (12 phases). This
+\* spec uses the smallest possible alphabet (3 symbols) because the
+\* generation-lineage contract only inspects whether the keeper is
+\* idle, actively executing, or rolling over a generation handoff.
+\* Mapping (note: snake_case wire format from phase_to_string):
+\*
+\*   "idle"        ↔ Offline
+\*   "running"     ↔ Running
+\*   "handing_off" ↔ HandingOff
+\*
+\* Unmodeled here (covered in companion specs):
+\*   Failing, Overflowed, Compacting, Draining, Paused,
+\*   Stopped, Crashed, Restarting, Dead — see
+\*   KeeperReconcileLiveness.tla and KeeperContextLifecycle.tla.
 Phases == {"idle", "running", "handing_off"}
 
 SeqElems(seq) == {seq[i] : i \in 1..Len(seq)}

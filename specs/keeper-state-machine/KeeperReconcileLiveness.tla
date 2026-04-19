@@ -89,6 +89,24 @@ DerivePhase ==
     ELSE "Offline"
 
 Phase == DerivePhase
+
+\* Issue #8642/#8701 family: explicit OCaml ↔ TLA+ mapping. SSOT for
+\* OCaml side is lib/keeper/keeper_state_machine.ml (12 phases). This
+\* spec uses the same CamelCase constructor names as the OCaml type
+\* but only models the 6 phases relevant to reconcile liveness — the
+\* phases the supervisor must drive to a stable state. Mapping
+\* (CamelCase identical to OCaml constructors):
+\*
+\*   "Stopped"  ↔ Stopped       \*  Terminal
+\*   "Dead"     ↔ Dead          \*  Terminal
+\*   "Running"  ↔ Running       \*  Recoverable
+\*   "Paused"   ↔ Paused        \*  Recoverable
+\*   "Crashed"  ↔ Crashed       \*  Recoverable
+\*   "Offline"  ↔ Offline       \*  Recoverable (cold)
+\*
+\* Unmodeled here (covered in companion specs):
+\*   Failing, Overflowed, Compacting, HandingOff, Draining, Restarting
+\*   See KeeperCoreTriad.tla and KeeperContextLifecycle.tla.
 TerminalPhases == {"Stopped", "Dead"}
 NotTerminal == Phase \notin TerminalPhases
 RecoverablePhases == {"Running", "Paused", "Crashed", "Stopped", "Dead", "Offline"}

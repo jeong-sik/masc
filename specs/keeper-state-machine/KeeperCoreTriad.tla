@@ -86,6 +86,22 @@ vars == <<phase, turn_status, effective_cascade, provider_idx,
 
 \* ── Type Invariant ───────────────────────────────────────
 
+\* Issue #8642/#8701 family: explicit OCaml ↔ TLA+ mapping. SSOT for
+\* OCaml side is lib/keeper/keeper_state_machine.ml (12 phases). This
+\* spec collapses the 12 phases into a 6-symbol "core triad" alphabet
+\* because the triad invariants only depend on running/failure/
+\* compaction signals, not on the full keeper lifecycle. Mapping:
+\*
+\*   "Running"     ↔ Running
+\*   "Failing"     ↔ Failing
+\*   "Overflowed"  ↔ Overflowed
+\*   "Compacting"  ↔ Compacting
+\*   "Draining"    ↔ Draining
+\*   "Terminal"    ↔ Stopped | Dead | Crashed | Offline   (collapsed)
+\*
+\* Unmodeled here (covered in companion specs):
+\*   HandingOff, Paused, Restarting   (see KeeperReconcileLiveness.tla
+\*   and KeeperGenerationLineage.tla).
 Phases == {"Running", "Failing", "Overflowed", "Compacting", "Draining", "Terminal"}
 TurnStatuses == {"idle", "selecting", "executing", "retrying", "done"}
 Cascades == {"keeper_unified", "local_recovery", "local_only", "none"}

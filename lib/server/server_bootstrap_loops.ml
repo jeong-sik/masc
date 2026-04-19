@@ -182,25 +182,25 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
             | Some h -> ("hearth", `String h) :: base
             | None -> base
           in
-          ("board.posted",
+          (Event_kind.Board.to_string Event_kind.Board.Posted,
            Activity_graph.entity ~kind:"agent" author,
            Some (Activity_graph.entity ~kind:"post" post_id),
            `Assoc payload_fields)
       | Board_dispatch.Comment_added { post_id; comment_id; author } ->
-          ("board.commented",
+          (Event_kind.Board.to_string Event_kind.Board.Commented,
            Activity_graph.entity ~kind:"agent" author,
            Some (Activity_graph.entity ~kind:"post" post_id),
            `Assoc [("post_id", `String post_id); ("comment_id", `String comment_id);
                    ("author", `String author)])
       | Board_dispatch.Post_voted { post_id; voter; direction } ->
           let dir = Board_votes.vote_direction_to_string direction in
-          ("board.voted",
+          (Event_kind.Board.to_string Event_kind.Board.Voted,
            Activity_graph.entity ~kind:"agent" voter,
            Some (Activity_graph.entity ~kind:"post" post_id),
            `Assoc [("post_id", `String post_id); ("direction", `String dir)])
       | Board_dispatch.Comment_voted { comment_id; voter; direction } ->
           let dir = Board_votes.vote_direction_to_string direction in
-          ("board.voted",
+          (Event_kind.Board.to_string Event_kind.Board.Voted,
            Activity_graph.entity ~kind:"agent" voter,
            Some (Activity_graph.entity ~kind:"comment" comment_id),
            `Assoc [("comment_id", `String comment_id); ("direction", `String dir)])

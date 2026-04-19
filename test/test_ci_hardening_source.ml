@@ -345,6 +345,27 @@ let test_http_read_surface_contracts () =
     (file_contains_pattern "lib/server/server_routes_http_routes_room.ml"
        {|"/api/v1/messages" (fun request reqd ->
        with_read_auth|});
+  check bool "room route delegates status reads to protocol boundary" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_room.ml"
+       "Room_protocol.status config");
+  check bool "room route delegates task reads to protocol boundary" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_room.ml"
+       "Room_protocol.tasks ?status_filter");
+  check bool "room route delegates agent reads to protocol boundary" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_room.ml"
+       "Room_protocol.agents ?status_filter config");
+  check bool "room route delegates message reads to protocol boundary" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_room.ml"
+       "Room_protocol.messages ?agent_filter");
+  check bool "room route does not read Coord directly" true
+    (file_not_contains_pattern "lib/server/server_routes_http_routes_room.ml"
+       "Coord.");
+  check bool "room route does not read Tempo directly" true
+    (file_not_contains_pattern "lib/server/server_routes_http_routes_room.ml"
+       "Tempo.");
+  check bool "room protocol owns the Coord read boundary" true
+    (file_contains_pattern "lib/room_protocol.ml"
+       "Coord.get_tasks_raw config");
   check bool "provider run status route now requires read auth" true
     (file_contains_pattern "lib/server/server_routes_http_routes_provider_runs.ml"
        {|"/api/v1/agent-runs/" (fun request reqd ->

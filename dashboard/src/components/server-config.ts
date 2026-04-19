@@ -43,12 +43,15 @@ function matchesSearch(entry: ConfigEntry, query: string): boolean {
   return (
     entry.env.toLowerCase().includes(lower) ||
     entry.description.toLowerCase().includes(lower) ||
+    entry.source.toLowerCase().includes(lower) ||
+    (entry.source_detail ?? '').toLowerCase().includes(lower) ||
     (entry.value ?? '').toLowerCase().includes(lower)
   )
 }
 
 function EntryRow({ entry }: { entry: ConfigEntry }) {
-  const isDefault = entry.source === 'default'
+  const isEnv = entry.source === 'env'
+  const isDefault = entry.source !== 'env'
   const valueClass = entry.sensitive
     ? 'text-[var(--text-muted)] italic'
     : isDefault
@@ -60,20 +63,26 @@ function EntryRow({ entry }: { entry: ConfigEntry }) {
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2">
           <code class="text-xs font-mono text-[var(--text-primary)]">${entry.env}</code>
-          ${!isDefault ? html`
+          ${isEnv ? html`
             <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">custom</span>
+          ` : null}
+          ${!isEnv && entry.source !== 'default' ? html`
+            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--bg-panel-hover)] text-[var(--text-muted)]">${entry.source}</span>
           ` : null}
           ${entry.sensitive ? html`
             <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--warn-10)] text-[var(--warn)]">sensitive</span>
           ` : null}
         </div>
         <div class="text-xs text-[var(--text-muted)] mt-0.5">${entry.description}</div>
+        ${entry.source_detail ? html`
+          <div class="text-3xs text-[var(--text-muted)] mt-0.5">source: ${entry.source_detail}</div>
+        ` : null}
       </div>
       <div class="text-right shrink-0">
         <div class=${`text-xs font-mono ${valueClass}`}>
           ${entry.value ?? entry.default}
         </div>
-        ${!isDefault && entry.default ? html`
+        ${isEnv && entry.default ? html`
           <div class="text-3xs text-[var(--text-muted)] mt-0.5">
             default: ${entry.default}
           </div>
@@ -87,7 +96,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
   const query = searchQuery.value
   const filtered = entries.filter(e => matchesSearch(e, query))
   const isExpanded = expandedCategories.value.has(name)
-  const customCount = filtered.filter(e => e.source !== 'default').length
+  const customCount = filtered.filter(e => e.source === 'env').length
 
   if (filtered.length === 0) return null
 

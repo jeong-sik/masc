@@ -547,11 +547,15 @@ module For_testing = struct
       attempts = pending.attempts;
       appended = pending.appended; }
 
-  let of_stage (stage : bridge_relay_stage) =
-    match relay_stage_to_string stage with
-    | "append" -> Append
-    | "broadcast" -> Broadcast
-    | _ -> Broadcast
+  (* Issue #8676: convert directly between the outer [relay_stage] and the
+     [For_testing.relay_stage] mirror. The previous string-roundtrip carried
+     a permissive [_ -> Broadcast] catch-all that would silently misclassify
+     any future outer constructor as [Broadcast] in test stage assertions
+     (#8605 anti-pattern). Direct match makes adding a constructor a
+     compile error here, forcing the test mirror to stay in sync. *)
+  let of_stage : bridge_relay_stage -> relay_stage = function
+    | Append -> Append
+    | Broadcast -> Broadcast
 
   let of_result (result : bridge_relay_result) =
     match result with

@@ -233,6 +233,68 @@ let test_semantic_flag_isolation () =
     | `Null -> ()
     | _ -> fail "semantic_exit must stay absent after flag flips off")
 
+(* ---------- P6 Tick 16: verifiable_markers JSON integration -------------- *)
+
+let with_markers_flag enabled f =
+  let prev = Sys.getenv_opt "MASC_BASH_VERIFIABLE_MARKERS" in
+  Unix.putenv "MASC_BASH_VERIFIABLE_MARKERS" (if enabled then "1" else "");
+  let restore () =
+    match prev with
+    | Some v -> Unix.putenv "MASC_BASH_VERIFIABLE_MARKERS" v
+    | None -> Unix.putenv "MASC_BASH_VERIFIABLE_MARKERS" ""
+  in
+  match f () with
+  | v -> restore (); v
+  | exception e -> restore (); raise e
+
+let test_markers_absent_when_flag_off () =
+  with_semantic_flag true (fun () ->
+    with_markers_flag false (fun () ->
+      let json =
+        run_json ~cmd:"git status" ~status:(Unix.WEXITED 128)
+          ~output:"fatal: not a git repository"
+      in
+      match json |> member "verifiable_markers" with
+      | `Null -> ()
+      | _ -> fail "markers must be absent when flag is off"))
+
+let test_markers_absent_when_semantic_off () =
+  (* Markers require semantic; flag-on alone without semantic is no-op. *)
+  with_semantic_flag false (fun () ->
+    with_markers_flag true (fun () ->
+      let json =
+        run_json ~cmd:"git status" ~status:(Unix.WEXITED 128)
+          ~output:"fatal: not a git repository"
+      in
+      match json |> member "verifiable_markers" with
+      | `Null -> ()
+      | _ -> fail "markers require semantic flag to also be on"))
+
+let test_markers_git_not_a_repo () =
+  with_semantic_flag true (fun () ->
+    with_markers_flag true (fun () ->
+      let json =
+        run_json ~cmd:"git status" ~status:(Unix.WEXITED 128)
+          ~output:"fatal: not a git repository"
+      in
+      let markers = json |> member "verifiable_markers" |> to_list in
+      check int "one marker" 1 (List.length markers);
+      let m = List.hd markers in
+      check string "kind" "git_not_a_repo" (m |> member "kind" |> to_string);
+      check string "confidence" "exact"
+        (m |> member "confidence" |> to_string)))
+
+let test_markers_unknown_output_emits_absent () =
+  (* No producer pattern → no marker list field. *)
+  with_semantic_flag true (fun () ->
+    with_markers_flag true (fun () ->
+      let json =
+        run_json ~cmd:"ls" ~status:(Unix.WEXITED 0) ~output:"hello world"
+      in
+      match json |> member "verifiable_markers" with
+      | `Null -> ()
+      | _ -> fail "unknown output must not emit a marker list"))
+
 let () =
   run "exec_core"
     [
@@ -268,5 +330,16 @@ let () =
             `Quick test_semantic_tool_missing_payload;
           test_case "flag flip isolates state" `Quick
             test_semantic_flag_isolation;
+        ] );
+      ( "verifiable_markers",
+        [
+          test_case "absent when markers flag off" `Quick
+            test_markers_absent_when_flag_off;
+          test_case "absent when semantic flag off" `Quick
+            test_markers_absent_when_semantic_off;
+          test_case "git_not_a_repo emits exact marker" `Quick
+            test_markers_git_not_a_repo;
+          test_case "unknown output emits no marker field" `Quick
+            test_markers_unknown_output_emits_absent;
         ] );
     ]

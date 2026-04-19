@@ -111,7 +111,36 @@ Examples:
   [`resolve()`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/config_dir_resolver.ml#L321)
   caches the result, so root changes are boot-static.
 
-### 4. Test-only boot overrides
+### 4. Legendary Bash exec gates (`request_dynamic`, additive-only)
+
+Flags introduced by the P1–P6 exec rework. Each is opt-in: the
+default keeps the pre-Legendary JSON shape and execution path, and
+turning a flag on only adds new fields or new code branches. No
+field is ever removed by these flags, so downstream consumers
+never break by enabling them.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `MASC_BASH_SEMANTIC_EXIT` | off | Emits a `return_code_interpretation` object (typed `semantic_exit`) alongside the raw `status`. See `lib/exec/exec_semantic.mli`. |
+| `MASC_BASH_OUTPUT_CAP` | on (500 KB head + 500 KB tail each) | Head+tail truncation via `Exec_buffer`. `MASC_BASH_CAP_HEAD` / `MASC_BASH_CAP_TAIL` override the per-stream caps. See `lib/exec/exec_buffer.mli`. |
+| `MASC_BASH_AUTO_BG` | off | Foreground commands that outrun `MASC_BLOCKING_BUDGET_MS` (default 15 000 ms) auto-promote to a `Bg_task`. Response gains `{promoted, background_task_id, partial_output, …}`. See `lib/exec/exec_run.mli`. |
+| `MASC_BLOCKING_BUDGET_MS` | 15 000 | Foreground race budget. Consumed only when `MASC_BASH_AUTO_BG` is on; otherwise inert. |
+| `MASC_BASH_AST_ONLY` | off | Single-gate AST shadow (dual-gate is the default). Flip requires a prod N=1000 zero-diff window per the flip covenant test (`test_gate_diff.ml`). |
+| `MASC_BASH_VERIFIABLE_MARKERS` | off | Emits `verifiable_markers` from `Cdal_judge.of_exec_outcome` so the verifier cascade can consume typed `Test_pass {count}`, `Build_ok`, etc. without regex scraping. See `lib/cdal_judge.mli`. |
+
+Representative code paths:
+
+- [`exec_semantic.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/exec/exec_semantic.ml)
+- [`exec_buffer.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/exec/exec_buffer.ml)
+- [`exec_run.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/exec/exec_run.ml)
+- [`cdal_judge.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/cdal_judge.ml)
+- [`worker_dev_tools.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/worker_dev_tools.ml) — legacy↔shadow diff harness
+
+Because every flag here is `request_dynamic` on the keeper-bash path
+(read at tool-invocation time), operators can flip a flag without a
+restart and the next `keeper_bash` call picks it up.
+
+### 5. Test-only boot overrides
 
 The following flags exist only to make OCaml test executables deterministic:
 

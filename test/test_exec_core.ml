@@ -295,6 +295,61 @@ let test_markers_unknown_output_emits_absent () =
       | `Null -> ()
       | _ -> fail "unknown output must not emit a marker list"))
 
+(* ---------- P3 Tick 9: output_cap env-gated head+tail truncation --------- *)
+
+let with_env key value f =
+  let prev = Sys.getenv_opt key in
+  Unix.putenv key (Option.value ~default:"" value);
+  let restore () =
+    match prev with
+    | Some v -> Unix.putenv key v
+    | None -> Unix.putenv key ""
+  in
+  match f () with
+  | v -> restore (); v
+  | exception e -> restore (); raise e
+
+let test_output_cap_absent_by_default () =
+  with_env "MASC_BASH_OUTPUT_CAP" None (fun () ->
+    let json =
+      run_json ~cmd:"ls" ~status:(Unix.WEXITED 0) ~output:"hello"
+    in
+    check string "output untouched" "hello" (json |> member "output" |> to_string);
+    match json |> member "output_cap" with
+    | `Null -> ()
+    | _ -> fail "output_cap must be absent when flag is off")
+
+let test_output_cap_on_preserves_small_output () =
+  with_env "MASC_BASH_OUTPUT_CAP" (Some "1") (fun () ->
+    let json =
+      run_json ~cmd:"ls" ~status:(Unix.WEXITED 0) ~output:"short"
+    in
+    check string "short output unchanged" "short"
+      (json |> member "output" |> to_string);
+    let cap = json |> member "output_cap" in
+    check int "total_bytes=5" 5 (cap |> member "total_bytes" |> to_int);
+    check int "bytes_dropped=0" 0 (cap |> member "bytes_dropped" |> to_int))
+
+let test_output_cap_truncates_large_output () =
+  with_env "MASC_BASH_OUTPUT_CAP" (Some "1") (fun () ->
+    with_env "MASC_BASH_CAP_HEAD" (Some "8") (fun () ->
+      with_env "MASC_BASH_CAP_TAIL" (Some "8") (fun () ->
+        let long = "HEADAAAA" ^ String.make 256 'X' ^ "TAILBBBB" in
+        let json =
+          run_json ~cmd:"cat big" ~status:(Unix.WEXITED 0) ~output:long
+        in
+        let out = json |> member "output" |> to_string in
+        (* separator format from Exec_buffer.render *)
+        if not (String.length out > 0 && String.length out < String.length long)
+        then fail "output should be shorter than input when capped";
+        let cap = json |> member "output_cap" in
+        check int "total_bytes" (String.length long)
+          (cap |> member "total_bytes" |> to_int);
+        let dropped = cap |> member "bytes_dropped" |> to_int in
+        if dropped <= 0 then fail "bytes_dropped must be positive";
+        check int "head_cap=8" 8 (cap |> member "head_cap" |> to_int);
+        check int "tail_cap=8" 8 (cap |> member "tail_cap" |> to_int))))
+
 let () =
   run "exec_core"
     [
@@ -341,5 +396,14 @@ let () =
             test_markers_git_not_a_repo;
           test_case "unknown output emits no marker field" `Quick
             test_markers_unknown_output_emits_absent;
+        ] );
+      ( "output_cap",
+        [
+          test_case "absent by default" `Quick
+            test_output_cap_absent_by_default;
+          test_case "small output unchanged, cap metadata emitted"
+            `Quick test_output_cap_on_preserves_small_output;
+          test_case "large output truncated with bytes_dropped > 0"
+            `Quick test_output_cap_truncates_large_output;
         ] );
     ]

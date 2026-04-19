@@ -607,6 +607,52 @@ let semantic_fields_of_executed (result : executed_result) :
     in
     ("semantic_exit", semantic_obj) :: (rci_field @ marker_field)
 
+(* Tick 9: head+tail output cap — opt-in via MASC_BASH_OUTPUT_CAP.
+   Defaults match the claude-code EndTruncatingAccumulator shape
+   (500 KB head + 500 KB tail).  Overrides via MASC_BASH_CAP_HEAD /
+   MASC_BASH_CAP_TAIL let keepers experiment without code changes.
+   Applies only to JSON emission; the record keeps the original
+   bytes so semantic interpretation and marker inference see the
+   full stream. *)
+let default_head_cap = 512 * 1024
+let default_tail_cap = 512 * 1024
+
+let env_int key =
+  match Sys.getenv_opt key with
+  | None | Some "" -> None
+  | Some s -> (try Some (int_of_string (String.trim s)) with _ -> None)
+
+let output_cap_enabled () =
+  match Sys.getenv_opt "MASC_BASH_OUTPUT_CAP" with
+  | Some ("1" | "true" | "TRUE" | "yes") -> true
+  | _ -> false
+
+let cap_output_for_json output =
+  if not (output_cap_enabled ()) then (output, None)
+  else
+    let head_cap =
+      Option.value ~default:default_head_cap (env_int "MASC_BASH_CAP_HEAD")
+    in
+    let tail_cap =
+      Option.value ~default:default_tail_cap (env_int "MASC_BASH_CAP_TAIL")
+    in
+    let head_cap = max 0 head_cap and tail_cap = max 0 tail_cap in
+    let b = Masc_exec.Exec_buffer.create ~head_cap ~tail_cap in
+    Masc_exec.Exec_buffer.add_string b output;
+    let rendered = Masc_exec.Exec_buffer.render b in
+    let total = Masc_exec.Exec_buffer.total_bytes b in
+    let dropped = Masc_exec.Exec_buffer.bytes_dropped b in
+    let meta : Yojson.Safe.t =
+      `Assoc
+        [
+          ("total_bytes", `Int total);
+          ("bytes_dropped", `Int dropped);
+          ("head_cap", `Int head_cap);
+          ("tail_cap", `Int tail_cap);
+        ]
+    in
+    (rendered, Some meta)
+
 let outcome_to_json ?(extra = []) = function
   | Executed result ->
       let hint_fields =
@@ -614,6 +660,12 @@ let outcome_to_json ?(extra = []) = function
         | Some hint ->
             [ ("hint", `String hint); ("recovery_hint", `String hint) ]
         | None -> []
+      in
+      let capped_output, output_cap_field = cap_output_for_json result.output in
+      let cap_field =
+        match output_cap_field with
+        | None -> []
+        | Some meta -> [ ("output_cap", meta) ]
       in
       `Assoc
         ([
@@ -623,7 +675,10 @@ let outcome_to_json ?(extra = []) = function
          @ [
              ( "status",
                Keeper_alerting_path.process_status_to_json result.process_status );
-             ("output", `String result.output);
+             ("output", `String capped_output);
+           ]
+         @ cap_field
+         @ [
              ( "semantic_status",
                `String (string_of_semantic_status result.semantic_status) );
              ("classification", classification_to_json result.classification);

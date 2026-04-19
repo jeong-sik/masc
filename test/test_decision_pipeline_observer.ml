@@ -38,16 +38,26 @@ let extract_quoted_strings s =
 
 let extract_tla_set ~marker content =
   let marker_len = String.length marker in
+  let is_marker_decl i =
+    if i + marker_len > String.length content then false
+    else if String.sub content i marker_len <> marker then false
+    else
+      let rec skip_ws j =
+        if j < String.length content
+           && (content.[j] = ' ' || content.[j] = '\t')
+        then skip_ws (j + 1)
+        else j
+      in
+      let j = skip_ws (i + marker_len) in
+      j + 2 <= String.length content && String.sub content j 2 = "=="
+  in
   let rec find_marker start =
     if start >= String.length content then None
     else
       match String.index_from_opt content start marker.[0] with
       | None -> None
       | Some i ->
-          if i + marker_len <= String.length content
-             && String.sub content i marker_len = marker
-          then Some i
-          else find_marker (i + 1)
+          if is_marker_decl i then Some i else find_marker (i + 1)
   in
   match find_marker 0 with
   | None -> Alcotest.fail ("missing marker " ^ marker)

@@ -15,6 +15,18 @@ TLC_URL="https://github.com/tlaplus/tlaplus/releases/download/v${TLC_VERSION}/tl
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+KEEP_TLC_ARTIFACTS="${KEEP_TLC_ARTIFACTS:-0}"
+
+cleanup_tlc_artifacts() {
+  if [ "$KEEP_TLC_ARTIFACTS" = "1" ]; then
+    echo "KEEP_TLC_ARTIFACTS=1 -> preserving TLC artefacts"
+    return 0
+  fi
+
+  "$REPO_ROOT/scripts/cleanup-tlc-artifacts.sh" || true
+}
+
+trap 'rc=$?; trap - EXIT; cleanup_tlc_artifacts; exit "$rc"' EXIT
 
 # Download TLC if not present
 if [ ! -f "$TLC_JAR" ]; then

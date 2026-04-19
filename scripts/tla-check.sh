@@ -64,6 +64,27 @@ run_tlc() {
   echo ""
 }
 
+run_tlc_cfg() {
+  local spec_dir="$1"
+  local tla_file="$2"
+  local cfg_file="$3"
+  local label="${4:-$cfg_file}"
+
+  if [ ! -f "$spec_dir/$cfg_file" ]; then
+    echo "SKIP $tla_file $label (no $cfg_file file)"
+    return 0
+  fi
+
+  echo "=== Checking $spec_dir/$tla_file ($label) ==="
+  "$JAVA" -XX:+UseParallelGC -Xmx4g \
+    -cp "$TLC_JAR" tlc2.TLC \
+    -config "$spec_dir/$cfg_file" \
+    -workers auto \
+    -deadlock \
+    "$spec_dir/$tla_file"
+  echo ""
+}
+
 # Run a buggy spec that MUST violate an invariant or property.
 # TLC exit codes: 12 = safety violation, 13 = liveness violation.
 # If TLC exits 0 (no violation), the spec is too weak and the test fails.
@@ -168,6 +189,9 @@ run_tlc "$REPO_ROOT/specs/masc-ecosystem" "MASCEcosystem.tla"
 # picked up automatically by the glob.
 BUG_MODELS_DIR="$REPO_ROOT/specs/bug-models"
 if [ -d "$BUG_MODELS_DIR" ]; then
+  run_tlc_cfg "$BUG_MODELS_DIR" "CascadeLiveness.tla" \
+    "CascadeLiveness-liveness.cfg" "liveness"
+
   for tla_path in "$BUG_MODELS_DIR"/*.tla; do
     [ -e "$tla_path" ] || continue              # no matches
     [ -L "$tla_path" ] && continue              # symlink → already run

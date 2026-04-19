@@ -41,6 +41,7 @@ run_harness "${SCRIPT_DIR}/verify_grpc_subscribe.sh"
 run_harness "${SCRIPT_DIR}/verify_h2c_autodetect.sh"
 run_harness "${SCRIPT_DIR}/verify_ws.sh"
 run_harness "${SCRIPT_DIR}/verify_webrtc_signaling.sh"
+run_harness "${SCRIPT_DIR}/verify_truth.sh"
 
 echo ""
 echo "================================================================"

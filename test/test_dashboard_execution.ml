@@ -162,6 +162,14 @@ let test_dashboard_execution_fixture () =
         check int "offline worker briefs" 1 (List.length offline_worker_briefs);
         check string "continuity skill route summary" "scene-director · +1 · judgment"
           (continuity_briefs |> List.hd |> member "skill_route_summary" |> to_string);
+        check (list string) "continuity recent tools keep window semantics"
+          [ "masc_keeper_status"; "masc_board_post" ]
+          (continuity_briefs |> List.hd |> member "recent_tool_names"
+         |> to_list |> List.map to_string);
+        check (list string) "continuity latest tools stay latest-only"
+          [ "masc_board_post" ]
+          (continuity_briefs |> List.hd |> member "latest_tool_names"
+         |> to_list |> List.map to_string);
         check string "continuity recent output stays concrete"
           "Prepared the next scene transition and handoff summary"
           (continuity_briefs |> List.hd |> member "recent_output_preview" |> to_string);

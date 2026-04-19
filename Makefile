@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps pin-external-deps sync-oas-pin-docs doctor-oas-pin doctor-oas-drift dashboard-drift-check dashboard-drift-regen dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak
+.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean clean-tlc-artifacts coverage coverage-summary coverage-html coverage-percent doc install-deps pin-external-deps sync-oas-pin-docs doctor-oas-pin doctor-oas-drift doctor-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard dashboard-drift-check dashboard-drift-regen dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak
 
 # Default target — OCaml + dashboard
 all: build-all
@@ -52,6 +52,10 @@ test-all: test-unit test-contract test-transport
 # Clean build artifacts
 clean:
 	dune clean --root .
+	bash scripts/cleanup-tlc-artifacts.sh
+
+clean-tlc-artifacts:
+	bash scripts/cleanup-tlc-artifacts.sh
 
 # Run tests with coverage instrumentation
 coverage:
@@ -94,6 +98,18 @@ release-evidence:
 # Fast local-only doctor for OAS/agent_sdk pin drift in the current switch.
 doctor-oas-pin:
 	bash scripts/check-oas-pin.sh --local-only
+
+# Disk hygiene snapshot for TLC artefacts, Dune cache drift, isolated builds, worktree fan-out.
+doctor-disk-hygiene:
+	bash scripts/disk-hygiene.sh
+
+# Safe fixes only: TLC artefact cleanup + Dune cache trim.
+fix-disk-hygiene:
+	bash scripts/disk-hygiene.sh --fix
+
+# Hard reset path for cache drift: also reset ~/.cache/dune and remove stray _build_* dirs.
+fix-disk-hygiene-hard:
+	bash scripts/disk-hygiene.sh --fix --reset-dune-cache --clean-extra-build-dirs
 
 # Check OAS API surface (Event_bus variants, HttpError variants, Metrics fields)
 # against scripts/oas-api-surface.json fingerprint. Catches upstream variant/field

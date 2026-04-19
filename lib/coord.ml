@@ -57,13 +57,20 @@ let merge_detail_fields fields details =
   | `Null -> `Assoc fields
   | other -> `Assoc (fields @ [ ("payload", other) ])
 
-let task_action_of_transition = function
-  | "claim" -> Audit_log.ClaimTask
-  | "start" -> Audit_log.StartTask
-  | "done" -> Audit_log.DoneTask
-  | "cancel" -> Audit_log.CancelTask
-  | "release" -> Audit_log.ReleaseTask
-  | other -> Audit_log.Custom ("task_" ^ other)
+(* Exhaustive on [Types.task_action]: a new variant becomes a compile
+   error here so the audit-log mapping cannot silently fall into the
+   [Custom "task_<other>"] catch-all that the prior string-typed
+   classifier produced. (#8605 family -- exhaustive-match template) *)
+let task_action_of_transition : Types.task_action -> Audit_log.action = function
+  | Types.Claim -> Audit_log.ClaimTask
+  | Types.Start -> Audit_log.StartTask
+  | Types.Done_action -> Audit_log.DoneTask
+  | Types.Cancel -> Audit_log.CancelTask
+  | Types.Release -> Audit_log.ReleaseTask
+  | (Types.Submit_for_verification
+    | Types.Approve_verification
+    | Types.Reject_verification) as action ->
+      Audit_log.Custom ("task_" ^ Types.task_action_to_string action)
 
 let observe_agent_lifecycle config ~agent_id ~event_kind ~details =
   let details =
@@ -114,13 +121,20 @@ let observe_agent_lifecycle config ~agent_id ~event_kind ~details =
       | _ -> Telemetry_eio.track_agent_joined config ~agent_id ()
   with Stdlib.Effect.Unhandled _ -> ())
 
+(* #8605 family: replaced four parallel string switches on [transition]
+   with [Types.task_action] variant matches. The compiler now forces
+   every dispatch to cover all 8 task_action constructors, so a future
+   action variant cannot silently coalesce into the catch-all "no-op"
+   branch. JSON wire format ("claim" / "start" / "done" / ...) is
+   preserved via [Types.task_action_to_string]. *)
 let observe_task_transition_event config ~agent_name ~task_id
-    ~transition ~details =
+    ~(transition : Types.task_action) ~details =
+  let transition_s = Types.task_action_to_string transition in
   let details =
     merge_detail_fields
       [
         ("event_family", `String "task_transition");
-        ("transition", `String transition);
+        ("transition", `String transition_s);
         ("task_id", `String task_id);
         ("agent_id", `String agent_name);
       ]
@@ -128,11 +142,13 @@ let observe_task_transition_event config ~agent_name ~task_id
   in
   let level =
     match transition with
-    | "cancel" -> Log.Warn
-    | _ -> Log.Info
+    | Types.Cancel -> Log.Warn
+    | (Types.Claim | Types.Start | Types.Done_action | Types.Release
+      | Types.Submit_for_verification | Types.Approve_verification
+      | Types.Reject_verification) -> Log.Info
   in
   let message =
-    Printf.sprintf "task %s %s by %s" task_id transition agent_name
+    Printf.sprintf "task %s %s by %s" task_id transition_s agent_name
   in
   Log.emit level ~module_name:"Task" ~details message;
   (try
@@ -141,15 +157,17 @@ let observe_task_transition_event config ~agent_name ~task_id
       ~details ~outcome:Audit_log.Success ();
     if telemetry_enabled () then
       match transition with
-      | "start" ->
+      | Types.Start ->
           Telemetry_eio.track_task_started config ~task_id ~agent_id:agent_name
-      | "done" | "cancel" ->
+      | Types.Done_action | Types.Cancel ->
           let duration_ms =
             Safe_ops.json_int ~default:0 "duration_ms" details
           in
           Telemetry_eio.track_task_completed config ~task_id ~duration_ms
-            ~success:(String.equal transition "done")
-      | _ -> ()
+            ~success:(transition = Types.Done_action)
+      | (Types.Claim | Types.Release
+        | Types.Submit_for_verification | Types.Approve_verification
+        | Types.Reject_verification) -> ()
   with Stdlib.Effect.Unhandled _ -> ());
   (try
      Keeper_accountability.record_task_transition config ~agent_name ~task_id

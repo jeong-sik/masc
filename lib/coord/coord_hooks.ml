@@ -91,12 +91,15 @@ let observe_agent_lifecycle_fn
 
 (** Shared observability hook for task transitions.
     Used by room task modules so every successful state transition is logged
-    consistently regardless of which tool or transport triggered it. *)
+    consistently regardless of which tool or transport triggered it.
+    #8605 family: [transition] is the canonical [Types.task_action]
+    variant -- typos at call sites fail to compile and the JSON wire
+    format is centralised in [Types.task_action_to_string]. *)
 let observe_task_transition_fn
   : (Coord_utils_backend_setup.config ->
      agent_name:string ->
      task_id:string ->
-     transition:string ->
+     transition:task_action ->
      details:Yojson.Safe.t ->
      unit) Atomic.t
   = Atomic.make

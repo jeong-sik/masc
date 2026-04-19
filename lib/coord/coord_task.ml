@@ -261,7 +261,7 @@ let task_transition_details ~from_status ~to_status ?notes ?reason ?duration_ms
     @ optional_field "duration_ms"
         (Option.map (fun value -> `Int value) duration_ms))
 
-let observe_task_transition config ~agent_name ~task_id ~transition ~details =
+let observe_task_transition config ~agent_name ~task_id ~(transition : Types.task_action) ~details =
   (Atomic.get Coord_hooks.observe_task_transition_fn) config ~agent_name
     ~task_id ~transition ~details
 
@@ -599,7 +599,7 @@ let claim_task config ~agent_name ~task_id =
                      ("ts", `String (now_iso ()));
                    ]));
             observe_task_transition config ~agent_name ~task_id
-              ~transition:"claim"
+              ~transition:Types.Claim
               ~details:
                 (task_transition_details ~from_status:Types.Todo
                    ~to_status:
@@ -714,7 +714,7 @@ let claim_task_r config ~agent_name ~task_id
                      ("ts", `String (now_iso ()));
                    ]));
             observe_task_transition config ~agent_name ~task_id
-              ~transition:"claim"
+              ~transition:Types.Claim
               ~details:
                 (task_transition_details ~from_status:Types.Todo
                    ~to_status:
@@ -1072,7 +1072,7 @@ let transition_task_r config ~agent_name ~task_id ~action
           | Types.Reject_verification -> None
         in
         observe_task_transition config ~agent_name ~task_id
-          ~transition:action_s
+          ~transition:action
           ~details:
             (task_transition_details
                ~from_status:task.task_status ~to_status:new_status
@@ -1217,7 +1217,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                       ?reason:(if reason = "" then None else Some reason)
                       ()));
               observe_task_transition config ~agent_name ~task_id
-                ~transition:"cancel"
+                ~transition:Types.Cancel
                 ~details:
                   (task_transition_details ~from_status:task.task_status
                      ~to_status:

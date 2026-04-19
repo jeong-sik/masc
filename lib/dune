@@ -153,6 +153,7 @@
    web_dashboard
    credits_dashboard
    repo_synthesis_benchmark
+   room_protocol
 
    inference_utils
    ;; WebRTC modules removed — use ocaml-webrtc library directly

@@ -141,6 +141,82 @@ let task_assignee = function
   | Types.Cancelled { cancelled_by; _ } -> cancelled_by
   | Types.Todo -> "unclaimed"
 
+let active_task_assignee = function
+  | Types.Claimed { assignee; _ }
+  | Types.InProgress { assignee; _ }
+  | Types.AwaitingVerification { assignee; _ } ->
+      Some assignee
+  | Types.Todo | Types.Done _ | Types.Cancelled _ -> None
+
+let assigned_task_ids ~matches_you tasks =
+  List.filter_map
+    (fun (task : Types.task) ->
+      match active_task_assignee task.task_status with
+      | Some assignee when matches_you assignee -> Some task.id
+      | Some _ | None -> None)
+    tasks
+
+type current_binding = {
+  assigned_task_ids : string list;
+  primary_owned : string option;
+  planning_current : string option;
+  current_is_assigned : bool;
+  effective_current : string option;
+  drift_reason : string option;
+  current_task_set : bool;
+  claim_first_suppressed : bool;
+}
+
+let resolve_current_binding ~assigned_task_ids ~planning_current =
+  let primary_owned =
+    match assigned_task_ids with
+    | id :: _ -> Some id
+    | [] -> None
+  in
+  let current_is_assigned =
+    match planning_current with
+    | Some current ->
+        List.exists (fun task_id -> String.equal task_id current)
+          assigned_task_ids
+    | None -> false
+  in
+  let drift_reason =
+    match primary_owned, planning_current with
+    | None, None -> None
+    | Some _, None -> None
+    | None, Some _ -> Some "no_owned"
+    | Some owned, Some current when String.equal owned current -> None
+    | Some _, Some _ when current_is_assigned -> Some "secondary_assignment"
+    | Some _, Some _ -> Some "stale_focus"
+  in
+  let effective_current =
+    match primary_owned, planning_current with
+    | Some owned, Some current when String.equal owned current -> Some current
+    | Some _, Some current when current_is_assigned -> Some current
+    | Some owned, Some _ -> Some owned
+    | Some owned, None -> Some owned
+    | None, Some _ | None, None -> None
+  in
+  let current_task_set =
+    match primary_owned, planning_current with
+    | Some owned, Some current when String.equal owned current -> true
+    | _ -> false
+  in
+  {
+    assigned_task_ids;
+    primary_owned;
+    planning_current;
+    current_is_assigned;
+    effective_current;
+    drift_reason;
+    current_task_set;
+    claim_first_suppressed = assigned_task_ids <> [];
+  }
+
+let task_id_list_label = function
+  | [] -> "[]"
+  | ids -> "[" ^ String.concat "," ids ^ "]"
+
 let agent_status_icon ~is_zombie = function
   | _ when is_zombie -> "💀"
   | Types.Busy -> "🔴"
@@ -225,18 +301,16 @@ let status_summary_string (ctx : context) =
   in
   let active_tasks = List.rev active_tasks in
   let shown_active_tasks = take_items max_active_tasks_display active_tasks in
-  let your_task =
-    active_tasks
-    |> List.find_map (fun (task : Types.task) ->
-           let assignee = task_assignee task.task_status in
-           if matches_you assignee then Some task.id else None)
+  let assigned_task_ids = assigned_task_ids ~matches_you active_tasks in
+  let binding =
+    resolve_current_binding ~assigned_task_ids ~planning_current:current_task
   in
   let guidance =
     Workflow_guide.current_state_guidance
       ~room_set:true
       ~joined
-      ~task_claimed:(Option.is_some your_task)
-      ~current_task_set:(Option.is_some current_task)
+      ~task_claimed:(binding.assigned_task_ids <> [])
+      ~current_task_set:binding.current_task_set
       ~worktree_active ~session_active:false
   in
   let suggested_next =
@@ -252,11 +326,29 @@ let status_summary_string (ctx : context) =
     else
       items
     |> fun items ->
-    if Option.is_some your_task && Option.is_none current_task then
+    if binding.assigned_task_ids <> [] && Option.is_none binding.planning_current then
       items
       @ [ "You own a task but planning current_task is unset. Call masc_plan_set_task." ]
     else
       items
+    |> fun items ->
+    (match binding.drift_reason with
+    | Some "secondary_assignment" ->
+        items
+        @ [
+            "Multiple assigned tasks detected. Current focus is also assigned; choose or reconcile the active lane before claiming new work.";
+          ]
+    | Some "stale_focus" ->
+        items
+        @ [
+            "Owned/current drift detected. Planning current_task is not assigned to you; treat primary_owned as the safe task lane.";
+          ]
+    | Some "no_owned" ->
+        items
+        @ [
+            "Planning current_task is set but no active task is assigned to you; clear or rebind current_task before following it.";
+          ]
+    | Some _ | None -> items)
     |> fun items ->
     if zombie_count > 0 then
       items
@@ -265,7 +357,7 @@ let status_summary_string (ctx : context) =
     else
       items
     |> fun items ->
-    if todo_count > 0 && Option.is_none your_task then
+    if todo_count > 0 && binding.assigned_task_ids = [] then
       items
       @ [ Printf.sprintf "%d unclaimed task(s) are available right now."
             todo_count ]
@@ -288,8 +380,18 @@ let status_summary_string (ctx : context) =
   Buffer.add_string buf
     (Printf.sprintf
        "🧭 You: agent=%s | joined=%s | owned=%s | current=%s | worktree=%s\n"
-       actual_name (bool_flag joined) (option_or_dash your_task)
+       actual_name (bool_flag joined) (option_or_dash binding.primary_owned)
        (option_or_dash current_task) (bool_flag worktree_active));
+  Buffer.add_string buf
+    (Printf.sprintf
+       "🔎 Task binding: assigned_set=%s | primary_owned=%s | planning_current=%s | current_is_assigned=%s | effective_current=%s | drift_reason=%s | claim_first_suppressed=%s\n"
+       (task_id_list_label binding.assigned_task_ids)
+       (option_or_dash binding.primary_owned)
+       (option_or_dash binding.planning_current)
+       (bool_flag binding.current_is_assigned)
+       (option_or_dash binding.effective_current)
+       (option_or_dash binding.drift_reason)
+       (bool_flag binding.claim_first_suppressed));
   if suggested_next <> [] then
     Buffer.add_string buf
       (Printf.sprintf "💡 Suggested next: %s\n"
@@ -385,22 +487,22 @@ let inspect_state ctx =
        with Sys_error _ | Yojson.Json_error _ -> false)
     else false
   in
-  let task_claimed =
+  let binding =
     if joined then
-      let actual_name = Coord.resolve_agent_name ctx.config ctx.agent_name in
-      Coord.get_tasks_raw ctx.config
-      |> List.exists (fun (task : Types.task) ->
-             match task.task_status with
-             | Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ }
-             | Types.AwaitingVerification { assignee; _ } ->
-                 assignee = ctx.agent_name || assignee = actual_name
-             | Types.Todo | Types.Done _ | Types.Cancelled _ -> false)
-    else false
+      let actual_name = safe_resolve_agent_name ctx ~joined in
+      let matches_you assignee =
+        String.equal assignee ctx.agent_name || String.equal assignee actual_name
+      in
+      let assigned_task_ids =
+        Coord.get_tasks_raw ctx.config |> assigned_task_ids ~matches_you
+      in
+      resolve_current_binding ~assigned_task_ids
+        ~planning_current:(safe_current_task ctx ~joined)
+    else
+      resolve_current_binding ~assigned_task_ids:[] ~planning_current:None
   in
-  let current_task_set =
-    if joined then Option.is_some (Planning_eio.get_current_task ctx.config)
-    else false
-  in
+  let task_claimed = binding.assigned_task_ids <> [] in
+  let current_task_set = binding.current_task_set in
   let worktree_active =
     if room_set then
       status_worktree_active ctx
@@ -482,8 +584,8 @@ let assertion_fix_hint = function
   | Task_claimed ->
       "Claim a task with masc_transition(action=claim) or masc_claim_next"
   | Current_task_set ->
-      "Call masc_plan_set_task after claim paths that did not auto-bind \
-       current_task (for example masc_transition(action=claim))"
+      "Call masc_plan_set_task to choose or re-sync the active task when \
+       current_task is unset, stale, or ambiguous"
   | Worktree_active ->
       "Call masc_worktree_create to work in an isolated branch"
 

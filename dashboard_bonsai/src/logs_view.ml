@@ -1586,26 +1586,63 @@ let render_response (response : Logs_types.response) : Node.t =
       ; Node.div ~attrs:[ Style.evrow_b ] body_inline
       ]
   in
-  let evs_stream =
-    Node.div
-      ~attrs:[ Style.evs ]
-      [ ev ~level:`Ok "23:50" [ Node.text "Luna answered the "
-                              ; Node.span ~attrs:[ Style.evrow_b_em ] [ Node.text "third bell" ]
-                              ; Node.text "."
-                              ]
-      ; ev ~level:`Warn "23:47" [ Node.text "storm sealed "
-                                ; Node.span ~attrs:[ Style.evrow_b_code ] [ Node.text "west_wing" ]
-                                ]
-      ; ev ~level:`Info "23:42" [ Node.text "DM narrates the manor under storm." ]
-      ; ev ~level:`Bad "23:29" [ Node.text "keeper "
-                               ; Node.span ~attrs:[ Style.evrow_b_code ] [ Node.text "brass-owl" ]
-                               ; Node.text " crashed mid-turn."
-                               ]
-      ; ev ~level:`Info "23:14" [ Node.text "round "
-                                ; Node.span ~attrs:[ Style.evrow_b_em ] [ Node.text "T3" ]
-                                ; Node.text " opens — DM's turn."
-                                ]
+  (* live evs: WARN/ERROR만 필터, 최근 5개. mock→real 전환. *)
+  let hhmm_of_ts (ts : string) : string =
+    (* "2026-04-19T17:12:03Z" -> "17:12" *)
+    if String.length ts >= 16
+    then String.sub ts ~pos:11 ~len:5
+    else ts
+  in
+  let ev_of_entry (e : Logs_types.entry) : Node.t =
+    let level : [ `Info | `Ok | `Warn | `Bad ] =
+      match e.normalized_level with
+      | "ERROR" -> `Bad
+      | "WARN" -> `Warn
+      | _ -> `Info
+    in
+    let body =
+      [ Node.text e.message
+      ; Node.text " "
+      ; Node.span ~attrs:[ Style.evrow_b_code ] [ Node.text e.module_ ]
       ]
+    in
+    ev ~level (hhmm_of_ts e.ts) body
+  in
+  let evs_stream =
+    let filtered =
+      List.filter response.entries ~f:(fun e ->
+        match e.normalized_level with
+        | "WARN" | "ERROR" -> true
+        | _ -> false)
+    in
+    let top_five =
+      match List.length filtered with
+      | n when n <= 5 -> filtered
+      | _ -> List.take filtered 5
+    in
+    match top_five with
+    | [] ->
+      Node.div
+        ~attrs:[ Style.evs ]
+        [ Node.div
+            ~attrs:[ Style.evrow ]
+            [ Node.div ~attrs:[ Style.evrow_t ] [ Node.text "—" ]
+            ; Node.div ~attrs:[ Style.evrow_mk ] []
+            ; Node.div
+                ~attrs:[ Style.evrow_b ]
+                [ Node.text "조용하다 · 경고 없음" ]
+            ]
+        ]
+    | rows -> Node.div ~attrs:[ Style.evs ] (List.map rows ~f:ev_of_entry)
+  in
+  let evs_tail =
+    let total_alarms =
+      List.count response.entries ~f:(fun e ->
+        match e.normalized_level with
+        | "WARN" | "ERROR" -> true
+        | _ -> false)
+    in
+    Printf.sprintf "%d / ∞" total_alarms
   in
   let aside =
     Node.div
@@ -1617,7 +1654,7 @@ let render_response (response : Logs_types.response) : Node.t =
           ]
       ; Node.div
           ~attrs:[]
-          [ aside_h ~tail:"5 / ∞" "chronicle · recent"
+          [ aside_h ~tail:evs_tail "chronicle · recent"
           ; evs_stream
           ]
       ]

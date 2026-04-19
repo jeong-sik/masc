@@ -18,6 +18,11 @@ val shell_op_to_string : shell_op -> string
 val all_shell_ops : shell_op list
 val valid_shell_op_strings : string list
 
+val gh_min_timeout_sec : float
+(** Minimum timeout_sec floor applied to gh op. Exposed so regression
+    tests can lock the floor against drift back to sub-network-latency
+    values. See #8688. *)
+
 val handle_keeper_bash :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

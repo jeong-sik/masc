@@ -18,6 +18,8 @@ PR7162 and the follow-up metric fixes around synthetic support handling.
   - `GET /api/v1/dashboard/execution`
   - keeper compatibility payload:
     - `keepers[*].trust_observatory.accountability`
+  - projection is omitted when `compact=true` or
+    `MASC_DECISION_LAYER_LEVEL < 3`
 - Runtime source:
   - `Keeper_exec_status_metrics.accountability_summary_json`
 - Durable ledger:
@@ -27,7 +29,8 @@ Treat this as an operator risk summary, not a write path.
 
 ## What This Surface Is
 
-- A 14-day rolling, evidence-first summary for one keeper.
+- A 14-day rolling, evidence-first summary for one keeper based on claim
+  `created_at` values inside the current 14-day window.
 - Separate from popularity signals such as board karma or reputation.
 - A read model that helps an operator decide whether manual review or
   lower-risk routing is preferable.
@@ -43,7 +46,8 @@ It is not:
 ### Explicit completion claim
 
 - Created by `record_completion_claim`.
-- Usually comes from the keeper saying it completed work on `keeper_turn`.
+- Usually comes from a keeper response header block on the direct or unified
+  turn path, rather than from task lifecycle transitions.
 - Stored with `synthetic=false`.
 - Participates in `unsupported_completion_rate` once it resolves or ages into
   `unsupported`.
@@ -70,7 +74,7 @@ evidence visible without diluting real unsupported completion claims.
 
 | Field | Meaning | Operator reading |
 |---|---|---|
-| `window_days` | Summary window size | Currently fixed at 14 days |
+| `window_days` | Summary window size | Currently fixed at 14 days of claim creation time |
 | `task_followthrough_rate` | `supported_task_commitments / resolved_task_commitments` | Low means claimed work is often released, cancelled, or left to expire |
 | `evidence_coverage` | `supported_claims / resolved_claims` | Low means work resolves without enough supporting evidence |
 | `unsupported_completion_rate` | `unsupported explicit completion claims / resolved explicit completion claims` | High means explicit "done" claims are aging unsupported or being contradicted |
@@ -79,6 +83,12 @@ evidence visible without diluting real unsupported completion claims.
 | `risk_band` | `low`, `medium`, `high` | Operator triage bucket |
 | `routing_hint` | `normal_routing`, `prefer_low_risk_when_equivalent`, `manual_review_recommended` | Soft routing guidance only |
 | `history` | Most recent 10 claim snapshots | Use it to see the concrete claim/resolution pattern |
+
+Default ratio behavior when the denominator is zero:
+
+- `task_followthrough_rate = 1.0`
+- `evidence_coverage = 1.0`
+- `unsupported_completion_rate = 0.0`
 
 ## Risk Band Thresholds
 

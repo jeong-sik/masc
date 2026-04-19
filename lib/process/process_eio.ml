@@ -63,6 +63,12 @@ let close_quietly fd =
   try Unix.close fd with
   | Unix.Unix_error _ -> () (* intentional: best-effort cleanup *)
 
+let pause_unix_fallback seconds =
+  try
+    ignore (Unix.select [] [] [] seconds)
+  with Unix.Unix_error (Unix.EINTR, _, _) ->
+    ()
+
 let unix_cwd_mutex = Stdlib.Mutex.create ()
 
 let create_process_env ?cwd prog argv env stdin_fd stdout_fd stderr_fd =
@@ -303,7 +309,7 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
                     timed_out := true;
                     kill_and_wait status_ref
                   end else
-                    Unix.sleepf
+                    pause_unix_fallback
                       (min 0.05
                          (max 0.0 (deadline -. Unix.gettimeofday ())))
             done;

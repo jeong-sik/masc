@@ -32,6 +32,20 @@ let stderr_hints_oom stderr =
   || contains lower "killed (oom)"
   || contains lower "cannot allocate memory"
 
+let first_token s =
+  let len = String.length s in
+  let rec skip_ws i =
+    if i >= len then i
+    else match s.[i] with ' ' | '\t' | '\n' -> skip_ws (i + 1) | _ -> i
+  in
+  let rec take_nonws i =
+    if i >= len then i
+    else match s.[i] with ' ' | '\t' | '\n' -> i | _ -> take_nonws (i + 1)
+  in
+  let start = skip_ws 0 in
+  let stop = take_nonws start in
+  if start = stop then "" else String.sub s start (stop - start)
+
 let interpret ~argv ~status ~stdout:_ ~stderr =
   match status with
   | Unix.WEXITED 0 -> `Ok
@@ -53,6 +67,11 @@ let interpret ~argv ~status ~stdout:_ ~stderr =
       `Oom_killed
   | Unix.WSIGNALED n -> `Signaled n
   | Unix.WSTOPPED n -> `Signaled n
+
+let interpret_cmd ~cmd ~status ~output =
+  let head = first_token cmd in
+  let argv = if head = "" then [] else [ head ] in
+  interpret ~argv ~status ~stdout:"" ~stderr:output
 
 let to_hint = function
   | `Ok -> None

@@ -156,6 +156,83 @@ let test_inline_only_keeps_artifact_refs_empty () =
       let refs = json |> member "artifact_refs" |> to_list in
       check int "no artifact ref" 0 (List.length refs))
 
+(* ---------- P1 Tick 3: Exec_semantic JSON integration ------------------ *)
+
+let with_semantic_flag enabled f =
+  let prev = Sys.getenv_opt "MASC_BASH_SEMANTIC_EXIT" in
+  Unix.putenv "MASC_BASH_SEMANTIC_EXIT" (if enabled then "1" else "");
+  let restore () =
+    match prev with
+    | Some v -> Unix.putenv "MASC_BASH_SEMANTIC_EXIT" v
+    | None -> Unix.putenv "MASC_BASH_SEMANTIC_EXIT" ""
+  in
+  match f () with
+  | v -> restore (); v
+  | exception e -> restore (); raise e
+
+let run_json ~cmd ~status ~output =
+  Masc_mcp.Exec_core.process_result_json
+    ~base_path:"/tmp"
+    ~keeper_name:"exec-core-semantic"
+    ~cmd
+    ~status
+    ~output
+    ()
+
+let test_semantic_off_by_default () =
+  with_semantic_flag false (fun () ->
+    let json = run_json ~cmd:"ls" ~status:(Unix.WEXITED 0) ~output:"" in
+    match json |> member "semantic_exit" with
+    | `Null -> ()
+    | _ -> fail "semantic_exit must be absent when flag is off")
+
+let test_semantic_ok_when_flag_on () =
+  with_semantic_flag true (fun () ->
+    let json = run_json ~cmd:"ls" ~status:(Unix.WEXITED 0) ~output:"" in
+    let sem = json |> member "semantic_exit" in
+    check string "kind=ok" "ok" (sem |> member "kind" |> to_string))
+
+let test_semantic_fail_carries_exit_code () =
+  with_semantic_flag true (fun () ->
+    let json = run_json ~cmd:"ls /no/such/path"
+                 ~status:(Unix.WEXITED 2) ~output:"ls: …" in
+    let sem = json |> member "semantic_exit" in
+    check string "kind=fail" "fail" (sem |> member "kind" |> to_string);
+    check int "exit_code=2" 2 (sem |> member "exit_code" |> to_int);
+    check bool "rci present" true
+      (match json |> member "return_code_interpretation" with
+       | `String _ -> true | _ -> false))
+
+let test_semantic_git_not_a_repo () =
+  with_semantic_flag true (fun () ->
+    let json = run_json ~cmd:"git status" ~status:(Unix.WEXITED 128)
+                 ~output:"fatal: not a git repository" in
+    let sem = json |> member "semantic_exit" in
+    check string "kind=git_not_a_repo" "git_not_a_repo"
+      (sem |> member "kind" |> to_string))
+
+let test_semantic_tool_missing_payload () =
+  with_semantic_flag true (fun () ->
+    let json = run_json ~cmd:"notarealtool --help"
+                 ~status:(Unix.WEXITED 127)
+                 ~output:"bash: notarealtool: command not found" in
+    let sem = json |> member "semantic_exit" in
+    check string "kind=tool_missing" "tool_missing"
+      (sem |> member "kind" |> to_string);
+    check string "tool=notarealtool" "notarealtool"
+      (sem |> member "tool" |> to_string))
+
+let test_semantic_flag_isolation () =
+  (* Flipping off after on must hide the field again. *)
+  with_semantic_flag true (fun () ->
+    let _ = run_json ~cmd:"ls" ~status:(Unix.WEXITED 0) ~output:"" in
+    ());
+  with_semantic_flag false (fun () ->
+    let json = run_json ~cmd:"ls" ~status:(Unix.WEXITED 0) ~output:"" in
+    match json |> member "semantic_exit" with
+    | `Null -> ()
+    | _ -> fail "semantic_exit must stay absent after flag flips off")
+
 let () =
   run "exec_core"
     [
@@ -177,5 +254,19 @@ let () =
             test_large_output_persists_artifact;
           test_case "inline only keeps artifact refs empty" `Quick
             test_inline_only_keeps_artifact_refs_empty;
+        ] );
+      ( "semantic_exit",
+        [
+          test_case "flag off by default hides field" `Quick
+            test_semantic_off_by_default;
+          test_case "ok kind on exit 0" `Quick test_semantic_ok_when_flag_on;
+          test_case "fail kind carries exit_code" `Quick
+            test_semantic_fail_carries_exit_code;
+          test_case "git exit 128 maps to git_not_a_repo" `Quick
+            test_semantic_git_not_a_repo;
+          test_case "exit 127 maps to tool_missing with tool payload"
+            `Quick test_semantic_tool_missing_payload;
+          test_case "flag flip isolates state" `Quick
+            test_semantic_flag_isolation;
         ] );
     ]

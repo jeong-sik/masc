@@ -39,6 +39,20 @@ val interpret :
 (** Map a finished [Unix.process_status] plus captured output into a
     semantic classification.
 
+    Callers that only have a merged [output] string (e.g.
+    [Exec_core.outcome]) should use [interpret_cmd] instead. *)
+
+val interpret_cmd :
+  cmd:string ->
+  status:Unix.process_status ->
+  output:string ->
+  t
+(** Best-effort [interpret] for call sites that carry a single
+    [cmd:string] instead of an [argv] list and a merged
+    [output:string] (stdout ++ stderr) instead of split streams.
+    The first whitespace-separated token is treated as the argv head
+    for tool-name heuristics; OOM detection scans the merged output.
+
     Heuristics (ported from claude-code [interpretCommandResult]):
     - exit 128 on [git …]  -> [`Git_not_a_repo]
     - exit 127             -> [`Tool_missing]
@@ -49,6 +63,8 @@ val interpret :
     - otherwise exit n     -> [`Fail n]
 
     [interpret] is total and never raises. *)
+
+    (* interpret_cmd doc intentionally above; keeps interpret doc local. *)
 
 val to_hint : t -> string option
 (** Human-readable operator hint for LLM consumption. None for [`Ok]. *)

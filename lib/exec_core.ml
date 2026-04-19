@@ -516,6 +516,45 @@ let build_blocked_outcome ~cmd ~error ~reason ?hint ?(retryability = Self_correc
       summary;
     }
 
+let semantic_payload_to_yojson (key, value) =
+  let v : Yojson.Safe.t =
+    match value with
+    | `String s -> `String s
+    | `Int i -> `Int i
+    | `Float f -> `Float f
+  in
+  (key, v)
+
+let semantic_fields_of_executed (result : executed_result) :
+    (string * Yojson.Safe.t) list =
+  if not (Masc_exec.Exec_semantic.enabled ()) then []
+  else
+    let sem =
+      Masc_exec.Exec_semantic.interpret_cmd
+        ~cmd:result.command
+        ~status:result.process_status
+        ~output:result.output
+    in
+    let kind = Masc_exec.Exec_semantic.to_kind sem in
+    let payload_fields =
+      Masc_exec.Exec_semantic.to_payload sem
+      |> List.map semantic_payload_to_yojson
+    in
+    let hint_field =
+      match Masc_exec.Exec_semantic.to_hint sem with
+      | None -> []
+      | Some h -> [ "hint", `String h ]
+    in
+    let semantic_obj : Yojson.Safe.t =
+      `Assoc (("kind", `String kind) :: payload_fields @ hint_field)
+    in
+    let rci_field =
+      match Masc_exec.Exec_semantic.to_hint sem with
+      | None -> []
+      | Some h -> [ "return_code_interpretation", `String h ]
+    in
+    ("semantic_exit", semantic_obj) :: rci_field
+
 let outcome_to_json ?(extra = []) = function
   | Executed result ->
       let hint_fields =
@@ -540,7 +579,8 @@ let outcome_to_json ?(extra = []) = function
              ("summary", `String result.summary);
              ("artifact_refs", `List (List.map artifact_ref_to_json result.artifact_refs));
            ]
-         @ hint_fields)
+         @ hint_fields
+         @ semantic_fields_of_executed result)
   | Blocked_result result ->
       `Assoc
         ([

@@ -48,6 +48,10 @@ val reset_autonomous_turn_queue_for_test : unit -> unit
 (** Test-only snapshot of keeper names currently queued for an autonomous turn. *)
 val autonomous_waiter_snapshot_for_test : unit -> string list
 
+(** Test-only snapshots of the current semaphore availability. *)
+val turn_semaphore_value_for_test : unit -> int
+val autonomous_turn_semaphore_value_for_test : unit -> int
+
 (** Test-only FIFO queue primitives for autonomous fairness regression tests. *)
 val enqueue_autonomous_waiter_for_test : string -> int
 val drop_autonomous_waiter_for_test : int -> unit
@@ -62,6 +66,13 @@ val record_autonomous_completion_at_for_test : keeper_name:string -> ts:float ->
 
 (** Test-only: clear all per-keeper completion timestamps. *)
 val reset_autonomous_completion_for_test : unit -> unit
+
+(** Test-only wrapper around the keeper turn slot acquisition path. *)
+val with_keeper_turn_slot_for_test :
+  keeper_name:string ->
+  channel:Keeper_world_observation.keeper_cycle_channel ->
+  (semaphore_wait_ms:int -> 'a) ->
+  'a
 
 val wakeup_relevant_keeper_for_board_signal :
   config:Coord.config -> Board_dispatch.keeper_board_signal -> unit

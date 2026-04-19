@@ -60,6 +60,12 @@ let () =
 
 let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit
 
+let turn_semaphore_value_for_test () =
+  Eio.Semaphore.get_value turn_semaphore
+
+let autonomous_turn_semaphore_value_for_test () =
+  Eio.Semaphore.get_value autonomous_turn_semaphore
+
 type autonomous_waiter =
   {
     ticket : int;
@@ -358,6 +364,10 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
       let semaphore_wait_ms =
         int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
       f ~semaphore_wait_ms)
+;;
+
+let with_keeper_turn_slot_for_test ~keeper_name ~channel f =
+  with_keeper_turn_slot ~keeper_name ~channel f
 ;;
 
 (** Optional gRPC client + env — WORM Atomic: set at server bootstrap

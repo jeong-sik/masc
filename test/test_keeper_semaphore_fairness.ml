@@ -109,6 +109,45 @@ let test_delay_decreases_with_elapsed_time () =
   KK.drop_autonomous_waiter_for_test ticket;
   Alcotest.(check bool) "delay decreases over time" true (delay_1s > delay_3s)
 
+let test_reactive_slot_released_when_body_raises () =
+  Eio_main.run @@ fun _env ->
+  let before = KK.turn_semaphore_value_for_test () in
+  let completed =
+    try
+      Some
+        (KK.with_keeper_turn_slot_for_test ~keeper_name:"reactive-test"
+           ~channel:Masc_mcp.Keeper_world_observation.Reactive
+           (fun ~semaphore_wait_ms:_ -> raise Exit))
+    with Exit -> None
+  in
+  Alcotest.(check bool) "body exception propagated" true
+    (Option.is_none completed);
+  Alcotest.(check int) "turn semaphore restored" before
+    (KK.turn_semaphore_value_for_test ())
+
+let test_autonomous_slot_released_when_body_raises () =
+  Eio_main.run @@ fun _env ->
+  KK.reset_autonomous_turn_queue_for_test ();
+  KK.reset_autonomous_completion_for_test ();
+  let before_turn = KK.turn_semaphore_value_for_test () in
+  let before_autonomous = KK.autonomous_turn_semaphore_value_for_test () in
+  let completed =
+    try
+      Some
+        (KK.with_keeper_turn_slot_for_test ~keeper_name:"autonomous-test"
+           ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
+           (fun ~semaphore_wait_ms:_ -> raise Exit))
+    with Exit -> None
+  in
+  Alcotest.(check bool) "body exception propagated" true
+    (Option.is_none completed);
+  Alcotest.(check int) "turn semaphore restored" before_turn
+    (KK.turn_semaphore_value_for_test ());
+  Alcotest.(check int) "autonomous semaphore restored" before_autonomous
+    (KK.autonomous_turn_semaphore_value_for_test ());
+  Alcotest.(check (list string)) "autonomous queue drained" []
+    (KK.autonomous_waiter_snapshot_for_test ())
+
 let () =
   Alcotest.run "Keeper_semaphore_fairness"
     [
@@ -130,5 +169,12 @@ let () =
             (with_fresh_state test_reset_clears_completion_table);
           Alcotest.test_case "delay decreases with elapsed time" `Quick
             (with_fresh_state test_delay_decreases_with_elapsed_time);
+        ] );
+      ( "slot_release",
+        [
+          Alcotest.test_case "reactive slot released when body raises" `Quick
+            (with_fresh_state test_reactive_slot_released_when_body_raises);
+          Alcotest.test_case "autonomous slot released when body raises" `Quick
+            (with_fresh_state test_autonomous_slot_released_when_body_raises);
         ] );
     ]

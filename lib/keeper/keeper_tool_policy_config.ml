@@ -192,7 +192,9 @@ let config_root_for_base_path ~base_path =
     else base_path
   in
   let direct_config = Filename.concat base_path "config" in
-  let direct_policy = Filename.concat direct_config "tool_policy.toml" in
+  let direct_policy =
+    Filename.concat direct_config Config_dir_resolver.tool_policy_toml_filename
+  in
   if Sys.file_exists direct_policy then (direct_config, [])
   else
     let inputs = Config_dir_resolver.inputs_from_env () in
@@ -202,7 +204,9 @@ let config_root_for_base_path ~base_path =
 
 let load ~base_path : (t, string) result =
   let config_root, resolution_warnings = config_root_for_base_path ~base_path in
-  let path = Filename.concat config_root "tool_policy.toml" in
+  let path =
+    Filename.concat config_root Config_dir_resolver.tool_policy_toml_filename
+  in
   match Safe_ops.read_file_safe path with
   | Error msg ->
       let warning_detail =

@@ -206,7 +206,9 @@ let analyze_with (inputs : inputs) =
   let repo_config_seed_path = repo_config_seed_path inputs in
   let keeper_runtime_toml_present =
     Env_config_core.existing_file
-      (Filename.concat active_config_root "keeper_runtime.toml")
+      (Filename.concat
+         active_config_root
+         Config_dir_resolver.keeper_runtime_toml_filename)
   in
   let path_diag =
     Server_base_path_diagnostics.detect

@@ -1,5 +1,5 @@
 open Operator_pending_confirm
-open Result_syntax
+open Result.Syntax
 
 include Operator_digest_types
 (* Operator_digest_session removed — team session cleanup *)

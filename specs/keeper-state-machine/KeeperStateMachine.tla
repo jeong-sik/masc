@@ -512,13 +512,14 @@ OfflineRequiresLaunchPending ==
 \*      runaway is caught by the retry latch + OverflowedResolves
 \*      instead.
 
-\* S11: CompactionClearsOverflow — action property: whenever compaction
-\*      goes from active to inactive, context_overflow must become false.
-\*      This encodes the CompactionCompleted contract: compaction resolves
-\*      the overflow condition. Replaces OverflowedNeverStutters (which
-\*      over-constrained by forbidding heartbeat changes in Overflowed).
+\* S11: CompactionClearsOverflow — action property: a successful
+\*      [CompactionCompleted] must clear the overflow flags.  A failed
+\*      compaction is allowed to leave [context_overflow] set so the
+\*      retry loop can re-enter [Overflowed] or latch [Paused] via
+\*      [compact_retry_exhausted].
 CompactionClearsOverflow ==
-    [][compaction_active /\ ~compaction_active' => ~context_overflow']_vars
+    [][CompactionCompleted =>
+         (~context_overflow' /\ ~compact_retry_exhausted')]_vars
 
 \* ── Liveness Properties ───────────────────────────────────
 
@@ -588,7 +589,7 @@ TypeOK ==
 \* violates CompactionClearsOverflow (compaction completed but
 \* context_overflow remains true).
 \*
-\* Used by: KeeperOverflowRecovery-buggy.cfg (SPECIFICATION SpecBuggy)
+\* Used by: KeeperStateMachine-overflow-buggy.cfg (SPECIFICATION SpecBuggy)
 
 BuggyCompactionCompleted ==
     /\ NotTerminal /\ compaction_active
@@ -603,6 +604,14 @@ BuggyCompactionCompleted ==
                    guardrail_triggered, drain_complete,
                    context_overflow, compact_retry_exhausted,
                    restart_count>>
+
+\* Buggy model witness: the buggy completion step above must still clear
+\* the overflow flags.  Kept separate from [CompactionClearsOverflow] so
+\* the clean spec can distinguish [CompactionCompleted] from the now-valid
+\* [CompactionFailed] transition that preserves [context_overflow].
+BuggyCompactionClearsOverflow ==
+    [][BuggyCompactionCompleted =>
+         (~context_overflow' /\ ~compact_retry_exhausted')]_vars
 
 NextBuggy ==
     \/ HeartbeatOk      \/ HeartbeatFailed

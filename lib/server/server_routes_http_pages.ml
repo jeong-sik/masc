@@ -279,6 +279,62 @@ let serve_dashboard_static name request reqd =
   | Error _ ->
       Http.Response.not_found reqd
 
+(** Dashboard Bonsai island (Jane Street Bonsai + js_of_ocaml).
+    Coexists with the Preact SPA under [/dashboard/b/*] until the migration is
+    complete. See planning/claude-plans/masc-mcp-eventual-parrot.md. *)
+let bonsai_asset_root () =
+  Filename.concat (assets_root ()) "dashboard_bonsai"
+
+let bonsai_index_html =
+  {|<!doctype html>
+<html lang="en" data-theme="dark-fantasy">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>masc-mcp · Bonsai</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap">
+<style>
+  html, body { background: #0a0706; margin: 0; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="/dashboard/b/assets/main.bc.js"></script>
+</body>
+</html>
+|}
+
+let serve_bonsai_index _request reqd =
+  Http.Response.html bonsai_index_html reqd
+
+let serve_bonsai_static name request reqd =
+  let path = Filename.concat (bonsai_asset_root ()) name in
+  match read_file path with
+  | Ok body ->
+      let content_type = asset_content_type name in
+      let cache_control =
+        if Filename.check_suffix name ".html" then
+          dashboard_index_cache_control
+        else
+          "public, max-age=31536000, immutable"
+      in
+      let final_body, encoding_headers =
+        if is_compressible_asset name && Http.Compression.accepts_zstd request then
+          let (compressed, did_compress) = Http.Compression.compress_zstd ~level:3 body in
+          if did_compress then
+            (compressed, [("content-encoding", "zstd"); ("vary", "Accept-Encoding")])
+          else
+            (body, [])
+        else
+          (body, [])
+      in
+      let headers = ("cache-control", cache_control) :: encoding_headers in
+      Http.Response.bytes ~headers ~content_type final_body reqd
+  | Error _ ->
+      Http.Response.not_found reqd
+
 let favicon_svg = {|
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <rect width="64" height="64" rx="12" fill="#0f172a"/>

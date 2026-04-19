@@ -49,6 +49,17 @@ let rec waitpid_nointr pid =
   | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
   | Unix.Unix_error (Unix.ECHILD, _, _) -> None
 
+let with_dev_null_fds f =
+  let in_fd = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0 in
+  let out_fd = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
+  let err_fd = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
+  Fun.protect
+    ~finally:(fun () ->
+      close_quietly in_fd;
+      close_quietly out_fd;
+      close_quietly err_fd)
+    (fun () -> f ~in_fd ~out_fd ~err_fd)
+
 let wait_until ~timeout_sec f =
   let deadline = Unix.gettimeofday () +. timeout_sec in
   let rec loop () =
@@ -123,8 +134,9 @@ let spawn_forever_process ?argv0 ~ignore_sigterm () =
         else
           "while :; do sleep 1; done"
       in
-      Unix.create_process "/bin/sh" [| name; "-c"; script |]
-        Unix.stdin Unix.stdout Unix.stderr
+      with_dev_null_fds (fun ~in_fd ~out_fd ~err_fd ->
+          Unix.create_process "/bin/sh" [| name; "-c"; script |]
+            in_fd out_fd err_fd)
   | None ->
       match Unix.fork () with
       | 0 ->

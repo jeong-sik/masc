@@ -234,10 +234,16 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
       | _ -> []
     in
     try
+      let argv = argv @ [ "--data-binary"; "@-" ] in
+      let raw_source = String.concat " " (List.map Filename.quote argv) in
       let status, raw_body =
-        Process_eio.run_argv_with_stdin_and_status
-          ~timeout_sec:20.0 ~stdin_content:request_body
-          (argv @ [ "--data-binary"; "@-" ])
+        Masc_exec.Exec_gate.run_argv_with_stdin_and_status
+          ~actor:"system/worker_container_types"
+          ~raw_source
+          ~summary:"worker container curl fallback"
+          ~timeout_sec:20.0
+          ~stdin_content:request_body
+          argv
       in
       match status with
       | Unix.WEXITED 0 -> Ok raw_body

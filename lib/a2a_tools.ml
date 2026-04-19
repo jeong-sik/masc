@@ -236,7 +236,12 @@ let fetch_remote_agent_card url :
         in
         try
           let (status, body) =
-            Process_eio.run_argv_with_status ~timeout_sec:Env_config_runtime.Timeout.gcloud_auth_sec argv
+            Masc_exec.Exec_gate.run_argv_with_status
+              ~actor:"tool/a2a_discovery"
+              ~raw_source:(String.concat " " (List.map Filename.quote argv))
+              ~summary:"a2a remote agent discovery"
+              ~timeout_sec:Env_config_runtime.Timeout.gcloud_auth_sec
+              argv
           in
           match status with
           | Unix.WEXITED 0 when String.length body > 0 -> (

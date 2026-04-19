@@ -109,9 +109,14 @@ let process_matches_runtime_ports ports (process : llama_process) =
   | None -> false
 
 let discover_processes () =
+  let argv = [ "ps"; "-ax"; "-o"; "pid=,command=" ] in
   let status, body =
-    Process_eio.run_argv_with_status ~timeout_sec:5.0
-      [ "ps"; "-ax"; "-o"; "pid=,command=" ]
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"tool/local_runtime"
+      ~raw_source:(String.concat " " (List.map Filename.quote argv))
+      ~summary:"tool local runtime process discovery"
+      ~timeout_sec:5.0
+      argv
   in
   match status with
   | Unix.WEXITED 0 ->
@@ -166,9 +171,14 @@ let fetch_models_at base_url =
   let url =
     String.trim base_url ^ Masc_network_defaults.openai_models_path
   in
+  let argv = [ "curl"; "-sS"; "--max-time"; "10"; url ] in
   let status, body =
-    Process_eio.run_argv_with_status ~timeout_sec:15.0
-      [ "curl"; "-sS"; "--max-time"; "10"; url ]
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"tool/local_runtime"
+      ~raw_source:(String.concat " " (List.map Filename.quote argv))
+      ~summary:"tool local runtime fetch models"
+      ~timeout_sec:15.0
+      argv
   in
   match status with
   | Unix.WEXITED 0 -> (

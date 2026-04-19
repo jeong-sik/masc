@@ -26,6 +26,16 @@ let network_mode_enum_strings =
 let shared_memory_scope_enum_strings =
   [ "disabled"; "room" ]
 
+(** Issue #8486: hand-mirrored from
+    [Keeper_status_detail.valid_tail_order_strings].  Same cycle
+    constraint — Keeper_schema is upstream of Keeper_status_detail.
+    The test [test_types.ml :: tail_order_ssot] asserts this mirror
+    stays in sync with the SSOT so adding a 3rd ordering constructor
+    fails compilation in [tail_order_to_string] AND fails the test
+    here, instead of silently dropping from the JSON Schema. *)
+let tail_order_enum_strings =
+  [ "oldest_first"; "newest_first" ]
+
 let string_array_schema =
   `Assoc [
     ("type", `String "array");
@@ -350,7 +360,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tail_order", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "oldest_first"; `String "newest_first"]);
+          ("enum", `List (List.map (fun s -> `String s) tail_order_enum_strings));
           ("description", `String "Ordering for metrics/history/compaction tails and recent memory notes. Default: oldest_first (compat).");
         ]);
         ("fast", `Assoc [

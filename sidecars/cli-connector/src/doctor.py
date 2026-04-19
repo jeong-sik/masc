@@ -27,7 +27,7 @@ if str(_shared_root) not in sys.path:
 
 import httpx  # noqa: E402
 
-from gate_shared import Check, Doctor, Severity  # noqa: E402
+from gate_shared import AutoFix, Check, Doctor, Severity  # noqa: E402
 from gate_shared.doctor import (  # noqa: E402
     NETWORK_TIMEOUT_SEC,
     check_dependencies_installed,
@@ -130,6 +130,10 @@ async def check_gate_reachable() -> Check:
             detail=url,
             message=res,
             hint="MASC 서버 기동 여부 확인 (./start-masc-mcp.sh)",
+            auto_fix=AutoFix(
+                description="MASC 서버를 다른 터미널에서 기동: ./start-masc-mcp.sh",
+                command="./start-masc-mcp.sh",
+            ),
         )
     if res.status_code >= 500:
         return Check(
@@ -180,6 +184,10 @@ async def check_keepers_available() -> Check:
             detail="0 keepers",
             message="서버에 등록된 keeper 가 없습니다.",
             hint="config/keepers/*.toml 에 keeper 를 정의하거나 runtime 등록 수행",
+            auto_fix=AutoFix(
+                description="config/keepers/ 에 keeper TOML 추가 후 서버 재기동, 또는 runtime 등록 API 호출",
+                command="ls $MASC_BASE_PATH/config/keepers/",
+            ),
         )
     return Check(
         name="keepers available",
@@ -204,12 +212,17 @@ async def check_default_keeper_exists() -> Check:
     except ValueError:
         return Check(name="default keeper exists", severity=Severity.skip, message="keepers 응답 파싱 실패")
     if default not in names:
+        suggested = names[0] if names else default
         return Check(
             name="default keeper exists",
             severity=Severity.warn,
             detail=default,
             message=f"CLI_DEFAULT_KEEPER='{default}' 가 등록된 keeper 목록에 없습니다. CLI 는 여전히 직접 이름 지정으로 동작합니다.",
-            hint="python -m src <existing_keeper_name> 으로 직접 지정",
+            hint=f"등록된 keeper: {', '.join(names[:5]) or '(none)'} — python -m src <existing_keeper_name> 으로 직접 지정",
+            auto_fix=AutoFix(
+                description=f"CLI_DEFAULT_KEEPER 를 실제 등록된 keeper 로 변경 (예: '{suggested}')",
+                command=f"export CLI_DEFAULT_KEEPER={suggested}",
+            ),
         )
     return Check(
         name="default keeper exists",

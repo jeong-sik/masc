@@ -32,6 +32,15 @@ let test_git_status_classified_as_git_read () =
   | [ Capability.Git (Git_op.Read `Status) ] -> ()
   | _ -> assert false
 
+let test_git_status_with_cwd_flag_classified_as_git_read () =
+  let ir =
+    Shell_ir.Simple
+      (simple ~args:[ lit "-C"; lit "/tmp/repo"; lit "status" ] (bin_ok "git"))
+  in
+  match Capability_check.of_ir ir with
+  | [ Capability.Git (Git_op.Read `Status) ] -> ()
+  | _ -> assert false
+
 let test_git_push_force_destructive () =
   let ir =
     Shell_ir.Simple
@@ -117,6 +126,7 @@ let test_pipeline_folds_caps () =
 let () =
   test_ls_emits_exec_bin ();
   test_git_status_classified_as_git_read ();
+  test_git_status_with_cwd_flag_classified_as_git_read ();
   test_git_push_force_destructive ();
   test_git_with_var_falls_back_to_exec_bin ();
   test_env_set_prefix_emitted_first ();

@@ -41,24 +41,30 @@ let raw_completion_at ~server_url ~model_id ~prompt ~max_tokens ~timeout_sec () 
   in
   let started = Time_compat.now () in
   try
+    let argv =
+      [
+        "curl";
+        "-sS";
+        "--http1.1";
+        "--max-time";
+        string_of_int (max 1 timeout_sec);
+        "-X";
+        "POST";
+        url;
+        "-H";
+        "content-type: application/json";
+        "--data-binary";
+        "@-";
+      ]
+    in
     let status, body =
-      Process_eio.run_argv_with_stdin_and_status
+      Masc_exec.Exec_gate.run_argv_with_stdin_and_status
+        ~actor:"tool/local_runtime_bench"
+        ~raw_source:(String.concat " " (List.map Filename.quote argv))
+        ~summary:"tool local runtime raw completion"
         ~timeout_sec:(float_of_int (max 1 (timeout_sec + 2)))
         ~stdin_content:request_body
-        [
-          "curl";
-          "-sS";
-          "--http1.1";
-          "--max-time";
-          string_of_int (max 1 timeout_sec);
-          "-X";
-          "POST";
-          url;
-          "-H";
-          "content-type: application/json";
-          "--data-binary";
-          "@-";
-        ]
+        argv
     in
     let latency_ms =
       int_of_float ((Time_compat.now () -. started) *. 1000.0)

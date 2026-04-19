@@ -28,20 +28,27 @@ let append_headers args headers =
   List.rev_append header_args_rev args
 
 let http_get_text_with_status_with_headers ?(timeout_sec = 10) ?(headers = []) url =
-  let status, body =
-    Process_eio.run_argv_with_status
-      (append_headers
-         [
-         "curl";
-         "-sS";
-         "--http1.1";
-         "--max-time";
-         string_of_int (max 1 timeout_sec);
+  let argv =
+    append_headers
+      [
+        "curl";
+        "-sS";
+        "--http1.1";
+        "--max-time";
+        string_of_int (max 1 timeout_sec);
         "-w";
         "\n%{http_code}";
-         url;
-       ]
-         headers)
+        url;
+      ]
+      headers
+  in
+  let status, body =
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"tool/local_runtime"
+      ~raw_source:(String.concat " " (List.map Filename.quote argv))
+      ~summary:"tool local runtime http get"
+      ~timeout_sec:(float_of_int (max 1 timeout_sec))
+      argv
   in
   match status with
   | Unix.WEXITED 0 ->
@@ -66,13 +73,12 @@ let http_get_json_with_status ?(timeout_sec = 10) url =
         Error (Printf.sprintf "invalid json from %s: %s" url msg))
 
 let http_post_json_text_with_status_with_headers ~timeout_sec ?(headers = []) ~url ~body_json () =
-  let status, body =
-    Process_eio.run_argv_with_status
-      (append_headers
-         [
-         "curl";
-         "-sS";
-         "--http1.1";
+  let argv =
+    append_headers
+      [
+        "curl";
+        "-sS";
+        "--http1.1";
         "--max-time";
         string_of_int (max 1 timeout_sec);
         "-H";
@@ -81,9 +87,17 @@ let http_post_json_text_with_status_with_headers ~timeout_sec ?(headers = []) ~u
         body_json;
         "-w";
         "\n%{http_code}";
-         url;
-       ]
-         headers)
+        url;
+      ]
+      headers
+  in
+  let status, body =
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"tool/local_runtime"
+      ~raw_source:(String.concat " " (List.map Filename.quote argv))
+      ~summary:"tool local runtime http post"
+      ~timeout_sec:(float_of_int (max 1 timeout_sec))
+      argv
   in
   match status with
   | Unix.WEXITED 0 ->

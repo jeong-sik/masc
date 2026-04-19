@@ -254,28 +254,6 @@ let parse_command cmd =
   let parts = String.split_on_char ' ' cmd in
   List.filter (fun s -> String.length s > 0) parts
 
-let close_quietly fd =
-  try Unix.close fd with
-  | Unix.Unix_error _ -> ()
-
-let remove_temp_file_quietly path =
-  try Sys.remove path with
-  | Sys_error _ -> ()
-
-let create_stderr_tempfile () =
-  let path = Filename.temp_file "masc_spawn_stderr" ".tmp" in
-  let fd =
-    Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC; Unix.O_CLOEXEC ] 0o600
-  in
-  (path, fd)
-
-let read_stderr_capture path =
-  try In_channel.with_open_bin path In_channel.input_all with
-  | _ ->
-    Printf.sprintf
-      "(stderr capture error) failed to read captured stderr file %s"
-      (Filename.basename path)
-
 let output_for_status ~(status : Unix.process_status) ~(stdout : string)
     ~(stderr : string) : string =
   match status with
@@ -290,59 +268,6 @@ let fallback_spawn_failure_output ~exit_code =
   Printf.sprintf
     "spawned agent exited with code %d without any stdout/stderr output"
     exit_code
-
-(** Mutex to serialize Sys.chdir + Unix.create_process.
-    Sys.chdir mutates process-global CWD; concurrent spawns without
-    serialization cause child processes to inherit the wrong directory. *)
-let chdir_mutex = Eio.Mutex.create ()
-
-(** Fork a subprocess with optional CWD change, holding [chdir_mutex]
-    only for the chdir-fork-restore window.  Returns the child pid, stdout
-    pipe, and a private stderr capture path. *)
-let fork_with_cwd ~cmd_array ~stdin_content ~working_dir ~config_working_dir =
-  Eio_guard.with_mutex chdir_mutex (fun () ->
-    let original_dir = Sys.getcwd () in
-    let target_dir = match working_dir with
-      | Some dir -> Some dir
-      | None -> config_working_dir
-    in
-    Option.iter Sys.chdir target_dir;
-    Fun.protect
-      ~finally:(fun () ->
-        if Option.is_some target_dir then Sys.chdir original_dir)
-      (fun () ->
-        let stdout_read, stdout_write = Unix.pipe ~cloexec:true () in
-        let stdin_read, stdin_write = Unix.pipe ~cloexec:true () in
-        let stderr_path, stderr_fd = create_stderr_tempfile () in
-        try
-          Exec_tap.record
-            ~kind:Exec_tap.Unix_create_process
-            ~argv:(Array.to_list cmd_array)
-            ?cwd:target_dir ();
-          let pid =
-            Unix.create_process (Array.get cmd_array 0) cmd_array stdin_read
-              stdout_write stderr_fd
-          in
-          Unix.close stdout_write;
-          Unix.close stdin_read;
-          Unix.close stderr_fd;
-          let rec write_all off len =
-            if len > 0 then begin
-              let written = Unix.write_substring stdin_write stdin_content off len in
-              write_all (off + written) (len - written)
-            end
-          in
-          write_all 0 (String.length stdin_content);
-          Unix.close stdin_write;
-          (pid, stdout_read, stderr_path)
-        with exn ->
-          close_quietly stdout_read;
-          close_quietly stdout_write;
-          close_quietly stdin_read;
-          close_quietly stdin_write;
-          close_quietly stderr_fd;
-          remove_temp_file_quietly stderr_path;
-          raise exn))
 
 let add_default_model_arg agent_name argv =
   match Provider_adapter.resolve_direct_adapter agent_name with
@@ -412,43 +337,29 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
        preventing --allowed-tools array values from leaking into
        positional query slot. Fixes gemini "Cannot use both a positional
        prompt and the --prompt (-p) flag together" error. (#5975) *)
-    let cmd_args =
-      [ "timeout"; string_of_int timeout ] @ base_args @ prompt_args @ mcp_args
-    in
-    let cmd_array = Array.of_list cmd_args in
-
+    let cmd_args = base_args @ prompt_args @ mcp_args in
     let stdin_content = if config.stdin_prompt then augmented_prompt else "" in
+    let cwd =
+      match working_dir with
+      | Some dir -> Some dir
+      | None -> config.working_dir
+    in
+    let raw_source = String.concat " " (List.map Filename.quote cmd_args) in
 
     try
-      (* Fork with chdir mutex to prevent CWD race between concurrent spawns *)
-      let (pid, stdout_read, stderr_path) =
-        fork_with_cwd ~cmd_array ~stdin_content
-          ~working_dir ~config_working_dir:config.working_dir
+      let raw_output, stderr_output, status =
+        let status, stdout, stderr =
+          Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
+            ~actor:"system/spawn"
+            ~raw_source
+            ~summary:"spawn agent cli"
+            ~timeout_sec:(float_of_int timeout)
+            ?cwd
+            ~stdin_content
+            cmd_args
+        in
+        (stdout, stderr, status)
       in
-
-      (* Read output + wait in systhread to avoid blocking the Eio event loop.
-         Without this, a long-running subprocess (e.g. fire_task) freezes the
-         entire server — health endpoint, SSE, all keeper fibers. *)
-      let (raw_output, stderr_output, status) =
-        Fun.protect
-          ~finally:(fun () -> remove_temp_file_quietly stderr_path)
-          (fun () ->
-            Eio_guard.run_in_systhread (fun () ->
-              let ic = Unix.in_channel_of_descr stdout_read in
-              let output =
-                Fun.protect
-                  ~finally:(fun () -> In_channel.close ic)
-                  (fun () -> In_channel.input_all ic)
-              in
-              let rec waitpid_retry () =
-                try Unix.waitpid [] pid
-                with Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_retry ()
-              in
-              let (_, status) = waitpid_retry () in
-              (output, read_stderr_capture stderr_path, status)))
-      in
-
-      (* CWD already restored inside fork_with_cwd *)
 
       let elapsed_ms =
         int_of_float ((Time_compat.now () -. start_time) *. 1000.0)
@@ -492,7 +403,6 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e ->
-    (* CWD already restored inside fork_with_cwd *)
     {
       success = false;
       output = Printf.sprintf "Spawn error: %s" (Printexc.to_string e);

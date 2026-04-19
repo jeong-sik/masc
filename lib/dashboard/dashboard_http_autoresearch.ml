@@ -460,12 +460,10 @@ let validate_loop_id loop_id =
     Error "invalid loop_id"
 
 let git_branch_exists ~repo_root branch =
-  let cmd =
-    Printf.sprintf "cd %s && git show-ref --verify --quiet %s"
-      (Filename.quote repo_root)
-      (Filename.quote ("refs/heads/" ^ branch))
-  in
-  match Autoresearch.run_capture_lines cmd with
+  match
+    Autoresearch.run_capture_lines ~workdir:repo_root
+      [ "show-ref"; "--verify"; "--quiet"; "refs/heads/" ^ branch ]
+  with
   | Unix.WEXITED 0, _ -> true
   | _ -> false
 
@@ -489,21 +487,13 @@ let ensure_managed_worktree ~base_path ~source_workdir ~loop_id =
       else begin
         Autoresearch.ensure_dir (Filename.dirname workdir);
         let branch = Autoresearch.managed_branch_name loop_id in
-        let cmd =
+        let argv =
           if git_branch_exists ~repo_root branch then
-            Printf.sprintf
-              "cd %s && git worktree add %s %s 2>&1"
-              (Filename.quote repo_root)
-              (Filename.quote workdir)
-              (Filename.quote branch)
+            [ "worktree"; "add"; workdir; branch ]
           else
-            Printf.sprintf
-              "cd %s && git worktree add -b %s %s HEAD 2>&1"
-              (Filename.quote repo_root)
-              (Filename.quote branch)
-              (Filename.quote workdir)
+            [ "worktree"; "add"; "-b"; branch; workdir; "HEAD" ]
         in
-        match Autoresearch.run_capture_lines cmd with
+        match Autoresearch.run_capture_lines ~workdir:repo_root argv with
         | Unix.WEXITED 0, _ ->
             Ok (workdir, repo_root, List.rev !warnings)
         | _, lines ->
@@ -612,24 +602,18 @@ let delete_loop_json ~(base_path : string) ~(loop_id : string) ~(requester_agent
              Autoresearch.git_top_level ~workdir:state.source_workdir
            with
            | Ok repo_root ->
-               let workdir =
-                 Autoresearch.managed_worktree_dir ~base_path loop_id
-               in
+              let workdir =
+                Autoresearch.managed_worktree_dir ~base_path loop_id
+              in
               if Sys.file_exists workdir then
-                let remove_cmd =
-                  Printf.sprintf "cd %s && git worktree remove --force %s 2>&1"
-                    (Filename.quote repo_root)
-                    (Filename.quote workdir)
-                in
-                ignore (Autoresearch.run_capture_lines remove_cmd);
+                ignore
+                  (Autoresearch.run_capture_lines ~workdir:repo_root
+                     [ "worktree"; "remove"; "--force"; workdir ]);
               let branch = Autoresearch.managed_branch_name loop_id in
               if git_branch_exists ~repo_root branch then
-                let branch_cmd =
-                  Printf.sprintf "cd %s && git branch -D %s 2>&1"
-                    (Filename.quote repo_root)
-                    (Filename.quote branch)
-                in
-                ignore (Autoresearch.run_capture_lines branch_cmd)
+                ignore
+                  (Autoresearch.run_capture_lines ~workdir:repo_root
+                     [ "branch"; "-D"; branch ])
            | Error msg ->
                Log.Autoresearch.warn
                  "delete loop git cleanup skipped for %s: %s" loop_id msg);

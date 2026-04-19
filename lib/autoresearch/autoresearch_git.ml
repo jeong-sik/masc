@@ -21,13 +21,21 @@ let is_in_git_repo workdir =
   in
   try walk workdir with Sys_error _ -> false
 
-(** Run a shell command via Process_eio and capture stdout lines.
-    Non-blocking: delegates to Eio.Process instead of Unix.open_process_in. *)
-let run_capture_lines cmd =
-  let status, raw_output =
-    Process_eio.run_argv_with_status ~timeout_sec:30.0
-      ["sh"; "-c"; cmd]
-  in
+let exec_gate_raw_source argv =
+  String.concat " " (List.map Filename.quote argv)
+
+let run_git_with_status ?(timeout_sec = 30.0) ~workdir argv =
+  let full_argv = "git" :: "-C" :: workdir :: argv in
+  let raw_source = exec_gate_raw_source full_argv in
+  Masc_exec.Exec_gate.run_argv_with_status
+    ~actor:"autoresearch/git"
+    ~raw_source
+    ~summary:"autoresearch git"
+    ~timeout_sec
+    full_argv
+
+let run_capture_lines ~workdir ?(timeout_sec = 30.0) argv =
+  let status, raw_output = run_git_with_status ~timeout_sec ~workdir argv in
   let lines =
     if String.length raw_output = 0 then []
     else String.split_on_char '\n' raw_output
@@ -39,11 +47,8 @@ let run_capture_lines cmd =
 let git_head_short ~workdir =
   if not (is_in_git_repo workdir) then None
   else
-  let cmd = Printf.sprintf "cd %s && git rev-parse --short HEAD 2>/dev/null"
-    (Filename.quote workdir) in
   let status, raw_output =
-    Process_eio.run_argv_with_status ~timeout_sec:10.0
-      ["sh"; "-c"; cmd]
+    run_git_with_status ~timeout_sec:10.0 ~workdir [ "rev-parse"; "--short"; "HEAD" ]
   in
   match status with
   | Unix.WEXITED 0 ->
@@ -58,48 +63,55 @@ let git_commit ~workdir ~message
   if not (is_in_git_repo workdir) then
     Result.error "not inside a git repository"
   else
-  let check_cmd = Printf.sprintf
-    "cd %s && git add -A && git diff --cached --quiet"
-    (Filename.quote workdir) in
-  let check_status, _check_output =
-    Process_eio.run_argv_with_status ~timeout_sec:30.0
-      ["sh"; "-c"; check_cmd]
+  let add_status, add_output =
+    run_git_with_status ~timeout_sec:30.0 ~workdir [ "add"; "-A" ]
   in
-  match check_status with
-  | Unix.WEXITED 0 ->
+  match add_status with
+  | Unix.WEXITED 0 -> (
+    let check_status, _check_output =
+      run_git_with_status ~timeout_sec:30.0 ~workdir
+        [ "diff"; "--cached"; "--quiet" ]
+    in
+    match check_status with
+    | Unix.WEXITED 0 ->
     (* No staged changes -- nothing to commit *)
     Result.ok None
-  | _ ->
-    let commit_cmd = Printf.sprintf
-      "cd %s && git commit -m %s 2>&1 && git rev-parse --short HEAD"
-      (Filename.quote workdir) (Filename.quote message) in
+    | Unix.WEXITED 1 ->
     let status, raw_output =
-      Process_eio.run_argv_with_status ~timeout_sec:30.0
-        ["sh"; "-c"; commit_cmd]
-    in
-    let lines =
-      String.split_on_char '\n' raw_output
-      |> List.filter (fun s -> s <> "")
-      |> List.rev
+      run_git_with_status ~timeout_sec:30.0 ~workdir [ "commit"; "-m"; message ]
     in
     (match status with
-    | Unix.WEXITED 0 ->
-      (match lines with
-       | hash :: _ -> Result.ok (Some (String.trim hash))
-       | [] -> Result.error "git commit succeeded but no hash returned")
+     | Unix.WEXITED 0 ->
+       let hash_status, hash_output =
+         run_git_with_status ~timeout_sec:10.0 ~workdir
+           [ "rev-parse"; "--short"; "HEAD" ]
+       in
+       (match hash_status with
+        | Unix.WEXITED 0 ->
+          let trimmed = String.trim hash_output in
+          if trimmed = "" then
+            Result.error "git commit succeeded but no hash returned"
+          else Result.ok (Some trimmed)
+        | _ ->
+          Result.error "git commit succeeded but rev-parse failed")
+     | _ ->
+       Result.error (Printf.sprintf "git commit failed: %s" raw_output))
+    | Unix.WEXITED code ->
+      Result.error (Printf.sprintf "git diff --cached --quiet exited %d" code)
     | _ ->
-      let output = String.concat "\n" (List.rev lines) in
-      Result.error (Printf.sprintf "git commit failed: %s" output))
+      Result.error "git diff --cached --quiet terminated abnormally")
+  | _ ->
+    Result.error (Printf.sprintf "git add failed: %s" add_output)
 
 (** Restore worktree files to current HEAD without moving the branch. *)
 let git_restore_head ~workdir =
   if not (is_in_git_repo workdir) then ()
   else
-  let cmd = Printf.sprintf "cd %s && git reset --hard HEAD 2>/dev/null"
-    (Filename.quote workdir) in
   (try
-    let (status, _output) = Process_eio.run_argv_with_status ~timeout_sec:30.0
-      ["sh"; "-c"; cmd] in
+    let (status, _output) =
+      run_git_with_status ~timeout_sec:30.0 ~workdir
+        [ "reset"; "--hard"; "HEAD" ]
+    in
     match status with
     | Unix.WEXITED 0 -> ()
     | _ -> Log.Autoresearch.warn "git restore HEAD non-zero exit in %s" workdir
@@ -109,11 +121,11 @@ let git_restore_head ~workdir =
 let git_reset_last ~workdir =
   if not (is_in_git_repo workdir) then ()
   else
-  let cmd = Printf.sprintf "cd %s && git reset --hard HEAD~1 2>/dev/null"
-    (Filename.quote workdir) in
   (try
-    let (status, _output) = Process_eio.run_argv_with_status ~timeout_sec:30.0
-      ["sh"; "-c"; cmd] in
+    let (status, _output) =
+      run_git_with_status ~timeout_sec:30.0 ~workdir
+        [ "reset"; "--hard"; "HEAD~1" ]
+    in
     match status with
     | Unix.WEXITED 0 -> ()
     | _ -> Log.Autoresearch.warn "git reset HEAD~1 non-zero exit in %s" workdir
@@ -136,10 +148,10 @@ let git_tag_best ~workdir ~cycle ~score =
   if not (is_in_git_repo workdir) then ()
   else
   let tag = Printf.sprintf "ar-best-c%d-%.4f" cycle score in
-  let cmd = Printf.sprintf "cd %s && git tag -f %s 2>/dev/null"
-    (Filename.quote workdir) (Filename.quote tag) in
-  (try ignore (Process_eio.run_argv_with_status ~timeout_sec:10.0
-    ["sh"; "-c"; cmd])
+  (try
+     ignore
+       (run_git_with_status ~timeout_sec:10.0 ~workdir
+          [ "tag"; "-f"; tag ])
    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Autoresearch.warn "git tag failed in %s: %s" workdir (Printexc.to_string exn))
 
 (** Get the git top-level directory for a workdir. *)
@@ -147,11 +159,7 @@ let git_top_level ~workdir =
   if not (is_in_git_repo workdir) then
     Result.error "workdir is not inside a git repository"
   else
-  let cmd =
-    Printf.sprintf "cd %s && git rev-parse --show-toplevel 2>/dev/null"
-      (Filename.quote workdir)
-  in
-  match run_capture_lines cmd with
+  match run_capture_lines ~workdir [ "rev-parse"; "--show-toplevel" ] with
   | Unix.WEXITED 0, top :: _ ->
       let trimmed = String.trim top in
       if trimmed = "" then Result.error "git top-level was empty"
@@ -162,11 +170,7 @@ let git_top_level ~workdir =
 let git_current_branch ~workdir =
   if not (is_in_git_repo workdir) then None
   else
-  let cmd =
-    Printf.sprintf "cd %s && git rev-parse --abbrev-ref HEAD 2>/dev/null"
-      (Filename.quote workdir)
-  in
-  match run_capture_lines cmd with
+  match run_capture_lines ~workdir [ "rev-parse"; "--abbrev-ref"; "HEAD" ] with
   | Unix.WEXITED 0, branch :: _ ->
       let trimmed = String.trim branch in
       if trimmed = "" then None else Some trimmed
@@ -176,11 +180,7 @@ let git_current_branch ~workdir =
 let git_is_dirty ~workdir =
   if not (is_in_git_repo workdir) then false
   else
-  let cmd =
-    Printf.sprintf "cd %s && git status --porcelain 2>/dev/null"
-      (Filename.quote workdir)
-  in
-  match run_capture_lines cmd with
+  match run_capture_lines ~workdir [ "status"; "--porcelain" ] with
   | Unix.WEXITED 0, lines -> List.exists (fun line -> String.trim line <> "") lines
   | _ -> false
 
@@ -206,14 +206,10 @@ let prepare_managed_worktree ~base_path ~source_workdir ~loop_id =
       else begin
         Autoresearch_storage.ensure_dir (Filename.dirname workdir);
         let branch = managed_branch_name loop_id in
-        let cmd =
-          Printf.sprintf
-            "cd %s && git worktree add -b %s %s HEAD 2>&1"
-            (Filename.quote repo_root)
-            (Filename.quote branch)
-            (Filename.quote workdir)
-        in
-        match run_capture_lines cmd with
+        match
+          run_capture_lines ~workdir:repo_root
+            [ "worktree"; "add"; "-b"; branch; workdir; "HEAD" ]
+        with
         | Unix.WEXITED 0, _ ->
             Result.ok (workdir, repo_root, List.rev !warnings)
         | _, lines ->

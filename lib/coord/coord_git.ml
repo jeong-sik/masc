@@ -6,26 +6,48 @@
 
 open Types
 
+let exec_gate_raw_source argv =
+  String.concat " " (List.map Filename.quote argv)
+
 (* ============================================ *)
 (* argv-based process helpers                   *)
 (* ============================================ *)
 
 (** Run argv and return first non-empty line. *)
 let run_argv_line (argv : string list) : string option =
-  let output = Process_eio.run_argv ~timeout_sec:30.0 argv in
+  let output =
+    Masc_exec.Exec_gate.run_argv
+      ~actor:"coord/git"
+      ~raw_source:(exec_gate_raw_source argv)
+      ~summary:"coord_git argv"
+      ~timeout_sec:30.0
+      argv
+  in
   match String.split_on_char '\n' output |> List.map String.trim |> List.filter (fun s -> s <> "") with
   | [] -> None
   | h :: _ -> Some h
 
 (** Run argv and return exit code. *)
 let run_argv_exit (argv : string list) : int =
-  match Process_eio.run_argv_with_status ~timeout_sec:30.0 argv with
+  match
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"coord/git"
+      ~raw_source:(exec_gate_raw_source argv)
+      ~summary:"coord_git argv"
+      ~timeout_sec:30.0
+      argv
+  with
   | Unix.WEXITED n, _ -> n
   | Unix.WSIGNALED _, _ -> 128
   | Unix.WSTOPPED _, _ -> 128
 
 let run_argv_lines (argv : string list) : string list =
-  Process_eio.run_argv ~timeout_sec:30.0 argv
+  Masc_exec.Exec_gate.run_argv
+    ~actor:"coord/git"
+    ~raw_source:(exec_gate_raw_source argv)
+    ~summary:"coord_git argv"
+    ~timeout_sec:30.0
+    argv
   |> String.split_on_char '\n'
   |> List.map String.trim
   |> List.filter (fun s -> s <> "")

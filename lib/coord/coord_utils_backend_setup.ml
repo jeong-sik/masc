@@ -221,7 +221,7 @@ let auto_detect_backend () =
 (** Storage type from environment variable.
     Defaults to filesystem when MASC_STORAGE_TYPE is not set. *)
 let storage_type_from_env () =
-  match env_opt "MASC_STORAGE_TYPE" with
+  match env_opt Env_config_core.storage_type_env_key with
   | Some raw ->
       let value = String.lowercase_ascii (String.trim raw) in
       (match value with

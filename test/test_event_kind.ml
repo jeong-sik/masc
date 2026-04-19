@@ -41,4 +41,33 @@ let () =
         exit 1
       end)
     Event_kind.Task.all;
+  (* Message family *)
+  List.iter
+    (fun v ->
+      let s = Event_kind.Message.to_string v in
+      match Event_kind.Message.of_string s with
+      | Some v' when v' = v -> ()
+      | Some _ ->
+          Printf.eprintf
+            "event_kind Message roundtrip mismatch for %s\n%!" s;
+          exit 1
+      | None ->
+          Printf.eprintf
+            "event_kind Message of_string returned None for %s\n%!" s;
+          exit 1)
+    Event_kind.Message.all;
+  (match Event_kind.Message.of_string "message.brodacast" with
+   | Some _ ->
+       prerr_endline "event_kind Message.of_string accepted a typo";
+       exit 1
+   | None -> ());
+  List.iter
+    (fun v ->
+      let s = Event_kind.Message.to_string v in
+      if not (String.length s > 8 && String.sub s 0 8 = "message.") then begin
+        Printf.eprintf
+          "event_kind Message name does not start with \"message.\": %s\n%!" s;
+        exit 1
+      end)
+    Event_kind.Message.all;
   print_endline "test_event_kind: OK"

@@ -260,6 +260,40 @@ let test_interface_mismatch_after_flaky_retry_disables_cache () =
           failf "expected exactly four dune invocations, got:\n%s"
             (String.concat "\n" log_lines))
 
+let test_timeout_diagnostics_capture_active_process_group () =
+  with_temp_dir "ci-run-tests-timeout" (fun dir ->
+      let ci_log = Filename.concat dir "ci-run-tests.log" in
+      let env =
+        [
+          ("CI_TEST_HEARTBEAT_SEC", "1");
+          ("CI_TEST_TIMEOUT_SEC", "2");
+          ("CI_TEST_LOG_FILE", ci_log);
+          ("CI_CONTRACT_HARNESS_ENABLED", "0");
+        ]
+      in
+      let code, stdout, stderr =
+        run_shell ~cwd:dir ~env
+          (Printf.sprintf "%s %s" (quote (script_path ()))
+             (quote "sh -c 'sleep 10'"))
+      in
+      check int "timeout exit code" 124 code;
+      let ci_log_contents = read_file ci_log in
+      let observed_output =
+        String.concat "\n" [ ci_log_contents; stdout; stderr ]
+      in
+      check bool "active command pid recorded" true
+        (contains_substring observed_output "active_cmd_pid=");
+      check bool "active command pgid recorded" true
+        (contains_substring observed_output "active_cmd_pgid=");
+      check bool "process tree snapshot recorded" true
+        (contains_substring observed_output
+           "active command process tree snapshot:");
+      check bool "sleeping process captured" true
+        (contains_substring observed_output "sleep 10");
+      check bool "timeout error present" true
+        (contains_substring observed_output
+           "[ci-run] ERROR: test command timed out after 2s"))
+
 let () =
   run "ci_run_tests_script"
     [
@@ -270,5 +304,7 @@ let () =
           test_case "interface mismatch after flaky retry disables cache"
             `Quick
             test_interface_mismatch_after_flaky_retry_disables_cache;
+          test_case "timeout diagnostics capture active process group" `Quick
+            test_timeout_diagnostics_capture_active_process_group;
         ] );
     ]

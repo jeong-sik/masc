@@ -65,6 +65,13 @@ let test_health_and_ci_runner_diagnostics () =
     (file_contains_pattern "scripts/ci-run-tests.sh" "TEST_LOG_FILE=");
   check bool "ci runner prints failure markers" true
     (file_contains_pattern "scripts/ci-run-tests.sh" "failure markers (latest 20)");
+  check bool "ci runner records active command pid/pgid" true
+    (file_contains_pattern "scripts/ci-run-tests.sh" "active_cmd_pgid=");
+  check bool "ci runner prints active command process tree snapshot" true
+    (file_contains_pattern "scripts/ci-run-tests.sh"
+       "active command process tree snapshot:");
+  check bool "ci runner tails dune log on failure" true
+    (file_contains_pattern "scripts/ci-run-tests.sh" "tail -n 120 ${dune_log}");
   check bool "ci runner retries dune rpc lock failures in isolated build dir" true
     (file_contains_pattern "scripts/ci-run-tests.sh"
        "detected dune RPC/lock failure; retrying once with isolated build dir");

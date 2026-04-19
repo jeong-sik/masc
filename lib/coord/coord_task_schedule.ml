@@ -164,7 +164,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
         | None -> blocked_ids @ exclude_task_ids
       in
       let eligible =
-        List.filter (fun t -> not (List.mem t.id all_excluded)) reclaimable_todo
+        List.filter (fun t -> not (List.mem t.id all_excluded)) unclaimed
       in
 
       (* Preset-aware filtering *)
@@ -188,7 +188,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
         | None -> ()
       in
 
-      match todo_tasks, preset_ok with
+      match all_todo, preset_ok with
       | [], _ ->
           (* Even if we released a task, there may be nothing else to claim.
              Write the release if it happened. *)
@@ -216,7 +216,8 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
                observe_auto_release ()
            | None -> ());
           clear_agent_state_after_release ();
-          Claim_next_no_eligible { excluded_count = List.length exclude_task_ids; preset_filtered }
+          Claim_next_no_eligible
+            { excluded_count = List.length all_excluded; preset_filtered }
       | _ :: _, task :: _ ->
           (* Claim this task *)
           let new_tasks = List.map (fun t ->

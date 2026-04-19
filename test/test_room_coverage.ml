@@ -385,7 +385,7 @@ let test_release_hard_stop_blocks_future_claim_next () =
     let _ = Coord.add_task config ~title:"Phantom task" ~priority:1 ~description:"" in
     let _ = Coord.add_task config ~title:"Healthy task" ~priority:2 ~description:"" in
     let _ = Coord.claim_task config ~agent_name:claude ~task_id:"task-001" in
-    let handoff_context =
+    let handoff_context : Types.task_handoff_context =
       {
         summary = "PR #6561 not found - do not reclaim";
         reason = Some "phantom artifact";
@@ -427,7 +427,7 @@ let test_release_hard_stop_blocks_direct_reclaim () =
     let claude = find_agent_name_by_prefix config "claude" in
     let _ = Coord.add_task config ~title:"Phantom task" ~priority:1 ~description:"" in
     let _ = Coord.claim_task config ~agent_name:claude ~task_id:"task-001" in
-    let handoff_context =
+    let handoff_context : Types.task_handoff_context =
       {
         summary = "PR #6561 not found - do not reclaim";
         reason = Some "phantom artifact";
@@ -444,9 +444,9 @@ let test_release_hard_stop_blocks_direct_reclaim () =
      with
     | Ok _ -> ()
     | Error e -> Alcotest.fail (Types.masc_error_to_string e));
-    match Coord.claim_task_r config ~agent_name:claude ~task_id:"task-001" with
+    match Coord.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
     | Error (Types.TaskInvalidState message) ->
-        Alcotest.check bool "direct claim blocked by do_not_reclaim_reason" true
+        Alcotest.(check bool) "direct claim blocked by do_not_reclaim_reason" true
           (str_contains message "blocked from re-claim")
     | Error e ->
         Alcotest.fail

@@ -23,6 +23,7 @@
   coord_portal
   coord_query
   coord_status
+  event_kind
   coord_task
   coord_task_schedule
   coord_git

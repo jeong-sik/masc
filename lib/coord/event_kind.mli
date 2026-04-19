@@ -1,13 +1,13 @@
 (** Event_kind — Compile-time verified event-kind identifiers.
 
-    Event-kind strings (["task.claimed"], ["board.voted"], …) flow
+    Event-kind strings such as task.claimed and board.voted flow
     between emitters (coord, board, keeper) and consumers
     (activity_graph_reducer, tool_agent_timeline, dashboard). Prior to
     this module both sides used raw [string]; a typo on either side
     compiled clean and silently diverged at runtime.
 
     This module is the SSOT for the [task.*] family. Other families
-    (board.*, agent.*, keeper.*) are tracked in #8455 and will be
+    covering board, agent, and keeper events are tracked in #8455 and will be
     migrated in follow-up PRs on the same pattern.
 
     Parse boundary: {!Task.of_string} at JSONL / wire ingress only;
@@ -28,7 +28,7 @@ module Task : sig
     | Linked
 
   val to_string : t -> string
-  (** Canonical dotted-form wire name ([\"task.claimed\"] etc.). *)
+  (** Canonical dotted-form wire name such as task.claimed. *)
 
   val of_string : string -> t option
   (** Inverse of {!to_string}. Returns [None] for unknown inputs so

@@ -528,6 +528,8 @@
    env_config_introspect
    runtime_params
    governance_registry
+   governance_pipeline_types
+   governance_pipeline_risk
    governance_pipeline
    approval_callbacks
    tool_compact

@@ -19,6 +19,15 @@ let masc_root_dir config =
     ~base_path:config.base_path
     ~cluster_name:config.backend_config.Backend_types.cluster_name
 
+(** Default-cluster shortcut for callers that only have a [base_path]
+    string and are in the default-cluster code path (no multi-cluster
+    awareness). Equivalent to
+    [masc_root_dir_from ~base_path ~cluster_name:"default"] and still
+    compiles down to [<base>/.masc]. Exposed so non-coord call sites
+    stop re-inlining [Filename.concat base_path ".masc"]. Issue #8355. *)
+let masc_dir_from_base_path ~base_path =
+  masc_root_dir_from ~base_path ~cluster_name:"default"
+
 (** Legacy room path helpers — retained for room_multi.ml compat shim. *)
 let current_room_root_path config = Filename.concat (masc_root_dir config) "current_room"
 let room_dir_for config room_id =

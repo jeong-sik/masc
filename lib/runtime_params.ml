@@ -136,10 +136,14 @@ let registry () =
 (* ── persistence ─────────────────────────────────────────────── *)
 
 let params_file base_path =
-  Filename.concat (Filename.concat base_path ".masc") "runtime_params.json"
+  Filename.concat
+    (Coord_utils.masc_dir_from_base_path ~base_path)
+    "runtime_params.json"
 
 let audit_file base_path =
-  Filename.concat (Filename.concat base_path ".masc") "param_audit.jsonl"
+  Filename.concat
+    (Coord_utils.masc_dir_from_base_path ~base_path)
+    "param_audit.jsonl"
 
 let ensure_dir path =
   let dir = Filename.dirname path in

@@ -75,7 +75,7 @@ let load_state (config : Coord_utils.config) : tempo_state =
 (** Save tempo state *)
 let save_state (config : Coord_utils.config) (state : tempo_state) : unit =
   let path = tempo_file config in
-  let masc_dir = Filename.concat config.base_path ".masc" in
+  let masc_dir = Coord_utils.masc_dir config in
   Fs_compat.mkdir_p masc_dir;
   let json = state_to_json state in
   let content = Yojson.Safe.pretty_to_string json in

@@ -460,9 +460,15 @@ let handle_request
                        | Some params ->
                            (try
                              let name = Yojson.Safe.Util.(params |> member "name" |> to_string) in
+                            (* Issue #8699: exhaustive match on tool_profile.
+                               Catch-all `_ -> Full` would silently elevate any
+                               future restricted profile to full tool access
+                               (fail-OPEN). Listing every constructor turns a
+                               new profile into a compile error so the access
+                               decision is reviewed at the boundary. *)
                             let call_profile = match profile with
                               | Operator_remote | Managed_agent -> profile
-                              | _ -> Full
+                              | Full -> Full
                             in
                             if not (TP.tool_allowed_in_profile state call_profile name) then
                                make_error ~id (-32601)

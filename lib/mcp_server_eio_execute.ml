@@ -468,9 +468,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
      Only the matched module's context is created (1 out of 45+).
      Eliminates per-call 40+ context creation and ~210 Hashtbl.replace. *)
 
-  (* Helper: create keeper context (shared by goals) *)
-  let make_keeper_ctx () : _ Tool_keeper.context =
-    { config; agent_name; sw; clock; proc_mgr = state.Mcp_server.proc_mgr; net = state.Mcp_server.net }
+  (* Helper: create keeper tool boundary context (shared by goals) *)
+  let make_keeper_tool_ctx () =
+    Keeper_tool_boundary.create ~config ~agent_name ~sw ~clock
+      ~proc_mgr:state.Mcp_server.proc_mgr ~net:state.Mcp_server.net
   in
 
   (* Dispatch a single module by tag — creates only that module's context.
@@ -519,7 +520,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_library ->
         Tool_library.dispatch { Tool_library.agent_name } ~name ~args:coerced_args
     | Mod_keeper ->
-        Tool_keeper.dispatch (make_keeper_ctx ()) ~name ~args:coerced_args
+        Keeper_tool_boundary.dispatch (make_keeper_tool_ctx ()) ~name
+          ~args:coerced_args
     (* Mod_repair_loop removed: tools pruned *)
     | Mod_autoresearch ->
         let ctx : Tool_autoresearch.context = { base_path = config.base_path;

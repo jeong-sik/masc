@@ -266,9 +266,6 @@ let models_of_cascade_name (cascade_name : string) : string list =
         cascade_name (Printexc.to_string exn);
       defaults
 
-let default_model_strings_from_config () : string list =
-  models_of_cascade_name "default"
-
 let resolve_providers_from_model_strings ?provider_filter
     (model_strings : string list)
     : Llm_provider.Provider_config.t list =

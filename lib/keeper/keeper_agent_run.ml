@@ -1159,7 +1159,22 @@ let run_turn
          | _ ->
            Some (Printf.sprintf
              "## Discovered Work (auto, %ds interval)\n\n%s\n\n\
-              Pick one and act, or call keeper_stay_silent if none fit your role."
+              ### Required: emit ONE tool_call this turn\n\
+              Valid tools (registered MCP — copy the name verbatim):\n\
+             \  - `keeper_claim_task` { task_id: \"<id from list above>\" } \
+              — reserve a task\n\
+             \  - `keeper_bash` { command: \"<shell cmd>\" } \
+              — execute shell (sandboxed)\n\
+             \  - `keeper_board_comment` { body: \"<note>\" } \
+              — coordinate via board\n\
+             \  - `keeper_stay_silent` { reason: \"<why>\" } \
+              — none of the above fit my role\n\n\
+              Anti-pattern: `Bash`, `Read`, `Skill`, `Agent` are NOT \
+              registered tools. Calling them is a hallucination — the \
+              call fails silently and the turn is wasted. Use the \
+              `keeper_*` names exactly as shown above.\n\n\
+              Plain-text replies are ignored. Pick the smallest viable \
+              action and emit it as a structured tool_call now."
              interval (String.concat "\n\n" chunks)))
     | _ -> None
   in

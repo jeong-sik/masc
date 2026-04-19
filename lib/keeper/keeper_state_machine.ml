@@ -550,7 +550,21 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
     in
     [ lifecycle "paused" detail ]
   | Paused, Running ->
-    [ lifecycle "resumed" "operator request" ]
+    (* Issue #8732 (sibling of #8728): resume is event-driven, not always
+       operator-initiated. [Compaction_completed] / [Fiber_terminated]
+       clear the latched [compact_retry_exhausted] flag and let
+       [derive_phase] leave Paused; if we hardcode "operator request"
+       the dashboard claims a human resumed the keeper when in fact
+       auto-compact recovered. Mirror the per-event arms used in the
+       Paused-detail label. *)
+    let detail =
+      match event with
+      | Operator_resume -> "operator request"
+      | Compaction_completed _ -> "auto-compact recovered"
+      | Fiber_terminated _ -> "fiber recovered"
+      | _ -> "operator request"
+    in
+    [ lifecycle "resumed" detail ]
   | _ -> []
 
 (* ── apply_event ───────────────────────────────────────── *)

@@ -1541,3 +1541,87 @@ let shadow_parse_outcome (cmd : string) : string =
 let cross_check_command ~legacy cmd =
   (legacy, shadow_parse_outcome cmd)
 
+(* ================================================================ *)
+(* Tick 13 (P5 continued) — typed destructive classes.              *)
+(*                                                                  *)
+(* [Eval_gate.destructive_patterns] currently exposes a flat list   *)
+(* of (substring, description) tuples.  The verifier cascade and    *)
+(* the shadow AST gate both want a typed discriminant so routing    *)
+(* logic does not depend on the free-form description string.       *)
+(*                                                                  *)
+(* [destructive_class_of_cmd] is the pure mapping used by Tick 14's *)
+(* golden diff: for every one of Eval_gate's 19 patterns there must *)
+(* be exactly one [destructive_class] that matches — the test suite *)
+(* enforces the covenant.                                           *)
+(* ================================================================ *)
+
+type destructive_class =
+  | Recursive_delete        (* rm -rf / rm -r / rmdir *)
+  | Sql_destructive         (* drop table, drop database, truncate, delete from *)
+  | Forced_git_mutation     (* git push --force, git reset --hard, git clean -f *)
+  | Privilege_escalation    (* chmod 777 *)
+  | Filesystem_format       (* mkfs *)
+  | Device_write            (* > /dev/, dd if= *)
+  | Process_signal          (* kill -9, pkill *)
+  | System_control          (* shutdown, reboot *)
+
+let destructive_class_to_string = function
+  | Recursive_delete -> "recursive_delete"
+  | Sql_destructive -> "sql_destructive"
+  | Forced_git_mutation -> "forced_git_mutation"
+  | Privilege_escalation -> "privilege_escalation"
+  | Filesystem_format -> "filesystem_format"
+  | Device_write -> "device_write"
+  | Process_signal -> "process_signal"
+  | System_control -> "system_control"
+
+(* Substring → class mapping.  Each entry mirrors one row in
+   [Eval_gate.destructive_patterns].  Order matters: longer
+   substrings come first so "rm -rf" matches before "rm -r". *)
+let destructive_class_substrings : (string * destructive_class) list = [
+  "rm -rf",            Recursive_delete;
+  "rm -r",             Recursive_delete;
+  "rmdir",             Recursive_delete;
+  "drop table",        Sql_destructive;
+  "drop database",     Sql_destructive;
+  "truncate table",    Sql_destructive;
+  "delete from",       Sql_destructive;
+  "git push --force",  Forced_git_mutation;
+  "git push -f",       Forced_git_mutation;
+  "git reset --hard",  Forced_git_mutation;
+  "git clean -f",      Forced_git_mutation;
+  "chmod 777",         Privilege_escalation;
+  "mkfs",              Filesystem_format;
+  "> /dev/",           Device_write;
+  "dd if=",            Device_write;
+  "kill -9",           Process_signal;
+  "pkill",             Process_signal;
+  "shutdown",          System_control;
+  "reboot",            System_control;
+]
+
+(* Case-insensitive substring-hit test without a regex engine. *)
+let contains_sub_ci (s : string) (sub : string) : bool =
+  let ls = String.length s and lsub = String.length sub in
+  if lsub = 0 then true
+  else if lsub > ls then false
+  else
+    let s = String.lowercase_ascii s and sub = String.lowercase_ascii sub in
+    let rec loop i =
+      if i + lsub > ls then false
+      else if String.sub s i lsub = sub then true
+      else loop (i + 1)
+    in
+    loop 0
+
+(* Returns the matching class (first hit in declaration order) plus
+   the literal substring that triggered, so callers can log both
+   the typed tag and the provenance.  [None] means "no known
+   destructive pattern found" — the caller is still free to apply
+   structural checks (rm with -r -f split flags, git push to a
+   protected branch, etc.) on top. *)
+let classify_destructive cmd : (destructive_class * string) option =
+  List.find_map (fun (sub, cls) ->
+    if contains_sub_ci cmd sub then Some (cls, sub) else None)
+    destructive_class_substrings
+

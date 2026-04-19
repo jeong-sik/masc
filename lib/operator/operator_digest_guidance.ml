@@ -6,23 +6,27 @@
 
 module U = Yojson.Safe.Util
 
-let judgment_surface_for_target_type = function
-  | "root" | "room" | "namespace" -> "command.namespace"
-  | _ -> "command.namespace"
+let normalize_target_type value =
+  String.trim value |> String.lowercase_ascii
 
-let judgment_target_type_of_string = function
-  | "root" | "room" | "namespace" -> Operator_judgment.Coord
-  | _ -> Operator_judgment.Coord
+let judgment_surface_for_target_type target_type =
+  if Operator_digest_types.is_root_alias target_type then Some "command.namespace"
+  else None
 
 let fresh_operator_judgment config ~target_type ~target_id =
-  let judgment_target_type = judgment_target_type_of_string target_type in
-  let surface = judgment_surface_for_target_type target_type in
+  let target_type = normalize_target_type target_type in
   match
-    Operator_judgment.latest_active config ~surface
-      ~target_type:judgment_target_type ~target_id
+    ( Operator_judgment.target_type_of_string target_type,
+      judgment_surface_for_target_type target_type )
   with
-  | Some value when Operator_judgment.is_fresh value ->
-      Some (Operator_judgment.to_yojson value)
+  | Some judgment_target_type, Some surface -> (
+      match
+        Operator_judgment.latest_active config ~surface
+          ~target_type:judgment_target_type ~target_id
+      with
+      | Some value when Operator_judgment.is_fresh value ->
+          Some (Operator_judgment.to_yojson value)
+      | _ -> None)
   | _ -> None
 
 let judgment_summary_json judgment_json =

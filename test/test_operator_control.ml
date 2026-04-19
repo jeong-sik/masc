@@ -62,6 +62,10 @@ let () =
             `Quick
             Test_operator_control_judgment
             .test_digest_room_ignores_stale_operator_judgment;
+          Alcotest.test_case
+            "guidance ignores unsupported target type" `Quick
+            Test_operator_control_judgment
+            .test_guidance_ignores_unsupported_target_type;
           Alcotest.test_case "operator judgment write and latest roundtrip"
             `Quick
             Test_operator_control_judgment

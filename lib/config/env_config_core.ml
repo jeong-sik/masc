@@ -291,6 +291,11 @@ let sb_path () =
 (** SSOT for the MASC_STORAGE_TYPE env-var name (issue 8352). *)
 let storage_type_env_key = "MASC_STORAGE_TYPE"
 
+(** SSOT for the MASC_ORCHESTRATOR_ENABLED env-var name (issue 8352).
+    Referenced by feature_flag_registry catalog, env_config_runtime reader,
+    env_config_snapshot entry, and orchestrator bootstrap. *)
+let orchestrator_enabled_env_key = "MASC_ORCHESTRATOR_ENABLED"
+
 (** Storage backend type. Set at runtime by server_runtime_bootstrap.
     Valid: "filesystem", "memory". *)
 let storage_type () =

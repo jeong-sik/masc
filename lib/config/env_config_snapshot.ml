@@ -765,7 +765,7 @@ let orchestrator_entries =
   [
     entry ~default:"orchestrator" "MASC_ORCHESTRATOR_AGENT"
       "Orchestrator agent name";
-    entry ~default:"(none)" "MASC_ORCHESTRATOR_ENABLED"
+    entry ~default:"(none)" Env_config_core.orchestrator_enabled_env_key
       "Orchestrator background loop enabled (feature flag)";
     entry ~default:"300.0" "MASC_ORCHESTRATOR_INTERVAL"
       "Orchestrator check interval (seconds)";

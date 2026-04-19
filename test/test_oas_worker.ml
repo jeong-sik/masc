@@ -20,11 +20,17 @@ let ctx_system_prompt = Keeper_exec_context.system_prompt_of_context
 let test_counter = ref 0
 let test_net : ([ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option ref) =
   ref None
+let test_proc_mgr = ref None
 
 let require_test_net () =
   match !test_net with
   | Some net -> net
   | None -> failwith "test net not initialized"
+
+let require_test_proc_mgr () =
+  match !test_proc_mgr with
+  | Some mgr -> mgr
+  | None -> failwith "test process manager not initialized"
 
 let temp_dir prefix =
   incr test_counter;
@@ -857,6 +863,82 @@ let test_run_model_with_masc_tools_rejects_invalid_explicit_label () =
         (contains_substring ~needle:"not-a-model-label" detail)
   | Error err ->
       Alcotest.failf "unexpected error shape: %s" (Oas.Error.to_string err)
+
+let mock_completion_request () : Llm_provider.Llm_transport.completion_request =
+  {
+    config =
+      Llm_provider.Provider_config.make
+        ~kind:Llm_provider.Provider_config.Claude_code
+        ~model_id:"auto"
+        ~base_url:""
+        ();
+    messages = [];
+    tools = [];
+  }
+
+let mock_api_response () : Oas.Types.api_response =
+  {
+    id = "mock-session";
+    model = "mock-cli";
+    stop_reason = Oas.Types.EndTurn;
+    content = [ Oas.Types.Text "ok" ];
+    usage = None;
+    telemetry = None;
+  }
+
+let leaking_test_transport_factory ~sw : Llm_provider.Llm_transport.t =
+  let response = Ok (mock_api_response ()) in
+  let leak_one_pipe () =
+    ignore (Eio.Process.pipe ~sw (require_test_proc_mgr ()))
+  in
+  {
+    complete_sync =
+      (fun _req ->
+        leak_one_pipe ();
+        { Llm_provider.Llm_transport.response; latency_ms = 0 });
+    complete_stream =
+      (fun ~on_event:_ _req ->
+        leak_one_pipe ();
+        response);
+  }
+
+let require_fd_leak_delta_at_least ~label ~minimum actual =
+  if actual < minimum then
+    Alcotest.failf "%s: expected fd delta >= %d, got %d" label minimum actual
+
+let require_fd_leak_delta_at_most ~label ~maximum actual =
+  if actual > maximum then
+    Alcotest.failf "%s: expected fd delta <= %d, got %d" label maximum actual
+
+let test_make_per_call_switch_transport_releases_cli_fd_resources () =
+  let request = mock_completion_request () in
+  let leaking_delta =
+    Eio.Switch.run @@ fun sw ->
+    let transport = leaking_test_transport_factory ~sw in
+    let before = Prometheus.approximate_open_fd_count () in
+    for _ = 1 to 32 do
+      ignore (transport.complete_sync request);
+      ignore (transport.complete_stream ~on_event:(fun _ -> ()) request)
+    done;
+    Prometheus.approximate_open_fd_count () - before
+  in
+  require_fd_leak_delta_at_least
+    ~label:"control transport leaks on long-lived switch"
+    ~minimum:32
+    leaking_delta;
+  let wrapped =
+    Oas_worker_exec.make_per_call_switch_transport leaking_test_transport_factory
+  in
+  let before = Prometheus.approximate_open_fd_count () in
+  for _ = 1 to 32 do
+    ignore (wrapped.complete_sync request);
+    ignore (wrapped.complete_stream ~on_event:(fun _ -> ()) request)
+  done;
+  let wrapped_delta = Prometheus.approximate_open_fd_count () - before in
+  require_fd_leak_delta_at_most
+    ~label:"per-call switch wrapper bounds fd growth"
+    ~maximum:6
+    wrapped_delta
 
 let test_classify_masc_internal_error_roundtrip () =
   let cascade_err =
@@ -1997,6 +2079,7 @@ let test_enrich_idle_detail_picks_last_tool () =
 let () =
   Eio_main.run @@ fun env ->
   test_net := Some env#net;
+  test_proc_mgr := Some (Eio.Stdenv.process_mgr env);
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio_guard.enable ();
   Alcotest.run "OAS Worker" [
@@ -2057,6 +2140,8 @@ let () =
         test_resume_propagates_summarizer;
       Alcotest.test_case "resume propagates priority" `Quick
         test_resume_propagates_priority;
+      Alcotest.test_case "CLI transports release fd resources per call" `Quick
+        test_make_per_call_switch_transport_releases_cli_fd_resources;
       Alcotest.test_case "invalid explicit model label is rejected" `Quick
         test_resolve_provider_of_label_rejects_invalid_explicit_label;
       Alcotest.test_case "run_model_with_masc_tools rejects invalid explicit model label" `Quick

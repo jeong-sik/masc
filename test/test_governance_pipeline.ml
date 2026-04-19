@@ -662,14 +662,16 @@ let test_blocked_response_structure_claim_next () =
    | _ -> Alcotest.fail "paranoid should block claim_next");
   cleanup_tmpdir tmpdir
 
-(* ── Unknown governance level defaults to development ──────── *)
+(* ── Unknown governance level fail-CLOSED on critical (#7641) ──────── *)
 
-let test_unknown_governance_level_allows_all () =
+let test_unknown_governance_level_fail_closed_on_critical () =
+  (* Security gate: typo / unknown level no longer silently allows every tool.
+     Mirrors fail-closed posture of audit_threshold. See #7641. *)
   let d = Gp.decide ~governance_level:"nonexistent"
     ~tool_name:"masc_delete_room" ~input:`Null in
   (match d.action with
-   | `Allow -> ()
-   | _ -> Alcotest.fail "unknown governance level should behave like development")
+   | `Require_confirm _ -> ()
+   | _ -> Alcotest.fail "unknown governance level should require confirm on critical risk")
 
 (* ── Case-insensitive tool name matching ────────────────────── *)
 
@@ -928,8 +930,8 @@ let () =
         test_paranoid_confirms_high;
       Alcotest.test_case "paranoid confirms critical" `Quick
         test_paranoid_confirms_critical;
-      Alcotest.test_case "unknown level allows all" `Quick
-        test_unknown_governance_level_allows_all;
+      Alcotest.test_case "unknown level fail-closed on critical (#7641)" `Quick
+        test_unknown_governance_level_fail_closed_on_critical;
     ];
     "trace_id", [
       Alcotest.test_case "has gov_ prefix" `Quick test_decision_has_trace_id;

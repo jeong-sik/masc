@@ -27,7 +27,7 @@ let option_to_yojson to_json = function
   | Some value -> to_json value
   | None -> `Null
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let int_option_of_yojson = function
   | `Null -> Ok None

@@ -1,7 +1,12 @@
 (** Worker execution types.
 
     Contains only the types actively used by the worker execution layer:
-    execution_scope, worker_class, and wait_mode. *)
+    execution_scope and worker_class.
+
+    Issue #8609: removed [wait_mode] type + helpers — zero OCaml callers
+    (TS dashboard has its own independent type). The previous
+    [wait_mode_of_string] also carried the same #8605 anti-pattern
+    ([_ -> Wait_background]). *)
 
 type execution_scope =
   | Observe_only
@@ -14,10 +19,6 @@ type worker_class =
   | Worker_scout
   | Worker_librarian
   | Worker_metacog
-
-type wait_mode =
-  | Wait_background
-  | Wait_blocking
 
 let execution_scope_to_string = function
   | Observe_only -> "observe_only"
@@ -51,10 +52,3 @@ let worker_class_of_string = function
   | "metacog" -> Some Worker_metacog
   | _ -> None
 
-let wait_mode_to_string = function
-  | Wait_background -> "background"
-  | Wait_blocking -> "blocking"
-
-let wait_mode_of_string = function
-  | "blocking" -> Wait_blocking
-  | _ -> Wait_background

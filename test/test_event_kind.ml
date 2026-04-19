@@ -5,7 +5,9 @@
     [all] enumerates every variant. These tests catch drift — e.g. a
     new variant added to [t] without extending [to_string]/[of_string]. *)
 
-open Masc_mcp
+(* Issue #8394 drive-by: Event_kind moved to Masc_coord library
+   (cross-library reference fix from #8635). Test reaches Event_kind
+   via masc_test_deps re-export of masc_mcp.masc_coord. *)
 
 let () =
   (* Round-trip: to_string → of_string = Some original *)

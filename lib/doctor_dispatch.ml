@@ -34,34 +34,18 @@ let capture_sidecar_json name =
       let result =
         try
           let python = python_bin () in
-          let ic =
-            Unix.open_process_args_in
+          let buf, status =
+            With_process.with_process_args_in
               python
               [| python; "-m"; "src"; "doctor"; "--json" |]
+              With_process.drain_to_buffer
           in
-          (* Error-path close prevents pipe fd leak when [Buffer.add_channel]
-             raises anything other than End_of_file (Sys_error, Unix_error).
-             Dashboard polls this endpoint — a single leak per poll accumulates
-             fast. Issue #8538. *)
-          try
-            let buf = Buffer.create 4096 in
-            (try
-               while true do
-                 Buffer.add_channel buf ic 4096
-               done
-             with End_of_file -> ());
-            let status = Unix.close_process_in ic in
-            let rc =
-              match status with
-              | Unix.WEXITED n -> n
-              | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 2
-            in
-            Ok (Buffer.contents buf, rc)
-          with e ->
-            ignore
-              (try Unix.close_process_in ic
-               with Unix.Unix_error _ | Sys_error _ -> Unix.WEXITED 1);
-            raise e
+          let rc =
+            match status with
+            | Unix.WEXITED n -> n
+            | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 2
+          in
+          Ok (Buffer.contents buf, rc)
         with e -> Error (Printexc.to_string e)
       in
       Sys.chdir prev;

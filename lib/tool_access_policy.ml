@@ -1,5 +1,7 @@
 (** Tool_access_policy — shared allow/deny selector ADT for runtime tool policies. *)
 
+module StringSet = Set.Make (String)
+
 type selector =
   | Empty
   | All
@@ -15,15 +17,13 @@ type t = {
 }
 
 let dedupe_keep_order names =
-  let seen = Hashtbl.create (max 16 (List.length names)) in
-  let rec loop acc = function
+  let rec loop seen acc = function
     | [] -> List.rev acc
-    | name :: rest when Hashtbl.mem seen name -> loop acc rest
+    | name :: rest when StringSet.mem name seen -> loop seen acc rest
     | name :: rest ->
-        Hashtbl.replace seen name ();
-        loop (name :: acc) rest
+        loop (StringSet.add name seen) (name :: acc) rest
   in
-  loop [] names
+  loop StringSet.empty [] names
 
 let normalize_names names =
   names

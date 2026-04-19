@@ -16,7 +16,8 @@ Options:
   -h, --help         Show this help.
 
 This check is warn-only by design. It reports OCaml north-star risk-pattern
-counts without changing CI pass/fail policy.
+text-hit counts without changing CI pass/fail policy. Counts are triage
+signals and may include comments or string literals.
 EOF
 }
 
@@ -85,8 +86,9 @@ cat <<EOF
 checked_at: $now_iso
 branch: $branch
 head: $head_sha
+counting_method: ripgrep text scan (comments/string literals may be included)
 
-Production scope: lib bin
+Production text-scan scope: lib bin
   failwith: $prod_failwith
   invalid_arg: $prod_invalid_arg
   assert false: $prod_assert_false
@@ -98,7 +100,7 @@ Production scope: lib bin
   broad catch (with _): $prod_broad_catch
   Yojson.Safe.Util: $prod_yojson_util
 
-All OCaml scope: lib bin test
+All OCaml text-scan scope: lib bin test
   failwith: $all_failwith
   assert false: $all_assert_false
   Obj.magic: $all_obj_magic
@@ -114,6 +116,10 @@ if [ -n "$JSON_OUT" ]; then
   "branch": "$branch",
   "head": "$head_sha",
   "mode": "warn_only",
+  "counting_method": "ripgrep_text_scan",
+  "notes": {
+    "counts_may_include_comments_and_string_literals": true
+  },
   "counts": {
     "prod_failwith": $prod_failwith,
     "prod_invalid_arg": $prod_invalid_arg,

@@ -60,8 +60,9 @@ For each improvement:
 
 ## Health Tracking
 
-`make ocaml-health` is observational by default. It reports risk-pattern
-counts but does not fail CI. Promote individual checks to ratchets only after
+`make ocaml-health` is observational by default. It reports ripgrep text-hit
+counts but does not fail CI. These counts are triage signals and may include
+comments or string literals; promote individual checks to ratchets only after
 their baseline and intended scope are reviewed.
 
 Tracked patterns include production `failwith`, `invalid_arg`, `assert false`,

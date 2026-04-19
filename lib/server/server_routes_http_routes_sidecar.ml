@@ -370,7 +370,10 @@ let read_status_json ~base_path id =
   in
   if Sys.file_exists path then
     let body = read_file path in
-    let parsed = try Some (Yojson.Safe.from_string body) with _ -> None in
+    let parsed =
+      try Some (Yojson.Safe.from_string body)
+      with Yojson.Json_error _ -> None
+    in
     `Assoc [
       ("ok", `Bool true);
       ("available", `Bool true);
@@ -660,7 +663,7 @@ let parse_body_pairs body_str : ((string * string) list, string) result =
       ) assoc in
       Ok pairs
   | _ -> Error "body must be a JSON object"
-  | exception _ -> Error "body is not valid JSON"
+  | exception Yojson.Json_error _ -> Error "body is not valid JSON"
 
 (** GET /api/v1/sidecar/config?name=<id>
 

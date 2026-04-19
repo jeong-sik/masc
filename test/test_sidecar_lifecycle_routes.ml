@@ -310,6 +310,24 @@ let test_coerce_rejects_oversized_value () =
   | Error _ -> ()
   | Ok _ -> failf "9000-byte value should be rejected by max_value_bytes guard"
 
+let test_parse_body_pairs_coerces_scalar_values () =
+  check (result (list (pair string string)) string)
+    "scalar JSON values are stringified for downstream type coercion"
+    (Ok [ ("PORT", "3000"); ("ENABLED", "true"); ("EMPTY", "") ])
+    (Routes.parse_body_pairs {|{"PORT":3000,"ENABLED":true,"EMPTY":null}|})
+
+let test_parse_body_pairs_rejects_non_object () =
+  check (result (list (pair string string)) string)
+    "non-object JSON rejected"
+    (Error "body must be a JSON object")
+    (Routes.parse_body_pairs {|["PORT",3000]|})
+
+let test_parse_body_pairs_rejects_invalid_json () =
+  check (result (list (pair string string)) string)
+    "invalid JSON rejected"
+    (Error "body is not valid JSON")
+    (Routes.parse_body_pairs {|{"PORT":|})
+
 let () =
   run "sidecar_lifecycle_routes"
     [
@@ -361,5 +379,11 @@ let () =
           test_case "coerce: integer ok/err"      `Quick test_coerce_integer_accepts_and_rejects;
           test_case "coerce: boolean variants"    `Quick test_coerce_boolean_accepts_variants;
           test_case "coerce: oversized rejected"  `Quick test_coerce_rejects_oversized_value;
+          test_case "parse body pairs: scalars" `Quick
+            test_parse_body_pairs_coerces_scalar_values;
+          test_case "parse body pairs: non-object" `Quick
+            test_parse_body_pairs_rejects_non_object;
+          test_case "parse body pairs: invalid JSON" `Quick
+            test_parse_body_pairs_rejects_invalid_json;
         ] );
     ]

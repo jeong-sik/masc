@@ -101,7 +101,7 @@ module Orchestrator = struct
     max 10 (min 3600 (get_int ~default:300 "MASC_ORCHESTRATOR_TIMEOUT"))
 
   let enabled =
-    Feature_flag_registry.get_bool "MASC_ORCHESTRATOR_ENABLED"
+    Feature_flag_registry.get_bool Env_config_core.orchestrator_enabled_env_key
 end
 
 (** {1 Relay Configuration} *)

@@ -175,7 +175,7 @@ let all_flags : flag list = [
     lifecycle = Active; since = "2.120.0" };
 
   (* ── Runtime ──────────────────────────────────────────────── *)
-  { env_name = "MASC_ORCHESTRATOR_ENABLED";
+  { env_name = Env_config_core.orchestrator_enabled_env_key;
     description = "Auto-orchestration background loop (superseded by zero-zombie cleanup)";
     default = false; category = "runtime";
     lifecycle = Deprecated "superseded by zero-zombie cleanup since v2.130.0"; since = "2.0.0" };

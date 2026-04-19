@@ -317,10 +317,13 @@ stylesheet
   .header {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: flex-end;
     border-bottom: 1px solid #2a1a14;
     padding-bottom: 0.75rem;
+    gap: 1rem;
   }
+
+  .header_lead { flex: 1; min-width: 0; }
 
   .eyebrow {
     font-family: 'Noto Sans KR', -apple-system, sans-serif;
@@ -339,6 +342,53 @@ stylesheet
     text-transform: uppercase;
     color: #e8d8b8;
     margin: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+
+  .versal {
+    font-family: 'EB Garamond', 'Cinzel', serif;
+    font-size: 3.5rem;
+    line-height: 0.82;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: uppercase;
+    background: linear-gradient(180deg, #e8d8b8 0%, #8a6a28 55%, #5a3028 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 0 18px rgba(138, 106, 40, 0.28);
+    margin-right: 4px;
+    align-self: flex-start;
+    padding-top: 6px;
+  }
+
+  .title_rest {
+    font-family: 'Cinzel', serif;
+    font-weight: 400;
+    font-size: 1rem;
+    letter-spacing: 0.3em;
+    color: #b8a488;
+    text-transform: uppercase;
+  }
+
+  .title_rule {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, #5a3028 0%, transparent 100%);
+    margin-left: 10px;
+    margin-right: 10px;
+    align-self: center;
+  }
+
+  .folio {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: #5a3028;
+    text-transform: none;
   }
 
   .meta {
@@ -919,8 +969,17 @@ let render_response (response : Logs_types.response) : Node.t =
     ; Node.div
         ~attrs:[ Style.header ]
         [ Node.div
+            ~attrs:[ Style.header_lead ]
             [ Node.p ~attrs:[ Style.eyebrow ] [ Node.text "log ring · in-memory" ]
-            ; Node.h1 ~attrs:[ Style.title ] [ Node.text "journal" ]
+            ; Node.h1
+                ~attrs:[ Style.title ]
+                [ Node.span ~attrs:[ Style.versal ] [ Node.text "J" ]
+                ; Node.span ~attrs:[ Style.title_rest ] [ Node.text "ournal" ]
+                ; Node.span ~attrs:[ Style.title_rule ] []
+                ; Node.span
+                    ~attrs:[ Style.folio ]
+                    [ Node.text "folio xii · recto" ]
+                ]
             ]
         ; Node.span
             ~attrs:[ Style.meta ]

@@ -18,8 +18,9 @@ PR7162 and the follow-up metric fixes around synthetic support handling.
   - `GET /api/v1/dashboard/execution`
   - keeper compatibility payload:
     - `keepers[*].trust_observatory.accountability`
-  - projection is omitted when `compact=true` or
-    `MASC_DECISION_LAYER_LEVEL < 3`
+  - projection is omitted when `compact=true`
+  - when `compact=false` but `MASC_DECISION_LAYER_LEVEL < 3`, the
+    `trust_observatory` field remains present and is `null`
 - Runtime source:
   - `Keeper_exec_status_metrics.accountability_summary_json`
 - Durable ledger:

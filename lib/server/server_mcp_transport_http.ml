@@ -183,7 +183,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
     | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
   in
-  let open Result_syntax in
+  let open Result.Syntax in
   ignore (
     let* () =
       match validate_mcp_session_profile ~profile session_id with

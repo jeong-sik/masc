@@ -1173,6 +1173,101 @@ stylesheet
     color: #a01818;
     background: rgba(160, 24, 24, 0.08);
   }
+
+  /* ─── page-head (hero) ───
+     dashboard_v2 "The Manor Under Storm" 톤의 hero 타이틀.
+     moonrise 앞, HUD 뒤에 배치되어 "무엇을 보고 있는가"의 나레이티브
+     선언이 된다. action buttons는 아직 기능 없고 cursor: default. */
+  .page_head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    margin: 8px 0 4px;
+  }
+  .page_head_lead {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .page_tag {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #6a5848;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .page_tag::after {
+    content: "";
+    flex: 0 0 40px;
+    height: 1px;
+    background: #5a3028;
+  }
+  .page_h1 {
+    font-family: 'Cinzel', 'Noto Sans KR', serif;
+    font-size: 36px;
+    letter-spacing: 0.16em;
+    color: #e8d8b8;
+    text-transform: uppercase;
+    margin: 6px 0 0;
+    line-height: 1.1;
+  }
+  .page_h1_blood {
+    color: #a01818;
+    text-shadow: 0 0 18px rgba(201, 74, 58, 0.32);
+  }
+  .page_sub {
+    font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
+    font-style: italic;
+    color: #b8a488;
+    margin-top: 6px;
+    font-size: 14px;
+    max-width: 540px;
+    line-height: 1.55;
+  }
+  .page_actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .pbtn {
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 10px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    padding: 7px 12px;
+    background: linear-gradient(180deg, #241a12 0%, #14100a 100%);
+    border: 1px solid #5a4618;
+    color: #b8a488;
+    cursor: default;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .pbtn:hover {
+    border-color: #8a6a28;
+    color: #8a6a28;
+  }
+  .pbtn_primary {
+    background: linear-gradient(180deg, #3a2a16 0%, #241810 100%);
+    border-color: #8a6a28;
+    color: #8a6a28;
+  }
+  .pbtn_primary:hover {
+    background: rgba(138, 106, 40, 0.12);
+    color: #e8d8b8;
+  }
+  .pbtn_glyph {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: currentColor;
+  }
 |}]
 
 let level_class level =
@@ -1665,6 +1760,41 @@ let render_response (response : Logs_types.response) : Node.t =
     ; brand_row
     ; view_heartbeat ()
     ; view_hud response
+    ; Node.div
+        ~attrs:[ Style.page_head ]
+        [ Node.div
+            ~attrs:[ Style.page_head_lead ]
+            [ Node.div
+                ~attrs:[ Style.page_tag ]
+                [ Node.text "chronicle · quiet fox · day iv" ]
+            ; Node.h1
+                ~attrs:[ Style.page_h1 ]
+                [ Node.text "the watch "
+                ; Node.span
+                    ~attrs:[ Style.page_h1_blood ]
+                    [ Node.text "under storm" ]
+                ]
+            ; Node.p
+                ~attrs:[ Style.page_sub ]
+                [ Node.text
+                    "네 명의 키퍼가 홀을 지킨다. Luna는 세 번째 종에 \
+                     응답했고, DM은 폭풍이 서쪽 동을 봉하는 장면을 서술한다."
+                ]
+            ]
+        ; Node.div
+            ~attrs:[ Style.page_actions ]
+            [ Node.button
+                ~attrs:[ Style.pbtn ]
+                [ Node.span ~attrs:[ Style.pbtn_glyph ] []
+                ; Node.text "preflight"
+                ]
+            ; Node.button
+                ~attrs:[ Style.pbtn; Style.pbtn_primary ]
+                [ Node.span ~attrs:[ Style.pbtn_glyph ] []
+                ; Node.text "advance round"
+                ]
+            ]
+        ]
     ; moonrise
     ; toolbar
     ; Node.div

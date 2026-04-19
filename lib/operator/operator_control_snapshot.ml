@@ -173,12 +173,87 @@ let recent_messages_json config =
   |> List.map Types.message_to_yojson
   |> fun rows -> `List rows
 
+let merge_tool_name_lists primary secondary =
+  let seen = Hashtbl.create 16 in
+  let add acc raw_name =
+    let name = String.trim raw_name in
+    if name = "" || Hashtbl.mem seen name then acc
+    else (
+      Hashtbl.replace seen name ();
+      name :: acc)
+  in
+  List.rev
+    (List.fold_left add []
+       (List.concat [ primary; secondary ]))
+
+let tool_names_of_recent_json (json : Yojson.Safe.t) =
+  let tools_used =
+    match U.member "tools_used" json with
+    | `List items ->
+        List.filter_map
+          (function
+            | `String value ->
+                let trimmed = String.trim value in
+                if trimmed = "" then None else Some trimmed
+            | _ -> None)
+          items
+    | _ -> []
+  in
+  let single_tool =
+    match U.member "tool" json with
+    | `String value ->
+        let trimmed = String.trim value in
+        if trimmed = "" then [] else [ trimmed ]
+    | _ -> []
+  in
+  merge_tool_name_lists single_tool tools_used
+
+let collect_recent_tool_names ?(limit = 8) (lines : string list) =
+  let ordered = List.rev lines in
+  let rec loop acc remaining = function
+    | _ when remaining <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | line :: rest -> (
+        try
+          let json = Yojson.Safe.from_string line in
+          let tools = tool_names_of_recent_json json in
+          let merged = merge_tool_name_lists (List.rev acc) tools in
+          let capped =
+            if List.length merged <= limit then merged
+            else List.filteri (fun idx _ -> idx < limit) merged
+          in
+          loop (List.rev capped) (limit - List.length capped) rest
+        with Yojson.Json_error _ ->
+          loop acc remaining rest)
+  in
+  loop [] limit ordered
+
+let recent_tool_names_from_files config keeper_name =
+  let decision_lines =
+    let path = Keeper_types.keeper_decision_log_path config keeper_name in
+    if Fs_compat.file_exists path then
+      Keeper_memory.read_file_tail_lines path ~max_bytes:120000 ~max_lines:120
+    else []
+  in
+  let metrics_lines =
+    let store = Keeper_types.keeper_metrics_store config keeper_name in
+    let dated = Dated_jsonl.read_recent_lines store 120 in
+    if dated <> [] then dated
+    else
+      let path = Keeper_types.keeper_metrics_path config keeper_name in
+      Keeper_memory.read_file_tail_lines path ~max_bytes:120000 ~max_lines:120
+  in
+  merge_tool_name_lists
+    (collect_recent_tool_names decision_lines)
+    (collect_recent_tool_names metrics_lines)
+
 let keeper_tool_audit_fields ?(include_allowed_tools = true) config
     (meta : Keeper_types.keeper_meta) =
   let fallback_allowed =
     if include_allowed_tools then Keeper_exec_tools.keeper_allowed_tool_names meta
     else []
   in
+  let recent_tool_names = recent_tool_names_from_files config meta.name in
   let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
   let fallback_snapshot =
     match
@@ -217,6 +292,7 @@ let keeper_tool_audit_fields ?(include_allowed_tools = true) config
   | Some task, Some result ->
       if task.seq > result.seq then
         ( task.allowed_tools,
+          recent_tool_names,
           result.tool_names,
           Some result.tool_call_count,
           fallback_snapshot.latest_action_source,
@@ -224,6 +300,7 @@ let keeper_tool_audit_fields ?(include_allowed_tools = true) config
           Some task.created_at )
       else
         ( task.allowed_tools,
+          merge_tool_name_lists result.tool_names recent_tool_names,
           result.tool_names,
           Some result.tool_call_count,
           fallback_snapshot.latest_action_source,
@@ -231,6 +308,7 @@ let keeper_tool_audit_fields ?(include_allowed_tools = true) config
           Some result.updated_at )
   | Some task, None ->
       ( task.allowed_tools,
+        recent_tool_names,
         [],
         None,
         fallback_snapshot.latest_action_source,
@@ -238,6 +316,7 @@ let keeper_tool_audit_fields ?(include_allowed_tools = true) config
         Some task.created_at )
   | None, Some result ->
       ( fallback_allowed,
+        merge_tool_name_lists result.tool_names recent_tool_names,
         result.tool_names,
         Some result.tool_call_count,
         fallback_snapshot.latest_action_source,
@@ -245,6 +324,7 @@ let keeper_tool_audit_fields ?(include_allowed_tools = true) config
         Some result.updated_at )
   | None, None ->
       ( fallback_allowed,
+        recent_tool_names,
         fallback_snapshot.latest_tool_names,
         fallback_snapshot.latest_tool_call_count,
         fallback_snapshot.latest_action_source,
@@ -359,15 +439,18 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    |> Keeper_exec_status.augment_keeper_diagnostic_json
                         ~meta ~keepalive_running ~keepalive_started_at ~now_ts
                  in
-                 let allowed_tool_names, latest_tool_names, latest_tool_call_count,
-                     latest_action_source, tool_audit_source, tool_audit_at =
+                 let allowed_tool_names, recent_tool_names, latest_tool_names,
+                     latest_tool_call_count, latest_action_source,
+                     tool_audit_source, tool_audit_at =
                    if lightweight then
-                     let _, latest_tool_names, latest_tool_call_count,
-                         latest_action_source, tool_audit_source, tool_audit_at =
+                     let _, recent_tool_names, latest_tool_names,
+                         latest_tool_call_count, latest_action_source,
+                         tool_audit_source, tool_audit_at =
                        keeper_tool_audit_fields ~include_allowed_tools:false
                          config meta
                      in
                      ( [],
+                       recent_tool_names,
                        latest_tool_names,
                        latest_tool_call_count,
                        latest_action_source,
@@ -445,7 +528,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        ("noop_turn_count", `Int meta.runtime.noop_turn_count);
                        ("allowed_tool_names", `List (List.map (fun value -> `String value) allowed_tool_names));
                        ("latest_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
-                       ("recent_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
+                       ("recent_tool_names", `List (List.map (fun value -> `String value) recent_tool_names));
                        ("latest_tool_call_count", option_to_json (fun value -> `Int value) latest_tool_call_count);
                        ("latest_action_source", string_option_to_json latest_action_source);
                        ("tool_audit_source", string_option_to_json tool_audit_source);

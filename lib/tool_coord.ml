@@ -440,31 +440,79 @@ let handle_workflow_guide ctx _args =
 
 (* ── State check (assertion-based verification) ────────────────── *)
 
+(** Issue #8636: SSOT for [masc_check] assertion vocabulary. Schema
+    enum, handler match, and default fallback used to disagree on
+    which strings were valid. The Variant + helpers below give a
+    single witness that compile-fails when a constructor is added but
+    [assertion_kind_to_string] / [assertion_kind_of_string_lenient]
+    aren't updated. Same shape as #8546 / #8601 / #8592. *)
+type assertion_kind =
+  | Room_set        (* legacy alias: namespace_ready *)
+  | Joined
+  | Task_claimed
+  | Current_task_set
+  | Worktree_active
+
+let assertion_kind_to_string = function
+  | Room_set -> "room_set"
+  | Joined -> "joined"
+  | Task_claimed -> "task_claimed"
+  | Current_task_set -> "current_task_set"
+  | Worktree_active -> "worktree_active"
+
+let all_assertion_kinds =
+  [ Room_set; Joined; Task_claimed; Current_task_set; Worktree_active ]
+
+let valid_assertion_strings =
+  List.map assertion_kind_to_string all_assertion_kinds
+
+let assertion_kind_of_string_lenient = function
+  | "room_set" | "namespace_ready" | "project_ready" -> Some Room_set
+  | "joined" -> Some Joined
+  | "task_claimed" -> Some Task_claimed
+  | "current_task_set" -> Some Current_task_set
+  | "worktree_active" -> Some Worktree_active
+  | _ -> None
+
+let assertion_fix_hint = function
+  | Room_set ->
+      "Call masc_start with your project root path."
+  | Joined ->
+      "Call masc_join to register your agent in the project namespace"
+  | Task_claimed ->
+      "Claim a task with masc_transition(action=claim) or masc_claim_next"
+  | Current_task_set ->
+      "Call masc_plan_set_task after claim paths that did not auto-bind \
+       current_task (for example masc_transition(action=claim))"
+  | Worktree_active ->
+      "Call masc_worktree_create to work in an isolated branch"
+
+let assertion_passes st = function
+  | Room_set -> st.room_set
+  | Joined -> st.joined
+  | Task_claimed -> st.task_claimed
+  | Current_task_set -> st.current_task_set
+  | Worktree_active -> st.worktree_active
+
 let check_assertion st assertion =
-  let (passed, fix_hint) = match assertion with
-    | "project_ready" | "namespace_ready" | "room_set" ->
-        (st.room_set,
-         "Call masc_start with your project root path.")
-    | "joined" ->
-        (st.joined,
-         "Call masc_join to register your agent in the project namespace")
-    | "task_claimed" ->
-        (st.task_claimed,
-         "Claim a task with masc_transition(action=claim) or masc_claim_next")
-    | "current_task_set" ->
-        (st.current_task_set,
-         "Call masc_plan_set_task after claim paths that did not auto-bind current_task (for example masc_transition(action=claim))")
-    | "worktree_active" ->
-        (st.worktree_active,
-         "Call masc_worktree_create to work in an isolated branch")
-    | other ->
-        (false, Printf.sprintf "Unknown assertion: %s" other)
-  in
-  `Assoc [
-    ("assertion", `String assertion);
-    ("passed", `Bool passed);
-    ("fix_hint", if passed then `Null else `String fix_hint);
-  ]
+  match assertion_kind_of_string_lenient assertion with
+  | Some kind ->
+      let passed = assertion_passes st kind in
+      let fix_hint = assertion_fix_hint kind in
+      `Assoc [
+        ("assertion", `String assertion);
+        ("passed", `Bool passed);
+        ("fix_hint", if passed then `Null else `String fix_hint);
+      ]
+  | None ->
+      `Assoc [
+        ("assertion", `String assertion);
+        ("passed", `Bool false);
+        ("fix_hint",
+         `String
+           (Printf.sprintf "Unknown assertion: %s (expected one of: %s)"
+              assertion (String.concat ", " valid_assertion_strings)));
+      ]
 
 let handle_check ctx args =
   let st = inspect_state ctx in

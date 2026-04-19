@@ -38,15 +38,30 @@ let keeper_health_to_string = function
   | KH_zombie -> "zombie"
   | KH_dead -> "dead"
 
-let keeper_health_of_string = function
-  | "healthy" -> KH_healthy
-  | "idle" -> KH_idle
-  | "offline" -> KH_offline
-  | "stale" -> KH_stale
-  | "degraded" -> KH_degraded
-  | "zombie" -> KH_zombie
-  | "dead" -> KH_dead
-  | _ -> KH_offline
+(** Issue #8670: strict parser returning [None] on unknown strings so
+    drift (producer typo, future variant) is visible to callers instead
+    of silently masquerading as [KH_offline]. Mirrors the #8636 lenient
+    parser pattern (option-typed reverse route on the parse boundary). *)
+let keeper_health_of_string_opt = function
+  | "healthy" -> Some KH_healthy
+  | "idle" -> Some KH_idle
+  | "offline" -> Some KH_offline
+  | "stale" -> Some KH_stale
+  | "degraded" -> Some KH_degraded
+  | "zombie" -> Some KH_zombie
+  | "dead" -> Some KH_dead
+  | _ -> None
+
+(** Back-compat wrapper for callers not yet migrated to the option form.
+    Logs the unknown string once per call so drift is operator-visible
+    even when callers do not branch on it. *)
+let keeper_health_of_string s =
+  match keeper_health_of_string_opt s with
+  | Some h -> h
+  | None ->
+      Log.Keeper.warn
+        "keeper_health_of_string: unknown wire string %S → KH_offline fallback (#8670)" s;
+      KH_offline
 
 let keeper_continuity_to_string = function
   | Continuity_healthy -> "healthy"

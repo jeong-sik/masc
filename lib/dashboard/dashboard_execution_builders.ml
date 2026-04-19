@@ -370,12 +370,11 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
           ]);
   }
 
-let operation_severity ~(status : string) ~blocker_summary =
-  match status with
-  | "failed" | "cancelled" -> Tone_bad
-  | "paused" -> Tone_warn
-  | _ when Option.is_some blocker_summary -> Tone_warn
-  | _ -> Tone_ok
+(* Issue #8645: removed dead [operation_severity ~status ~blocker_summary]
+   helper — zero callers in lib/test, not exposed via .mli. The body
+   also carried the #8605 anti-pattern (catch-all to [Tone_ok]). If
+   future code needs status-based severity, re-introduce with a Variant
+   input + exhaustive match instead of a string. *)
 
 let build_operation_contexts () =
   []

@@ -1,6 +1,6 @@
 (** Autoresearch_serde — JSON serialization and deserialization for autoresearch types.
 
-    Converts cycle_record, loop_state, persisted_summary, and swarm_link
+    Converts cycle_record, loop_state, persisted_summary, and execution_link
     to/from Yojson.Safe.t.
 
     @since 2.80.0 *)
@@ -319,7 +319,7 @@ let state_of_yojson_result (json : Yojson.Safe.t) : (persisted_summary, string) 
       lower_is_better;
     }
 
-let swarm_link_to_yojson (link : swarm_link) : Yojson.Safe.t =
+let execution_link_to_yojson (link : execution_link) : Yojson.Safe.t =
   `Assoc
     [
       ("loop_id", `String link.loop_id);
@@ -332,8 +332,8 @@ let swarm_link_to_yojson (link : swarm_link) : Yojson.Safe.t =
       ("linked_at", `Float link.linked_at);
     ]
 
-let swarm_link_of_yojson_result (json : Yojson.Safe.t) : (swarm_link, string) result =
-  let kind = "swarm_link" in
+let execution_link_of_yojson_result (json : Yojson.Safe.t) : (execution_link, string) result =
+  let kind = "execution_link" in
   let* loop_id = required_string_field kind json "loop_id" in
   let* session_id = required_string_field kind json "session_id" in
   let* operation_id = optional_string_field json "operation_id" in

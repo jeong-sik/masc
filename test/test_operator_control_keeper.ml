@@ -71,8 +71,12 @@ let test_snapshot_exposes_keeper_and_social_actions () =
           in
           Alcotest.(check bool) "task inject confirm false" false
             Yojson.Safe.Util.(task_inject |> member "confirm_required" |> to_bool);
-          Alcotest.(check bool) "team stop still in available actions" true
-            (Option.is_some (find_action "team_stop")))
+          (* Issue #8394: team_* operator actions retired. Assert
+             absence so re-introduction is caught at test time. *)
+          Alcotest.(check bool) "team_stop is NOT in available actions" true
+            (Option.is_none (find_action "team_stop"));
+          Alcotest.(check bool) "team_turn is NOT in available actions" true
+            (Option.is_none (find_action "team_turn")))
 
 let test_keeper_status_exposes_summary_and_recoverable () =
   Eio_main.run @@ fun env ->
@@ -959,6 +963,17 @@ proactive_enabled = true
         (json |> member "proactive" |> member "enabled" |> to_bool);
       Alcotest.(check string) "default source kind" "toml"
         (json |> member "sources" |> member "default_source_kind" |> to_string);
+      Alcotest.(check string) "active config root" config_dir
+        (json |> member "sources" |> member "active_config_root" |> to_string);
+      Alcotest.(check string) "active config root source" "env"
+        (json |> member "sources" |> member "active_config_root_source" |> to_string);
+      Alcotest.(check string) "live meta source" "runtime_overlay"
+        (json |> member "sources" |> member "live_meta" |> member "source" |> to_string);
+      Alcotest.(check string) "default manifest source" "toml"
+        (json |> member "sources" |> member "default_manifest" |> member "source" |> to_string);
+      Alcotest.(check string) "config resolution source" "env"
+        (json |> member "sources" |> member "config_resolution"
+         |> member "config_root" |> member "source" |> to_string);
       Alcotest.(check bool) "live override flagged" true
         (json |> member "sources" |> member "has_live_override" |> to_bool);
       Alcotest.(check string) "auto team session removed" "removed"
@@ -969,6 +984,19 @@ proactive_enabled = true
       in
       Alcotest.(check bool) "override field proactive" true
         (List.mem "proactive.enabled" override_fields);
+      let override_field_sources =
+        json |> member "sources" |> member "override_field_sources" |> to_list
+      in
+      Alcotest.(check bool) "override field source proactive" true
+        (List.exists
+           (fun item ->
+              String.equal
+                (item |> member "field" |> to_string)
+                "proactive.enabled"
+              && String.equal
+                   (item |> member "source" |> to_string)
+                   "live_meta")
+           override_field_sources);
       Alcotest.(check bool) "initiative surface removed" true
         (json |> member "initiative" = `Null);
       Alcotest.(check int) "total input tokens surfaced" 1200

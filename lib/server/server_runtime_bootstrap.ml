@@ -6,7 +6,7 @@ module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 
 let force_jsonl_fallback_env () =
-  Unix.putenv "MASC_STORAGE_TYPE" "filesystem"
+  Unix.putenv Env_config_core.storage_type_env_key "filesystem"
 
 let requested_backend_mode () =
   Env_config_core.storage_type ()
@@ -182,8 +182,10 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   ensure_default_oas_cascade_timeout_env ();
   Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
   Exec_tap.install_from_env ();
-  Unix.putenv "MASC_BASE_PATH_INPUT" (Option.value ~default:"" input_base_path);
-  Unix.putenv "MASC_BASE_PATH" base_path;
+  Unix.putenv
+    Env_config_core.base_path_input_env_key
+    (Option.value ~default:"" input_base_path);
+  Unix.putenv Env_config_core.base_path_env_key base_path;
   bootstrap_base_path_config_root ~base_path;
   (* Apply keeper runtime overrides from the resolved config root's
      keeper_runtime.toml. Must run before any module that reads

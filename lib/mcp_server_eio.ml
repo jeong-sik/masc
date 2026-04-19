@@ -76,10 +76,12 @@ let mcp_session_of_json = Mcp_server_eio_governance.mcp_session_of_json
     Tool_shard schemas. *)
 
 let read_only_tools_inline =
-  ["masc_status"; "masc_who"; "masc_messages"]
+  List.map Tool_name.Masc.to_string
+    Tool_name.Masc.[ Status; Who; Messages ]
 
 let requires_join_tools_inline =
-  ["masc_broadcast"; "masc_leave"]
+  List.map Tool_name.Masc.to_string
+    Tool_name.Masc.[ Broadcast; Leave ]
 
 let mcp_context_required_tools_inline =
   Tool_schemas_inline.schemas

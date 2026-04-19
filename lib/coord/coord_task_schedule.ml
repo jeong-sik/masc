@@ -9,7 +9,7 @@ include Coord_state
 
 let task_is_claim_pool_candidate (task : Types.task) =
   match task.task_status with
-  | Todo -> true
+  | Todo -> Option.is_none task.do_not_reclaim_reason
   | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ ->
       false
 
@@ -140,14 +140,32 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
         if priority_cmp <> 0 then priority_cmp
         else compare b.created_at a.created_at  (* Newer first to unblock stale queues *)
       ) working_tasks in
+      (* Identify blocked Todo tasks for observability *)
+      let all_todo = List.filter (fun (t : Types.task) ->
+        match t.task_status with
+        | Todo -> true
+        | _ -> false
+      ) sorted in
+      let blocked_todo = List.filter (fun (t : Types.task) ->
+        Option.is_some t.do_not_reclaim_reason
+      ) all_todo in
+      if blocked_todo <> [] then
+        log_event config
+          (Printf.sprintf
+             "{\"type\":\"task_claim_next_skip_blocked\",\"agent\":\"%s\",\"blocked\":%d,\"ts\":\"%s\"}"
+             agent_name (List.length blocked_todo) (now_iso ()));
+
       let unclaimed = List.filter task_is_claim_pool_candidate sorted in
       (* Also exclude the just-released task: the agent is moving on,
          re-claiming the same task would be a no-op loop. *)
+      let blocked_ids = List.map (fun (t : Types.task) -> t.id) blocked_todo in
       let all_excluded = match released_task_id with
-        | Some rid -> rid :: exclude_task_ids
-        | None -> exclude_task_ids
+        | Some rid -> rid :: (blocked_ids @ exclude_task_ids)
+        | None -> blocked_ids @ exclude_task_ids
       in
-      let eligible = List.filter (fun t -> not (List.mem t.id all_excluded)) unclaimed in
+      let eligible =
+        List.filter (fun t -> not (List.mem t.id all_excluded)) unclaimed
+      in
 
       (* Preset-aware filtering *)
       let preset_ok = List.filter task_filter eligible in
@@ -170,7 +188,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
         | None -> ()
       in
 
-      match unclaimed, preset_ok with
+      match all_todo, preset_ok with
       | [], _ ->
           (* Even if we released a task, there may be nothing else to claim.
              Write the release if it happened. *)
@@ -198,7 +216,8 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
                observe_auto_release ()
            | None -> ());
           clear_agent_state_after_release ();
-          Claim_next_no_eligible { excluded_count = List.length exclude_task_ids; preset_filtered }
+          Claim_next_no_eligible
+            { excluded_count = List.length all_excluded; preset_filtered }
       | _ :: _, task :: _ ->
           (* Claim this task *)
           let new_tasks = List.map (fun t ->
@@ -230,12 +249,12 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
           (match released_task_id with
            | Some rid ->
                Coord_task.emit_task_activity config ~agent_name ~task_id:rid
-                 ~kind:"task.released"
+                 ~kind:(Event_kind.Task.to_string Event_kind.Task.Released)
                  ~payload:(`Assoc [ ("task_id", `String rid) ]);
                observe_auto_release ()
            | None -> ());
           Coord_task.emit_task_activity config ~agent_name ~task_id:task.id
-            ~kind:"task.claimed"
+            ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
             ~payload:
               (`Assoc
                 [
@@ -282,7 +301,10 @@ let claim_next config ~agent_name =
   match claim_next_r config ~agent_name () with
   | Claim_next_claimed { message; _ } -> message
   | Claim_next_no_unclaimed -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
-  | Claim_next_no_eligible _ -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
+  | Claim_next_no_eligible { excluded_count; preset_filtered } ->
+      Printf.sprintf
+        "📋 No eligible unclaimed tasks. ACTION: Stop task-checking — blocked/excluded=%d, preset_filtered=%d."
+        excluded_count preset_filtered
   | Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
 
 (** Release stale task claims older than [ttl_seconds].

@@ -36,6 +36,10 @@ let make_test_meta ?(name = "keeper-sangsu") ?(agent_name = "keeper-sangsu-agent
                ("name", `String name);
                ("agent_name", `String agent_name);
                ("trace_id", `String "test-trace-accountability");
+               ( "tool_access",
+                 Keeper_types.tool_access_to_json
+                   (Keeper_types.Preset
+                      { preset = Keeper_types.Full; also_allow = [] }) );
              ])
   with
   | Ok meta -> meta
@@ -193,6 +197,38 @@ let test_claim_tool_exposes_routing_warning_for_high_risk_keeper () =
       check string "warning present"
         "⚠ Accountability risk is high for this keeper. Prefer manual review or lower-risk routing when equivalent."
         (string_member "routing_warning" result))
+
+let test_preflight_exposes_routing_hint_for_high_risk_keeper () =
+  with_room (fun config ->
+      let meta = make_test_meta () in
+      let created_at =
+        iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
+      in
+      append_accountability_event config.base_path ~created_at
+        (`Assoc
+           [
+             ("event_type", `String "claim_created");
+             ("claim_id", `String "acct-high-risk-preflight");
+             ("agent_name", `String "keeper-sangsu-agent");
+             ("keeper_name", `String "keeper-sangsu");
+             ("kind", `String "completion_claim");
+             ("subject", `String "Prior claim");
+             ("surface", `String "keeper_turn");
+             ("created_at", `String created_at);
+             ("evidence_refs", `List []);
+             ("synthetic", `Bool false);
+           ]);
+      let result =
+        Keeper_exec_tools.execute_keeper_tool_call
+          ~config ~meta ~ctx_work:(make_ctx_work ())
+          ~name:"keeper_preflight_check" ~input:(`Assoc []) ()
+        |> Yojson.Safe.from_string
+      in
+      check bool "accountability risk present" true
+        (Yojson.Safe.Util.(result |> member "accountability_risk" |> to_bool));
+      check string "risk band exposed" "high" (string_member "risk_band" result);
+      check string "routing hint exposed" "manual_review_recommended"
+        (string_member "routing_hint" result))
 
 let test_synthetic_claims_do_not_dilute_unsupported_rate () =
   (* Regression: synthetic completion claims (created by task_transition "done")
@@ -439,6 +475,8 @@ let () =
             test_stale_completion_claim_sets_high_risk;
           test_case "claim tool exposes routing warning for high risk keeper"
             `Quick test_claim_tool_exposes_routing_warning_for_high_risk_keeper;
+          test_case "preflight exposes routing hint for high risk keeper"
+            `Quick test_preflight_exposes_routing_hint_for_high_risk_keeper;
           test_case "synthetic claims do not dilute unsupported rate" `Quick
             test_synthetic_claims_do_not_dilute_unsupported_rate;
           test_case "summary lookup reads window once" `Quick

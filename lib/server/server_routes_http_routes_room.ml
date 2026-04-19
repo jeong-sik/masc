@@ -16,13 +16,12 @@ module Keeper_stream = Server_routes_http_keeper_stream
   |> Http.Router.get "/api/v1/status" (fun request reqd ->
        with_read_auth (fun state _req reqd ->
          let config = state.Mcp_server.room_config in
-         let room_state = Coord.read_state config in
-         let tempo = Tempo.get_tempo config in
+         let status = Room_protocol.status config in
          let json = `Assoc [
-           ("cluster", `String (Env_config_core.cluster_name ()));
-           ("project", `String room_state.project);
-           ("tempo_interval_s", `Float tempo.current_interval_s);
-           ("paused", `Bool room_state.paused);
+           ("cluster", `String status.cluster);
+           ("project", `String status.project);
+           ("tempo_interval_s", `Float status.tempo_interval_s);
+           ("paused", `Bool status.paused);
          ] in
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
@@ -34,31 +33,9 @@ module Keeper_stream = Server_routes_http_keeper_stream
          let include_cancelled = bool_query_param req "include_cancelled" ~default:false in
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
-         let tasks = Coord.get_tasks_raw config in
          let filtered =
-           match status_filter with
-           | None -> tasks
-           | Some status ->
-               List.filter (fun (t : Types.task) ->
-                 String.equal status (Types.string_of_task_status t.task_status)
-               ) tasks
-         in
-         let filtered =
-           match status_filter with
-           | Some _ -> filtered
-           | None ->
-               List.filter (fun (t : Types.task) ->
-                 let is_done = match t.task_status with
-                   | Types.Done _ -> true
-                   | _ -> false
-                 in
-                 let is_cancelled = match t.task_status with
-                   | Types.Cancelled _ -> true
-                   | _ -> false
-                 in
-                 (include_done || not is_done) &&
-                 (include_cancelled || not is_cancelled)
-               ) filtered
+           Room_protocol.tasks ?status_filter ~include_done
+             ~include_cancelled config
          in
          let total = List.length filtered in
          let page =
@@ -74,12 +51,8 @@ module Keeper_stream = Server_routes_http_keeper_stream
                ("status", `String (Types.string_of_task_status t.task_status));
                ("priority", `Int t.priority);
                ( "assignee",
-                 match t.task_status with
-                 | Claimed { assignee; _ }
-                 | InProgress { assignee; _ }
-                 | Done { assignee; _ } ->
-                     `String assignee
-                 | _ -> `Null );
+                 Json_util.string_opt_to_json
+                   (Room_protocol.task_assignee t) );
                ("created_at", `String t.created_at);
              ]
            in
@@ -105,20 +78,11 @@ module Keeper_stream = Server_routes_http_keeper_stream
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
          let agents =
-           try Coord.get_agents_raw config
-           with Invalid_argument _ -> []
+           Room_protocol.agents ?status_filter config
          in
-         let filtered =
-           match status_filter with
-           | None -> agents
-           | Some status ->
-               List.filter (fun (a : Types.agent) ->
-                 String.equal status (Types.string_of_agent_status a.status)
-               ) agents
-         in
-         let total = List.length filtered in
+         let total = List.length agents in
          let page =
-           filtered
+           agents
            |> List.filteri (fun idx _ -> idx >= offset && idx < offset + limit)
          in
          let agents_json = List.map (fun (a : Types.agent) ->
@@ -148,14 +112,8 @@ module Keeper_stream = Server_routes_http_keeper_stream
          let since_seq = int_query_param req "since_seq" ~default:0 in
          let limit = int_query_param req "limit" ~default:20 in
          let agent_filter = query_param req "agent" in
-         let msgs = Coord.get_messages_raw config ~since_seq ~limit:500 in
          let filtered =
-           match agent_filter with
-           | None -> msgs
-           | Some agent ->
-               List.filter (fun (m : Types.message) ->
-                 String.equal agent m.from_agent
-               ) msgs
+           Room_protocol.messages ?agent_filter ~since_seq ~limit:500 config
          in
          let total = List.length filtered in
          let page = filtered |> List.filteri (fun idx _ -> idx < limit) in

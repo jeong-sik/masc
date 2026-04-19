@@ -657,6 +657,12 @@
  (modules test_tool_name)
  (libraries masc_test_deps))
 
+; ── Event_kind variant roundtrip (#8455) ────────────────
+(test
+ (name test_event_kind)
+ (modules test_event_kind)
+ (libraries masc_test_deps))
+
 ; ── Core Triad: State x Decision x Cascade ──────────────
 (test
  (name test_keeper_cascade_routing)
@@ -996,7 +1002,13 @@
 (test
  (name test_harness_shell_helpers)
  (modules test_harness_shell_helpers)
- (libraries alcotest unix))
+ (deps %{exe:../bin/keeper_campaign_fsm.exe})
+ (action
+  (setenv KEEPER_CAMPAIGN_FSM_EXE %{exe:../bin/keeper_campaign_fsm.exe}
+   (setenv MASC_HARNESS_ALLOW_DUNE_EXEC_FALLBACK 0
+    (run %{test}))))
+ (libraries alcotest unix)
+)
 
 
 (test

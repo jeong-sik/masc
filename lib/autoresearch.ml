@@ -66,8 +66,8 @@ let cycle_to_yojson = Autoresearch_serde.cycle_to_yojson
 let cycle_of_yojson_result = Autoresearch_serde.cycle_of_yojson_result
 let state_to_yojson = Autoresearch_serde.state_to_yojson
 let state_of_yojson_result = Autoresearch_serde.state_of_yojson_result
-let swarm_link_to_yojson = Autoresearch_serde.swarm_link_to_yojson
-let swarm_link_of_yojson_result = Autoresearch_serde.swarm_link_of_yojson_result
+let execution_link_to_yojson = Autoresearch_serde.execution_link_to_yojson
+let execution_link_of_yojson_result = Autoresearch_serde.execution_link_of_yojson_result
 
 (* ================================================================ *)
 (* Re-exports: Storage                                               *)
@@ -82,11 +82,11 @@ let session_link_file = Autoresearch_storage.session_link_file
 let ensure_dir = Autoresearch_storage.ensure_dir
 let append_cycle = Autoresearch_storage.append_cycle
 let save_state = Autoresearch_storage.save_state
-let save_swarm_link = Autoresearch_storage.save_swarm_link
-let load_swarm_link_by_loop = Autoresearch_storage.load_swarm_link_by_loop
-let load_swarm_link_by_session = Autoresearch_storage.load_swarm_link_by_session
-let load_swarm_link_by_loop_result = Autoresearch_storage.load_swarm_link_by_loop_result
-let load_swarm_link_by_session_result = Autoresearch_storage.load_swarm_link_by_session_result
+let save_execution_link = Autoresearch_storage.save_execution_link
+let load_execution_link_by_loop = Autoresearch_storage.load_execution_link_by_loop
+let load_execution_link_by_session = Autoresearch_storage.load_execution_link_by_session
+let load_execution_link_by_loop_result = Autoresearch_storage.load_execution_link_by_loop_result
+let load_execution_link_by_session_result = Autoresearch_storage.load_execution_link_by_session_result
 let load_state = Autoresearch_storage.load_state
 let load_state_result = Autoresearch_storage.load_state_result
 let latest_cycle_record = Autoresearch_storage.latest_cycle_record
@@ -343,9 +343,9 @@ let stop_loop ~base_path ?reason loop_id =
             in
             Some (stop_state state)))
 
-(** Linked loop status JSON for swarm integration.
+(** Linked loop status JSON for execution-session integration.
     Acquires [loops_mu] read lock internally. *)
-let linked_status_json ~base_path (link : swarm_link) =
+let linked_status_json ~base_path (link : execution_link) =
   let current_cycle, status, best_score, target_score, error_message, workdir,
       lower_is_better, source_workdir, program_note, warnings,
       queued_hypothesis =

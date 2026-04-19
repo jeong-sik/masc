@@ -44,12 +44,14 @@ let emit_message_activity config ~from_agent ~content ~mention
         Log.Misc.warn "message activity emit failed (%s): %s" kind
           (Printexc.to_string exn)
   in
-  emit ~kind:"message.broadcast" ~tags:[ "message"; "broadcast" ] ();
+  emit
+    ~kind:(Event_kind.Message.to_string Event_kind.Message.Broadcast)
+    ~tags:[ "message"; "broadcast" ] ();
   match mention with
   | Some target when String.trim target <> "" ->
       emit
         ~subject:Coord_hooks.{ kind = "agent"; id = target }
-        ~kind:"message.mentioned"
+        ~kind:(Event_kind.Message.to_string Event_kind.Message.Mentioned)
         ~tags:[ "message"; "mention" ] ()
   | _ -> ()
 

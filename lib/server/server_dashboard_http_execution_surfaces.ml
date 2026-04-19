@@ -134,33 +134,51 @@ let _transport_health_cache =
         );
       ])
 
+(* Issue #8396: cache patchers used to recognise only 7 lifecycle event
+   names while [Keeper_lifecycle_events.all_event_names] now publishes
+   10. The drift left dashboard rows stale until the next full
+   recompute when the supervisor emitted [dead_cleaned],
+   [self_preservation], [paused_pruned], or the phase-derived [running].
+
+   The 4 patchers below remain string-typed (cache rows deserialise
+   from JSON), but each [match] now covers every name in the SSOT.
+   The sync test in [test/test_types.ml :: lifecycle_event_cache_patcher_coverage]
+   asserts every name in [Keeper_lifecycle_events.all_event_names]
+   returns [Some] from at least one of these patchers. *)
+
 let keepalive_running_of_lifecycle_event = function
-  | "started" | "restarted" | "reconciled" -> Some true
-  | "resumed" -> Some true
+  | "started" | "restarted" | "reconciled" | "running" -> Some true
+  | "resumed" | "self_preservation" -> Some true
   | "paused" -> Some true
+  | "paused_pruned" -> Some false   (* prune == removed from supervision *)
+  | "dead_cleaned" -> Some false    (* cleanup == no longer alive *)
   | "stopped" | "crashed" | "dead" -> Some false
   | _ -> None
 
 let phase_of_lifecycle_event = function
-  | "started" | "restarted" | "reconciled" -> Some "running"
-  | "resumed" -> Some "running"
+  | "started" | "restarted" | "reconciled" | "running" -> Some "running"
+  | "resumed" | "self_preservation" -> Some "running"
   | "paused" -> Some "paused"
+  | "paused_pruned" -> Some "stopped"
   | "stopped" -> Some "stopped"
   | "crashed" -> Some "crashed"
-  | "dead" -> Some "dead"
+  | "dead" | "dead_cleaned" -> Some "dead"
   | _ -> None
 
 let pipeline_stage_of_lifecycle_event = function
-  | "started" | "restarted" | "reconciled" -> Some "idle"
-  | "resumed" -> Some "idle"
+  | "started" | "restarted" | "reconciled" | "running" -> Some "idle"
+  | "resumed" | "self_preservation" -> Some "idle"
   | "paused" -> Some "paused"
-  | "stopped" | "dead" -> Some "offline"
+  | "paused_pruned" -> Some "offline"
+  | "stopped" | "dead" | "dead_cleaned" -> Some "offline"
   | "crashed" -> Some "crashed"
   | _ -> None
 
 let paused_of_lifecycle_event = function
-  | "started" | "restarted" | "reconciled" | "resumed" -> Some false
-  | "paused" | "stopped" -> Some true
+  | "started" | "restarted" | "reconciled" | "resumed" | "running"
+  | "self_preservation" -> Some false
+  | "paused" | "paused_pruned" | "stopped" -> Some true
+  | "dead" | "dead_cleaned" | "crashed" -> Some false
   | _ -> None
 
 let keeper_agent_status_opt row =

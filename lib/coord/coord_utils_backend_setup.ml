@@ -114,7 +114,7 @@ let sync_test_base_path_env resolved_path =
     match Env_config_core.base_path_opt () with
     | Some current when String.equal current resolved_path -> ()
     | _ ->
-        Unix.putenv "MASC_BASE_PATH" resolved_path;
+        Unix.putenv Env_config_core.base_path_env_key resolved_path;
         Unix.putenv "MASC_TEST_SYNCED_BASE_PATH" resolved_path;
         Log.Coord.info "Synchronized MASC_BASE_PATH=%s for test executable %s"
           resolved_path (Filename.basename Sys.executable_name)
@@ -221,7 +221,7 @@ let auto_detect_backend () =
 (** Storage type from environment variable.
     Defaults to filesystem when MASC_STORAGE_TYPE is not set. *)
 let storage_type_from_env () =
-  match env_opt "MASC_STORAGE_TYPE" with
+  match env_opt Env_config_core.storage_type_env_key with
   | Some raw ->
       let value = String.lowercase_ascii (String.trim raw) in
       (match value with

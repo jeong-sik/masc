@@ -111,10 +111,14 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
 }
 
 const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'params'>) => void> = {
-  shell: () => { void refreshShell({ force: true }) },
+  // Route visits should reuse the existing shell TTL instead of forcing a
+  // fresh projection on every navigation.
+  shell: () => { void refreshShell() },
   namespaceTruth: () => { requestNamespaceTruth() },
   missionSnapshot: () => { void refreshMissionSnapshot() },
-  execution: () => { void refreshExecution({ force: true }) },
+  // Execution already has a fetch scheduler; route refreshes should enqueue
+  // through that budgeted path instead of bypassing it.
+  execution: () => { void refreshExecution() },
   observatory: () => { void refreshObservatoryPanel() },
   activityGraph: () => { void refreshActivityGraphSurface() },
   board: () => { void refreshBoard() },

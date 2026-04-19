@@ -491,7 +491,8 @@ let handle_claim_next ctx _args =
     | Coord.Claim_next_no_unclaimed -> "📋 No unclaimed tasks available"
     | Coord.Claim_next_no_eligible { preset_filtered; _ } when preset_filtered > 0 ->
         Printf.sprintf "📋 No eligible tasks (preset mismatch: %d tasks require different preset)" preset_filtered
-    | Coord.Claim_next_no_eligible _ -> "📋 No unclaimed tasks available"
+    | Coord.Claim_next_no_eligible { excluded_count; _ } ->
+        Printf.sprintf "📋 No eligible tasks available (blocked/excluded: %d)" excluded_count
     | Coord.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
   in
   (true, message)

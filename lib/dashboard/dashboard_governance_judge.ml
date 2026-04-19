@@ -113,6 +113,39 @@ let judgment_generated_at json =
   json |> member "generated_at" |> to_string_option |> parse_iso_opt
   |> Option.value ~default:0.0
 
+let normalize_disk_recommended_action judgment =
+  match judgment |> member "recommended_action" with
+  | `Assoc action_fields ->
+      let canonical_tool =
+        match List.assoc_opt "resolved_tool" action_fields with
+        | Some (`String tool) ->
+            let tool = tool |> String.trim |> String.lowercase_ascii in
+            if tool = "" then None else Some tool
+        | _ -> None
+      in
+      let normalized_action =
+        `Assoc
+          (List.map
+             (fun (key, value) ->
+               if String.equal key "resolved_tool" then
+                 ("resolved_tool", option_to_yojson (fun item -> `String item) canonical_tool)
+               else
+                 (key, value))
+             action_fields)
+      in
+      (match judgment with
+       | `Assoc fields ->
+           `Assoc
+             (List.map
+                (fun (key, value) ->
+                  if String.equal key "recommended_action" then
+                    ("recommended_action", normalized_action)
+                  else
+                    (key, value))
+                fields)
+       | other -> other)
+  | _ -> judgment
+
 let load_judgments_into_table jsons =
   let table = Hashtbl.create 32 in
   List.iter (fun json ->
@@ -172,6 +205,7 @@ let latest_judgments base_path =
 let fresh_judgments_json ~base_path ~limit =
   let now = Unix.gettimeofday () in
   latest_judgments base_path
+  |> List.map normalize_disk_recommended_action
   |> List.filter (fun j ->
     match j |> member "expires_at" |> to_string_option with
     | Some iso ->

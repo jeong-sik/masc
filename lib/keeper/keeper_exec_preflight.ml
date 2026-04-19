@@ -1,5 +1,12 @@
 open Keeper_types
 
+let json_string_field name = function
+  | `Assoc fields -> (
+      match List.assoc_opt name fields with
+      | Some (`String value) -> Some value
+      | _ -> None)
+  | _ -> None
+
 let handle_keeper_preflight_check
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -63,9 +70,20 @@ let handle_keeper_preflight_check
   in
   let () = add_check "preset" preset_ok preset_name in
   (* Check 5: accountability risk *)
+  let accountability_summary =
+    Keeper_accountability.accountability_summary_json config ~keeper_name:meta.name
+      ~agent_name:meta.agent_name
+  in
+  let risk_band =
+    json_string_field "risk_band" accountability_summary
+    |> Option.value ~default:"unknown"
+  in
+  let routing_hint =
+    json_string_field "routing_hint" accountability_summary
+    |> Option.value ~default:"normal_routing"
+  in
   let accountability_risk =
-    Keeper_accountability.accountability_risk_is_high config ~keeper_name:meta.name
-      ~agent_name:meta.name
+    String.equal risk_band "high"
   in
   let () =
     add_check "accountability_risk" (not accountability_risk)
@@ -89,6 +107,8 @@ let handle_keeper_preflight_check
         ; "preset", `String preset_name
         ; "preset_sufficient", `Bool preset_ok
         ; "accountability_risk", `Bool accountability_risk
+        ; "risk_band", `String risk_band
+        ; "routing_hint", `String routing_hint
         ; "clone_target", `String clone_target
         ; "keeper", `String meta.name
         ])

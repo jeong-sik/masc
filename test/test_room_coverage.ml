@@ -379,6 +379,80 @@ let test_claim_next_r_released_task_field () =
      | _ -> Alcotest.fail "second claim should succeed")
   )
 
+let test_release_hard_stop_blocks_future_claim_next () =
+  with_test_env (fun config ->
+    let claude = find_agent_name_by_prefix config "claude" in
+    let _ = Coord.add_task config ~title:"Phantom task" ~priority:1 ~description:"" in
+    let _ = Coord.add_task config ~title:"Healthy task" ~priority:2 ~description:"" in
+    let _ = Coord.claim_task config ~agent_name:claude ~task_id:"task-001" in
+    let handoff_context : Types.task_handoff_context =
+      {
+        summary = "PR #6561 not found - do not reclaim";
+        reason = Some "phantom artifact";
+        next_step = Some "cancel the stale task";
+        failure_mode = Some "not_found";
+        evidence_refs = [ "PR#6561" ];
+        updated_at = None;
+        updated_by = Some claude;
+      }
+    in
+    (match
+       Coord.release_task_r config ~agent_name:claude ~task_id:"task-001"
+         ~handoff_context ()
+     with
+    | Ok _ -> ()
+    | Error e -> Alcotest.fail (Types.masc_error_to_string e));
+    let task_001 =
+      match
+        List.find_opt
+          (fun (t : Types.task) -> String.equal t.id "task-001")
+          (Coord.get_tasks_raw config)
+      with
+      | Some task -> task
+      | None -> Alcotest.fail "task-001 not found after release"
+    in
+    Alcotest.(check string) "task-001 back to todo" "todo"
+      (Types.task_status_to_string task_001.task_status);
+    Alcotest.(check int) "release increments cycle count" 1 task_001.cycle_count;
+    Alcotest.(check (option string)) "hard-stop reason persisted"
+      (Some "PR #6561 not found - do not reclaim")
+      task_001.do_not_reclaim_reason;
+    match Coord.claim_next_r config ~agent_name:claude () with
+    | Coord.Claim_next_claimed { task_id; _ } ->
+        Alcotest.(check string) "claim_next skips blocked todo" "task-002" task_id
+    | _ -> Alcotest.fail "expected claim_next_r to skip blocked task-001")
+
+let test_release_hard_stop_blocks_direct_reclaim () =
+  with_test_env (fun config ->
+    let claude = find_agent_name_by_prefix config "claude" in
+    let _ = Coord.add_task config ~title:"Phantom task" ~priority:1 ~description:"" in
+    let _ = Coord.claim_task config ~agent_name:claude ~task_id:"task-001" in
+    let handoff_context : Types.task_handoff_context =
+      {
+        summary = "PR #6561 not found - do not reclaim";
+        reason = Some "phantom artifact";
+        next_step = Some "cancel the stale task";
+        failure_mode = Some "not_found";
+        evidence_refs = [ "PR#6561" ];
+        updated_at = None;
+        updated_by = Some claude;
+      }
+    in
+    (match
+       Coord.release_task_r config ~agent_name:claude ~task_id:"task-001"
+         ~handoff_context ()
+     with
+    | Ok _ -> ()
+    | Error e -> Alcotest.fail (Types.masc_error_to_string e));
+    match Coord.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
+    | Error (Types.TaskInvalidState message) ->
+        Alcotest.(check bool) "direct claim blocked by do_not_reclaim_reason" true
+          (str_contains message "blocked from re-claim")
+    | Error e ->
+        Alcotest.fail
+          ("expected TaskInvalidState, got " ^ Types.masc_error_to_string e)
+    | Ok _ -> Alcotest.fail "direct claim should be blocked after hard-stop release")
+
 (* ============================================================ *)
 (* Update Priority Tests                                         *)
 (* ============================================================ *)
@@ -1127,6 +1201,10 @@ let () =
       Alcotest.test_case "BUG-004: auto-releases previous" `Quick test_claim_next_auto_releases_previous;
       Alcotest.test_case "BUG-004: released task claimable" `Quick test_claim_next_released_task_claimable_by_others;
       Alcotest.test_case "BUG-004: released_task_id field" `Quick test_claim_next_r_released_task_field;
+      Alcotest.test_case "release hard-stop blocks future claim_next" `Quick
+        test_release_hard_stop_blocks_future_claim_next;
+      Alcotest.test_case "release hard-stop blocks direct reclaim" `Quick
+        test_release_hard_stop_blocks_direct_reclaim;
     ];
 
     (* === Update Priority === *)

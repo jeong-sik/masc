@@ -1039,6 +1039,47 @@ let () =
           (Option.map Masc_mcp.Tool_library.source_to_string
              (Masc_mcp.Tool_library.source_of_string_opt "fabricated")));
     ];
+    "assertion_kind_ssot", [
+      (* Issue #8636: 3-way drift on masc_check assertion vocabulary —
+         schema enum (5), handler match (5 + namespace_ready alias),
+         default fallback (4 — missing worktree_active). The fix
+         introduces [Tool_coord.assertion_kind] variant + helpers and
+         a cycle-safe schema mirror in Tool_schemas_coord_core. These
+         tests pin the witness, the alias semantics, and the schema
+         mirror — adding a 6th constructor forces compile errors in
+         [assertion_kind_to_string] AND test failure here. *)
+      Alcotest.test_case "witness covers all 5 constructors" `Quick (fun () ->
+        let module C = Masc_mcp.Tool_coord in
+        let witness k =
+          let actual = C.assertion_kind_to_string k in
+          if not (List.mem actual C.valid_assertion_strings) then
+            Alcotest.failf "assertion_kind_to_string %S not in valid_assertion_strings" actual
+        in
+        witness C.Room_set;
+        witness C.Joined;
+        witness C.Task_claimed;
+        witness C.Current_task_set;
+        witness C.Worktree_active;
+        Alcotest.(check int) "count" 5 (List.length C.all_assertion_kinds));
+      Alcotest.test_case "valid_assertion_strings pinned to wire format" `Quick (fun () ->
+        Alcotest.(check (list string)) "wire-format strings"
+          [ "room_set"; "joined"; "task_claimed"; "current_task_set"; "worktree_active" ]
+          Masc_mcp.Tool_coord.valid_assertion_strings);
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        Alcotest.(check (list string)) "schema mirror == SSOT"
+          Masc_mcp.Tool_coord.valid_assertion_strings
+          Tool_schemas_coord_core.assertion_kind_enum_strings);
+      Alcotest.test_case "lenient parser accepts namespace_ready alias" `Quick (fun () ->
+        let module C = Masc_mcp.Tool_coord in
+        match C.assertion_kind_of_string_lenient "namespace_ready" with
+        | Some C.Room_set -> ()
+        | Some _ -> Alcotest.fail "alias should map to Room_set"
+        | None -> Alcotest.fail "alias should parse");
+      Alcotest.test_case "lenient parser rejects unknown" `Quick (fun () ->
+        Alcotest.(check bool) "unknown -> None" true
+          (Masc_mcp.Tool_coord.assertion_kind_of_string_lenient
+             "fabricated_assertion" = None));
+    ];
     "compact_retry_exhausted_ssot", [
       (* Issue #8581: the [compact_retry_exhausted] field was read by
          derive_phase to promote (context_overflow + latch) to Paused
@@ -1120,6 +1161,93 @@ let () =
         Alcotest.(check int) "10 distinct" 10 (List.length names);
         Alcotest.(check int) "no duplicates" (List.length names)
           (List.length dedup));
+    ];
+    "lifecycle_event_cache_patcher_coverage", [
+      (* Issue #8396: dashboard cache patchers used to recognise only
+         a 7-name subset of [Keeper_lifecycle_events.all_event_names].
+         When the supervisor emitted [dead_cleaned] / [self_preservation]
+         / [paused_pruned] / [running] (phase-derived), cached rows
+         stayed stale until the next full recompute. These tests pin
+         the invariant that *every* SSOT event name produces a [Some]
+         from at least one of the 4 patchers — a new event added to
+         the SSOT without updating the patcher fails this test. *)
+      Alcotest.test_case "every SSOT event has at least one patcher hit" `Quick (fun () ->
+        let module S = Masc_mcp.Server_dashboard_http_execution_surfaces in
+        let module L = Masc_mcp.Keeper_lifecycle_events in
+        List.iter (fun event ->
+          let any =
+            S.keepalive_running_of_lifecycle_event event <> None
+            || S.phase_of_lifecycle_event event <> None
+            || S.pipeline_stage_of_lifecycle_event event <> None
+            || S.paused_of_lifecycle_event event <> None
+          in
+          Alcotest.(check bool)
+            (Printf.sprintf "%s patched by at least one patcher" event)
+            true any)
+          L.all_event_names);
+      Alcotest.test_case "every SSOT event hits keepalive_running patcher" `Quick (fun () ->
+        let module S = Masc_mcp.Server_dashboard_http_execution_surfaces in
+        let module L = Masc_mcp.Keeper_lifecycle_events in
+        List.iter (fun event ->
+          Alcotest.(check bool)
+            (Printf.sprintf "%s -> Some" event) true
+            (S.keepalive_running_of_lifecycle_event event <> None))
+          L.all_event_names);
+      Alcotest.test_case "every SSOT event hits phase patcher" `Quick (fun () ->
+        let module S = Masc_mcp.Server_dashboard_http_execution_surfaces in
+        let module L = Masc_mcp.Keeper_lifecycle_events in
+        List.iter (fun event ->
+          Alcotest.(check bool)
+            (Printf.sprintf "%s -> Some" event) true
+            (S.phase_of_lifecycle_event event <> None))
+          L.all_event_names);
+      Alcotest.test_case "unknown event still returns None" `Quick (fun () ->
+        let module S = Masc_mcp.Server_dashboard_http_execution_surfaces in
+        Alcotest.(check bool) "fabricated -> None" true
+          (S.keepalive_running_of_lifecycle_event "fabricated_event" = None));
+    ];
+    "claim_pool_invariant", [
+      (* Issue #8659: a verifier-held task (status=AwaitingVerification)
+         was reclaimed by a different agent's masc_claim_next, breaking
+         verifier handoff semantics. Root-cause path is still under
+         investigation — these tests pin the *invariant* that the
+         claim-pool filter must exclude every non-Todo status, so any
+         future regression that re-introduces a way to flip
+         AwaitingVerification back into the pool fails compilation
+         (witness exhaustive over [task_status]) or the assertion. *)
+      Alcotest.test_case "Todo is the only claim pool candidate" `Quick (fun () ->
+        let module S = Coord_task_schedule in
+        let dummy_task ts : Types.task =
+          { id = "t-1"; title = "x"; description = "";
+            files = []; created_at = "2026-04-19T00:00:00Z";
+            task_status = ts; priority = 5;
+            worktree = None;
+            required_role = Types_core.Unassigned;
+            required_preset = None;
+            stage = None; contract = None; handoff_context = None;
+            cycle_count = 0;
+            do_not_reclaim_reason = None; }
+        in
+        Alcotest.(check bool) "Todo -> claim pool" true
+          (S.task_is_claim_pool_candidate (dummy_task Types.Todo));
+        Alcotest.(check bool) "Claimed -> NOT claim pool" false
+          (S.task_is_claim_pool_candidate
+             (dummy_task (Types.Claimed { assignee = "a"; claimed_at = "t" })));
+        Alcotest.(check bool) "InProgress -> NOT claim pool" false
+          (S.task_is_claim_pool_candidate
+             (dummy_task (Types.InProgress { assignee = "a"; started_at = "t" })));
+        Alcotest.(check bool)
+          "AwaitingVerification -> NOT claim pool (regression #8659)" false
+          (S.task_is_claim_pool_candidate
+             (dummy_task (Types.AwaitingVerification {
+                assignee = "a"; submitted_at = "t"; verification_id = "v";
+                required_verifier_role = Types.Reviewer; deadline = None })));
+        Alcotest.(check bool) "Done -> NOT claim pool" false
+          (S.task_is_claim_pool_candidate
+             (dummy_task (Types.Done { assignee = "a"; completed_at = "t"; notes = None })));
+        Alcotest.(check bool) "Cancelled -> NOT claim pool" false
+          (S.task_is_claim_pool_candidate
+             (dummy_task (Types.Cancelled { cancelled_by = "a"; cancelled_at = "t"; reason = None }))));
     ];
     "publish_phase_lifecycle_ssot", [
       (* Issue #8572: phase-bearing publish_lifecycle calls used to pass

@@ -231,7 +231,7 @@ let status_json (ctx : context) ~loop_id json_fields =
     | _ -> [ ("error", `String "invalid status payload") ]
   in
   let link =
-    Autoresearch.load_swarm_link_by_loop ~base_path:ctx.base_path loop_id
+    Autoresearch.load_execution_link_by_loop ~base_path:ctx.base_path loop_id
   in
   let queued_hypothesis = Hashtbl.find_opt pending_hypotheses loop_id in
   let link_fields =
@@ -359,7 +359,7 @@ let handle_stop (ctx : context) args =
     | Some state ->
         let _config = Coord.default_config ctx.base_path in
         broadcast_loop_lifecycle "autoresearch_stopped" state;
-        (match Autoresearch.load_swarm_link_by_loop ~base_path:ctx.base_path id with
+        (match Autoresearch.load_execution_link_by_loop ~base_path:ctx.base_path id with
         | Some _link ->
             (* Team_session_store removed — skip event append *)
             ()

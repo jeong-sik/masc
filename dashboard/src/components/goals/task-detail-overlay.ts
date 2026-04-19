@@ -250,13 +250,22 @@ function ContractSection({ task }: { task: Task }) {
 
       ${isAwaitingVerification ? html`
         <div class="rounded border border-accent/30 bg-[var(--accent-5)] px-4 py-3">
-          <div class="text-xs font-medium text-accent">Verifier Keeper 검증 중</div>
+          <div class="flex items-center justify-between gap-3 flex-wrap">
+            <div class="text-xs font-medium text-accent">Verifier Keeper 검증 중</div>
+            <a
+              href=${`#workspace?section=verification&task=${encodeURIComponent(task.id)}`}
+              class="rounded border border-accent/50 bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-semibold uppercase tracking-1 text-accent hover:bg-[var(--accent-20)]"
+              title="검증 패널에서 이 태스크를 직접 승인/반려"
+            >검증에 개입 →</a>
+          </div>
           <div class="mt-1 text-2xs text-text-body">
             Submitter: <span class="font-mono">${verifierAssignee ?? '(unknown)'}</span>
           </div>
           <div class="mt-0.5 text-2xs text-text-muted">
             다른 keeper가 completion_contract의 정량 기준을 독립 실측 중입니다.
             통과 시 approve_verification → done, 미충족 시 reject_verification → in_progress로 복귀.
+            인간 판단이 필요하면 우측 상단 버튼으로 검증 패널에서 직접 승인/반려할 수 있습니다
+            (operator: 접두어로 감사 로그에 기록).
           </div>
         </div>
       ` : null}

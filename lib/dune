@@ -458,6 +458,7 @@
    keeper_hooks_oas
    keeper_extend_turns
    keeper_llm_bridge
+   keeper_tool_alias
    keeper_tool_disclosure
    keeper_turn_telemetry
    keeper_approval_queue
@@ -629,6 +630,7 @@
   keeper_rollover
   keeper_approval_queue
   keeper_post_turn
+  keeper_tool_alias
   keeper_tool_disclosure
   keeper_turn_telemetry
   keeper_exec_context

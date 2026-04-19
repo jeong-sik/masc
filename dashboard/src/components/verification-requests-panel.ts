@@ -32,6 +32,7 @@ import {
   createManagedAsyncResource,
   type ManagedAsyncResource,
 } from '../lib/async-state'
+import { route } from '../router'
 
 const AUTO_REFRESH_MS = 15_000
 const DEFAULT_LIMIT = 100
@@ -485,6 +486,19 @@ export function VerificationRequestsPanel() {
       resource.cancel()
     }
   }, [resource])
+
+  // Deep-link support: task-detail-overlay renders a "검증에 개입" link with
+  // ?task=<id> so operators land on this panel pre-filtered to the pending
+  // request they came from. Treat the URL as a one-shot hint — write the
+  // task id into the shared search signal once on mount (and whenever the
+  // route param changes), but leave subsequent typing in the search input
+  // untouched so operators can widen the filter manually.
+  const taskParam = route.value.params.task
+  useEffect(() => {
+    if (taskParam && searchQuery.value !== taskParam) {
+      searchQuery.value = taskParam
+    }
+  }, [taskParam])
 
   const current = resource.state.value
   const data = current.data ?? null

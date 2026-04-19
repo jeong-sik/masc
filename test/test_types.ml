@@ -1165,6 +1165,49 @@ let () =
         Alcotest.(check bool) "fabricated -> None" true
           (S.keepalive_running_of_lifecycle_event "fabricated_event" = None));
     ];
+    "claim_pool_invariant", [
+      (* Issue #8659: a verifier-held task (status=AwaitingVerification)
+         was reclaimed by a different agent's masc_claim_next, breaking
+         verifier handoff semantics. Root-cause path is still under
+         investigation — these tests pin the *invariant* that the
+         claim-pool filter must exclude every non-Todo status, so any
+         future regression that re-introduces a way to flip
+         AwaitingVerification back into the pool fails compilation
+         (witness exhaustive over [task_status]) or the assertion. *)
+      Alcotest.test_case "Todo is the only claim pool candidate" `Quick (fun () ->
+        let module S = Coord_task_schedule in
+        let dummy_task ts : Types.task =
+          { id = "t-1"; title = "x"; description = "";
+            files = []; created_at = "2026-04-19T00:00:00Z";
+            task_status = ts; priority = 5;
+            worktree = None;
+            required_role = Types_core.Unassigned;
+            required_preset = None;
+            stage = None; contract = None; handoff_context = None;
+            cycle_count = 0;
+            do_not_reclaim_reason = None; }
+        in
+        Alcotest.(check bool) "Todo -> claim pool" true
+          (S.task_is_claim_pool_candidate (dummy_task Types.Todo));
+        Alcotest.(check bool) "Claimed -> NOT claim pool" false
+          (S.task_is_claim_pool_candidate
+             (dummy_task (Types.Claimed { assignee = "a"; claimed_at = "t" })));
+        Alcotest.(check bool) "InProgress -> NOT claim pool" false
+          (S.task_is_claim_pool_candidate
+             (dummy_task (Types.InProgress { assignee = "a"; started_at = "t" })));
+        Alcotest.(check bool)
+          "AwaitingVerification -> NOT claim pool (regression #8659)" false
+          (S.task_is_claim_pool_candidate
+             (dummy_task (Types.AwaitingVerification {
+                assignee = "a"; submitted_at = "t"; verification_id = "v";
+                required_verifier_role = Types.Reviewer; deadline = None })));
+        Alcotest.(check bool) "Done -> NOT claim pool" false
+          (S.task_is_claim_pool_candidate
+             (dummy_task (Types.Done { assignee = "a"; completed_at = "t"; notes = None })));
+        Alcotest.(check bool) "Cancelled -> NOT claim pool" false
+          (S.task_is_claim_pool_candidate
+             (dummy_task (Types.Cancelled { cancelled_by = "a"; cancelled_at = "t"; reason = None }))));
+    ];
     "publish_phase_lifecycle_ssot", [
       (* Issue #8572: phase-bearing publish_lifecycle calls used to pass
          a hand-coded event_name string alongside the phase Variant —

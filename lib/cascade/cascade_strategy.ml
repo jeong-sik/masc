@@ -50,6 +50,22 @@ let kind_to_string = function
   | Sticky -> "sticky"
   | Round_robin -> "round_robin"
 
+(* Issue #8603: SSOT helpers — replace hard-coded list in [parse_kind]'s
+   Error arm so adding an 8th constructor updates the operator-visible
+   error message automatically. Same Variant SSOT shape as #8486 /
+   #8467 / #8592 / #8601. *)
+let all_kinds = [
+  Failover;
+  Capacity_aware;
+  Weighted_random;
+  Circuit_breaker_cycling;
+  Priority_tier;
+  Sticky;
+  Round_robin;
+]
+
+let valid_kind_strings = List.map kind_to_string all_kinds
+
 let parse_kind = function
   | "failover" -> Ok Failover
   | "capacity_aware" -> Ok Capacity_aware
@@ -60,10 +76,8 @@ let parse_kind = function
   | "round_robin" -> Ok Round_robin
   | other ->
     Error (Printf.sprintf
-             "unknown cascade strategy %S (expected one of: \
-              failover, capacity_aware, weighted_random, \
-              circuit_breaker_cycling, priority_tier, sticky, \
-              round_robin)" other)
+             "unknown cascade strategy %S (expected one of: %s)"
+             other (String.concat ", " valid_kind_strings))
 
 let default_sticky_ttl_ms = 300_000
 

@@ -366,15 +366,33 @@ let rec validate_json_value ?label schema value =
 let validate_input_json schema json =
   validate_json_value ~label:"input" schema json
 
-let param_type_of_schema schema =
+(* Strict classifier: returns [None] for unknown JSON Schema wire types
+   so callers can distinguish "rule fired" from "fall-through default".
+   See #8832. *)
+let param_type_of_schema_opt schema : Agent_sdk.Types.param_type option =
   match schema_type schema with
-  | "string" -> Agent_sdk.Types.String
-  | "integer" -> Agent_sdk.Types.Integer
-  | "number" -> Agent_sdk.Types.Number
-  | "boolean" -> Agent_sdk.Types.Boolean
-  | "array" -> Agent_sdk.Types.Array
-  | "object" -> Agent_sdk.Types.Object
-  | _ -> Agent_sdk.Types.String
+  | "string" -> Some Agent_sdk.Types.String
+  | "integer" -> Some Agent_sdk.Types.Integer
+  | "number" -> Some Agent_sdk.Types.Number
+  | "boolean" -> Some Agent_sdk.Types.Boolean
+  | "array" -> Some Agent_sdk.Types.Array
+  | "object" -> Some Agent_sdk.Types.Object
+  | _ -> None
+
+(* Back-compat wrapper: warns on unknown wire type and falls back to
+   [String] (the legacy permissive default). The explicit warn converts
+   the silent #8605-family fallback into an observable signal without
+   changing the classification result. New callers should prefer
+   [param_type_of_schema_opt] and decide how to handle [None]
+   explicitly. *)
+let param_type_of_schema schema =
+  match param_type_of_schema_opt schema with
+  | Some t -> t
+  | None ->
+      Log.Misc.warn
+        "param_type_of_schema: unknown JSON Schema type %S -> String (drift; see #8832)"
+        (schema_type schema);
+      Agent_sdk.Types.String
 
 let tool_params_of_input_schema schema =
   let required = required_names schema in

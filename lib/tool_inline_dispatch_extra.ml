@@ -120,10 +120,10 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
             ("event", `String "board_post");
             ("content_preview", `String (String.sub content 0 (min 100 (String.length content))));
           ]);
-        emit_activity config ~kind:"board.posted" ~actor:author
+        emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Posted) ~actor:author
           ?subject:
             (Option.map (Activity_graph.entity ~kind:"post") post_id)
-          ~tags:[ "board"; "board.posted" ]
+          ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Posted ]
           ~payload:
             (`Assoc
               [
@@ -188,9 +188,9 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
             ("post_id", `String post_id);
             ("content_preview", `String (String.sub content 0 (min 100 (String.length content))));
           ]);
-        emit_activity config ~kind:"board.commented" ~actor:author
+        emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Commented) ~actor:author
           ~subject:(Activity_graph.entity ~kind:"post" post_id)
-          ~tags:[ "board"; "board.commented" ]
+          ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Commented ]
           ~payload:
             (`Assoc
               [
@@ -243,9 +243,9 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         let subject_kind =
           if String.equal name "masc_board_vote" then "post" else "comment"
         in
-        emit_activity config ~kind:"board.voted" ~actor:voter
+        emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Voted) ~actor:voter
           ~subject:(Activity_graph.entity ~kind:subject_kind target_id)
-          ~tags:[ "board"; "board.voted" ]
+          ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Voted ]
           ~payload:
             (`Assoc
               [
@@ -266,9 +266,9 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ("timestamp", `String (Types.now_iso ()));
         ] in
         Mcp_server.sse_broadcast state notification;
-        emit_activity config ~kind:"board.deleted" ~actor:agent_name
+        emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Deleted) ~actor:agent_name
           ~subject:(Activity_graph.entity ~kind:"post" post_id)
-          ~tags:[ "board"; "board.deleted" ]
+          ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Deleted ]
           ~payload:(`Assoc [ ("post_id", `String post_id) ])
           ()
       end;

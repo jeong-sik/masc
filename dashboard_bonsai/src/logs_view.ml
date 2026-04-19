@@ -1,0 +1,936 @@
+(** Phase 1 logs view — MASC Design System (dark-fantasy theme).
+
+    Layout follows MASC's keeper-row grammar: hairline-separated rows, tight
+    8-16 px padding, tiny 2-4 px radii, flat shadows. One brass accent
+    (timestamps, header chrome). Level colors are the MASC status palette
+    (bile / ember / blood) — not generic yellow/red. Body uses EB Garamond;
+    timestamps, module, and source badges use JetBrains Mono or Noto Sans KR
+    UI per the system's type stack.
+
+    Tokens are inlined as literals because ppx_css has no access to the
+    design system's [:root] variables yet. When [colors_and_type.css] is
+    served from [assets/dashboard_bonsai/], the inline values become
+    [var(--bg-deep)] etc. *)
+
+open! Core
+open! Bonsai_web
+open Virtual_dom.Vdom
+
+module Style =
+[%css
+stylesheet
+  {|
+  .root {
+    position: relative;
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 88% 14%, rgba(138, 106, 40, 0.10), transparent 22%),
+      radial-gradient(circle at 8% 88%, rgba(160, 24, 24, 0.05), transparent 28%),
+      #0a0706;
+    color: #b8a488;
+    font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
+    font-size: 15px;
+    padding: 1.5rem 2.5rem 4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    isolation: isolate;
+  }
+
+  .root::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    opacity: 0.28;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.2' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.9  0 0 0 0 0.85  0 0 0 0 0.7  0 0 0 0.05 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    mix-blend-mode: overlay;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #2a1a14;
+  }
+
+  .rune {
+    width: 22px;
+    height: 22px;
+    border: 1px solid #8a6a28;
+    display: grid;
+    place-items: center;
+    color: #8a6a28;
+    font-family: 'Cinzel', serif;
+    font-size: 11px;
+    transform: rotate(45deg);
+  }
+
+  .rune_inner {
+    transform: rotate(-45deg);
+  }
+
+  .wordmark {
+    font-family: 'Cinzel', serif;
+    font-size: 13px;
+    letter-spacing: 0.22em;
+    color: #8a6a28;
+    text-transform: uppercase;
+  }
+
+  .crumbs {
+    margin-left: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #6a5848;
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .crumbs_sep { color: #5a3028; }
+  .crumbs_cur { color: #e8d8b8; letter-spacing: 0.14em; }
+
+  .pulse_slot { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+  .pulse {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #8a6a28;
+    box-shadow: 0 0 8px rgba(138, 106, 40, 0.55);
+    animation: pulse-beat 2.4s ease-in-out infinite;
+  }
+
+  @keyframes pulse-beat {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+  }
+
+  .pulse_label {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #6a5848;
+  }
+
+  .heartbeat {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 14px 12px;
+    background:
+      linear-gradient(180deg, #14100d 0%, #0f0b09 100%);
+    border: 1px solid #2a1a14;
+    border-radius: 2px;
+    box-shadow: inset 0 0 0 1px rgba(196, 162, 101, 0.04);
+  }
+
+  .heartbeat_head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .heartbeat_eyebrow {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #6a5848;
+  }
+
+  .heartbeat_scale {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    color: #4a3a32;
+  }
+
+  .heartbeat_track {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 2px;
+    height: 36px;
+    align-items: end;
+    padding: 0 1px;
+    border-bottom: 1px solid #2a1a14;
+  }
+
+  .heartbeat_bar {
+    min-width: 2px;
+    background: #3a5a48;
+    border-radius: 1px;
+    opacity: 0.82;
+  }
+
+  .heartbeat_bar_warn  { background: linear-gradient(180deg, #a06a1a 0%, #6a3c10 100%); }
+  .heartbeat_bar_error { background: linear-gradient(180deg, #e84848 0%, #8a1010 100%); box-shadow: 0 0 6px rgba(160, 24, 24, 0.45); }
+  .heartbeat_bar_idle  { background: #2a1a14; opacity: 0.6; }
+
+  .hud {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 1px;
+    background: #2a1a14;
+    border: 1px solid #5a3028;
+    border-radius: 2px;
+    box-shadow:
+      inset 0 0 0 1px rgba(196, 162, 101, 0.08),
+      0 2px 12px rgba(0, 0, 0, 0.6),
+      0 16px 24px -16px rgba(0, 0, 0, 0.9);
+    backdrop-filter: blur(2px);
+  }
+
+  .hud::before,
+  .hud::after {
+    content: "";
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border: 1px solid #8a6a28;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .hud::before {
+    top: -1px;
+    left: -1px;
+    border-right: 0;
+    border-bottom: 0;
+  }
+
+  .hud::after {
+    bottom: -1px;
+    right: -1px;
+    border-left: 0;
+    border-top: 0;
+  }
+
+  .hud_cell {
+    background: #14100d;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .hud_k {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: #6a5848;
+  }
+
+  .hud_v {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    color: #b8a488;
+  }
+
+  .hud_v_ok   { color: #5a7a3a; }
+  .hud_v_warn { color: #a06a1a; }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: #14100d;
+    border: 1px solid #2a1a14;
+    border-radius: 2px;
+    flex-wrap: wrap;
+  }
+
+  .chip_group {
+    display: inline-flex;
+    gap: 4px;
+    padding: 2px;
+    border: 1px solid #2a1a14;
+    border-radius: 999px;
+    background: #0f0b09;
+  }
+
+  .chip {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 999px;
+    color: #6a5848;
+    cursor: pointer;
+    transition: background 0.18s, color 0.18s;
+  }
+
+  .chip:hover { color: #b8a488; }
+  .chip_active {
+    color: #e8d8b8;
+    background: rgba(138, 106, 40, 0.14);
+    box-shadow: inset 0 0 0 1px #8a6a28;
+  }
+
+  .input_shell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid #2a1a14;
+    border-radius: 2px;
+    background: #0f0b09;
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 11px;
+    color: #6a5848;
+  }
+
+  .input_shell_label { letter-spacing: 0.25em; text-transform: uppercase; color: #4a3a32; font-size: 9px; }
+  .input_shell_value { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: #b8a488; }
+
+  .toolbar_spacer { flex: 1; }
+
+  .btn_ghost {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 5px 12px;
+    border: 1px solid #2a1a14;
+    border-radius: 2px;
+    background: transparent;
+    color: #b8a488;
+    cursor: pointer;
+    transition: color 0.18s, border-color 0.18s;
+  }
+  .btn_ghost:hover { color: #8a6a28; border-color: #5a3028; }
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid #2a1a14;
+    padding-bottom: 0.75rem;
+  }
+
+  .eyebrow {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #6a5848;
+    margin: 0 0 0.25rem 0;
+  }
+
+  .title {
+    font-family: 'Cinzel', serif;
+    font-weight: 500;
+    font-size: 1.25rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #e8d8b8;
+    margin: 0;
+  }
+
+  .meta {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: #8a6a28;
+  }
+
+  .tape {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 1.75rem 10rem 5rem 9rem 7.5rem minmax(0, 1fr);
+    gap: 1rem;
+    padding: 0.625rem 0.75rem;
+    border-bottom: 1px dashed #2a1a14;
+    border-left: 2px solid #2a1a14;
+    align-items: baseline;
+    transition: background 0.18s ease, box-shadow 0.18s ease, border-left-color 0.18s ease;
+  }
+
+  .sigil {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid #8a6a28;
+    background:
+      radial-gradient(circle at 35% 30%, rgba(232, 216, 184, 0.18), transparent 55%),
+      #14100d;
+    display: grid;
+    place-items: center;
+    font-family: 'Cinzel', serif;
+    font-size: 10px;
+    letter-spacing: 0;
+    color: #8a6a28;
+    text-transform: uppercase;
+    box-shadow:
+      inset 0 0 0 1px rgba(232, 216, 184, 0.06),
+      0 0 6px rgba(138, 106, 40, 0.18);
+    align-self: center;
+  }
+
+  .sigil_warn  { color: #a06a1a; border-color: #a06a1a; box-shadow: inset 0 0 0 1px rgba(232,216,184,0.06), 0 0 8px rgba(160, 106, 26, 0.35); }
+  .sigil_error { color: #e8d8b8; border-color: #a01818; background: radial-gradient(circle at 35% 30%, rgba(232,216,184,0.28), transparent 55%), #3a1410; box-shadow: inset 0 0 0 1px rgba(232,216,184,0.08), 0 0 10px rgba(160, 24, 24, 0.45); }
+
+  .message_lead::first-letter {
+    font-family: 'Cinzel', 'EB Garamond', serif;
+    font-weight: 600;
+    font-size: 2.4rem;
+    line-height: 0.85;
+    float: left;
+    padding: 2px 8px 0 0;
+    margin-top: 2px;
+    background: linear-gradient(180deg, #e8d8b8 0%, #8a6a28 55%, #5a3028 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 0 14px rgba(138, 106, 40, 0.25);
+  }
+
+  .row_debug { border-left-color: #4a3a32; }
+  .row_info  { border-left-color: #3a5a48; }
+
+  .row:hover {
+    background: linear-gradient(90deg, rgba(138, 106, 40, 0.08), transparent 70%);
+    box-shadow: inset 1px 0 0 0 rgba(138, 106, 40, 0.35);
+    border-left-color: #8a6a28;
+  }
+
+  .row_error {
+    background: linear-gradient(90deg, rgba(160, 24, 24, 0.08) 0%, transparent 60%);
+    border-left-color: #a01818;
+  }
+
+  .row_error:hover {
+    background: linear-gradient(90deg, rgba(160, 24, 24, 0.18) 0%, transparent 65%);
+    box-shadow: inset 1px 0 0 0 rgba(160, 24, 24, 0.55);
+    border-left-color: #c94a3a;
+  }
+
+  .row_warn {
+    background: linear-gradient(90deg, rgba(160, 106, 26, 0.06) 0%, transparent 60%);
+    border-left-color: #a06a1a;
+  }
+
+  .row_warn:hover {
+    background: linear-gradient(90deg, rgba(160, 106, 26, 0.15) 0%, transparent 65%);
+    box-shadow: inset 1px 0 0 0 rgba(160, 106, 26, 0.5);
+    border-left-color: #c4461a;
+  }
+
+  .ts {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    color: #6a5848;
+  }
+
+  .ts_rel {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #4a3a32;
+  }
+
+  .level {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 10px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+
+  .level_debug { color: #6a5848; }
+  .level_info  { color: #b8a488; }
+  .level_warn  { color: #a06a1a; }
+  .level_error { color: #a01818; text-shadow: 0 0 12px rgba(160, 24, 24, 0.32); }
+
+  .mod_col {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: #6a5848;
+  }
+
+  .source_badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border: 1px solid #2a1a14;
+    border-radius: 999px;
+    background: #1b1612;
+    color: #6a5848;
+    width: fit-content;
+    height: fit-content;
+  }
+
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #6a5848;
+    display: inline-block;
+  }
+
+  .dot_ok    { background: #5a7a3a; box-shadow: 0 0 6px #5a7a3a; }
+  .dot_warn  { background: #a06a1a; box-shadow: 0 0 6px #a06a1a; }
+  .dot_bad   { background: #a01818; box-shadow: 0 0 6px #a01818; }
+
+  .message {
+    color: #b8a488;
+    font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
+    font-size: 14px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .details {
+    color: #6a5848;
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-size: 10px;
+    margin-top: 0.25rem;
+    opacity: 0.75;
+  }
+
+  .empty {
+    color: #6a5848;
+    font-family: 'EB Garamond', Georgia, serif;
+    font-style: italic;
+    padding: 3rem 0 4rem;
+    text-align: center;
+    font-size: 1rem;
+    line-height: 1.7;
+  }
+
+  .empty_attr {
+    display: block;
+    margin-top: 0.75rem;
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-style: normal;
+    color: #4a3a32;
+  }
+
+  .tape_fade {
+    position: relative;
+  }
+
+  .tape_fade::before {
+    content: "";
+    position: sticky;
+    top: 58px;
+    display: block;
+    height: 24px;
+    margin-bottom: -24px;
+    pointer-events: none;
+    z-index: 2;
+    background: linear-gradient(180deg, #0a0706 0%, rgba(10, 7, 6, 0) 100%);
+  }
+
+  .roster {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    margin-top: 1rem;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: #2a1a14;
+    border: 1px solid #3a2a20;
+    border-radius: 2px;
+    box-shadow:
+      inset 0 0 0 1px rgba(196, 162, 101, 0.06),
+      0 -8px 24px -12px rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(2px);
+  }
+
+  .roster_slot {
+    background: #14100d;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .roster_sigil {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 1px solid #8a6a28;
+    background: radial-gradient(circle at 35% 30%, rgba(232, 216, 184, 0.22), transparent 55%), #14100d;
+    display: grid;
+    place-items: center;
+    font-family: 'Cinzel', serif;
+    font-size: 11px;
+    color: #e8d8b8;
+    text-transform: uppercase;
+    box-shadow: inset 0 0 0 1px rgba(232, 216, 184, 0.08), 0 0 8px rgba(138, 106, 40, 0.22);
+    flex-shrink: 0;
+  }
+
+  .roster_body {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .roster_name {
+    font-family: 'Cinzel', serif;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #e8d8b8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .roster_state {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: #6a5848;
+  }
+
+  .roster_dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #6a5848;
+  }
+
+  .roster_dot_live     { background: #5a7a3a; box-shadow: 0 0 6px #5a7a3a; animation: pulse-beat 1.8s ease-in-out infinite; }
+  .roster_dot_thinking { background: #8a6a28; box-shadow: 0 0 6px #8a6a28; animation: pulse-beat 1.2s ease-in-out infinite; }
+  .roster_dot_idle     { background: #4a3a32; }
+  .roster_dot_failed   { background: #a01818; box-shadow: 0 0 8px #a01818; }
+
+  .roster_when {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 10px;
+    color: #6a5848;
+    flex-shrink: 0;
+  }
+|}]
+
+let level_class level =
+  match level with
+  | "DEBUG" -> Style.level_debug
+  | "WARN" -> Style.level_warn
+  | "ERROR" -> Style.level_error
+  | _ -> Style.level_info
+;;
+
+let row_tint level =
+  match level with
+  | "WARN" -> Some Style.row_warn
+  | "ERROR" -> Some Style.row_error
+  | "DEBUG" -> Some Style.row_debug
+  | _ -> Some Style.row_info
+;;
+
+let dot_class level =
+  match level with
+  | "WARN" -> Style.dot_warn
+  | "ERROR" -> Style.dot_bad
+  | _ -> Style.dot_ok
+;;
+
+let sigil_class level =
+  match level with
+  | "WARN" -> Some Style.sigil_warn
+  | "ERROR" -> Some Style.sigil_error
+  | _ -> None
+;;
+
+let sigil_char source =
+  match String.to_list source with
+  | c :: _ -> String.of_char (Char.uppercase c)
+  | [] -> "·"
+;;
+
+let view_entry ~is_first (e : Logs_types.entry) =
+  let row_attrs =
+    match row_tint e.normalized_level with
+    | None -> [ Style.row ]
+    | Some tint -> [ Style.row; tint ]
+  in
+  let sigil_attrs =
+    match sigil_class e.normalized_level with
+    | None -> [ Style.sigil ]
+    | Some c -> [ Style.sigil; c ]
+  in
+  let message_attrs =
+    if is_first then [ Style.message; Style.message_lead ] else [ Style.message ]
+  in
+  let message_block =
+    match e.details with
+    | None -> [ Node.div ~attrs:message_attrs [ Node.text e.message ] ]
+    | Some details_raw ->
+      [ Node.div ~attrs:message_attrs [ Node.text e.message ]
+      ; Node.div ~attrs:[ Style.details ] [ Node.text details_raw ]
+      ]
+  in
+  Node.div
+    ~attrs:row_attrs
+    [ Node.div ~attrs:sigil_attrs [ Node.text (sigil_char e.module_) ]
+    ; Node.div
+        ~attrs:[ Style.ts ]
+        [ Node.span [ Node.text e.ts ]
+        ; Node.span ~attrs:[ Style.ts_rel ] [ Node.text "just now" ]
+        ]
+    ; Node.div
+        ~attrs:[ Style.level; level_class e.normalized_level ]
+        [ Node.text e.normalized_level ]
+    ; Node.div ~attrs:[ Style.mod_col ] [ Node.text e.module_ ]
+    ; Node.div
+        ~attrs:[ Style.source_badge ]
+        [ Node.span ~attrs:[ Style.dot; dot_class e.normalized_level ] []
+        ; Node.text e.source
+        ]
+    ; Node.div message_block
+    ]
+;;
+
+let hud_cell ?(v_class = None) ~k ~v () =
+  let v_attrs =
+    match v_class with
+    | None -> [ Style.hud_v ]
+    | Some c -> [ Style.hud_v; c ]
+  in
+  Node.div
+    ~attrs:[ Style.hud_cell ]
+    [ Node.div ~attrs:[ Style.hud_k ] [ Node.text k ]
+    ; Node.div ~attrs:v_attrs [ Node.text v ]
+    ]
+;;
+
+(* Heartbeat strip — 60 bars representing event density across recent cycles.
+   Static shape for Phase 1; Phase 1c wires real per-minute buckets. *)
+let heartbeat_bars : (int * [ `Info | `Warn | `Error | `Idle ]) list =
+  [ 18, `Info; 22, `Info; 14, `Info; 8, `Idle; 24, `Info; 31, `Info; 28, `Info
+  ; 16, `Info; 12, `Idle; 34, `Warn; 40, `Warn; 29, `Info; 22, `Info; 18, `Info
+  ; 14, `Info; 6, `Idle; 9, `Idle; 22, `Info; 27, `Info; 33, `Info; 41, `Warn
+  ; 52, `Warn; 38, `Warn; 24, `Info; 19, `Info; 12, `Idle; 27, `Info; 31, `Info
+  ; 36, `Info; 44, `Warn; 58, `Warn; 72, `Error; 61, `Error; 49, `Warn
+  ; 38, `Warn; 28, `Info; 22, `Info; 18, `Info; 14, `Idle; 11, `Idle
+  ; 24, `Info; 31, `Info; 28, `Info; 22, `Info; 17, `Info; 12, `Idle
+  ; 26, `Info; 34, `Info; 41, `Warn; 47, `Warn; 35, `Warn; 28, `Info
+  ; 22, `Info; 19, `Info; 16, `Info; 14, `Info; 28, `Info; 44, `Warn
+  ; 58, `Error; 82, `Error
+  ]
+;;
+
+let view_heartbeat () =
+  let bar (height, level) =
+    let cls =
+      match level with
+      | `Warn -> Some Style.heartbeat_bar_warn
+      | `Error -> Some Style.heartbeat_bar_error
+      | `Idle -> Some Style.heartbeat_bar_idle
+      | `Info -> None
+    in
+    let base_attrs =
+      match cls with
+      | None -> [ Style.heartbeat_bar ]
+      | Some c -> [ Style.heartbeat_bar; c ]
+    in
+    let h = Int.max 2 height in
+    let style =
+      Attr.style (Css_gen.create ~field:"height" ~value:(Printf.sprintf "%dpx" h))
+    in
+    Node.div ~attrs:(style :: base_attrs) []
+  in
+  Node.div
+    ~attrs:[ Style.heartbeat ]
+    [ Node.div
+        ~attrs:[ Style.heartbeat_head ]
+        [ Node.span
+            ~attrs:[ Style.heartbeat_eyebrow ]
+            [ Node.text "cycle pulse · last 60 ticks" ]
+        ; Node.span
+            ~attrs:[ Style.heartbeat_scale ]
+            [ Node.text "t-60 ·—· t0" ]
+        ]
+    ; Node.div
+        ~attrs:[ Style.heartbeat_track ]
+        (List.map ~f:bar heartbeat_bars)
+    ]
+;;
+
+(* Keeper roster — sticky bottom strip. Four fixed keeper slots as a
+   visual placeholder; Phase 1c wires this to a keeper_status Var so the
+   state dot, last-heard timestamp, and presence reflect live telemetry. *)
+type keeper_state = [ `Live | `Thinking | `Idle | `Failed ]
+
+let view_roster () =
+  let slot ~sigil ~name ~(state : keeper_state) ~state_label ~when_ =
+    let dot_cls =
+      match state with
+      | `Live -> Style.roster_dot_live
+      | `Thinking -> Style.roster_dot_thinking
+      | `Idle -> Style.roster_dot_idle
+      | `Failed -> Style.roster_dot_failed
+    in
+    Node.div
+      ~attrs:[ Style.roster_slot ]
+      [ Node.div ~attrs:[ Style.roster_sigil ] [ Node.text sigil ]
+      ; Node.div
+          ~attrs:[ Style.roster_body ]
+          [ Node.span ~attrs:[ Style.roster_name ] [ Node.text name ]
+          ; Node.div
+              ~attrs:[ Style.roster_state ]
+              [ Node.span ~attrs:[ Style.roster_dot; dot_cls ] []
+              ; Node.text state_label
+              ]
+          ]
+      ; Node.span ~attrs:[ Style.roster_when ] [ Node.text when_ ]
+      ]
+  in
+  Node.div
+    ~attrs:[ Style.roster ]
+    [ slot ~sigil:"P" ~name:"keeper · poe" ~state:`Live
+        ~state_label:"speaking" ~when_:"3s"
+    ; slot ~sigil:"J" ~name:"janitor" ~state:`Thinking
+        ~state_label:"thinking" ~when_:"12s"
+    ; slot ~sigil:"G" ~name:"governance" ~state:`Idle
+        ~state_label:"idle · ok" ~when_:"2m"
+    ; slot ~sigil:"I" ~name:"improver" ~state:`Failed
+        ~state_label:"paused · auth" ~when_:"7m"
+    ]
+;;
+
+let view_hud (response : Logs_types.response) =
+  Node.div
+    ~attrs:[ Style.hud ]
+    [ hud_cell ~k:"Source" ~v:"Log.Ring" ()
+    ; hud_cell ~k:"Total" ~v:(Printf.sprintf "%d" response.total) ()
+    ; hud_cell ~k:"Level" ~v:"INFO+" ()
+    ; hud_cell ~v_class:(Some Style.hud_v_ok) ~k:"Refresh" ~v:"poll · 3s" ()
+    ; hud_cell ~k:"Limit" ~v:"200" ()
+    ; hud_cell ~v_class:(Some Style.hud_v_ok) ~k:"Link" ~v:"fetch · ok" ()
+    ]
+;;
+
+let render_response (response : Logs_types.response) : Node.t =
+  let tape =
+    match response.entries with
+    | [] ->
+      Node.div
+        ~attrs:[ Style.empty ]
+        [ Node.text "저택은 조용하다. 아무도 아직 말하지 않았다."
+        ; Node.span
+            ~attrs:[ Style.empty_attr ]
+            [ Node.text "log ring · empty" ]
+        ]
+    | entries ->
+      let rendered =
+        List.mapi entries ~f:(fun i e -> view_entry ~is_first:(i = 0) e)
+      in
+      Node.div
+        ~attrs:[ Style.tape_fade ]
+        [ Node.div ~attrs:[ Style.tape ] rendered ]
+  in
+  let brand_row =
+    Node.div
+      ~attrs:[ Style.brand ]
+      [ Node.div
+          ~attrs:[ Style.rune ]
+          [ Node.span ~attrs:[ Style.rune_inner ] [ Node.text "M" ] ]
+      ; Node.span ~attrs:[ Style.wordmark ] [ Node.text "masc" ]
+      ; Node.div
+          ~attrs:[ Style.crumbs ]
+          [ Node.span [ Node.text "observatory" ]
+          ; Node.span ~attrs:[ Style.crumbs_sep ] [ Node.text "›" ]
+          ; Node.span ~attrs:[ Style.crumbs_cur ] [ Node.text "logs · 저널" ]
+          ]
+      ; Node.div
+          ~attrs:[ Style.pulse_slot ]
+          [ Node.span ~attrs:[ Style.pulse ] []
+          ; Node.span ~attrs:[ Style.pulse_label ] [ Node.text "live · 3s" ]
+          ]
+      ]
+  in
+  let toolbar =
+    Node.div
+      ~attrs:[ Style.toolbar ]
+      [ Node.div
+          ~attrs:[ Style.chip_group ]
+          [ Node.span ~attrs:[ Style.chip ] [ Node.text "debug+" ]
+          ; Node.span
+              ~attrs:[ Style.chip; Style.chip_active ]
+              [ Node.text "info+" ]
+          ; Node.span ~attrs:[ Style.chip ] [ Node.text "warn+" ]
+          ; Node.span ~attrs:[ Style.chip ] [ Node.text "error" ]
+          ]
+      ; Node.div
+          ~attrs:[ Style.input_shell ]
+          [ Node.span ~attrs:[ Style.input_shell_label ] [ Node.text "module" ]
+          ; Node.span ~attrs:[ Style.input_shell_value ] [ Node.text "—" ]
+          ]
+      ; Node.div
+          ~attrs:[ Style.input_shell ]
+          [ Node.span ~attrs:[ Style.input_shell_label ] [ Node.text "limit" ]
+          ; Node.span ~attrs:[ Style.input_shell_value ] [ Node.text "200" ]
+          ]
+      ; Node.div ~attrs:[ Style.toolbar_spacer ] []
+      ; Node.button ~attrs:[ Style.btn_ghost ] [ Node.text "refresh" ]
+      ]
+  in
+  Node.div
+    ~attrs:[ Style.root ]
+    [ brand_row
+    ; view_heartbeat ()
+    ; view_hud response
+    ; toolbar
+    ; Node.div
+        ~attrs:[ Style.header ]
+        [ Node.div
+            [ Node.p ~attrs:[ Style.eyebrow ] [ Node.text "log ring · in-memory" ]
+            ; Node.h1 ~attrs:[ Style.title ] [ Node.text "journal" ]
+            ]
+        ; Node.span
+            ~attrs:[ Style.meta ]
+            [ Node.text (Printf.sprintf "seq up to %d" response.total) ]
+        ]
+    ; tape
+    ; view_roster ()
+    ]
+;;
+
+let component (_graph @ local) =
+  Bonsai.map (Bonsai.Expert.Var.value Logs_var.var) ~f:render_response
+;;

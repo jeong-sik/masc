@@ -1,5 +1,5 @@
 open Tool_args
-open Result_syntax
+open Result.Syntax
 
 include Operator_control_action
 

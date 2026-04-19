@@ -5,8 +5,6 @@
     explicit completion claims, then derives trust/risk summaries from
     deterministic evidence. *)
 
-open Types
-
 type claim_kind =
   | Task_commitment
   | Completion_claim
@@ -323,7 +321,7 @@ let append_resolution (config : Coord_query.config) (event : resolution_event) =
 let task_title_for_id (config : Coord_query.config) task_id =
   Coord_query.get_tasks_safe config
   |> List.find_opt (fun (task : Types.task) -> String.equal task.id task_id)
-  |> Option.map (fun task -> task.title)
+  |> Option.map (fun (task : Types.task) -> task.title)
 
 let create_task_commitment config ~agent_name ~task_id ~surface =
   let now = Time_compat.now () in

@@ -793,6 +793,28 @@ let () =
         Alcotest.(check bool) "git_worktree present" true
           (List.mem "git_worktree" Masc_mcp.Tool_shard.keeper_shell_op_enum_strings));
     ];
+    "channel_label_ssot", [
+      (* Issue #8569: keeper_keepalive used to hand-build the
+         [channel=…] log label as [if is_autonomous then "autonomous"
+         else "reactive"], emitting [autonomous] (truncated) while
+         every other surface emitted the SSOT
+         [Keeper_world_observation.channel_to_string]'s
+         [scheduled_autonomous] (full snake_case). Operators grepping
+         for one form silently missed events from the other. The fix
+         derives the keepalive label from the SSOT directly. These
+         tests pin the SSOT label and catch any future re-truncation. *)
+      Alcotest.test_case "channel_to_string emits full snake_case" `Quick (fun () ->
+        let open Masc_mcp.Keeper_world_observation in
+        Alcotest.(check string) "Scheduled_autonomous label"
+          "scheduled_autonomous" (channel_to_string Scheduled_autonomous);
+        Alcotest.(check string) "Reactive label"
+          "reactive" (channel_to_string Reactive));
+      Alcotest.test_case "truncated 'autonomous' label is NOT the SSOT (regression #8569)" `Quick (fun () ->
+        let open Masc_mcp.Keeper_world_observation in
+        let label = channel_to_string Scheduled_autonomous in
+        Alcotest.(check bool) "label is not the truncated form" false
+          (String.equal label "autonomous"));
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

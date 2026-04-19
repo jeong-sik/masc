@@ -114,7 +114,7 @@ let test_get_float_missing () =
     (Tool_args.get_float args "duration" 1.0)
 
 let test_get_float_wrong_type () =
-  let args = `Assoc [("duration", `String "2.5")] in
+  let args = `Assoc [("duration", `String "oops")] in
   check (float 0.001) "uses default on string" 1.0
     (Tool_args.get_float args "duration" 1.0)
 

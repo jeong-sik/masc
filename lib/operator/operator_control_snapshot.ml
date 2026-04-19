@@ -332,9 +332,28 @@ let keeper_tool_audit_fields ?(include_allowed_tools = true) config
         fallback_snapshot.tool_audit_at )
 
 (* Concurrency cap for parallel keeper snapshot fibers.
-   Prevents memory bursts when many keepers are processed simultaneously.
-   Each keeper fiber does filesystem I/O + heavy JSON construction (~50 fields). *)
-let _keeper_snapshot_max_concurrency = 4
+   Originally 4 to guard against memory bursts when many keepers are
+   processed simultaneously.  Live measurement via #8829 over 48 samples
+   showed this cap was the dominant cost, not the per-keeper I/O:
+
+       wait avg=1334ms max=4424ms   (queued on semaphore)
+       work avg=604ms  max=3088ms   (meta/agent/profile I/O + JSON)
+       ratio wait/work = 2.21x
+
+   Raising to 16 matches the current fleet size so no fiber queues on
+   the semaphore in the common case.  The original memory concern was
+   written when keepers were a new surface; modern machines absorb the
+   per-fiber JSON construction (~50 fields × 16 keepers ≈ a few MB)
+   without visible pressure.  Env-overridable via
+   [MASC_KEEPER_SNAPSHOT_CONCURRENCY] for operators on tight memory
+   envelopes (e.g. CI runners) who still want the old behaviour. *)
+let _keeper_snapshot_max_concurrency =
+  match Sys.getenv_opt "MASC_KEEPER_SNAPSHOT_CONCURRENCY" with
+  | Some s ->
+      (match int_of_string_opt (String.trim s) with
+       | Some n when n >= 1 && n <= 64 -> n
+       | _ -> 16)
+  | None -> 16
 
 let _keeper_sem = Eio.Semaphore.make _keeper_snapshot_max_concurrency
 

@@ -1,4 +1,4 @@
-(lang dune 3.17)
+(lang dune 3.22)
 
 (using menhir 3.0)
 
@@ -26,7 +26,7 @@
  (description "MASC Protocol: File-based coordination for Claude, Gemini, and Codex agents")
  (depends
   (ocaml (>= 5.4))
-  (dune (>= 3.17))
+  (dune (>= 3.22))
   ; External dependencies (opam pin)
   (mcp_protocol (>= 1.3.0))
   (ocaml-webrtc (>= 0.2.3))

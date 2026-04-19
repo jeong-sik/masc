@@ -388,8 +388,15 @@ let rec evidence_preview_strings json =
       fields |> List.map snd |> List.concat_map evidence_preview_strings |> dedup_strings |> take 4
   | _ -> []
 
+(* Issue #8395: [Operator_digest] canonicalizes root-level attention to
+   [target_type="root"] but also accepts the aliases "namespace" and
+   "room" via [Operator_digest_types.is_root_alias]. This predicate
+   previously compared only to the literal "room", so root-level
+   incidents (the canonical form) fell through to the public queue.
+   Delegate to the shared alias check so every root variant is treated
+   as internal attention — identical to [Dashboard_mission_assembly]. *)
 let is_internal_attention incident =
-  String.equal (string_field "target_type" incident) "room"
+  Operator_digest_types.is_root_alias (string_field "target_type" incident)
 
 let related_sessions_for_attention incident sessions =
   let direct_session =

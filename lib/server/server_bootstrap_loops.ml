@@ -82,8 +82,20 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
   Eio.Switch.on_release sw (fun () ->
     Oas_bus_instrument.unsubscribe masc_event_bus keeper_lifecycle_sub);
   (* Spawn the OAS bus depth sampler so warnings surface on stdout
-     even when /metrics is not scraped. *)
-  Oas_bus_instrument.start_sampler ~sw ~clock ();
+     even when /metrics is not scraped.
+
+     [MASC_OAS_BUS_WARN_DEPTH] lets operators raise the threshold without
+     a rebuild — fleet-wide keeper load legitimately pushes depth past
+     the 200 default at peak (issue #8517). Invalid values fall back to
+     the compile-time default. *)
+  let warn_threshold =
+    match Sys.getenv_opt "MASC_OAS_BUS_WARN_DEPTH" with
+    | Some v -> (match int_of_string_opt (String.trim v) with
+                 | Some n when n > 0 -> n
+                 | _ -> 200)
+    | None -> 200
+  in
+  Oas_bus_instrument.start_sampler ~sw ~clock ~warn_threshold ();
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       (try

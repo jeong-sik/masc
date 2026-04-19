@@ -273,11 +273,20 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
     | Keeper_world_observation.Scheduled_autonomous -> true
     | Keeper_world_observation.Reactive -> false
   in
+  (* Issue #8569: derive the [channel=…] log label from the SSOT
+     [Keeper_world_observation.channel_to_string], not from a local
+     [if is_autonomous] branch. The boolean drives routing (semaphore
+     selection); the label belongs to the Variant SSOT, which emits
+     [scheduled_autonomous] (full snake_case). The previous local
+     branch emitted [autonomous] (truncated), splitting [channel=…]
+     log lines from every other surface that uses the SSOT helper —
+     operators grepping for one form silently missed the other. *)
+  let channel_label = Keeper_world_observation.channel_to_string channel in
   let t0 = Time_compat.now () in
   let queue_depth = List.length (autonomous_waiter_snapshot_for_test ()) in
   Log.Keeper.debug "semaphore_acquire: keeper=%s channel=%s autonomous_available=%d turn_available=%d queue_depth=%d"
     keeper_name
-    (if is_autonomous then "autonomous" else "reactive")
+    channel_label
     (Eio.Semaphore.get_value autonomous_turn_semaphore)
     (Eio.Semaphore.get_value turn_semaphore)
     queue_depth;
@@ -303,7 +312,7 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
           "semaphore_wait: %s semaphore wait exceeded %.0fs (channel=%s), \
            skipping turn"
           label semaphore_wait_timeout_sec
-          (if is_autonomous then "autonomous" else "reactive");
+          channel_label;
         raise (Semaphore_wait_timeout semaphore_wait_timeout_sec))
     | None ->
       (* No Eio clock available: we are running outside an Eio main loop

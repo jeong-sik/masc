@@ -111,21 +111,29 @@ let execution_scope_to_string = function
   | Limited_code_change -> "limited_code_change"
   | Autonomous -> "autonomous"
 
-let execution_scope_of_string = function
-  | "observe_only" -> Observe_only
-  | "autonomous" -> Autonomous
-  | _ -> Limited_code_change
+(* Issue #8605: previously returned [Limited_code_change] for any
+   unknown input — silent privilege miscategorization. Switched to
+   Option so the 3 wire names parse explicitly and typos are visible
+   to callers. See worker_types.ml for the longer rationale. *)
+let execution_scope_of_string_opt = function
+  | "observe_only" -> Some Observe_only
+  | "limited_code_change" -> Some Limited_code_change
+  | "autonomous" -> Some Autonomous
+  | _ -> None
 
 let delivery_verdict_status_to_string = function
   | Delivery_pass -> "pass"
   | Delivery_repair -> "repair"
   | Delivery_fail -> "fail"
 
-let delivery_verdict_status_of_string = function
-  | "pass" -> Delivery_pass
-  | "repair" -> Delivery_repair
-  | "fail" -> Delivery_fail
-  | _ -> Delivery_fail
+(* Issue #8605: previously fell through to [Delivery_fail] (fail-closed
+   but silent). Switched to Option so callers can distinguish a real
+   "fail" verdict from a typo'd input. *)
+let delivery_verdict_status_of_string_opt = function
+  | "pass" -> Some Delivery_pass
+  | "repair" -> Some Delivery_repair
+  | "fail" -> Some Delivery_fail
+  | _ -> None
 
 let turn_kind_to_string = function
   | Turn_note -> "note"

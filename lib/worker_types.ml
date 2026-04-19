@@ -24,10 +24,17 @@ let execution_scope_to_string = function
   | Limited_code_change -> "limited_code_change"
   | Autonomous -> "autonomous"
 
-let execution_scope_of_string = function
-  | "observe_only" -> Observe_only
-  | "autonomous" -> Autonomous
-  | _ -> Limited_code_change
+(* Issue #8605: returns [Some] only for the 3 wire-format names; any
+   other input (including typos like "Observe_only" with capitalisation
+   or fabricated values) returns [None]. Callers must handle [None]
+   explicitly — the previous variant-returning shape silently routed
+   unknowns to [Limited_code_change], a *valid* variant, which is silent
+   privilege miscategorization. *)
+let execution_scope_of_string_opt = function
+  | "observe_only" -> Some Observe_only
+  | "limited_code_change" -> Some Limited_code_change
+  | "autonomous" -> Some Autonomous
+  | _ -> None
 
 let worker_class_to_string = function
   | Worker_manager -> "manager"

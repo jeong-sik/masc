@@ -53,9 +53,12 @@ let execution_scope_to_yojson = function
 
 let execution_scope_of_yojson = function
   | `String value ->
-      Some
-        (Worker_types.execution_scope_of_string
-           (String.lowercase_ascii (String.trim value)))
+      (* Issue #8605: was [Some (execution_scope_of_string ...)] — silently
+         downgraded any unknown string to [Limited_code_change]. The opt
+         version returns [None] for typos, surfacing the malformed input
+         to the JSON layer instead of routing it to a valid privilege. *)
+      Worker_types.execution_scope_of_string_opt
+        (String.lowercase_ascii (String.trim value))
   | `Null -> None
   | _ -> None
 

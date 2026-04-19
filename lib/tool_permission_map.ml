@@ -66,8 +66,12 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_policy_approve", CanBroadcast);
     ("masc_cleanup_zombies", CanBroadcast);
     ("masc_autoresearch_start", CanAdmin);
-    ("masc_autoresearch_swarm_start", CanAdmin);
-    ("masc_repo_synthesis_swarm_start", CanAdmin);
+    (* Issue #8661: dropped masc_autoresearch_swarm_start /
+       masc_repo_synthesis_swarm_start — tools were retired with the
+       swarm cleanup (#8559) and tests in test_tool_access_policy.ml
+       and test_tool_shard_coverage.ml already pin them as not present.
+       Permission map entries were dead surface granting CanAdmin to
+       non-existent tools. *)
     ("masc_autoresearch_cycle", CanAdmin);
     ("masc_autoresearch_inject", CanAdmin);
     ("masc_autoresearch_stop", CanAdmin);

@@ -13,7 +13,7 @@ type transport = Streamable_HTTP
 type session = {
   id: string;
   created_at: float;
-  mutable last_seen: float;
+  mutable last_seen: float [@atomic];
   transport: transport;
   mutable subscriptions: string list;
 }

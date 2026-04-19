@@ -16,7 +16,7 @@ type transport = Streamable_HTTP
 type session = {
   id: string;                 (** Unique session ID (UUID) *)
   created_at: float;          (** Unix timestamp *)
-  mutable last_seen: float;   (** Last activity timestamp *)
+  mutable last_seen: float [@atomic];   (** Last activity timestamp; atomic read/write for unlocked concurrent update via [Session.touch]. *)
   transport: transport;       (** Transport type for this session *)
   mutable subscriptions: string list; (** Event types subscribed *)
 }

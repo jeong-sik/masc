@@ -146,10 +146,16 @@ let worker_meta_of_yojson json =
       | None -> None
       | Some worker_name ->
           let execution_scope =
+            (* Issue #8605: was Option.map over the variant-returning
+               [_of_string] which silently downgraded typos to
+               [Limited_code_change]. Now uses [_of_string_opt] +
+               flatten so a typo becomes [None], then
+               [execution_scope_or_default] applies its explicit default. *)
             json |> member "execution_scope" |> to_string_option
             |> Option.map (fun value ->
-                   Worker_types.execution_scope_of_string
-                     (String.lowercase_ascii (String.trim value)))
+                   String.lowercase_ascii (String.trim value))
+            |> Option.map Worker_types.execution_scope_of_string_opt
+            |> Option.join
             |> execution_scope_or_default
           in
           Some

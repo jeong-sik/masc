@@ -195,10 +195,16 @@ let delivery_verdict_of_yojson (json : Yojson.Safe.t) =
               {
                 contract_id;
                 status =
+                  (* Issue #8605: was [_of_string] which silently
+                     mapped any unknown value to [Delivery_fail]. The
+                     opt version returns [None] for typos; the explicit
+                     [Delivery_fail] default is now visible at the
+                     decoder boundary. *)
                   (match member "status" json with
                   | `String value ->
-                      delivery_verdict_status_of_string
-                        (String.lowercase_ascii (String.trim value))
+                      Option.value ~default:Delivery_fail
+                        (delivery_verdict_status_of_string_opt
+                           (String.lowercase_ascii (String.trim value)))
                   | _ -> Delivery_fail);
                 summary =
                   (match member "summary" json with
@@ -309,9 +315,13 @@ let planned_worker_of_yojson (json : Yojson.Safe.t) =
             spawn_role = member "spawn_role" json |> to_string_option;
             spawn_model = member "spawn_model" json |> to_string_option;
             execution_scope =
-              Option.map
-                execution_scope_of_string
-                (member "execution_scope" json |> to_string_option);
+              (* Issue #8605: was Option.map over [_of_string] (silent
+                 typo->Limited_code_change). Now flatten via the opt
+                 version: typos surface as [None] instead of routing
+                 to a valid privilege. *)
+              Option.bind
+                (member "execution_scope" json |> to_string_option)
+                execution_scope_of_string_opt;
             thinking_enabled = member "thinking_enabled" json |> to_bool_option;
             thinking_budget = member "thinking_budget" json |> to_int_option;
             max_turns = member "max_turns" json |> to_int_option;

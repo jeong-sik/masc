@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-04-19
 code_refs:
   - scripts/check-doc-truth.sh
   - config/
@@ -40,11 +40,11 @@ The key distinction is:
 ### `keeper_runtime.toml`
 
 - Loaded once at boot from
-  [`Keeper_runtime_config.load_and_apply`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/keeper/keeper_runtime_config.ml#L148)
+  [`Keeper_runtime_config.load_and_apply`](../lib/keeper/keeper_runtime_config.ml)
 - Invoked during bootstrap in
-  [`server_runtime_bootstrap.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/server/server_runtime_bootstrap.ml#L188)
+  [`server_runtime_bootstrap.ml`](../lib/server/server_runtime_bootstrap.ml)
 - Contract documented in
-  [`keeper_runtime_config.mli`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/keeper/keeper_runtime_config.mli#L1)
+  [`keeper_runtime_config.mli`](../lib/keeper/keeper_runtime_config.mli)
 
 Operational meaning:
 
@@ -54,9 +54,9 @@ Operational meaning:
 ### `tool_policy.toml`
 
 - Loaded once by
-  [`Keeper_tool_policy.init_policy_config`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/keeper/keeper_tool_policy.ml#L57)
+  [`Keeper_tool_policy.init_policy_config`](../lib/keeper/keeper_tool_policy.ml)
 - Resolved from the active config root by
-  [`keeper_tool_policy_config.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/keeper/keeper_tool_policy_config.ml#L203)
+  [`keeper_tool_policy_config.ml`](../lib/keeper/keeper_tool_policy_config.ml)
 
 Operational meaning:
 
@@ -66,13 +66,13 @@ Operational meaning:
 ### `keepers/*.toml`
 
 - Parsed by
-  [`Keeper_types_profile.load_keeper_toml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/keeper/keeper_types_profile.ml#L335)
+  [`Keeper_types_profile.load_keeper_toml`](../lib/keeper/keeper_types_profile.ml)
 - Resolved through
-  [`Config_dir_resolver.keeper_toml_path_opt`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/config_dir_resolver.ml#L374)
+  [`Config_dir_resolver.keeper_toml_path_opt`](../lib/config_dir_resolver.ml)
 - Reconciled for running keepers by
-  [`ensure_keeper_meta`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/keeper/keeper_runtime.ml#L56)
+  [`ensure_keeper_meta`](../lib/keeper/keeper_runtime.ml)
   inside the supervisor sweep
-  ([`keeper_runtime.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/keeper/keeper_runtime.ml#L381))
+  ([`keeper_runtime.ml`](../lib/keeper/keeper_runtime.ml))
 
 Operational meaning:
 
@@ -83,10 +83,10 @@ Operational meaning:
 ### `cascade.json`
 
 - Resolved via
-  [`Oas_model_resolve.models_of_cascade_name`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/oas_model_resolve.ml#L280)
+  [`Cascade_runtime.models_of_cascade_name`](../lib/cascade/cascade_runtime.ml)
 - The code explicitly delegates JSON caching/reload to OAS and documents an
   mtime-based cache
-  ([`oas_model_resolve.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/oas_model_resolve.ml#L274))
+  ([`cascade_runtime.ml`](../lib/cascade/cascade_runtime.ml))
 
 Operational meaning:
 

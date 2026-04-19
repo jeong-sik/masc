@@ -21,13 +21,23 @@ let strict_action_enums =
     `String "namespace_pause";
     `String "namespace_resume";
     `String "social_sweep";
+    (* Issue #8417: [task_inject] has a real handler in
+       [Operator_control.dispatch] (line 119) and is advertised by
+       [Operator_pending_confirm.available_actions] (line 253).  It
+       was previously grouped with the legacy aliases, so the remote
+       operator MCP surface and the LLM judge never saw it and
+       couldn't discover the capability. The remaining entries in
+       [legacy_action_alias_enums] are genuine aliases
+       ([keeper_msg]→[keeper_message], [room_pause]→[namespace_pause],
+       [room_resume]→[namespace_resume], [autonomy_tick]→[social_sweep]). *)
+    `String "task_inject";
     `String "keeper_message";
     `String "keeper_probe";
     `String "keeper_recover";
   ]
 
 let legacy_action_alias_enums =
-  [ `String "keeper_msg"; `String "task_inject"; `String "room_pause"; `String "room_resume";
+  [ `String "keeper_msg"; `String "room_pause"; `String "room_resume";
     `String "autonomy_tick" ]
 
 let target_type_enums =

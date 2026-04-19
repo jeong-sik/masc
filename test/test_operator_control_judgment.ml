@@ -88,6 +88,35 @@ let test_digest_room_ignores_stale_operator_judgment () =
       Alcotest.(check bool) "judgment missing" true
         (Yojson.Safe.Util.member "judgment" digest = `Null))
 
+let test_guidance_ignores_unsupported_target_type () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      record_operator_judgment config ~surface:"command.namespace"
+        ~target_type:Operator_judgment.Coord ~target_id:None
+        ~summary:"Root guidance must not leak to keeper targets."
+        ~fresh_for_sec:90.0 ();
+      let fields =
+        Operator_digest_guidance.active_guidance_fields ~config ~actor:"operator"
+          ~target_type:"keeper" ~target_id:None ~fallback_recommendations:[]
+          ~fallback_summary:(`Assoc [ ("count", `Int 0) ])
+      in
+      let guidance = `Assoc fields in
+      Alcotest.(check string) "judgment owner fallback" "fallback_read_model"
+        Yojson.Safe.Util.(guidance |> member "judgment_owner" |> to_string);
+      Alcotest.(check bool) "authoritative judgment unavailable" false
+        Yojson.Safe.Util.
+          (guidance |> member "authoritative_judgment_available" |> to_bool);
+      Alcotest.(check string) "active guidance layer fallback" "fallback"
+        Yojson.Safe.Util.(guidance |> member "active_guidance_layer" |> to_string);
+      Alcotest.(check bool) "judgment missing" true
+        (Yojson.Safe.Util.member "judgment" guidance = `Null))
+
 let test_operator_judgment_write_and_latest_roundtrip () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

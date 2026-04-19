@@ -12,6 +12,9 @@ import { InlineSpinner } from './common/inline-spinner'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
 import { FilterChips } from './common/filter-chips'
 import { buildCompactionSpec } from './keeper-fsm-specs'
+import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
+
+const REFRESH_MS = 30_000
 
 interface KeeperMemoryTierPanelProps {
   keeperName: string
@@ -66,40 +69,48 @@ export function KeeperMemoryTierPanel({
     setLoading(true)
     setError(null)
 
-    Promise.allSettled([
-      fetchKeeperStateDiagram(keeperName, { signal: controller.signal }),
-      fetchKeeperComposite(keeperName, { signal: controller.signal }),
-    ])
-      .then(([usageResult, compositeResult]) => {
-        if (controller.signal.aborted) return
-        let nextError: string | null = null
+    const refresh = async () => {
+      Promise.allSettled([
+        fetchKeeperStateDiagram(keeperName, { signal: controller.signal }),
+        fetchKeeperComposite(keeperName, { signal: controller.signal }),
+      ])
+        .then(([usageResult, compositeResult]) => {
+          if (controller.signal.aborted) return
+          let nextError: string | null = null
 
-        if (usageResult.status === 'fulfilled') {
-          setUsage(usageResult.value.memory_kind_usage ?? [])
-        } else {
-          setUsage(null)
-          nextError = usageResult.reason instanceof Error ? usageResult.reason.message : 'memory tier fetch failed'
-        }
+          if (usageResult.status === 'fulfilled') {
+            setUsage(usageResult.value.memory_kind_usage ?? [])
+          } else {
+            setUsage(null)
+            nextError = usageResult.reason instanceof Error ? usageResult.reason.message : 'memory tier fetch failed'
+          }
 
-        if (compositeResult.status === 'fulfilled') {
-          setSnapshot(compositeResult.value)
-        } else {
-          setSnapshot(null)
-          nextError ||= compositeResult.reason instanceof Error
-            ? compositeResult.reason.message
-            : 'composite fetch failed'
-        }
+          if (compositeResult.status === 'fulfilled') {
+            setSnapshot(compositeResult.value)
+          } else {
+            setSnapshot(null)
+            nextError ||= compositeResult.reason instanceof Error
+              ? compositeResult.reason.message
+              : 'composite fetch failed'
+          }
 
-        setError(nextError)
-        setLoading(false)
-      })
-      .catch(err => {
-        if (controller.signal.aborted) return
-        setError(err instanceof Error ? err.message : 'memory tier fetch failed')
-        setLoading(false)
-      })
+          setError(nextError)
+          setLoading(false)
+        })
+        .catch(err => {
+          if (controller.signal.aborted) return
+          setError(err instanceof Error ? err.message : 'memory tier fetch failed')
+          setLoading(false)
+        })
+    }
 
-    return () => { controller.abort() }
+    refresh()
+    const cleanup = setupVisibleAutoRefresh(() => refresh(), REFRESH_MS)
+
+    return () => {
+      controller.abort()
+      cleanup()
+    }
   }, [keeperName])
 
   if (loading) {

@@ -443,7 +443,7 @@ let () =
       Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
         Alcotest.(check (list string)) "tool_schemas mirror == SSOT"
           Masc_mcp.Tool_misc_admin.valid_admin_section_strings
-          Masc_tool_schemas.Tool_schemas_misc.admin_section_enum_strings);
+          Tool_schemas_misc.admin_section_enum_strings);
     ];
     "config_category_ssot", [
       Alcotest.test_case "producer helper matches all_categories order" `Quick (fun () ->
@@ -847,6 +847,40 @@ let () =
         Alcotest.(check (list string)) "tail_order mirror == SSOT"
           Masc_mcp.Keeper_status_detail.valid_tail_order_strings
           Masc_mcp.Keeper_schema.tail_order_enum_strings);
+    ];
+    "dashboard_scope_ssot", [
+      (* Issue #8592: witness exhaustiveness for [Dashboard.scope] +
+         sync test for [Tool_schemas_misc.dashboard_scope_enum_strings].
+         Same shape as #8486 (tail_order). The dashboard scope was
+         hand-rolled inline in tool_schemas_misc.ml; adding a 3rd
+         constructor would silently drop from the JSON Schema. *)
+      Alcotest.test_case "witness covers both variants" `Quick (fun () ->
+        let module D = Masc_mcp.Dashboard in
+        let witness s =
+          let actual = D.scope_to_string s in
+          if not (List.mem actual D.valid_scope_strings) then
+            Alcotest.failf "scope_to_string %S not in valid_scope_strings" actual
+        in
+        witness D.All; witness D.Current;
+        Alcotest.(check int) "count" 2 (List.length D.valid_scope_strings));
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        Alcotest.(check (list string)) "dashboard scope mirror == SSOT"
+          Masc_mcp.Dashboard.valid_scope_strings
+          Tool_schemas_misc.dashboard_scope_enum_strings);
+      Alcotest.test_case "scope_of_string_opt round-trips SSOT strings" `Quick (fun () ->
+        let module D = Masc_mcp.Dashboard in
+        List.iter (fun s ->
+          match D.scope_of_string_opt s with
+          | None -> Alcotest.failf "scope_of_string_opt %S returned None" s
+          | Some scope ->
+            let back = D.scope_to_string scope in
+            Alcotest.(check string) (Printf.sprintf "round-trip %S" s) s back)
+        D.valid_scope_strings);
+      Alcotest.test_case "scope_of_string_opt rejects unknown input" `Quick (fun () ->
+        Alcotest.(check (option string)) "unknown -> None"
+          None
+          (Option.map Masc_mcp.Dashboard.scope_to_string
+             (Masc_mcp.Dashboard.scope_of_string_opt "recent")));
     ];
     "compact_retry_exhausted_ssot", [
       (* Issue #8581: the [compact_retry_exhausted] field was read by

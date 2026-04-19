@@ -45,6 +45,27 @@ type scope =
   | All
   | Current
 
+(** Issue #8592: SSOT helpers for [scope]. The witness function and
+    canonical string list are mirrored in the JSON Schema layer
+    ([Tool_schemas_misc.dashboard_scope_enum_strings]) — direct
+    dependency would cycle. The test [test_types.ml ::
+    dashboard_scope_ssot] asserts the mirror stays in sync. Adding a
+    new constructor here forces a compile error in [scope_to_string]
+    and fails the schema mirror test instead of silently dropping
+    from the enum. *)
+let scope_to_string = function
+  | All -> "all"
+  | Current -> "current"
+
+let all_scopes = [ All; Current ]
+
+let valid_scope_strings = List.map scope_to_string all_scopes
+
+let scope_of_string_opt = function
+  | "all" -> Some All
+  | "current" -> Some Current
+  | _ -> None
+
 (** Re-export shared types from Dashboard_labels to avoid breaking existing callers *)
 type room_snapshot = Dashboard_labels.room_snapshot = {
   room_id: string;

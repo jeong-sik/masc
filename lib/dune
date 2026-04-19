@@ -365,7 +365,6 @@
    trajectory
    eval_gate
    eval_harness
-   event_kind
    exec_core
    eval_calibration
    ;; Keeper contract

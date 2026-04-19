@@ -441,8 +441,11 @@ let default_dynamic_selector (obs : observation_context) : strategy list =
     @param observation Optional observation context for Dynamic strategies.
       When a strategy list contains [Dynamic], this context determines
       which concrete strategies are applied. *)
+(* Issue #8597 #1: dropped [~system_prompt]. The OAS Context_reducer
+   pipeline operates on [messages] only — the system prompt is part of
+   [messages] (role=System) when present. The labeled arg was passed by
+   keeper_compact_policy but never read. *)
 let compact
-    ~system_prompt:(_system_prompt : string)
     ~(messages : Agent_sdk.Types.message list)
     ~(strategies : strategy list)
     ?(observation : observation_context option)

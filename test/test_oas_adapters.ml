@@ -81,8 +81,8 @@ let test_roundtrip_tool_msg () =
 
 let compact_ctx (ctx : Keeper_exec_context.working_context) strategies =
   let messages =
+    (* Issue #8597 #1: ~system_prompt dropped from compact signature. *)
     Context_compact_oas.compact
-      ~system_prompt:(ctx_system_prompt ctx)
       ~messages:(ctx_messages ctx)
       ~strategies () in
   Keeper_exec_context.sync_oas_context

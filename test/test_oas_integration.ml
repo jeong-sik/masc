@@ -479,8 +479,8 @@ let test_compact_syncs_oas_context () =
   let ctx = Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "msg1") in
   let ctx = Keeper_exec_context.append ctx (Agent_sdk.Types.assistant_msg "msg2") in
   let messages =
+    (* Issue #8597 #1: ~system_prompt dropped from compact signature. *)
     Context_compact_oas.compact
-      ~system_prompt:(ctx_system_prompt ctx)
       ~messages:(ctx_messages ctx)
       ~strategies:[Context_compact_oas.MergeContiguous] () in
   let ctx = Keeper_exec_context.sync_oas_context

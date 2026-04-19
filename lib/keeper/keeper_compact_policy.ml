@@ -152,8 +152,10 @@ let compact_if_needed
             (Printexc.to_string exn));
       let messages =
           let msgs_after_compact =
+            (* Issue #8597 #1: dropped [~system_prompt] arg — compact
+               ignored it (system prompt already present in messages
+               when role=System). *)
             Context_compact_oas.compact
-              ~system_prompt:(system_prompt_of_context ctx)
               ~messages:(messages_of_context ctx)
               ~strategies
               ()

@@ -405,45 +405,6 @@ async function bootstrapWarmPayload(path: string, res: Response): Promise<unknow
   }
 }
 
-async function parseJsonResponse<T>(
-  method: string,
-  path: string,
-  res: Response,
-): Promise<T> {
-  let rawText = ''
-  try {
-    rawText = await res.text()
-  } catch {
-    throw new ApiRequestError({
-      method,
-      path,
-      status: res.status,
-      statusText: res.statusText,
-      detail: 'failed to read response body',
-    })
-  }
-  if (rawText.trim() === '') {
-    throw new ApiRequestError({
-      method,
-      path,
-      status: res.status,
-      statusText: res.statusText,
-      detail: 'empty JSON response',
-    })
-  }
-  try {
-    return JSON.parse(rawText) as T
-  } catch {
-    throw new ApiRequestError({
-      method,
-      path,
-      status: res.status,
-      statusText: res.statusText,
-      detail: 'invalid JSON response',
-    })
-  }
-}
-
 export function defaultBoardVoter(): string {
   const params = getQueryParams()
   return sanitizeDashboardActorName(params.get('agent'))

@@ -304,6 +304,84 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
         Yojson.Safe.Util.
           (keeper |> member "latest_tool_names" |> to_list |> List.map to_string))
 
+let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "owner"));
+      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "owner";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let keeper_name = "lightweight-recent-tools" in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Keep recent tool names distinct from latest");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      Keeper_keepalive.stop_keepalive keeper_name;
+      let decision_path = Keeper_types.keeper_decision_log_path config keeper_name in
+      Fs_compat.append_jsonl decision_path
+        (`Assoc
+          [
+            ("ts", `String (Types.now_iso ()));
+            ("selected_mode", `String "tool_use");
+            ("tool_call_count", `Int 2);
+            ("tools_used", `List [ `String "masc_status"; `String "masc_tasks" ]);
+          ]);
+      for _ = 1 to 20 do
+        Fs_compat.append_jsonl decision_path
+          (`Assoc
+            [
+              ("ts", `String (Types.now_iso ()));
+              ("selected_mode", `String "text_response");
+              ("tool_call_count", `Int 0);
+              ("tools_used", `List []);
+            ])
+      done;
+      let json =
+        Operator_control.snapshot_json ~view:"summary"
+          ~include_keepers:true ~include_messages:false
+          ~lightweight_summary:true
+          (operator_ctx env sw config "owner")
+      in
+      let keeper =
+        match
+          Yojson.Safe.Util.(json |> member "keepers" |> member "items" |> to_list)
+          |> List.find_opt (fun row ->
+                 Yojson.Safe.Util.(row |> member "name" |> to_string) = keeper_name)
+        with
+        | Some keeper -> keeper
+        | None -> Alcotest.fail "expected keeper in lightweight snapshot"
+      in
+      Alcotest.(check (list string)) "recent tool names retain recent window"
+        [ "masc_status"; "masc_tasks" ]
+        Yojson.Safe.Util.
+          (keeper |> member "recent_tool_names" |> to_list |> List.map to_string);
+      Alcotest.(check (list string)) "latest tool names stay latest-only"
+        []
+        Yojson.Safe.Util.
+          (keeper |> member "latest_tool_names" |> to_list |> List.map to_string))
+
 let test_snapshot_waiters_share_inflight_result () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

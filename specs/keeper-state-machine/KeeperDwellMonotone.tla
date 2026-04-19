@@ -25,6 +25,37 @@
 \*               transition, modelling a forgotten clamp-to-now.
 \*               DwellNonNegative MUST be violated.  If it passes, the
 \*               invariant is too weak and must be strengthened.
+\*
+\* Implementation mapping (spec ↔ runtime, see #8642 family):
+\*
+\*   Producer side — phase transition stamps entry timestamp:
+\*     lib/keeper/keeper_registry.ml:919
+\*       Keeper_transition_audit.record_transition {
+\*         ...; wall_clock_at_decision = now; ... }
+\*     The OCaml side stamps [wall_clock_at_decision = now] at the moment
+\*     of each transition apply, satisfying the spec discipline that
+\*     entry_at := now (not future, not stale).  [now] comes from
+\*     [Time_compat.now ()] which is wall-clock monotonic in practice
+\*     (system clock).
+\*
+\*   Consumer side — dashboard derives dwell from the latest transition:
+\*     dashboard/src/components/keeper-detail.ts:1167-1168
+\*       const [phaseEnteredAtSec, ...] = useState<number | null>(null)
+\*       // sourced from fetchKeeperTransitions(...).transitions[0]
+\*       //   .wall_clock_at_decision
+\*
+\*   Defense in depth — frontend clamp guards a misbehaving clock:
+\*     dashboard/src/components/keeper-phase-indicator.ts:113
+\*       formatDuration(Math.max(0, Date.now()/1000 - phaseEnteredAtSec))
+\*     Even if [phaseEnteredAtSec > Date.now()/1000] (clock skew between
+\*     server and client, or a missed clamp on the producer), the dwell
+\*     UI never shows a negative duration.  This is independent of the
+\*     spec — the spec ensures the producer side is correct so the clamp
+\*     should never fire in practice.
+\*
+\* Out of scope here (sibling specs):
+\*   - phase _selection_ logic (KeeperConditionsGovernPhase, KeeperStateMachine)
+\*   - per-turn time accounting (KeeperTurnCycle)
 
 EXTENDS Integers, TLC
 

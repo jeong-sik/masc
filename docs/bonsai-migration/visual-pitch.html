@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en" data-theme="dark-fantasy">
+<head>
+<meta charset="utf-8">
+<title>masc-mcp · Bonsai — visual pitch</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap">
+<style>
+html, body { margin: 0; background: #0a0706; }
+.root {
+  position: relative;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 88% 14%, rgba(138,106,40,0.10), transparent 22%),
+    radial-gradient(circle at 8% 88%, rgba(160,24,24,0.05), transparent 28%),
+    #0a0706;
+  color: #b8a488;
+  font-family: 'EB Garamond','Noto Sans KR',Georgia,serif;
+  font-size: 15px;
+  padding: 1.5rem 2.5rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  isolation: isolate;
+}
+.root::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: -1; opacity: 0.28;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.2' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.9  0 0 0 0 0.85  0 0 0 0 0.7  0 0 0 0.05 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  mix-blend-mode: overlay;
+}
+
+.brand { display: flex; align-items: center; gap: 14px; padding-bottom: 1rem; border-bottom: 1px solid #2a1a14; }
+.rune { width: 22px; height: 22px; border: 1px solid #8a6a28; display: grid; place-items: center; color: #8a6a28; font-family:'Cinzel',serif; font-size: 11px; transform: rotate(45deg); }
+.rune span { transform: rotate(-45deg); }
+.wordmark { font-family:'Cinzel',serif; font-size: 13px; letter-spacing: 0.22em; color: #8a6a28; text-transform: uppercase; }
+.crumbs { margin-left: 14px; display: flex; gap: 10px; color: #6a5848; font-family:'Noto Sans KR',sans-serif; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; }
+.crumbs .sep { color: #5a3028; }
+.crumbs .cur { color: #e8d8b8; letter-spacing: 0.14em; }
+.pulse-slot { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.pulse { width: 6px; height: 6px; border-radius: 50%; background: #8a6a28; box-shadow: 0 0 8px rgba(138,106,40,0.55); }
+.pulse-label { font-family:'Noto Sans KR',sans-serif; font-size: 9px; letter-spacing: 0.3em; text-transform: uppercase; color: #6a5848; }
+
+.heartbeat {
+  display: flex; flex-direction: column; gap: 6px; padding: 10px 14px 12px;
+  background: linear-gradient(180deg, #14100d 0%, #0f0b09 100%);
+  border: 1px solid #2a1a14; border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(196,162,101,0.04);
+}
+.hb-head { display: flex; align-items: center; justify-content: space-between; }
+.hb-eyebrow { font-family: 'Noto Sans KR', sans-serif; font-size: 9px; letter-spacing: 0.3em; text-transform: uppercase; color: #6a5848; }
+.hb-scale { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 9px; letter-spacing: 0.12em; color: #4a3a32; }
+.hb-track { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; height: 36px; align-items: end; padding: 0 1px; border-bottom: 1px solid #2a1a14; }
+.hb-bar { min-width: 2px; background: #3a5a48; border-radius: 1px; opacity: 0.82; }
+.hb-bar.warn  { background: linear-gradient(180deg, #a06a1a 0%, #6a3c10 100%); }
+.hb-bar.error { background: linear-gradient(180deg, #e84848 0%, #8a1010 100%); box-shadow: 0 0 6px rgba(160,24,24,0.45); }
+.hb-bar.idle  { background: #2a1a14; opacity: 0.6; }
+
+.hud {
+  position: relative; display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px;
+  background: #2a1a14; border: 1px solid #5a3028; border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(196,162,101,0.08), 0 2px 12px rgba(0,0,0,0.6), 0 16px 24px -16px rgba(0,0,0,0.9);
+}
+.hud::before, .hud::after { content: ""; position: absolute; width: 14px; height: 14px; border: 1px solid #8a6a28; pointer-events: none; }
+.hud::before { top:-1px; left:-1px; border-right:0; border-bottom:0; }
+.hud::after  { bottom:-1px; right:-1px; border-left:0; border-top:0; }
+.hud-cell { background: #14100d; padding: 10px 14px; display: flex; flex-direction: column; gap: 3px; }
+.hud-k { font-family:'Noto Sans KR',sans-serif; font-size: 9px; letter-spacing: 0.25em; text-transform: uppercase; color: #6a5848; }
+.hud-v { font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-variant-numeric: tabular-nums; font-size: 12px; color: #b8a488; }
+.hud-v.ok { color: #5a7a3a; }
+.hud-v.warn { color: #a06a1a; }
+
+.toolbar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: #14100d; border: 1px solid #2a1a14; border-radius: 2px; flex-wrap: wrap; }
+.chip-group { display: inline-flex; gap: 4px; padding: 2px; border: 1px solid #2a1a14; border-radius: 999px; background: #0f0b09; }
+.chip { font-family: 'Noto Sans KR',sans-serif; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; padding: 4px 12px; border-radius: 999px; color: #6a5848; cursor: pointer; }
+.chip.active { color: #e8d8b8; background: rgba(138,106,40,0.14); box-shadow: inset 0 0 0 1px #8a6a28; }
+.input-shell { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid #2a1a14; border-radius: 2px; background: #0f0b09; font-family: 'Noto Sans KR',sans-serif; font-size: 11px; color: #6a5848; }
+.input-shell .l { letter-spacing: 0.25em; text-transform: uppercase; color: #4a3a32; font-size: 9px; }
+.input-shell .v { font-family: 'JetBrains Mono',ui-monospace,Menlo,monospace; font-size: 11px; color: #b8a488; }
+.spacer { flex: 1; }
+.btn-ghost { font-family: 'Noto Sans KR',sans-serif; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; padding: 5px 12px; border: 1px solid #2a1a14; border-radius: 2px; background: transparent; color: #b8a488; cursor: pointer; }
+.btn-ghost:hover { color: #8a6a28; border-color: #5a3028; }
+
+.ts-rel { font-family: 'Noto Sans KR',sans-serif; font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: #4a3a32; margin-top: 2px; }
+
+.header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid #2a1a14; padding-bottom: 0.75rem; }
+.eyebrow { font-family:'Noto Sans KR',sans-serif; font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase; color: #6a5848; margin: 0 0 0.25rem 0; }
+.title { font-family:'Cinzel',serif; font-weight: 500; font-size: 1.25rem; letter-spacing: 0.2em; text-transform: uppercase; color: #e8d8b8; margin: 0; }
+.meta { font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-variant-numeric: tabular-nums; font-size: 11px; letter-spacing: 0.1em; color: #8a6a28; }
+
+.tape { display: flex; flex-direction: column; }
+.row { display: grid; grid-template-columns: 1.75rem 10rem 5rem 9rem 7.5rem minmax(0,1fr); gap: 1rem; padding: 0.625rem 0.75rem; border-bottom: 1px dashed #2a1a14; border-left: 2px solid #2a1a14; align-items: baseline; }
+.sigil {
+  width: 22px; height: 22px; border-radius: 50%; border: 1px solid #8a6a28;
+  background: radial-gradient(circle at 35% 30%, rgba(232,216,184,0.18), transparent 55%), #14100d;
+  display: grid; place-items: center;
+  font-family: 'Cinzel', serif; font-size: 10px; color: #8a6a28; text-transform: uppercase;
+  box-shadow: inset 0 0 0 1px rgba(232,216,184,0.06), 0 0 6px rgba(138,106,40,0.18);
+  align-self: center;
+}
+.sigil.warn  { color: #a06a1a; border-color: #a06a1a; box-shadow: inset 0 0 0 1px rgba(232,216,184,0.06), 0 0 8px rgba(160,106,26,0.35); }
+.sigil.error { color: #e8d8b8; border-color: #a01818; background: radial-gradient(circle at 35% 30%, rgba(232,216,184,0.28), transparent 55%), #3a1410; box-shadow: inset 0 0 0 1px rgba(232,216,184,0.08), 0 0 10px rgba(160,24,24,0.45); }
+.msg.lead::first-letter {
+  font-family: 'Cinzel', 'EB Garamond', serif;
+  font-weight: 600;
+  font-size: 2.4rem;
+  line-height: 0.85;
+  float: left;
+  padding: 2px 8px 0 0;
+  margin-top: 2px;
+  background: linear-gradient(180deg, #e8d8b8 0%, #8a6a28 55%, #5a3028 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 14px rgba(138,106,40,0.25);
+}
+.row.info  { border-left-color: #3a5a48; }
+.row.warn  { border-left-color: #a06a1a; background: linear-gradient(90deg, rgba(160,106,26,0.06) 0%, transparent 60%); }
+.row.error { border-left-color: #a01818; background: linear-gradient(90deg, rgba(160,24,24,0.08) 0%, transparent 60%); }
+.row.debug { border-left-color: #4a3a32; }
+.ts { display: flex; flex-direction: column; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-variant-numeric: tabular-nums; font-size: 11px; color: #6a5848; }
+.level { font-family:'Noto Sans KR',sans-serif; font-size: 10px; letter-spacing: 0.25em; text-transform: uppercase; font-weight: 500; }
+.level.debug { color: #6a5848; }
+.level.info  { color: #b8a488; }
+.level.warn  { color: #a06a1a; }
+.level.error { color: #a01818; text-shadow: 0 0 12px rgba(160,24,24,0.32); }
+.mod { font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size: 11px; color: #6a5848; }
+.badge {
+  display: inline-flex; align-items: center; gap: 6px; font-family:'Noto Sans KR',sans-serif;
+  font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; padding: 3px 8px;
+  border: 1px solid #2a1a14; border-radius: 999px; background: #1b1612; color: #6a5848;
+  width: fit-content; height: fit-content;
+}
+.dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.dot.ok { background: #5a7a3a; box-shadow: 0 0 6px #5a7a3a; }
+.dot.warn { background: #a06a1a; box-shadow: 0 0 6px #a06a1a; }
+.dot.bad { background: #a01818; box-shadow: 0 0 6px #a01818; }
+.msg { color: #b8a488; font-family:'EB Garamond','Noto Sans KR',Georgia,serif; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.details { color: #6a5848; font-family:'JetBrains Mono',ui-monospace,Menlo,monospace; font-size: 10px; margin-top: 0.25rem; opacity: 0.75; }
+</style>
+</head>
+<body>
+<div class="root">
+
+<div class="brand">
+  <div class="rune"><span>M</span></div>
+  <span class="wordmark">masc</span>
+  <div class="crumbs"><span>observatory</span><span class="sep">›</span><span class="cur">logs · 저널</span></div>
+  <div class="pulse-slot"><span class="pulse"></span><span class="pulse-label">live · 3s</span></div>
+</div>
+
+<div class="heartbeat">
+  <div class="hb-head">
+    <span class="hb-eyebrow">cycle pulse · last 60 ticks</span>
+    <span class="hb-scale">t-60 ·—· t0</span>
+  </div>
+  <div class="hb-track">
+    <div class="hb-bar" style="height:18px"></div>
+    <div class="hb-bar" style="height:22px"></div>
+    <div class="hb-bar" style="height:14px"></div>
+    <div class="hb-bar idle" style="height:8px"></div>
+    <div class="hb-bar" style="height:24px"></div>
+    <div class="hb-bar" style="height:31px"></div>
+    <div class="hb-bar" style="height:28px"></div>
+    <div class="hb-bar" style="height:16px"></div>
+    <div class="hb-bar idle" style="height:12px"></div>
+    <div class="hb-bar warn" style="height:34px"></div>
+    <div class="hb-bar warn" style="height:40px"></div>
+    <div class="hb-bar" style="height:29px"></div>
+    <div class="hb-bar" style="height:22px"></div>
+    <div class="hb-bar" style="height:18px"></div>
+    <div class="hb-bar" style="height:14px"></div>
+    <div class="hb-bar idle" style="height:6px"></div>
+    <div class="hb-bar idle" style="height:9px"></div>
+    <div class="hb-bar" style="height:22px"></div>
+    <div class="hb-bar" style="height:27px"></div>
+    <div class="hb-bar" style="height:33px"></div>
+    <div class="hb-bar warn" style="height:41px"></div>
+    <div class="hb-bar warn" style="height:52px"></div>
+    <div class="hb-bar warn" style="height:38px"></div>
+    <div class="hb-bar" style="height:24px"></div>
+    <div class="hb-bar" style="height:19px"></div>
+    <div class="hb-bar idle" style="height:12px"></div>
+    <div class="hb-bar" style="height:27px"></div>
+    <div class="hb-bar" style="height:31px"></div>
+    <div class="hb-bar" style="height:36px"></div>
+    <div class="hb-bar warn" style="height:44px"></div>
+    <div class="hb-bar warn" style="height:58px"></div>
+    <div class="hb-bar error" style="height:72px"></div>
+    <div class="hb-bar error" style="height:61px"></div>
+    <div class="hb-bar warn" style="height:49px"></div>
+    <div class="hb-bar warn" style="height:38px"></div>
+    <div class="hb-bar" style="height:28px"></div>
+    <div class="hb-bar" style="height:22px"></div>
+    <div class="hb-bar" style="height:18px"></div>
+    <div class="hb-bar idle" style="height:14px"></div>
+    <div class="hb-bar idle" style="height:11px"></div>
+    <div class="hb-bar" style="height:24px"></div>
+    <div class="hb-bar" style="height:31px"></div>
+    <div class="hb-bar" style="height:28px"></div>
+    <div class="hb-bar" style="height:22px"></div>
+    <div class="hb-bar" style="height:17px"></div>
+    <div class="hb-bar idle" style="height:12px"></div>
+    <div class="hb-bar" style="height:26px"></div>
+    <div class="hb-bar" style="height:34px"></div>
+    <div class="hb-bar warn" style="height:41px"></div>
+    <div class="hb-bar warn" style="height:47px"></div>
+    <div class="hb-bar warn" style="height:35px"></div>
+    <div class="hb-bar" style="height:28px"></div>
+    <div class="hb-bar" style="height:22px"></div>
+    <div class="hb-bar" style="height:19px"></div>
+    <div class="hb-bar" style="height:16px"></div>
+    <div class="hb-bar" style="height:14px"></div>
+    <div class="hb-bar" style="height:28px"></div>
+    <div class="hb-bar warn" style="height:44px"></div>
+    <div class="hb-bar error" style="height:58px"></div>
+    <div class="hb-bar error" style="height:82px"></div>
+
+  </div>
+</div>
+
+<div class="hud">
+  <div class="hud-cell"><div class="hud-k">Source</div><div class="hud-v">Log.Ring</div></div>
+  <div class="hud-cell"><div class="hud-k">Total</div><div class="hud-v">1842</div></div>
+  <div class="hud-cell"><div class="hud-k">Level</div><div class="hud-v">INFO+</div></div>
+  <div class="hud-cell"><div class="hud-k">Refresh</div><div class="hud-v ok">poll · 3s</div></div>
+  <div class="hud-cell"><div class="hud-k">Limit</div><div class="hud-v">200</div></div>
+  <div class="hud-cell"><div class="hud-k">Link</div><div class="hud-v ok">fetch · ok</div></div>
+</div>
+
+<div class="toolbar">
+  <div class="chip-group">
+    <span class="chip">debug+</span>
+    <span class="chip active">info+</span>
+    <span class="chip">warn+</span>
+    <span class="chip">error</span>
+  </div>
+  <div class="input-shell"><span class="l">module</span><span class="v">—</span></div>
+  <div class="input-shell"><span class="l">limit</span><span class="v">200</span></div>
+  <div class="spacer"></div>
+  <button class="btn-ghost">refresh</button>
+</div>
+
+<div class="header">
+  <div>
+    <p class="eyebrow">log ring · in-memory</p>
+    <h1 class="title">journal</h1>
+  </div>
+  <span class="meta">seq up to 1842</span>
+</div>
+
+<div class="tape">
+  <div class="row error">
+    <div class="sigil error">K</div>
+    <div class="ts"><span>2026-04-19T22:16:32Z</span><span class="ts-rel">3s ago</span></div>
+    <div class="level error">Error</div>
+    <div class="mod">Keeper</div>
+    <div class="badge"><span class="dot bad"></span>structured</div>
+    <div>
+      <div class="msg lead">janitor: keeper cycle FAILED cascade=vendor_mix_balanced max_context=200000 latency=38135ms</div>
+      <div class="details">{"request_id":"req-9aa1","session_id":"sess-0012","cause_code":"turn_failed","phase":"failing"}</div>
+    </div>
+  </div>
+  <div class="row warn">
+    <div class="sigil warn">K</div>
+    <div class="ts"><span>2026-04-19T22:14:21Z</span><span class="ts-rel">5s ago</span></div>
+    <div class="level warn">Warn</div>
+    <div class="mod">Keeper</div>
+    <div class="badge"><span class="dot warn"></span>structured</div>
+    <div>
+      <div class="msg">checkpoint migration sanitized messages: dropped_blocks=12 dropped_messages=1 dropped_chars=6744</div>
+    </div>
+  </div>
+  <div class="row info">
+    <div class="sigil">O</div>
+    <div class="ts"><span>2026-04-19T22:13:48Z</span><span class="ts-rel">12s ago</span></div>
+    <div class="level info">Info</div>
+    <div class="mod">oas:event</div>
+    <div class="badge"><span class="dot ok"></span>structured</div>
+    <div>
+      <div class="msg">turn started agent=keeper-poe-agent turn=4</div>
+      <div class="details">{"type":"oas:turn_started","event_type":"turn_started","correlation_id":"cbe9-64fc"}</div>
+    </div>
+  </div>
+  <div class="row info">
+    <div class="sigil">O</div>
+    <div class="ts"><span>2026-04-19T22:13:47Z</span><span class="ts-rel">38s ago</span></div>
+    <div class="level info">Info</div>
+    <div class="mod">oas:agent</div>
+    <div class="badge"><span class="dot ok"></span>structured</div>
+    <div>
+      <div class="msg">turn completed turn=1 max_turns=3 turn_duration_sec=26.625 stop=end_turn</div>
+    </div>
+  </div>
+  <div class="row info">
+    <div class="sigil">G</div>
+    <div class="ts"><span>2026-04-19T22:13:21Z</span><span class="ts-rel">1m ago</span></div>
+    <div class="level info">Info</div>
+    <div class="mod">Governance</div>
+    <div class="badge"><span class="dot ok"></span>structured</div>
+    <div>
+      <div class="msg">refresh_once: ok model=codex judgments=2</div>
+    </div>
+  </div>
+  <div class="row debug">
+    <div class="sigil">K</div>
+    <div class="ts"><span>2026-04-19T22:13:05Z</span><span class="ts-rel">2m ago</span></div>
+    <div class="level debug">Debug</div>
+    <div class="mod">Keeper</div>
+    <div class="badge"><span class="dot"></span>legacy_traceln</div>
+    <div>
+      <div class="msg">keeper poe applied OAS env OAS_CLAUDE_STRICT_MCP=1</div>
+    </div>
+  </div>
+  <div class="row info">
+    <div class="sigil">S</div>
+    <div class="ts"><span>2026-04-19T22:12:59Z</span><span class="ts-rel">4m ago</span></div>
+    <div class="level info">Info</div>
+    <div class="mod">Server</div>
+    <div class="badge"><span class="dot ok"></span>structured</div>
+    <div>
+      <div class="msg">masc-mcp server started on :8935</div>
+      <div class="details">{"build":"feature/bonsai-phase-0","pid":49685}</div>
+    </div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

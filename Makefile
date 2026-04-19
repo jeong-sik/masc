@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean clean-tlc-artifacts coverage coverage-summary coverage-html coverage-percent doc install-deps pin-external-deps sync-oas-pin-docs doctor-oas-pin doctor-oas-drift doctor-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard dashboard-drift-check dashboard-drift-regen dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-run-local-fresh-boot harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak
+.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean clean-tlc-artifacts coverage coverage-summary coverage-html coverage-percent doc install-deps pin-external-deps sync-oas-pin-docs doctor-oas-pin doctor-oas-drift doctor-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard dashboard-drift-check dashboard-drift-regen dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-run-local-fresh-boot harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak bonsai-dashboard dev-bonsai-dashboard clean-bonsai-dashboard
 
 # Default target — OCaml + dashboard
 all: build-all
@@ -18,6 +18,21 @@ dashboard:
 # Dashboard dev server (Vite HMR, proxies /api + /sse to MASC :8935)
 dev-dashboard:
 	cd dashboard && pnpm dev
+
+# Build dashboard Bonsai island (js_of_ocaml, OxCaml switch `bonsai-dashboard`).
+# See planning/claude-plans/masc-mcp-eventual-parrot.md.
+bonsai-dashboard:
+	cd dashboard_bonsai && eval $$(opam env --switch=bonsai-dashboard) && dune build
+	mkdir -p assets/dashboard_bonsai
+	cp dashboard_bonsai/_build/default/bin/main.bc.js assets/dashboard_bonsai/main.bc.js
+
+# Watch mode for the Bonsai island. Does not copy the artifact — pair with
+# a separate tail of main.bc.js or re-run `make bonsai-dashboard` on save.
+dev-bonsai-dashboard:
+	cd dashboard_bonsai && eval $$(opam env --switch=bonsai-dashboard) && dune build --watch
+
+clean-bonsai-dashboard:
+	rm -rf dashboard_bonsai/_build assets/dashboard_bonsai
 
 # Build everything (alias for build)
 build-all: build

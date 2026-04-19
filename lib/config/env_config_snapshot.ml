@@ -743,7 +743,7 @@ let path_entries =
       "Fail-fast on base path resolution issues";
     entry ~default:"(none)" "MASC_CONFIG_DIR"
       "Config directory override; None when unset";
-    entry ~default:"(none)" "MASC_DATA_DIR"
+    entry ~default:"(none)" Env_config_core.data_dir_env_key
       "Data directory override; None=<base_path>/data";
     entry ~default:"(none)" "MASC_PERSONAS_DIR"
       "Personas directory override; None when unset";

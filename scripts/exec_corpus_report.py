@@ -39,20 +39,38 @@ BIN_AUDITED = {
     "docker", "curl", "wget", "ssh", "scp",
     "tar", "rsync", "make", "cmake",
     "npm", "yarn", "pnpm", "pip", "opam", "cargo",
-    "gh", "glab",
+    "gh", "glab", "terminal-notifier", "osascript", "play", "rec",
+    "ffplay", "mpg123", "open", "claude", "gemini", "codex",
 }
 BIN_SAFE = {
     "ls", "cat", "pwd", "echo", "head", "tail",
     "grep", "rg", "find", "which", "test", "file",
     "basename", "dirname", "stat", "du", "df",
     "sort", "uniq", "wc", "cut", "tr",
-    "date", "env", "printenv", "hostname", "whoami",
+    "date", "env", "printenv", "hostname", "whoami", "uname", "ps", "tty",
 }
+
+def normalize_git_args(argv):
+    if not argv or argv[0] != "git":
+        return argv
+    args = list(argv[1:])
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token in {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}:
+            i += 2
+            continue
+        if token in {"--no-pager", "--literal-pathspecs"}:
+            i += 1
+            continue
+        break
+    return ["git"] + args[i:]
 
 
 def classify(argv):
     if not argv:
         return "bin_unknown"
+    argv = normalize_git_args(argv)
     head = argv[0]
     if head == "git" and len(argv) > 1:
         sub = argv[1]
@@ -90,7 +108,10 @@ def build_report(entries):
     bin_top = Counter()
     git_sub = Counter()
     for e in entries:
-        kinds[e.get("kind", "?")] += 1
+        kind = e.get("kind", "?")
+        kinds[kind] += 1
+        if kind == "Exec_gate.decision":
+            continue
         argv = e.get("argv") or []
         buckets[classify(argv)] += 1
         if argv:

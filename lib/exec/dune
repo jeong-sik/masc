@@ -3,5 +3,6 @@
 (include_subdirs no)
 (library
  (name masc_exec)
+ (public_name masc_mcp.masc_exec)
  (wrapped true)
- (libraries))
+ (libraries masc_process unix))

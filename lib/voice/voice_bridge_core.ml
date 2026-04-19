@@ -220,8 +220,18 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
              | Some m -> record_playback ~agent_id ~message:m
              | None -> ());
             let t0 = Unix.gettimeofday () in
+            let raw_source =
+              String.concat " " (List.map Filename.quote argv)
+            in
             try
-              match Process_eio.run_argv_with_status ~timeout_sec:60.0 argv with
+              match
+                Masc_exec.Exec_gate.run_argv_with_status
+                  ~actor:"voice/bridge_core"
+                  ~raw_source
+                  ~summary:"voice local playback"
+                  ~timeout_sec:60.0
+                  argv
+              with
               | Unix.WEXITED 0, _ ->
                 let dur = Unix.gettimeofday () -. t0 in
                 log_info

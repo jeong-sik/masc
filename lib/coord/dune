@@ -39,6 +39,7 @@
   masc_backend
   masc_eio_context
   masc_process
+  masc_mcp.masc_exec
   time_compat
   fs_compat
   yojson

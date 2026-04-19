@@ -37,47 +37,35 @@ let executable_dir () =
   in
   Filename.dirname path
 
-(** Probe git commit via subprocess.
-    Offloaded to system thread to avoid blocking Eio scheduler. *)
 let git_capture_output ~repo_root args =
-  let argv = "git" :: "-C" :: repo_root :: args in
-  Exec_tap.record
-    ~kind:Exec_tap.Unix_open_process_args_full
-    ~argv ~cwd:repo_root ();
-  let channels =
-    Unix.open_process_args_full "git"
-      (Array.of_list argv)
-      (Unix.environment ())
-  in
-  let stdout, stdin, stderr = channels in
-  try
-    close_out_noerr stdin;
-    let output = In_channel.input_all stdout in
-    ignore (In_channel.input_all stderr);
-    match Unix.close_process_full channels with
-    | Unix.WEXITED 0 -> Some output
-    | _ -> None
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    ignore (try Unix.close_process_full channels with Unix.Unix_error _ -> Unix.WEXITED 1);
-    raise exn
+  let argv = [ "git"; "-C"; repo_root ] @ args in
+  let raw_source = String.concat " " (List.map Filename.quote argv) in
+  match
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"system/build_identity"
+      ~raw_source
+      ~summary:"build identity git probe"
+      ~timeout_sec:5.0
+      argv
+  with
+  | Unix.WEXITED 0, output -> Some output
+  | _ -> None
+
 let git_probe_from_root repo_root =
-  let f () =
-    let output =
-      try git_capture_output ~repo_root [ "rev-parse"; "--short"; "HEAD" ] with
-      | Sys_error msg ->
-          Log.Identity.warn "git_probe_from_root read failed: %s" msg;
-          None
-      | Unix.Unix_error (code, fn, arg) ->
-          Log.Identity.warn "git_probe_from_root unix error: %s (%s %s)"
-            (Unix.error_message code) fn arg;
-          None
-      | exn ->
-          Log.Identity.warn "git_probe_from_root unexpected: %s" (Printexc.to_string exn);
-          None
-    in
-    Option.bind output trim_to_option
+  let output =
+    try git_capture_output ~repo_root [ "rev-parse"; "--short"; "HEAD" ] with
+    | Sys_error msg ->
+        Log.Identity.warn "git_probe_from_root read failed: %s" msg;
+        None
+    | Unix.Unix_error (code, fn, arg) ->
+        Log.Identity.warn "git_probe_from_root unix error: %s (%s %s)"
+          (Unix.error_message code) fn arg;
+        None
+    | exn ->
+        Log.Identity.warn "git_probe_from_root unexpected: %s" (Printexc.to_string exn);
+        None
   in
-  Eio_guard.run_in_systhread f
+  Option.bind output trim_to_option
 
 (** Pick the ordered list of directories to probe for a git repo,
     executable_dir first so the binary's own source tree wins over

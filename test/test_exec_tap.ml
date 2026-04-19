@@ -93,6 +93,26 @@ let test_multiple_calls_each_line () =
     !captured;
   Exec_tap.disable ()
 
+let test_gate_decision_shape () =
+  let captured = ref "" in
+  Exec_tap.enable ~writer:(fun line -> captured := line);
+  Exec_tap.record_gate_decision
+    ~actor:"coord/git"
+    ~raw_source:"git --version"
+    ~summary:"coord git version"
+    ~gate_mode:"parallel"
+    ~gate_verdict:"allow"
+    ~gate_enforced:false
+    ~argv:[ "git"; "--version" ]
+    ();
+  let line = !captured in
+  Exec_tap.disable ();
+  must_contain ~tag:"gate kind" line "\"kind\":\"Exec_gate.decision\"";
+  must_contain ~tag:"actor" line "\"actor\":\"coord/git\"";
+  must_contain ~tag:"mode" line "\"gate_mode\":\"parallel\"";
+  must_contain ~tag:"verdict" line "\"gate_verdict\":\"allow\"";
+  must_contain ~tag:"enforced" line "\"gate_enforced\":false"
+
 let () =
   test_off_is_noop ();
   test_on_emits_one_line ();
@@ -100,4 +120,5 @@ let () =
   test_defaults_are_null ();
   test_writer_exception_is_swallowed ();
   test_multiple_calls_each_line ();
+  test_gate_decision_shape ();
   print_endline "[test_exec_tap] all tests passed"

@@ -233,6 +233,14 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           (Printexc.to_string exn);
         []
   in
+  let accountability_summary =
+    if compact || Keeper_decision_audit.decision_layer_level () < 3 then
+      (fun ~keeper_name ~agent_name ->
+        Keeper_exec_status_metrics.accountability_summary_json config
+          ~keeper_name ~agent_name)
+    else
+      Keeper_exec_status_metrics.accountability_summary_lookup config
+  in
   (* Parallel keeper I/O: each keeper's metadata + metrics reads run concurrently.
      Results are collected into a shared ref array, then filter_map'd. *)
   let results = Array.make (List.length names) None in
@@ -650,8 +658,8 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                     `List (List.filteri (fun i _ -> i < 10) keeper_events)
                   in
                   let accountability =
-                    Keeper_exec_status_metrics.accountability_summary_json config
-                      ~keeper_name:m.name ~agent_name:m.agent_name
+                    accountability_summary ~keeper_name:m.name
+                      ~agent_name:m.agent_name
                   in
                   `Assoc [
                     ("reputation", reputation);

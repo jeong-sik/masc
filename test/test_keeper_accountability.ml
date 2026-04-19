@@ -258,6 +258,95 @@ let test_synthetic_claims_do_not_dilute_unsupported_rate () =
       check string "risk band should be high" "high"
         (string_member "risk_band" summary))
 
+let test_summary_lookup_reads_window_once_for_multiple_agents () =
+  with_room (fun config ->
+      let created_at =
+        iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
+      in
+      List.iter
+        (fun (claim_id, keeper_name, agent_name, subject) ->
+          append_accountability_event config.base_path ~created_at
+            (`Assoc
+               [
+                 ("event_type", `String "claim_created");
+                 ("claim_id", `String claim_id);
+                 ("agent_name", `String agent_name);
+                 ("keeper_name", `String keeper_name);
+                 ("kind", `String "completion_claim");
+                 ("subject", `String subject);
+                 ("surface", `String "keeper_turn");
+                 ("created_at", `String created_at);
+                 ("evidence_refs", `List []);
+                 ("synthetic", `Bool false);
+               ]))
+        [
+          ("acct-a", "keeper-a", "keeper-a-agent", "Ship A");
+          ("acct-b", "keeper-b", "keeper-b-agent", "Ship B");
+        ];
+      Keeper_accountability.enable_window_read_count_for_testing ();
+      let read_count =
+        Fun.protect
+          ~finally:Keeper_accountability.disable_window_read_count_for_testing
+          (fun () ->
+            let lookup =
+              Keeper_accountability.accountability_summary_lookup config
+            in
+            let summary_a =
+              lookup ~keeper_name:"keeper-a" ~agent_name:"keeper-a-agent"
+            in
+            let summary_b =
+              lookup ~keeper_name:"keeper-b" ~agent_name:"keeper-b-agent"
+            in
+            check string "agent a risk" "high"
+              (string_member "risk_band" summary_a);
+            check string "agent b risk" "high"
+              (string_member "risk_band" summary_b);
+            Keeper_accountability.window_read_count_for_testing ())
+      in
+      check int "window read count" 1 read_count)
+
+let test_summary_json_rereads_window_per_agent () =
+  with_room (fun config ->
+      let created_at =
+        iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
+      in
+      List.iter
+        (fun (claim_id, keeper_name, agent_name, subject) ->
+          append_accountability_event config.base_path ~created_at
+            (`Assoc
+               [
+                 ("event_type", `String "claim_created");
+                 ("claim_id", `String claim_id);
+                 ("agent_name", `String agent_name);
+                 ("keeper_name", `String keeper_name);
+                 ("kind", `String "completion_claim");
+                 ("subject", `String subject);
+                 ("surface", `String "keeper_turn");
+                 ("created_at", `String created_at);
+                 ("evidence_refs", `List []);
+                 ("synthetic", `Bool false);
+               ]))
+        [
+          ("acct-json-a", "keeper-json-a", "keeper-json-a-agent", "Ship A");
+          ("acct-json-b", "keeper-json-b", "keeper-json-b-agent", "Ship B");
+        ];
+      Keeper_accountability.enable_window_read_count_for_testing ();
+      let read_count =
+        Fun.protect
+          ~finally:Keeper_accountability.disable_window_read_count_for_testing
+          (fun () ->
+            ignore
+              (Keeper_accountability.accountability_summary_json config
+                 ~keeper_name:"keeper-json-a"
+                 ~agent_name:"keeper-json-a-agent");
+            ignore
+              (Keeper_accountability.accountability_summary_json config
+                 ~keeper_name:"keeper-json-b"
+                 ~agent_name:"keeper-json-b-agent");
+            Keeper_accountability.window_read_count_for_testing ())
+      in
+      check int "window read count" 2 read_count)
+
 (* --- Attribution tests --- *)
 
 module A = Masc_mcp.Attribution
@@ -352,6 +441,10 @@ let () =
             `Quick test_claim_tool_exposes_routing_warning_for_high_risk_keeper;
           test_case "synthetic claims do not dilute unsupported rate" `Quick
             test_synthetic_claims_do_not_dilute_unsupported_rate;
+          test_case "summary lookup reads window once" `Quick
+            test_summary_lookup_reads_window_once_for_multiple_agents;
+          test_case "summary json rereads window per agent" `Quick
+            test_summary_json_rereads_window_per_agent;
         ] );
       ( "attribution",
         [

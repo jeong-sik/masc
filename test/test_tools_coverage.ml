@@ -224,7 +224,11 @@ let test_remote_operator_action_schema_is_strict () =
             | Some (`List enums) ->
                 Alcotest.(check bool) "remote excludes team_turn" false
                   (List.mem (`String "team_turn") enums);
-                Alcotest.(check bool) "remote excludes task_inject" false
+                (* Issue #8417: [task_inject] has a real handler +
+                   approval contract; promoted into the strict enum so
+                   remote operator callers and the LLM judge can
+                   discover the capability. *)
+                Alcotest.(check bool) "remote includes task_inject" true
                   (List.mem (`String "task_inject") enums);
                 Alcotest.(check bool) "remote excludes keeper_msg" false
                   (List.mem (`String "keeper_msg") enums);

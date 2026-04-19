@@ -333,6 +333,7 @@
         test_json_util
         test_process_eio_coverage
         test_with_process_coverage
+        test_bg_task_stub
         test_provider_adapter
         test_worker_container_coverage
         test_resilience
@@ -486,6 +487,7 @@
         test_json_util
         test_process_eio_coverage
         test_with_process_coverage
+        test_bg_task_stub
         test_provider_adapter
         test_worker_container_coverage
         test_resilience

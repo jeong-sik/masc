@@ -42,6 +42,19 @@ let project_root_from_executable () =
     in
     walk_up (Filename.dirname exe)
 
+let config_root_from_ancestor start_dir =
+  let rec walk_up dir =
+    let config_root = Filename.concat dir "config" in
+    let tool_policy =
+      Filename.concat config_root Config_dir_resolver.tool_policy_toml_filename
+    in
+    if Sys.file_exists tool_policy then Some config_root
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None else walk_up parent
+  in
+  walk_up start_dir
+
 let dedupe_keep_order items =
   let seen = Hashtbl.create (List.length items) in
   List.filter
@@ -55,12 +68,13 @@ let dedupe_keep_order items =
 
 let versioned_config_root_candidates () =
   let cwd_candidate = Filename.concat (Sys.getcwd ()) "config" in
+  let cwd_ancestor_candidate = config_root_from_ancestor (Sys.getcwd ()) in
   let exe_candidate =
     match project_root_from_executable () with
     | Some root -> Some (Filename.concat root "config")
     | None -> None
   in
-  [ Some cwd_candidate; exe_candidate ]
+  [ Some cwd_candidate; cwd_ancestor_candidate; exe_candidate ]
   |> List.filter_map (fun x -> x)
   |> dedupe_keep_order
   |> List.filter (fun path -> Sys.file_exists path && Sys.is_directory path)

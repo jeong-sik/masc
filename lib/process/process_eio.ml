@@ -650,3 +650,118 @@ let run_argv_with_status ?(timeout_sec = 60.0) ?env ?cwd
     run_argv_with_status_split ~timeout_sec ?env ?cwd argv
   in
   (status, output_for_status ~status ~stdout ~stderr)
+
+(* ============================================================ *)
+(* Detached (background) spawn primitives — P2 Legendary Bash   *)
+(* ============================================================ *)
+
+type detached_handle = {
+  pid : int;
+  pgid : int;
+  stdout_fd : Unix.file_descr;
+  stderr_fd : Unix.file_descr;
+  started_at : float;
+}
+
+let spawn_detached ~argv ~env ~cwd =
+  match argv with
+  | [] -> Error "spawn_detached: empty argv"
+  | bin :: _ ->
+      (try
+         let out_r, out_w = Unix.pipe ~cloexec:true () in
+         let err_r, err_w = Unix.pipe ~cloexec:true () in
+         let devnull =
+           Unix.openfile "/dev/null" [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0
+         in
+         (* Use fork/exec instead of create_process_env so the child
+            can [setpgrp] before [execvpe].  OCaml's Unix module does
+            not expose [setpgid(pid, pgid)] for the parent to call on
+            a child, so the child has to establish its own process
+            group authoritatively.  A short window between fork and
+            setpgrp still leaves the child in the parent's group — any
+            signal delivered to the parent group in that window would
+            also reach the child.  Acceptable for background shells;
+            signal-race-free semantics would require posix_spawn with
+            POSIX_SPAWN_SETPGROUP via Ctypes, a follow-up item. *)
+         let pid = Unix.fork () in
+         if pid = 0 then begin
+           (* --- CHILD --- *)
+           (* [Unix.setsid] creates a new session AND a new process
+              group with the child as leader.  OCaml's stdlib does not
+              expose [setpgid], so [setsid] is the portable way to
+              guarantee a new group.  Side effect: the child detaches
+              from the parent's controlling terminal, which matches
+              the "background shell" semantics we want. *)
+           (try ignore (Unix.setsid ()) with _ -> ());
+           (try
+              if cwd <> "" then Unix.chdir cwd
+            with _ -> Unix._exit 126);
+           Unix.dup2 devnull Unix.stdin;
+           Unix.dup2 out_w Unix.stdout;
+           Unix.dup2 err_w Unix.stderr;
+           Unix.close out_r; Unix.close err_r;
+           Unix.close out_w; Unix.close err_w; Unix.close devnull;
+           (try Unix.execvpe bin (Array.of_list argv) env
+            with _ -> Unix._exit 127)
+         end else begin
+           (* --- PARENT --- *)
+           Unix.close out_w;
+           Unix.close err_w;
+           Unix.close devnull;
+           Ok
+             {
+               pid;
+               pgid = pid;
+               stdout_fd = out_r;
+               stderr_fd = err_r;
+               started_at = Unix.gettimeofday ();
+             }
+         end
+       with
+       | Unix.Unix_error (err, fn, arg) ->
+           Error
+             (Printf.sprintf "spawn_detached %s: %s (%s %s)"
+                bin (Unix.error_message err) fn arg)
+       | exn ->
+           Error
+             (Printf.sprintf "spawn_detached %s: %s" bin
+                (Printexc.to_string exn)))
+
+let is_pgid_alive ~pgid =
+  try
+    Unix.kill (-pgid) 0;
+    true
+  with
+  | Unix.Unix_error (Unix.ESRCH, _, _) -> false
+  | Unix.Unix_error (Unix.EPERM, _, _) ->
+      (* EPERM means the process exists but we can't signal it —
+         conservative "alive" answer. *)
+      true
+  | _ -> false
+
+let tree_kill ~pgid ~signal ~grace_sec =
+  let safe_kill s =
+    try Unix.kill (-pgid) s
+    with
+    | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
+    | Unix.Unix_error (Unix.EPERM, _, _) ->
+        (* macOS can return EPERM after all processes in the group
+           have exited but the session object lingers. Treat as
+           "already gone". *)
+        ()
+  in
+  safe_kill signal;
+  if grace_sec > 0.0 then begin
+    let deadline = Unix.gettimeofday () +. grace_sec in
+    let step = min 0.1 (grace_sec /. 10.0) in
+    let rec wait_loop () =
+      if not (is_pgid_alive ~pgid) then ()
+      else if Unix.gettimeofday () >= deadline then
+        safe_kill Sys.sigkill
+      else begin
+        (try ignore (Unix.select [] [] [] step) with _ -> ());
+        wait_loop ()
+      end
+    in
+    wait_loop ()
+  end

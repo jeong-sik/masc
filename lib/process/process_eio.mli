@@ -79,3 +79,53 @@ val run_argv_with_status_split :
   (Unix.process_status * string * string)
 (** Like [run_argv_with_status], but returns
     [(status, stdout, stderr)] without combining stderr into stdout. *)
+
+(** {1 Detached (background) spawn primitives — P2 foundation} *)
+
+type detached_handle = {
+  pid : int;
+      (** Child process PID (also the process-group leader). *)
+  pgid : int;
+      (** Process group ID; always equal to [pid] for tree-kill. *)
+  stdout_fd : Unix.file_descr;
+      (** Read end of child's stdout pipe. Caller owns and must close. *)
+  stderr_fd : Unix.file_descr;
+      (** Read end of child's stderr pipe. Caller owns and must close. *)
+  started_at : float;
+      (** [Unix.gettimeofday ()] at spawn time. *)
+}
+
+val spawn_detached :
+  argv:string list ->
+  env:string array ->
+  cwd:string ->
+  (detached_handle, string) result
+(** Fork a child in its own process group and return immediately with
+    a handle containing PID, PGID, and the caller-owned read ends of
+    stdout/stderr. The child runs until it exits or is signaled — it
+    does NOT die with the current Eio switch.
+
+    Tree-kill: [Unix.kill (-handle.pgid) signal] reaches every
+    descendant (grandchildren included). Use {!tree_kill} for the
+    SIGTERM → grace → SIGKILL sequence.
+
+    Bypasses the [proc_mgr] so the child is not tracked by Eio;
+    callers are responsible for [Unix.waitpid] reaping (directly or
+    via a long-lived daemon fiber in [Bg_task]).
+
+    The argv-only API is intentional: no shell interpolation,
+    matching the rest of this module. *)
+
+val tree_kill :
+  pgid:int ->
+  signal:int ->
+  grace_sec:float ->
+  unit
+(** Escalating tree-kill. Signals the process group [-pgid] with
+    [signal]; after [grace_sec], if any member survives, escalates to
+    SIGKILL. Idempotent — safe to call on already-dead groups. *)
+
+val is_pgid_alive : pgid:int -> bool
+(** True when [-pgid] responds to signal 0, i.e. at least one member
+    of the group is still alive. *)
+

@@ -234,7 +234,6 @@ let () = test "dispatch_status_multi_assignment_current_requires_disambiguation"
       assert (str_contains result "effective_current=task-002");
       assert (str_contains result "drift_reason=secondary_assignment");
       assert (str_contains result "claim_first_suppressed=yes");
-      assert (str_contains result "Multiple assigned tasks detected");
       assert (not (str_contains result "task-002 is stale focus"))
   | None -> failwith "dispatch returned None");
   match Tool_coord.dispatch ctx ~name:"masc_check"

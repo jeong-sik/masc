@@ -584,9 +584,8 @@ let assertion_fix_hint = function
   | Task_claimed ->
       "Claim a task with masc_transition(action=claim) or masc_claim_next"
   | Current_task_set ->
-      "Call masc_plan_set_task to bind your owned task when planning \
-       current_task is unset or stale (for example after drift or \
-       masc_transition(action=claim))"
+      "Call masc_plan_set_task to choose or re-sync the active task when \
+       current_task is unset, stale, or ambiguous"
   | Worktree_active ->
       "Call masc_worktree_create to work in an isolated branch"
 

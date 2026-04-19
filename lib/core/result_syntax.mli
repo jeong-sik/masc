@@ -1,7 +1,5 @@
-(** Result_syntax — shared Result monad binding operators.
+(** Result_syntax — thin re-export of stdlib [Stdlib.Result.Syntax].
 
-    Usage: [open Result_syntax] at the top of any module that
-    uses [let*] for Result chaining. *)
+    Kept as a compatibility alias; prefer [open Result.Syntax] at call sites. *)
 
-val ( let* ) : ('a, 'e) result -> ('a -> ('b, 'e) result) -> ('b, 'e) result
-val ( let+ ) : ('a, 'e) result -> ('a -> 'b) -> ('b, 'e) result
+include module type of Stdlib.Result.Syntax

@@ -38,15 +38,28 @@ let keeper_health_to_string = function
   | KH_zombie -> "zombie"
   | KH_dead -> "dead"
 
-let keeper_health_of_string = function
-  | "healthy" -> KH_healthy
-  | "idle" -> KH_idle
-  | "offline" -> KH_offline
-  | "stale" -> KH_stale
-  | "degraded" -> KH_degraded
-  | "zombie" -> KH_zombie
-  | "dead" -> KH_dead
-  | _ -> KH_offline
+(** Strict parser. Returns [None] on unknown wire so callers can route
+    explicitly (drop / fallback / route). See #8670 / #8605. *)
+let keeper_health_of_string_opt = function
+  | "healthy" -> Some KH_healthy
+  | "idle" -> Some KH_idle
+  | "offline" -> Some KH_offline
+  | "stale" -> Some KH_stale
+  | "degraded" -> Some KH_degraded
+  | "zombie" -> Some KH_zombie
+  | "dead" -> Some KH_dead
+  | _ -> None
+
+(** Back-compat wrapper: unknown wire still falls back to [KH_offline] but a
+    [Log.Keeper.warn] is emitted so producer/consumer drift surfaces in
+    operator logs instead of silently misreporting a live keeper as offline. *)
+let keeper_health_of_string s =
+  match keeper_health_of_string_opt s with
+  | Some v -> v
+  | None ->
+      Log.Keeper.warn
+        "keeper_health: unknown wire %S -> KH_offline (drift; see #8670)" s;
+      KH_offline
 
 let keeper_continuity_to_string = function
   | Continuity_healthy -> "healthy"

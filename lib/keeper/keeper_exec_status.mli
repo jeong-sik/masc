@@ -26,7 +26,12 @@ val augment_keeper_diagnostic_json :
   Yojson.Safe.t
 
 val keeper_health_to_string : keeper_health -> string
+
+val keeper_health_of_string_opt : string -> keeper_health option
+(** Strict: [None] on unknown wire (see #8670 / #8605). *)
+
 val keeper_health_of_string : string -> keeper_health
+(** Back-compat: unknown -> [KH_offline] with [Log.Keeper.warn] so drift surfaces. *)
 val keeper_continuity_to_string : keeper_continuity -> string
 
 val keeper_health_state :

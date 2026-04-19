@@ -57,23 +57,68 @@ let path_relative_to ~root path =
     Some (String.sub path (String.length root + 1) (String.length path - String.length root - 1))
   else None
 
+(* Per-path TTL cache for `git rev-parse --short HEAD`.  Each miss forks
+   git and can take seconds on large worktrees (~/me etc.), yet HEAD
+   changes infrequently, and every dashboard shell refresh calls this
+   twice (workspace + base).  Serving cached values keeps snapshot_json
+   off the 5 s git-probe budget on the hot path. *)
+let git_rev_parse_short_ttl_sec = 60.0
+
+let git_rev_parse_short_cache :
+    (string, string option * float) Hashtbl.t =
+  Hashtbl.create 4
+
+let git_rev_parse_short_mu = Stdlib.Mutex.create ()
+
+let git_rev_parse_short_cached_lookup dir ~now =
+  Stdlib.Mutex.lock git_rev_parse_short_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
+    (fun () ->
+      match Hashtbl.find_opt git_rev_parse_short_cache dir with
+      | Some (value, ts) when now -. ts <= git_rev_parse_short_ttl_sec ->
+          Some value
+      | _ -> None)
+
+let git_rev_parse_short_cache_store dir value ~now =
+  Stdlib.Mutex.lock git_rev_parse_short_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
+    (fun () ->
+      Hashtbl.replace git_rev_parse_short_cache dir (value, now))
+
+let git_rev_parse_short_probe dir =
+  let argv = [ "git"; "-C"; dir; "rev-parse"; "--short"; "HEAD" ] in
+  let raw_source = String.concat " " (List.map Filename.quote argv) in
+  match
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:"system/runtime_info"
+      ~raw_source
+      ~summary:"dashboard runtime git probe"
+      ~timeout_sec:5.0
+      argv
+  with
+  | Unix.WEXITED 0, output -> trim_to_option output
+  | _ -> None
+
 let git_rev_parse_short path =
   match trim_to_option path with
   | None -> None
   | Some dir when not (Sys.file_exists dir) -> None
   | Some dir ->
-      let argv = [ "git"; "-C"; dir; "rev-parse"; "--short"; "HEAD" ] in
-      let raw_source = String.concat " " (List.map Filename.quote argv) in
-      (match
-         Masc_exec.Exec_gate.run_argv_with_status
-           ~actor:"system/runtime_info"
-           ~raw_source
-           ~summary:"dashboard runtime git probe"
-           ~timeout_sec:5.0
-           argv
-       with
-       | Unix.WEXITED 0, output -> trim_to_option output
-       | _ -> None)
+      let now = Time_compat.now () in
+      (match git_rev_parse_short_cached_lookup dir ~now with
+       | Some value -> value
+       | None ->
+           let value = git_rev_parse_short_probe dir in
+           git_rev_parse_short_cache_store dir value ~now;
+           value)
+
+let clear_git_rev_parse_short_cache_for_tests () =
+  Stdlib.Mutex.lock git_rev_parse_short_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
+    (fun () -> Hashtbl.clear git_rev_parse_short_cache)
 
 let path_item_json ~source path =
   `Assoc

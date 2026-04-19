@@ -276,13 +276,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         cascade_name = (match p.profile_defaults.cascade_name with
           | Some name -> name
           | None -> Keeper_config.default_cascade_name);
-        models = (match p.profile_defaults.models with
-          | Some ms -> ms
-          | None ->
-            (* Fallback: read default_models from cascade config (user-declared
-               JSON), not from an OCaml literal. MASC is a config interpreter —
-               it does not know what models exist. *)
-            Cascade_runtime.default_model_strings_from_config ());
+        (* Empty = "use cascade_name". Injecting any default here would silently
+           override the keeper's declared cascade_name in oas_worker_named. *)
+        models = Option.value ~default:[] p.profile_defaults.models;
         will;
         needs;
         desires;

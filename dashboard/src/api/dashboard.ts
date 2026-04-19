@@ -127,12 +127,22 @@ export async function fetchAgentRelations(agentName: string): Promise<AgentRelat
   return parseAgentRelationsResponse(raw)
 }
 
+export type ConfigEntrySource = 'env' | 'default' | 'derived' | 'runtime'
+
+export interface ConfigEntryProvenance {
+  kind: ConfigEntrySource
+  detail: string
+  derived_from?: string[]
+}
+
 export interface ConfigEntry {
   env: string
   description: string
   value: string | null
   default: string
-  source: 'env' | 'default'
+  source: ConfigEntrySource
+  source_detail?: string
+  provenance?: ConfigEntryProvenance
   sensitive: boolean
 }
 

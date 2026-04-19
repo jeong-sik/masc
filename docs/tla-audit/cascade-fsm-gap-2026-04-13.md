@@ -2,6 +2,8 @@
 
 > Status: historical audit only, not a live keeper contract.
 > The current canonical cascade/runtime-truth specs are `KeeperCascadeLifecycle.tla`, `KeeperCompactionLifecycle.tla`, `KeeperCompositeLifecycle.tla`, `KeeperStateMachine.tla`, and `boundary/KeeperContinueGate.tla`.
+> Follow-up: `task-048` wires the audited `CascadeLiveness` liveness obligation
+> into the default TLA sweep via `specs/bug-models/CascadeLiveness-liveness.cfg`.
 > References to `manual_reconcile` below describe the audited 2026-04-13 system, not the current live API/runtime contract.
 
 Date: 2026-04-13
@@ -20,7 +22,7 @@ exhaustion and recovery, but keepers still get stuck.
 | Spec | Location | Clean cfg | Buggy cfg |
 |------|----------|-----------|-----------|
 | CascadeExhaustion | `specs/bug-models/CascadeExhaustion.tla` | ExhaustionSafetyLastOk | ExhaustionDiagnosticConsistency violated |
-| CascadeLiveness | `specs/bug-models/CascadeLiveness.tla` | Safety invariants + EventualTermination | NoPhantomSlots violated |
+| CascadeLiveness | `specs/bug-models/CascadeLiveness.tla` | Safety invariants; `CascadeLiveness-liveness.cfg` checks EventualTermination | NoPhantomSlots violated |
 | OllamaBodyIntegrity | `specs/bug-models/OllamaBodyIntegrity.tla` | BalancedNeverFails | BalancedNeverFails violated |
 | SlotScheduler | `specs/bug-models/SlotScheduler.tla` | MutualExclusion + NeverStuck | NeverStuck violated |
 | KeeperStateMachine | `specs/keeper-state-machine/KeeperStateMachine.tla` | 9 safety + 5 liveness | N/A (no buggy variant for cascade) |
@@ -219,13 +221,16 @@ is not enabled. The keeper stays in "waiting" until either:
   not the default Spec).
 
 The default `CascadeLiveness.cfg` uses `SPECIFICATION Spec` (without
-SF on TurnTimeout) and only checks safety invariants. The liveness
-property `EventualTermination` is mentioned in comments but not in the
-cfg file.
+SF on TurnTimeout) and only checks safety invariants. Before `task-048`,
+the liveness property `EventualTermination` was mentioned in comments
+but not wired into the default sweep. `task-048` adds
+`CascadeLiveness-liveness.cfg` with `SPECIFICATION SpecLive` and
+`PROPERTY EventualTermination`, and `scripts/tla-check.sh` now runs that
+cfg before the normal bug-model glob.
 
 **Proposed addition**:
 - Add a `CascadeLiveness-liveness.cfg` that uses `SpecLive` and checks
-  `EventualTermination`.
+  `EventualTermination`. **Done in task-048.**
 - Add an invariant: `AllUnhealthyImpliesNoWaitingWithoutTimeout` that
   verifies keepers waiting on all-unhealthy providers are rescued by
   timeout.

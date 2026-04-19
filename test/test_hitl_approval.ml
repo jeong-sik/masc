@@ -454,7 +454,9 @@ let test_approval_get_dispatch_not_found () =
   in
   Alcotest.(check bool) "not found fails" false ok;
   Alcotest.(check bool) "not found message" true
-    (contains_substring msg "not found or already resolved")
+    (contains_substring msg "no longer pending");
+  Alcotest.(check bool) "not found next action" true
+    (contains_substring msg "Refresh with masc_approval_pending")
 
 let test_approval_get_rejects_reader_role () =
   match

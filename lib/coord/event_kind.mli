@@ -46,7 +46,7 @@ module Message : sig
     | Mentioned
 
   val to_string : t -> string
-  (** Canonical dotted-form wire name ([\"message.broadcast\"] etc.). *)
+  (** Canonical dotted-form wire name (e.g. [message.broadcast]). *)
 
   val of_string : string -> t option
   val all : t list

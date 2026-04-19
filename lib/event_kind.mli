@@ -6,9 +6,9 @@
     this module both sides used raw [string]; a typo on either side
     compiled clean and silently diverged at runtime.
 
-    This module is the SSOT for the [task.*] family. Other families
-    (board.*, agent.*, keeper.*) are tracked in #8455 and will be
-    migrated in follow-up PRs on the same pattern.
+    This module is the SSOT for the task.* family. Other families
+    (board.*, agent.*, keeper.*, ...) are tracked in issue 8455 and
+    will be migrated in follow-up PRs on the same pattern.
 
     Parse boundary: {!Task.of_string} at JSONL / wire ingress only;
     internal code uses [Task.t] directly so typos become compile

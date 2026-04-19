@@ -563,6 +563,44 @@ module KeeperSandbox = struct
   (** Fail closed unless Docker reports userns support. *)
   let require_userns () =
     get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
+
+  (** docker_with_git: when true, route keeper_bash commands beginning with
+      "git " or "gh " to the Docker_with_git profile even when the keeper's
+      default profile is Docker_hardened. Lets a single keeper run network-
+      bound git/gh ops without granting wholesale network for all bash. *)
+  let with_git_dispatch_enabled () =
+    get_bool ~default:true "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
+
+  (** Host path mounted read-only at /root/.config/gh inside docker_with_git.
+      Default $HOME/.config/gh. Empty string disables the mount (no gh auth). *)
+  let gh_creds_host_path () =
+    let default =
+      try Filename.concat (Sys.getenv "HOME") ".config/gh"
+      with Not_found -> ""
+    in
+    get_string ~default "MASC_KEEPER_SANDBOX_GH_CREDS"
+
+  (** Host path mounted read-only at /root/.gitconfig. Default $HOME/.gitconfig. *)
+  let gitconfig_host_path () =
+    let default =
+      try Filename.concat (Sys.getenv "HOME") ".gitconfig"
+      with Not_found -> ""
+    in
+    get_string ~default "MASC_KEEPER_SANDBOX_GITCONFIG"
+
+  (** SSH directory mount (~/.ssh). OFF by default — gh + HTTPS covers most
+      flows; SSH is opt-in to keep the mount surface minimal. *)
+  let ssh_dir_host_path () =
+    get_string ~default:"" "MASC_KEEPER_SANDBOX_SSH_DIR"
+
+  (** Optional GitHub token forwarded as GH_TOKEN env into docker_with_git
+      containers. Defaults to the host GH_TOKEN; empty disables forwarding. *)
+  let gh_token () =
+    let default =
+      try Sys.getenv "GH_TOKEN"
+      with Not_found -> ""
+    in
+    get_string ~default "MASC_KEEPER_SANDBOX_GH_TOKEN"
 end
 
 module DashboardHealth = struct

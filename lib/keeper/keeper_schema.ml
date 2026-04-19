@@ -20,7 +20,7 @@ let tool_preset_enum_strings =
     Keeper_types_profile fails the test instead of silently dropping
     from the JSON Schema. *)
 let sandbox_profile_enum_strings =
-  [ "legacy_local"; "docker_hardened" ]
+  [ "legacy_local"; "docker_hardened"; "docker_with_git" ]
 let network_mode_enum_strings =
   [ "none"; "inherit" ]
 let shared_memory_scope_enum_strings =

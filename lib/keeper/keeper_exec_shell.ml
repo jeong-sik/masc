@@ -562,6 +562,132 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
             else
               Ok seccomp_args
 
+(* docker_with_git: leading-token check used by per-command dispatch.
+   Returns true when the trimmed command's first whitespace-separated word
+   is exactly "git" or "gh" (case-sensitive — both lowercase by convention).
+   Subcommand args do not change the dispatch decision; e.g. "git push --force"
+   still dispatches to docker_with_git, but the existing destructive-bash
+   guard (Worker_dev_tools.is_destructive_bash_operation) already rejects
+   force-push before this point. *)
+let cmd_targets_git_or_gh cmd =
+  let trimmed = String.trim cmd in
+  let first_word =
+    match String.index_opt trimmed ' ' with
+    | Some i -> String.sub trimmed 0 i
+    | None -> trimmed
+  in
+  match first_word with
+  | "git" | "gh" -> true
+  | _ -> false
+
+(* Mount spec helper: only emit the -v flag when the host path is non-empty
+   AND exists on disk. Missing files would cause docker to create them as
+   directories, breaking gh / git config reads. *)
+let optional_ro_mount ~host ~container =
+  if host = "" then []
+  else if not (Sys.file_exists host) then []
+  else [ "-v"; host ^ ":" ^ container ^ ":ro" ]
+
+let run_docker_with_git_bash
+    ~(config : Coord.config)
+    ~(meta : keeper_meta)
+    ~(cwd : string)
+    ~(timeout_sec : float)
+    ~(cmd : string) =
+  let image = Env_config_keeper.KeeperSandbox.docker_image () in
+  let sandbox_error_json message =
+    Keeper_registry.record_error ~base_path:config.base_path meta.name message;
+    error_json message
+  in
+  if String.trim image = "" then
+    sandbox_error_json "keeper sandbox docker image is not configured"
+  else if command_uses_nested_container_runtime cmd then
+    sandbox_error_json
+      "docker_with_git blocks nested container runtimes and host socket references"
+  else
+    match ensure_keeper_sandbox_runtime ~timeout_sec with
+    | Error err -> sandbox_error_json err
+    | Ok seccomp_args ->
+    let host_root =
+      keeper_playground_root ~config ~meta
+      |> Keeper_alerting_path.normalize_path_for_check
+      |> Keeper_alerting_path.strip_trailing_slashes
+    in
+    let container_name = keeper_sandbox_container_name meta in
+    let container_root = keeper_private_container_root meta in
+    let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
+    let uid = Unix.getuid () in
+    let gid = Unix.getgid () in
+    let gh_creds = Env_config_keeper.KeeperSandbox.gh_creds_host_path () in
+    let gitconfig = Env_config_keeper.KeeperSandbox.gitconfig_host_path () in
+    let ssh_dir = Env_config_keeper.KeeperSandbox.ssh_dir_host_path () in
+    let gh_token = Env_config_keeper.KeeperSandbox.gh_token () in
+    let cred_mounts =
+      optional_ro_mount ~host:gh_creds ~container:"/root/.config/gh"
+      @ optional_ro_mount ~host:gitconfig ~container:"/root/.gitconfig"
+      @ optional_ro_mount ~host:ssh_dir ~container:"/root/.ssh"
+    in
+    let token_env =
+      if gh_token = "" then [] else [ "-e"; "GH_TOKEN=" ^ gh_token ]
+    in
+    let argv =
+      [
+        "docker";
+        "run";
+        "--rm";
+        "--name";
+        container_name;
+        "-i";
+        "--user";
+        Printf.sprintf "%d:%d" uid gid;
+        "--read-only";
+        "--tmpfs";
+        (Printf.sprintf "/tmp:rw,nosuid,nodev,noexec,size=%s"
+           (Env_config_keeper.KeeperSandbox.tmpfs_size ()));
+        "--cap-drop=ALL";
+        "--security-opt";
+        "no-new-privileges";
+      ]
+      @ seccomp_args
+      @ [
+        "--pids-limit";
+        string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ());
+        "--memory";
+        Env_config_keeper.KeeperSandbox.memory ();
+        "-v";
+        host_root ^ ":" ^ container_root ^ ":rw";
+        "--workdir";
+        container_cwd;
+        "--network";
+        "bridge";
+      ]
+      @ cred_mounts
+      @ token_env
+      @ [ image; "bash"; "-lc"; cmd ^ " 2>&1" ]
+    in
+    let st, out =
+      Process_eio.run_argv_with_status
+        ~cwd:(Sys.getcwd ()) ~timeout_sec argv
+    in
+    if st <> Unix.WEXITED 0 then
+      Keeper_registry.record_error ~base_path:config.base_path meta.name
+        (Printf.sprintf "sandbox docker exec failed (%s): %s"
+           image
+           (Worker_dev_tools.truncate_for_log out))
+    else
+      Keeper_registry.clear_error ~base_path:config.base_path meta.name;
+    Yojson.Safe.to_string
+      (`Assoc
+         [
+           ("ok", `Bool (st = Unix.WEXITED 0));
+           ("cwd", `String cwd);
+           ("sandbox_profile", `String "docker_with_git");
+           ("network_mode", `String "bridge");
+           ("effective_sandbox_image", `String image);
+           ("status", Keeper_alerting_path.process_status_to_json st);
+           ("output", `String out);
+         ])
+
 let run_docker_hardened_bash
     ~(config : Coord.config)
     ~(meta : keeper_meta)
@@ -697,8 +823,19 @@ let handle_keeper_bash
       String.starts_with ~prefix:(playground_abs ^ "/") (cwd_canonical ^ "/")
       || String.equal playground_abs cwd_canonical
     in
-    let sandbox_profile, sandbox_network_mode =
+    let base_profile, base_network_mode =
       effective_sandbox_profile ~meta ~in_playground
+    in
+    (* docker_with_git per-command dispatch. Upgrades a Docker_hardened keeper
+       to Docker_with_git when the command's leading token is git/gh, so the
+       container gets bridge network + read-only credential mounts.
+       Disabled when MASC_KEEPER_SANDBOX_GIT_DISPATCH=false. *)
+    let sandbox_profile, sandbox_network_mode =
+      if base_profile = Docker_hardened
+         && Env_config_keeper.KeeperSandbox.with_git_dispatch_enabled ()
+         && cmd_targets_git_or_gh cmd
+      then (Docker_with_git, Network_inherit)
+      else (base_profile, base_network_mode)
     in
     (* Destructive guard: always active regardless of Docker or preset *)
     if Worker_dev_tools.is_destructive_bash_operation cmd
@@ -714,6 +851,12 @@ let handle_keeper_bash
            ~retryability:Exec_core.Operator_required
            ~extra:[ "cmd", `String cmd_for_log ]
            ()))
+    else if sandbox_profile = Docker_with_git then (
+      Log.Keeper.info
+        "DOCKER_WITH_GIT_EXEC: keeper=%s cwd=%s cmd=%s"
+        meta.name cwd cmd_for_log;
+      run_docker_with_git_bash
+        ~config ~meta ~cwd ~timeout_sec ~cmd)
     else if sandbox_profile = Docker_hardened then (
       Log.Keeper.info
         "DOCKER_HARDENED_EXEC: keeper=%s cwd=%s cmd=%s network=%s"

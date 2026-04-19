@@ -27,6 +27,12 @@ val gh_min_timeout_sec : float
 (** Minimum timeout_sec floor applied to gh op. Exposed so regression
     tests can lock the floor against drift back to sub-network-latency
     values. See #8688. *)
+
+val cmd_targets_git_or_gh : string -> bool
+(** docker_with_git per-command dispatch predicate. True when the
+    trimmed command's first whitespace-separated word is exactly
+    "git" or "gh". Exposed for unit testing. *)
+
 val handle_keeper_bash :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

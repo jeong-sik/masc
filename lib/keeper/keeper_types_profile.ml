@@ -10,6 +10,14 @@ let keeper_debug = Env_config.KeeperRuntime.debug
 type sandbox_profile =
   | Legacy_local
   | Docker_hardened
+  | Docker_with_git
+    (** Hardened docker profile with bridge network + read-only mounts of
+        ~/.config/gh and ~/.gitconfig (and optionally ~/.ssh) to permit
+        git/gh CLI operations. All other Docker_hardened guards (cap-drop,
+        no-new-privs, read-only rootfs, tmpfs, pids/memory limits, no
+        nested runtimes) remain in force. Default OFF; per-keeper opt-in
+        via TOML or per-command dispatch when keeper_bash receives
+        cmd starting with "git " or "gh ". *)
 
 type network_mode =
   | Network_none
@@ -22,18 +30,20 @@ type shared_memory_scope =
 let sandbox_profile_to_string = function
   | Legacy_local -> "legacy_local"
   | Docker_hardened -> "docker_hardened"
+  | Docker_with_git -> "docker_with_git"
 
 let sandbox_profile_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
   | "legacy_local" -> Some Legacy_local
   | "docker_hardened" -> Some Docker_hardened
+  | "docker_with_git" -> Some Docker_with_git
   | _ -> None
 
 (* Issue #8467: Variant SSOT — adding a constructor to [sandbox_profile]
    forces [sandbox_profile_to_string] exhaustiveness AND extends
    [valid_sandbox_profile_strings] so [keeper_schema] picks it up via
    the mirror declared there. *)
-let all_sandbox_profiles = [ Legacy_local; Docker_hardened ]
+let all_sandbox_profiles = [ Legacy_local; Docker_hardened; Docker_with_git ]
 let valid_sandbox_profile_strings =
   List.map sandbox_profile_to_string all_sandbox_profiles
 
@@ -72,6 +82,7 @@ let default_sandbox_profile = Legacy_local
 let default_network_mode_for_profile = function
   | Legacy_local -> Network_inherit
   | Docker_hardened -> Network_none
+  | Docker_with_git -> Network_inherit
 
 let default_shared_memory_scope = Shared_memory_disabled
 

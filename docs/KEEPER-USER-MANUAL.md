@@ -299,6 +299,8 @@ spawn 시 인자로 직접 설정하는 필드.
 
 - keeper shell write는 자기 playground 안에서만 허용된다.
 - `docker_hardened`는 keeper_bash를 ephemeral Docker sandbox로 실행한다. 기본은 read-only rootfs, tmpfs `/tmp`, `cap-drop=ALL`, `no-new-privileges`, `pids-limit`, memory limit, private playground mount, network=`none`이다.
+- `docker_with_git`은 `docker_hardened`의 보안 가드를 모두 유지하면서 `--network bridge` + `~/.config/gh` / `~/.gitconfig` read-only mount + `GH_TOKEN` env forward 를 추가한다. git/gh CLI 가 컨테이너 안에서 동작한다. `~/.ssh` mount 는 `MASC_KEEPER_SANDBOX_SSH_DIR` 환경 변수로 명시 opt-in 시에만 활성화된다.
+- 기본 dispatch: keeper의 `sandbox_profile` 이 `docker_hardened` 여도 `keeper_bash` 의 cmd 가 `git` 또는 `gh` 로 시작하면 자동으로 `docker_with_git` 으로 라우팅된다 (`MASC_KEEPER_SANDBOX_GIT_DISPATCH=false` 로 비활성화 가능). 즉 git/gh 외 모든 명령은 여전히 network=none 의 hardened 컨테이너에서 실행된다.
 - `shared_memory_scope=room`은 공용 writable mount가 아니라 flattened `default` namespace typed lane만 연다.
 - team memory 도구는 keeper tool surface에도 노출되어야 하므로 preset에 없다면 `tool_also_allow` 또는 `tool_access.also_allow`로 명시해야 한다.
 

@@ -735,6 +735,37 @@ let () =
           Masc_mcp.Tool_code_write.valid_git_action_strings
           Masc_mcp.Tool_code_write.allowed_git_actions);
     ];
+    "mcp_session_action_ssot", [
+      (* Issue #8520: introduces [Mcp_session.action] Variant where 2
+         sites previously co-validated raw strings (schema enum +
+         tool_inline_dispatch match). Witness covers all 5 constructors;
+         mirror sync test asserts the Tool_schemas_inline_infra mirror
+         stays in lock-step with the SSOT. *)
+      Alcotest.test_case "witness covers all 5 variants" `Quick (fun () ->
+        let module M = Mcp_session in
+        let witness a =
+          let actual = M.action_to_string a in
+          if not (List.mem actual M.valid_action_strings) then
+            Alcotest.failf "action_to_string %S not in valid_action_strings" actual
+        in
+        witness M.Get; witness M.Create; witness M.List;
+        witness M.Cleanup; witness M.Remove;
+        Alcotest.(check int) "count" 5 (List.length M.valid_action_strings));
+      Alcotest.test_case "of_string_opt sound partial" `Quick (fun () ->
+        let module M = Mcp_session in
+        Alcotest.(check bool) "create" true (M.action_of_string_opt "create" <> None);
+        Alcotest.(check bool) "GET (case)" true (M.action_of_string_opt "GET" <> None);
+        Alcotest.(check bool) "  list  (trim)" true
+          (M.action_of_string_opt "  list  " <> None);
+        Alcotest.(check bool) "garbage rejected" true
+          (M.action_of_string_opt "delete" = None);
+        Alcotest.(check bool) "empty rejected" true
+          (M.action_of_string_opt "" = None));
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        Alcotest.(check (list string)) "tool_schemas mirror == SSOT"
+          Mcp_session.valid_action_strings
+          Tool_schemas_inline_infra.mcp_session_action_enum_strings);
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

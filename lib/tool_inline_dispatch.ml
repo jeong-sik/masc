@@ -111,15 +111,23 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
 
   (* ── MCP Session ────────────────────────────────────────────── *)
   | "masc_mcp_session" ->
-      let action = arg_get_string "action" "" in
-      if action = "" then Some (false, "action is required (create|get|list|delete)")
-      else
+      (* Issue #8520: parse via Mcp_session.action_of_string_opt;
+         dispatch via exhaustive match on the Variant — adding a 6th
+         action will fail compilation here, not silently break. *)
+      let raw = arg_get_string "action" "" in
+      (match Mcp_session.action_of_string_opt raw with
+       | None ->
+         Some (false,
+           Printf.sprintf
+             "action must be one of [%s]; got %S"
+             (String.concat "|" Mcp_session.valid_action_strings) raw)
+       | Some action ->
       let now = Time_compat.now () in
       let sessions = ctx.load_mcp_sessions config in
       let save sessions = ctx.save_mcp_sessions config sessions in
       let response =
         match action with
-        | "create" ->
+        | Mcp_session.Create ->
             let agent_name = arg_get_string_opt "agent_name" in
             let id = Mcp_session.generate () in
             let record : Mcp_server_eio_governance.mcp_session_record =
@@ -129,7 +137,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
               ("status", `String "created");
               ("session", Mcp_server_eio_governance.mcp_session_to_json record);
             ])
-        | "get" ->
+        | Mcp_session.Get ->
             let session_id = arg_get_string "session_id" "" in
             (match List.find_opt (fun (s : Mcp_server_eio_governance.mcp_session_record) -> s.id = session_id) sessions with
              | None -> Error (Printf.sprintf "MCP session '%s' not found" session_id)
@@ -141,12 +149,12 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
                    ("status", `String "ok");
                    ("session", Mcp_server_eio_governance.mcp_session_to_json updated);
                  ]))
-        | "list" ->
+        | Mcp_session.List ->
             Ok (`Assoc [
               ("count", `Int (List.length sessions));
               ("sessions", `List (List.map Mcp_server_eio_governance.mcp_session_to_json sessions));
             ])
-        | "cleanup" ->
+        | Mcp_session.Cleanup ->
             let cutoff = now -. Masc_time_constants.days_to_seconds 7 in
             let remaining = List.filter (fun (s : Mcp_server_eio_governance.mcp_session_record) -> s.last_seen >= cutoff) sessions in
             let removed = List.length sessions - List.length remaining in
@@ -156,7 +164,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
               ("removed", `Int removed);
               ("remaining", `Int (List.length remaining));
             ])
-        | "remove" ->
+        | Mcp_session.Remove ->
             let session_id = arg_get_string "session_id" "" in
             let remaining = List.filter (fun (s : Mcp_server_eio_governance.mcp_session_record) -> s.id <> session_id) sessions in
             if List.length remaining = List.length sessions then
@@ -168,12 +176,10 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
                 ("session_id", `String session_id);
               ])
             end
-        | other ->
-            Error (Printf.sprintf "Unknown action: %s" other)
       in
       (match response with
        | Ok json -> Some (true, Yojson.Safe.to_string json)
-       | Error e -> Some (false, e))
+       | Error e -> Some (false, e)))
 
   (* Infrastructure tools: cancellation, subscription, progress,
      governance_set removed — pruned from surfaces *)

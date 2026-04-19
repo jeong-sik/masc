@@ -83,7 +83,7 @@ let context_from_env ?(include_configured = false) ~allow_legacy_accept () =
     Printf.sprintf "http://%s:%d" default_host (configured_http_port ())
   in
   let base_url =
-    match Sys.getenv_opt "MASC_HTTP_BASE_URL" with
+    match Sys.getenv_opt Env_config_core.http_base_url_env_key with
     | Some raw -> (
         match trim_nonempty raw with
         | Some value -> normalize_loopback_base_url value

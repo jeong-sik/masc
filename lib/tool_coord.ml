@@ -105,7 +105,7 @@ let safe_current_task (ctx : context) ~joined =
     | Sys_error _ | Yojson.Json_error _ -> None
     | exn ->
         Log.Coord.warn "get_current_task failed for %s: %s" ctx.agent_name
-          (Printexc.to_string exn);
+        (Printexc.to_string exn);
         None
 
 let safe_get_agents (ctx : context) =
@@ -326,9 +326,10 @@ let status_summary_string (ctx : context) =
     else
       items
     |> fun items ->
-    if binding.assigned_task_ids <> [] && Option.is_none binding.planning_current then
+    if Option.is_some binding.primary_owned && not binding.current_task_set then
       items
-      @ [ "You own a task but planning current_task is unset. Call masc_plan_set_task." ]
+      @ [ "You own a task but planning current_task is unset or drifted. \
+           Treat owned as canonical and call masc_plan_set_task." ]
     else
       items
     |> fun items ->
@@ -509,7 +510,6 @@ let inspect_state ctx =
     else false
   in
   { room_set; joined; task_claimed; current_task_set; worktree_active }
-
 let state_to_json st =
   `Assoc [
     ("project_ready", `Bool st.room_set);
@@ -584,8 +584,9 @@ let assertion_fix_hint = function
   | Task_claimed ->
       "Claim a task with masc_transition(action=claim) or masc_claim_next"
   | Current_task_set ->
-      "Call masc_plan_set_task to choose or re-sync the active task when \
-       current_task is unset, stale, or ambiguous"
+      "Call masc_plan_set_task to bind your owned task when planning \
+       current_task is unset or stale (for example after drift or \
+       masc_transition(action=claim))"
   | Worktree_active ->
       "Call masc_worktree_create to work in an isolated branch"
 

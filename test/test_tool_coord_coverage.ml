@@ -250,6 +250,49 @@ let () = test "dispatch_status_multi_assignment_current_requires_disambiguation"
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "dispatch_check_owned_current_drift_fails_current_task_set" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  ignore (Coord.add_task ctx.config ~title:"Owned task" ~priority:3 ~description:"");
+  ignore (Coord.add_task ctx.config ~title:"Stale current task" ~priority:3 ~description:"");
+  ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+  Planning_eio.set_current_task ctx.config ~task_id:"task-002";
+  match Tool_coord.dispatch ctx ~name:"masc_check"
+          ~args:(`Assoc [("assertions", `List [`String "task_claimed"; `String "current_task_set"])]) with
+  | Some (success, result) ->
+      assert success;
+      let json = Yojson.Safe.from_string result in
+      assert (Yojson.Safe.Util.member "all_passed" json = `Bool false);
+      assert (
+        Yojson.Safe.Util.member "fix_hint" json
+        = `String
+            "Call masc_plan_set_task to choose or re-sync the active task when current_task is unset, stale, or ambiguous")
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_status_surfaces_owned_current_drift" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  ignore (Coord.add_task ctx.config ~title:"Owned task" ~priority:3 ~description:"");
+  ignore (Coord.add_task ctx.config ~title:"Stale current task" ~priority:3 ~description:"");
+  ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+  Planning_eio.set_current_task ctx.config ~task_id:"task-002";
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some (success, result) ->
+      assert success;
+      assert (str_contains result "owned=task-001");
+      assert (str_contains result "current=task-002");
+      assert (str_contains result "💡 Suggested next: masc_plan_set_task");
+      assert (str_contains result "planning current_task is unset or drifted")
+  | None -> failwith "dispatch returned None"
+)
+
 let () = test "dispatch_check_project_ready_alias" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in

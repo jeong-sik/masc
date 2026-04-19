@@ -28,7 +28,12 @@ type span_status =
   | Span_left | Span_retired | Span_finalized | Span_stopped | Span_ended
 
 val span_status_to_string : span_status -> string
+
+val span_status_of_string_opt : string -> span_status option
+(** Strict: [None] on unknown wire (see #8684 / #8605). *)
+
 val span_status_of_string : string -> span_status
+(** Back-compat: unknown -> [Span_ended] with [Log.Misc.warn] so drift surfaces. *)
 
 type entity_ref = {
   kind : string;

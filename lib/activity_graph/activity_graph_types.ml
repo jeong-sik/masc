@@ -61,12 +61,25 @@ let span_status_to_string = function
   | Span_finalized -> "finalized" | Span_stopped -> "stopped"
   | Span_ended -> "ended"
 
-let span_status_of_string = function
-  | "open" -> Span_open | "completed" -> Span_completed
-  | "released" -> Span_released | "cancelled" -> Span_cancelled
-  | "left" -> Span_left | "retired" -> Span_retired
-  | "finalized" -> Span_finalized | "stopped" -> Span_stopped
-  | _ -> Span_ended
+(** Strict parser. Returns [None] on unknown wire so callers can react
+    explicitly (drop / fallback / route). See #8684 / #8605. *)
+let span_status_of_string_opt = function
+  | "open" -> Some Span_open | "completed" -> Some Span_completed
+  | "released" -> Some Span_released | "cancelled" -> Some Span_cancelled
+  | "left" -> Some Span_left | "retired" -> Some Span_retired
+  | "finalized" -> Some Span_finalized | "stopped" -> Some Span_stopped
+  | "ended" -> Some Span_ended
+  | _ -> None
+
+(** Back-compat wrapper: unknown wire becomes [Span_ended] but logs a warn so
+    drift between producer and this enum is observable instead of silent. *)
+let span_status_of_string s =
+  match span_status_of_string_opt s with
+  | Some v -> v
+  | None ->
+      Log.Misc.warn
+        "activity_graph: unknown span_status wire %S -> Span_ended (drift; see #8684)" s;
+      Span_ended
 
 type entity_ref = {
   kind : string;

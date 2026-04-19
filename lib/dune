@@ -254,8 +254,6 @@
    goal_orchestrator
    goal_scheduler
    convergence
-   swarm
-   swarm_goal_loop
    coord
    run_eio
    team_context
@@ -269,7 +267,6 @@
    streamable_http
    subsystem_health
    subscriptions
-   swarm_checkpoint
    telemetry_eio
    telemetry_unified
    tempo
@@ -746,7 +743,6 @@
    cohttp-eio
    agent_sdk
    agent_sdk.llm_provider
-   agent_sdk.swarm
    masc_mcp.oas_compat
 
    uri

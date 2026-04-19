@@ -48,13 +48,6 @@ module Orchestrator : sig
   val enabled : bool
 end
 
-module TeamSession : sig
-  val router_judge_enabled : unit -> bool
-  val router_judge_timeout_sec : unit -> int
-  val router_judge_confidence_threshold : unit -> float
-  val router_judge_model_opt : unit -> string option
-end
-
 module Spawn : sig
   val timeout_seconds : int
   val coding_timeout_seconds : int
@@ -65,7 +58,7 @@ module Local_runtime : sig
   val server_url : string
   val default_model : string
   val max_tokens : int
-  val llama_swarm_model_opt : unit -> string option
+  val worker_model_opt : unit -> string option
   val mcp_url : unit -> string
 end
 
@@ -73,7 +66,7 @@ module Llama : sig
   val server_url : string
   val default_model : string
   val max_tokens : int
-  val llama_swarm_model_opt : unit -> string option
+  val worker_model_opt : unit -> string option
   val mcp_url : unit -> string
 end
 

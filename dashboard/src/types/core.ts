@@ -799,11 +799,6 @@ interface KeeperConfigHandoff {
   cooldown_sec: number
 }
 
-interface KeeperConfigAutoTeamSession {
-  status: KeeperFeatureStatus
-  enabled: boolean | null
-}
-
 interface KeeperConfigRuntime {
   paused: boolean
   registered: boolean
@@ -918,7 +913,6 @@ export interface KeeperConfig {
   compaction: KeeperConfigCompaction
   proactive: KeeperConfigProactive
   drift: KeeperConfigDrift
-  auto_team_session: KeeperConfigAutoTeamSession
   handoff: KeeperConfigHandoff
   hooks?: KeeperHookIntrospection
   runtime: KeeperConfigRuntime

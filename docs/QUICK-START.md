@@ -297,8 +297,7 @@ Config/init diagnosis: `docs/CONFIG-DOCTOR.md`
 ## References
 
 - `docs/COMMAND-PLANE-RUNBOOK.md` — managed-operation compatibility lane
-- `docs/BENCHMARK-RUNBOOK.md` — single-agent vs swarm recipes
+- `docs/BENCHMARK-RUNBOOK.md` — benchmark recipes
 - `docs/INTEGRATED-BENCHMARK-RUNBOOK.md` — control/search/local64 wrapper
 - `docs/SUPERVISOR-MODE.md` — supervised execution path
-- `docs/SWARM-DELIVERY-RUNBOOK.md` — implementation delivery path
 - `README.md` — canonical public overview

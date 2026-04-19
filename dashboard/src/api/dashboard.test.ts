@@ -235,10 +235,6 @@ describe('fetchKeeperConfig', () => {
         count_total: '2',
         last_reason: 'board quiet',
       },
-      auto_team_session: {
-        status: 'source_only',
-        enabled: null,
-      },
       handoff: {
         auto: 'true',
         threshold: '0.85',

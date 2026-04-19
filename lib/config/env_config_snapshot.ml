@@ -92,8 +92,6 @@ let runtime_entries =
     entry ~default:"(none)" "MASC_AUTO_RESPOND" "Auto-respond mode";
     entry ~default:"(none)" "MASC_SLOT_YIELD_ENABLED"
       "Release LLM slot during tool execution (feature flag)";
-    entry ~default:"(none)" "MASC_TEAM_SESSION_ROUTER_JUDGE"
-      "Team session routing judge for dispatch (feature flag)";
     entry ~default:"true" "MASC_TELEMETRY_ENABLED"
       "Enable telemetry collection";
   ]
@@ -817,26 +815,10 @@ let sse_entries =
       "Per-client SSE event stream capacity (clamped 8-1024)";
   ]
 
-let swarm_entries =
-  [
-    entry ~default:"(none)" "MASC_SWARM_MOVING_WINDOW_SEC"
-      "Moving window for swarm activity detection (seconds, floor 30)";
-  ]
-
 let task_entries =
   [
     entry ~default:"3600.0" "MASC_CLAIM_TTL_SECONDS"
       "Maximum time a task stays claimed without heartbeat before auto-release (seconds)";
-  ]
-
-let team_session_entries =
-  [
-    entry ~default:"0.72" "MASC_TEAM_SESSION_ROUTER_CONFIDENCE_THRESHOLD"
-      "Router judge confidence threshold (clamped 0-1)";
-    entry ~default:"(none)" "MASC_TEAM_SESSION_ROUTER_JUDGE_MODEL"
-      "Router judge model override; None when unset";
-    entry ~default:"15" "MASC_TEAM_SESSION_ROUTER_JUDGE_TIMEOUT_SEC"
-      "Team session router judge timeout (clamped >=5 seconds)";
   ]
 
 let telemetry_entries =
@@ -956,7 +938,7 @@ let all_categories () =
     category "runtime"
       (runtime_entries @ cli_entries @ relay_entries @ task_entries
        @ message_gc_entries @ pulse_entries @ internal_timer_entries
-       @ timeout_entries @ sse_entries @ swarm_entries @ telemetry_entries
+       @ timeout_entries @ sse_entries @ telemetry_entries
        @ circuit_breaker_entries @ tool_entries);
     category "rate_limiting" rate_limiting_entries;
     category "inference"
@@ -985,7 +967,7 @@ let all_categories () =
        @ procedural_memory_entries);
     category "worker" (worker_entries @ worker_runtime_entries);
     category "web_search" web_search_entries;
-    category "session" (session_entries @ team_session_entries @ tempo_entries);
+    category "session" (session_entries @ tempo_entries);
   ]
 
 let valid_config_category_strings =

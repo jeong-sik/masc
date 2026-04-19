@@ -91,7 +91,7 @@ let test_worker_runtime_config_prefers_env_override () =
   write_file
     (Filename.concat config_dir "worker-runtime.json")
     {|{
-  "team_session_spawn": {
+  "worker_spawn": {
     "backend": "docker",
     "docker_scopes": ["limited_code_change", "autonomous"],
     "docker": {
@@ -157,7 +157,7 @@ let test_worker_runtime_invalid_config_fails_closed () =
   let config_dir = make_config_root root in
   write_file
     (Filename.concat config_dir "worker-runtime.json")
-    {|{ "team_session_spawn": { "backend": "docker", |};
+    {|{ "worker_spawn": { "backend": "docker", |};
   with_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
   with_env "MASC_WORKER_RUNTIME_BACKEND" None @@ fun () ->
   Lib.Config_dir_resolver.reset ();

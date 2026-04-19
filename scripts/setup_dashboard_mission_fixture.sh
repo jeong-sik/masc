@@ -131,7 +131,7 @@ async function seedRoom() {
   });
 }
 
-function seedTeamSession() {
+function seedExecutionSession() {
   const now = Date.now();
   const startedAt = Math.floor(now / 1000) - 45;
   const startedIso = new Date(startedAt * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -139,7 +139,7 @@ function seedTeamSession() {
   const sessionDir = path.join(basePath, '.masc', 'team-sessions', sessionId);
   const session = {
     session_id: sessionId,
-    goal: 'Validate local64 swarm role coverage, runtime visibility, and operator census',
+    goal: 'Validate local64 worker coverage, runtime visibility, and operator census',
     created_by: 'mission-fixture-root',
     room_id: roomId,
     status: 'interrupted',
@@ -151,7 +151,7 @@ function seedTeamSession() {
     control_profile: 'hierarchical_quality_v1',
     orchestration_mode: 'assist',
     communication_mode: 'hybrid',
-    model_cascade: ['qwen3.5-35b-a3b-ud-q8-xl', 'qwen27-balanced', 'qwen9-swarm'],
+    model_cascade: ['qwen3.5-35b-a3b-ud-q8-xl', 'qwen27-balanced', 'qwen9-worker'],
     fallback_policy: 'cascade_then_task',
     instruction_profile: 'strict',
     alert_channel: 'both',
@@ -204,7 +204,7 @@ function seedTeamSession() {
         spawn_agent: 'llama',
         runtime_actor: 'llama-local-gamma',
         spawn_role: 'executor',
-        spawn_model: 'qwen9-swarm',
+        spawn_model: 'qwen9-worker',
         worker_class: 'executor',
         parent_actor: 'team-session-local64-smoke',
         capsule_mode: 'fresh',
@@ -325,13 +325,13 @@ function seedPendingConfirm() {
       confirm_token: 'confirm-mission-fixture-001',
       trace_id: 'ops_fixture_mission',
       actor: 'dashboard-fixture',
-      action_type: 'team_stop',
-      target_type: 'team_session',
-      target_id: sessionId,
+      action_type: 'namespace_pause',
+      target_type: 'root',
+      target_id: null,
       payload: {
         reason: 'Fixture pending confirmation for mission dashboard',
       },
-      delegated_tool: 'masc_team_session_stop',
+      delegated_tool: 'masc_pause',
       created_at: nowIso(),
       expires_at: null,
     },
@@ -340,7 +340,7 @@ function seedPendingConfirm() {
 
 (async () => {
   await seedRoom();
-  seedTeamSession();
+  seedExecutionSession();
   seedPendingConfirm();
   console.log(JSON.stringify({
     ok: true,

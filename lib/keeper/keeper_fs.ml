@@ -24,18 +24,26 @@ let ensure_dir (path : string) : string =
   let deferred_exn = ref None in
   Eio_guard.with_mutex dir_mu (fun () ->
     if not (Hashtbl.mem ensured_dirs path) || not (Fs_compat.file_exists path) then begin
-      match Fs_compat.mkdir_p path with
-      | () -> Hashtbl.replace ensured_dirs path ()
-      | exception (Eio.Cancel.Cancelled _ as exn) ->
-          Log.Keeper.warn "keeper_fs: ensure_dir cancelled path=%s" path;
-          deferred_exn := Some exn
-      | exception exn ->
-          Log.Keeper.warn "keeper_fs: ensure_dir failed path=%s: %s"
-            path (Printexc.to_string exn);
-          deferred_exn := Some exn
+      match
+        try
+          Fs_compat.mkdir_p path;
+          Hashtbl.replace ensured_dirs path ();
+          Ok ()
+        with
+        | Eio.Cancel.Cancelled _ as exn ->
+            Log.Keeper.warn "keeper_fs: ensure_dir cancelled path=%s" path;
+            Error (exn, Printexc.get_raw_backtrace ())
+        | exn ->
+            Log.Keeper.warn "keeper_fs: ensure_dir failed path=%s: %s"
+              path (Printexc.to_string exn);
+            Error (exn, Printexc.get_raw_backtrace ())
+      with
+      | Ok () -> ()
+      | Error err -> deferred_exn := Some err
     end);
-  (match !deferred_exn with Some exn -> raise exn | None -> ());
-  path
+  match !deferred_exn with
+  | Some (exn, bt) -> Printexc.raise_with_backtrace exn bt
+  | None -> path
 
 let invalidate_dir (path : string) : unit =
   Eio_guard.with_mutex dir_mu (fun () ->

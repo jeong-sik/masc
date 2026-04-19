@@ -69,7 +69,6 @@ function normalizeGovernanceContextRef(raw: unknown): GovernanceContextRef {
     board_post_id: asNullableString(raw.board_post_id),
     task_id: asNullableString(raw.task_id),
     operation_id: asNullableString(raw.operation_id),
-    team_session_id: asNullableString(raw.team_session_id),
   }
 }
 
@@ -171,7 +170,7 @@ export function normalizeGovernanceDecisionItem(raw: unknown): GovernanceDecisio
     linked_board_post_id: asNullableString(raw.linked_board_post_id) ?? context.board_post_id ?? null,
     linked_task_id: asNullableString(raw.linked_task_id) ?? context.task_id ?? null,
     linked_operation_id: asNullableString(raw.linked_operation_id) ?? context.operation_id ?? null,
-    linked_session_id: asNullableString(raw.linked_session_id) ?? context.team_session_id ?? null,
+    linked_session_id: asNullableString(raw.linked_session_id) ?? null,
     recommended_action: normalizeGovernanceResolvedAction(raw.recommended_action),
     executed_route: normalizeGovernanceExecutedRoute(raw.executed_route),
     guardrail_state: normalizeGovernanceGuardrailState(raw.guardrail_state),

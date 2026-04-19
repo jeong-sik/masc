@@ -4,7 +4,6 @@ export interface GovernanceContextRef {
   board_post_id?: string | null
   task_id?: string | null
   operation_id?: string | null
-  team_session_id?: string | null
 }
 
 export interface GovernanceResolvedAction {

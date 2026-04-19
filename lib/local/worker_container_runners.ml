@@ -2,7 +2,7 @@
 
 include Worker_container
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let resolve_net ?net () =
   match net with

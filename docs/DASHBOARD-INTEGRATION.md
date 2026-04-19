@@ -51,6 +51,12 @@ Experimental features such as TRPG live under `lab`.
 - `GET /api/v1/dashboard/execution`
   - `summary`, `execution_queue`, `operation_briefs`, `worker_support_briefs`, `continuity_briefs`, `offline_worker_briefs`
   - compatibility payloads remain: `agents`, `tasks`, `messages`, `keepers`
+  - keeper compatibility payloads may include `trust_observatory.accountability`
+    as an operator-only risk summary
+  - treat `routing_hint` there as soft guidance, not a hard routing gate or
+    public ranking signal
+  - semantics and triage rules live in
+    [KEEPER-ACCOUNTABILITY-RUNBOOK.md](./KEEPER-ACCOUNTABILITY-RUNBOOK.md)
   - test fixture mode: `?fixture=execution_smoke` or `MASC_DASHBOARD_FIXTURE=execution_smoke`
 - `GET /api/v1/dashboard/board`
   - `posts` plus memory-feed summary

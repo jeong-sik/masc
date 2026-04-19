@@ -45,6 +45,15 @@
 
 ### Changed
 
+- **OAS pin bump → `main@54f4aeab` (v0.162.0 + Gemini policy fix).**
+  Carries upstream OAS `#1048 fix(gemini_cli): use sentinel name to
+  disable MCP, avoiding empty-string policy crash`. Gemini CLI 0.38
+  introduced a Policy Engine that rejects empty `--allowed-mcp-server-names`
+  entries, which crashed every keeper turn that set
+  `OAS_GEMINI_NO_MCP=1` (i.e. all 4 built-in keepers — scholar / analyst
+  / executor / verifier — and any cascade vendoring Gemini). OAS now
+  passes the sentinel name `__oas_no_mcp__`. Dependency floor and
+  declared base version remain `0.162.0`.
 - **OAS pin bump → `v0.162.0`.** Raises the `agent_sdk` dependency floor
   from `0.161.0` to `0.162.0` and pins OAS `main@3b0409d2`, pulling in
   the provider-registry context-window fix (#1040) plus the 0.162.0

@@ -3,7 +3,53 @@
 
 ## Unreleased
 
+## [0.11.0] - 2026-04-20
+
 ### Added
+
+- **Tool-failure root-cause sweep (#8688, RFC #8760).** Server-authored
+  hints now have Good/Bad examples for the top rejection classes and
+  the keeper persona prompt documents how to consume them. Observability
+  script `scripts/sweep-tool-error-signatures.sh` (#8767) buckets daily
+  `tool_calls/*.jsonl` failures by normalized signature so the impact
+  of prompt changes is measurable. Shipped:
+  - `keeper_exec_shell` — raise gh op timeout floor 5s → 15s (#8712),
+    hint on gh `Could not resolve to a Repository` from playground cwd
+    (#8734), Good:/Bad: examples for 5 readonly-shell categories
+    (#8704).
+  - `keeper.capabilities` — tool error grammar (envelope / hint field /
+    same-turn retry / judgment escalation) replaces the weak
+    "do not retry" one-liner (#8775 / RFC R1).
+  - `worker_dev_tools` — Chain_or_redirect and Injection hints name
+    the `cwd=` argument explicitly so `cd X && Y` stops being the
+    default suggestion (#8783).
+  - `keeper_alerting_path` — `path_not_in_allowed_paths` suggests the
+    concrete playground prefix when the raw path starts with `repos/`
+    or `mind/` (#8789).
+  - `tool_task` — completion-rejection message embeds a concrete
+    accepted-notes example (#8708).
+  - `anti_rationalization` — empty evaluator response routes to
+    liveness approval instead of hard rejection (#8722).
+- **Runtime event listener (pilot).** `feat(runtime_events)` (#8792)
+  installs an OCaml `Runtime_events` listener and reserves event handles
+  for MASC turn / tool-call observability (Wave 2A pilot).
+- **Streamable HTTP atomic race fix (pilot).** `session.last_seen`
+  marked `[@atomic]` to remove an unlocked race in the streamable HTTP
+  transport (#8790, Wave 2 pilot).
+- **CDAL attribution on verification legs.** Approve/reject verification
+  transitions now record attribution so the post-hoc CDAL timeline
+  includes who verified (#8731).
+- **Verifier role gating for `task_verify`.** Affordance is now gated
+  to verifier-role keepers (#8715). Default keeper set excludes the
+  verification approvers from ordinary work claim queues.
+- **Multi-assignment current binding semantics.** Task assignments can
+  now express the current active binding vs historical ones; surfaced
+  in `masc_check` and downstream accountability paths (#8776).
+- **Keeper msg observability.** Usage / cost / cache-token counters and
+  the raw model id are surfaced on `keeper_msg` MCP responses so clients
+  and dashboards can attribute cost per keeper turn (#8717).
+
+### Changed
 
 - **Doctor phase 1 — 시스템 전반 진단.** MASC 전체(서버 + 5 sidecar)를
   동일한 `Check/Severity/AutoFix` 모델로 진단하는 Doctor 축을 CLI · HTTP ·

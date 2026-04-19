@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean clean-tlc-artifacts coverage coverage-summary coverage-html coverage-percent doc install-deps pin-external-deps sync-oas-pin-docs doctor-oas-pin doctor-oas-drift doctor-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard dashboard-drift-check dashboard-drift-regen dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-run-local-fresh-boot harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak bonsai-dashboard dev-bonsai-dashboard clean-bonsai-dashboard
+.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean clean-tlc-artifacts coverage coverage-summary coverage-html coverage-percent doc install-deps pin-external-deps sync-oas-pin-docs doctor-oas-pin doctor-oas-drift doctor-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard dashboard-drift-check dashboard-drift-regen dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-run-local-fresh-boot harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak bonsai-dashboard bonsai-dashboard-if-available dev-bonsai-dashboard clean-bonsai-dashboard
 
 # Default target — OCaml + dashboard
 all: build-all
@@ -21,21 +21,42 @@ dev-dashboard:
 
 # Build dashboard Bonsai island (js_of_ocaml, OxCaml switch `bonsai-dashboard`).
 # See planning/claude-plans/masc-mcp-eventual-parrot.md.
+# --root . pins dune to dashboard_bonsai/dune-project — otherwise dune walks
+# up the directory tree (out of the worktree, into the real repo root) and
+# misresolves the project. Must pair with OPAMSWITCH= so the env loads.
 bonsai-dashboard:
-	cd dashboard_bonsai && eval $$(opam env --switch=bonsai-dashboard) && dune build
+	cd dashboard_bonsai && OPAMSWITCH=bonsai-dashboard opam exec -- dune build --root .
 	mkdir -p assets/dashboard_bonsai
+	rm -f assets/dashboard_bonsai/main.bc.js
 	cp dashboard_bonsai/_build/default/bin/main.bc.js assets/dashboard_bonsai/main.bc.js
+
+# Build Bonsai only if the OxCaml switch exists. Used by `build-all` so a
+# single `make` run builds both main masc-mcp and the Bonsai island when
+# the dev setup includes the extra switch, but does not block CI / first-
+# time contributors who have not bootstrapped it.
+bonsai-dashboard-if-available:
+	@if opam switch list --short 2>/dev/null | grep -qx bonsai-dashboard; then \
+	  echo "==> bonsai-dashboard switch detected, building Bonsai island..."; \
+	  $(MAKE) bonsai-dashboard; \
+	else \
+	  echo "==> bonsai-dashboard switch not found — skipping Bonsai island."; \
+	  echo "    Run \`opam switch create bonsai-dashboard ocaml-variants.5.2.0+ox\`"; \
+	  echo "    (see docs/bonsai-migration/phase-0-report.md) to enable."; \
+	fi
 
 # Watch mode for the Bonsai island. Does not copy the artifact — pair with
 # a separate tail of main.bc.js or re-run `make bonsai-dashboard` on save.
 dev-bonsai-dashboard:
-	cd dashboard_bonsai && eval $$(opam env --switch=bonsai-dashboard) && dune build --watch
+	cd dashboard_bonsai && OPAMSWITCH=bonsai-dashboard opam exec -- dune build --root . --watch
 
 clean-bonsai-dashboard:
 	rm -rf dashboard_bonsai/_build assets/dashboard_bonsai
 
-# Build everything (alias for build)
-build-all: build
+# Build everything: main masc-mcp + Preact dashboard + Bonsai (if available).
+# Note: `dune build` at the repo root only compiles the main OCaml — the
+# Bonsai island lives on a separate OxCaml switch and cannot be driven
+# from the same dune invocation. Use `make` for the full build.
+build-all: build bonsai-dashboard-if-available
 
 # Run tests (alias for test-unit)
 test: test-unit

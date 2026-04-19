@@ -410,6 +410,7 @@ let inspect_state ctx =
 
 let state_to_json st =
   `Assoc [
+    ("project_ready", `Bool st.room_set);
     ("namespace_ready", `Bool st.room_set);
     ("room_set", `Bool st.room_set);
     ("joined", `Bool st.joined);
@@ -441,7 +442,7 @@ let handle_workflow_guide ctx _args =
 
 let check_assertion st assertion =
   let (passed, fix_hint) = match assertion with
-    | "namespace_ready" | "room_set" ->
+    | "project_ready" | "namespace_ready" | "room_set" ->
         (st.room_set,
          "Call masc_start with your project root path.")
     | "joined" ->
@@ -467,7 +468,7 @@ let check_assertion st assertion =
 
 let handle_check ctx args =
   let st = inspect_state ctx in
-  let default_assertions = [ "room_set"; "joined"; "task_claimed"; "current_task_set" ] in
+  let default_assertions = [ "project_ready"; "joined"; "task_claimed"; "current_task_set" ] in
   let assertions =
     match Yojson.Safe.Util.member "assertions" args with
     | `List items ->

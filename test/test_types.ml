@@ -833,6 +833,37 @@ let () =
           Masc_mcp.Keeper_status_detail.valid_tail_order_strings
           Masc_mcp.Keeper_schema.tail_order_enum_strings);
     ];
+    "compact_retry_exhausted_ssot", [
+      (* Issue #8581: the [compact_retry_exhausted] field was read by
+         derive_phase to promote (context_overflow + latch) to Paused
+         but never set in OCaml — the right disjunct of the Paused
+         branch was dead code. The fix introduces a first-class event
+         [Compact_retry_exhausted] that latches the field, dispatched by
+         [pause_keeper_for_overflow] before [Operator_pause]. These
+         tests pin the new event surface and the latch transition. *)
+      Alcotest.test_case "event_to_string emits stable wire string" `Quick (fun () ->
+        let open Masc_mcp.Keeper_state_machine in
+        Alcotest.(check string) "Compact_retry_exhausted wire form"
+          "compact_retry_exhausted"
+          (event_to_string Compact_retry_exhausted));
+      Alcotest.test_case "update_conditions latches the flag" `Quick (fun () ->
+        let open Masc_mcp.Keeper_state_machine in
+        let c0 = default_conditions in
+        Alcotest.(check bool) "init: flag false" false
+          c0.compact_retry_exhausted;
+        let c1 = update_conditions c0 Compact_retry_exhausted in
+        Alcotest.(check bool) "after event: flag true" true
+          c1.compact_retry_exhausted);
+      Alcotest.test_case "Operator_compact_requested clears the latch" `Quick (fun () ->
+        let open Masc_mcp.Keeper_state_machine in
+        let c =
+          update_conditions default_conditions Compact_retry_exhausted
+        in
+        Alcotest.(check bool) "latched" true c.compact_retry_exhausted;
+        let c' = update_conditions c Operator_compact_requested in
+        Alcotest.(check bool) "cleared by operator compact" false
+          c'.compact_retry_exhausted);
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

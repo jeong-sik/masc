@@ -186,6 +186,15 @@ type event =
     (** Emitted as part of [Overflowed] entry actions to mark the
         start of auto-recovery. Sets [compaction_active] so the next
         [derive_phase] returns [Compacting]. *)
+  | Compact_retry_exhausted
+    (** Issue #8581: latches [compact_retry_exhausted]. Mirrors the
+        TLA+ [CompactRetryExhausted] action. Dispatchers fire this
+        before [Operator_pause] so the Paused phase carries the real
+        reason ("auto-compact retry budget exhausted") for operator
+        observability. Before this event existed, the
+        [compact_retry_exhausted] field was read by [derive_phase]
+        but never set in OCaml — the right disjunct of the Paused
+        promotion was dead code. *)
   | Operator_compact_requested
     (** Operator invoked [masc_keeper_compact] MCP tool. Behaves like
         [Auto_compact_triggered] but also clears [compact_retry_exhausted]

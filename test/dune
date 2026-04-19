@@ -97,6 +97,7 @@
         ; test_contract_composer removed (team session cleanup)
         test_cdal_conformance
         test_task_stage
+        test_ocaml_north_star_task_lifecycle
         ; test_risk_digest removed (team session cleanup)
         test_artifact_store
         test_tool_blob_store
@@ -204,6 +205,7 @@
           ; test_contract_composer removed (team session cleanup)
           test_cdal_conformance
           test_task_stage
+          test_ocaml_north_star_task_lifecycle
           ; test_risk_digest removed (team session cleanup)
           test_artifact_store
           test_tool_blob_store

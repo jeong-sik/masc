@@ -259,6 +259,10 @@ let test_to_json_masks_sensitive_values_and_tracks_sources () =
       let entry = find_config_entry json "MASC_ADMIN_TOKEN" in
       let open Yojson.Safe.Util in
       check string "source is env" "env" (entry |> member "source" |> to_string);
+      check string "source detail names env" "environment variable MASC_ADMIN_TOKEN"
+        (entry |> member "source_detail" |> to_string);
+      check string "provenance kind is env" "env"
+        (entry |> member "provenance" |> member "kind" |> to_string);
       check bool "marked sensitive" true (entry |> member "sensitive" |> to_bool);
       check string "masked token" "supe***"
         (entry |> member "value" |> to_string))
@@ -271,6 +275,22 @@ let test_to_json_treats_blank_env_as_default () =
       check string "blank source is default" "default"
         (entry |> member "source" |> to_string);
       check bool "blank value omitted" true (entry |> member "value" = `Null))
+
+let test_to_json_exposes_derived_and_runtime_provenance () =
+  with_env "MASC_HTTP_BASE_URL" "   " (fun () ->
+      with_env Env_config.base_path_env_key "   " (fun () ->
+          let json = Env_config.to_json () in
+          let base_url = find_config_entry json "MASC_HTTP_BASE_URL" in
+          let base_path = find_config_entry json Env_config.base_path_env_key in
+          let open Yojson.Safe.Util in
+          check string "derived source" "derived"
+            (base_url |> member "source" |> to_string);
+          check string "derived provenance kind" "derived"
+            (base_url |> member "provenance" |> member "kind" |> to_string);
+          check string "runtime source" "runtime"
+            (base_path |> member "source" |> to_string);
+          check string "runtime provenance kind" "runtime"
+            (base_path |> member "provenance" |> member "kind" |> to_string)))
 
 (* ============================================================
    print_summary Tests
@@ -555,6 +575,8 @@ let () =
         test_to_json_masks_sensitive_values_and_tracks_sources;
       test_case "to_json treats blank env as default" `Quick
         test_to_json_treats_blank_env_as_default;
+      test_case "to_json exposes derived and runtime provenance" `Quick
+        test_to_json_exposes_derived_and_runtime_provenance;
     ];
     "print_summary", [
       test_case "no error" `Quick test_print_summary_no_error;

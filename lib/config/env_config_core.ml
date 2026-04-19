@@ -183,13 +183,18 @@ let cluster_name () =
   | Some name -> name
   | None -> "default"
 
+(** SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352).
+    Defined here (above [masc_http_base_url]) so the constant is in scope
+    before first use. *)
+let http_base_url_env_key = "MASC_HTTP_BASE_URL"
+
 let rec masc_http_base_url () =
   match masc_http_base_url_result () with
   | Ok base -> base
   | Error msg -> raise (Config_error msg)
 
 and masc_http_base_url_result () =
-  match raw_value_opt "MASC_HTTP_BASE_URL" |> trim_opt with
+  match raw_value_opt http_base_url_env_key |> trim_opt with
   | Some base -> Ok (strip_trailing_slashes base)
   | None ->
       let host =
@@ -223,6 +228,8 @@ let get_port ~default name =
     reference the same literal. Issue 8352. *)
 let base_path_env_key = "MASC_BASE_PATH"
 let base_path_input_env_key = "MASC_BASE_PATH_INPUT"
+(* http_base_url_env_key is defined above (before masc_http_base_url) so the
+   SSOT constant is in scope at first use. *)
 
 (** Project base path for .masc data directory.
     Used by board, checkpoint, thompson_sampling, voice, keeper.

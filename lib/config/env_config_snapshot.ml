@@ -59,7 +59,7 @@ let server_entries =
   [
     entry ~default:Masc_network_defaults.masc_http_default_port_s "MASC_HTTP_PORT" "HTTP server port";
     entry ~default:Env_config_core.default_host "MASC_HOST" "Server bind host";
-    entry ~default:"(derived)" "MASC_HTTP_BASE_URL" "Public HTTP base URL";
+    entry ~default:"(derived)" Env_config_core.http_base_url_env_key "Public HTTP base URL";
     entry ~default:"" "MASC_CLUSTER_NAME" "Cluster name for multi-instance";
     entry ~default:"(cwd)" Env_config_core.base_path_env_key "Base storage directory";
     entry ~default:"(none)" "MASC_BUILD_GIT_COMMIT" "Build git commit hash";

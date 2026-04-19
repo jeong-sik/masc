@@ -131,16 +131,30 @@ let can_review_completion ~(task_opt : Types.task option) ~(agent_name : string)
        | _ -> false)
   | None -> false
 
+(* Concrete example handed to the keeper when the anti-rationalization
+   gate rejects a completion. Prior form said only "describe actual
+   work"; small-LLM keepers retried the same perfunctory notes
+   (37 Tool_task completion rejects observed on 2026-04-17/18 in
+   ~/me/.masc/tool_calls). The example shows the expected density:
+   what changed, which files, what verification ran. See #8688. *)
+let completion_notes_example =
+  "Example of accepted notes: 'Added Event_kind.Board variant to \
+   lib/coord/event_kind.{ml,mli}, migrated 8 call-sites in \
+   coord_task.ml and activity_graph.ml, test_event_kind round-trip \
+   green, CI green on PR #NNNN.'"
+
 let completion_rejection_message ?(allow_force = false) reason =
   if allow_force then
     Printf.sprintf
       "Completion rejected by anti-rationalization gate: %s\n\
        Revise your completion notes to describe actual work, then retry.\n\
-       Use force=true to override (operator only)." reason
+       %s\n\
+       Use force=true to override (operator only)." reason completion_notes_example
   else
     Printf.sprintf
       "Completion rejected by anti-rationalization gate: %s\n\
-       Revise your completion notes to describe actual work, then retry." reason
+       Revise your completion notes to describe actual work, then retry.\n\
+       %s" reason completion_notes_example
 
 let parse_task_contract args =
   match args |> member "contract" with

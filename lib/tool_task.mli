@@ -26,6 +26,17 @@ val dispatch : context -> name:string -> args:Yojson.Safe.t -> tool_result optio
 
 val schemas : Types.tool_schema list
 
+val completion_notes_example : string
+(** Concrete example of accepted completion notes. Referenced in the
+    rejection message so the keeper sees the expected density, not
+    just "describe actual work". See #8688. *)
+
+val completion_rejection_message : ?allow_force:bool -> string -> string
+(** Build the wire-level message returned when the anti-rationalization
+    gate rejects a completion. Always embeds
+    [completion_notes_example]. Exposed for regression tests that lock
+    in the example substring. *)
+
 (** [is_cross_model_verdict result] is [true] iff [result] has both
     [generator_cascade = Some g] and [evaluator_cascade] non-empty,
     and [g <> evaluator_cascade].

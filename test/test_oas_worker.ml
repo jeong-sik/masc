@@ -1368,6 +1368,7 @@ let test_keeper_checkpoint_store_oas_missing_returns_none () =
               | Parse_error d -> "parse:" ^ d
               | Store_error d -> "store:" ^ d
               | Io_error d -> "io:" ^ d
+              | Sdk_other_error d -> "sdk_other:" ^ d
               | Not_found -> "not_found"))))
 
 let test_keeper_checkpoint_store_writes_oas_history () =

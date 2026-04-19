@@ -984,6 +984,12 @@ function ConnectorLivePanel({
       ${showSidecarOffEmpty
         ? (() => {
             const cmds = sidecarCommands(connectorId)
+            const copyLabels = {
+              start: `Copy ${connectorName} sidecar start command`,
+              tail: `Copy ${connectorName} sidecar tail logs command`,
+              status: `Copy ${connectorName} sidecar status command`,
+              stop: `Copy ${connectorName} sidecar stop command`,
+            }
             // Informational amber tone (Railway / Vercel idle-service
             // convention): "needs action, not broken". Earlier this
             // panel inherited the connector accent gradient (iMessage =
@@ -1023,16 +1029,36 @@ function ConnectorLivePanel({
                   Click <strong>Start</strong> to spawn via the backend, or copy the command below to run it from a terminal.
                 </div>
                 <div class="mt-2 grid grid-cols-1 gap-1.5">
-                  <${CopyableCode} label="start" command=${cmds.start} variant="primary" />
+                  <${CopyableCode}
+                    label="start"
+                    command=${cmds.start}
+                    ariaLabel=${copyLabels.start}
+                    variant="primary"
+                  />
                 </div>
                 <div class="mt-2">
                   <div class="mb-1 text-3xs uppercase tracking-4 text-[var(--text-dim)]">
                     Or for diagnostics
                   </div>
                   <div class="grid grid-cols-1 gap-1.5" data-sidecar-secondary-cmds>
-                    <${CopyableCode} label="tail logs" command=${cmds.tail} variant="secondary" />
-                    <${CopyableCode} label="status" command=${cmds.status} variant="secondary" />
-                    <${CopyableCode} label="stop" command=${cmds.stop} variant="secondary" />
+                    <${CopyableCode}
+                      label="tail logs"
+                      command=${cmds.tail}
+                      ariaLabel=${copyLabels.tail}
+                      variant="secondary"
+                    />
+                    <${CopyableCode}
+                      label="status"
+                      command=${cmds.status}
+                      ariaLabel=${copyLabels.status}
+                      variant="secondary"
+                    />
+                    <${CopyableCode}
+                      label="stop"
+                      command=${cmds.stop}
+                      ariaLabel=${copyLabels.stop}
+                      variant="secondary"
+                    />
                   </div>
                 </div>
                 <${SetupGuideCard} connectorId=${connectorId} />

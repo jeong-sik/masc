@@ -3711,5 +3711,67 @@ let () =
               check bool "empty mention_targets" false
                 (UT.is_verifier_role_keeper
                    { minimal_meta with mention_targets = [] }));
+          test_case "affordance: verifier sees task_verify when pending>0"
+            `Quick (fun () ->
+              let meta =
+                { minimal_meta with mention_targets = [ "verifier" ] }
+              in
+              let obs =
+                { base_observation with pending_verification_count = 3 }
+              in
+              let affordances =
+                UT.observed_affordances_of_observation ~meta obs
+              in
+              check bool "task_verify present for verifier" true
+                (List.mem "task_verify" affordances));
+          test_case "affordance: non-verifier gated off task_verify" `Quick
+            (fun () ->
+              let meta =
+                { minimal_meta with mention_targets = [ "analyst" ] }
+              in
+              let obs =
+                { base_observation with pending_verification_count = 3 }
+              in
+              let affordances =
+                UT.observed_affordances_of_observation ~meta obs
+              in
+              check bool "task_verify absent for non-verifier" false
+                (List.mem "task_verify" affordances));
+          test_case "affordance: no meta keeps legacy surface-to-all" `Quick
+            (fun () ->
+              let obs =
+                { base_observation with pending_verification_count = 2 }
+              in
+              let affordances =
+                UT.observed_affordances_of_observation obs
+              in
+              check bool "task_verify present without meta" true
+                (List.mem "task_verify" affordances));
+          test_case "trigger: non-verifier gated off pending_verification"
+            `Quick (fun () ->
+              let meta =
+                { minimal_meta with mention_targets = [ "scholar" ] }
+              in
+              let obs =
+                { base_observation with pending_verification_count = 5 }
+              in
+              let triggers =
+                UT.observed_triggers_of_observation ~meta obs
+              in
+              check bool "pending_verification absent for non-verifier" false
+                (List.mem "pending_verification" triggers));
+          test_case "trigger: verifier sees pending_verification" `Quick
+            (fun () ->
+              let meta =
+                { minimal_meta with mention_targets = [ "검증자" ] }
+              in
+              let obs =
+                { base_observation with pending_verification_count = 1 }
+              in
+              let triggers =
+                UT.observed_triggers_of_observation ~meta obs
+              in
+              check bool "pending_verification present for verifier" true
+                (List.mem "pending_verification" triggers));
         ] );
     ]

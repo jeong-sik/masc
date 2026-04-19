@@ -1,6 +1,49 @@
 # Changelog
 
 
+## Unreleased
+
+### Added
+
+- **Doctor phase 1 — 시스템 전반 진단.** MASC 전체(서버 + 5 sidecar)를
+  동일한 `Check/Severity/AutoFix` 모델로 진단하는 Doctor 축을 CLI · HTTP ·
+  Dashboard 3계층으로 일괄 구축. `flutter doctor` / `brew doctor` 외형 참고.
+  - **CLI** — `masc-mcp doctor [config|sidecar <name>|all] [--json]`
+    (`bin/main_eio.ml` 의 `Cmd.group` 으로 backward-compat 유지, 무인자 호출
+    은 기존 `config` 와 동일).
+  - **Fan-out** — `doctor all` 은 config + `discord|slack|telegram|imessage|cli`
+    sidecar 를 순차 실행하고 Korean aggregate summary (`정상/경고/오류`) +
+    per-doctor breakdown 을 출력. `--json` 은 envelope 형태
+    (`{title, doctors[{name, kind, exit_code, payload}], summary, exit_code}`)
+    로 CI · 대시보드 contract 제공. `Doctor_dispatch.aggregate_exit_code` 는
+    `error > warn > ok` 우선순위와 unknown rc → error 상향을 보장.
+  - **HTTP endpoint** — `GET /api/v1/dashboard/doctor` (phase 1: self-subprocess
+    forward, `with_public_read` 권한). 실패 시 5xx + `{error, hint}` 로 운영자
+    원인 안내.
+  - **Dashboard UI** — Lab 탭 → inspector → **Doctor** sub-tab. `<DoctorPanel />`
+    이 envelope 을 poll 해 summary header + 3-column grid 로 렌더. 카드 클릭
+    시 drill-down 으로 sidecar `checks[]` 또는 config `warnings[]` 표시, 자동
+    치유 가능한 check 에는 accent 배지 (실제 `--fix` 실행은 CLI 유지).
+  - **Observability** — `doctor --fix` 가 `FixOutcome` 리스트를 캡처해
+    "자가 치유 실행:" 블록으로 실패 격리(try/except)와 결과 렌더. 세 상태
+    (fix 성공·환경 미해결 / fix 예외 / fix 미정의) 를 구분 가능.
+  - **출력 polish** — sidecar `render_pretty` 제목을 markdown `#` 대신
+    underline 스타일로 전환해 `doctor all` divider 와 시각적 일관성 확보.
+
+  관련 PR (모두 2026-04-19 merge):
+  - Framework (이전 배포): #8375 / #8406 / #8410 / #8432 / #8442 / #8452 / #8457 / #8468
+  - Observability: #8478 (FixOutcome)
+  - CLI dispatch/fan-out: #8481 #8502 #8518
+  - Backend endpoint: #8525
+  - Dashboard UI: #8533 #8534 #8535 #8540 #8541
+  - Polish / docs: #8539 #8536
+
+  Docs: `docs/DOCTOR-ARCHITECTURE.md`, `docs/CONFIG-DOCTOR.md`.
+
+  후속 (phase 2 / 축 9): server endpoint in-process 전환(Eio.Process ~cwd),
+  `--fix` 버튼 HITL approval, 실제 callback 확장.
+
+
 ## [0.10.1] - 2026-04-19
 
 ### Changed

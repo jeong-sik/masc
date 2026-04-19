@@ -309,7 +309,7 @@ let discover config ?(endpoint : string option) ?(capability : string option) ?(
     let agents_json = List.map (fun (a : Types.agent) ->
       `Assoc [
         ("name", `String a.name);
-        ("status", `String (agent_status_to_string a.status));
+        ("status", `String (Types.agent_status_to_string a.status));
         ("capabilities", `List (List.map (fun s -> `String s) a.capabilities));
         ("current_task", match a.current_task with
           | None -> `Null
@@ -406,7 +406,7 @@ let delegate config ~agent_name ~target ~message
       ~initial_message:(Some full_message)
     in
     match portal_result with
-    | Error e -> Error (masc_error_to_string e)
+    | Error e -> Error (Types.masc_error_to_string e)
     | Ok msg ->
       let task_id = generate_uuid () in
       match task_type with

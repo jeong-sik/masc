@@ -59,7 +59,43 @@ type state = {
   mutable closed : bool;
   mutable stdout_eof : bool;
   mutable stderr_eof : bool;
+  pid_file : string option;
+      (** Full path to the persistence sidecar when
+          [~base_path] was supplied at spawn. Deleted on close/kill. *)
 }
+
+(* Tick 7: PID-file helpers. Path convention:
+     <base_path>/.masc/keeper/<keeper>/bg/<task_id>.pid
+   Contents: three lines — pid, pgid, started_at (unix seconds).
+   Written best-effort; failures are logged but do not abort spawn. *)
+
+let bg_dir_of ~base_path ~keeper =
+  Filename.concat (Filename.concat (Filename.concat base_path ".masc")
+    (Filename.concat "keeper" keeper)) "bg"
+
+let pid_file_of ~base_path ~keeper ~task_id =
+  Filename.concat (bg_dir_of ~base_path ~keeper) (task_id ^ ".pid")
+
+let rec ensure_dir path =
+  if Sys.file_exists path then ()
+  else begin
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    (try Unix.mkdir path 0o755
+     with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  end
+
+let try_write_pid_file path ~pid ~pgid ~started_at =
+  try
+    ensure_dir (Filename.dirname path);
+    let oc = open_out_gen [ Open_wronly; Open_creat; Open_trunc ] 0o644 path in
+    Printf.fprintf oc "%d\n%d\n%f\n" pid pgid started_at;
+    close_out oc
+  with _ -> ()
+
+let try_delete_pid_file = function
+  | None -> ()
+  | Some path -> (try Unix.unlink path with _ -> ())
 
 let registry : (string, state) Hashtbl.t = Hashtbl.create 16
 let registry_mu = Mutex.create ()
@@ -139,17 +175,29 @@ let poll_state st =
     if st.status <> None && st.stdout_eof && st.stderr_eof then begin
       st.closed <- true;
       (try Unix.close st.handle.stdout_fd with _ -> ());
-      (try Unix.close st.handle.stderr_fd with _ -> ())
+      (try Unix.close st.handle.stderr_fd with _ -> ());
+      try_delete_pid_file st.pid_file
     end
   end
 
-let spawn ~keeper ~argv ~cwd ~envp ~timeout_sec =
+let spawn ?base_path ~keeper ~argv ~cwd ~envp ~timeout_sec () =
   match Process_eio.spawn_detached ~argv ~env:envp ~cwd with
   | Error e -> Error (Spawn_failed e)
   | Ok handle ->
       try_set_nonblock handle.stdout_fd;
       try_set_nonblock handle.stderr_fd;
       let tid = fresh_id () in
+      let pid_file =
+        match base_path with
+        | None | Some "" -> None
+        | Some bp ->
+            let path = pid_file_of ~base_path:bp ~keeper ~task_id:tid in
+            try_write_pid_file path
+              ~pid:handle.pid
+              ~pgid:handle.pgid
+              ~started_at:handle.started_at;
+            Some path
+      in
       let st =
         {
           handle;
@@ -161,6 +209,7 @@ let spawn ~keeper ~argv ~cwd ~envp ~timeout_sec =
           closed = false;
           stdout_eof = false;
           stderr_eof = false;
+          pid_file;
         }
       in
       with_reg (fun () -> Hashtbl.replace registry tid st);
@@ -197,6 +246,11 @@ let kill tid ~signal ~grace_sec =
       (try
          Process_eio.tree_kill ~pgid:st.handle.pgid ~signal ~grace_sec;
          with_reg (fun () -> poll_state st);
+         (* Best-effort PID file cleanup: if poll_state did not
+            observe EOF yet (slow-closing FDs), at least unlink the
+            sidecar so the next reap cycle does not flag a live
+            task as orphan. *)
+         if st.closed then try_delete_pid_file st.pid_file;
          Ok ()
        with e -> Error (Kill_failed (Printexc.to_string e)))
 
@@ -206,4 +260,69 @@ let list ~keeper =
       (fun tid st acc -> if st.keeper = keeper then tid :: acc else acc)
       registry [])
 
-let reap_orphans ~base_path:_ = 0
+(* Directory walk helpers — avoid Filename.Infix / extra deps. *)
+
+let safe_readdir dir =
+  try Array.to_list (Sys.readdir dir) with _ -> []
+
+let is_dir p = try Sys.is_directory p with _ -> false
+
+let read_pid_file path =
+  try
+    let ic = open_in path in
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      let pid = int_of_string (String.trim (input_line ic)) in
+      let pgid = int_of_string (String.trim (input_line ic)) in
+      Some (pid, pgid))
+  with _ -> None
+
+let pid_is_live pid =
+  try Unix.kill pid 0; true
+  with
+  | Unix.Unix_error (Unix.ESRCH, _, _) -> false
+  (* EPERM means pid exists but we lack permission — still considered
+     live for orphan detection. *)
+  | Unix.Unix_error (Unix.EPERM, _, _) -> true
+  | _ -> false
+
+let live_task_ids () =
+  with_reg (fun () ->
+    Hashtbl.fold (fun tid _ acc -> tid :: acc) registry [])
+
+(* Scan <base_path>/.masc/keeper/*/bg/*.pid, SIGKILL any pgroup whose
+   task_id is absent from the live registry, and delete the sidecar.
+   Stale files whose leader pid no longer exists are also removed.
+   Returns the count of files removed. *)
+let reap_orphans ~base_path =
+  if base_path = "" then 0
+  else
+    let keeper_root =
+      Filename.concat (Filename.concat base_path ".masc") "keeper"
+    in
+    if not (is_dir keeper_root) then 0
+    else
+      let live = live_task_ids () in
+      let reaped = ref 0 in
+      List.iter (fun keeper ->
+        let bg_dir = Filename.concat (Filename.concat keeper_root keeper) "bg" in
+        if is_dir bg_dir then
+          List.iter (fun entry ->
+            if Filename.check_suffix entry ".pid" then begin
+              let task_id = Filename.chop_suffix entry ".pid" in
+              let path = Filename.concat bg_dir entry in
+              let live_here = List.mem task_id live in
+              if live_here then ()
+              else begin
+                (match read_pid_file path with
+                 | Some (pid, pgid) when pid_is_live pid ->
+                     (* Orphan: live pgroup, no registry entry. *)
+                     Process_eio.tree_kill ~pgid
+                       ~signal:Sys.sigterm ~grace_sec:1.0
+                 | _ -> ());
+                (try Unix.unlink path with _ -> ());
+                incr reaped
+              end
+            end)
+            (safe_readdir bg_dir))
+        (safe_readdir keeper_root);
+      !reaped

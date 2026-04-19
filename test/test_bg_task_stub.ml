@@ -27,6 +27,7 @@ let sp
       ~keeper ~argv ~cwd
       ~envp:(env_of_current ())
       ~timeout_sec
+      ()
   with
   | Ok tid -> tid
   | Error _ -> failwith "spawn failed"
@@ -112,6 +113,86 @@ let test_reap_orphans_returns_zero () =
   check int "no orphans at boot" 0
     (Bg_task.reap_orphans ~base_path:"/tmp/no-such-base")
 
+(* Tick 7 integration: when spawn is given ~base_path, a PID file
+   appears at <base>/.masc/keeper/<k>/bg/<tid>.pid. After kill and
+   close, the file is unlinked. *)
+let test_pid_file_created_and_cleaned () =
+  let base = Filename.temp_file "bg_task_tick7" "" in
+  Unix.unlink base;
+  Unix.mkdir base 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      try
+        let keeper_dir = Filename.concat (Filename.concat base ".masc") "keeper" in
+        let rec rm path =
+          if Sys.is_directory path then begin
+            Array.iter (fun e -> rm (Filename.concat path e)) (Sys.readdir path);
+            Unix.rmdir path
+          end else Unix.unlink path
+        in
+        if Sys.file_exists keeper_dir then rm keeper_dir
+      with _ -> ())
+    (fun () ->
+      let tid =
+        match
+          Bg_task.spawn ~base_path:base ~keeper:"kp-pid"
+            ~argv:[ "/bin/sleep"; "5" ]
+            ~cwd:"" ~envp:(env_of_current ()) ~timeout_sec:0.0 ()
+        with
+        | Ok t -> t
+        | Error _ -> failwith "spawn failed"
+      in
+      ignore (Unix.select [] [] [] 0.1);
+      let pid_path =
+        Filename.concat base
+          (Printf.sprintf ".masc/keeper/kp-pid/bg/%s.pid"
+             (Bg_task.task_id_to_string tid))
+      in
+      check bool "pid file exists mid-run" true (Sys.file_exists pid_path);
+      ignore (Bg_task.kill tid ~signal:Sys.sigterm ~grace_sec:1.0);
+      ignore (poll_for_closed tid);
+      check bool "pid file gone after close" false (Sys.file_exists pid_path))
+
+(* reap_orphans removes a stale pid file whose pid is no longer live
+   and whose task_id is absent from the registry. *)
+let test_reap_orphans_removes_stale_file () =
+  let base = Filename.temp_file "bg_task_reap" "" in
+  Unix.unlink base;
+  Unix.mkdir base 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      try
+        let keeper_dir = Filename.concat (Filename.concat base ".masc") "keeper" in
+        let rec rm path =
+          if Sys.is_directory path then begin
+            Array.iter (fun e -> rm (Filename.concat path e)) (Sys.readdir path);
+            Unix.rmdir path
+          end else Unix.unlink path
+        in
+        if Sys.file_exists keeper_dir then rm keeper_dir
+      with _ -> ())
+    (fun () ->
+      let bg_dir =
+        Filename.concat base ".masc/keeper/kp-reap/bg"
+      in
+      let rec mkp p =
+        if Sys.file_exists p then ()
+        else begin
+          let parent = Filename.dirname p in
+          if parent <> p then mkp parent;
+          try Unix.mkdir p 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+        end
+      in
+      mkp bg_dir;
+      let stale = Filename.concat bg_dir "ghost-tid.pid" in
+      let oc = open_out stale in
+      (* PID 999999 assumed dead on any reasonable test host *)
+      output_string oc "999999\n999999\n0.0\n";
+      close_out oc;
+      let n = Bg_task.reap_orphans ~base_path:base in
+      check bool "reaped at least one" true (n >= 1);
+      check bool "stale file removed" false (Sys.file_exists stale))
+
 let () =
   run "bg_task"
     [
@@ -123,8 +204,15 @@ let () =
             test_list_empty_for_unknown_keeper;
           test_case "unknown id returns structured errors" `Quick
             test_unknown_task_errors;
-          test_case "reap_orphans pre-impl returns 0" `Quick
+          test_case "reap_orphans on missing base returns 0" `Quick
             test_reap_orphans_returns_zero;
+        ] );
+      ( "persistence",
+        [
+          test_case "pid file created and cleaned on close" `Quick
+            test_pid_file_created_and_cleaned;
+          test_case "reap_orphans removes stale pid file" `Quick
+            test_reap_orphans_removes_stale_file;
         ] );
       ( "lifecycle",
         [

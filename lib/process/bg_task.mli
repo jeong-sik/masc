@@ -54,11 +54,13 @@ type spawn_error =
   | Invalid_cwd of string
 
 val spawn :
+  ?base_path:string ->
   keeper:string ->
   argv:string list ->
   cwd:string ->
   envp:string array ->
   timeout_sec:float ->
+  unit ->
   (task_id, spawn_error) result
 (** Fork a long-lived shell task.  Runs until it exits, until
     [timeout_sec] elapses (SIGTERM -> grace -> SIGKILL), or until
@@ -66,7 +68,13 @@ val spawn :
     addresses [-pgid].
 
     [timeout_sec = 0.0] disables the timeout — typical for keeper
-    polling loops that expect to {!kill} explicitly. *)
+    polling loops that expect to {!kill} explicitly.
+
+    [base_path] when supplied enables PID-file persistence at
+    \`<base_path>/.masc/keeper/<keeper>/bg/<task_id>.pid\`.  The file
+    records \`pid\\npgid\\nstarted_at\\n\` so {!reap_orphans} can recover
+    stranded process groups across keeper restarts.  When omitted,
+    no filesystem state is written. *)
 
 type read_error =
   | Unknown_task of task_id

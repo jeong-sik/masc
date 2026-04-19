@@ -974,15 +974,21 @@ let handle_keeper_bash
                   && Worker_dev_tools.is_write_operation cmd then
                  Log.Keeper.info "WRITE_AUDIT: keeper=%s cwd=%s cmd=%s playground=%b"
                    meta.name cwd cmd_for_log in_playground;
-               let argv = [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ] in
+               (* Tick 7: background mode keeps stdout/stderr separate
+                  so [keeper_bash_output] can report them distinctly.
+                  Foreground mode merges via [2>&1] for backward
+                  compatibility with the single [output] JSON field. *)
                if run_in_background then begin
+                 let argv = [ "/bin/bash"; "-lc"; cmd ] in
                  match
                    Bg_task.spawn
+                     ~base_path:root
                      ~keeper:meta.name
                      ~argv
                      ~cwd
                      ~envp:(Unix.environment ())
                      ~timeout_sec
+                     ()
                  with
                  | Ok tid ->
                      Log.Keeper.info
@@ -1014,6 +1020,7 @@ let handle_keeper_bash
                      error_json (Printf.sprintf "invalid cwd: %s" msg)
                end
                else
+                 let argv = [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ] in
                  let st, out =
                    Process_eio.run_argv_with_status ~cwd ~timeout_sec argv
                  in

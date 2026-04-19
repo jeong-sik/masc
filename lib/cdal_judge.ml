@@ -196,3 +196,240 @@ let judge (b : Cdal_loader.loaded_bundle) : Cdal_types.contract_verdict =
   } in
   let judgment_hash = Cdal_types.compute_judgment_hash verdict_without_hash in
   { verdict_without_hash with judgment_hash }
+
+(* ================================================================ *)
+(* Exec-outcome verifiable markers (Legendary Bash P6 Tick 15).     *)
+(*                                                                  *)
+(* The goal is to lift structured signals out of a finished bash    *)
+(* invocation *without* the verifier cascade having to regex the    *)
+(* raw output.  Heuristics here are deliberately conservative:      *)
+(* when we cannot pin the output to a known producer (dune, cargo,  *)
+(* eslint, git status), we return [] and let the caller keep the    *)
+(* raw bytes as evidence.  False positives poison the cascade, so   *)
+(* confidence defaults to [`Heuristic]; only [`Exact] markers are   *)
+(* granted "proof" status downstream.                               *)
+(* ================================================================ *)
+
+type marker_confidence = [ `Exact | `Heuristic ]
+
+type verifiable_marker =
+  | Test_pass of { count : int; confidence : marker_confidence }
+  | Test_fail of { count : int; confidence : marker_confidence }
+  | Build_ok  of { confidence : marker_confidence }
+  | Build_fail of { confidence : marker_confidence }
+  | Lint_clean of { confidence : marker_confidence }
+  | Lint_dirty of { count : int; confidence : marker_confidence }
+  | Git_clean of { confidence : marker_confidence }
+  | Git_dirty of { confidence : marker_confidence }
+  | Git_not_a_repo
+
+let conf_to_string = function
+  | `Exact -> "exact"
+  | `Heuristic -> "heuristic"
+
+let marker_to_string = function
+  | Test_pass { count; confidence } ->
+      Printf.sprintf "test_pass:%d:%s" count (conf_to_string confidence)
+  | Test_fail { count; confidence } ->
+      Printf.sprintf "test_fail:%d:%s" count (conf_to_string confidence)
+  | Build_ok { confidence } -> "build_ok:" ^ conf_to_string confidence
+  | Build_fail { confidence } -> "build_fail:" ^ conf_to_string confidence
+  | Lint_clean { confidence } -> "lint_clean:" ^ conf_to_string confidence
+  | Lint_dirty { count; confidence } ->
+      Printf.sprintf "lint_dirty:%d:%s" count (conf_to_string confidence)
+  | Git_clean { confidence } -> "git_clean:" ^ conf_to_string confidence
+  | Git_dirty { confidence } -> "git_dirty:" ^ conf_to_string confidence
+  | Git_not_a_repo -> "git_not_a_repo:exact"
+
+(* --- low-level text helpers (no re lib; keep deps thin) --- *)
+
+let contains_sub s sub =
+  let ls = String.length s and lsub = String.length sub in
+  if lsub = 0 then true
+  else if lsub > ls then false
+  else
+    let rec loop i =
+      if i + lsub > ls then false
+      else if String.sub s i lsub = sub then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let contains_ci s sub =
+  contains_sub (String.lowercase_ascii s) (String.lowercase_ascii sub)
+
+(* Counts occurrences of a fixed substring. *)
+let count_sub s sub =
+  let ls = String.length s and lsub = String.length sub in
+  if lsub = 0 || lsub > ls then 0
+  else
+    let rec loop i acc =
+      if i + lsub > ls then acc
+      else if String.sub s i lsub = sub then loop (i + lsub) (acc + 1)
+      else loop (i + 1) acc
+    in
+    loop 0 0
+
+(* Producer classifiers — match on a few unambiguous strings each
+   tool emits.  The raw stream is concatenated stdout ^ stderr. *)
+
+let looks_like_dune_build out =
+  contains_sub out "dune build" ||
+  contains_sub out "ocamlc " ||
+  contains_sub out "ocamlopt "
+
+let looks_like_dune_runtest out =
+  contains_sub out "dune runtest" ||
+  contains_sub out "Alcotest" ||
+  contains_sub out "Testing `"
+
+let looks_like_cargo out =
+  contains_sub out "Compiling " ||
+  contains_sub out "running " && contains_sub out " target/"
+
+let looks_like_git_status out =
+  contains_sub out "nothing to commit" ||
+  contains_sub out "Changes not staged" ||
+  contains_sub out "Untracked files" ||
+  contains_sub out "Changes to be committed"
+
+let looks_like_lint_eslint out =
+  contains_ci out "eslint" || contains_ci out "problem"
+
+(* Test count extraction.  Alcotest / cargo-test lines commonly look
+   like one of:
+
+     "Test Successful in 0.003s. 8 tests run."      (int BEFORE marker)
+     "12 tests passed."                              (int BEFORE marker)
+     "test result: ok. 12 passed; 0 failed; ..."    (int AFTER marker)
+
+   Strategy: per line, for each known marker we check whether the
+   marker appears and then scan the line in the appropriate direction
+   starting from the marker position.  First match wins; 0 means
+   "no producer-specific pattern matched". *)
+
+let split_lines s =
+  String.split_on_char '\n' s
+
+let first_int_before line pos =
+  let rec skip_ws i =
+    if i < 0 then i
+    else if line.[i] = ' ' || line.[i] = '\t' then skip_ws (i - 1)
+    else i
+  in
+  let end_ = skip_ws (pos - 1) in
+  if end_ < 0 then None
+  else if not (line.[end_] >= '0' && line.[end_] <= '9') then None
+  else
+    let rec start_of i =
+      if i < 0 then 0
+      else if line.[i] >= '0' && line.[i] <= '9' then start_of (i - 1)
+      else i + 1
+    in
+    let start = start_of end_ in
+    int_of_string_opt (String.sub line start (end_ - start + 1))
+
+let first_int_after line pos =
+  let ls = String.length line in
+  let rec skip_ws i =
+    if i >= ls then i
+    else if line.[i] = ' ' || line.[i] = '\t' then skip_ws (i + 1)
+    else i
+  in
+  let start = skip_ws pos in
+  if start >= ls then None
+  else if not (line.[start] >= '0' && line.[start] <= '9') then None
+  else
+    let buf = Buffer.create 8 in
+    let rec loop i =
+      if i >= ls then ()
+      else
+        let c = line.[i] in
+        if c >= '0' && c <= '9' then begin
+          Buffer.add_char buf c; loop (i + 1)
+        end
+    in
+    loop start;
+    int_of_string_opt (Buffer.contents buf)
+
+let find_sub_in line sub =
+  let ls = String.length line and lsub = String.length sub in
+  if lsub = 0 || lsub > ls then None
+  else
+    let rec loop i =
+      if i + lsub > ls then None
+      else if String.sub line i lsub = sub then Some i
+      else loop (i + 1)
+    in
+    loop 0
+
+let test_count_from_output out =
+  let markers_before = [ "tests run"; "tests passed"; "test passed" ] in
+  let markers_after = [ "test result: ok. "; "passed:" ] in
+  let rec per_line = function
+    | [] -> 0
+    | line :: rest ->
+        let found_before =
+          List.find_map (fun m ->
+            match find_sub_in line m with
+            | None -> None
+            | Some pos -> first_int_before line pos) markers_before
+        in
+        (match found_before with
+         | Some n -> n
+         | None ->
+             let found_after =
+               List.find_map (fun m ->
+                 match find_sub_in line m with
+                 | None -> None
+                 | Some pos -> first_int_after line (pos + String.length m))
+                 markers_after
+             in
+             (match found_after with
+              | Some n -> n
+              | None -> per_line rest))
+  in
+  per_line (split_lines out)
+
+let of_exec_outcome ~semantic ~stdout ~stderr =
+  let out = stdout ^ "\n" ^ stderr in
+  let semantic : Masc_exec.Exec_semantic.t = semantic in
+  match semantic with
+  | `Git_not_a_repo -> [ Git_not_a_repo ]
+  | `Ok ->
+      if looks_like_dune_runtest out then
+        let n = test_count_from_output out in
+        [ Test_pass { count = n; confidence = `Heuristic } ]
+      else if looks_like_dune_build out then
+        [ Build_ok { confidence = `Heuristic } ]
+      else if looks_like_cargo out then
+        [ Build_ok { confidence = `Heuristic } ]
+      else if looks_like_git_status out then begin
+        if contains_sub out "nothing to commit" then
+          [ Git_clean { confidence = `Exact } ]
+        else
+          [ Git_dirty { confidence = `Exact } ]
+      end
+      else if looks_like_lint_eslint out then begin
+        (* No problem lines → clean. *)
+        if not (contains_ci out "error") && not (contains_ci out "warning")
+        then [ Lint_clean { confidence = `Heuristic } ]
+        else
+          let n = count_sub out "error " + count_sub out "warning " in
+          [ Lint_dirty { count = n; confidence = `Heuristic } ]
+      end
+      else []
+  | `Fail _ ->
+      if looks_like_dune_runtest out then
+        let n = test_count_from_output out in
+        [ Test_fail { count = n; confidence = `Heuristic } ]
+      else if looks_like_dune_build out then
+        [ Build_fail { confidence = `Heuristic } ]
+      else if looks_like_cargo out then
+        [ Build_fail { confidence = `Heuristic } ]
+      else if looks_like_lint_eslint out then
+        let n = count_sub out "error " + count_sub out "warning " in
+        [ Lint_dirty { count = n; confidence = `Heuristic } ]
+      else []
+  | `Timeout _ | `Signaled _ | `Oom_killed -> []
+  | `Policy_denied _ | `Tool_missing _ | `Permission_denied _ -> []

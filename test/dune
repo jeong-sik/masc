@@ -423,6 +423,7 @@
         test_cdal_types
         test_cdal_loader
         test_cdal_judge
+        test_cdal_verifiable_markers
         test_cdal_eval_v1
         test_cdal_friction_projection
         test_cdal_verdict_gate
@@ -578,6 +579,7 @@
         test_cdal_types
         test_cdal_loader
         test_cdal_judge
+        test_cdal_verifiable_markers
         test_cdal_eval_v1
         test_cdal_friction_projection
         test_cdal_verdict_gate

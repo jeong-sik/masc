@@ -102,7 +102,7 @@ let allowlisted_env_pairs () =
     @ [
       "GOOGLE_CLOUD_PROJECT";
       "GOOGLE_CLOUD_LOCATION";
-      "MASC_STORAGE_TYPE";
+      Env_config_core.storage_type_env_key;
       Env_config_core.base_path_env_key;
       "MASC_CONFIG_DIR";
     ]

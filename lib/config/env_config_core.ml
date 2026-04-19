@@ -274,10 +274,13 @@ let sb_path () =
   | Ok path -> path
   | Error msg -> raise (Config_error msg)
 
+(** SSOT for the MASC_STORAGE_TYPE env-var name (issue 8352). *)
+let storage_type_env_key = "MASC_STORAGE_TYPE"
+
 (** Storage backend type. Set at runtime by server_runtime_bootstrap.
     Valid: "filesystem", "memory". *)
 let storage_type () =
-  match raw_value_opt "MASC_STORAGE_TYPE" |> trim_opt with
+  match raw_value_opt storage_type_env_key |> trim_opt with
   | Some raw -> (
       match String.lowercase_ascii (String.trim raw) with
       | "filesystem" | "file" | "jsonl" | "auto" -> "filesystem"

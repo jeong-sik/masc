@@ -477,6 +477,7 @@
    keeper_event_bus
    masc_event_bus
    keeper_keepalive
+   keeper_lifecycle_events
    heartbeat_smart
    keeper_crash_persistence
    keeper_chat_store

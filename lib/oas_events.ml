@@ -135,7 +135,23 @@ let publish_keeper_snapshot (_bus : Agent_sdk.Event_bus.t) ~keeper_name
 (** {1 Keeper Lifecycle Events} *)
 
 (** Publish a keeper keepalive lifecycle event.
-    Event names: "started", "stopped", "crashed", "restarted", "dead". *)
+
+    Event names are pinned by
+    {!Keeper_lifecycle_events.all_event_names}, which covers both the
+    custom verbs (\[started\] / \[reconciled\] / \[restarted\] /
+    \[dead_cleaned\] / \[self_preservation\] / \[paused_pruned\]) and
+    the phase-derived names (\[stopped\] / \[crashed\] / \[dead\] /
+    \[running\]).
+
+    Issue #8575: the previous docstring listed only five names, so
+    operators silently missed the cleanup and self-healing events
+    (\[reconciled\] / \[dead_cleaned\] / \[self_preservation\] /
+    \[paused_pruned\]) — exactly the events that signal supervisor
+    recovery actions where observability matters most. Subscribe to
+    {!Keeper_lifecycle_events.all_event_names} to receive the full
+    stream; the sync test in [test_types.ml ::
+    lifecycle_events_ssot] asserts every literal still emitted by
+    [Keeper_supervisor] / [Keeper_keepalive] lives in the SSOT. *)
 let publish_keeper_lifecycle (_bus : Agent_sdk.Event_bus.t) ?phase ~event
     ~keeper_name ~detail () =
   let phase_json =

@@ -913,6 +913,57 @@ let () =
         Alcotest.(check bool) "cleared by operator compact" false
           c'.compact_retry_exhausted);
     ];
+    "lifecycle_events_ssot", [
+      (* Issue #8575: Oas_events.publish_keeper_lifecycle docstring
+         used to list 5 event names (started/stopped/crashed/restarted/
+         dead) while the supervisor + keepalive together emit 10 —
+         operators reading the doc silently missed the cleanup /
+         self-healing events (reconciled / dead_cleaned /
+         self_preservation / paused_pruned). The fix introduces
+         Keeper_lifecycle_events as the SSOT vocabulary and these
+         tests pin it: every literal still emitted by the production
+         code lives in [all_event_names], and the phase-derived strings
+         match Keeper_state_machine.phase_to_string for the four
+         phases that fire a wire event. *)
+      Alcotest.test_case "custom-event witness covers all constructors" `Quick (fun () ->
+        let module L = Masc_mcp.Keeper_lifecycle_events in
+        let witness e =
+          let s = L.to_string e in
+          if not (List.mem s L.valid_custom_event_strings) then
+            Alcotest.failf "to_string %S not in valid_custom_event_strings" s
+        in
+        witness L.Started;
+        witness L.Reconciled;
+        witness L.Restarted;
+        witness L.Dead_cleaned;
+        witness L.Self_preservation;
+        witness L.Paused_pruned;
+        Alcotest.(check int) "all_custom_events count" 6
+          (List.length L.all_custom_events));
+      Alcotest.test_case "phase-derived strings match Keeper_state_machine SSOT" `Quick (fun () ->
+        let open Masc_mcp.Keeper_state_machine in
+        let expected = [
+          phase_to_string Stopped;
+          phase_to_string Crashed;
+          phase_to_string Dead;
+          phase_to_string Running;
+        ] in
+        Alcotest.(check (list string)) "phase-derived event names match SSOT"
+          expected
+          Masc_mcp.Keeper_lifecycle_events.phase_derived_event_strings);
+      Alcotest.test_case "all_event_names covers cleanup events (regression #8575)" `Quick (fun () ->
+        let names = Masc_mcp.Keeper_lifecycle_events.all_event_names in
+        List.iter (fun n ->
+          Alcotest.(check bool) (Printf.sprintf "%s present" n) true
+            (List.mem n names))
+          [ "reconciled"; "dead_cleaned"; "self_preservation"; "paused_pruned" ]);
+      Alcotest.test_case "all_event_names totals 10 distinct names" `Quick (fun () ->
+        let names = Masc_mcp.Keeper_lifecycle_events.all_event_names in
+        let dedup = List.sort_uniq String.compare names in
+        Alcotest.(check int) "10 distinct" 10 (List.length names);
+        Alcotest.(check int) "no duplicates" (List.length names)
+          (List.length dedup));
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

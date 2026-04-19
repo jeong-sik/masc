@@ -70,11 +70,11 @@ let server_entries =
 
 let auth_entries =
   [
-    entry ~sensitive:true ~default:"(none)" "MASC_ADMIN_TOKEN"
+    entry ~sensitive:true ~default:"(none)" Env_config_core.admin_token_env_key
       "Admin authentication token";
     entry ~default:"false" "MASC_ALLOW_ANONYMOUS_MUTATIONS"
       "Allow anonymous mutations (local dev only)";
-    entry ~default:"true" "MASC_TOOL_AUTH_STRICT"
+    entry ~default:"true" Env_config_core.tool_auth_strict_env_key
       "Require auth for all tool calls";
     entry ~default:"false" "MASC_HTTP_AUTH_STRICT"
       "Require auth for HTTP endpoints";

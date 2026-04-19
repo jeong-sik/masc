@@ -311,14 +311,18 @@ let relay_calibration_enabled () =
 
 (** {1 Auth} *)
 
+(** SSOT for auth env-var names (issue 8352). *)
+let admin_token_env_key = "MASC_ADMIN_TOKEN"
+let tool_auth_strict_env_key = "MASC_TOOL_AUTH_STRICT"
+
 (** Admin token for privileged endpoints. None = admin auth disabled. *)
 let admin_token_opt () =
-  raw_value_opt "MASC_ADMIN_TOKEN" |> trim_opt
+  raw_value_opt admin_token_env_key |> trim_opt
 
 (** Strict tool auth mode. Default: true.
     true = unknown masc_* tools require worker-level permission. *)
 let tool_auth_strict () =
-  get_bool ~default:true "MASC_TOOL_AUTH_STRICT"
+  get_bool ~default:true tool_auth_strict_env_key
 
 (** {1 Logging / Telemetry} *)
 

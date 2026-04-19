@@ -230,12 +230,12 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
           (match released_task_id with
            | Some rid ->
                Coord_task.emit_task_activity config ~agent_name ~task_id:rid
-                 ~kind:"task.released"
+                 ~kind:(Event_kind.Task.to_string Event_kind.Task.Released)
                  ~payload:(`Assoc [ ("task_id", `String rid) ]);
                observe_auto_release ()
            | None -> ());
           Coord_task.emit_task_activity config ~agent_name ~task_id:task.id
-            ~kind:"task.claimed"
+            ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
             ~payload:
               (`Assoc
                 [

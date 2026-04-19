@@ -374,7 +374,7 @@ let add_task ?contract ?required_preset config ~title ~priority ~description =
         version = backlog.version + 1;
       } in
       write_backlog config new_backlog;
-      emit_task_activity config ~agent_name:"system" ~task_id ~kind:"task.created"
+      emit_task_activity config ~agent_name:"system" ~task_id ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
         ~payload:
           (`Assoc
             [
@@ -437,7 +437,7 @@ let add_task_with_role ?contract config ~title ~priority ~description
         version = backlog.version + 1;
       } in
       write_backlog config new_backlog;
-      emit_task_activity config ~agent_name:"system" ~task_id ~kind:"task.created"
+      emit_task_activity config ~agent_name:"system" ~task_id ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
         ~payload:
           (`Assoc
             [
@@ -501,7 +501,7 @@ let batch_add_tasks_internal config tasks =
       List.iter
         (fun (task : Types.task) ->
           emit_task_activity config ~agent_name:"system" ~task_id:task.id
-            ~kind:"task.created"
+            ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
             ~payload:
               (`Assoc
                 [
@@ -586,7 +586,7 @@ let claim_task config ~agent_name ~task_id =
             update_local_agent_state config ~agent_name (fun agent ->
               { agent with status = Busy; current_task = Some task_id });
             ignore (broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id));
-            emit_task_activity config ~agent_name ~task_id ~kind:"task.claimed"
+            emit_task_activity config ~agent_name ~task_id ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
               ~payload:(`Assoc [ ("task_id", `String task_id) ]);
             log_event config
               (Yojson.Safe.to_string
@@ -702,7 +702,7 @@ let claim_task_r config ~agent_name ~task_id
             update_local_agent_state config ~agent_name (fun agent ->
               { agent with status = Busy; current_task = Some task_id });
             ignore (broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id));
-            emit_task_activity config ~agent_name ~task_id ~kind:"task.claimed"
+            emit_task_activity config ~agent_name ~task_id ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
               ~payload:(`Assoc [ ("task_id", `String task_id) ]);
             log_event config
               (Yojson.Safe.to_string
@@ -1016,15 +1016,15 @@ let transition_task_r config ~agent_name ~task_id ~action
         (match action with
          | Types.Claim ->
              emit_task_activity config ~agent_name ~task_id
-               ~kind:"task.claimed"
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
                ~payload:(`Assoc [ ("task_id", `String task_id) ])
          | Types.Start ->
              emit_task_activity config ~agent_name ~task_id
-               ~kind:"task.started"
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Started)
                ~payload:(`Assoc [ ("task_id", `String task_id) ])
          | Types.Done_action ->
              emit_task_activity config ~agent_name ~task_id
-               ~kind:"task.done"
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Done)
                ~payload:
                  (`Assoc
                    [
@@ -1033,7 +1033,7 @@ let transition_task_r config ~agent_name ~task_id ~action
                    ])
          | Types.Cancel ->
              emit_task_activity config ~agent_name ~task_id
-               ~kind:"task.cancelled"
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Cancelled)
                ~payload:
                  (`Assoc
                    [
@@ -1042,7 +1042,7 @@ let transition_task_r config ~agent_name ~task_id ~action
                    ])
          | Types.Release ->
              emit_task_activity config ~agent_name ~task_id
-               ~kind:"task.released"
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Released)
                ~payload:
                  (`Assoc
                    ([
@@ -1060,15 +1060,15 @@ let transition_task_r config ~agent_name ~task_id ~action
                    | None -> []))
          | Types.Submit_for_verification ->
              emit_task_activity config ~agent_name ~task_id
-               ~kind:"task.submit_for_verification"
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Submit_for_verification)
                ~payload:(`Assoc [ ("task_id", `String task_id) ])
          | Types.Approve_verification ->
              emit_task_activity config ~agent_name ~task_id
-               ~kind:"task.approved"
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Approved)
                ~payload:(`Assoc [ ("task_id", `String task_id) ])
          | Types.Reject_verification ->
              emit_task_activity config ~agent_name ~task_id
-               ~kind:"task.rejected"
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Rejected)
                ~payload:(`Assoc [ ("task_id", `String task_id) ]));
         let duration_ms =
           match action with
@@ -1208,7 +1208,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
               let msg = if reason = "" then Printf.sprintf "🚫 Cancelled %s" task_id else Printf.sprintf "🚫 Cancelled %s - %s" task_id reason in
               ignore (broadcast config ~from_agent:agent_name ~content:msg);
               emit_task_activity config ~agent_name ~task_id
-                ~kind:"task.cancelled"
+                ~kind:(Event_kind.Task.to_string Event_kind.Task.Cancelled)
                 ~payload:
                   (`Assoc
                     [
@@ -1319,7 +1319,7 @@ let link_task_execution_artifacts_r config ~task_id ?session_id ?operation_id
               in
               write_backlog config new_backlog;
               emit_task_activity config ~agent_name:"system" ~task_id
-                ~kind:"task.linked"
+                ~kind:(Event_kind.Task.to_string Event_kind.Task.Linked)
                 ~payload:
                   (`Assoc
                     ([

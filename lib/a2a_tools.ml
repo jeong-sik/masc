@@ -300,16 +300,16 @@ let discover config ?(endpoint : string option) ?(capability : string option) ?(
     let filtered = match capability with
       | None -> agents
       | Some cap ->
-        List.filter (fun (a : agent) ->
+        List.filter (fun (a : Types.agent) ->
           List.mem cap a.capabilities
         ) agents
     in
     (* Include local agent card *)
     let local_card = Agent_card.generate_default ~schemas () in
-    let agents_json = List.map (fun (a : agent) ->
+    let agents_json = List.map (fun (a : Types.agent) ->
       `Assoc [
         ("name", `String a.name);
-        ("status", `String (agent_status_to_string a.status));
+        ("status", `String (Types.agent_status_to_string a.status));
         ("capabilities", `List (List.map (fun s -> `String s) a.capabilities));
         ("current_task", match a.current_task with
           | None -> `Null
@@ -337,7 +337,9 @@ let discover config ?(endpoint : string option) ?(capability : string option) ?(
 let query_skill config ~schemas ~agent_name ~skill_id : (Yojson.Safe.t, string) result =
   (* First, find the agent *)
   let agents = Coord.get_agents_raw config in
-  let agent_opt = List.find_opt (fun (a : agent) -> a.name = agent_name) agents in
+  let agent_opt =
+    List.find_opt (fun (a : Types.agent) -> a.name = agent_name) agents
+  in
   match agent_opt with
   | None -> Error (Printf.sprintf "Agent '%s' not found" agent_name)
   | Some _agent ->
@@ -406,7 +408,7 @@ let delegate config ~agent_name ~target ~message
       ~initial_message:(Some full_message)
     in
     match portal_result with
-    | Error e -> Error (masc_error_to_string e)
+    | Error e -> Error (Types.masc_error_to_string e)
     | Ok msg ->
       let task_id = generate_uuid () in
       match task_type with

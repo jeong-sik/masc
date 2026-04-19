@@ -1010,7 +1010,13 @@
 (test
  (name test_harness_shell_helpers)
  (modules test_harness_shell_helpers)
- (libraries alcotest unix))
+ (deps %{exe:../bin/keeper_campaign_fsm.exe})
+ (action
+  (setenv KEEPER_CAMPAIGN_FSM_EXE %{exe:../bin/keeper_campaign_fsm.exe}
+   (setenv MASC_HARNESS_ALLOW_DUNE_EXEC_FALLBACK 0
+    (run %{test}))))
+ (libraries alcotest unix)
+)
 
 
 (test
@@ -1114,6 +1120,12 @@
 (test
  (name test_otel_trace_context)
  (modules test_otel_trace_context)
+ (libraries masc_test_deps))
+
+; OpenTelemetry GenAI semantic convention helpers
+(test
+ (name test_otel_genai)
+ (modules test_otel_genai)
  (libraries masc_test_deps))
 
 (executable

@@ -65,6 +65,10 @@ dashboard/dist/
 assets/dashboard/
 viewer/dist-build/
 
+# Dashboard Bonsai island (js_of_ocaml build output)
+dashboard_bonsai/_build/
+assets/dashboard_bonsai/
+
 # TLC model checker artifacts
 specs/**/states/
 specs/**/*_TTrace_*.tla

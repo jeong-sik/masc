@@ -1,2 +1,2 @@
-(dirs (:standard \ .worktrees _build_codex_trpg archive))
+(dirs (:standard \ .worktrees _build_codex_trpg archive dashboard_bonsai))
  

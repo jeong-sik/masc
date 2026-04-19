@@ -160,13 +160,38 @@ record_campaign_event() {
 replay_campaign_fsm() {
   local events_file="$1"
   local output_file="$2"
-  local bin_path="$REPO_ROOT/_build/default/bin/keeper_campaign_fsm.exe"
-  if [[ -x "$bin_path" ]]; then
-    "$bin_path" replay "$events_file" "$output_file" >/dev/null
-  else
-    dune exec --root "$REPO_ROOT" ./bin/keeper_campaign_fsm.exe -- \
-      replay "$events_file" "$output_file" >/dev/null
+  local explicit="${KEEPER_CAMPAIGN_FSM_EXE:-}"
+  local dune_build_dir="${DUNE_BUILD_DIR:-_build}"
+  local repo_build_dir="$REPO_ROOT/$dune_build_dir"
+  if [[ "$dune_build_dir" = /* ]]; then
+    repo_build_dir="$dune_build_dir"
   fi
+
+  local -a candidates=()
+  if [[ -n "$explicit" ]]; then
+    candidates+=("$explicit")
+  fi
+  candidates+=(
+    "$repo_build_dir/default/bin/keeper_campaign_fsm.exe"
+    "$REPO_ROOT/_build/default/bin/keeper_campaign_fsm.exe"
+    "$REPO_ROOT/bin/keeper_campaign_fsm.exe"
+  )
+
+  local bin_path
+  for bin_path in "${candidates[@]}"; do
+    if [[ -x "$bin_path" ]]; then
+      "$bin_path" replay "$events_file" "$output_file" >/dev/null
+      return 0
+    fi
+  done
+
+  if [[ "$(normalize_bool "${MASC_HARNESS_ALLOW_DUNE_EXEC_FALLBACK:-1}")" != "1" ]]; then
+    echo "keeper_campaign_fsm executable not found; build with: dune build --root . ./bin/keeper_campaign_fsm.exe" >&2
+    return 1
+  fi
+
+  dune exec --root "$REPO_ROOT" ./bin/keeper_campaign_fsm.exe -- \
+    replay "$events_file" "$output_file" >/dev/null
 }
 
 models_json() {

@@ -186,7 +186,13 @@ let load_state_cached ~base_path loop_id =
              Hashtbl.replace persisted_summaries_cache loop_id (mtime, summary);
              result
          | None -> None)
-  with _ -> None
+  with
+  (* Issue #8619: re-raise cancellation so a shutdown mid-load does
+     not silently render the dashboard panel as "no data". Other
+     exceptions (Unix.stat ENOENT, JSON parse failure on a partial
+     write) keep the prior cached/None behaviour. *)
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> None
 
 (** Build the loops list JSON for GET /api/v1/autoresearch/loops.
     Merges in-memory active loops with persisted-only loops.

@@ -90,7 +90,14 @@ let config_json () =
      non-standard profile). Both paths go through [add_profile] so
      duplicates are filtered by canonical name. *)
   let keeper_entries =
-    try Keeper_registry.all () with _ -> []
+    (* Issue #8619: was [with _ -> []] which silently swallowed
+       Eio.Cancel.Cancelled. Re-raise cancellation; only fall back
+       to empty for non-cancel exceptions (e.g. registry not yet
+       initialised). *)
+    try Keeper_registry.all ()
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> []
   in
   let acc_after_standard =
     List.fold_left add_profile [] standard_profiles

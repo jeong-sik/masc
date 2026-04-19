@@ -1417,10 +1417,37 @@ let handle_keeper_shell
                         query (--state, --limit, --json)."
                    ]
                else
-                 gh_base ~ok:(st = Unix.WEXITED 0) ~cwd
+                 let ok = st = Unix.WEXITED 0 in
+                 (* #8688: 37 repo-resolve rejects on 2026-04-17/18 came
+                    back with "Could not resolve to a Repository". All
+                    originated from keeper_shell op=gh run from a
+                    playground cwd that has no upstream
+                    (.masc/playground/<name>), so gh falls through to
+                    the parent working dir and gives up. The keeper LLM
+                    got only gh's raw stderr, which named the fake
+                    repo but not the fix. Attach a concrete hint. *)
+                 let base_fields =
                    [ "status", Keeper_alerting_path.process_status_to_json st
-                   ; "output", `String out
-                   ])))
+                   ; "output", `String out ]
+                 in
+                 let hinted_fields =
+                   if (not ok)
+                      && String_util.contains_substring_ci out
+                           "Could not resolve to a Repository"
+                   then
+                     base_fields @
+                     [ "error", `String "gh_repo_resolve_failed"
+                     ; "hint", `String
+                         "gh ran from a keeper playground cwd with no \
+                          upstream remote, so it resolved the working \
+                          directory name as the repository. Retry with \
+                          an explicit `--repo OWNER/NAME` (e.g. \
+                          `gh pr list --repo jeong-sik/masc-mcp \
+                          --state open`), or git_clone the repo first \
+                          and cd into the clone." ]
+                   else base_fields
+                 in
+                 gh_base ~ok ~cwd hinted_fields)))
   | _ ->
     Yojson.Safe.to_string
       (`Assoc

@@ -104,7 +104,7 @@ let allowlisted_env_pairs () =
       "GOOGLE_CLOUD_LOCATION";
       Env_config_core.storage_type_env_key;
       Env_config_core.base_path_env_key;
-      "MASC_CONFIG_DIR";
+      Env_config_core.config_dir_env_key;
     ]
   in
   let inherited =

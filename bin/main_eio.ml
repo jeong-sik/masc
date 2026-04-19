@@ -128,8 +128,10 @@ let make_extended_handler routes =
     let path = Http.Request.path request in
     let skip_rate_limit =
       String.equal path "/health"
-      || String.equal path "/health/live"
-      || String.equal path "/health/ready"
+      (* Issue #8403: derive probe exemptions from Server_health_paths SSOT
+         so a renamed probe stays exempt from rate limits without a
+         separate manual edit here. *)
+      || Masc_mcp.Server_health_paths.is_public path
     in
     let rl_key = Masc_mcp.Rate_limit.key_of_sockaddr client_addr in
     if (not skip_rate_limit) && not (Masc_mcp.Rate_limit.check_global ~key:rl_key) then

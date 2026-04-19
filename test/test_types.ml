@@ -989,6 +989,34 @@ let () =
           | None -> Alcotest.failf "phase_of_string %S returned None — round-trip broken" s
         ) all_phases);
     ];
+    "health_paths_ssot", [
+      (* Issue #8403: SSOT for /health/live and /health/ready strings.
+         The literals previously appeared 9 times across 5 files (HTTP/1
+         router, H/2 gateway, auth public-read whitelist, startup
+         takeover liveness probe default, bin rate-limit exemption)
+         with no shared constant — silent drift was the failure mode
+         (a renamed probe could leak an auth-required URL through the
+         public whitelist, or fall outside the rate-limit exemption).
+         These tests pin the constants to their literal wire format
+         (external monitors depend on them) and assert [is_public]
+         covers both probes. *)
+      Alcotest.test_case "constants pinned to wire format" `Quick (fun () ->
+        let open Masc_mcp.Server_health_paths in
+        Alcotest.(check string) "liveness wire path" "/health/live" liveness;
+        Alcotest.(check string) "readiness wire path" "/health/ready" readiness);
+      Alcotest.test_case "public lists both probes in order" `Quick (fun () ->
+        let open Masc_mcp.Server_health_paths in
+        Alcotest.(check (list string)) "public order"
+          [ "/health/live"; "/health/ready" ] public);
+      Alcotest.test_case "is_public matches probes, rejects others" `Quick (fun () ->
+        let open Masc_mcp.Server_health_paths in
+        Alcotest.(check bool) "/health/live" true (is_public "/health/live");
+        Alcotest.(check bool) "/health/ready" true (is_public "/health/ready");
+        Alcotest.(check bool) "/health (root) not in public" false
+          (is_public "/health");
+        Alcotest.(check bool) "/foo not in public" false (is_public "/foo");
+        Alcotest.(check bool) "empty path" false (is_public ""));
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

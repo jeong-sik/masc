@@ -107,6 +107,7 @@
    server_dashboard_http_cache
    server_dashboard_http_link_preview
    server_dashboard_http_core
+   server_health_paths
    server_routes_http
    server_routes_http_common
    server_routes_http_pages

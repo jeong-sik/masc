@@ -385,8 +385,10 @@ let with_admin_auth handler request reqd =
 (** Public read access - no auth required (dashboard, health) *)
 let is_public_read_path path =
   String.equal path "/health"
-  || String.equal path "/health/live"
-  || String.equal path "/health/ready"
+  (* Issue #8403: derive probe whitelist from Server_health_paths SSOT
+     so adding/renaming a probe automatically refreshes the auth filter
+     instead of leaking an auth-required probe through. *)
+  || Server_health_paths.is_public path
   || String.equal path "/api/v1/gate/health"
   || String.equal path "/api/v1/gate/status"
   || String.equal path "/api/v1/gate/connectors"

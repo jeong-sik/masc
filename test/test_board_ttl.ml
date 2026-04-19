@@ -38,6 +38,36 @@ let test_visibility_strings_complete () =
       (List.mem expected strs)
   ) ["public"; "unlisted"; "internal"; "direct"]
 
+(* Issue #8449 PR A: Board_dispatch.sort_order schema enum SSOT.
+   Witness covers all 5 variants; adding a 6th constructor will fail
+   compilation in [sort_order_to_string]. *)
+let test_sort_order_witness_in_enum () =
+  let module D = Masc_mcp.Board_dispatch in
+  let witness s =
+    let actual = D.sort_order_to_string s in
+    if not (List.mem actual D.valid_sort_order_strings) then
+      Alcotest.failf "sort_order_to_string %S not in valid_sort_order_strings" actual
+  in
+  witness D.Hot;
+  witness D.Trending;
+  witness D.Recent;
+  witness D.Updated;
+  witness D.Discussed;
+  Alcotest.(check int) "count" 5
+    (List.length D.valid_sort_order_strings)
+
+let test_sort_order_aliases () =
+  let module D = Masc_mcp.Board_dispatch in
+  Alcotest.(check (option string)) "new -> Recent" (Some "recent")
+    (Option.map D.sort_order_to_string (D.sort_order_of_string_opt "new"));
+  Alcotest.(check (option string)) "active -> Updated" (Some "updated")
+    (Option.map D.sort_order_to_string (D.sort_order_of_string_opt "active"));
+  Alcotest.(check (option string)) "comments -> Discussed" (Some "discussed")
+    (Option.map D.sort_order_to_string (D.sort_order_of_string_opt "comments"));
+  Alcotest.(check (option string)) "garbage rejected" None
+    (D.sort_order_of_string_opt "definitely-not-an-order"
+     |> Option.map D.sort_order_to_string)
+
 let test_permanent_post () =
   let store = create_store () in
   match
@@ -183,6 +213,13 @@ let () =
             test_visibility_witness_in_enum;
           Alcotest.test_case "all 4 strings present" `Quick
             test_visibility_strings_complete;
+        ] );
+      ( "sort_order_ssot",
+        [
+          Alcotest.test_case "witness covers all 5 variants" `Quick
+            test_sort_order_witness_in_enum;
+          Alcotest.test_case "aliases new/active/comments accepted" `Quick
+            test_sort_order_aliases;
         ] );
       ( "post_kind",
         [

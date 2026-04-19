@@ -39,6 +39,11 @@ async function refreshServerConfigSurface(): Promise<void> {
   await refreshServerConfig()
 }
 
+async function refreshDoctorSurface(): Promise<void> {
+  const { refreshDoctor } = await import('./components/doctor-panel')
+  await refreshDoctor()
+}
+
 type RefreshTask =
   | 'shell'
   | 'namespaceTruth'
@@ -120,6 +125,7 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   inspector: () => {
     void refreshFeatureHealthSurface()
     void refreshServerConfigSurface()
+    void refreshDoctorSurface()
   },
   operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },
   operatorRoomDigest: () => { void refreshOperatorRoomDigest({ force: true }) },

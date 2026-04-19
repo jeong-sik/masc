@@ -5,6 +5,63 @@
 
     @since 2.62.0 *)
 
+(** Issue #8480: hand-mirrored from
+    [Keeper_tool_pr_review.valid_pr_review_event_strings]. Direct
+    dependency would create a cycle (Tool_shard -> Keeper_tool_pr_review
+    -> Keeper_alerting -> Tool_shard). The sync regression test
+    [test_types.ml :: pr_review_event_ssot] asserts these stay in
+    lock-step so adding a new event in keeper_tool_pr_review.ml fails
+    the test before shipping with a stale schema. *)
+let pr_review_event_enum_strings =
+  [ "COMMENT"; "APPROVE"; "REQUEST_CHANGES" ]
+
+(** Issue #8484: hand-mirrored from
+    [Keeper_exec_memory.valid_memory_search_source_strings]. Direct
+    dependency would risk a Tool_shard -> Keeper_* -> Tool_shard cycle
+    (same shape as #8467 / #8480), so this stays a local mirror with a
+    sync regression test in [test_types.ml :: memory_search_source_ssot]. *)
+let memory_search_source_enum_strings =
+  [ "memory"; "history"; "all" ]
+
+(** Issue #8527: hand-mirrored from
+    [Keeper_memory_policy.valid_memory_kind_strings] (derived from
+    [kind_caps ()]). Same cycle-avoidance pattern as #8467 / #8480 / #8484.
+    Previous hand-list dropped [long_term] even though
+    [keeper_memory_bank] actively writes long_term rows — LLMs could
+    not filter for the very rows the system writes. Sync regression
+    test in [test_types.ml :: memory_kind_ssot] catches drift. *)
+let memory_kind_enum_strings =
+  [ "constraints"; "decision"; "next"; "goal"; "progress"; "open_question"; "long_term" ]
+
+(** Issue #8490: hand-mirrored from
+    [Keeper_exec_fs.valid_fs_write_mode_strings]. Direct dependency
+    would risk a Tool_shard -> Keeper_* -> Tool_shard cycle (same
+    shape as #8467 / #8480 / #8484). Sync regression test in
+    [test_types.ml :: fs_write_mode_ssot] catches drift. *)
+let fs_write_mode_enum_strings =
+  [ "overwrite"; "append" ]
+
+(** Issue #8513: hand-mirrored from
+    [Board_dispatch.valid_sort_order_strings] (#8453 SSOT). Direct
+    dependency would risk a Tool_shard -> Board_* -> Tool_shard cycle.
+    Sync regression test in [test_types.ml :: sort_order_schema_ssot]
+    catches drift. The schema previously hand-listed only 3 of 5 sort
+    orders (recent/hot/updated) — Trending and Discussed were dropped,
+    so LLM clients couldn't filter by them via schema validation even
+    though [sort_order_of_string_opt] accepts them. Same shape as
+    #8430 / #8471 / #8474 / #8493 REAL drift bugs. *)
+let sort_order_enum_strings =
+  [ "hot"; "trending"; "recent"; "updated"; "discussed" ]
+
+(** Issue #8506: hand-mirrored from
+    [Board_votes.valid_vote_direction_strings]. Direct dependency
+    would risk a Tool_shard -> Board_* -> Tool_shard cycle.  Sync
+    regression test in [test_types.ml :: vote_direction_ssot] catches
+    drift. Same shape as #8467 / #8480 / #8484 / #8490 mirror+sync
+    pattern. *)
+let vote_direction_enum_strings =
+  [ "up"; "down" ]
+
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;
@@ -62,15 +119,17 @@ string-interpolating your own keeper name.";
     name = "keeper_memory_search";
     description = "Search memory for past goals, decisions, progress, or conversation history. \
 Returns scored results with metadata. Default searches the structured memory bank. \
-Use 'kind' to filter (goal, decision, progress, next, open_question, constraints). \
+Use 'kind' to filter (goal, decision, progress, next, open_question, constraints, long_term). \
 Use source='history' for raw user messages, source='all' for both.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("query", `Assoc [("type", `String "string"); ("description", `String "keyword to search for")]);
-        ("kind", `Assoc [("type", `String "string"); ("enum", `List [`String "goal"; `String "decision"; `String "progress"; `String "next"; `String "open_question"; `String "constraints"]); ("description", `String "Filter by memory kind")]);
+        ("kind", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) memory_kind_enum_strings)); ("description", `String "Filter by memory kind")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "max results (1-10, default 5)")]);
-        ("source", `Assoc [("type", `String "string"); ("enum", `List [`String "memory"; `String "history"; `String "all"]); ("description", `String "Search scope: memory (default, structured notes), history (raw messages), or all")]);
+        (* Issue #8484: derive from local mirror that tracks
+           [Keeper_exec_memory.valid_memory_search_source_strings]. *)
+        ("source", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) memory_search_source_enum_strings)); ("description", `String "Search scope: memory (default, structured notes), history (raw messages), or all")]);
       ]);
       ("required", `List [`String "query"]);
     ];
@@ -131,7 +190,10 @@ and content preview for each post.";
       ("properties", `Assoc [
         ("hearth", `Assoc [("type", `String "string"); ("description", `String "Filter by topic channel (e.g. code-review, research)")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return (default: 20, max: 50)")]);
-        ("sort_by", `Assoc [("type", `String "string"); ("enum", `List [`String "recent"; `String "hot"; `String "updated"]); ("description", `String "Sort order (default: recent)")]);
+        (* Issue #8513: derive from local mirror tracking
+           [Board_dispatch.valid_sort_order_strings].  Schema used to
+           expose only 3 of 5 sort orders. *)
+        ("sort_by", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) sort_order_enum_strings)); ("description", `String "Sort order (default: recent)")]);
       ]);
     ];
   };
@@ -156,7 +218,9 @@ or disagreement with a proposal or finding.";
       ("type", `String "object");
       ("properties", `Assoc [
         ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID (format: p-xxxx...). Get from keeper_board_list results.")]);
-        ("direction", `Assoc [("type", `String "string"); ("enum", `List [`String "up"; `String "down"]); ("description", `String "Vote direction (default: up)")]);
+        (* Issue #8506: derive from local mirror that tracks
+           [Board_votes.valid_vote_direction_strings]. *)
+        ("direction", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) vote_direction_enum_strings)); ("description", `String "Vote direction (default: up)")]);
       ]);
       ("required", `List [`String "post_id"]);
     ];
@@ -268,7 +332,9 @@ Creates parent dirs.";
       ("properties", `Assoc [
         ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path to write")]);
         ("content", `Assoc [("type", `String "string"); ("description", `String "File content to write")]);
-        ("mode", `Assoc [("type", `String "string"); ("enum", `List [`String "overwrite"; `String "append"]); ("description", `String "Write mode (default: overwrite)")]);
+        (* Issue #8490: derive from local mirror that tracks
+           [Keeper_exec_fs.valid_fs_write_mode_strings]. *)
+        ("mode", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) fs_write_mode_enum_strings)); ("description", `String "Write mode (default: overwrite)")]);
       ]);
       ("required", `List [`String "path"; `String "content"]);
     ];
@@ -382,7 +448,13 @@ Pass the PR number as `pr_number` (preferred) or `number` (legacy alias).";
         ("pr_number", `Assoc [("type", `String "integer"); ("description", `String "PR number (preferred field name)")]);
         ("number", `Assoc [("type", `String "integer"); ("description", `String "PR number (legacy alias for pr_number)")]);
         ("body", `Assoc [("type", `String "string"); ("description", `String "Review body text")]);
-        ("event", `Assoc [("type", `String "string"); ("enum", `List [`String "COMMENT"; `String "APPROVE"; `String "REQUEST_CHANGES"]); ("description", `String "Review event type")]);
+        (* Issue #8480: mirrors [Keeper_tool_pr_review.valid_pr_review_event_strings].
+           Direct dependency would create a cycle (Tool_shard ->
+           Keeper_tool_pr_review -> Keeper_alerting -> Tool_shard), so the
+           sync regression test [test_types.ml :: pr_review_event_ssot]
+           asserts these stay in lock-step. Same pattern as #8467
+           (sandbox_profile / network_mode / shared_memory_scope). *)
+        ("event", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) pr_review_event_enum_strings)); ("description", `String "Review event type")]);
         ("path", `Assoc [("type", `String "string"); ("description", `String "File path for inline comment (optional)")]);
         ("line", `Assoc [("type", `String "integer"); ("description", `String "Line number for inline comment (optional)")]);
       ]);

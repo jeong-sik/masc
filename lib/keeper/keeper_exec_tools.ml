@@ -209,7 +209,7 @@ let execute_keeper_tool_call_with_outcome
                      "now_unix", `Float now_ts ]))
     | "keeper_context_status" ->
       success_tool_result
-        (Keeper_exec_memory.keeper_context_status_json ~meta ~ctx_work)
+        (Keeper_exec_memory.keeper_context_status_json ~config ~meta ~ctx_work)
     | "keeper_memory_search" ->
       success_tool_result
         (Keeper_exec_memory.keeper_memory_search_json ~config ~meta ~ctx_work ~args)

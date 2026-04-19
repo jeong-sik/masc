@@ -50,7 +50,12 @@ TLC = $(JAVA) $(JAVA_OPTS) \
 CLEAN_CFGS := $(shell find . -name '*.cfg' ! -name '*-buggy*.cfg' ! -name '*-ci.cfg' | sort)
 BUGGY_CFGS := $(shell find . -name '*-buggy*.cfg' | sort)
 
-.PHONY: check-all check-clean check-buggy check-bug-models check-keeper check-ecosystem check-boundary check-closure list
+.PHONY: check-all check-clean check-buggy check-bug-models check-keeper check-ecosystem check-boundary check-closure list clean clean-artefacts
+
+clean: clean-artefacts
+
+clean-artefacts:
+	@bash $(shell git rev-parse --show-toplevel)/scripts/cleanup-tlc-artifacts.sh
 
 check-all: check-clean check-buggy
 	@echo "=== All TLA+ specs passed ==="

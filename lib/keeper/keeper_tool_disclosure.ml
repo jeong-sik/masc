@@ -58,6 +58,22 @@ let unexpected_tool_names
          true))
 ;;
 
+(** [has_valid_tool_call ~unexpected_tool_names ~tool_names] returns
+    true iff at least one name in [tool_names] is absent from
+    [unexpected_tool_names] — i.e. at least one call is on the keeper
+    surface. Used by [Keeper_agent_run] (#8471) to decide whether a
+    turn mixing unknown tools with valid ones should hard-fail or
+    continue with a partial-tolerance WARN. *)
+let has_valid_tool_call
+      ~(unexpected_tool_names : string list)
+      ~(tool_names : string list)
+  : bool
+  =
+  let unexpected = Hashtbl.create (List.length unexpected_tool_names) in
+  List.iter (fun n -> Hashtbl.replace unexpected n ()) unexpected_tool_names;
+  List.exists (fun n -> not (Hashtbl.mem unexpected n)) tool_names
+;;
+
 type completion_contract =
   | Allow_text_or_tool
   | Require_tool_use

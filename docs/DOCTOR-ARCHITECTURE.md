@@ -1,10 +1,15 @@
 ---
 status: design
-last_verified: 2026-04-18
+last_verified: 2026-04-19
 code_refs:
   - sidecars/shared/gate_shared/doctor.py
   - sidecars/discord-bot/src/doctor.py
   - bin/main_eio.ml
+  - lib/doctor_dispatch.ml
+  - lib/server/server_routes_http_routes_dashboard.ml
+  - dashboard/src/components/doctor-panel.ts
+  - dashboard/src/components/lab-inspector.ts
+  - dashboard/src/tab-refresh.ts
 ---
 
 # Doctor 아키텍처
@@ -123,13 +128,78 @@ class AutoFix:
 
 | 계층 | Doctor | 구현 상태 |
 |------|--------|-----------|
-| OCaml 서버 | `main_eio.exe doctor` — 베이스 경로 / 활성 config root | 운영 중 (`docs/CONFIG-DOCTOR.md`) |
-| Discord sidecar | `python -m src doctor` | 이 PR |
-| Slack sidecar | `python -m src doctor` | 후속 |
-| Telegram sidecar | `python -m src doctor` | 후속 |
-| iMessage sidecar | `python -m src doctor` | 후속 |
-| CLI connector | `python -m src doctor` | 후속 |
-| 대시보드 | `/api/v1/dashboard/doctor` 취합 패널 | 후속 |
+| OCaml 서버 | `masc-mcp doctor config` — 베이스 경로 / 활성 config root | 운영 중 (`docs/CONFIG-DOCTOR.md`) |
+| Discord sidecar | `masc-mcp doctor sidecar discord` ↔ `python -m src doctor` | 운영 중 |
+| Slack sidecar | `masc-mcp doctor sidecar slack` ↔ `python -m src doctor` | 운영 중 |
+| Telegram sidecar | `masc-mcp doctor sidecar telegram` ↔ `python -m src doctor` | 운영 중 |
+| iMessage sidecar | `masc-mcp doctor sidecar imessage` ↔ `python -m src doctor` | 운영 중 |
+| CLI connector | `masc-mcp doctor sidecar cli` ↔ `python -m src doctor` | 운영 중 |
+| 전 계층 fan-out | `masc-mcp doctor all` (+ `--json` envelope) | 운영 중 |
+| 대시보드 Backend | `GET /api/v1/dashboard/doctor` | 운영 중 (phase 1 subprocess) |
+| 대시보드 Frontend | Lab → inspector → Doctor sub-tab | 운영 중 |
+
+### Dispatch
+
+```
+masc-mcp doctor                     # default → config (backward-compat)
+masc-mcp doctor config              # base path / config root 진단
+masc-mcp doctor sidecar <name>      # python -m src doctor 를 해당 sidecar 디렉터리에서 실행
+masc-mcp doctor sidecar <name> --json
+masc-mcp doctor all                 # config + 5 sidecar 연쇄 실행 + aggregate 요약
+```
+
+지원 sidecar 이름: `discord`, `slack`, `telegram`, `imessage`, `cli`.
+
+구현은 `lib/doctor_dispatch.ml` (pure mapping + `aggregate_exit_code`) +
+`bin/main_eio.ml` 의 `doctor_sidecar_exit` / `doctor_all_exit`. Python 실행
+파일은 `MASC_PYTHON` env 로 override 할 수 있고, 기본값은 `python3`.
+stdout/stderr 은 그대로 forward 되며 exit code 도 그대로 전달된다.
+
+`doctor all` 은 각 Doctor 의 stdout 을 그대로 흘려보낸 뒤 마지막에
+
+```
+========================================
+합계: 6 Doctor · 정상 3 · 경고 2 · 오류 1
+config=정상 · discord=경고 · slack=경고 · telegram=오류 · imessage=정상 · cli=정상
+========================================
+```
+
+형태의 aggregate 요약을 붙인다. 종합 exit code 는 `max(all rcs)`
+(`error>warn>ok`) 로 계산되며, 종료 신호나 알 수 없는 rc (`<0` 또는 `>2`) 는
+`error` 로 상향 처리된다.
+
+`doctor all --json` 은 envelope 형태로 모든 Doctor 의 원본 JSON shape 을
+보존한 채 취합한다. 대시보드 `/api/v1/dashboard/doctor` 패널에서 이 포맷을
+파싱한다:
+
+```json
+{
+  "title": "MASC Doctor (전 계층)",
+  "doctors": [
+    {
+      "name": "config",
+      "kind": "config",
+      "exit_code": 1,
+      "payload": { "status": "warn", "init_state": "initialized", ... }
+    },
+    {
+      "name": "discord",
+      "kind": "sidecar",
+      "exit_code": 2,
+      "payload": { "title": "Discord Sidecar Doctor", "checks": [...], "summary": {...} }
+    }
+  ],
+  "summary": { "total": 6, "ok": 3, "warn": 2, "error": 1 },
+  "exit_code": 2
+}
+```
+
+- `kind` 는 `"config"` | `"sidecar"` 2종 — UI 가 payload shape 을 구분.
+- `payload` 는 각 doctor 의 기존 JSON 을 그대로 담는다 — client 가 기존
+  schema 를 재활용할 수 있게.
+- sidecar 가 비-JSON stdout 을 뱉거나 subprocess 가 crash 하면 payload 는
+  `{"raw": ..., "parse_error": ...}` 또는 `{"error": ...}` 로 degrade 된다
+  (exit_code 는 2).
 
 ## Discord Sidecar Doctor 체크 목록
 
@@ -160,12 +230,64 @@ class AutoFix:
 5. **한국어 설명 우선**: hint/message 는 운영자가 바로 따라할 수 있는
    구체적인 행동으로 쓴다 ("설정 확인" 같은 모호한 문장은 금지).
 
-## 대시보드 패널 (후속)
+## 대시보드 패널
 
-계획: `/api/v1/dashboard/doctor` 가 등록된 모든 Doctor 를 병렬 실행하고
-SSE 로 결과를 흘려보낸다. 대시보드 쪽은 각 커넥터별로 세부 섹션을 접어두고,
-red/yellow 가 있을 때만 자동으로 펼친다. `--fix` 버튼은 `callback_available`
-이 `true` 인 체크에만 노출한다.
+### Backend endpoint (phase 1 — 운영 중)
+
+`GET /api/v1/dashboard/doctor` 가 `masc-mcp doctor all --json` 과 동일한
+envelope 을 반환한다 (참조: [Dispatch 섹션](#dispatch)).
+
+```
+GET /api/v1/dashboard/doctor
+→ 200
+{
+  "title": "MASC Doctor (전 계층)",
+  "doctors": [{name, kind, exit_code, payload}, ...],
+  "summary": {total, ok, warn, error},
+  "exit_code": 0|1|2
+}
+```
+
+구현은 단순한 subprocess forward 로 시작했다:
+- Server handler 가 `Sys.argv.(0) doctor all --json` 을 `Unix.open_process_in`
+  으로 spawn 해 stdout 을 HTTP body 에 그대로 전달.
+- Server 는 repo root 에서 실행돼야 CLI 가 `sidecars/` 를 찾을 수 있다.
+  이는 phase 2 에서 library 추출 + Eio.Process ~cwd 로 제거 예정.
+- 실패 시 `{error, hint}` 로 5xx 반환 — 운영자가 원인 즉시 확인 가능.
+
+### Frontend panel (운영 중 — phase 1)
+
+Lab 탭 → inspector → **Doctor** sub-tab 에서 확인한다. 구현:
+
+- `dashboard/src/components/doctor-panel.ts` — types (`DoctorEnvelope`,
+  `DoctorEntry`, `DoctorSummary`), pure helpers (`severityLabel`,
+  `severityChipClass`, `summaryLine`, `doctorHeading`), async resource
+  (`loadDoctor` / `refreshDoctor`), React 컴포넌트
+  (`<DoctorPanel />`, `<DoctorEntryCard />`).
+- `dashboard/src/components/lab-inspector.ts` — "Doctor" sub-tab 등록.
+- `dashboard/src/tab-refresh.ts` — inspector refresh 파이프라인에
+  `refreshDoctorSurface` 합류. 사용자가 Lab 돌아올 때 자동 갱신.
+
+현재 UI:
+
+- Summary header — "N Doctor · 정상 X · 경고 Y · 오류 Z" + 새로고침 버튼
+- 6 doctor grid (config + 5 sidecar) — 각자 severity chip + exit code
+
+Follow-up (phase 2):
+
+- Drill-down — sidecar `checks[]` / config `warnings[]` 펼침 (`kind`
+  discriminator 로 payload 분기)
+- `--fix` 버튼 — `callback_available` 인 check 한해 AutoFix trigger
+- SSE live update — 현재는 inspector 복귀 시 refresh
+
+### Phase 2 (후속 — in-process)
+
+- `bin/main_eio.ml` 의 envelope 조립 로직을 `lib/doctor_dispatch.ml` 로
+  추출 (`build_envelope ~base_path ()`)
+- `capture_sidecar_json` 의 `Sys.chdir` 을 `Eio.Process.spawn ~cwd` 로 교체
+  (server 멀티스레드에서 chdir race 방지)
+- Server endpoint 가 subprocess 대신 in-process 함수 호출 → PATH / cwd 의존
+  제거 + latency 절감
 
 ## 참고
 

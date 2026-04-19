@@ -53,7 +53,12 @@ let snapshot_schema ~remote =
             schema_properties
               [
                 ("actor", `Assoc [ ("type", `String "string") ]);
-                ("view", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "summary"; `String "keepers"; `String "messages"; `String "full" ]) ]);
+                (* Issue #8471: derive enum from Variant SSOT
+                   ([Operator_control_snapshot.valid_snapshot_view_strings]).
+                   Sessions was missing from the hand-written list before
+                   this fix; the parser accepted "sessions" but the
+                   schema rejected it. *)
+                ("view", `Assoc [ ("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) Operator_control_snapshot.valid_snapshot_view_strings)) ]);
                 ("include_messages", `Assoc [ ("type", `String "boolean") ]);
                 ("include_keepers", `Assoc [ ("type", `String "boolean") ]);
               ] );

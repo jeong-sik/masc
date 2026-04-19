@@ -28,6 +28,17 @@ type verdict =
   | Approve
   | Reject of string
 
+(** Issue #8436: schema enum used to be hand-rolled as a 2-element
+    string list. Payload-bearing [Reject _] prevents the simple
+    [List.map] trick. Witness function below ensures every variant
+    maps to a name in [valid_verdict_strings]. Adding a 3rd
+    constructor will fail compilation in [verdict_constructor_name]. *)
+let verdict_constructor_name = function
+  | Approve -> "APPROVE"
+  | Reject _ -> "REJECT"
+
+let valid_verdict_strings = [ "APPROVE"; "REJECT" ]
+
 type gate =
   | Length
   | Excuse
@@ -216,7 +227,9 @@ let report_review_verdict_schema : Types.tool_schema =
       "properties", `Assoc [
         "verdict", `Assoc [
           "type", `String "string";
-          "enum", `List [`String "APPROVE"; `String "REJECT"];
+          (* Issue #8436: derived from Variant SSOT. Hand-rolled enum
+             risks dropping a constructor on extension. *)
+          "enum", `List (List.map (fun s -> `String s) valid_verdict_strings);
           "description", `String "APPROVE if notes describe real work, REJECT if vague or avoidant";
         ];
         "reason", `Assoc [

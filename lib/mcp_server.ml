@@ -413,20 +413,54 @@ let read_event_lines config ~limit =
     ) month_dirs;
     List.rev !collected
 
+(** Issue #8474: FSM transition matrix.  Each entry mirrors a match-arm
+    in [Coord_task.transition_task_r] (lib/coord/coord_task.ml ~line
+    831).  Verifier-FSM rows ([submit_for_verification],
+    [approve_verification], [reject_verification]) are gated at runtime
+    by [MASC_VERIFICATION_FSM_ENABLED] but listed unconditionally so
+    the published schema matches the action enum
+    ([Types.valid_task_action_strings] via #8354).  The regression test
+    [test_types.ml :: fsm_transition_matrix] asserts every action
+    listed by [Coord_task.valid_next_actions_for_status] for any
+    reachable status appears here, so adding a 4th verifier action
+    fails the test before it ships with a stale schema. *)
+let task_fsm_transitions : (string * string list * string * string option) list =
+  [
+    ("claim",                   ["todo"],                                  "claimed",                None);
+    ("start",                   ["claimed"],                               "in_progress",            None);
+    ("done",                    ["claimed"; "in_progress"],                "done",                   None);
+    ("cancel",                  ["todo"; "claimed"; "in_progress"],        "cancelled",              None);
+    ("release",                 ["claimed"; "in_progress"],                "todo",                   None);
+    (* Action names match [Types.task_action_to_string] (SSOT):
+       Approve_verification -> "approve", Reject_verification -> "reject". *)
+    ("submit_for_verification", ["claimed"; "in_progress"],                "awaiting_verification",  Some "MASC_VERIFICATION_FSM_ENABLED + verifier-FSM only");
+    ("approve",                 ["awaiting_verification"],                 "done",                   Some "MASC_VERIFICATION_FSM_ENABLED + verifier != assignee");
+    ("reject",                  ["awaiting_verification"],                 "in_progress",            Some "MASC_VERIFICATION_FSM_ENABLED + verifier != assignee");
+  ]
+
+let task_fsm_transition_to_json (action, froms, to_, gate) =
+  let base =
+    [ ("action", `String action)
+    ; ("from", `List (List.map (fun s -> `String s) froms))
+    ; ("to", `String to_)
+    ]
+  in
+  let fields = match gate with
+    | None -> base
+    | Some g -> base @ [("gated_by", `String g)]
+  in
+  `Assoc fields
+
 let schema_json =
   (* Issue #8354: enums derived from Variant SSOT in [Types]. Hand-rolled
      lists used to drop [awaiting_verification] and the verification
-     actions ([submit_for_verification] / [approve] / [reject]). *)
+     actions ([submit_for_verification] / [approve] / [reject]).
+     Issue #8474: transitions matrix derived from [task_fsm_transitions]
+     (single source of truth) — used to drop the 3 verifier-FSM rows. *)
   `Assoc [
     ("task_statuses", `List (List.map (fun s -> `String s) Types.valid_task_status_strings));
     ("actions", `List (List.map (fun s -> `String s) Types.valid_task_action_strings));
-    ("transitions", `List [
-      `Assoc [("action", `String "claim"); ("from", `List [`String "todo"]); ("to", `String "claimed")];
-      `Assoc [("action", `String "start"); ("from", `List [`String "claimed"]); ("to", `String "in_progress")];
-      `Assoc [("action", `String "done"); ("from", `List [`String "claimed"; `String "in_progress"]); ("to", `String "done")];
-      `Assoc [("action", `String "cancel"); ("from", `List [`String "todo"; `String "claimed"; `String "in_progress"]); ("to", `String "cancelled")];
-      `Assoc [("action", `String "release"); ("from", `List [`String "claimed"; `String "in_progress"]); ("to", `String "todo")];
-    ]);
+    ("transitions", `List (List.map task_fsm_transition_to_json task_fsm_transitions));
     ("cas", `Assoc [
       ("field", `String "backlog.version");
       ("parameter", `String "expected_version");
@@ -442,6 +476,9 @@ let schema_markdown =
     "- done: claimed/in_progress(by you) -> done";
     "- cancel: todo/claimed/in_progress(by you) -> cancelled";
     "- release: claimed/in_progress(by you) -> todo";
+    "- submit_for_verification: claimed/in_progress(by you) -> awaiting_verification (MASC_VERIFICATION_FSM_ENABLED)";
+    "- approve: awaiting_verification -> done (verifier != assignee, MASC_VERIFICATION_FSM_ENABLED)";
+    "- reject: awaiting_verification -> in_progress (verifier != assignee, MASC_VERIFICATION_FSM_ENABLED)";
     "";
     "CAS guard: expected_version == backlog.version";
   ]

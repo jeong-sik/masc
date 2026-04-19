@@ -16,31 +16,34 @@ let dir_mu = Eio.Mutex.create ()
 let ensured_dirs : (string, unit) Hashtbl.t = Hashtbl.create 16
 
 let ensure_dir (path : string) : string =
-  let result =
-    Eio_guard.with_mutex dir_mu (fun () ->
-      if not (Hashtbl.mem ensured_dirs path) || not (Fs_compat.file_exists path) then
-        match
-          try
-            Fs_compat.mkdir_p path;
-            Hashtbl.replace ensured_dirs path ();
-            Ok path
-          with
-          | Eio.Cancel.Cancelled _ as exn ->
-              Log.Keeper.warn "keeper_fs: ensure_dir cancelled path=%s" path;
-              Error (exn, Printexc.get_raw_backtrace ())
-          | exn ->
-              Log.Keeper.warn "keeper_fs: ensure_dir failed path=%s: %s"
-                path (Printexc.to_string exn);
-              Error (exn, Printexc.get_raw_backtrace ())
+  (* Capture exceptions inside the mutex body so the lock exits normally,
+     then re-raise after release. Escaping an exception from
+     Eio.Mutex.use_rw poisons the mutex and breaks all subsequent
+     ensure_dir calls in the same process (Issue #8475: fleet-test
+     isolation cascade failures). *)
+  let deferred_exn = ref None in
+  Eio_guard.with_mutex dir_mu (fun () ->
+    if not (Hashtbl.mem ensured_dirs path) || not (Fs_compat.file_exists path) then begin
+      match
+        try
+          Fs_compat.mkdir_p path;
+          Hashtbl.replace ensured_dirs path ();
+          Ok ()
         with
-        | Ok _ as ok -> ok
-        | Error _ as err -> err
-      else
-        Ok path)
-  in
-  match result with
-  | Ok path -> path
-  | Error (exn, bt) -> Printexc.raise_with_backtrace exn bt
+        | Eio.Cancel.Cancelled _ as exn ->
+            Log.Keeper.warn "keeper_fs: ensure_dir cancelled path=%s" path;
+            Error (exn, Printexc.get_raw_backtrace ())
+        | exn ->
+            Log.Keeper.warn "keeper_fs: ensure_dir failed path=%s: %s"
+              path (Printexc.to_string exn);
+            Error (exn, Printexc.get_raw_backtrace ())
+      with
+      | Ok () -> ()
+      | Error err -> deferred_exn := Some err
+    end);
+  match !deferred_exn with
+  | Some (exn, bt) -> Printexc.raise_with_backtrace exn bt
+  | None -> path
 
 let invalidate_dir (path : string) : unit =
   Eio_guard.with_mutex dir_mu (fun () ->

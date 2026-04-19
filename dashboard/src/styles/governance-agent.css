@@ -4,7 +4,7 @@
   background:
     linear-gradient(
       135deg,
-      rgba(10, 22, 40, 0.95) 0%,
+      var(--backdrop-modal) 0%,
       rgba(16, 28, 52, 0.88) 100%
     );
   box-shadow:

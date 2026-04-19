@@ -16,26 +16,55 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 _shared_root = Path(__file__).resolve().parent.parent.parent / "shared"
 if str(_shared_root) not in sys.path:
     sys.path.insert(0, str(_shared_root))
 
+# httpx is required for the doctor itself. pydantic_settings and
+# python-telegram-bot are NOT imported at module top so the doctor can
+# still run and report them as missing instead of crashing.
 import httpx  # noqa: E402
-from pydantic import ValidationError  # noqa: E402
 
 from gate_shared import AutoFix, Check, Doctor, Severity  # noqa: E402
-from gate_shared.doctor import NETWORK_TIMEOUT_SEC  # noqa: E402
+from gate_shared.doctor import (  # noqa: E402
+    NETWORK_TIMEOUT_SEC,
+    check_dependencies_installed,
+)
 
-from .config import BotConfig, get_config  # noqa: E402
+if TYPE_CHECKING:
+    from .config import BotConfig
 
 # Telegram 봇 토큰은 `<digits>:<base64url-ish>` 규약. BotFather 가 발급하는 포맷.
 _TG_TOKEN_RE = re.compile(r"^\d{6,}:[A-Za-z0-9_-]{30,}$")
+
+_REQUIRED_PACKAGES = (
+    "python-telegram-bot",
+    "pydantic",
+    "pydantic-settings",
+    "httpx",
+    "httpx-sse",
+)
+
+
+def _config_or_none() -> BotConfig | None:
+    try:
+        from pydantic import ValidationError  # noqa: PLC0415
+
+        from .config import get_config  # noqa: PLC0415
+    except ImportError:
+        return None
+    try:
+        return get_config()
+    except (ValidationError, OSError):
+        return None
 
 
 async def run_doctor() -> Doctor:
     doc = Doctor("Telegram Sidecar Doctor")
     doc.register(check_python_version)
+    doc.register(check_dependencies_installed(_REQUIRED_PACKAGES))
     doc.register(check_telegram_lib_version)
     doc.register(check_bot_token)
     doc.register(check_env_gate_url)
@@ -79,13 +108,6 @@ async def check_telegram_lib_version() -> Check:
         message="python-telegram-bot 미설치.",
         hint="pip install -r requirements.txt",
     )
-
-
-def _config_or_none() -> BotConfig | None:
-    try:
-        return get_config()
-    except (ValidationError, OSError):
-        return None
 
 
 def _mask(raw: str) -> str:

@@ -1,5 +1,5 @@
 name: Setup OCaml Toolchain
-description: Shared Linux OCaml toolchain bootstrap that avoids upstream opam binary gaps.
+description: Shared OCaml toolchain bootstrap with Linux local-opam pinning and macOS parity.
 
 inputs:
   ocaml-compiler:
@@ -18,17 +18,20 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Bootstrap local opam switch
+    - name: Setup OCaml (macOS)
+      if: runner.os == 'macOS'
+      uses: ocaml/setup-ocaml@v3.6.0
+      with:
+        ocaml-compiler: ${{ inputs.ocaml-compiler }}
+        dune-cache: ${{ inputs.dune-cache }}
+
+    - name: Bootstrap local opam switch (Linux)
+      if: runner.os == 'Linux'
       shell: bash
       env:
         OCAML_COMPILER_INPUT: ${{ inputs.ocaml-compiler }}
       run: |
         set -euo pipefail
-
-        if [ "$(uname -s)" != "Linux" ]; then
-          echo "setup-ocaml-toolchain currently supports Linux runners only" >&2
-          exit 1
-        fi
 
         case "${OCAML_COMPILER_INPUT}" in
           5.4|5.4.x)
@@ -98,3 +101,10 @@ runs:
         switch_prefix="$(opam var prefix --switch="${switch_name}")"
         echo "OPAMSWITCH=${switch_name}" >> "${GITHUB_ENV}"
         echo "${switch_prefix}/bin" >> "${GITHUB_PATH}"
+
+    - name: Reject unsupported runner OS
+      if: runner.os != 'Linux' && runner.os != 'macOS'
+      shell: bash
+      run: |
+        echo "setup-ocaml-toolchain supports Linux and macOS runners only" >&2
+        exit 1

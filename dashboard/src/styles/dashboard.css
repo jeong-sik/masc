@@ -72,7 +72,7 @@
 }
 /* ── Agent card hover ── */
 .agent-card:hover {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  box-shadow: 0 2px 8px var(--black-20);
   transform: translateY(-2px);
   border-color: var(--accent);
 }
@@ -88,7 +88,7 @@
   content-visibility: auto;
   contain-intrinsic-size: auto 120px;
   transition: border-color 0.2s, transform 0.2s, background 0.2s;
-  &:hover { border-color: rgba(71, 184, 255, 0.26); background: var(--white-6); transform: translateY(-1px); }
+  &:hover { border-color: var(--accent-30); background: var(--white-6); transform: translateY(-1px); }
 }
 
 /* Vote column */
@@ -164,12 +164,12 @@
 }
 
 .swimlane-vis-container .vis-time-axis .vis-text {
-  color: #94a3b8;
+  color: var(--slate-400);
   font-size: 10px;
 }
 
 .swimlane-vis-container .vis-labelset .vis-label {
-  color: #cbd5e1;
+  color: var(--text-slate-light);
   font-size: 11px;
   border-bottom: 1px solid rgba(100, 116, 139, 0.12);
 }
@@ -180,7 +180,7 @@
 }
 
 .swimlane-vis-container .vis-labelset .vis-label.activity-swimlane-group-highlighted {
-  color: #fbbf24;
+  color: var(--warn);
 }
 
 .swimlane-vis-container .vis-panel.vis-center,
@@ -192,14 +192,14 @@
 }
 
 .swimlane-vis-container .vis-current-time {
-  background-color: #f43f5e;
+  background-color: var(--rose);
 }
 
 .swimlane-vis-container .vis-tooltip {
   background-color: rgba(15, 23, 42, 0.95);
   border: 1px solid rgba(100, 116, 139, 0.3);
   border-radius: 6px;
-  color: #e2e8f0;
+  color: var(--frost-100);
   font-size: 11px;
   padding: 8px 10px;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
@@ -207,7 +207,7 @@
 }
 
 .swimlane-vis-container .vis-item.vis-selected {
-  border-color: #fbbf24;
+  border-color: var(--warn);
   border-width: 2px;
   box-shadow: 0 0 5px rgba(251, 191, 36, 0.5);
   z-index: 10;
@@ -221,7 +221,7 @@
 
 .card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(71, 184, 255, 0.08);
+  box-shadow: 0 8px 24px var(--black-50), 0 2px 8px rgba(71, 184, 255, 0.08);
   border-color: rgba(71, 184, 255, 0.25);
 }
 

@@ -2,6 +2,30 @@
 
 open Types
 
+(** Issue #8430: canonical [tool_preset] strings. Mirrors
+    [Keeper_types.valid_tool_preset_strings]. Direct dependency would
+    create a cycle (Keeper_schema -> Keeper_types -> Keeper_types_profile
+    -> Keeper_schema), so the test in [test_types.ml :: tool_preset_ssot]
+    asserts these two lists stay in sync. *)
+let tool_preset_enum_strings =
+  [ "minimal"; "social"; "messaging"; "coding"; "research"; "delivery"; "full" ]
+
+(** Issue #8467: canonical strings for [Keeper_types_profile.sandbox_profile],
+    [network_mode], and [shared_memory_scope]. Same cycle constraint as
+    [tool_preset_enum_strings] above — Keeper_schema cannot depend on
+    Keeper_types_profile directly because the latter [include]s
+    Keeper_config and is otherwise downstream. The test
+    [test_types.ml :: keeper_profile_enum_ssot] asserts these mirrors
+    stay in sync with [valid_*_strings] so adding a constructor in
+    Keeper_types_profile fails the test instead of silently dropping
+    from the JSON Schema. *)
+let sandbox_profile_enum_strings =
+  [ "legacy_local"; "docker_hardened" ]
+let network_mode_enum_strings =
+  [ "none"; "inherit" ]
+let shared_memory_scope_enum_strings =
+  [ "disabled"; "room" ]
+
 let string_array_schema =
   `Assoc [
     ("type", `String "array");
@@ -113,7 +137,13 @@ let keeper_schemas : tool_schema list = [
         ("tool_preset", `Assoc [
           ("type", `String "string");
           ("description", `String "Compatibility field. Use tool_access.kind='preset' for new callers.");
-          ("enum", `List [`String "minimal"; `String "messaging"; `String "coding"; `String "research"; `String "full"]);
+          (* Issue #8430: mirrors [Keeper_types.valid_tool_preset_strings].
+             Direct dependency would create a cycle
+             (Keeper_schema -> Keeper_types -> Keeper_types_profile ->
+             Keeper_schema). Test [test_types.ml :: tool_preset_ssot]
+             asserts the two stay in sync — if either side adds a value
+             the other diverges. Used to drop Social and Delivery. *)
+          ("enum", `List (List.map (fun s -> `String s) tool_preset_enum_strings));
         ]);
         ("tool_custom_allowlist", `Assoc [
           ("type", `String "array");
@@ -240,17 +270,17 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("sandbox_profile", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "legacy_local"; `String "docker_hardened"]);
+          ("enum", `List (List.map (fun s -> `String s) sandbox_profile_enum_strings));
           ("description", `String "Filesystem/process sandbox profile. 'legacy_local' keeps the current local execution model. 'docker_hardened' runs keeper_bash in an ephemeral hardened Docker container rooted at the keeper playground.");
         ]);
         ("network_mode", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "none"; `String "inherit"]);
+          ("enum", `List (List.map (fun s -> `String s) network_mode_enum_strings));
           ("description", `String "Network policy associated with the sandbox profile. 'none' is valid only with sandbox_profile='docker_hardened'.");
         ]);
         ("shared_memory_scope", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "disabled"; `String "room"]);
+          ("enum", `List (List.map (fun s -> `String s) shared_memory_scope_enum_strings));
           ("description", `String "Typed shared-memory lane policy. 'room' enables keeper-authorized masc_team_memory_* access on the flattened default namespace.");
         ]);
         ("allowed_paths", `Assoc [
@@ -263,7 +293,13 @@ let keeper_schemas : tool_schema list = [
             "Canonical tool policy. Prefer this over tool_preset/tool_also_allow. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
         ("tool_preset", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "minimal"; `String "messaging"; `String "coding"; `String "research"; `String "full"]);
+          (* Issue #8430: mirrors [Keeper_types.valid_tool_preset_strings].
+             Direct dependency would create a cycle
+             (Keeper_schema -> Keeper_types -> Keeper_types_profile ->
+             Keeper_schema). Test [test_types.ml :: tool_preset_ssot]
+             asserts the two stay in sync — if either side adds a value
+             the other diverges. Used to drop Social and Delivery. *)
+          ("enum", `List (List.map (fun s -> `String s) tool_preset_enum_strings));
           ("description", `String "Compatibility field. Use tool_access.kind='preset' for new callers.");
         ]);
         ("tool_custom_allowlist", `Assoc [

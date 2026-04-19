@@ -27,6 +27,22 @@ val read_keeper_memory_summary :
   recent_limit:int ->
   keeper_memory_summary
 
+val read_memory_horizon_counts :
+  Coord.config ->
+  name:string ->
+  max_bytes:int ->
+  max_lines:int ->
+  (string * int) list
+
+val read_recent_memory_texts :
+  Coord.config ->
+  name:string ->
+  horizon:string ->
+  max_bytes:int ->
+  max_lines:int ->
+  limit:int ->
+  string list
+
 (** {1 Query Detection} *)
 
 val is_memory_recall_query : string -> bool

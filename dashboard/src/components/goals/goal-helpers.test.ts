@@ -10,6 +10,8 @@ import {
   filterTasksByQuery,
   resetTaskSearch,
   taskSearchQuery,
+  countAwaitingVerificationTasks,
+  countAwaitingVerificationInTree,
 } from './goal-helpers'
 import type { Task } from '../../types'
 
@@ -252,5 +254,55 @@ describe('resetTaskSearch', () => {
     taskSearchQuery.value = 'something'
     resetTaskSearch()
     expect(taskSearchQuery.value).toBe('')
+  })
+})
+
+// ================================================================
+// countAwaitingVerificationTasks / countAwaitingVerificationInTree
+// ================================================================
+
+describe('countAwaitingVerificationTasks', () => {
+  it('counts only awaiting_verification statuses', () => {
+    const tasks = [
+      { status: 'todo' },
+      { status: 'awaiting_verification' },
+      { status: 'done' },
+      { status: 'awaiting_verification' },
+    ]
+    expect(countAwaitingVerificationTasks(tasks)).toBe(2)
+  })
+
+  it('returns 0 for empty task list', () => {
+    expect(countAwaitingVerificationTasks([])).toBe(0)
+  })
+})
+
+describe('countAwaitingVerificationInTree', () => {
+  it('sums awaiting counts across nested children', () => {
+    const tree = [
+      {
+        tasks: [{ status: 'awaiting_verification' }, { status: 'done' }],
+        children: [
+          {
+            tasks: [{ status: 'awaiting_verification' }],
+            children: [
+              {
+                tasks: [{ status: 'awaiting_verification' }, { status: 'todo' }],
+                children: [],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        tasks: [{ status: 'done' }],
+        children: [],
+      },
+    ]
+    expect(countAwaitingVerificationInTree(tree)).toBe(3)
+  })
+
+  it('returns 0 for empty tree', () => {
+    expect(countAwaitingVerificationInTree([])).toBe(0)
   })
 })

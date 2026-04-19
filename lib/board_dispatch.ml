@@ -8,6 +8,37 @@
 
 type sort_order = Hot | Trending | Recent | Updated | Discussed
 
+(** Issue #8449: SSOT helpers for [sort_order]. Three call sites used to
+    own private parsers and a separate Variant in [Tool_board]; this PR
+    A introduces the canonical helpers here so the schema enum can derive
+    from the Variant. PR B will collapse the duplicate Variant; PR C
+    will route [server_utils] through these parsers.
+
+    All constructors are nullary so [List.map] works. *)
+let all_sort_orders = [ Hot; Trending; Recent; Updated; Discussed ]
+
+let sort_order_to_string = function
+  | Hot -> "hot"
+  | Trending -> "trending"
+  | Recent -> "recent"
+  | Updated -> "updated"
+  | Discussed -> "discussed"
+
+let valid_sort_order_strings = List.map sort_order_to_string all_sort_orders
+
+(** Lenient parser: canonical names plus documented aliases that the
+    three pre-existing parsers (Tool_board.sort_order_of_string,
+    Tool_board.parse_sort_order, server_utils inline) all accept.
+    Aliases: new=Recent, active=Updated, comments=Discussed. *)
+let sort_order_of_string_opt s =
+  match String.lowercase_ascii (String.trim s) with
+  | "hot" -> Some Hot
+  | "trending" -> Some Trending
+  | "recent" | "new" -> Some Recent
+  | "updated" | "active" -> Some Updated
+  | "discussed" | "comments" -> Some Discussed
+  | _ -> None
+
 type board_backend =
   | Jsonl of Board.store
 

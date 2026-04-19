@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import json
 import sys
 from collections.abc import Awaitable, Callable, Iterable, Sequence
@@ -32,8 +33,12 @@ __all__ = [
     "Check",
     "CheckFn",
     "Doctor",
+    "FixOutcome",
     "NETWORK_TIMEOUT_SEC",
     "Severity",
+    "check_dependencies_installed",
+    "exit_code_for",
+    "render_fix_outcomes",
     "render_pretty",
     "render_json",
 ]
@@ -55,6 +60,21 @@ class AutoFix:
     description: str
     command: str | None = None
     callback: Callable[[], Awaitable[None]] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FixOutcome:
+    """``auto_fix.callback`` 실행 결과.
+
+    fire-and-forget 가 아니라 어떤 fix 가 시도됐고, 성공·실패했는지를
+    렌더러에 전달해 운영자가 "--fix 이후 여전히 실패" 와 "--fix 가 에러로
+    멈춤" 을 구분할 수 있게 한다.
+    """
+
+    check_name: str
+    description: str
+    success: bool
+    message: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,19 +116,116 @@ def _colorize(text: str, sev: Severity, *, use_color: bool) -> str:
     return f"{_COLOR[sev]}{text}{_RESET}"
 
 
+def _banner(counts: dict[Severity, int], *, use_color: bool) -> str:
+    """검사 결과를 한 줄로 요약한 상단 배너. ``flutter doctor`` 헤드라인 풍.
+
+    error > warn > (모두 skip) > ok 순으로 우선 판정한다. skip 만 있을 때
+    "통과" 로 표시하면 전제가 깨진 상태를 정상처럼 오해하게 된다.
+    """
+
+    n_err = counts[Severity.error]
+    n_warn = counts[Severity.warn]
+    n_ok = counts[Severity.ok]
+    n_skip = counts[Severity.skip]
+    actionable = n_ok + n_warn + n_err  # skip 은 "전제 부족" — 통과도 실패도 아님
+    if n_err > 0:
+        return _colorize(
+            f"✗ 심각한 문제 {n_err}개 — 실행 전 점검이 필요합니다.",
+            Severity.error,
+            use_color=use_color,
+        )
+    if n_warn > 0:
+        return _colorize(
+            f"! 주의 항목 {n_warn}개 — 실행은 가능합니다.",
+            Severity.warn,
+            use_color=use_color,
+        )
+    if actionable == 0 and n_skip > 0:
+        return _colorize(
+            f"· 모든 검사를 건너뛰었습니다 ({n_skip}개, 전제 부족).",
+            Severity.skip,
+            use_color=use_color,
+        )
+    return _colorize(
+        "✓ 모든 검사가 통과했습니다.",
+        Severity.ok,
+        use_color=use_color,
+    )
+
+
+def _action_items(checks: Sequence[Check]) -> list[str]:
+    """warn/error 의 hint 와 auto-fix 를 모아 번호 매긴 조치 목록으로.
+
+    운영자가 위에서 아래로만 읽어도 다음 행동을 알 수 있도록 footer 로 재정리.
+    per-check 블록에 이미 같은 정보가 있지만, 검사가 많아지면 스크롤을 되돌려야
+    한다. 이 목록은 "지금 뭘 해야 하나?" 에 한눈에 답한다.
+    """
+
+    items: list[str] = []
+    n = 0
+    for c in checks:
+        if not c.severity.needs_action():
+            continue
+        if c.hint:
+            n += 1
+            items.append(f"  {n}. [설정] {c.name} — {c.hint}")
+        if c.auto_fix is not None:
+            n += 1
+            label = "자동 치유" if c.auto_fix.callback is not None else "수동 실행"
+            items.append(f"  {n}. [{label}] {c.auto_fix.description}")
+            if c.auto_fix.command:
+                items.append(f"       $ {c.auto_fix.command}")
+            if c.auto_fix.callback is not None:
+                items.append("       # doctor --fix 로 실행")
+    return items
+
+
+_SEVERITY_KR: Final[dict[Severity, str]] = {
+    Severity.ok: "정상",
+    Severity.warn: "경고",
+    Severity.error: "오류",
+    Severity.info: "참고",
+    Severity.skip: "건너뜀",
+}
+
+
+def _summary_kr(counts: dict[Severity, int]) -> str:
+    order = (Severity.ok, Severity.warn, Severity.error, Severity.info, Severity.skip)
+    parts = [f"{_SEVERITY_KR[s]} {counts[s]}" for s in order if counts[s] > 0]
+    return "합계: " + (" · ".join(parts) if parts else "검사 없음")
+
+
 def render_pretty(
     title: str,
     checks: Sequence[Check],
     *,
     use_color: bool | None = None,
 ) -> str:
-    """사람이 읽기 좋은 출력 ( ``flutter doctor`` 풍)."""
+    """사람이 읽기 좋은 출력.
+
+    레이아웃은 ``flutter doctor`` / ``brew doctor`` 외형을 참고:
+
+    1. 제목 (전통적 underline 스타일 — ``Discord Sidecar Doctor`` + ``====``)
+    2. 배너 — 전체 상태 한 줄 요약
+    3. 검사 목록 — 등록 순서 유지 (검진 흐름이 곧 읽는 순서)
+    4. 조치 항목 — warn/error 에서 나온 hint + auto-fix 를 번호 목록으로
+    5. 합계 — 한글 카운트
+
+    Note: `masc-mcp doctor all` 이 섹션마다 ``====`` divider 를 넣으므로,
+    사이드카 제목도 동일한 underline 을 써서 단독/통합 실행 양쪽에서
+    시각적으로 자연스럽게 이어지도록 한다 (이전의 markdown ``#`` 접두 제거).
+    """
 
     if use_color is None:
         use_color = sys.stdout.isatty()
 
+    counts = _tally(checks)
+
     lines: list[str] = []
-    lines.append(f"# {title}")
+    lines.append(title)
+    lines.append("=" * len(title))
+    lines.append("")
+    lines.append(_banner(counts, use_color=use_color))
     lines.append("")
     for c in checks:
         sym = _colorize(_SYMBOL[c.severity], c.severity, use_color=use_color)
@@ -128,12 +245,44 @@ def render_pretty(
                 lines.append(f"        $ {c.auto_fix.command}")
             if c.auto_fix.callback is not None:
                 lines.append("        auto-fix 가능: doctor --fix")
+    actions = _action_items(checks)
+    if actions:
+        lines.append("")
+        lines.append("조치 항목:")
+        lines.extend(actions)
     lines.append("")
-    counts = _tally(checks)
-    summary = ", ".join(
-        f"{counts[s]} {s.value}" for s in Severity if counts[s] > 0
-    )
-    lines.append(f"summary: {summary or '0 checks'}")
+    lines.append(_summary_kr(counts))
+    return "\n".join(lines)
+
+
+def render_fix_outcomes(
+    outcomes: Sequence[FixOutcome],
+    *,
+    use_color: bool | None = None,
+) -> str:
+    """``run_auto_fixes`` 결과를 사람이 읽기 좋은 "자가 치유 실행:" 블록으로.
+
+    빈 리스트면 빈 문자열을 반환 — 호출자가 조건부로 출력하기 쉽게.
+    재점검 결과 (rerun) 앞에 prepend 하도록 설계됨.
+    """
+
+    if not outcomes:
+        return ""
+
+    if use_color is None:
+        use_color = sys.stdout.isatty()
+
+    ok_sym = _colorize("[✓]", Severity.ok, use_color=use_color)
+    err_sym = _colorize("[✗]", Severity.error, use_color=use_color)
+
+    lines: list[str] = []
+    lines.append("자가 치유 실행:")
+    for o in outcomes:
+        sym = ok_sym if o.success else err_sym
+        lines.append(f"  {sym} {o.check_name} — {o.description}")
+        if not o.success and o.message:
+            lines.append(f"      ↳ {o.message}")
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -212,11 +361,81 @@ class Doctor:
                 message=f"check raised: {exc.__class__.__name__}: {exc}",
             )
 
-    async def run_auto_fixes(self, checks: Sequence[Check]) -> list[Check]:
+    async def run_auto_fixes(
+        self, checks: Sequence[Check]
+    ) -> tuple[list[Check], list[FixOutcome]]:
+        """auto-fix callback 을 실행하고 결과를 함께 반환한다.
+
+        반환값:
+          (재점검_결과, fix_실행_결과_목록)
+
+        - fix 가 예외를 던져도 다음 fix 는 계속 실행한다. 한 치유가 실패했다고
+          나머지 치유까지 막히면 "--fix 실행 했는데 아무것도 안 변했다" 처럼
+          보인다.
+        - outcomes 는 렌더러 ("자가 치유 실행:" 블록) 에서 성공/실패를
+          운영자에게 명시적으로 노출하는 데 쓴다.
+        """
+
+        outcomes: list[FixOutcome] = []
         for c in checks:
             if c.auto_fix is None or c.auto_fix.callback is None:
                 continue
             if not c.severity.needs_action():
                 continue
-            await c.auto_fix.callback()
-        return await self.run()
+            try:
+                await c.auto_fix.callback()
+                outcomes.append(
+                    FixOutcome(
+                        check_name=c.name,
+                        description=c.auto_fix.description,
+                        success=True,
+                    )
+                )
+            except Exception as exc:  # 한 fix 실패가 나머지를 막지 않도록
+                outcomes.append(
+                    FixOutcome(
+                        check_name=c.name,
+                        description=c.auto_fix.description,
+                        success=False,
+                        message=f"{exc.__class__.__name__}: {exc}",
+                    )
+                )
+        rerun = await self.run()
+        return rerun, outcomes
+
+
+def check_dependencies_installed(packages: Sequence[str]) -> CheckFn:
+    """Return a CheckFn that reports any missing packages by name.
+
+    Uses importlib.metadata (stdlib) so the check itself has zero runtime
+    dependencies — critical for diagnosing "nothing is installed yet"
+    states where importing the sidecar's own config module would crash.
+
+    Register this first in a Doctor so the operator sees a single clear
+    'missing deps' check instead of a raw ImportError traceback.
+    """
+
+    async def _check() -> Check:
+        missing: list[str] = []
+        for pkg in packages:
+            try:
+                importlib.metadata.version(pkg)
+            except importlib.metadata.PackageNotFoundError:
+                missing.append(pkg)
+        if not missing:
+            return Check(
+                name="dependencies installed",
+                severity=Severity.ok,
+                detail=f"{len(packages)} packages",
+                message="",
+            )
+        return Check(
+            name="dependencies installed",
+            severity=Severity.error,
+            detail=", ".join(missing),
+            message="필수 패키지가 설치돼 있지 않습니다. 다음 체크들이 연쇄 실패할 수 있습니다.",
+            hint="uv sync 또는 pip install -r requirements.txt",
+        )
+
+    _check.__name__ = "check_dependencies_installed"
+    return _check

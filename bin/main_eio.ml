@@ -596,12 +596,230 @@ let doctor_cmd_exit base_path as_json =
   print_endline output;
   Config_doctor.exit_code report
 
-let doctor_cmd =
+let doctor_sidecar_exit name as_json =
+  match Masc_mcp.Doctor_dispatch.sidecar_dir name with
+  | None ->
+    Printf.eprintf
+      "unknown sidecar: %s (known: %s)\n"
+      name
+      Masc_mcp.Doctor_dispatch.known_summary;
+    2
+  | Some rel_dir ->
+    let repo_root = Sys.getcwd () in
+    let abs_dir =
+      if Filename.is_relative rel_dir
+      then Filename.concat repo_root rel_dir
+      else rel_dir
+    in
+    if not (Sys.file_exists abs_dir)
+    then begin
+      Printf.eprintf
+        "sidecar directory not found: %s\nhint: run from repository root\n"
+        abs_dir;
+      2
+    end
+    else begin
+      let python =
+        try Sys.getenv "MASC_PYTHON" with Not_found -> "python3"
+      in
+      let args =
+        if as_json
+        then [| python; "-m"; "src"; "doctor"; "--json" |]
+        else [| python; "-m"; "src"; "doctor" |]
+      in
+      let prev = Sys.getcwd () in
+      Sys.chdir abs_dir;
+      let pid =
+        try
+          Some
+            (Unix.create_process
+               python
+               args
+               Unix.stdin
+               Unix.stdout
+               Unix.stderr)
+        with Unix.Unix_error (err, _, _) ->
+          Printf.eprintf
+            "failed to exec %s: %s\nhint: set MASC_PYTHON to a valid interpreter\n"
+            python
+            (Unix.error_message err);
+          None
+      in
+      Sys.chdir prev;
+      match pid with
+      | None -> 2
+      | Some pid ->
+        let _, status = Unix.waitpid [] pid in
+        (match status with
+         | Unix.WEXITED n -> n
+         | Unix.WSIGNALED s -> 128 + s
+         | Unix.WSTOPPED s -> 128 + s)
+    end
+
+let sidecar_name_arg =
+  let doc =
+    Printf.sprintf
+      "Sidecar name (%s)"
+      Masc_mcp.Doctor_dispatch.known_summary
+  in
+  Arg.(required & pos 0 (some string) None & info [] ~docv:"SIDECAR" ~doc)
+
+let doctor_config_cmd =
   let doc =
     "Diagnose config initialization, active config roots, and base-path shadowing"
   in
-  let info = Cmd.info "doctor" ~doc in
+  let info = Cmd.info "config" ~doc in
   Cmd.v info Term.(const doctor_cmd_exit $ base_path $ doctor_json)
+
+let doctor_sidecar_cmd =
+  let doc =
+    "Run a sidecar's doctor and forward its output (spawns python -m src doctor)"
+  in
+  let info = Cmd.info "sidecar" ~doc in
+  Cmd.v info Term.(const doctor_sidecar_exit $ sidecar_name_arg $ doctor_json)
+
+let doctor_all_divider () =
+  print_endline "========================================"
+
+let doctor_all_section title =
+  print_newline ();
+  doctor_all_divider ();
+  print_endline title;
+  doctor_all_divider ()
+
+let label_for_rc = function
+  | 0 -> "정상"
+  | 1 -> "경고"
+  | 2 -> "오류"
+  | _ -> "오류"
+
+let doctor_all_json_exit base_path =
+  let config_report =
+    Config_doctor.analyze
+      ~base_path_input:base_path
+      ~default_base_path:(default_base_path ())
+      ()
+  in
+  let config_payload = Config_doctor.to_yojson config_report in
+  let config_rc = Config_doctor.exit_code config_report in
+  let sidecar_entries =
+    List.map
+      (fun name ->
+        match Masc_mcp.Doctor_dispatch.capture_sidecar_json name with
+        | Ok (body, rc) ->
+          let payload : Yojson.Safe.t =
+            try Yojson.Safe.from_string body with
+            | _ ->
+              `Assoc
+                [ "raw", `String body
+                ; "parse_error", `String "invalid JSON from sidecar"
+                ]
+          in
+          (name, rc, payload)
+        | Error msg -> (name, 2, `Assoc [ "error", `String msg ]))
+      Masc_mcp.Doctor_dispatch.known_sidecars
+  in
+  let all_entries =
+    ("config", "config", config_rc, config_payload)
+    :: List.map
+         (fun (name, rc, payload) -> (name, "sidecar", rc, payload))
+         sidecar_entries
+  in
+  let all_rcs = List.map (fun (_, _, rc, _) -> rc) all_entries in
+  let total = List.length all_rcs in
+  let count_eq v = List.length (List.filter (( = ) v) all_rcs) in
+  let ok_count = count_eq 0 in
+  let warn_count = count_eq 1 in
+  let err_count = total - ok_count - warn_count in
+  let doctors_json : Yojson.Safe.t =
+    `List
+      (List.map
+         (fun (name, kind, rc, payload) ->
+           `Assoc
+             [ "name", `String name
+             ; "kind", `String kind
+             ; "exit_code", `Int rc
+             ; "payload", payload
+             ])
+         all_entries)
+  in
+  let aggregate =
+    Masc_mcp.Doctor_dispatch.aggregate_exit_code all_rcs
+  in
+  let result : Yojson.Safe.t =
+    `Assoc
+      [ "title", `String "MASC Doctor (전 계층)"
+      ; "doctors", doctors_json
+      ; ( "summary"
+        , `Assoc
+            [ "total", `Int total
+            ; "ok", `Int ok_count
+            ; "warn", `Int warn_count
+            ; "error", `Int err_count
+            ] )
+      ; "exit_code", `Int aggregate
+      ]
+  in
+  print_endline (Yojson.Safe.pretty_to_string result);
+  aggregate
+
+let doctor_all_exit base_path as_json =
+  if as_json
+  then doctor_all_json_exit base_path
+  else begin
+    doctor_all_section "Config Doctor";
+    let config_rc = doctor_cmd_exit base_path false in
+    let sidecar_rcs =
+      List.map
+        (fun name ->
+          doctor_all_section
+            (Printf.sprintf
+               "%s Sidecar Doctor"
+               (String.capitalize_ascii name));
+          let rc = doctor_sidecar_exit name false in
+          (name, rc))
+        Masc_mcp.Doctor_dispatch.known_sidecars
+    in
+    let all_rcs = config_rc :: List.map snd sidecar_rcs in
+    let total = List.length all_rcs in
+    let count_eq v = List.length (List.filter (( = ) v) all_rcs) in
+    let ok_count = count_eq 0 in
+    let warn_count = count_eq 1 in
+    let err_count = total - ok_count - warn_count in
+    print_newline ();
+    doctor_all_divider ();
+    Printf.printf
+      "합계: %d Doctor · 정상 %d · 경고 %d · 오류 %d\n"
+      total
+      ok_count
+      warn_count
+      err_count;
+    let breakdown =
+      ("config", config_rc) :: sidecar_rcs
+      |> List.map (fun (name, rc) ->
+             Printf.sprintf "%s=%s" name (label_for_rc rc))
+      |> String.concat " · "
+    in
+    print_endline breakdown;
+    doctor_all_divider ();
+    Masc_mcp.Doctor_dispatch.aggregate_exit_code all_rcs
+  end
+
+let doctor_all_cmd =
+  let doc =
+    "Run config + every registered sidecar doctor and show an aggregate \
+     summary"
+  in
+  let info = Cmd.info "all" ~doc in
+  Cmd.v info Term.(const doctor_all_exit $ base_path $ doctor_json)
+
+let doctor_cmd =
+  let doc = "Doctor: diagnose MASC server and sidecars" in
+  let info = Cmd.info "doctor" ~doc in
+  Cmd.group
+    ~default:Term.(const doctor_cmd_exit $ base_path $ doctor_json)
+    info
+    [ doctor_config_cmd; doctor_sidecar_cmd; doctor_all_cmd ]
 
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in

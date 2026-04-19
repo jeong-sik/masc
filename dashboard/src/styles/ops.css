@@ -4,7 +4,7 @@
 
 @utility ops-banner {
   &.error { background: var(--bad-12); border-color: rgba(239, 68, 68, 0.34); color: #fecaca; }
-  &.warn { background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.28); color: #fde68a; }
+  &.warn { background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.28); color: var(--yellow-100); }
   &.info { background: var(--cyan-12); border-color: rgba(34, 211, 238, 0.26); color: #cffafe; }
 }
 

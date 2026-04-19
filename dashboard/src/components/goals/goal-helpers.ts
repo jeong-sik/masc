@@ -128,3 +128,29 @@ export function sortByTimeDesc(a: Task, b: Task): number {
   const tb = b.updated_at ?? b.created_at ?? ''
   return tb.localeCompare(ta)
 }
+
+// -- Goal tree verification helpers ----------------------------
+
+interface StatusBearer {
+  status: string
+}
+
+export function countAwaitingVerificationTasks(tasks: readonly StatusBearer[]): number {
+  let n = 0
+  for (const t of tasks) if (t.status === 'awaiting_verification') n++
+  return n
+}
+
+interface TreeNodeLike {
+  tasks: readonly StatusBearer[]
+  children: readonly TreeNodeLike[]
+}
+
+export function countAwaitingVerificationInTree(nodes: readonly TreeNodeLike[]): number {
+  let n = 0
+  for (const node of nodes) {
+    n += countAwaitingVerificationTasks(node.tasks)
+    if (node.children.length > 0) n += countAwaitingVerificationInTree(node.children)
+  }
+  return n
+}

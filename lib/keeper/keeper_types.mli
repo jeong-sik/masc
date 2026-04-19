@@ -181,6 +181,18 @@ val now_iso : unit -> string
 
 val tool_preset_to_string : tool_preset -> string
 val tool_preset_of_string : string -> tool_preset option
+
+val all_tool_presets : tool_preset list
+(** Issue #8430: complete list of [tool_preset] constructors in
+    declaration order. Adding an 8th constructor will fail to compile
+    in [tool_preset_to_string] and in the witness test. *)
+
+val valid_tool_preset_strings : string list
+(** Issue #8430: canonical strings for every [tool_preset] constructor
+    via [tool_preset_to_string]. Schema authors should mirror or
+    consume this; see [Keeper_schema.tool_preset_enum_strings] which
+    keeps a synced copy due to a build-graph cycle. *)
+
 val proactive_cycle_outcome_to_string : proactive_cycle_outcome -> string
 val proactive_cycle_outcome_of_string : string -> proactive_cycle_outcome
 val scheduled_autonomous_cycle_outcome_to_string :

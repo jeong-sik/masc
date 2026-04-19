@@ -100,6 +100,7 @@ let allowed_worktree_prefixes config =
    so legacy server operations that need to touch repo worktrees
    continue to work. *)
 let validate_writable_path ~(agent_name : string) config path =
+  let path = Tool_code.normalize_agent_relative_path ~config ~agent_name path in
   match Tool_code.validate_path config path with
   | Error e -> Error e
   | Ok canonical_path ->
@@ -125,12 +126,61 @@ let validate_writable_path ~(agent_name : string) config path =
         agent_playground_prefix
         canonical_path))
 
-(* Git action allowlist *)
-let allowed_git_actions = [
-  "add"; "commit"; "push"; "diff"; "status";
-  "log"; "branch"; "checkout"; "stash"; "fetch";
-  "clone";
-]
+(* Issue #8522: Variant SSOT for git action.  Adding a constructor
+   forces compilation in [git_action_to_string] AND extends
+   [valid_git_action_strings]; the schema enum below derives from
+   the SSOT, the allowlist [allowed_git_actions] is the SSOT (no
+   separate hand-list), and downstream inline checks pattern-match
+   on the Variant for push-force and clone special paths. *)
+type git_action =
+  | Add
+  | Commit
+  | Push
+  | Diff
+  | Status
+  | Log
+  | Branch
+  | Checkout
+  | Stash
+  | Fetch
+  | Clone
+
+let git_action_to_string = function
+  | Add -> "add"
+  | Commit -> "commit"
+  | Push -> "push"
+  | Diff -> "diff"
+  | Status -> "status"
+  | Log -> "log"
+  | Branch -> "branch"
+  | Checkout -> "checkout"
+  | Stash -> "stash"
+  | Fetch -> "fetch"
+  | Clone -> "clone"
+
+let git_action_of_string_opt raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "add" -> Some Add
+  | "commit" -> Some Commit
+  | "push" -> Some Push
+  | "diff" -> Some Diff
+  | "status" -> Some Status
+  | "log" -> Some Log
+  | "branch" -> Some Branch
+  | "checkout" -> Some Checkout
+  | "stash" -> Some Stash
+  | "fetch" -> Some Fetch
+  | "clone" -> Some Clone
+  | _ -> None
+
+let all_git_actions =
+  [ Add; Commit; Push; Diff; Status; Log; Branch; Checkout; Stash; Fetch; Clone ]
+
+let valid_git_action_strings = List.map git_action_to_string all_git_actions
+
+(* Allowlist re-uses the SSOT — kept as the prior name for any other
+   call sites that grep for it. *)
+let allowed_git_actions = valid_git_action_strings
 
 let max_output_bytes = 10 * 1024
 let max_output_label = "10KB"
@@ -272,6 +322,7 @@ let validate_clone_url ~base_path url =
     #6527 iter 6 scoped this per-agent so agent A cannot drop a clone
     into agent B's playground/repos/ via masc_code_git action=clone. *)
 let validate_clone_cwd ~(agent_name : string) config cwd =
+  let cwd = Tool_code.normalize_agent_relative_path ~config ~agent_name cwd in
   match Tool_code.validate_path config cwd with
   | Error e -> Error e
   | Ok canonical_path ->
@@ -795,7 +846,9 @@ Returns git command output.";
       ("properties", `Assoc [
         ("action", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "add"; `String "commit"; `String "push"; `String "diff"; `String "status"; `String "log"; `String "branch"; `String "checkout"; `String "stash"; `String "fetch"; `String "clone"]);
+          (* Issue #8522: derive from Variant SSOT — adding a new
+             constructor flows through here automatically. *)
+          ("enum", `List (List.map (fun s -> `String s) valid_git_action_strings));
           ("description", `String "Git action to perform");
         ]);
         ("args", `Assoc [

@@ -1,5 +1,13 @@
 open Types
 
+(** Issue #8520: hand-mirrored from [Mcp_session.valid_action_strings].
+    [masc_tool_schemas] only depends on [masc_types], so it cannot
+    derive directly. The sync regression test in [test_types.ml ::
+    mcp_session_action_ssot] catches drift. Same shape as
+    #8467/#8480/#8484/#8490/#8493/#8506/#8513 mirror+sync pattern. *)
+let mcp_session_action_enum_strings =
+  [ "get"; "create"; "list"; "cleanup"; "remove" ]
+
 let schemas : tool_schema list = [
   (* masc_mcp_session *)
   {
@@ -12,7 +20,9 @@ Pair with masc_subscription to receive session-scoped event notifications.";
       ("properties", `Assoc [
         ("action", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "get"; `String "create"; `String "list"; `String "cleanup"; `String "remove"]);
+          (* Issue #8520: derive from local mirror tracking
+             [Mcp_session.valid_action_strings]. *)
+          ("enum", `List (List.map (fun s -> `String s) mcp_session_action_enum_strings));
           ("description", `String "Session action");
         ]);
         ("session_id", `Assoc [

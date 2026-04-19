@@ -17,7 +17,18 @@ val redact_json_value : Yojson.Safe.t -> Yojson.Safe.t
 
 val redact_preview : ?max_len:int -> string -> string
 (** Truncate to [max_len] (default 200) and strip known sensitive patterns.
-    Result is safe for storage in proof/dashboard/metrics. *)
+    Result is safe for storage in proof/dashboard/metrics.
+
+    Sentinel-aware: if the input is a [Tool_output] blob marker, decode
+    and redact only the user-visible preview body so sha256/bytes/mime
+    survive intact for downstream parsers. *)
+
+val preview_json_strings : ?max_len:int -> Yojson.Safe.t -> Yojson.Safe.t
+(** Recursively apply [redact_preview] to every string leaf, preserving
+    JSON structure. Use this instead of [Yojson.Safe.to_string |>
+    String.sub] when the JSON may contain a [masc:blob ...] sentinel in
+    a string field — blind byte truncation chops through sha256 and
+    strands the marker. *)
 
 val redact_tool_input : tool_name:string -> Yojson.Safe.t -> string option
 (** Produce a redacted preview of tool input JSON.

@@ -170,10 +170,36 @@ let cli_model_override model_id =
   | "" | "auto" -> None
   | _ -> Some (String.trim model_id)
 
+(** Wrap CLI transports in a per-call sub-switch.
+
+    agent_sdk's CLI subprocess helper binds stdout/stderr pipes to the
+    switch passed at transport construction time. Reusing a long-lived
+    keeper/server switch across many calls can therefore retain those pipe
+    resources until the outer switch exits. By instantiating the real CLI
+    transport inside a fresh sub-switch for each completion call, any
+    leftover pipe resources are deterministically released at the end of the
+    call even when the outer keeper lifetime is long-lived. *)
+let make_per_call_switch_transport
+    (factory : sw:Eio.Switch.t -> Llm_provider.Llm_transport.t)
+    : Llm_provider.Llm_transport.t =
+  let with_call_switch f =
+    Eio.Switch.run (fun sw -> f (factory ~sw))
+  in
+  {
+    complete_sync =
+      (fun req ->
+        with_call_switch (fun transport -> transport.complete_sync req));
+    complete_stream =
+      (fun ~on_event req ->
+        with_call_switch (fun transport ->
+            transport.complete_stream ~on_event req));
+  }
+
 let non_http_transport_of_provider
     ~(sw : Eio.Switch.t)
     ~(provider_cfg : Llm_provider.Provider_config.t)
   : (Llm_provider.Llm_transport.t option, Oas.Error.sdk_error) result =
+  let _ = sw in
   let proc_mgr_result () =
     match Process_eio.get_proc_mgr () with
     | Ok mgr -> Ok mgr
@@ -192,7 +218,9 @@ let non_http_transport_of_provider
            in
            Ok
              (Some
-                (Llm_provider.Transport_claude_code.create ~sw ~mgr ~config)))
+                (make_per_call_switch_transport (fun ~sw ->
+                     Llm_provider.Transport_claude_code.create ~sw ~mgr
+                       ~config))))
   | Llm_provider.Provider_config.Gemini_cli ->
       (match proc_mgr_result () with
        | Error _ as e -> e
@@ -205,15 +233,19 @@ let non_http_transport_of_provider
            in
            Ok
              (Some
-                (Llm_provider.Transport_gemini_cli.create ~sw ~mgr ~config)))
+                (make_per_call_switch_transport (fun ~sw ->
+                     Llm_provider.Transport_gemini_cli.create ~sw ~mgr
+                       ~config))))
   | Llm_provider.Provider_config.Codex_cli ->
       (match proc_mgr_result () with
        | Error _ as e -> e
        | Ok mgr ->
            Ok
              (Some
-                (Llm_provider.Transport_codex_cli.create ~sw ~mgr
-                   ~config:Llm_provider.Transport_codex_cli.default_config)))
+                (make_per_call_switch_transport (fun ~sw ->
+                     Llm_provider.Transport_codex_cli.create ~sw ~mgr
+                       ~config:
+                         Llm_provider.Transport_codex_cli.default_config))))
   | Anthropic | OpenAI_compat | Ollama | Gemini | Glm ->
       Ok None
 

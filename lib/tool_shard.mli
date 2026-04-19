@@ -2,6 +2,41 @@
 
     @since 2.62.0 *)
 
+(** Issue #8480: hand-mirrored from
+    [Keeper_tool_pr_review.valid_pr_review_event_strings]. Direct
+    dependency would create a cycle (Tool_shard -> Keeper_tool_pr_review
+    -> Keeper_alerting -> Tool_shard). The sync regression test
+    [test_types.ml :: pr_review_event_ssot] catches drift. *)
+val pr_review_event_enum_strings : string list
+
+(** Issue #8513: hand-mirrored from
+    [Board_dispatch.valid_sort_order_strings] (#8453 SSOT). Schema
+    previously hand-listed 3 of 5 sort orders; sync regression test in
+    [test_types.ml :: sort_order_schema_ssot] catches drift. *)
+val sort_order_enum_strings : string list
+
+(** Issue #8484: hand-mirrored from
+    [Keeper_exec_memory.valid_memory_search_source_strings]. Sync
+    regression test in [test_types.ml :: memory_search_source_ssot]
+    catches drift. *)
+val memory_search_source_enum_strings : string list
+
+(** Issue #8527: hand-mirrored from
+    [Keeper_memory_policy.valid_memory_kind_strings]. Sync regression
+    test in [test_types.ml :: memory_kind_ssot] catches drift. *)
+val memory_kind_enum_strings : string list
+
+(** Issue #8490: hand-mirrored from
+    [Keeper_exec_fs.valid_fs_write_mode_strings]. Sync regression test
+    in [test_types.ml :: fs_write_mode_ssot] catches drift. *)
+val fs_write_mode_enum_strings : string list
+
+
+(** Issue #8506: hand-mirrored from
+    [Board_votes.valid_vote_direction_strings]. Sync regression test
+    in [test_types.ml :: vote_direction_ssot] catches drift. *)
+val vote_direction_enum_strings : string list
+
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;

@@ -2,6 +2,21 @@
 
 open Types
 
+(** Issue #8493: [masc_config] category filter strings mirror
+    [Env_config_snapshot.valid_config_category_strings]. This library
+    depends only on [masc_types], so it cannot depend on [masc_config]
+    directly without reintroducing the cycle this split avoids. The
+    sync test in [test/test_types.ml :: config_category_ssot] keeps this
+    mirror aligned with the producer-side SSOT. *)
+let config_category_enum_strings =
+  [
+    "server"; "auth"; "transport"; "storage"; "runtime";
+    "rate_limiting"; "inference"; "keeper"; "keeper_execution";
+    "keeper_guardrails"; "autonomy"; "level2"; "dashboard";
+    "economy"; "governance"; "channel"; "process"; "worker";
+    "web_search"; "session";
+  ]
+
 let schemas : tool_schema list = [
   {
     name = "masc_config";
@@ -13,7 +28,7 @@ Pass category to filter results to a single section.";
       ("properties", `Assoc [
         ("category", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "server"; `String "auth"; `String "transport"; `String "storage"; `String "runtime"; `String "rate_limiting"; `String "inference"; `String "keeper"; `String "dashboard"]);
+          ("enum", `List (List.map (fun s -> `String s) config_category_enum_strings));
           ("description", `String "Filter by config category");
         ]);
       ]);

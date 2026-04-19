@@ -5,6 +5,8 @@ include Activity_graph_types
 include Activity_graph_registry
 include Activity_graph_reducer
 
+module StringMap = Map.Make (String)
+
 (* ================================================================ *)
 (* File storage paths                                               *)
 (* ================================================================ *)
@@ -216,14 +218,16 @@ let graph_json config ?(kinds = []) ?(limit = 500)
     list_events_with_total config ~kinds ~after_seq:0 ~limit ?since_ms ()
   in
   let kind_counts_json =
-    let counts = Hashtbl.create 16 in
-    List.iter
-      (fun (e : event) ->
-        let prev = Option.value (Hashtbl.find_opt counts e.kind) ~default:0 in
-        Hashtbl.replace counts e.kind (prev + 1))
-      events;
+    let counts =
+      List.fold_left
+        (fun acc (e : event) ->
+          let prev = StringMap.find_opt e.kind acc |> Option.value ~default:0 in
+          StringMap.add e.kind (prev + 1) acc)
+        StringMap.empty
+        events
+    in
     `Assoc
-      (Hashtbl.fold
+      (StringMap.fold
          (fun kind count acc -> (kind, `Int count) :: acc)
          counts []
       |> List.sort (fun (a, _) (b, _) -> String.compare a b))

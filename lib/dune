@@ -49,6 +49,7 @@
    gate_keeper_backend
    config
    config_doctor
+   doctor_dispatch
    config_dir_resolver
    dashboard
    failure_envelope

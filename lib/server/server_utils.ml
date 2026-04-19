@@ -29,24 +29,22 @@ let iso8601_of_unix ts =
     (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
     tm.tm_hour tm.tm_min tm.tm_sec
 
+(** Issue #8449 PR C: HTTP query-param sort_by parser. Delegates to
+    [Board_dispatch.sort_order_of_string_opt] (canonical + documented
+    aliases new/active/comments) instead of duplicating the inline
+    match. HTTP semantics keep the "default to Hot" fallback for
+    missing or invalid query params — graceful UI degradation, not
+    silent data corruption. *)
 let board_sort_order_of_request request =
-  let to_sort = function
-    | "trending" -> Board_dispatch.Trending
-    | "recent" | "new" -> Board_dispatch.Recent
-    | "updated" | "active" -> Board_dispatch.Updated
-    | "discussed" | "comments" -> Board_dispatch.Discussed
-    | _ -> Board_dispatch.Hot
-  in
   match query_param request "sort_by" with
   | None -> Board_dispatch.Hot
-  | Some sort -> to_sort (String.lowercase_ascii (String.trim sort))
+  | Some sort ->
+    (match Board_dispatch.sort_order_of_string_opt sort with
+     | Some s -> s
+     | None -> Board_dispatch.Hot)
 
-let board_sort_label = function
-  | Board_dispatch.Hot -> "hot"
-  | Board_dispatch.Trending -> "trending"
-  | Board_dispatch.Recent -> "recent"
-  | Board_dispatch.Updated -> "updated"
-  | Board_dispatch.Discussed -> "discussed"
+(** Issue #8449 PR C: thin alias over the Variant SSOT helper. *)
+let board_sort_label = Board_dispatch.sort_order_to_string
 
 let filter_board_posts ~exclude_system ~exclude_automation posts =
   posts

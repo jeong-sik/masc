@@ -6,8 +6,42 @@ module StringSet = Set.Make (String)
 
 let contains_ci = String_util.contains_substring_ci
 
+(* Issue #8484: Variant SSOT for memory search scope. Adding a new
+   constructor forces compilation in [memory_search_source_to_string]
+   AND extends [valid_memory_search_source_strings]; the schema in
+   [tool_shard.ml] mirrors the SSOT (cycle: Tool_shard ->
+   Keeper_exec_memory -> ... -> Tool_shard prevented via local mirror,
+   sync test catches drift). The previous code used a string match
+   with a wildcard `_ -> memory` branch which silently routed any
+   unknown source to memory — anti-pattern from CLAUDE.md "Unknown ->
+   Permissive Default". Now [of_string_opt] returns [None] for
+   unknown values and the caller decides the fallback explicitly. *)
+type memory_search_source =
+  | Memory
+  | History
+  | All
+
+let memory_search_source_to_string = function
+  | Memory -> "memory"
+  | History -> "history"
+  | All -> "all"
+
+let memory_search_source_of_string_opt raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "memory" -> Some Memory
+  | "history" -> Some History
+  | "all" -> Some All
+  | _ -> None
+
+let all_memory_search_sources = [ Memory; History; All ]
+
+let valid_memory_search_source_strings =
+  List.map memory_search_source_to_string all_memory_search_sources
+
 type memory_match = {
   kind: string;
+  horizon: string;
+  source: string option;
   text: string;
   priority: int;
   generation: int;
@@ -31,6 +65,13 @@ let search_memory_bank
          try
            let j = Yojson.Safe.from_string line in
            let kind = Safe_ops.json_string ~default:"" "kind" j |> String.trim in
+           let horizon =
+             Keeper_memory_policy.memory_horizon_of_json ~kind j
+           in
+           let source =
+             Safe_ops.json_string ~default:"" "source" j
+             |> String.trim
+           in
            let text = Safe_ops.json_string ~default:"" "text" j |> String.trim in
            let priority = Safe_ops.json_int ~default:0 "priority" j in
            let generation = Safe_ops.json_int ~default:0 "generation" j in
@@ -38,7 +79,18 @@ let search_memory_bank
            let ts = Safe_ops.json_string ~default:"" "ts" j in
            let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
            if kind = "" || text = "" then None
-           else Some { kind; text; priority; generation; turn; ts; score = ts_unix }
+           else
+             Some {
+               kind;
+               horizon;
+               source = if source = "" then None else Some source;
+               text;
+               priority;
+               generation;
+               turn;
+               ts;
+               score = ts_unix;
+             }
          with Yojson.Json_error _ -> None)
   in
   let total_candidates = List.length parsed in
@@ -69,11 +121,26 @@ let search_memory_bank
          let recency_weight =
            max 0.0 (min 1.0 (1.0 -. (0.3 *. (age /. max_age))))
          in
+         let horizon_weight =
+           match m.horizon with
+           | h when h = Keeper_memory_policy.long_term_horizon -> 1.10
+           | h when h = Keeper_memory_policy.short_term_horizon ->
+               if m.generation >= meta.runtime.generation then 1.05 else 0.65
+           | _ -> 1.0
+         in
+         let source_bonus =
+           match m.source with
+           | Some "cross_trace_recurrence" -> 0.04
+           | Some "progress_consolidation" -> 0.02
+           | _ -> 0.0
+         in
          let synthetic_penalty =
            if contains_ci m.text "[SYNTHETIC]" then -0.1 else 0.0
          in
          let score =
-           (float_of_int m.priority /. 100.0) *. recency_weight +. synthetic_penalty
+           ((float_of_int m.priority /. 100.0) *. recency_weight *. horizon_weight)
+           +. synthetic_penalty
+           +. source_bonus
          in
          let rounded = Float.round (score *. 1000.0) /. 1000.0 in
          { m with score = rounded })
@@ -88,6 +155,11 @@ let search_memory_bank
 let memory_match_to_json (m : memory_match) : Yojson.Safe.t =
   `Assoc [
     "kind", `String m.kind;
+    "horizon", `String m.horizon;
+    ( "source",
+      match m.source with
+      | Some source -> `String source
+      | None -> `Null );
     "text", `String m.text;
     "priority", `Int m.priority;
     "generation", `Int m.generation;
@@ -155,21 +227,29 @@ let keeper_memory_search_json
       ~(args : Yojson.Safe.t) =
   let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
   let limit = max 1 (min 10 (Safe_ops.json_int ~default:5 "limit" args)) in
-  let source = Safe_ops.json_string ~default:"memory" "source" args |> String.trim in
+  let source_raw = Safe_ops.json_string ~default:"memory" "source" args in
+  (* Issue #8484: explicit fallback to Memory for back-compat with the
+     prior wildcard branch — but unknown values are now visibly mapped,
+     not silently absorbed. *)
+  let source =
+    memory_search_source_of_string_opt source_raw
+    |> Option.value ~default:Memory
+  in
+  let source_label = memory_search_source_to_string source in
   let kind_filter = Safe_ops.json_string ~default:"" "kind" args |> String.trim in
   let result =
     match source with
-    | "history" ->
+    | History ->
       let matches = search_history ~config ~meta ~ctx_work ~query ~limit in
       let no_match = matches = [] in
       let match_jsons = List.map (fun msg -> `String msg) matches in
       `Assoc ([
         "query", `String query;
-        "source", `String "history";
+        "source", `String source_label;
         "match_count", `Int (List.length matches);
         "matches", `List match_jsons;
       ] @ (if no_match then [ "no_match", `Bool true ] else []))
-    | "all" ->
+    | All ->
       let (bank_matches, bank_total) =
         search_memory_bank ~config ~meta ~query ~kind_filter ~limit
       in
@@ -183,16 +263,16 @@ let keeper_memory_search_json
       let no_match = total_matches = 0 in
       let bank_jsons = List.map memory_match_to_json bank_matches in
       let history_jsons = List.map (fun msg ->
-        `Assoc [ "source", `String "history"; "text", `String msg ]
+        `Assoc [ "source", `String (memory_search_source_to_string History); "text", `String msg ]
       ) history_matches in
       `Assoc ([
         "query", `String query;
-        "source", `String "all";
+        "source", `String source_label;
         "total_candidates", `Int bank_total;
         "match_count", `Int total_matches;
         "matches", `List (bank_jsons @ history_jsons);
       ] @ (if no_match then [ "no_match", `Bool true ] else []))
-    | _ (* "memory" *) ->
+    | Memory ->
       let (matches, total_candidates) =
         search_memory_bank ~config ~meta ~query ~kind_filter ~limit
       in
@@ -200,7 +280,7 @@ let keeper_memory_search_json
       let match_jsons = List.map memory_match_to_json matches in
       `Assoc ([
         "query", `String query;
-        "source", `String "memory";
+        "source", `String source_label;
         "total_candidates", `Int total_candidates;
         "match_count", `Int (List.length matches);
         "matches", `List match_jsons;
@@ -231,7 +311,7 @@ let keeper_memory_search_json
       "ts_unix", `Float (Time_compat.now ());
       "event", `String "memory_search";
       "query", `String query;
-      "source", `String source;
+      "source", `String source_label;
       "kind_filter", `String kind_filter;
       "match_count", `Int log_match_count;
     ] @ (match log_top_score with
@@ -242,10 +322,30 @@ let keeper_memory_search_json
   Yojson.Safe.to_string result
 ;;
 
-let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_context) =
-  let continuity =
+let keeper_context_status_json
+    ~(config : Coord.config)
+    ~(meta : keeper_meta)
+    ~(ctx_work : working_context) =
+  let progress_snapshot =
+    Keeper_memory_policy.read_progress_snapshot ~config ~name:meta.name
+  in
+  let checkpoint_snapshot =
     Keeper_memory_policy.latest_state_snapshot_from_messages
       (messages_of_context ctx_work)
+  in
+  let continuity, recovery_source =
+    match progress_snapshot with
+    | Some snapshot -> (Some snapshot, "progress_log")
+    | None ->
+        (match checkpoint_snapshot with
+         | Some snapshot -> (Some snapshot, "checkpoint")
+         | None ->
+             (match
+                Keeper_memory_policy.state_snapshot_of_summary_text
+                  meta.continuity_summary
+              with
+              | Some snapshot -> (Some snapshot, "meta_summary")
+              | None -> (None, "none")))
   in
   let continuity_summary =
     match continuity with
@@ -260,6 +360,15 @@ let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_contex
     if ctx_work.max_tokens = 0
     then 0.0
     else float_of_int ctx_tokens /. float_of_int ctx_work.max_tokens
+  in
+  let memory_tier_summary =
+    Keeper_memory_recall.read_memory_horizon_counts config
+      ~name:meta.name
+      ~max_bytes:(128 * 1024)
+      ~max_lines:300
+    |> List.map (fun (horizon, count) ->
+           horizon,
+           `Int count)
   in
   (* Give the keeper the three canonical playground paths from the SSOT
      so it does not need to re-interpolate ".masc/playground/<name>/..."
@@ -293,6 +402,8 @@ let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_contex
             | None -> `Null
             | Some snapshot -> Keeper_memory_policy.keeper_state_snapshot_to_json snapshot )
         ; "continuity_summary", `String continuity_summary
+        ; "recovery_source", `String recovery_source
+        ; "memory_tier_summary", `Assoc memory_tier_summary
         ])
 ;;
 

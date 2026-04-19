@@ -226,8 +226,8 @@ let contains_substring ~haystack ~needle =
 let test_path_rejection_explains_relative_anchor () =
   let meta = make_meta ~execution_scope:"workspace" ~name:"ani1999" () in
   with_temp_config (fun config ->
-    match KES.resolve_keeper_path ~config ~meta ~raw_path:"repos/masc-mcp" with
-    | Ok path -> fail ("expected rejection for repos/masc-mcp, got: " ^ path)
+    match KES.resolve_keeper_path ~config ~meta ~raw_path:"lib/foo.ml" with
+    | Ok path -> fail ("expected rejection for lib/foo.ml, got: " ^ path)
     | Error err ->
       check bool "preserves machine-readable prefix" true
         (String.starts_with ~prefix:"path_not_in_allowed_paths:" err);
@@ -267,6 +267,21 @@ let test_resolve_keeper_path_allows_playground_write_default () =
     match KES.resolve_keeper_path ~config ~meta ~raw_path:"notes.md" with
     | Error err -> fail ("expected playground write path, got error: " ^ err)
     | Ok path -> check string "bare file defaults into playground" expected path)
+
+let test_repos_prefix_maps_into_playground_repos () =
+  let meta = make_meta ~execution_scope:"workspace" ~name:"keeper" () in
+  with_temp_config (fun config ->
+    let expected =
+      Filename.concat
+        (Filename.concat
+           (KAP.project_root_of_config config)
+           (KAP.playground_path_of_keeper meta.name))
+        "repos/masc-mcp/lib/foo.ml"
+    in
+    match KES.resolve_keeper_path ~config ~meta
+            ~raw_path:"repos/masc-mcp/lib/foo.ml" with
+    | Error err -> fail ("expected repos/ path to resolve into playground, got: " ^ err)
+    | Ok path -> check string "repos/ goes into playground repos/" expected path)
 
 (* ── Path doubling tests ── *)
 
@@ -476,6 +491,8 @@ let () =
             test_resolve_keeper_path_blocks_workspace_repo_write_default;
           test_case "bare writes default into playground" `Quick
             test_resolve_keeper_path_allows_playground_write_default;
+          test_case "repos prefix maps into playground repos" `Quick
+            test_repos_prefix_maps_into_playground_repos;
         ] );
       ( "path_doubling_guard",
         [

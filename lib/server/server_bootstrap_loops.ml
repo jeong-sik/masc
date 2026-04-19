@@ -82,8 +82,20 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
   Eio.Switch.on_release sw (fun () ->
     Oas_bus_instrument.unsubscribe masc_event_bus keeper_lifecycle_sub);
   (* Spawn the OAS bus depth sampler so warnings surface on stdout
-     even when /metrics is not scraped. *)
-  Oas_bus_instrument.start_sampler ~sw ~clock ();
+     even when /metrics is not scraped.
+
+     [MASC_OAS_BUS_WARN_DEPTH] lets operators raise the threshold without
+     a rebuild — fleet-wide keeper load legitimately pushes depth past
+     the 200 default at peak (issue #8517). Invalid values fall back to
+     the compile-time default. *)
+  let warn_threshold =
+    match Sys.getenv_opt "MASC_OAS_BUS_WARN_DEPTH" with
+    | Some v -> (match int_of_string_opt (String.trim v) with
+                 | Some n when n > 0 -> n
+                 | _ -> 200)
+    | None -> 200
+  in
+  Oas_bus_instrument.start_sampler ~sw ~clock ~warn_threshold ();
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       (try
@@ -144,13 +156,13 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
                   ("comment_id", `String comment_id);
                   ("author", `String author)]
       | Board_dispatch.Post_voted { post_id; voter; direction } ->
-          let dir = match direction with Board.Up -> "up" | Board.Down -> "down" in
+          let dir = Board_votes.vote_direction_to_string direction in
           `Assoc [("type", `String "post_voted");
                   ("post_id", `String post_id);
                   ("voter", `String voter);
                   ("direction", `String dir)]
       | Board_dispatch.Comment_voted { comment_id; voter; direction } ->
-          let dir = match direction with Board.Up -> "up" | Board.Down -> "down" in
+          let dir = Board_votes.vote_direction_to_string direction in
           `Assoc [("type", `String "comment_voted");
                   ("comment_id", `String comment_id);
                   ("voter", `String voter);
@@ -181,13 +193,13 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
            `Assoc [("post_id", `String post_id); ("comment_id", `String comment_id);
                    ("author", `String author)])
       | Board_dispatch.Post_voted { post_id; voter; direction } ->
-          let dir = match direction with Board.Up -> "up" | Board.Down -> "down" in
+          let dir = Board_votes.vote_direction_to_string direction in
           ("board.voted",
            Activity_graph.entity ~kind:"agent" voter,
            Some (Activity_graph.entity ~kind:"post" post_id),
            `Assoc [("post_id", `String post_id); ("direction", `String dir)])
       | Board_dispatch.Comment_voted { comment_id; voter; direction } ->
-          let dir = match direction with Board.Up -> "up" | Board.Down -> "down" in
+          let dir = Board_votes.vote_direction_to_string direction in
           ("board.voted",
            Activity_graph.entity ~kind:"agent" voter,
            Some (Activity_graph.entity ~kind:"comment" comment_id),

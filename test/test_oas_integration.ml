@@ -101,7 +101,7 @@ let test_event_bus_task_transition () =
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
   Oas_events.publish_task_transition bus ~agent_name:"worker"
-    ~task_id:"task-1" ~transition:"done";
+    ~task_id:"task-1" ~transition:Types_core.Done_action;
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
   match (List.hd events : Event_bus.event).payload with

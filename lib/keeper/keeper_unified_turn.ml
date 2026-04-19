@@ -477,6 +477,19 @@ let pause_keeper_for_overflow
          "%s: overflow pause write_meta failed: %s"
          meta.name err);
   Keeper_registry.update_meta ~base_path:config.base_path meta.name paused_meta;
+  (* Issue #8581: latch the retry-exhausted condition BEFORE the
+     Operator_pause that drives the Paused phase. This way the Paused
+     state carries the real reason (auto-compact retry budget exhausted)
+     for dashboards / operator observability — the right disjunct of
+     [derive_phase]'s Paused branch ([context_overflow] /\
+     [compact_retry_exhausted]) reaches a real value instead of staying
+     dead code. The Operator_pause that follows still drives the actual
+     phase transition deterministically (first disjunct:
+     [operator_paused]). *)
+  dispatch_keeper_phase_event
+    ~config
+    ~keeper_name:meta.name
+    Keeper_state_machine.Compact_retry_exhausted;
   dispatch_keeper_phase_event
     ~config
     ~keeper_name:meta.name

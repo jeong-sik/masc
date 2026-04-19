@@ -135,6 +135,20 @@ type event =
       limit_tokens : int option;
     }
   | Auto_compact_triggered
+  | Compact_retry_exhausted
+    (** Issue #8581: latch the [compact_retry_exhausted] condition.
+
+        Before this event existed, the field was read in [derive_phase]
+        but never set in OCaml — the right disjunct of the Paused
+        promotion ([context_overflow] /\ [compact_retry_exhausted]) was
+        dead code. The retry-loop in [keeper_unified_turn] paused the
+        keeper via [Operator_pause] instead, conflating "operator paused"
+        with "auto-compact retry budget exhausted" on dashboards.
+
+        Dispatchers should fire this BEFORE [Operator_pause] so the
+        Paused phase carries the real reason (budget exhaustion) for
+        observability, while the existing first disjunct
+        ([operator_paused]) still drives derive_phase deterministically. *)
   | Operator_compact_requested
   | Operator_clear_requested of { preserve_system : bool; reason : string }
 
@@ -183,6 +197,7 @@ let event_to_string = function
     Printf.sprintf "context_overflow_detected(%s,tokens=%d,limit=%s)"
       src r.token_count lim
   | Auto_compact_triggered -> "auto_compact_triggered"
+  | Compact_retry_exhausted -> "compact_retry_exhausted"
   | Operator_compact_requested -> "operator_compact_requested"
   | Operator_clear_requested r ->
     Printf.sprintf "operator_clear_requested(preserve_system=%b,reason=%s)"
@@ -453,6 +468,15 @@ let update_conditions (c : conditions) (ev : event) : conditions =
        keeper into [Compacting] on the next derivation without waiting
        for [Compaction_started] from the post-turn lifecycle. *)
     { c with compaction_active = true }
+  | Compact_retry_exhausted ->
+    (* Issue #8581: latch the retry-exhausted condition. Mirrors the
+       TLA+ [CompactRetryExhausted] action. The right disjunct of
+       [derive_phase]'s Paused branch — [(context_overflow &&
+       compact_retry_exhausted)] — was previously dead code because
+       no event ever set this flag; now [pause_keeper_for_overflow]
+       dispatches it before [Operator_pause] so the Paused phase
+       carries the actual reason for dashboards / observability. *)
+    { c with compact_retry_exhausted = true }
   | Operator_compact_requested ->
     (* Operator override: same as [Auto_compact_triggered] but also
        releases the retry latch so that a fresh compaction sequence
@@ -668,6 +692,7 @@ let event_to_json (ev : event) : Yojson.Safe.t =
       "limit_tokens", limit_tokens;
     ]
   | Auto_compact_triggered -> obj "auto_compact_triggered" []
+  | Compact_retry_exhausted -> obj "compact_retry_exhausted" []
   | Operator_compact_requested -> obj "operator_compact_requested" []
   | Operator_clear_requested r ->
     obj "operator_clear_requested" [

@@ -1,7 +1,7 @@
 (** Autoresearch_storage — File paths and persistence for autoresearch loops.
 
     Handles results directory layout, JSONL append, state save/load,
-    and swarm link persistence.
+    and execution link persistence.
 
     @since 2.80.0 *)
 
@@ -17,6 +17,9 @@ let results_file ~base_path loop_id =
 let state_file ~base_path loop_id =
   Filename.concat (results_dir ~base_path loop_id) "state.json"
 
+(** On-disk filename is kept as [swarm.json] for backward compatibility with
+    existing data in deployed installs. The OCaml-level rename to
+    [execution_link] only affects the in-memory type/API surface. *)
 let loop_link_file ~base_path loop_id =
   Filename.concat (results_dir ~base_path loop_id) "swarm.json"
 
@@ -54,10 +57,10 @@ let save_state ~base_path (state : Autoresearch_types.loop_state) =
   let json = Yojson.Safe.pretty_to_string (Autoresearch_serde.state_to_yojson state) in
   Fs_compat.save_file path json
 
-let save_swarm_link ~base_path (link : Autoresearch_types.swarm_link) =
+let save_execution_link ~base_path (link : Autoresearch_types.execution_link) =
   let loop_path = loop_link_file ~base_path link.loop_id in
   let session_path = session_link_file ~base_path link.session_id in
-  let json = Autoresearch_serde.swarm_link_to_yojson link in
+  let json = Autoresearch_serde.execution_link_to_yojson link in
   let write path =
     let dir = Filename.dirname path in
     Fs_compat.mkdir_p dir;
@@ -89,26 +92,26 @@ let decode_json_file_result ~path ~kind decode =
          | Error msg ->
              Error (Printf.sprintf "%s decode failed for %s: %s" kind path msg))
 
-let load_swarm_link_by_loop_result ~base_path loop_id =
+let load_execution_link_by_loop_result ~base_path loop_id =
   let path = loop_link_file ~base_path loop_id in
-  decode_json_file_result ~path ~kind:"swarm link"
-    Autoresearch_serde.swarm_link_of_yojson_result
+  decode_json_file_result ~path ~kind:"execution link"
+    Autoresearch_serde.execution_link_of_yojson_result
 
-let load_swarm_link_by_loop ~base_path loop_id =
-  match load_swarm_link_by_loop_result ~base_path loop_id with
+let load_execution_link_by_loop ~base_path loop_id =
+  match load_execution_link_by_loop_result ~base_path loop_id with
   | None -> None
   | Some (Ok link) -> Some link
   | Some (Error msg) ->
       Log.Autoresearch.warn "%s" msg;
       None
 
-let load_swarm_link_by_session_result ~base_path session_id =
+let load_execution_link_by_session_result ~base_path session_id =
   let path = session_link_file ~base_path session_id in
-  decode_json_file_result ~path ~kind:"swarm link"
-    Autoresearch_serde.swarm_link_of_yojson_result
+  decode_json_file_result ~path ~kind:"execution link"
+    Autoresearch_serde.execution_link_of_yojson_result
 
-let load_swarm_link_by_session ~base_path session_id =
-  match load_swarm_link_by_session_result ~base_path session_id with
+let load_execution_link_by_session ~base_path session_id =
+  match load_execution_link_by_session_result ~base_path session_id with
   | None -> None
   | Some (Ok link) -> Some link
   | Some (Error msg) ->

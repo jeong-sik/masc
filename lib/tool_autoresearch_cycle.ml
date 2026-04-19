@@ -619,7 +619,7 @@ let handle_cycle (ctx : Tool_autoresearch_context.t) args =
                        Autoresearch.save_state ~base_path:ctx.base_path state;
                        let _config = Coord.default_config ctx.base_path in
                        (match
-                          Autoresearch.load_swarm_link_by_loop
+                          Autoresearch.load_execution_link_by_loop
                             ~base_path:ctx.base_path id
                         with
                        | Some _link ->

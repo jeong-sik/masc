@@ -60,7 +60,7 @@ let all_flags : flag list = [
     default = false; category = "transport";
     lifecycle = Active; since = "2.140.0" };
 
-  { env_name = "MASC_TELEMETRY_ENABLED";
+  { env_name = Env_config_core.telemetry_enabled_env_key;
     description = "Telemetry/span collection";
     default = true; category = "transport";
     lifecycle = Active; since = "2.50.0" };
@@ -81,7 +81,7 @@ let all_flags : flag list = [
     default = true; category = "tool";
     lifecycle = Active; since = "2.100.0" };
 
-  { env_name = "MASC_PARSE_WARN";
+  { env_name = Env_config_core.parse_warn_env_key;
     description = "Log JSON parse warnings";
     default = false; category = "tool";
     lifecycle = Active; since = "2.60.0" };

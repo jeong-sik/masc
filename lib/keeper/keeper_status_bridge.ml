@@ -281,21 +281,58 @@ let runtime_surface_json config (meta : keeper_meta) =
      @ social_runtime_fields_json meta
      @ runtime_blocker_fields_json config meta)
 
+let existing_path_json ?source path =
+  let fields =
+    [
+      ("path", `String path);
+      ("exists", `Bool (Fs_compat.file_exists path));
+    ]
+  in
+  let fields =
+    match source with
+    | Some value -> ("source", `String value) :: fields
+    | None -> fields
+  in
+  `Assoc (List.rev fields)
+
+let optional_existing_path_json ?source = function
+  | Some path -> existing_path_json ?source path
+  | None -> `Null
+
+let override_field_source_json ~default_source_kind ~default_manifest_path field =
+  `Assoc
+    [
+      ("field", `String field);
+      ("source", `String "live_meta");
+      ("default_source_kind", Json_util.string_opt_to_json default_source_kind);
+      ("default_manifest_path", Json_util.string_opt_to_json default_manifest_path);
+    ]
+
 let source_provenance_json config (meta : keeper_meta) =
   let snapshot = keeper_default_source_snapshot meta.name in
   let override_fields = live_override_fields meta snapshot.defaults in
+  let resolution = Config_dir_resolver.resolve () in
+  let live_meta_path = keeper_meta_path config meta.name in
+  let default_manifest_path = snapshot.defaults.manifest_path in
+  let default_source_kind = snapshot.source_kind in
   `Assoc
     [
-      ("live_meta_path", `String (keeper_meta_path config meta.name));
-      ( "default_manifest_path",
-        match snapshot.defaults.manifest_path with
-        | Some path -> `String path
-        | None -> `Null );
-      ( "default_source_kind",
-        match snapshot.source_kind with
-        | Some kind -> `String kind
-        | None -> `Null );
+      ("live_meta_path", `String live_meta_path);
+      ("live_meta", existing_path_json ~source:"runtime_overlay" live_meta_path);
+      ("default_manifest_path", Json_util.string_opt_to_json default_manifest_path);
+      ( "default_manifest",
+        optional_existing_path_json ?source:default_source_kind default_manifest_path );
+      ("default_source_kind", Json_util.string_opt_to_json default_source_kind);
+      ("active_config_root", `String resolution.config_root.path);
+      ( "active_config_root_source",
+        `String (Config_dir_resolver.source_to_string resolution.config_root.source) );
+      ("config_resolution", Config_dir_resolver.to_json resolution);
       ("precedence", `List [ `String "live_meta"; `String "toml"; `String "persona" ]);
       ("has_live_override", `Bool (override_fields <> []));
       ("override_fields", string_list_to_json override_fields);
+      ( "override_field_sources",
+        `List
+          (List.map
+             (override_field_source_json ~default_source_kind ~default_manifest_path)
+             override_fields) );
     ]

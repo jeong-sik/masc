@@ -45,11 +45,10 @@
 
 ### Changed
 
-- **OAS pin ratchet → `main@cfcd85a9`.** Keeps the `0.160.1` dependency
-  floor but advances the runtime pin past `f70fd95e` to pick up OAS
-  #1018's stale Swarm-semantics doc cleanup, so local `check-oas-pin`
-  drift warnings disappear and MASC tracks the current upstream main
-  truth again.
+- **OAS pin bump → `v0.162.0`.** Raises the `agent_sdk` dependency floor
+  from `0.161.0` to `0.162.0` and pins OAS `main@3b0409d2`, pulling in
+  the provider-registry context-window fix (#1040) plus the 0.162.0
+  release rollup (#1042) without leaving `check-oas-pin` drift warnings.
 
 ### Reliability
 

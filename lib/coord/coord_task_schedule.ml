@@ -7,6 +7,12 @@ open Types
 include Coord_utils
 include Coord_state
 
+let task_is_claim_pool_candidate (task : Types.task) =
+  match task.task_status with
+  | Todo -> true
+  | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ ->
+      false
+
 let agent_current_task_matches_backlog backlog ~agent_name task_id =
   match
     List.find_opt
@@ -134,11 +140,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
         if priority_cmp <> 0 then priority_cmp
         else compare b.created_at a.created_at  (* Newer first to unblock stale queues *)
       ) working_tasks in
-      let unclaimed = List.filter (fun t ->
-        match t.task_status with
-        | Todo -> true
-        | _ -> false
-      ) sorted in
+      let unclaimed = List.filter task_is_claim_pool_candidate sorted in
       (* Also exclude the just-released task: the agent is moving on,
          re-claiming the same task would be a no-op loop. *)
       let all_excluded = match released_task_id with

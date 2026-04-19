@@ -198,6 +198,53 @@ let test_claim_next_all_claimed () =
     Alcotest.(check bool) "no unclaimed tasks" true (str_contains result "No unclaimed")
   )
 
+let test_claim_next_skips_done_and_cancelled () =
+  with_test_env (fun config ->
+    let _ = Coord.add_task config ~title:"Done Task" ~priority:1 ~description:"" in
+    let _ = Coord.add_task config ~title:"Cancelled Task" ~priority:2 ~description:"" in
+    let _ = Coord.add_task config ~title:"Todo Task" ~priority:3 ~description:"" in
+    let _ = Coord.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
+    let _ = transition_done config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done" in
+    (match
+       Coord.cancel_task_r config ~agent_name:"alice" ~task_id:"task-002"
+         ~reason:"cancelled"
+     with
+    | Ok _ -> ()
+    | Error e -> Alcotest.fail (Types.masc_error_to_string e));
+
+    let result = Coord.claim_next config ~agent_name:"claude" in
+    Alcotest.(check bool) "claims the remaining todo task" true
+      (str_contains result "task-003");
+
+    let tasks = Coord.get_tasks_raw config in
+    let status_of task_id =
+      match List.find_opt (fun (t : Types.task) -> String.equal t.id task_id) tasks with
+      | Some task -> Types.task_status_to_string task.task_status
+      | None -> Alcotest.failf "missing task %s" task_id
+    in
+    Alcotest.(check string) "done task preserved" "done" (status_of "task-001");
+    Alcotest.(check string) "cancelled task preserved" "cancelled" (status_of "task-002");
+    Alcotest.(check string) "todo task claimed" "claimed" (status_of "task-003")
+  )
+
+let test_claim_next_terminal_only_backlog () =
+  with_test_env (fun config ->
+    let _ = Coord.add_task config ~title:"Done Task" ~priority:1 ~description:"" in
+    let _ = Coord.add_task config ~title:"Cancelled Task" ~priority:2 ~description:"" in
+    let _ = Coord.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
+    let _ = transition_done config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done" in
+    (match
+       Coord.cancel_task_r config ~agent_name:"alice" ~task_id:"task-002"
+         ~reason:"cancelled"
+     with
+    | Ok _ -> ()
+    | Error e -> Alcotest.fail (Types.masc_error_to_string e));
+
+    let result = Coord.claim_next config ~agent_name:"claude" in
+    Alcotest.(check bool) "terminal backlog reports no unclaimed tasks" true
+      (str_contains result "No unclaimed")
+  )
+
 let test_claim_next_consecutive () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"First" ~priority:1 ~description:"" in
@@ -1070,6 +1117,10 @@ let () =
       Alcotest.test_case "priority order" `Quick test_claim_next_priority_order;
       Alcotest.test_case "empty backlog" `Quick test_claim_next_empty_backlog;
       Alcotest.test_case "all claimed" `Quick test_claim_next_all_claimed;
+      Alcotest.test_case "skips done/cancelled" `Quick
+        test_claim_next_skips_done_and_cancelled;
+      Alcotest.test_case "terminal-only backlog" `Quick
+        test_claim_next_terminal_only_backlog;
       Alcotest.test_case "consecutive" `Quick test_claim_next_consecutive;
       Alcotest.test_case "reconciles stale current_task" `Quick
         test_claim_next_reconciles_stale_agent_current_task;

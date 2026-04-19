@@ -268,6 +268,43 @@ let test_json_float_opt_wrong_type () =
   let open Safe_ops in
   check (option (float 0.001)) "None on string" None (json_float_opt "name" sample_json)
 
+(* Small-LLM coercion: stringified numerics parse into numeric getters.
+   Field evidence 2026-04-17/18: keepers routinely send max_results:"0.0",
+   offset:"100.0", etc. Missing coercion silently produced zero results
+   across hundreds of masc_code_read / masc_code_search calls. *)
+let test_json_int_coerces_stringified_int () =
+  let open Safe_ops in
+  let j = Yojson.Safe.from_string {|{"limit": "42"}|} in
+  check int "parses stringified int" 42 (json_int ~default:0 "limit" j)
+
+let test_json_int_coerces_stringified_float () =
+  let open Safe_ops in
+  let j = Yojson.Safe.from_string {|{"limit": "100.0"}|} in
+  check int "parses stringified float by truncation" 100 (json_int ~default:0 "limit" j)
+
+let test_json_int_falls_back_on_garbage_string () =
+  let open Safe_ops in
+  let j = Yojson.Safe.from_string {|{"limit": "abc"}|} in
+  check int "default on unparseable string" 7 (json_int ~default:7 "limit" j)
+
+let test_json_float_coerces_stringified_number () =
+  let open Safe_ops in
+  let j = Yojson.Safe.from_string {|{"rate": "0.25"}|} in
+  check (float 0.001) "parses stringified float"
+    0.25 (json_float ~default:0.0 "rate" j)
+
+let test_json_bool_coerces_stringified_bool () =
+  let open Safe_ops in
+  let j = Yojson.Safe.from_string {|{"flag": "true", "off": "0"}|} in
+  check bool "parses 'true'" true (json_bool ~default:false "flag" j);
+  check bool "parses '0' as false" false (json_bool ~default:true "off" j)
+
+let test_json_int_opt_coerces_stringified () =
+  let open Safe_ops in
+  let j = Yojson.Safe.from_string {|{"n": "13", "bad": "not a number"}|} in
+  check (option int) "Some from string int" (Some 13) (json_int_opt "n" j);
+  check (option int) "None from garbage" None (json_int_opt "bad" j)
+
 (* json_string_list (Safe_ops version) *)
 let test_json_string_list_present () =
   let open Safe_ops in
@@ -410,5 +447,13 @@ let () =
       test_case "present" `Quick test_json_string_list_present;
       test_case "missing" `Quick test_json_string_list_missing;
       test_case "wrong type" `Quick test_json_string_list_wrong_type;
+    ];
+    "json_stringified_coercion", [
+      test_case "int from stringified int" `Quick test_json_int_coerces_stringified_int;
+      test_case "int from stringified float" `Quick test_json_int_coerces_stringified_float;
+      test_case "int falls back on garbage" `Quick test_json_int_falls_back_on_garbage_string;
+      test_case "float from stringified number" `Quick test_json_float_coerces_stringified_number;
+      test_case "bool from stringified bool" `Quick test_json_bool_coerces_stringified_bool;
+      test_case "int_opt from stringified" `Quick test_json_int_opt_coerces_stringified;
     ];
   ]

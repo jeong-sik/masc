@@ -229,15 +229,41 @@ let command_blocked_hint name =
     | "sed" | "awk" -> " Use keeper_fs_edit for in-place edits."
     | "find" -> " Use rg --files or masc_code_search."
     | "curl" | "wget" -> " Use masc_web_search for content fetching."
+    | "gh" ->
+      " 'gh' is NOT available in the keeper sandbox. For pull-request \
+       work use keeper_pr_list / keeper_pr_view / keeper_pr_comment / \
+       keeper_pr_review_read. For issues use masc_board_list / \
+       masc_board_post / masc_board_comment. For commits or branches \
+       just use 'git' directly — it is on the allowlist."
+    | "docker" | "podman" | "kubectl" | "systemctl" | "brew" | "apt"
+    | "apt-get" | "yum" | "dnf" ->
+      Printf.sprintf
+        " '%s' operates on host / cluster state and is deliberately \
+         excluded from the keeper sandbox. If you need this operation, \
+         escalate to an operator via masc_board_post instead of retrying."
+        name
+    | "ssh" | "scp" | "rsync" | "ftp" | "sftp" | "nc" ->
+      Printf.sprintf
+        " '%s' is a network primitive and is not permitted. Keeper \
+         network access goes through masc_web_search or \
+         masc_autoresearch_* tools."
+        name
     | _ when looks_like_source_code name ->
       " This looks like source code, not a shell command — use \
        masc_code_edit / masc_code_write / masc_code_read instead."
     | _ -> ""
   in
+  (* The "Allowed: ..." list below is a hand-curated prefix of
+     [dev_allowed_commands] — kept short so the hint fits in one line of
+     LLM context, but truthful (no stale entries). Keep in sync when
+     dev_allowed_commands changes; the pointer to keeper_tools_list
+     covers anything not in the printed prefix. *)
   Printf.sprintf
-    "Command blocked: '%s' is not allowed. Allowed: dune, git, rg, ls, cat, \
-     make, node, npm, etc.%s For file operations use keeper_fs_read or \
-     keeper_fs_edit."
+    "Command blocked: '%s' is not allowed. Common allowed commands: \
+     dune, git, rg, ls, cat, head, tail, grep, find, make, node, npm, \
+     python3, pytest, cargo, go.%s See keeper_tools_list for the \
+     exhaustive tool surface, and keeper_fs_read / keeper_fs_edit for \
+     file operations."
     name alt
 
 type block_reason =
@@ -378,13 +404,46 @@ let has_path_rewrite_syntax cmd =
       | _ -> false)
     cmd
 
+(* When a path-bearing keeper command carries path-rewrite syntax, tell the
+   keeper which specific character tripped the block and what the supported
+   alternative is. Otherwise small-LLM keepers retry the same glob/quote
+   pattern (observed 62x on 2026-04-17/18). *)
+let path_rewrite_redirect_hint cmd =
+  let has ch = String.contains cmd ch in
+  let suggestions = [
+    (has '*' || has '?' || has '[' || has ']'),
+      "Glob expansion ('*' / '?' / '[]') — use masc_code_search with \
+       file_pattern (e.g. file_pattern='*.ml') or rg with --glob instead \
+       of letting the shell expand.";
+    (has '{' || has '}'),
+      "Brace expansion ('{a,b}') — run one command per target, or use \
+       masc_code_search / rg which accept multiple patterns natively.";
+    (has '\\'),
+      "Backslash escaping — the keeper shell does not interpret escapes. \
+       Use masc_code_search with is_regex=true for pattern work that \
+       would need \\. / \\w / etc.";
+    (has '\'' || has '"'),
+      "Quoting — path args must be unquoted plain strings. Move any \
+       pattern into masc_code_search.query with is_regex appropriately set.";
+  ] in
+  let active =
+    List.filter_map (fun (cond, msg) -> if cond then Some msg else None)
+      suggestions
+  in
+  match active with
+  | [] -> ""
+  | msgs -> " " ^ String.concat " " msgs
+
 let validate_command_paths ?workdir cmd =
   match workdir with
   | None -> Ok ()
   | Some _ ->
     if String.contains cmd '/' && has_path_rewrite_syntax cmd then
       Error
-        "Path syntax blocked: shell quoting, globbing, brace expansion, and backslash escapes are not allowed for path-bearing keeper commands. Use plain unquoted paths and explicit cwd."
+        ("Path syntax blocked: shell quoting, globbing, brace expansion, \
+          and backslash escapes are not allowed for path-bearing keeper \
+          commands. Use plain unquoted paths and explicit cwd."
+         ^ path_rewrite_redirect_hint cmd)
     else
     let rec loop expect_path_value = function
       | [] -> Ok ()

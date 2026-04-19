@@ -200,15 +200,16 @@ let legacy_session_min_tool_names =
   (* Legacy keepers historically received canonical masc_* coordination tools,
      not the SDK alias-heavy Session_min surface. Keep this compatibility list
      explicit so missing tool_access migration remains stable after tier removal. *)
-  [
-    "masc_status";
-    "masc_tasks";
-    "masc_claim_next";
-    "masc_plan_set_task";
-    "masc_transition";
-    "masc_add_task";
-    "masc_broadcast";
-  ]
+  List.map Tool_name.Masc.to_string
+    Tool_name.Masc.[
+      Status;
+      Tasks;
+      Claim_next;
+      Plan_set_task;
+      Transition;
+      Add_task;
+      Broadcast;
+    ]
 
 let migrate_legacy_restricted_tools names =
   Custom (normalize_tool_names (legacy_keeper_internal_tool_names @ names))

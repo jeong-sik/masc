@@ -71,8 +71,12 @@ let test_snapshot_exposes_keeper_and_social_actions () =
           in
           Alcotest.(check bool) "task inject confirm false" false
             Yojson.Safe.Util.(task_inject |> member "confirm_required" |> to_bool);
-          Alcotest.(check bool) "team stop still in available actions" true
-            (Option.is_some (find_action "team_stop")))
+          (* Issue #8394: team_* operator actions retired. Assert
+             absence so re-introduction is caught at test time. *)
+          Alcotest.(check bool) "team_stop is NOT in available actions" true
+            (Option.is_none (find_action "team_stop"));
+          Alcotest.(check bool) "team_turn is NOT in available actions" true
+            (Option.is_none (find_action "team_turn")))
 
 let test_keeper_status_exposes_summary_and_recoverable () =
   Eio_main.run @@ fun env ->

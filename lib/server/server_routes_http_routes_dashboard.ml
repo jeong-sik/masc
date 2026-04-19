@@ -952,7 +952,9 @@ and add_autoresearch_routes router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/keeper/cascade" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_status" (fun _state req reqd ->
+       with_tool_auth
+         ~tool_name:(Tool_name.Masc.to_string Tool_name.Masc.Status)
+         (fun _state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            match Yojson.Safe.from_string body_str with
            | exception Yojson.Json_error _ ->

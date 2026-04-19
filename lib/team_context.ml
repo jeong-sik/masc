@@ -33,7 +33,7 @@ let max_tasks = 10
 (** Shared findings file within the .masc directory. *)
 let findings_path ~base_path =
   Filename.concat
-    (Filename.concat base_path ".masc")
+    (Coord_utils.masc_dir_from_base_path ~base_path)
     "shared_findings.jsonl"
 
 let add_finding ~base_path ~worker_name ~finding =

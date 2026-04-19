@@ -102,7 +102,7 @@ let current_inputs ~base_path_input ~default_base_path () =
     | Some source -> Some source
     | None ->
         let inherited_env_matches =
-          match Sys.getenv_opt "MASC_BASE_PATH" with
+          match Sys.getenv_opt Env_config_core.base_path_env_key with
           | Some existing ->
               String.equal
                 (Env_config_core.normalize_masc_base_path_input existing)

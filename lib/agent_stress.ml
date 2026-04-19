@@ -84,7 +84,7 @@ let init ~base_path =
     match !store_path_ref with
     | Some _ -> ()
     | None ->
-      let masc_dir = Filename.concat base_path ".masc" in
+      let masc_dir = Coord_utils.masc_dir_from_base_path ~base_path in
       let path = Filename.concat masc_dir "agent_stress.jsonl" in
       store_path_ref := Some path)
 

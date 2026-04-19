@@ -103,7 +103,7 @@ let allowlisted_env_pairs () =
       "GOOGLE_CLOUD_PROJECT";
       "GOOGLE_CLOUD_LOCATION";
       "MASC_STORAGE_TYPE";
-      "MASC_BASE_PATH";
+      Env_config_core.base_path_env_key;
       "MASC_CONFIG_DIR";
     ]
   in
@@ -116,7 +116,7 @@ let allowlisted_env_pairs () =
   in
   let overrides =
     [
-      ("MASC_BASE_PATH", "");
+      (Env_config_core.base_path_env_key, "");
       ("MASC_HTTP_BASE_URL", docker_http_base_url ());
       (Env_config_runtime.Local_runtime.mcp_url_env_key, docker_mcp_url ());
       ("LLAMA_SERVER_URL", docker_llama_server_url ());

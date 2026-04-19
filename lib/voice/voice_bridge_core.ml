@@ -305,7 +305,7 @@ let resolved_base_path_opt () =
 
 let masc_base_dir () =
   match resolved_base_path_opt () with
-  | Some base_path -> Filename.concat base_path ".masc"
+  | Some base_path -> Coord_utils.masc_dir_from_base_path ~base_path
   | None -> ".masc"
 
 let ensure_audio_dir () =

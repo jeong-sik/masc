@@ -217,6 +217,13 @@ let get_port ~default name =
 
 (** {1 Core Path / Storage} *)
 
+(** Env var names exposed as SSOT constants so out-of-process callers
+    that read/write the variable by name (docker worker putenv, sidecar
+    lookup, config doctor diagnostics, runtime-bootstrap putenv) can
+    reference the same literal. Issue 8352. *)
+let base_path_env_key = "MASC_BASE_PATH"
+let base_path_input_env_key = "MASC_BASE_PATH_INPUT"
+
 (** Project base path for .masc data directory.
     Used by board, checkpoint, thompson_sampling, voice, keeper.
     Set at startup; may be overridden from inside the running process via
@@ -224,11 +231,11 @@ let get_port ~default name =
     running server.
     Returns None when MASC_BASE_PATH is unset or empty. *)
 let base_path_source_opt () =
-  match raw_value_opt "MASC_BASE_PATH_INPUT" |> trim_opt with
-  | Some value -> Some ("MASC_BASE_PATH_INPUT", value)
+  match raw_value_opt base_path_input_env_key |> trim_opt with
+  | Some value -> Some (base_path_input_env_key, value)
   | None ->
-      (match raw_value_opt "MASC_BASE_PATH" |> trim_opt with
-       | Some value -> Some ("MASC_BASE_PATH", value)
+      (match raw_value_opt base_path_env_key |> trim_opt with
+       | Some value -> Some (base_path_env_key, value)
        | None -> None)
 
 let base_path_raw_opt () =

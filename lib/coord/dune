@@ -23,9 +23,9 @@
   coord_portal
   coord_query
   coord_status
-  event_kind
   coord_task
   coord_task_schedule
+  event_kind
   coord_git
   coord_worktree
   mention

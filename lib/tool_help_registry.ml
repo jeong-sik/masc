@@ -181,7 +181,7 @@ let manual_help_entry name =
             ];
           prompt_hints =
             [
-              "Use before changing auth or unit policy to confirm what is actually enforced.";
+              "Use before changing auth to confirm what is actually enforced.";
             ];
         }
   | "masc_tool_admin_update" ->
@@ -189,16 +189,26 @@ let manual_help_entry name =
         {
           name;
           short_description =
-            "Apply auth or unit-policy updates through a single admin entrypoint.";
+            "Apply auth updates through a single admin entrypoint.";
           when_to_use =
-            "Use when you need to change auth settings or update a unit policy envelope.";
+            "Use when you need to change auth settings (enable/disable, default role, token expiry).";
           key_constraints =
             [
-              "Section must be one of: auth | unit_policy.";
-              "Unit tool/model allowlists now affect command-plane routing and assignment when capability tags are present; worker-runtime per-tool enforcement is still a follow-up slice.";
+              (* Issue #8546: derive from the schema-side mirror.
+                 Tool_help_registry → Capability_registry → Tool_misc_admin
+                 is an existing chain, so referencing Tool_misc_admin here
+                 would close a cycle. The schema mirror in
+                 [Tool_schemas_misc] lives in the leaf [masc_tool_schemas]
+                 library, which the cycle-aware sync test in
+                 [test/test_types.ml :: admin_section_ssot] keeps aligned
+                 with the SSOT. Adding a section therefore flows:
+                 Variant → schema mirror → help text, with no cycle. *)
+              Printf.sprintf "Section must be one of: %s."
+                (String.concat " | "
+                   Tool_schemas_misc.admin_section_enum_strings);
             ];
           details_markdown =
-            "Delegates to the existing truthful write paths: Config mode updates, Auth config persistence, managed-operation unit policy updates, and keeper meta policy updates. Command-plane unit policy now feeds routing/assignment gates; deeper worker-runtime enforcement remains a separate step.";
+            "Delegates to the existing truthful write path: Auth config persistence (load/save under base_path).";
           doc_refs =
             [
               "docs/COMMAND-PLANE-RUNBOOK.md";

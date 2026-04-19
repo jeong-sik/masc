@@ -686,6 +686,45 @@ let () =
         Alcotest.(check bool) "trending present" true (List.mem "trending" actual);
         Alcotest.(check bool) "discussed present" true (List.mem "discussed" actual));
     ];
+    "admin_section_ssot", [
+      (* Issue #8546: Variant SSOT for masc_tool_admin_update.section.
+         The schema previously listed [unit_policy] but the dispatcher
+         only routed [auth] — clients following the schema received
+         [section must be one of: auth]. The witness here covers all
+         constructors, the mirror check pins the schema enum to the SSOT,
+         and the regression case asserts the broken [unit_policy] entry
+         did not creep back in. *)
+      Alcotest.test_case "witness covers all sections" `Quick (fun () ->
+        let open Masc_mcp.Tool_misc_admin in
+        let witness s =
+          let n = admin_section_to_string s in
+          if not (List.mem n valid_admin_section_strings) then
+            Alcotest.failf
+              "admin_section_to_string %S not in valid_admin_section_strings"
+              n
+        in
+        witness Auth;
+        Alcotest.(check int) "all_admin_sections count"
+          (List.length all_admin_sections)
+          (List.length valid_admin_section_strings));
+      Alcotest.test_case "schema mirror == SSOT" `Quick (fun () ->
+        Alcotest.(check (list string))
+          "tool_schemas_misc mirror"
+          Masc_mcp.Tool_misc_admin.valid_admin_section_strings
+          Tool_schemas_misc.admin_section_enum_strings);
+      Alcotest.test_case "unit_policy is not advertised (regression #8546)" `Quick (fun () ->
+        let strs = Masc_mcp.Tool_misc_admin.valid_admin_section_strings in
+        Alcotest.(check bool) "unit_policy absent" false
+          (List.mem "unit_policy" strs);
+        Alcotest.(check bool) "unit_policy absent in schema mirror" false
+          (List.mem "unit_policy" Tool_schemas_misc.admin_section_enum_strings));
+      Alcotest.test_case "of_string_opt round-trips" `Quick (fun () ->
+        let open Masc_mcp.Tool_misc_admin in
+        Alcotest.(check bool) "auth round-trips" true
+          (admin_section_of_string_opt "auth" = Some Auth);
+        Alcotest.(check bool) "unknown returns None" true
+          (admin_section_of_string_opt "unit_policy" = None));
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

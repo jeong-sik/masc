@@ -17,6 +17,32 @@ type context = {
   agent_name: string;
 }
 
+(** Issue #8546: Variant SSOT for [masc_tool_admin_update.section].
+
+    Schema previously listed [unit_policy] and the description hinted at
+    [keeper-policy], but the dispatcher only routed [auth] — clients
+    following the schema received [section must be one of: auth].
+
+    Adding a new section requires extending this Variant; the schema
+    enum, help text, and dispatcher error message all derive from
+    [valid_admin_section_strings], so they cannot drift. The mirror in
+    [Tool_schemas_misc.admin_section_enum_strings] stays in sync via
+    [test/test_types.ml :: admin_section_ssot] (cycle-avoidance:
+    tool_schemas → masc_mcp would cycle). *)
+type admin_section = Auth
+
+let admin_section_to_string = function
+  | Auth -> "auth"
+
+let all_admin_sections : admin_section list = [ Auth ]
+
+let valid_admin_section_strings : string list =
+  List.map admin_section_to_string all_admin_sections
+
+let admin_section_of_string_opt = function
+  | "auth" -> Some Auth
+  | _ -> None
+
 (* ================================================================ *)
 (* Local helpers (duplicated from tool_misc to avoid circular deps) *)
 (* ================================================================ *)
@@ -255,11 +281,15 @@ let handle_tool_admin_snapshot ctx args =
   (true, Yojson.Safe.to_string payload)
 
 let handle_tool_admin_update ctx args =
-  let section =
+  let raw =
     get_string args "section" "" |> String.trim |> String.lowercase_ascii
   in
-  match section with
-  | "auth" ->
+  match admin_section_of_string_opt raw with
+  | None ->
+      ( false,
+        Printf.sprintf "section must be one of: %s"
+          (String.concat " | " valid_admin_section_strings) )
+  | Some Auth ->
       let current = Auth.load_auth_config ctx.config.base_path in
       let require_token =
         match bool_arg_opt args "require_token" with
@@ -318,5 +348,3 @@ let handle_tool_admin_update ctx args =
               ]
           in
           (true, Yojson.Safe.to_string payload))
-  | _ ->
-      (false, "section must be one of: auth")

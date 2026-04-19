@@ -17,6 +17,14 @@ let config_category_enum_strings =
     "web_search"; "session";
   ]
 
+(** Issue #8546: mirror of [Tool_misc_admin.valid_admin_section_strings].
+    [tool_schemas] is a leaf library that cannot depend on [masc_mcp]
+    without introducing the cycle this split was designed to break, so
+    the section enum is duplicated here with a sync test in
+    [test/test_types.ml :: admin_section_ssot]. Add a constructor to the
+    Variant and append the matching string here when extending sections. *)
+let admin_section_enum_strings = [ "auth" ]
+
 let schemas : tool_schema list = [
   {
     name = "masc_config";
@@ -199,15 +207,24 @@ Uses configured web-search providers with structured fallback behavior and retur
   };
   {
     name = "masc_tool_admin_update";
-    description = "Apply auth, unit-policy, or keeper-policy updates through a single admin entrypoint. \
-Use when toggling auth or updating unit/keeper policies. \
-After masc_tool_admin_snapshot to review current state before making changes.";
+    description = "Apply auth updates through a single admin entrypoint. \
+Use when toggling auth, rotating secrets, or changing the default role. \
+Run masc_tool_admin_snapshot first to review current state before making changes.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("section", `Assoc [
+          (* Issue #8546: hand mirror of
+             [Tool_misc_admin.valid_admin_section_strings]. tool_schemas
+             cannot depend on masc_mcp without a cycle, so the schema
+             enum is mirrored here and the sync test in
+             [test/test_types.ml :: admin_section_ssot] asserts the two
+             stay aligned. The handler dispatches Variant-exhaustively;
+             listing a string here that the dispatcher does not handle
+             would surface a "section must be one of …" error to LLM
+             clients (the original drift symptom this SSOT prevents). *)
           ("type", `String "string");
-          ("enum", `List [`String "auth"; `String "unit_policy"]);
+          ("enum", `List (List.map (fun s -> `String s) admin_section_enum_strings));
           ("description", `String "Config section to update");
         ]);
         ("enabled", `Assoc [
@@ -230,18 +247,6 @@ After masc_tool_admin_snapshot to review current state before making changes.";
         ("token_expiry_hours", `Assoc [
           ("type", `String "integer");
           ("description", `String "Token expiry in hours for section=auth");
-        ]);
-        ("unit_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Managed unit id for section=unit_policy");
-        ]);
-        ("policy", `Assoc [
-          ("type", `String "object");
-          ("description", `String "Unit policy envelope for section=unit_policy");
-        ]);
-        ("budget", `Assoc [
-          ("type", `String "object");
-          ("description", `String "Unit budget envelope for section=unit_policy");
         ]);
       ]);
       ("required", `List [`String "section"]);

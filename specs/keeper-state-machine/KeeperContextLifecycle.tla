@@ -54,6 +54,24 @@ vars == <<keeper_phase, turn_number, context_id, context_tokens, message_count,
           tool_pairs, ckpt_ctx_id, ckpt_turn, ckpt_valid,
           resume_ctx_id, fail_count, next_ctx_id>>
 
+\* Issue #8701: explicit OCaml ↔ TLA+ mapping for the context lifecycle
+\* abstraction. SSOT for OCaml side is lib/keeper/keeper_state_machine.ml
+\* (12 phases). This spec intentionally collapses the 12 OCaml phases into
+\* a 7-symbol alphabet because the context-lifecycle invariants do not
+\* depend on transport/handoff details. Mapping:
+\*
+\*   "idle"           ↔ Offline       (no fiber, no work)
+\*   "running"        ↔ Running       (active turn)
+\*   "compacting"     ↔ Compacting    (in-flight context compaction)
+\*   "overflow_retry" ↔ Overflowed    (next turn retries after compaction)
+\*   "done"           ↔ Stopped       (graceful shutdown)
+\*   "error"          ↔ Failing | Crashed   (recoverable | fatal)
+\*   "dead"           ↔ Dead          (terminal, no restart)
+\*
+\* Unmodeled here (covered in companion specs):
+\*   HandingOff, Draining, Paused, Restarting
+\* See KeeperGenerationLineage.tla for HandingOff and
+\*     KeeperReconcileLiveness.tla for Paused/Restarting/Draining.
 Phases == {"idle", "running", "compacting", "overflow_retry", "done", "error", "dead"}
 
 \* ── Initial State ────────────────────────────────────────

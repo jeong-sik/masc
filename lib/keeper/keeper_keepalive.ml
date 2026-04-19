@@ -60,6 +60,12 @@ let () =
 
 let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit
 
+let turn_semaphore_value_for_test () =
+  Eio.Semaphore.get_value turn_semaphore
+
+let autonomous_turn_semaphore_value_for_test () =
+  Eio.Semaphore.get_value autonomous_turn_semaphore
+
 type autonomous_waiter =
   {
     ticket : int;
@@ -173,6 +179,27 @@ let record_autonomous_completion ~(keeper_name : string) : unit =
   with_completion_table (fun () ->
     Hashtbl.replace last_autonomous_completion keeper_name
       (Time_compat.now ()))
+
+type keeper_turn_slot_state = {
+  acquired_autonomous : bool ref;
+  acquired_turn : bool ref;
+  autonomous_ticket : int option ref;
+}
+
+let release_keeper_turn_slot ~keeper_name state =
+  Option.iter
+    (fun ticket -> drop_autonomous_waiter ~ticket)
+    !(state.autonomous_ticket);
+  (* Release exactly what we acquired. Order does not matter because
+     these two semaphores do not contend with each other. *)
+  if !(state.acquired_turn) then Eio.Semaphore.release turn_semaphore;
+  if !(state.acquired_autonomous) then begin
+    (* Stamp completion time BEFORE releasing the semaphore so that
+       [maybe_yield_for_fairness] can measure the correct interval
+       when this keeper's heartbeat loops back immediately. *)
+    record_autonomous_completion ~keeper_name;
+    Eio.Semaphore.release autonomous_turn_semaphore
+  end
 
 let reset_autonomous_completion_for_test () : unit =
   with_completion_table (fun () ->
@@ -295,9 +322,13 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
      path fires (Semaphore_wait_timeout, Eio.Cancel.Cancelled, or any
      other). This keeps resource cleanup independent of Eio.Semaphore's
      internal cancel-race handling. *)
-  let acquired_autonomous = ref false in
-  let acquired_turn = ref false in
-  let autonomous_ticket = ref None in
+  let slot_state =
+    {
+      acquired_autonomous = ref false;
+      acquired_turn = ref false;
+      autonomous_ticket = ref None;
+    }
+  in
   let acquire_bounded ~label sem =
     match Eio_context.get_clock_opt () with
     | Some clock ->
@@ -326,18 +357,7 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
       Eio.Semaphore.acquire sem
   in
   Fun.protect
-    ~finally:(fun () ->
-      Option.iter (fun ticket -> drop_autonomous_waiter ~ticket) !autonomous_ticket;
-      (* Release exactly what we acquired. Order does not matter because
-         these two semaphores do not contend with each other. *)
-      if !acquired_turn then Eio.Semaphore.release turn_semaphore;
-      if !acquired_autonomous then begin
-        (* Stamp completion time BEFORE releasing the semaphore so that
-           [maybe_yield_for_fairness] can measure the correct interval
-           when this keeper's heartbeat loops back immediately. *)
-        record_autonomous_completion ~keeper_name;
-        Eio.Semaphore.release autonomous_turn_semaphore
-      end)
+    ~finally:(fun () -> release_keeper_turn_slot ~keeper_name slot_state)
     (fun () ->
       if is_autonomous then begin
         (* Fairness cooldown: if this keeper recently completed a turn and
@@ -346,18 +366,22 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
            See [maybe_yield_for_fairness] and #6810. *)
         maybe_yield_for_fairness ~keeper_name;
         let ticket = enqueue_autonomous_waiter ~keeper_name in
-        autonomous_ticket := Some ticket;
+        slot_state.autonomous_ticket := Some ticket;
         wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at:t0;
         acquire_bounded ~label:"autonomous" autonomous_turn_semaphore;
-        acquired_autonomous := true;
+        slot_state.acquired_autonomous := true;
         drop_autonomous_waiter ~ticket;
-        autonomous_ticket := None
+        slot_state.autonomous_ticket := None
       end;
       acquire_bounded ~label:"turn" turn_semaphore;
-      acquired_turn := true;
+      slot_state.acquired_turn := true;
       let semaphore_wait_ms =
         int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
       f ~semaphore_wait_ms)
+;;
+
+let with_keeper_turn_slot_for_test ~keeper_name ~channel f =
+  with_keeper_turn_slot ~keeper_name ~channel f
 ;;
 
 (** Optional gRPC client + env — WORM Atomic: set at server bootstrap

@@ -214,6 +214,26 @@ let test_today_log_file_falls_back_to_project_root_log () =
         log_path
         (Routes.today_log_file ~base_path ~project_root "discord"))
 
+let test_start_shell_command_matches_detached_contract () =
+  let base_path = "/tmp/masc runtime root" in
+  let script = "/tmp/masc runtime root/sidecars/discord-bot/run.sh" in
+  check string "detached start command"
+    (Printf.sprintf
+       "MASC_BASE_PATH=%s setsid nohup %s start </dev/null >/dev/null 2>&1 &"
+       (Filename.quote base_path)
+       (Filename.quote script))
+    (Routes.sidecar_start_shell_command ~base_path ~script)
+
+let test_start_shell_command_quotes_shell_meta () =
+  let base_path = "/tmp/runtime;touch /tmp/pwned" in
+  let script = "/tmp/sidecars/discord-bot/run.sh && id" in
+  check string "shell metacharacters are quoted, not escaped ad hoc"
+    (Printf.sprintf
+       "MASC_BASE_PATH=%s setsid nohup %s start </dev/null >/dev/null 2>&1 &"
+       (Filename.quote base_path)
+       (Filename.quote script))
+    (Routes.sidecar_start_shell_command ~base_path ~script)
+
 (* ---- Config write helpers (PUT /api/v1/sidecar/config). ---- *)
 
 let test_escape_quotes_and_backslash () =
@@ -290,6 +310,43 @@ let test_coerce_rejects_oversized_value () =
   | Error _ -> ()
   | Ok _ -> failf "9000-byte value should be rejected by max_value_bytes guard"
 
+let test_parse_body_pairs_coerces_scalar_values () =
+  check (result (list (pair string string)) string)
+    "scalar JSON values are stringified for downstream type coercion"
+    (Ok [ ("PORT", "3000"); ("ENABLED", "true"); ("EMPTY", "") ])
+    (Routes.parse_body_pairs {|{"PORT":3000,"ENABLED":true,"EMPTY":null}|})
+
+let test_parse_body_pairs_rejects_non_object () =
+  check (result (list (pair string string)) string)
+    "non-object JSON rejected"
+    (Error "body must be a JSON object")
+    (Routes.parse_body_pairs {|["PORT",3000]|})
+
+let test_parse_body_pairs_rejects_invalid_json () =
+  check (result (list (pair string string)) string)
+    "invalid JSON rejected"
+    (Error "body is not valid JSON")
+    (Routes.parse_body_pairs {|{"PORT":|})
+
+let test_atomic_write_file_replaces_content () =
+  with_temp_dir "sidecar-atomic-write" (fun dir ->
+      let path = Filename.concat dir "nested/config.toml" in
+      Routes.ensure_parent_dir path;
+      check (result unit string)
+        "initial write"
+        (Ok ())
+        (Routes.atomic_write_file ~path "TOKEN = \"old\"\n");
+      check string "initial content"
+        "TOKEN = \"old\"\n"
+        (In_channel.with_open_text path In_channel.input_all);
+      check (result unit string)
+        "replacement write"
+        (Ok ())
+        (Routes.atomic_write_file ~path "TOKEN = \"new\"\n");
+      check string "replacement content"
+        "TOKEN = \"new\"\n"
+        (In_channel.with_open_text path In_channel.input_all))
+
 let () =
   run "sidecar_lifecycle_routes"
     [
@@ -325,6 +382,13 @@ let () =
         [
           test_case "known_ids size = 4" `Quick test_known_ids_size_matches_dashboard;
         ] );
+      ( "start_command",
+        [
+          test_case "detached command contract" `Quick
+            test_start_shell_command_matches_detached_contract;
+          test_case "quotes shell metacharacters" `Quick
+            test_start_shell_command_quotes_shell_meta;
+        ] );
       ( "config_write_helpers",
         [
           test_case "escape: quotes + backslash"  `Quick test_escape_quotes_and_backslash;
@@ -334,5 +398,13 @@ let () =
           test_case "coerce: integer ok/err"      `Quick test_coerce_integer_accepts_and_rejects;
           test_case "coerce: boolean variants"    `Quick test_coerce_boolean_accepts_variants;
           test_case "coerce: oversized rejected"  `Quick test_coerce_rejects_oversized_value;
+          test_case "parse body pairs: scalars" `Quick
+            test_parse_body_pairs_coerces_scalar_values;
+          test_case "parse body pairs: non-object" `Quick
+            test_parse_body_pairs_rejects_non_object;
+          test_case "parse body pairs: invalid JSON" `Quick
+            test_parse_body_pairs_rejects_invalid_json;
+          test_case "atomic write replaces content" `Quick
+            test_atomic_write_file_replaces_content;
         ] );
     ]

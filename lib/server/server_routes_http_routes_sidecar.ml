@@ -331,6 +331,12 @@ let runtime_sidecar_script_result ?base_path id =
               `start-masc-mcp.sh --sidecar-root /path/to/masc-mcp`."
              id script)
 
+let sidecar_start_shell_command ~base_path ~script =
+  Printf.sprintf
+    "MASC_BASE_PATH=%s setsid nohup %s start </dev/null >/dev/null 2>&1 &"
+    (Filename.quote base_path)
+    (Filename.quote script)
+
 (** Clamp the [?lines=N] query param to [1, 1000]. Pure so unit tests
     can pin the upper bound without a request mock. *)
 let clamp_lines = function
@@ -364,7 +370,10 @@ let read_status_json ~base_path id =
   in
   if Sys.file_exists path then
     let body = read_file path in
-    let parsed = try Some (Yojson.Safe.from_string body) with _ -> None in
+    let parsed =
+      try Some (Yojson.Safe.from_string body)
+      with Yojson.Json_error _ -> None
+    in
     `Assoc [
       ("ok", `Bool true);
       ("available", `Bool true);
@@ -612,12 +621,12 @@ let atomic_write_file ~(path : string) (content : string) : (unit, string) resul
   try
     let oc = open_out tmp in
     Fun.protect
-      ~finally:(fun () -> try close_out oc with _ -> ())
+      ~finally:(fun () -> close_out_noerr oc)
       (fun () -> output_string oc content);
     Sys.rename tmp path;
     Ok ()
   with exn ->
-    (try Sys.remove tmp with _ -> ());
+    (try Sys.remove tmp with Sys_error _ -> ());
     Error (Printf.sprintf "atomic write failed: %s" (Printexc.to_string exn))
 
 (** Make sure [.gate/runtime/<id>/] exists before atomic_write_file
@@ -654,7 +663,7 @@ let parse_body_pairs body_str : ((string * string) list, string) result =
       ) assoc in
       Ok pairs
   | _ -> Error "body must be a JSON object"
-  | exception _ -> Error "body is not valid JSON"
+  | exception Yojson.Json_error _ -> Error "body is not valid JSON"
 
 (** GET /api/v1/sidecar/config?name=<id>
 
@@ -683,7 +692,7 @@ let handle_get_config _state request reqd =
       else
         let content =
           try In_channel.with_open_text path In_channel.input_all
-          with _ -> ""
+          with Sys_error _ -> ""
         in
         (match Keeper_toml_loader.parse_toml content with
          | Error msg ->
@@ -804,12 +813,7 @@ let handle_start state request reqd =
               restart. Only [script] is interpolated, and the path comes from
               a resolved directory + fixed filename, so [Filename.quote] gives
               a closed-shell injection surface. *)
-           let cmd =
-             Printf.sprintf
-               "MASC_BASE_PATH=%s setsid nohup %s start </dev/null >/dev/null 2>&1 &"
-               (Filename.quote base_path)
-               (Filename.quote script)
-           in
+           let cmd = sidecar_start_shell_command ~base_path ~script in
            let _ = Sys.command cmd in
            respond_json request reqd ~status:`Accepted
              (`Assoc [

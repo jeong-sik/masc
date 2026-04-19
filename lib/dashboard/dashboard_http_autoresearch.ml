@@ -23,7 +23,7 @@ let loop_summary_json (base_path : string)
     |> List.map (fun s -> `String s)
   in
   let link =
-    Autoresearch_storage.load_swarm_link_by_loop ~base_path state.loop_id
+    Autoresearch_storage.load_execution_link_by_loop ~base_path state.loop_id
   in
   `Assoc
     [
@@ -55,14 +55,14 @@ let loop_summary_json (base_path : string)
       ( "error",
         Json_util.string_opt_to_json state.error_message );
       ( "session_id",
-        Json_util.string_opt_to_json (Option.map (fun (l : Autoresearch_types.swarm_link) -> l.session_id) link) );
+        Json_util.string_opt_to_json (Option.map (fun (l : Autoresearch_types.execution_link) -> l.session_id) link) );
       ( "operation_id",
-        Json_util.string_opt_to_json (Option.bind link (fun (l : Autoresearch_types.swarm_link) -> l.operation_id)) );
+        Json_util.string_opt_to_json (Option.bind link (fun (l : Autoresearch_types.execution_link) -> l.operation_id)) );
       ( "task_id",
         Json_util.string_opt_to_json
-          (Option.bind link (fun (l : Autoresearch_types.swarm_link) -> l.task_id)) );
+          (Option.bind link (fun (l : Autoresearch_types.execution_link) -> l.task_id)) );
       ( "linked_at",
-        Json_util.float_opt_to_json (Option.map (fun (l : Autoresearch_types.swarm_link) -> l.linked_at) link) );
+        Json_util.float_opt_to_json (Option.map (fun (l : Autoresearch_types.execution_link) -> l.linked_at) link) );
       ( "queued_hypothesis",
         Json_util.string_opt_to_json state.queued_hypothesis );
     ]
@@ -70,7 +70,7 @@ let loop_summary_json (base_path : string)
 let persisted_to_loop_summary_json (base_path : string)
     (p : Autoresearch_types.persisted_summary) : Yojson.Safe.t =
   let link =
-    Autoresearch_storage.load_swarm_link_by_loop ~base_path p.loop_id
+    Autoresearch_storage.load_execution_link_by_loop ~base_path p.loop_id
   in
   `Assoc
     [
@@ -108,14 +108,14 @@ let persisted_to_loop_summary_json (base_path : string)
       ( "error",
         Json_util.string_opt_to_json p.error_message );
       ( "session_id",
-        Json_util.string_opt_to_json (Option.map (fun (l : Autoresearch_types.swarm_link) -> l.session_id) link) );
+        Json_util.string_opt_to_json (Option.map (fun (l : Autoresearch_types.execution_link) -> l.session_id) link) );
       ( "operation_id",
-        Json_util.string_opt_to_json (Option.bind link (fun (l : Autoresearch_types.swarm_link) -> l.operation_id)) );
+        Json_util.string_opt_to_json (Option.bind link (fun (l : Autoresearch_types.execution_link) -> l.operation_id)) );
       ( "task_id",
         Json_util.string_opt_to_json
-          (Option.bind link (fun (l : Autoresearch_types.swarm_link) -> l.task_id)) );
+          (Option.bind link (fun (l : Autoresearch_types.execution_link) -> l.task_id)) );
       ( "linked_at",
-        Json_util.float_opt_to_json (Option.map (fun (l : Autoresearch_types.swarm_link) -> l.linked_at) link) );
+        Json_util.float_opt_to_json (Option.map (fun (l : Autoresearch_types.execution_link) -> l.linked_at) link) );
       ( "queued_hypothesis",
         Json_util.string_opt_to_json p.queued_hypothesis );
     ]
@@ -513,7 +513,7 @@ let rec rm_rf path =
       Sys.remove path
 
 let delete_session_link ~base_path loop_id =
-  match Autoresearch.load_swarm_link_by_loop ~base_path loop_id with
+  match Autoresearch.load_execution_link_by_loop ~base_path loop_id with
   | Some link ->
       let session_path =
         Autoresearch.session_link_file ~base_path link.session_id

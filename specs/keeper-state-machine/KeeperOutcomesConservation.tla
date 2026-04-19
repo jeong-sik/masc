@@ -25,6 +25,40 @@
 \*               buckets (successes ∧ failures on the same turn),
 \*               bumping both but observed_turns only once.
 \*               ConservationLaw MUST be violated.
+\*
+\* OCaml ↔ TLA+ mapping (see #8642 family):
+\*
+\*   spec variable     | OCaml ref / counter                         | source
+\*   ------------------+---------------------------------------------+--------
+\*   successes         | `succ_turns` (incr on Turn_succeeded)       | lib/dashboard/dashboard_http_keeper.ml:81
+\*   failures          | `fail_turn`  (incr on Turn_failed _)        | lib/dashboard/dashboard_http_keeper.ml:82
+\*   rejected          | `gate_rejected` field (currently 0 — see    | lib/dashboard/dashboard_http_keeper.ml (compute_outcomes_rollup)
+\*                     | "scope drift" below)                        |
+\*   observed_turns    | succ_turns + fail_turn                      | lib/dashboard/dashboard_http_keeper.ml:89
+\*
+\* Aggregation entry point:
+\*   lib/dashboard/dashboard_http_keeper.ml:65 (compute_outcomes_rollup)
+\*   — called at line 530 from the per-keeper detail JSON builder.
+\*
+\* SCOPE DRIFT (worth knowing, NOT a spec violation):
+\*   The OCaml comment above compute_outcomes_rollup (lines 60-64) reads:
+\*     "Historical [gate_rejected] counts are not yet persisted in the
+\*      same read model, so the field remains 0 until a keeper-turn
+\*      source is added."
+\*   Today the spec's 3-bucket law (s + f + r = observed) holds vacuously
+\*   because r is always 0. When `gate_rejected` becomes a live counter
+\*   the spec invariant becomes load-bearing — the increment site for
+\*   `gate_rejected` must also bump `observed_turns`, otherwise the law
+\*   breaks. Anyone wiring the third bucket should run the spec's clean
+\*   AND buggy cfgs to confirm the wiring honours conservation.
+\*
+\* Out-of-scope counters (intentionally not modelled here):
+\*   - succ_compactions / fail_compaction / succ_handoffs / fail_handoff
+\*     are tracked separately in the same OCaml function but live on a
+\*     different axis (per-mechanism, not per-turn). They do NOT affect
+\*     observed_turns.
+\*   - keeper_verdicts (pass / fail / unknown from harness verdicts) live
+\*     in a sibling read model.
 
 EXTENDS Integers, TLC
 

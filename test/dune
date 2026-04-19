@@ -657,6 +657,13 @@
  (modules test_anti_rationalization_empty_liveness)
  (libraries masc_test_deps))
 
+; Regression for readonly_hint_of_category — every named category
+; must carry a concrete Good:/Bad: example so small-LLM keepers can
+; self-correct (#8688 root-cause sweep follow-up).
+(test
+ (name test_keeper_readonly_hints)
+ (modules test_keeper_readonly_hints)
+ (libraries masc_test_deps))
 (test
  (name test_cascade_health_tracker)
  (modules test_cascade_health_tracker)
@@ -946,7 +953,9 @@
  (name test_operator_mcp_e2e)
  (modules test_operator_mcp_e2e)
  (libraries masc_test_deps)
- (deps ../bin/main_eio.exe)
+ (deps
+  ../bin/main_eio.exe
+  (source_tree ../config))
  (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
 
 (test

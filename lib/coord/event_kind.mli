@@ -60,7 +60,7 @@ module Board : sig
     | Deleted
 
   val to_string : t -> string
-  (** Canonical dotted-form wire name ([board.posted] etc.). *)
+  (** Canonical dotted-form wire name (e.g. [board.posted]). *)
 
   val of_string : string -> t option
   val all : t list

@@ -1649,10 +1649,11 @@ type shadow_verdict =
   | Shadow_allow of { parse_tag : string }
       (** Parser and destructive classifier both clean. [parse_tag] is
           the tag from [shadow_parse_outcome] so callers can tell
-          [parsed_simple] apart from [too_complex:*] at triage time. *)
+          [parsed_simple] apart from the too_complex family at triage
+          time. *)
   | Shadow_parse_unsupported of { parse_tag : string }
-      (** Grammar did not accept the command (parse_error,
-          parse_aborted:*, too_complex:*).  Not a deny — means the
+      (** Grammar did not accept the command (parse_error, or any of
+          the parse_aborted / too_complex subtags).  Not a deny — means the
           AST gate cannot yet express an opinion.  Callers in
           observation mode should still fall back to the regex
           verdict; in flip mode they must conservatively reject. *)

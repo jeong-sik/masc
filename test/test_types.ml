@@ -564,6 +564,38 @@ let () =
           Masc_mcp.Keeper_exec_memory.valid_memory_search_source_strings
           Masc_mcp.Tool_shard.memory_search_source_enum_strings);
     ];
+    "mcp_session_action_ssot", [
+      (* Issue #8520: introduces [mcp_session_action] Variant where 2
+         sites previously hand-validated raw strings. Witness covers all
+         5 constructors; mirror sync test asserts
+         [Tool_schemas_inline_infra]'s hand-mirrored enum stays in
+         lock-step with the SSOT (cycle-avoidance pattern from #8484). *)
+      Alcotest.test_case "witness covers all 5 variants" `Quick (fun () ->
+        let module G = Masc_mcp.Mcp_server_eio_governance in
+        let witness a =
+          let actual = G.mcp_session_action_to_string a in
+          if not (List.mem actual G.valid_mcp_session_action_strings) then
+            Alcotest.failf "mcp_session_action_to_string %S not in valid_mcp_session_action_strings" actual
+        in
+        witness G.Get; witness G.Create; witness G.List;
+        witness G.Cleanup; witness G.Remove;
+        Alcotest.(check int) "count" 5
+          (List.length G.valid_mcp_session_action_strings));
+      Alcotest.test_case "of_string_opt sound partial" `Quick (fun () ->
+        let module G = Masc_mcp.Mcp_server_eio_governance in
+        Alcotest.(check bool) "create" true
+          (G.mcp_session_action_of_string_opt "create" <> None);
+        Alcotest.(check bool) "CLEANUP (case)" true
+          (G.mcp_session_action_of_string_opt "CLEANUP" <> None);
+        Alcotest.(check bool) "  remove  (trim)" true
+          (G.mcp_session_action_of_string_opt "  remove  " <> None);
+        Alcotest.(check bool) "garbage rejected" true
+          (G.mcp_session_action_of_string_opt "definitely-not-an-action" = None));
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        Alcotest.(check (list string)) "tool_schemas mirror == SSOT"
+          Masc_mcp.Mcp_server_eio_governance.valid_mcp_session_action_strings
+          Masc_tool_schemas.Tool_schemas_inline_infra.mcp_session_action_enum_strings);
+    ];
     "fs_write_mode_ssot", [
       (* Issue #8490: introduces [fs_write_mode] Variant where 5 sites
          previously hand-validated raw strings + relied on an

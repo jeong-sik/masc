@@ -1,5 +1,14 @@
 open Types
 
+(** Issue #8520: hand-mirrored from
+    [Mcp_server_eio_governance.valid_mcp_session_action_strings]. This
+    library ([masc_tool_schemas]) depends only on [masc_types]; pulling
+    in the governance module would inflate the dep graph. Sync
+    regression test in [test_types.ml :: mcp_session_action_ssot]
+    catches drift (same cycle-avoidance pattern as #8484 / #8490 / #8513). *)
+let mcp_session_action_enum_strings =
+  [ "get"; "create"; "list"; "cleanup"; "remove" ]
+
 let schemas : tool_schema list = [
   (* masc_mcp_session *)
   {
@@ -12,7 +21,7 @@ Pair with masc_subscription to receive session-scoped event notifications.";
       ("properties", `Assoc [
         ("action", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "get"; `String "create"; `String "list"; `String "cleanup"; `String "remove"]);
+          ("enum", `List (List.map (fun s -> `String s) mcp_session_action_enum_strings));
           ("description", `String "Session action");
         ]);
         ("session_id", `Assoc [

@@ -95,3 +95,38 @@ let save_mcp_sessions (config : Coord.config) (sessions : mcp_session_record lis
   ensure_masc_dir config;
   let json = `List (List.map mcp_session_to_json sessions) in
   Coord_utils.write_json config (mcp_sessions_path config) json
+
+(* Issue #8520: Variant SSOT for the [masc_mcp_session] action argument.
+   Adding a 6th constructor forces compilation in [mcp_session_action_to_string]
+   AND the dispatcher match in [tool_inline_dispatch]; the schema enum in
+   [tool_schemas_inline_infra] derives from [valid_mcp_session_action_strings]
+   via a hand-mirror (same cycle pattern as #8484 / #8490 / #8513) with a
+   sync regression test. *)
+type mcp_session_action =
+  | Get
+  | Create
+  | List
+  | Cleanup
+  | Remove
+
+let mcp_session_action_to_string = function
+  | Get -> "get"
+  | Create -> "create"
+  | List -> "list"
+  | Cleanup -> "cleanup"
+  | Remove -> "remove"
+
+let mcp_session_action_of_string_opt raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "get" -> Some Get
+  | "create" -> Some Create
+  | "list" -> Some List
+  | "cleanup" -> Some Cleanup
+  | "remove" -> Some Remove
+  | _ -> None
+
+let all_mcp_session_actions =
+  [ Get; Create; List; Cleanup; Remove ]
+
+let valid_mcp_session_action_strings =
+  List.map mcp_session_action_to_string all_mcp_session_actions

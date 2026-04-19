@@ -1,6 +1,6 @@
 open Alcotest
 
-module WP = Masc_mcp.With_process
+module WP = With_process
 
 (* ----- fd counting helper ---------------------------------------------- *)
 

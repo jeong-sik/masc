@@ -152,16 +152,27 @@ let publish_keeper_snapshot (_bus : Agent_sdk.Event_bus.t) ~keeper_name
     stream; the sync test in [test_types.ml ::
     lifecycle_events_ssot] asserts every literal still emitted by
     [Keeper_supervisor] / [Keeper_keepalive] lives in the SSOT. *)
-let publish_keeper_lifecycle (_bus : Agent_sdk.Event_bus.t) ?phase ~event
+(* #8856 / #8605 family: [event] is now the unified
+   [Keeper_lifecycle_events.lifecycle_event] variant -- typos at the
+   16 supervisor/keepalive call sites fail to compile. JSON wire
+   format ("event" + optional "phase" field) is preserved
+   bit-identically:
+     - Custom_event { verb; phase = None }  -> event=verb, phase=null
+     - Custom_event { verb; phase = Some p } -> event=verb, phase=p
+     - Phase_event p                          -> event=p, phase=p
+   The legacy ?phase optional argument is folded into the variant. *)
+let publish_keeper_lifecycle (_bus : Agent_sdk.Event_bus.t)
+    ~(event : Keeper_lifecycle_events.lifecycle_event)
     ~keeper_name ~detail () =
   let phase_json =
-    match phase with
+    match Keeper_lifecycle_events.lifecycle_event_phase event with
     | Some phase ->
       `String (Keeper_state_machine.phase_to_string phase)
     | None -> `Null
   in
+  let event_str = Keeper_lifecycle_events.lifecycle_event_to_string event in
   let payload = `Assoc [
-    ("event", `String event);
+    ("event", `String event_str);
     ("keeper_name", `String keeper_name);
     ("phase", phase_json);
     ("detail", `String detail);

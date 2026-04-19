@@ -5,8 +5,15 @@
 
 ### Changed
 
-- **OAS pin bump → `main@2798831c` (v0.162.0 + 7 follow-ups).** Carries
+- **OAS pin bump → `main@5bd2b908` (v0.162.0 + 8 follow-ups).** Carries
   upstream OAS commits since the last `54f4aeab` pin:
+  - `5bd2b908` #1064 — `perf(gemini_cli): fail-fast on
+    MODEL_CAPACITY_EXHAUSTED stderr`. Aborts the gemini CLI on the
+    first 429 `MODEL_CAPACITY_EXHAUSTED` / `rateLimitExceeded` line so
+    the OAS cascade can move on to the next provider immediately
+    instead of waiting ~30–60 s for the CLI's internal retry loop.
+    Gated by `OAS_GEMINI_CLI_NO_FAIL_FAST_ON_CAPACITY=1` for callers
+    that still want the CLI's internal retries.
   - `2798831c` #1035 — `fix(hooks): emit OnError on tool-not-found
     dispatch failure (#1032)`. Surfaces a previously-silent dispatch
     failure mode through the existing `Hooks.OnError` channel; useful

@@ -3,14 +3,10 @@
 open Masc_exec
 
 let check_eq ctx expected actual =
-  if expected <> actual then
-    failwith
-      (Printf.sprintf "%s: expected %S, got %S" ctx expected actual)
+  Alcotest.(check string) ctx expected actual
 
 let check_int ctx expected actual =
-  if expected <> actual then
-    failwith
-      (Printf.sprintf "%s: expected %d, got %d" ctx expected actual)
+  Alcotest.(check int) ctx expected actual
 
 (* Small inputs fit fully inside head_cap and render byte-identical. *)
 let test_small_input_no_truncation () =
@@ -75,17 +71,17 @@ let test_head_cap_zero () =
   Exec_buffer.add_string b "abcdefg";
   check_eq "head empty" "" (Exec_buffer.head b);
   check_eq "tail last 4" "defg" (Exec_buffer.tail b);
-  check_eq "render" "defg" (Exec_buffer.render b)
+  check_eq "render" "\n...(truncated 3 bytes)...\ndefg" (Exec_buffer.render b)
 
 (* Negative caps rejected. *)
 let test_negative_caps_rejected () =
   (try
      let _ = Exec_buffer.create ~head_cap:(-1) ~tail_cap:4 in
-     failwith "negative head_cap not rejected"
+     Alcotest.fail "negative head_cap not rejected"
    with Invalid_argument _ -> ());
   (try
      let _ = Exec_buffer.create ~head_cap:4 ~tail_cap:(-1) in
-     failwith "negative tail_cap not rejected"
+     Alcotest.fail "negative tail_cap not rejected"
    with Invalid_argument _ -> ())
 
 (* add_bytes out-of-range rejected. *)
@@ -94,7 +90,7 @@ let test_add_bytes_oob () =
   let buf = Bytes.of_string "abcd" in
   try
     Exec_buffer.add_bytes b buf 2 10;
-    failwith "oob not rejected"
+    Alcotest.fail "oob not rejected"
   with Invalid_argument _ -> ()
 
 let () =

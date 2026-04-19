@@ -84,13 +84,22 @@ let test_tree_kill_sigterm () =
   with
   | Error e -> failf "spawn failed: %s" e
   | Ok h ->
-      P.tree_kill ~pgid:h.pgid ~signal:Sys.sigterm ~grace_sec:2.0;
-      let dead =
-        wait_until ~timeout_s:3.0 (fun () ->
-          not (P.is_pgid_alive ~pgid:h.pgid))
+      let alive =
+        wait_until ~timeout_s:1.0 (fun () ->
+          P.is_pgid_alive ~pgid:h.pgid)
       in
+      check bool "pgroup reaches alive state" true alive;
+      P.tree_kill ~pgid:h.pgid ~signal:Sys.sigterm ~grace_sec:2.0;
+      let status = ref None in
+      let exited =
+        wait_until ~timeout_s:3.0 (fun () ->
+          match waitpid_nohang h.pid with
+          | Some s -> status := Some s; true
+          | None -> false)
+      in
+      check bool "child exited after tree_kill" true exited;
+      let dead = not (P.is_pgid_alive ~pgid:h.pgid) in
       check bool "pgroup dead after tree_kill" true dead;
-      ignore (Unix.waitpid [] h.pid);
       Unix.close h.stdout_fd; Unix.close h.stderr_fd
 
 let test_tree_kill_escalates_to_sigkill () =
@@ -104,13 +113,22 @@ let test_tree_kill_escalates_to_sigkill () =
   with
   | Error e -> failf "spawn failed: %s" e
   | Ok h ->
-      P.tree_kill ~pgid:h.pgid ~signal:Sys.sigterm ~grace_sec:0.5;
-      let dead =
-        wait_until ~timeout_s:2.0 (fun () ->
-          not (P.is_pgid_alive ~pgid:h.pgid))
+      let alive =
+        wait_until ~timeout_s:1.0 (fun () ->
+          P.is_pgid_alive ~pgid:h.pgid)
       in
+      check bool "pgroup reaches alive state" true alive;
+      P.tree_kill ~pgid:h.pgid ~signal:Sys.sigterm ~grace_sec:0.5;
+      let status = ref None in
+      let exited =
+        wait_until ~timeout_s:2.0 (fun () ->
+          match waitpid_nohang h.pid with
+          | Some s -> status := Some s; true
+          | None -> false)
+      in
+      check bool "child exited after escalation" true exited;
+      let dead = not (P.is_pgid_alive ~pgid:h.pgid) in
       check bool "SIGKILL reached stubborn child" true dead;
-      ignore (Unix.waitpid [] h.pid);
       Unix.close h.stdout_fd; Unix.close h.stderr_fd
 
 (* TODO (Tick 7): grandchild reach test.  A naive

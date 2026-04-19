@@ -70,8 +70,11 @@ type state = {
    Written best-effort; failures are logged but do not abort spawn. *)
 
 let bg_dir_of ~base_path ~keeper =
-  Filename.concat (Filename.concat (Filename.concat base_path ".masc")
-    (Filename.concat "keeper" keeper)) "bg"
+  Filename.concat
+    (Filename.concat
+       (Common.masc_dir_from_base_path ~base_path)
+       (Filename.concat "keeper" keeper))
+    "bg"
 
 let pid_file_of ~base_path ~keeper ~task_id =
   Filename.concat (bg_dir_of ~base_path ~keeper) (task_id ^ ".pid")
@@ -297,7 +300,9 @@ let reap_orphans ~base_path =
   if base_path = "" then 0
   else
     let keeper_root =
-      Filename.concat (Filename.concat base_path ".masc") "keeper"
+      Filename.concat
+        (Common.masc_dir_from_base_path ~base_path)
+        "keeper"
     in
     if not (is_dir keeper_root) then 0
     else

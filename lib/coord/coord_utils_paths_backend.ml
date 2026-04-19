@@ -7,7 +7,7 @@ open Coord_utils_backend_setup
     match [masc_root_dir] exactly: default cluster -> [<base>/.masc/],
     non-default -> [<base>/.masc/clusters/<sanitized>/]. *)
 let masc_root_dir_from ~base_path ~cluster_name =
-  let masc_root = Filename.concat base_path ".masc" in
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
   match cluster_name with
   | "" | "default" -> masc_root
   | other ->

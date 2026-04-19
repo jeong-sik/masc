@@ -32,14 +32,12 @@ let test_benign_disallowed_command_yields_agree () =
      command as a diff. *)
   check string "benign unknown bin → agree" "agree" (diff_tag "foo bar")
 
-let test_unsupported_grammar_is_shadow_cannot_parse () =
-  (* Pipeline is not yet parsed as simple; legacy disagrees or
-     agrees depending on allowlist, but the shadow says
-     parse-unsupported, so diff is [Shadow_cannot_parse] — the
-     grammar upgrade queue target. *)
+let test_pipeline_shadow_agrees_with_legacy_policy () =
+  (* Pipeline parsing is now covered by the shadow parser. Legacy still
+     owns allowlist policy, so a benign disallowed pipeline is [Agree],
+     not a parser-coverage gap. *)
   let d, _, _ = W.diff_command "ls | wc -l" in
-  check string "pipe parse-unsupported"
-    "shadow_cannot_parse" (W.gate_diff_to_string d)
+  check string "pipe agrees" "agree" (W.gate_diff_to_string d)
 
 let test_sql_destructive_agrees () =
   (* `drop table foo` is denied by legacy (Eval_gate) and by shadow
@@ -93,8 +91,8 @@ let () =
       test_case "unknown bin still agree" `Quick
         test_benign_disallowed_command_yields_agree;
       test_case "sql destructive agree" `Quick test_sql_destructive_agrees;
-      test_case "pipe parse unsupported" `Quick
-        test_unsupported_grammar_is_shadow_cannot_parse;
+      test_case "pipeline shadow agrees with legacy policy" `Quick
+        test_pipeline_shadow_agrees_with_legacy_policy;
     ]);
     ("shape", [
       test_case "diff_command triple shape" `Quick

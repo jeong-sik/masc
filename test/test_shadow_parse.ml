@@ -39,9 +39,8 @@ let test_shell_chain_marks_unsupported () =
   let t = tag "ls && rm -rf /" in
   if not (is_non_simple_tag t) then fail ("unexpected tag: " ^ t)
 
-let test_pipe_marks_unsupported () =
-  let t = tag "ls | wc -l" in
-  if not (is_non_simple_tag t) then fail ("unexpected tag: " ^ t)
+let test_pipe_parses () =
+  check string "pipe is parsed_simple" "parsed_simple" (tag "ls | wc -l")
 
 let test_cross_check_pairs_legacy_and_shadow () =
   let legacy_ok = Ok () in
@@ -59,7 +58,7 @@ let () =
       test_case "empty command tag" `Quick test_empty_command_is_parse_error;
       test_case "shell chain unsupported" `Quick
         test_shell_chain_marks_unsupported;
-      test_case "pipe unsupported" `Quick test_pipe_marks_unsupported;
+      test_case "pipe parses" `Quick test_pipe_parses;
     ]);
     ("cross_check", [
       test_case "cross_check preserves legacy result" `Quick

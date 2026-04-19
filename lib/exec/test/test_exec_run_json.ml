@@ -22,8 +22,11 @@ open Masc_exec
 
 let clean_bg_dir ~base_path ~keeper =
   let bg_dir =
-    Filename.concat (Filename.concat (Filename.concat base_path ".masc")
-      (Filename.concat "keeper" keeper)) "bg"
+    Filename.concat
+      (Filename.concat
+         (Common.masc_dir_from_base_path ~base_path)
+         (Filename.concat "keeper" keeper))
+      "bg"
   in
   if Sys.file_exists bg_dir then
     let files = try Sys.readdir bg_dir with _ -> [||] in

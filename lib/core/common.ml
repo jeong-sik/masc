@@ -32,6 +32,11 @@ let protect ~module_name ~finally_label ~finally f =
              ~during_exception:true ~backtrace:bt2 ex2);
       Printexc.raise_with_backtrace ex bt
 
+let masc_dirname = ".masc"
+
+let masc_dir_from_base_path ~base_path =
+  Filename.concat base_path masc_dirname
+
 (** Maximum output bytes for tool responses. SSOT for the 64KB cap. *)
 let max_tool_output_bytes = 65_536
 

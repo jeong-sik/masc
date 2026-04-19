@@ -7,7 +7,7 @@
 
     @since God file decomposition — extracted from oas_worker.ml *)
 
-open Result_syntax
+open Result.Syntax
 
 (* ================================================================ *)
 (* Cascade profile defaults (moved from Cascade module)              *)

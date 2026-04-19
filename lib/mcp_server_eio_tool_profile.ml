@@ -458,7 +458,7 @@ type tools_list_params = {
   cursor : string option;
 }
 
-open Result_syntax
+open Result.Syntax
 
 let strict_assoc_params params =
   match params with

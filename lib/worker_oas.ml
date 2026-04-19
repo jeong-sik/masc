@@ -14,7 +14,7 @@
     @since Phase 5 — OAS Agent.run adapter for workers *)
 
 open Printf
-open Result_syntax
+open Result.Syntax
 
 (* ================================================================ *)
 (* worker_container_meta -> OAS Types.model                          *)

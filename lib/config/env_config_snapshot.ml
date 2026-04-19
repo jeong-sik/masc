@@ -108,7 +108,7 @@ let rate_limiting_entries =
 
 let storage_entries =
   [
-    entry ~default:"filesystem" "MASC_STORAGE_TYPE"
+    entry ~default:"filesystem" Env_config_core.storage_type_env_key
       "Backend storage type (filesystem only)";
     entry ~default:"1000" "MASC_PUBSUB_MAX_MESSAGES"
       "Max pubsub messages per batch";

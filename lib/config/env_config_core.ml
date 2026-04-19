@@ -295,13 +295,18 @@ let storage_type () =
       | other -> other)
   | None -> "filesystem"
 
+(** SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352).
+    Shared by snapshot catalog and docker worker inheritance list. *)
+let config_dir_env_key = "MASC_CONFIG_DIR"
+let personas_dir_env_key = "MASC_PERSONAS_DIR"
+
 (** Config directory override. *)
 let config_dir_opt () =
-  raw_value_opt "MASC_CONFIG_DIR" |> trim_opt
+  raw_value_opt config_dir_env_key |> trim_opt
 
 (** Personas directory override. *)
 let personas_dir_opt () =
-  raw_value_opt "MASC_PERSONAS_DIR" |> trim_opt
+  raw_value_opt personas_dir_env_key |> trim_opt
 
 (** {1 Relay Calibration} *)
 

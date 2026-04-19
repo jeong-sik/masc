@@ -348,7 +348,12 @@ let graph_json config ?(kinds = []) ?(limit = 500)
         List.iter (fun (e : event) ->
           let idx = min (num_buckets - 1) ((e.ts_ms - min_ts) / bucket_width) in
           let (count, agents_tbl, tasks_done) = buckets.(idx) in
-          let new_tasks_done = tasks_done + (if e.kind = "task.done" then 1 else 0) in
+          let new_tasks_done =
+            tasks_done
+            + (if String.equal e.kind
+                 (Event_kind.Task.to_string Event_kind.Task.Done)
+               then 1 else 0)
+          in
           (match e.actor with
            | Some actor -> Hashtbl.replace agents_tbl actor.id true
            | None -> ());

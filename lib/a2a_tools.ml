@@ -337,7 +337,9 @@ let discover config ?(endpoint : string option) ?(capability : string option) ?(
 let query_skill config ~schemas ~agent_name ~skill_id : (Yojson.Safe.t, string) result =
   (* First, find the agent *)
   let agents = Coord.get_agents_raw config in
-  let agent_opt = List.find_opt (fun (a : Types.agent) -> a.name = agent_name) agents in
+  let agent_opt =
+    List.find_opt (fun (a : Types.agent) -> a.name = agent_name) agents
+  in
   match agent_opt with
   | None -> Error (Printf.sprintf "Agent '%s' not found" agent_name)
   | Some _agent ->

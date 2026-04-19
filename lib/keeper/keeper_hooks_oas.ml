@@ -320,8 +320,22 @@ let make_hooks
            Prometheus.inc_counter
              "masc_after_turn_telemetry_missing_total"
              ~labels:[("model", model)] ());
-        Log.Keeper.info "keeper:%s turn=%d total_turns=%d model=%s tokens=%d"
-          meta.name turn meta.runtime.usage.total_turns model total_tok;
+        let fmt_tok_s = function
+          | Some v -> Printf.sprintf "%.1f" v
+          | None -> "-"
+        in
+        let prompt_tok_s, decode_tok_s, latency_ms =
+          match response.telemetry with
+          | Some { timings = Some t; request_latency_ms; _ } ->
+              fmt_tok_s t.prompt_per_second,
+              fmt_tok_s t.predicted_per_second,
+              request_latency_ms
+          | _ -> "-", "-", 0
+        in
+        Log.Keeper.info
+          "keeper:%s turn=%d total_turns=%d model=%s tokens=%d prompt_tok_s=%s decode_tok_s=%s latency_ms=%d"
+          meta.name turn meta.runtime.usage.total_turns model total_tok
+          prompt_tok_s decode_tok_s latency_ms;
         (* Emit per-turn cost event for task attribution.
            cost_usd from OAS Pricing.annotate_response_cost (oas#393 resolved). *)
         (match trajectory_acc with

@@ -30,11 +30,16 @@ stylesheet
     color: #b8a488;
     font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
     font-size: 15px;
-    padding: 1.5rem 2.5rem 4rem;
+    padding: 1.5rem 2.5rem 4rem 244px;
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
     isolation: isolate;
+  }
+
+  @media (max-width: 880px) {
+    .root { padding-left: 1.25rem; }
+    .nav  { display: none; }
   }
 
   .root::before {
@@ -846,6 +851,126 @@ stylesheet
     color: #5a3028;
     white-space: nowrap;
   }
+
+  /* ─── left nav (220px, fixed) ───
+     dashboard_v2 shell의 nav column을 fixed positioning으로 도입.
+     scroll시 항상 보이고, root는 padding-left로 자리만 비워준다. */
+  .nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 220px;
+    height: 100vh;
+    padding: 18px 0 24px;
+    background: linear-gradient(180deg, #18110c 0%, #0e0806 100%);
+    border-right: 1px solid #2a1a14;
+    box-shadow: inset -1px 0 0 rgba(138, 106, 40, 0.08);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    z-index: 5;
+  }
+
+  .nav_brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 18px 18px;
+    border-bottom: 1px solid #2a1a14;
+    margin-bottom: 12px;
+  }
+  .nav_brand_rune {
+    width: 18px;
+    height: 18px;
+    border: 1px solid #8a6a28;
+    color: #8a6a28;
+    display: grid;
+    place-items: center;
+    font-family: 'Cinzel', serif;
+    font-size: 9px;
+    transform: rotate(45deg);
+  }
+  .nav_brand_rune > span { transform: rotate(-45deg); display: block; }
+  .nav_brand_word {
+    font-family: 'Cinzel', serif;
+    font-size: 12px;
+    letter-spacing: 0.28em;
+    color: #e8d8b8;
+    text-transform: uppercase;
+  }
+  .nav_brand_blood { color: #a01818; }
+
+  .nav_section {
+    padding: 14px 18px 6px;
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #6a5848;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .nav_section::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, #5a3028, transparent);
+  }
+
+  .nav_link {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 8px 18px;
+    color: #b8a488;
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    cursor: default;
+    user-select: none;
+  }
+  .nav_link:hover {
+    color: #8a6a28;
+    background: rgba(138, 106, 40, 0.05);
+  }
+  .nav_link_active {
+    color: #8a6a28;
+    border-left-color: #8a6a28;
+    background: linear-gradient(90deg, rgba(138, 106, 40, 0.10), transparent 70%);
+  }
+  .nav_link_glyph {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #5a3028;
+    flex-shrink: 0;
+  }
+  .nav_link_active .nav_link_glyph {
+    background: #8a6a28;
+    box-shadow: 0 0 6px #8a6a28;
+  }
+  .nav_link_tail {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: #a01818;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .nav_foot {
+    margin-top: auto;
+    padding: 14px 18px 0;
+    border-top: 1px solid #2a1a14;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    color: #5a3028;
+    text-transform: uppercase;
+  }
+  .nav_foot_v { color: #6a5848; }
 |}]
 
 let level_class level =
@@ -1130,9 +1255,72 @@ let render_response (response : Logs_types.response) : Node.t =
       ; Node.span ~attrs:[ Style.moon_tail ] [ Node.text "operator · vincent" ]
       ]
   in
+  let nav_section label =
+    Node.div ~attrs:[ Style.nav_section ] [ Node.text label ]
+  in
+  let nav_link ?(active = false) ?tail label =
+    let attrs =
+      if active
+      then [ Style.nav_link; Style.nav_link_active ]
+      else [ Style.nav_link ]
+    in
+    let tail_node =
+      match tail with
+      | None -> []
+      | Some t -> [ Node.span ~attrs:[ Style.nav_link_tail ] [ Node.text t ] ]
+    in
+    Node.div
+      ~attrs
+      ([ Node.span ~attrs:[ Style.nav_link_glyph ] []
+       ; Node.text label
+       ]
+       @ tail_node)
+  in
+  let nav =
+    Node.div
+      ~attrs:[ Style.nav ]
+      [ Node.div
+          ~attrs:[ Style.nav_brand ]
+          [ Node.div
+              ~attrs:[ Style.nav_brand_rune ]
+              [ Node.span [ Node.text "M" ] ]
+          ; Node.span
+              ~attrs:[ Style.nav_brand_word ]
+              [ Node.text "ma"
+              ; Node.span
+                  ~attrs:[ Style.nav_brand_blood ]
+                  [ Node.text "s" ]
+              ; Node.text "c"
+              ]
+          ]
+      ; nav_section "chronicle"
+      ; nav_link "overview"
+      ; nav_link ~active:true "logs · journal"
+      ; nav_link "goals"
+      ; nav_section "runtime"
+      ; nav_link "keepers" ~tail:"04"
+      ; nav_link "observatory"
+      ; nav_link "intervene"
+      ; nav_section "lab"
+      ; nav_link "tools"
+      ; nav_link "sessions"
+      ; nav_link "social board"
+      ; nav_section "crypt"
+      ; nav_link "dead keepers" ~tail:"00"
+      ; nav_link "archive runs"
+      ; Node.div
+          ~attrs:[ Style.nav_foot ]
+          [ Node.text "phase 0 · /b/ · "
+          ; Node.span
+              ~attrs:[ Style.nav_foot_v ]
+              [ Node.text "v0.18-pre" ]
+          ]
+      ]
+  in
   Node.div
     ~attrs:[ Style.root ]
-    [ brand_row
+    [ nav
+    ; brand_row
     ; view_heartbeat ()
     ; view_hud response
     ; moonrise

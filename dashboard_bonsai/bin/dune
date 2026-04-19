@@ -1,0 +1,6 @@
+(executable
+ (name main)
+ (modes js)
+ (libraries dashboard_bonsai_lib bonsai_web)
+ (js_of_ocaml (flags (:standard --opt 3 --enable use-js-string --disable pretty --disable debuginfo --effects=cps)))
+ (preprocess (pps ppx_jane js_of_ocaml-ppx)))

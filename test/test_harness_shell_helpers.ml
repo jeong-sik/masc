@@ -61,6 +61,51 @@ let contains_substring haystack needle =
   in
   nlen = 0 || loop 0
 
+let executable path =
+  Sys.file_exists path
+  &&
+  try
+    Unix.access path [ Unix.X_OK ];
+    true
+  with Unix.Unix_error _ -> false
+
+let keeper_campaign_fsm_exe () =
+  let root = source_root () in
+  let absolute path =
+    if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path
+    else path
+  in
+  let dune_build_dir =
+    match Sys.getenv_opt "DUNE_BUILD_DIR" with
+    | Some value when String.trim value <> "" -> value
+    | _ -> "_build"
+  in
+  let build_root =
+    if Filename.is_relative dune_build_dir then
+      Filename.concat root dune_build_dir
+    else
+      dune_build_dir
+  in
+  let candidates =
+    match Sys.getenv_opt "KEEPER_CAMPAIGN_FSM_EXE" with
+    | Some path when String.trim path <> "" ->
+      [
+        absolute path;
+        Filename.concat build_root "default/bin/keeper_campaign_fsm.exe";
+        Filename.concat root "_build/default/bin/keeper_campaign_fsm.exe";
+      ]
+    | _ ->
+      [
+        Filename.concat build_root "default/bin/keeper_campaign_fsm.exe";
+        Filename.concat root "_build/default/bin/keeper_campaign_fsm.exe";
+      ]
+  in
+  match List.find_opt executable candidates with
+  | Some path -> path
+  | None ->
+    failf "keeper_campaign_fsm.exe not found; candidates:\n%s"
+      (String.concat "\n" candidates)
+
 let test_server_bootstrap_temp_helpers () =
   with_temp_dir "harness-bootstrap-temp" (fun dir ->
       let script =
@@ -119,12 +164,13 @@ let test_keeper_campaign_harness_dry_run () =
       let script =
         Filename.concat (source_root ()) "scripts/harness_keeper_campaign.sh"
       in
+      let fsm_exe = keeper_campaign_fsm_exe () in
       let run_dir = Filename.concat dir "artifacts" in
       let code, _stdout, stderr =
         run_bash ~cwd:(source_root ())
           (Printf.sprintf
-             "DRY_RUN=1 START_SERVER=0 RUN_DIR=%s %s"
-             (quote run_dir) (quote script))
+             "DRY_RUN=1 START_SERVER=0 RUN_DIR=%s KEEPER_CAMPAIGN_FSM_EXE=%s MASC_HARNESS_ALLOW_DUNE_EXEC_FALLBACK=0 %s"
+             (quote run_dir) (quote fsm_exe) (quote script))
       in
       if code <> 0 then
         failf "keeper campaign dry run failed (%d): %s" code stderr;
@@ -151,9 +197,7 @@ let test_keeper_campaign_harness_dry_run () =
 
 let test_keeper_campaign_cli_replay () =
   with_temp_dir "keeper-campaign-cli" (fun dir ->
-      let exe =
-        Filename.concat (source_root ()) "_build/default/bin/keeper_campaign_fsm.exe"
-      in
+      let exe = keeper_campaign_fsm_exe () in
       let events_path = Filename.concat dir "events.jsonl" in
       let output_path = Filename.concat dir "state.json" in
       let events =

@@ -1,6 +1,6 @@
 open Yojson.Safe.Util
 
-open Result_syntax
+open Result.Syntax
 
 type target_type =
   | Coord

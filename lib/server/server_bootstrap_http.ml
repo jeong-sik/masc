@@ -6,8 +6,8 @@ module Http = Http_server_eio
 
 let make_http_config ~host ~port : Http.config =
   let config = { Http.default_config with port; host } in
-  Unix.putenv "MASC_HOST" config.host;
-  Unix.putenv "MASC_HTTP_PORT" (string_of_int config.port);
+  Unix.putenv Env_config_core.host_env_key config.host;
+  Unix.putenv Env_config_core.http_port_env_key (string_of_int config.port);
   (match Sys.getenv_opt Env_config_core.http_base_url_env_key with
   | Some existing when String.trim existing <> "" -> ()
   | _ ->
@@ -16,8 +16,7 @@ let make_http_config ~host ~port : Http.config =
           Masc_network_defaults.masc_http_default_host
         else config.host
       in
-      Unix.putenv
-        Env_config_core.http_base_url_env_key
+      Unix.putenv Env_config_core.http_base_url_env_key
         (Printf.sprintf "http://%s:%d" advertised_host config.port));
   config
 

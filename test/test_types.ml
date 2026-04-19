@@ -430,6 +430,21 @@ let () =
           Masc_mcp.Keeper_types_profile.valid_shared_memory_scope_strings
           Masc_mcp.Keeper_schema.shared_memory_scope_enum_strings);
     ];
+    "admin_section_ssot", [
+      (* Issue #8546: schema advertised [auth; unit_policy] while the
+         handler only implemented `auth`, so LLM clients following the
+         schema got `"section must be one of: auth"`. SSOT now lives in
+         [Tool_misc_admin] and both the schema (via hand mirror) and the
+         dispatcher error message derive from it. *)
+      Alcotest.test_case "SSOT contains exactly the implemented sections" `Quick (fun () ->
+        Alcotest.(check (list string)) "auth only"
+          [ "auth" ]
+          Masc_mcp.Tool_misc_admin.valid_admin_section_strings);
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        Alcotest.(check (list string)) "tool_schemas mirror == SSOT"
+          Masc_mcp.Tool_misc_admin.valid_admin_section_strings
+          Masc_tool_schemas.Tool_schemas_misc.admin_section_enum_strings);
+    ];
     "config_category_ssot", [
       Alcotest.test_case "producer helper matches all_categories order" `Quick (fun () ->
         Alcotest.(check (list string)) "all_categories -> names"

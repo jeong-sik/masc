@@ -12,6 +12,18 @@ module U = Yojson.Safe.Util
 
 type tool_result = bool * string
 
+(** SSOT for canonical `section` values accepted by
+    [masc_tool_admin_update]. Adding a new section requires:
+    (1) a new branch in the dispatcher match below,
+    (2) this list gets the new string,
+    (3) [Tool_schemas_misc.admin_section_enum_strings] mirror (sync test
+    in [test_types.ml :: admin_section_ssot] catches drift).
+
+    Issue #8546: schema advertised [auth; unit_policy] but the handler
+    only implemented `auth`, so LLM clients following the schema got
+    `"section must be one of: auth"` — fictional sections removed. *)
+let valid_admin_section_strings : string list = [ "auth" ]
+
 type context = {
   config: Coord.config;
   agent_name: string;
@@ -319,4 +331,6 @@ let handle_tool_admin_update ctx args =
           in
           (true, Yojson.Safe.to_string payload))
   | _ ->
-      (false, "section must be one of: auth")
+      (false,
+       Printf.sprintf "section must be one of: %s"
+         (String.concat " | " valid_admin_section_strings))

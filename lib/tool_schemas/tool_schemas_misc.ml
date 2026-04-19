@@ -2,6 +2,13 @@
 
 open Types
 
+(** Issue #8546: mirror of [Tool_misc_admin.valid_admin_section_strings].
+    Schema previously advertised [auth; unit_policy] but the handler only
+    implemented `auth`, so LLM clients following the schema got a
+    conflicting `"section must be one of: auth"` error. Cycle pattern
+    same as #8484 / #8490 / #8493. *)
+let admin_section_enum_strings = [ "auth" ]
+
 (** Issue #8493: [masc_config] category filter strings mirror
     [Env_config_snapshot.valid_config_category_strings]. This library
     depends only on [masc_types], so it cannot depend on [masc_config]
@@ -199,16 +206,17 @@ Uses configured web-search providers with structured fallback behavior and retur
   };
   {
     name = "masc_tool_admin_update";
-    description = "Apply auth, unit-policy, or keeper-policy updates through a single admin entrypoint. \
-Use when toggling auth or updating unit/keeper policies. \
-After masc_tool_admin_snapshot to review current state before making changes.";
+    description = "Apply auth updates through a single admin entrypoint. \
+Use after masc_tool_admin_snapshot to review current state before making changes. \
+Additional sections (unit_policy, keeper_policy) are not yet implemented and \
+will be added here when their handlers land.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("section", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "auth"; `String "unit_policy"]);
-          ("description", `String "Config section to update");
+          ("enum", `List (List.map (fun s -> `String s) admin_section_enum_strings));
+          ("description", `String "Config section to update (currently only auth is implemented)");
         ]);
         ("enabled", `Assoc [
           ("type", `String "boolean");

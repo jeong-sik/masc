@@ -448,6 +448,16 @@ let review
            Log.Task.info "[anti-rationalization] verdict via text fallback";
            (match parse_verdict text with
             | Ok v -> (v, Llm_text_fallback, None)
+            | Error "empty review output" ->
+              (* An evaluator that returns empty text is not producing
+                 unknown-format output (ADR D3 target); it is producing
+                 no signal, indistinguishable from an unavailable
+                 evaluator. Approve by liveness — same policy as the
+                 [Error err] branch below — instead of blaming the
+                 completing keeper for an evaluator-side gap. Observed
+                 35 rejects in 2 days (#8688, ~/me/.masc/tool_calls). *)
+              Log.Task.warn "[anti-rationalization] evaluator returned empty text (approving by liveness)";
+              ( Approve, Fallback, Some "evaluator returned empty response" )
             | Error parse_err ->
               (* ADR D3: parse failure is NOT silently approved.
                  Use Reject instead of Approve for unknown format. *)

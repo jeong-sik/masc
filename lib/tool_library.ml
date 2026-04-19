@@ -1,7 +1,7 @@
 (** Tool_library - Agent Knowledge Library operations
 
     Manages the personal knowledge base at ~/me/docs/library/
-    - Direct experience documents only (source: direct_experience | research | experiment)
+    - Direct experience documents only (source: see [library_source])
     - YAML frontmatter with confidence scores
     - Candidates promotion flow
 *)
@@ -10,6 +10,36 @@ open Printf
 
 (** Confidence threshold for routing documents to library vs candidates. *)
 let library_confidence_threshold = 0.5
+
+(** Issue #8601: SSOT for library document [source] field. Schema enum,
+    handler validation, and module docstring previously listed the values
+    independently — the docstring drifted (claimed 3, runtime had 4).
+    The witness pattern below is the standard Variant SSOT shape used by
+    #8486 (tail_order), #8467 (sandbox_profile), #8592 (dashboard scope).
+    Adding a 5th source forces compile errors in [source_to_string] and
+    fails the [library_source_ssot] test in test_types.ml. *)
+type library_source =
+  | Direct_experience
+  | Research
+  | Experiment
+  | Observation
+
+let source_to_string = function
+  | Direct_experience -> "direct_experience"
+  | Research -> "research"
+  | Experiment -> "experiment"
+  | Observation -> "observation"
+
+let all_sources = [ Direct_experience; Research; Experiment; Observation ]
+
+let valid_source_strings = List.map source_to_string all_sources
+
+let source_of_string_opt = function
+  | "direct_experience" -> Some Direct_experience
+  | "research" -> Some Research
+  | "experiment" -> Some Experiment
+  | "observation" -> Some Observation
+  | _ -> None
 
 (* String helper - check if sub is contained in s *)
 let string_contains ~sub s =
@@ -176,11 +206,17 @@ let handle_add ctx args =
   if title = "" then (false, "title is required")
   else if content = "" then (false, "content is required")
   else begin
-    (* Validate source *)
-    let valid_sources = ["direct_experience"; "research"; "experiment"; "observation"] in
-    if not (List.mem source valid_sources) then
-      (false, sprintf "Invalid source. Must be one of: %s" (String.concat ", " valid_sources))
-    else begin
+    (* Issue #8601: validate via Variant SSOT instead of List.mem on a
+       hand-rolled string list. source_of_string_opt returns None for
+       any unknown value; the error message derives from
+       valid_source_strings so adding a new constructor updates it
+       automatically. *)
+    match source_of_string_opt source with
+    | None ->
+      (false,
+       sprintf "Invalid source. Must be one of: %s"
+         (String.concat ", " valid_source_strings))
+    | Some _ -> begin
       (* Determine destination based on confidence *)
       let dest_dir = if confidence < library_confidence_threshold then candidates_dir () else library_root () in
       let date = Time_compat.now () |> Unix.localtime in
@@ -301,7 +337,8 @@ let tool_definitions = [
   ]);
   ("masc_library_add", {|Add a new document to the library. Documents with confidence < 0.5 go to candidates/.|}, [
     ("title", "string", true, "Document title");
-    ("source", "string", true, "Source type: direct_experience, research, experiment, observation");
+    ("source", "string", true,
+     sprintf "Source type: %s" (String.concat ", " valid_source_strings));
     ("confidence", "number", true, "Confidence score 0.0-1.0");
     ("tags", "array", false, "List of tags");
     ("content", "string", true, "Document body content (markdown)");
@@ -366,8 +403,13 @@ Follow up with masc_library_promote to move candidates to the main library after
         ]);
         ("source", `Assoc [
           ("type", `String "string");
-          ("description", `String "Source type: direct_experience, research, experiment, observation");
-          ("enum", `List [`String "direct_experience"; `String "research"; `String "experiment"; `String "observation"]);
+          ("description",
+           `String
+             (sprintf "Source type: %s"
+                (String.concat ", " valid_source_strings)));
+          (* Issue #8601: enum derived from Variant SSOT. *)
+          ("enum",
+           `List (List.map (fun s -> `String s) valid_source_strings));
         ]);
         ("confidence", `Assoc [
           ("type", `String "number");

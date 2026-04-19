@@ -1,9 +1,8 @@
-(** Result_syntax — shared Result monad binding operators.
+(** Result_syntax — thin re-export of stdlib [Stdlib.Result.Syntax].
 
-    Eliminates the need for per-file Result.bind definitions
-    that were duplicated across 21+ files.
-    Usage: [open Result_syntax] at the top of any module that
-    uses [let*] for Result chaining. *)
+    Historical: defined [let*]/[let+] locally before call sites migrated.
+    OCaml 4.14+ provides the same operators in [Stdlib.Result.Syntax];
+    this module is kept as a compatibility alias while call sites migrate
+    directly to [open Result.Syntax]. *)
 
-let ( let* ) = Result.bind
-let ( let+ ) r f = Result.map f r
+include Stdlib.Result.Syntax

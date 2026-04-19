@@ -6,6 +6,8 @@
 module Keeper : sig
   type t =
     | Bash
+    | Bash_kill
+    | Bash_output
     | Board_cleanup
     | Board_comment
     | Board_comment_vote

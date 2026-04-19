@@ -241,6 +241,7 @@
    orchestrator
    otel_config
    otel_dispatch_hook
+   otel_genai
    otel_spans
    otel_trace_context
    planning_eio

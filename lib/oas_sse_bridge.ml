@@ -121,7 +121,7 @@ let wrap_event ~ts ~correlation_id ~run_id ~event_type ~payload
     Reads envelope metadata ([correlation_id], [run_id], [ts]) from
     [evt.meta] and includes them in every emitted JSON object. *)
 let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t option =
-  let { Agent_sdk.Event_bus.correlation_id; run_id; ts } = evt.meta in
+  let { Agent_sdk.Event_bus.correlation_id; run_id; ts; _ } = evt.meta in
   let wrap = wrap_event ~ts ~correlation_id ~run_id in
   match evt.payload with
   | Agent_sdk.Event_bus.AgentStarted { agent_name; task_id } ->

@@ -82,7 +82,9 @@ let estimate_tokens = Inference_utils.estimate_tokens
 (** {1 Source Fetchers} *)
 
 (** Fetch from MASC cache *)
-let fetch_from_cache (room_config : Coord_utils.config) ~(config : recall_config) ~query:_ =
+(* Issue #8597 #2: dropped [~query] — cache filtering is by tag
+   (config.cache_tags), not by query string. *)
+let fetch_from_cache (room_config : Coord_utils.config) ~(config : recall_config) =
   let entries =
     match config.cache_tags with
     | [] -> Cache_eio.list room_config ()
@@ -107,7 +109,9 @@ let fetch_from_cache (room_config : Coord_utils.config) ~(config : recall_config
   ) entries
 
 (** Fetch recent broadcasts *)
-let fetch_from_broadcasts (room_config : Coord_utils.config) ~(config : recall_config) ~query:_ =
+(* Issue #8597 #2: dropped [~query] — broadcast fetch is limit-based
+   (config.max_broadcasts), not query-ranked. *)
+let fetch_from_broadcasts (room_config : Coord_utils.config) ~(config : recall_config) =
   let messages = Coord.get_messages_raw room_config
     ~since_seq:0
     ~limit:config.max_broadcasts
@@ -129,7 +133,11 @@ let fetch_from_broadcasts (room_config : Coord_utils.config) ~(config : recall_c
   ) messages
 
 (** Fetch recently modified files from working directory *)
-let fetch_from_file_context (room_config : Coord_utils.config) ~config:(_config : recall_config) ~query =
+(* Issue #8597 #2: dropped [~config]. recall_config has no field that
+   maps to file scanning (max_files=10 / max_preview_bytes=500 are
+   hard-coded; cache_tags / max_broadcasts / max_tokens belong to other
+   sources). The arg was structurally received, semantically ignored. *)
+let fetch_from_file_context (room_config : Coord_utils.config) ~query =
   let masc_dir = Coord_utils.masc_dir room_config in
   let work_dir = Filename.dirname masc_dir in (* Parent of .masc *)
   
@@ -235,11 +243,15 @@ let fetch_from_file_context (room_config : Coord_utils.config) ~config:(_config 
   )
   |> List.filter (fun item -> String.length item.content > 10)
 
-(** Fetch from a single source (sync, no Eio) *)
+(** Fetch from a single source (sync, no Eio).
+
+    Each leaf consumes only the args it needs (#8597 #2):
+    - [Masc_cache] / [Recent_broadcasts] use [config] (tags / limit)
+    - [File_context] uses [query] for relevance ranking *)
 let fetch_source room_config ~config ~query = function
-  | Masc_cache -> fetch_from_cache room_config ~config ~query
-  | Recent_broadcasts -> fetch_from_broadcasts room_config ~config ~query
-  | File_context -> fetch_from_file_context room_config ~config ~query
+  | Masc_cache -> fetch_from_cache room_config ~config
+  | Recent_broadcasts -> fetch_from_broadcasts room_config ~config
+  | File_context -> fetch_from_file_context room_config ~query
 
 (** {1 Main API} *)
 

@@ -30,11 +30,20 @@ stylesheet
     color: #b8a488;
     font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
     font-size: 15px;
-    padding: 1.5rem 2.5rem 4rem;
+    padding: 1.5rem calc(340px + 24px) 4rem 244px;
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
     isolation: isolate;
+  }
+
+  @media (max-width: 1280px) {
+    .root { padding-right: 2.5rem; }
+    .aside { display: none; }
+  }
+  @media (max-width: 880px) {
+    .root { padding-left: 1.25rem; }
+    .nav  { display: none; }
   }
 
   .root::before {
@@ -846,6 +855,324 @@ stylesheet
     color: #5a3028;
     white-space: nowrap;
   }
+
+  /* ─── left nav (220px, fixed) ───
+     dashboard_v2 shell의 nav column을 fixed positioning으로 도입.
+     scroll시 항상 보이고, root는 padding-left로 자리만 비워준다. */
+  .nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 220px;
+    height: 100vh;
+    padding: 18px 0 24px;
+    background: linear-gradient(180deg, #18110c 0%, #0e0806 100%);
+    border-right: 1px solid #2a1a14;
+    box-shadow: inset -1px 0 0 rgba(138, 106, 40, 0.08);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    z-index: 5;
+  }
+
+  .nav_brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 18px 18px;
+    border-bottom: 1px solid #2a1a14;
+    margin-bottom: 12px;
+  }
+  .nav_brand_rune {
+    width: 18px;
+    height: 18px;
+    border: 1px solid #8a6a28;
+    color: #8a6a28;
+    display: grid;
+    place-items: center;
+    font-family: 'Cinzel', serif;
+    font-size: 9px;
+    transform: rotate(45deg);
+  }
+  .nav_brand_rune > span { transform: rotate(-45deg); display: block; }
+  .nav_brand_word {
+    font-family: 'Cinzel', serif;
+    font-size: 12px;
+    letter-spacing: 0.28em;
+    color: #e8d8b8;
+    text-transform: uppercase;
+  }
+  .nav_brand_blood { color: #a01818; }
+
+  .nav_section {
+    padding: 14px 18px 6px;
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #6a5848;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .nav_section::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, #5a3028, transparent);
+  }
+
+  .nav_link {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 8px 18px;
+    color: #b8a488;
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    cursor: default;
+    user-select: none;
+  }
+  .nav_link:hover {
+    color: #8a6a28;
+    background: rgba(138, 106, 40, 0.05);
+  }
+  .nav_link_active {
+    color: #8a6a28;
+    border-left-color: #8a6a28;
+    background: linear-gradient(90deg, rgba(138, 106, 40, 0.10), transparent 70%);
+  }
+  .nav_link_glyph {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #5a3028;
+    flex-shrink: 0;
+  }
+  .nav_link_active .nav_link_glyph {
+    background: #8a6a28;
+    box-shadow: 0 0 6px #8a6a28;
+  }
+  .nav_link_tail {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: #a01818;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .nav_foot {
+    margin-top: auto;
+    padding: 14px 18px 0;
+    border-top: 1px solid #2a1a14;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    color: #5a3028;
+    text-transform: uppercase;
+  }
+  .nav_foot_v { color: #6a5848; }
+
+  /* ─── right aside (340px, fixed) ───
+     dashboard_v2 aside: focus card + chronicle evs stream.
+     현재는 static skeleton. 추후 Var 연결. */
+  .aside {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 340px;
+    height: 100vh;
+    padding: 22px 18px 28px;
+    background: linear-gradient(180deg, #16100a 0%, #0e0806 100%);
+    border-left: 1px solid #2a1a14;
+    box-shadow: inset 1px 0 0 rgba(138, 106, 40, 0.06);
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    overflow-y: auto;
+    z-index: 5;
+  }
+
+  .aside_h {
+    font-family: 'Cinzel', serif;
+    font-size: 11px;
+    letter-spacing: 0.28em;
+    color: #8a6a28;
+    text-transform: uppercase;
+    margin: 0 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .aside_h::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, #5a3028, transparent);
+  }
+  .aside_h_tail {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: #6a5848;
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+    text-transform: none;
+  }
+
+  /* ─── focus card ─── */
+  .focus {
+    position: relative;
+    padding: 16px 16px 14px;
+    background: linear-gradient(180deg, #241a12 0%, #14100a 100%);
+    border: 1px solid #5a4618;
+  }
+  .focus::before {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border: 1px solid #5a3028;
+    pointer-events: none;
+  }
+  .focus_who {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .focus_portrait {
+    width: 46px;
+    height: 46px;
+    border: 1px solid #8a6a28;
+    background: linear-gradient(135deg, #2a1f14, #0e0806);
+    display: grid;
+    place-items: center;
+    font-family: 'Cinzel', serif;
+    font-size: 18px;
+    color: #8a6a28;
+    flex-shrink: 0;
+  }
+  .focus_name_col { flex: 1; }
+  .focus_name {
+    font-family: 'Cinzel', serif;
+    font-size: 16px;
+    color: #8a6a28;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+  .focus_role {
+    font-family: 'EB Garamond', Georgia, serif;
+    font-style: italic;
+    font-size: 11px;
+    color: #6a5848;
+    margin-top: 2px;
+  }
+
+  .ctx_bar { margin-top: 14px; position: relative; }
+  .ctx_lbl {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: #6a5848;
+    margin-bottom: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .ctx_lbl_v { color: #e8d8b8; }
+  .vial {
+    height: 8px;
+    background: #0a0604;
+    border: 1px solid #2a1a14;
+    position: relative;
+    overflow: hidden;
+  }
+  .vial_fill {
+    display: block;
+    height: 100%;
+    width: 64%;
+    background: linear-gradient(90deg, #8a6a20, #d4a940);
+    box-shadow: 0 0 6px rgba(138, 106, 40, 0.45);
+  }
+  .vial::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(90deg, transparent 0 19px, rgba(0, 0, 0, 0.5) 19px 20px);
+    pointer-events: none;
+  }
+
+  .focus_stats {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px 14px;
+    margin-top: 14px;
+  }
+  .focus_stat_l {
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    color: #6a5848;
+    text-transform: uppercase;
+  }
+  .focus_stat_v {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 12px;
+    color: #e8d8b8;
+    margin-top: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ─── chronicle evs stream ─── */
+  .evs { display: flex; flex-direction: column; }
+  .evrow {
+    display: grid;
+    grid-template-columns: 52px 12px 1fr;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px dashed #2a1a14;
+    align-items: baseline;
+  }
+  .evrow:last-child { border-bottom: 0; }
+  .evrow_t {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: #6a5848;
+    font-variant-numeric: tabular-nums;
+  }
+  .evrow_mk {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    align-self: center;
+    justify-self: center;
+    background: #5a4618;
+  }
+  .evrow_ok  .evrow_mk { background: #5a7a3a; box-shadow: 0 0 6px #5a7a3a; }
+  .evrow_warn .evrow_mk { background: #8a6a28; box-shadow: 0 0 6px #8a6a28; }
+  .evrow_bad  .evrow_mk { background: #a01818; box-shadow: 0 0 6px #a01818; }
+  .evrow_b {
+    font-family: 'EB Garamond', Georgia, serif;
+    font-size: 12px;
+    color: #b8a488;
+    line-height: 1.45;
+  }
+  .evrow_b_em { color: #e8d8b8; font-style: italic; }
+  .evrow_b_code {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: #8a6a28;
+    background: rgba(138, 106, 40, 0.08);
+    padding: 0 5px;
+    border: 1px solid #2a1a14;
+  }
+  .evrow_bad .evrow_b_code {
+    color: #a01818;
+    background: rgba(160, 24, 24, 0.08);
+  }
 |}]
 
 let level_class level =
@@ -1130,9 +1457,212 @@ let render_response (response : Logs_types.response) : Node.t =
       ; Node.span ~attrs:[ Style.moon_tail ] [ Node.text "operator · vincent" ]
       ]
   in
+  let nav_section label =
+    Node.div ~attrs:[ Style.nav_section ] [ Node.text label ]
+  in
+  let nav_link ?(active = false) ?tail label =
+    let attrs =
+      if active
+      then [ Style.nav_link; Style.nav_link_active ]
+      else [ Style.nav_link ]
+    in
+    let tail_node =
+      match tail with
+      | None -> []
+      | Some t -> [ Node.span ~attrs:[ Style.nav_link_tail ] [ Node.text t ] ]
+    in
+    Node.div
+      ~attrs
+      ([ Node.span ~attrs:[ Style.nav_link_glyph ] []
+       ; Node.text label
+       ]
+       @ tail_node)
+  in
+  let nav =
+    Node.div
+      ~attrs:[ Style.nav ]
+      [ Node.div
+          ~attrs:[ Style.nav_brand ]
+          [ Node.div
+              ~attrs:[ Style.nav_brand_rune ]
+              [ Node.span [ Node.text "M" ] ]
+          ; Node.span
+              ~attrs:[ Style.nav_brand_word ]
+              [ Node.text "ma"
+              ; Node.span
+                  ~attrs:[ Style.nav_brand_blood ]
+                  [ Node.text "s" ]
+              ; Node.text "c"
+              ]
+          ]
+      ; nav_section "chronicle"
+      ; nav_link "overview"
+      ; nav_link ~active:true "logs · journal"
+      ; nav_link "goals"
+      ; nav_section "runtime"
+      ; nav_link "keepers" ~tail:"04"
+      ; nav_link "observatory"
+      ; nav_link "intervene"
+      ; nav_section "lab"
+      ; nav_link "tools"
+      ; nav_link "sessions"
+      ; nav_link "social board"
+      ; nav_section "crypt"
+      ; nav_link "dead keepers" ~tail:"00"
+      ; nav_link "archive runs"
+      ; Node.div
+          ~attrs:[ Style.nav_foot ]
+          [ Node.text "phase 0 · /b/ · "
+          ; Node.span
+              ~attrs:[ Style.nav_foot_v ]
+              [ Node.text "v0.18-pre" ]
+          ]
+      ]
+  in
+  let aside_h ?tail label =
+    let tail_node =
+      match tail with
+      | None -> []
+      | Some t ->
+        [ Node.span ~attrs:[ Style.aside_h_tail ] [ Node.text t ] ]
+    in
+    Node.div ~attrs:[ Style.aside_h ] (Node.text label :: tail_node)
+  in
+  let focus_stat l v =
+    Node.div
+      ~attrs:[]
+      [ Node.div ~attrs:[ Style.focus_stat_l ] [ Node.text l ]
+      ; Node.div ~attrs:[ Style.focus_stat_v ] [ Node.text v ]
+      ]
+  in
+  let focus_card =
+    Node.div
+      ~attrs:[ Style.focus ]
+      [ Node.div
+          ~attrs:[ Style.focus_who ]
+          [ Node.div ~attrs:[ Style.focus_portrait ] [ Node.text "L" ]
+          ; Node.div
+              ~attrs:[ Style.focus_name_col ]
+              [ Node.div ~attrs:[ Style.focus_name ] [ Node.text "Luna" ]
+              ; Node.div
+                  ~attrs:[ Style.focus_role ]
+                  [ Node.text "dungeon master · alchemist" ]
+              ]
+          ]
+      ; Node.div
+          ~attrs:[ Style.ctx_bar ]
+          [ Node.div
+              ~attrs:[ Style.ctx_lbl ]
+              [ Node.span [ Node.text "context" ]
+              ; Node.span
+                  ~attrs:[ Style.ctx_lbl_v ]
+                  [ Node.text "64%" ]
+              ]
+          ; Node.div
+              ~attrs:[ Style.vial ]
+              [ Node.span ~attrs:[ Style.vial_fill ] [] ]
+          ]
+      ; Node.div
+          ~attrs:[ Style.focus_stats ]
+          [ focus_stat "turn" "47 / 60"
+          ; focus_stat "heartbeat" "3s"
+          ; focus_stat "mem" "128k"
+          ; focus_stat "latency" "812ms"
+          ]
+      ]
+  in
+  let ev ?(level = `Info) t body_inline =
+    let attrs =
+      match level with
+      | `Info -> [ Style.evrow ]
+      | `Ok -> [ Style.evrow; Style.evrow_ok ]
+      | `Warn -> [ Style.evrow; Style.evrow_warn ]
+      | `Bad -> [ Style.evrow; Style.evrow_bad ]
+    in
+    Node.div
+      ~attrs
+      [ Node.div ~attrs:[ Style.evrow_t ] [ Node.text t ]
+      ; Node.div ~attrs:[ Style.evrow_mk ] []
+      ; Node.div ~attrs:[ Style.evrow_b ] body_inline
+      ]
+  in
+  (* live evs: WARN/ERROR만 필터, 최근 5개. mock→real 전환. *)
+  let hhmm_of_ts (ts : string) : string =
+    (* "2026-04-19T17:12:03Z" -> "17:12" *)
+    if String.length ts >= 16
+    then String.sub ts ~pos:11 ~len:5
+    else ts
+  in
+  let ev_of_entry (e : Logs_types.entry) : Node.t =
+    let level : [ `Info | `Ok | `Warn | `Bad ] =
+      match e.normalized_level with
+      | "ERROR" -> `Bad
+      | "WARN" -> `Warn
+      | _ -> `Info
+    in
+    let body =
+      [ Node.text e.message
+      ; Node.text " "
+      ; Node.span ~attrs:[ Style.evrow_b_code ] [ Node.text e.module_ ]
+      ]
+    in
+    ev ~level (hhmm_of_ts e.ts) body
+  in
+  let evs_stream =
+    let filtered =
+      List.filter response.entries ~f:(fun e ->
+        match e.normalized_level with
+        | "WARN" | "ERROR" -> true
+        | _ -> false)
+    in
+    let top_five =
+      match List.length filtered with
+      | n when n <= 5 -> filtered
+      | _ -> List.take filtered 5
+    in
+    match top_five with
+    | [] ->
+      Node.div
+        ~attrs:[ Style.evs ]
+        [ Node.div
+            ~attrs:[ Style.evrow ]
+            [ Node.div ~attrs:[ Style.evrow_t ] [ Node.text "—" ]
+            ; Node.div ~attrs:[ Style.evrow_mk ] []
+            ; Node.div
+                ~attrs:[ Style.evrow_b ]
+                [ Node.text "조용하다 · 경고 없음" ]
+            ]
+        ]
+    | rows -> Node.div ~attrs:[ Style.evs ] (List.map rows ~f:ev_of_entry)
+  in
+  let evs_tail =
+    let total_alarms =
+      List.count response.entries ~f:(fun e ->
+        match e.normalized_level with
+        | "WARN" | "ERROR" -> true
+        | _ -> false)
+    in
+    Printf.sprintf "%d / ∞" total_alarms
+  in
+  let aside =
+    Node.div
+      ~attrs:[ Style.aside ]
+      [ Node.div
+          ~attrs:[]
+          [ aside_h ~tail:"ctx 64%" "focus · keeper"
+          ; focus_card
+          ]
+      ; Node.div
+          ~attrs:[]
+          [ aside_h ~tail:evs_tail "chronicle · recent"
+          ; evs_stream
+          ]
+      ]
+  in
   Node.div
     ~attrs:[ Style.root ]
-    [ brand_row
+    [ nav
+    ; brand_row
     ; view_heartbeat ()
     ; view_hud response
     ; moonrise
@@ -1159,6 +1689,7 @@ let render_response (response : Logs_types.response) : Node.t =
     ; tape
     ; view_roster ()
     ; Node.div ~attrs:[ Style.signet ] [ Node.text "M" ]
+    ; aside
     ]
 ;;
 

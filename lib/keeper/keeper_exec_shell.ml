@@ -152,6 +152,40 @@ let readonly_shell_token_match tokens =
       Some ("curl --output", "destructive")
   | _ -> None
 
+(* Each branch ends with concrete Good:/Bad: examples so small-LLM keepers
+   can self-correct without a retry loop. Prior form only named the
+   category, which left 57 command_blocked_readonly rejections on
+   2026-04-17/18 without a wire-level rewrite. See masc-mcp#8688. *)
+let readonly_hint_of_category = function
+  | "chaining" ->
+      "`&&`, `||`, and `;` chaining are blocked in readonly shell. \
+       Issue one command per keeper_shell call, or use a dedicated \
+       sub-op: git_log, git_status, git_diff, git_worktree, find, \
+       ls, rg, head, tail, wc, tree, cat, pwd. \
+       Good: command='git status'. Bad: command='git status && git log -1'."
+  | "redirect" ->
+      "Redirects (`>`, `>>`, `| tee`) are blocked in readonly shell. \
+       Use keeper_fs_edit to write files, or keeper_bash with the \
+       coding preset for write operations. \
+       Good: keeper_fs_edit path=notes.md content='...'. \
+       Bad: command='echo hi > notes.md'."
+  | "git_write" ->
+      "Use keeper_bash with coding preset for git write operations. \
+       Good: keeper_bash cmd='git add lib/foo.ml'. \
+       Bad: keeper_shell command='git commit -m x' (readonly shell \
+       does not accept git write commands)."
+  | "package_install" ->
+      "Package installation requires keeper_bash with coding preset. \
+       Good: keeper_bash cmd='opam install -y eio'. \
+       Bad: keeper_shell command='opam install eio' (readonly shell \
+       does not accept package installs)."
+  | "destructive" ->
+      "Use keeper_bash for write operations, not readonly shell. \
+       Good: keeper_bash cmd='rm .tmp/scratch.log'. \
+       Bad: keeper_shell command='rm -rf .tmp/' (readonly shell does \
+       not accept destructive commands)."
+  | _ -> "This operation is not allowed in readonly shell."
+
 let process_status_is_timeout = function
   | Unix.WSIGNALED sig_num -> sig_num = Sys.sigterm
   | Unix.WEXITED 124 -> true  (* Process_eio returns 124 on Eio.Time.Timeout *)
@@ -1140,21 +1174,6 @@ let handle_keeper_shell
     else
       (* Non-overridable deny layer (runs after preset gate).
          First match wins — specific patterns before generic. *)
-      let hint_of_category = function
-        | "chaining"        ->
-          "`&&`, `||`, and `;` chaining are blocked in readonly shell. \
-           Issue one command per keeper_shell call, or use a dedicated \
-           sub-op: git_log, git_status, git_diff, git_worktree, find, \
-           ls, rg, head, tail, wc, tree, cat, pwd."
-        | "redirect"        ->
-          "Redirects (`>`, `>>`, `| tee`) are blocked in readonly shell. \
-           Use keeper_fs_edit to write files, or keeper_bash with the \
-           coding preset for write operations."
-        | "git_write"       -> "Use keeper_bash with coding preset for git write operations."
-        | "package_install" -> "Package installation requires keeper_bash with coding preset."
-        | "destructive"     -> "Use keeper_bash for write operations, not readonly shell."
-        | _                 -> "This operation is not allowed in readonly shell."
-      in
       let substring_rules =
         [ (* chaining *)
           "&&", "chaining"
@@ -1175,7 +1194,7 @@ let handle_keeper_shell
       in
       (match matched with
       | Some (pat, category) ->
-        let hint = hint_of_category category in
+        let hint = readonly_hint_of_category category in
         Yojson.Safe.to_string
           (Exec_core.blocked_result_json
              ~cmd:cmd_str

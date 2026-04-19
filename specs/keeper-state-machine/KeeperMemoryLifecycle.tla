@@ -11,6 +11,61 @@
 \*   - overflow/handoff do not silently drop retained notes,
 \*   - handoff clears stale short-term notes,
 \*   - each tier stays within its configured bound.
+\*
+\* OCaml <-> TLA+ mapping (see #8642 family):
+\*
+\*   spec variable    | OCaml field / source                              | location
+\*   -----------------+--------------------------------------------------+--------
+\*   short_mem        | rows with horizon = "short_term"                 | lib/keeper/keeper_memory_policy.ml:155
+\*   mid_mem          | rows with horizon = "mid_term"                   | lib/keeper/keeper_memory_policy.ml:156
+\*   long_mem         | rows with horizon = "long_term"                  | lib/keeper/keeper_memory_policy.ml:157
+\*   open_short       | unresolved short-term notes (open_question kind) | lib/keeper/keeper_memory_bank.ml
+\*   provenanced      | rows with non-empty trace_id / source            | lib/keeper/keeper_memory_bank.ml
+\*   generation       | snapshot.generation field                        | snapshot record
+\*   overflowed       | derived: short_mem cardinality > MaxShort        | runtime check
+\*
+\* Tier vocabulary (string-typed, intentionally not a variant today):
+\*   lib/keeper/keeper_memory_policy.ml:155-157
+\*     `let short_term_horizon = "short_term"`
+\*     `let mid_term_horizon   = "mid_term"`
+\*     `let long_term_horizon  = "long_term"`
+\*
+\* Producer (kind -> tier classification):
+\*   lib/keeper/keeper_memory_policy.ml:159-164  memory_horizon_of_kind
+\*   lib/keeper/keeper_memory_policy.ml:166-175  memory_horizon_of_json
+\*
+\* Persistence / promotion sites:
+\*   lib/keeper/keeper_memory_bank.ml:550   `let horizon = memory_horizon_of_kind kind`
+\*   lib/keeper/keeper_memory_recall.ml:104 recall path uses same horizon function
+\*   lib/keeper/keeper_compact_policy.ml    overflow + handoff scheduling
+\*   lib/keeper/keeper_compact_audit.ml     ledger trail (provenance source)
+\*
+\* SCOPE DRIFT (worth knowing, NOT a spec violation):
+\*   memory_horizon_of_kind silently routes unknown kinds to mid_term_horizon
+\*   (lib/keeper/keeper_memory_policy.ml:164  `| _ -> mid_term_horizon`).
+\*   The spec invariants (ProvenanceRequired, RecoveryBounded, NoSilentLoss)
+\*   hold regardless of WHICH tier a note lands in -- the drift is UPSTREAM
+\*   of the spec vocabulary. A typo'd kind ("goalss") gets the wrong tier
+\*   with no signal. Tracked separately for the standard #8605 wire-string
+\*   fix template (strict _opt + warn-and-default wrapper).
+\*
+\* Bug Model (BuggyCompactOverflow already in this spec):
+\*   Clean cfg : NoSilentLoss holds (lost_notes = {}).
+\*   Buggy cfg : compaction trims short tier WITHOUT promoting to mid;
+\*               dropped notes accumulate in lost_notes -- NoSilentLoss
+\*               MUST be violated.
+\*
+\* Adding new tiers / horizons:
+\*   - new horizon constant -> spec needs a new tier variable + cap + invariant
+\*   - new kind keyword     -> only producer side (memory_horizon_of_kind);
+\*                             does NOT require spec update unless it lands
+\*                             in a new tier
+\*
+\* Out-of-scope (intentionally not modelled here):
+\*   - reward-model evaluation (lib/keeper/keeper_memory.ml include chain)
+\*   - recall scoring (keeper_memory_recall.ml -- separate retrieval axis)
+\*   - keeper-runtime compaction trigger thresholds (keeper_compact_policy.ml)
+\*     this spec uses generic MaxShort/MaxMid/MaxLong constants instead
 
 EXTENDS Naturals, FiniteSets
 

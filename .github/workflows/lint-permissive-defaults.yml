@@ -1,0 +1,24 @@
+name: lint-permissive-defaults
+
+on:
+  pull_request:
+    paths:
+      - 'lib/**/*.ml'
+      - 'scripts/lint/no-unknown-permissive-default.sh'
+      - 'scripts/lint/no-unknown-permissive-default.allowlist'
+      - '.github/workflows/lint-permissive-defaults.yml'
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - name: Run #8605 family detector
+        run: bash scripts/lint/no-unknown-permissive-default.sh

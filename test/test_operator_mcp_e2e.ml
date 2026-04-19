@@ -348,6 +348,9 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
   let base_path = Filename.temp_file "operator-mcp-base-" "" in
   (try Sys.remove base_path with _ -> ());
   Unix.mkdir base_path 0o755;
+  let project_root = Masc_test_deps.find_project_root () in
+  let config_dir = Filename.concat project_root "config" in
+  let personas_dir = Filename.concat config_dir "personas" in
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Masc_mcp.Coord.default_config base_path in
@@ -419,6 +422,8 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
         ("DATABASE_URL", "");
         ("SUPABASE_DB_URL", "");
         ("SB_PG_URL", "");
+        ("MASC_CONFIG_DIR", config_dir);
+        ("MASC_PERSONAS_DIR", personas_dir);
         ("MASC_BOARD_BACKEND", "jsonl");
       ]
   in

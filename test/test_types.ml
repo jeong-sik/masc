@@ -564,6 +564,25 @@ let () =
           Masc_mcp.Keeper_exec_memory.valid_memory_search_source_strings
           Masc_mcp.Tool_shard.memory_search_source_enum_strings);
     ];
+    "memory_kind_ssot", [
+      (* Issue #8527: schema enum for [keeper_memory_search.kind] dropped
+         [long_term] even though [keeper_memory_bank] actively writes
+         long_term rows. Same cycle-avoidance pattern as #8484 — hand
+         mirror in Tool_shard, sync-test the mirror against the SSOT. *)
+      Alcotest.test_case "SSOT includes every kind_caps entry" `Quick (fun () ->
+        let caps = Masc_mcp.Keeper_memory_policy.kind_caps () in
+        Alcotest.(check (list string)) "derived == kind_caps keys"
+          (List.map fst caps)
+          Masc_mcp.Keeper_memory_policy.valid_memory_kind_strings);
+      Alcotest.test_case "long_term is in SSOT" `Quick (fun () ->
+        Alcotest.(check bool) "long_term present" true
+          (List.mem "long_term"
+             Masc_mcp.Keeper_memory_policy.valid_memory_kind_strings));
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        Alcotest.(check (list string)) "tool_shard mirror == SSOT"
+          Masc_mcp.Keeper_memory_policy.valid_memory_kind_strings
+          Masc_mcp.Tool_shard.memory_kind_enum_strings);
+    ];
     "fs_write_mode_ssot", [
       (* Issue #8490: introduces [fs_write_mode] Variant where 5 sites
          previously hand-validated raw strings + relied on an

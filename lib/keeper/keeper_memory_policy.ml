@@ -779,6 +779,13 @@ let total_cap () : int = 12
 let kind_caps () : (string * int) list =
   [ ("constraints", 2); ("decision", 2); ("next", 2); ("goal", 2); ("progress", 2); ("open_question", 2); ("long_term", 4) ]
 
+(** SSOT for canonical memory kind strings accepted by [keeper_memory_search]
+    and produced by [keeper_memory_bank]. Mirrored (with a sync regression
+    test) in [Tool_shard.memory_kind_enum_strings] because a direct
+    dependency would create a Tool_shard -> Keeper_* -> Tool_shard cycle
+    (#8467/#8480 pattern). Issue #8527. *)
+let valid_memory_kind_strings : string list = List.map fst (kind_caps ())
+
 let cap_for_kind (caps : (string * int) list) (kind : string) : int =
   List.assoc_opt kind caps |> Option.value ~default:1
 

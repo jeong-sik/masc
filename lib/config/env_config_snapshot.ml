@@ -30,12 +30,56 @@ type entry = {
   sensitive : bool;
 }
 
+type source_provenance = {
+  kind : string;
+  detail : string;
+  derived_from : string list;
+}
+
 let entry ?(sensitive = false) ~default env_name description =
   let sensitive = sensitive || is_sensitive_name env_name in
   { env_name; description; default_display = default; sensitive }
 
+let default_provenance e =
+  match e.default_display with
+  | "(derived)" ->
+      {
+        kind = "derived";
+        detail = "computed by runtime config helpers from related settings";
+        derived_from = [];
+      }
+  | "(cwd)" ->
+      {
+        kind = "runtime";
+        detail = "resolved from the process working directory or base path";
+        derived_from = [];
+      }
+  | _ ->
+      { kind = "default"; detail = "compiled default value"; derived_from = [] }
+
+let source_provenance e raw =
+  match raw with
+  | Some _ ->
+      {
+        kind = "env";
+        detail = "environment variable " ^ e.env_name;
+        derived_from = [];
+      }
+  | None -> default_provenance e
+
+let provenance_to_json p =
+  `Assoc
+    ([
+       ("kind", `String p.kind);
+       ("detail", `String p.detail);
+     ]
+    @
+    if p.derived_from = [] then []
+    else [ ("derived_from", `List (List.map (fun v -> `String v) p.derived_from)) ])
+
 let read_entry e =
   let raw = Env_config_core.trim_opt (Sys.getenv_opt e.env_name) in
+  let provenance = source_provenance e raw in
   let display_value =
     match raw with
     | None -> None
@@ -48,7 +92,9 @@ let read_entry e =
       ("description", `String e.description);
       ("value", Json_util.string_opt_to_json display_value);
       ("default", `String e.default_display);
-      ("source", `String (if raw = None then "default" else "env"));
+      ("source", `String provenance.kind);
+      ("source_detail", `String provenance.detail);
+      ("provenance", provenance_to_json provenance);
       ("sensitive", `Bool e.sensitive);
     ]
 

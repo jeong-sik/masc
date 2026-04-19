@@ -95,7 +95,9 @@ let resolved_config_root ~base_path =
   resolution.Config_dir_resolver.config_root.path
 
 let toml_path ~base_path =
-  Filename.concat (resolved_config_root ~base_path) "keeper_runtime.toml"
+  Filename.concat
+    (resolved_config_root ~base_path)
+    Config_dir_resolver.keeper_runtime_toml_filename
 
 let read_file path =
   try Ok (In_channel.with_open_text path In_channel.input_all)

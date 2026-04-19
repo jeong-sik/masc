@@ -113,8 +113,11 @@ let bootstrap_base_path_config_root ~base_path =
          Fs_compat.mkdir_p (Filename.concat config_root "prompts");
          Fs_compat.mkdir_p (Filename.concat config_root "keepers");
          Fs_compat.mkdir_p (Filename.concat config_root "personas");
-         if not (Sys.file_exists (Filename.concat config_root "cascade.json")) then
-           Fs_compat.save_file (Filename.concat config_root "cascade.json") "{}";
+         let cascade_path =
+           Filename.concat config_root Config_dir_resolver.cascade_json_filename
+         in
+         if not (Sys.file_exists cascade_path) then
+           Fs_compat.save_file cascade_path "{}";
          Log.Server.warn
            "bootstrapped minimal base-path config root without versioned source: %s"
            config_root);

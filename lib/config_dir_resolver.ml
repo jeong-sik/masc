@@ -1,5 +1,12 @@
 module StringSet = Set.Make (String)
 
+(** SSOT for config filenames documented in [docs/TOML-RELOAD-MATRIX.md].
+    Consumed by the resolver here and by config loaders elsewhere in the
+    codebase. Issue #8414. *)
+let cascade_json_filename = "cascade.json"
+let tool_policy_toml_filename = "tool_policy.toml"
+let keeper_runtime_toml_filename = "keeper_runtime.toml"
+
 type source =
   | Env
   | Local_masc
@@ -137,7 +144,7 @@ let to_json (resolution : resolution) =
     ]
 
 let config_signature_exists config_dir =
-  let cascade = Filename.concat config_dir "cascade.json" in
+  let cascade = Filename.concat config_dir cascade_json_filename in
   let prompts = Filename.concat config_dir "prompts" in
   let keepers = Filename.concat config_dir "keepers" in
   let personas = Filename.concat config_dir "personas" in
@@ -265,9 +272,8 @@ let config_root_resolution (inputs : inputs) =
 let child_item (root : path_item) name =
   let path = Filename.concat root.path name in
   let exists =
-    match name with
-    | "cascade.json" -> existing_file path
-    | _ -> existing_dir path
+    if String.equal name cascade_json_filename then existing_file path
+    else existing_dir path
   in
   { path; exists; source = root.source }
 
@@ -296,12 +302,12 @@ let inputs_from_env () =
 
 let resolve_with inputs =
   let config_root, root_warnings = config_root_resolution inputs in
-  let cascade = child_item config_root "cascade.json" in
+  let cascade = child_item config_root cascade_json_filename in
   let prompts = child_item config_root "prompts" in
   let keepers = child_item config_root "keepers" in
   let personas, persona_warnings = personas_item inputs config_root in
   let missing_child_warnings =
-    [ ("cascade.json", cascade.exists); ("prompts", prompts.exists); ("keepers", keepers.exists); ("personas", personas.exists) ]
+    [ (cascade_json_filename, cascade.exists); ("prompts", prompts.exists); ("keepers", keepers.exists); ("personas", personas.exists) ]
     |> List.filter_map (fun (label, exists) ->
            if exists then None
            else

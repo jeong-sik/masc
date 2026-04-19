@@ -447,8 +447,16 @@ let task_status_of_yojson json =
         let submitted_at = json |> member "submitted_at" |> to_string in
         let verification_id = json |> member "verification_id" |> to_string in
         let required_verifier_role =
+          (* Issue #8615: was [role_of_string s] (lossy default to
+             [Unassigned]). [role_satisfies ~required:Unassigned]
+             returns true for ANY agent role — that silently bypasses
+             the verification gate when the JSON value is a typo or
+             a fabricated role string. Fail closed to [Reviewer] (the
+             same default the [None] arm uses) so an unrecognised
+             value at least demands the strictest sane interpretation. *)
           match json |> member "required_verifier_role" |> to_string_option with
-          | Some s -> role_of_string s
+          | Some s ->
+              role_of_string_opt s |> Option.value ~default:Reviewer
           | None -> Reviewer in
         let deadline = json |> member "deadline" |> to_string_option in
         Ok (AwaitingVerification { assignee; submitted_at; verification_id;

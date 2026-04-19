@@ -139,6 +139,65 @@ let test_awaiting_verification_in_enum () =
   Alcotest.(check bool) "awaiting_verification present"
     true (List.mem "awaiting_verification" valid_task_status_strings)
 
+(* Issue #8615: AwaitingVerification.required_verifier_role decoder
+   used to fall through [role_of_string] which silently maps unknown
+   input to [Unassigned]. [role_satisfies ~required:Unassigned _] is
+   always true, which silently bypassed the verification gate. The
+   fix routes [Some s] through [role_of_string_opt] with an explicit
+   [Reviewer] fail-closed default. These regression tests pin the
+   contract: typo + fabricated value -> Reviewer, never Unassigned. *)
+let test_required_verifier_role_typo_decodes_to_reviewer () =
+  let json =
+    `Assoc [
+      ("status", `String "awaiting_verification");
+      ("assignee", `String "alice");
+      ("submitted_at", `String "2026-04-19T12:00:00Z");
+      ("verification_id", `String "v-1");
+      (* "Reviewer" capitalised — invalid wire format *)
+      ("required_verifier_role", `String "Reviewer");
+    ]
+  in
+  match task_status_of_yojson json with
+  | Ok (AwaitingVerification { required_verifier_role; _ }) ->
+      Alcotest.(check bool) "typo defaults to Reviewer (not Unassigned)"
+        true (required_verifier_role = Reviewer)
+  | Ok _ -> Alcotest.fail "expected AwaitingVerification"
+  | Error e -> Alcotest.fail e
+
+let test_required_verifier_role_unknown_decodes_to_reviewer () =
+  let json =
+    `Assoc [
+      ("status", `String "awaiting_verification");
+      ("assignee", `String "alice");
+      ("submitted_at", `String "2026-04-19T12:00:00Z");
+      ("verification_id", `String "v-1");
+      ("required_verifier_role", `String "fabricated_role");
+    ]
+  in
+  match task_status_of_yojson json with
+  | Ok (AwaitingVerification { required_verifier_role; _ }) ->
+      Alcotest.(check bool) "fabricated -> Reviewer (not Unassigned)"
+        true (required_verifier_role = Reviewer)
+  | Ok _ -> Alcotest.fail "expected AwaitingVerification"
+  | Error e -> Alcotest.fail e
+
+let test_required_verifier_role_canonical_still_works () =
+  let json =
+    `Assoc [
+      ("status", `String "awaiting_verification");
+      ("assignee", `String "alice");
+      ("submitted_at", `String "2026-04-19T12:00:00Z");
+      ("verification_id", `String "v-1");
+      ("required_verifier_role", `String "admin");
+    ]
+  in
+  match task_status_of_yojson json with
+  | Ok (AwaitingVerification { required_verifier_role; _ }) ->
+      Alcotest.(check bool) "canonical 'admin' decodes to Admin"
+        true (required_verifier_role = Admin)
+  | Ok _ -> Alcotest.fail "expected AwaitingVerification"
+  | Error e -> Alcotest.fail e
+
 let test_actions_enum_has_verification_actions () =
   let must = ["submit_for_verification"; "approve"; "reject"] in
   List.iter (fun s ->
@@ -309,6 +368,14 @@ let () =
       Alcotest.test_case "status strings match witness" `Quick test_status_strings_match_variant_witness;
       Alcotest.test_case "awaiting_verification in enum" `Quick test_awaiting_verification_in_enum;
       Alcotest.test_case "actions enum has verification actions" `Quick test_actions_enum_has_verification_actions;
+    ];
+    "required_verifier_role_strict", [
+      Alcotest.test_case "typo (capitalised) -> Reviewer (#8615)" `Quick
+        test_required_verifier_role_typo_decodes_to_reviewer;
+      Alcotest.test_case "fabricated value -> Reviewer (#8615)" `Quick
+        test_required_verifier_role_unknown_decodes_to_reviewer;
+      Alcotest.test_case "canonical 'admin' still decodes (#8615)" `Quick
+        test_required_verifier_role_canonical_still_works;
     ];
     "agent_role_ssot", [
       Alcotest.test_case "witness covers all variants" `Quick (fun () ->

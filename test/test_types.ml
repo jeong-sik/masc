@@ -614,6 +614,24 @@ let () =
           Masc_mcp.Keeper_exec_fs.valid_fs_write_mode_strings
           Masc_mcp.Tool_shard.fs_write_mode_enum_strings);
     ];
+    "memory_kind_ssot", [
+      (* Issue #8527: [Keeper_memory_bank] actively writes memory rows
+         with [kind = "long_term"] (see keeper_memory_bank.ml:200/212/
+         253/264), and [kind_caps ()] advertises 7 kinds including
+         [long_term]. But the JSON Schema enum in [Tool_shard] for
+         [keeper_memory_search.kind] previously hardcoded only 6 kinds,
+         so LLM clients could not filter the very rows the system
+         produces. This test asserts the mirror stays in sync with the
+         derived SSOT and that [long_term] is part of it. *)
+      Alcotest.test_case "kind_caps advertises 7 canonical kinds including long_term" `Quick (fun () ->
+        let kinds = Masc_mcp.Keeper_memory_policy.valid_memory_kind_strings in
+        Alcotest.(check int) "count" 7 (List.length kinds);
+        Alcotest.(check bool) "long_term present" true (List.mem "long_term" kinds));
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        Alcotest.(check (list string)) "tool_shard mirror == SSOT"
+          Masc_mcp.Keeper_memory_policy.valid_memory_kind_strings
+          Masc_mcp.Tool_shard.memory_kind_enum_strings);
+    ];
     "vote_direction_ssot", [
       (* Issue #8506: Variant + to_string already existed (board_types/
          board_votes), but 4 inline matches in server_bootstrap_loops.ml

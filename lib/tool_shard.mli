@@ -31,6 +31,13 @@ val memory_kind_enum_strings : string list
     in [test_types.ml :: fs_write_mode_ssot] catches drift. *)
 val fs_write_mode_enum_strings : string list
 
+(** Issue #8527: hand-mirrored from
+    [Keeper_memory_policy.valid_memory_kind_strings] (derived from
+    [kind_caps ()]). Previous hardcoded 6-element enum missed
+    [long_term] even though [Keeper_memory_bank] actively writes rows
+    with that kind. Sync regression test in
+    [test_types.ml :: memory_kind_ssot] catches drift. *)
+val memory_kind_enum_strings : string list
 
 (** Issue #8506: hand-mirrored from
     [Board_votes.valid_vote_direction_strings]. Sync regression test

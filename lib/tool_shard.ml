@@ -41,6 +41,17 @@ let memory_kind_enum_strings =
 let fs_write_mode_enum_strings =
   [ "overwrite"; "append" ]
 
+(** Issue #8527: hand-mirrored from
+    [Keeper_memory_policy.valid_memory_kind_strings] (which derives
+    from [kind_caps ()]). Previous hardcoded 6-element enum missed
+    [long_term] even though [Keeper_memory_bank] actively writes rows
+    with that kind, so LLM clients could not filter for the very rows
+    the system produces. Local mirror avoids Tool_shard -> Keeper_* ->
+    Tool_shard cycle. Sync regression test in
+    [test_types.ml :: memory_kind_ssot] catches drift. *)
+let memory_kind_enum_strings =
+  [ "constraints"; "decision"; "next"; "goal"; "progress"; "open_question"; "long_term" ]
+
 (** Issue #8513: hand-mirrored from
     [Board_dispatch.valid_sort_order_strings] (#8453 SSOT). Direct
     dependency would risk a Tool_shard -> Board_* -> Tool_shard cycle.

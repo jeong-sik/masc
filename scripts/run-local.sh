@@ -12,18 +12,35 @@ HOST="${MASC_HOST:-127.0.0.1}"
 PORT="${MASC_MCP_PORT:-}"
 PORT_EXPLICIT=0
 PRINT_PORT_ONLY=0
+BOOTSTRAP_ONLY=0
 BUILD_DASHBOARD=0
 DUNE_JOBS="${MASC_DUNE_JOBS:-8}"
 
+git_common_root() {
+  if ! command -v git >/dev/null 2>&1; then
+    return 1
+  fi
+  local common_dir
+  common_dir="$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null || true)"
+  if [ -z "$common_dir" ]; then
+    return 1
+  fi
+  if [[ "$common_dir" != /* ]]; then
+    common_dir="$REPO_ROOT/$common_dir"
+  fi
+  (cd "$(dirname "$common_dir")" && pwd)
+}
+
 usage() {
   cat >&2 <<'EOF'
-Usage: scripts/run-local.sh [--target-dir PATH] [--host HOST] [--port PORT] [--print-port] [--build-dashboard]
+Usage: scripts/run-local.sh [--target-dir PATH] [--host HOST] [--port PORT] [--print-port] [--bootstrap-only] [--build-dashboard]
 
 Dir-local local-dev launcher:
   - runtime data root defaults to <target>/.masc/
   - config root defaults to <target>/.masc/config
   - personas root defaults to <target>/.masc/config/personas
   - gRPC / WS / WebRTC are disabled by default
+  - --bootstrap-only materializes local config/build state but does not start the server
 
 For shared repo/full-runtime startup, use ./start-masc-mcp.sh instead.
 EOF
@@ -57,6 +74,22 @@ binary_is_stale() {
   local exe="$1"
   if [ ! -x "$exe" ]; then
     return 0
+  fi
+  if [[ "$exe" != "$REPO_ROOT/"* ]]; then
+    local common_root="" common_head=""
+    common_root="$(git_common_root 2>/dev/null || true)"
+    if [ -n "$common_root" ] && [ "$common_root" != "$REPO_ROOT" ]; then
+      common_head="$(git -C "$common_root" rev-parse HEAD 2>/dev/null || true)"
+      if [ -n "$common_head" ] \
+        && git -C "$REPO_ROOT" diff --quiet "${common_head}"...HEAD -- bin lib dune-project 2>/dev/null \
+        && git -C "$REPO_ROOT" diff --quiet -- bin lib dune-project 2>/dev/null \
+        && git -C "$REPO_ROOT" diff --cached --quiet -- bin lib dune-project 2>/dev/null; then
+        if ! git -C "$REPO_ROOT" ls-files --others --exclude-standard -- bin lib dune-project 2>/dev/null \
+          | grep -q .; then
+          return 1
+        fi
+      fi
+    fi
   fi
   if [ "$REPO_ROOT/dune-project" -nt "$exe" ]; then
     return 0
@@ -102,6 +135,25 @@ build_dashboard_if_requested() {
   fi
 }
 
+resolve_built_exe() {
+  local common_root=""
+  common_root="$(git_common_root 2>/dev/null || true)"
+  local -a candidates=(
+    "$REPO_ROOT/_build/default/bin/main_eio.exe"
+  )
+  if [ -n "$common_root" ] && [ "$common_root" != "$REPO_ROOT" ]; then
+    candidates+=("$common_root/_build/default/bin/main_eio.exe")
+  fi
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  printf '%s\n' "$REPO_ROOT/_build/default/bin/main_eio.exe"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --target-dir)
@@ -119,6 +171,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --print-port)
       PRINT_PORT_ONLY=1
+      shift
+      ;;
+    --bootstrap-only)
+      BOOTSTRAP_ONLY=1
       shift
       ;;
     --build-dashboard)
@@ -156,7 +212,7 @@ build_dashboard_if_requested
 
 LOCAL_CONFIG_DIR="${MASC_CONFIG_DIR:-$TARGET_DIR/.masc/config}"
 LOCAL_PERSONAS_DIR="${MASC_PERSONAS_DIR:-$LOCAL_CONFIG_DIR/personas}"
-EXE="$REPO_ROOT/_build/default/bin/main_eio.exe"
+EXE="$(resolve_built_exe)"
 
 if binary_is_stale "$EXE"; then
   echo "[local-run] Building local binary..." >&2
@@ -166,6 +222,15 @@ fi
 if [ ! -x "$EXE" ]; then
   echo "Failed to resolve built binary: $EXE" >&2
   exit 1
+fi
+
+if [ "$BOOTSTRAP_ONLY" = "1" ]; then
+  echo "[local-run] Bootstrap ready" >&2
+  echo "  Target dir: $TARGET_DIR" >&2
+  echo "  Config root: $LOCAL_CONFIG_DIR" >&2
+  echo "  Personas root: $LOCAL_PERSONAS_DIR" >&2
+  echo "  Binary: $EXE" >&2
+  exit 0
 fi
 
 if lsof -iTCP:"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then

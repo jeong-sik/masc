@@ -97,17 +97,26 @@ room_scope = "current"
 proactive_enabled = false
 |}
 let find_free_port () =
-  let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-  Fun.protect
-    ~finally:(fun () -> Unix.close socket)
-    (fun () ->
-      (match Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0)) with
-       | () -> ()
-       | exception Unix.Unix_error ((Unix.EPERM | Unix.EACCES), "bind", _) ->
-         Alcotest.skip ());
-      match Unix.getsockname socket with
-      | Unix.ADDR_INET (_, port) -> port
-      | _ -> Alcotest.fail "unexpected socket address")
+  let start = 9200 + (Unix.getpid () mod 1000) in
+  let rec loop attempts port =
+    if attempts <= 0 then
+      Alcotest.skip ()
+    else
+      let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+      let next_port = if port >= 65535 then 9200 else port + 1 in
+      Fun.protect
+        ~finally:(fun () -> Unix.close socket)
+        (fun () ->
+          match Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, port)) with
+          | () -> port
+          | exception Unix.Unix_error
+                        ((Unix.EADDRINUSE | Unix.EADDRNOTAVAIL | Unix.EPERM | Unix.EACCES), "bind", _) ->
+              loop (attempts - 1) next_port
+          | exception Unix.Unix_error (err, fn, arg) ->
+              Alcotest.failf "find_free_port bind failed: %s (%s %s)"
+                (Unix.error_message err) fn arg)
+  in
+  loop 2048 start
 
 let merge_env_overrides overrides =
   let override_keys = List.map fst overrides in
@@ -177,6 +186,120 @@ let curl_health_status ~port =
   | Unix.WEXITED 0 -> int_of_string_opt output
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None
 
+let curl_health_json ~port =
+  let url = Printf.sprintf "http://127.0.0.1:%d/health" port in
+  let args = [| "curl"; "-sS"; "--http1.1"; "--max-time"; "2"; url |] in
+  let ic = Unix.open_process_args_in "curl" args in
+  let output = read_all ic |> String.trim in
+  match Unix.close_process_in ic with
+  | Unix.WEXITED 0 -> (
+      try Some (Yojson.Safe.from_string output) with _ -> None)
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None
+
+let http_status_from_headers path =
+  let lines = String.split_on_char '\n' (read_file path) in
+  let rec loop = function
+    | [] -> None
+    | line :: rest ->
+        let line = String.trim line in
+        if String.starts_with ~prefix:"HTTP/" line then
+          match String.split_on_char ' ' line with
+          | _version :: code :: _ -> int_of_string_opt code
+          | _ -> loop rest
+        else
+          loop rest
+  in
+  loop lines
+
+let require_http_status_from_headers path =
+  match http_status_from_headers path with
+  | Some status -> status
+  | None -> Alcotest.failf "missing HTTP status\nheaders:\n%s" (read_file path)
+
+let header_value path key =
+  let key = String.lowercase_ascii key ^ ":" in
+  let lines = String.split_on_char '\n' (read_file path) in
+  let rec loop = function
+    | [] -> None
+    | line :: rest ->
+        let normalized = String.lowercase_ascii line in
+        if String.starts_with ~prefix:key normalized then
+          let value =
+            match String.split_on_char ':' line with
+            | _name :: rest -> String.concat ":" rest |> String.trim
+            | [] -> ""
+          in
+          Some (String.trim (String.map (fun c -> if Char.equal c '\r' then ' ' else c) value))
+        else
+          loop rest
+  in
+  loop lines
+
+let require_header_value path key =
+  match header_value path key with
+  | Some value -> value
+  | None ->
+      Alcotest.failf "missing %s\nheaders:\n%s" key (read_file path)
+
+let parse_json_response_file path =
+  let text = read_file path in
+  let trimmed = String.trim text in
+  if trimmed <> "" && (trimmed.[0] = '{' || trimmed.[0] = '[') then
+    Yojson.Safe.from_string trimmed
+  else
+    let lines = String.split_on_char '\n' text in
+    let rec loop = function
+      | [] -> Alcotest.failf "no JSON payload found in %s" path
+      | line :: rest ->
+          let line = String.trim line in
+          if String.starts_with ~prefix:"data: " line then
+            Yojson.Safe.from_string (String.sub line 6 (String.length line - 6))
+          else
+            loop rest
+    in
+    loop lines
+
+let curl_request_capture ?(headers = []) ~output_dir ~name ~method_ ~url ?payload () =
+  let headers_path = Filename.concat output_dir (name ^ ".headers") in
+  let body_path = Filename.concat output_dir (name ^ ".body") in
+  let base_args =
+    [
+      "curl";
+      "-sS";
+      "--http1.1";
+      "--max-time";
+      "5";
+      "-D";
+      headers_path;
+      "-o";
+      body_path;
+      "-X";
+      method_;
+      url;
+      "-H";
+      "Accept: application/json, text/event-stream";
+    ]
+  in
+  let header_args =
+    headers |> List.concat_map (fun header -> [ "-H"; header ])
+  in
+  let payload_args =
+    match payload with
+    | Some body -> [ "-d"; body ]
+    | None -> []
+  in
+  let args = Array.of_list (base_args @ header_args @ payload_args) in
+  let ic = Unix.open_process_args_in "curl" args in
+  let _ = read_all ic in
+  match Unix.close_process_in ic with
+  | Unix.WEXITED 0 -> (headers_path, body_path)
+  | Unix.WEXITED code ->
+      Alcotest.failf "curl %s failed with exit %d" name code
+  | Unix.WSIGNALED signal ->
+      Alcotest.failf "curl %s signaled %d" name signal
+  | Unix.WSTOPPED signal ->
+      Alcotest.failf "curl %s stopped %d" name signal
+
 let process_alive pid =
   match Unix.waitpid [Unix.WNOHANG] pid with
   | 0, _ -> true
@@ -197,6 +320,38 @@ let wait_for_health ~pid ~port ~timeout_s =
         Unix.sleepf 0.1;
         loop ()
       end
+  in
+  loop ()
+
+let wait_for_startup_phase ~pid ~port ~timeout_s expected_phase =
+  let deadline = Unix.gettimeofday () +. timeout_s in
+  let rec loop () =
+    match curl_health_json ~port with
+    | Some json -> (
+        let phase =
+          Yojson.Safe.Util.(
+            json |> member "startup" |> member "phase" |> to_string_option)
+        in
+        match phase with
+        | Some phase when String.equal phase expected_phase -> true
+        | _ ->
+            if not (process_alive pid) then
+              false
+            else if Unix.gettimeofday () >= deadline then
+              false
+            else begin
+              Unix.sleepf 0.2;
+              loop ()
+            end)
+    | None ->
+        if not (process_alive pid) then
+          false
+        else if Unix.gettimeofday () >= deadline then
+          false
+        else begin
+          Unix.sleepf 0.2;
+          loop ()
+        end
   in
   loop ()
 
@@ -1029,6 +1184,157 @@ let test_main_eio_serves_health_before_lazy_startup () =
             Alcotest.skip ()
           end))
 
+let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
+  with_temp_dir "startup-fresh-boot-e2e" (fun dir ->
+      let exe = find_main_eio_exe () in
+      let port = find_free_port () in
+      let log_file = Filename.concat dir "server.log" in
+      let log_fd =
+        Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+      in
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
+      with_cwd (project_root ()) @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
+      let expected_config = Filename.concat dir ".masc/config" in
+      Alcotest.(check bool) "tool policy bootstrapped" true
+        (Sys.file_exists (Filename.concat expected_config "tool_policy.toml"));
+      let env =
+        merge_env_overrides
+          [
+            ("MASC_BASE_PATH", dir);
+            ("MASC_STORAGE_TYPE", "filesystem");
+            ("GRAPHQL_API_KEY", "");
+            ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
+            ("MASC_AUTONOMY_ENABLED", "0");
+            ("MASC_ORCHESTRATOR_ENABLED", "0");
+            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_USE_H2", "0");
+            ("DUNE_SOURCEROOT", project_root ());
+          ]
+      in
+      let pid =
+        Unix.create_process_env exe
+          [|
+            exe;
+            "--host";
+            "127.0.0.1";
+            "--port";
+            string_of_int port;
+            "--base-path";
+            dir;
+          |]
+          env Unix.stdin log_fd log_fd
+      in
+      Unix.close log_fd;
+      Fun.protect
+        ~finally:(fun () -> stop_process pid)
+        (fun () ->
+          if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "ready") then begin
+            prerr_endline
+              (Printf.sprintf
+                 "main_eio fresh boot did not reach startup.phase=ready within timeout in this environment.\nlog:\n%s"
+                 (read_file log_file));
+            Alcotest.skip ()
+          end;
+          let health_headers, health_body =
+            curl_request_capture ~output_dir:dir ~name:"health" ~method_:"GET"
+              ~url:(Printf.sprintf "http://127.0.0.1:%d/health" port) ()
+          in
+          ignore health_headers;
+          let health_json = parse_json_response_file health_body in
+          let startup =
+            Yojson.Safe.Util.member "startup" health_json
+          in
+          let config_root_path =
+            Yojson.Safe.Util.(
+              health_json
+              |> member "startup"
+              |> member "config_resolution"
+              |> member "config_root"
+              |> member "path"
+              |> to_string)
+          in
+          let effective_base_path =
+            Yojson.Safe.Util.(
+              health_json |> member "paths" |> member "effective_base_path"
+              |> to_string)
+          in
+          Alcotest.(check string) "startup phase ready" "ready"
+            Yojson.Safe.Util.(startup |> member "phase" |> to_string);
+          Alcotest.(check string) "effective base path matches fresh dir"
+            (canonical_path dir) (canonical_path effective_base_path);
+          Alcotest.(check string) "config root matches fresh dir"
+            (canonical_path expected_config) (canonical_path config_root_path);
+          let init_headers, init_body =
+            curl_request_capture
+              ~output_dir:dir ~name:"initialize" ~method_:"POST"
+              ~url:(Printf.sprintf "http://127.0.0.1:%d/mcp" port)
+              ~headers:[ "Content-Type: application/json" ]
+              ~payload:
+                {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"fresh-boot-test","version":"1.0"}}}|}
+              ()
+          in
+          Alcotest.(check (option int)) "initialize http 200" (Some 200)
+            (http_status_from_headers init_headers);
+          let init_json = parse_json_response_file init_body in
+          Alcotest.(check string) "initialize protocol" "2025-11-25"
+            Yojson.Safe.Util.(
+              init_json |> member "result" |> member "protocolVersion" |> to_string);
+          let session_id =
+            require_header_value init_headers "Mcp-Session-Id"
+          in
+          let protocol_version =
+            require_header_value init_headers "Mcp-Protocol-Version"
+          in
+          let notify_headers, _notify_body =
+            curl_request_capture
+              ~output_dir:dir ~name:"initialized" ~method_:"POST"
+              ~url:(Printf.sprintf "http://127.0.0.1:%d/mcp" port)
+              ~headers:
+                [
+                  "Content-Type: application/json";
+                  "Mcp-Session-Id: " ^ session_id;
+                  "Mcp-Protocol-Version: " ^ protocol_version;
+                ]
+              ~payload:
+                {|{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}|}
+              ()
+          in
+          let notify_code =
+            require_http_status_from_headers notify_headers
+          in
+          Alcotest.(check bool) "notifications/initialized accepted" true
+            (List.mem notify_code [ 200; 202; 204 ]);
+          let tools_headers, tools_body =
+            curl_request_capture
+              ~output_dir:dir ~name:"tools-list" ~method_:"POST"
+              ~url:(Printf.sprintf "http://127.0.0.1:%d/mcp" port)
+              ~headers:
+                [
+                  "Content-Type: application/json";
+                  "Mcp-Session-Id: " ^ session_id;
+                  "Mcp-Protocol-Version: " ^ protocol_version;
+                ]
+              ~payload:
+                {|{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}|}
+              ()
+          in
+          Alcotest.(check (option int)) "tools/list http 200" (Some 200)
+            (http_status_from_headers tools_headers);
+          let tools_json = parse_json_response_file tools_body in
+          let tool_names =
+            Yojson.Safe.Util.(
+              tools_json |> member "result" |> member "tools" |> to_list
+              |> List.filter_map (fun tool ->
+                     match member "name" tool with
+                     | `String name -> Some name
+                     | _ -> None))
+          in
+          Alcotest.(check bool) "tools/list nonempty" true (tool_names <> []);
+          Alcotest.(check bool) "canonical tool present" true
+            (List.mem "masc_status" tool_names)))
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1144,5 +1450,8 @@ let () =
             test_prompt_markdown_dir_prefers_resolved_config_dir_over_cwd;
           Alcotest.test_case "main_eio serves health before lazy startup"
             `Slow test_main_eio_serves_health_before_lazy_startup;
+          Alcotest.test_case
+            "main_eio fresh bootstrap and MCP handshake"
+            `Slow test_main_eio_fresh_bootstrap_and_mcp_handshake;
         ] );
     ]

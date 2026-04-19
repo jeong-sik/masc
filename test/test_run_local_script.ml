@@ -304,6 +304,30 @@ let test_config_dir_set_personas_dir_unset_defaults_to_config_personas () =
         (contains_substring captured
            ("MASC_PERSONAS_DIR=" ^ Filename.concat override_config "personas")))
 
+let test_bootstrap_only_materializes_state_without_exec () =
+  with_temp_dir "run-local-script" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let capture = Filename.concat dir "captured-env.txt" in
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let code, stdout, stderr =
+        run_shell ~cwd:repo_root
+          ~env:[ ("FAKE_CAPTURE_FILE", capture) ]
+          ~unset_env:
+            [ "MASC_BASE_PATH"; "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ]
+          (Printf.sprintf "%s --target-dir %s --port 9961 --bootstrap-only"
+             (quote script) (quote target))
+      in
+      if code <> 0 then
+        failf "run-local bootstrap-only failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      check bool "bootstrapped cascade" true
+        (Sys.file_exists (Filename.concat target ".masc/config/cascade.json"));
+      check bool "fake exe not invoked" false (Sys.file_exists capture);
+      check bool "bootstrap ready message" true
+        (contains_substring stderr "[local-run] Bootstrap ready"))
+
 let () =
   run "run_local_script"
     [
@@ -321,5 +345,7 @@ let () =
             test_explicit_config_env_is_preserved_without_bootstrap;
           test_case "config_dir set personas_dir unset defaults to config/personas" `Quick
             test_config_dir_set_personas_dir_unset_defaults_to_config_personas;
+          test_case "bootstrap-only materializes state without exec" `Quick
+            test_bootstrap_only_materializes_state_without_exec;
         ] );
     ]

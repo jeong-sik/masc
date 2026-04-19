@@ -125,12 +125,26 @@ curl -sS -D "$INIT_HEADERS" "http://127.0.0.1:${PORT}/mcp" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"manual-check","version":"0.1"}}}'
 
 SESSION_ID="$(awk -F': ' 'tolower($1)=="mcp-session-id"{gsub("\r", "", $2); print $2}' "$INIT_HEADERS")"
+PROTOCOL_VERSION="$(awk -F': ' 'tolower($1)=="mcp-protocol-version"{gsub("\r", "", $2); print $2}' "$INIT_HEADERS")"
 curl -sS "http://127.0.0.1:${PORT}/mcp" \
   -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
   -H "Mcp-Session-Id: ${SESSION_ID}" \
+  -H "Mcp-Protocol-Version: ${PROTOCOL_VERSION}" \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' >/dev/null
+curl -sS "http://127.0.0.1:${PORT}/mcp" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  -H "Mcp-Session-Id: ${SESSION_ID}" \
+  -H "Mcp-Protocol-Version: ${PROTOCOL_VERSION}" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 rm -f "$INIT_HEADERS"
+```
+
+fresh temp-dir launcher proof:
+
+```bash
+scripts/harness/contract/run_local_fresh_boot_contract.sh
 ```
 
 ## 3. MCP 연결

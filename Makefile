@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean clean-tlc-artifacts coverage coverage-summary coverage-html coverage-percent doc install-deps pin-external-deps sync-oas-pin-docs doctor-oas-pin doctor-oas-drift doctor-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard dashboard-drift-check dashboard-drift-regen dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak
+.PHONY: build test test-unit test-contract test-contract-live test-transport test-webrtc-live-env test-all clean clean-tlc-artifacts coverage coverage-summary coverage-html coverage-percent doc install-deps pin-external-deps sync-oas-pin-docs doctor-oas-pin doctor-oas-drift doctor-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard dashboard-drift-check dashboard-drift-regen dev-setup fmt fmt-check health ci dashboard dev-dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-run-local-fresh-boot harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check check-memory-leak
 
 # Default target — OCaml + dashboard
 all: build-all
@@ -178,6 +178,10 @@ harness-game-view-contract:
 # MCP streamable transport contract harness (Accept policy + deprecation headers)
 harness-streamable-http-contract:
 	scripts/harness_streamable_http_contract.sh
+
+# Fresh temp-dir proof: run-local bootstrap -> /health -> initialize -> tools/list
+harness-run-local-fresh-boot:
+	scripts/harness/contract/run_local_fresh_boot_contract.sh
 
 # TRPG session bootstrap contract harness (preset/pool/party/session/intervention)
 harness-trpg-session-contract:

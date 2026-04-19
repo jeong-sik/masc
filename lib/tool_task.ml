@@ -78,6 +78,33 @@ let validate_task_id task_id =
   if task_id = "" then Error (Types.TaskNotFound "")
   else Ok task_id
 
+let sync_planning_current_task_with_owned_task (ctx : context) =
+  let actual_name =
+    try Coord.resolve_agent_name ctx.config ctx.agent_name
+    with
+    | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
+    | exn ->
+        Log.Task.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
+          (Printexc.to_string exn);
+        ctx.agent_name
+  in
+  let matches_you assignee =
+    String.equal assignee ctx.agent_name || String.equal assignee actual_name
+  in
+  let owned_task =
+    Coord.get_tasks_raw ctx.config
+    |> List.find_map (fun (task : Types.task) ->
+           match task.task_status with
+           | Types.Claimed { assignee; _ }
+           | Types.InProgress { assignee; _ }
+           | Types.AwaitingVerification { assignee; _ } ->
+               if matches_you assignee then Some task.id else None
+           | Types.Todo | Types.Done _ | Types.Cancelled _ -> None)
+  in
+  match owned_task with
+  | Some task_id -> Planning_eio.set_current_task ctx.config ~task_id
+  | None -> Planning_eio.clear_current_task ctx.config
+
 let review_completion_notes
     ~(completion_contract : string list option)
     ~(evaluator_cascade : string option)
@@ -478,7 +505,7 @@ let handle_claim ctx args =
        (match preset_warning with
         | Some warning -> Log.Task.warn "%s (agent=%s)" warning ctx.agent_name
         | None -> ());
-       Planning_eio.set_current_task ctx.config ~task_id;
+       sync_planning_current_task_with_owned_task ctx;
        Subscriptions.push_event_to_sessions (`Assoc [
          ("type", `String "masc/task_claimed");
          ("task_id", `String task_id);
@@ -499,8 +526,8 @@ let handle_claim_next ctx _args =
   let task_filter = preset_task_filter ~agent_preset in
   let result = Coord.claim_next_r ctx.config ~agent_name:ctx.agent_name ~task_filter () in
   let message = match result with
-    | Coord.Claim_next_claimed { task_id; message; _ } ->
-        Planning_eio.set_current_task ctx.config ~task_id;
+    | Coord.Claim_next_claimed { message; _ } ->
+        sync_planning_current_task_with_owned_task ctx;
         message
     | Coord.Claim_next_no_unclaimed -> "📋 No unclaimed tasks available"
     | Coord.Claim_next_no_eligible { preset_filtered; _ } when preset_filtered > 0 ->
@@ -527,9 +554,14 @@ let handle_release ctx args =
        then
          (false, "Strict task release requires handoff_context.summary")
        else
-         result_to_response
-           (Coord.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
-              ?expected_version ?handoff_context ()))
+         let result =
+           Coord.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
+             ?expected_version ?handoff_context ()
+         in
+         (match result with
+          | Ok _ -> sync_planning_current_task_with_owned_task ctx
+          | Error _ -> ());
+         result_to_response result)
 
 let transition_known_args =
   [
@@ -576,6 +608,7 @@ and handle_cancel_task ctx args =
   (* Record failed metric on cancellation *)
   (match result with
    | Ok _ ->
+       sync_planning_current_task_with_owned_task ctx;
        let metric : Metrics_store_eio.task_metric = {
          id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Time_compat.now () *. 1000.));
          agent_id = ctx.agent_name;
@@ -810,6 +843,9 @@ and handle_transition ctx args =
     | None -> None
   in
   let result = try_transition 0 in
+  (match result with
+   | Ok _ -> sync_planning_current_task_with_owned_task ctx
+   | Error _ -> ());
   (* Notify A2A subscribers on successful transition *)
   (match result with
    | Ok _ ->

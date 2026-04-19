@@ -932,7 +932,9 @@ let test_handle_request_tools_call_transition_claim_guidance () =
     Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
   in
   let steps = workflow_next_step_names response in
-  Alcotest.(check bool) "claim guidance includes plan_set_task" true
+  Alcotest.(check (option string)) "claim binds current_task" (Some "task-001")
+    (Masc_mcp.Planning_eio.get_current_task state.room_config);
+  Alcotest.(check bool) "claim guidance omits plan_set_task" false
     (List.mem "masc_plan_set_task" steps);
   cleanup_dir base_path
 

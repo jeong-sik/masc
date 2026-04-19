@@ -185,7 +185,9 @@ let test_transition_claim_call_guidance () =
       ~args:(`Assoc [ ("action", `String "claim"); ("task_id", `String "task-001") ])
       ~success:true
   in
-  check_has_tool g.next_steps "masc_plan_set_task";
+  check_has_tool g.next_steps "masc_worktree_create";
+  check bool "claim guidance omits plan_set_task" false
+    (List.exists (fun (s : WG.step) -> s.tool = "masc_plan_set_task") g.next_steps);
   check_has_precondition g "project_ready";
   check_lacks_precondition g "room_set"
 

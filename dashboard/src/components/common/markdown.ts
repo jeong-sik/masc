@@ -44,7 +44,7 @@ function getMermaid(): Promise<MermaidApi> {
   const promise = mermaidPromise ?? (mermaidPromise = importMermaid())
   return promise.then(mermaid => {
     if (mermaidConfigured) return mermaid
-    mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' })
+    mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict', suppressErrorRendering: true })
     mermaidConfigured = true
     return mermaid
   }).catch((err) => {

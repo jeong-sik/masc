@@ -102,12 +102,11 @@ let after_claim_auto_bound ~success =
 let after_transition_claim ~success =
   if success then
     { next_steps =
-        [ s "masc_plan_set_task" "Bind claimed task as your planning current_task";
-          s "masc_worktree_create" "Create an isolated worktree for this task" ];
+        [ s "masc_worktree_create" "Create an isolated worktree for this task";
+          s "masc_heartbeat" "Signal liveness before starting long work" ];
       preconditions = [ project_ready; "joined" ];
       common_mistakes =
-        [ "masc_transition(action=claim) only claims backlog ownership — it does not bind planning current_task";
-          "Forgetting masc_worktree_create — working on main branch directly" ] }
+        [ "Forgetting masc_worktree_create — working on main branch directly" ] }
   else
     { next_steps =
         [ s "masc_status" "Check which tasks are available";
@@ -152,7 +151,7 @@ let after_transition_generic ~success =
           s "masc_workflow_guide" "Inspect the next recommended step for your current state" ];
       preconditions = [ project_ready; "joined" ];
       common_mistakes =
-        [ "masc_transition follow-up depends on action. claim may require masc_plan_set_task, while done/release/cancel do not." ] }
+        [ "masc_transition follow-up depends on action. claim should auto-bind current_task, while done/release/cancel may clear it." ] }
   else
     { next_steps =
         [ s "masc_status" "Check task state before retrying the transition";
@@ -356,7 +355,7 @@ let current_state_guidance ~room_set ~joined ~task_claimed
         [ s "masc_plan_set_task" "Bind your claimed task as current_task" ];
       preconditions = [ project_ready; "joined"; "task_claimed" ];
       common_mistakes =
-        [ "Some claim paths leave planning current_task unset. This commonly happens after masc_transition(action=claim)." ] }
+        [ "Legacy or out-of-band claim paths can leave planning current_task stale. Call masc_plan_set_task to realign." ] }
   else if not worktree_active then
     { next_steps =
         [ s "masc_worktree_create" "Create an isolated git worktree for this task";

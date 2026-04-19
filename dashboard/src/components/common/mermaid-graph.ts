@@ -18,6 +18,7 @@ async function getMermaid(): Promise<MermaidApi> {
     startOnLoad: false,
     theme: 'dark',
     securityLevel: 'strict',
+    suppressErrorRendering: true,
   })
   mermaidConfigured = true
   return mermaid

@@ -30,6 +30,34 @@
 \*               temporal counter-example.  If the property still
 \*               holds, the spec (or fairness annotation) is too weak
 \*               and must be strengthened.
+\*
+\* OCaml ↔ TLA+ mapping (see #8642 family):
+\*
+\*   spec variable                | OCaml location                                    | semantic
+\*   -----------------------------+---------------------------------------------------+---------
+\*   phase \in {"Running", "HandingOff"} | lib/keeper/keeper_state_machine.ml:8,12     | type phase = ... | Running | ... | HandingOff | ...
+\*                                | (full 12-phase variant; this spec projects to 2)  |
+\*   handoff_needed (boolean)     | lib/keeper/keeper_state_machine.ml:61             | conditions.context_handoff_needed : bool
+\*                                | lib/keeper/keeper_state_machine.ml:389            | set from auto_rules.handoff at update_conditions
+\*
+\* Producer side (where conditions are stamped):
+\*   lib/keeper/keeper_state_machine.ml:351
+\*     `else if c.handoff_active then HandingOff` — derive_phase routes
+\*     into HandingOff when handoff_active is set, satisfying the spec
+\*     liveness obligation that handoff_needed must lead to a phase that
+\*     acknowledges the signal.
+\*
+\* Wire path to the dashboard banner consumer:
+\*   lib/keeper/keeper_state_machine.ml:620
+\*     `"context_handoff_needed", \`Bool c.context_handoff_needed`
+\*     (json export — read by dashboard/src/components/keeper-conditions-divergent.ts).
+\*
+\* Scope projection: spec models the 2-phase fragment (Running / HandingOff).
+\* The full 12-phase variant is out of scope here; sibling specs
+\* (KeeperContextLifecycle, KeeperCompactionLifecycle) cover other phase
+\* groups. Adding new OCaml phases does NOT require updating this spec
+\* unless the new phase competes with HandingOff for the handoff_needed
+\* signal.
 
 EXTENDS TLC
 

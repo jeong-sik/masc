@@ -4,6 +4,7 @@
 
 (library
  (name masc_exec_bash_parser)
+ (public_name masc_mcp.masc_exec_bash_parser)
  (wrapped true)
  (libraries masc_exec))
 

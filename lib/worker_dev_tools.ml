@@ -1486,3 +1486,58 @@ let make_readonly_tools ~proc_mgr ~clock ?workdir ?on_exec () : Agent_sdk.Tool.t
   [ make_file_read ?workdir ?on_exec ();
     make_shell_exec_readonly ~workdir ~on_exec ~proc_mgr ~clock ]
 
+(* ================================================================ *)
+(* Tick 12 (P5, reduced scope) — shadow AST parse observation.      *)
+(*                                                                  *)
+(* The existing regex allowlist ([validate_command] above) remains  *)
+(* the authoritative gate.  This helper runs the typed bash parser  *)
+(* (Masc_exec.Parser.Bash.parse_string) in parallel and maps the    *)
+(* outcome to a coarse, stable tag string.  Callers that want to    *)
+(* build prod observability can log the tag alongside the regex     *)
+(* verdict; when the tag distribution has baked in (plan decision   *)
+(* point 2: "N=1000 prod 호출 무결 후 flag 전환"), the gate can    *)
+(* migrate in a follow-up without touching the regex layer.         *)
+(*                                                                  *)
+(* The helper never panics — the parser catches every Menhir/Lex    *)
+(* exception internally and surfaces them via Parsed.t.             *)
+(* ================================================================ *)
+
+let too_complex_reason_tag (r : Masc_exec.Parsed.reason_too_complex) =
+  match r with
+  | `Heredoc -> "heredoc"
+  | `Here_string -> "here_string"
+  | `Cmd_subst -> "cmd_subst"
+  | `Proc_subst -> "proc_subst"
+  | `Subshell -> "subshell"
+  | `Arith_expansion -> "arith_expansion"
+  | `Control_flow -> "control_flow"
+  | `Logic_op -> "logic_op"
+  | `Function_def -> "function_def"
+  | `Glob_brace -> "glob_brace"
+  | `Background -> "background"
+  | `Unknown_construct s -> "unknown:" ^ s
+
+let aborted_reason_tag (r : Masc_exec.Parsed.reason_aborted) =
+  match r with
+  | `Timeout_50ms -> "timeout_50ms"
+  | `Depth_limit -> "depth_limit"
+  | `Token_limit_50k -> "token_limit_50k"
+
+(* Coarse outcome tags.  Stable strings so downstream telemetry can
+   histogram them without re-parsing. *)
+let shadow_parse_outcome (cmd : string) : string =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed _ -> "parsed_simple"
+  | Masc_exec.Parsed.Parse_error _ -> "parse_error"
+  | Masc_exec.Parsed.Parse_aborted r ->
+      "parse_aborted:" ^ aborted_reason_tag r
+  | Masc_exec.Parsed.Too_complex r ->
+      "too_complex:" ^ too_complex_reason_tag r
+
+(* Legacy verdict ↔ shadow verdict cross-check.  Returns a tuple of
+   legacy allow/deny + shadow tag, so telemetry can spot "legacy
+   allows but shadow cannot parse" drift without needing two
+   separate call sites.  Intentionally side-effect free. *)
+let cross_check_command ~legacy cmd =
+  (legacy, shadow_parse_outcome cmd)
+

@@ -79,6 +79,15 @@ let tail_order_to_string = function
   | Oldest_first -> "oldest_first"
   | Newest_first -> "newest_first"
 
+(** Exhaustive list of [tail_order] constructors. Used to derive the
+    schema enum via [Keeper_schema.tail_order_enum_strings] mirror so a
+    3rd constructor would silently drop from the JSON Schema without
+    the [test_types.ml :: tail_order_ssot] sync test. Issue #8486. *)
+let all_tail_orders : tail_order list = [ Oldest_first; Newest_first ]
+
+let valid_tail_order_strings : string list =
+  List.map tail_order_to_string all_tail_orders
+
 let apply_tail_order order items =
   match order with
   | Oldest_first -> items

@@ -583,6 +583,25 @@ let () =
           Masc_mcp.Keeper_memory_policy.valid_memory_kind_strings
           Masc_mcp.Tool_shard.memory_kind_enum_strings);
     ];
+    "tail_order_ssot", [
+      (* Issue #8486: [Keeper_status_detail.tail_order] Variant + to_string
+         already existed but the schema enum at [Keeper_schema] was a
+         hand-list — adding a 3rd ordering constructor would have silently
+         dropped from the JSON Schema. Same prevention shape as #8467. *)
+      Alcotest.test_case "witness covers all tail_order variants" `Quick (fun () ->
+        let module K = Masc_mcp.Keeper_status_detail in
+        let witness o =
+          let actual = K.tail_order_to_string o in
+          if not (List.mem actual K.valid_tail_order_strings) then
+            Alcotest.failf "tail_order_to_string %S not in valid_tail_order_strings" actual
+        in
+        witness K.Oldest_first; witness K.Newest_first;
+        Alcotest.(check int) "count" 2 (List.length K.valid_tail_order_strings));
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        Alcotest.(check (list string)) "Keeper_schema mirror == SSOT"
+          Masc_mcp.Keeper_status_detail.valid_tail_order_strings
+          Masc_mcp.Keeper_schema.tail_order_enum_strings);
+    ];
     "fs_write_mode_ssot", [
       (* Issue #8490: introduces [fs_write_mode] Variant where 5 sites
          previously hand-validated raw strings + relied on an

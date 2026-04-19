@@ -433,10 +433,13 @@ let validate_sandbox_settings
       | Network_none ->
           Error
             "network_mode=none requires sandbox_profile=docker_hardened")
-  | Docker_hardened ->
+  | Docker_hardened | Docker_with_git ->
+      let profile_label = sandbox_profile_to_string sandbox_profile in
       if allowed_paths = [ "*" ] then
         Error
-          "docker_hardened rejects allowed_paths=[\"*\"]; keep writes inside the private playground root"
+          (Printf.sprintf
+             "%s rejects allowed_paths=[\"*\"]; keep writes inside the private playground root"
+             profile_label)
       else
         let escaping =
           List.filter
@@ -450,6 +453,7 @@ let validate_sandbox_settings
         | _ ->
             Error
               (Printf.sprintf
-                 "docker_hardened allowed_paths must stay under %s (rejected: %s)"
+                 "%s allowed_paths must stay under %s (rejected: %s)"
+                 profile_label
                  (private_workspace_root_rel keeper_name)
                  (String.concat ", " escaping))

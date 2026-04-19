@@ -289,14 +289,21 @@ let bonsai_asset_root () =
    query string so the browser refetches whenever the bundle is rebuilt.
    Cache-Control on the bundle itself stays [immutable] (1 year) for cheap
    reloads of unchanged code; the URL change is what defeats the cache. *)
-let bonsai_bundle_version () =
-  let bundle_path = Filename.concat (bonsai_asset_root ()) "main.bc.js" in
+let bonsai_asset_mtime filename =
+  let path = Filename.concat (bonsai_asset_root ()) filename in
   try
-    let st = Unix.stat bundle_path in
+    let st = Unix.stat path in
     Printf.sprintf "%d" (Float.to_int st.st_mtime)
   with _ -> "0"
 
+let bonsai_bundle_version () = bonsai_asset_mtime "main.bc.js"
+let bonsai_tokens_version () = bonsai_asset_mtime "colors_and_type.css"
+
 let bonsai_index_html () =
+  (* [colors_and_type.css] is the MASC Design System SSOT — :root palette,
+     font stacks, and utility primitives. Served from assets/dashboard_bonsai/
+     (copied there by `make bonsai-dashboard`). If the file isn't present,
+     the <link> 404s and the inline <style> fallback keeps the page readable. *)
   Printf.sprintf
     {|<!doctype html>
 <html lang="en" data-theme="dark-fantasy">
@@ -307,6 +314,7 @@ let bonsai_index_html () =
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap">
+<link rel="stylesheet" href="/dashboard/b/assets/colors_and_type.css?v=%s">
 <style>
   html, body { background: #0a0706; margin: 0; }
 </style>
@@ -317,6 +325,7 @@ let bonsai_index_html () =
 </body>
 </html>
 |}
+    (bonsai_tokens_version ())
     (bonsai_bundle_version ())
 
 let serve_bonsai_index _request reqd =

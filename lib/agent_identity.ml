@@ -340,12 +340,29 @@ let archetype_to_string = function
   | Athena -> "athena"
   | Generalist -> "generalist"
 
-let archetype_of_string = function
-  | "melchior" | "scientist" | "tech" -> Melchior
-  | "balthasar" | "mirror" | "ethics" -> Balthasar
-  | "casper" | "strategist" | "planner" -> Casper
-  | "athena" | "reasoner" | "logic" -> Athena
-  | _ -> Generalist
+(** Issue #8691: strict parser. The previous catch-all silently
+    collapsed any unknown wire string into [Generalist] AND the
+    canonical ["generalist"] label was matched only via that catch-all
+    (round-trip relied on the default). Same SSOT pattern as
+    #8615/#8670/#8682/#8687. *)
+let archetype_of_string_opt = function
+  | "melchior" | "scientist" | "tech" -> Some Melchior
+  | "balthasar" | "mirror" | "ethics" -> Some Balthasar
+  | "casper" | "strategist" | "planner" -> Some Casper
+  | "athena" | "reasoner" | "logic" -> Some Athena
+  | "generalist" | "" -> Some Generalist
+  | _ -> None
+
+(** Back-compat wrapper: callers that have no other recovery still
+    fall back to [Generalist] but a warning is logged so the typo /
+    drift becomes operator-visible. *)
+let archetype_of_string s =
+  match archetype_of_string_opt s with
+  | Some v -> v
+  | None ->
+      Log.Misc.warn
+        "archetype_of_string: unknown wire string %S → Generalist fallback (#8691)" s;
+      Generalist
 
 let archetype_emoji = function
   | Melchior -> "🔬"

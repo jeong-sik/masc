@@ -1911,12 +1911,15 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
     m
 ;;
 
-let publish_keeper_lifecycle ?phase ~event ~keeper_name ~detail () : unit =
+(* #8856: hook takes the unified
+   [Keeper_lifecycle_events.lifecycle_event] variant. *)
+let publish_keeper_lifecycle
+    ~(event : Keeper_lifecycle_events.lifecycle_event)
+    ~keeper_name ~detail () : unit =
   match get_bus () with
   | Some bus ->
     Oas_events.publish_keeper_lifecycle
       bus
-      ?phase
       ~event
       ~keeper_name
       ~detail
@@ -1924,21 +1927,18 @@ let publish_keeper_lifecycle ?phase ~event ~keeper_name ~detail () : unit =
   | None -> ()
 ;;
 
-(** Issue #8572: phase-derived event helper.
-
-    Use this when the lifecycle event name is the phase itself
-    (e.g. [Stopped → "stopped"]). Keeps [event_to_string] from being
-    hand-recomputed at every call site, eliminating the
-    [~phase:Stopped ~event:"crashed"]-style typo class. *)
+(** Phase-event helper: the wire event name IS the phase name. *)
 let publish_keeper_phase_lifecycle ~phase ~keeper_name ~detail () : unit =
-  let event = Keeper_state_machine.phase_to_string phase in
-  publish_keeper_lifecycle ~phase ~event ~keeper_name ~detail ()
+  publish_keeper_lifecycle
+    ~event:(Keeper_lifecycle_events.Phase_event phase)
+    ~keeper_name ~detail ()
 ;;
 
 let publish_keeper_started ~(live_meta : keeper_meta) : unit =
   publish_keeper_lifecycle
-    ~phase:Keeper_state_machine.Running
-    ~event:"started"
+    ~event:(Keeper_lifecycle_events.Custom_event
+              { verb = Keeper_lifecycle_events.Started;
+                phase = Some Keeper_state_machine.Running })
     ~keeper_name:live_meta.name
     ~detail:"keepalive"
     ()

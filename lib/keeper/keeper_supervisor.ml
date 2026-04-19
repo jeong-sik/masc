@@ -68,26 +68,25 @@ let committed_tools_of_ambiguous_blocker (blocker : string) =
 
 (* ── Event publishing ────────────────────────────────────── *)
 
-let publish_lifecycle ?phase event_name keeper_name detail () =
+(* #8856 / #8605 family: single helper takes the unified
+   [Keeper_lifecycle_events.lifecycle_event] variant. The legacy
+   [publish_lifecycle ?phase event_name] (string event_name) and
+   [publish_phase_lifecycle ~phase] are folded into [publish_lifecycle
+   ~event] -- the compiler now enforces that every call site picks
+   either Custom_event (with optional phase context) or Phase_event,
+   eliminating the [~phase:Stopped ~event:"crashed"] typo class
+   originally addressed at runtime by #8572 / #8575. *)
+let publish_lifecycle
+    ~(event : Keeper_lifecycle_events.lifecycle_event) keeper_name detail () =
   match Keeper_keepalive.get_bus () with
   | Some bus ->
-      Oas_events.publish_keeper_lifecycle bus ~event:event_name
-        ?phase ~keeper_name ~detail ()
+      Oas_events.publish_keeper_lifecycle bus ~event ~keeper_name ~detail ()
   | None -> ()
 
-(** Issue #8572: derive the wire [event] string from [phase] so the
-    Variant SSOT stays the only source of truth.
-
-    The legacy [publish_lifecycle ~phase event_name …] still works for
-    the named custom-event sites ([dead_cleaned] / [self_preservation]
-    / [paused_pruned]) that genuinely have no phase. Phase-bearing
-    sites should call this helper instead so that renaming a phase in
-    [Keeper_state_machine] flows to every observer automatically — no
-    chance of [~phase:Stopped "crashed"]-style typo emitting a
-    contradiction. *)
+(** Phase-event helper: the wire event name IS the phase name. *)
 let publish_phase_lifecycle ~phase keeper_name detail () =
-  let event_name = Keeper_state_machine.phase_to_string phase in
-  publish_lifecycle ~phase event_name keeper_name detail ()
+  publish_lifecycle ~event:(Keeper_lifecycle_events.Phase_event phase)
+    keeper_name detail ()
 
 (* ── Supervised fiber launch ─────────────────────────────── *)
 
@@ -237,8 +236,11 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     Keeper_registry.update_meta ~base_path:ctx.config.base_path meta.name
       live_meta;
     launch_supervised_fiber ~proactive_warmup_sec ctx live_meta reg;
-    publish_lifecycle ~phase:Keeper_state_machine.Running
-      "started" meta.name "supervised" ()
+    publish_lifecycle
+      ~event:(Keeper_lifecycle_events.Custom_event
+                { verb = Keeper_lifecycle_events.Started;
+                  phase = Some Keeper_state_machine.Running })
+      meta.name "supervised" ()
   end
 
 let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
@@ -359,8 +361,11 @@ let reconcile_keepalive_keepers (ctx : _ context) =
              if not dominated_by_sweep then begin
                supervise_keepalive ~proactive_warmup_sec:0 ctx meta;
                if Keeper_registry.is_running ~base_path meta.name then begin
-                 publish_lifecycle ~phase:Keeper_state_machine.Running
-                   "reconciled" meta.name "durable keeper" ();
+                 publish_lifecycle
+                   ~event:(Keeper_lifecycle_events.Custom_event
+                             { verb = Keeper_lifecycle_events.Reconciled;
+                               phase = Some Keeper_state_machine.Running })
+                   meta.name "durable keeper" ();
                  Log.Keeper.info "%s: reconciled durable keeper" meta.name
                end
              end
@@ -389,20 +394,31 @@ let cleanup_dead_tombstone (ctx : _ context)
       in
       Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
       if persisted_paused then begin
-        publish_lifecycle "dead_cleaned" entry.name "paused meta persisted" ();
+        publish_lifecycle
+          ~event:(Keeper_lifecycle_events.Custom_event
+                    { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
+          entry.name "paused meta persisted" ();
         Log.Keeper.info "%s: dead tombstone cleaned up" entry.name
       end else begin
-        publish_lifecycle "dead_cleaned" entry.name
-          "meta write failed, unregistered anyway" ();
+        publish_lifecycle
+          ~event:(Keeper_lifecycle_events.Custom_event
+                    { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
+          entry.name "meta write failed, unregistered anyway" ();
         Log.Keeper.warn "%s: dead tombstone unregistered despite meta write failure" entry.name
       end
   | Ok None ->
       Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
-      publish_lifecycle "dead_cleaned" entry.name "meta missing" ();
+      publish_lifecycle
+        ~event:(Keeper_lifecycle_events.Custom_event
+                  { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
+        entry.name "meta missing" ();
       Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name
   | Error err ->
       Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
-      publish_lifecycle "dead_cleaned" entry.name
+      publish_lifecycle
+        ~event:(Keeper_lifecycle_events.Custom_event
+                  { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
+        entry.name
         (Printf.sprintf "meta read error: %s" err) ();
       Log.Keeper.warn "%s: dead tombstone unregistered (meta error: %s)"
         entry.name err
@@ -444,7 +460,11 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
       Log.Keeper.warn
         "self-preservation: suppressing %d/%d restarts (ratio=%.2f, cohort=%s)"
         (List.length dominant_entries) n_total ratio dominant_key;
-      publish_lifecycle "self_preservation" "supervisor"
+      publish_lifecycle
+        ~event:(Keeper_lifecycle_events.Custom_event
+                  { verb = Keeper_lifecycle_events.Self_preservation;
+                    phase = None })
+        "supervisor"
         (Printf.sprintf "%d/%d suppressed, cohort=%s"
            (List.length dominant_entries) n_total dominant_key) ();
       Keeper_crash_persistence.enqueue_sp_event
@@ -547,8 +567,11 @@ let sweep_and_recover (ctx : _ context) =
           ~restart_count:attempt ~last_restart_ts:now
           ~crash_log:(keep_last_n 5 (now, crash_msg) old_crash_log);
         launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta reg;
-        publish_lifecycle ~phase:Keeper_state_machine.Running
-          "restarted" old_entry.name
+        publish_lifecycle
+          ~event:(Keeper_lifecycle_events.Custom_event
+                    { verb = Keeper_lifecycle_events.Restarted;
+                      phase = Some Keeper_state_machine.Running })
+          old_entry.name
           (Printf.sprintf "attempt %d" attempt) ();
         Log.Keeper.info "%s: restarted (attempt %d, backoff %.0fs)"
           old_entry.name attempt (backoff_delay (attempt - 1))
@@ -587,7 +610,11 @@ let sweep_and_recover (ctx : _ context) =
                let path = Keeper_types.keeper_meta_path ctx.config name in
                (try
                   Sys.remove path;
-                  publish_lifecycle "paused_pruned" name
+                  publish_lifecycle
+                    ~event:(Keeper_lifecycle_events.Custom_event
+                              { verb = Keeper_lifecycle_events.Paused_pruned;
+                                phase = None })
+                    name
                     (Printf.sprintf "last_updated=%s" meta.updated_at) ();
                   Log.Keeper.info "%s: stale paused meta pruned" name
                 with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

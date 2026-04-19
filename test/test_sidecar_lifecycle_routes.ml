@@ -328,6 +328,25 @@ let test_parse_body_pairs_rejects_invalid_json () =
     (Error "body is not valid JSON")
     (Routes.parse_body_pairs {|{"PORT":|})
 
+let test_atomic_write_file_replaces_content () =
+  with_temp_dir "sidecar-atomic-write" (fun dir ->
+      let path = Filename.concat dir "nested/config.toml" in
+      Routes.ensure_parent_dir path;
+      check (result unit string)
+        "initial write"
+        (Ok ())
+        (Routes.atomic_write_file ~path "TOKEN = \"old\"\n");
+      check string "initial content"
+        "TOKEN = \"old\"\n"
+        (In_channel.with_open_text path In_channel.input_all);
+      check (result unit string)
+        "replacement write"
+        (Ok ())
+        (Routes.atomic_write_file ~path "TOKEN = \"new\"\n");
+      check string "replacement content"
+        "TOKEN = \"new\"\n"
+        (In_channel.with_open_text path In_channel.input_all))
+
 let () =
   run "sidecar_lifecycle_routes"
     [
@@ -385,5 +404,7 @@ let () =
             test_parse_body_pairs_rejects_non_object;
           test_case "parse body pairs: invalid JSON" `Quick
             test_parse_body_pairs_rejects_invalid_json;
+          test_case "atomic write replaces content" `Quick
+            test_atomic_write_file_replaces_content;
         ] );
     ]

@@ -621,12 +621,12 @@ let atomic_write_file ~(path : string) (content : string) : (unit, string) resul
   try
     let oc = open_out tmp in
     Fun.protect
-      ~finally:(fun () -> try close_out oc with _ -> ())
+      ~finally:(fun () -> close_out_noerr oc)
       (fun () -> output_string oc content);
     Sys.rename tmp path;
     Ok ()
   with exn ->
-    (try Sys.remove tmp with _ -> ());
+    (try Sys.remove tmp with Sys_error _ -> ());
     Error (Printf.sprintf "atomic write failed: %s" (Printexc.to_string exn))
 
 (** Make sure [.gate/runtime/<id>/] exists before atomic_write_file
@@ -692,7 +692,7 @@ let handle_get_config _state request reqd =
       else
         let content =
           try In_channel.with_open_text path In_channel.input_all
-          with _ -> ""
+          with Sys_error _ -> ""
         in
         (match Keeper_toml_loader.parse_toml content with
          | Error msg ->

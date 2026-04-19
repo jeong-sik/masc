@@ -303,9 +303,10 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
                     timed_out := true;
                     kill_and_wait status_ref
                   end else
-                    Unix.sleepf
-                      (min 0.05
-                         (max 0.0 (deadline -. Unix.gettimeofday ())))
+                    ignore
+                      (Unix.select [] [] []
+                         (min 0.05
+                            (max 0.0 (deadline -. Unix.gettimeofday ()))))
             done;
             close_quietly stdout_r;
             let status =

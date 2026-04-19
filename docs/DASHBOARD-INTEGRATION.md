@@ -60,6 +60,7 @@ Experimental features such as TRPG live under `lab`.
     public ranking signal
   - semantics and triage rules live in
     [KEEPER-ACCOUNTABILITY-RUNBOOK.md](./KEEPER-ACCOUNTABILITY-RUNBOOK.md)
+  - long-term accountability/reputation evolution plan lives in `docs/design/accountability-reputation-v2-roadmap.md`
   - test fixture mode: `?fixture=execution_smoke` or `MASC_DASHBOARD_FIXTURE=execution_smoke`
 - `GET /api/v1/dashboard/board`
   - `posts` plus memory-feed summary

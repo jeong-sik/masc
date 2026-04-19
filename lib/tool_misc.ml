@@ -26,16 +26,13 @@ type context = {
 let handle_dashboard ctx args =
   let compact = get_bool args "compact" false in
   let scope_arg = String.lowercase_ascii (get_string args "scope" "all") in
-  let scope =
-    match scope_arg with
-    | "all" -> Ok Dashboard.All
-    | "current" -> Ok Dashboard.Current
-    | other -> Error other
-  in
-  match scope with
-  | Error other ->
-      (false, Printf.sprintf "❌ Invalid dashboard scope '%s' (expected: all | current)" other)
-  | Ok scope ->
+  match Dashboard.scope_of_string_opt scope_arg with
+  | None ->
+      (false,
+       Printf.sprintf "❌ Invalid dashboard scope '%s' (expected: %s)"
+         scope_arg
+         (String.concat " | " Dashboard.valid_scope_strings))
+  | Some scope ->
       let output =
         if compact then Dashboard.generate_compact ~scope ctx.config
         else Dashboard.generate ~scope ctx.config

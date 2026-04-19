@@ -9,6 +9,14 @@ open Types
     same as #8484 / #8490 / #8493. *)
 let admin_section_enum_strings = [ "auth" ]
 
+(** Issue #8592: hand-mirrored from [Dashboard.valid_scope_strings].
+    Cycle constraint — Tool_schemas_misc is upstream of Dashboard.
+    The test [test_types.ml :: dashboard_scope_ssot] asserts this
+    mirror stays in sync with the SSOT so adding a 3rd scope
+    constructor fails compilation in [scope_to_string] AND fails the
+    test here, instead of silently dropping from the JSON Schema. *)
+let dashboard_scope_enum_strings = [ "all"; "current" ]
+
 (** Issue #8493: [masc_config] category filter strings mirror
     [Env_config_snapshot.valid_config_category_strings]. This library
     depends only on [masc_types], so it cannot depend on [masc_config]
@@ -103,7 +111,7 @@ Use from the answering side after a prior masc_webrtc_offer call.";
         ]);
         ("scope", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "all"; `String "current"]);
+          ("enum", `List (List.map (fun s -> `String s) dashboard_scope_enum_strings));
           ("description", `String "Dashboard scope (default: all)");
           ("default", `String "all");
         ]);

@@ -134,9 +134,12 @@ harness_start_server() {
   mkdir -p "$base_path"
   (
     export MASC_BASE_PATH="$base_path"
+    export MASC_CONFIG_DIR="${MASC_CONFIG_DIR:-$base_path/.masc/config}"
+    export MASC_PERSONAS_DIR="${MASC_PERSONAS_DIR:-$MASC_CONFIG_DIR/personas}"
     export MASC_STORAGE_TYPE="filesystem"
     export MASC_AUTONOMY_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
+    export MASC_KEEPER_BOOTSTRAP_ENABLED="${MASC_KEEPER_BOOTSTRAP_ENABLED:-false}"
     export MASC_ALLOW_LEGACY_ACCEPT="1"
     export MASC_TOOL_TIMEOUT_DEFAULT_SEC="${MASC_TOOL_TIMEOUT_DEFAULT_SEC:-90}"
     export GRAPHQL_API_KEY=""

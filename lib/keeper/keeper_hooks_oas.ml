@@ -120,17 +120,19 @@ let emit_cost_event
     2. Destructive pattern detection — reject dangerous bash/edit commands
     3. Cost event emission — auto-emit per-turn cost to .masc/costs.jsonl
 
-    @param config Coord configuration
     @param meta_ref Mutable ref to keeper metadata
-    @param session Session context for checkpoint persistence
-    @param ctx_snapshot Immutable snapshot of working context (reserved, unused)
     @param generation Current generation counter
     @param max_cost_usd Optional cost budget (rejects tool calls above limit)
     @param destructive_check Enable destructive pattern detection (default true)
     @param pre_tool_use_guard Optional callback that can short-circuit a tool
            before execution by returning an inline override response.
     @param on_tool_executed Optional callback after each tool execution
-    @param trajectory_acc Optional trajectory accumulator for cost attribution *)
+    @param trajectory_acc Optional trajectory accumulator for cost attribution
+
+    Issue #8597 #3-5: dropped [~config], [~session], [~ctx_snapshot]. The
+    closure body never read them; the docstring even admitted [ctx_snapshot]
+    was "reserved, unused". State now flows through [meta_ref] (mutable) and
+    the explicit callbacks (pre_tool_use_guard / on_tool_executed). *)
 
 (** Suggest alternative tools from the keeper's allowed set that were
     NOT part of the repeated tool calls. Returns up to [max_suggestions]
@@ -226,10 +228,7 @@ let recent_tool_streak_count ?(within_sec = 900.0) ~(tool_name : string)
   loop 0 (List.rev entries)
 
 let make_hooks
-    ~config:(_config : Coord.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)
-    ~session:(_session : Keeper_exec_context.session_context)
-    ~ctx_snapshot:(_ctx_snapshot : Keeper_exec_context.working_context)
     ~(generation : int)
     ?(max_cost_usd : float option)
     ?(destructive_check : bool = true)

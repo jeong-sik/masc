@@ -1090,11 +1090,10 @@ let run_turn
      Failure recovery: evidence records + operator notification via board,
      not sticky blocker state. See plan: enchanted-strolling-bonbon. *)
   let base_hooks =
+    (* Issue #8597 #3-5: dropped ~config / ~session / ~ctx_snapshot —
+       the hook closure ignored them; state flows via meta_ref + callbacks. *)
     Keeper_hooks_oas.make_hooks
-      ~config
       ~meta_ref
-      ~session
-      ~ctx_snapshot
       ~generation
       ?max_cost_usd
       ?trajectory_acc

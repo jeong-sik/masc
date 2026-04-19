@@ -1379,13 +1379,25 @@ let heartbeat_bars : (int * [ `Info | `Warn | `Error | `Idle ]) list =
 ;;
 
 let view_heartbeat () =
-  let bar (height, level) =
+  let bar i (height, level) =
     let cls =
       match level with
       | `Warn -> Some Style.heartbeat_bar_warn
       | `Error -> Some Style.heartbeat_bar_error
       | `Idle -> Some Style.heartbeat_bar_idle
       | `Info -> None
+    in
+    let level_name =
+      match level with
+      | `Warn -> "WARN"
+      | `Error -> "ERROR"
+      | `Idle -> "idle"
+      | `Info -> "info"
+    in
+    let total = List.length heartbeat_bars in
+    let t_ago = total - 1 - i in
+    let tip =
+      Printf.sprintf "t-%d · %s · ticks %d" t_ago level_name height
     in
     let base_attrs =
       match cls with
@@ -1396,7 +1408,8 @@ let view_heartbeat () =
     let style =
       Attr.style (Css_gen.create ~field:"height" ~value:(Printf.sprintf "%dpx" h))
     in
-    Node.div ~attrs:(style :: base_attrs) []
+    let title_attr = Attr.create "title" tip in
+    Node.div ~attrs:(title_attr :: style :: base_attrs) []
   in
   Node.div
     ~attrs:[ Style.heartbeat ]
@@ -1411,7 +1424,7 @@ let view_heartbeat () =
         ]
     ; Node.div
         ~attrs:[ Style.heartbeat_track ]
-        (List.map ~f:bar heartbeat_bars)
+        (List.mapi ~f:bar heartbeat_bars)
     ]
 ;;
 
@@ -1760,27 +1773,41 @@ let render_response (response : Logs_types.response) : Node.t =
     ; brand_row
     ; view_heartbeat ()
     ; view_hud response
-    ; Node.div
-        ~attrs:[ Style.page_head ]
-        [ Node.div
-            ~attrs:[ Style.page_head_lead ]
-            [ Node.div
-                ~attrs:[ Style.page_tag ]
-                [ Node.text "chronicle · quiet fox · day iv" ]
-            ; Node.h1
-                ~attrs:[ Style.page_h1 ]
-                [ Node.text "the watch "
-                ; Node.span
-                    ~attrs:[ Style.page_h1_blood ]
-                    [ Node.text "under storm" ]
-                ]
-            ; Node.p
-                ~attrs:[ Style.page_sub ]
-                [ Node.text
-                    "네 명의 키퍼가 홀을 지킨다. Luna는 세 번째 종에 \
-                     응답했고, DM은 폭풍이 서쪽 동을 봉하는 장면을 서술한다."
-                ]
-            ]
+    ; (let warn_n =
+         List.count response.entries ~f:(fun e ->
+           String.equal e.normalized_level "WARN")
+       in
+       let err_n =
+         List.count response.entries ~f:(fun e ->
+           String.equal e.normalized_level "ERROR")
+       in
+       let sub_text =
+         match response.entries with
+         | [] ->
+           "저택은 조용하다. 아무도 아직 말하지 않았고, 폭풍은 아직 문을 두드리지 않았다."
+         | _ ->
+           Printf.sprintf
+             "네 명의 키퍼가 홀을 지킨다. 마지막 %d행을 들었고, 경보 %d · 경고 %d이 울렸다."
+             response.total
+             err_n
+             warn_n
+       in
+       Node.div
+         ~attrs:[ Style.page_head ]
+         [ Node.div
+             ~attrs:[ Style.page_head_lead ]
+             [ Node.div
+                 ~attrs:[ Style.page_tag ]
+                 [ Node.text "chronicle · quiet fox · day iv" ]
+             ; Node.h1
+                 ~attrs:[ Style.page_h1 ]
+                 [ Node.text "the watch "
+                 ; Node.span
+                     ~attrs:[ Style.page_h1_blood ]
+                     [ Node.text "under storm" ]
+                 ]
+             ; Node.p ~attrs:[ Style.page_sub ] [ Node.text sub_text ]
+             ]
         ; Node.div
             ~attrs:[ Style.page_actions ]
             [ Node.button
@@ -1794,7 +1821,7 @@ let render_response (response : Logs_types.response) : Node.t =
                 ; Node.text "advance round"
                 ]
             ]
-        ]
+        ])
     ; moonrise
     ; toolbar
     ; Node.div

@@ -59,7 +59,12 @@ Example: masc_leave({agent_name: 'claude-xyz'})";
   };
   {
     name = "masc_broadcast";
-    description = "Send a message visible to ALL agents via SSE push. Use for: status updates ('Starting task X'), help requests ('@gemini can you review this?'), completions. Use @agent_name to ping specific agent. Default: verbose format.";
+    description = "Send a message visible to ALL agents via SSE push. Use for: status updates ('Starting task X'), help requests ('@gemini can you review this?'), completions. Use @agent_name to ping specific agent.";
+    (* Issue #8595: removed dead `format` enum field. The handler in
+       tool_inline_dispatch_comm.handle_broadcast never read it; the
+       typed PoC handler explicitly destructured it as `_format`.
+       Schema previously lied to LLM clients about output shape
+       customization. Same anti-pattern as #8546 admin_section. *)
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -70,12 +75,6 @@ Example: masc_leave({agent_name: 'claude-xyz'})";
         ("message", `Assoc [
           ("type", `String "string");
           ("description", `String "Message content (use @mention for specific agents)");
-        ]);
-        ("format", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "compact"; `String "verbose"]);
-          ("description", `String "Output format: 'compact' or 'verbose' (default, JSON)");
-          ("default", `String "verbose");
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "message"]);

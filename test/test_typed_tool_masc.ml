@@ -11,17 +11,17 @@ let parse json =
 let test_parse_valid () =
   let json = `Assoc [("message", `String "hello world")] in
   match parse json with
-  | Ok (message, format) ->
-    Alcotest.(check string) "message" "hello world" message;
-    Alcotest.(check string) "format default" "" format
+  | Ok message ->
+    Alcotest.(check string) "message" "hello world" message
   | Error e -> Alcotest.fail ("parse failed: " ^ e)
 
-let test_parse_with_format () =
+let test_parse_extra_fields_ignored () =
+  (* Issue #8595: schema advertised a [format] field but the handler
+     ignored it. After removing [format] from the schema, an unexpected
+     [format] key must not cause a parse failure (Sg drops unknown fields). *)
   let json = `Assoc [("message", `String "hi"); ("format", `String "compact")] in
   match parse json with
-  | Ok (message, format) ->
-    Alcotest.(check string) "message" "hi" message;
-    Alcotest.(check string) "format" "compact" format
+  | Ok message -> Alcotest.(check string) "message" "hi" message
   | Error e -> Alcotest.fail ("parse failed: " ^ e)
 
 let test_parse_missing_message () =
@@ -41,13 +41,12 @@ let test_parse_wrong_type () =
 let test_parse_coerces_int_message () =
   let json = `Assoc [("message", `Int 42)] in
   match parse json with
-  | Ok (message, format) ->
-    Alcotest.(check string) "message coerced" "42" message;
-    Alcotest.(check string) "format default" "" format
+  | Ok message ->
+    Alcotest.(check string) "message coerced" "42" message
   | Error e -> Alcotest.fail ("expected coercion: " ^ e)
 
 let test_handler_success () =
-  match Tool_broadcast_typed.handle_broadcast ("hello @claude", "") with
+  match Tool_broadcast_typed.handle_broadcast "hello @claude" with
   | Ok output ->
     Alcotest.(check bool) "delivered" true output.delivered;
     Alcotest.(check string) "message" "hello @claude" output.room_message;
@@ -55,12 +54,12 @@ let test_handler_success () =
   | Error e -> Alcotest.fail ("handler failed: " ^ e)
 
 let test_handler_empty () =
-  match Tool_broadcast_typed.handle_broadcast ("   ", "") with
+  match Tool_broadcast_typed.handle_broadcast "   " with
   | Ok _ -> Alcotest.fail "expected error"
   | Error _ -> ()
 
 let test_handler_trim () =
-  match Tool_broadcast_typed.handle_broadcast ("  trimmed  ", "") with
+  match Tool_broadcast_typed.handle_broadcast "  trimmed  " with
   | Ok output -> Alcotest.(check string) "trimmed" "trimmed" output.room_message
   | Error e -> Alcotest.fail e
 
@@ -117,14 +116,16 @@ let test_to_spec () =
   Alcotest.(check bool) "requires_join" true spec.requires_join
 
 let test_params () =
+  (* Issue #8595: was 2 (message + dead format). Now 1 — schema reflects
+     handler reality. *)
   let schema = Typed_tool_masc.schema Tool_broadcast_typed.tool in
-  Alcotest.(check int) "params" 2 (List.length schema.parameters)
+  Alcotest.(check int) "params" 1 (List.length schema.parameters)
 
 let () =
   Alcotest.run "Typed_tool_masc" [
     ("parse", [
       Alcotest.test_case "valid" `Quick test_parse_valid;
-      Alcotest.test_case "with format" `Quick test_parse_with_format;
+      Alcotest.test_case "extra fields ignored (#8595)" `Quick test_parse_extra_fields_ignored;
       Alcotest.test_case "missing message" `Quick test_parse_missing_message;
       Alcotest.test_case "wrong type" `Quick test_parse_wrong_type;
       Alcotest.test_case "int coerces to string" `Quick test_parse_coerces_int_message;

@@ -5,6 +5,7 @@
    declares non-emitting (timeout, signaled, policy_denied, etc.). *)
 
 open Alcotest
+open Masc_mcp
 
 let marker_list : Cdal_judge.verifiable_marker list testable =
   let pp fmt ms =

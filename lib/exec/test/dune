@@ -4,4 +4,4 @@
         test_exec_gate_runtime test_exec_semantic test_exec_buffer
         test_exec_run test_exec_run_json)
  (libraries masc_exec masc_exec_bash_parser masc_process
-            eio eio_main yojson str unix))
+            alcotest eio eio_main yojson str unix))

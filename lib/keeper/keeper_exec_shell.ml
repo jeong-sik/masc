@@ -68,6 +68,13 @@ let io_timeout_sec = env_float "MASC_KEEPER_IO_TIMEOUT_SEC" 30.0
 let read_timeout_sec = env_float "MASC_KEEPER_READ_TIMEOUT_SEC" 15.0
 let user_timeout_max_sec = env_float "MASC_KEEPER_USER_TIMEOUT_MAX_SEC" 180.0
 
+(* Floor for gh op timeout_sec. GitHub API + gh auth handshake is
+   usually 3-10s; previous floors (1s, then 5s) produced 41
+   gh_command_timed_out rejections in 2 days, every single one at
+   timeout_sec=5 (#8688). 15s keeps keepers from requesting a
+   sub-network-latency timeout without masking genuine hangs. *)
+let gh_min_timeout_sec = 15.0
+
 let normalize_gh_command (cmd : string) : string =
   let tokens =
     cmd
@@ -1328,13 +1335,17 @@ let handle_keeper_shell
       Safe_ops.json_string ~default:"" "cmd" args
       |> normalize_gh_command
     in
-    (* gh runs against remote network, so 1s floor from shell default is
-       too aggressive (observed: keepers passing timeout_sec=1 kills
-       [gh pr create] mid-TCP). Floor at 5s and default at the configured
+    (* gh runs against remote network. Prior floors (1s, then 5s) kept
+       firing gh_command_timed_out on plain read calls — 41 such
+       rejections on 2026-04-17/18 (#8688), every single one at
+       timeout_sec=5. GitHub API round-trip alone runs 1-8s even on
+       small queries, and `gh` spends additional time on auth handshake
+       and JSON encoding. Floor at 15s so the keeper LLM cannot request
+       a sub-network-latency timeout; default remains the configured
        pr_create timeout (tool_policy.toml, default 30s). *)
     let gh_default_timeout = Keeper_tool_policy.pr_create_timeout_sec () in
     let timeout_sec =
-      clamp_shell_timeout ~min_sec:5.0 ~default:gh_default_timeout args
+      clamp_shell_timeout ~min_sec:gh_min_timeout_sec ~default:gh_default_timeout args
     in
     if cmd_str = "" then
       error_json ~fields:[ "op", `String op ]
@@ -1412,9 +1423,12 @@ let handle_keeper_shell
                    ; "status", Keeper_alerting_path.process_status_to_json st
                    ; "output", `String out
                    ; "hint", `String
-                       "gh network call exceeded timeout_sec. Retry with a \
-                        larger value (e.g. timeout_sec=60) or narrow the \
-                        query (--state, --limit, --json)."
+                       "gh network call exceeded timeout_sec. Retry \
+                        with a larger value — gh round-trip plus auth \
+                        handshake is usually 3-10s, so prefer \
+                        timeout_sec=30 or timeout_sec=60 rather than \
+                        the 15s floor. You may also narrow the query \
+                        (--state, --limit, --json)."
                    ]
                else
                  gh_base ~ok:(st = Unix.WEXITED 0) ~cwd

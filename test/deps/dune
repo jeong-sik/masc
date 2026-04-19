@@ -55,6 +55,7 @@
    (re_export qcheck-alcotest)
    (re_export qcheck-core)
    (re_export re)
+   (re_export runtime_events)
    (re_export str)
    (re_export time_compat)
    (re_export unix)

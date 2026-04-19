@@ -26,6 +26,14 @@ val augment_keeper_diagnostic_json :
   Yojson.Safe.t
 
 val keeper_health_to_string : keeper_health -> string
+
+(** Strict parse: returns [None] when the wire string is not one of the
+    seven canonical keeper_health labels. Prefer this over
+    [keeper_health_of_string] for new code so drift is visible. *)
+val keeper_health_of_string_opt : string -> keeper_health option
+
+(** Back-compat parse: returns [KH_offline] on unknown strings and
+    logs a warning so the typo is operator-visible. Issue #8670. *)
 val keeper_health_of_string : string -> keeper_health
 val keeper_continuity_to_string : keeper_continuity -> string
 

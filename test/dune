@@ -1108,6 +1108,12 @@
  (modules test_otel_trace_context)
  (libraries masc_test_deps))
 
+; OpenTelemetry GenAI semantic convention helpers
+(test
+ (name test_otel_genai)
+ (modules test_otel_genai)
+ (libraries masc_test_deps))
+
 (executable
  (name keeper_tool_matrix_case_runner)
  (modules keeper_tool_matrix_case_runner test_keeper_tool_matrix_cases

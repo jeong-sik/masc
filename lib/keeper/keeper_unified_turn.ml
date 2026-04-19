@@ -1824,23 +1824,38 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     .effective_max_turns_per_call_scheduled_autonomous
                       keeper_profile )
             in
-            Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
-              ~max_context ~build_turn_prompt
-              ~user_message ~cascade_name:effective_cascade_name
-              ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
+            Otel_genai.with_keeper_turn_span
+              ~keeper_name:run_meta.name
+              ~agent_name:run_meta.agent_name
+              ~cascade_name:effective_cascade_name
+              ~trace_id:(Keeper_id.Trace_id.to_string run_meta.runtime.trace_id)
               ~generation:run_generation
+              ~max_context
               ~max_turns
               ~max_idle_turns
-              ~history_user_source:"world_state_prompt"
-              ~history_assistant_source:"internal_assistant"
-              ~temperature ~max_tokens
-              ~oas_timeout_s
-              ?max_cost_usd
-              ~trajectory_acc
+              ~channel:(Keeper_world_observation.channel_to_string channel)
               ~is_retry
-              ?shared_context
-              ?event_bus:(Keeper_event_bus.get ())
-              ()
+              ~current_task_id:
+                (Option.map Keeper_id.Task_id.to_string
+                   run_meta.current_task_id)
+              (fun () ->
+                Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
+                  ~max_context ~build_turn_prompt
+                  ~user_message ~cascade_name:effective_cascade_name
+                  ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
+                  ~generation:run_generation
+                  ~max_turns
+                  ~max_idle_turns
+                  ~history_user_source:"world_state_prompt"
+                  ~history_assistant_source:"internal_assistant"
+                  ~temperature ~max_tokens
+                  ~oas_timeout_s
+                  ?max_cost_usd
+                  ~trajectory_acc
+                  ~is_retry
+                  ?shared_context
+                  ?event_bus:(Keeper_event_bus.get ())
+                  ())
           in
           let rec retry_loop ~run_meta ~max_context ~run_generation
               ~attempt ~is_retry

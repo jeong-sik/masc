@@ -1625,3 +1625,99 @@ let classify_destructive cmd : (destructive_class * string) option =
     if contains_sub_ci cmd sub then Some (cls, sub) else None)
     destructive_class_substrings
 
+(* ================================================================ *)
+(* Tick 14 (P5 continued) — legacy ↔ shadow diff harness.           *)
+(*                                                                  *)
+(* Pure diff producer: given a command string, render both the      *)
+(* legacy regex verdict and the shadow AST/destructive verdict      *)
+(* into a single [gate_diff] record.  The flag flip (plan decision  *)
+(* point 2) is gated on this harness showing zero                   *)
+(* [Legacy_allow_shadow_deny] OR [Legacy_deny_shadow_allow] rows    *)
+(* across N=1000 prod calls.  Until then the record is consumed by  *)
+(* telemetry only.                                                  *)
+(* ================================================================ *)
+
+type legacy_verdict =
+  | Legacy_allow
+  | Legacy_reject_by_allowlist
+  | Legacy_reject_destructive of string
+      (** The matching substring from [Eval_gate.destructive_patterns],
+          NOT the description.  Callers that need the free-form
+          description can look it up in [destructive_patterns]. *)
+
+type shadow_verdict =
+  | Shadow_allow of { parse_tag : string }
+      (** Parser and destructive classifier both clean. [parse_tag] is
+          the tag from [shadow_parse_outcome] so callers can tell
+          [parsed_simple] apart from [too_complex:*] at triage time. *)
+  | Shadow_parse_unsupported of { parse_tag : string }
+      (** Grammar did not accept the command (parse_error,
+          parse_aborted:*, too_complex:*).  Not a deny — means the
+          AST gate cannot yet express an opinion.  Callers in
+          observation mode should still fall back to the regex
+          verdict; in flip mode they must conservatively reject. *)
+  | Shadow_deny_destructive of destructive_class * string
+      (** [classify_destructive] matched; the [string] is the
+          triggering substring. *)
+
+type gate_diff =
+  | Agree
+      (** Legacy and shadow reached the same allow/deny decision. *)
+  | Legacy_allow_shadow_deny
+      (** Legacy regex allowed but shadow identified destructive
+          content. Indicates legacy under-blocks — must be fixed
+          BEFORE flip (otherwise flip is a safety regression). *)
+  | Legacy_deny_shadow_allow
+      (** Legacy rejected but shadow saw nothing dangerous.
+          Indicates legacy over-blocks — needs analysis to
+          determine whether legacy is too conservative or shadow
+          is missing coverage. *)
+  | Shadow_cannot_parse
+      (** Grammar upgrade needed; legacy decision stands. *)
+
+let classify_legacy cmd : legacy_verdict =
+  match validate_command cmd with
+  | Ok () ->
+      (match Eval_gate.detect_destructive cmd with
+       | Some (substring, _desc) -> Legacy_reject_destructive substring
+       | None -> Legacy_allow)
+  | Error _ -> Legacy_reject_by_allowlist
+
+let classify_shadow cmd : shadow_verdict =
+  let parse_tag = shadow_parse_outcome cmd in
+  (* Destructive classifier runs on the raw string regardless of
+     parser success — the substring catalogue does not need AST
+     structure. This keeps the shadow path meaningful on commands
+     the grammar has not yet upgraded to support. *)
+  match classify_destructive cmd with
+  | Some (cls, sub) -> Shadow_deny_destructive (cls, sub)
+  | None ->
+      if parse_tag = "parsed_simple" then Shadow_allow { parse_tag }
+      else Shadow_parse_unsupported { parse_tag }
+
+let diff_of_verdicts ~legacy ~shadow : gate_diff =
+  match legacy, shadow with
+  (* Grammar gap is surfaced first — the flip is blocked on a
+     shadow opinion, so Shadow_parse_unsupported is always a signal
+     worth tracking regardless of the legacy decision. *)
+  | _, Shadow_parse_unsupported _ -> Shadow_cannot_parse
+  | Legacy_allow, Shadow_allow _ -> Agree
+  (* Allowlist rejects are policy (which bins are permitted),
+     orthogonal to the destructive/safety gate — treat as agreement
+     since shadow is not authoritative on binary selection. *)
+  | Legacy_reject_by_allowlist, _ -> Agree
+  | Legacy_reject_destructive _, Shadow_deny_destructive _ -> Agree
+  | Legacy_allow, Shadow_deny_destructive _ -> Legacy_allow_shadow_deny
+  | Legacy_reject_destructive _, Shadow_allow _ -> Legacy_deny_shadow_allow
+
+let diff_command cmd : gate_diff * legacy_verdict * shadow_verdict =
+  let legacy = classify_legacy cmd in
+  let shadow = classify_shadow cmd in
+  (diff_of_verdicts ~legacy ~shadow, legacy, shadow)
+
+let gate_diff_to_string = function
+  | Agree -> "agree"
+  | Legacy_allow_shadow_deny -> "legacy_allow_shadow_deny"
+  | Legacy_deny_shadow_allow -> "legacy_deny_shadow_allow"
+  | Shadow_cannot_parse -> "shadow_cannot_parse"
+

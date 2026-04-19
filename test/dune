@@ -320,6 +320,7 @@
         test_worker_dev_tools
         test_shadow_parse
         test_destructive_class
+        test_gate_diff
         test_oas_integration
         test_memory_oas_5tier
         test_verifier_oas_bridge
@@ -478,6 +479,7 @@
         test_worker_dev_tools
         test_shadow_parse
         test_destructive_class
+        test_gate_diff
         test_oas_integration
         test_memory_oas_5tier
         test_verifier_oas_bridge

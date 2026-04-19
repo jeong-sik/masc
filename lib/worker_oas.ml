@@ -578,6 +578,9 @@ and resume_worker_via_oas
     ?(approval : Oas.Hooks.approval_callback =
       Approval_callbacks.reject_by_default)
     () : (Worker_container_types.run_result, string) result =
+  Masc_runtime_events.emit_turn_start ();
+  Fun.protect ~finally:Masc_runtime_events.emit_turn_end
+  @@ fun () ->
   let worker_name = meta.worker_name in
   let session_id = meta.mcp_session_id in
   let heartbeat_cbs =

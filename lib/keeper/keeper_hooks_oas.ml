@@ -240,6 +240,8 @@ let make_hooks
         success:bool -> unit =
         fun ~tool_name:_ ~input:_ ~output_text:_ ~success:_ -> ())
     ?(trajectory_acc : Trajectory.accumulator option)
+    ?(discover_work_nudge : unit -> string option =
+        fun () -> None)
     ()
   : Agent_sdk.Hooks.hooks =
   let sse_turn_complete = "keeper_turn_complete" in
@@ -271,6 +273,25 @@ let make_hooks
   in
   let non_gate_hooks =
     { Agent_sdk.Hooks.empty with
+
+    (* Work discovery injection (#8773 fix). The callback owns the policy
+       (interval, sources, query) and returns Some text only when there
+       is actionable work to surface. Hook stays domain-agnostic: it just
+       wraps the callback's payload in a Nudge so the next LLM turn sees
+       it as ambient observation. Returns Continue when callback yields
+       None — silent no-op, no token cost. *)
+    before_turn = Some (fun event ->
+      match event with
+      | Agent_sdk.Hooks.BeforeTurn _ ->
+        (match discover_work_nudge () with
+         | None -> Agent_sdk.Hooks.Continue
+         | Some text when String.trim text = "" ->
+           Agent_sdk.Hooks.Continue
+         | Some text ->
+           Log.Keeper.info "keeper:%s before_turn: injecting work_discovery nudge (%d chars)"
+             (!meta_ref).name (String.length text);
+           Agent_sdk.Hooks.Nudge text)
+      | _ -> Agent_sdk.Hooks.Continue);
 
     after_turn = Some (fun event ->
       match event with

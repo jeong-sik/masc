@@ -1092,6 +1092,77 @@ let run_turn
      Now: OAS Agent.run completes naturally (max_turns or model end_turn).
      Failure recovery: evidence records + operator notification via board,
      not sticky blocker state. See plan: enchanted-strolling-bonbon. *)
+  (* Work discovery callback (#8773 fix). Returns Some Nudge text only when:
+     1. meta.work_discovery_enabled = Some true
+     2. interval since last_work_discovery_ts has elapsed
+     3. at least one source produced actionable items
+     Otherwise None — hook returns Continue, no token cost.
+
+     Boundary discipline: this closure owns ALL domain logic (which
+     sources to query, how to format). The OAS hook (Hooks.before_turn
+     + Nudge) is generic. Keeps the layer split that #6814 enforced
+     while restoring the work surface that schema declared but had no
+     consumer (lib/ grep for work_discovery_sources = 5 storage refs,
+     0 reads). *)
+  let discover_work_nudge () : string option =
+    let meta = !meta_ref in
+    match meta.work_discovery_enabled with
+    | Some true ->
+      let interval =
+        Option.value ~default:600 meta.work_discovery_interval_sec in
+      let since_last =
+        Time_compat.now ()
+        -. meta.runtime.proactive_rt.last_work_discovery_ts
+      in
+      if since_last < float_of_int interval then None
+      else
+        let sources =
+          Option.value ~default:[] meta.work_discovery_sources in
+        let chunks =
+          List.filter_map
+            (fun src ->
+              match src with
+              | "stale_tasks" | "unclaimed_tasks" ->
+                (try
+                   let backlog = Coord.read_backlog config in
+                   let unclaimed =
+                     List.filter
+                       (fun (t : Types.task) ->
+                         t.task_status = Types.Todo)
+                       backlog.tasks
+                   in
+                   match unclaimed with
+                   | [] -> None
+                   | tasks ->
+                     let n = min 5 (List.length tasks) in
+                     let preview =
+                       List.filteri (fun i _ -> i < n) tasks
+                       |> List.map (fun (t : Types.task) ->
+                            Printf.sprintf "  - %s (p%d): %s"
+                              t.id t.priority
+                              (if String.length t.title > 80 then
+                                 String.sub t.title 0 80 ^ "…"
+                               else t.title))
+                       |> String.concat "\n"
+                     in
+                     Some (Printf.sprintf
+                       "**Unclaimed tasks (%d total, showing %d):**\n%s"
+                       (List.length tasks) n preview)
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | _ -> None)
+              | _ -> None)
+            sources
+        in
+        (match chunks with
+         | [] -> None
+         | _ ->
+           Some (Printf.sprintf
+             "## Discovered Work (auto, %ds interval)\n\n%s\n\n\
+              Pick one and act, or call keeper_stay_silent if none fit your role."
+             interval (String.concat "\n\n" chunks)))
+    | _ -> None
+  in
   let base_hooks =
     (* Issue #8597 #3-5: dropped ~config / ~session / ~ctx_snapshot —
        the hook closure ignored them; state flows via meta_ref + callbacks. *)
@@ -1100,6 +1171,7 @@ let run_turn
       ~generation
       ?max_cost_usd
       ?trajectory_acc
+      ~discover_work_nudge
       ()
   in
   (* BM25 Tool_selector removed: discovery mode uses core + keeper_tool_search.

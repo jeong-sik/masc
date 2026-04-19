@@ -685,6 +685,7 @@ exception Shutdown
 (** Convenience function to start server *)
 let start ?(config = default_config) ?(routes = default_routes) () =
   Eio_main.run @@ fun env ->
+  Masc_runtime_events.start_listener ();
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
 

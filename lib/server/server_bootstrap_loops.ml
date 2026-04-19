@@ -239,7 +239,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       (Printexc.to_string exn));
   (* Build read-only tool surface shared by both judges. *)
   let judge_tool_names =
-    [ "masc_status"; "masc_tasks"; "masc_agents"; "masc_board_list" ]
+    List.map Tool_name.Masc.to_string
+      Tool_name.Masc.[ Status; Tasks; Agents; Board_list ]
   in
   let judge_masc_tools =
     match

@@ -9,7 +9,7 @@ type broadcast_output = {
   mention : string option;
 }
 
-val broadcast_schema : (string * string) Agent_sdk.Tool_schema_gen.schema
+val broadcast_schema : string Agent_sdk.Tool_schema_gen.schema
 val encode_broadcast : broadcast_output -> Yojson.Safe.t
-val handle_broadcast : string * string -> (broadcast_output, string) result
-val tool : (string * string, broadcast_output) Typed_tool_masc.t
+val handle_broadcast : string -> (broadcast_output, string) result
+val tool : (string, broadcast_output) Typed_tool_masc.t

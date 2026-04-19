@@ -7,11 +7,11 @@ let message_field =
   Sg.string_field "message" ~required:true
     ~desc:"Message content to broadcast to all agents" ()
 
-let format_field =
-  Sg.string_field "format" ~required:false
-    ~desc:"Output format: compact or verbose (default: verbose)" ()
-
-let broadcast_schema = Sg.two message_field format_field
+(* Issue #8595: dropped [format_field]. The schema field was advertised
+   to LLM clients but [handle_broadcast] never read it (destructured as
+   [_format]). Removing it brings the typed PoC schema in line with the
+   production handler and the freshly de-bloated inline schema. *)
+let broadcast_schema = Sg.one message_field
 
 type broadcast_output = {
   delivered : bool;
@@ -27,7 +27,7 @@ let encode_broadcast (output : broadcast_output) : Yojson.Safe.t =
     | Some m -> [("mention", `String m)]
     | None -> [])
 
-let handle_broadcast ((message, _format) : string * string)
+let handle_broadcast (message : string)
     : (broadcast_output, string) result =
   let trimmed = String.trim message in
   if trimmed = "" then Error "Broadcast message cannot be empty"

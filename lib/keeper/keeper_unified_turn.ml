@@ -777,7 +777,15 @@ let is_verifier_role_keeper (meta : Keeper_types.keeper_meta) : bool =
     (fun token -> List.mem token meta.mention_targets)
     verifier_role_mention_tokens
 
+(* Verification signals (pending_verification trigger / task_verify
+   affordance) are only surfaced to keepers whose persona declares the
+   verifier role. Non-verifier keepers would otherwise steal verification
+   work that their persona is not configured to perform.  When [meta] is
+   omitted the legacy surface-to-all behaviour is kept for backwards
+   compatibility with callers that have no keeper context (e.g. dashboard
+   snapshots, diagnostics). *)
 let observed_triggers_of_observation
+    ?meta
     (observation : Keeper_world_observation.world_observation) : string list =
   let triggers = ref [] in
   let add trigger = triggers := trigger :: !triggers in
@@ -786,13 +794,20 @@ let observed_triggers_of_observation
   if observation.pending_scope_messages <> [] then add "scope_message";
   if observation.unclaimed_task_count > 0 then add "new_unclaimed_task";
   if observation.failed_task_count > 0 then add "failed_task";
-  if observation.pending_verification_count > 0 then add "pending_verification";
+  let verifier_eligible =
+    match meta with
+    | None -> true
+    | Some m -> is_verifier_role_keeper m
+  in
+  if verifier_eligible && observation.pending_verification_count > 0 then
+    add "pending_verification";
   if observation.active_goals <> [] && observation.idle_seconds > 0 then
     add "idle_timeout_candidate";
   if Option.is_some observation.worktree_change_summary then add "worktree_change";
   List.rev !triggers
 
 let observed_affordances_of_observation
+    ?meta
     (observation : Keeper_world_observation.world_observation) : string list =
   let affordances = ref [] in
   let add affordance = affordances := affordance :: !affordances in
@@ -801,7 +816,13 @@ let observed_affordances_of_observation
   if observation.pending_scope_messages <> [] then add "message_sweep";
   if observation.unclaimed_task_count > 0 then add "task_claim";
   if observation.failed_task_count > 0 then add "task_audit";
-  if observation.pending_verification_count > 0 then add "task_verify";
+  let verifier_eligible =
+    match meta with
+    | None -> true
+    | Some m -> is_verifier_role_keeper m
+  in
+  if verifier_eligible && observation.pending_verification_count > 0 then
+    add "task_verify";
   if Option.is_some observation.worktree_change_summary then add "inspect_worktree_delta";
   List.rev !affordances
 
@@ -840,8 +861,8 @@ let append_decision_record
     ?error
     () : unit =
   let now_ts = Time_compat.now () in
-  let trigger_signals = observed_triggers_of_observation observation in
-  let affordances = observed_affordances_of_observation observation in
+  let trigger_signals = observed_triggers_of_observation ~meta observation in
+  let affordances = observed_affordances_of_observation ~meta observation in
   let tools_used =
     match result with
     | Some r -> r.tools_used

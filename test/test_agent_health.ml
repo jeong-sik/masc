@@ -17,6 +17,7 @@ let test_fresh_agent_healthy () =
   | Agent_health.Healthy -> ()
   | Agent_health.Recovering -> fail "expected Healthy, got Recovering"
   | Agent_health.Unhealthy r -> fail (Printf.sprintf "expected Healthy, got Unhealthy(%s)" r)
+  | Agent_health.Unknown raw -> fail (Printf.sprintf "expected Healthy, got Unknown(%S)" raw)
 
 (* Test: is_healthy returns true for fresh agent *)
 let test_is_healthy_fresh () =
@@ -57,6 +58,7 @@ let test_unhealthy_has_reason () =
   | Agent_health.Unhealthy _ -> ()  (* reason present *)
   | Agent_health.Healthy -> fail "expected Unhealthy, got Healthy"
   | Agent_health.Recovering -> fail "expected Unhealthy, got Recovering"
+  | Agent_health.Unknown raw -> fail (Printf.sprintf "expected Unhealthy, got Unknown(%S)" raw)
 
 (* Test: filter_healthy separates healthy from unhealthy *)
 let test_filter_healthy () =
@@ -100,7 +102,9 @@ let test_get_summary_with_failures () =
 let test_status_to_string () =
   check string "healthy" "healthy" (Agent_health.health_status_to_string Agent_health.Healthy);
   check string "recovering" "recovering" (Agent_health.health_status_to_string Agent_health.Recovering);
-  check string "unhealthy" "unhealthy" (Agent_health.health_status_to_string (Agent_health.Unhealthy "x"))
+  check string "unhealthy" "unhealthy" (Agent_health.health_status_to_string (Agent_health.Unhealthy "x"));
+  (* Issue #8607 *)
+  check string "unknown" "unknown" (Agent_health.health_status_to_string (Agent_health.Unknown "throttled"))
 
 (* Test: summary_to_json produces valid JSON *)
 let test_summary_to_json () =

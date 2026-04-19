@@ -17,6 +17,12 @@ type health_status =
   | Healthy
   | Unhealthy of string  (** reason *)
   | Recovering           (** half-open, testing *)
+  | Unknown of string    (** Issue #8607: unrecognised circuit-breaker
+                             state_name (carries the raw value for
+                             diagnostics). Previously [_ -> Healthy]
+                             silently masked future state additions
+                             (e.g. a 4th [Throttled]) and any wire-format
+                             drift as a green health signal. *)
 
 type agent_health_summary = {
   agent_name : string;
@@ -38,11 +44,16 @@ let check_health ~agent_name : health_status =
   | Error reason ->
       Unhealthy reason
 
-(** Convenience predicate: can this agent participate? *)
+(** Convenience predicate: can this agent participate?
+    Issue #8607: [Unknown] is treated as not-healthy — a fail-closed
+    response to drift. Today [check_health] never returns [Unknown]
+    (only [get_summary] does), but the explicit arm pins the
+    semantic so future paths producing [Unknown] don't accidentally
+    grant participation. *)
 let is_healthy ~agent_name : bool =
   match check_health ~agent_name with
   | Healthy | Recovering -> true
-  | Unhealthy _ -> false
+  | Unhealthy _ | Unknown _ -> false
 
 (** Record a successful action — clears half-open state. *)
 let record_success ~agent_name =
@@ -66,54 +77,64 @@ let filter_healthy (agents : (string * 'a) list) : (string * 'a) list * (string 
     | Unhealthy reason ->
         skipped := (name, reason) :: !skipped;
         Log.debug ~ctx:"agent_health" "Skipping %s: %s" name reason
+    | Unknown raw ->
+        (* Issue #8607: fail-closed for unrecognised breaker states.
+           Surface the raw value so operators can investigate. *)
+        let reason = Printf.sprintf "unknown breaker state %S" raw in
+        skipped := (name, reason) :: !skipped;
+        Log.debug ~ctx:"agent_health" "Skipping %s: %s" name reason
   ) agents;
   (List.rev !healthy, List.rev !skipped)
 
 (** {1 Statistics} *)
 
+(* Issue #8607: shared mapping helper — both get_summary and
+   get_all_summaries used to inline the same 4-arm match with [_ ->
+   Healthy] as the catch-all, so an unknown state_name lied as
+   Healthy. Unifying ensures one place to update; routing the
+   catch-all through [Unknown name] makes drift operator-visible. *)
+let health_status_of_breaker
+    ~(state_name : string)
+    ~(open_reason : string option)
+    : health_status =
+  match state_name with
+  | "closed" -> Healthy
+  | "half_open" -> Recovering
+  | "open" -> Unhealthy (Option.value ~default:"unknown" open_reason)
+  | other -> Unknown other
+
+let cooldown_remaining_of (open_until : float option) : int =
+  match open_until with
+  | Some until ->
+      let remaining = until -. Time_compat.now () in
+      if remaining > 0.0 then int_of_float remaining else 0
+  | None -> 0
+
 (** Get health summary for a single agent. *)
 let get_summary ~agent_name : agent_health_summary =
   let status = Circuit_breaker.get_status_global ~agent_id:agent_name in
-  let health_status = match status.state_name with
-    | "closed" -> Healthy
-    | "half_open" -> Recovering
-    | "open" -> Unhealthy (Option.value ~default:"unknown" status.open_reason)
-    | _ -> Healthy
-  in
-  let cooldown_remaining = match status.open_until with
-    | Some until ->
-        let remaining = until -. Time_compat.now () in
-        if remaining > 0.0 then int_of_float remaining else 0
-    | None -> 0
-  in
   {
     agent_name;
-    status = health_status;
+    status =
+      health_status_of_breaker
+        ~state_name:status.state_name
+        ~open_reason:status.open_reason;
     recent_failures = status.recent_failures;
-    cooldown_remaining_sec = cooldown_remaining;
+    cooldown_remaining_sec = cooldown_remaining_of status.open_until;
   }
 
 (** Get health summaries for all known agents. *)
 let get_all_summaries () : agent_health_summary list =
   let breakers = Circuit_breaker.list_all_breakers (Eio.Lazy.force Circuit_breaker.global) in
   List.map (fun (s : Circuit_breaker.breaker_status) ->
-    let health_status = match s.state_name with
-      | "closed" -> Healthy
-      | "half_open" -> Recovering
-      | "open" -> Unhealthy (Option.value ~default:"unknown" s.open_reason)
-      | _ -> Healthy
-    in
-    let cooldown_remaining = match s.open_until with
-      | Some until ->
-          let remaining = until -. Time_compat.now () in
-          if remaining > 0.0 then int_of_float remaining else 0
-      | None -> 0
-    in
     {
       agent_name = s.agent_id;
-      status = health_status;
+      status =
+        health_status_of_breaker
+          ~state_name:s.state_name
+          ~open_reason:s.open_reason;
       recent_failures = s.recent_failures;
-      cooldown_remaining_sec = cooldown_remaining;
+      cooldown_remaining_sec = cooldown_remaining_of s.open_until;
     }
   ) breakers
 
@@ -123,6 +144,10 @@ let health_status_to_string = function
   | Healthy -> "healthy"
   | Unhealthy _ -> "unhealthy"
   | Recovering -> "recovering"
+  (* Issue #8607: distinct wire string so dashboards/operators can
+     filter for unrecognised breaker states instead of mixing them
+     with green ones. *)
+  | Unknown _ -> "unknown"
 
 let summary_to_json (s : agent_health_summary) : Yojson.Safe.t =
   `Assoc [

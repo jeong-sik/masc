@@ -271,6 +271,16 @@ let test_parse_since_ms_supports_minutes () =
   check (option int) "1h still parses" (Some (3600 * 1000))
     (Lib.Server_activity_http.parse_since_ms "1h")
 
+let test_span_status_of_string_handles_ended_round_trip () =
+  check string "ended round-trips explicitly" "ended"
+    (Activity_graph.span_status_of_string "ended"
+     |> Activity_graph.span_status_to_string)
+
+let test_span_status_of_string_keeps_legacy_unknown_fallback () =
+  check string "unknown falls back to ended" "ended"
+    (Activity_graph.span_status_of_string "definitely-not-a-status"
+     |> Activity_graph.span_status_to_string)
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -291,5 +301,9 @@ let () =
             test_agent_spans_json_honors_since_ms;
           test_case "parse_since_ms supports minutes" `Quick
             test_parse_since_ms_supports_minutes;
+          test_case "span_status parses ended explicitly" `Quick
+            test_span_status_of_string_handles_ended_round_trip;
+          test_case "span_status keeps unknown fallback" `Quick
+            test_span_status_of_string_keeps_legacy_unknown_fallback;
         ] );
     ]

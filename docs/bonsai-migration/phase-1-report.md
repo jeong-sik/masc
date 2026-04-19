@@ -175,6 +175,16 @@ Design decisions:
   `Css_gen`-based inline `height: Npx` style per bar. Phase 3 chart
   binding budget: any library that exceeds the cost of this 60-bar
   strip (~3.7 KB gzip, zero runtime) must justify itself.
+- Iteration 11 (keeper roster footer strip): a sticky `position: sticky;
+  bottom: 0` 4-column roster closes the page — one slot per keeper
+  (P/J/G/I sigil disc, Cinzel name `keeper · poe` / `janitor` /
+  `governance` / `improver`, state label, last-heard mono timestamp).
+  State dots animate via `pulse-beat`: bile green "speaking", brass
+  "thinking", slate "idle", blood "paused · auth". The roster echoes
+  the brand bar at the top so the page opens and closes on the same
+  dark-brass beat, and it reserves a functional slot where Phase 1c+
+  will plug a `keeper_status` Var (independent of the logs Var) — a
+  second Bonsai data island coexisting on the same page.
 
 The Bonsai bundle renders this same design at
 `/dashboard/b/logs`. Because headless Chrome won't wait for the 9 MB

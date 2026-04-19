@@ -553,6 +553,97 @@ stylesheet
     z-index: 2;
     background: linear-gradient(180deg, #0a0706 0%, rgba(10, 7, 6, 0) 100%);
   }
+
+  .roster {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    margin-top: 1rem;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: #2a1a14;
+    border: 1px solid #3a2a20;
+    border-radius: 2px;
+    box-shadow:
+      inset 0 0 0 1px rgba(196, 162, 101, 0.06),
+      0 -8px 24px -12px rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(2px);
+  }
+
+  .roster_slot {
+    background: #14100d;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .roster_sigil {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 1px solid #8a6a28;
+    background: radial-gradient(circle at 35% 30%, rgba(232, 216, 184, 0.22), transparent 55%), #14100d;
+    display: grid;
+    place-items: center;
+    font-family: 'Cinzel', serif;
+    font-size: 11px;
+    color: #e8d8b8;
+    text-transform: uppercase;
+    box-shadow: inset 0 0 0 1px rgba(232, 216, 184, 0.08), 0 0 8px rgba(138, 106, 40, 0.22);
+    flex-shrink: 0;
+  }
+
+  .roster_body {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .roster_name {
+    font-family: 'Cinzel', serif;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #e8d8b8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .roster_state {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: #6a5848;
+  }
+
+  .roster_dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #6a5848;
+  }
+
+  .roster_dot_live     { background: #5a7a3a; box-shadow: 0 0 6px #5a7a3a; animation: pulse-beat 1.8s ease-in-out infinite; }
+  .roster_dot_thinking { background: #8a6a28; box-shadow: 0 0 6px #8a6a28; animation: pulse-beat 1.2s ease-in-out infinite; }
+  .roster_dot_idle     { background: #4a3a32; }
+  .roster_dot_failed   { background: #a01818; box-shadow: 0 0 8px #a01818; }
+
+  .roster_when {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 10px;
+    color: #6a5848;
+    flex-shrink: 0;
+  }
 |}]
 
 let level_class level =
@@ -700,6 +791,48 @@ let view_heartbeat () =
     ]
 ;;
 
+(* Keeper roster — sticky bottom strip. Four fixed keeper slots as a
+   visual placeholder; Phase 1c wires this to a keeper_status Var so the
+   state dot, last-heard timestamp, and presence reflect live telemetry. *)
+type keeper_state = [ `Live | `Thinking | `Idle | `Failed ]
+
+let view_roster () =
+  let slot ~sigil ~name ~(state : keeper_state) ~state_label ~when_ =
+    let dot_cls =
+      match state with
+      | `Live -> Style.roster_dot_live
+      | `Thinking -> Style.roster_dot_thinking
+      | `Idle -> Style.roster_dot_idle
+      | `Failed -> Style.roster_dot_failed
+    in
+    Node.div
+      ~attrs:[ Style.roster_slot ]
+      [ Node.div ~attrs:[ Style.roster_sigil ] [ Node.text sigil ]
+      ; Node.div
+          ~attrs:[ Style.roster_body ]
+          [ Node.span ~attrs:[ Style.roster_name ] [ Node.text name ]
+          ; Node.div
+              ~attrs:[ Style.roster_state ]
+              [ Node.span ~attrs:[ Style.roster_dot; dot_cls ] []
+              ; Node.text state_label
+              ]
+          ]
+      ; Node.span ~attrs:[ Style.roster_when ] [ Node.text when_ ]
+      ]
+  in
+  Node.div
+    ~attrs:[ Style.roster ]
+    [ slot ~sigil:"P" ~name:"keeper · poe" ~state:`Live
+        ~state_label:"speaking" ~when_:"3s"
+    ; slot ~sigil:"J" ~name:"janitor" ~state:`Thinking
+        ~state_label:"thinking" ~when_:"12s"
+    ; slot ~sigil:"G" ~name:"governance" ~state:`Idle
+        ~state_label:"idle · ok" ~when_:"2m"
+    ; slot ~sigil:"I" ~name:"improver" ~state:`Failed
+        ~state_label:"paused · auth" ~when_:"7m"
+    ]
+;;
+
 let view_hud (response : Logs_types.response) =
   Node.div
     ~attrs:[ Style.hud ]
@@ -794,6 +927,7 @@ let render_response (response : Logs_types.response) : Node.t =
             [ Node.text (Printf.sprintf "seq up to %d" response.total) ]
         ]
     ; tape
+    ; view_roster ()
     ]
 ;;
 

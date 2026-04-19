@@ -98,6 +98,35 @@ html, body { margin: 0; background: #0a0706; }
 }
 .sigil.warn  { color: #a06a1a; border-color: #a06a1a; box-shadow: inset 0 0 0 1px rgba(232,216,184,0.06), 0 0 8px rgba(160,106,26,0.35); }
 .sigil.error { color: #e8d8b8; border-color: #a01818; background: radial-gradient(circle at 35% 30%, rgba(232,216,184,0.28), transparent 55%), #3a1410; box-shadow: inset 0 0 0 1px rgba(232,216,184,0.08), 0 0 10px rgba(160,24,24,0.45); }
+.roster {
+  position: sticky; bottom: 0; z-index: 3; margin-top: 1rem;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+  background: #2a1a14; border: 1px solid #3a2a20; border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(196,162,101,0.06), 0 -8px 24px -12px rgba(0,0,0,0.85);
+}
+.roster-slot { background: #14100d; padding: 10px 14px; display: flex; align-items: center; gap: 10px; }
+.roster-sigil {
+  width: 26px; height: 26px; border-radius: 50%; border: 1px solid #8a6a28;
+  background: radial-gradient(circle at 35% 30%, rgba(232,216,184,0.22), transparent 55%), #14100d;
+  display: grid; place-items: center;
+  font-family: 'Cinzel',serif; font-size: 11px; color: #e8d8b8; text-transform: uppercase;
+  box-shadow: inset 0 0 0 1px rgba(232,216,184,0.08), 0 0 8px rgba(138,106,40,0.22);
+  flex-shrink: 0;
+}
+.roster-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.roster-name {
+  font-family: 'Cinzel',serif; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: #e8d8b8;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.roster-state { display: flex; align-items: center; gap: 6px; font-family: 'Noto Sans KR',sans-serif; font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; color: #6a5848; }
+.roster-dot { width: 5px; height: 5px; border-radius: 50%; background: #6a5848; }
+.roster-dot.live     { background: #5a7a3a; box-shadow: 0 0 6px #5a7a3a; animation: pulse 1.8s ease-in-out infinite; }
+.roster-dot.thinking { background: #8a6a28; box-shadow: 0 0 6px #8a6a28; animation: pulse 1.2s ease-in-out infinite; }
+.roster-dot.idle     { background: #4a3a32; }
+.roster-dot.failed   { background: #a01818; box-shadow: 0 0 8px #a01818; }
+@keyframes pulse { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
+.roster-when { margin-left: auto; font-family: 'JetBrains Mono',ui-monospace,Menlo,monospace; font-variant-numeric: tabular-nums; font-size: 10px; color: #6a5848; flex-shrink: 0; }
+
 .msg.lead::first-letter {
   font-family: 'Cinzel', 'EB Garamond', serif;
   font-weight: 600;
@@ -320,6 +349,41 @@ html, body { margin: 0; background: #0a0706; }
       <div class="msg">masc-mcp server started on :8935</div>
       <div class="details">{"build":"feature/bonsai-phase-0","pid":49685}</div>
     </div>
+  </div>
+</div>
+
+<div class="roster">
+  <div class="roster-slot">
+    <div class="roster-sigil">P</div>
+    <div class="roster-body">
+      <span class="roster-name">keeper · poe</span>
+      <div class="roster-state"><span class="roster-dot live"></span>speaking</div>
+    </div>
+    <span class="roster-when">3s</span>
+  </div>
+  <div class="roster-slot">
+    <div class="roster-sigil">J</div>
+    <div class="roster-body">
+      <span class="roster-name">janitor</span>
+      <div class="roster-state"><span class="roster-dot thinking"></span>thinking</div>
+    </div>
+    <span class="roster-when">12s</span>
+  </div>
+  <div class="roster-slot">
+    <div class="roster-sigil">G</div>
+    <div class="roster-body">
+      <span class="roster-name">governance</span>
+      <div class="roster-state"><span class="roster-dot idle"></span>idle · ok</div>
+    </div>
+    <span class="roster-when">2m</span>
+  </div>
+  <div class="roster-slot">
+    <div class="roster-sigil">I</div>
+    <div class="roster-body">
+      <span class="roster-name">improver</span>
+      <div class="roster-state"><span class="roster-dot failed"></span>paused · auth</div>
+    </div>
+    <span class="roster-when">7m</span>
   </div>
 </div>
 

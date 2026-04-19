@@ -214,6 +214,26 @@ let test_today_log_file_falls_back_to_project_root_log () =
         log_path
         (Routes.today_log_file ~base_path ~project_root "discord"))
 
+let test_start_shell_command_matches_detached_contract () =
+  let base_path = "/tmp/masc runtime root" in
+  let script = "/tmp/masc runtime root/sidecars/discord-bot/run.sh" in
+  check string "detached start command"
+    (Printf.sprintf
+       "MASC_BASE_PATH=%s setsid nohup %s start </dev/null >/dev/null 2>&1 &"
+       (Filename.quote base_path)
+       (Filename.quote script))
+    (Routes.sidecar_start_shell_command ~base_path ~script)
+
+let test_start_shell_command_quotes_shell_meta () =
+  let base_path = "/tmp/runtime;touch /tmp/pwned" in
+  let script = "/tmp/sidecars/discord-bot/run.sh && id" in
+  check string "shell metacharacters are quoted, not escaped ad hoc"
+    (Printf.sprintf
+       "MASC_BASE_PATH=%s setsid nohup %s start </dev/null >/dev/null 2>&1 &"
+       (Filename.quote base_path)
+       (Filename.quote script))
+    (Routes.sidecar_start_shell_command ~base_path ~script)
+
 (* ---- Config write helpers (PUT /api/v1/sidecar/config). ---- *)
 
 let test_escape_quotes_and_backslash () =
@@ -324,6 +344,13 @@ let () =
       ( "invariants",
         [
           test_case "known_ids size = 4" `Quick test_known_ids_size_matches_dashboard;
+        ] );
+      ( "start_command",
+        [
+          test_case "detached command contract" `Quick
+            test_start_shell_command_matches_detached_contract;
+          test_case "quotes shell metacharacters" `Quick
+            test_start_shell_command_quotes_shell_meta;
         ] );
       ( "config_write_helpers",
         [

@@ -331,6 +331,12 @@ let runtime_sidecar_script_result ?base_path id =
               `start-masc-mcp.sh --sidecar-root /path/to/masc-mcp`."
              id script)
 
+let sidecar_start_shell_command ~base_path ~script =
+  Printf.sprintf
+    "MASC_BASE_PATH=%s setsid nohup %s start </dev/null >/dev/null 2>&1 &"
+    (Filename.quote base_path)
+    (Filename.quote script)
+
 (** Clamp the [?lines=N] query param to [1, 1000]. Pure so unit tests
     can pin the upper bound without a request mock. *)
 let clamp_lines = function
@@ -804,12 +810,7 @@ let handle_start state request reqd =
               restart. Only [script] is interpolated, and the path comes from
               a resolved directory + fixed filename, so [Filename.quote] gives
               a closed-shell injection surface. *)
-           let cmd =
-             Printf.sprintf
-               "MASC_BASE_PATH=%s setsid nohup %s start </dev/null >/dev/null 2>&1 &"
-               (Filename.quote base_path)
-               (Filename.quote script)
-           in
+           let cmd = sidecar_start_shell_command ~base_path ~script in
            let _ = Sys.command cmd in
            respond_json request reqd ~status:`Accepted
              (`Assoc [

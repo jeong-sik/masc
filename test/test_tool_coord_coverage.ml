@@ -159,7 +159,7 @@ let () = test "dispatch_removed_named_room_tools" (fun () ->
   assert (Tool_coord.dispatch ctx ~name:"masc_room_enter" ~args = None)
 )
 
-let () = test "dispatch_check_transition_claim_requires_plan_task" (fun () ->
+let () = test "dispatch_check_transition_claim_auto_binds_current_task" (fun () ->
   Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -181,11 +181,7 @@ let () = test "dispatch_check_transition_claim_requires_plan_task" (fun () ->
   | Some (success, result) ->
       assert success;
       let json = Yojson.Safe.from_string result in
-      assert (Yojson.Safe.Util.member "all_passed" json = `Bool false);
-      assert (
-        Yojson.Safe.Util.member "fix_hint" json
-        = `String
-            "Call masc_plan_set_task to choose or re-sync the active task when current_task is unset, stale, or ambiguous")
+      assert (Yojson.Safe.Util.member "all_passed" json = `Bool true)
   | None -> failwith "dispatch returned None"
 )
 

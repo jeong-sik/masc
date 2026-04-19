@@ -793,7 +793,7 @@ let () = test "handle_claim_next_prefers_live_keeper_preset" (fun () ->
   | _ -> failwith ("expected exactly one task: " ^ result)
 )
 
-let () = test "transition_claim_leaves_planning_current_task_unset" (fun () ->
+let () = test "transition_claim_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Transition claim")]) in
   let (success, _result) =
@@ -801,6 +801,44 @@ let () = test "transition_claim_leaves_planning_current_task_unset" (fun () ->
       (`Assoc [("task_id", `String "task-001"); ("action", `String "claim")])
   in
   assert success;
+  assert (Planning_eio.get_current_task ctx.config = Some "task-001")
+)
+
+let () = test "transition_release_clears_planning_current_task" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Transition release")]) in
+  let (success_claim, _result) =
+    Tool_task.handle_transition ctx
+      (`Assoc [("task_id", `String "task-001"); ("action", `String "claim")])
+  in
+  assert success_claim;
+  let (success_release, _result) =
+    Tool_task.handle_transition ctx
+      (`Assoc [("task_id", `String "task-001"); ("action", `String "release")])
+  in
+  assert success_release;
+  assert (Planning_eio.get_current_task ctx.config = None)
+)
+
+let () = test "transition_done_clears_planning_current_task" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Transition done")]) in
+  let (success_claim, _result) =
+    Tool_task.handle_transition ctx
+      (`Assoc [("task_id", `String "task-001"); ("action", `String "claim")])
+  in
+  assert success_claim;
+  let (success_done, result) =
+    Tool_task.handle_transition ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "done");
+          ("notes", `String "Implemented the transport parity checks and verified the result.");
+        ])
+  in
+  assert success_done;
+  assert (not (str_contains result "rejected"));
   assert (Planning_eio.get_current_task ctx.config = None)
 )
 

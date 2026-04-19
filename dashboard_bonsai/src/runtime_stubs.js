@@ -31,28 +31,26 @@ function caml_sys_const_arch_arm64 () {
 
 // OxCaml extends OCaml 5's Domain Local Storage (DLS, already in jsoo
 // runtime) with Thread Local Storage (TLS) primitives. Stock js_of_ocaml
-// 6 has no TLS stubs, so the bundle throws on first init:
-//   TypeError: runtime.caml_domain_tls_set is not a function
-//     at init (domain.ml:578)
+// 6 has no TLS stubs.
 //
-// Browser bundles are single-threaded, so TLS reduces to a global map
-// keyed by the slot identifier. Same shape as the runtime's DLS
-// implementation, just under a separate global to keep the namespaces
-// independent (in case OxCaml ever uses both for distinct values in
-// the same program).
+// Shape matters: jsoo's DLS get/set take/return the *entire* OCaml array
+// as a single argument (see runtime: caml_domain_dls_set(a){caml_domain_dls = a;}).
+// OxCaml's TLS uses the same convention — basement calls Array.blit on
+// the value returned by tls_get, so it must be an OCaml array, not a
+// dict keyed by slot ids. An earlier dict-based stub (#8816) crashed
+// with Invalid_argument("Array.blit") for exactly this reason.
+//
+// Browser bundles are single-threaded, so TLS reduces to one global
+// array. [0] is the OCaml empty-array tag — basement initialises real
+// values via blit on first use.
 
 //Provides: caml_domain_tls_set
-function caml_domain_tls_set (key, value) {
-  globalThis.__caml_tls = globalThis.__caml_tls || Object.create(null);
-  globalThis.__caml_tls[key] = value;
+function caml_domain_tls_set (a) {
+  globalThis.__caml_tls_storage = a;
   return 0;
 }
 
 //Provides: caml_domain_tls_get
-function caml_domain_tls_get (key) {
-  var tls = globalThis.__caml_tls;
-  if (tls && Object.prototype.hasOwnProperty.call(tls, key)) {
-    return tls[key];
-  }
-  return 0;
+function caml_domain_tls_get (_unit) {
+  return globalThis.__caml_tls_storage || [0];
 }

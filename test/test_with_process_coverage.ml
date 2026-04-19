@@ -35,7 +35,7 @@ let test_sys_error_closes_pipe () =
          (fun _ic -> raise (Sys_error "synthetic"))
      in
      ()
-   with Sys_error "synthetic" -> raised := true);
+   with Sys_error msg when msg = "synthetic" -> raised := true);
   check bool "exception propagated" true !raised;
   (* give kernel a moment to reclaim *)
   let after = count_open_fds () in

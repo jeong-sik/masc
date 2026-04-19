@@ -1,24 +1,22 @@
-(** Run git subprocess and capture stdout lines.
-    Offloaded to a system thread via Eio_unix.run_in_systhread to avoid
-    blocking the Eio scheduler. Falls back to direct execution when
-    called without Eio context (tests, signal handlers). *)
 let run_git_capture_lines ~workdir args =
-  let f () =
-    try
-      let argv = "git" :: "-C" :: workdir :: args in
-      Exec_tap.record
-        ~kind:Exec_tap.Unix_open_process_args_in
-        ~argv ~cwd:workdir ();
-      let lines, status =
-        With_process.with_process_args_in "git" (Array.of_list argv)
-          With_process.drain_lines
-      in
-      match status with
-      | Unix.WEXITED 0 -> Some lines
-      | _ -> None
-    with Sys_error _ | Unix.Unix_error _ -> None
-  in
-  Eio_guard.run_in_systhread f
+  try
+    let argv = [ "git"; "-C"; workdir ] @ args in
+    let raw_source = String.concat " " (List.map Filename.quote argv) in
+    match
+      Masc_exec.Exec_gate.run_argv_with_status
+        ~actor:"system/worktree_live_context"
+        ~raw_source
+        ~summary:"worktree live context git capture"
+        ~timeout_sec:5.0
+        argv
+    with
+    | Unix.WEXITED 0, output ->
+        Some
+          (output
+          |> String.split_on_char '\n'
+          |> List.filter (fun line -> String.trim line <> ""))
+    | _ -> None
+  with Sys_error _ | Unix.Unix_error _ -> None
 
 let repo_root_for ~base_path =
   if not (Coord_git.has_git_marker base_path) then None

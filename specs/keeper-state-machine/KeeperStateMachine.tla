@@ -180,6 +180,25 @@ CompactionCompleted ==
                    restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete, restart_count>>
 
+\* Compaction attempt failed — clears the in-flight compaction flag but
+\* deliberately leaves [context_overflow] set so the keeper re-enters
+\* Overflowed for the retry loop to decide next step. The retry-budget
+\* latch is owned by [CompactRetryExhausted] (separate event) once the
+\* caller exhausts its allowance. Mirrors [Compaction_failed] in
+\* [Keeper_state_machine.update_conditions]; added in #8578 to align the
+\* model's event alphabet with the runtime so TLC can reason about
+\* failure paths.
+CompactionFailed ==
+    /\ NotTerminal /\ compaction_active
+    /\ compaction_active' = FALSE
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
+                   handoff_active, operator_paused, stop_requested,
+                   restart_budget_remaining, backoff_elapsed,
+                   guardrail_triggered, drain_complete,
+                   context_overflow, compact_retry_exhausted,
+                   restart_count>>
+
 HandoffStarted ==
     /\ NotTerminal /\ fiber_alive
     /\ ~handoff_active /\ ~compaction_active
@@ -193,6 +212,21 @@ HandoffStarted ==
                    restart_count>>
 
 HandoffCompleted ==
+    /\ NotTerminal /\ handoff_active
+    /\ handoff_active' = FALSE
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
+                   compaction_active, operator_paused, stop_requested,
+                   restart_budget_remaining, backoff_elapsed,
+                   guardrail_triggered, drain_complete,
+                   context_overflow, compact_retry_exhausted,
+                   restart_count>>
+
+\* Handoff attempt failed — clears the in-flight handoff flag, leaves
+\* the rest unchanged. Mirrors [Handoff_failed] in
+\* [Keeper_state_machine.update_conditions]; added in #8578 so TLC can
+\* reason about handoff failure recovery.
+HandoffFailed ==
     /\ NotTerminal /\ handoff_active
     /\ handoff_active' = FALSE
     /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
@@ -226,6 +260,24 @@ OperatorResume ==
                    restart_count>>
 
 StopRequested ==
+    /\ NotTerminal /\ ~stop_requested
+    /\ stop_requested' = TRUE
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
+                   compaction_active, handoff_active, operator_paused,
+                   restart_budget_remaining, backoff_elapsed,
+                   guardrail_triggered, drain_complete,
+                   context_overflow, compact_retry_exhausted,
+                   restart_count>>
+
+\* Operator-initiated stop. Same condition update as [StopRequested]
+\* (sets [stop_requested]); the runtime distinguishes the two by a
+\* [remove_meta] payload that controls whether the keeper meta file is
+\* deleted on stop. The condition-level effect is identical, so TLC
+\* sees the same successor states. Mirrors [Operator_stop] in
+\* [Keeper_state_machine.update_conditions]; added in #8578 so the
+\* model and runtime share the same event alphabet.
+OperatorStop ==
     /\ NotTerminal /\ ~stop_requested
     /\ stop_requested' = TRUE
     /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
@@ -393,10 +445,10 @@ Next ==
     \/ HeartbeatOk      \/ HeartbeatFailed
     \/ TurnSucceeded    \/ TurnFailed
     \/ ContextMeasured
-    \/ CompactionStarted \/ CompactionCompleted
-    \/ HandoffStarted   \/ HandoffCompleted
+    \/ CompactionStarted \/ CompactionCompleted \/ CompactionFailed
+    \/ HandoffStarted   \/ HandoffCompleted    \/ HandoffFailed
     \/ OperatorPause    \/ OperatorResume
-    \/ StopRequested    \/ DrainCompleteEv
+    \/ StopRequested    \/ OperatorStop        \/ DrainCompleteEv
     \/ FiberTerminated  \/ FiberStarted
     \/ SupervisorRestartAttempt
     \/ RestartBudgetExhausted

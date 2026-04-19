@@ -618,7 +618,7 @@ let claim_task config ~agent_name ~task_id =
     the claim is rejected if the roles do not match. *)
 let claim_task_r config ~agent_name ~task_id
     ?(agent_role = Types_core.Unassigned) () : string Types.masc_result =
-  let open Result_syntax in
+  let open Result.Syntax in
   let* () = if not (is_initialized config) then Error Types.NotInitialized else Ok () in
   let* () =
     match validate_agent_name_r agent_name, validate_task_id_r task_id with
@@ -795,7 +795,7 @@ let derive_release_do_not_reclaim_reason (task : Types.task) handoff_context =
 let transition_task_r config ~agent_name ~task_id ~action
     ?expected_version ?(notes="") ?(reason="") ?handoff_context
     ?(force=false) () : string Types.masc_result =
-  let open Result_syntax in
+  let open Result.Syntax in
   let* () = if not (is_initialized config) then Error Types.NotInitialized else Ok () in
   let* () =
     match validate_agent_name_r agent_name, validate_task_id_r task_id with

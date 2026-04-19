@@ -468,7 +468,13 @@ let check_assertion st assertion =
 
 let handle_check ctx args =
   let st = inspect_state ctx in
-  let default_assertions = [ "project_ready"; "joined"; "task_claimed"; "current_task_set" ] in
+  (* Issue #8636: include every assertion the handler knows about so
+     callers that omit the field get full coverage. The previous list
+     dropped "worktree_active", silently bypassing the worktree
+     precondition check whenever the field was missing. *)
+  let default_assertions =
+    [ "project_ready"; "joined"; "task_claimed"; "current_task_set"; "worktree_active" ]
+  in
   let assertions =
     match Yojson.Safe.Util.member "assertions" args with
     | `List items ->

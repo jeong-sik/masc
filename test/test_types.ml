@@ -933,6 +933,45 @@ let () =
             Alcotest.(check string) (Printf.sprintf "round-trip %S" s) s back)
           C.valid_kind_strings);
     ];
+    "library_source_ssot", [
+      (* Issue #8601: 3-way drift — module docstring claimed 3 sources,
+         handler valid_sources had 4, schema enum had 4. The fix
+         introduces [library_source] variant + standard SSOT helpers.
+         These tests pin the witness, the all_sources count, the
+         valid string set, and round-trip behaviour. Adding a 5th
+         source forces compile errors in [source_to_string] and
+         fails this test. *)
+      Alcotest.test_case "witness covers all 4 constructors" `Quick (fun () ->
+        let module L = Masc_mcp.Tool_library in
+        let witness s =
+          let actual = L.source_to_string s in
+          if not (List.mem actual L.valid_source_strings) then
+            Alcotest.failf "source_to_string %S not in valid_source_strings" actual
+        in
+        witness L.Direct_experience;
+        witness L.Research;
+        witness L.Experiment;
+        witness L.Observation;
+        Alcotest.(check int) "count" 4 (List.length L.all_sources));
+      Alcotest.test_case "valid_source_strings pinned to wire format" `Quick (fun () ->
+        Alcotest.(check (list string)) "wire-format strings"
+          [ "direct_experience"; "research"; "experiment"; "observation" ]
+          Masc_mcp.Tool_library.valid_source_strings);
+      Alcotest.test_case "source_of_string_opt round-trips SSOT strings" `Quick (fun () ->
+        let module L = Masc_mcp.Tool_library in
+        List.iter (fun s ->
+          match L.source_of_string_opt s with
+          | None -> Alcotest.failf "source_of_string_opt %S returned None" s
+          | Some src ->
+            let back = L.source_to_string src in
+            Alcotest.(check string) (Printf.sprintf "round-trip %S" s) s back)
+        L.valid_source_strings);
+      Alcotest.test_case "source_of_string_opt rejects unknown" `Quick (fun () ->
+        Alcotest.(check (option string)) "unknown -> None"
+          None
+          (Option.map Masc_mcp.Tool_library.source_to_string
+             (Masc_mcp.Tool_library.source_of_string_opt "fabricated")));
+    ];
     "compact_retry_exhausted_ssot", [
       (* Issue #8581: the [compact_retry_exhausted] field was read by
          derive_phase to promote (context_overflow + latch) to Paused

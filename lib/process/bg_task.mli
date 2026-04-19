@@ -2,20 +2,21 @@
     roadmap.
 
     Maps claude-code's [backgroundTaskId] / [BashOutput] / [KillShell]
-    triad onto OCaml/Eio primitives:
-    - [Eio.Switch] per task gives type-safe cancellation propagation;
-      every child fiber and every spawned process lives inside the
-      switch's scope, so a [cancel] transitively tears them down.
-    - pgid-based tree-kill (via [Unix.setpgid] in the child and
-      [Unix.kill (-pgid)] in the parent) reaches grandchildren that a
-      naïve [Unix.kill pid] would leak.
-    - Append-only backing files on disk (\`.masc/keeper/<name>/bg/<id>.out\`
-      / [.err]) avoid the JS [StreamWrapper] model — readers [Read]
-      against a ring-buffer view with a [bytes_dropped] counter.
+    triad onto OCaml Unix primitives.
 
-    Implementation arrives in Tick 5. This mli is the contract so
-    downstream modules (tool_shard, keeper_exec_shell) can start
-    depending on the types in parallel. *)
+    Tick 6a (current): pull-based.  [read] drains whatever is pending
+    on the child's pipes without blocking.  No long-lived fiber, no
+    Eio switch — the MCP polling loop IS the drain cadence.  Child
+    runs in its own session via {!Process_eio.spawn_detached};
+    tree-kill via [Unix.kill (-pgid)] reaches descendants.
+
+    Tick 7 (planned): introduce a daemon switch and push-based
+    drainers so slow readers can't stall producers, plus
+    append-only backing files under
+    \`.masc/keeper/<name>/bg/<id>.{out,err}\` for persistence across
+    reader restarts.  That tick will reintroduce a [val init :
+    sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> unit] hook
+    separately from [spawn] so this signature stays stable. *)
 
 type task_id = private string
 (** Opaque UUID-like handle. Constructible only via [spawn]. *)
@@ -53,20 +54,19 @@ type spawn_error =
   | Invalid_cwd of string
 
 val spawn :
-  sw:Eio.Switch.t ->
-  env:Eio_unix.Stdenv.base ->
   keeper:string ->
   argv:string list ->
   cwd:string ->
   envp:string array ->
   timeout_sec:float ->
   (task_id, spawn_error) result
-(** Fork a long-lived shell task, attach it to [sw]. The task keeps
-    running until it exits, [timeout_sec] elapses (SIGTERM -> grace ->
-    SIGKILL), or the switch is cancelled. The underlying process
-    starts in its own process group; tree-kill addresses
-    [-pgid]. Output is tee'd to the backing files and to the in-memory
-    ring buffers. *)
+(** Fork a long-lived shell task.  Runs until it exits, until
+    [timeout_sec] elapses (SIGTERM -> grace -> SIGKILL), or until
+    {!kill} is invoked.  The child starts in its own session; tree-kill
+    addresses [-pgid].
+
+    [timeout_sec = 0.0] disables the timeout — typical for keeper
+    polling loops that expect to {!kill} explicitly. *)
 
 type read_error =
   | Unknown_task of task_id

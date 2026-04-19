@@ -1,7 +1,6 @@
 (** A2A MCP Tools - Agent-to-Agent communication protocol.
     Types and JSON conversion are in A2a_types. *)
 
-open Types
 include A2a_types
 
 module SMap = Map.Make(String)

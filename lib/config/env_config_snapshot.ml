@@ -30,12 +30,56 @@ type entry = {
   sensitive : bool;
 }
 
+type source_provenance = {
+  kind : string;
+  detail : string;
+  derived_from : string list;
+}
+
 let entry ?(sensitive = false) ~default env_name description =
   let sensitive = sensitive || is_sensitive_name env_name in
   { env_name; description; default_display = default; sensitive }
 
+let default_provenance e =
+  match e.default_display with
+  | "(derived)" ->
+      {
+        kind = "derived";
+        detail = "computed by runtime config helpers from related settings";
+        derived_from = [];
+      }
+  | "(cwd)" ->
+      {
+        kind = "runtime";
+        detail = "resolved from the process working directory or base path";
+        derived_from = [];
+      }
+  | _ ->
+      { kind = "default"; detail = "compiled default value"; derived_from = [] }
+
+let source_provenance e raw =
+  match raw with
+  | Some _ ->
+      {
+        kind = "env";
+        detail = "environment variable " ^ e.env_name;
+        derived_from = [];
+      }
+  | None -> default_provenance e
+
+let provenance_to_json p =
+  `Assoc
+    ([
+       ("kind", `String p.kind);
+       ("detail", `String p.detail);
+     ]
+    @
+    if p.derived_from = [] then []
+    else [ ("derived_from", `List (List.map (fun v -> `String v) p.derived_from)) ])
+
 let read_entry e =
   let raw = Env_config_core.trim_opt (Sys.getenv_opt e.env_name) in
+  let provenance = source_provenance e raw in
   let display_value =
     match raw with
     | None -> None
@@ -48,7 +92,9 @@ let read_entry e =
       ("description", `String e.description);
       ("value", Json_util.string_opt_to_json display_value);
       ("default", `String e.default_display);
-      ("source", `String (if raw = None then "default" else "env"));
+      ("source", `String provenance.kind);
+      ("source_detail", `String provenance.detail);
+      ("provenance", provenance_to_json provenance);
       ("sensitive", `Bool e.sensitive);
     ]
 
@@ -57,8 +103,8 @@ let category name entries =
 
 let server_entries =
   [
-    entry ~default:Masc_network_defaults.masc_http_default_port_s "MASC_HTTP_PORT" "HTTP server port";
-    entry ~default:Env_config_core.default_host "MASC_HOST" "Server bind host";
+    entry ~default:Masc_network_defaults.masc_http_default_port_s Env_config_core.http_port_env_key "HTTP server port";
+    entry ~default:Env_config_core.default_host Env_config_core.host_env_key "Server bind host";
     entry ~default:"(derived)" Env_config_core.http_base_url_env_key "Public HTTP base URL";
     entry ~default:"" "MASC_CLUSTER_NAME" "Cluster name for multi-instance";
     entry ~default:"(cwd)" Env_config_core.base_path_env_key "Base storage directory";
@@ -85,14 +131,14 @@ let runtime_entries =
     entry ~default:"(none)" "MASC_CDAL_ENABLED"
       "Contract-driven agent loop proof capture (feature flag)";
     entry ~default:"true" "MASC_DISPATCH_V2" "Enable V2 dispatch engine";
-    entry ~default:"(auto)" "MASC_LOG_LEVEL" "Log level override";
-    entry ~default:"false" "MASC_PARSE_WARN" "Enable JSON parse warnings";
-    entry ~default:"production" "MASC_GOVERNANCE_LEVEL"
+    entry ~default:"(auto)" Env_config_core.log_level_env_key "Log level override";
+    entry ~default:"false" Env_config_core.parse_warn_env_key "Enable JSON parse warnings";
+    entry ~default:"production" Env_config_core.governance_level_env_key
       "Governance enforcement level";
     entry ~default:"(none)" "MASC_AUTO_RESPOND" "Auto-respond mode";
     entry ~default:"(none)" "MASC_SLOT_YIELD_ENABLED"
       "Release LLM slot during tool execution (feature flag)";
-    entry ~default:"true" "MASC_TELEMETRY_ENABLED"
+    entry ~default:"true" Env_config_core.telemetry_enabled_env_key
       "Enable telemetry collection";
   ]
 
@@ -741,11 +787,11 @@ let path_entries =
       "Base path resolution source override; None when unset";
     entry ~default:"(none)" "MASC_BASE_PATH_STRICT"
       "Fail-fast on base path resolution issues";
-    entry ~default:"(none)" "MASC_CONFIG_DIR"
+    entry ~default:"(none)" Env_config_core.config_dir_env_key
       "Config directory override; None when unset";
     entry ~default:"(none)" "MASC_DATA_DIR"
       "Data directory override; None=<base_path>/data";
-    entry ~default:"(none)" "MASC_PERSONAS_DIR"
+    entry ~default:"(none)" Env_config_core.personas_dir_env_key
       "Personas directory override; None when unset";
   ]
 

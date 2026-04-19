@@ -414,6 +414,7 @@
    keeper_tool_diversity
    keeper_tool_policy_config
    keeper_tool_policy
+   keeper_tool_boundary
    keeper_turn_intent
    keeper_discovered_tools
    keeper_tool_affinity

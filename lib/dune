@@ -153,6 +153,7 @@
    web_dashboard
    credits_dashboard
    repo_synthesis_benchmark
+   room_protocol
 
    inference_utils
    ;; WebRTC modules removed — use ocaml-webrtc library directly
@@ -240,6 +241,7 @@
    orchestrator
    otel_config
    otel_dispatch_hook
+   otel_genai
    otel_spans
    otel_trace_context
    planning_eio
@@ -414,6 +416,7 @@
    keeper_tool_diversity
    keeper_tool_policy_config
    keeper_tool_policy
+   keeper_tool_boundary
    keeper_turn_intent
    keeper_discovered_tools
    keeper_tool_affinity

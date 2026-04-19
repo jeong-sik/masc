@@ -470,12 +470,12 @@ let legacy_voice_base_url_opt () =
       Some (Printf.sprintf "http://%s:%s" host port)
 
 let http_listener_env_explicit () =
-  Option.is_some (Sys.getenv_opt "MASC_HTTP_BASE_URL" |> trim_opt)
-  || Option.is_some (Sys.getenv_opt "MASC_HOST" |> trim_opt)
-  || Option.is_some (Sys.getenv_opt "MASC_HTTP_PORT" |> trim_opt)
+  Option.is_some (Sys.getenv_opt Env_config_core.http_base_url_env_key |> trim_opt)
+  || Option.is_some (Sys.getenv_opt Env_config_core.host_env_key |> trim_opt)
+  || Option.is_some (Sys.getenv_opt Env_config_core.http_port_env_key |> trim_opt)
 
 let default_voice_session_base_url () =
-  match Sys.getenv_opt "MASC_HTTP_BASE_URL" |> trim_opt with
+  match Sys.getenv_opt Env_config_core.http_base_url_env_key |> trim_opt with
   | Some base_url -> normalize_base_url base_url
   | None ->
       if http_listener_env_explicit () then

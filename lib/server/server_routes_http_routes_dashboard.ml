@@ -340,15 +340,22 @@ let rec add_routes ~sw ~clock router =
          let cmd =
            Printf.sprintf "%s doctor all --json" (Filename.quote self_bin)
          in
+         (* Fun.protect guarantees close_process_in on every exit path
+            (End_of_file, Eio.Cancel.Cancelled, read errors). Without it the
+            subprocess FD pair and the zombie child leak per request, and a
+            busy dashboard polling this endpoint exhausts the server FD
+            budget (observed 2703/3000 after ~6h of polling). *)
          try
            let ic = Unix.open_process_in cmd in
            let buf = Buffer.create 8192 in
-           (try
-              while true do
-                Buffer.add_channel buf ic 4096
-              done
-            with End_of_file -> ());
-           let _ = Unix.close_process_in ic in
+           Fun.protect
+             ~finally:(fun () -> ignore (Unix.close_process_in ic))
+             (fun () ->
+               try
+                 while true do
+                   Buffer.add_channel buf ic 4096
+                 done
+               with End_of_file -> ());
            Http.Response.json
              ~compress:true
              ~request:req

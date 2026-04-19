@@ -212,6 +212,18 @@ let () = test "dispatch_check_claim_next_marks_current_task_set" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "dispatch_check_project_ready_alias" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  match Tool_coord.dispatch ctx ~name:"masc_check"
+          ~args:(`Assoc [("assertions", `List [`String "project_ready"])]) with
+  | Some (success, result) ->
+      assert success;
+      let json = Yojson.Safe.from_string result in
+      assert (Yojson.Safe.Util.member "all_passed" json = `Bool true)
+  | None -> failwith "dispatch returned None"
+)
+
 (* Test helper functions *)
 let () = test "get_string_present" (fun () ->
   let args = `Assoc [("key", `String "value")] in

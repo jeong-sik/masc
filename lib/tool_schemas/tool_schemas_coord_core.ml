@@ -58,11 +58,11 @@ Pair with masc_workflow_guide for next-step recommendations.";
           ("items", `Assoc [
             ("type", `String "string");
             ("enum", `List [
-              `String "room_set"; `String "joined"; `String "task_claimed";
+              `String "project_ready"; `String "namespace_ready"; `String "room_set"; `String "joined"; `String "task_claimed";
               `String "current_task_set"; `String "worktree_active";
             ]);
           ]);
-          ("description", `String "List of state assertions to check. Each returns true/false with a fix hint if false. Historical key 'room_set' means project scope configured.");
+          ("description", `String "List of state assertions to check. Each returns true/false with a fix hint if false. Canonical readiness key is 'project_ready'; 'namespace_ready' and historical 'room_set' remain compatibility aliases.");
         ]);
       ]);
       ("required", `List [`String "assertions"]);

@@ -315,6 +315,24 @@ let list_pending_dashboard_json () : Yojson.Safe.t =
   ) (Atomic.get pending) [] in
   `List (sort_entries_by_requested_at entries)
 
+let pending_entry_detail_json (entry : pending_approval) : Yojson.Safe.t =
+  `Assoc [
+    ("id", `String entry.id);
+    ("keeper_name", `String entry.keeper_name);
+    ("tool_name", `String entry.tool_name);
+    ("risk_level", `String (risk_level_to_string entry.risk_level));
+    ("requested_at", `Float entry.requested_at);
+    ("requested_at_iso", `String (Types.iso8601_of_unix_seconds entry.requested_at));
+    ("waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at));
+    ("input", entry.input);
+    ("input_preview", `String (input_preview_of_json entry.input));
+  ]
+
+let get_pending_json ~id : Yojson.Safe.t option =
+  match SMap.find_opt id (Atomic.get pending) with
+  | None -> None
+  | Some entry -> Some (pending_entry_detail_json entry)
+
 let pending_count () : int =
   SMap.cardinal (Atomic.get pending)
 

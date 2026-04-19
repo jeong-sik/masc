@@ -9,8 +9,50 @@
 
 module GP = Masc_mcp.Governance_pipeline
 module AQ = Masc_mcp.Keeper_approval_queue
+module Mcp_eio = Masc_mcp.Mcp_server_eio
 
 let check = Alcotest.(check string)
+
+let temp_dir () =
+  let dir = Filename.temp_file "test_hitl_approval_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm_rf path =
+    if Sys.is_directory path then begin
+      Array.iter (fun name -> rm_rf (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    end else
+      Sys.remove path
+  in
+  try rm_rf dir with _ -> ()
+
+let contains_substring s needle =
+  let s_len = String.length s in
+  let n_len = String.length needle in
+  let rec loop i =
+    if i + n_len > s_len then false
+    else if String.sub s i n_len = needle then true
+    else loop (i + 1)
+  in
+  n_len = 0 || loop 0
+
+let execute_approval_get args =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:"approval-get-test"
+        state ~name:"masc_approval_get" ~arguments:args)
 
 (* ── 1. Risk classification ──────────────────────────────── *)
 
@@ -316,6 +358,116 @@ let test_background_pending_reuses_existing_entry () =
   Alcotest.(check bool) "second callback not attached to duplicate submit" true
     (Option.is_none !second_callback)
 
+let test_approval_queue_get_pending_detail () =
+  Eio_main.run @@ fun _env ->
+  let initial_count = AQ.pending_count () in
+  let callback_result = ref None in
+  let input =
+    `Assoc [
+      ("path", `String "/tmp/danger");
+      ("reason", `String "operator needs full input");
+      ("nested", `Assoc [("mode", `String "detail")]);
+    ]
+  in
+  let id =
+    AQ.submit_pending
+      ~keeper_name:"detail-keeper"
+      ~tool_name:"masc_code_delete"
+      ~input
+      ~risk_level:AQ.Critical
+      ~on_resolution:(fun decision -> callback_result := Some decision)
+  in
+  let open Yojson.Safe.Util in
+  let detail =
+    match AQ.get_pending_json ~id with
+    | Some json -> json
+    | None -> Alcotest.fail "expected pending approval detail"
+  in
+  Alcotest.(check string) "detail id" id (detail |> member "id" |> to_string);
+  Alcotest.(check string) "detail keeper" "detail-keeper"
+    (detail |> member "keeper_name" |> to_string);
+  Alcotest.(check string) "detail tool" "masc_code_delete"
+    (detail |> member "tool_name" |> to_string);
+  Alcotest.(check string) "detail risk" "critical"
+    (detail |> member "risk_level" |> to_string);
+  Alcotest.(check string) "detail includes full input"
+    (Yojson.Safe.to_string input)
+    (detail |> member "input" |> Yojson.Safe.to_string);
+  Alcotest.(check bool) "detail includes preview" true
+    (String.length (detail |> member "input_preview" |> to_string) > 0);
+  Alcotest.(check bool) "missing detail returns none" true
+    (Option.is_none (AQ.get_pending_json ~id:"missing-approval"));
+  (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail ("resolve failed: " ^ msg));
+  Alcotest.(check bool) "callback fired" true
+    (match !callback_result with Some Agent_sdk.Hooks.Approve -> true | _ -> false);
+  Alcotest.(check int) "entry removed"
+    initial_count (AQ.pending_count ())
+
+let test_approval_get_dispatch_success () =
+  let initial_count = AQ.pending_count () in
+  let callback_result = ref None in
+  let input =
+    `Assoc [
+      ("path", `String "/tmp/operator-only");
+      ("payload", `Assoc [("secret", `String "full-input")]);
+    ]
+  in
+  let id =
+    AQ.submit_pending
+      ~keeper_name:"dispatch-detail-keeper"
+      ~tool_name:"masc_code_delete"
+      ~input
+      ~risk_level:AQ.Critical
+      ~on_resolution:(fun decision -> callback_result := Some decision)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "test cleanup")))
+    (fun () ->
+      let ok, payload =
+        execute_approval_get (`Assoc [("id", `String id)])
+      in
+      Alcotest.(check bool) "dispatch approval_get success" true ok;
+      let open Yojson.Safe.Util in
+      let json = Yojson.Safe.from_string payload in
+      Alcotest.(check string) "dispatch detail id" id
+        (json |> member "id" |> to_string);
+      Alcotest.(check string) "dispatch includes full input"
+        (Yojson.Safe.to_string input)
+        (json |> member "input" |> Yojson.Safe.to_string));
+  Alcotest.(check int) "dispatch cleanup removes pending"
+    initial_count (AQ.pending_count ());
+  Alcotest.(check bool) "cleanup rejects callback" true
+    (match !callback_result with Some (Agent_sdk.Hooks.Reject _) -> true | _ -> false)
+
+let test_approval_get_dispatch_missing_id () =
+  let ok, msg = execute_approval_get (`Assoc [("id", `String "")]) in
+  Alcotest.(check bool) "missing id fails" false ok;
+  Alcotest.(check bool) "missing id message" true
+    (contains_substring msg "id is required")
+
+let test_approval_get_dispatch_not_found () =
+  let ok, msg =
+    execute_approval_get (`Assoc [("id", `String "appr_missing")])
+  in
+  Alcotest.(check bool) "not found fails" false ok;
+  Alcotest.(check bool) "not found message" true
+    (contains_substring msg "not found or already resolved")
+
+let test_approval_get_rejects_reader_role () =
+  match
+    Masc_mcp.Auth.authorize_tool_for_role ~agent_name:"reader"
+      ~role:Types.Reader ~tool_name:"masc_approval_get"
+  with
+  | Error (Types.Forbidden _) -> ()
+  | Error err ->
+      Alcotest.fail
+        (Printf.sprintf "expected forbidden, got %s"
+           (Types.masc_error_to_string err))
+  | Ok () -> Alcotest.fail "reader should not be allowed to call approval_get"
+
 (* ── 4. Approval callback integration ────────────────────── *)
 
 let test_callback_approves_low_risk () =
@@ -412,6 +564,16 @@ let () =
         test_background_pending_callback_and_keeper_lookup;
       Alcotest.test_case "background pending reuses existing entry" `Quick
         test_background_pending_reuses_existing_entry;
+      Alcotest.test_case "get pending detail includes full input" `Quick
+        test_approval_queue_get_pending_detail;
+      Alcotest.test_case "dispatch approval_get success" `Quick
+        test_approval_get_dispatch_success;
+      Alcotest.test_case "dispatch approval_get missing id" `Quick
+        test_approval_get_dispatch_missing_id;
+      Alcotest.test_case "dispatch approval_get not found" `Quick
+        test_approval_get_dispatch_not_found;
+      Alcotest.test_case "approval_get rejects reader role" `Quick
+        test_approval_get_rejects_reader_role;
     ]);
     ("callback_integration", [
       Alcotest.test_case "low risk auto-approved" `Quick test_callback_approves_low_risk;

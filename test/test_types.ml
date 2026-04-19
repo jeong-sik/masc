@@ -815,6 +815,24 @@ let () =
         Alcotest.(check bool) "label is not the truncated form" false
           (String.equal label "autonomous"));
     ];
+    "tail_order_ssot", [
+      (* Issue #8486: witness exhaustiveness for [Keeper_status_detail.tail_order]
+         + sync test for the [Keeper_schema.tail_order_enum_strings] mirror.
+         Same shape as #8467 (sandbox/network/shared_memory). *)
+      Alcotest.test_case "witness covers both variants" `Quick (fun () ->
+        let module S = Masc_mcp.Keeper_status_detail in
+        let witness o =
+          let actual = S.tail_order_to_string o in
+          if not (List.mem actual S.valid_tail_order_strings) then
+            Alcotest.failf "tail_order_to_string %S not in valid_tail_order_strings" actual
+        in
+        witness S.Oldest_first; witness S.Newest_first;
+        Alcotest.(check int) "count" 2 (List.length S.valid_tail_order_strings));
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        Alcotest.(check (list string)) "tail_order mirror == SSOT"
+          Masc_mcp.Keeper_status_detail.valid_tail_order_strings
+          Masc_mcp.Keeper_schema.tail_order_enum_strings);
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

@@ -79,6 +79,15 @@ let tail_order_to_string = function
   | Oldest_first -> "oldest_first"
   | Newest_first -> "newest_first"
 
+(* Issue #8486: Variant SSOT for [tail_order]. Adding a constructor
+   forces [tail_order_to_string] exhaustiveness AND extends
+   [valid_tail_order_strings]; the schema in [Keeper_schema] mirrors
+   this list (cycle-avoidance: Keeper_schema -> Keeper_types ->
+   Keeper_types_profile -> Keeper_schema, same shape as #8467). *)
+let all_tail_orders = [ Oldest_first; Newest_first ]
+let valid_tail_order_strings =
+  List.map tail_order_to_string all_tail_orders
+
 let apply_tail_order order items =
   match order with
   | Oldest_first -> items

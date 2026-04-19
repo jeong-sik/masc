@@ -12,7 +12,8 @@ let make_http_config ~host ~port : Http.config =
   | Some existing when String.trim existing <> "" -> ()
   | _ ->
       let advertised_host =
-        if Server_auth.is_unspecified_host config.host then "127.0.0.1"
+        if Server_auth.is_unspecified_host config.host then
+          Masc_network_defaults.masc_http_default_host
         else config.host
       in
       Unix.putenv "MASC_HTTP_BASE_URL"

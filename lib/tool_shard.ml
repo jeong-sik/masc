@@ -23,6 +23,16 @@ let pr_review_event_enum_strings =
 let memory_search_source_enum_strings =
   [ "memory"; "history"; "all" ]
 
+(** Issue #8527: hand-mirrored from
+    [Keeper_memory_policy.valid_memory_kind_strings] (derived from
+    [kind_caps ()]). Same cycle-avoidance pattern as #8467 / #8480 / #8484.
+    Previous hand-list dropped [long_term] even though
+    [keeper_memory_bank] actively writes long_term rows — LLMs could
+    not filter for the very rows the system writes. Sync regression
+    test in [test_types.ml :: memory_kind_ssot] catches drift. *)
+let memory_kind_enum_strings =
+  [ "constraints"; "decision"; "next"; "goal"; "progress"; "open_question"; "long_term" ]
+
 (** Issue #8490: hand-mirrored from
     [Keeper_exec_fs.valid_fs_write_mode_strings]. Direct dependency
     would risk a Tool_shard -> Keeper_* -> Tool_shard cycle (same
@@ -109,13 +119,13 @@ string-interpolating your own keeper name.";
     name = "keeper_memory_search";
     description = "Search memory for past goals, decisions, progress, or conversation history. \
 Returns scored results with metadata. Default searches the structured memory bank. \
-Use 'kind' to filter (goal, decision, progress, next, open_question, constraints). \
+Use 'kind' to filter (goal, decision, progress, next, open_question, constraints, long_term). \
 Use source='history' for raw user messages, source='all' for both.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("query", `Assoc [("type", `String "string"); ("description", `String "keyword to search for")]);
-        ("kind", `Assoc [("type", `String "string"); ("enum", `List [`String "goal"; `String "decision"; `String "progress"; `String "next"; `String "open_question"; `String "constraints"]); ("description", `String "Filter by memory kind")]);
+        ("kind", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) memory_kind_enum_strings)); ("description", `String "Filter by memory kind")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "max results (1-10, default 5)")]);
         (* Issue #8484: derive from local mirror that tracks
            [Keeper_exec_memory.valid_memory_search_source_strings]. *)

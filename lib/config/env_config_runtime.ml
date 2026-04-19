@@ -161,10 +161,16 @@ module Local_runtime = struct
   let worker_model_opt () =
     Sys.getenv_opt "LLAMA_WORKER_MODEL" |> trim_opt
 
+  (** Env var that overrides the default MCP endpoint URL. Exposed as
+      SSOT so out-of-process callers (e.g. [worker_runtime_docker.ml]
+      that need container-local URL rewriting) read the same literal
+      without re-inlining the string. Issue #8352. *)
+  let mcp_url_env_key = "MASC_MCP_URL"
+
   (** MASC MCP endpoint URL (formerly in Chain module).
       Defaults to {base_url}/mcp. *)
   let mcp_url () =
-    match Sys.getenv_opt "MASC_MCP_URL" |> trim_opt with
+    match Sys.getenv_opt mcp_url_env_key |> trim_opt with
     | Some url -> url
     | None -> Env_config_core.masc_http_base_url () ^ "/mcp"
 end

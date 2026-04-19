@@ -66,9 +66,9 @@ diag_dump() {
 
   echo "[ci-diag] ulimit -n (open files): $(ulimit -n 2>/dev/null || echo unknown)"
   echo "[ci-diag] tmpdir usage: $(du -sh "${TMPDIR:-/tmp}" 2>/dev/null | cut -f1 || echo unknown)"
-  echo "[ci-diag] process snapshot (dune/ocaml/test):"
+  echo "[ci-diag] process snapshot (bash/timeout/tee/dune/ocaml/test):"
   ps -eo pid,ppid,etime,%cpu,%mem,comm,args \
-    | grep -Ei 'dune|ocaml|alcotest|test_' \
+    | grep -Ei 'bash|timeout|gtimeout|tee|dune|ocaml|alcotest|test_' \
     | grep -v grep \
     || true
 
@@ -190,28 +190,35 @@ run_agent_sdk_clean_retry() {
 run_with_timeout() {
   local cmd="${1}"
   local timeout_bin=""
+  local status=0
   if command -v timeout >/dev/null 2>&1; then
     timeout_bin="timeout"
   elif command -v gtimeout >/dev/null 2>&1; then
     timeout_bin="gtimeout"
   fi
 
+  # Avoid process substitution here. In CI we have observed runs where
+  # `dune test` appears to exit after keeper/tool matrix output, but the
+  # nested bash wrapper remains alive until the outer timeout fires. A
+  # single merged stream through tee is less precise than separate stdout
+  # and stderr fan-out, but it avoids that stuck-cleanup path.
   if [[ -n "${timeout_bin}" ]]; then
     if "${timeout_bin}" --help 2>&1 | grep -q -- '--foreground'; then
       "${timeout_bin}" --foreground "${TEST_TIMEOUT_SEC}" bash -lc "${cmd}" \
-        > >(tee -a "${TEST_LOG_FILE}") \
-        2> >(tee -a "${TEST_LOG_FILE}" >&2)
+        2>&1 | tee -a "${TEST_LOG_FILE}"
+      status=${PIPESTATUS[0]}
     else
       "${timeout_bin}" "${TEST_TIMEOUT_SEC}" bash -lc "${cmd}" \
-        > >(tee -a "${TEST_LOG_FILE}") \
-        2> >(tee -a "${TEST_LOG_FILE}" >&2)
+        2>&1 | tee -a "${TEST_LOG_FILE}"
+      status=${PIPESTATUS[0]}
     fi
   else
     echo "[ci-run] WARN: timeout command not found (timeout/gtimeout); running without enforced timeout"
-    bash -lc "${cmd}" \
-      > >(tee -a "${TEST_LOG_FILE}") \
-      2> >(tee -a "${TEST_LOG_FILE}" >&2)
+    bash -lc "${cmd}" 2>&1 | tee -a "${TEST_LOG_FILE}"
+    status=${PIPESTATUS[0]}
   fi
+
+  return "${status}"
 }
 
 hb_pid=""

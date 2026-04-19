@@ -334,22 +334,28 @@ let tool_auth_strict () =
 
 (** {1 Logging / Telemetry} *)
 
+(** SSOT for logging / observability env-var names (issue 8352). *)
+let log_level_env_key = "MASC_LOG_LEVEL"
+let telemetry_enabled_env_key = "MASC_TELEMETRY_ENABLED"
+let parse_warn_env_key = "MASC_PARSE_WARN"
+let governance_level_env_key = "MASC_GOVERNANCE_LEVEL"
+
 (** Log level string (e.g. "debug", "info", "warn", "error"). *)
 let log_level_opt () =
-  raw_value_opt "MASC_LOG_LEVEL" |> trim_opt
+  raw_value_opt log_level_env_key |> trim_opt
 
 (** Whether telemetry tracking is enabled. Default: true. *)
 let telemetry_enabled () =
-  get_bool ~default:true "MASC_TELEMETRY_ENABLED"
+  get_bool ~default:true telemetry_enabled_env_key
 
 (** Whether to log parse warnings. Default: false. *)
 let parse_warn_enabled () =
-  get_bool ~default:false "MASC_PARSE_WARN"
+  get_bool ~default:false parse_warn_env_key
 
 (** Governance level. Set at runtime by server_runtime_bootstrap.
     Valid: "production", "development", etc. Default: "production". *)
 let governance_level () =
-  get_string ~default:"production" "MASC_GOVERNANCE_LEVEL"
+  get_string ~default:"production" governance_level_env_key
   |> String.lowercase_ascii
 
 (** {1 Build Identity} *)

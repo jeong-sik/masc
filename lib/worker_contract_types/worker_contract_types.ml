@@ -7,9 +7,16 @@ open Yojson.Safe.Util
 
 let dedup_strings = Dashboard_utils.dedup_strings
 
+(* Privilege boundary: each [worker_class] must explicitly choose its default
+   execution scope. The previous [_ -> Observe_only] catch-all was safe today
+   (least privilege) but silently denied any new worker_class an elevated
+   default — a maintainer adding [Worker_executor_v2] would never see the
+   decision needed to be made. Exhaustive match converts each new constructor
+   into a compile error here, forcing the choice. See #8605 family. *)
 let default_execution_scope_for_worker_class = function
   | Some Worker_executor -> Limited_code_change
-  | _ -> Observe_only
+  | Some (Worker_manager | Worker_scout | Worker_librarian | Worker_metacog)
+  | None -> Observe_only
 
 let effective_execution_scope ~worker_class execution_scope =
   match execution_scope with

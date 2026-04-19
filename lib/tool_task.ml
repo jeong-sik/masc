@@ -833,13 +833,27 @@ and handle_transition ctx args =
           let verification_id = Option.value ~default:"" verification_id_before in
           Verification_protocol.on_approve_verification
             ~config:ctx.config ~task_id ~verifier:ctx.agent_name
-            ~verification_id ~notes
+            ~verification_id ~notes;
+          (* Record a CDAL verdict attribution on the approval leg so the
+             dashboard gets a complete audit line.  With the verification
+             FSM enabled, tasks reach Done via approve_verification rather
+             than Done_action, so the gate_check call on the Done_action
+             path (persisted_contract_rejection) never fires and the CDAL
+             gate shows zero entries in Dashboard_attribution even when
+             contracts are present.  The rejection string is intentionally
+             dropped — the verifier keeper has already judged the task,
+             we only want the [Dashboard_attribution] side effect that
+             [gate_check] performs internally. *)
+          if Env_config_runtime.Cdal.gate_enabled () then
+            ignore (Cdal_verdict_gate.gate_check ~task_id ())
         | Types.Reject_verification ->
           let reason = if notes <> "" then notes else reason in
           let verification_id = Option.value ~default:"" verification_id_before in
           Verification_protocol.on_reject_verification
             ~config:ctx.config ~task_id ~verifier:ctx.agent_name
-            ~verification_id ~reason
+            ~verification_id ~reason;
+          if Env_config_runtime.Cdal.gate_enabled () then
+            ignore (Cdal_verdict_gate.gate_check ~task_id ())
         | _ -> ())
    | Error err ->
        Log.Task.error "task transition failed: %s" (Types.masc_error_to_string err));

@@ -171,6 +171,29 @@ let absolute_allowed_paths_result ~(config : Coord.config)
     project-root anchor rule lets the keeper correct on the next call without
     re-trying the same broken interpretation. See
     [memory/feedback_tool-error-messages-teach-llm.md]. *)
+(** Look for a playground-root allowed path (contains ".masc/playground/")
+    and return the first match. Used to suggest a concrete rewrite when the
+    raw path looks like a playground-subdir pattern that was not prepended. *)
+let playground_root_of_allowed (allowed_norms : string list) : string option =
+  List.find_opt
+    (fun p ->
+      let marker = "/.masc/playground/" in
+      let mlen = String.length marker in
+      let slen = String.length p in
+      let rec find i =
+        if i + mlen > slen then false
+        else if String.sub p i mlen = marker then true
+        else find (i + 1)
+      in
+      find 0)
+    allowed_norms
+
+let raw_looks_like_playground_subdir (raw : string) : bool =
+  starts_with ~prefix:"repos/" raw
+  || starts_with ~prefix:"mind/" raw
+  || raw = "repos"
+  || raw = "mind"
+
 let format_path_rejection ~(raw : string) ~(resolved : string)
     ~(allowed_norms : string list) : string =
   let resolved_hint =
@@ -181,9 +204,21 @@ let format_path_rejection ~(raw : string) ~(resolved : string)
     else
       ""
   in
+  let playground_hint =
+    if raw_looks_like_playground_subdir raw then
+      match playground_root_of_allowed allowed_norms with
+      | Some pg ->
+        Printf.sprintf
+          ". Your raw path starts with 'repos/' or 'mind/'; prepend your \
+           playground root (try path=%s/%s) or call keeper_context_status \
+           and use the playground_repos / playground_mind variables."
+          pg raw
+      | None -> ""
+    else ""
+  in
   Printf.sprintf
-    "path_not_in_allowed_paths: %s%s (allowed: [%s])"
-    raw resolved_hint (String.concat ", " allowed_norms)
+    "path_not_in_allowed_paths: %s%s (allowed: [%s])%s"
+    raw resolved_hint (String.concat ", " allowed_norms) playground_hint
 
 let resolve_keeper_target_path ~(config : Coord.config)
     ~(allowed_paths : string list) ~(raw_path : string)

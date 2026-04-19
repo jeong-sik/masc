@@ -37,7 +37,7 @@ let test_git_op_read () =
 let test_git_op_read_with_cwd_flag () =
   match Git_op.of_argv [ "git"; "-C"; "/tmp/repo"; "status" ] with
   | Ok (Git_op.Read _) -> ()
-  | _ -> failwith "git -C /tmp/repo status must be Read"
+  | _ -> assert false (* git -C /tmp/repo status must be Read *)
 
 let test_git_op_unknown () =
   match Git_op.of_argv [ "git"; "exotic-subcmd" ] with

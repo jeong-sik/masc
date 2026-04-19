@@ -56,11 +56,16 @@ let string_of_status = function
   | Idle -> "idle"
   | Suspended -> "suspended"
 
-let status_of_string = function
-  | "active" -> Active
-  | "idle" -> Idle
-  | "suspended" -> Suspended
-  | _ -> Idle
+(* Issue #8612: returns [Some] only for the 3 wire-format names; any
+   other input returns [None]. The previous variant-returning shape
+   silently routed unknowns to [Idle], a *valid* downstream variant,
+   which is silent JSON-decode miscategorization. Same anti-pattern
+   class as #8605 (execution_scope) and #8607 (agent_health). *)
+let status_of_string_opt = function
+  | "active" -> Some Active
+  | "idle" -> Some Idle
+  | "suspended" -> Some Suspended
+  | _ -> None
 
 let session_to_json session =
   `Assoc [
@@ -82,7 +87,15 @@ let session_of_json json =
     started_at = json |> member "started_at" |> to_float;
     last_activity = json |> member "last_activity" |> to_float;
     turn_count = json |> member "turn_count" |> to_int;
-    status = json |> member "status" |> to_string |> status_of_string;
+    (* Issue #8612: a corrupt or mis-versioned status field used to
+       silently decode as [Idle]. We now fail-closed at the boundary:
+       unknown status defaults to [Suspended] so the session is visible
+       to the operator (and won't be skipped by lifecycle GC that treats
+       Idle as "nothing to clean up"). *)
+    status =
+      json |> member "status" |> to_string
+      |> status_of_string_opt
+      |> Option.value ~default:Suspended;
   }
 
 (** {1 Creation} *)

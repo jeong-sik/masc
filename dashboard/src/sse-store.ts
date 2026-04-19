@@ -18,6 +18,7 @@ import {
   keeperHeartbeats,
   invalidateDashboardCache,
   hydrateExecutionSnapshot,
+  refreshDashboard,
   refreshExecution,
   refreshBoard,
   serverStatus,
@@ -282,6 +283,9 @@ async function hydrateAfterReconnect(): Promise<void> {
     console.warn('[SSE] reconnect OAS replay failed', err instanceof Error ? err.message : err)
   }
   requestNamespaceTruthNow()
+  void refreshDashboard({ force: true }).catch(err =>
+    console.warn('[SSE] reconnect dashboard refresh failed', err instanceof Error ? err.message : err),
+  )
   void refreshActiveRoute().catch(err =>
     console.warn('[SSE] reconnect route refresh failed', err instanceof Error ? err.message : err),
   )
@@ -291,6 +295,12 @@ async function hydrateAfterReconnect(): Promise<void> {
     if (namespaceTruthError.value) {
       requestNamespaceTruthNow()
     }
+    void refreshDashboard({ force: true }).catch(retryErr =>
+      console.warn(
+        '[SSE] reconnect dashboard retry failed',
+        retryErr instanceof Error ? retryErr.message : retryErr,
+      ),
+    )
     void refreshActiveRoute().catch(retryErr =>
       console.warn('[SSE] reconnect route retry failed', retryErr instanceof Error ? retryErr.message : retryErr),
     )

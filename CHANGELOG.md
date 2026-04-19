@@ -43,6 +43,14 @@
   후속 (phase 2 / 축 9): server endpoint in-process 전환(Eio.Process ~cwd),
   `--fix` 버튼 HITL approval, 실제 callback 확장.
 
+### Changed
+
+- **OAS pin ratchet → `main@cfcd85a9`.** Keeps the `0.160.1` dependency
+  floor but advances the runtime pin past `f70fd95e` to pick up OAS
+  #1018's stale Swarm-semantics doc cleanup, so local `check-oas-pin`
+  drift warnings disappear and MASC tracks the current upstream main
+  truth again.
+
 
 ## [0.10.1] - 2026-04-19
 

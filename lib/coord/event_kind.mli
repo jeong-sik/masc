@@ -28,7 +28,7 @@ module Task : sig
     | Linked
 
   val to_string : t -> string
-  (** Canonical dotted-form wire name ([\"task.claimed\"] etc.). *)
+  (** Canonical dotted-form wire name ([task.claimed] etc.). *)
 
   val of_string : string -> t option
   (** Inverse of {!to_string}. Returns [None] for unknown inputs so

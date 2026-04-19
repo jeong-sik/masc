@@ -191,11 +191,14 @@ let manual_help_entry name =
           short_description =
             "Apply auth or unit-policy updates through a single admin entrypoint.";
           when_to_use =
-            "Use when you need to change auth settings or update a unit policy envelope.";
+            "Use when you need to change auth settings.";
           key_constraints =
             [
-              "Section must be one of: auth | unit_policy.";
-              "Unit tool/model allowlists now affect command-plane routing and assignment when capability tags are present; worker-runtime per-tool enforcement is still a follow-up slice.";
+              (* Issue #8546: trimmed to current handler capability.
+                 Previously listed unit_policy / keeper_policy which had no
+                 handler and caused conflicting responses. *)
+              "Section must be: auth.";
+              "Unit tool/model allowlist plumbing is tracked separately and not yet exposed through this entrypoint.";
             ];
           details_markdown =
             "Delegates to the existing truthful write paths: Config mode updates, Auth config persistence, managed-operation unit policy updates, and keeper meta policy updates. Command-plane unit policy now feeds routing/assignment gates; deeper worker-runtime enforcement remains a separate step.";

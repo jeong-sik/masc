@@ -66,6 +66,14 @@ let test_run_argv_with_status_fallback_surfaces_spawn_error () =
   check bool "missing command output surfaced" true
     (contains output "process_eio_error")
 
+let test_run_argv_with_status_fallback_enforces_timeout () =
+  Process_eio.reset_for_testing ();
+  let status, _output =
+    Process_eio.run_argv_with_status ~timeout_sec:1.0 [ "/bin/sleep"; "5" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> -1 in
+  check int "fallback timeout exit code" 124 code
+
 let test_init_exposes_complete_runtime () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -213,6 +221,8 @@ let () =
             test_run_argv_fallback_surfaces_spawn_error;
           test_case "argv-with-status-fallback-surfaces-spawn-error" `Quick
             test_run_argv_with_status_fallback_surfaces_spawn_error;
+          test_case "argv-with-status-fallback-enforces-timeout" `Quick
+            test_run_argv_with_status_fallback_enforces_timeout;
           test_case "init-exposes-complete-runtime" `Quick
             test_init_exposes_complete_runtime;
         ] );

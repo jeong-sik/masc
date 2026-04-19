@@ -40,3 +40,20 @@ module Task = struct
     [ Created; Claimed; Started; Released; Done; Cancelled;
       Submit_for_verification; Approved; Rejected; Linked ]
 end
+
+module Message = struct
+  type t =
+    | Broadcast
+    | Mentioned
+
+  let to_string = function
+    | Broadcast -> "message.broadcast"
+    | Mentioned -> "message.mentioned"
+
+  let of_string = function
+    | "message.broadcast" -> Some Broadcast
+    | "message.mentioned" -> Some Mentioned
+    | _ -> None
+
+  let all = [ Broadcast; Mentioned ]
+end

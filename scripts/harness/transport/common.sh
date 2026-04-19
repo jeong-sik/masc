@@ -11,7 +11,15 @@ source "${ROOT_DIR}/scripts/harness/lib/server_bootstrap.sh"
 MASC_HTTP_PORT="${MASC_HTTP_PORT:-$(harness_pick_free_port)}"
 MASC_GRPC_PORT="${MASC_GRPC_PORT:-$(harness_pick_free_port)}"
 MASC_WS_PORT="${MASC_WS_PORT:-$(harness_pick_free_port)}"
-MASC_BASE_URL="http://127.0.0.1:${MASC_HTTP_PORT}"
+# Issue #8423: `MASC_HTTP_BASE_URL` is the documented name the OCaml
+# server reads (server_bootstrap_http.ml, env_config_core.ml). The
+# harness historically only exported `MASC_BASE_URL`, so an operator
+# setting `MASC_HTTP_BASE_URL` saw the real service while `verify_*.sh`
+# kept probing the free-port default. Honour the documented name first,
+# keep `MASC_BASE_URL` as a legacy alias so the 7 in-tree `verify_*.sh`
+# callers keep working until a follow-up PR migrates them.
+MASC_HTTP_BASE_URL="${MASC_HTTP_BASE_URL:-http://127.0.0.1:${MASC_HTTP_PORT}}"
+MASC_BASE_URL="${MASC_HTTP_BASE_URL}"
 MASC_GRPC_ADDR="127.0.0.1:${MASC_GRPC_PORT}"
 MASC_WS_URL="ws://127.0.0.1:${MASC_WS_PORT}"
 
@@ -19,6 +27,7 @@ export ROOT_DIR
 export MASC_HTTP_PORT
 export MASC_GRPC_PORT
 export MASC_WS_PORT
+export MASC_HTTP_BASE_URL
 export MASC_BASE_URL
 export MASC_GRPC_ADDR
 export MASC_WS_URL

@@ -49,12 +49,13 @@
   - Sidecar honours configured runtime paths (#8267).
   - `oas_sse_bridge` surfaces `keeper_name` on envelope `agent_name` (#8261).
 
-- **OAS pin bump → `v0.160.0`.** `agent_sdk` floor raised from `0.159.0`
-  to `0.160.0` (dune-project + masc_mcp.opam + pin script SHA
-  `e5ec2d1a608a320d420b66b7b3e1b33c8cef0dd8`). Picks up the event-bus
+- **OAS pin bump → `v0.160.1`.** `agent_sdk` floor raised from `0.159.0`
+  to `0.160.1` (dune-project + masc_mcp.opam + pin script SHA
+  `43527e8095f2f0c35aa84853d941025a0031aea0`). Keeps the event-bus
   backpressure-policy API (`Block` / `Drop_oldest` / `Drop_newest`),
   per-subscription + per-bus stats, and `subscribe ?purpose` labels from
-  OAS #998 so slow subscribers become observable instead of silent.
+  OAS #998, and now tracks OAS PR #1004 where the deprecated
+  `agent_sdk_swarm` package was removed from the upstream tree.
 
 - **Keeper `[keeper.oas_env]` TOML table.** Per-keeper OAS transport env
   vars are now declarative. `config/keepers/<name>.toml` accepts a new

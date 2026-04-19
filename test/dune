@@ -370,6 +370,7 @@
         test_task_dispatch
         test_drift_guard_core
         test_verify_handoff_tool
+        test_param_type_classifier
         test_tool_contract_truth
         test_file_lock_eio
         test_error_logging_coverage
@@ -529,6 +530,7 @@
         test_task_dispatch
         test_drift_guard_core
         test_verify_handoff_tool
+        test_param_type_classifier
         test_tool_contract_truth
         test_file_lock_eio
         test_error_logging_coverage

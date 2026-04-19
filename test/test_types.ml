@@ -766,6 +766,33 @@ let () =
           Mcp_session.valid_action_strings
           Tool_schemas_inline_infra.mcp_session_action_enum_strings);
     ];
+    "keeper_shell_op_ssot", [
+      (* Issue #8524: Keeper_exec_shell.shell_op Variant has 16
+         constructors but tool_shard.ml schema enum hand-listed only
+         15 — git_worktree was missing even though the dispatcher
+         accepted it (line 1021) and supported_ops self-advertised it
+         (line 1383). 6th REAL bug found via this sweep. Same shape
+         as #8430 / #8471 / #8474 / #8493 / #8513. *)
+      Alcotest.test_case "witness covers all 16 variants" `Quick (fun () ->
+        let module S = Masc_mcp.Keeper_exec_shell in
+        let witness o =
+          let actual = S.shell_op_to_string o in
+          if not (List.mem actual S.valid_shell_op_strings) then
+            Alcotest.failf "shell_op_to_string %S not in valid_shell_op_strings" actual
+        in
+        witness S.Pwd; witness S.Ls; witness S.Cat; witness S.Rg;
+        witness S.Git_status; witness S.Find; witness S.Head; witness S.Tail;
+        witness S.Wc; witness S.Tree; witness S.Git_log; witness S.Git_diff;
+        witness S.Git_worktree; witness S.Bash; witness S.Git_clone; witness S.Gh;
+        Alcotest.(check int) "count" 16 (List.length S.valid_shell_op_strings));
+      Alcotest.test_case "schema mirror matches SSOT" `Quick (fun () ->
+        Alcotest.(check (list string)) "tool_shard mirror == SSOT"
+          Masc_mcp.Keeper_exec_shell.valid_shell_op_strings
+          Masc_mcp.Tool_shard.keeper_shell_op_enum_strings);
+      Alcotest.test_case "git_worktree now in schema" `Quick (fun () ->
+        Alcotest.(check bool) "git_worktree present" true
+          (List.mem "git_worktree" Masc_mcp.Tool_shard.keeper_shell_op_enum_strings));
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

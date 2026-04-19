@@ -1,6 +1,57 @@
 open Keeper_types
 open Keeper_exec_shared
 
+(* Issue #8524: Variant SSOT for keeper_shell op.  Adding a constructor
+   forces compilation in [shell_op_to_string] AND extends
+   [valid_shell_op_strings]; the schema in [tool_shard.ml] mirrors
+   the SSOT (cycle-aware, sync test) and [supported_ops] in
+   [handle_keeper_shell_unsupported] derives from it (replaced the
+   hand-rolled list which had drifted from the dispatcher). The
+   schema previously omitted [git_worktree] even though the
+   dispatcher and supported_ops both list it — same drift class as
+   #8430 / #8471 / #8474 / #8493 / #8513. *)
+type shell_op =
+  | Pwd
+  | Ls
+  | Cat
+  | Rg
+  | Git_status
+  | Find
+  | Head
+  | Tail
+  | Wc
+  | Tree
+  | Git_log
+  | Git_diff
+  | Git_worktree
+  | Bash
+  | Git_clone
+  | Gh
+
+let shell_op_to_string = function
+  | Pwd -> "pwd"
+  | Ls -> "ls"
+  | Cat -> "cat"
+  | Rg -> "rg"
+  | Git_status -> "git_status"
+  | Find -> "find"
+  | Head -> "head"
+  | Tail -> "tail"
+  | Wc -> "wc"
+  | Tree -> "tree"
+  | Git_log -> "git_log"
+  | Git_diff -> "git_diff"
+  | Git_worktree -> "git_worktree"
+  | Bash -> "bash"
+  | Git_clone -> "git_clone"
+  | Gh -> "gh"
+
+let all_shell_ops =
+  [ Pwd; Ls; Cat; Rg; Git_status; Find; Head; Tail; Wc; Tree;
+    Git_log; Git_diff; Git_worktree; Bash; Git_clone; Gh ]
+
+let valid_shell_op_strings = List.map shell_op_to_string all_shell_ops
+
 (** Shell operation timeout constants.
     - [io_timeout_sec]: commands that may block on network/disk I/O
       (git status, ls with large dirs, custom bash).
@@ -1377,12 +1428,11 @@ let handle_keeper_shell
           ; "error", `String "unsupported_op"
           ; "op", `String op
           ; ( "supported_ops"
+              (* Issue #8524: derive from Variant SSOT instead of a
+                 hand-rolled duplicate. *)
             , `List
                 (List.map
                    (fun name -> `String name)
-                   [ "pwd"; "ls"; "cat"; "rg"; "git_status";
-                     "find"; "head"; "tail"; "wc"; "tree";
-                     "git_log"; "git_diff"; "git_worktree"; "bash";
-                     "git_clone"; "gh" ]) )
+                   valid_shell_op_strings) )
           ])
 ;;

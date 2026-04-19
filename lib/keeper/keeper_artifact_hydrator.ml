@@ -15,9 +15,11 @@ let try_hydrate ~store ~sha256 ~marker =
     match Tool_blob_store.fetch store ~sha256 with
     | Some bytes -> Some bytes
     | None -> None
-  with _ ->
-    ignore marker;
-    None
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ ->
+      ignore marker;
+      None
 
 let hydrate_block ~store ~remaining
     (block : Agent_sdk.Types.content_block) : Agent_sdk.Types.content_block =

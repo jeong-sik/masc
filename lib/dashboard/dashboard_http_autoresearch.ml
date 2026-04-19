@@ -186,7 +186,9 @@ let load_state_cached ~base_path loop_id =
              Hashtbl.replace persisted_summaries_cache loop_id (mtime, summary);
              result
          | None -> None)
-  with _ -> None
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> None
 
 (** Build the loops list JSON for GET /api/v1/autoresearch/loops.
     Merges in-memory active loops with persisted-only loops.

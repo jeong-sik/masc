@@ -1088,7 +1088,7 @@ let () = test "claim_next_returns_no_unclaimed_when_all_tasks_terminal" (fun () 
   ]) in
   (* Now try to claim next from a different agent in same room *)
   let agent2_ctx = make_test_ctx_with_agent "agent-2" in
-  let (success, msg) = Tool_task.handle_claim_next agent2_ctx (`Assoc []) in
+  let (_success, msg) = Tool_task.handle_claim_next agent2_ctx (`Assoc []) in
   (* Should report no unclaimed tasks (success=true, message contains "No") *)
   assert (String.length msg > 0);
   match String.index_opt msg 'N' with
@@ -1102,7 +1102,7 @@ let () = test "claim_next_filters_out_cancelled_tasks" (fun () ->
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Cancelled task")]) in
   let _ = Coord.cancel_task_r ctx.config ~agent_name:ctx.agent_name ~task_id:"task-001" ~reason:"not needed" in
   let agent2_ctx = make_test_ctx_with_agent "agent-claim-2" in
-  let (success, msg) = Tool_task.handle_claim_next agent2_ctx (`Assoc []) in
+  let (_success, msg) = Tool_task.handle_claim_next agent2_ctx (`Assoc []) in
   match String.index_opt msg 'N' with
   | Some _ -> () (* "No unclaimed" is correct *)
   | None -> failwith (Printf.sprintf "Expected no tasks available, got: %s" msg)

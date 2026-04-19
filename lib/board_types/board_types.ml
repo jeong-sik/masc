@@ -80,14 +80,28 @@ module Agent_id : sig
 end = struct
   type t = string
 
-  (* Agent names: alphanumeric, dash, underscore, dot. Max 32 chars *)
+  (* Agent names: alphanumeric, dash, underscore, dot.
+     Issue #8625: limit was 32, but [Validation.Agent_id.validate]
+     (used by masc_join / masc_claim_next / masc_transition) allows 64.
+     Generated worker identities like
+     [codex-task-claimer-20260419t102609z] (36 chars) joined and
+     transitioned tasks fine but were rejected by [masc_board_post]
+     because of this stricter local limit. Aligned with the canonical
+     validator. *)
+  let max_agent_id_len = 64
   let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9._-]+$|} |> Re.compile
 
   let of_string s =
     let s = String.trim s in
     let len = String.length s in
-    if len >= 1 && len <= 32 && Re.execp valid_pattern s then Ok s
-    else Error (Validation_error (Printf.sprintf "Invalid agent_id: %s" s))
+    if len >= 1 && len <= max_agent_id_len && Re.execp valid_pattern s then
+      Ok s
+    else
+      Error
+        (Validation_error
+           (Printf.sprintf
+              "Invalid agent_id: %s (max %d chars, must match %s)"
+              s max_agent_id_len "[a-zA-Z0-9._-]+"))
 
   let to_string t = t
 end

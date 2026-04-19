@@ -54,12 +54,18 @@ let publish_board_post (_bus : Agent_sdk.Event_bus.t) ~agent_name ~post_id =
   ] in
   masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.board_post", payload)))
 
-(** Publish a task state change event to the shared Event_bus. *)
-let publish_task_transition (_bus : Agent_sdk.Event_bus.t) ~agent_name ~task_id ~transition =
+(** Publish a task state change event to the shared Event_bus.
+    #8605 family: [transition] is the canonical [Types.task_action]
+    variant -- typos at call sites fail to compile. JSON wire format
+    ("claim" / "start" / "done" / ...) is preserved via
+    [Types.task_action_to_string]. Sibling refactor of #8846 (the
+    Coord-side hook for the same transition vocabulary). *)
+let publish_task_transition (_bus : Agent_sdk.Event_bus.t) ~agent_name ~task_id
+    ~(transition : Types.task_action) =
   let payload = `Assoc [
     ("agent_name", `String agent_name);
     ("task_id", `String task_id);
-    ("transition", `String transition);
+    ("transition", `String (Types.task_action_to_string transition));
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.task_transition", payload)))

@@ -694,6 +694,57 @@ stylesheet
     color: #6a5848;
     flex-shrink: 0;
   }
+
+  .signet {
+    position: fixed;
+    left: 1.75rem;
+    bottom: 1.25rem;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 32% 28%, #c94a3a 0%, #a01818 40%, #5a0a0a 80%, #2a0404 100%);
+    border: 2px solid #8a6a28;
+    box-shadow:
+      inset 0 0 0 1px rgba(232, 216, 184, 0.18),
+      inset -6px -8px 14px rgba(0, 0, 0, 0.55),
+      inset 5px 4px 10px rgba(232, 216, 184, 0.15),
+      0 6px 14px rgba(160, 24, 24, 0.35),
+      0 0 22px rgba(138, 106, 40, 0.22);
+    transform: rotate(-14deg);
+    z-index: 4;
+    pointer-events: none;
+    display: grid;
+    place-items: center;
+    font-family: 'Cinzel', serif;
+    font-weight: 600;
+    color: #e8d8b8;
+    font-size: 22px;
+    letter-spacing: 0.04em;
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6), 0 0 8px rgba(232, 216, 184, 0.35);
+  }
+
+  .signet::before {
+    content: "";
+    position: absolute;
+    inset: 6px;
+    border-radius: 50%;
+    border: 1px dashed rgba(232, 216, 184, 0.22);
+    transform: rotate(14deg);
+  }
+
+  .signet::after {
+    content: "masc · seal";
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 50%;
+    transform: translateX(-50%) rotate(14deg);
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 8px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #5a3028;
+    white-space: nowrap;
+  }
 |}]
 
 let level_class level =
@@ -987,6 +1038,7 @@ let render_response (response : Logs_types.response) : Node.t =
         ]
     ; tape
     ; view_roster ()
+    ; Node.div ~attrs:[ Style.signet ] [ Node.text "M" ]
     ]
 ;;
 

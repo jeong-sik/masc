@@ -28,7 +28,9 @@ type state = {
 }
 
 let governance_dir base_path =
-  Filename.concat (Filename.concat base_path ".masc") "governance"
+  Filename.concat
+    (Coord_utils.masc_dir_from_base_path ~base_path)
+    "governance"
 
 (** Legacy single-file path (for fallback reads). *)
 let judgments_path base_path =

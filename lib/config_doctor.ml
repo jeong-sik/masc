@@ -71,10 +71,12 @@ let canonicalize_path ~cwd path =
   | Unix.Unix_error _ | Sys_error _ | Invalid_argument _ -> absolute
 
 let local_base_config_root ~base_path =
-  Filename.concat (Filename.concat base_path ".masc") "config"
+  Filename.concat
+    (Coord_utils.masc_dir_from_base_path ~base_path)
+    "config"
 
 let runtime_data_root ~base_path =
-  Filename.concat base_path ".masc"
+  Coord_utils.masc_dir_from_base_path ~base_path
 
 let repo_config_seed_path (inputs : inputs) =
   [

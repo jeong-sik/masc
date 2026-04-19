@@ -34,7 +34,9 @@ let current_status_lines ~repo_root =
   |> List.filter (fun line -> line <> "")
 
 let state_dir ~repo_root =
-  Filename.concat (Filename.concat repo_root ".masc") "live-context"
+  Filename.concat
+    (Coord_utils.masc_dir_from_base_path ~base_path:repo_root)
+    "live-context"
 
 let state_file ~repo_root ~actor_key =
   let safe_key = Coord_utils.safe_filename actor_key in

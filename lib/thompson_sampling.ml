@@ -76,7 +76,7 @@ let stats_path () =
         (* Fallback: try to get from environment or use current dir *)
         Env_config_core.base_path ()
   in
-  let masc_dir = Filename.concat base ".masc" in
+  let masc_dir = Coord_utils.masc_dir_from_base_path ~base_path:base in
   Fs_compat.mkdir_p masc_dir;
   Filename.concat masc_dir "autonomy_stats.jsonl"
 

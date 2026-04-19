@@ -177,7 +177,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd body ~extra_headers:cors
 
-      | `GET, "/health/live" ->
+      | `GET, p when String.equal p Server_health_paths.liveness ->
           let body =
             Yojson.Safe.to_string
               (`Assoc [
@@ -187,7 +187,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd body ~extra_headers:cors
 
-      | `GET, "/health/ready" ->
+      | `GET, p when String.equal p Server_health_paths.readiness ->
           let current = Server_startup_state.(!state) in
           let body, status =
             if current.state_ready then

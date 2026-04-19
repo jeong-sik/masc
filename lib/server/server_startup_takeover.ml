@@ -108,7 +108,7 @@ let read_status_line fd ~timeout_sec =
   in
   loop ()
 
-let probe_liveness ?(timeout_sec = 3.0) ?(path = "/health/live") port =
+let probe_liveness ?(timeout_sec = 3.0) ?(path = Server_health_paths.liveness) port =
   Safe_ops.protect ~default:false (fun () ->
     let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
     Fun.protect

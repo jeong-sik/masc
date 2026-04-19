@@ -583,6 +583,25 @@ let () =
           Masc_mcp.Keeper_memory_policy.valid_memory_kind_strings
           Masc_mcp.Tool_shard.memory_kind_enum_strings);
     ];
+    "keeper_shell_op_ssot", [
+      (* Issue #8524: [keeper_shell.op] schema enum dropped git_worktree
+         even though the handler and the [supported_ops] self-advert
+         listed it — same drift class as #8430 / #8471 / #8474 / #8493.
+         The new SSOT [valid_keeper_shell_op_strings] is consumed by the
+         Tool_shard mirror and by the self-advert response, so drift now
+         fails this test at CI time. *)
+      Alcotest.test_case "git_worktree is in SSOT" `Quick (fun () ->
+        Alcotest.(check bool) "git_worktree present" true
+          (List.mem "git_worktree"
+             Masc_mcp.Keeper_exec_shell.valid_keeper_shell_op_strings));
+      Alcotest.test_case "SSOT has 16 ops" `Quick (fun () ->
+        Alcotest.(check int) "count" 16
+          (List.length Masc_mcp.Keeper_exec_shell.valid_keeper_shell_op_strings));
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        Alcotest.(check (list string)) "tool_shard mirror == SSOT"
+          Masc_mcp.Keeper_exec_shell.valid_keeper_shell_op_strings
+          Masc_mcp.Tool_shard.keeper_shell_op_enum_strings);
+    ];
     "fs_write_mode_ssot", [
       (* Issue #8490: introduces [fs_write_mode] Variant where 5 sites
          previously hand-validated raw strings + relied on an

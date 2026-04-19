@@ -37,6 +37,11 @@ val fs_write_mode_enum_strings : string list
     in [test_types.ml :: vote_direction_ssot] catches drift. *)
 val vote_direction_enum_strings : string list
 
+(** Issue #8524: hand-mirrored from
+    [Keeper_exec_shell.valid_keeper_shell_op_strings]. Sync regression
+    test in [test_types.ml :: keeper_shell_op_ssot] catches drift. *)
+val keeper_shell_op_enum_strings : string list
+
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;

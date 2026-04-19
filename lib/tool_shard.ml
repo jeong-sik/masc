@@ -62,6 +62,17 @@ let sort_order_enum_strings =
 let vote_direction_enum_strings =
   [ "up"; "down" ]
 
+(** Issue #8524: hand-mirrored from
+    [Keeper_exec_shell.valid_keeper_shell_op_strings]. Same
+    cycle-avoidance pattern (Tool_shard -> Keeper_* -> Tool_shard).
+    Previous hand-list dropped [git_worktree] even though the handler
+    and [supported_ops] self-advert both listed it. Sync regression
+    test in [test_types.ml :: keeper_shell_op_ssot] catches drift. *)
+let keeper_shell_op_enum_strings =
+  [ "pwd"; "ls"; "cat"; "rg"; "git_status"; "find"; "head"; "tail";
+    "wc"; "tree"; "git_log"; "git_diff"; "git_worktree"; "bash";
+    "git_clone"; "gh" ]
+
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;
@@ -345,7 +356,7 @@ let shell_tools : Types.tool_schema list = [
   {
     name = "keeper_shell";
     description = "Run a safe project shell command. \
-ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash, git_clone, gh. \
+ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, git_worktree, bash, git_clone, gh. \
 Read-only ops default to the keeper playground. \
 IMPORTANT: paths resolve automatically — use 'repos/X' not '.masc/playground/your-name/repos/X'. Never include the playground prefix in path or cwd. \
 Use cwd to target an explicit allowed directory or cloned repo. \
@@ -359,7 +370,7 @@ git_log/git_diff for repo history, bash for curl/jq/env/which, gh for GitHub PR/
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("op", `Assoc [("type", `String "string"); ("enum", `List [`String "pwd"; `String "ls"; `String "cat"; `String "rg"; `String "git_status"; `String "find"; `String "head"; `String "tail"; `String "wc"; `String "tree"; `String "git_log"; `String "git_diff"; `String "bash"; `String "git_clone"; `String "gh"]); ("description", `String "Command to run")]);
+        ("op", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) keeper_shell_op_enum_strings)); ("description", `String "Command to run")]);
         ("cmd", `Assoc [("type", `String "string"); ("description", `String "gh subcommand for op=gh, e.g. 'pr list --state open'. Do NOT put --repo in cmd; current working dir determines the repo.")]);
         ("path", `Assoc [("type", `String "string"); ("description", `String "Target path for ls/cat/rg/find/head/tail/wc/tree")]);
         ("cwd", `Assoc [("type", `String "string"); ("description", `String "Optional working directory for pwd/git_status/git_log/git_diff/git_worktree/bash. Must stay within keeper playground or an explicit allowed path.")]);

@@ -17,6 +17,16 @@ let io_timeout_sec = env_float "MASC_KEEPER_IO_TIMEOUT_SEC" 30.0
 let read_timeout_sec = env_float "MASC_KEEPER_READ_TIMEOUT_SEC" 15.0
 let user_timeout_max_sec = env_float "MASC_KEEPER_USER_TIMEOUT_MAX_SEC" 180.0
 
+(** Canonical list of [keeper_shell.op] identifiers accepted by the
+    handler below. SSOT: the schema enum (via [Tool_shard] mirror) and
+    the [supported_ops] self-advert both derive from this list. Issue
+    #8524 fixed a drift where the hand-listed schema dropped
+    [git_worktree] even though the handler and self-advert listed it. *)
+let valid_keeper_shell_op_strings : string list =
+  [ "pwd"; "ls"; "cat"; "rg"; "git_status"; "find"; "head"; "tail";
+    "wc"; "tree"; "git_log"; "git_diff"; "git_worktree"; "bash";
+    "git_clone"; "gh" ]
+
 let normalize_gh_command (cmd : string) : string =
   let tokens =
     cmd
@@ -1380,9 +1390,6 @@ let handle_keeper_shell
             , `List
                 (List.map
                    (fun name -> `String name)
-                   [ "pwd"; "ls"; "cat"; "rg"; "git_status";
-                     "find"; "head"; "tail"; "wc"; "tree";
-                     "git_log"; "git_diff"; "git_worktree"; "bash";
-                     "git_clone"; "gh" ]) )
+                   valid_keeper_shell_op_strings) )
           ])
 ;;

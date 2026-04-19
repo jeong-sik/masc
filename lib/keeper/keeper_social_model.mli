@@ -62,6 +62,10 @@ type accountability_claim = {
 
 val speech_act_to_string : speech_act -> string
 val delivery_surface_to_string : delivery_surface -> string
+val delivery_surface_view_of_meta :
+  Keeper_types.keeper_meta -> delivery_surface option
+val delivery_surface_view_source_of_meta :
+  Keeper_types.keeper_meta -> string option
 val model_id_to_string : model_id -> string
 val model_id_of_string : string -> model_id option
 val is_known_social_model : string -> bool

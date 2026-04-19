@@ -199,6 +199,15 @@ let keeper_list_row_json ~runtime_class config name =
               if String.trim meta.runtime.last_speech_act = ""
               then `Null
               else `String meta.runtime.last_speech_act );
+            ( "delivery_surface_view",
+              Json_util.string_opt_to_json
+                (Keeper_social_model.delivery_surface_view_of_meta meta
+                 |> Option.map Keeper_social_model.delivery_surface_to_string)
+            );
+            ( "delivery_surface_view_source",
+              Json_util.string_opt_to_json
+                (Keeper_social_model.delivery_surface_view_source_of_meta meta)
+            );
             ( "last_social_transition_reason",
               if String.trim meta.runtime.last_social_transition_reason = ""
               then `Null

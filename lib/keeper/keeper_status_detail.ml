@@ -1082,6 +1082,13 @@ let handle_keeper_status ctx args : tool_result =
                if String.trim m.runtime.last_speech_act = ""
                then `Null
                else `String m.runtime.last_speech_act);
+             ("delivery_surface_view",
+               Json_util.string_opt_to_json
+                 (Keeper_social_model.delivery_surface_view_of_meta m
+                  |> Option.map Keeper_social_model.delivery_surface_to_string));
+             ("delivery_surface_view_source",
+               Json_util.string_opt_to_json
+                 (Keeper_social_model.delivery_surface_view_source_of_meta m));
              ("last_transition_reason",
                if String.trim m.runtime.last_social_transition_reason = ""
                then `Null

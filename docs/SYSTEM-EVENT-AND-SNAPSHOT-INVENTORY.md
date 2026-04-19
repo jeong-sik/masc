@@ -63,6 +63,27 @@ The following direct registry mutation helpers update fields that the composite 
 - `set_turn_selected_model`
 - `mark_turn_finished`
 
+Current code cross-check: `keeper_unified_turn.ml` still calls these helpers directly in the live turn path
+(`1711-1731`, `1781-1836`, `1934-2074` in the 2026-04-18 tree), so this is not dead API
+surface. The helpers are active, but they remain silent with respect to
+`keeper_composite_changed`.
+
+| Helper | Current direct caller(s) | Composite fields touched | Emits `keeper_composite_changed`? |
+| --- | --- | --- | --- |
+| `mark_turn_started` | `keeper_unified_turn.ml:1716` | installs `current_turn_observation`, initializes `turn_phase=prompting`, resets compaction stage | No |
+| `mark_turn_measurement` | `keeper_unified_turn.ml:1718` | binds pending measurement into the current turn snapshot | No |
+| `set_turn_decision_stage` | `keeper_unified_turn.ml:1722` | updates `decision_stage` to `guard_ok` when measurement is present | No |
+| `set_turn_cascade_state` | `keeper_unified_turn.ml:1782`, `1818`, `1834` | updates `cascade_state`, and via `turn_phase_of_cascade_state` also changes `turn_phase` | No |
+| `set_turn_phase` | `keeper_unified_turn.ml:1786`, `1934`, `1979`, `1987`, `2033`, `2067`, `2072` | forces `turn_phase` during terminal/compaction/error paths | No |
+| `set_turn_selected_model` | `keeper_unified_turn.ml:1831` | stores `selected_model` after a successful cascade attempt | No |
+| `mark_turn_finished` | `keeper_unified_turn.ml:1730` (finally block) | clears `current_turn_observation`, ending the live turn snapshot | No |
+
+By contrast, the nearby `dispatch_keeper_phase_event` calls in the overflow-retry path
+(`keeper_unified_turn.ml:1939-1946`) eventually go through
+`Keeper_registry.dispatch_event_with_audit`, so those phase-machine events *do* emit
+`keeper_composite_changed`. The gap is therefore real: direct turn-mutation helpers update
+observer-visible composite fields without producing the composite tick.
+
 That means `keeper_composite_changed` is not a complete “all composite mutations” stream. It is specifically tied to successful `dispatch_event*` applications.
 
 ## Keeper Heartbeat Snapshot Timing

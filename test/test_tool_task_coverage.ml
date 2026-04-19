@@ -428,6 +428,7 @@ let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun 
   if not success_release then failwith result_release;
   match Coord.get_tasks_raw ctx.config with
   | [ task ] -> (
+      assert (task.do_not_reclaim_reason = None);
       match task.handoff_context with
       | Some handoff_context ->
           assert (handoff_context.summary = "blocked on integration fixture");

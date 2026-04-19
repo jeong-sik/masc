@@ -114,15 +114,15 @@ let judgment_generated_at json =
   |> Option.value ~default:0.0
 
 let normalize_disk_recommended_action judgment =
-  let canonical_tool =
-    match judgment |> member "recommended_action" |> member "resolved_tool" |> to_string_option with
-    | Some tool ->
-        let tool = tool |> String.trim |> String.lowercase_ascii in
-        if tool = "" then None else Some tool
-    | None -> None
-  in
   match judgment |> member "recommended_action" with
   | `Assoc action_fields ->
+      let canonical_tool =
+        match List.assoc_opt "resolved_tool" action_fields with
+        | Some (`String tool) ->
+            let tool = tool |> String.trim |> String.lowercase_ascii in
+            if tool = "" then None else Some tool
+        | _ -> None
+      in
       let normalized_action =
         `Assoc
           (List.map

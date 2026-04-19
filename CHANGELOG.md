@@ -43,6 +43,24 @@
   후속 (phase 2 / 축 9): server endpoint in-process 전환(Eio.Process ~cwd),
   `--fix` 버튼 HITL approval, 실제 callback 확장.
 
+- **CDAL verdict attribution on verification approve/reject legs (#8731).**
+  `tool_task.ml` 의 `Approve_verification` / `Reject_verification` 핸들러에
+  `Cdal_verdict_gate.gate_check` 호출을 추가. FSM-enabled 경로는
+  `Done_action` 를 우회하기 때문에 기존 CDAL gate 가 verification 승인
+  시점에 동작하지 않아 `/api/v1/attribution/summary` 에 `cdal_verdict`
+  gate 가 0 entries 로 남았다. 이제 `Env_config_runtime.Cdal.gate_enabled()`
+  (default true) 가 켜진 환경에서 approve/reject 양쪽이 verdict lookup +
+  `Dashboard_attribution` ring 기록을 남긴다.
+
+- **Verifier-role affordance gating (#8715).**
+  `keeper_unified_turn.ml` 의 `observed_triggers_of_observation` /
+  `observed_affordances_of_observation` 에 `?meta` optional param 을 추가하고
+  `pending_verification` trigger 및 `task_verify` affordance 를
+  `is_verifier_role_keeper` 가 참인 keeper 에만 노출한다. 그 외 persona 는
+  world observation 에서 verification 관련 신호를 보지 않으므로 fleet 노이즈
+  감소. `?meta=None` 호출은 legacy surface-to-all 유지 (diagnostics / snapshot
+  caller 호환).
+
 ### Changed
 
 - **OAS pin bump → `main@54f4aeab` (v0.162.0 + Gemini policy fix).**

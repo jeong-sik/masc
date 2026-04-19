@@ -279,15 +279,19 @@ let block_reason_to_string = function
   | Empty_command -> "command must not be empty"
   | Chain_or_redirect ->
     "Blocked: chaining (&&/||/;) and redirects (|/>) are not allowed. \
-     Run ONE command per call. Example: cmd='dune build'. \
-     Do NOT use: cmd='cd x && dune build' or cmd='rg foo | wc -l'. \
-     To write files, use keeper_fs_edit."
+     Run ONE command per call. \
+     To change directory, use the `cwd` argument instead of `cd` — \
+     Good: cwd='repos/masc-mcp', cmd='dune build'. \
+     Bad:  cmd='cd repos/masc-mcp && dune build'. \
+     For pipelines like `rg foo | wc -l`, run the primary command and \
+     process output at the LLM layer. To write files, use keeper_fs_edit."
   | Injection ->
     "Shell injection syntax (;, &&, standalone &, `, $) not allowed. \
-     Run ONE command per call. Example: cmd='dune build'. \
-     Do NOT use: cmd='cd x && dune build' or cmd='cmd1 ; cmd2'. \
-     keeper_bash runs from the playground root — pass full relative \
-     paths in the command itself (cmd='rg pattern lib/keeper/file.ml'). \
+     Run ONE command per call. \
+     To change directory, use the `cwd` argument — \
+     Good: cwd='repos/masc-mcp', cmd='dune build'. \
+     Bad:  cmd='cd repos/masc-mcp && dune build' or cmd='cmd1 ; cmd2'. \
+     Relative paths resolve from `cwd` (defaults to playground root). \
      For file writes, use keeper_fs_edit."
   | Process_substitution ->
     "Process substitution (<(...) or >(...)) is not allowed."

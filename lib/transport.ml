@@ -184,20 +184,35 @@ module Rest = struct
   let openapi_bearer_security =
     `List [ `Assoc [ ("bearerAuth", `List []) ] ]
 
-  let auth_mode_of_operation = function
-    | "masc_websocket_discovery" -> Public
-    | "masc_webrtc_offer" | "masc_webrtc_answer" -> Same_origin_or_bearer
+  (** Issue #8687: strict parser. Returns [None] when [name] is not in the
+      curated catalog so unregistered operations become operator-visible
+      rather than silently inheriting [Conditional_bearer]. Same shape as
+      #8615/#8670/#8682 SSOT parsers. *)
+  let auth_mode_of_operation_opt = function
+    | "masc_websocket_discovery" -> Some Public
+    | "masc_webrtc_offer" | "masc_webrtc_answer" -> Some Same_origin_or_bearer
     | "masc_broadcast"
     | "masc_operator_action"
-    | "masc_operator_confirm" -> Bearer_required
+    | "masc_operator_confirm" -> Some Bearer_required
     | "masc_status"
     | "masc_tasks"
     | "masc_who"
     | "masc_messages"
     | "masc_operator_snapshot"
     | "masc_operator_digest"
-    | "masc_agent_card" -> Conditional_bearer
-    | _ -> Conditional_bearer
+    | "masc_agent_card" -> Some Conditional_bearer
+    | _ -> None
+
+  (** Back-compat wrapper: callers (OpenAPI doc generation) still receive a
+      concrete [auth_mode] but a warning is logged so the catalog drift is
+      operator-visible. Issue #8687. *)
+  let auth_mode_of_operation name =
+    match auth_mode_of_operation_opt name with
+    | Some mode -> mode
+    | None ->
+        Log.Transport.warn
+          "auth_mode_of_operation: %S not in catalog → Conditional_bearer fallback (#8687)" name;
+        Conditional_bearer
 
   let auth_mode_of_mcp_path () = Conditional_bearer
 

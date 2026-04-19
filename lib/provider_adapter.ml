@@ -63,6 +63,7 @@ type gemini_direct_auth =
 
 let google_cloud_project_env = "GOOGLE_CLOUD_PROJECT"
 let google_cloud_location_env = "GOOGLE_CLOUD_LOCATION"
+let gemini_api_key_env = "GEMINI_API_KEY"
 
 let string_of_runtime_kind = function
   | Local -> "local"
@@ -761,7 +762,7 @@ let explicit_llama_model_label () =
   | Error msg -> invalid_arg msg
 
 let gemini_direct_available () =
-  env_present google_cloud_project_env || env_present "GEMINI_API_KEY"
+  env_present google_cloud_project_env || env_present gemini_api_key_env
 
 let configured_default_model_label_result () =
   match Env_config.Model_defaults.default_cascade_opt () with
@@ -930,7 +931,7 @@ let resolve_gemini_direct_auth () =
           location = vertex_location ();
         }
   | _ -> (
-      match Sys.getenv_opt "GEMINI_API_KEY" with
+      match Sys.getenv_opt gemini_api_key_env with
       | Some raw when String.trim raw <> "" -> Gemini_api_key
       | _ ->
           Gemini_auth_missing
@@ -1037,7 +1038,7 @@ let docker_auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.
     let uri = Uri.of_string cfg.base_url in
     if Masc_network_defaults.is_loopback_host_opt (Uri.host uri) then []
     else auth_env_keys_of_provider_kind cfg.kind
-  | Llm_provider.Provider_config.Gemini -> [ "GEMINI_API_KEY" ]
+  | Llm_provider.Provider_config.Gemini -> [ gemini_api_key_env ]
   | _ -> auth_env_keys_of_provider_kind cfg.kind
 
 let all_auth_env_keys () : string list =

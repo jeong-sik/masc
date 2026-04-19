@@ -13,15 +13,24 @@ let run_git_capture_lines ~workdir args =
         Unix.open_process_args_in "git"
           (Array.of_list argv)
       in
-      let rec loop acc =
-        match input_line ic with
-        | line -> loop (line :: acc)
-        | exception End_of_file -> List.rev acc
-      in
-      let lines = loop [] in
-      match Unix.close_process_in ic with
-      | Unix.WEXITED 0 -> Some lines
-      | _ -> None
+      (* Error-path close prevents pipe fd leak when [input_line] raises
+         mid-stream (Sys_error, Unix_error). Mirrors [build_identity.ml]
+         pattern. Issue #8538. *)
+      try
+        let rec loop acc =
+          match input_line ic with
+          | line -> loop (line :: acc)
+          | exception End_of_file -> List.rev acc
+        in
+        let lines = loop [] in
+        match Unix.close_process_in ic with
+        | Unix.WEXITED 0 -> Some lines
+        | _ -> None
+      with exn ->
+        ignore
+          (try Unix.close_process_in ic
+           with Unix.Unix_error _ | Sys_error _ -> Unix.WEXITED 1);
+        raise exn
     with Sys_error _ | Unix.Unix_error _ -> None
   in
   Eio_guard.run_in_systhread f

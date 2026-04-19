@@ -46,6 +46,7 @@ type claim_snapshot = {
 
 let store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
 let store_cache_mu = Eio.Mutex.create ()
+let window_read_count_for_testing_ref : int option ref = ref None
 
 let task_commitment_expiry_sec = 72.0 *. 3600.0
 let completion_claim_expiry_sec = 24.0 *. 3600.0
@@ -245,6 +246,9 @@ let resolution_event_of_json json =
   | _ -> None
 
 let read_window_entries (config : Coord_query.config) =
+  (match !window_read_count_for_testing_ref with
+  | Some count -> window_read_count_for_testing_ref := Some (count + 1)
+  | None -> ());
   let now = Time_compat.now () in
   let since = event_date_string (now -. (float_of_int summary_window_days *. 86400.0)) in
   let until = event_date_string now in
@@ -531,16 +535,10 @@ let risk_band_of_metrics ~evidence_coverage ~unsupported_completion_rate
   else
     "high"
 
-let accountability_summary_json (config : Coord_query.config) ~keeper_name
-    ~agent_name =
-  let now = Time_compat.now () in
-  let cutoff = now -. (float_of_int summary_window_days *. 86400.0) in
-  let snapshots =
-    materialize_claims (read_window_entries config)
-    |> List.filter (fun snapshot ->
-           String.equal snapshot.claim.agent_name agent_name
-           && created_at_unix snapshot.claim >= cutoff)
-  in
+let summary_cutoff now =
+  now -. (float_of_int summary_window_days *. 86400.0)
+
+let summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots =
   let supported_claims = ref 0 in
   let resolved_claims = ref 0 in
   let unsupported_completion_claims = ref 0 in
@@ -549,6 +547,7 @@ let accountability_summary_json (config : Coord_query.config) ~keeper_name
   let supported_task_commitments = ref 0 in
   let resolved_task_commitments = ref 0 in
   let recent_supported_claims = ref 0 in
+  let cutoff = summary_cutoff now in
   List.iter
     (fun (snapshot : claim_snapshot) ->
       let status = effective_status ~now snapshot in
@@ -657,6 +656,45 @@ let accountability_summary_json (config : Coord_query.config) ~keeper_name
       ("routing_hint", `String routing_hint);
       ("history", `List history);
     ]
+
+let accountability_summary_lookup (config : Coord_query.config) =
+  let now = Time_compat.now () in
+  let cutoff = summary_cutoff now in
+  let by_agent : (string, claim_snapshot list) Hashtbl.t = Hashtbl.create 32 in
+  (* Request-local pre-aggregation: the dashboard rebuilds this lookup per
+     render, so the next request naturally refreshes the window contents. *)
+  materialize_claims (read_window_entries config)
+  |> List.iter (fun snapshot ->
+         if created_at_unix snapshot.claim >= cutoff then
+           let existing =
+             match Hashtbl.find_opt by_agent snapshot.claim.agent_name with
+             | Some items -> items
+             | None -> []
+           in
+           Hashtbl.replace by_agent snapshot.claim.agent_name
+             (snapshot :: existing));
+  fun ~keeper_name ~agent_name ->
+    let snapshots =
+      match Hashtbl.find_opt by_agent agent_name with
+      | Some items -> items
+      | None -> []
+    in
+    summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots
+
+let accountability_summary_json (config : Coord_query.config) ~keeper_name
+    ~agent_name =
+  accountability_summary_lookup config ~keeper_name ~agent_name
+
+let enable_window_read_count_for_testing () =
+  window_read_count_for_testing_ref := Some 0
+
+let disable_window_read_count_for_testing () =
+  window_read_count_for_testing_ref := None
+
+let window_read_count_for_testing () =
+  match !window_read_count_for_testing_ref with
+  | Some count -> count
+  | None -> 0
 
 let accountability_risk_is_high config ~keeper_name ~agent_name =
   match accountability_summary_json config ~keeper_name ~agent_name with

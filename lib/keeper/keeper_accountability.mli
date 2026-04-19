@@ -38,6 +38,16 @@ val accountability_summary_json :
   agent_name:string ->
   Yojson.Safe.t
 
+val accountability_summary_lookup :
+  Coord_query.config ->
+  keeper_name:string ->
+  agent_name:string ->
+  Yojson.Safe.t
+
+val enable_window_read_count_for_testing : unit -> unit
+val disable_window_read_count_for_testing : unit -> unit
+val window_read_count_for_testing : unit -> int
+
 val accountability_risk_is_high :
   Coord_query.config ->
   keeper_name:string ->

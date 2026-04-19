@@ -15,5 +15,10 @@ val summarize_metrics_lines :
 val empty_tool_audit_snapshot : tool_audit_snapshot
 val latest_tool_audit_snapshot_from_files :
   Coord.config -> keeper_name:string -> tool_audit_snapshot option
+val accountability_summary_lookup :
+  Coord.config ->
+  keeper_name:string ->
+  agent_name:string ->
+  Yojson.Safe.t
 val accountability_summary_json :
   Coord.config -> keeper_name:string -> agent_name:string -> Yojson.Safe.t

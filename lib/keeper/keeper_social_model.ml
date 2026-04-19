@@ -75,6 +75,23 @@ let nonempty_opt value =
   let trimmed = String.trim value in
   if String.equal trimmed "" then None else Some trimmed
 
+let delivery_surface_view_of_meta (meta : Keeper_types.keeper_meta) =
+  match
+    Keeper_social_model_types.speech_act_of_string meta.runtime.last_speech_act
+  with
+  | Some speech_act ->
+      Some
+        (Keeper_social_model_types.default_delivery_surface_of_speech_act
+           speech_act)
+  | None -> None
+
+let delivery_surface_view_source_of_meta (meta : Keeper_types.keeper_meta) =
+  match
+    Keeper_social_model_types.speech_act_of_string meta.runtime.last_speech_act
+  with
+  | Some _ -> Some "derived_from_last_speech_act"
+  | None -> None
+
 let previous_state_of_meta (meta : Keeper_types.keeper_meta) =
   let runtime = meta.runtime in
   let speech_act =

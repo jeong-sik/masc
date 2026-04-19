@@ -244,9 +244,19 @@ let social_model_resolution_fields_json (meta : keeper_meta) =
   ]
 
 let social_runtime_fields_json (meta : keeper_meta) =
+  let delivery_surface_view =
+    Keeper_social_model.delivery_surface_view_of_meta meta
+    |> Option.map Keeper_social_model.delivery_surface_to_string
+  in
+  let delivery_surface_view_source =
+    Keeper_social_model.delivery_surface_view_source_of_meta meta
+  in
   social_model_resolution_fields_json meta
   @ [
       ("last_speech_act", trimmed_string_json meta.runtime.last_speech_act);
+      ("delivery_surface_view", Json_util.string_opt_to_json delivery_surface_view);
+      ( "delivery_surface_view_source",
+        Json_util.string_opt_to_json delivery_surface_view_source );
       ( "last_social_transition_reason",
         trimmed_string_json meta.runtime.last_social_transition_reason );
       ("last_blocker", trimmed_string_json meta.runtime.last_blocker);

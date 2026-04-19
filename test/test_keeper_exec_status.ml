@@ -378,6 +378,12 @@ let test_runtime_surface_exposes_social_model_resolution_fields () =
   check string "last speech act"
     "stay_silent"
     (runtime |> member "last_speech_act" |> to_string);
+  check string "delivery surface view"
+    "silent"
+    (runtime |> member "delivery_surface_view" |> to_string);
+  check string "delivery surface view source"
+    "derived_from_last_speech_act"
+    (runtime |> member "delivery_surface_view_source" |> to_string);
   check string "transition reason"
     "tool_only:stay_silent"
     (runtime |> member "last_social_transition_reason" |> to_string);

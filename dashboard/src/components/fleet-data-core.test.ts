@@ -33,7 +33,9 @@ function okJson<T>(body: T) {
   return {
     ok: true,
     status: 200,
+    statusText: 'OK',
     json: async () => body,
+    text: async () => JSON.stringify(body),
   }
 }
 

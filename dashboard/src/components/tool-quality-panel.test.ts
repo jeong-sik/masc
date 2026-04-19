@@ -37,6 +37,16 @@ const payloadWithMissingToolMetrics = {
   ],
 }
 
+function okJson<T>(body: T) {
+  return {
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  }
+}
+
 async function flushUi(): Promise<void> {
   await act(async () => {
     for (let i = 0; i < 4; i += 1) {
@@ -113,10 +123,7 @@ describe('ToolQualityPanel', () => {
   })
 
   it('normalizes missing tool metric fields before rendering', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => payloadWithMissingToolMetrics,
-    })
+    const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithMissingToolMetrics))
     vi.stubGlobal('fetch', fetchMock)
     const { ToolQualityPanel } = await import('./tool-quality-panel')
 
@@ -139,10 +146,7 @@ describe('ToolQualityPanel', () => {
           reject(new DOMException('replaced by newer refresh', 'AbortError'))
         })
       }))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => payload,
-      })
+      .mockResolvedValueOnce(okJson(payload))
     vi.stubGlobal('fetch', fetchMock)
     const { ToolQualityPanel, refreshToolQuality } = await import('./tool-quality-panel')
 
@@ -165,10 +169,7 @@ describe('ToolQualityPanel', () => {
   })
 
   it('refreshes again when the refresh button is clicked', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => payload,
-    })
+    const fetchMock = vi.fn().mockResolvedValue(okJson(payload))
     vi.stubGlobal('fetch', fetchMock)
     const { ToolQualityPanel } = await import('./tool-quality-panel')
 

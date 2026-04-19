@@ -1237,6 +1237,8 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
        Log.Keeper.error "keeper:%s OAS checkpoint store error: %s" trace_id detail
    | Error (Io_error detail) ->
        Log.Keeper.error "keeper:%s OAS checkpoint I/O error: %s" trace_id detail
+   | Error (Sdk_other_error detail) ->
+       Log.Keeper.error "keeper:%s OAS checkpoint SDK error: %s" trace_id detail
    | Error Not_found | Ok _ -> ());
   let oas_checkpoint = Result.to_option oas_result in
   let legacy_checkpoint =

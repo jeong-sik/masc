@@ -249,6 +249,12 @@ type checkpoint_load_error =
   | Store_error of string
   | Parse_error of string
   | Io_error of string
+  (** Catch-all for SDK errors outside the Io / Serialization families
+      (Api / Agent / Mcp / Config / Orchestration / A2a / Internal).
+      Distinct from Io_error so observers can tell a local
+      checkpoint-store I/O failure apart from an SDK-level failure that
+      surfaced during a load. (#8605 family) *)
+  | Sdk_other_error of string
 
 (* Checkpoint-load failures classify as [Not_found] only when the
    underlying SDK error is genuinely "this file does not exist on first
@@ -293,6 +299,14 @@ let is_not_found_detail (detail : string) : bool =
   || String.starts_with ~prefix:"eio.io fs not_found" d  (* Eio.Io (Fs Not_found _) *)
   || has_substring d "no such file or directory"
 
+(* #8605 family: exhaustive on Agent_sdk.Error.sdk_error top-level
+   variants. The previous wildcard collapsed Api / Agent / Mcp / Config
+   / Orchestration / A2a / Internal errors into Io_error, hiding
+   non-IO failures from the dashboard. The wildcards on Io _ and
+   Serialization _ remain narrow (one level deep) so future inner
+   variants land in the semantically correct category, but a future
+   top-level sdk_error variant becomes a build error and forces a
+   deliberate routing decision. *)
 let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
   match e with
   | Io (FileOpFailed r) ->
@@ -304,7 +318,9 @@ let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
       Parse_error (sprintf "version mismatch: expected %d, got %d" r.expected r.got)
   | Serialization (UnknownVariant r) ->
       Parse_error (sprintf "unknown variant %s: %s" r.type_name r.value)
-  | _ -> Io_error (Agent_sdk.Error.to_string e)
+  | Api _ | Agent _ | Mcp _ | Config _
+  | Orchestration _ | A2a _ | Internal _ ->
+      Sdk_other_error (Agent_sdk.Error.to_string e)
 
 let load_oas_history_file ~(session_dir : string) ~(snapshot_id : string) :
     (Agent_sdk.Checkpoint.t, checkpoint_load_error) result =

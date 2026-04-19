@@ -219,7 +219,13 @@ let auto_detect_backend () =
   "filesystem"
 
 (** Storage type from environment variable.
-    Defaults to filesystem when MASC_STORAGE_TYPE is not set. *)
+    Defaults to filesystem when MASC_STORAGE_TYPE is not set.
+
+    Unknown / typo'd values (e.g. "postgres", "redis", "memoryy") used to
+    silently pass through and the downstream wildcard in [backend_config_for]
+    collapsed them into [FileSystem] with no log trace. Now an unknown value
+    is warned and explicitly normalised to "filesystem", so the operator sees
+    the drift. See #8737 / #8605. *)
 let storage_type_from_env () =
   match env_opt Env_config_core.storage_type_env_key with
   | Some raw ->
@@ -227,7 +233,11 @@ let storage_type_from_env () =
       (match value with
        | "filesystem" | "file" | "jsonl" | "auto" -> "filesystem"
        | "memory" -> "memory"
-       | other -> other)
+       | other ->
+           Log.Backend.warn
+             "MASC_STORAGE_TYPE=%S not recognised (known: filesystem|file|jsonl|auto|memory) -> using filesystem; see #8737"
+             other;
+           "filesystem")
   | None -> auto_detect_backend ()
 
 (* ============================================ *)
@@ -257,10 +267,18 @@ let backend_config_for base_path =
     | Some name -> name
     | None -> "default"
   in
+  (* Exhaustive over the values that [storage_type_from_env] now produces
+     ("memory" | "filesystem"). The wildcard branch is defensive; if it ever
+     fires the upstream sanitiser regressed and we want to know. *)
   let backend_type =
     match storage_type with
     | "memory" -> Backend_types.Memory
-    | _ -> Backend_types.FileSystem
+    | "filesystem" -> Backend_types.FileSystem
+    | other ->
+        Log.Backend.warn
+          "backend_config_for: storage_type=%S bypassed sanitiser -> defaulting to FileSystem; see #8737"
+          other;
+        Backend_types.FileSystem
   in
   let masc_root = Filename.concat base_path ".masc" in
   let cluster_segment =

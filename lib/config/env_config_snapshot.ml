@@ -131,14 +131,14 @@ let runtime_entries =
     entry ~default:"(none)" "MASC_CDAL_ENABLED"
       "Contract-driven agent loop proof capture (feature flag)";
     entry ~default:"true" "MASC_DISPATCH_V2" "Enable V2 dispatch engine";
-    entry ~default:"(auto)" "MASC_LOG_LEVEL" "Log level override";
-    entry ~default:"false" "MASC_PARSE_WARN" "Enable JSON parse warnings";
-    entry ~default:"production" "MASC_GOVERNANCE_LEVEL"
+    entry ~default:"(auto)" Env_config_core.log_level_env_key "Log level override";
+    entry ~default:"false" Env_config_core.parse_warn_env_key "Enable JSON parse warnings";
+    entry ~default:"production" Env_config_core.governance_level_env_key
       "Governance enforcement level";
     entry ~default:"(none)" "MASC_AUTO_RESPOND" "Auto-respond mode";
     entry ~default:"(none)" "MASC_SLOT_YIELD_ENABLED"
       "Release LLM slot during tool execution (feature flag)";
-    entry ~default:"true" "MASC_TELEMETRY_ENABLED"
+    entry ~default:"true" Env_config_core.telemetry_enabled_env_key
       "Enable telemetry collection";
   ]
 

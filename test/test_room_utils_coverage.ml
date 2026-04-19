@@ -462,6 +462,24 @@ let test_storage_type_auto_is_deprecated () =
       check string "auto falls back to filesystem" "filesystem"
         (Coord_utils.storage_type_from_env ()))
 
+(* #8737: unknown / typo'd MASC_STORAGE_TYPE values used to silently pass
+   through and then collapse into FileSystem in [backend_config_for] with no
+   log. The sanitiser now normalises any unknown value to "filesystem" (with
+   a Log.Backend.warn surfaced separately) so downstream is exhaustive. *)
+let test_storage_type_unknown_normalised_to_filesystem () =
+  with_envs
+    (pg_env_bindings ~masc_storage_type:"postgres" ())
+    (fun () ->
+      check string "unknown postgres normalised to filesystem" "filesystem"
+        (Coord_utils.storage_type_from_env ()))
+
+let test_storage_type_typo_normalised_to_filesystem () =
+  with_envs
+    (pg_env_bindings ~masc_storage_type:"memoryy" ())
+    (fun () ->
+      check string "typo memoryy normalised to filesystem" "filesystem"
+        (Coord_utils.storage_type_from_env ()))
+
 (* ============================================================
    safe_filename Tests
    ============================================================ *)
@@ -697,6 +715,8 @@ let () =
       test_case "defaults to filesystem" `Quick test_storage_type_defaults_to_filesystem;
       test_case "legacy url does not auto select" `Quick test_storage_type_legacy_url_does_not_auto_select;
       test_case "auto is deprecated" `Quick test_storage_type_auto_is_deprecated;
+      test_case "unknown normalised to filesystem (#8737)" `Quick test_storage_type_unknown_normalised_to_filesystem;
+      test_case "typo normalised to filesystem (#8737)" `Quick test_storage_type_typo_normalised_to_filesystem;
     ];
     "safe_filename", [
       test_case "normal" `Quick test_safe_filename_normal;

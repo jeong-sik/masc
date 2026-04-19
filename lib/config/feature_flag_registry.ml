@@ -76,7 +76,7 @@ let all_flags : flag list = [
     default = false; category = "tool";
     lifecycle = Active; since = "2.90.0" };
 
-  { env_name = "MASC_TOOL_AUTH_STRICT";
+  { env_name = Env_config_core.tool_auth_strict_env_key;
     description = "Unknown masc_* tools require worker-level permission";
     default = true; category = "tool";
     lifecycle = Active; since = "2.100.0" };

@@ -315,6 +315,15 @@ let config_dir_opt () =
 let personas_dir_opt () =
   raw_value_opt personas_dir_env_key |> trim_opt
 
+(** SSOT for the MASC_DATA_DIR env-var name (issue 8352).
+    Overrides [<base_path>/data] as the root for CDAL verdicts and other
+    runtime data stores. Read by cdal_verdict_gate and cdal_eval_v1. *)
+let data_dir_env_key = "MASC_DATA_DIR"
+
+(** Data directory override. *)
+let data_dir_opt () =
+  raw_value_opt data_dir_env_key |> trim_opt
+
 (** {1 Relay Calibration} *)
 
 (** Whether relay token calibration is enabled. Default: true. *)

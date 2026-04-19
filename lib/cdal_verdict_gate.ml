@@ -49,7 +49,7 @@ let check_verdict (v : Cdal_types.contract_verdict) : gate_result =
 
 let default_base_path =
   let root =
-    match Sys.getenv_opt "MASC_DATA_DIR" with
+    match Sys.getenv_opt Env_config_core.data_dir_env_key with
     | Some dir -> dir
     | None -> Filename.concat (Env_config_core.base_path ()) "data"
   in

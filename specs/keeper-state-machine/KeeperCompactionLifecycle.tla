@@ -9,6 +9,32 @@
 \* It is intentionally a projection, not a full copy of post-turn policy.
 \* The runtime does not expose a compaction retry counter; only the
 \* boolean retry-exhausted latch is modeled here.
+\*
+\* OCaml ↔ TLA+ mapping (see also #8642 family — KeeperContextLifecycle,
+\* KeeperCoreTriad, KeeperGenerationLineage, KeeperReconcileLiveness):
+\*
+\*   spec phase  | OCaml Keeper_state_machine.phase  | source of truth
+\*   ------------+-----------------------------------+----------------
+\*   "Running"   | Running                           | lib/keeper/keeper_state_machine.ml:8
+\*   "Overflowed"| Overflowed                        | lib/keeper/keeper_state_machine.ml:10
+\*   "Compacting"| Compacting                        | lib/keeper/keeper_state_machine.ml:11
+\*   "Paused"    | Paused                            | lib/keeper/keeper_state_machine.ml:14
+\*
+\* Out-of-scope OCaml phases (intentional projection — not modelled here):
+\*   Offline, Failing, HandingOff, Draining, Crashed
+\*
+\* The 4-phase projection captures only the overflow/compaction recovery
+\* loop. Other lifecycle transitions (boot/shutdown/handoff/crash) live in
+\* sibling specs (e.g. KeeperContextLifecycle for boot/handoff/draining,
+\* KeeperCircuitBreaker for crash/failing).
+\*
+\* compaction_stage variant ↔ OCaml: TLA models {accumulating, compacting,
+\* done}; OCaml runtime uses the same labels in
+\* lib/keeper/keeper_registry.ml + lib/keeper/keeper_state_machine.ml
+\* (search "compaction_stage").
+\*
+\* retry_exhausted boolean ↔ OCaml: latched by Compact_retry_exhausted
+\* event; cleared by Compaction_completed (lib/keeper/keeper_state_machine.ml).
 
 EXTENDS TLC
 

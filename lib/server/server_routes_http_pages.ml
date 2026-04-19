@@ -285,8 +285,20 @@ let serve_dashboard_static name request reqd =
 let bonsai_asset_root () =
   Filename.concat (assets_root ()) "dashboard_bonsai"
 
-let bonsai_index_html =
-  {|<!doctype html>
+(* Bundle version — mtime of main.bc.js, appended to the script src as a
+   query string so the browser refetches whenever the bundle is rebuilt.
+   Cache-Control on the bundle itself stays [immutable] (1 year) for cheap
+   reloads of unchanged code; the URL change is what defeats the cache. *)
+let bonsai_bundle_version () =
+  let bundle_path = Filename.concat (bonsai_asset_root ()) "main.bc.js" in
+  try
+    let st = Unix.stat bundle_path in
+    Printf.sprintf "%d" (Float.to_int st.st_mtime)
+  with _ -> "0"
+
+let bonsai_index_html () =
+  Printf.sprintf
+    {|<!doctype html>
 <html lang="en" data-theme="dark-fantasy">
 <head>
 <meta charset="utf-8">
@@ -301,13 +313,14 @@ let bonsai_index_html =
 </head>
 <body>
 <div id="app"></div>
-<script src="/dashboard/b/assets/main.bc.js"></script>
+<script src="/dashboard/b/assets/main.bc.js?v=%s"></script>
 </body>
 </html>
 |}
+    (bonsai_bundle_version ())
 
 let serve_bonsai_index _request reqd =
-  Http.Response.html bonsai_index_html reqd
+  Http.Response.html (bonsai_index_html ()) reqd
 
 let serve_bonsai_static name request reqd =
   let path = Filename.concat (bonsai_asset_root ()) name in

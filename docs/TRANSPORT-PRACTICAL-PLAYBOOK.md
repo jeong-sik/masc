@@ -35,8 +35,11 @@ Before changing transport health reporting, run the truth harness:
 ./scripts/harness/transport/verify_truth.sh
 ```
 
-This is an explicit drift harness, not part of `run_all.sh` by default. It
-returns non-zero when reported truth and live probe truth disagree.
+This is the explicit drift harness. It is included in
+`./scripts/harness/transport/run_all.sh` and therefore also runs in the CI
+transport harness suite. Run it directly when iterating on transport truth so
+reported truth vs. live probe drift fails fast without waiting for the full
+suite. It returns non-zero when those surfaces disagree.
 
 It bootstraps an isolated server when needed and compares:
 

@@ -541,10 +541,17 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
     [ lifecycle "recovered" "failure counters reset" ]
   | _, Paused ->
     (* Distinguish operator-pause from overflow-induced pause so the
-       dashboard can surface the right message. *)
+       dashboard can surface the right message.
+       Issue #8728: Compact_retry_exhausted (added in #8581 specifically
+       to stop conflating operator pauses with auto-compact budget
+       exhaustion) used to fall into the catch-all and get re-labelled
+       as "operator request" - defeating the new event's whole purpose.
+       List both overflow-class events explicitly so the distinction
+       reaches the dashboard. *)
     let detail =
       match event with
-      | Context_overflow_detected _ -> "auto-compact retry exhausted"
+      | Context_overflow_detected _
+      | Compact_retry_exhausted -> "auto-compact retry exhausted"
       | Operator_pause -> "operator request"
       | _ -> "operator request"
     in

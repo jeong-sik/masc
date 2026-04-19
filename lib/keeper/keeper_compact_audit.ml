@@ -331,7 +331,7 @@ end
 (* Translate one OAS event into zero or one persist_* effect. *)
 let handle_event ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
   : unit =
-  let { Agent_sdk.Event_bus.correlation_id; run_id; ts } = evt.meta in
+  let { Agent_sdk.Event_bus.correlation_id; run_id; ts; _ } = evt.meta in
   match evt.payload with
   | Agent_sdk.Event_bus.ContextCompactStarted { agent_name; trigger } ->
     let compaction_id = synth_compaction_id ~ts_unix:ts ~keeper_name:agent_name in

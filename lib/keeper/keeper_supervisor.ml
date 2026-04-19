@@ -75,6 +75,20 @@ let publish_lifecycle ?phase event_name keeper_name detail () =
         ?phase ~keeper_name ~detail ()
   | None -> ()
 
+(** Issue #8572: derive the wire [event] string from [phase] so the
+    Variant SSOT stays the only source of truth.
+
+    The legacy [publish_lifecycle ~phase event_name …] still works for
+    the named custom-event sites ([dead_cleaned] / [self_preservation]
+    / [paused_pruned]) that genuinely have no phase. Phase-bearing
+    sites should call this helper instead so that renaming a phase in
+    [Keeper_state_machine] flows to every observer automatically — no
+    chance of [~phase:Stopped "crashed"]-style typo emitting a
+    contradiction. *)
+let publish_phase_lifecycle ~phase keeper_name detail () =
+  let event_name = Keeper_state_machine.phase_to_string phase in
+  publish_lifecycle ~phase event_name keeper_name detail ()
+
 (* ── Supervised fiber launch ─────────────────────────────── *)
 
 let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
@@ -111,8 +125,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
            ignore (Keeper_registry.dispatch_event ~base_path meta.name
              Keeper_state_machine.Drain_complete);
            if resolve_done `Stopped then
-             publish_lifecycle ~phase:Keeper_state_machine.Stopped
-               "stopped" meta.name "normal exit" ()
+             publish_phase_lifecycle ~phase:Keeper_state_machine.Stopped
+               meta.name "normal exit" ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
@@ -144,8 +158,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                ~name:meta.name ~ts ~reason ~restart_count:rc;
              Keeper_registry.record_error ~base_path meta.name reason;
              if resolve_done (`Crashed reason) then
-               publish_lifecycle ~phase:Keeper_state_machine.Crashed
-                 "crashed" meta.name reason ()))
+               publish_phase_lifecycle ~phase:Keeper_state_machine.Crashed
+                 meta.name reason ()))
       ~finally:(fun () ->
         (* Finally runs best-effort. Any exception raised here (including
            Eio.Cancel.Cancelled, which propagates during concurrent fiber
@@ -179,8 +193,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
               ignore (Keeper_registry.dispatch_event ~base_path meta.name
                 (Keeper_state_machine.Fiber_terminated { outcome = reason }));
               if resolve_done (`Crashed reason) then
-                publish_lifecycle ~phase:Keeper_state_machine.Crashed
-                  "crashed" meta.name reason ()
+                publish_phase_lifecycle ~phase:Keeper_state_machine.Crashed
+                  meta.name reason ()
             end
           end
         with exn ->
@@ -502,7 +516,7 @@ let sweep_and_recover (ctx : _ context) =
     ignore (Keeper_registry.dispatch_event ~base_path entry.name
       Keeper_state_machine.Restart_budget_exhausted);
     Keeper_registry.mark_dead ~base_path entry.name ~at:now;
-    publish_lifecycle ~phase:Keeper_state_machine.Dead "dead" entry.name
+    publish_phase_lifecycle ~phase:Keeper_state_machine.Dead entry.name
       (Printf.sprintf "restart budget exhausted (%d), last: %s"
          max_restarts msg) ();
     Log.Keeper.error "%s: restart budget exhausted (%d). Dead."

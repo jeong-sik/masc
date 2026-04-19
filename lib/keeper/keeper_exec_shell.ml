@@ -1019,20 +1019,115 @@ let handle_keeper_bash
                  | Error (Bg_task.Invalid_cwd msg) ->
                      error_json (Printf.sprintf "invalid cwd: %s" msg)
                end
-               else
-                 let argv = [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ] in
-                 let st, out =
-                   Process_eio.run_argv_with_status ~cwd ~timeout_sec argv
+               else begin
+                 (* Tick 11: Foreground path with optional auto-background
+                    race.  When [MASC_BASH_AUTO_BG] is enabled and an Eio
+                    clock is available, route through
+                    [Masc_exec.Exec_run.run_with_auto_bg]: the command
+                    spawns as a Bg_task, races its exit against
+                    [MASC_BLOCKING_BUDGET_MS] (default 15000), and on
+                    budget expiry returns a [Promoted] handle the LLM
+                    can poll via [keeper_bash_output].  Without the
+                    flag, fall back to the legacy blocking call so
+                    existing consumers see no shape change. *)
+                 let auto_bg_enabled =
+                   match Sys.getenv_opt "MASC_BASH_AUTO_BG" with
+                   | Some ("1" | "true" | "yes" | "on") -> true
+                   | _ -> false
                  in
-                 Yojson.Safe.to_string
-                   (Exec_core.process_result_json
-                      ~base_path:root
-                      ~keeper_name:meta.name
-                      ~cmd
-                      ~extra:[ "cwd", `String cwd ]
-                      ~status:st
-                      ~output:out
-                      ())))
+                 let argv_merged =
+                   [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ]
+                 in
+                 match
+                   if auto_bg_enabled
+                   then Eio_context.get_clock_opt ()
+                   else None
+                 with
+                 | None ->
+                   let st, out =
+                     Process_eio.run_argv_with_status
+                       ~cwd ~timeout_sec argv_merged
+                   in
+                   Yojson.Safe.to_string
+                     (Exec_core.process_result_json
+                        ~base_path:root
+                        ~keeper_name:meta.name
+                        ~cmd
+                        ~extra:[ "cwd", `String cwd ]
+                        ~status:st
+                        ~output:out
+                        ())
+                 | Some clock ->
+                   let budget_ms = Masc_exec.Exec_run.default_budget_ms () in
+                   let outcome =
+                     Masc_exec.Exec_run.run_with_auto_bg
+                       ~clock
+                       ~base_path:root
+                       ~budget_ms
+                       ~keeper:meta.name
+                       ~argv:argv_merged
+                       ~cwd
+                       ~envp:(Unix.environment ())
+                       ~timeout_sec
+                       ()
+                   in
+                   (match outcome with
+                    | Masc_exec.Exec_run.Completed r ->
+                      Yojson.Safe.to_string
+                        (Exec_core.process_result_json
+                           ~base_path:root
+                           ~keeper_name:meta.name
+                           ~cmd
+                           ~extra:[ "cwd", `String cwd ]
+                           ~status:r.status
+                           ~output:r.stdout
+                           ())
+                    | Masc_exec.Exec_run.Promoted p ->
+                      Log.Keeper.info
+                        "BG_PROMOTE: keeper=%s task_id=%s budget_ms=%d cmd=%s"
+                        meta.name
+                        (Bg_task.task_id_to_string p.task_id)
+                        budget_ms
+                        cmd_for_log;
+                      Yojson.Safe.to_string
+                        (`Assoc
+                          [
+                            ("ok", `Bool false);
+                            ("promoted", `Bool true);
+                            ( "background_task_id",
+                              `String
+                                (Bg_task.task_id_to_string p.task_id) );
+                            ("cmd", `String cmd);
+                            ("cwd", `String cwd);
+                            ("partial_output", `String p.partial_stdout);
+                            ( "bytes_dropped",
+                              `Int p.bytes_dropped_stdout );
+                            ("budget_ms", `Int budget_ms);
+                            ( "hint",
+                              `String
+                                (Printf.sprintf
+                                   "Command exceeded \
+                                    MASC_BLOCKING_BUDGET_MS=%d. Still \
+                                    running in background; poll with \
+                                    keeper_bash_output or stop with \
+                                    keeper_bash_kill."
+                                   budget_ms) );
+                          ])
+                    | Masc_exec.Exec_run.Spawn_error
+                        (Bg_task.Spawn_failed e) ->
+                      error_json
+                        (Printf.sprintf
+                           "auto-bg spawn failed: %s" e)
+                    | Masc_exec.Exec_run.Spawn_error
+                        (Bg_task.Too_many_tasks { keeper = k; limit }) ->
+                      error_json
+                        (Printf.sprintf
+                           "keeper %s exceeded background task limit (%d)"
+                           k limit)
+                    | Masc_exec.Exec_run.Spawn_error
+                        (Bg_task.Invalid_cwd msg) ->
+                      error_json (Printf.sprintf "invalid cwd: %s" msg))
+               end))
 ;;
 
 (* ============================================================ *)

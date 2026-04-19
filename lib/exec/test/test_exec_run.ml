@@ -21,6 +21,7 @@
    Alcotest_lwt, just Eio + Bg_task. *)
 
 open Alcotest
+open Masc_exec
 
 let keeper = "exec_run_test"
 

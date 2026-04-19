@@ -584,6 +584,12 @@ let test_keeper_context_status_reports_recovery_source_and_tiers () =
     in
     check string "recovery source exposed" "progress_log"
       Yojson.Safe.Util.(json |> member "recovery_source" |> to_string);
+    check string "sandbox root is tool-ready" "."
+      Yojson.Safe.Util.(json |> member "sandbox_root" |> to_string);
+    check string "sandbox repos is tool-ready" "repos"
+      Yojson.Safe.Util.(json |> member "sandbox_repos" |> to_string);
+    check string "sandbox backend is local by default" "local"
+      Yojson.Safe.Util.(json |> member "sandbox_backend" |> to_string);
     check int "long-term count exposed" 1
       Yojson.Safe.Util.(json |> member "memory_tier_summary" |> member "long_term" |> to_int))
 

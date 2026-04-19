@@ -1,11 +1,12 @@
 (** Test suite for Keeper_alerting_path.effective_allowed_paths.
-    Verifies playground-only defaults, wildcard handling, and explicit
+    Verifies single-sandbox defaults, wildcard handling, and explicit
     allowed_paths behavior. Workspace/local scope no longer grants any
     hardcoded repo-root or state paths. *)
 
 open Alcotest
 module KAP = Masc_mcp.Keeper_alerting_path
 module KES = Masc_mcp.Keeper_exec_shared
+module KS = Masc_mcp.Keeper_sandbox
 module KT = Masc_mcp.Keeper_types
 module KTU = Masc_mcp.Keeper_turn_up_args
 
@@ -23,15 +24,13 @@ let make_meta ?(execution_scope = "observe_only") ?(allowed_paths = [])
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
 
-let playground_bundle name =
-  [ KAP.playground_path_of_keeper name;
-    KAP.playground_mind_path name;
-    KAP.playground_repos_path name ]
+let sandbox_roots name =
+  [ KAP.sandbox_path_of_keeper name ]
 
 (* After #6527 iter 4, `.worktrees/` is no longer a workspace default.
    New worktrees land inside the keeper's own
    `.masc/playground/<keeper>/repos/<clone>/.worktrees/...` and are
-   already covered by the playground bundle paths above. *)
+   already covered by the sandbox root above. *)
 let with_temp_dir prefix f =
   let path = Filename.temp_file prefix "" in
   Sys.remove path;
@@ -53,15 +52,15 @@ let with_temp_dir prefix f =
 let test_observe_only_empty_paths () =
   let meta = make_meta ~execution_scope:"observe_only" ~name:"t" () in
   let effective = KAP.effective_allowed_paths ~meta in
-  check (list string) "observe_only + [] = playground bundle"
-    (playground_bundle "t") effective
+  check (list string) "observe_only + [] = sandbox root"
+    (sandbox_roots "t") effective
 
 let test_observe_only_explicit_paths () =
   let meta = make_meta ~execution_scope:"observe_only"
       ~allowed_paths:["src/"; "lib/"] ~name:"t" () in
   let effective = KAP.effective_allowed_paths ~meta in
-  check (list string) "observe_only + explicit = playground bundle + explicit"
-    (playground_bundle "t" @ ["src/"; "lib/"]) effective
+  check (list string) "observe_only + explicit = sandbox root + explicit"
+    (sandbox_roots "t" @ ["src/"; "lib/"]) effective
 
 (* ── workspace scope ── *)
 
@@ -69,29 +68,29 @@ let test_workspace_empty_paths_playground_only () =
   let meta = make_meta ~execution_scope:"workspace"
       ~name:"sangsu" () in
   let effective = KAP.effective_allowed_paths ~meta in
-  check (list string) "workspace + [] = playground bundle only"
-    (playground_bundle "sangsu") effective
+  check (list string) "workspace + [] = sandbox root only"
+    (sandbox_roots "sangsu") effective
 
 let test_workspace_explicit_paths () =
   let meta = make_meta ~execution_scope:"workspace"
       ~allowed_paths:["src/"; "docs/"] ~name:"t" () in
   let effective = KAP.effective_allowed_paths ~meta in
-  check (list string) "workspace + explicit = playground bundle + explicit"
-    (playground_bundle "t" @ ["src/"; "docs/"]) effective
+  check (list string) "workspace + explicit = sandbox root + explicit"
+    (sandbox_roots "t" @ ["src/"; "docs/"]) effective
 
 let test_workspace_write_paths_playground_only () =
   let meta = make_meta ~execution_scope:"workspace"
       ~name:"sangsu" () in
   let effective = KAP.effective_write_allowed_paths ~meta in
-  check (list string) "workspace write defaults are playground-only"
-    (playground_bundle "sangsu") effective
+  check (list string) "workspace write defaults are sandbox-only"
+    (sandbox_roots "sangsu") effective
 
 let test_workspace_write_paths_preserve_explicit_overrides () =
   let meta = make_meta ~execution_scope:"workspace"
       ~allowed_paths:["workspace/yousleepwhen/oas/"] ~name:"t" () in
   let effective = KAP.effective_write_allowed_paths ~meta in
   check (list string) "explicit write override preserved"
-    (playground_bundle "t" @ ["workspace/yousleepwhen/oas/"]) effective
+    (sandbox_roots "t" @ ["workspace/yousleepwhen/oas/"]) effective
 
 let test_workspace_star_wildcard () =
   let meta = make_meta ~execution_scope:"workspace"
@@ -104,8 +103,8 @@ let test_workspace_star_wildcard () =
 let test_local_empty_paths () =
   let meta = make_meta ~execution_scope:"local" ~name:"t" () in
   let effective = KAP.effective_allowed_paths ~meta in
-  check (list string) "local + [] = playground bundle"
-    (playground_bundle "t") effective
+  check (list string) "local + [] = sandbox root"
+    (sandbox_roots "t") effective
 
 (* ── wildcard handling ── *)
 
@@ -119,22 +118,22 @@ let test_star_wildcard_any_scope () =
 
 let test_explicit_paths_any_scope () =
   let paths = ["lib/keeper/"; "test/"] in
-  let expected = playground_bundle "t" @ ["lib/keeper/"; "test/"] in
+  let expected = sandbox_roots "t" @ ["lib/keeper/"; "test/"] in
   List.iter (fun scope ->
     let meta = make_meta ~execution_scope:scope ~allowed_paths:paths ~name:"t" () in
     let effective = KAP.effective_allowed_paths ~meta in
-    check (list string) (scope ^ " + explicit = playground bundle + explicit")
+    check (list string) (scope ^ " + explicit = sandbox root + explicit")
       expected effective
   ) ["observe_only"; "workspace"; "local"]
 
-(* ── keeper name in playground default ── *)
+(* ── keeper name in sandbox default ── *)
 
 let test_playground_default_uses_keeper_name () =
   let meta = make_meta ~execution_scope:"workspace"
       ~name:"cdal-formalist" () in
   let effective = KAP.effective_allowed_paths ~meta in
-  check (list string) "name embedded in playground path"
-    (playground_bundle "cdal-formalist") effective
+  check (list string) "name embedded in sandbox path"
+    (sandbox_roots "cdal-formalist") effective
 
 (* ── playground path ── *)
 
@@ -148,7 +147,7 @@ let test_playground_always_present () =
   List.iter (fun scope ->
     let meta = make_meta ~execution_scope:scope ~name:"abc" () in
     let effective = KAP.effective_allowed_paths ~meta in
-    check bool (scope ^ " has playground")
+    check bool (scope ^ " has sandbox root")
       true (List.mem ".masc/playground/abc/" effective)
   ) scopes
 
@@ -206,6 +205,39 @@ let test_default_roots_use_playground_with_full_access () =
       ~allowed_paths:["*"] ~name:"keeper" () in
   check_default_roots_use_playground meta
 
+let test_sandbox_contract_reports_single_tool_root () =
+  let meta = make_meta ~execution_scope:"workspace" ~name:"keeper" () in
+  with_temp_config (fun config ->
+    let sb = KS.of_meta ~config ~meta in
+    check string "sandbox id" "keeper:keeper" sb.sandbox_id;
+    check string "sandbox root arg" "." sb.root_arg;
+    check string "sandbox repos arg" "repos" sb.repos_arg;
+    check string "host root rel uses existing disk layout"
+      ".masc/playground/keeper/" sb.host_root_rel;
+    check (option string) "local has no container root" None sb.container_root)
+
+let test_sandbox_contract_reports_docker_container_root () =
+  let meta =
+    let json = `Assoc [
+      ("name", `String "keeper");
+      ("agent_name", `String "agent-keeper");
+      ("trace_id", `String "trace-keeper");
+      ("goal", `String "test");
+      ("execution_scope", `String "workspace");
+      ("sandbox_profile", `String "docker_hardened");
+      ("network_mode", `String "none");
+    ] in
+    match KT.meta_of_json json with
+    | Ok meta -> meta
+    | Error err -> fail ("docker meta: " ^ err)
+  in
+  with_temp_config (fun config ->
+    let sb = KS.of_meta ~config ~meta in
+    check string "docker backend" "docker_hardened"
+      (KS.backend_to_string sb.backend);
+    check (option string) "docker has private container root"
+      (Some "/home/keeper/playground/keeper") sb.container_root)
+
 (* Error UX: rejection messages must teach the LLM why the path failed,
    not just that it failed. The relative-path case is the common one — bare
    "X not allowed" sends the keeper into a retry loop guessing alternatives.
@@ -223,17 +255,17 @@ let contains_substring ~haystack ~needle =
     in
     scan 0
 
-let test_path_rejection_explains_relative_anchor () =
+let test_path_rejection_explains_sandbox_boundary () =
   let meta = make_meta ~execution_scope:"workspace" ~name:"ani1999" () in
   with_temp_config (fun config ->
     match KES.resolve_keeper_path ~config ~meta ~raw_path:"lib/foo.ml" with
     | Ok path -> fail ("expected rejection for lib/foo.ml, got: " ^ path)
     | Error err ->
       check bool "preserves machine-readable prefix" true
-        (String.starts_with ~prefix:"path_not_in_allowed_paths:" err);
-      check bool "includes relative-anchor explanation" true
+        (String.starts_with ~prefix:"path_outside_sandbox:" err);
+      check bool "includes sandbox-boundary explanation" true
         (contains_substring ~haystack:err
-           ~needle:"relative paths anchor at project root");
+           ~needle:"sandbox boundary");
       check bool "includes resolved candidate" true
         (contains_substring ~haystack:err ~needle:"resolved="))
 
@@ -251,8 +283,8 @@ let test_resolve_keeper_path_blocks_workspace_repo_write_default () =
     match KES.resolve_keeper_path ~config ~meta ~raw_path:"lib/foo.ml" with
     | Ok path -> fail ("expected write rejection, got: " ^ path)
     | Error err ->
-      check bool "rejects repo-root write outside playground" true
-        (String.starts_with ~prefix:"path_not_in_allowed_paths:" err))
+      check bool "rejects repo-root write outside sandbox" true
+        (String.starts_with ~prefix:"path_outside_sandbox:" err))
 
 let test_resolve_keeper_path_allows_playground_write_default () =
   let meta = make_meta ~execution_scope:"workspace" ~name:"keeper" () in
@@ -448,34 +480,41 @@ let () =
     [
       ( "effective_allowed_paths",
         [
-          test_case "observe_only + [] = [playground]" `Quick
+          test_case "observe_only + [] = [sandbox root]" `Quick
             test_observe_only_empty_paths;
-          test_case "observe_only + explicit = playground + explicit" `Quick
+          test_case "observe_only + explicit = sandbox root + explicit" `Quick
             test_observe_only_explicit_paths;
-          test_case "workspace + [] = playground only" `Quick
+          test_case "workspace + [] = sandbox root only" `Quick
             test_workspace_empty_paths_playground_only;
-          test_case "workspace + explicit = playground + explicit" `Quick
+          test_case "workspace + explicit = sandbox root + explicit" `Quick
             test_workspace_explicit_paths;
-          test_case "workspace write defaults are playground-only" `Quick
+          test_case "workspace write defaults are sandbox-only" `Quick
             test_workspace_write_paths_playground_only;
           test_case "workspace write defaults preserve explicit overrides" `Quick
             test_workspace_write_paths_preserve_explicit_overrides;
           test_case "workspace + [*] = full access" `Quick
             test_workspace_star_wildcard;
-          test_case "local + [] = [playground]" `Quick
+          test_case "local + [] = [sandbox root]" `Quick
             test_local_empty_paths;
           test_case "[*] wildcard any scope" `Quick
             test_star_wildcard_any_scope;
           test_case "explicit paths any scope" `Quick
             test_explicit_paths_any_scope;
-          test_case "keeper name in playground default" `Quick
+          test_case "keeper name in sandbox default" `Quick
             test_playground_default_uses_keeper_name;
+        ] );
+      ( "sandbox_contract",
+        [
+          test_case "single local sandbox root" `Quick
+            test_sandbox_contract_reports_single_tool_root;
+          test_case "docker backend reports container root" `Quick
+            test_sandbox_contract_reports_docker_container_root;
         ] );
       ( "playground",
         [
           test_case "path sanitizes keeper name" `Quick
             test_playground_path_sanitizes_name;
-          test_case "playground always in allowed_paths" `Quick
+          test_case "sandbox root always in allowed_paths" `Quick
             test_playground_always_present;
           test_case "ensure playground bundle creates subdirs" `Quick
             test_ensure_playground_bundle_creates_subdirs;
@@ -483,8 +522,8 @@ let () =
             test_default_roots_use_playground_with_explicit_paths;
           test_case "default roots stay in playground with full access" `Quick
             test_default_roots_use_playground_with_full_access;
-          test_case "rejection explains relative-anchor + resolved candidate" `Quick
-            test_path_rejection_explains_relative_anchor;
+          test_case "rejection explains sandbox boundary + resolved candidate" `Quick
+            test_path_rejection_explains_sandbox_boundary;
           test_case "absolute path rejection still works" `Quick
             test_path_rejection_omits_resolved_for_absolute;
           test_case "workspace repo writes blocked by default" `Quick

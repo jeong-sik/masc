@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # validate-prompt-paths.sh — keeper prompt/config drift gate for #6527.
 #
-# Invariant: every `.worktrees/<...>` reference in config/ must be preceded
-# by a playground prefix (`.masc/playground/.../`). A bare `.worktrees/...`
-# string teaches keepers a server-root relative path that the harness blocks
-# (iter3 cwd_outside_playground / iter6 write_outside_playground_blocked).
+# Invariant: every `.worktrees/<...>` reference in config/ must be inside a
+# keeper sandbox repo path.  The model-facing canonical form is now
+# `repos/<repo>/.worktrees/...`; legacy `.masc/playground/.../repos/...`
+# remains accepted as a compatibility form.  A bare `.worktrees/...` string
+# teaches keepers a server-root relative path that the harness blocks.
 #
 # Re-run locally:
 #   bash scripts/validate-prompt-paths.sh
 #
 # Exit codes:
-#   0 — all .worktrees/ references are playground-prefixed (OK)
+#   0 — all .worktrees/ references are sandbox-repo rooted (OK)
 #   1 — bare .worktrees/... reference found (drift)
 #   2 — required tool missing
 
@@ -49,7 +50,7 @@ done
 drift_hits="$(
   rg --no-heading --with-filename --line-number --color=never \
      '\.worktrees/' "${SEARCH_ROOTS[@]}" \
-    | rg -v '\.masc/playground/' \
+    | rg -v 'repos/[^[:space:]]*\.worktrees/|\.masc/playground/' \
     || true
 )"
 
@@ -59,12 +60,12 @@ if [ -n "$drift_hits" ]; then
 
 Keepers see every config/prompts, config/keepers/*.toml, and config/personas/*
 as part of their system prompt. A bare `.worktrees/<branch>` path is relative
-to the server root, not the keeper playground — the harness rejects it
-as write_outside_playground_blocked / cwd_outside_playground (#6527 iter3/iter6).
+to the server root, not the keeper sandbox — the harness rejects it as outside
+the sandbox boundary.
 
-Every .worktrees reference in config/ MUST be prefixed with the playground
-path, for example:
-  .masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/<branch-or-task>/
+Every .worktrees reference in config/ MUST be rooted in a sandbox repo path,
+for example:
+  repos/<REPO_NAME>/.worktrees/<branch-or-task>/
 
 Offending lines:
 EOF
@@ -74,5 +75,5 @@ EOF
   exit 1
 fi
 
-echo "✓ validate-prompt-paths: all .worktrees/ references are playground-rooted"
+echo "✓ validate-prompt-paths: all .worktrees/ references are sandbox-repo rooted"
 exit 0

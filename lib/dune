@@ -409,6 +409,7 @@
    keeper_memory_bank
    keeper_memory_recall
    keeper_skill_routing
+   keeper_sandbox
    keeper_alerting
    keeper_alerting_path
    keeper_timing
@@ -663,6 +664,7 @@
   tool_autoresearch_broadcast
   tool_autoresearch_cycle
   keeper_skill_routing
+  keeper_sandbox
   keeper_alerting_path
   ;; tool_local_runtime sub-modules
   tool_local_runtime_http

@@ -1,32 +1,27 @@
-(** Runtime_events event registrations for masc-mcp (Wave 2A pilot).
+(** Runtime_events event registrations for masc-mcp (Wave 2A).
 
     Consumed by Olly or custom [Runtime_events.Callbacks] programs.
-    Emit sites for [ev_turn_start]/[ev_turn_end] will be added in
-    follow-up PRs; this module currently only installs the listener
-    and reserves event handles. *)
+    [ev_turn] is a span event: consumers receive [Begin]/[End] bounds
+    via a single [Runtime_events.Type.span] handler. *)
 
 type Runtime_events.User.tag +=
-  | Turn_start
-  | Turn_end
+  | Turn
 
-val ev_turn_start : unit Runtime_events.User.t
-(** Event handle for the beginning of an agent turn.  Prefer
-    [emit_turn_start] for emission; exposed here so that callers
-    building custom [Runtime_events.Callbacks.add_user_event] handlers
-    can register a consumer. *)
-
-val ev_turn_end : unit Runtime_events.User.t
-(** Event handle for the end of an agent turn.  See [ev_turn_start]. *)
+val ev_turn : Runtime_events.Type.span Runtime_events.User.t
+(** Span event bracketing an agent turn.  Consumers register with
+    [Runtime_events.Callbacks.add_user_event Runtime_events.Type.span]
+    to receive both bounds keyed by timestamp; no external
+    correlation id is needed. *)
 
 val emit_turn_start : unit -> unit
-(** Record a turn-start event in the Runtime_events ring buffer.
-    Safe to call from any fiber; the underlying write is a single
-    domain-local buffer append. *)
+(** Record the opening bound ([Begin]) of a turn span in the
+    Runtime_events ring buffer.  Safe to call from any fiber; the
+    underlying write is a single domain-local buffer append. *)
 
 val emit_turn_end : unit -> unit
-(** Record a turn-end event in the Runtime_events ring buffer.  Pair
-    with [emit_turn_start] around the turn body (the observer pairs
-    them by seq). *)
+(** Record the closing bound ([End]) of a turn span.  Pair with
+    [emit_turn_start] around the turn body (the consumer pairs them
+    by domain+timestamp). *)
 
 val start_listener : unit -> unit
 (** Install the Runtime_events ring buffer listener.

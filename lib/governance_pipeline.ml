@@ -40,12 +40,22 @@ let generate_trace_id () =
 
 (* ── Policy Decision ────────────────────────────────────────── *)
 
-(** Minimum risk level that requires confirmation for each governance level. *)
+(** Minimum risk level that requires confirmation for each governance level.
+
+    Security gate: unknown level (typo, future variant) is fail-CLOSED — it
+    requires confirmation for [Critical] risk and warns the operator instead
+    of silently allowing every tool through. Mirrors the fail-closed posture
+    of [audit_threshold] just below. See #7641 / #8605. *)
 let confirm_threshold = function
   | "paranoid" -> Some Medium
   | "enterprise" -> Some High
   | "production" -> Some Critical
-  | "development" | _ -> None
+  | "development" -> None
+  | other ->
+      Log.Governance.warn
+        "confirm_threshold: unknown governance_level %S -> fail-closed (require confirm at Critical); see #7641"
+        other;
+      Some Critical
 
 let keeper_confirm_threshold = function
   | "production" -> Some High

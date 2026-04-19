@@ -3,6 +3,29 @@
 
 ## Unreleased
 
+### Changed
+
+- **OAS pin bump → `main@2798831c` (v0.162.0 + 7 follow-ups).** Carries
+  upstream OAS commits since the last `54f4aeab` pin:
+  - `2798831c` #1035 — `fix(hooks): emit OnError on tool-not-found
+    dispatch failure (#1032)`. Surfaces a previously-silent dispatch
+    failure mode through the existing `Hooks.OnError` channel; useful
+    for keeper observability when LLMs hallucinate tool names.
+  - `2a9a8756` #1061 — batch register 15 orphan test executables (OAS
+    internal coverage; no surface change).
+  - `e1578747` #1045 — refactor: split runtime control and memory
+    backend helpers (internal split, public modules unchanged).
+  - `4d7b8489` #1043 — refactor: split context reducer helpers
+    (internal split, `Context` API unchanged).
+  - `98a13ab5` #1041 — refactor(checkpoint): split codec and delta
+    helpers (internal split, `Checkpoint` API unchanged).
+  - `8a5abf2e` #1060 — register orphan `test_memory_advanced` (OAS
+    internal coverage).
+  - `d2b81773` #1059 — `build(dune): bump lang 3.11 → 3.22 to match
+    toolchain` (OAS-side dune version, opaque to consumers).
+
+  Dependency floor and declared base version remain `0.162.0`.
+
 ## [0.11.0] - 2026-04-20
 
 ### Added

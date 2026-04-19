@@ -47,7 +47,11 @@ type handoff_payload = {
 (** Context estimation calibration state *)
 type calibration_state = {
   mutable samples: (int * int) list;  (* (estimated, actual) pairs *)
-  mutable correction_factor: float;    (* multiplied to estimate *)
+  mutable correction_factor: float [@atomic];
+    (* multiplied to estimate; read cross-fiber by [estimate_context]
+       so the field is marked [@atomic] for release-store/acquire-load
+       semantics. The compound update (samples+factor) in
+       [record_actual_tokens] is not itself atomic — see module doc. *)
 }
 
 let calibration = {

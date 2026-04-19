@@ -131,10 +131,23 @@ type kind =
         @since 0.9.7 *)
 
 val kind_to_string : kind -> string
+
+val all_kinds : kind list
+(** All [kind] constructors in declaration order.  Adding a new
+    constructor forces compile errors in [kind_to_string] (which
+    powers [valid_kind_strings] used by the [parse_kind] error
+    message), so the operator-visible "expected one of" list stays
+    in sync automatically.  Issue #8603. *)
+
+val valid_kind_strings : string list
+(** Wire-format names for {!all_kinds}, derived via {!kind_to_string}. *)
+
 val parse_kind : string -> (kind, string) result
 (** [parse_kind s] returns [Ok kind] for known names, [Error msg] for
-    unknown values.  Callers should warn-and-fallback to [Failover]
-    rather than raise, to keep keeper startup resilient to config typos. *)
+    unknown values.  The [Error] message lists {!valid_kind_strings}
+    so it stays in sync with the variant.  Callers should warn-and-fallback
+    to [Failover] rather than raise, to keep keeper startup resilient to
+    config typos. *)
 
 (** {1 Strategy value} *)
 

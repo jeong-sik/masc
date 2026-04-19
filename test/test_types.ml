@@ -882,6 +882,57 @@ let () =
           (Option.map Masc_mcp.Dashboard.scope_to_string
              (Masc_mcp.Dashboard.scope_of_string_opt "recent")));
     ];
+    "cascade_strategy_kind_ssot", [
+      (* Issue #8603: parse_kind's Error message used to hard-code the
+         7 wire-format names; an 8th constructor would silently produce
+         a stale operator-visible error. The fix exposes [all_kinds]
+         and [valid_kind_strings] derived from kind_to_string and
+         routes the error message through them. These tests pin the
+         witness exhaustiveness, the count, and that the error message
+         is derived (not hard-coded). *)
+      Alcotest.test_case "all_kinds round-trips through kind_to_string" `Quick (fun () ->
+        let module C = Masc_mcp.Cascade_strategy in
+        List.iter (fun k ->
+          let actual = C.kind_to_string k in
+          if not (List.mem actual C.valid_kind_strings) then
+            Alcotest.failf "kind_to_string %S not in valid_kind_strings" actual)
+          C.all_kinds;
+        Alcotest.(check int) "count" 7 (List.length C.all_kinds);
+        Alcotest.(check int) "strings count" 7
+          (List.length C.valid_kind_strings));
+      Alcotest.test_case "valid_kind_strings pinned to wire format" `Quick (fun () ->
+        Alcotest.(check (list string)) "wire-format names"
+          [ "failover"; "capacity_aware"; "weighted_random";
+            "circuit_breaker_cycling"; "priority_tier"; "sticky";
+            "round_robin" ]
+          Masc_mcp.Cascade_strategy.valid_kind_strings);
+      Alcotest.test_case "parse_kind error mentions every valid kind" `Quick (fun () ->
+        let module C = Masc_mcp.Cascade_strategy in
+        match C.parse_kind "fabricated_strategy" with
+        | Ok _ -> Alcotest.fail "expected Error for unknown kind"
+        | Error msg ->
+          List.iter (fun k ->
+            let needle = k in
+            let len = String.length needle in
+            let mlen = String.length msg in
+            let rec contains i =
+              if i + len > mlen then false
+              else if String.sub msg i len = needle then true
+              else contains (i + 1)
+            in
+            Alcotest.(check bool)
+              (Printf.sprintf "error message lists %S" k) true (contains 0))
+            C.valid_kind_strings);
+      Alcotest.test_case "parse_kind round-trips every valid string" `Quick (fun () ->
+        let module C = Masc_mcp.Cascade_strategy in
+        List.iter (fun s ->
+          match C.parse_kind s with
+          | Error e -> Alcotest.failf "parse_kind %S returned Error: %s" s e
+          | Ok k ->
+            let back = C.kind_to_string k in
+            Alcotest.(check string) (Printf.sprintf "round-trip %S" s) s back)
+          C.valid_kind_strings);
+    ];
     "compact_retry_exhausted_ssot", [
       (* Issue #8581: the [compact_retry_exhausted] field was read by
          derive_phase to promote (context_overflow + latch) to Paused

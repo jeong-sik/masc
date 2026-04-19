@@ -657,9 +657,8 @@ let claim_task_r config ~agent_name ~task_id
         else Ok ()
       in
       (* Cycle-prevention gate: refuse claim when do_not_reclaim_reason is set.
-         The reason is populated by the cancel hook (3+ cancels or hard-stop
-         keywords) or by the operator directly. See PRs #7794 (schema),
-         #7798 (cancel hook). *)
+         The reason can come from cancel/release hard-stop logic or be applied
+         directly by an operator. See PRs #7794 (schema), #7798 (cancel hook). *)
       let* () =
         match task.do_not_reclaim_reason with
         | None -> Ok ()
@@ -734,6 +733,65 @@ let claim_task_r config ~agent_name ~task_id
 (** Unified task transition (single entrypoint).
     When [~force:true], release/cancel/done bypass the assignee guard.
     Used by keeper for orphan task cleanup. *)
+let release_handoff_texts handoff_context =
+  match handoff_context with
+  | None -> []
+  | Some handoff_context ->
+      [
+        Some handoff_context.summary;
+        handoff_context.reason;
+        handoff_context.next_step;
+        handoff_context.failure_mode;
+      ]
+      |> List.filter_map (function
+           | None -> None
+           | Some text ->
+               let trimmed = String.trim text in
+               if trimmed = "" then None else Some trimmed)
+
+let release_hard_stop_markers =
+  [
+    "do not reclaim";
+    "scope mismatch";
+    "wrong keeper";
+    "not found";
+    "phantom";
+    "repo access";
+    "repo unavailable";
+    "already done";
+    "already completed";
+    "completed by another";
+    "invalid pr";
+    "invalid issue";
+  ]
+
+let release_should_block_reclaim handoff_context =
+  List.exists
+    (fun text ->
+      let lower = String.lowercase_ascii text in
+      List.exists
+        (fun marker -> String_util.contains_substring lower marker)
+        release_hard_stop_markers)
+    (release_handoff_texts handoff_context)
+
+let derive_release_do_not_reclaim_reason (task : Types.task) handoff_context =
+  match task.do_not_reclaim_reason with
+  | Some _ as existing -> existing
+  | None ->
+      let next_cycle = task.cycle_count + 1 in
+      let first_text =
+        match release_handoff_texts handoff_context with
+        | text :: _ -> Some text
+        | [] -> None
+      in
+      if release_should_block_reclaim handoff_context then
+        Some
+          (Option.value first_text
+             ~default:(Printf.sprintf "auto: %d releases" next_cycle))
+      else if next_cycle >= 3 then
+        Some (Printf.sprintf "auto: %d releases" next_cycle)
+      else None
+
 let transition_task_r config ~agent_name ~task_id ~action
     ?expected_version ?(notes="") ?(reason="") ?handoff_context
     ?(force=false) () : string Types.masc_result =
@@ -971,6 +1029,13 @@ let transition_task_r config ~agent_name ~task_id ~action
       else begin
         let new_tasks = List.map (fun t ->
           if t.id = task_id then
+            let cycle_count, do_not_reclaim_reason =
+              match action with
+              | Types.Release ->
+                  ( t.cycle_count + 1,
+                    derive_release_do_not_reclaim_reason t handoff_context )
+              | _ -> t.cycle_count, t.do_not_reclaim_reason
+            in
             {
               t with
               task_status = new_status;
@@ -982,6 +1047,8 @@ let transition_task_r config ~agent_name ~task_id ~action
                 | Types.Submit_for_verification | Types.Approve_verification
                 | Types.Reject_verification ->
                     None);
+              cycle_count;
+              do_not_reclaim_reason;
             }
           else
             t

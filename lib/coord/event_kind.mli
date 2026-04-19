@@ -1,6 +1,6 @@
 (** Event_kind — Compile-time verified event-kind identifiers.
 
-    Event-kind strings (["task.claimed"], ["board.voted"], …) flow
+    Event-kind strings such as task.claimed and board.voted flow
     between emitters (coord, board, keeper) and consumers
     (activity_graph_reducer, tool_agent_timeline, dashboard). Prior to
     this module both sides used raw [string]; a typo on either side

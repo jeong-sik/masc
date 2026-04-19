@@ -402,6 +402,51 @@ stylesheet
   .tape {
     display: flex;
     flex-direction: column;
+    position: relative;
+    padding-left: 1.5rem;
+    isolation: isolate;
+  }
+
+  /* Vertical brass thread running down the left margin — anchors the
+     time gutter and reads as a continuous "spine" for the row sequence. */
+  .tape::before {
+    content: "";
+    position: absolute;
+    left: 0.6rem;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: linear-gradient(180deg,
+      transparent 0%,
+      #5a3028 6%,
+      #2a1a14 92%,
+      transparent 100%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Top fade — entries appear out of darkness as they scroll past the HUD. */
+  .tape::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 28px;
+    background: linear-gradient(180deg, #0a0706 0%, rgba(10, 7, 6, 0) 100%);
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  /* Symmetric bottom fade so old entries dissolve into the page floor
+     before the roster strip. Sibling element (not pseudo) so it can sit
+     after the row stream in DOM order without breaking sticky positioning. */
+  .tape_end {
+    position: relative;
+    height: 32px;
+    background: linear-gradient(180deg, rgba(10, 7, 6, 0) 0%, #0a0706 100%);
+    margin-top: -8px;
+    pointer-events: none;
   }
 
   .row {
@@ -588,20 +633,11 @@ stylesheet
     color: #4a3a32;
   }
 
+  /* Wrapper kept for backward compatibility with the existing render
+     code; the top fade now lives on .tape::after, so the old sticky
+     pseudo is no longer needed. */
   .tape_fade {
     position: relative;
-  }
-
-  .tape_fade::before {
-    content: "";
-    position: sticky;
-    top: 58px;
-    display: block;
-    height: 24px;
-    margin-bottom: -24px;
-    pointer-events: none;
-    z-index: 2;
-    background: linear-gradient(180deg, #0a0706 0%, rgba(10, 7, 6, 0) 100%);
   }
 
   .roster {
@@ -963,7 +999,9 @@ let render_response (response : Logs_types.response) : Node.t =
       in
       Node.div
         ~attrs:[ Style.tape_fade ]
-        [ Node.div ~attrs:[ Style.tape ] rendered ]
+        [ Node.div ~attrs:[ Style.tape ] rendered
+        ; Node.div ~attrs:[ Style.tape_end ] []
+        ]
   in
   let brand_row =
     Node.div

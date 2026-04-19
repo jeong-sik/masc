@@ -280,10 +280,15 @@ let effective_status ~(now : float) (snapshot : claim_snapshot) =
   | Some resolution -> resolution.status
   | None ->
       let age = now -. created_at_unix snapshot.claim in
+      (* Per-constructor exhaustive match: a new [claim_kind] (e.g.,
+         Verification_claim) triggers a compile error here so its expiry
+         rule is an explicit decision, not silently inherited from the
+         old wildcard arm. See #8768 / #8765 family. *)
       match snapshot.claim.kind with
-      | Task_commitment when age > task_commitment_expiry_sec -> Expired
-      | Completion_claim when age > completion_claim_expiry_sec -> Unsupported
-      | _ -> Pending
+      | Task_commitment ->
+          if age > task_commitment_expiry_sec then Expired else Pending
+      | Completion_claim ->
+          if age > completion_claim_expiry_sec then Unsupported else Pending
 
 let open_recent_claim ~(now : float) snapshots ~agent_name ~kind ~subject ~task_id
     ~max_age_sec =

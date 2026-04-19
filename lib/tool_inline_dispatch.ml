@@ -90,6 +90,17 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
   | "masc_approval_pending" ->
       let json = Keeper_approval_queue.list_pending_json () in
       Some (true, Yojson.Safe.to_string json)
+  | "masc_approval_get" ->
+      let id = arg_get_string "id" "" in
+      if id = "" then Some (false, "id is required")
+      else
+        (match Keeper_approval_queue.get_pending_json ~id with
+         | Some json -> Some (true, Yojson.Safe.to_string json)
+         | None ->
+           Some (false,
+             Printf.sprintf
+               "approval %s is no longer pending or was not found. Refresh with masc_approval_pending before approving/rejecting."
+               id))
   | "masc_approval_resolve" ->
       let id = arg_get_string "id" "" in
       let decision_str = arg_get_string "decision" "approve" in

@@ -165,12 +165,10 @@ rpc_server_not_running_detected() {
 clean_current_build_dir() {
   if [[ "${ACTIVE_TEST_BUILD_DIR}" != "_build" ]]; then
     env DUNE_BUILD_DIR="${ACTIVE_TEST_BUILD_DIR}" dune clean --root . \
-      > >(tee -a "${TEST_LOG_FILE}") \
-      2> >(tee -a "${TEST_LOG_FILE}" >&2)
+      2>&1 | tee -a "${TEST_LOG_FILE}"
   else
     dune clean --root . \
-      > >(tee -a "${TEST_LOG_FILE}") \
-      2> >(tee -a "${TEST_LOG_FILE}" >&2)
+      2>&1 | tee -a "${TEST_LOG_FILE}"
   fi
 }
 

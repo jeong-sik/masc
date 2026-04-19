@@ -1039,6 +1039,47 @@ let () =
           (Option.map Masc_mcp.Tool_library.source_to_string
              (Masc_mcp.Tool_library.source_of_string_opt "fabricated")));
     ];
+    "assertion_kind_ssot", [
+      (* Issue #8636: 3-way drift on masc_check assertion vocabulary —
+         schema enum (5), handler match (5 + namespace_ready alias),
+         default fallback (4 — missing worktree_active). The fix
+         introduces [Tool_coord.assertion_kind] variant + helpers and
+         a cycle-safe schema mirror in Tool_schemas_coord_core. These
+         tests pin the witness, the alias semantics, and the schema
+         mirror — adding a 6th constructor forces compile errors in
+         [assertion_kind_to_string] AND test failure here. *)
+      Alcotest.test_case "witness covers all 5 constructors" `Quick (fun () ->
+        let module C = Masc_mcp.Tool_coord in
+        let witness k =
+          let actual = C.assertion_kind_to_string k in
+          if not (List.mem actual C.valid_assertion_strings) then
+            Alcotest.failf "assertion_kind_to_string %S not in valid_assertion_strings" actual
+        in
+        witness C.Room_set;
+        witness C.Joined;
+        witness C.Task_claimed;
+        witness C.Current_task_set;
+        witness C.Worktree_active;
+        Alcotest.(check int) "count" 5 (List.length C.all_assertion_kinds));
+      Alcotest.test_case "valid_assertion_strings pinned to wire format" `Quick (fun () ->
+        Alcotest.(check (list string)) "wire-format strings"
+          [ "room_set"; "joined"; "task_claimed"; "current_task_set"; "worktree_active" ]
+          Masc_mcp.Tool_coord.valid_assertion_strings);
+      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
+        Alcotest.(check (list string)) "schema mirror == SSOT"
+          Masc_mcp.Tool_coord.valid_assertion_strings
+          Tool_schemas_coord_core.assertion_kind_enum_strings);
+      Alcotest.test_case "lenient parser accepts namespace_ready alias" `Quick (fun () ->
+        let module C = Masc_mcp.Tool_coord in
+        match C.assertion_kind_of_string_lenient "namespace_ready" with
+        | Some C.Room_set -> ()
+        | Some _ -> Alcotest.fail "alias should map to Room_set"
+        | None -> Alcotest.fail "alias should parse");
+      Alcotest.test_case "lenient parser rejects unknown" `Quick (fun () ->
+        Alcotest.(check bool) "unknown -> None" true
+          (Masc_mcp.Tool_coord.assertion_kind_of_string_lenient
+             "fabricated_assertion" = None));
+    ];
     "compact_retry_exhausted_ssot", [
       (* Issue #8581: the [compact_retry_exhausted] field was read by
          derive_phase to promote (context_overflow + latch) to Paused

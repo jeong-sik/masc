@@ -1,7 +1,7 @@
 (** Voice_bridge — TTS synthesis, MCP voice sessions, conferences. *)
 
 include Voice_bridge_core
-open Result_syntax
+open Result.Syntax
 
 let safe_agent_id value =
   String.map

@@ -964,6 +964,31 @@ let () =
         Alcotest.(check int) "no duplicates" (List.length names)
           (List.length dedup));
     ];
+    "publish_phase_lifecycle_ssot", [
+      (* Issue #8572: phase-bearing publish_lifecycle calls used to pass
+         a hand-coded event_name string alongside the phase Variant —
+         no compile-time link, so [~phase:Stopped "crashed"] would
+         have shipped a contradictory event. The fix derives the
+         event from [Keeper_state_machine.phase_to_string]; these
+         tests pin the wire-format strings downstream consumers
+         (dashboards, audit log) depend on so a Variant rename
+         cannot silently change the event name. *)
+      Alcotest.test_case "phase_to_string emits stable wire strings" `Quick (fun () ->
+        let open Masc_mcp.Keeper_state_machine in
+        Alcotest.(check string) "Stopped" "stopped" (phase_to_string Stopped);
+        Alcotest.(check string) "Crashed" "crashed" (phase_to_string Crashed);
+        Alcotest.(check string) "Running" "running" (phase_to_string Running);
+        Alcotest.(check string) "Dead" "dead" (phase_to_string Dead));
+      Alcotest.test_case "all_phases round-trip through to_string/of_string" `Quick (fun () ->
+        let open Masc_mcp.Keeper_state_machine in
+        List.iter (fun p ->
+          let s = phase_to_string p in
+          match phase_of_string s with
+          | Some p' when phase_to_string p' = s -> ()
+          | Some _ -> Alcotest.failf "phase_of_string %S parsed to a different phase" s
+          | None -> Alcotest.failf "phase_of_string %S returned None — round-trip broken" s
+        ) all_phases);
+    ];
     "verdict_ssot", [
       (* Issue #8436: payload-bearing variants need a witness function
          (not List.map verdict_to_string list, which would emit "WARN: "

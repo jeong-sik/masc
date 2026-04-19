@@ -1900,6 +1900,17 @@ let publish_keeper_lifecycle ?phase ~event ~keeper_name ~detail () : unit =
   | None -> ()
 ;;
 
+(** Issue #8572: phase-derived event helper.
+
+    Use this when the lifecycle event name is the phase itself
+    (e.g. [Stopped → "stopped"]). Keeps [event_to_string] from being
+    hand-recomputed at every call site, eliminating the
+    [~phase:Stopped ~event:"crashed"]-style typo class. *)
+let publish_keeper_phase_lifecycle ~phase ~keeper_name ~detail () : unit =
+  let event = Keeper_state_machine.phase_to_string phase in
+  publish_keeper_lifecycle ~phase ~event ~keeper_name ~detail ()
+;;
+
 let publish_keeper_started ~(live_meta : keeper_meta) : unit =
   publish_keeper_lifecycle
     ~phase:Keeper_state_machine.Running
@@ -1945,8 +1956,8 @@ let record_keeper_stopped
       Keeper_state_machine.Stop_requested);
     ignore (Keeper_registry.dispatch_event ~base_path keeper_name
       Keeper_state_machine.Drain_complete);
-    publish_keeper_lifecycle ~phase:Keeper_state_machine.Stopped
-      ~event:"stopped" ~keeper_name ~detail ();
+    publish_keeper_phase_lifecycle ~phase:Keeper_state_machine.Stopped
+      ~keeper_name ~detail ();
     true)
   else
     false
@@ -1967,8 +1978,8 @@ let record_keeper_crashed
       (Keeper_state_machine.Fiber_terminated { outcome = reason }));
     Keeper_registry.record_crash ~base_path keeper_name (Time_compat.now ()) reason;
     Keeper_registry.record_error ~base_path keeper_name reason;
-    publish_keeper_lifecycle ~phase:Keeper_state_machine.Crashed
-      ~event:"crashed" ~keeper_name ~detail:reason ())
+    publish_keeper_phase_lifecycle ~phase:Keeper_state_machine.Crashed
+      ~keeper_name ~detail:reason ())
 ;;
 
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_meta) : unit

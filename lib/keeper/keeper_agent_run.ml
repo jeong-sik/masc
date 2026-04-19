@@ -441,6 +441,9 @@ let run_turn
       ()
   : (run_result, Oas.Error.sdk_error) result
   =
+  Masc_runtime_events.emit_turn_start ();
+  Fun.protect ~finally:Masc_runtime_events.emit_turn_end
+  @@ fun () ->
   (* 0. Resolve inference parameters via Cascade_inference *)
   let temperature =
     match temperature with

@@ -1121,6 +1121,50 @@ let () =
         Alcotest.(check int) "no duplicates" (List.length names)
           (List.length dedup));
     ];
+    "lifecycle_event_cache_patcher_coverage", [
+      (* Issue #8396: dashboard cache patchers used to recognise only
+         a 7-name subset of [Keeper_lifecycle_events.all_event_names].
+         When the supervisor emitted [dead_cleaned] / [self_preservation]
+         / [paused_pruned] / [running] (phase-derived), cached rows
+         stayed stale until the next full recompute. These tests pin
+         the invariant that *every* SSOT event name produces a [Some]
+         from at least one of the 4 patchers — a new event added to
+         the SSOT without updating the patcher fails this test. *)
+      Alcotest.test_case "every SSOT event has at least one patcher hit" `Quick (fun () ->
+        let module S = Masc_mcp.Server_dashboard_http_execution_surfaces in
+        let module L = Masc_mcp.Keeper_lifecycle_events in
+        List.iter (fun event ->
+          let any =
+            S.keepalive_running_of_lifecycle_event event <> None
+            || S.phase_of_lifecycle_event event <> None
+            || S.pipeline_stage_of_lifecycle_event event <> None
+            || S.paused_of_lifecycle_event event <> None
+          in
+          Alcotest.(check bool)
+            (Printf.sprintf "%s patched by at least one patcher" event)
+            true any)
+          L.all_event_names);
+      Alcotest.test_case "every SSOT event hits keepalive_running patcher" `Quick (fun () ->
+        let module S = Masc_mcp.Server_dashboard_http_execution_surfaces in
+        let module L = Masc_mcp.Keeper_lifecycle_events in
+        List.iter (fun event ->
+          Alcotest.(check bool)
+            (Printf.sprintf "%s -> Some" event) true
+            (S.keepalive_running_of_lifecycle_event event <> None))
+          L.all_event_names);
+      Alcotest.test_case "every SSOT event hits phase patcher" `Quick (fun () ->
+        let module S = Masc_mcp.Server_dashboard_http_execution_surfaces in
+        let module L = Masc_mcp.Keeper_lifecycle_events in
+        List.iter (fun event ->
+          Alcotest.(check bool)
+            (Printf.sprintf "%s -> Some" event) true
+            (S.phase_of_lifecycle_event event <> None))
+          L.all_event_names);
+      Alcotest.test_case "unknown event still returns None" `Quick (fun () ->
+        let module S = Masc_mcp.Server_dashboard_http_execution_surfaces in
+        Alcotest.(check bool) "fabricated -> None" true
+          (S.keepalive_running_of_lifecycle_event "fabricated_event" = None));
+    ];
     "publish_phase_lifecycle_ssot", [
       (* Issue #8572: phase-bearing publish_lifecycle calls used to pass
          a hand-coded event_name string alongside the phase Variant —

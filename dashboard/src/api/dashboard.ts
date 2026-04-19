@@ -1407,12 +1407,24 @@ export function fetchKeeperToolStats(
 
 // ── Keeper tool call log (full I/O) ──────────────────────
 
+// Output is either an inline string (legacy / small payload) or a
+// normalized blob descriptor — see lib/keeper_tool_call_log.ml
+// `blob_aware_output_json`. The renderer must accept both shapes.
+export type ToolCallOutputBlob = {
+  _blob: {
+    sha256: string
+    bytes: number
+    mime: string
+    preview: string
+  }
+}
+
 export type ToolCallEntry = {
   ts: number
   keeper: string
   tool: string
   input: unknown
-  output: string
+  output: string | ToolCallOutputBlob
   success: boolean
   duration_ms: number
   model?: string
@@ -1422,6 +1434,28 @@ type ToolCallsResponse = {
   keeper: string
   count: number
   entries: ToolCallEntry[]
+}
+
+function decodeToolCallOutput(raw: unknown): string | ToolCallOutputBlob {
+  if (typeof raw === 'string') return raw
+  if (
+    isRecord(raw) &&
+    isRecord(raw._blob) &&
+    typeof raw._blob.sha256 === 'string' &&
+    typeof raw._blob.bytes === 'number' &&
+    typeof raw._blob.mime === 'string' &&
+    typeof raw._blob.preview === 'string'
+  ) {
+    return {
+      _blob: {
+        sha256: raw._blob.sha256,
+        bytes: raw._blob.bytes,
+        mime: raw._blob.mime,
+        preview: raw._blob.preview,
+      },
+    }
+  }
+  return ''
 }
 
 function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
@@ -1434,7 +1468,7 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     keeper,
     tool,
     input: raw.input,
-    output: asString(raw.output, ''),
+    output: decodeToolCallOutput(raw.output),
     success: asBoolean(raw.success, false),
     duration_ms: asNumber(raw.duration_ms, 0),
     model: asString(raw.model),

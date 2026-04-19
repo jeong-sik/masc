@@ -57,3 +57,26 @@ module Message = struct
 
   let all = [ Broadcast; Mentioned ]
 end
+
+module Board = struct
+  type t =
+    | Posted
+    | Commented
+    | Voted
+    | Deleted
+
+  let to_string = function
+    | Posted -> "board.posted"
+    | Commented -> "board.commented"
+    | Voted -> "board.voted"
+    | Deleted -> "board.deleted"
+
+  let of_string = function
+    | "board.posted" -> Some Posted
+    | "board.commented" -> Some Commented
+    | "board.voted" -> Some Voted
+    | "board.deleted" -> Some Deleted
+    | _ -> None
+
+  let all = [ Posted; Commented; Voted; Deleted ]
+end

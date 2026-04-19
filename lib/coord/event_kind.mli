@@ -6,10 +6,10 @@
     this module both sides used raw [string]; a typo on either side
     compiled clean and silently diverged at runtime.
 
-    This module is the SSOT for the task.* and message.* families.
-    Other families (board.*, agent.*, keeper.*, ...) are tracked in
-    issue 8455 and will be migrated in follow-up PRs on the same
-    pattern.
+    This module is the SSOT for the [task.*], [message.*] and [board.*]
+    families. Other families (agent.*, keeper.*, decision.*, operation.*,
+    etc.) are tracked in #8455 and will be migrated in follow-up PRs on
+    the same pattern.
 
     Parse boundary: {!Task.of_string} at JSONL / wire ingress only;
     internal code uses [Task.t] directly so typos become compile
@@ -47,6 +47,20 @@ module Message : sig
 
   val to_string : t -> string
   (** Canonical dotted-form wire name (e.g. [message.broadcast]). *)
+
+  val of_string : string -> t option
+  val all : t list
+end
+
+module Board : sig
+  type t =
+    | Posted
+    | Commented
+    | Voted
+    | Deleted
+
+  val to_string : t -> string
+  (** Canonical dotted-form wire name ([board.posted] etc.). *)
 
   val of_string : string -> t option
   val all : t list

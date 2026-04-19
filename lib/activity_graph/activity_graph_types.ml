@@ -61,12 +61,33 @@ let span_status_to_string = function
   | Span_finalized -> "finalized" | Span_stopped -> "stopped"
   | Span_ended -> "ended"
 
-let span_status_of_string = function
-  | "open" -> Span_open | "completed" -> Span_completed
-  | "released" -> Span_released | "cancelled" -> Span_cancelled
-  | "left" -> Span_left | "retired" -> Span_retired
-  | "finalized" -> Span_finalized | "stopped" -> Span_stopped
-  | _ -> Span_ended
+(** Issue #8682: strict parser. The previous catch-all silently
+    collapsed any unknown wire string (typo, future variant) into
+    [Span_ended] — a terminal-but-unspecified state — masking drift
+    from any future producer. Same pattern as #8636/#8670 SSOT
+    parsers: option-typed reverse route on the parse boundary. *)
+let span_status_of_string_opt = function
+  | "open" -> Some Span_open
+  | "completed" -> Some Span_completed
+  | "released" -> Some Span_released
+  | "cancelled" -> Some Span_cancelled
+  | "left" -> Some Span_left
+  | "retired" -> Some Span_retired
+  | "finalized" -> Some Span_finalized
+  | "stopped" -> Some Span_stopped
+  | "ended" -> Some Span_ended
+  | _ -> None
+
+(** Back-compat wrapper: callers that have no other recovery still
+    fall back to [Span_ended] but a warning is logged so the typo /
+    drift becomes operator-visible. *)
+let span_status_of_string s =
+  match span_status_of_string_opt s with
+  | Some v -> v
+  | None ->
+      Log.Misc.warn
+        "span_status_of_string: unknown wire string %S → Span_ended fallback (#8682)" s;
+      Span_ended
 
 type entity_ref = {
   kind : string;

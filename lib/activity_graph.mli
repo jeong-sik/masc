@@ -28,6 +28,14 @@ type span_status =
   | Span_left | Span_retired | Span_finalized | Span_stopped | Span_ended
 
 val span_status_to_string : span_status -> string
+
+(** Strict parse: returns [None] when the wire string is not one of the
+    nine canonical span_status labels. Prefer this over
+    [span_status_of_string] for new code so drift is visible. Issue #8682. *)
+val span_status_of_string_opt : string -> span_status option
+
+(** Back-compat parse: returns [Span_ended] on unknown strings and
+    logs a warning so the typo is operator-visible. Issue #8682. *)
 val span_status_of_string : string -> span_status
 
 type entity_ref = {

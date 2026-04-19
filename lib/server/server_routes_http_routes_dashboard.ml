@@ -341,35 +341,15 @@ let rec add_routes ~sw ~clock router =
            Printf.sprintf "%s doctor all --json" (Filename.quote self_bin)
          in
          try
-           let ic = Unix.open_process_in cmd in
-           (* Error-path close prevents pipe fd leak when [Buffer.add_channel]
-              raises anything other than End_of_file. Dashboard polls this
-              endpoint on an interval — a single leak per poll saturates the
-              per-process pipe limit within ~30 minutes. Issue #8538. *)
-           let buf_result =
-             try
-               let buf = Buffer.create 8192 in
-               (try
-                  while true do
-                    Buffer.add_channel buf ic 4096
-                  done
-                with End_of_file -> ());
-               Ok buf
-             with exn ->
-               ignore
-                 (try Unix.close_process_in ic
-                  with Unix.Unix_error _ | Sys_error _ -> Unix.WEXITED 1);
-               Error exn
+           let buf, _status =
+             With_process.with_process_in cmd
+               (With_process.drain_to_buffer ~chunk:4096)
            in
-           (match buf_result with
-            | Error exn -> raise exn
-            | Ok buf ->
-                let _ = Unix.close_process_in ic in
-                Http.Response.json
-                  ~compress:true
-                  ~request:req
-                  (Buffer.contents buf)
-                  reqd)
+           Http.Response.json
+             ~compress:true
+             ~request:req
+             (Buffer.contents buf)
+             reqd
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->

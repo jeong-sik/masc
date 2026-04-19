@@ -443,7 +443,7 @@ let () =
       Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
         Alcotest.(check (list string)) "tool_schemas mirror == SSOT"
           Masc_mcp.Tool_misc_admin.valid_admin_section_strings
-          Masc_tool_schemas.Tool_schemas_misc.admin_section_enum_strings);
+          Tool_schemas_misc.admin_section_enum_strings);
     ];
     "config_category_ssot", [
       Alcotest.test_case "producer helper matches all_categories order" `Quick (fun () ->

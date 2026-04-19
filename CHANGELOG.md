@@ -51,6 +51,19 @@
   drift warnings disappear and MASC tracks the current upstream main
   truth again.
 
+### Reliability
+
+- **FD leak SSOT (#8538 Tier 2).** PR #8543 이 3 hot-path call site 에 inline
+  try/with 으로 pipe fd leak 을 막았지만, 같은 패턴을 여러 곳에서 재유도하면
+  drift 가 발생한다. 공통 combinator `With_process.with_process_in` /
+  `with_process_args_in` 을 `lib/process/with_process.ml` 에 추출하고
+  `doctor_dispatch.ml`, `server_routes_http_routes_dashboard.ml`,
+  `worktree_live_context.ml` 세 site 를 SSOT 에 귀속시켜 drift vector 제거.
+  `test/test_with_process_coverage.ml` 이 error path 별 fd 회수와 100-iter
+  stress 를 검증한다. `Fun.protect` 대신 수동 try/with 을 선택한 근거:
+  finally 에서 던져진 예외가 `Fun.Finally_raised` 로 랩핑돼 `Eio.Cancel.Cancelled`
+  의 구조적 취소 정보를 가릴 수 있음 (OCaml stdlib `Fun.protect` spec).
+  후속: `Eio.Process.parse_out` 기반 Tier 3 이관 (follow-up Issue).
 
 ## [0.10.1] - 2026-04-19
 

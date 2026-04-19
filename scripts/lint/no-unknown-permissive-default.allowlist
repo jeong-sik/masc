@@ -10,8 +10,10 @@
 # #8605 umbrella — tracked in https://github.com/jeong-sik/masc-mcp/issues/8605
 lib/sdk_tool_contract.ml:377
 lib/activity_graph/activity_graph_types.ml:89
-lib/coord.ml:81
-lib/coord.ml:102
-lib/coord.ml:132
+# coord.ml:132 (observe_task_transition) eliminated by #8846.
+# coord.ml:81/102 (observe_agent_lifecycle) still string-based; lines shifted to
+# 88/109 after #8846's insertions. Migration pending in #8842.
+lib/coord.ml:88
+lib/coord.ml:109
 lib/eval_harness.ml:370
 lib/types/types_auth.ml:83

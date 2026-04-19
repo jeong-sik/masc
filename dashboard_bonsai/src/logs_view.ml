@@ -242,6 +242,71 @@ stylesheet
   .hud_v_ok   { color: #5a7a3a; }
   .hud_v_warn { color: #a06a1a; }
 
+  /* Moonrise strip — narrative interlude between the HUD readout and
+     the filter toolbar. Reads as a quiet status bar that names the
+     watch, the time of day, and who is at the helm. */
+  .moonrise {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 8px 14px;
+    background:
+      linear-gradient(90deg,
+        rgba(138, 106, 40, 0.10) 0%,
+        transparent 45%,
+        rgba(160, 24, 24, 0.06) 100%),
+      #0f0b09;
+    border: 1px solid #2a1a14;
+    border-radius: 2px;
+    font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
+    font-variant: small-caps;
+    letter-spacing: 0.08em;
+    font-size: 12px;
+    color: #b8a488;
+  }
+
+  .moon_glyph {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 28% 28%, #e8d8b8 0%, #8a6a28 55%, #5a3028 100%);
+    box-shadow:
+      0 0 10px rgba(232, 216, 184, 0.22),
+      inset 0 0 0 1px rgba(232, 216, 184, 0.12);
+    flex-shrink: 0;
+  }
+
+  .moon_lead {
+    font-family: 'Cinzel', serif;
+    font-variant: normal;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: #e8d8b8;
+    font-size: 10px;
+  }
+
+  .moon_sep {
+    color: #5a3028;
+    font-variant: normal;
+  }
+
+  .moon_mono {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    font-variant: normal;
+    letter-spacing: 0.04em;
+    color: #8a6a28;
+  }
+
+  .moon_tail {
+    margin-left: auto;
+    color: #6a5848;
+    font-variant: normal;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+  }
+
   .toolbar {
     display: flex;
     align-items: center;
@@ -1049,11 +1114,28 @@ let render_response (response : Logs_types.response) : Node.t =
       ; Node.button ~attrs:[ Style.btn_ghost ] [ Node.text "refresh" ]
       ]
   in
+  let moonrise =
+    Node.div
+      ~attrs:[ Style.moonrise ]
+      [ Node.span ~attrs:[ Style.moon_glyph ] []
+      ; Node.span ~attrs:[ Style.moon_lead ] [ Node.text "the watch is on" ]
+      ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
+      ; Node.span [ Node.text "lit by a half moon" ]
+      ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
+      ; Node.span ~attrs:[ Style.moon_mono ] [ Node.text "23:50 local" ]
+      ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
+      ; Node.span
+          ~attrs:[ Style.moon_mono ]
+          [ Node.text "base=/tmp/masc-bonsai-dev" ]
+      ; Node.span ~attrs:[ Style.moon_tail ] [ Node.text "operator · vincent" ]
+      ]
+  in
   Node.div
     ~attrs:[ Style.root ]
     [ brand_row
     ; view_heartbeat ()
     ; view_hud response
+    ; moonrise
     ; toolbar
     ; Node.div
         ~attrs:[ Style.header ]

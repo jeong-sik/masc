@@ -155,7 +155,7 @@ jobs:
             build=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|dune-workspace$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/gen-grpc-descriptors\.sh$)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|dune-workspace$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/check-ssot\.sh$|scripts/gen-grpc-descriptors\.sh$)'; then
             lint=true
           fi
 
@@ -526,6 +526,11 @@ jobs:
         run: |
           chmod +x scripts/check-boundary-guard.sh
           scripts/check-boundary-guard.sh
+
+      - name: Check SSOT bypass ratchet (#8462)
+        run: |
+          chmod +x scripts/check-ssot.sh
+          scripts/check-ssot.sh
 
       - name: Build with warnings as errors
         run: |

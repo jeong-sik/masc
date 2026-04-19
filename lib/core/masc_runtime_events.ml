@@ -21,4 +21,7 @@ let ev_turn_end =
   Runtime_events.User.register "masc.turn.end"
     Turn_end Runtime_events.Type.unit
 
+let emit_turn_start () = Runtime_events.User.write ev_turn_start ()
+let emit_turn_end ()   = Runtime_events.User.write ev_turn_end ()
+
 let start_listener () = Runtime_events.start ()

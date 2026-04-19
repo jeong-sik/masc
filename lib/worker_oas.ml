@@ -523,6 +523,9 @@ let rec run_worker_via_oas
     ?contract
     ?worker_run_id
     () : (Worker_container_types.run_result, string) result =
+  Masc_runtime_events.emit_turn_start ();
+  Fun.protect ~finally:Masc_runtime_events.emit_turn_end
+  @@ fun () ->
   let session_id = meta.mcp_session_id in
   let worker_name = meta.worker_name in
   let heartbeat_cbs =

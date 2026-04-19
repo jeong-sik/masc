@@ -97,7 +97,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
         match previous_claim with
         | Some prev ->
             Coord_task.observe_task_transition config ~agent_name ~task_id:prev.id
-              ~transition:"release"
+              ~transition:Types.Release
               ~details:
                 (Coord_task.task_transition_details ~from_status:prev.task_status
                    ~to_status:Types.Todo
@@ -267,7 +267,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
             "{\"type\":\"task_claim_next\",\"agent\":\"%s\",\"task\":\"%s\",\"priority\":%d,\"ts\":\"%s\"}"
             agent_name task.id task.priority (now_iso ()));
           Coord_task.observe_task_transition config ~agent_name ~task_id:task.id
-            ~transition:"claim"
+            ~transition:Types.Claim
             ~details:
               (Coord_task.task_transition_details ~from_status:Types.Todo
                  ~to_status:

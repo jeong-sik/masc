@@ -436,31 +436,39 @@ let maybe_support_recent_completion_claim config ~agent_name ~task_id ~evidence_
           supporting_evidence_refs = normalize_refs evidence_refs;
         }
 
+(* #8605 family: exhaustive on [Types.task_action]. The previous
+   string match silently no-oped for typos and any future transition
+   string. With the variant the compiler now forces a deliberate
+   decision for every task_action constructor; verification-related
+   actions explicitly produce no commitment side effects -- their
+   accountability tracking lives in [record_completion_claim]. *)
 let record_task_transition (config : Coord_query.config) ~agent_name ~task_id
-    ~transition ~details =
+    ~(transition : Types.task_action) ~details =
   if not (is_keeper_agent_name agent_name) then ()
   else
     match transition with
-    | "claim" | "start" ->
+    | Types.Claim | Types.Start ->
         create_task_commitment config ~agent_name ~task_id
           ~surface:"task_transition"
-    | "done" ->
+    | Types.Done_action ->
         let base_refs = [ "task:" ^ task_id ] in
         resolve_recent_task_commitment config ~agent_name ~task_id
           ~status:Supported ~reason:(Some "task_done")
           ~evidence_refs:base_refs ~max_age_sec:task_commitment_expiry_sec;
         maybe_support_recent_completion_claim config ~agent_name ~task_id
           ~evidence_refs:base_refs
-    | "release" | "cancel" ->
+    | Types.Release | Types.Cancel ->
         let reason =
           match json_string_opt "reason" details with
           | Some value when String.trim value <> "" -> Some (String.trim value)
-          | _ -> Some transition
+          | _ -> Some (Types.task_action_to_string transition)
         in
         resolve_recent_task_commitment config ~agent_name ~task_id
           ~status:Partial ~reason
           ~evidence_refs:[ "task:" ^ task_id ] ~max_age_sec:task_commitment_expiry_sec
-    | _ -> ()
+    | Types.Submit_for_verification
+    | Types.Approve_verification
+    | Types.Reject_verification -> ()
 
 let supporting_refs_for_turn ~trace_id ~turn_number strong_evidence_refs =
   normalize_refs

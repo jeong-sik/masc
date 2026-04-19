@@ -62,10 +62,15 @@ let span_status_to_string = function
   | Span_ended -> "ended"
 
 let span_status_of_string = function
-  | "open" -> Span_open | "completed" -> Span_completed
-  | "released" -> Span_released | "cancelled" -> Span_cancelled
-  | "left" -> Span_left | "retired" -> Span_retired
-  | "finalized" -> Span_finalized | "stopped" -> Span_stopped
+  | "open" -> Span_open
+  | "completed" -> Span_completed
+  | "released" -> Span_released
+  | "cancelled" -> Span_cancelled
+  | "left" -> Span_left
+  | "retired" -> Span_retired
+  | "finalized" -> Span_finalized
+  | "stopped" -> Span_stopped
+  | "ended" -> Span_ended
   | _ -> Span_ended
 
 type entity_ref = {

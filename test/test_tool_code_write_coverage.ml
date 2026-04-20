@@ -4,6 +4,17 @@
 open Alcotest
 
 module Tool_code_write = Masc_mcp.Tool_code_write
+module Coord = Masc_mcp.Coord
+
+let msg_contains ~needle haystack =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  let rec loop i =
+    if i + nlen > hlen then false
+    else if String.sub haystack i nlen = needle then true
+    else loop (i + 1)
+  in
+  nlen = 0 || loop 0
 
 (* OCaml's Unix module does not expose unsetenv; for config overrides that are
    read via Env_config_core.trim_opt, an empty string is equivalent to unset. *)
@@ -111,6 +122,16 @@ let test_org_with_dots () =
    [.ci_build/default/test] still find config/tool_policy.toml reliably. *)
 let project_base_path () = Masc_test_deps.find_project_root ()
 
+let make_ctx () : Tool_code_write.context =
+  let base_path = project_base_path () in
+  { Tool_code_write.config = Coord.default_config base_path;
+    agent_name = "test-agent"; }
+
+let dispatch_exn ctx ~name ~args =
+  match Tool_code_write.dispatch ctx ~name ~args with
+  | Some result -> result
+  | None -> fail ("dispatch returned None for " ^ name)
+
 let test_allowed_org () =
   let bp = project_base_path () in
   (check (result unit string)) "allowed org passes"
@@ -176,6 +197,59 @@ let test_mixed_case_org () =
     (Ok ())
     (Tool_code_write.validate_clone_url ~base_path:bp
        "https://github.com/Jeong-Sik/repo.git")
+
+(* ── masc_code_git dispatch coverage ───────────────────────────── *)
+
+let test_code_git_clone_rejects_flag_args () =
+  let ctx = make_ctx () in
+  let args =
+    `Assoc
+      [ ("action", `String "clone");
+        ("args",
+         `List
+           [ `String "https://github.com/jeong-sik/masc-mcp.git";
+             `String "--upload-pack=/bin/sh" ]) ]
+  in
+  let (ok, msg) = dispatch_exn ctx ~name:"masc_code_git" ~args in
+  check bool "clone flags rejected" false ok;
+  check bool "mentions injection block" true
+    (msg_contains ~needle:"clone does not accept flags" msg)
+
+let test_code_git_push_main_blocked_before_cwd_validation () =
+  let ctx = make_ctx () in
+  let args =
+    `Assoc
+      [ ("action", `String "push");
+        ("args", `List [ `String "origin"; `String "main" ]) ]
+  in
+  let (ok, msg) = dispatch_exn ctx ~name:"masc_code_git" ~args in
+  check bool "push main rejected" false ok;
+  check bool "dangerous op message" true
+    (msg_contains ~needle:"Dangerous git operation blocked" msg)
+
+let test_code_git_force_push_blocked_before_cwd_validation () =
+  let ctx = make_ctx () in
+  let args =
+    `Assoc
+      [ ("action", `String "push");
+        ("args", `List [ `String "--force"; `String "origin"; `String "feature/foo" ]) ]
+  in
+  let (ok, msg) = dispatch_exn ctx ~name:"masc_code_git" ~args in
+  check bool "force push rejected" false ok;
+  check bool "dangerous op message" true
+    (msg_contains ~needle:"Dangerous git operation blocked" msg)
+
+let test_code_git_checkout_dot_blocked_before_cwd_validation () =
+  let ctx = make_ctx () in
+  let args =
+    `Assoc
+      [ ("action", `String "checkout");
+        ("args", `List [ `String "--"; `String "." ]) ]
+  in
+  let (ok, msg) = dispatch_exn ctx ~name:"masc_code_git" ~args in
+  check bool "checkout dot rejected" false ok;
+  check bool "dangerous op message" true
+    (msg_contains ~needle:"Dangerous git operation blocked" msg)
 
 (* ── validate_code_shell_command ─────────────────────────────────── *)
 
@@ -403,6 +477,16 @@ let () =
       test_case "missing config fails closed" `Quick test_missing_base_path_without_config_fails_closed;
       test_case "explicit config dir override still validates" `Quick test_explicit_config_dir_override_still_validates;
       test_case "mixed-case org" `Quick test_mixed_case_org;
+    ]);
+    ("masc_code_git", [
+      test_case "clone rejects flag args" `Quick
+        test_code_git_clone_rejects_flag_args;
+      test_case "push main blocked before cwd validation" `Quick
+        test_code_git_push_main_blocked_before_cwd_validation;
+      test_case "force push blocked before cwd validation" `Quick
+        test_code_git_force_push_blocked_before_cwd_validation;
+      test_case "checkout dot blocked before cwd validation" `Quick
+        test_code_git_checkout_dot_blocked_before_cwd_validation;
     ]);
     ("validate_code_shell_command", [
       test_case "allows pipe with allowlisted segments" `Quick

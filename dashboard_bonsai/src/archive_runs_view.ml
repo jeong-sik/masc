@@ -322,43 +322,12 @@ let view_meta_strip (r : Archive_runs_types.response) =
       | Failed -> true
       | _ -> false)
   in
-  Node.div
-    ~attrs:[ Style.meta_strip ]
-    [ Node.div
-        ~attrs:[ Style.meta_item ]
-        [ Node.span ~attrs:[ Style.meta_k ] [ Node.text "total" ]
-        ; Node.span
-            ~attrs:[ Style.meta_v ]
-            [ Node.text (Printf.sprintf "%d" r.total) ]
-        ]
-    ; Node.div
-        ~attrs:[ Style.meta_item ]
-        [ Node.span ~attrs:[ Style.meta_k ] [ Node.text "running" ]
-        ; Node.span
-            ~attrs:[ Style.meta_v_live ]
-            [ Node.text (Printf.sprintf "%d" running) ]
-        ]
-    ; Node.div
-        ~attrs:[ Style.meta_item ]
-        [ Node.span ~attrs:[ Style.meta_k ] [ Node.text "completed" ]
-        ; Node.span
-            ~attrs:[ Style.meta_v ]
-            [ Node.text (Printf.sprintf "%d" completed) ]
-        ]
-    ; Node.div
-        ~attrs:[ Style.meta_item ]
-        [ Node.span ~attrs:[ Style.meta_k ] [ Node.text "failed" ]
-        ; Node.span
-            ~attrs:[ Style.meta_v_fail ]
-            [ Node.text (Printf.sprintf "%d" failed) ]
-        ]
-    ; Node.div
-        ~attrs:[ Style.meta_item ]
-        [ Node.span ~attrs:[ Style.meta_k ] [ Node.text "offset" ]
-        ; Node.span
-            ~attrs:[ Style.meta_v ]
-            [ Node.text (Printf.sprintf "%d" r.offset) ]
-        ]
+  Meta.strip
+    [ Meta.cell ~k:"total" ~v:(Printf.sprintf "%d" r.total) ()
+    ; Meta.cell ~color:`Ok ~k:"running" ~v:(Printf.sprintf "%d" running) ()
+    ; Meta.cell ~k:"completed" ~v:(Printf.sprintf "%d" completed) ()
+    ; Meta.cell ~color:`Blood ~k:"failed" ~v:(Printf.sprintf "%d" failed) ()
+    ; Meta.cell ~k:"offset" ~v:(Printf.sprintf "%d" r.offset) ()
     ]
 ;;
 

@@ -81,6 +81,33 @@ let handle_keeper_fs_read
     (match Keeper_sandbox_containment.check_read_target ~config ~meta ~target with
      | Error e -> error_json ~fields:[ "path", `String target ] e
      | Ok () ->
+    (* RFC-0006 Phase B-2: when MASC_KEEPER_DOCKER_READ is on (and
+       symmetric_sandbox is also on, and the keeper is hardened),
+       route the actual byte read through [docker run --rm <image>
+       cat <container_path>] so the container's mount restrictions
+       are the load-bearing isolation. The host containment check
+       above remains as defense-in-depth. *)
+    if Keeper_docker_read.should_route_read ~meta then
+      let timeout_sec = 30.0 in
+      match
+        Keeper_docker_read.read_file_in_container ~config ~meta
+          ~host_path:target ~max_bytes ~timeout_sec ()
+      with
+      | Error msg ->
+        error_json ~fields:[ "path", `String target ] msg
+      | Ok body ->
+        let total = String.length body in
+        let truncated = total >= max_bytes in
+        Yojson.Safe.to_string
+          (`Assoc
+             [ "ok", `Bool true
+             ; "path", `String target
+             ; "bytes", `Int total
+             ; "truncated", `Bool truncated
+             ; "content", `String body
+             ; "via", `String "docker"
+             ])
+    else
     (match Safe_ops.read_file_safe target with
      | Error e when String.starts_with ~prefix:file_not_found_prefix e ->
        missing_file_error_json ~config ~target ~fallback_dir ~error:e

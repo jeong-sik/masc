@@ -93,6 +93,7 @@
         test_keeper_sandbox_containment
         test_keeper_shell_containment
         test_keeper_fs_edit_patch
+        test_keeper_docker_read
         test_keeper_github_read_only
         test_worktree_live_context
         test_tool_input_validation
@@ -207,6 +208,7 @@
           test_keeper_sandbox_containment
           test_keeper_shell_containment
           test_keeper_fs_edit_patch
+          test_keeper_docker_read
           test_keeper_github_read_only
           test_worktree_live_context
           test_tool_input_validation

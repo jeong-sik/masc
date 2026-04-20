@@ -1,16 +1,16 @@
 ---- MODULE FileLockStarvation ----
 \* Bug Model: File lock prune-while-held creates duplicate mutex.
 \*
-\* Models file_lock_eio.ml: get_lock + prune_stale_entries.
+\* Models lib/process/file_lock_eio.ml: get_entry + prune_stale_entries.
 \*
 \* Lock acquisition order: table_mu -> per-path Eio.Mutex -> Unix.flock
 \*
 \* Bug scenario:
-\*   1. Fiber A: get_lock("foo") returns mu1, acquires mu1, acquires flock
+\*   1. Fiber A: get_entry("foo") returns mu1, acquires mu1, acquires flock
 \*      (doing slow work, last_used becomes stale)
-\*   2. Fiber B: get_lock("bar") triggers prune_stale_entries,
+\*   2. Fiber B: get_entry("bar") triggers prune_stale_entries,
 \*      removes mu1 from table (last_used too old)
-\*   3. Fiber C: get_lock("foo") creates NEW mu2 for same path,
+\*   3. Fiber C: get_entry("foo") creates NEW mu2 for same path,
 \*      acquires mu2 (different mutex!), tries flock -> blocked by A
 \*
 \* After prune: two Eio.Mutexes exist for the same path.
@@ -19,10 +19,17 @@
 \*
 \* If flock is not used (with_mutex path only), data corruption is possible.
 \*
-\* Actual code:
-\*   file_lock_eio.ml:35-42  prune_stale_entries (under table_mu)
-\*   file_lock_eio.ml:47-59  get_lock (creates new entry if absent)
-\*   file_lock_eio.ml:144-146 with_mutex — uses Eio.Mutex ONLY, no flock
+\* Actual code (verified 2026-04-20):
+\*   lib/process/file_lock_eio.ml:52   prune_stale_entries (under table_mu)
+\*   lib/process/file_lock_eio.ml:68   get_entry (formerly get_lock; creates
+\*                                     new entry if absent)
+\*   lib/process/file_lock_eio.ml:84   release_entry (counterpart to get_entry)
+\*   lib/process/file_lock_eio.ml:170  with_mutex — uses Eio.Mutex ONLY, no flock
+\*   lib/process/file_lock_eio.ml:180  with_lock — Eio.Mutex + Unix flock
+\*
+\* (Path drift: lib/file_lock_eio.ml -> lib/process/file_lock_eio.ml.
+\*  Symbol drift: get_lock -> get_entry + release_entry pair.
+\*  Recorded for cross-reference.)
 
 EXTENDS Naturals
 

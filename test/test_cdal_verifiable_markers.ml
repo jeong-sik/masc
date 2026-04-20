@@ -61,6 +61,47 @@ let test_alcotest_pass_counts () =
       fail (Printf.sprintf "expected count=8, got %d" count)
   | _ -> fail "expected Test_pass marker"
 
+let test_pytest_pass_counts () =
+  let stdout =
+    "===== test session starts =====\n\
+     platform darwin -- Python 3.12\n\
+     collected 12 items\n\n\
+     tests/test_a.py ............                            [100%]\n\n\
+     ===== 12 passed in 0.45s =====\n"
+  in
+  match call ~stdout `Ok with
+  | [ Cdal_judge.Test_pass { count = 12; confidence = `Heuristic } ] -> ()
+  | [ Cdal_judge.Test_pass { count; _ } ] ->
+      fail (Printf.sprintf "expected pytest count=12, got %d" count)
+  | _ -> fail "expected Test_pass marker from pytest output"
+
+let test_pytest_fail_counts () =
+  let stdout =
+    "===== test session starts =====\n\
+     collected 10 items\n\n\
+     tests/test_b.py FFFFF.....                              [100%]\n\n\
+     ===== 5 failed, 5 passed in 1.23s =====\n"
+  in
+  match call ~stdout (`Fail 1) with
+  | [ Cdal_judge.Test_fail { count = 5; confidence = `Heuristic } ] -> ()
+  | [ Cdal_judge.Test_fail { count; _ } ] ->
+      fail (Printf.sprintf "expected pytest failed=5, got %d" count)
+  | _ -> fail "expected Test_fail marker from pytest output"
+
+let test_pytest_banner_required () =
+  (* Bare "12 passed" without the "=====" banner must NOT classify as
+     pytest — the summary-line anchor prevents false positives where
+     source code, docstrings, or framework prose mention "N passed". *)
+  let stdout =
+    "some log output mentioning 12 passed tests in passing\n"
+  in
+  match call ~stdout `Ok with
+  | [] -> ()
+  | markers ->
+      fail ("expected [] without pytest banner, got "
+            ^ String.concat ","
+                (List.map Cdal_judge.marker_to_string markers))
+
 let test_git_status_clean_exact () =
   let stdout = "On branch main\nnothing to commit, working tree clean\n" in
   match call ~stdout `Ok with
@@ -111,6 +152,9 @@ let () =
       test_case "dune build ok" `Quick test_dune_build_ok_heuristic;
       test_case "dune build fail" `Quick test_dune_build_fail_heuristic;
       test_case "alcotest pass count" `Quick test_alcotest_pass_counts;
+      test_case "pytest pass count" `Quick test_pytest_pass_counts;
+      test_case "pytest fail count" `Quick test_pytest_fail_counts;
+      test_case "pytest banner required" `Quick test_pytest_banner_required;
       test_case "git status clean" `Quick test_git_status_clean_exact;
       test_case "git status dirty" `Quick test_git_status_dirty_exact;
     ]);

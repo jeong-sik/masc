@@ -18,6 +18,17 @@
   (`test_legendary_counters`).  No behavior change on the request
   path.
 
+- **`Cdal_judge` pytest classifier.**  `of_exec_outcome` now emits
+  typed `Test_pass` / `Test_fail` markers for pytest output in
+  addition to dune, cargo, and alcotest.  Detection is anchored on
+  the canonical `===== N passed in Ts =====` / `===== N failed`
+  summary banner so that bare "N passed" prose elsewhere in stdout
+  cannot false-positive.  Banner-required behavior is covered by a
+  dedicated negative test
+  (`test_pytest_banner_required`).  Lifts the verifier cascade out
+  of OCaml-only coverage so Python-test keepers get the same typed
+  marker stream as dune keepers.
+
 - **Legendary Bash operator runbook.**  New
   `docs/LEGENDARY-BASH-RUNBOOK.md` consolidates the P1–P6 rollout
   surface: current flag state table, authoritative opt-out tokens,

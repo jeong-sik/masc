@@ -1959,10 +1959,23 @@ let run_turn
        let tool_names =
          Keeper_tool_disclosure.merge_reported_and_observed_tool_names ~reported_tool_names ~observed_tool_names
        in
+       (* RFC-0006 Phase A.3: canonicalize Anthropic Code built-in names
+          (Bash/Read/Edit/Grep/Write) to their keeper_* internal cognates
+          before the surface check. Without this, the disclosure check
+          flags every Bash/Read call as "unexpected" and nukes turns where
+          the LLM only used the alias names (≈18% of turns per #8778).
+
+          Phase A.2 (OAS dual registration) makes the actual call succeed
+          end-to-end. This step alone just stops the turn loss. Names with
+          no cognate (Skill/Agent/WebSearch) remain unexpected and may
+          still trigger a teaching error — see Keeper_tool_alias.is_hallucinated_builtin. *)
+       let canonical_tool_names =
+         Keeper_tool_alias.canonicalize_observed tool_names
+       in
        let unexpected_tool_names =
          Keeper_tool_disclosure.unexpected_tool_names
            ~allowed_tool_names:all_tool_names
-           ~tool_names
+           ~tool_names:canonical_tool_names
        in
        (* Partial tolerance (#8471): when a turn mixes valid tool calls
           with unexpected ones (LLM hallucinating Claude Code built-ins
@@ -1975,7 +1988,7 @@ let run_turn
        let valid_tool_calls_present =
          Keeper_tool_disclosure.has_valid_tool_call
            ~unexpected_tool_names
-           ~tool_names
+           ~tool_names:canonical_tool_names
        in
        if unexpected_tool_names <> [] && not valid_tool_calls_present then
          let reason =

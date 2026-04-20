@@ -5,6 +5,7 @@
     (Phase A.2/A.3) can rely on stable contracts. *)
 
 module Alias = Masc_mcp.Keeper_tool_alias
+module Disclosure = Masc_mcp.Keeper_tool_disclosure
 
 let test_known_aliases_resolve () =
   Alcotest.(check (option string)) "Bash -> keeper_bash"
@@ -87,6 +88,67 @@ let test_alias_table_is_stable () =
          (Some internal) (Alias.to_internal public))
     pairs
 
+(* ── Phase A.3 integration: canonicalize before the disclosure check ─── *)
+
+(** Mirrors the call sequence in [keeper_agent_run.ml:1875] after
+    canonicalization is applied. Pins the contract: a turn whose only
+    tool calls are Anthropic Code aliases (Bash/Read/Edit/Grep/Write)
+    must NOT produce any unexpected names. *)
+let allowed_keeper_surface =
+  [ "keeper_bash"; "keeper_fs_read"; "keeper_fs_edit"; "keeper_shell";
+    "keeper_board_post"; "extend_turns" ]
+
+let test_pure_alias_turn_no_longer_unexpected () =
+  let observed = [ "Bash" ] in
+  let canonical = Alias.canonicalize_observed observed in
+  let unexpected =
+    Disclosure.unexpected_tool_names
+      ~allowed_tool_names:allowed_keeper_surface
+      ~tool_names:canonical
+  in
+  Alcotest.(check (list string))
+    "[Bash] only -> no unexpected (was the 18% nuke source)"
+    [] unexpected
+
+let test_mixed_alias_and_internal_no_unexpected () =
+  let observed = [ "Read"; "keeper_board_post"; "Edit" ] in
+  let canonical = Alias.canonicalize_observed observed in
+  let unexpected =
+    Disclosure.unexpected_tool_names
+      ~allowed_tool_names:allowed_keeper_surface
+      ~tool_names:canonical
+  in
+  Alcotest.(check (list string)) "mixed alias + internal -> no unexpected"
+    [] unexpected
+
+let test_hallucinated_builtin_still_unexpected () =
+  let observed = [ "Skill"; "Bash" ] in
+  let canonical = Alias.canonicalize_observed observed in
+  let unexpected =
+    Disclosure.unexpected_tool_names
+      ~allowed_tool_names:allowed_keeper_surface
+      ~tool_names:canonical
+  in
+  Alcotest.(check (list string))
+    "Skill remains unexpected (no cognate); Bash resolved"
+    [ "Skill" ] unexpected
+
+let test_partial_tolerance_still_works () =
+  let observed = [ "Skill"; "Bash" ] in
+  let canonical = Alias.canonicalize_observed observed in
+  let unexpected =
+    Disclosure.unexpected_tool_names
+      ~allowed_tool_names:allowed_keeper_surface
+      ~tool_names:canonical
+  in
+  let has_valid =
+    Disclosure.has_valid_tool_call
+      ~unexpected_tool_names:unexpected
+      ~tool_names:canonical
+  in
+  Alcotest.(check bool) "Bash counts as valid -> partial tolerance kicks in"
+    true has_valid
+
 let () =
   Alcotest.run "Keeper_tool_alias"
     [
@@ -100,5 +162,16 @@ let () =
           Alcotest.test_case "hallucinated builtins" `Quick test_hallucinated_builtins;
           Alcotest.test_case "no overlap" `Quick test_no_overlap_alias_and_hallucinated;
           Alcotest.test_case "table is stable" `Quick test_alias_table_is_stable;
+        ] );
+      ( "disclosure-integration",
+        [
+          Alcotest.test_case "pure alias turn no longer unexpected" `Quick
+            test_pure_alias_turn_no_longer_unexpected;
+          Alcotest.test_case "mixed alias + internal no unexpected" `Quick
+            test_mixed_alias_and_internal_no_unexpected;
+          Alcotest.test_case "hallucinated builtin still unexpected" `Quick
+            test_hallucinated_builtin_still_unexpected;
+          Alcotest.test_case "partial tolerance still works" `Quick
+            test_partial_tolerance_still_works;
         ] );
     ]

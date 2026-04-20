@@ -105,31 +105,38 @@ let evidence_of_verdict (v : Cdal_types.contract_verdict) : Yojson.Safe.t =
     ("blocking_gaps_count", `Int (blocking_gap_count v));
   ]
 
-let to_attribution (v : Cdal_types.contract_verdict) : Attribution.t =
+let strict_gate_label = "cdal_verdict"
+let advisory_gate_label = "cdal_verdict_advisory"
+
+let to_attribution ?(gate_label = strict_gate_label)
+    (v : Cdal_types.contract_verdict) : Attribution.t =
   let evidence = evidence_of_verdict v in
   match check_verdict v with
   | Allow ->
-    Attribution.passed ~origin:Det ~gate:"cdal_verdict" ~evidence
+    Attribution.passed ~origin:Det ~gate:gate_label ~evidence
   | Reject reason ->
-    Attribution.policy_failed ~origin:Det ~gate:"cdal_verdict" ~evidence ~reason
+    Attribution.policy_failed ~origin:Det ~gate:gate_label ~evidence ~reason
 
-let attribution_for_missing_verdict ~task_id : Attribution.t =
+let attribution_for_missing_verdict ?(gate_label = strict_gate_label)
+    ~task_id () : Attribution.t =
   let evidence = `Assoc [ ("task_id", `String task_id) ] in
-  Attribution.policy_failed ~origin:Det ~gate:"cdal_verdict" ~evidence
+  Attribution.policy_failed ~origin:Det ~gate:gate_label ~evidence
     ~reason:
       (Printf.sprintf
          "No CDAL verdict found for task %s. Submit evidence before completing."
          task_id)
 
-let gate_check ?(base_dir = default_base_path) ~task_id () : string option =
+let gate_check ?(base_dir = default_base_path)
+    ?(gate_label = strict_gate_label) ~task_id () : string option =
   match lookup_latest_verdict ~base_dir ~task_id () with
   | None ->
-    Dashboard_attribution.record (attribution_for_missing_verdict ~task_id);
+    Dashboard_attribution.record
+      (attribution_for_missing_verdict ~gate_label ~task_id ());
     Some (Printf.sprintf
       "No CDAL verdict found for task %s. Submit evidence before completing."
       task_id)
   | Some verdict ->
-    Dashboard_attribution.record (to_attribution verdict);
+    Dashboard_attribution.record (to_attribution ~gate_label verdict);
     match check_verdict verdict with
     | Allow -> None
     | Reject msg -> Some msg

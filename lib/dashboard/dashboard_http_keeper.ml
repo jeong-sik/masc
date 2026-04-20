@@ -136,6 +136,24 @@ let compute_outcomes_rollup
     | [] -> `Null
     | v :: _ -> `Float v.timestamp
   in
+  let cdal_bucket gate_name =
+    match
+      List.find_opt
+        (fun (s : Dashboard_attribution.gate_summary) ->
+          String.equal s.gate gate_name)
+        (Dashboard_attribution.summary ())
+    with
+    | None -> `Null
+    | Some s ->
+      `Assoc [
+        ("scope", `String "global");
+        ("passed", `Int s.passed);
+        ("policy_failed", `Int s.policy_failed);
+        ("transition_blocked", `Int s.transition_blocked);
+        ("partial_pass", `Int s.partial_pass);
+        ("total", `Int s.total);
+      ]
+  in
   `Assoc [
     ("window", `String "transition_ring_last_50");
     ("observed_turns", `Int observed_turns);
@@ -164,24 +182,15 @@ let compute_outcomes_rollup
       (* cdal_gate: populate from Dashboard_attribution ring.
          Scope is global (CDAL attribution is gate-keyed, not per-keeper),
          but visibility in the per-keeper diagnostic is still useful — it
-         confirms the verdict gate is live and surfaces recent outcomes. *)
-      ("cdal_gate",
-        (match
-           List.find_opt
-             (fun (s : Dashboard_attribution.gate_summary) ->
-               String.equal s.gate "cdal_verdict")
-             (Dashboard_attribution.summary ())
-         with
-         | None -> `Null
-         | Some s ->
-             `Assoc [
-               ("scope", `String "global");
-               ("passed", `Int s.passed);
-               ("policy_failed", `Int s.policy_failed);
-               ("transition_blocked", `Int s.transition_blocked);
-               ("partial_pass", `Int s.partial_pass);
-               ("total", `Int s.total);
-             ]));
+         confirms the verdict gate is live and surfaces recent outcomes.
+
+         Two buckets are exposed so consumers can tell "strict-enforced"
+         from "allowed through under advisory":
+         - [cdal_gate]            → gate="cdal_verdict"           (strict)
+         - [cdal_gate_advisory]   → gate="cdal_verdict_advisory"  (audit-only) *)
+      ("cdal_gate", cdal_bucket Cdal_verdict_gate.strict_gate_label);
+      ("cdal_gate_advisory",
+        cdal_bucket Cdal_verdict_gate.advisory_gate_label);
       ("last_verdict_at", last_verdict_at);
     ]);
   ]

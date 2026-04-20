@@ -210,6 +210,10 @@ type current_binding = {
   claim_first_suppressed : bool;
 }
 
+type planning_context_state = {
+  planning_missing_task : string option;
+}
+
 let resolve_current_binding ~assigned_task_ids ~planning_current =
   let primary_owned =
     match assigned_task_ids with
@@ -255,6 +259,17 @@ let resolve_current_binding ~assigned_task_ids ~planning_current =
     current_task_set;
     claim_first_suppressed = assigned_task_ids <> [];
   }
+
+let planning_context_state (ctx : context) (binding : current_binding) =
+  let planning_missing_task =
+    match binding.primary_owned with
+    | None -> None
+    | Some task_id -> (
+        match Planning_eio.load ctx.config ~task_id with
+        | Ok _ -> None
+        | Error _ -> Some task_id)
+  in
+  { planning_missing_task }
 
 let task_id_list_label = function
   | [] -> "[]"
@@ -353,6 +368,7 @@ let status_summary_string (ctx : context) =
   let binding =
     resolve_current_binding ~assigned_task_ids ~planning_current:current_task
   in
+  let planning_state = planning_context_state ctx binding in
   let guidance =
     Workflow_guide.current_state_guidance
       ~room_set:true
@@ -362,27 +378,30 @@ let status_summary_string (ctx : context) =
       ~worktree_active ~session_active:false
   in
   let suggested_next =
-    guidance.next_steps
-    |> List.map (fun (step : Workflow_guide.step) -> step.tool)
-    |> fun tools ->
-    if credential_blocked then
-      List.filter (fun tool -> not (is_lifecycle_tool tool)) tools
+    if Option.is_some planning_state.planning_missing_task then
+      [ "masc_plan_init"; "masc_status" ]
     else
-      match binding.drift_reason with
-      | Some "no_owned" ->
-          let tools =
-            List.filter (fun tool -> not (String.equal tool "masc_transition"))
-              tools
-          in
-          let tools =
-            if todo_count > 0 then
-              "masc_claim_next" :: tools
-            else
-              tools
-          in
-          unique_strings tools
-      | Some _ | None -> tools
-    |> take_items 2
+      guidance.next_steps
+      |> List.map (fun (step : Workflow_guide.step) -> step.tool)
+      |> fun tools ->
+      if credential_blocked then
+        List.filter (fun tool -> not (is_lifecycle_tool tool)) tools
+      else
+        match binding.drift_reason with
+        | Some "no_owned" ->
+            let tools =
+              List.filter (fun tool -> not (String.equal tool "masc_transition"))
+                tools
+            in
+            let tools =
+              if todo_count > 0 then
+                "masc_claim_next" :: tools
+              else
+                tools
+            in
+            unique_strings tools
+        | Some _ | None -> tools
+      |> take_items 2
   in
   let attention_items =
     []
@@ -401,6 +420,16 @@ let status_summary_string (ctx : context) =
         ]
     else
       items
+    |> fun items ->
+    (match planning_state.planning_missing_task with
+    | Some task_id ->
+        items
+        @ [
+            Printf.sprintf
+              "Owned task %s has no planning context. Initialize or repair planning before continuing claimed work."
+              task_id;
+          ]
+    | None -> items)
     |> fun items ->
     if Option.is_some binding.primary_owned && not binding.current_task_set then
       items
@@ -469,6 +498,11 @@ let status_summary_string (ctx : context) =
        (option_or_dash binding.effective_current)
        (option_or_dash binding.drift_reason)
        (bool_flag binding.claim_first_suppressed));
+  (match planning_state.planning_missing_task with
+  | Some task_id ->
+      Buffer.add_string buf
+        (Printf.sprintf "📝 Planning: missing=yes | task=%s\n" task_id)
+  | None -> ());
   if credential_state.credential_required then
     Buffer.add_string buf
       (Printf.sprintf "🔐 Credential: required=yes | available=%s | candidates=%s\n"

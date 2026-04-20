@@ -89,8 +89,18 @@ let test_tool_count_matches_allowed () =
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
       let tool_names = List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) tools in
-      check bool "all tools are in allowed list" true
-        (List.for_all (fun name -> List.mem name allowed) tool_names))
+      (* RFC-0006 Phase A.2: aliased Tool.t entries (Bash/Read) carry the
+         public name on Tool.schema.name even though their handler dispatches
+         the internal keeper_* name. Accept either: name in allowed OR the
+         alias's internal target in allowed. *)
+      check bool "all tools are in allowed list (or are an alias)" true
+        (List.for_all
+           (fun name ->
+              List.mem name allowed
+              || (match Keeper_tool_alias.to_internal name with
+                  | Some internal -> List.mem internal allowed
+                  | None -> false))
+           tool_names))
 
 let find_tool name tools =
   List.find (fun (tool : Tool.t) -> String.equal tool.schema.name name) tools

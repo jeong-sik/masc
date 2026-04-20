@@ -116,9 +116,9 @@ Use to timestamp events, check elapsed time, or include current time in reports.
     name = "keeper_context_status";
     description = "Check your own context window usage and session state. Returns: \
 name (your keeper name), context_ratio (0.0-1.0), context_tokens, context_max, \
-message_count, generation, last_model_used, continuity_summary, and your three \
-canonical playground paths (playground_bundle, playground_mind, playground_repos) \
-relative to the server base_path, plus tool_paths (mind, repos, bundle) which you can pass \
+message_count, generation, last_model_used, continuity_summary, and canonical \
+sandbox paths (sandbox_root, sandbox_mind, sandbox_repos) plus backend/profile \
+metadata. sandbox paths are tool-ready and can be passed \
 directly as path or cwd to keeper tools without prefix. Use when deciding whether to compact context, \
 extend turns, hand off to the next generation, or resolve a path without \
 string-interpolating your own keeper name.";
@@ -359,12 +359,12 @@ let shell_tools : Types.tool_schema list = [
     name = "keeper_shell";
     description = "Run a safe project shell command. \
 ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash, git_clone, gh. \
-Read-only ops default to the keeper playground. \
-IMPORTANT: paths resolve automatically — use 'repos/X' not '.masc/playground/your-name/repos/X'. Never include the playground prefix in path or cwd. \
+Read-only ops default to the keeper sandbox. \
+IMPORTANT: paths resolve automatically — use 'repos/X' or 'mind/X'. Never include host paths like '.masc/playground/your-name/repos/X' in path or cwd. \
 Use cwd to target an explicit allowed directory or cloned repo. \
 find REQUIRES pattern param (e.g. pattern=\"*.ml\"). \
 bash op: single command only, no chaining (&&, ||, |, ; are blocked), no redirects (>, >>). \
-git_clone: clone a repo into your playground (url required, sandboxed to .masc/playground/<name>/). \
+git_clone: clone a repo into your sandbox repos/ lane (url required). \
 gh op: run a gh CLI subcommand with cmd=\"<subcommand>\" (e.g. cmd=\"pr list --state open\"). Always run `gh pr list` first before referencing a PR number to avoid hallucinations. Dangerous commands (repo delete, auth logout, secret set/delete) are blocked. \
 If path not found, clone the repo first with op=git_clone. \
 Use rg for pattern search, find for path discovery, head/tail for line ranges, \
@@ -378,14 +378,14 @@ git_log/git_diff for repo history, bash for curl/jq/env/which, gh for GitHub PR/
         ("op", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) keeper_shell_op_enum_strings)); ("description", `String "Command to run")]);
         ("cmd", `Assoc [("type", `String "string"); ("description", `String "gh subcommand for op=gh, e.g. 'pr list --state open'. Do NOT put --repo in cmd; current working dir determines the repo.")]);
         ("path", `Assoc [("type", `String "string"); ("description", `String "Target path for ls/cat/rg/find/head/tail/wc/tree")]);
-        ("cwd", `Assoc [("type", `String "string"); ("description", `String "Optional working directory for pwd/git_status/git_log/git_diff/git_worktree/bash. Must stay within keeper playground or an explicit allowed path.")]);
+        ("cwd", `Assoc [("type", `String "string"); ("description", `String "Optional working directory for pwd/git_status/git_log/git_diff/git_worktree/bash. Must stay within the keeper sandbox or an explicit allowed path.")]);
         ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg, or name glob for find (REQUIRED for find, e.g. \"*.ml\")")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "Result limit for ls/rg/find/tree, or line count for git_log")]);
         ("lines", `Assoc [("type", `String "integer"); ("description", `String "Number of lines for head/tail (default 20, max 200)")]);
         ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Max bytes for cat")]);
         ("command", `Assoc [("type", `String "string"); ("description", `String "Single shell command for bash op. No chaining (&&/||/;/|) or redirects (>/>>) allowed. Read-only.")]);
         ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds for bash op (default: 30, max: 180)")]);
-        ("url", `Assoc [("type", `String "string"); ("description", `String "Git repo URL for git_clone op (e.g. 'https://github.com/org/repo'). Clones into .masc/playground/<your_name>/.")]);
+        ("url", `Assoc [("type", `String "string"); ("description", `String "Git repo URL for git_clone op (e.g. 'https://github.com/org/repo'). Clones into sandbox repos/.")]);
       ]);
       ("required", `List [`String "op"]);
     ];
@@ -399,8 +399,8 @@ let coding_keeper_bridge_tools : Types.tool_schema list = [
 NO chaining (&&, ||, ;), NO pipes (|), NO redirects (> >>). \
 Violations are blocked. Good: cmd='dune build', cmd='ls -la lib/'. \
 Bad: cmd='cd x && dune build', cmd='rg foo | wc -l'. \
-Runs in the keeper playground by default; use cwd to target an explicit allowed directory. \
-Paths resolve automatically — never include '.masc/playground/your-name/' in cwd. Use 'repos/X' instead. \
+Runs in the keeper sandbox by default; use cwd to target an explicit allowed directory. \
+Paths resolve automatically — never include host storage prefixes such as '.masc/playground/your-name/' in cwd. Use 'repos/X' instead. \
 For read-only ops use keeper_shell, for file edits use keeper_fs_edit. \
 Set run_in_background=true for long-running tasks (returns background_task_id; \
 poll with keeper_bash_output, terminate with keeper_bash_kill).";
@@ -408,7 +408,7 @@ poll with keeper_bash_output, terminate with keeper_bash_kill).";
       ("type", `String "object");
       ("properties", `Assoc [
         ("cmd", `Assoc [("type", `String "string"); ("description", `String "Single command only. No chaining/pipe/redirect. Example: 'dune build', 'rg pattern lib/'")]);
-        ("cwd", `Assoc [("type", `String "string"); ("description", `String "Optional working directory for the command. Must stay within keeper playground or an explicit allowed path.")]);
+        ("cwd", `Assoc [("type", `String "string"); ("description", `String "Optional working directory for the command. Must stay within the keeper sandbox or an explicit allowed path.")]);
         ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds (default: 30, max: 180). For run_in_background=true, 0 disables the timeout.")]);
         ("run_in_background", `Assoc [("type", `String "boolean"); ("description", `String "Default false. When true, returns immediately with background_task_id; poll output via keeper_bash_output, stop via keeper_bash_kill.")]);
       ]);
@@ -454,12 +454,13 @@ let keeper_preflight_tools : Types.tool_schema list = [
   {
     name = "keeper_preflight_check";
     description = "Validate prerequisites before starting autonomous work: \
-gh auth, repo access, keeper identity, preset level, clone target path. \
+gh auth, repo access, keeper identity, preset level, repo readiness. \
 Returns structured JSON with all check results. Read-only, no side effects.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("repo", `Assoc [("type", `String "string"); ("description", `String "GitHub repo (owner/name) to check access for")]);
+        ("repo_name", `Assoc [("type", `String "string"); ("description", `String "Optional sandbox repo directory name under repos/ when it differs from the GitHub repo basename")]);
       ]);
       ("required", `List [`String "repo"]);
     ];

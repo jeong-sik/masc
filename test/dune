@@ -28,6 +28,7 @@
 ; ============================================================
 (tests
  (names test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_audit_log test_http_negotiation
+        test_attempt_state
         test_sse test_cancellation test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_spawn
@@ -59,6 +60,7 @@
         test_keeper_registry
         test_keeper_supervisor
         test_keeper_allowed_paths
+        test_keeper_repo_readiness
         test_keeper_tool_surface_guard
         test_keeper_pr_review
         test_keeper_execution_scope
@@ -88,6 +90,8 @@
         test_keeper_discovered_tools
         test_keeper_tool_affinity
         test_keeper_tool_alias
+        test_keeper_sandbox_containment
+        test_keeper_shell_containment
         test_keeper_github_read_only
         test_worktree_live_context
         test_tool_input_validation
@@ -137,6 +141,7 @@
         test_mid_turn_resume
         test_lockfree_atomic)
  (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_audit_log test_http_negotiation
+          test_attempt_state
           test_sse test_cancellation test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_spawn
@@ -168,6 +173,7 @@
           test_keeper_registry
           test_keeper_supervisor
           test_keeper_allowed_paths
+          test_keeper_repo_readiness
           test_keeper_tool_surface_guard
           test_keeper_pr_review
           test_keeper_execution_scope
@@ -197,6 +203,8 @@
           test_keeper_discovered_tools
           test_keeper_tool_affinity
           test_keeper_tool_alias
+          test_keeper_sandbox_containment
+          test_keeper_shell_containment
           test_keeper_github_read_only
           test_worktree_live_context
           test_tool_input_validation
@@ -321,6 +329,7 @@
         test_shadow_parse
         test_destructive_class
         test_gate_diff
+        test_legendary_counters
         test_oas_integration
         test_memory_oas_5tier
         test_verifier_oas_bridge
@@ -482,6 +491,7 @@
         test_shadow_parse
         test_destructive_class
         test_gate_diff
+        test_legendary_counters
         test_oas_integration
         test_memory_oas_5tier
         test_verifier_oas_bridge
@@ -691,6 +701,11 @@
  (name test_cascade_strategy)
  (modules test_cascade_strategy)
  (libraries masc_test_deps))
+
+(test
+ (name test_cascade_model_resolve)
+ (modules test_cascade_model_resolve)
+ (libraries masc_test_deps unix))
 
 (test
  (name test_dashboard_tla_specs)

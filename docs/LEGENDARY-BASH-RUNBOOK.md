@@ -181,6 +181,38 @@ justifies otherwise. Suggested gate:
 `MASC_BLOCKING_BUDGET_MS` tuning can precede the flip. Raising it
 reduces promotion frequency; lowering it accelerates it.
 
+## In-process Snapshot Endpoint
+
+Both observers also increment `Atomic.t` counters inside the process
+while enabled. The cumulative totals are exposed as a single public-
+read JSON endpoint for dashboards or flip-decision tooling that does
+not want to scan the keeper log stream:
+
+```
+GET /api/v1/legendary_bash/shadow_counters
+```
+
+Response shape (field names mirror `Legendary_counters.snapshot` 1:1):
+
+```json
+{
+  "gate_diff_total": 0,
+  "gate_diff_agree": 0,
+  "gate_diff_legacy_allow_shadow_deny": 0,
+  "gate_diff_legacy_deny_shadow_allow": 0,
+  "gate_diff_shadow_cannot_parse": 0,
+  "auto_bg_observed": 0,
+  "auto_bg_would_have_promoted": 0
+}
+```
+
+Every counter stays at `0` until the matching observer env flag is
+set, so the endpoint itself is cost-free under default posture. The
+log stream and the counter snapshot are redundant on purpose: logs
+for point-in-time diagnostics, counters for `disagree ratio =
+(legacy_allow_shadow_deny + legacy_deny_shadow_allow) / gate_diff_total`
+trend math over a rolling window.
+
 ## Rollback
 
 Each Legendary flag has an inert opt-out path. No restart required.

@@ -130,6 +130,242 @@ let normalize_tool_result ~(success : bool) (raw : string) : string =
     long enough to include the actionable portion of the error. *)
 let sse_error_preview_max_chars = 300
 
+(** RFC-0006 Phase A.2: build the per-tool handler closure.
+
+    Extracted from the original anonymous closure inside [make_tools] so
+    that alias [Tool.t] entries (e.g. [Bash] -> [keeper_bash]) can reuse
+    the exact same telemetry/circuit-breaker/decision-log pipeline by
+    instantiating this helper with the INTERNAL name as [~name].
+
+    Telemetry SSOT contract: [~name] flows into every observability
+    sink (Keeper_registry.record_tool_use, SSE broadcast tool_name,
+    decision-log "tool" field, on_keeper_tool_call). The LLM-facing
+    public name (Bash/Read/...) only appears as the [Tool.schema.name]
+    set by [Tool_bridge.oas_tool_of_masc] above this helper.
+
+    [?translate_input] reshapes the incoming JSON from the public schema
+    to the internal tool's expected payload (e.g. [{command,timeout}] ->
+    [{cmd,timeout_sec}]). Identity by default. *)
+let make_keeper_tool_handler
+    ~(name : string)
+    ~(config : Coord.config)
+    ~(meta : Keeper_types.keeper_meta)
+    ~(ctx_snapshot : Keeper_types.working_context)
+    ?search_fn
+    ?on_tool_called
+    ?(translate_input = fun j -> j)
+    ~(failure_counts : (string, int) Hashtbl.t)
+    ()
+  : Yojson.Safe.t -> bool * string =
+  let args_key input =
+    let h = Hashtbl.hash (Yojson.Safe.to_string input) in
+    Printf.sprintf "%s:%d" name h
+  in
+  fun raw_input ->
+    let input = translate_input raw_input in
+    let key = args_key input in
+    let prior_fails =
+      (match Hashtbl.find_opt failure_counts key with
+        | Some n -> n | None -> 0)
+    in
+    if prior_fails >= max_consecutive_failures then begin
+      Log.Keeper.warn "tool %s blocked after %d consecutive failures (same args)"
+        name prior_fails;
+      let msg = Printf.sprintf
+        "This tool has failed %d times in a row with the same arguments. Try a different approach or different arguments."
+        prior_fails in
+      (false, normalize_tool_result ~success:false msg)
+    end else
+      let t0 = Time_compat.now () in
+      try
+        let (result, duration_ms) =
+          Inference_utils.timed (fun () ->
+            Keeper_exec_tools.execute_keeper_tool_call_with_outcome
+              ~config ~meta ~ctx_work:ctx_snapshot
+              ?search_fn
+              ~name ~input ())
+        in
+        let raw_result = result.raw_output in
+        let is_failure =
+          match result.outcome with
+          | `Failure -> true
+          | `Success -> false
+        in
+        if is_failure then begin
+          let count = prior_fails + 1 in
+          Hashtbl.replace failure_counts key count;
+          Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:name ~success:false;
+          !Keeper_exec_tools.on_keeper_tool_call ~tool_name:name ~success:false ~duration_ms;
+          (* Tool-call observability flows through the OAS Event_bus
+             (ToolCalled + ToolCompleted). MASC-side observers removed
+             in refactor/tool-call-single-source. *)
+          (let tr = Tool_result.{ tool_name = name; success = false;
+              duration_ms = Float.of_int duration_ms; data = `Null } in
+           ignore (Tool_dispatch.run_post_hooks tr));
+          let detail =
+            let s = String.trim raw_result in
+            String_util.utf8_safe ~max_bytes:(sse_error_preview_max_chars + 3) ~suffix:"..." s |> String_util.to_string
+          in
+          let ts = Time_compat.now () in
+          (try Sse.broadcast
+            (`Assoc [
+              ("type", `String "keeper_tool_call");
+              ("name", `String meta.name);
+              ("tool_name", `String name);
+              ("duration_ms", `Int duration_ms);
+              ("success", `Bool false);
+              ("error_text", `String detail);
+              ("ts_unix", `Float ts);
+            ])
+           with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+          Log.Keeper.error
+            "tool %s returned error result (%d/%d): %s"
+            name count max_consecutive_failures detail;
+          let normalized_error =
+            normalize_tool_result ~success:false raw_result
+          in
+          (try
+            Keeper_types_support.append_jsonl_line
+              (Keeper_types_support.keeper_decision_log_path config meta.name)
+              (`Assoc [
+                "ts_unix", `Float ts;
+                "event", `String "tool_exec";
+                "keeper_name", `String meta.name;
+                "tool", `String name;
+                "duration_ms", `Int duration_ms;
+                "result_bytes", `Int (String.length normalized_error);
+                "ok", `Bool false;
+              ])
+          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+          Keeper_tool_call_log.set_truncation_info
+            ~keeper_name:meta.name
+            ~original_bytes:(String.length normalized_error) ();
+          (false, Tool_output_validation.cap normalized_error)
+        end else begin
+          Hashtbl.remove failure_counts key;
+          Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:name ~success:true;
+          !Keeper_exec_tools.on_keeper_tool_call ~tool_name:name ~success:true ~duration_ms;
+          (* Tool-call observability via OAS Event_bus. See above. *)
+          (let tr = Tool_result.{ tool_name = name; success = true;
+              duration_ms = Float.of_int duration_ms; data = `Null } in
+           ignore (Tool_dispatch.run_post_hooks tr));
+          let ts = Time_compat.now () in
+          (try Sse.broadcast
+            (`Assoc [
+              ("type", `String "keeper_tool_call");
+              ("name", `String meta.name);
+              ("tool_name", `String name);
+              ("duration_ms", `Int duration_ms);
+              ("success", `Bool true);
+              ("ts_unix", `Float ts);
+            ])
+           with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+          (* Notify session callback (e.g., mark_used for discovered tools) *)
+          (match on_tool_called with Some f -> f name | None -> ());
+          (* PR#814 Gap 1: Capture git status delta after successful tool execution.
+             If the working tree changed, log it so the keeper is aware of
+             file-system side effects from its tool calls. *)
+          let change_block =
+            Worktree_live_context.capture_change_block
+              ~base_path:config.base_path ~actor_key:meta.name
+          in
+          (match change_block with
+           | Some _cb ->
+               Log.Keeper.info "post-tool git delta detected for %s after %s"
+                 meta.name name
+           | None -> ());
+          let normalized =
+            normalize_tool_result ~success:true raw_result
+          in
+          let final_result =
+            match change_block with
+            | None -> normalized
+            | Some cb ->
+              (* Inject changes field into the normalized JSON envelope
+                 to preserve valid JSON structure. *)
+              (try
+                 let json = Yojson.Safe.from_string normalized in
+                 match json with
+                 | `Assoc fields ->
+                   Yojson.Safe.to_string
+                     (`Assoc (fields @ [("changes", `String cb)]))
+                 | _ -> normalized
+               with Yojson.Json_error _ -> normalized)
+          in
+          let original_len = String.length final_result in
+          let truncated_result = Tool_output_validation.cap final_result in
+          let was_truncated = original_len > Tool_output_validation.max_output_chars in
+          if was_truncated then
+            Log.Keeper.info "tool %s output truncated: %d -> %d chars"
+              name original_len (String.length truncated_result);
+          (try
+            Keeper_types_support.append_jsonl_line
+              (Keeper_types_support.keeper_decision_log_path config meta.name)
+              (`Assoc ([
+                "ts_unix", `Float ts;
+                "event", `String "tool_exec";
+                "keeper_name", `String meta.name;
+                "tool", `String name;
+                "duration_ms", `Int duration_ms;
+                "result_bytes", `Int original_len;
+                "ok", `Bool true;
+              ] @ (if was_truncated then
+                ["truncated_to", `Int (String.length truncated_result)]
+              else [])))
+          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+          (* Publish truncation info for OAS hook's tool_call_log *)
+          Keeper_tool_call_log.set_truncation_info
+            ~keeper_name:meta.name
+            ~original_bytes:original_len
+            ?truncated_to:(if was_truncated
+              then Some (String.length truncated_result) else None) ();
+          (true, truncated_result)
+        end
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+        let ts = Time_compat.now () in
+        let duration_ms =
+          int_of_float ((ts -. t0) *. 1000.0) in
+        let count = prior_fails + 1 in
+        let error_text = Printexc.to_string exn in
+        Hashtbl.replace failure_counts key count;
+        Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:name ~success:false;
+        !Keeper_exec_tools.on_keeper_tool_call ~tool_name:name ~success:false ~duration_ms;
+        (* Tool-call observability via OAS Event_bus. See above. *)
+        (try Sse.broadcast
+          (`Assoc [
+            ("type", `String "keeper_tool_call");
+            ("name", `String meta.name);
+            ("tool_name", `String name);
+            ("duration_ms", `Int duration_ms);
+            ("success", `Bool false);
+            ("error_text", `String error_text);
+            ("ts_unix", `Float ts);
+          ])
+         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+        let msg = Printf.sprintf "tool %s failed (%d/%d): %s"
+          name count max_consecutive_failures
+          (Printexc.to_string exn) in
+        Log.Keeper.error "%s" msg;
+        let normalized_exn = normalize_tool_result ~success:false msg in
+        (try
+          Keeper_types_support.append_jsonl_line
+            (Keeper_types_support.keeper_decision_log_path config meta.name)
+            (`Assoc [
+              "ts_unix", `Float ts;
+              "event", `String "tool_exec";
+              "keeper_name", `String meta.name;
+              "tool", `String name;
+              "duration_ms", `Int duration_ms;
+              "result_bytes", `Int (String.length normalized_exn);
+              "ok", `Bool false;
+              "error", `String error_text;
+            ])
+        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+        Keeper_tool_call_log.set_truncation_info
+          ~keeper_name:meta.name
+          ~original_bytes:(String.length normalized_exn) ();
+        (false, Tool_output_validation.cap normalized_exn)
+
 let make_tools
     ~(config : Coord.config)
     ~(meta : Keeper_types.keeper_meta)
@@ -148,218 +384,48 @@ let make_tools
   in
   let failure_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
   (* No mutex: Hashtbl ops are non-yielding, single domain. *)
-  let args_key name input =
-    let h = Hashtbl.hash (Yojson.Safe.to_string input) in
-    Printf.sprintf "%s:%d" name h
+  (* Pass A: existing internal tools. Behavior unchanged from pre-A.2. *)
+  let internal_tools =
+    List.filter_map (fun (td : Types.tool_schema) ->
+      if List.mem td.name universe_names then
+        Some (Tool_bridge.oas_tool_of_masc
+          ~name:td.name
+          ~description:td.description
+          ~input_schema:td.input_schema
+          (make_keeper_tool_handler ~name:td.name ~config ~meta ~ctx_snapshot
+             ?search_fn ?on_tool_called ~failure_counts ()))
+      else None
+    ) tool_defs
   in
-  List.filter_map (fun (td : Types.tool_schema) ->
-    if List.mem td.name universe_names then
-      Some (Tool_bridge.oas_tool_of_masc
-        ~name:td.name
-        ~description:td.description
-        ~input_schema:td.input_schema
-        (fun input ->
-          let key = args_key td.name input in
-          let prior_fails =
-            (match Hashtbl.find_opt failure_counts key with
-              | Some n -> n | None -> 0)
+  (* Pass B: RFC-0006 Phase A.2 — register dual aliases so the LLM can
+     call Anthropic Code names (Bash/Read) successfully. The handler
+     dispatches with [~name:internal] so all telemetry SSOT remains
+     internal; only the Tool.schema.name (LLM-visible) is the public
+     alias. translate_input reshapes the LLM's payload before dispatch. *)
+  let alias_tools =
+    List.filter_map (fun (public, internal) ->
+      if not (List.mem internal universe_names) then None
+      else
+        match
+          List.find_opt (fun (td : Types.tool_schema) ->
+            String.equal td.name internal) tool_defs
+        with
+        | None -> None
+        | Some internal_def ->
+          let input_schema =
+            match Keeper_tool_alias.public_input_schema public with
+            | Some s -> s
+            | None -> internal_def.input_schema
           in
-          if prior_fails >= max_consecutive_failures then begin
-            Log.Keeper.warn "tool %s blocked after %d consecutive failures (same args)"
-              td.name prior_fails;
-            let msg = Printf.sprintf
-              "This tool has failed %d times in a row with the same arguments. Try a different approach or different arguments."
-              prior_fails in
-            (false, normalize_tool_result ~success:false msg)
-          end else
-            let t0 = Time_compat.now () in
-            try
-              let (result, duration_ms) =
-                Inference_utils.timed (fun () ->
-                  Keeper_exec_tools.execute_keeper_tool_call_with_outcome
-                    ~config ~meta ~ctx_work:ctx_snapshot
-                    ?search_fn
-                    ~name:td.name ~input ())
-              in
-              let raw_result = result.raw_output in
-              let is_failure =
-                match result.outcome with
-                | `Failure -> true
-                | `Success -> false
-              in
-              if is_failure then begin
-                let count = prior_fails + 1 in
-                Hashtbl.replace failure_counts key count;
-                Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:false;
-                !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:false ~duration_ms;
-                (* Tool-call observability flows through the OAS Event_bus
-                   (ToolCalled + ToolCompleted). MASC-side observers removed
-                   in refactor/tool-call-single-source. *)
-                (let tr = Tool_result.{ tool_name = td.name; success = false;
-                    duration_ms = Float.of_int duration_ms; data = `Null } in
-                 ignore (Tool_dispatch.run_post_hooks tr));
-                let detail =
-                  let s = String.trim raw_result in
-                  String_util.utf8_safe ~max_bytes:(sse_error_preview_max_chars + 3) ~suffix:"..." s |> String_util.to_string
-                in
-                let ts = Time_compat.now () in
-                (try Sse.broadcast
-                  (`Assoc [
-                    ("type", `String "keeper_tool_call");
-                    ("name", `String meta.name);
-                    ("tool_name", `String td.name);
-                    ("duration_ms", `Int duration_ms);
-                    ("success", `Bool false);
-                    ("error_text", `String detail);
-                    ("ts_unix", `Float ts);
-                  ])
-                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-                Log.Keeper.error
-                  "tool %s returned error result (%d/%d): %s"
-                  td.name count max_consecutive_failures detail;
-                let normalized_error =
-                  normalize_tool_result ~success:false raw_result
-                in
-                (try
-                  Keeper_types_support.append_jsonl_line
-                    (Keeper_types_support.keeper_decision_log_path config meta.name)
-                    (`Assoc [
-                      "ts_unix", `Float ts;
-                      "event", `String "tool_exec";
-                      "keeper_name", `String meta.name;
-                      "tool", `String td.name;
-                      "duration_ms", `Int duration_ms;
-                      "result_bytes", `Int (String.length normalized_error);
-                      "ok", `Bool false;
-                    ])
-                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-                Keeper_tool_call_log.set_truncation_info
-                  ~keeper_name:meta.name
-                  ~original_bytes:(String.length normalized_error) ();
-                (false, Tool_output_validation.cap normalized_error)
-              end else begin
-                Hashtbl.remove failure_counts key;
-                Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:true;
-                !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:true ~duration_ms;
-                (* Tool-call observability via OAS Event_bus. See above. *)
-                (let tr = Tool_result.{ tool_name = td.name; success = true;
-                    duration_ms = Float.of_int duration_ms; data = `Null } in
-                 ignore (Tool_dispatch.run_post_hooks tr));
-                let ts = Time_compat.now () in
-                (try Sse.broadcast
-                  (`Assoc [
-                    ("type", `String "keeper_tool_call");
-                    ("name", `String meta.name);
-                    ("tool_name", `String td.name);
-                    ("duration_ms", `Int duration_ms);
-                    ("success", `Bool true);
-                    ("ts_unix", `Float ts);
-                  ])
-                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-                (* Notify session callback (e.g., mark_used for discovered tools) *)
-                (match on_tool_called with Some f -> f td.name | None -> ());
-                (* PR#814 Gap 1: Capture git status delta after successful tool execution.
-                   If the working tree changed, log it so the keeper is aware of
-                   file-system side effects from its tool calls. *)
-                let change_block =
-                  Worktree_live_context.capture_change_block
-                    ~base_path:config.base_path ~actor_key:meta.name
-                in
-                (match change_block with
-                 | Some _cb ->
-                     Log.Keeper.info "post-tool git delta detected for %s after %s"
-                       meta.name td.name
-                 | None -> ());
-                let normalized =
-                  normalize_tool_result ~success:true raw_result
-                in
-                let final_result =
-                  match change_block with
-                  | None -> normalized
-                  | Some cb ->
-                    (* Inject changes field into the normalized JSON envelope
-                       to preserve valid JSON structure. *)
-                    (try
-                       let json = Yojson.Safe.from_string normalized in
-                       match json with
-                       | `Assoc fields ->
-                         Yojson.Safe.to_string
-                           (`Assoc (fields @ [("changes", `String cb)]))
-                       | _ -> normalized
-                     with Yojson.Json_error _ -> normalized)
-                in
-                let original_len = String.length final_result in
-                let truncated_result = Tool_output_validation.cap final_result in
-                let was_truncated = original_len > Tool_output_validation.max_output_chars in
-                if was_truncated then
-                  Log.Keeper.info "tool %s output truncated: %d -> %d chars"
-                    td.name original_len (String.length truncated_result);
-                (try
-                  Keeper_types_support.append_jsonl_line
-                    (Keeper_types_support.keeper_decision_log_path config meta.name)
-                    (`Assoc ([
-                      "ts_unix", `Float ts;
-                      "event", `String "tool_exec";
-                      "keeper_name", `String meta.name;
-                      "tool", `String td.name;
-                      "duration_ms", `Int duration_ms;
-                      "result_bytes", `Int original_len;
-                      "ok", `Bool true;
-                    ] @ (if was_truncated then
-                      ["truncated_to", `Int (String.length truncated_result)]
-                    else [])))
-                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-                (* Publish truncation info for OAS hook's tool_call_log *)
-                Keeper_tool_call_log.set_truncation_info
-                  ~keeper_name:meta.name
-                  ~original_bytes:original_len
-                  ?truncated_to:(if was_truncated
-                    then Some (String.length truncated_result) else None) ();
-                (true, truncated_result)
-              end
-            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              let ts = Time_compat.now () in
-              let duration_ms =
-                int_of_float ((ts -. t0) *. 1000.0) in
-              let count = prior_fails + 1 in
-              let error_text = Printexc.to_string exn in
-              Hashtbl.replace failure_counts key count;
-              Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:false;
-              !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:false ~duration_ms;
-              (* Tool-call observability via OAS Event_bus. See above. *)
-              (try Sse.broadcast
-                (`Assoc [
-                  ("type", `String "keeper_tool_call");
-                  ("name", `String meta.name);
-                  ("tool_name", `String td.name);
-                  ("duration_ms", `Int duration_ms);
-                  ("success", `Bool false);
-                  ("error_text", `String error_text);
-                  ("ts_unix", `Float ts);
-                ])
-               with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-              let msg = Printf.sprintf "tool %s failed (%d/%d): %s"
-                td.name count max_consecutive_failures
-                (Printexc.to_string exn) in
-              Log.Keeper.error "%s" msg;
-              let normalized_exn = normalize_tool_result ~success:false msg in
-              (try
-                Keeper_types_support.append_jsonl_line
-                  (Keeper_types_support.keeper_decision_log_path config meta.name)
-                  (`Assoc [
-                    "ts_unix", `Float ts;
-                    "event", `String "tool_exec";
-                    "keeper_name", `String meta.name;
-                    "tool", `String td.name;
-                    "duration_ms", `Int duration_ms;
-                    "result_bytes", `Int (String.length normalized_exn);
-                    "ok", `Bool false;
-                    "error", `String error_text;
-                  ])
-              with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-              Keeper_tool_call_log.set_truncation_info
-                ~keeper_name:meta.name
-                ~original_bytes:(String.length normalized_exn) ();
-              (false, Tool_output_validation.cap normalized_exn)))
-    else None
-  ) tool_defs
+          Some (Tool_bridge.oas_tool_of_masc
+            ~name:public
+            ~description:internal_def.description
+            ~input_schema
+            (make_keeper_tool_handler ~name:internal ~config ~meta ~ctx_snapshot
+               ?search_fn ?on_tool_called
+               ~translate_input:(fun j ->
+                 Keeper_tool_alias.translate_input ~public j)
+               ~failure_counts ()))
+    ) (Keeper_tool_alias.oas_dual_register_aliases ())
+  in
+  internal_tools @ alias_tools

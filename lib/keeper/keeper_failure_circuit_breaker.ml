@@ -7,7 +7,7 @@
     next tool call.
 
     Error classes are coarse categories (path_not_found, cwd_not_directory,
-    path_not_in_allowed_paths) — not exact error strings. This prevents
+    path_not_in_allowed_paths/path_outside_sandbox) — not exact error strings. This prevents
     near-miss variants from resetting the counter. *)
 
 (* ================================================================ *)
@@ -26,7 +26,7 @@ let classify_error (error_msg : string) : error_class =
   else
     let contains sub = String_util.contains_substring error_msg sub in
     if contains "path_not_found" then Path_not_found
-    else if contains "path_not_in_allowed" then Path_not_allowed
+    else if contains "path_not_in_allowed" || contains "path_outside_sandbox" then Path_not_allowed
     else if contains "cwd_not_directory" then Cwd_not_directory
     else if contains "No such file or directory" then Path_not_found
     else if contains "exit" && contains "code" then Shell_exit_nonzero

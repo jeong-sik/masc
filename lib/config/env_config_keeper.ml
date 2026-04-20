@@ -601,6 +601,18 @@ module KeeperSandbox = struct
       with Not_found -> ""
     in
     get_string ~default "MASC_KEEPER_SANDBOX_GH_TOKEN"
+
+  (** RFC-0006 Phase B-1: when true, hardened keepers' read-side tools
+      (keeper_fs_read; later keeper_shell op=rg/ls/cat/find/...) are
+      restricted to the keeper's playground bundle on the host even
+      though the path resolver alone would have allowed broader access.
+
+      Closes the asymmetry where keeper_bash gates execution to docker
+      but keeper_fs_read still walks the host. Default off so existing
+      hardened keepers (analyst/janitor/poe/minjae) keep working until
+      operators flip the flag. *)
+  let symmetric_read_containment () =
+    get_bool ~default:false "MASC_KEEPER_SYMMETRIC_SANDBOX"
 end
 
 module DashboardHealth = struct

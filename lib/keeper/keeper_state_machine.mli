@@ -249,20 +249,32 @@ val transition_error_to_string : transition_error -> string
 (** Derive phase from conditions. Pure, priority-ordered.
     This is the SOLE function that determines keeper phase.
 
-    Priority (first match wins):
-    1.  Dead (terminal)
-    2.  Stopped (stop_requested + drain_complete)
-    3.  Offline (launch_pending before first fiber start)
-    4.  Restarting (fiber dead + budget + backoff elapsed)
-    5.  Crashed (fiber dead + budget remaining)
-    6.  Draining (stop_requested)
-    7.  Guardrail -> Failing
+    Priority (first match wins) — mirrors the [DerivePhase] action in
+    [specs/keeper-state-machine/KeeperStateMachine.tla]:
+    1.  Stopped (stop_requested + drain_complete + ~compaction_active +
+                 ~handoff_active)
+        -- Checked first because a clean drain wins even if the fiber
+        subsequently exits.  Buffer-state guards prevent a TLC deadlock
+        where Stopped is entered while compaction/handoff is still in
+        flight (see comment on [keeper_state_machine.ml:derive_phase]).
+    2.  Offline (launch_pending + ~fiber_alive) -- pre-start registration
+    3.  Dead (~fiber_alive + ~restart_budget_remaining) -- terminal
+    4.  Restarting (~fiber_alive + budget + backoff_elapsed)
+    5.  Crashed (~fiber_alive + budget remaining)
+    6.  Draining (stop_requested) -- in-progress stop
+    7.  Failing (guardrail_triggered)
     8.  Paused (operator_paused OR context_overflow + compact_retry_exhausted)
     9.  HandingOff (handoff_active)
     10. Compacting (compaction_active)
-    11. Overflowed (context_overflow AND NOT compaction_active)
-    12. Failing (heartbeat degraded, turn degraded, or manual reconcile required)
-    13. Running (fiber_alive) *)
+    11. Overflowed (context_overflow) -- transient, auto-compact pending
+    12. Failing (~heartbeat_healthy OR ~turn_healthy)
+    13. Running (fiber_alive)
+    14. Offline (default fallback for inconsistent zero-state)
+
+    Drift note: prior to this revision the docstring listed Dead as
+    priority 1; the actual implementation has always checked Stopped
+    first (the TLA+ spec agrees).  The order above is the ground truth
+    enforced by [keeper_state_machine.ml] and TLC. *)
 val derive_phase : conditions -> phase
 
 (** Pure condition updater: given current conditions and an event,

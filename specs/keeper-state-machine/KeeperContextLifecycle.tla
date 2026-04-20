@@ -58,15 +58,26 @@ vars == <<keeper_phase, turn_number, context_id, context_tokens, message_count,
 \* abstraction. SSOT for OCaml side is lib/keeper/keeper_state_machine.ml
 \* (12 phases). This spec intentionally collapses the 12 OCaml phases into
 \* a 7-symbol alphabet because the context-lifecycle invariants do not
-\* depend on transport/handoff details. Mapping:
+\* depend on transport/handoff details.
 \*
-\*   "idle"           ↔ Offline       (no fiber, no work)
-\*   "running"        ↔ Running       (active turn)
-\*   "compacting"     ↔ Compacting    (in-flight context compaction)
-\*   "overflow_retry" ↔ Overflowed    (next turn retries after compaction)
-\*   "done"           ↔ Stopped       (graceful shutdown)
-\*   "error"          ↔ Failing | Crashed   (recoverable | fatal)
-\*   "dead"           ↔ Dead          (terminal, no restart)
+\* Mapping (#8979: spec-internal abstract names — five of seven do NOT
+\* match phase_to_string output verbatim; two ("running", "compacting")
+\* coincide with the wire format):
+\*
+\*   spec name         ↔ OCaml constructor   (phase_to_string output)
+\*   ------------------+----------------------+----------------------
+\*   "idle"            ↔ Offline               ("offline")
+\*   "running"         ↔ Running               ("running")          *
+\*   "compacting"      ↔ Compacting            ("compacting")       *
+\*   "overflow_retry"  ↔ Overflowed            ("overflowed")
+\*   "done"            ↔ Stopped               ("stopped")
+\*   "error"           ↔ Failing | Crashed     ("failing"|"crashed")
+\*   "dead"            ↔ Dead                  ("dead")             *
+\*       * = spec name and wire format coincide.
+\*
+\* If trace-driven model checking is later added, the spec strings would
+\* need to be renamed to match the wire format.  Until then, treat the
+\* table above as the authoritative abstraction function.
 \*
 \* Unmodeled here (covered in companion specs):
 \*   HandingOff, Draining, Paused, Restarting

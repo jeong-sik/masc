@@ -5,6 +5,53 @@
 
 ### Added
 
+- **Legendary Bash shadow-counters HTTP endpoint.**  New
+  `GET /api/v1/legendary_bash/shadow_counters` returns the
+  `Legendary_counters.snapshot` as JSON.  Public-read (same auth
+  posture as `/api/v1/activity/*`), zero-cost when observers are
+  off (all counters stay at zero).  Wired behind
+  `Server_routes_http_routes_artifacts` in the route pipeline.
+  `LEGENDARY-BASH-RUNBOOK.md` now documents the endpoint and the
+  suggested `disagree_ratio` formula so operators can drive the
+  `MASC_BASH_AST_ONLY` flip decision from a dashboard instead of a
+  log grep pipeline.
+
+- **Legendary Bash in-process shadow counters.**  New
+  `lib/legendary_counters.{ml,mli}` exposes `Atomic.t`-backed totals
+  for the P5 gate-diff observer (`total` + 4 buckets mirroring
+  `Worker_dev_tools.gate_diff` 1:1) and the P4 auto-background
+  observer (`observed` + `would_have_promoted`).  The counters are
+  incremented from the same sites that already emit
+  `gate_diff_shadow` / `auto_bg_would_have_promoted` log lines, so
+  the cost remains zero whenever the matching observer env flag is
+  off.  `snapshot_to_json` returns a stable field layout intended
+  for a later dashboard / HTTP endpoint.  5 unit tests
+  (`test_legendary_counters`).  No behavior change on the request
+  path.
+
+- **`Cdal_judge` pytest classifier.**  `of_exec_outcome` now emits
+  typed `Test_pass` / `Test_fail` markers for pytest output in
+  addition to dune, cargo, and alcotest.  Detection is anchored on
+  the canonical `===== N passed in Ts =====` / `===== N failed`
+  summary banner so that bare "N passed" prose elsewhere in stdout
+  cannot false-positive.  Banner-required behavior is covered by a
+  dedicated negative test
+  (`test_pytest_banner_required`).  Lifts the verifier cascade out
+  of OCaml-only coverage so Python-test keepers get the same typed
+  marker stream as dune keepers.
+
+- **KEEPER-USER-MANUAL §3.1.2 Legendary Bash 도구 표면.**  New
+  subsection documents the three-tool surface (`keeper_bash`,
+  `keeper_bash_output`, `keeper_bash_kill`) at the level a keeper
+  operator reads: call-schema contract, single-command / no-chaining
+  rule, the three flag-gated optional response fields
+  (`return_code_interpretation`, `verifiable_markers`, promoted
+  triple), and the background polling / tree-kill lifecycle.  Points
+  operators at the existing `LEGENDARY-BASH-RUNBOOK.md` /
+  `ENV-CONTRACT.md §4` as SSOT for flag matrices.  Adds both files
+  to the manual's 관련 문서 appendix so new keeper operators land on
+  the procedure docs.  No code change.
+
 - **Legendary Bash operator runbook.**  New
   `docs/LEGENDARY-BASH-RUNBOOK.md` consolidates the P1–P6 rollout
   surface: current flag state table, authoritative opt-out tokens,

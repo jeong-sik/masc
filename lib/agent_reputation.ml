@@ -185,6 +185,8 @@ let keeper_name_of_agent agent_name =
      && String.sub trimmed (len - suffix_len) suffix_len = suffix
   then
     String.sub trimmed 0 (len - suffix_len)
+  else if Nickname.is_generated_nickname trimmed then
+    Option.value (Nickname.extract_agent_type trimmed) ~default:trimmed
   else
     trimmed
 

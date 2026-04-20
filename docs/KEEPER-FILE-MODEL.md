@@ -159,7 +159,7 @@ These are still accepted by the loader, but for consistency they should be used 
 | `proactive_enabled` | bool | Override default proactive scheduling |
 | `proactive_idle_sec`, `proactive_cooldown_sec` | int | Proactive scheduling intervals |
 | `room_signal_prompt_enabled` | bool | Override room-signal prompt behavior |
-| `allowed_paths` | string array | Exceptional path override only; prefer empty and rely on playground default |
+| `allowed_paths` | string array | Exceptional path override only; prefer empty and rely on the single sandbox root |
 | `tool_also_allow` | string array | Extra tool names added to the preset surface |
 | `also_allow` | string array | Backward-compat alias for `tool_also_allow` (will warn as "unknown key" after deprecation) |
 | `tool_denylist` | string array | Tool names blocked regardless of preset |
@@ -200,10 +200,10 @@ tool_also_allow = ["masc_team_memory_read", "masc_team_memory_write", "masc_team
 
 Operational intent:
 
-- private writable lane: `.masc/playground/<keeper>/...`
+- private writable lane: the keeper sandbox. The current local/docker storage path is `.masc/playground/<keeper>/...`, but keeper tools should use sandbox-relative paths such as `repos/<repo>` and `mind/<file>`.
 - shared lane: `masc_team_memory_read/write/search` only, on flattened `room="default"`
 - no arbitrary shared writable shell directory
-- `docker_hardened`는 `allowed_paths=["*"]`를 거부하고, private playground root 밖 경로도 허용하지 않는다
+- `docker_hardened`는 `allowed_paths=["*"]`를 거부하고, private sandbox root 밖 경로도 허용하지 않는다
 
 ### Removed / forbidden fields (hard-rejected)
 

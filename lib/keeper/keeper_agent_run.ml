@@ -1064,8 +1064,16 @@ let run_turn
      preset (e.g. social keeper seeing keeper_fs_edit) from reaching
      the LLM and triggering tool_not_allowed errors. *)
   let allowed_exec_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  (* RFC-0006 Phase A.2: extend the allowed-execution set with public
+     alias names (Bash/Read/...) whose internal target is already
+     allowed. Without this, the AllowList partition at line ~1476 drops
+     Bash/Read even though [Keeper_tools_oas.make_tools] now registers
+     them with OAS, defeating the dual registration. *)
+  let allowed_exec_names_with_aliases =
+    Keeper_tool_alias.expand_universe allowed_exec_names
+  in
   let allowed_exec_set =
-    let base = Keeper_tool_policy.tool_name_set allowed_exec_names in
+    let base = Keeper_tool_policy.tool_name_set allowed_exec_names_with_aliases in
     (* Core always-tools bypass candidate_set in can_execute, so they
        may be absent from keeper_allowed_tool_names.  Add them back to
        prevent the preset filter from dropping survival-critical tools. *)
@@ -1154,7 +1162,24 @@ let run_turn
               | _ -> None)
             sources
         in
-        (match chunks with
+        (* L4 fix: meta.work_discovery_guidance was dead schema (declared
+           in 7 sites — types/json/toml/diff — but read by 0 consumers).
+           Inject as a persona-level operator hint that activates the
+           nudge even when [sources] is empty or yields no chunks. This
+           lets keepers like sangsu (local_only cascade, no sources
+           configured) receive directed guidance via the same Nudge
+           pipeline that L1+L2 already delivers to the LLM. *)
+        let guidance_section =
+          match meta.work_discovery_guidance with
+          | Some g when String.trim g <> "" ->
+            Some (Printf.sprintf "**Operator guidance:** %s" (String.trim g))
+          | _ -> None
+        in
+        let sections =
+          chunks
+          @ (match guidance_section with Some s -> [s] | None -> [])
+        in
+        (match sections with
          | [] -> None
          | _ ->
            Some (Printf.sprintf
@@ -1178,7 +1203,7 @@ let run_turn
               `NO_TOOL_CHANNEL: <brief reason>` instead of pretending a \
               tool ran. Otherwise pick the smallest viable action and emit \
               it as a structured tool_call now."
-             interval (String.concat "\n\n" chunks)))
+             interval (String.concat "\n\n" sections)))
     | _ -> None
   in
   let base_hooks =

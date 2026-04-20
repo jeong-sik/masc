@@ -222,10 +222,25 @@ let resolved_keeper_args_from_persona args :
                      in
                      Ok (persona, resolved))
              | None ->
+                 (* #8605 family: defaults.tool_preset is a config-supplied
+                    string; Option.bind silently absorbs unparseable values
+                    (config drift adds an unknown preset name).  Warn before
+                    falling back so producer/consumer drift surfaces in
+                    operator logs.  Mirrors #8916 in keeper_turn_up_create.ml.
+                    Follow-up: lift to a shared helper to avoid divergence. *)
                  let tool_preset =
-                   match Option.bind defaults.tool_preset tool_preset_of_string with
-                   | Some preset -> preset
+                   match defaults.tool_preset with
                    | None -> Research
+                   | Some raw ->
+                       (match tool_preset_of_string raw with
+                        | Some preset -> preset
+                        | None ->
+                            Log.Keeper.warn
+                              "keeper_exec_persona: unknown tool_preset %S \
+                               in profile defaults -> Research (drift; \
+                               see #8605)"
+                              raw;
+                            Research)
                  in
                  let tool_also_allow =
                    match get_string_list args "tool_also_allow" with

@@ -21,11 +21,13 @@ let test_get_string_missing () =
 
 let test_get_string_base_branch () =
   let args = `Assoc [("base_branch", `String "main")] in
-  check string "extracts branch" "main" (Tool_args.get_string args "base_branch" "develop")
+  check string "extracts branch" "main"
+    (Tool_args.get_string args "base_branch" Tool_worktree.default_base_branch)
 
 let test_get_string_base_branch_default () =
   let args = `Assoc [] in
-  check string "uses develop default" "develop" (Tool_args.get_string args "base_branch" "develop")
+  check string "uses auto default" "auto"
+    (Tool_args.get_string args "base_branch" Tool_worktree.default_base_branch)
 
 (* ============================================================
    Context Creation Tests

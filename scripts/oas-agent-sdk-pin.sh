@@ -3,5 +3,5 @@
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
 readonly OAS_AGENT_SDK_BASE_VERSION="v0.163.0"
 readonly OAS_AGENT_SDK_TRACK_REF="main"
-readonly OAS_AGENT_SDK_SHA="3649037186dee630dbd04e61016c503e853fc68e"
+readonly OAS_AGENT_SDK_SHA="82e89665df87effbba1452d22af7cf62385583dd"
 readonly OAS_AGENT_SDK_MIN_VERSION="0.163.0"

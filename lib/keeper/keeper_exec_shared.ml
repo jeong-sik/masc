@@ -96,9 +96,7 @@ let keeper_effective_write_allowed_paths ~(meta : keeper_meta) =
 
 let keeper_playground_root ~(config : Coord.config) ~(meta : keeper_meta) =
   ignore (Keeper_alerting_path.ensure_playground_bundle ~config ~name:meta.name);
-  Filename.concat
-    (Keeper_alerting_path.project_root_of_config config)
-    (Keeper_alerting_path.playground_path_of_keeper meta.name)
+  Keeper_sandbox.host_root_abs ~config meta.name
 ;;
 
 let keeper_default_write_root ~(config : Coord.config) ~(meta : keeper_meta) =
@@ -126,16 +124,15 @@ let is_playground_lane_relative_path (raw : string) =
        || String.starts_with ~prefix:(prefix ^ "/") raw)
     [ "mind"; "repos" ]
 
-(* Bare filenames and canonical playground bundle lanes default to the keeper
-   playground, but rooted-looking relative paths (for example
+(* Bare filenames and canonical sandbox lanes default to the keeper sandbox,
+   but rooted-looking relative paths (for example
    "workspace/..." or "lib/...") keep project-root/boundary semantics.
 
-   Additionally, strip the keeper's own playground prefix when the path already
-   includes it.  Keeper LLMs sometimes construct paths like
+   Additionally, strip the keeper's legacy playground prefix when the path
+   already includes it.  Keeper LLMs sometimes construct paths like
    ".masc/playground/<name>/repos" (relative) or
    "<base>/.masc/playground/<name>/.masc/playground/<name>/repos" (absolute,
-   doubled) because they concatenate the playground root they see in tool
-   output with the playground-relative path from the prompt.  Stripping early
+   doubled).  Stripping early
    prevents the downstream resolver from doubling the prefix again. *)
 let playground_relative_unless_allowed_root ~(config : Coord.config)
     ~(meta : keeper_meta) (raw : string) : string =

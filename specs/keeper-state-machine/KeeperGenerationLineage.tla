@@ -45,11 +45,21 @@ vars ==
 \* spec uses the smallest possible alphabet (3 symbols) because the
 \* generation-lineage contract only inspects whether the keeper is
 \* idle, actively executing, or rolling over a generation handoff.
-\* Mapping (note: snake_case wire format from phase_to_string):
 \*
-\*   "idle"        ↔ Offline
-\*   "running"     ↔ Running
-\*   "handing_off" ↔ HandingOff
+\* Mapping (#8979: spec-internal abstract names — do NOT match
+\* phase_to_string output verbatim; "idle" is an abstraction over
+\* Offline, not the wire string "offline"):
+\*
+\*   spec name      ↔ OCaml constructor      (phase_to_string output)
+\*   ---------------+-------------------------+----------------------
+\*   "idle"         ↔ Offline                  ("offline")
+\*   "running"      ↔ Running                  ("running")
+\*   "handing_off"  ↔ HandingOff               ("handing_off")
+\*
+\* If trace-driven model checking is later added, the spec strings
+\* would need to be renamed to match the wire format ("offline" instead
+\* of "idle").  Until then, treat the table above as the authoritative
+\* abstraction function.
 \*
 \* Unmodeled here (covered in companion specs):
 \*   Failing, Overflowed, Compacting, Draining, Paused,

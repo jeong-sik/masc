@@ -307,6 +307,25 @@ let () = test "dispatch_status_suppresses_lifecycle_guidance_without_credential"
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "dispatch_status_no_owned_prefers_claim_next_over_transition" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  ignore (Coord.add_task ctx.config ~title:"Unclaimed task" ~priority:3 ~description:"");
+  Planning_eio.set_current_task ctx.config ~task_id:"task-001";
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some (success, result) ->
+      assert success;
+      assert (str_contains result "owned=- | current=task-001");
+      assert (str_contains result "drift_reason=no_owned");
+      assert (str_contains result "claim_first_suppressed=no");
+      assert (str_contains result "💡 Suggested next: masc_claim_next -> masc_status");
+      assert (not (str_contains result "💡 Suggested next: masc_status -> masc_transition"))
+  | None -> failwith "dispatch returned None"
+)
+
 let () = test "dispatch_check_project_ready_alias" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in

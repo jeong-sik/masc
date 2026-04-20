@@ -65,6 +65,16 @@ let handle_keeper_fs_read
     missing_file_error_json ~config ~target ~fallback_dir ~error:e
   | Error e -> error_json e
   | Ok target ->
+    (* RFC-0006 Phase B-1: symmetric sandbox guard. For hardened keepers
+       (sandbox_profile=docker_hardened/docker_with_git) with
+       MASC_KEEPER_SYMMETRIC_SANDBOX=true, the resolver-level allowed_paths
+       check is augmented by a strict playground-bundle containment so the
+       host FS cannot leak through keeper_fs_read while keeper_bash is
+       container-isolated. No-op for legacy keepers and when the env flag
+       is off. *)
+    (match Keeper_sandbox_containment.check_read_target ~config ~meta ~target with
+     | Error e -> error_json ~fields:[ "path", `String target ] e
+     | Ok () ->
     (match Safe_ops.read_file_safe target with
      | Error e when String.starts_with ~prefix:file_not_found_prefix e ->
        missing_file_error_json ~config ~target ~fallback_dir ~error:e
@@ -80,7 +90,7 @@ let handle_keeper_fs_read
              ; "bytes", `Int total
              ; "truncated", `Bool truncated
              ; "content", `String body
-             ]))
+             ])))
 ;;
 
 let handle_keeper_fs_edit

@@ -11,9 +11,18 @@ let aliases : (string * string) list =
   [
     "Bash", "keeper_bash";
     "Edit", "keeper_fs_edit";
-    "Grep", "keeper_shell";   (* op=rg routed at dispatch layer, Phase A.2 *)
+    "Grep", "keeper_shell";   (* op=rg routed at dispatch layer, Phase A.4 *)
     "Read", "keeper_fs_read";
     "Write", "keeper_fs_edit"; (* create-vs-update collapsed at dispatch layer *)
+  ]
+
+(* Subset of [aliases] safe for OAS dual registration in Phase A.2.
+   Edit/Write/Grep need nontrivial input shape adapters (string-replace
+   semantics, op=rg synthesis) — landing in Phase A.4. *)
+let oas_dual_register : (string * string) list =
+  [
+    "Bash", "keeper_bash";
+    "Read", "keeper_fs_read";
   ]
 
 (* Anthropic Code surface names without a keeper cognate. The disclosure
@@ -55,3 +64,122 @@ let hallucinated_set =
 let is_hallucinated_builtin name = Hashtbl.mem hallucinated_set name
 
 let all_aliases () = aliases
+
+(* ── Phase A.2 OAS dual registration ────────────────────────────── *)
+
+let oas_dual_register_aliases () = oas_dual_register
+
+(* Helpers for assembling JSON tool schemas. Kept local to avoid coupling
+   alias semantics with the broader Tool_shard helpers. *)
+let property name typ description =
+  ( name,
+    `Assoc
+      [ ("type", `String typ); ("description", `String description) ] )
+
+let object_schema ?(required = []) properties =
+  `Assoc
+    [
+      ("type", `String "object");
+      ("properties", `Assoc properties);
+      ("required", `List (List.map (fun n -> `String n) required));
+    ]
+
+(* Anthropic Code "Bash" tool schema, mirrored as closely as we can while
+   only exposing what keeper_bash actually supports. *)
+let bash_public_schema =
+  object_schema ~required:[ "command" ]
+    [
+      property "command" "string"
+        "The shell command to execute. Single command only. No chaining \
+         (&&, ||, ;), pipes (|), or redirects (>, >>). Example: 'dune \
+         build', 'rg pattern lib/'.";
+      property "description" "string"
+        "Optional short description of what the command does. Logged for \
+         observability.";
+      property "timeout" "number"
+        "Timeout in seconds (default 30, max 180). For \
+         run_in_background=true, 0 disables the timeout.";
+      property "run_in_background" "boolean"
+        "Default false. When true, returns immediately with \
+         background_task_id; poll output via keeper_bash_output, stop via \
+         keeper_bash_kill.";
+    ]
+
+(* Anthropic Code "Read" tool schema. We do not yet support offset/limit
+   in keeper_fs_read; declared here so the LLM can pass them but the
+   translator drops them. *)
+let read_public_schema =
+  object_schema ~required:[ "file_path" ]
+    [
+      property "file_path" "string"
+        "Absolute or playground-relative file path to read.";
+      property "limit" "integer"
+        "Approximate maximum bytes to return (mapped to keeper_fs_read \
+         max_bytes; line-based limit is not supported).";
+      property "offset" "integer"
+        "Currently ignored; reads from the start. Listed for compatibility \
+         with the Anthropic Read tool surface.";
+    ]
+
+let public_input_schema = function
+  | "Bash" -> Some bash_public_schema
+  | "Read" -> Some read_public_schema
+  | _ -> None
+
+(* Translate an LLM call payload from the public schema to the internal
+   tool's expected shape. Identity for unknown aliases.
+
+   Robust against malformed payloads: anything that isn't a JSON object
+   passes through unchanged so the downstream validator can produce the
+   normal structured error. *)
+let translate_bash_input input =
+  match input with
+  | `Assoc fields ->
+      let out = ref [] in
+      List.iter
+        (fun (k, v) ->
+          match k with
+          | "command" -> out := ("cmd", v) :: !out
+          | "timeout" -> out := ("timeout_sec", v) :: !out
+          | "description" -> ()  (* dropped; logged elsewhere *)
+          | _ -> out := (k, v) :: !out)
+        fields;
+      `Assoc (List.rev !out)
+  | _ -> input
+
+let translate_read_input input =
+  match input with
+  | `Assoc fields ->
+      let out = ref [] in
+      List.iter
+        (fun (k, v) ->
+          match k with
+          | "file_path" -> out := ("path", v) :: !out
+          | "limit" -> out := ("max_bytes", v) :: !out
+          | "offset" -> ()  (* keeper_fs_read does not support offsets *)
+          | _ -> out := (k, v) :: !out)
+        fields;
+      `Assoc (List.rev !out)
+  | _ -> input
+
+let translate_input ~public input =
+  match public with
+  | "Bash" -> translate_bash_input input
+  | "Read" -> translate_read_input input
+  | _ -> input
+
+let expand_universe internal_names =
+  let already = Hashtbl.create (List.length internal_names) in
+  List.iter (fun n -> Hashtbl.replace already n ()) internal_names;
+  let extras =
+    List.filter_map
+      (fun (public, internal) ->
+        if Hashtbl.mem already internal && not (Hashtbl.mem already public)
+        then begin
+          Hashtbl.replace already public ();
+          Some public
+        end
+        else None)
+      oas_dual_register
+  in
+  internal_names @ extras

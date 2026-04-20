@@ -122,6 +122,12 @@ let add_routes ~port ~host router =
            else
              Http.Response.not_found reqd
          ) request reqd)
+  (* Bonsai API — must precede the /dashboard/b/ SPA catchall. *)
+  |> Http.Router.get "/dashboard/b/api/keepers/summary"
+       (fun request reqd ->
+         with_public_read (fun _state req reqd ->
+           bonsai_api_keepers_summary req reqd
+         ) request reqd)
   |> Http.Router.get "/dashboard/b" (fun request reqd ->
        with_canonical_loopback_host ~port
          (fun request reqd ->

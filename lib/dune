@@ -7,6 +7,7 @@
    a2a_types
    a2a_tools
    admission_queue
+   attempt_state
    admission_queue_metrics
    agent_card
    agent_economy
@@ -125,6 +126,7 @@
    server_routes_http_routes_attribution
    server_routes_http_routes_activity
    server_routes_http_routes_artifacts
+   server_routes_http_routes_legendary_bash
    server_routes_http_routes_channel_gate
    server_routes_http_routes_sidecar
    server_h2_gateway
@@ -186,6 +188,7 @@
    worker_container
    worker_container_runners
    worker_dev_tools
+   legendary_counters
    worker_tool_input
    worker_verification
    prompt_defaults
@@ -409,8 +412,11 @@
    keeper_memory_bank
    keeper_memory_recall
    keeper_skill_routing
+   keeper_sandbox
+   keeper_repo_readiness
    keeper_alerting
    keeper_alerting_path
+   keeper_sandbox_containment
    keeper_timing
    keeper_tool_registry
    keeper_tool_diversity
@@ -663,7 +669,9 @@
   tool_autoresearch_broadcast
   tool_autoresearch_cycle
   keeper_skill_routing
+  keeper_sandbox
   keeper_alerting_path
+  keeper_sandbox_containment
   ;; tool_local_runtime sub-modules
   tool_local_runtime_http
   tool_local_runtime_verify
@@ -812,6 +820,9 @@
    masc_mcp.config
    ;; Dashboard utilities (extracted sub-library)
    masc_mcp.dashboard_utils
+   ;; Dashboard API wire contracts (extracted sub-library)
+   ;; Shared typed JSON contracts between OCaml handlers and Bonsai island.
+   masc_mcp.masc_dashboard_api_types
    ;; Team session types removed (Epic #6107)
    ;; MCP tool schema cluster (extracted sub-library)
    masc_mcp.tool_schemas

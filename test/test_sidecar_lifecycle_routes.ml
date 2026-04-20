@@ -302,7 +302,9 @@ let test_reconcile_running_unavailable_starts_once () =
       ~next_retry_at:"2099-04-20T00:00:30Z"
       ~current_generation:3
       ~observed_state:Routes.Observed_unavailable
-      ~write_attempt:(fun attempt -> written_attempt := Some attempt)
+      ~write_attempt:(fun attempt ->
+        written_attempt := Some attempt;
+        Ok ())
       ~start_shell:(fun () -> incr shell_calls)
       desired
   in
@@ -317,7 +319,32 @@ let test_reconcile_running_unavailable_starts_once () =
        check string "next action recorded"
          "wait for observed status, or open logs if the sidecar remains offline after backoff"
          attempt.operator_next_action
-   | None -> failf "running reconcile should persist attempt metadata")
+  | None -> failf "running reconcile should persist attempt metadata")
+
+let test_reconcile_attempt_write_failure_does_not_start () =
+  let shell_calls = ref 0 in
+  let desired : Routes.desired_record =
+    {
+      Routes.connector_id = "discord";
+      desired_state = Routes.Desired_running;
+      generation = 3;
+      updated_by = "test";
+      updated_at = "2026-04-20T00:00:00Z";
+    }
+  in
+  let result =
+    Routes.reconcile_desired_once
+      ~now:"2026-04-20T00:00:00Z"
+      ~next_retry_at:"2099-04-20T00:00:30Z"
+      ~current_generation:3
+      ~observed_state:Routes.Observed_unavailable
+      ~write_attempt:(fun _ -> Error "disk full")
+      ~start_shell:(fun () -> incr shell_calls)
+      desired
+  in
+  check int "attempt write failure suppresses shell start" 0 !shell_calls;
+  check string "attempt write failure result" "noop:attempt_write_failed"
+    (Routes.reconcile_result_to_string result)
 
 let test_reconcile_running_unavailable_backoff_noops () =
   let shell_calls = ref 0 in
@@ -587,6 +614,8 @@ let () =
             test_reconcile_stale_generation_does_not_start;
           test_case "running + unavailable starts once" `Quick
             test_reconcile_running_unavailable_starts_once;
+          test_case "attempt write failure does not start" `Quick
+            test_reconcile_attempt_write_failure_does_not_start;
           test_case "running + unavailable backs off repeated same-generation start" `Quick
             test_reconcile_running_unavailable_backoff_noops;
           test_case "stopped desired no-ops" `Quick test_reconcile_stopped_noops;

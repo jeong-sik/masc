@@ -84,6 +84,13 @@ let test_keeper_surface_status_maps_dead_to_inactive () =
   in
   check string "dead keeper is not surfaced as busy" "inactive" status
 
+let test_keeper_status_helpers_tolerate_null_status_json () =
+  check string "null agent status is unknown" "unknown" (ES.agent_status_text `Null);
+  check bool "null agent status has no live signal" false
+    (ES.agent_runtime_has_live_signal `Null);
+  check string "null surface inputs fall back offline" "offline"
+    (ES.keeper_surface_status ~agent_status:`Null ~diagnostic:`Null)
+
 (* --- keeper_health_state tests (online/offline mismatch fix) --- *)
 
 let make_agent_status ?(exists = true) ?(status = "active")
@@ -95,6 +102,18 @@ let make_agent_status ?(exists = true) ?(status = "active")
     ("last_seen_ago_s", `Float last_seen_ago_s);
     ("is_zombie", `Bool is_zombie);
   ]
+
+let test_keeper_diagnostic_tolerates_null_agent_status () =
+  let meta = make_meta ~name:"keeper-null-agent-status-test" () in
+  let diagnostic =
+    ES.keeper_diagnostic_json ~meta ~agent_status:`Null ~keepalive_running:true
+      ~history_items:[] ~now_ts:(Time_compat.now ())
+  in
+  let open Yojson.Safe.Util in
+  check string "null agent status maps diagnostic offline" "offline"
+    (diagnostic |> member "health_state" |> to_string);
+  check string "null agent status maps quiet reason" "agent_missing"
+    (diagnostic |> member "quiet_reason" |> to_string)
 
 let test_health_keepalive_running_overrides_stale_last_seen () =
   let meta = make_meta () in
@@ -449,6 +468,8 @@ let () =
             test_health_keepalive_not_running_not_stale_is_offline;
           test_case "fresh live signal suppresses stale error degradation" `Quick
             test_diagnostic_ignores_stale_error_when_live_signal_is_newer;
+          test_case "diagnostic tolerates null agent status json" `Quick
+            test_keeper_diagnostic_tolerates_null_agent_status;
         ] );
       ( "surface_status",
         [
@@ -462,6 +483,8 @@ let () =
             test_keeper_surface_status_maps_zombie_to_inactive;
           test_case "maps dead to inactive" `Quick
             test_keeper_surface_status_maps_dead_to_inactive;
+          test_case "status helpers tolerate null status json" `Quick
+            test_keeper_status_helpers_tolerate_null_status_json;
           test_case "runtime surface derives slot wait timeout blocker" `Quick
             test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta;
           test_case "runtime surface derives continue-gate blocker" `Quick

@@ -51,6 +51,15 @@ let test_align_keeper_runtime_status_ignores_zombie_runtime_signal () =
   Alcotest.(check string) "zombie runtime does not override inactive" "inactive"
     status
 
+let test_align_keeper_runtime_status_tolerates_null_status_json () =
+  let status =
+    Operator_control_snapshot.align_keeper_runtime_status
+      ~surface_status:"inactive" ~diagnostic:`Null ~agent_status_json:`Null
+      ~keepalive_running:true
+  in
+  Alcotest.(check string) "null runtime status keeps surface status" "inactive"
+    status
+
 let test_compute_context_ratio_uses_resolved_cli_context_budget () =
   let base =
     match

@@ -80,9 +80,7 @@ let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
     Keeper_exec_status.agent_runtime_has_live_signal agent_status_json
   in
   let is_zombie =
-    match U.member "is_zombie" agent_status_json with
-    | `Bool value -> value
-    | _ -> false
+    Safe_ops.json_bool ~default:false "is_zombie" agent_status_json
   in
   match (runtime_status, has_live_signal, is_zombie) with
   | Some status, true, false -> Some status
@@ -90,9 +88,8 @@ let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
 
 let health_state_allows_runtime_status_override (diagnostic : Yojson.Safe.t) =
   let kh =
-    match U.member "health_state" diagnostic with
-    | `String s -> Keeper_exec_status.keeper_health_of_string s
-    | _ -> Keeper_types.KH_offline
+    Safe_ops.json_string ~default:"offline" "health_state" diagnostic
+    |> Keeper_exec_status.keeper_health_of_string
   in
   match kh with
   | Keeper_types.KH_stale | KH_degraded | KH_zombie | KH_dead -> false
@@ -424,9 +421,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    Keeper_status_bridge.runtime_keepalive_running config meta
                  in
                  let agent_exists =
-                   match agent_json |> U.member "exists" with
-                   | `Bool value -> value
-                   | _ -> false
+                   Safe_ops.json_bool ~default:false "exists" agent_json
                  in
                  let now_ts = Time_compat.now () in
                  let keepalive_started_at =

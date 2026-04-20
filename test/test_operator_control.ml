@@ -17,6 +17,10 @@ let () =
             `Quick
             Test_operator_control_snapshot
             .test_align_keeper_runtime_status_ignores_zombie_runtime_signal;
+          Alcotest.test_case "snapshot runtime alignment tolerates null status json"
+            `Quick
+            Test_operator_control_snapshot
+            .test_align_keeper_runtime_status_tolerates_null_status_json;
           Alcotest.test_case "snapshot context ratio resolves cli provider budget"
             `Quick
             Test_operator_control_snapshot

@@ -159,8 +159,8 @@ let yojson_field name j =
 let test_oas_dual_register_subset () =
   let pairs = Alias.oas_dual_register_aliases () in
   let names = List.map fst pairs in
-  Alcotest.(check (list string)) "Phase A.2 dual-reg subset"
-    [ "Bash"; "Read" ] names;
+  Alcotest.(check (list string)) "Phase A.4 dual-reg covers Bash/Edit/Grep/Read/Write"
+    [ "Bash"; "Edit"; "Grep"; "Read"; "Write" ] names;
   (* Every entry must also appear in the full alias table. *)
   let full = List.map fst (Alias.all_aliases ()) in
   List.iter
@@ -171,12 +171,12 @@ let test_oas_dual_register_subset () =
     pairs
 
 let test_public_input_schema_present () =
-  Alcotest.(check bool) "Bash has tailored schema"
-    true (Option.is_some (Alias.public_input_schema "Bash"));
-  Alcotest.(check bool) "Read has tailored schema"
-    true (Option.is_some (Alias.public_input_schema "Read"));
-  Alcotest.(check bool) "Edit (deferred) has no tailored schema"
-    true (Option.is_none (Alias.public_input_schema "Edit"));
+  List.iter
+    (fun name ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s has tailored schema" name)
+        true (Option.is_some (Alias.public_input_schema name)))
+    [ "Bash"; "Edit"; "Grep"; "Read"; "Write" ];
   Alcotest.(check bool) "unknown public name has no schema"
     true (Option.is_none (Alias.public_input_schema "Nope"))
 
@@ -246,6 +246,141 @@ let test_translate_read_input () =
     (Option.bind max_bytes (function `Int i -> Some i | _ -> None));
   Alcotest.(check bool) "offset is dropped (keeper_fs_read does not support it)"
     true (Option.is_none offset)
+
+let test_edit_schema_uses_anthropic_fields () =
+  let schema = Option.get (Alias.public_input_schema "Edit") in
+  let props = Option.get (yojson_field "properties" schema) in
+  List.iter
+    (fun field ->
+      Alcotest.(check bool)
+        (Printf.sprintf "Edit schema exposes %S" field)
+        true (Option.is_some (yojson_field field props)))
+    [ "file_path"; "old_string"; "new_string"; "replace_all" ];
+  Alcotest.(check bool) "Edit schema does not expose internal 'mode' to LLM"
+    true (Option.is_none (yojson_field "mode" props))
+
+let test_write_schema_uses_anthropic_fields () =
+  let schema = Option.get (Alias.public_input_schema "Write") in
+  let props = Option.get (yojson_field "properties" schema) in
+  List.iter
+    (fun field ->
+      Alcotest.(check bool)
+        (Printf.sprintf "Write schema exposes %S" field)
+        true (Option.is_some (yojson_field field props)))
+    [ "file_path"; "content" ];
+  Alcotest.(check bool) "Write schema does not expose internal 'mode' to LLM"
+    true (Option.is_none (yojson_field "mode" props))
+
+let test_grep_schema_uses_anthropic_fields () =
+  let schema = Option.get (Alias.public_input_schema "Grep") in
+  let props = Option.get (yojson_field "properties" schema) in
+  Alcotest.(check bool) "Grep schema exposes 'pattern'"
+    true (Option.is_some (yojson_field "pattern" props));
+  Alcotest.(check bool) "Grep schema does not expose internal 'op' to LLM"
+    true (Option.is_none (yojson_field "op" props))
+
+let test_translate_edit_input () =
+  let input =
+    `Assoc
+      [
+        ("file_path", `String "/tmp/foo.ml");
+        ("old_string", `String "let x = 1");
+        ("new_string", `String "let x = 2");
+        ("replace_all", `Bool true);
+      ]
+  in
+  let translated = Alias.translate_input ~public:"Edit" input in
+  Alcotest.(check (option string)) "file_path -> path"
+    (Some "/tmp/foo.ml")
+    (Option.bind (yojson_field "path" translated)
+       (function `String s -> Some s | _ -> None));
+  Alcotest.(check (option string)) "mode injected as 'patch'"
+    (Some "patch")
+    (Option.bind (yojson_field "mode" translated)
+       (function `String s -> Some s | _ -> None));
+  Alcotest.(check bool) "old_string preserved" true
+    (Option.is_some (yojson_field "old_string" translated));
+  Alcotest.(check bool) "new_string preserved" true
+    (Option.is_some (yojson_field "new_string" translated));
+  Alcotest.(check (option bool)) "replace_all preserved"
+    (Some true)
+    (Option.bind (yojson_field "replace_all" translated)
+       (function `Bool b -> Some b | _ -> None))
+
+let test_translate_edit_drops_caller_supplied_mode () =
+  (* Defense-in-depth: even if the LLM tries to override mode the
+     translator must force mode=patch. *)
+  let input =
+    `Assoc
+      [
+        ("file_path", `String "/tmp/x");
+        ("old_string", `String "a");
+        ("new_string", `String "b");
+        ("mode", `String "overwrite");
+        ("content", `String "ignored");
+      ]
+  in
+  let translated = Alias.translate_input ~public:"Edit" input in
+  Alcotest.(check (option string)) "mode is forced to patch"
+    (Some "patch")
+    (Option.bind (yojson_field "mode" translated)
+       (function `String s -> Some s | _ -> None));
+  Alcotest.(check bool) "caller-supplied content dropped" true
+    (Option.is_none (yojson_field "content" translated))
+
+let test_translate_write_input () =
+  let input =
+    `Assoc
+      [
+        ("file_path", `String "/tmp/new.txt");
+        ("content", `String "hello world");
+      ]
+  in
+  let translated = Alias.translate_input ~public:"Write" input in
+  Alcotest.(check (option string)) "file_path -> path"
+    (Some "/tmp/new.txt")
+    (Option.bind (yojson_field "path" translated)
+       (function `String s -> Some s | _ -> None));
+  Alcotest.(check (option string)) "mode injected as 'overwrite'"
+    (Some "overwrite")
+    (Option.bind (yojson_field "mode" translated)
+       (function `String s -> Some s | _ -> None));
+  Alcotest.(check (option string)) "content preserved verbatim"
+    (Some "hello world")
+    (Option.bind (yojson_field "content" translated)
+       (function `String s -> Some s | _ -> None))
+
+let test_translate_grep_input () =
+  let input =
+    `Assoc
+      [
+        ("pattern", `String "TODO");
+        ("path", `String "lib/");
+        ("glob", `String "*.ml");
+        ("type", `String "ml");
+        ("-i", `Bool true);
+        ("-n", `Bool true);
+      ]
+  in
+  let translated = Alias.translate_input ~public:"Grep" input in
+  Alcotest.(check (option string)) "op injected as 'rg'"
+    (Some "rg")
+    (Option.bind (yojson_field "op" translated)
+       (function `String s -> Some s | _ -> None));
+  Alcotest.(check (option string)) "pattern preserved"
+    (Some "TODO")
+    (Option.bind (yojson_field "pattern" translated)
+       (function `String s -> Some s | _ -> None));
+  Alcotest.(check bool) "path preserved" true
+    (Option.is_some (yojson_field "path" translated));
+  Alcotest.(check bool) "glob preserved" true
+    (Option.is_some (yojson_field "glob" translated));
+  Alcotest.(check bool) "type preserved" true
+    (Option.is_some (yojson_field "type" translated));
+  Alcotest.(check bool) "-i shim dropped" true
+    (Option.is_none (yojson_field "-i" translated));
+  Alcotest.(check bool) "-n shim dropped" true
+    (Option.is_none (yojson_field "-n" translated))
 
 let test_translate_unknown_is_identity () =
   let input = `Assoc [ ("foo", `String "bar") ] in
@@ -322,8 +457,15 @@ let () =
           Alcotest.test_case "tailored input schema present" `Quick test_public_input_schema_present;
           Alcotest.test_case "Bash schema uses 'command' field" `Quick test_bash_schema_uses_command_field;
           Alcotest.test_case "Read schema uses 'file_path' field" `Quick test_read_schema_uses_file_path;
+          Alcotest.test_case "Edit schema uses Anthropic field names" `Quick test_edit_schema_uses_anthropic_fields;
+          Alcotest.test_case "Write schema uses Anthropic field names" `Quick test_write_schema_uses_anthropic_fields;
+          Alcotest.test_case "Grep schema uses Anthropic field names" `Quick test_grep_schema_uses_anthropic_fields;
           Alcotest.test_case "translate Bash input shape" `Quick test_translate_bash_input;
           Alcotest.test_case "translate Read input shape" `Quick test_translate_read_input;
+          Alcotest.test_case "translate Edit input shape" `Quick test_translate_edit_input;
+          Alcotest.test_case "translate Edit drops caller mode" `Quick test_translate_edit_drops_caller_supplied_mode;
+          Alcotest.test_case "translate Write input shape" `Quick test_translate_write_input;
+          Alcotest.test_case "translate Grep input shape" `Quick test_translate_grep_input;
           Alcotest.test_case "translate unknown is identity" `Quick test_translate_unknown_is_identity;
           Alcotest.test_case "translate malformed is identity" `Quick test_translate_malformed_input_is_identity;
           Alcotest.test_case "expand_universe adds aliases" `Quick test_expand_universe_adds_aliases;

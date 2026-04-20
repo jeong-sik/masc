@@ -691,8 +691,8 @@ let () =
           if not (List.mem actual F.valid_fs_write_mode_strings) then
             Alcotest.failf "fs_write_mode_to_string %S not in valid_fs_write_mode_strings" actual
         in
-        witness F.Overwrite; witness F.Append;
-        Alcotest.(check int) "count" 2 (List.length F.valid_fs_write_mode_strings));
+        witness F.Overwrite; witness F.Append; witness F.Patch;
+        Alcotest.(check int) "count" 3 (List.length F.valid_fs_write_mode_strings));
       Alcotest.test_case "of_string_opt sound partial + empty back-compat" `Quick (fun () ->
         let module F = Masc_mcp.Keeper_exec_fs in
         Alcotest.(check bool) "overwrite" true (F.fs_write_mode_of_string_opt "overwrite" <> None);

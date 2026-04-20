@@ -16,13 +16,18 @@ let aliases : (string * string) list =
     "Write", "keeper_fs_edit"; (* create-vs-update collapsed at dispatch layer *)
   ]
 
-(* Subset of [aliases] safe for OAS dual registration in Phase A.2.
-   Edit/Write/Grep need nontrivial input shape adapters (string-replace
-   semantics, op=rg synthesis) — landing in Phase A.4. *)
+(* Subset of [aliases] safe for OAS dual registration. Phase A.4
+   (#8963 follow-up) added Edit/Write/Grep once their input adapters
+   landed: Edit goes through the new keeper_fs_edit mode=patch path,
+   Write maps cleanly to mode=overwrite, Grep synthesizes
+   keeper_shell op=rg. *)
 let oas_dual_register : (string * string) list =
   [
     "Bash", "keeper_bash";
+    "Edit", "keeper_fs_edit";
+    "Grep", "keeper_shell";
     "Read", "keeper_fs_read";
+    "Write", "keeper_fs_edit";
   ]
 
 (* Anthropic Code surface names without a keeper cognate. The disclosure
@@ -121,9 +126,68 @@ let read_public_schema =
          with the Anthropic Read tool surface.";
     ]
 
+(* Anthropic Code "Edit" tool schema. Patch semantics: in-place string
+   replacement. Maps to keeper_fs_edit mode=patch. *)
+let edit_public_schema =
+  object_schema ~required:[ "file_path"; "old_string"; "new_string" ]
+    [
+      property "file_path" "string"
+        "Absolute or playground-relative file path to edit. The file \
+         must exist.";
+      property "old_string" "string"
+        "Exact substring to replace. Must occur exactly once in the file \
+         unless replace_all=true.";
+      property "new_string" "string"
+        "Replacement substring. Pass an empty string to delete \
+         old_string.";
+      property "replace_all" "boolean"
+        "Default false. When true, replaces every occurrence of \
+         old_string.";
+    ]
+
+(* Anthropic Code "Write" tool schema. Maps to keeper_fs_edit
+   mode=overwrite (parent dirs created automatically). *)
+let write_public_schema =
+  object_schema ~required:[ "file_path"; "content" ]
+    [
+      property "file_path" "string"
+        "Absolute or playground-relative file path. Parent directories \
+         are created as needed.";
+      property "content" "string"
+        "Full file content. Overwrites the existing file.";
+    ]
+
+(* Anthropic Code "Grep" tool schema. Synthesized as keeper_shell op=rg
+   so the LLM does not need to learn keeper_shell's op enum. The
+   keeper_shell rg implementation already supports type/glob filters
+   used here. Anthropic-Code -i and -n flags are accepted as boolean
+   conveniences but currently dropped (rg always emits line numbers). *)
+let grep_public_schema =
+  object_schema ~required:[ "pattern" ]
+    [
+      property "pattern" "string"
+        "Regular expression to search for.";
+      property "path" "string"
+        "Directory or file to search in. Defaults to the keeper \
+         playground when omitted.";
+      property "glob" "string"
+        "Glob filter, e.g. '*.ml' or 'lib/**/*.ml'.";
+      property "type" "string"
+        "Ripgrep file-type filter, e.g. 'ml', 'py'.";
+      property "-i" "boolean"
+        "Case insensitive. Currently accepted but not yet routed; \
+         Anthropic-Code compatibility shim.";
+      property "-n" "boolean"
+        "Show line numbers. Always true under the hood; accepted for \
+         schema parity.";
+    ]
+
 let public_input_schema = function
   | "Bash" -> Some bash_public_schema
+  | "Edit" -> Some edit_public_schema
+  | "Grep" -> Some grep_public_schema
   | "Read" -> Some read_public_schema
+  | "Write" -> Some write_public_schema
   | _ -> None
 
 (* Translate an LLM call payload from the public schema to the internal
@@ -162,10 +226,70 @@ let translate_read_input input =
       `Assoc (List.rev !out)
   | _ -> input
 
+(* Anthropic Edit { file_path, old_string, new_string, replace_all? }
+   → keeper_fs_edit { path, mode=patch, old_string, new_string,
+                      replace_all }. The handler reads the current
+   file, replaces, and writes back. *)
+let translate_edit_input input =
+  match input with
+  | `Assoc fields ->
+      let out = ref [ ("mode", `String "patch") ] in
+      List.iter
+        (fun (k, v) ->
+          match k with
+          | "file_path" -> out := ("path", v) :: !out
+          | "old_string" | "new_string" | "replace_all" ->
+              out := (k, v) :: !out
+          | "mode" | "content" -> ()  (* ignore caller-supplied overrides *)
+          | _ -> out := (k, v) :: !out)
+        fields;
+      `Assoc (List.rev !out)
+  | _ -> input
+
+(* Anthropic Write { file_path, content } → keeper_fs_edit
+   { path, content, mode=overwrite }. *)
+let translate_write_input input =
+  match input with
+  | `Assoc fields ->
+      let out = ref [ ("mode", `String "overwrite") ] in
+      List.iter
+        (fun (k, v) ->
+          match k with
+          | "file_path" -> out := ("path", v) :: !out
+          | "content" -> out := ("content", v) :: !out
+          | "mode" -> ()  (* always overwrite via Write alias *)
+          | _ -> out := (k, v) :: !out)
+        fields;
+      `Assoc (List.rev !out)
+  | _ -> input
+
+(* Anthropic Grep { pattern, path?, glob?, type?, -i?, -n? } →
+   keeper_shell { op=rg, pattern, path?, glob?, type? }. The boolean
+   conveniences -i/-n are dropped; keeper_shell rg always emits line
+   numbers and case sensitivity is folded into the pattern itself. *)
+let translate_grep_input input =
+  match input with
+  | `Assoc fields ->
+      let out = ref [ ("op", `String "rg") ] in
+      List.iter
+        (fun (k, v) ->
+          match k with
+          | "pattern" | "path" | "glob" | "type" ->
+              out := (k, v) :: !out
+          | "op" -> ()  (* always rg via Grep alias *)
+          | "-i" | "-n" -> ()  (* shim accepted, not routed *)
+          | _ -> out := (k, v) :: !out)
+        fields;
+      `Assoc (List.rev !out)
+  | _ -> input
+
 let translate_input ~public input =
   match public with
   | "Bash" -> translate_bash_input input
+  | "Edit" -> translate_edit_input input
+  | "Grep" -> translate_grep_input input
   | "Read" -> translate_read_input input
+  | "Write" -> translate_write_input input
   | _ -> input
 
 let expand_universe internal_names =

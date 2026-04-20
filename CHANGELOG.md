@@ -5,6 +5,16 @@
 
 ### Added
 
+- **`MASC_BASH_AUTO_BG_OBSERVE` dark-launch observer.**  Companion
+  to `AST_SHADOW_LOG` (#8902) covering the AUTO_BG rollout axis.
+  When the flag is set every foreground-only `keeper_bash` run is
+  timed, and if the elapsed duration would have tripped
+  `MASC_BLOCKING_BUDGET_MS` (default 15 000 ms) the keeper emits
+  `auto_bg_would_have_promoted keeper=… cmd_hash=… duration_ms=N
+  budget_ms=M`.  Inert when `AUTO_BG` itself is already enabled.
+  Evidence for the later `AUTO_BG` default-flip decision without
+  any behavior change.
+
 - **`MASC_BASH_AST_SHADOW_LOG` dark-launch observer.**  With the
   flag set to a truthy value every `keeper_bash` call runs
   `Worker_dev_tools.diff_command` side-by-side with the live regex

@@ -102,6 +102,56 @@ let test_pytest_banner_required () =
             ^ String.concat ","
                 (List.map Cdal_judge.marker_to_string markers))
 
+let test_go_test_pass_counts () =
+  let stdout =
+    "=== RUN   TestA\n\
+     --- PASS: TestA (0.00s)\n\
+     === RUN   TestB\n\
+     --- PASS: TestB (0.01s)\n\
+     === RUN   TestC\n\
+     --- PASS: TestC (0.00s)\n\
+     PASS\n\
+     ok   example.com/pkg    0.023s\n"
+  in
+  match call ~stdout `Ok with
+  | [ Cdal_judge.Test_pass { count = 3; confidence = `Heuristic } ] -> ()
+  | [ Cdal_judge.Test_pass { count; _ } ] ->
+      fail (Printf.sprintf "expected go test count=3, got %d" count)
+  | _ -> fail "expected Test_pass marker from go test output"
+
+let test_go_test_fail_counts () =
+  let stdout =
+    "=== RUN   TestA\n\
+     --- FAIL: TestA (0.00s)\n\
+         test_a.go:10: expected 1, got 2\n\
+     === RUN   TestB\n\
+     --- FAIL: TestB (0.00s)\n\
+     === RUN   TestC\n\
+     --- PASS: TestC (0.00s)\n\
+     FAIL\n\
+     exit status 1\n\
+     FAIL   example.com/pkg   0.012s\n"
+  in
+  match call ~stdout (`Fail 1) with
+  | [ Cdal_judge.Test_fail { count = 2; confidence = `Heuristic } ] -> ()
+  | [ Cdal_judge.Test_fail { count; _ } ] ->
+      fail (Printf.sprintf "expected go test failed=2, got %d" count)
+  | _ -> fail "expected Test_fail marker from go test output"
+
+let test_go_test_banner_required () =
+  (* Bare "PASS" / "FAIL" words in prose must NOT classify as go test —
+     the "--- PASS:" / "--- FAIL:" / "=== RUN" preface is required. *)
+  let stdout =
+    "doc: the test passed successfully\n\
+     user-visible result: PASS\n"
+  in
+  match call ~stdout `Ok with
+  | [] -> ()
+  | markers ->
+      fail ("expected [] without go test preface, got "
+            ^ String.concat ","
+                (List.map Cdal_judge.marker_to_string markers))
+
 let test_git_status_clean_exact () =
   let stdout = "On branch main\nnothing to commit, working tree clean\n" in
   match call ~stdout `Ok with
@@ -155,6 +205,9 @@ let () =
       test_case "pytest pass count" `Quick test_pytest_pass_counts;
       test_case "pytest fail count" `Quick test_pytest_fail_counts;
       test_case "pytest banner required" `Quick test_pytest_banner_required;
+      test_case "go test pass count" `Quick test_go_test_pass_counts;
+      test_case "go test fail count" `Quick test_go_test_fail_counts;
+      test_case "go test banner required" `Quick test_go_test_banner_required;
       test_case "git status clean" `Quick test_git_status_clean_exact;
       test_case "git status dirty" `Quick test_git_status_dirty_exact;
     ]);

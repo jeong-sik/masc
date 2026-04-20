@@ -5,6 +5,18 @@
 
 ### Added
 
+- **`Cdal_judge` go test classifier.**  `of_exec_outcome` now emits
+  typed `Test_pass {count}` / `Test_fail {count}` markers for `go
+  test` output in addition to dune, cargo, alcotest, and pytest.
+  Detection anchors on the runner-specific `--- PASS:` / `--- FAIL:`
+  / `=== RUN` prefaces so that bare `PASS` / `FAIL` tokens elsewhere
+  in stdout (e.g. docstrings or user-visible prose) cannot
+  false-positive. Count is obtained by counting `--- PASS:` /
+  `--- FAIL:` occurrences — one per completed subtest. Banner-
+  required behavior is covered by a dedicated negative test
+  (`test_go_test_banner_required`). Verifier cascade now covers
+  dune + cargo + pytest + go test.
+
 - **Legendary Bash shadow-counters HTTP endpoint.**  New
   `GET /api/v1/legendary_bash/shadow_counters` returns the
   `Legendary_counters.snapshot` as JSON.  Public-read (same auth

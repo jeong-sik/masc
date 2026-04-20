@@ -9,23 +9,14 @@ open Keeper_keepalive
 open Keeper_execution
 open Keeper_turn_up_args
 
-(* #8605 family: profile_defaults.tool_preset is a config-supplied string.
-   Option.bind silently absorbs unparseable values (e.g. config drift adds a
-   preset name the OCaml side does not yet know).  Warn before returning None
-   so the caller's `Option.value ~default:Research` fallback becomes visible
-   in operator logs instead of silently downgrading the preset. *)
+(* #8605 family: warn-and-default parser for profile_defaults.tool_preset
+   lifted to [Keeper_preset_defaults] so this file and
+   [keeper_exec_persona] share one SSOT instead of two diverging copies
+   (#8923). *)
 let preset_of_defaults defaults =
-  match defaults.tool_preset with
-  | None -> None
-  | Some raw ->
-      (match tool_preset_of_string raw with
-       | Some _ as v -> v
-       | None ->
-           Log.Keeper.warn
-             "preset_of_defaults: unknown tool_preset %S in profile defaults \
-              -> falling back to caller default (drift; see #8605)"
-             raw;
-           None)
+  Keeper_preset_defaults.preset_of_defaults_warn
+    ~call_site:"keeper_turn_up_create"
+    ~defaults_tool_preset:defaults.tool_preset
 
 let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   Log.Keeper.info "create_keeper: starting for name=%s" p.name;

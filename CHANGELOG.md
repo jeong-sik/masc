@@ -21,6 +21,31 @@
   unterminated-quote negative.  No grammar change; no behaviour
   change on commands without single quotes.
 
+- **Bash parser double-quote string support (P5 parse-gap step).**
+  `lib/exec/parser/bash_lexer.mll` now recognises `"..."` double-
+  quoted literals alongside unquoted `WORD` tokens.  The double-
+  quote body is matched by `dq_body = [^ '"' '\n' '\\' '$' '`']*`
+  and emitted as a single `WORD` with the surrounding quotes
+  stripped, so shapes like `rg "error pattern"` /
+  `git commit -m "some message"` / `echo "hello world"` round-trip
+  as one `Shell_ir.Lit` element — spaces preserved, pipe metachar
+  inside the body left literal.  Bash features that `"..."` would
+  otherwise interpret (backslash escapes `\"`/`\\`, variable
+  expansion `$FOO`, command substitution `` ` ``/`$(…)`, embedded
+  newlines) are subset-excluded at the A1 layer: their presence in
+  the body breaks the lex and surfaces as `Parse_error`, which is
+  fail-closed for the subset gate.  The grammar is unchanged
+  (`WORD` production already accepts the token in any argument
+  position).  Follow-up PRs will add an unescape sub-rule for `\"`
+  / `\\` / `\n` / `\$` to widen coverage.  Eight new parser tests
+  cover the happy paths (basic literal, empty string, pipe
+  metachar as literal, `rg "error pattern" src/`) and the four
+  fail-closed negatives (`$FOO`, `\"` escapes, backtick subst,
+  unterminated `"`).  19/19 parser tests green locally.  Narrows
+  the `Shadow_cannot_parse` bucket emitted by the AST gate shadow
+  observer, bringing the `MASC_BASH_AST_ONLY` flip criterion one
+  step closer.
+
 - **`Cdal_judge` go test classifier.**  `of_exec_outcome` now emits
   typed `Test_pass {count}` / `Test_fail {count}` markers for `go
   test` output in addition to dune, cargo, alcotest, and pytest.

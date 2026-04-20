@@ -15,6 +15,7 @@
 open! Core
 open! Bonsai_web
 open Virtual_dom.Vdom
+open Js_of_ocaml
 
 module Style =
 [%css
@@ -179,7 +180,7 @@ stylesheet
     opacity: 0.82;
   }
 
-  .heartbeat_bar_warn  { background: linear-gradient(180deg, #a06a1a 0%, #6a3c10 100%); }
+  .heartbeat_bar_warn  { background: linear-gradient(180deg, var(--status-warn) 0%, #6a3c10 100%); }
   .heartbeat_bar_error { background: linear-gradient(180deg, #e84848 0%, #8a1010 100%); box-shadow: 0 0 6px rgba(160, 24, 24, 0.45); }
   .heartbeat_bar_idle  { background: var(--border-main); opacity: 0.6; }
 
@@ -248,8 +249,8 @@ stylesheet
     color: var(--text-primary);
   }
 
-  .hud_v_ok   { color: #5a7a3a; }
-  .hud_v_warn { color: #a06a1a; }
+  .hud_v_ok   { color: var(--status-ok); }
+  .hud_v_warn { color: var(--status-warn); }
 
   /* Moonrise strip — narrative interlude between the HUD readout and
      the filter toolbar. Reads as a quiet status bar that names the
@@ -555,7 +556,7 @@ stylesheet
     align-self: center;
   }
 
-  .sigil_warn  { color: #a06a1a; border-color: #a06a1a; box-shadow: inset 0 0 0 1px rgba(232,216,184,0.06), 0 0 8px rgba(160, 106, 26, 0.35); }
+  .sigil_warn  { color: var(--status-warn); border-color: var(--status-warn); box-shadow: inset 0 0 0 1px rgba(232,216,184,0.06), 0 0 8px rgba(160, 106, 26, 0.35); }
   .sigil_error { color: var(--text-bright); border-color: var(--accent-blood); background: radial-gradient(circle at 35% 30%, rgba(232,216,184,0.28), transparent 55%), #3a1410; box-shadow: inset 0 0 0 1px rgba(232,216,184,0.08), 0 0 10px rgba(160, 24, 24, 0.45); }
 
   .message_lead::first-letter {
@@ -595,7 +596,7 @@ stylesheet
 
   .row_warn {
     background: linear-gradient(90deg, rgba(160, 106, 26, 0.06) 0%, transparent 60%);
-    border-left-color: #a06a1a;
+    border-left-color: var(--status-warn);
   }
 
   .row_warn:hover {
@@ -632,7 +633,7 @@ stylesheet
 
   .level_debug { color: var(--text-dim); }
   .level_info  { color: var(--text-primary); }
-  .level_warn  { color: #a06a1a; }
+  .level_warn  { color: var(--status-warn); }
   .level_error { color: var(--accent-blood); text-shadow: 0 0 12px rgba(160, 24, 24, 0.32); }
 
   .mod_col {
@@ -666,8 +667,8 @@ stylesheet
     display: inline-block;
   }
 
-  .dot_ok    { background: #5a7a3a; box-shadow: 0 0 6px #5a7a3a; }
-  .dot_warn  { background: #a06a1a; box-shadow: 0 0 6px #a06a1a; }
+  .dot_ok    { background: var(--status-ok); box-shadow: 0 0 6px var(--status-ok); }
+  .dot_warn  { background: var(--status-warn); box-shadow: 0 0 6px var(--status-warn); }
   .dot_bad   { background: var(--accent-blood); box-shadow: 0 0 6px var(--accent-blood); }
 
   .message {
@@ -791,7 +792,7 @@ stylesheet
     background: var(--text-dim);
   }
 
-  .roster_dot_live     { background: #5a7a3a; box-shadow: 0 0 6px #5a7a3a; animation: pulse-beat 1.8s ease-in-out infinite; }
+  .roster_dot_live     { background: var(--status-ok); box-shadow: 0 0 6px var(--status-ok); animation: pulse-beat 1.8s ease-in-out infinite; }
   .roster_dot_thinking { background: var(--accent-brass); box-shadow: 0 0 6px var(--accent-brass); animation: pulse-beat 1.2s ease-in-out infinite; }
   .roster_dot_idle     { background: #4a3a32; }
   .roster_dot_failed   { background: var(--accent-blood); box-shadow: 0 0 8px var(--accent-blood); }
@@ -976,6 +977,36 @@ stylesheet
   }
   .nav_foot_v { color: var(--text-dim); }
 
+  /* ─── theme chips ───
+     클릭 시 location.hash 를 바꾸면 bin/main.ml 의 hashchange listener가
+     <html data-theme="..."> 를 즉시 교체. URL이 SSOT이라 북마크/공유
+     가능. active chip은 document.documentElement.dataset.theme 기준
+     runtime JS가 칠하지 못해 정적으로는 강조 없음 — 추후 Var 연결 시
+     active 스타일 추가. */
+  .theme_chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 10px 18px 6px;
+  }
+  .theme_chip {
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 8px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    padding: 3px 6px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-main);
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+    border-radius: 1px;
+  }
+  .theme_chip:hover {
+    border-color: var(--accent-brass-dim);
+    color: var(--accent-brass);
+  }
+
   /* ─── right aside (340px, fixed) ───
      dashboard_v2 aside: focus card + chronicle evs stream.
      현재는 static skeleton. 추후 Var 연결. */
@@ -1151,7 +1182,7 @@ stylesheet
     justify-self: center;
     background: var(--accent-brass-dim);
   }
-  .evrow_ok  .evrow_mk { background: #5a7a3a; box-shadow: 0 0 6px #5a7a3a; }
+  .evrow_ok  .evrow_mk { background: var(--status-ok); box-shadow: 0 0 6px var(--status-ok); }
   .evrow_warn .evrow_mk { background: var(--accent-brass); box-shadow: 0 0 6px var(--accent-brass); }
   .evrow_bad  .evrow_mk { background: var(--accent-blood); box-shadow: 0 0 6px var(--accent-blood); }
   .evrow_b {
@@ -1618,6 +1649,27 @@ let render_response (response : Logs_types.response) : Node.t =
       ; nav_section "crypt"
       ; nav_link "dead keepers" ~tail:"00"
       ; nav_link "archive runs"
+      ; (let chip name label =
+           Node.div
+             ~attrs:
+               [ Style.theme_chip
+               ; Attr.on_click (fun _ ->
+                   Effect.of_sync_fun
+                     (fun () ->
+                       Dom_html.window##.location##.hash
+                       := Js.string ("#" ^ name))
+                     ())
+               ]
+             [ Node.text label ]
+         in
+         Node.div
+           ~attrs:[ Style.theme_chips ]
+           [ chip "dark" "dark"
+           ; chip "cyber" "cyber"
+           ; chip "term" "term"
+           ; chip "parchment" "parch"
+           ; chip "paper" "paper"
+           ])
       ; Node.div
           ~attrs:[ Style.nav_foot ]
           [ Node.text "phase 0 · /b/ · "

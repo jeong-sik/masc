@@ -17,14 +17,21 @@
 \* of the non-dispatchable states.
 \*
 \* ── Abstraction note ──
-\* The real keeper_state_machine.ml has 11 phases:
-\*   Offline, Running, Failing, Compacting, HandingOff, Draining,
-\*   Paused, Stopped, Crashed, Restarting, Dead.
+\* The real keeper_state_machine.ml has 12 phases (lib/keeper/
+\* keeper_state_machine.ml:50, all_phases):
+\*   Offline, Running, Failing, Overflowed, Compacting, HandingOff,
+\*   Draining, Paused, Stopped, Crashed, Restarting, Dead.
 \* This model collapses them to 6 representative phases for the
 \* keepalive-dispatch invariant. The collapse:
 \*   - Failing/Crashed/Restarting -> not modeled (treated as Offline or
 \*     Running by the dispatcher; their invariants belong to
 \*     KeeperStateMachine.tla, not this spec).
+\*   - Overflowed -> collapsed into "compacting" for this contract.
+\*     Overflowed is the auto-compact entry signal in the real FSM
+\*     (keeper_state_machine.ml:212): Running -> Overflowed ->
+\*     Compacting on context overflow. Both phases are equally
+\*     non-dispatchable from keepalive's perspective; modeling them
+\*     separately would not add bug coverage.
 \*   - Draining -> not modeled (a variant of Stopped for the keepalive
 \*     contract; no dispatch allowed in either).
 \*   - Paused -> not modeled here. Paused is a caller-controlled soft

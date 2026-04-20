@@ -2,15 +2,26 @@
 \* Bug Model: Cascade liveness under concurrent keepers with slot contention.
 \*
 \* Models the interaction between:
-\*   - cascade_executor.ml: try_next with slot-aware fallthrough
-\*   - provider_throttle.ml: per-provider semaphore (non-blocking on non-last)
-\*   - admission_queue.ml: global MASC concurrency gate
-\*   - keeper_unified_turn.ml: MASC turn timeout (kills entire OAS cascade)
+\*   - lib/cascade/cascade_runtime.ml + cascade_strategy.ml + cascade_fsm.ml
+\*       (formerly a single `cascade_executor.ml`): try_next with
+\*       slot-aware fallthrough. The executor role was split into
+\*       runtime (orchestration), strategy (provider order), and fsm
+\*       (per-attempt state machine) under the lib/cascade/ subdir.
+\*   - lib/cascade/cascade_throttle.ml (formerly `provider_throttle.ml`):
+\*       per-provider semaphore (non-blocking on non-last)
+\*   - lib/admission_queue.ml: global MASC concurrency gate
+\*   - lib/keeper/keeper_unified_turn.ml: MASC turn timeout
+\*       (kills entire OAS cascade)
 \*
 \* Real-world evidence: 2026-04-08 logs show 7355 GLM calls, 54 Ollama calls,
 \* 1538 timeouts.  Ollama failover broken by parse error (Content-Length bug).
 \* This spec models the slot/timeout mechanics that determine whether Ollama
 \* is reachable at all, independent of the parse bug.
+\*
+\* (Path drift recorded 2026-04-20. The `cascade_executor` symbol no
+\* longer exists as a single module; `try_next` was distributed across
+\* the cascade_runtime + cascade_strategy + cascade_fsm trio when the
+\* lib/cascade/ subdir was extracted.)
 
 EXTENDS Naturals, FiniteSets
 

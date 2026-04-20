@@ -519,7 +519,8 @@ let order_weighted_entries
     let health_adjusted = List.map
         (fun (e : Cascade_config_loader.weighted_entry) ->
            (* Extract model_id from "provider:model_id" to match the key
-              used by cascade_executor (cfg.model_id). *)
+              used by the cascade runtime (cfg.model_id; see
+              cascade_runtime.ml + cascade_strategy.ml). *)
            let provider_key = match String.split_on_char ':' e.model with
              | _ :: rest when rest <> [] -> String.concat ":" rest
              | _ -> e.model

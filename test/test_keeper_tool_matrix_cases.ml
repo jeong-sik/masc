@@ -262,6 +262,17 @@ let keeper_arguments fixture (schema : Types.tool_schema) =
   | "keeper_shell" -> `Assoc [ ("op", `String "git_status") ]
   | "keeper_bash" ->
       `Assoc [ ("cmd", `String "pwd"); ("timeout_sec", `Float 5.0) ]
+  | "keeper_bash_output" ->
+      (* No live background task in test fixtures — handler returns
+         structured "no background task with id=..." error which the
+         expectation table accepts as a valid Bg_task surface. *)
+      `Assoc [ ("task_id", `String "bgt-matrix-fixture-0-0") ]
+  | "keeper_bash_kill" ->
+      `Assoc
+        [
+          ("task_id", `String "bgt-matrix-fixture-0-0");
+          ("grace_sec", `Float 0.5);
+        ]
   | "keeper_voice_speak" ->
       `Assoc [ ("message", `String "tool matrix hello") ]
   | "keeper_voice_listen" ->
@@ -354,6 +365,13 @@ let keeper_expectation_for_name name =
          the sample file is written at base_path. File-not-found in
          tests without a playground file is an acceptable outcome. *)
       Expect_success_or_guard [ "file not found" ]
+  | "keeper_bash_output" | "keeper_bash_kill" ->
+      (* Matrix fixtures never spawn a real background task, so the
+         only outcome is the handler's structured "no background task"
+         response. Bg_task.read returns Unknown_task; the keeper-side
+         handler maps it to error_json with this exact phrase. *)
+      Expect_success_or_guard
+        [ "no background task with id="; "already reaped" ]
   | _ -> Expect_success
 
 let extra_guard_fragments_for_name = function

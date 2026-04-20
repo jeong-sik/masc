@@ -4,33 +4,40 @@
 \* Bug class: "Code clears a blocking condition at the data layer but
 \* forgets to dispatch the corresponding FSM event."
 \*
-\* Historical instance (Bug #1, #6801): maybe_recover_from_failing() in
-\* keeper_keepalive.ml called Keeper_manual_reconcile.clear (data) but did
-\* NOT dispatch Manual_reconcile_cleared to the FSM. Result: derive_phase()
-\* stayed in Failing because conditions.manual_reconcile_required was never
-\* set to FALSE, even though the blocking file was deleted.
+\* Headline live instance: keeper_exec_context.ml clears the data-layer
+\* compaction_active flag and MUST dispatch Compaction_completed to the
+\* FSM in the same step (line 174). If the dispatch is omitted,
+\* derive_phase keeps the keeper in Compacting forever even though the
+\* flag is cleared. Same shape applies to handoff_active +
+\* Handoff_completed (line 190), turn-failure counter + Turn_succeeded
+\* (keeper_keepalive.ml:947 inside maybe_recover_from_failing at :935),
+\* and the guardrail measurement carried by Context_measured (line 807).
 \*
-\* NOTE (2026-04-20, #9032): The Keeper_manual_reconcile mechanism has been
-\* removed from the runtime (only a gravestone comment remains at
-\* keeper_status_detail.ml:118). This spec retains the bug class and the
-\* 4 other mapped blockers (turn, compact, handoff, guardrail) below, which
-\* continue to model live mechanisms. maybe_recover_from_failing() now lives
-\* at keeper_keepalive.ml:935 and dispatches Turn_succeeded at :947.
+\* Historical instance (Bug #1, #6801): maybe_recover_from_failing()
+\* used to call Keeper_manual_reconcile.clear (data) without dispatching
+\* Manual_reconcile_cleared. The Keeper_manual_reconcile mechanism has
+\* been removed from the runtime (gravestone comment at
+\* keeper_status_detail.ml:118), so this spec drops "reconcile" from
+\* the modeled Blockers set and retains only the 4 live blockers
+\* (turn / compact / handoff / guardrail). See #9032.
 \*
-\* This spec models 5 blocking conditions from the keeper FSM
+\* This spec models 4 blocking conditions from the keeper FSM
 \* (keeper_state_machine.ml). Each has a "data layer" boolean and an
 \* "FSM condition" boolean. A clearing action MUST set both to FALSE
 \* atomically (within 1 step). The buggy variant omits the FSM dispatch.
 \*
-\* ── Mapped clearing actions (from OCaml code) ──
+\* ── Mapped clearing actions (from OCaml code, verified 2026-04-20) ──
 \*
-\*  # | Data clear             | FSM event                  | OCaml location (verified 2026-04-20)
+\*  # | Data clear             | FSM event                  | OCaml location
 \*  --+------------------------+----------------------------+--------------------------------
-\*  1 | manual_reconcile file  | Manual_reconcile_cleared   | [REMOVED 2026-04-20, see #9032]
-\*  2 | turn_failures counter  | Turn_succeeded             | keeper_keepalive.ml:947 (inside maybe_recover_from_failing at :935)
-\*  3 | compaction_active flag | Compaction_completed       | keeper_exec_context.ml:174
-\*  4 | handoff_active flag    | Handoff_completed          | keeper_exec_context.ml:190
-\*  5 | guardrail measurement  | Context_measured(stop=F)   | keeper_keepalive.ml:807 (RFC-0002 dispatch)
+\*  1 | turn_failures counter  | Turn_succeeded             | keeper_keepalive.ml:947 (inside maybe_recover_from_failing at :935)
+\*  2 | compaction_active flag | Compaction_completed       | keeper_exec_context.ml:174
+\*  3 | handoff_active flag    | Handoff_completed          | keeper_exec_context.ml:190
+\*  4 | guardrail measurement  | Context_measured(stop=F)   | keeper_keepalive.ml:807 (RFC-0002 dispatch)
+\*
+\*  RETIRED:
+\*    manual_reconcile file -> Manual_reconcile_cleared
+\*    [REMOVED, see #8987 / #9032 / KeeperReconcileLiveness.tla banner]
 \*
 \* ── Abstraction ──
 \* Each blocking condition is modeled as a pair: (data_blocked, fsm_blocked).
@@ -124,9 +131,11 @@ NeverStuckFailing ==
 
 \* ── Bug Model: one blocker omits FSM dispatch ──
 \* The buggy clear sets data_blocked=FALSE but does NOT touch fsm_blocked.
-\* Historical instance: keeper_keepalive.ml where Keeper_manual_reconcile.clear
-\* was called without Manual_reconcile_cleared. The mechanism has since been
-\* removed (see #9032), but the bug class generalizes to the 4 live blockers
+\* Live instance the spec now guards: a refactor in
+\* keeper_exec_context.ml that clears the compaction_active or
+\* handoff_active flag without dispatching the matching
+\* Compaction_completed / Handoff_completed event. Same shape as the
+\* historical reconcile bug (#6801) but applied to the 4 live blockers
 \* still mapped above.
 
 BuggyClear(b) ==

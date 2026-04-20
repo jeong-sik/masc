@@ -201,3 +201,76 @@ let requests_json ?task_id ?limit () : Yojson.Safe.t =
     ("total", `Int (List.length filtered));
     ("requests", `List (List.map request_to_json trimmed));
   ]
+
+(* ── Summary projection ─────────────────────────────── *)
+
+let max_recent = 20
+let default_recent = 3
+
+let clamp_recent r =
+  let r = Option.value r ~default:default_recent in
+  if r < 0 then 0 else if r > max_recent then max_recent else r
+
+(** Minimal row for the ["recent_rejections"] array — strictly the fields
+    a summary consumer needs (who, why, when, which task). Keeps the
+    payload small and independent of the full [requests_json] schema so
+    future additions to the row shape do not leak into summary. *)
+let rejection_row_json (req : V.verification_request) : Yojson.Safe.t =
+  let _status, _verdict_opt, verdict_reason, approved_by =
+    derive_status_fields req
+  in
+  let task_title = task_title_of_output req.output in
+  `Assoc [
+    ("request_id", `String req.id);
+    ("task_id", `String req.task_id);
+    ("task_title", `String task_title);
+    ("keeper",
+     match approved_by with
+     | Some v -> `String v
+     | None -> `Null);
+    ("verdict_reason", `String verdict_reason);
+    ("created_at", `String (iso_of_unix req.created_at));
+  ]
+
+let is_rejected (req : V.verification_request) : bool =
+  match req.status with
+  | V.Completed (V.Fail _) | V.Completed (V.Partial _) -> true
+  | _ -> false
+
+let bucket_of_status (req : V.verification_request) : string =
+  let status, _, _, _ = derive_status_fields req in
+  status
+
+let summary_json ?recent () : Yojson.Safe.t =
+  let recent = clamp_recent recent in
+  let all = load_requests () in
+  let total = List.length all in
+  let pending = ref 0 in
+  let approved = ref 0 in
+  let rejected = ref 0 in
+  List.iter (fun req ->
+    match bucket_of_status req with
+    | "pending" -> incr pending
+    | "approved" -> incr approved
+    | "rejected" -> incr rejected
+    | _ -> ()
+  ) all;
+  let recent_rejections =
+    all
+    |> List.filter is_rejected
+    |> sort_desc
+    |> take recent
+    |> List.map rejection_row_json
+  in
+  `Assoc [
+    ("updated_at", `String (now_iso ()));
+    ("total", `Int total);
+    ("by_status", `Assoc [
+      ("pending", `Int !pending);
+      ("approved", `Int !approved);
+      ("rejected", `Int !rejected);
+      (* timed_out reserved for future state-machine variant; always 0 today *)
+      ("timed_out", `Int 0);
+    ]);
+    ("recent_rejections", `List recent_rejections);
+  ]

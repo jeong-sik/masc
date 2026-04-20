@@ -101,9 +101,21 @@ let context_from_env ?(include_configured = false) ~allow_legacy_accept () =
 let maybe_configured_fields ~include_configured enabled =
   if include_configured then [ ("configured", `Bool enabled) ] else []
 
+let tcp_port_reachable port =
+  try
+    let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    Fun.protect
+      ~finally:(fun () -> try Unix.close sock with _ -> ())
+      (fun () ->
+        Unix.connect sock
+          (Unix.ADDR_INET (Unix.inet_addr_of_string "127.0.0.1", port));
+        true)
+  with _ -> false
+
 let websocket_discovery_json (ctx : http_context) =
   let enabled = Server_ws_standalone.is_enabled () in
   let port = Server_ws_standalone.configured_port () in
+  let reachable = Transport_metrics.ws_listening () || tcp_port_reachable port in
   let base_fields =
     [
       ("enabled", `Bool enabled);
@@ -111,6 +123,7 @@ let websocket_discovery_json (ctx : http_context) =
     @ maybe_configured_fields ~include_configured:ctx.include_configured enabled
     @ [
         ("listening", `Bool (Transport_metrics.ws_listening ()));
+        ("reachable", `Bool reachable);
         ("listen_status", `String (Atomic.get Transport_metrics.ws_listen_status));
         ("mode", `String "standalone");
         ("discovery_path", `String "/ws");
@@ -146,6 +159,12 @@ let enabled_protocols_json () =
 let transport_status_json (ctx : http_context) =
   let grpc_enabled = Masc_grpc_server.is_enabled () in
   let grpc_port = Masc_grpc_server.configured_port () in
+  let grpc_reachable =
+    Transport_metrics.grpc_listening () || tcp_port_reachable grpc_port
+  in
+  let streamable_auth_policy_present =
+    Env_config.Transport.http_auth_strict_env_enabled ()
+  in
   let webrtc_enabled = Server_webrtc_transport.is_enabled () in
   `Assoc
     [
@@ -154,12 +173,16 @@ let transport_status_json (ctx : http_context) =
       ("legacy_endpoints_deprecated", `Bool true);
       ( "http",
         `Assoc
-          [
+          (maybe_configured_fields ~include_configured:ctx.include_configured
+             true
+          @ [
             ("enabled", `Bool true);
+            ("protocol_capable", `Bool true);
+            ("auth_policy_present", `Bool streamable_auth_policy_present);
             ("base_url", `String ctx.base_url);
             ("mcp_url", `String (ctx.base_url ^ "/mcp"));
             ("sse_url", `String (ctx.base_url ^ "/sse"));
-          ] );
+          ]) );
       ( "grpc",
         `Assoc
           ([
@@ -169,6 +192,7 @@ let transport_status_json (ctx : http_context) =
               grpc_enabled
           @ [
               ("listening", `Bool (Transport_metrics.grpc_listening ()));
+              ("reachable", `Bool grpc_reachable);
               ("listen_status", `String (Atomic.get Transport_metrics.grpc_listen_status));
               ("port", `Int grpc_port);
               ("service", `String Masc_grpc_service.service_name);

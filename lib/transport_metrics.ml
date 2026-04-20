@@ -202,6 +202,17 @@ let ws_port () = Env_config.Transport.ws_port
 let ws_listening () =
   ws_enabled () && Atomic.get ws_runtime_listening
 
+let tcp_port_reachable port =
+  try
+    let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    Fun.protect
+      ~finally:(fun () -> try Unix.close sock with _ -> ())
+      (fun () ->
+        Unix.connect sock
+          (Unix.ADDR_INET (Unix.inet_addr_of_string "127.0.0.1", port));
+        true)
+  with _ -> false
+
 let hot_session_json (session : hot_queue_session) =
   `Assoc
     [
@@ -281,8 +292,13 @@ let transport_health_json ~config =
   let ws_sessions = int_of_float (v "masc_ws_sessions_total" ()) in
   let grpc_configured = grpc_enabled () in
   let grpc_live = grpc_listening () in
+  let grpc_reachable = grpc_live || tcp_port_reachable (grpc_port ()) in
   let ws_configured = ws_enabled () in
   let ws_live = ws_listening () in
+  let ws_reachable = ws_live || tcp_port_reachable (ws_port ()) in
+  let streamable_auth_policy_present =
+    Env_config.Transport.http_auth_strict_env_enabled ()
+  in
   let webrtc_configured = Server_webrtc_transport.is_enabled () in
   let webrtc_pending = Server_webrtc_transport.pending_offer_count () in
   let webrtc_peers = Server_webrtc_transport.active_peer_count () in
@@ -343,6 +359,7 @@ let transport_health_json ~config =
       ("enabled", `Bool grpc_configured);
       ("configured", `Bool grpc_configured);
       ("listening", `Bool grpc_live);
+      ("reachable", `Bool grpc_reachable);
       ("listen_status", `String (Atomic.get grpc_listen_status));
       ("port", `Int (grpc_port ()));
       ("active_streams", `Int (int_of_float grpc_streams));
@@ -354,6 +371,7 @@ let transport_health_json ~config =
       ("enabled", `Bool ws_configured);
       ("configured", `Bool ws_configured);
       ("listening", `Bool ws_live);
+      ("reachable", `Bool ws_reachable);
       ("listen_status", `String (Atomic.get ws_listen_status));
       ("mode", `String "standalone");
       ("port", `Int (ws_port ()));
@@ -381,6 +399,9 @@ let transport_health_json ~config =
       ("legacy_sse_endpoint", `String "/sse");
       ("legacy_messages_endpoint", `String "/messages");
       ("default_transport", `String "streamable_http");
+      ("configured", `Bool true);
+      ("protocol_capable", `Bool true);
+      ("auth_policy_present", `Bool streamable_auth_policy_present);
       ("supports_post", `Bool true);
       ("supports_sse_upgrade", `Bool true);
       ("supports_delete", `Bool true);

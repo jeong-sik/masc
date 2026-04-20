@@ -283,7 +283,10 @@ let () = test "dispatch_status_surfaces_owned_current_drift" (fun () ->
       assert success;
       assert (str_contains result "owned=task-001");
       assert (str_contains result "current=task-002");
-      assert (str_contains result "💡 Suggested next: masc_plan_init -> masc_status");
+      assert (
+        str_contains result
+          "Do not retry generic masc_plan_init from a drifted surface");
+      assert (not (str_contains result "💡 Suggested next: masc_plan_init -> masc_status"));
       assert (str_contains result "planning current_task is unset or drifted")
   | None -> failwith "dispatch returned None"
 )
@@ -341,7 +344,11 @@ let () = test "dispatch_status_surfaces_missing_planning_for_owned_task" (fun ()
       assert (str_contains result "owned=task-001 | current=task-001");
       assert (str_contains result "📝 Planning: missing=yes | task=task-001");
       assert (str_contains result "Owned task task-001 has no planning context.");
-      assert (str_contains result "💡 Suggested next: masc_plan_init -> masc_status");
+      assert (
+        str_contains result
+          "Do not retry generic masc_plan_init from a drifted surface");
+      assert (str_contains result "handoff/worktree/test logs as the temporary SSOT");
+      assert (not (str_contains result "💡 Suggested next: masc_plan_init -> masc_status"));
       assert (not (str_contains result "💡 Suggested next: masc_heartbeat"));
       assert (not (str_contains result "💡 Suggested next: masc_status -> masc_transition"))
   | None -> failwith "dispatch returned None"

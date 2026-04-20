@@ -1,0 +1,8 @@
+(include_subdirs no)
+(library
+ (name masc_dashboard_api_types)
+ (public_name masc_mcp.masc_dashboard_api_types)
+ (wrapped false)
+ (modules keepers)
+ (libraries yojson)
+ (preprocess (pps ppx_deriving_yojson)))

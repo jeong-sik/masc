@@ -363,13 +363,26 @@ let status_summary_string (ctx : context) =
   in
   let suggested_next =
     guidance.next_steps
-    |> take_items 2
     |> List.map (fun (step : Workflow_guide.step) -> step.tool)
     |> fun tools ->
     if credential_blocked then
       List.filter (fun tool -> not (is_lifecycle_tool tool)) tools
     else
-      tools
+      match binding.drift_reason with
+      | Some "no_owned" ->
+          let tools =
+            List.filter (fun tool -> not (String.equal tool "masc_transition"))
+              tools
+          in
+          let tools =
+            if todo_count > 0 then
+              "masc_claim_next" :: tools
+            else
+              tools
+          in
+          unique_strings tools
+      | Some _ | None -> tools
+    |> take_items 2
   in
   let attention_items =
     []

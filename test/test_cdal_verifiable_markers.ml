@@ -152,6 +152,78 @@ let test_go_test_banner_required () =
             ^ String.concat ","
                 (List.map Cdal_judge.marker_to_string markers))
 
+let test_jest_pass_counts () =
+  let stdout =
+    "PASS src/component.test.ts\n\
+     PASS src/other.test.ts\n\n\
+     Test Suites: 2 passed, 2 total\n\
+     Tests:       7 passed, 7 total\n\
+     Snapshots:   0 total\n\
+     Time:        1.234 s\n"
+  in
+  match call ~stdout `Ok with
+  | [ Cdal_judge.Test_pass { count = 7; confidence = `Heuristic } ] -> ()
+  | [ Cdal_judge.Test_pass { count; _ } ] ->
+      fail (Printf.sprintf "expected jest count=7, got %d" count)
+  | _ -> fail "expected Test_pass marker from jest output"
+
+let test_jest_fail_counts () =
+  let stdout =
+    "FAIL src/component.test.ts\n\n\
+     Test Suites: 1 failed, 1 passed, 2 total\n\
+     Tests:       2 failed, 5 passed, 7 total\n\
+     Snapshots:   0 total\n"
+  in
+  match call ~stdout (`Fail 1) with
+  | [ Cdal_judge.Test_fail { count = 2; confidence = `Heuristic } ] -> ()
+  | [ Cdal_judge.Test_fail { count; _ } ] ->
+      fail (Printf.sprintf "expected jest failed=2, got %d" count)
+  | _ -> fail "expected Test_fail marker from jest output"
+
+let test_vitest_pass_counts () =
+  let stdout =
+    " \xe2\x9c\x93 src/foo.test.ts (3)\n\
+     \xe2\x9c\x93 src/bar.test.ts (2)\n\n\
+     Test Files  2 passed (2)\n\
+     \x20\x20    Tests  5 passed (5)\n\
+     \x20   Start at  10:00:00\n\
+     \x20Duration  0.50s\n"
+  in
+  match call ~stdout `Ok with
+  | [ Cdal_judge.Test_pass { count = 5; confidence = `Heuristic } ] -> ()
+  | [ Cdal_judge.Test_pass { count; _ } ] ->
+      fail (Printf.sprintf "expected vitest count=5, got %d" count)
+  | _ -> fail "expected Test_pass marker from vitest output"
+
+let test_vitest_fail_counts () =
+  let stdout =
+    " \xe2\x9d\xaf src/foo.test.ts (3)\n\
+     \x20\x20 \xc3\x97 test 1\n\n\
+     Test Files  1 failed | 1 passed (2)\n\
+     \x20    Tests  2 failed | 3 passed (5)\n\
+     \x20 Duration  0.50s\n"
+  in
+  match call ~stdout (`Fail 1) with
+  | [ Cdal_judge.Test_fail { count = 2; confidence = `Heuristic } ] -> ()
+  | [ Cdal_judge.Test_fail { count; _ } ] ->
+      fail (Printf.sprintf "expected vitest failed=2, got %d" count)
+  | _ -> fail "expected Test_fail marker from vitest output"
+
+let test_jest_vitest_banner_required () =
+  (* Bare prose containing "Tests" / "passed" without the "Test Suites:"
+     (jest) or "Test Files " (vitest) banner must NOT classify — the
+     banner is the runner-specific fingerprint. *)
+  let stdout =
+    "doc: the Tests passed successfully on all 12 runs\n\
+     user-visible result: Tests complete\n"
+  in
+  match call ~stdout `Ok with
+  | [] -> ()
+  | markers ->
+      fail ("expected [] without jest/vitest banner, got "
+            ^ String.concat ","
+                (List.map Cdal_judge.marker_to_string markers))
+
 let test_git_status_clean_exact () =
   let stdout = "On branch main\nnothing to commit, working tree clean\n" in
   match call ~stdout `Ok with
@@ -208,6 +280,12 @@ let () =
       test_case "go test pass count" `Quick test_go_test_pass_counts;
       test_case "go test fail count" `Quick test_go_test_fail_counts;
       test_case "go test banner required" `Quick test_go_test_banner_required;
+      test_case "jest pass count" `Quick test_jest_pass_counts;
+      test_case "jest fail count" `Quick test_jest_fail_counts;
+      test_case "vitest pass count" `Quick test_vitest_pass_counts;
+      test_case "vitest fail count" `Quick test_vitest_fail_counts;
+      test_case "jest/vitest banner required" `Quick
+        test_jest_vitest_banner_required;
       test_case "git status clean" `Quick test_git_status_clean_exact;
       test_case "git status dirty" `Quick test_git_status_dirty_exact;
     ]);

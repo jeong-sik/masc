@@ -45,15 +45,6 @@ let publish_heartbeat (_bus : Agent_sdk.Event_bus.t) ~agent_name ~turn ~context_
   ] in
   masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.heartbeat", payload)))
 
-(** Publish a board post event to the shared Event_bus. *)
-let publish_board_post (_bus : Agent_sdk.Event_bus.t) ~agent_name ~post_id =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("post_id", `String post_id);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.board_post", payload)))
-
 (** Publish a task state change event to the shared Event_bus.
     #8605 family: [transition] is the canonical [Types.task_action]
     variant -- typos at call sites fail to compile. JSON wire format
@@ -69,16 +60,6 @@ let publish_task_transition (_bus : Agent_sdk.Event_bus.t) ~agent_name ~task_id
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.task_transition", payload)))
-
-(** Publish a heartbeat recovery event to the OAS Event_bus.
-    Emitted when a previously timed-out agent re-activates. *)
-let publish_heartbeat_recovered (_bus : Agent_sdk.Event_bus.t) ~agent_name ~previous_timeout_s =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("previous_timeout_s", `Float previous_timeout_s);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.heartbeat_recovered", payload)))
 
 (** {1 Autonomy Agent Lifecycle Events} *)
 
@@ -210,45 +191,3 @@ let publish_reputation_changed (_bus : Agent_sdk.Event_bus.t) ~agent_name ~old_s
   ] in
   masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.reputation_changed", payload)))
 
-(** Publish an institution episode event. *)
-let publish_institution_episode (_bus : Agent_sdk.Event_bus.t) ~episode_id ~event_type ~participants =
-  let payload = `Assoc [
-    ("episode_id", `String episode_id);
-    ("event_type", `String event_type);
-    ("participant_count", `Int (List.length participants));
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.institution_episode", payload)))
-
-(** {1 Harness Observability Events (#3165)} *)
-
-(** Publish a verdict-recorded event.
-    Emitted after [Eval_calibration.record_verdict] persists a verdict. *)
-let publish_verdict_recorded (_bus : Agent_sdk.Event_bus.t) ~agent_name ~task_id
-    ~gate ~verdict =
-  let payload = `Assoc [
-    ("agent_name", `String agent_name);
-    ("task_id", `String task_id);
-    ("gate", `String gate);
-    ("verdict", `String verdict);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("masc.harness.verdict_recorded", payload)))
-
-(** Publish a pre-compaction observation event.
-    Emitted before [Context_compact_oas.compact] runs in keeper. *)
-let publish_pre_compact (_bus : Agent_sdk.Event_bus.t) ~keeper_name
-    ~context_ratio ~strategy_names ~active_agent_count ~context_window
-    ~is_local_model =
-  let payload = `Assoc [
-    ("keeper_name", `String keeper_name);
-    ("context_ratio", `Float context_ratio);
-    ("strategies", `List (List.map (fun s -> `String s) strategy_names));
-    ("active_agent_count", `Int active_agent_count);
-    ("context_window", `Int context_window);
-    ("is_local_model", `Bool is_local_model);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("masc.harness.pre_compact", payload)))

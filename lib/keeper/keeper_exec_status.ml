@@ -156,22 +156,17 @@ let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.S
               ]))
 
 let json_string_opt key json =
-  match Yojson.Safe.Util.member key json with
-  | `String s ->
+  match Safe_ops.json_string_opt key json with
+  | Some s ->
       let trimmed = String.trim s in
       if trimmed = "" then None else Some trimmed
-  | _ -> None
+  | None -> None
 
 let json_bool key json default =
-  match Yojson.Safe.Util.member key json with
-  | `Bool value -> value
-  | _ -> default
+  Safe_ops.json_bool ~default key json
 
 let json_float_opt key json =
-  match Yojson.Safe.Util.member key json with
-  | `Float value -> Some value
-  | `Int value -> Some (float_of_int value)
-  | _ -> None
+  Safe_ops.json_float_opt key json
 
 let agent_status_text agent_status =
   json_string_opt "status" agent_status

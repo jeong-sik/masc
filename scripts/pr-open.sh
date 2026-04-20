@@ -60,6 +60,14 @@ validate_pr_body_file() {
   fi
 }
 
+validate_no_staged_changes() {
+  if ! git diff --cached --quiet --exit-code; then
+    echo "staged changes detected; commit or unstage them before opening a PR" >&2
+    git diff --cached --name-only >&2
+    exit 1
+  fi
+}
+
 is_doc_path() {
   case "$1" in
     docs/*|examples/trpg-mvp/*|README.md|*.md) return 0 ;;
@@ -105,6 +113,8 @@ if [[ "$branch" == "main" || "$branch" == "master" ]]; then
   echo "refusing to open PR from branch '$branch'" >&2
   exit 1
 fi
+
+validate_no_staged_changes
 
 if [[ -n "$body_file" ]]; then
   validate_pr_body_file "$body_file"

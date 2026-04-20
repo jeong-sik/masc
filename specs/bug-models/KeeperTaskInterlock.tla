@@ -306,8 +306,9 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 \*      update in keeper_registry.mark_dead leaves task_claimer
 \*      pointing at the dead keeper.
 \*
-\*   2. A separate asynchronous subsystem, Room_gc.cleanup_zombies
-\*      (lib/room/room_gc.ml), periodically scans agents by heartbeat
+\*   2. A separate asynchronous subsystem, Coord.cleanup_zombies
+\*      (lib/coord/coord_gc.ml — moved from the old lib/room/ namespace,
+\*      verified 2026-04-20), periodically scans agents by heartbeat
 \*      last_seen and force-releases Claimed/InProgress tasks whose
 \*      assignee is a zombie agent. This is modelled below as
 \*      ReconcileByGC.
@@ -319,7 +320,9 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 \* it against the TLC runner in tla-check.sh / specs/Makefile.
 
 \* Zombie GC reconciliation: release an orphaned task whose claimer
-\* is dead. Mirrors room_gc.ml:118-132 Phase 3 cascade.
+\* is dead. Mirrors lib/coord/coord_gc.ml:128 onward (the "Phase 3:
+\* Release tasks" cascade body, ~20 lines through line 147; verified
+\* 2026-04-20). Old "room_gc.ml:118-132" line range was stale.
 ReconcileByGC(t) ==
     /\ Held(t)
     /\ keeper_phase[task_claimer[t]] = "dead"

@@ -3,6 +3,8 @@
 
 ## Unreleased
 
+## [0.12.0] - 2026-04-20
+
 ### Added
 
 - **Bash parser single-quote string support (P5 parse-gap step).**

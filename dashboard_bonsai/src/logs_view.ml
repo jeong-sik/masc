@@ -1006,6 +1006,26 @@ stylesheet
     border-color: var(--accent-brass-dim);
     color: var(--accent-brass);
   }
+  .theme_chip_active {
+    border-color: var(--accent-brass);
+    color: var(--accent-brass);
+    background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
+    box-shadow: 0 0 0 1px rgba(138, 106, 40, 0.25) inset;
+  }
+
+  /* active chip via declarative CSS only — listener가 <html data-theme>
+     값을 세팅하면 cascading selector가 해당 chip에 active 스타일을 자동
+     적용. Bonsai state 경유 없이도 동작한다. */
+  html[data-theme="dark-fantasy"] .theme_chip[data-chip-theme="dark"],
+  html[data-theme="cyberpunk"]    .theme_chip[data-chip-theme="cyber"],
+  html[data-theme="terminal"]     .theme_chip[data-chip-theme="term"],
+  html[data-theme="parchment"]    .theme_chip[data-chip-theme="parchment"],
+  html[data-theme="paper"]        .theme_chip[data-chip-theme="paper"] {
+    border-color: var(--accent-brass);
+    color: var(--accent-brass);
+    background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
+    box-shadow: 0 0 0 1px rgba(138, 106, 40, 0.25) inset;
+  }
 
   /* ─── right aside (340px, fixed) ───
      dashboard_v2 aside: focus card + chronicle evs stream.
@@ -1653,6 +1673,7 @@ let render_response (response : Logs_types.response) : Node.t =
            Node.div
              ~attrs:
                [ Style.theme_chip
+               ; Attr.create "data-chip-theme" name
                ; Attr.on_click (fun _ ->
                    Effect.of_sync_fun
                      (fun () ->

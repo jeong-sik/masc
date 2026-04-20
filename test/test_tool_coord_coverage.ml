@@ -283,7 +283,7 @@ let () = test "dispatch_status_surfaces_owned_current_drift" (fun () ->
       assert success;
       assert (str_contains result "owned=task-001");
       assert (str_contains result "current=task-002");
-      assert (str_contains result "💡 Suggested next: masc_plan_set_task");
+      assert (str_contains result "💡 Suggested next: masc_plan_init -> masc_status");
       assert (str_contains result "planning current_task is unset or drifted")
   | None -> failwith "dispatch returned None"
 )
@@ -344,6 +344,26 @@ let () = test "dispatch_status_surfaces_missing_planning_for_owned_task" (fun ()
       assert (str_contains result "💡 Suggested next: masc_plan_init -> masc_status");
       assert (not (str_contains result "💡 Suggested next: masc_heartbeat"));
       assert (not (str_contains result "💡 Suggested next: masc_status -> masc_transition"))
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_status_flags_todo_with_completed_deliverable_as_conflict" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  ignore (Coord.add_task ctx.config ~title:"Conflicted todo" ~priority:2 ~description:"");
+  ignore (Coord.add_task ctx.config ~title:"Fresh todo" ~priority:2 ~description:"");
+  ignore
+    (Planning_eio.set_deliverable ctx.config ~task_id:"task-001"
+       ~content:"Task-001 completed. Exercised masc_observe_operations.");
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some (success, result) ->
+      assert success;
+      assert (str_contains result "⚠️ task-001 P2 [todo_conflict] Conflicted todo (unclaimed)");
+      assert (str_contains result "📋 task-002 P2 [todo] Fresh todo (unclaimed)");
+      assert (str_contains result "1 todo task(s) have completed-looking planning deliverables");
   | None -> failwith "dispatch returned None"
 )
 

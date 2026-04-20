@@ -199,6 +199,42 @@ let assigned_task_ids ~matches_you tasks =
       | Some _ | None -> None)
     tasks
 
+let first_line text =
+  match String.index_opt text '\n' with
+  | Some i -> String.sub text 0 i
+  | None -> text
+
+let deliverable_claims_completion ~task_id deliverable =
+  let normalized =
+    deliverable
+    |> String.trim
+    |> String.lowercase_ascii
+    |> first_line
+  in
+  normalized <> ""
+  && (String.starts_with ~prefix:(String.lowercase_ascii task_id ^ " completed")
+        normalized
+      || String.starts_with ~prefix:"completed" normalized)
+
+let todo_task_has_completed_deliverable_conflict (ctx : context)
+    (task : Types.task) =
+  match task.task_status with
+  | Types.Todo -> (
+      match Planning_eio.load ctx.config ~task_id:task.id with
+      | Ok plan_ctx ->
+          deliverable_claims_completion ~task_id:task.id plan_ctx.deliverable
+      | Error _ -> false)
+  | Types.Claimed _ | Types.InProgress _ | Types.AwaitingVerification _
+  | Types.Done _ | Types.Cancelled _ -> false
+
+let todo_completed_deliverable_conflicts (ctx : context) tasks =
+  List.filter_map
+    (fun ((task : Types.task)) ->
+      Coord_query.safe_yield ();
+      if todo_task_has_completed_deliverable_conflict ctx task then Some task.id
+      else None)
+    tasks
+
 type current_binding = {
   assigned_task_ids : string list;
   primary_owned : string option;
@@ -364,6 +400,9 @@ let status_summary_string (ctx : context) =
   in
   let active_tasks = List.rev active_tasks in
   let shown_active_tasks = take_items max_active_tasks_display active_tasks in
+  let todo_conflict_task_ids = todo_completed_deliverable_conflicts ctx active_tasks in
+  let todo_conflict_count = List.length todo_conflict_task_ids in
+  let fresh_todo_count = max 0 (todo_count - todo_conflict_count) in
   let assigned_task_ids = assigned_task_ids ~matches_you active_tasks in
   let binding =
     resolve_current_binding ~assigned_task_ids ~planning_current:current_task
@@ -394,7 +433,7 @@ let status_summary_string (ctx : context) =
                 tools
             in
             let tools =
-              if todo_count > 0 then
+              if fresh_todo_count > 0 then
                 "masc_claim_next" :: tools
               else
                 tools
@@ -456,6 +495,16 @@ let status_summary_string (ctx : context) =
           ]
     | Some _ | None -> items)
     |> fun items ->
+    if todo_conflict_count > 0 then
+      items
+      @ [
+          Printf.sprintf
+            "%d todo task(s) have completed-looking planning deliverables; treat them as control-plane conflicts, not fresh claimable work."
+            todo_conflict_count;
+        ]
+    else
+      items
+    |> fun items ->
     if zombie_count > 0 then
       items
       @ [ Printf.sprintf "%d stale agent(s) are still visible in the namespace."
@@ -463,10 +512,10 @@ let status_summary_string (ctx : context) =
     else
       items
     |> fun items ->
-    if todo_count > 0 && binding.assigned_task_ids = [] then
+    if fresh_todo_count > 0 && binding.assigned_task_ids = [] then
       items
       @ [ Printf.sprintf "%d unclaimed task(s) are available right now."
-            todo_count ]
+            fresh_todo_count ]
     else
       items
   in
@@ -544,7 +593,12 @@ let status_summary_string (ctx : context) =
   List.iter
     (fun (task : Types.task) ->
       Coord_query.safe_yield ();
-      let (status_icon, status_label) = task_status_badge task.task_status in
+      let (status_icon, status_label) =
+        if List.exists (String.equal task.id) todo_conflict_task_ids then
+          ("⚠️", "todo_conflict")
+        else
+          task_status_badge task.task_status
+      in
       let assignee = task_assignee task.task_status in
       Buffer.add_string buf
         (Printf.sprintf "  %s %s P%d [%s] %s (%s)\n" status_icon task.id

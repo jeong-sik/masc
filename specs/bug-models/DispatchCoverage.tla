@@ -15,7 +15,7 @@
 \* keeper_status_detail.ml:118). This spec retains the bug class and the
 \* 4 other mapped blockers (turn, compact, handoff, guardrail) below, which
 \* continue to model live mechanisms. maybe_recover_from_failing() now lives
-\* at keeper_keepalive.ml:940.
+\* at keeper_keepalive.ml:935 and dispatches Turn_succeeded at :947.
 \*
 \* This spec models 5 blocking conditions from the keeper FSM
 \* (keeper_state_machine.ml). Each has a "data layer" boolean and an
@@ -24,13 +24,13 @@
 \*
 \* ── Mapped clearing actions (from OCaml code) ──
 \*
-\*  # | Data clear             | FSM event                  | OCaml location
+\*  # | Data clear             | FSM event                  | OCaml location (verified 2026-04-20)
 \*  --+------------------------+----------------------------+--------------------------------
 \*  1 | manual_reconcile file  | Manual_reconcile_cleared   | [REMOVED 2026-04-20, see #9032]
-\*  2 | turn_failures counter  | Turn_succeeded             | keeper_keepalive.ml (near recover)
-\*  3 | compaction_active flag  | Compaction_completed       | keeper_exec_context.ml
-\*  4 | handoff_active flag     | Handoff_completed          | keeper_exec_context.ml
-\*  5 | guardrail measurement  | Context_measured(stop=F)   | keeper_keepalive.ml
+\*  2 | turn_failures counter  | Turn_succeeded             | keeper_keepalive.ml:947 (inside maybe_recover_from_failing at :935)
+\*  3 | compaction_active flag | Compaction_completed       | keeper_exec_context.ml:174
+\*  4 | handoff_active flag    | Handoff_completed          | keeper_exec_context.ml:190
+\*  5 | guardrail measurement  | Context_measured(stop=F)   | keeper_keepalive.ml:807 (RFC-0002 dispatch)
 \*
 \* ── Abstraction ──
 \* Each blocking condition is modeled as a pair: (data_blocked, fsm_blocked).

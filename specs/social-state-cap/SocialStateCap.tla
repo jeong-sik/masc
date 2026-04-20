@@ -33,7 +33,41 @@ VARIABLES
 vars == <<state, turn, pc>>
 
 \* ── Enum domains ────────────────────────────
-
+\*
+\* OCaml ↔ TLA+ mapping (verified 2026-04-20, see issue #9065):
+\*
+\*   spec name in Speeches  ↔ keeper_social_model_types.mli speech_act
+\*   ----------------------+----------------------------------------------
+\*   "stay_silent"          ↔ Stay_silent
+\*   "inform"               ↔ Inform
+\*   "request_help"         ↔ Request_help
+\*   "claim_task"           ↔ Claim_task
+\*   (NOT MODELLED)         ↔ Comment_board, Post_board, Broadcast, Defer
+\*
+\*   spec name in Surfaces  ↔ keeper_social_model_types.mli delivery_surface
+\*   ----------------------+----------------------------------------------
+\*   "silent"               ↔ Silent
+\*   "visible_reply"        ↔ Visible_reply
+\*   "board_post"           ↔ Board_post
+\*   "task_claim"           ↔ Task_claim_surface
+\*   (NOT MODELLED)         ↔ Board_comment, Broadcast_surface
+\*
+\* Sound partial coverage rationale:
+\*   The cap chain (PR #7692/#7704/#7709) is enforced at a SINGLE
+\*   emission point — `Types.cap_social_state` called from
+\*   keeper_social_model_magentic_ledger_v1.ml lines 200 and 220
+\*   (every emission path goes through it). Because that match is
+\*   exhaustive over the OCaml type, all 8 speech_act / 6 delivery_surface
+\*   constructors are capped uniformly regardless of which 4 the spec
+\*   chose to enumerate. The 4×4 projection here verifies the cap math
+\*   itself; unmodelled values are safe by construction (same emission
+\*   path, same cap_social_state call).
+\*
+\*   What this projection does NOT catch: a future change that adds
+\*   a new emission site that bypasses cap_social_state. If that happens
+\*   the spec must be extended to include the new constructors AND the
+\*   new emission action. See issue #9065 option 3 (witness pattern in
+\*   keeper_social_model_types.ml) for a compile-time guard.
 Speeches == {"stay_silent", "inform", "request_help", "claim_task"}
 Surfaces == {"silent", "visible_reply", "board_post", "task_claim"}
 

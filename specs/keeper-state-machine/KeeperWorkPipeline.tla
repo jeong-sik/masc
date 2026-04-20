@@ -1,12 +1,29 @@
 ---- MODULE KeeperWorkPipeline ----
-\* Keeper Autonomous Work Pipeline — TLA+ Formal Specification
+\* ── STATUS: ASPIRATIONAL DESIGN INVARIANT (not wired to current runtime) ──
+\* This spec describes a future workspace/PR/commit pipeline. As of
+\* 2026-04-20:
+\*   - lib/keeper/keeper_exec_github.ml does NOT exist
+\*     (`find lib -name "*github*"` returns 0 hits in lib/keeper/)
+\*   - The primitives this spec models — `force_push_attempted`,
+\*     `workspace_init`, `workspace_cleaned`, `commit_identity`,
+\*     `submit_count` — have 0 hits in lib/keeper/
+\*   - This spec is NOT in scripts/tla-check.sh (TLC does not run it)
+\* The actual keeper exec surface is keeper_exec_board / _context / _fs /
+\* _masc / _memory + keeper_tool_pr_review, with a different state shape.
+\* See issue #9044 for the retire / re-target / banner trichotomy.
+\* This banner takes the "banner" option to make the aspirational nature
+\* explicit; treat the safety properties below as forward-looking design
+\* documentation, not runtime invariants.
+\* ──────────────────────────────────────────────────────────────────────
+\*
+\* Keeper Autonomous Work Pipeline — TLA+ Formal Specification (DESIGN)
 \*
 \* Models the deterministic core of a keeper's autonomous task execution:
 \* workspace lifecycle, file operations, commit safety, PR creation, review cycles.
 \*
 \* Complementary to KeeperStateMachine (lifecycle) and KeeperTurnCycle (turns).
 \* This spec models what happens WITHIN a Running phase when a keeper executes
-\* an autonomous coding task.
+\* an autonomous coding task — IF/WHEN such a runtime exists.
 \*
 \* Verifies properties that unit tests cannot:
 \*   - Path traversal safety (writes always inside workspace boundary)
@@ -15,7 +32,9 @@
 \*   - Review before submit (at least one review before PR creation)
 \*   - No orphan workspaces (initialized workspaces always cleaned up)
 \*
-\* Mirrors: lib/keeper/keeper_exec_github.ml, lib/tool_code_write.ml
+\* Mirrors (TARGET, not current):
+\*   lib/keeper/keeper_exec_github.ml — DOES NOT EXIST AS OF 2026-04-20
+\*   lib/tool_code_write.ml          — exists, partially relevant
 
 EXTENDS Naturals, FiniteSets
 

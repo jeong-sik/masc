@@ -804,7 +804,27 @@ let handle_keeper_bash
   if cmd = ""
   then error_json "cmd is required. Good: cmd='ls -la lib/'. Bad: cmd=''."
 
-  else
+  else begin
+    (* Tick 22: dark-launch shadow logger.  Runs
+       [Worker_dev_tools.diff_command] side-by-side with the
+       live gate and emits a structured line for every non-[Agree]
+       outcome so operators can collect flip-blocker evidence
+       (Legacy_deny_shadow_allow) and inverted-gap cases
+       (Legacy_allow_shadow_deny) from real traffic without
+       changing any behavior.  Flag-gated by
+       [MASC_BASH_AST_SHADOW_LOG]; default off. *)
+    (if Worker_dev_tools.shadow_diff_log_enabled () then
+       let diff, legacy, shadow = Worker_dev_tools.diff_command cmd in
+       match diff with
+       | Worker_dev_tools.Agree -> ()
+       | _ ->
+         Log.Keeper.info
+           "gate_diff_shadow keeper=%s cmd_hash=%s diff=%s legacy=%s shadow=%s"
+           meta.name
+           (Worker_dev_tools.cmd_hash_for_log cmd)
+           (Worker_dev_tools.gate_diff_to_string diff)
+           (Worker_dev_tools.legacy_verdict_to_tag legacy)
+           (Worker_dev_tools.shadow_verdict_to_tag shadow));
     (* Resolve cwd early — needed for playground detection before validation. *)
     match resolve_keeper_shell_write_cwd ~config ~meta ~args with
     | Error e -> error_json e
@@ -1128,6 +1148,7 @@ let handle_keeper_bash
                         (Bg_task.Invalid_cwd msg) ->
                       error_json (Printf.sprintf "invalid cwd: %s" msg))
                end))
+  end
 ;;
 
 (* ============================================================ *)

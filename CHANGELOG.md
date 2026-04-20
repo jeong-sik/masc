@@ -3,6 +3,20 @@
 
 ## Unreleased
 
+### Added
+
+- **`MASC_BASH_AST_SHADOW_LOG` dark-launch observer.**  With the
+  flag set to a truthy value every `keeper_bash` call runs
+  `Worker_dev_tools.diff_command` side-by-side with the live regex
+  gate and emits a structured log line
+  (`gate_diff_shadow keeper=… cmd_hash=… diff=… legacy=… shadow=…`)
+  for every non-`Agree` outcome.  Command strings are hashed to a
+  12-hex MD5 prefix before logging so no raw shell fragments leak
+  to the log stream.  Default off; behavior is unchanged when
+  disabled.  This is the evidence-collection step before the
+  `MASC_BASH_AST_ONLY` default flip, which still waits on an
+  N=1000 zero-diff window per the plan.
+
 ### Changed
 
 - **`MASC_BASH_VERIFIABLE_MARKERS` flipped to on by default.**

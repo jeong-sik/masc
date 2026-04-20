@@ -290,6 +290,18 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       (Printf.sprintf "tool call failed: %s — %s" name
          (Option.value ~default:"(no detail)" error_detail));
 
+  (* Classify call source: Keeper_internal if the resolved agent_name matches
+     a registered keeper (keeper-internal dispatch via cli_agent runtime),
+     otherwise External_mcp (true external MCP client).  Sound partial:
+     missing identity falls through to External_mcp.  Issue #8915. *)
+  let source : Tool_registry.call_source =
+    if String.length agent_name = 0 then External_mcp
+    else
+      match Keeper_registry.find_by_agent_name agent_name with
+      | Some _ -> Keeper_internal
+      | None -> External_mcp
+  in
+
   (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
   let telemetry_enabled = Env_config_core.telemetry_enabled () in
   if telemetry_enabled then
@@ -297,7 +309,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
      | Some fs ->
          (try Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
                 ~tool_name:name ~agent_id:agent_name ~success ~duration_ms
-                ~source:(Tool_registry.string_of_source External_mcp) ()
+                ~source:(Tool_registry.string_of_source source) ()
           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             log_mcp_exn ~label:"telemetry tracking failed" exn)
      | None -> ());
@@ -307,7 +319,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     Prometheus.record_error ~error_type:name ();
 
   (* Track in-memory call counter for all declared tool names (including hidden). *)
-  Tool_registry.record_call_if_known ~source:External_mcp ~tool_name:name ~success ~duration_ms ();
+  Tool_registry.record_call_if_known ~source ~tool_name:name ~success ~duration_ms ();
 
   let tool_args_preview =
     Observability_redact.redact_tool_input ~tool_name:name arguments
@@ -329,7 +341,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
          ("tool_name", `String name);
          ("success", `Bool success);
          ("duration_ms", `Int duration_ms);
-         ("source", `String (Tool_registry.string_of_source External_mcp));
+         ("source", `String (Tool_registry.string_of_source source));
          ("error", match error_detail with Some e -> `String e | None -> `Null);
          ( "tool_args_preview",
            match tool_args_preview with

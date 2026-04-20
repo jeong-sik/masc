@@ -123,6 +123,14 @@ type post_turn_lifecycle = {
   message_count : int;
 }
 
+type max_context_resolution = {
+  requested_override : int option;
+  primary_budget : int;
+  cascade_budget : int;
+  turn_budget : int;
+  effective_budget : int;
+}
+
 type overflow_retry_recovery = {
   checkpoint : Agent_sdk.Checkpoint.t;
   compaction : compaction_event;
@@ -247,6 +255,14 @@ val keeper_action_kind_of_tool_names : string list -> string
 
 val effective_model_labels_for_turn :
   keeper_meta -> string list
+
+val resolve_max_context_resolution :
+  requested_override:int option ->
+  string list ->
+  max_context_resolution
+
+val resolve_max_context_resolution_of_meta :
+  keeper_meta -> max_context_resolution
 
 val room_cursor_for : keeper_meta -> string -> int
 

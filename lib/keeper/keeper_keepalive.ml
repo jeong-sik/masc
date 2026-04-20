@@ -602,17 +602,12 @@ let write_heartbeat_snapshot
     Cascade_runtime.models_of_cascade_name meta_current.cascade_name
   in
   let max_cascade_context =
-    let min_keeper_context = Keeper_config.min_keeper_context_tokens in
-    let raw = match meta_current.max_context_override with
-      | Some v -> v
-      | None ->
-          let resolved =
-            Cascade_runtime.resolve_max_cascade_context cascade_models
-          in
-          Cascade_runtime.clamp_context_for_pure_local_labels
-            ~labels:cascade_models ~max_context:resolved
+    let resolution =
+      Keeper_exec_context.resolve_max_context_resolution
+        ~requested_override:meta_current.max_context_override
+        cascade_models
     in
-    max min_keeper_context raw
+    resolution.effective_budget
   in
   let base_dir = session_base_dir ctx.config in
   ignore (Keeper_fs.ensure_dir (Filename.concat base_dir (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)));

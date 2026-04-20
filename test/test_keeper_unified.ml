@@ -2483,6 +2483,20 @@ let test_resolved_max_context_for_turn_uses_primary_budget () =
   check int "turn budget follows primary available model" expected
     (UT.resolved_max_context_for_turn ~meta:minimal_meta labels)
 
+let test_max_context_resolution_separates_override_and_effective_budget () =
+  let labels = [ "unknown:model" ] in
+  let resolution =
+    KEC.resolve_max_context_resolution
+      ~requested_override:(Some 1_000_000) labels
+  in
+  check int "primary budget uses fallback context window"
+    Masc_mcp.Cascade_runtime.fallback_context_window
+    resolution.primary_budget;
+  check int "turn budget preserves requested override" 1_000_000
+    resolution.turn_budget;
+  check int "effective budget caps to primary budget"
+    resolution.primary_budget resolution.effective_budget
+
 let test_side_effect_reclassification_ignores_keeper_read_only_tools () =
   let original =
     Agent_sdk.Error.Api
@@ -3659,6 +3673,8 @@ let () =
             test_clamp_context_for_pure_local_labels;
           test_case "turn context budget uses primary model" `Quick
             test_resolved_max_context_for_turn_uses_primary_budget;
+          test_case "max_context resolution separates override and effective budget" `Quick
+            test_max_context_resolution_separates_override_and_effective_budget;
           test_case "read-only keeper tools do not become ambiguous partial" `Quick
             test_side_effect_reclassification_ignores_keeper_read_only_tools;
           test_case "mixed tool sets only keep mutating keeper tools" `Quick

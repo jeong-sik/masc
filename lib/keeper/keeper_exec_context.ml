@@ -133,6 +133,14 @@ type overflow_retry_recovery = Keeper_post_turn.overflow_retry_recovery = {
   turn_generation : int;
 }
 
+type max_context_resolution = {
+  requested_override : int option;
+  primary_budget : int;
+  cascade_budget : int;
+  turn_budget : int;
+  effective_budget : int;
+}
+
 let apply_post_turn_lifecycle = Keeper_post_turn.apply_post_turn_lifecycle
 let recover_latest_checkpoint_for_overflow_retry =
   Keeper_post_turn.recover_latest_checkpoint_for_overflow_retry
@@ -233,6 +241,39 @@ let effective_model_labels_for_turn (m : keeper_meta) : string list =
       if model_allowed
       then dedupe_keep_order (model :: configured)
       else configured
+
+let resolve_max_context_resolution ~requested_override (labels : string list)
+    : max_context_resolution =
+  let min_keeper_context = Keeper_config.min_keeper_context_tokens in
+  let clamp resolved =
+    let local_clamped =
+      Cascade_runtime.clamp_context_for_pure_local_labels
+        ~labels ~max_context:resolved
+    in
+    max min_keeper_context local_clamped
+  in
+  let primary_budget =
+    Cascade_runtime.resolve_primary_max_context labels
+    |> clamp
+  in
+  let cascade_budget =
+    Cascade_runtime.resolve_max_cascade_context labels
+    |> clamp
+  in
+  let turn_budget =
+    match requested_override with
+    | Some requested when requested > 0 ->
+      max min_keeper_context requested
+    | _ -> primary_budget
+  in
+  let effective_budget = min turn_budget primary_budget in
+  { requested_override; primary_budget; cascade_budget; turn_budget; effective_budget }
+
+let resolve_max_context_resolution_of_meta (m : keeper_meta)
+    : max_context_resolution =
+  let labels = effective_model_labels_for_turn m in
+  resolve_max_context_resolution
+    ~requested_override:m.max_context_override labels
 
 let room_cursor_for meta room_id =
   meta.last_seen_seq_by_room

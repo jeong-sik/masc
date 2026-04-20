@@ -674,23 +674,30 @@ let accountability_summary_lookup (config : Coord_query.config) =
   let now = Time_compat.now () in
   let cutoff = summary_cutoff now in
   let by_agent : (string, claim_snapshot list) Hashtbl.t = Hashtbl.create 32 in
+  let by_keeper : (string, claim_snapshot list) Hashtbl.t = Hashtbl.create 32 in
+  let add_snapshot table key snapshot =
+    let existing =
+      match Hashtbl.find_opt table key with
+      | Some items -> items
+      | None -> []
+    in
+    Hashtbl.replace table key (snapshot :: existing)
+  in
   (* Request-local pre-aggregation: the dashboard rebuilds this lookup per
      render, so the next request naturally refreshes the window contents. *)
   materialize_claims (read_window_entries config)
   |> List.iter (fun snapshot ->
-         if created_at_unix snapshot.claim >= cutoff then
-           let existing =
-             match Hashtbl.find_opt by_agent snapshot.claim.agent_name with
-             | Some items -> items
-             | None -> []
-           in
-           Hashtbl.replace by_agent snapshot.claim.agent_name
-             (snapshot :: existing));
+         if created_at_unix snapshot.claim >= cutoff then (
+           add_snapshot by_agent snapshot.claim.agent_name snapshot;
+           add_snapshot by_keeper snapshot.claim.keeper_name snapshot));
   fun ~keeper_name ~agent_name ->
     let snapshots =
       match Hashtbl.find_opt by_agent agent_name with
       | Some items -> items
-      | None -> []
+      | None -> (
+          match Hashtbl.find_opt by_keeper keeper_name with
+          | Some items -> items
+          | None -> [])
     in
     summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots
 

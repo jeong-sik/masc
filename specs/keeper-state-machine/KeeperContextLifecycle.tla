@@ -147,7 +147,11 @@ TurnProducesOutput(k) ==
                    ckpt_turn, ckpt_valid, resume_ctx_id, fail_count, next_ctx_id>>
 
 \* 3. Token Budget Exceeded: running -> overflow_retry
-\*    Models TokenBudgetExceeded(Input) in keeper_unified_turn.ml:65
+\*    Models TokenBudgetExceeded(Input) recognised in
+\*    keeper_unified_turn.ml:318 (`is_input_overflow` pattern matcher)
+\*    and handled by the per-turn overflow path at line 455. Verified
+\*    2026-04-20: line 65 was a stale anchor predating the @since 2.256.0
+\*    extension that broadened TokenBudgetExceeded handling.
 TokenBudgetExceeded(k) ==
     /\ keeper_phase[k] = "running"
     /\ context_tokens[k] > MaxTokens

@@ -10,6 +10,21 @@ open Keeper_types
 open Keeper_exec_context
 module Social = Keeper_social_model
 
+(* Interval (seconds) for the per-turn background fiber that drains the
+   `keeper_turn` subscription on the OAS event bus.  See
+   [start_background_turn_event_bus_drain] for context.  Default 0.05s
+   (50 ms); tunable via [MASC_KEEPER_TURN_DRAIN_INTERVAL_SEC] — floats
+   parsed as seconds, invalid values fall back to the default. *)
+let default_turn_event_bus_drain_interval_sec = 0.05
+
+let turn_event_bus_drain_interval_sec () =
+  match Sys.getenv_opt "MASC_KEEPER_TURN_DRAIN_INTERVAL_SEC" with
+  | Some raw ->
+    (match float_of_string_opt (String.trim raw) with
+     | Some v when v > 0. -> v
+     | _ -> default_turn_event_bus_drain_interval_sec)
+  | None -> default_turn_event_bus_drain_interval_sec
+
 let substring_matches_at ~(needle : string) (haystack : string) start_idx =
   let needle_len = String.length needle in
   let rec loop offset =
@@ -1820,7 +1835,21 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                        Log.Keeper.warn
                          "%s: keeper_turn event-bus drain failed: %s"
                          meta.name (Printexc.to_string exn));
-                  Eio.Time.sleep clock 0.25;
+                  (* 2026-04-20: 0.25s → 0.05s.  OAS publishes a burst
+                     of events per tool cycle (ToolCalled / ToolResult /
+                     ToolCompleted + assistant / usage).  With 0.25s
+                     polling, a tool-heavy turn could accumulate >256
+                     events for this subscriber before the next drain,
+                     saturating the default Eio.Stream buffer and
+                     blocking [oas_bus_instrument.publish].  Fleet logs
+                     2026-04-20 recorded subscriber_purpose=keeper_turn
+                     depth peaks 219–469 (the 469 sample confirmed
+                     publishers blocked: 469 − 256 buffer ≈ 213 stuck
+                     sends).  50 ms keeps drain latency under the
+                     typical inter-event spacing so depth stays below
+                     the warn threshold outside tool bursts.  Override
+                     via [MASC_KEEPER_TURN_DRAIN_INTERVAL_SEC]. *)
+                  Eio.Time.sleep clock (turn_event_bus_drain_interval_sec ());
                   loop ()
                 end
               in

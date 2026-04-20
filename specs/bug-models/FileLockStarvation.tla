@@ -20,12 +20,14 @@
 \* If flock is not used (with_mutex path only), data corruption is possible.
 \*
 \* Actual code (verified 2026-04-20):
-\*   lib/process/file_lock_eio.ml:52   prune_stale_entries (under table_mu)
-\*   lib/process/file_lock_eio.ml:68   get_entry (formerly get_lock; creates
-\*                                     new entry if absent)
-\*   lib/process/file_lock_eio.ml:84   release_entry (counterpart to get_entry)
-\*   lib/process/file_lock_eio.ml:170  with_mutex — uses Eio.Mutex ONLY, no flock
-\*   lib/process/file_lock_eio.ml:180  with_lock — Eio.Mutex + Unix flock
+\*   lib/process/file_lock_eio.ml:prune_stale_entries  (under table_mu)
+\*   lib/process/file_lock_eio.ml:get_entry            (formerly get_lock;
+\*                                                      creates new entry
+\*                                                      if absent)
+\*   lib/process/file_lock_eio.ml:release_entry        (counterpart to get_entry)
+\*   lib/process/file_lock_eio.ml:with_mutex           (uses Eio.Mutex ONLY,
+\*                                                      no flock)
+\*   lib/process/file_lock_eio.ml:with_lock            (Eio.Mutex + Unix flock)
 \*
 \* (Path drift: lib/file_lock_eio.ml -> lib/process/file_lock_eio.ml.
 \*  Symbol drift: get_lock -> get_entry + release_entry pair.

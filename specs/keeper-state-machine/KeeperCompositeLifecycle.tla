@@ -23,10 +23,14 @@
 \* Design intent
 \*   1. shared_measurement is the coordination hub (Context_measured event,
 \*      Keeper_state_machine.mli:131-136, auto_rules_summary).
-\*   2. The 11-state parent phase from RFC-0002 is projected to
+\*   2. The 12-state parent phase from RFC-0002 is projected to the
+\*      7-element set
 \*      {Running, Failing, Overflowed, Compacting, HandingOff, Draining,
 \*       Stable}
 \*      — exactly the phases that matter for cross-spec ordering.
+\*      (See Comment A for the explicit 12->7 mapping; the 6 phases that
+\*      collapse to "Stable" are out of scope for the joint invariants
+\*      because they sit outside the turn cycle.)
 \*   3. Parent-lifecycle recovery is modeled directly as Running/Failing
 \*      phase transitions; legacy two-store recovery placeholders are
 \*      intentionally excluded from this observer.
@@ -52,8 +56,9 @@ ASSUME MaxTurnTicks \in Nat /\ MaxTurnTicks >= 2
 
 VARIABLES
     ksm_phase,          \* KSM projection. KeeperStateMachine.tla phase
-                        \* Reduced to the 6 values that change cross-spec
-                        \* behavior. Mapping from 11-state is in Comment A.
+                        \* Reduced to the 7 values that change cross-spec
+                        \* behavior (6 active + Stable absorber).
+                        \* Mapping from 12-state OCaml phase is in Comment A.
 
     ktc_turn_phase,     \* KTC projection. KeeperTurnCycle.tla / unified turn
                         \* Values: idle, prompting, executing, compacting,

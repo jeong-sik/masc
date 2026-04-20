@@ -68,7 +68,7 @@ VARIABLES
 
 vars == << phase, entered_at, now >>
 
-\* RFC-0002 11-phase FSM (keeper_state_machine.ml).
+\* RFC-0002 12-phase FSM (keeper_state_machine.ml: type phase, 12 constructors).
 PhaseSet == {
     "Offline",
     "Running",

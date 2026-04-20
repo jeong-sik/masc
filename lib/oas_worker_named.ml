@@ -189,6 +189,119 @@ let config_for_label
       approval;
     }
 
+let codex_cli_prompt_arg_limit_bytes = 512 * 1024
+let codex_cli_min_retry_tokens = 4_096
+
+type codex_cli_prompt_preflight = {
+  prompt_bytes : int;
+  prompt_tokens : int;
+  context_window_tokens : int;
+  retry_limit_tokens : int;
+  hits_argv_limit : bool;
+  hits_context_window : bool;
+}
+
+let codex_cli_prompt_bytes_to_token_limit ~prompt_bytes ~prompt_tokens =
+  if prompt_bytes <= 0 then
+    prompt_tokens
+  else
+    Int64.(
+      div
+        (mul (of_int (Stdlib.max 1 prompt_tokens))
+           (of_int codex_cli_prompt_arg_limit_bytes))
+        (of_int prompt_bytes)
+      |> to_int)
+
+let codex_cli_prompt_preflight ~(config : Oas_worker_exec.config) ~(goal : string)
+    : codex_cli_prompt_preflight option =
+  match config.provider_cfg.kind with
+  | Llm_provider.Provider_config.Codex_cli ->
+    let messages =
+      Oas.Agent_turn.prepare_messages
+        ~messages:(config.initial_messages @ [ Oas.Types.user_msg goal ])
+        ~context_reducer:config.context_reducer
+        ~turn_params:Oas.Hooks.default_turn_params
+    in
+    let req_config =
+      match String.trim config.system_prompt with
+      | "" -> config.provider_cfg
+      | _ ->
+        { config.provider_cfg with
+          system_prompt = Some config.system_prompt;
+        }
+    in
+    let system_prompt =
+      Llm_provider.Cli_common_prompt.system_prompt_of ~req_config messages
+    in
+    let prompt =
+      messages
+      |> Llm_provider.Cli_common_prompt.non_system_messages
+      |> Llm_provider.Cli_common_prompt.prompt_of_messages
+      |> fun prompt ->
+      Llm_provider.Cli_common_prompt.prompt_with_system_prompt
+        ~prompt ~system_prompt
+    in
+    let prompt_bytes = String.length prompt in
+    let prompt_tokens =
+      max 1 (Oas.Context_reducer.estimate_char_tokens prompt)
+    in
+    let context_window_tokens =
+      Oas.Provider.resolve_max_context_tokens
+        ~fallback:Cascade_runtime.fallback_context_window
+        (Some config.provider)
+    in
+    let hits_argv_limit = prompt_bytes > codex_cli_prompt_arg_limit_bytes in
+    let hits_context_window = prompt_tokens > context_window_tokens in
+    if not hits_argv_limit && not hits_context_window then
+      None
+    else
+      let retry_limit_tokens =
+        let byte_limit =
+          codex_cli_prompt_bytes_to_token_limit ~prompt_bytes ~prompt_tokens
+        in
+        let limit =
+          if hits_argv_limit then byte_limit else prompt_tokens
+          |> fun limit ->
+          if hits_context_window then min context_window_tokens limit else limit
+        in
+        max codex_cli_min_retry_tokens (min prompt_tokens limit)
+      in
+      Some
+        {
+          prompt_bytes;
+          prompt_tokens;
+          context_window_tokens;
+          retry_limit_tokens;
+          hits_argv_limit;
+          hits_context_window;
+        }
+  | _ -> None
+
+let codex_cli_preflight_error ~(scope : string)
+    ~(provider_cfg : Llm_provider.Provider_config.t)
+    (preflight : codex_cli_prompt_preflight) =
+  Log.Misc.warn
+    "codex_cli prompt preflight rejected spawn (scope=%s, model=%s, prompt_bytes=%d, prompt_tokens=%d, retry_limit=%d, context_window=%d, argv_limit=%b, context_limit=%b)"
+    scope provider_cfg.model_id preflight.prompt_bytes
+    preflight.prompt_tokens preflight.retry_limit_tokens
+    preflight.context_window_tokens preflight.hits_argv_limit
+    preflight.hits_context_window;
+  Oas.Error.Agent
+    (Oas.Error.TokenBudgetExceeded
+       {
+         kind = "Input";
+         used = preflight.prompt_tokens;
+         limit = preflight.retry_limit_tokens;
+       })
+
+let with_codex_cli_preflight ~(scope : string) ~(config : Oas_worker_exec.config)
+    ~(goal : string) (run : unit -> ('a, Oas.Error.sdk_error) result)
+    : ('a, Oas.Error.sdk_error) result =
+  match codex_cli_prompt_preflight ~config ~goal with
+  | Some preflight ->
+    Error (codex_cli_preflight_error ~scope ~provider_cfg:config.provider_cfg preflight)
+  | None -> run ()
+
 (** Convert an OAS sdk_error into a Cascade_fsm provider_outcome.
     API-level errors and model-capability-dependent agent errors are
     cascadeable (a different provider may succeed).  Structural agent
@@ -361,28 +474,38 @@ let run_named
         initial_messages; raw_trace; yield_on_tool;
       }
     in
-    let effective_checkpoint = match resume_checkpoint with
-      | Some _ -> resume_checkpoint
-      | None -> oas_checkpoint
-    in
     let local_agent_ref : Oas.Agent.t option ref = ref None in
-    let result =
-      Oas_worker_exec.run ~sw ~net ~config ?oas_checkpoint:effective_checkpoint ?on_event
-        ?on_yield ?on_resume ~agent_ref:local_agent_ref ?proof_ref ?contract goal
-    in
-    (* Extract checkpoint from the agent if it made progress.
-       The agent's mutable state reflects all completed turns even on Error. *)
-    let checkpoint_after = match !local_agent_ref with
-      | Some agent when (Oas.Agent.state agent).turn_count > 0 ->
-        (* Also propagate to caller's agent_ref for final result *)
-        (match agent_ref with Some r -> r := Some agent | None -> ());
-        Some (Oas.Agent.checkpoint agent)
-      | Some agent ->
-        (match agent_ref with Some r -> r := Some agent | None -> ());
-        None
-      | None -> None
-    in
-    (result, checkpoint_after)
+    match
+      with_codex_cli_preflight
+        ~scope:(Printf.sprintf "cascade:%s/%s" cascade_name provider_cfg.model_id)
+        ~config ~goal
+        (fun () ->
+          let effective_checkpoint = match resume_checkpoint with
+            | Some _ -> resume_checkpoint
+            | None -> oas_checkpoint
+          in
+          let result =
+            Oas_worker_exec.run ~sw ~net ~config ?oas_checkpoint:effective_checkpoint ?on_event
+              ?on_yield ?on_resume ~agent_ref:local_agent_ref ?proof_ref ?contract goal
+          in
+          Ok result)
+    with
+    | Error err ->
+      (Error err, None)
+    | Ok result ->
+      (* Extract checkpoint from the agent if it made progress.
+         The agent's mutable state reflects all completed turns even on Error. *)
+      let checkpoint_after = match !local_agent_ref with
+        | Some agent when (Oas.Agent.state agent).turn_count > 0 ->
+          (* Also propagate to caller's agent_ref for final result *)
+          (match agent_ref with Some r -> r := Some agent | None -> ());
+          Some (Oas.Agent.checkpoint agent)
+        | Some agent ->
+          (match agent_ref with Some r -> r := Some agent | None -> ());
+          None
+        | None -> None
+      in
+      (result, checkpoint_after)
   in
   let rec try_cascade
       ?(on_success = fun ~provider_key:_ -> ())
@@ -776,21 +899,25 @@ let run_model_by_label
           ~keeper_name:"oas-label-model"
           ~cascade_name:model_label
           (fun () ->
-            match Oas_worker_exec.run ~sw ~net ~config ?on_event ?contract goal with
-            | Ok result when accept result.response -> Ok result
-            | Ok result ->
-                Error
-                  (sdk_error_of_masc_internal_error
-                     (Accept_rejected
-                        {
-                          scope = model_label;
-                          model = Some result.response.model;
-                          reason =
-                            Printf.sprintf
-                              "response rejected by accept (model=%s)"
-                              result.response.model;
-                        }))
-            | Error e -> Error e)
+            with_codex_cli_preflight
+              ~scope:(Printf.sprintf "model_label:%s" model_label)
+              ~config ~goal
+              (fun () ->
+                match Oas_worker_exec.run ~sw ~net ~config ?on_event ?contract goal with
+                | Ok result when accept result.response -> Ok result
+                | Ok result ->
+                    Error
+                      (sdk_error_of_masc_internal_error
+                         (Accept_rejected
+                            {
+                              scope = model_label;
+                              model = Some result.response.model;
+                              reason =
+                                Printf.sprintf
+                                  "response rejected by accept (model=%s)"
+                                  result.response.model;
+                            }))
+                | Error e -> Error e))
       with
       | Admission_queue.Wait_timeout wait_ms ->
           admission_wait_timeout_error ~keeper_name:"oas-label-model"
@@ -892,8 +1019,12 @@ let run_model_with_masc_tools
           ~keeper_name:"oas-explicit-model"
           ~cascade_name:model_label
           (fun () ->
-            Oas_worker_exec.run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?contract ?on_event
-              goal)
+            with_codex_cli_preflight
+              ~scope:(Printf.sprintf "explicit_model:%s" model_label)
+              ~config ~goal
+              (fun () ->
+                Oas_worker_exec.run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?contract ?on_event
+                  goal))
       with
       | Admission_queue.Wait_timeout wait_ms ->
           admission_wait_timeout_error ~keeper_name:"oas-explicit-model"

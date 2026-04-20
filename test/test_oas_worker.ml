@@ -973,6 +973,54 @@ let test_classify_masc_internal_error_roundtrip () =
         (contains_substring ~needle:"response rejected by accept" reason)
   | _ -> Alcotest.fail "expected structured accept rejection"
 
+let make_codex_cli_provider_cfg ?(model_id = "codex") () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.Codex_cli
+    ~model_id ~base_url:"" ()
+
+let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
+  let provider_cfg = make_codex_cli_provider_cfg () in
+  let config =
+    Oas_worker_exec.default_config
+      ~name:"codex-preflight"
+      ~provider_cfg
+      ~system_prompt:"system"
+      ~tools:[]
+  in
+  let huge_goal = String.make 600_000 'a' in
+  match Oas_worker_named.codex_cli_prompt_preflight ~config ~goal:huge_goal with
+  | Some preflight ->
+      Alcotest.(check bool) "argv limit hit" true preflight.hits_argv_limit;
+      Alcotest.(check bool) "context limit hit" true preflight.hits_context_window;
+      Alcotest.(check int) "fallback context window"
+        Masc_mcp.Cascade_runtime.fallback_context_window
+        preflight.context_window_tokens;
+      Alcotest.(check bool) "retry limit reduced" true
+        (preflight.retry_limit_tokens < preflight.prompt_tokens)
+  | None -> Alcotest.fail "expected codex preflight overflow"
+
+let test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow () =
+  let provider_cfg = make_codex_cli_provider_cfg ~model_id:"gpt-4.1" () in
+  let config =
+    Oas_worker_exec.default_config
+      ~name:"codex-preflight"
+      ~provider_cfg
+      ~system_prompt:"system"
+      ~tools:[]
+  in
+  let huge_goal = String.make 600_000 'a' in
+  match Oas_worker_named.codex_cli_prompt_preflight ~config ~goal:huge_goal with
+  | Some preflight ->
+      Alcotest.(check bool) "argv limit hit" true preflight.hits_argv_limit;
+      Alcotest.(check bool) "context limit not hit" false preflight.hits_context_window;
+      Alcotest.(check bool) "gpt-4.1 context window preserved" true
+        (preflight.context_window_tokens >= 1_000_000);
+      Alcotest.(check bool) "retry limit scaled below prompt tokens" true
+        (preflight.retry_limit_tokens < preflight.prompt_tokens);
+      Alcotest.(check bool) "retry limit below full context window" true
+        (preflight.retry_limit_tokens < preflight.context_window_tokens)
+  | None -> Alcotest.fail "expected argv-only codex preflight overflow"
+
 let test_worker_build_agent_uses_default_internal_retry_policy () =
   with_raw_trace "worker_build_agent_retry" @@ fun raw_trace ->
   let meta = make_worker_meta () in
@@ -2149,6 +2197,10 @@ let () =
         test_run_model_with_masc_tools_rejects_invalid_explicit_label;
       Alcotest.test_case "structured MASC internal errors roundtrip through classifier" `Quick
         test_classify_masc_internal_error_roundtrip;
+      Alcotest.test_case "codex preflight uses pipeline context fallback" `Quick
+        test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback;
+      Alcotest.test_case "codex preflight scales retry limit for argv overflow" `Quick
+        test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow;
       Alcotest.test_case "worker build_agent installs retry policy" `Quick
         test_worker_build_agent_uses_default_internal_retry_policy;
       Alcotest.test_case "resume config propagates retry policy" `Quick

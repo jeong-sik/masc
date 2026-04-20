@@ -1740,41 +1740,78 @@ let view_heartbeat () =
    state dot, last-heard timestamp, and presence reflect live telemetry. *)
 type keeper_state = [ `Live | `Thinking | `Idle | `Failed ]
 
-let view_roster () =
-  let slot ~sigil ~name ~(state : keeper_state) ~state_label ~when_ =
-    let dot_cls =
-      match state with
-      | `Live -> Style.roster_dot_live
-      | `Thinking -> Style.roster_dot_thinking
-      | `Idle -> Style.roster_dot_idle
-      | `Failed -> Style.roster_dot_failed
-    in
-    Node.div
-      ~attrs:[ Style.roster_slot ]
-      [ Node.div ~attrs:[ Style.roster_sigil ] [ Node.text sigil ]
-      ; Node.div
-          ~attrs:[ Style.roster_body ]
-          [ Node.span ~attrs:[ Style.roster_name ] [ Node.text name ]
-          ; Node.div
-              ~attrs:[ Style.roster_state ]
-              [ Node.span ~attrs:[ Style.roster_dot; dot_cls ] []
-              ; Node.text state_label
-              ]
-          ]
-      ; Node.span ~attrs:[ Style.roster_when ] [ Node.text when_ ]
-      ]
+(** Map live keeper status to the roster dot state. [Warn] → [`Thinking]
+    (something is happening but concerning), [Dead] → [`Failed]. *)
+let roster_state_of (s : Keepers_types.keeper_status) : keeper_state =
+  match s with
+  | Live -> `Live
+  | Warn -> `Thinking
+  | Dead -> `Failed
+;;
+
+let roster_slot_of ~(state : keeper_state) ~sigil ~name ~state_label ~when_ =
+  let dot_cls =
+    match state with
+    | `Live -> Style.roster_dot_live
+    | `Thinking -> Style.roster_dot_thinking
+    | `Idle -> Style.roster_dot_idle
+    | `Failed -> Style.roster_dot_failed
   in
   Node.div
-    ~attrs:[ Style.roster ]
-    [ slot ~sigil:"P" ~name:"keeper · poe" ~state:`Live
-        ~state_label:"speaking" ~when_:"3s"
-    ; slot ~sigil:"J" ~name:"janitor" ~state:`Thinking
-        ~state_label:"thinking" ~when_:"12s"
-    ; slot ~sigil:"G" ~name:"governance" ~state:`Idle
-        ~state_label:"idle · ok" ~when_:"2m"
-    ; slot ~sigil:"I" ~name:"improver" ~state:`Failed
-        ~state_label:"paused · auth" ~when_:"7m"
+    ~attrs:[ Style.roster_slot ]
+    [ Node.div ~attrs:[ Style.roster_sigil ] [ Node.text sigil ]
+    ; Node.div
+        ~attrs:[ Style.roster_body ]
+        [ Node.span ~attrs:[ Style.roster_name ] [ Node.text name ]
+        ; Node.div
+            ~attrs:[ Style.roster_state ]
+            [ Node.span ~attrs:[ Style.roster_dot; dot_cls ] []
+            ; Node.text state_label
+            ]
+        ]
+    ; Node.span ~attrs:[ Style.roster_when ] [ Node.text when_ ]
     ]
+;;
+
+let roster_slot_of_keeper (k : Keepers_types.keeper) =
+  let sigil =
+    if String.length k.name = 0
+    then "·"
+    else Char.to_string (Char.uppercase k.name.[0])
+  in
+  let when_ =
+    match k.latency_ms with
+    | 0 -> "×"
+    | n when n < 1000 -> Printf.sprintf "%dms" n
+    | n -> Printf.sprintf "%.1fs" (Float.of_int n /. 1000.0)
+  in
+  roster_slot_of
+    ~state:(roster_state_of k.status)
+    ~sigil
+    ~name:k.name
+    ~state_label:k.stat
+    ~when_
+;;
+
+let view_roster_static () =
+  [ roster_slot_of ~sigil:"P" ~name:"keeper · poe" ~state:`Live
+      ~state_label:"speaking" ~when_:"3s"
+  ; roster_slot_of ~sigil:"J" ~name:"janitor" ~state:`Thinking
+      ~state_label:"thinking" ~when_:"12s"
+  ; roster_slot_of ~sigil:"G" ~name:"governance" ~state:`Idle
+      ~state_label:"idle · ok" ~when_:"2m"
+  ; roster_slot_of ~sigil:"I" ~name:"improver" ~state:`Failed
+      ~state_label:"paused · auth" ~when_:"7m"
+  ]
+;;
+
+let view_roster ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
+  let slots =
+    match keepers.keepers with
+    | [] -> view_roster_static ()
+    | live -> List.map live ~f:roster_slot_of_keeper
+  in
+  Node.div ~attrs:[ Style.roster ] slots
 ;;
 
 (* ─── swimlane mock ───
@@ -1987,7 +2024,84 @@ let ctx_hairline ~x =
     []
 ;;
 
-let view_context_pressure () =
+(** Rotating palette for per-keeper ctx polylines. Dead keepers always use
+    [--t-err] regardless of index so crashed lanes stand out. *)
+let ctx_palette = [|
+  "var(--t-llm)";
+  "var(--t-tool)";
+  "var(--t-think)";
+  "var(--t-wait)";
+|]
+
+let ctx_stroke_of ~(index : int) ~(status : Keepers_types.keeper_status) =
+  match status with
+  | Dead -> "var(--t-err)"
+  | _ -> ctx_palette.(index mod Array.length ctx_palette)
+;;
+
+(** Build SVG [points] attribute from ctx_history. x = (60 - t_minus_min) * 10
+    (so t-60 → 0, t-0 → 600). y = 100 - pct (SVG origin at top). Samples
+    sorted by descending t_minus_min (older first). *)
+let ctx_points_of (samples : Keepers_types.ctx_sample list) : string =
+  let sorted =
+    List.sort samples ~compare:(fun (a : Keepers_types.ctx_sample)
+                                    (b : Keepers_types.ctx_sample) ->
+      Int.compare b.t_minus_min a.t_minus_min)
+  in
+  List.map sorted ~f:(fun (s : Keepers_types.ctx_sample) ->
+    Printf.sprintf "%d,%d"
+      ((60 - s.t_minus_min) * 10)
+      (100 - s.ctx_pct))
+  |> String.concat ~sep:" "
+;;
+
+(** Static fallback — mirrors the hand-coded 4 polyline mock. *)
+let ctx_polylines_static () =
+  [ ctx_polyline
+      ~points:"0,62 100,60 200,63 300,60 400,58 500,62 600,58"
+      ~stroke_var:"var(--t-llm)" ~dashed:false
+  ; ctx_polyline
+      ~points:"0,60 100,54 200,48 300,42 400,38 500,35 600,33"
+      ~stroke_var:"var(--t-tool)" ~dashed:false
+  ; ctx_polyline
+      ~points:"0,90 100,89 200,90 300,88 400,88 500,90 600,88"
+      ~stroke_var:"var(--t-wait)" ~dashed:false
+  ; ctx_polyline
+      ~points:"0,55 100,35 200,15 260,5"
+      ~stroke_var:"var(--t-err)" ~dashed:true
+  ]
+;;
+
+let ctx_polylines_of_keepers (ks : Keepers_types.keeper list) =
+  List.mapi ks ~f:(fun i (k : Keepers_types.keeper) ->
+    let dashed =
+      match k.status with
+      | Dead -> true
+      | _ -> false
+    in
+    ctx_polyline
+      ~points:(ctx_points_of k.ctx_history)
+      ~stroke_var:(ctx_stroke_of ~index:i ~status:k.status)
+      ~dashed)
+;;
+
+let ctx_meta_lines_of (ks : Keepers_types.keeper list) : string list =
+  let pair (k : Keepers_types.keeper) =
+    match k.status with
+    | Dead -> Printf.sprintf "%s ×" k.name
+    | _ -> Printf.sprintf "%s %d" k.name k.ctx_pct
+  in
+  (* group into 2 items per line for visual density *)
+  let rec chunks = function
+    | [] -> []
+    | [ a ] -> [ a ]
+    | a :: b :: rest -> (a ^ " · " ^ b) :: chunks rest
+  in
+  chunks (List.map ks ~f:pair)
+;;
+
+let view_context_pressure
+      ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
   let hairlines =
     List.init 7 ~f:(fun i -> ctx_hairline ~x:(i * 100))
   in
@@ -1996,27 +2110,10 @@ let view_context_pressure () =
     ; ctx_guide ~y:10 ~stroke_var:"var(--accent-blood)"      (* 90 % danger *)
     ]
   in
-  (* mock: 7 points over 60 min. y = 100 - pct. *)
-  let luna =
-    ctx_polyline
-      ~points:"0,62 100,60 200,63 300,60 400,58 500,62 600,58"
-      ~stroke_var:"var(--t-llm)" ~dashed:false
-  in
-  let brass_owl =
-    ctx_polyline
-      ~points:"0,60 100,54 200,48 300,42 400,38 500,35 600,33"
-      ~stroke_var:"var(--t-tool)" ~dashed:false
-  in
-  let moth =
-    ctx_polyline
-      ~points:"0,90 100,89 200,90 300,88 400,88 500,90 600,88"
-      ~stroke_var:"var(--t-wait)" ~dashed:false
-  in
-  let ash_hound =
-    (* crashes at t-34 (x=260). truncated polyline. *)
-    ctx_polyline
-      ~points:"0,55 100,35 200,15 260,5"
-      ~stroke_var:"var(--t-err)" ~dashed:true
+  let polylines =
+    match keepers.keepers with
+    | [] -> ctx_polylines_static ()
+    | live_keepers -> ctx_polylines_of_keepers live_keepers
   in
   let svg =
     Node.create_svg "svg"
@@ -2025,7 +2122,12 @@ let view_context_pressure () =
         svg_a "preserveAspectRatio" "none";
         Style.ctx_svg;
       ]
-      (hairlines @ guides @ [ luna; brass_owl; moth; ash_hound ])
+      (hairlines @ guides @ polylines)
+  in
+  let meta_lines =
+    match keepers.keepers with
+    | [] -> [ "luna 38 · brass-owl 67"; "moth 12 · ash ×" ]
+    | live -> ctx_meta_lines_of live
   in
   Node.div
     ~attrs:[ Style.swim ]
@@ -2050,10 +2152,9 @@ let view_context_pressure () =
         ~attrs:[ Style.ctx_chart ]
         [ Node.div
             ~attrs:[ Style.ctx_meta ]
-            [ Node.text "keepers · %"
-            ; Node.span ~attrs:[ Style.ctx_meta_v ] [ Node.text "luna 38 · brass-owl 67" ]
-            ; Node.span ~attrs:[ Style.ctx_meta_v ] [ Node.text "moth 12 · ash ×" ]
-            ]
+            (Node.text "keepers · %"
+             :: List.map meta_lines ~f:(fun line ->
+                  Node.span ~attrs:[ Style.ctx_meta_v ] [ Node.text line ]))
         ; Node.div
             ~attrs:[ Style.ctx_track ]
             [ svg
@@ -2588,7 +2689,7 @@ let render_response
             ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "iv" ]
             ]
         ]
-    ; view_roster ()
+    ; view_roster ~keepers ()
     ; Node.div
         ~attrs:[ Style.sec ]
         [ Node.span ~attrs:[ Style.sec_glyph ] []
@@ -2618,7 +2719,7 @@ let render_response
             ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "pending" ]
             ]
         ]
-    ; view_context_pressure ()
+    ; view_context_pressure ~keepers ()
     ; Node.div
         ~attrs:[ Style.sec ]
         [ Node.span ~attrs:[ Style.sec_glyph ] []

@@ -299,12 +299,19 @@ let keeper_arguments fixture (schema : Types.tool_schema) =
   | "keeper_broadcast" ->
       `Assoc [ ("message", `String "tool matrix broadcast") ]
   | "keeper_task_done" ->
+      (* The completion text intentionally contains the "follow-up"
+         excuse pattern so the anti-rationalization gate fast-rejects
+         on Gate 2 (excuse pattern) without invoking the cross_verifier
+         LLM cascade. The matrix runs in environments where the
+         evaluator cascade is unreachable, and the LLM path's 180s
+         timeout would always exceed the 25s per-case budget. The
+         expectation table accepts the structured rejection. *)
       `Assoc
         [
           ("task_id", `String (Generic.ensure_task fixture.generic));
           ( "result",
             `String
-              "Validated the keeper tool matrix case, confirmed the task fixture was claimed, and recorded the successful completion path." );
+              "Validated the keeper tool matrix case as a follow-up smoke check, confirmed the task fixture was claimed, and recorded the successful completion path." );
         ]
   | "keeper_board_cleanup" | "keeper_board_delete" ->
       `Assoc [ ("post_id", `String (Generic.ensure_board_post fixture.generic)) ]

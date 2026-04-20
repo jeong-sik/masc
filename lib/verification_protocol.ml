@@ -22,6 +22,45 @@
 let on_submit_for_verification ~(config : Coord.config)
     ~(task : Types.task) ~assignee ~verification_id ~evidence_refs =
   let base_path = config.Coord.base_path in
+  let first_line text =
+    match String.index_opt text '\n' with
+    | Some i -> String.sub text 0 i
+    | None -> text
+  in
+  let deliverable_claims_completion ~task_id deliverable =
+    let normalized =
+      deliverable
+      |> String.trim
+      |> String.lowercase_ascii
+      |> first_line
+    in
+    normalized <> ""
+    && (String.starts_with
+          ~prefix:(String.lowercase_ascii task_id ^ " completed")
+          normalized
+        || String.starts_with ~prefix:"completed" normalized)
+  in
+  let request_kind, request_summary, next_action, board_type, board_title, board_content =
+    match Planning_eio.load config ~task_id:task.id with
+    | Ok plan_ctx
+      when deliverable_claims_completion ~task_id:task.id plan_ctx.deliverable ->
+        ( "conflict_triage",
+          "Conflict verification required: board / planning / mutation path disagree.",
+          "Reconcile board / planning / mutation surfaces before ordinary approval.",
+          "verification_conflict_request",
+          Printf.sprintf "Conflict verify: %s" task.title,
+          Printf.sprintf
+            "Conflict verification required for task %s (%s) by %s. Do not approve as ordinary merged-PR verification; reconcile board / planning / mutation surfaces first."
+            task.id task.title assignee )
+    | Ok _ | Error _ ->
+        ( "normal",
+          "",
+          "",
+          "verification_request",
+          Printf.sprintf "Verify: %s" task.title,
+          Printf.sprintf "Verification requested for task %s (%s) by %s"
+            task.id task.title assignee )
+  in
   (* Observability for #8272: tasks submitted without a contract land in
      storage with empty completion_contract + empty evidence, which the
      dashboard renders as "—". Surface this as a warn so operators can
@@ -48,21 +87,25 @@ let on_submit_for_verification ~(config : Coord.config)
       ~output:(`Assoc [
         ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
         ("task_title", `String task.title);
+        ("request_kind", `String request_kind);
+        ("request_summary", `String request_summary);
+        ("next_action", `String next_action);
       ])
       ~criteria ~worker:assignee () in
   let meta_json = `Assoc [
-    ("type", `String "verification_request");
+    ("type", `String board_type);
     ("task_id", `String task.id);
     ("verification_id", `String verification_id);
     ("worker", `String assignee);
     ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
     ("criteria", `List (List.map Verification.criterion_to_yojson criteria));
+    ("request_kind", `String request_kind);
+    ("next_action", `String next_action);
   ] in
   let _post = Board_dispatch.create_post
     ~author:"system"
-    ~content:(Printf.sprintf "Verification requested for task %s (%s) by %s"
-      task.id task.title assignee)
-    ~title:(Printf.sprintf "Verify: %s" task.title)
+    ~content:board_content
+    ~title:board_title
     ~post_kind:Board.System_post
     ~meta_json
     ~visibility:Board.Internal

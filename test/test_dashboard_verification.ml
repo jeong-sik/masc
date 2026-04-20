@@ -185,6 +185,49 @@ let test_task_id_filter () =
      | `List _ -> Alcotest.fail "expected empty list"
      | _ -> Alcotest.fail "requests not list"))
 
+let test_requests_json_surfaces_conflict_triage_fields () =
+  with_temp_base_path (fun base_path ->
+    let output =
+      `Assoc [
+        ("evidence_refs", `List [`String "ref-A"]);
+        ("task_title", `String "conflict task");
+        ("request_kind", `String "conflict_triage");
+        ( "request_summary",
+          `String "Conflict verification required: board / planning / mutation path disagree." );
+        ( "next_action",
+          `String "Reconcile board / planning / mutation surfaces before ordinary approval." );
+      ]
+    in
+    let req =
+      match V.create_request ~base_path ~task_id:"task-conflict" ~output
+              ~criteria:[V.Custom "tests pass"] ~worker:"keeper-alpha" () with
+      | Ok req -> req
+      | Error e -> Alcotest.fail (Printf.sprintf "create_request failed: %s" e)
+    in
+    let j = D.requests_json ~task_id:"task-conflict" () in
+    let reqs =
+      match member "requests" j with
+      | `List xs -> xs
+      | _ -> Alcotest.fail "requests should be list"
+    in
+    let row =
+      match reqs with
+      | [row] -> row
+      | _ -> Alcotest.fail "expected one request row"
+    in
+    (match member "request_id" row with
+     | `String id when id = req.id -> ()
+     | _ -> Alcotest.fail "request_id mismatch");
+    (match member "request_kind" row with
+     | `String "conflict_triage" -> ()
+     | _ -> Alcotest.fail "request_kind mismatch");
+    (match member "request_summary" row with
+     | `String "Conflict verification required: board / planning / mutation path disagree." -> ()
+     | _ -> Alcotest.fail "request_summary mismatch");
+    (match member "next_action" row with
+     | `String "Reconcile board / planning / mutation surfaces before ordinary approval." -> ()
+     | _ -> Alcotest.fail "next_action mismatch"))
+
 (* ── Registration ───────────────────────────────────── *)
 
 let () =
@@ -192,5 +235,7 @@ let () =
     "requests_json", [
       Alcotest.test_case "shape" `Quick test_requests_json_shape;
       Alcotest.test_case "task_id filter" `Quick test_task_id_filter;
+      Alcotest.test_case "conflict triage fields" `Quick
+        test_requests_json_surfaces_conflict_triage_fields;
     ];
   ]

@@ -89,6 +89,7 @@ vi.mock('./common/input', () => ({
 // ── Import after mocks ────────────────────────────────
 
 import {
+  __resetVerificationRequestsPanelForTest,
   VerificationRequestsPanel,
   filterVerificationRequests,
 } from './verification-requests-panel'
@@ -98,6 +99,9 @@ function makeRequest(overrides: Partial<VerificationRequest> = {}): Verification
     request_id: 'req-001',
     task_id: 'task-001',
     task_title: '',
+    request_kind: 'normal',
+    request_summary: '',
+    next_action: null,
     keeper: null,
     status: 'pending',
     created_at: new Date().toISOString(),
@@ -126,6 +130,7 @@ function setData(requests: VerificationRequest[]) {
 describe('VerificationRequestsPanel', () => {
   beforeEach(() => {
     mockState.value = { loading: false, error: null, data: null }
+    __resetVerificationRequestsPanelForTest()
   })
   afterEach(() => cleanup())
 
@@ -240,6 +245,38 @@ describe('VerificationRequestsPanel', () => {
       expect(empty).toBeTruthy()
       expect(empty.textContent).toContain('필터 결과 없음')
       expect(empty.textContent).toContain('1 items')
+    })
+  })
+
+  it('renders conflict-triage pending rows with summary and next action', async () => {
+    setData([
+      makeRequest({
+        request_id: 'req-conflict',
+        status: 'pending',
+        request_kind: 'conflict_triage',
+        request_summary: 'Conflict verification required: board / planning / mutation path disagree.',
+        next_action: 'Reconcile board / planning / mutation surfaces before ordinary approval.',
+      }),
+    ])
+    render(html`<${VerificationRequestsPanel} />`)
+
+    expect(screen.getByText('충돌 triage')).toBeTruthy()
+    expect(screen.getByText('일반 merged-PR 승인 금지 · triage 우선')).toBeTruthy()
+
+    fireEvent.click(screen.getByText('자세히'))
+    await waitFor(() => {
+      expect(screen.getByText('Verification Summary')).toBeTruthy()
+      expect(
+        screen.getByText(
+          'Conflict verification required: board / planning / mutation path disagree.',
+        ),
+      ).toBeTruthy()
+      expect(screen.getByText('Next Action')).toBeTruthy()
+      expect(
+        screen.getByText(
+          'Reconcile board / planning / mutation surfaces before ordinary approval.',
+        ),
+      ).toBeTruthy()
     })
   })
 })

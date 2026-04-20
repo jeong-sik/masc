@@ -9,7 +9,8 @@
 
 # #8605 umbrella — tracked in https://github.com/jeong-sik/masc-mcp/issues/8605
 lib/sdk_tool_contract.ml:377
-lib/activity_graph/activity_graph_types.ml:89
+# activity_graph_types.ml:89 (span_status_of_string) eliminated by this PR --
+# strict _opt + warn-and-default wrapper template (mirrors #8779 node_status).
 # coord.ml:132 (observe_task_transition) eliminated by #8846.
 # coord.ml:88/109 (observe_agent_lifecycle) eliminated by this PR
 # (agent_lifecycle_event variant migration).

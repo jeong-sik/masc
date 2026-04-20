@@ -23,7 +23,6 @@ specs/bug-models/FileLockStarvation.tla  lib/process/file_lock_eio.ml:52
 specs/bug-models/FileLockStarvation.tla  lib/process/file_lock_eio.ml:68
 specs/bug-models/FileLockStarvation.tla  lib/process/file_lock_eio.ml:84
 specs/bug-models/HebbianLearning.tla  lib/hebbian_eio.ml:264
-specs/bug-models/KeeperTaskInterlock.tla  lib/types/types_core.ml:335
 specs/bug-models/SessionRegistryGhost.tla  lib/session.ml:49
 specs/bug-models/SessionRegistryGhost.tla  lib/session.ml:70
 specs/bug-models/SSEBroadcastBlock.tla  lib/sse.ml:649

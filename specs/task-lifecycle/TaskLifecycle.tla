@@ -2,7 +2,7 @@
 (* TLA+ spec for the MASC task lifecycle and the AwaitingVerification gate.
 
    Covers the 6-state lifecycle exposed by the OCaml [task_status] type
-   in `lib/types/types_core.ml:335-348`:
+   in `lib/types/types_core.ml:task_status`:
 
      Todo / Claimed / InProgress / AwaitingVerification / Done / Cancelled
 

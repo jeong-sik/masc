@@ -334,31 +334,27 @@ let view_meta_strip (r : Archive_runs_types.response) =
 
 let render (r : Archive_runs_types.response) : Node.t =
   let total = r.total in
-  Node.div
-    ~attrs:[ Style.root ]
-    [ Placeholder_view.sidebar ~active:Archive_runs
-    ; Node.div
-        ~attrs:[ Style.main ]
-        [ Hero.view
-            ~eyebrow:"archive · autoresearch"
-            ~title:"archive runs"
-            ~tail:(Printf.sprintf "· %d" total, `Brass)
-            ~sub:
-              "autoresearch의 reinforced-write loop 기록. 각 row는 \
-               목표 · cycle progress · keeps/discards 의 총합. 실패한 \
-               run은 error 사유를 함께 남긴다."
-            ()
-        ; view_meta_strip r
-        ; (match r.loops with
-           | [] ->
-             Node.div
-               ~attrs:[ Style.quiet ]
-               [ Node.text "no runs recorded yet." ]
-           | loops ->
-             Node.div
-               ~attrs:[ Style.loop_list ]
-               (List.map loops ~f:view_loop))
-        ]
+  Shell_view.view
+    ~active:Archive_runs
+    [ Hero.view
+        ~eyebrow:"archive · autoresearch"
+        ~title:"archive runs"
+        ~tail:(Printf.sprintf "· %d" total, `Brass)
+        ~sub:
+          "autoresearch의 reinforced-write loop 기록. 각 row는 \
+           목표 · cycle progress · keeps/discards 의 총합. 실패한 \
+           run은 error 사유를 함께 남긴다."
+        ()
+    ; view_meta_strip r
+    ; (match r.loops with
+       | [] ->
+         Node.div
+           ~attrs:[ Style.quiet ]
+           [ Node.text "no runs recorded yet." ]
+       | loops ->
+         Node.div
+           ~attrs:[ Style.loop_list ]
+           (List.map loops ~f:view_loop))
     ]
 ;;
 

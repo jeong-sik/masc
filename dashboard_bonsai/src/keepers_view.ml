@@ -154,38 +154,34 @@ let view_hud_strip (keepers : Keepers_types.response) =
 
 let render (keepers : Keepers_types.response) : Node.t =
   let has_fleet = not (List.is_empty keepers.keepers) in
-  Node.div
-    ~attrs:[ Style.root ]
-    [ Placeholder_view.sidebar ~active:Keepers
-    ; Node.div
-        ~attrs:[ Style.main ]
-        [ view_hero keepers
-        ; view_hud_strip keepers
-        ; (if has_fleet
-           then
-             Node.div
-               ~attrs:[]
-               [ Sec.view ~title:"roster" ~sub:"현재"
-                   ~right:
-                     (Printf.sprintf
-                        "fleet %d"
-                        (List.length keepers.keepers))
-                   ()
-               ; Roster.view ~keepers ()
-               ; Sec.view ~title:"swim" ~sub:"60s"
-                   ~right:"lane · activity" ()
-               ; Swim.view ~keepers ()
-               ; Sec.view ~title:"pressure" ~sub:"60m"
-                   ~right:"ctx %" ()
-               ; Ctx_chart.view ~keepers ()
-               ]
-           else
-             Node.div
-               ~attrs:[ Style.quiet ]
-               [ Node.text
-                   "fleet endpoint is quiet — no keepers reported yet."
-               ])
-        ]
+  Shell_view.view
+    ~active:Keepers
+    [ view_hero keepers
+    ; view_hud_strip keepers
+    ; (if has_fleet
+       then
+         Node.div
+           ~attrs:[]
+           [ Sec.view ~title:"roster" ~sub:"현재"
+               ~right:
+                 (Printf.sprintf
+                    "fleet %d"
+                    (List.length keepers.keepers))
+               ()
+           ; Roster.view ~keepers ()
+           ; Sec.view ~title:"swim" ~sub:"60s"
+               ~right:"lane · activity" ()
+           ; Swim.view ~keepers ()
+           ; Sec.view ~title:"pressure" ~sub:"60m"
+               ~right:"ctx %" ()
+           ; Ctx_chart.view ~keepers ()
+           ]
+       else
+         Node.div
+           ~attrs:[ Style.quiet ]
+           [ Node.text
+               "fleet endpoint is quiet — no keepers reported yet."
+           ])
     ]
 ;;
 

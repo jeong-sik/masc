@@ -145,23 +145,19 @@ let render (keepers : Keepers_types.response) : Node.t =
     | "" -> "—"
     | ts -> Printf.sprintf "%s UTC" (hhmmss_of_iso ts)
   in
-  Node.div
-    ~attrs:[ Style.root ]
-    [ Placeholder_view.sidebar ~active:Dead_keepers
-    ; Node.div
-        ~attrs:[ Style.main ]
-        [ Hero.view
-            ~eyebrow:"crypt · the fallen"
-            ~title:"dead keepers"
-            ~tail:(Printf.sprintf "· %02d" dead_n, `Blood)
-            ~sub:
-              "fleet의 추락한 자들. 이 목록은 Keepers 엔드포인트의 status=Dead \
-               필터링 — 별도 endpoint 없음. 각 slot은 마지막으로 관측된 \
-               state와 latency를 기록한다."
-            ()
-        ; view_meta_strip ~total ~dead:dead_n ~synced
-        ; view_dead_list dead
-        ]
+  Shell_view.view
+    ~active:Dead_keepers
+    [ Hero.view
+        ~eyebrow:"crypt · the fallen"
+        ~title:"dead keepers"
+        ~tail:(Printf.sprintf "· %02d" dead_n, `Blood)
+        ~sub:
+          "fleet의 추락한 자들. 이 목록은 Keepers 엔드포인트의 status=Dead \
+           필터링 — 별도 endpoint 없음. 각 slot은 마지막으로 관측된 \
+           state와 latency를 기록한다."
+        ()
+    ; view_meta_strip ~total ~dead:dead_n ~synced
+    ; view_dead_list dead
     ]
 ;;
 

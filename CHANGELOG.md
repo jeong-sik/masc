@@ -1,27 +1,57 @@
 # Changelog
 
 
-## Unreleased
+## [0.12.1] - 2026-04-20
+
+Patch release consolidating nine PRs landed on main after v0.12.0 was
+tagged earlier the same day. Primary driver: pick up #9016
+(symbol-anchor allowlist format) so the #8605 family lint gate no
+longer carries the line-number DET assumption that caused the cycle 26
+drift incident.
 
 ### Added
 
-- **`Cdal_judge` jest / vitest classifier.**  `of_exec_outcome`
-  now emits typed `Test_pass {count}` / `Test_fail {count}`
-  markers for jest and vitest runner output in addition to dune,
-  cargo, alcotest, pytest, and go test.  Detection anchors on the
-  runner-specific summary banners — `Test Suites:` for jest,
-  `Test Files ` for vitest — so bare prose or user-visible text
-  mentioning "Tests" or "passed" cannot false-positive.  Count is
-  extracted from the `Tests:` / `Tests` summary line by scanning
-  for " passed" / " failed" and reading the int immediately
-  before the tag.  This correctly handles vitest's pipe-delimited
-  failure lines (`Tests  2 failed | 3 passed (5)` →
-  `Test_fail {count=2}`).  Banner-required behaviour is covered
-  by a dedicated negative test (`test_jest_vitest_banner_
-  required`).  Verifier cascade now covers dune + cargo + pytest
-  + go test + jest + vitest, bringing JavaScript-ecosystem
-  runner output (Kidsnote FE repos, most npm projects) into the
-  same typed-marker surface the rest of the cascade consumes.
+- **Docker-routed reads for hardened keepers** (#8977, RFC-0006 Phase
+  B-2). `keeper_shell` read-path operations now exit the host sandbox
+  via docker exec, closing the symmetric containment gap opened by
+  Phase B-1 for write paths.
+- **Double-quote string literal support in exec parser** (#9015, P5
+  Tick 31). Parser now accepts `"..."` alongside `'...'` in shell
+  token splitting, matching operator expectation and eliminating a
+  silent mis-split class.
+- **Bonsai dashboard heartbeat bars** (#9019). Heartbeat strip reads
+  live from `Logs` entries rather than a polled summary, removing a
+  stale-snapshot intermediate layer.
+- **`Cdal_judge` jest / vitest classifier** (#9025, P6 Tick 32).
+
+### Fixed
+
+- **Symbol-anchor allowlist format** (#9016). The `#8605` family lint
+  allowlist now accepts `path::symbol` entries alongside the legacy
+  `path:line` form. Symbol anchor is stable across line drift — the
+  entry stays valid while the enclosing `let <symbol>` keeps its
+  name. Removes the DET failure mode behind cycle 26 drift incidents.
+
+### Changed
+
+- **Bonsai dashboard observation-first copy cleanup** (#9023).
+  Dashboard strings rewritten to observation-focused language per
+  memory `feedback_dashboard-observation-focus.md` — less
+  explanation, more signal.
+- **SocialStateCap TLA+ spec migration** (#9020). Moved into
+  `specs/` and retired the orphan `tla/` directory; TLC coverage now
+  discovers it via the unified root.
+
+### Docs
+
+- **Spec path/line corrections**: `FileLockStarvation` +
+  `SSEBroadcastBlock` preludes (#9017). Keeps TLA+ → OCaml mapping
+  accurate after recent refactors.
+- **Batch-18 `.mli` annotations** (#9024): `tool_local_runtime_status`
+  + `keeper_chat_store` + `tool_unified`. Continues the `#8605`
+  umbrella's module-interface-surface work.
+
+## Unreleased
 
 ## [0.12.0] - 2026-04-20
 

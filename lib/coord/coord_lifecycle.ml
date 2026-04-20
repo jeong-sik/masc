@@ -107,7 +107,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
            "{\"type\":\"agent_join\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
            nickname agent_type new_session_id (now_iso ()));
          (Atomic.get Coord_hooks.observe_agent_lifecycle_fn) config ~agent_id:nickname
-           ~event_kind:"rejoin"
+           ~event:Coord_hooks.Lifecycle_rejoin
            ~details:
              (`Assoc
                [
@@ -171,7 +171,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
     (now_iso ()));
   (Atomic.get Coord_hooks.observe_agent_lifecycle_fn) config ~agent_id:nickname
-    ~event_kind:"join"
+    ~event:Coord_hooks.Lifecycle_join
     ~details:
       (`Assoc
         [
@@ -229,7 +229,7 @@ let leave config ~agent_name =
       "{\"type\":\"agent_leave\",\"agent\":\"%s\",\"ts\":\"%s\"}"
       actual_name (now_iso ()));
     (Atomic.get Coord_hooks.observe_agent_lifecycle_fn) config ~agent_id:actual_name
-      ~event_kind:"leave"
+      ~event:Coord_hooks.Lifecycle_leave
       ~details:`Null;
 
     (* Record co-presence relationships via hook (async, non-blocking) *)

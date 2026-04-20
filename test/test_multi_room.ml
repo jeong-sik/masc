@@ -94,8 +94,8 @@ let test_join_uses_default_namespace () =
       Fun.protect
         ~finally:(fun () -> Atomic.set Coord_hooks.observe_agent_lifecycle_fn previous_hook)
         (fun () ->
-          Atomic.set Coord_hooks.observe_agent_lifecycle_fn (fun _config ~agent_id:_ ~event_kind ~details:_ ->
-              captured_event_kind := Some event_kind);
+          Atomic.set Coord_hooks.observe_agent_lifecycle_fn (fun _config ~agent_id:_ ~event ~details:_ ->
+              captured_event_kind := Some (Coord_hooks.agent_lifecycle_event_to_string event));
           let result =
             Coord.join config ~agent_name:"claude"
               ~capabilities:[ "debug" ] ()

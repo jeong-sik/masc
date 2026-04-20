@@ -11,9 +11,7 @@
 lib/sdk_tool_contract.ml:377
 lib/activity_graph/activity_graph_types.ml:89
 # coord.ml:132 (observe_task_transition) eliminated by #8846.
-# coord.ml:81/102 (observe_agent_lifecycle) still string-based; lines shifted to
-# 88/109 after #8846's insertions. Migration pending in #8842.
-lib/coord.ml:88
-lib/coord.ml:109
+# coord.ml:88/109 (observe_agent_lifecycle) eliminated by this PR
+# (agent_lifecycle_event variant migration).
 lib/eval_harness.ml:370
 lib/types/types_auth.ml:83

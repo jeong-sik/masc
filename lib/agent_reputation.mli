@@ -23,6 +23,9 @@ type agent_reputation = {
   accountability_evidence_coverage: float;
   accountability_unsupported_completion_rate: float;
   accountability_open_overdue_commitments: int;
+  accountability_keeper_name: string; (** Keeper identity used for accountability lookup. *)
+  accountability_source: string; (** direct_agent | canonical_keeper_fallback | none *)
+  accountability_source_label: string; (** Operator-facing provenance label. *)
   overall_score: float;       (** Weighted composite after accountability penalty, 0.0-1.0 *)
 }
 

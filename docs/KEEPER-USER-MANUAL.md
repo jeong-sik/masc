@@ -319,6 +319,72 @@ guardrail:
 - team memory는 keeper context에서만 허용되고, `room`은 항상 `default`여야 한다.
 - `legacy_local`는 `network_mode=none`을 허용하지 않는다. `none`은 `docker_hardened`와 함께 써야 한다.
 
+### 3.1.2 Legendary Bash 도구 표면
+
+`keeper_bash` 및 형제 도구(`keeper_bash_output`, `keeper_bash_kill`)는
+claude-code BashTool / BashOutput / KillShell 시맨틱을 OCaml + Eio로
+체화한 Legendary Bash 구현이다. 운영자 flag 매트릭스와 flip 절차는
+[`LEGENDARY-BASH-RUNBOOK.md`](./LEGENDARY-BASH-RUNBOOK.md) 단일 문서가
+SSOT다. 여기서는 keeper 운영자 입장에서 알아야 할 호출 규약만 짧게
+정리한다.
+
+#### `keeper_bash`
+
+한 번 호출에 **하나의 명령**만 실행한다. `&&` / `||` / `;` 체이닝,
+파이프(`|`), 리다이렉트(`>`, `>>`)는 사전 gate에서 거부된다. 필요한
+경우 호출을 나눠 발행해야 한다.
+
+| 필드 | 기본값 | 의미 |
+| --- | --- | --- |
+| `cmd` | 필수 | 실행할 단일 명령. 예: `dune build`, `rg foo lib/`. |
+| `cwd` | keeper playground | 허용된 경로 내에서만 지정 가능. `repos/X` 같은 상대 경로가 자동 해석된다. |
+| `timeout_sec` | 30 (최대 180) | 초 단위 타임아웃. `run_in_background=true`에서 `0`이면 무한. |
+| `run_in_background` | false | `true`이면 즉시 `background_task_id`와 함께 반환, 실제 실행은 백그라운드에서 계속된다. |
+
+응답 JSON에는 `status` / `stdout` / `stderr` 외에, 운영자 flag가 켜져
+있을 때만 다음 추가 필드가 포함된다. 세부 시맨틱은 RUNBOOK 참조.
+
+- `return_code_interpretation` — `MASC_BASH_SEMANTIC_EXIT`가 기본 on.
+  타입화된 `semantic_exit` 해석 (예: `git_not_a_repo`, `tool_missing`).
+- `verifiable_markers` — `MASC_BASH_VERIFIABLE_MARKERS`가 기본 on.
+  `Test_pass {count}`, `Build_ok`, `Lint_clean` 등 verifier cascade가
+  regex scraping 없이 소비할 수 있는 타입 마커.
+- `promoted` / `background_task_id` / `partial_output` —
+  `MASC_BASH_AUTO_BG=true` 상태에서 foreground 실행이 blocking budget
+  (`MASC_BLOCKING_BUDGET_MS`, 기본 15 000 ms)을 넘으면 자동으로 bg로
+  승격되어 삽입된다. 기본은 opt-in, flip 전 `AUTO_BG_OBSERVE` observer가
+  prod 데이터를 먼저 누적한다.
+
+#### 백그라운드 작업 생명주기
+
+`run_in_background=true`로 시작한 작업은 `keeper_bash_output`으로
+증분 폴링하고 `keeper_bash_kill`로 종료한다.
+
+`keeper_bash_output` 응답:
+
+- `stdout_since` / `stderr_since`에 누적 오프셋이 들어온다. 다음 폴링
+  호출에서 그 값을 다시 전달해 중복 읽기를 방지한다.
+- `closed=true`이면 프로세스가 종료된 뒤다. `exit`과 함께 고정된 최종
+  `semantic_exit`을 확인할 수 있다.
+- 현재 구현은 stderr를 stdout으로 병합하므로 stderr 측 커서는 대개 비어
+  있다.
+
+`keeper_bash_kill`:
+
+- 기본 SIGTERM → grace 2.0 s → SIGKILL 순서로 tree-kill한다. 프로세스
+  그룹 전체 (`-pgid`)를 대상으로 하므로 자식 fiber까지 함께 종료된다.
+- 이미 종료된 task에 대해서도 idempotent하게 안전하다.
+- `grace_sec`은 최대 30 초까지 조정 가능하다.
+
+#### 관찰 & 롤아웃
+
+dark-launch observer 두 개 (`MASC_BASH_AST_SHADOW_LOG`,
+`MASC_BASH_AUTO_BG_OBSERVE`)는 **기본 off**이며, operator가 flip 전
+prod 증거를 수집할 때 켠다. 로그 라인 포맷과 grep recipe, flip
+기준은 [`LEGENDARY-BASH-RUNBOOK.md`](./LEGENDARY-BASH-RUNBOOK.md)
+단일 문서를 따른다. env flag 전체 표는
+[`ENV-CONTRACT.md §4`](./ENV-CONTRACT.md)에 정의되어 있다.
+
 ### 3.2 페르소나 로드 필드 (Profile-Loaded)
 
 `profile.json` 매니페스트에서 로드되는 필드. `-`(빈 값)이면 매니페스트에 해당 키가 없는 것이다.
@@ -785,3 +851,5 @@ dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이
 | [QUICK-START.md](./QUICK-START.md) | repo coordination 시작 경로 |
 | [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md) | historical compatibility lane |
 | [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARCHITECTURE-SSOT.md) | 아키텍처 SSOT |
+| [LEGENDARY-BASH-RUNBOOK.md](./LEGENDARY-BASH-RUNBOOK.md) | `keeper_bash` flag matrix + dark-launch observer 절차 |
+| [ENV-CONTRACT.md](./ENV-CONTRACT.md) | 환경변수 reload class + Legendary Bash §4 |

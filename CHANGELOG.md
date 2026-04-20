@@ -40,6 +40,18 @@
   of OCaml-only coverage so Python-test keepers get the same typed
   marker stream as dune keepers.
 
+- **KEEPER-USER-MANUAL §3.1.2 Legendary Bash 도구 표면.**  New
+  subsection documents the three-tool surface (`keeper_bash`,
+  `keeper_bash_output`, `keeper_bash_kill`) at the level a keeper
+  operator reads: call-schema contract, single-command / no-chaining
+  rule, the three flag-gated optional response fields
+  (`return_code_interpretation`, `verifiable_markers`, promoted
+  triple), and the background polling / tree-kill lifecycle.  Points
+  operators at the existing `LEGENDARY-BASH-RUNBOOK.md` /
+  `ENV-CONTRACT.md §4` as SSOT for flag matrices.  Adds both files
+  to the manual's 관련 문서 appendix so new keeper operators land on
+  the procedure docs.  No code change.
+
 - **Legendary Bash operator runbook.**  New
   `docs/LEGENDARY-BASH-RUNBOOK.md` consolidates the P1–P6 rollout
   surface: current flag state table, authoritative opt-out tokens,

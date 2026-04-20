@@ -205,3 +205,16 @@ let auto_bg_promotion_rate (s : snapshot) : float =
   safe_ratio
     ~num:s.auto_bg_would_have_promoted
     ~den:s.auto_bg_observed
+
+let snapshot_to_json_with_ratios (s : snapshot) : Yojson.Safe.t =
+  match snapshot_to_json s with
+  | `Assoc fields ->
+      `Assoc (fields @ [
+        ("ratios",
+         `Assoc [
+           ("disagree_ratio", `Float (disagree_ratio s));
+           ("shadow_parse_coverage", `Float (shadow_parse_coverage s));
+           ("auto_bg_promotion_rate", `Float (auto_bg_promotion_rate s));
+         ]);
+      ])
+  | other -> other

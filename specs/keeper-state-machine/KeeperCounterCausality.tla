@@ -5,7 +5,7 @@
 \*   - rg "last_cause|last_incremented|last_bumped" lib/ -t ml -> 0 hits
 \*   - .claude/plans/curried-moseying-whisper.md (referenced below) -> 0 hits
 \* The OCaml side has the counters themselves
-\* (lib/dashboard/dashboard_http_keeper.ml:763-776) but no
+\* (lib/dashboard/dashboard_http_keeper.ml:keepers_dashboard_json) but no
 \* {last_incremented_at, last_cause_event} pair paired with them; the
 \* Agent Modal hover tooltip described in the redesign is not wired.
 \* NOT in scripts/tla-check.sh runner -- this spec records the design

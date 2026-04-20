@@ -37,8 +37,8 @@
 \*   observed_turns    | succ_turns + fail_turn                      | lib/dashboard/dashboard_http_keeper.ml:89
 \*
 \* Aggregation entry point:
-\*   lib/dashboard/dashboard_http_keeper.ml:65 (compute_outcomes_rollup)
-\*   — called at line 530 from the per-keeper detail JSON builder.
+\*   lib/dashboard/dashboard_http_keeper.ml:compute_outcomes_rollup
+\*   — called from the per-keeper detail JSON builder.
 \*
 \* SCOPE DRIFT (worth knowing, NOT a spec violation):
 \*   The OCaml comment above compute_outcomes_rollup (lines 60-64) reads:

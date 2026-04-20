@@ -121,3 +121,14 @@ val auto_bg_promotion_rate : snapshot -> float
     tuning ("would promotion fire too often?") and the
     [MASC_BASH_AUTO_BG] default-flip decision ("is promotion rare
     enough to be tolerable?"). *)
+
+val snapshot_to_json_with_ratios : snapshot -> Yojson.Safe.t
+(** Same flat field set as {!snapshot_to_json}, with an additional
+    ["ratios"] sibling object containing the three derived ratios
+    ({!disagree_ratio}, {!shadow_parse_coverage},
+    {!auto_bg_promotion_rate}).  Consumers that prefer server-computed
+    flip-decision math over client-side arithmetic should call this
+    helper; the flat fields remain a 1:1 mirror of {!snapshot} so
+    existing dashboards keep working.  All ratio values are finite
+    ([0.0] when the denominator is zero), so the output remains a
+    valid JSON document regardless of observer state. *)

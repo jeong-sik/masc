@@ -217,16 +217,25 @@ Response shape (field names mirror `Legendary_counters.snapshot` 1:1):
   "too_complex_background": 0,
   "too_complex_parse_error": 0,
   "too_complex_parse_aborted": 0,
-  "too_complex_other": 0
+  "too_complex_other": 0,
+  "ratios": {
+    "disagree_ratio": 0.0,
+    "shadow_parse_coverage": 0.0,
+    "auto_bg_promotion_rate": 0.0
+  }
 }
 ```
 
 Every counter stays at `0` until the matching observer env flag is
 set, so the endpoint itself is cost-free under default posture. The
-log stream and the counter snapshot are redundant on purpose: logs
-for point-in-time diagnostics, counters for `disagree ratio =
-(legacy_allow_shadow_deny + legacy_deny_shadow_allow) / gate_diff_total`
-trend math over a rolling window.
+`ratios` sibling surfaces the three flip-decision ratios server-side
+so dashboards and shell recipes do not have to re-derive them (and
+can no longer drift from the
+[`Legendary_counters` SSOT helpers](#derived-ratios-ssot)). All three
+values are finite floats — the endpoint never emits `NaN` / `inf`,
+even when every counter is `0`. The log stream and the counter
+snapshot remain redundant on purpose: logs for point-in-time
+diagnostics, counters for trend math over a rolling window.
 
 ### Derived ratios (SSOT)
 

@@ -28,6 +28,7 @@
 ; ============================================================
 (tests
  (names test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_audit_log test_http_negotiation
+        test_attempt_state
         test_sse test_cancellation test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_spawn
@@ -139,6 +140,7 @@
         test_mid_turn_resume
         test_lockfree_atomic)
  (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_audit_log test_http_negotiation
+          test_attempt_state
           test_sse test_cancellation test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_spawn

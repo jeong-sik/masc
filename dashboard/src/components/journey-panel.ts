@@ -489,9 +489,10 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
   const contextSummary = keeper?.context_tokens != null && keeper?.context_max != null
     ? `${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}`
     : null
+  const showExtended = useSignal(false)
 
   return html`
-    <${Card} class="flex flex-col gap-4">
+    <${Card} class="flex flex-col gap-5 bg-gradient-to-br from-[rgba(var(--white-rgb,255),0.08)] via-[rgba(var(--white-rgb,255),0.04)] to-[rgba(var(--white-rgb,255),0.06)] border border-[var(--white-10)] backdrop-blur-md">
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-2">
@@ -548,160 +549,180 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
         </div>
       </div>
 
-      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <${JourneyTile} label="Task">
-          ${task
-            ? html`
-                <div class="font-mono text-xs text-[var(--text-strong)]">${task.id}</div>
-                ${task.assignee
-                  ? html`<div>담당: <strong class="text-[var(--text-strong)]">${task.assignee}</strong></div>`
-                  : html`<${TileHint} text="아직 assignee가 없습니다." />`}
-                ${task.updated_at
-                  ? html`<div class="text-xs text-[var(--text-muted)]">최근 갱신 <${TimeAgo} timestamp=${task.updated_at} /></div>`
-                  : null}
-              `
-            : html`<${TileHint} text="현재 연결된 task 없이 keeper 연속성만 추적 중입니다." />`}
-        <//>
-
-        <${JourneyTile} label="Run">
-          ${record.sessionId
-            ? html`<div><span class="text-[var(--text-dim)]">session</span><div class="mt-1 font-mono text-xs text-[var(--text-strong)]">${truncate(record.sessionId, 24)}</div></div>`
-            : html`<${TileHint} text="아직 session_id가 연결되지 않았습니다." />`}
-          ${record.operationId
-            ? html`<div><span class="text-[var(--text-dim)]">operation</span><div class="mt-1 font-mono text-xs text-[var(--text-strong)]">${truncate(record.operationId, 24)}</div></div>`
-            : null}
-          ${record.workerRunId
-            ? html`<div><span class="text-[var(--text-dim)]">worker run</span><div class="mt-1 font-mono text-xs text-[var(--text-strong)]">${truncate(record.workerRunId, 24)}</div></div>`
-            : null}
-          ${trimText(record.executionSession?.goal ?? record.missionSession?.goal, 90)
-            ? html`<div class="text-xs leading-relaxed text-[var(--text-muted)]">${trimText(record.executionSession?.goal ?? record.missionSession?.goal, 90)}</div>`
-            : null}
-        <//>
-
-        <${JourneyTile} label="Contract">
-          ${task
-            ? html`
-                <div class="flex flex-wrap items-center gap-2">
-                  <${StatusChip} tone=${task.contract?.strict ? 'info' : 'neutral'}>
-                    ${task.contract?.strict ? 'strict' : 'advisory'}
-                  <//>
-                  ${task.status === 'awaiting_verification'
-                    ? html`<${StatusChip} tone="select">verification pending<//>`
+      <div class="flex flex-col gap-4">
+        <div class="grid gap-3 md:grid-cols-2">
+          <${JourneyTile} label="Task">
+            ${task
+              ? html`
+                  <div class="font-mono text-xs text-[var(--text-strong)]">${task.id}</div>
+                  ${task.assignee
+                    ? html`<div>담당: <strong class="text-[var(--text-strong)]">${task.assignee}</strong></div>`
+                    : html`<${TileHint} text="아직 assignee가 없습니다." />`}
+                  ${task.updated_at
+                    ? html`<div class="text-xs text-[var(--text-muted)]">최근 갱신 <${TimeAgo} timestamp=${task.updated_at} /></div>`
                     : null}
-                </div>
-                <div class="grid grid-cols-3 gap-2">
-                  <${MetricChip} label="completion" value=${completionItems.length} />
-                  <${MetricChip} label="unmet" value=${unmetItems.length} tone=${unmetItems.length > 0 ? 'bad' : 'ok'} />
-                  <${MetricChip} label="evidence" value=${requiredEvidence.length} />
-                </div>
-                ${unmetItems.length > 0
-                  ? html`<div class="text-xs leading-relaxed text-[var(--warn)]">${unmetItems.slice(0, 2).join(' · ')}</div>`
-                  : null}
-              `
-            : keeper?.runtime_blocker_class === 'completion_contract_violation'
-              ? html`<div class="text-xs leading-relaxed text-[var(--bad-light)]">최근 runtime blocker가 completion contract violation으로 관측됐습니다.</div>`
-              : html`<${TileHint} text="현재 contract gate가 연결된 task가 없습니다." />`}
-        <//>
+                `
+              : html`<${TileHint} text="현재 연결된 task 없이 keeper 연속성만 추적 중입니다." />`}
+          <//>
 
-        <${JourneyTile} label="Keeper">
-          ${keeper
-            ? html`
-                <div class="flex flex-wrap items-center gap-2">
-                  <div class="font-semibold text-[var(--text-strong)]">${keeper.name}</div>
-                  ${keeper.phase ? html`<${StatusChip} tone=${keeperStateTone(keeper.phase)}>${keeper.phase}<//>` : null}
-                  <${StatusChip} tone=${keeperStateTone(keeper.status)}>${keeper.status}<//>
-                </div>
-                <div class="flex flex-wrap gap-3 text-xs text-[var(--text-muted)]">
-                  <span>ctx ${formatPct(keeper.context_ratio)}</span>
-                  ${contextSummary ? html`<span>${contextSummary}</span>` : null}
-                  ${keeper.last_activity_ago_s != null ? html`<span>활동 ${formatAgeSeconds(keeper.last_activity_ago_s)}</span>` : null}
-                </div>
-                ${trimText(record.continuity?.continuity_summary ?? record.continuity?.note, 100)
-                  ? html`<div class="text-xs leading-relaxed text-[var(--text-muted)]">${trimText(record.continuity?.continuity_summary ?? record.continuity?.note, 100)}</div>`
-                  : null}
-              `
-            : html`<${TileHint} text="현재 task에 연결된 keeper가 없습니다." />`}
-        <//>
+          <${JourneyTile} label="Run">
+            ${record.sessionId
+              ? html`<div><span class="text-[var(--text-dim)]">session</span><div class="mt-1 font-mono text-xs text-[var(--text-strong)]">${truncate(record.sessionId, 24)}</div></div>`
+              : html`<${TileHint} text="아직 session_id가 연결되지 않았습니다." />`}
+            ${record.operationId
+              ? html`<div><span class="text-[var(--text-dim)]">operation</span><div class="mt-1 font-mono text-xs text-[var(--text-strong)]">${truncate(record.operationId, 24)}</div></div>`
+              : null}
+            ${record.workerRunId
+              ? html`<div><span class="text-[var(--text-dim)]">worker run</span><div class="mt-1 font-mono text-xs text-[var(--text-strong)]">${truncate(record.workerRunId, 24)}</div></div>`
+              : null}
+            ${trimText(record.executionSession?.goal ?? record.missionSession?.goal, 90)
+              ? html`<div class="text-xs leading-relaxed text-[var(--text-muted)]">${trimText(record.executionSession?.goal ?? record.missionSession?.goal, 90)}</div>`
+              : null}
+          <//>
 
-        <${JourneyTile} label="Thinking">
-          ${keeper?.pipeline_stage
-            ? html`<${StatusChip} tone=${pipelineTone(keeper.pipeline_stage)}>${keeper.pipeline_stage}<//>`
-            : html`<${TileHint} text="thinking stage가 아직 보고되지 않았습니다." />`}
-          ${keeper?.skill_primary
-            ? html`<div><span class="text-[var(--text-dim)]">skill</span><div class="mt-1 font-semibold text-[var(--text-strong)]">${keeper.skill_primary}</div></div>`
-            : null}
-          ${trimText(keeper?.skill_reason ?? keeper?.recent_input_preview ?? record.worker?.focus, 100)
-            ? html`<div class="text-xs leading-relaxed text-[var(--text-muted)]">${trimText(keeper?.skill_reason ?? keeper?.recent_input_preview ?? record.worker?.focus, 100)}</div>`
-            : null}
-        <//>
-
-        <${JourneyTile} label="Memory">
-          ${trimText(keeper?.memory_recent_note, 100)
-            ? html`<div class="text-xs leading-relaxed text-[var(--text-body)]">${trimText(keeper?.memory_recent_note, 100)}</div>`
-            : html`<${TileHint} text="최근 memory note가 아직 없습니다." />`}
-          ${keeper?.metrics_window
-            ? html`
-                <div class="grid grid-cols-3 gap-2">
-                  <${MetricChip} label="pass" value=${formatPct(keeper.metrics_window.memory_pass_rate)} tone="ok" />
-                  <${MetricChip} label="checks" value=${keeper.metrics_window.memory_checks ?? 0} />
-                  <${MetricChip} label="compact" value=${keeper.compaction_count ?? keeper.metrics_window.memory_compaction_events ?? 0} tone="warn" />
-                </div>
-              `
-            : null}
-        <//>
-
-        <${JourneyTile} label="Turn">
-          ${keeper
-            ? html`
-                <div class="grid grid-cols-3 gap-2">
-                  <${MetricChip} label="turns" value=${keeper.turn_count ?? keeper.total_turns ?? 0} />
-                  <${MetricChip} label="last" value=${formatAgeSeconds(keeper.last_turn_ago_s)} tone="info" />
-                  <${MetricChip} label="auto" value=${keeper.autonomous_turn_count ?? 0} />
-                </div>
-                ${keeper.runtime_blocker_summary
-                  ? html`<div class="text-xs leading-relaxed text-[var(--warn)]">${trimText(keeper.runtime_blocker_summary, 100)}</div>`
-                  : null}
-              `
-            : html`<${TileHint} text="연결된 keeper turn 정보가 없습니다." />`}
-        <//>
-
-        <${JourneyTile} label="Life">
-          ${lifeEntries.length > 0
-            ? html`
-                ${lifeEntries.map((entry) => html`
-                  <div key=${entry.id} class="rounded border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
-                    <div class="flex items-center justify-between gap-2">
-                      <${StatusChip} tone=${entry.source === 'journal' ? 'info' : entry.source === 'handoff' ? 'warn' : 'neutral'} uppercase=${false}>
-                        ${entry.source}
-                      <//>
-                      ${entry.timestamp ? html`<${TimeAgo} timestamp=${entry.timestamp} class="text-2xs text-[var(--text-dim)]" />` : null}
-                    </div>
-                    <div class="mt-2 text-xs leading-relaxed text-[var(--text-body)]">${entry.text}</div>
+          <${JourneyTile} label="Contract" class="md:col-span-2">
+            ${task
+              ? html`
+                  <div class="flex flex-wrap items-center gap-2">
+                    <${StatusChip} tone=${task.contract?.strict ? 'info' : 'neutral'}>
+                      ${task.contract?.strict ? 'strict' : 'advisory'}
+                    <//>
+                    ${task.status === 'awaiting_verification'
+                      ? html`<${StatusChip} tone="select">verification pending<//>`
+                      : null}
                   </div>
-                `)}
-              `
-            : html`<${TileHint} text="현재 컨텍스트에 엮인 recent life signal이 없습니다." />`}
-        <//>
+                  <div class="grid grid-cols-3 gap-2">
+                    <${MetricChip} label="completion" value=${completionItems.length} />
+                    <${MetricChip} label="unmet" value=${unmetItems.length} tone=${unmetItems.length > 0 ? 'bad' : 'ok'} />
+                    <${MetricChip} label="evidence" value=${requiredEvidence.length} />
+                  </div>
+                  ${unmetItems.length > 0
+                    ? html`<div class="text-xs leading-relaxed text-[var(--warn)]">${unmetItems.slice(0, 2).join(' · ')}</div>`
+                    : null}
+                `
+              : keeper?.runtime_blocker_class === 'completion_contract_violation'
+                ? html`<div class="text-xs leading-relaxed text-[var(--bad-light)]">최근 runtime blocker가 completion contract violation으로 관측됐습니다.</div>`
+                : html`<${TileHint} text="현재 contract gate가 연결된 task가 없습니다." />`}
+          <//>
 
-        <${JourneyTile} label="Cascade">
-          ${keeper
-            ? html`
-                <div class="flex flex-wrap items-center gap-2">
-                  ${keeper.cascade_name ? html`<${StatusChip} tone="info">${keeper.cascade_name}<//>` : null}
-                  ${keeper.active_model ? html`<${StatusChip} tone="neutral" uppercase=${false}>${keeper.active_model}<//>` : null}
-                </div>
-                <div class="text-xs text-[var(--text-muted)]">
-                  ${keeper.last_model_used || keeper.model ? html`last ${keeper.last_model_used ?? keeper.model}` : 'model 기록 없음'}
-                </div>
-                ${keeper.next_model_hint
-                  ? html`<div class="text-xs text-[var(--text-muted)]">next ${keeper.next_model_hint}</div>`
-                  : null}
-                ${keeper.metrics_window?.fallback_rate != null
-                  ? html`<div class="text-xs text-[var(--text-muted)]">fallback ${formatPct(keeper.metrics_window.fallback_rate)}</div>`
-                  : null}
-              `
-            : html`<${TileHint} text="cascade 선택 정보는 keeper runtime에서만 노출됩니다." />`}
-        <//>
+          <${JourneyTile} label="Keeper" class="md:col-span-2">
+            ${keeper
+              ? html`
+                  <div class="flex flex-wrap items-center gap-2">
+                    <div class="font-semibold text-[var(--text-strong)]">${keeper.name}</div>
+                    ${keeper.phase ? html`<${StatusChip} tone=${keeperStateTone(keeper.phase)}>${keeper.phase}<//>` : null}
+                    <${StatusChip} tone=${keeperStateTone(keeper.status)}>${keeper.status}<//>
+                  </div>
+                  <div class="flex flex-wrap gap-3 text-xs text-[var(--text-muted)]">
+                    <span>ctx ${formatPct(keeper.context_ratio)}</span>
+                    ${contextSummary ? html`<span>${contextSummary}</span>` : null}
+                    ${keeper.last_activity_ago_s != null ? html`<span>활동 ${formatAgeSeconds(keeper.last_activity_ago_s)}</span>` : null}
+                  </div>
+                  ${trimText(record.continuity?.continuity_summary ?? record.continuity?.note, 100)
+                    ? html`<div class="text-xs leading-relaxed text-[var(--text-muted)]">${trimText(record.continuity?.continuity_summary ?? record.continuity?.note, 100)}</div>`
+                    : null}
+                `
+              : html`<${TileHint} text="현재 task에 연결된 keeper가 없습니다." />`}
+          <//>
+        </div>
+
+        <div class="flex items-center gap-3 border-t border-[var(--white-8)] pt-3">
+          <button
+            class="inline-flex items-center rounded px-3 py-1.5 text-xs font-medium text-[var(--text-muted)] transition hover:text-[var(--text-body)] hover:bg-[var(--white-5)]"
+            onClick=${() => { showExtended.value = !showExtended.value }}
+          >
+            ${showExtended.value ? '▼' : '▶'} 추가 정보
+          </button>
+          <div class="text-2xs text-[var(--text-dim)]">
+            thinking, memory, turn, lifecycle, cascade
+          </div>
+        </div>
+
+        ${showExtended.value
+          ? html`
+              <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                <${JourneyTile} label="Thinking">
+                  ${keeper?.pipeline_stage
+                    ? html`<${StatusChip} tone=${pipelineTone(keeper.pipeline_stage)}>${keeper.pipeline_stage}<//>`
+                    : html`<${TileHint} text="thinking stage가 아직 보고되지 않았습니다." />`}
+                  ${keeper?.skill_primary
+                    ? html`<div><span class="text-[var(--text-dim)]">skill</span><div class="mt-1 font-semibold text-[var(--text-strong)]">${keeper.skill_primary}</div></div>`
+                    : null}
+                  ${trimText(keeper?.skill_reason ?? keeper?.recent_input_preview ?? record.worker?.focus, 100)
+                    ? html`<div class="text-xs leading-relaxed text-[var(--text-muted)]">${trimText(keeper?.skill_reason ?? keeper?.recent_input_preview ?? record.worker?.focus, 100)}</div>`
+                    : null}
+                <//>
+
+                <${JourneyTile} label="Memory">
+                  ${trimText(keeper?.memory_recent_note, 100)
+                    ? html`<div class="text-xs leading-relaxed text-[var(--text-body)]">${trimText(keeper?.memory_recent_note, 100)}</div>`
+                    : html`<${TileHint} text="최근 memory note가 아직 없습니다." />`}
+                  ${keeper?.metrics_window
+                    ? html`
+                        <div class="grid grid-cols-3 gap-2">
+                          <${MetricChip} label="pass" value=${formatPct(keeper.metrics_window.memory_pass_rate)} tone="ok" />
+                          <${MetricChip} label="checks" value=${keeper.metrics_window.memory_checks ?? 0} />
+                          <${MetricChip} label="compact" value=${keeper.compaction_count ?? keeper.metrics_window.memory_compaction_events ?? 0} tone="warn" />
+                        </div>
+                      `
+                    : null}
+                <//>
+
+                <${JourneyTile} label="Turn">
+                  ${keeper
+                    ? html`
+                        <div class="grid grid-cols-3 gap-2">
+                          <${MetricChip} label="turns" value=${keeper.turn_count ?? keeper.total_turns ?? 0} />
+                          <${MetricChip} label="last" value=${formatAgeSeconds(keeper.last_turn_ago_s)} tone="info" />
+                          <${MetricChip} label="auto" value=${keeper.autonomous_turn_count ?? 0} />
+                        </div>
+                        ${keeper.runtime_blocker_summary
+                          ? html`<div class="text-xs leading-relaxed text-[var(--warn)]">${trimText(keeper.runtime_blocker_summary, 100)}</div>`
+                          : null}
+                      `
+                    : html`<${TileHint} text="연결된 keeper turn 정보가 없습니다." />`}
+                <//>
+
+                <${JourneyTile} label="Life" class="lg:col-span-2">
+                  ${lifeEntries.length > 0
+                    ? html`
+                        ${lifeEntries.map((entry) => html`
+                          <div key=${entry.id} class="rounded border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
+                            <div class="flex items-center justify-between gap-2">
+                              <${StatusChip} tone=${entry.source === 'journal' ? 'info' : entry.source === 'handoff' ? 'warn' : 'neutral'} uppercase=${false}>
+                                ${entry.source}
+                              <//>
+                              ${entry.timestamp ? html`<${TimeAgo} timestamp=${entry.timestamp} class="text-2xs text-[var(--text-dim)]" />` : null}
+                            </div>
+                            <div class="mt-2 text-xs leading-relaxed text-[var(--text-body)]">${entry.text}</div>
+                          </div>
+                        `)}
+                      `
+                    : html`<${TileHint} text="현재 컨텍스트에 엮인 recent life signal이 없습니다." />`}
+                <//>
+
+                <${JourneyTile} label="Cascade">
+                  ${keeper
+                    ? html`
+                        <div class="flex flex-wrap items-center gap-2">
+                          ${keeper.cascade_name ? html`<${StatusChip} tone="info">${keeper.cascade_name}<//>` : null}
+                          ${keeper.active_model ? html`<${StatusChip} tone="neutral" uppercase=${false}>${keeper.active_model}<//>` : null}
+                        </div>
+                        <div class="text-xs text-[var(--text-muted)]">
+                          ${keeper.last_model_used || keeper.model ? html`last ${keeper.last_model_used ?? keeper.model}` : 'model 기록 없음'}
+                        </div>
+                        ${keeper.next_model_hint
+                          ? html`<div class="text-xs text-[var(--text-muted)]">next ${keeper.next_model_hint}</div>`
+                          : null}
+                        ${keeper.metrics_window?.fallback_rate != null
+                          ? html`<div class="text-xs text-[var(--text-muted)]">fallback ${formatPct(keeper.metrics_window.fallback_rate)}</div>`
+                          : null}
+                      `
+                    : html`<${TileHint} text="cascade 선택 정보는 keeper runtime에서만 노출됩니다." />`}
+                <//>
+              </div>
+            `
+          : null}
       </div>
     <//>
   `

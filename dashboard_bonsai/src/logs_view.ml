@@ -2551,21 +2551,25 @@ let render_response
   let nav_section label =
     Node.div ~attrs:[ Style.nav_section ] [ Node.text label ]
   in
-  let nav_link ?(active = false) ?tail label =
-    let attrs =
-      if active
-      then [ Style.nav_link; Style.nav_link_active ]
-      else [ Style.nav_link ]
+  let current_route =
+    let path =
+      Brr.Uri.path (Brr.Window.location Brr.G.window) |> Jstr.to_string
     in
+    Route.of_path path
+  in
+  let nav_link ?tail (route : Route.t) =
+    let active = Route.equal route current_route in
+    let base = [ Style.nav_link ] in
+    let base = if active then Style.nav_link_active :: base else base in
     let tail_node =
       match tail with
       | None -> []
       | Some t -> [ Node.span ~attrs:[ Style.nav_link_tail ] [ Node.text t ] ]
     in
-    Node.div
-      ~attrs
+    Node.a
+      ~attrs:(Attr.href (Route.path route) :: base)
       ([ Node.span ~attrs:[ Style.nav_link_glyph ] []
-       ; Node.text label
+       ; Node.text (Route.label route)
        ]
        @ tail_node)
   in
@@ -2587,22 +2591,22 @@ let render_response
               ]
           ]
       ; nav_section "chronicle"
-      ; nav_link "overview"
-      ; nav_link ~active:true "logs · journal"
-      ; nav_link "goals"
+      ; nav_link Overview
+      ; nav_link Logs
+      ; nav_link Goals
       ; nav_section "runtime"
       ; (let tail =
            match keepers.keepers with
            | [] -> "—"
            | ks -> Printf.sprintf "%02d" (List.length ks)
          in
-         nav_link "keepers" ~tail)
-      ; nav_link "observatory"
-      ; nav_link "intervene"
+         nav_link Keepers ~tail)
+      ; nav_link Observatory
+      ; nav_link Intervene
       ; nav_section "lab"
-      ; nav_link "tools"
-      ; nav_link "sessions"
-      ; nav_link "social board"
+      ; nav_link Tools
+      ; nav_link Sessions
+      ; nav_link Social_board
       ; nav_section "crypt"
       ; (let tail =
            match keepers.keepers with
@@ -2616,8 +2620,8 @@ let render_response
              in
              Printf.sprintf "%02d" dead_n
          in
-         nav_link "dead keepers" ~tail)
-      ; nav_link "archive runs"
+         nav_link Dead_keepers ~tail)
+      ; nav_link Archive_runs
       ; (let chip name label =
            Node.div
              ~attrs:

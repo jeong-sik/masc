@@ -3,7 +3,9 @@
     Server serves the same HTML shell (see
     [lib/server/server_routes_http_pages.ml:bonsai_index_html]) at every
     [/dashboard/b/*] URL, so route selection happens client-side. Static
-    read at mount time — no client-side history API yet. *)
+    read at mount time — no client-side history API yet.
+
+    Route SSOT: [route.ml]. Add a tab = add a variant + extend helpers. *)
 
 open! Core
 open! Bonsai_web
@@ -13,8 +15,8 @@ let current_path () =
 ;;
 
 let root (graph @ local) =
-  let path = current_path () in
-  if String.is_prefix path ~prefix:"/dashboard/b/logs"
-  then Logs_view.component graph
-  else Hello_view.component graph
+  match Route.of_path (current_path ()) with
+  | Logs -> Logs_view.component graph
+  | Hello -> Hello_view.component graph
+  | other -> Placeholder_view.component ~route:other graph
 ;;

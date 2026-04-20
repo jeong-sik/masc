@@ -12,7 +12,12 @@
 \* Invariant: when an operation saves, no other write has happened
 \* since that operation loaded (graph_version == load_version + 1).
 \*
-\* Reference: hebbian_eio.ml lines 268-275 (docstring warning).
+\* Reference (verified 2026-04-20):
+\*   lib/hebbian_eio.ml:264  let strengthen — wraps body in
+\*                            with_graph_lock config (load -> compute -> save).
+\*   The lock-required pattern is enforced by call-site convention
+\*   (every public mutator calls with_graph_lock); there is no
+\*   inline docstring at lines 268-275.
 
 EXTENDS Naturals
 

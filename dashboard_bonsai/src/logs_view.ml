@@ -356,6 +356,19 @@ stylesheet
     box-shadow: inset 0 0 0 1px var(--accent-brass);
   }
 
+  /* Declarative active state for filter chips — theme chip 패턴과 동일.
+     <html data-log-level="X"> 가 set되면 매칭되는 chip만 active 스타일.
+     기본값 = info (data-log-level 속성 없는 초기 상태도 info chip이 활성). */
+  html[data-log-level="debug"] .chip[data-filter-level="debug"],
+  html[data-log-level="info"]  .chip[data-filter-level="info"],
+  html[data-log-level="warn"]  .chip[data-filter-level="warn"],
+  html[data-log-level="error"] .chip[data-filter-level="error"],
+  html:not([data-log-level])   .chip[data-filter-level="info"] {
+    color: var(--text-bright);
+    background: rgba(138, 106, 40, 0.14);
+    box-shadow: inset 0 0 0 1px var(--accent-brass);
+  }
+
   .input_shell {
     display: inline-flex;
     align-items: center;
@@ -2313,15 +2326,35 @@ let render_response
   let toolbar =
     Node.div
       ~attrs:[ Style.toolbar ]
-      [ Node.div
-          ~attrs:[ Style.chip_group ]
-          [ Node.span ~attrs:[ Style.chip ] [ Node.text "debug+" ]
-          ; Node.span
-              ~attrs:[ Style.chip; Style.chip_active ]
-              [ Node.text "info+" ]
-          ; Node.span ~attrs:[ Style.chip ] [ Node.text "warn+" ]
-          ; Node.span ~attrs:[ Style.chip ] [ Node.text "error" ]
-          ]
+      [ (let filter_chip ~level ~label =
+           let click =
+             Attr.on_click (fun _ev ->
+               let effect =
+                 Effect.of_sync_fun
+                   (fun () ->
+                     let doc = Js_of_ocaml.Dom_html.document in
+                     doc##.documentElement##setAttribute
+                       (Js_of_ocaml.Js.string "data-log-level")
+                       (Js_of_ocaml.Js.string level))
+                   ()
+               in
+               effect)
+           in
+           Node.span
+             ~attrs:
+               [ Style.chip
+               ; Attr.create "data-filter-level" level
+               ; click
+               ]
+             [ Node.text label ]
+         in
+         Node.div
+           ~attrs:[ Style.chip_group ]
+           [ filter_chip ~level:"debug" ~label:"debug+"
+           ; filter_chip ~level:"info" ~label:"info+"
+           ; filter_chip ~level:"warn" ~label:"warn+"
+           ; filter_chip ~level:"error" ~label:"error"
+           ])
       ; Node.div
           ~attrs:[ Style.input_shell ]
           [ Node.span ~attrs:[ Style.input_shell_label ] [ Node.text "module" ]

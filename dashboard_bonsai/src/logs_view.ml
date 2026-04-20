@@ -1531,6 +1531,50 @@ stylesheet
   }
   .ctx_lbl_warn { top: 22px; color: color-mix(in oklab, var(--accent-brass) 80%, var(--text-dim)); }
   .ctx_lbl_dang { top: 6px;  color: color-mix(in oklab, var(--accent-blood) 80%, var(--text-dim)); }
+
+  /* ─── flame mini — tool category stacked bar ───
+     last cycle의 시간 배분을 도구 카테고리로 나눈 단일 horizontal bar.
+     각 segment 색은 --t-*. 아래 legend는 color chip + label + %. */
+  .flame { padding: 10px 14px; }
+  .flame_bar {
+    display: flex;
+    height: 14px;
+    border: 1px solid var(--border-main);
+    background: var(--bg-deep);
+    overflow: hidden;
+  }
+  .flame_seg {
+    height: 100%;
+    border-right: 1px solid rgba(0, 0, 0, 0.35);
+  }
+  .flame_seg:last-child { border-right: 0; }
+  .flame_seg_llm   { background: var(--t-llm); }
+  .flame_seg_tool  { background: var(--t-tool); }
+  .flame_seg_think { background: var(--t-think); }
+  .flame_seg_wait  { background: var(--t-wait); }
+  .flame_seg_err   { background: var(--t-err); }
+  .flame_legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-top: 10px;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.04em;
+  }
+  .flame_item { display: inline-flex; align-items: center; gap: 6px; }
+  .flame_chip {
+    width: 10px;
+    height: 10px;
+    display: inline-block;
+    border: 1px solid rgba(0, 0, 0, 0.45);
+  }
+  .flame_lbl { color: var(--text-primary); }
+  .flame_pct {
+    color: var(--text-bright);
+    font-variant-numeric: tabular-nums;
+  }
 |}]
 
 let level_class level =
@@ -1974,6 +2018,43 @@ let view_context_pressure () =
             ]
         ]
     ]
+;;
+
+type flame_kind = [ `Llm | `Tool | `Think | `Wait | `Err ]
+
+let flame_seg_class = function
+  | `Llm   -> Style.flame_seg_llm
+  | `Tool  -> Style.flame_seg_tool
+  | `Think -> Style.flame_seg_think
+  | `Wait  -> Style.flame_seg_wait
+  | `Err   -> Style.flame_seg_err
+;;
+
+let flame_label = function
+  | `Llm -> "llm" | `Tool -> "tool" | `Think -> "think"
+  | `Wait -> "wait" | `Err -> "err"
+;;
+
+let view_flame_mini ~(segments : (flame_kind * int) list) =
+  let bar =
+    Node.div
+      ~attrs:[ Style.flame_bar ]
+      (List.map segments ~f:(fun (kind, pct) ->
+        let style = Attr.create "style" (Printf.sprintf "width:%d%%" pct) in
+        Node.div ~attrs:[ Style.flame_seg; flame_seg_class kind; style ] []))
+  in
+  let legend =
+    Node.div
+      ~attrs:[ Style.flame_legend ]
+      (List.map segments ~f:(fun (kind, pct) ->
+        Node.span
+          ~attrs:[ Style.flame_item ]
+          [ Node.span ~attrs:[ Style.flame_chip; flame_seg_class kind ] []
+          ; Node.span ~attrs:[ Style.flame_lbl ] [ Node.text (flame_label kind) ]
+          ; Node.span ~attrs:[ Style.flame_pct ] [ Node.text (Printf.sprintf "%d" pct) ]
+          ]))
+  in
+  Node.div ~attrs:[ Style.flame ] [ bar; legend ]
 ;;
 
 let view_hud (response : Logs_types.response) =
@@ -2445,6 +2526,28 @@ let render_response (response : Logs_types.response) : Node.t =
             ]
         ]
     ; view_context_pressure ()
+    ; Node.div
+        ~attrs:[ Style.sec ]
+        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "flame · last cycle" ]
+        ; Node.span
+            ~attrs:[ Style.sec_sub ]
+            [ Node.text "tool category split · single bar + legend" ]
+        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span
+            ~attrs:[ Style.sec_r ]
+            [ Node.text "mock · trace endpoint "
+            ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "pending" ]
+            ]
+        ]
+    ; view_flame_mini
+        ~segments:
+          [ `Llm, 42
+          ; `Tool, 18
+          ; `Think, 12
+          ; `Wait, 20
+          ; `Err, 8
+          ]
     ; Node.div ~attrs:[ Style.signet ] [ Node.text "M" ]
     ; aside
     ]

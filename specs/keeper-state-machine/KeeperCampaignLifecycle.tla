@@ -36,6 +36,17 @@
 \* and lives in sibling specs (KeeperStateMachine, KeeperContextLifecycle).
 \* Adding a new keeper lifecycle phase does NOT require updating this
 \* spec; adding a new campaign phase DOES.
+\*
+\* Known modelling gap (issue #8946): [ContinuityObserved] models only the
+\* SUCCESS outcome.  The OCaml impl (apply_event at
+\* lib/keeper/keeper_campaign_fsm.ml:336-368) ALSO transitions to
+\* [Escalated] when goal_matches / task_matches / lifecycle_evidence /
+\* target_reached fail, with a textual reason.  TLC therefore cannot
+\* reach Escalated via the Continuity_observed path; only via
+\* [ErrorObserved].  Any safety/liveness property about the Escalated
+\* outcome from this entry point is currently unverified by the model.
+\* See issue #8946 for the proposed [ContinuityObservedInsufficientEvidence]
+\* sibling action and reason invariant.
 
 EXTENDS Naturals
 

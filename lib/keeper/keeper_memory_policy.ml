@@ -156,23 +156,50 @@ let short_term_horizon = "short_term"
 let mid_term_horizon = "mid_term"
 let long_term_horizon = "long_term"
 
-let memory_horizon_of_kind (kind : string) : string =
+(* Strict classifier: returns [None] for unknown kinds so callers can
+   distinguish "rule fired" from "fall-through default". See #8826. *)
+let memory_horizon_of_kind_opt (kind : string) : string option =
   match String.lowercase_ascii (String.trim kind) with
-  | "next" | "open_question" | "progress" -> short_term_horizon
-  | "goal" | "decision" | "constraints" -> mid_term_horizon
-  | "long_term" -> long_term_horizon
-  | _ -> mid_term_horizon
+  | "next" | "open_question" | "progress" -> Some short_term_horizon
+  | "goal" | "decision" | "constraints" -> Some mid_term_horizon
+  | "long_term" -> Some long_term_horizon
+  | _ -> None
 
-let memory_horizon_of_json ~(kind : string) (json : Yojson.Safe.t) : string =
+(* Back-compat wrapper: warns once per unknown kind and falls back to
+   [mid_term_horizon] (the legacy permissive default). The explicit warn
+   converts the silent #8605-family fallback into an observable signal
+   without changing the legacy classification result. *)
+let memory_horizon_of_kind (kind : string) : string =
+  match memory_horizon_of_kind_opt kind with
+  | Some h -> h
+  | None ->
+      Log.Memory.warn
+        "memory_horizon_of_kind: unknown kind %S -> mid_term (drift; see #8826)"
+        kind;
+      mid_term_horizon
+
+(* Strict JSON horizon parser: returns [None] for missing or unknown
+   horizon strings so callers can decide whether to consult [kind] or
+   reject the row. *)
+let memory_horizon_of_json_opt (json : Yojson.Safe.t) : string option =
   match
     Safe_ops.json_string ~default:"" "horizon" json
     |> String.trim
     |> String.lowercase_ascii
   with
-  | "short_term" -> short_term_horizon
-  | "mid_term" -> mid_term_horizon
-  | "long_term" -> long_term_horizon
-  | _ -> memory_horizon_of_kind kind
+  | "short_term" -> Some short_term_horizon
+  | "mid_term" -> Some mid_term_horizon
+  | "long_term" -> Some long_term_horizon
+  | _ -> None
+
+(* Back-compat wrapper: when the JSON [horizon] is absent or unknown we
+   fall through to [memory_horizon_of_kind kind] (which itself warns on
+   unknown). The cascade is preserved exactly; the new wrapper just
+   exposes a strict variant for new callers. *)
+let memory_horizon_of_json ~(kind : string) (json : Yojson.Safe.t) : string =
+  match memory_horizon_of_json_opt json with
+  | Some h -> h
+  | None -> memory_horizon_of_kind kind
 
 let trim_nonempty (s : string) : string option =
   let t = String.trim s in

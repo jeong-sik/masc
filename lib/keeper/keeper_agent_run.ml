@@ -1162,7 +1162,24 @@ let run_turn
               | _ -> None)
             sources
         in
-        (match chunks with
+        (* L4 fix: meta.work_discovery_guidance was dead schema (declared
+           in 7 sites — types/json/toml/diff — but read by 0 consumers).
+           Inject as a persona-level operator hint that activates the
+           nudge even when [sources] is empty or yields no chunks. This
+           lets keepers like sangsu (local_only cascade, no sources
+           configured) receive directed guidance via the same Nudge
+           pipeline that L1+L2 already delivers to the LLM. *)
+        let guidance_section =
+          match meta.work_discovery_guidance with
+          | Some g when String.trim g <> "" ->
+            Some (Printf.sprintf "**Operator guidance:** %s" (String.trim g))
+          | _ -> None
+        in
+        let sections =
+          chunks
+          @ (match guidance_section with Some s -> [s] | None -> [])
+        in
+        (match sections with
          | [] -> None
          | _ ->
            Some (Printf.sprintf
@@ -1183,7 +1200,7 @@ let run_turn
               `keeper_*` names exactly as shown above.\n\n\
               Plain-text replies are ignored. Pick the smallest viable \
               action and emit it as a structured tool_call now."
-             interval (String.concat "\n\n" chunks)))
+             interval (String.concat "\n\n" sections)))
     | _ -> None
   in
   let base_hooks =

@@ -117,6 +117,14 @@ let to_payload : t -> (string * payload_value) list = function
   | `Permission_denied path -> [ "path", `String path ]
 
 let enabled () =
+  (* Plan decision point 5: after P1 merge the semantic fields flip
+     to default-on.  They are purely additive JSON keys, so no
+     downstream consumer parses them as required — turning the
+     flag on by default surfaces the typed exit classification to
+     every [keeper_bash] response without an operator opt-in.
+     [MASC_BASH_SEMANTIC_EXIT=0] remains the explicit off switch
+     for the rare caller that wants the pre-P1 byte-identical
+     shape.  A later minor bump will remove the flag entirely. *)
   match Sys.getenv_opt "MASC_BASH_SEMANTIC_EXIT" with
-  | Some ("1" | "true" | "TRUE") -> true
-  | _ -> false
+  | Some ("0" | "false" | "FALSE" | "no" | "off") -> false
+  | _ -> true

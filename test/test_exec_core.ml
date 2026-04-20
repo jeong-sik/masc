@@ -159,8 +159,11 @@ let test_inline_only_keeps_artifact_refs_empty () =
 (* ---------- P1 Tick 3: Exec_semantic JSON integration ------------------ *)
 
 let with_semantic_flag enabled f =
+  (* Post-flip: empty string means "default", which is now ON.
+     Use explicit "0" for the off case so the test intention is
+     preserved regardless of the default. *)
   let prev = Sys.getenv_opt "MASC_BASH_SEMANTIC_EXIT" in
-  Unix.putenv "MASC_BASH_SEMANTIC_EXIT" (if enabled then "1" else "");
+  Unix.putenv "MASC_BASH_SEMANTIC_EXIT" (if enabled then "1" else "0");
   let restore () =
     match prev with
     | Some v -> Unix.putenv "MASC_BASH_SEMANTIC_EXIT" v
@@ -179,7 +182,10 @@ let run_json ~cmd ~status ~output =
     ~output
     ()
 
-let test_semantic_off_by_default () =
+let test_semantic_hidden_on_explicit_off () =
+  (* Post-flip: the only way the semantic field vanishes is an
+     explicit operator opt-out.  Covers the "byte-identical
+     pre-P1 shape" path for rare callers that need it. *)
   with_semantic_flag false (fun () ->
     let json = run_json ~cmd:"ls" ~status:(Unix.WEXITED 0) ~output:"" in
     match json |> member "semantic_exit" with
@@ -374,8 +380,8 @@ let () =
         ] );
       ( "semantic_exit",
         [
-          test_case "flag off by default hides field" `Quick
-            test_semantic_off_by_default;
+          test_case "explicit opt-out hides field" `Quick
+            test_semantic_hidden_on_explicit_off;
           test_case "ok kind on exit 0" `Quick test_semantic_ok_when_flag_on;
           test_case "fail kind carries exit_code" `Quick
             test_semantic_fail_carries_exit_code;

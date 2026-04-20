@@ -1480,11 +1480,11 @@ stylesheet
     border-radius: 1px;
   }
   .swim_frame:hover { border-color: var(--text-bright); z-index: 2; }
-  .swim_frame_llm  { background: #6a7a9c; }
-  .swim_frame_tool { background: #8a7a3a; }
-  .swim_frame_err  { background: var(--accent-blood); color: var(--text-bright); }
-  .swim_frame_wait { background: #2a2520; color: var(--text-dim); }
-  .swim_frame_think { background: #4a4a5a; color: var(--text-primary); }
+  .swim_frame_llm  { background: var(--t-llm); }
+  .swim_frame_tool { background: var(--t-tool); }
+  .swim_frame_err  { background: var(--t-err); color: var(--text-bright); }
+  .swim_frame_wait { background: var(--t-wait); color: var(--text-dim); }
+  .swim_frame_think { background: var(--t-think); color: var(--text-primary); }
 |}]
 
 let level_class level =

@@ -62,6 +62,13 @@
   --status-bad:   #a01818;       /* blood */
   --status-idle:  #4a3a32;       /* dried mold */
 
+  /* Trace frame palette — swimlane / flame / tool-category bars */
+  --t-llm:   #6a7a9c;            /* muted blue-gray — inference */
+  --t-tool:  #8a7a3a;            /* muted brass — tool call */
+  --t-think: #4a4a5a;            /* slate — reasoning */
+  --t-wait:  #2a2520;            /* deep dusk — idle */
+  --t-err:   var(--accent-blood);
+
   /* Type stacks */
   --font-display: 'Cinzel', 'Noto Sans KR', 'EB Garamond', serif;
   --font-body:    'EB Garamond', 'Noto Sans KR', Georgia, serif;
@@ -123,6 +130,12 @@
   --radius-xs: 0; --radius-sm: 0; --radius-md: 0;
   --shadow-panel: 0 0 16px rgba(106, 47, 214, 0.3);
   --shadow-glow:  0 0 24px rgba(0, 255, 204, 0.2), 0 0 48px rgba(0, 255, 204, 0.05);
+  /* Trace frames — neon */
+  --t-llm:   #6a2fd6;
+  --t-tool:  #00ffcc;
+  --t-think: #3a2555;
+  --t-wait:  #0d0821;
+  --t-err:   #ff2266;
 }
 
 /* ── Terminal ──────────────────────────────────────────── */
@@ -151,6 +164,12 @@
   --radius-xs: 0; --radius-sm: 0; --radius-md: 0;
   --shadow-panel: 0 0 8px rgba(0, 255, 0, 0.1);
   --shadow-glow:  0 0 16px rgba(0, 255, 0, 0.15);
+  /* Trace frames — phosphor */
+  --t-llm:   #00aa00;
+  --t-tool:  #ffcc00;
+  --t-think: #006633;
+  --t-wait:  #000800;
+  --t-err:   #ff4400;
 }
 
 /* ── Parchment (in-app warm theme) ─────────────────────── */
@@ -170,6 +189,12 @@
   --accent-blood: #8b4513;
   --accent-ink:   #556b2f;
   --accent-glow:  rgba(196, 160, 80, 0.1);
+  /* Trace frames — warm parchment */
+  --t-llm:   #6a5d48;
+  --t-tool:  #c4a050;
+  --t-think: #4a3f30;
+  --t-wait:  #1a1610;
+  --t-err:   #8b4513;
 }
 
 /* ── Paper / Ink (docs + light-surface inversion) ──────── */
@@ -216,6 +241,12 @@
   --shadow-panel: 0 1px 2px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.06);
   --shadow-card:  0 1px 0 rgba(0,0,0,0.04);
   --shadow-glow:  none;
+  /* Trace frames — ink on paper */
+  --t-llm:   var(--slate);
+  --t-tool:  var(--brass);
+  --t-think: var(--plum);
+  --t-wait:  var(--paper-3);
+  --t-err:   var(--brick);
 }
 
 /* ══════════════════════════════════════════════════════════════

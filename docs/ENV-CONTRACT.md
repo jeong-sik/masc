@@ -126,7 +126,7 @@ never break by enabling them.
 | `MASC_BASH_AUTO_BG` | off | Foreground commands that outrun `MASC_BLOCKING_BUDGET_MS` (default 15 000 ms) auto-promote to a `Bg_task`. Response gains `{promoted, background_task_id, partial_output, …}`. See `lib/exec/exec_run.mli`. |
 | `MASC_BLOCKING_BUDGET_MS` | 15 000 | Foreground race budget. Consumed only when `MASC_BASH_AUTO_BG` is on; otherwise inert. |
 | `MASC_BASH_AST_ONLY` | off | Single-gate AST shadow (dual-gate is the default). Flip requires a prod N=1000 zero-diff window per the flip covenant test (`test_gate_diff.ml`). |
-| `MASC_BASH_VERIFIABLE_MARKERS` | off | Emits `verifiable_markers` from `Cdal_judge.of_exec_outcome` so the verifier cascade can consume typed `Test_pass {count}`, `Build_ok`, etc. without regex scraping. See `lib/cdal_judge.mli`. |
+| `MASC_BASH_VERIFIABLE_MARKERS` | **on** (post flip PR) | Emits `verifiable_markers` from `Cdal_judge.of_exec_outcome` so the verifier cascade can consume typed `Test_pass {count}`, `Build_ok`, etc. without regex scraping. Set to `0` / `false` / `no` / `off` to opt out. See `lib/cdal_judge.mli`. |
 
 Representative code paths:
 

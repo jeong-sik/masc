@@ -60,3 +60,13 @@ val handle_keeper_shell :
   meta:Keeper_types.keeper_meta ->
   args:Yojson.Safe.t ->
   string
+
+(** [ensure_keeper_sandbox_runtime ~timeout_sec] preflights the host
+    Docker runtime against the configured hardening requirements
+    (seccomp profile present, optional rootless / userns checks).
+    Returns the [--security-opt seccomp=...] argv fragment when the
+    runtime passes; [Error _] when something is missing. Exposed for
+    [Keeper_docker_read] (RFC-0006 Phase B-2) which reuses the same
+    preflight before spawning a one-shot container for fs reads. *)
+val ensure_keeper_sandbox_runtime :
+  timeout_sec:float -> (string list, string) result

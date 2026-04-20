@@ -613,6 +613,20 @@ module KeeperSandbox = struct
       operators flip the flag. *)
   let symmetric_read_containment () =
     get_bool ~default:false "MASC_KEEPER_SYMMETRIC_SANDBOX"
+
+  (** RFC-0006 Phase B-2: when true (and symmetric_read_containment is
+      also on), hardened keeper read-side ops route through
+      [docker run --rm <image> cat <container_path>] so the
+      container's mount restrictions become the primary boundary.
+
+      The host-side containment check (B-1) remains as defense in
+      depth — if the docker route is misconfigured, the host check
+      still blocks. Default off because docker spawn per read is
+      slower (~hundreds of ms) and only worth it for deployments
+      that can absorb the latency in exchange for mount-level
+      isolation. *)
+  let docker_read_routing () =
+    get_bool ~default:false "MASC_KEEPER_DOCKER_READ"
 end
 
 module DashboardHealth = struct

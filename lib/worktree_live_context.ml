@@ -10,6 +10,29 @@ let set_git_capture_hook_for_tests hook =
 let clear_git_capture_hook_for_tests () =
   Atomic.set git_capture_hook_for_tests None
 
+(* `git status --porcelain` timeout budget.
+
+   The 5.0s default hit its ceiling 30x in a 45-minute fleet window on
+   2026-04-20 when the workdir was a Second Brain root with many
+   worktrees, thousands of untracked files, and concurrent indexer
+   activity. Each timeout falls through to stale cache (live context
+   goes quiet for the keeper) and emits a WARN.
+
+   15.0s covers p99 for large working trees without meaningfully
+   stretching keeper turn latency — the call is cached (see
+   [status_cache_ttl_sec] below) so the full budget is paid at most
+   once per TTL window per repo. Env var stays the escape hatch for
+   unusually slow hosts. *)
+let default_git_status_timeout_sec = 15.0
+
+let git_status_timeout_sec () =
+  match Sys.getenv_opt "MASC_WORKTREE_GIT_STATUS_TIMEOUT_SEC" with
+  | Some raw ->
+    (match float_of_string_opt (String.trim raw) with
+     | Some v when v > 0. -> v
+     | _ -> default_git_status_timeout_sec)
+  | None -> default_git_status_timeout_sec
+
 let run_git_capture_lines_once ~workdir args =
   try
     let argv = [ "git"; "-C"; workdir ] @ args in
@@ -19,7 +42,7 @@ let run_git_capture_lines_once ~workdir args =
         ~actor:"system/worktree_live_context"
         ~raw_source
         ~summary:"worktree live context git capture"
-        ~timeout_sec:5.0
+        ~timeout_sec:(git_status_timeout_sec ())
         argv
     with
     | Unix.WEXITED 0, output ->

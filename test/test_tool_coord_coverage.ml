@@ -326,6 +326,27 @@ let () = test "dispatch_status_no_owned_prefers_claim_next_over_transition" (fun
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "dispatch_status_surfaces_missing_planning_for_owned_task" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  ignore (Coord.add_task ctx.config ~title:"Claimed without plan" ~priority:3 ~description:"");
+  ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+  Planning_eio.set_current_task ctx.config ~task_id:"task-001";
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some (success, result) ->
+      assert success;
+      assert (str_contains result "owned=task-001 | current=task-001");
+      assert (str_contains result "📝 Planning: missing=yes | task=task-001");
+      assert (str_contains result "Owned task task-001 has no planning context.");
+      assert (str_contains result "💡 Suggested next: masc_plan_init -> masc_status");
+      assert (not (str_contains result "💡 Suggested next: masc_heartbeat"));
+      assert (not (str_contains result "💡 Suggested next: masc_status -> masc_transition"))
+  | None -> failwith "dispatch returned None"
+)
+
 let () = test "dispatch_check_project_ready_alias" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in

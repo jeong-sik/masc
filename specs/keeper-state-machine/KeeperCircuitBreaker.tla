@@ -6,12 +6,11 @@
 \*
 \*   spec variable    | OCaml location                                          | semantic
 \*   -----------------+---------------------------------------------------------+---------
-\*   Threshold        | lib/keeper/keeper_failure_circuit_breaker.ml:118        | `let threshold = 3` (matches spec CONSTANT)
-\*   count            | lib/keeper/keeper_failure_circuit_breaker.ml:64         | `mutable consecutive_count : int`
-\*   currentClass     | lib/keeper/keeper_failure_circuit_breaker.ml:63         | `mutable consecutive_class : error_class`
-\*   tripped          | lib/keeper/keeper_failure_circuit_breaker.ml (record_   | `record_failure` returns whether hint was injected this step
-\*                    | failure return value)                                   |
-\*   ErrorClasses     | lib/keeper/keeper_failure_circuit_breaker.ml:17-22      | `type error_class = Path_not_found | Path_not_allowed | Cwd_not_directory | Shell_exit_nonzero | Other`
+\*   Threshold        | lib/keeper/keeper_failure_circuit_breaker.ml:threshold         | `let threshold = 3` (matches spec CONSTANT)
+\*   count            | lib/keeper/keeper_failure_circuit_breaker.ml:consecutive_count | `mutable consecutive_count : int`
+\*   currentClass     | lib/keeper/keeper_failure_circuit_breaker.ml:consecutive_class | `mutable consecutive_class : error_class`
+\*   tripped          | lib/keeper/keeper_failure_circuit_breaker.ml:record_failure    | `record_failure` returns whether hint was injected this step
+\*   ErrorClasses     | lib/keeper/keeper_failure_circuit_breaker.ml:error_class       | `type error_class = Path_not_found | Path_not_allowed | Cwd_not_directory | Shell_exit_nonzero | Other`
 \*
 \* Scope projection: spec models 3 error classes
 \* (path_not_found, path_not_allowed, other); OCaml has 5

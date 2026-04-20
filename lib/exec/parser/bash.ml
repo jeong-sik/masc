@@ -43,6 +43,58 @@ let to_shell_ir (stages : (string * string list) list)
     Parsed.Parse_error
       { pos = Lexing.dummy_pos; token = ""; expected = [ "command" ] }
 
+(* Post-hoc [reason_too_complex] classifier.  Runs only after the
+   Menhir grammar (or lexer) has rejected the input — so the input is
+   already outside the A1-PR-1 simple-command subset.  Inspects the
+   raw source for the dominant shell metachar and returns the most
+   specific [reason_too_complex] variant it can.
+
+   The scan is deliberately substring-based (not quote-aware): callers
+   who quote metachars through single or double quotes land on
+   [Parsed.Parsed] before this path runs, so anything reaching here
+   has an unquoted metachar somewhere.  False-positive precision
+   matters less than differentiating between "couldn't parse at all"
+   (the old [Parse_error] bucket) and "rejected because a specific
+   shell feature is subset-excluded" — the latter is what the corpus
+   tap aggregates to drive future grammar expansion priority.
+
+   Order matters: multi-char markers ([<<<], [<<], [>>], [&&], [||],
+   [$(], [$((], [<(], [>(]) are checked before their single-char
+   prefixes.  First match wins. *)
+(* Tiny substring helper — parser lib does not depend on Astring and
+   we do not want to pull the dep in for one function. *)
+let contains_sub (s : string) (sub : string) : bool =
+  let ls = String.length s and lsub = String.length sub in
+  if lsub = 0 then true
+  else if lsub > ls then false
+  else
+    let rec loop i =
+      if i + lsub > ls then false
+      else if String.sub s i lsub = sub then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let classify_too_complex (source : string) : Parsed.reason_too_complex option =
+  let has sub = contains_sub source sub in
+  if has "$((" then Some `Arith_expansion
+  else if has "<<<" then Some `Here_string
+  else if has "<<" then Some `Heredoc
+  else if has "&&" || has "||" then Some `Logic_op
+  else if has "$(" || has "`" then Some `Cmd_subst
+  else if has "<(" || has ">(" then Some `Proc_subst
+  else if has ">>" || has ">" || has "<" then Some `Redirect
+  else if has "(" || has ")" then Some `Subshell
+  else if has "&" then Some `Background
+  else if has "{" || has "}" then Some `Glob_brace
+  else None
+
+let map_error_or_classify (source : string) (lexbuf : Lexing.lexbuf)
+    : Shell_ir.t Parsed.t =
+  match classify_too_complex source with
+  | Some reason -> Parsed.Too_complex reason
+  | None -> Parsed.Parse_error (make_parse_error lexbuf)
+
 let parse_string (source : string) : Shell_ir.t Parsed.t =
   Bash_lexer.reset_tokens ();
   let lexbuf = Lexing.from_string source in
@@ -50,5 +102,5 @@ let parse_string (source : string) : Shell_ir.t Parsed.t =
     let raw = Bash_subset.command Bash_lexer.token lexbuf in
     to_shell_ir raw
   with
-  | Bash_subset.Error -> Parsed.Parse_error (make_parse_error lexbuf)
-  | Failure _ -> Parsed.Parse_error (make_parse_error lexbuf)
+  | Bash_subset.Error -> map_error_or_classify source lexbuf
+  | Failure _ -> map_error_or_classify source lexbuf

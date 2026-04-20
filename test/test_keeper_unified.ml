@@ -1002,6 +1002,37 @@ let test_prompt_omits_claim_first_guidance_when_task_claimed () =
   check bool "no immediate task move section once task claimed" false
     (contains_substring user "### Immediate Task Move")
 
+let test_prompt_omits_claim_first_guidance_when_claim_tool_unavailable () =
+  let obs =
+    { base_observation with
+      unclaimed_task_count = 3;
+      active_agent_count = 5;
+    }
+  in
+  let sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_policy_meta ~observation:obs ()
+  in
+  check bool "system prompt omits auto-claim when tool unavailable" false
+    (contains_substring sys "Call keeper_task_claim with {}");
+  check bool "user prompt omits immediate task move when tool unavailable" false
+    (contains_substring user "### Immediate Task Move")
+
+let test_prompt_omits_claim_first_guidance_when_paused () =
+  let meta = { minimal_meta with paused = true } in
+  let obs =
+    { base_observation with
+      unclaimed_task_count = 3;
+      active_agent_count = 5;
+    }
+  in
+  let sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta ~observation:obs ()
+  in
+  check bool "system prompt omits auto-claim while paused" false
+    (contains_substring sys "Call keeper_task_claim with {}");
+  check bool "user prompt omits immediate task move while paused" false
+    (contains_substring user "### Immediate Task Move")
+
 let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
   check bool "obsolete claim alias removed" false
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "keeper_claim_task");
@@ -3428,6 +3459,10 @@ let () =
             test_prompt_includes_claim_first_guidance;
           test_case "claim first guidance omitted when task claimed" `Quick
             test_prompt_omits_claim_first_guidance_when_task_claimed;
+          test_case "claim first guidance omitted when tool unavailable" `Quick
+            test_prompt_omits_claim_first_guidance_when_claim_tool_unavailable;
+          test_case "claim first guidance omitted when paused" `Quick
+            test_prompt_omits_claim_first_guidance_when_paused;
           test_case "work discovery nudge uses registered tool schemas" `Quick
             test_work_discovery_nudge_uses_registered_keeper_tool_schemas;
           test_case "prefers silence guidance" `Quick

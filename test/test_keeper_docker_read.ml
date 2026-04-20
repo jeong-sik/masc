@@ -220,6 +220,51 @@ let test_read_empty_image_config_errors () =
          in
          loop 0)
 
+(* ── run_command_in_container error paths
+   (exercised without invoking docker) ──────────────────────────── *)
+
+let test_run_command_empty_argv_errors () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  match
+    Keeper_docker_read.run_command_in_container ~config ~meta
+      ~command_argv:[] ~max_bytes:4096 ~timeout_sec:5.0 ()
+  with
+  | Ok _ -> Alcotest.fail "expected error for empty command_argv"
+  | Error msg ->
+      Alcotest.(check bool) "mentions empty command_argv" true
+        (let needle = "command_argv is empty" in
+         let nlen = String.length needle in
+         let mlen = String.length msg in
+         let rec loop i =
+           if i + nlen > mlen then false
+           else if String.sub msg i nlen = needle then true
+           else loop (i + 1)
+         in
+         loop 0)
+
+let test_run_command_empty_image_errors () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  match
+    Keeper_docker_read.run_command_in_container ~config ~meta
+      ~command_argv:[ "ls"; "/" ] ~max_bytes:4096 ~timeout_sec:5.0 ()
+  with
+  | Ok _ -> Alcotest.fail "expected image-config error"
+  | Error msg ->
+      Alcotest.(check bool) "mentions docker image" true
+        (let needle = "docker image" in
+         let nlen = String.length needle in
+         let mlen = String.length msg in
+         let rec loop i =
+           if i + nlen > mlen then false
+           else if String.sub msg i nlen = needle then true
+           else loop (i + 1)
+         in
+         loop 0)
+
 let () =
   Alcotest.run "Keeper_docker_read"
     [
@@ -251,5 +296,12 @@ let () =
             `Quick test_read_outside_playground_returns_mapping_error;
           Alcotest.test_case "empty image configuration errors" `Quick
             test_read_empty_image_config_errors;
+        ] );
+      ( "run_command_in_container",
+        [
+          Alcotest.test_case "empty command_argv errors" `Quick
+            test_run_command_empty_argv_errors;
+          Alcotest.test_case "empty image configuration errors" `Quick
+            test_run_command_empty_image_errors;
         ] );
     ]

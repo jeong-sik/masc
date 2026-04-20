@@ -44,8 +44,10 @@
 \*   1. Keeper_registry.mark_dead (keeper_registry.ml:237) sets
 \*      entry.phase = Dead but never touches the task FSM. No
 \*      task cascade fires on this call.
-\*   2. cleanup_dead_tombstone (keeper_supervisor.ml:225) writes
-\*      paused=true and unregisters the keeper; task FSM untouched.
+\*   2. cleanup_dead_tombstone (keeper_supervisor.ml:380, called from
+\*      :545) writes paused=true and unregisters the keeper; task FSM
+\*      untouched. Verified 2026-04-20 (line 225 was a stale anchor
+\*      from before later additions to the supervisor file).
 \*   3. Task assignee = keeper's agent identity (the keeper IS the
 \*      claimant), so a dead keeper's Claimed/InProgress tasks have
 \*      task_claimer == keeper_name, and the TLA+ "Held ∧ Dead"
@@ -53,11 +55,11 @@
 \*
 \* What actually restores the invariant:
 \*
-\*   Room_gc.cleanup_zombies (room/room_gc.ml:39-150) scans the
+\*   Coord_gc.cleanup_zombies (lib/coord/coord_gc.ml:cleanup_zombies) scans the
 \*   agents directory on a periodic GC cycle, detects agents whose
 \*   last_seen is older than Env_config.Zombie.keeper_threshold_seconds
 \*   ("zombie" agents), and in Phase 3 iterates the backlog calling
-\*   Room_hooks.force_release_task_fn for every Claimed/InProgress
+\*   Coord_hooks.force_release_task_fn for every Claimed/InProgress
 \*   task whose assignee is a zombie. This is the **asynchronous,
 \*   heartbeat-timeout-driven** path that eventually restores the
 \*   NoDeadKeeperHoldsTask property.
@@ -70,7 +72,7 @@
 \*   without the GC window. Until that cascade exists, a Dead keeper
 \*   can hold a Claimed task for up to ~keeper_threshold_seconds —
 \*   the transient window is visible on the dashboard Keepers section
-\*   (#6556) and is safe because Room.claim_task_r rejects any
+\*   (#6556) and is safe because Coord_task.claim_task_r rejects any
 \*   attempt by another agent to re-claim the orphaned task
 \*   (TaskAlreadyClaimed), so no state corruption is possible.
 \*
@@ -96,7 +98,10 @@ vars == <<keeper_phase, task_status, task_claimer>>
 
 Phases == {"running", "draining", "dead"}
 \* "cancelled" and "awaiting_verification" are in Statuses for TypeOK
-\* completeness. The real task FSM has 6 states (types_core.ml:265-277).
+\* completeness. The real task FSM has 6 states defined at
+\* types_core.ml:335-348 (verified 2026-04-20: range 265-277 was a
+\* stale anchor predating the schema/witness additions; the type now
+\* lives further down the file).
 \* "awaiting_verification" is entered when an agent with a completion
 \* contract tries Done — the verifier gate redirects to Submit_for_verification.
 \* A different agent must then Approve (->done) or Reject (->in_progress).
@@ -306,9 +311,9 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 \*      update in keeper_registry.mark_dead leaves task_claimer
 \*      pointing at the dead keeper.
 \*
-\*   2. A separate asynchronous subsystem, Coord.cleanup_zombies
-\*      (lib/coord/coord_gc.ml — moved from the old lib/room/ namespace,
-\*      verified 2026-04-20), periodically scans agents by heartbeat
+\*   2. A separate asynchronous subsystem, Coord_gc.cleanup_zombies
+\*      (lib/coord/coord_gc.ml:cleanup_zombies), periodically scans agents by
+\*      heartbeat
 \*      last_seen and force-releases Claimed/InProgress tasks whose
 \*      assignee is a zombie agent. This is modelled below as
 \*      ReconcileByGC.
@@ -320,9 +325,7 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 \* it against the TLC runner in tla-check.sh / specs/Makefile.
 
 \* Zombie GC reconciliation: release an orphaned task whose claimer
-\* is dead. Mirrors lib/coord/coord_gc.ml:128 onward (the "Phase 3:
-\* Release tasks" cascade body, ~20 lines through line 147; verified
-\* 2026-04-20). Old "room_gc.ml:118-132" line range was stale.
+\* is dead. Mirrors lib/coord/coord_gc.ml:cleanup_zombies Phase 3 cascade.
 ReconcileByGC(t) ==
     /\ Held(t)
     /\ keeper_phase[task_claimer[t]] = "dead"

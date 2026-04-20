@@ -3,6 +3,28 @@
 
 ## Unreleased
 
+### Added
+
+- **Legendary Bash shadow-counter per-reason `too_complex_*`
+  histogram.**  `Legendary_counters.snapshot` now includes fifteen
+  new fields — one per `Parsed.reason_too_complex` variant plus
+  dedicated `too_complex_parse_error`, `too_complex_parse_aborted`,
+  and `too_complex_other` buckets.  The shadow-observer in
+  `keeper_exec_shell.ml` feeds the `parse_tag` string (e.g.
+  `"too_complex:redirect"`) through the new
+  `Legendary_counters.incr_too_complex_by_tag` routing table
+  whenever `diff=Shadow_cannot_parse`; unknown tags collapse into
+  `too_complex_other` so the histogram sum always equals
+  `gate_diff_shadow_cannot_parse`.  Same zero-cost posture as the
+  other counters — nothing increments until
+  `MASC_BASH_AST_SHADOW_LOG` is on.  Exposed through the existing
+  `/api/v1/legendary_bash/shadow_counters` endpoint (additive
+  fields only, pre-existing consumers unaffected).  Six new unit
+  tests (prefixed / bare / parse_error / parse_aborted / unknown /
+  JSON shape).  `LEGENDARY-BASH-RUNBOOK.md` documents the new
+  buckets and the A1-PR-N prioritisation recipe ("top-N buckets
+  over observation window = next grammar expansion targets").
+
 ### Changed
 
 - **TLA+ specs 이관 완결 (`tla/` → `specs/`).** 기존 top-level
@@ -24,6 +46,29 @@
   states 포함 17 분 런타임에 pass.
 
 ### Added
+
+- **Bash parser post-hoc `Too_complex` classifier (P5 parse-gap
+  narrowing).**  `Masc_exec_bash_parser.Bash.parse_string` now
+  post-processes lexer/grammar rejections through
+  `classify_too_complex`, a substring scanner that upgrades the
+  response from opaque `Parse_error` to a typed
+  `Parsed.Too_complex reason` variant whenever the rejection is
+  attributable to a subset-excluded bash feature.  Ordered
+  multi-char markers first (`<<<`, `<<`, `>>`, `&&`, `||`, `$(`,
+  `$((`, `<(`, `>(`), then single-char (`<`, `>`, `&`, `(`, `{`,
+  etc.), first match wins.  New variant `Redirect` added to
+  `Parsed.reason_too_complex` for `<`/`>`/`>>`; mapping added to
+  `Worker_dev_tools.too_complex_reason_tag` → `"redirect"`.  Eleven
+  new parser tests cover `Logic_op` (`&&`/`||`), `Redirect`,
+  `Heredoc` (`<<`), `Here_string` (`<<<`), `Cmd_subst` (`` ` ``
+  and `$(`), `Arith_expansion` (`$((`), `Background` (`&`),
+  `Subshell` (`(…)`).  The existing
+  `test_double_quote_with_backtick_rejected` now expects
+  `Too_complex `Cmd_subst` — the substring scan is not
+  quote-aware, and since anything reaching this arm has already
+  been grammar-rejected the more specific tag is strictly better
+  for the corpus-tap telemetry that drives future A1-PR-N grammar
+  expansion priority decisions.
 
 - **Legendary Bash `bg_tasks/<keeper>` HTTP endpoint.**  New
   `GET /api/v1/legendary_bash/bg_tasks/<keeper>` returns the

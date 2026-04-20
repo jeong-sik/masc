@@ -42,3 +42,30 @@ val read_file_in_container :
   timeout_sec:float ->
   unit ->
   (string, string) result
+
+(** [run_command_in_container ~config ~meta ~command_argv ~max_bytes
+    ~timeout_sec ()] is the general-purpose primitive that
+    [read_file_in_container] is built on. It runs the same hardened
+    docker prelude (read-only rootfs, no caps, no network, playground
+    mounted read-only at [Keeper_sandbox.container_root meta.name])
+    and appends [command_argv] as the program + arguments executed
+    inside the container.
+
+    The caller owns container-path translation: any path referenced
+    in [command_argv] must already be in container space (use
+    [container_path_of_host] to convert). The first element of
+    [command_argv] is the executable.
+
+    Returns the captured stdout bytes clamped to [max_bytes]. Errors
+    include image misconfiguration, empty [command_argv], runtime
+    preflight failure, and docker exit non-zero. The error tag uses
+    the program name (e.g. [docker_rg_failed], [docker_cat_failed])
+    for caller log forensics. *)
+val run_command_in_container :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  command_argv:string list ->
+  max_bytes:int ->
+  timeout_sec:float ->
+  unit ->
+  (string, string) result

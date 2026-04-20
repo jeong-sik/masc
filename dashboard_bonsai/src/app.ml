@@ -19,5 +19,6 @@ let root (graph @ local) =
   | Logs -> Logs_view.component graph
   | Hello -> Hello_view.component graph
   | Dead_keepers -> Dead_keepers_view.component graph
+  | Keepers -> Keepers_view.component graph
   | other -> Placeholder_view.component ~route:other graph
 ;;

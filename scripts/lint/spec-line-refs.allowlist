@@ -21,9 +21,6 @@ specs/bug-models/HebbianLearning.tla  lib/hebbian_eio.ml:264
 specs/bug-models/SessionRegistryGhost.tla  lib/session.ml:49
 specs/bug-models/SessionRegistryGhost.tla  lib/session.ml:70
 specs/bug-models/SSEBroadcastBlock.tla  lib/sse.ml:649
-specs/keeper-state-machine/KeeperCampaignLifecycle.tla  lib/keeper/keeper_campaign_fsm.ml:33
-specs/keeper-state-machine/KeeperCampaignLifecycle.tla  lib/keeper/keeper_campaign_fsm.ml:336
-specs/keeper-state-machine/KeeperCampaignLifecycle.tla  lib/keeper/keeper_campaign_fsm.ml:99
 specs/keeper-state-machine/KeeperConditionsGovernPhase.tla  lib/keeper/keeper_state_machine.ml:389
 specs/keeper-state-machine/KeeperConditionsGovernPhase.tla  lib/keeper/keeper_state_machine.ml:61
 specs/keeper-state-machine/KeeperConditionsGovernPhase.tla  lib/keeper/keeper_state_machine.ml:8

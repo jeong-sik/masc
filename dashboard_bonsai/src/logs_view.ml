@@ -1749,7 +1749,37 @@ let heartbeat_bars : (int * [ `Info | `Warn | `Error | `Idle ]) list =
   ]
 ;;
 
-let view_heartbeat () =
+let heartbeat_bars_of_entries (entries : Logs_types.entry list)
+  : (int * [ `Info | `Warn | `Error | `Idle ]) list
+  =
+  let level_of (e : Logs_types.entry) =
+    match e.normalized_level with
+    | "ERROR" -> `Error
+    | "WARN" -> `Warn
+    | "DEBUG" -> `Idle
+    | _ -> `Info
+  in
+  let height_of (e : Logs_types.entry) =
+    Int.clamp_exn (String.length e.message / 2) ~min:6 ~max:72
+  in
+  let take_last n xs =
+    let total = List.length xs in
+    if total <= n then xs else List.drop xs (total - n)
+  in
+  let selected = take_last 60 entries in
+  let bars = List.map selected ~f:(fun e -> height_of e, level_of e) in
+  let n = List.length bars in
+  if n >= 60
+  then bars
+  else List.append (List.init (60 - n) ~f:(fun _ -> 6, `Idle)) bars
+;;
+
+let view_heartbeat ?(entries : Logs_types.entry list = []) () =
+  let bars =
+    match entries with
+    | [] -> heartbeat_bars
+    | _ -> heartbeat_bars_of_entries entries
+  in
   let bar i (height, level) =
     let cls =
       match level with
@@ -1765,7 +1795,7 @@ let view_heartbeat () =
       | `Idle -> "idle"
       | `Info -> "info"
     in
-    let total = List.length heartbeat_bars in
+    let total = List.length bars in
     let t_ago = total - 1 - i in
     let tip =
       Printf.sprintf "t-%d · %s · ticks %d" t_ago level_name height
@@ -1795,7 +1825,7 @@ let view_heartbeat () =
         ]
     ; Node.div
         ~attrs:[ Style.heartbeat_track ]
-        (List.mapi ~f:bar heartbeat_bars)
+        (List.mapi ~f:bar bars)
     ]
 ;;
 
@@ -2833,7 +2863,7 @@ let render_response
     ~attrs:[ Style.root ]
     [ nav
     ; brand_row
-    ; view_heartbeat ()
+    ; view_heartbeat ~entries:response.entries ()
     ; view_hud ~keepers response
     ; (let warn_n =
          List.count response.entries ~f:(fun e ->

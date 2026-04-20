@@ -18,7 +18,12 @@ type agent_reputation = {
   response_rate: float;       (** responded / received, 0.0 if no mentions *)
   board_posts: int;
   board_comments: int;
-  overall_score: float;       (** Weighted composite 0.0-1.0 *)
+  accountability_score: float; (** Evidence-backed trust modifier, 0.0-1.0 *)
+  accountability_risk_band: string; (** low | medium | high from the accountability ledger *)
+  accountability_evidence_coverage: float;
+  accountability_unsupported_completion_rate: float;
+  accountability_open_overdue_commitments: int;
+  overall_score: float;       (** Weighted composite after accountability penalty, 0.0-1.0 *)
 }
 
 val agent_reputation_to_yojson : agent_reputation -> Yojson.Safe.t
@@ -40,6 +45,15 @@ val reputation_to_json : agent_reputation -> Yojson.Safe.t
 val reputation_of_json : Yojson.Safe.t -> agent_reputation option
 (** Wraps {!agent_reputation_of_yojson}. Returns None on parse failure
     or when [agent_name] is empty. *)
+
+val compute_accountability_score :
+  evidence_coverage:float ->
+  unsupported_completion_rate:float ->
+  open_overdue_commitments:int ->
+  float
+(** Compute an evidence-backed penalty score from accountability metrics.
+    A score of [1.0] means no penalty; [0.0] means the agent's activity
+    score should not be trusted for routing/reward decisions. *)
 
 val compute_overall_score :
   completion_rate:float ->

@@ -167,6 +167,58 @@ let test_stale_completion_claim_sets_high_risk () =
       let first = List.hd history in
       check string "history status" "unsupported" (string_member "status" first))
 
+let test_agent_reputation_penalizes_unsupported_claims () =
+  with_room ~agent_name:"keeper-rep-agent" (fun config ->
+      ignore
+        (Coord.add_task config ~title:"Reputation task" ~priority:1
+           ~description:"desc");
+      ignore
+        (Coord.claim_task config ~agent_name:"keeper-rep-agent"
+           ~task_id:"task-001");
+      (match
+         Coord.transition_task_r config ~agent_name:"keeper-rep-agent"
+           ~task_id:"task-001" ~action:Types.Done_action ()
+       with
+      | Ok _ -> ()
+      | Error err ->
+          Alcotest.failf "done transition failed: %s"
+            (Types.masc_error_to_string err));
+      let created_at =
+        iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
+      in
+      append_accountability_event config.base_path ~created_at
+        (`Assoc
+           [
+             ("event_type", `String "claim_created");
+             ("claim_id", `String "acct-rep-unsupported");
+             ("agent_name", `String "keeper-rep-agent");
+             ("keeper_name", `String "keeper-rep");
+             ("kind", `String "completion_claim");
+             ("subject", `String "Unsupported claim");
+             ("surface", `String "keeper_turn");
+             ("created_at", `String created_at);
+             ("evidence_refs", `List []);
+             ("synthetic", `Bool false);
+           ]);
+      let unpenalized =
+        Agent_reputation.compute_overall_score ~completion_rate:1.0
+          ~response_rate:0.0 ~board_posts:0 ~board_comments:0
+      in
+      let rep =
+        Agent_reputation.compute_reputation config
+          ~agent_name:"keeper-rep-agent"
+      in
+      check int "tasks completed" 1 rep.tasks_completed;
+      check int "tasks claimed" 1 rep.tasks_claimed;
+      check string "accountability risk band" "high"
+        rep.accountability_risk_band;
+      check (float 0.0001) "unsupported completion rate" 1.0
+        rep.accountability_unsupported_completion_rate;
+      check (float 0.0001) "accountability score clamps to zero" 0.0
+        rep.accountability_score;
+      check bool "overall reputation penalized" true
+        (rep.overall_score < unpenalized))
+
 let test_claim_tool_exposes_routing_warning_for_high_risk_keeper () =
   with_room (fun config ->
       let meta = make_test_meta () in
@@ -473,6 +525,8 @@ let () =
             test_same_turn_evidence_marks_claim_supported;
           test_case "stale completion claim sets high risk" `Quick
             test_stale_completion_claim_sets_high_risk;
+          test_case "agent reputation penalizes unsupported claims" `Quick
+            test_agent_reputation_penalizes_unsupported_claims;
           test_case "claim tool exposes routing warning for high risk keeper"
             `Quick test_claim_tool_exposes_routing_warning_for_high_risk_keeper;
           test_case "preflight exposes routing hint for high risk keeper"

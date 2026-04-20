@@ -317,11 +317,21 @@ let persisted_contract_rejection ~(ctx : context)
         (* Always run the verdict lookup so Dashboard_attribution records the
            outcome (pass / policy_failed / missing). strict=false stays
            advisory — we drop the rejection but keep the audit trail so the
-           dashboard shows a verification trace instead of nothing. *)
+           dashboard shows a verification trace instead of nothing.
+
+           Advisory recordings go into the [cdal_verdict_advisory] gate
+           bucket so the dashboard can distinguish "strict-enforced"
+           from "allowed through under advisory" without guessing. *)
+        let gate_label =
+          if contract.strict then Cdal_verdict_gate.strict_gate_label
+          else Cdal_verdict_gate.advisory_gate_label
+        in
         Log.Task.info
-          "[cdal-gate] checking verdict for task=%s agent=%s strict=%b"
-          task.id ctx.agent_name contract.strict;
-        let rejection = Cdal_verdict_gate.gate_check ~task_id:task.id () in
+          "[cdal-gate] checking verdict for task=%s agent=%s strict=%b gate=%s"
+          task.id ctx.agent_name contract.strict gate_label;
+        let rejection =
+          Cdal_verdict_gate.gate_check ~gate_label ~task_id:task.id ()
+        in
         if contract.strict then rejection
         else begin
           (match rejection with

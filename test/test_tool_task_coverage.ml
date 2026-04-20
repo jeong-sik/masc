@@ -381,11 +381,25 @@ let () = test "handle_done_advisory_contract_records_attribution" (fun () ->
   in
   if not success_done then
     failwith "advisory contract (strict=false) must not block handle_done";
-  let recent = Dashboard_attribution.recent ~gate:"cdal_verdict" ~limit:20 () in
-  if recent = [] then
+  (* Advisory contracts record under the dedicated advisory gate bucket so
+     dashboards can count "allowed through under advisory" separately from
+     strict-enforced verdicts. *)
+  let advisory_recent =
+    Dashboard_attribution.recent
+      ~gate:Cdal_verdict_gate.advisory_gate_label ~limit:20 ()
+  in
+  if advisory_recent = [] then
     failwith
-      "expected Dashboard_attribution to record a cdal_verdict entry for \
-       advisory contract (audit trail regression)"
+      "expected Dashboard_attribution to record a cdal_verdict_advisory \
+       entry for strict=false contract (audit trail regression)";
+  let strict_recent =
+    Dashboard_attribution.recent
+      ~gate:Cdal_verdict_gate.strict_gate_label ~limit:20 ()
+  in
+  if strict_recent <> [] then
+    failwith
+      "advisory recording must not leak into the strict cdal_verdict \
+       bucket"
 )
 
 let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun () ->

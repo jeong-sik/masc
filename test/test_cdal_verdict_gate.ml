@@ -288,7 +288,7 @@ let test_to_attribution_inconclusive_no_gaps_is_passed () =
     (match attr.outcome with A.Passed -> true | _ -> false)
 
 let test_attribution_missing_verdict () =
-  let attr = CVG.attribution_for_missing_verdict ~task_id:"T-999" in
+  let attr = CVG.attribution_for_missing_verdict ~task_id:"T-999" () in
   assert_gate_is_cdal_verdict attr;
   (match attr.outcome with
    | A.Policy_failed { reason } ->
@@ -299,6 +299,29 @@ let test_attribution_missing_verdict () =
   Alcotest.(check (option string))
     "evidence.task_id" (Some "T-999")
     (evidence_string_field attr "task_id")
+
+let test_to_attribution_honors_advisory_label () =
+  let v = make_verdict ~status:CT.Violated ~findings:[ make_finding () ] () in
+  let attr = CVG.to_attribution ~gate_label:CVG.advisory_gate_label v in
+  Alcotest.(check string) "gate" CVG.advisory_gate_label attr.A.gate;
+  Alcotest.(check bool) "still policy_failed" true
+    (match attr.outcome with A.Policy_failed _ -> true | _ -> false)
+
+let test_attribution_missing_verdict_honors_advisory_label () =
+  let attr =
+    CVG.attribution_for_missing_verdict
+      ~gate_label:CVG.advisory_gate_label
+      ~task_id:"T-advisory"
+      ()
+  in
+  Alcotest.(check string) "gate" CVG.advisory_gate_label attr.A.gate;
+  Alcotest.(check bool) "origin=Det" true (attr.origin = A.Det)
+
+let test_gate_labels_are_distinct () =
+  (* Guardrail so refactors cannot accidentally collapse the two
+     buckets into one: dashboards rely on the distinction. *)
+  Alcotest.(check bool) "labels differ" true
+    (not (String.equal CVG.strict_gate_label CVG.advisory_gate_label))
 
 let test_attribution_roundtrips_to_json () =
   (* Ensure the generated attribution serializes through Attribution.to_yojson
@@ -350,6 +373,12 @@ let () =
         test_to_attribution_inconclusive_no_gaps_is_passed;
       Alcotest.test_case "missing verdict envelope" `Quick
         test_attribution_missing_verdict;
+      Alcotest.test_case "advisory gate label on to_attribution" `Quick
+        test_to_attribution_honors_advisory_label;
+      Alcotest.test_case "advisory gate label on missing verdict" `Quick
+        test_attribution_missing_verdict_honors_advisory_label;
+      Alcotest.test_case "strict vs advisory labels are distinct" `Quick
+        test_gate_labels_are_distinct;
       Alcotest.test_case "yojson roundtrip" `Quick
         test_attribution_roundtrips_to_json;
     ]);

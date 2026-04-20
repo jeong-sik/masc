@@ -359,31 +359,27 @@ let view_meta_strip (r : Goals_types.response) =
 ;;
 
 let render (r : Goals_types.response) : Node.t =
-  Node.div
-    ~attrs:[ Style.root ]
-    [ Placeholder_view.sidebar ~active:Goals
-    ; Node.div
-        ~attrs:[ Style.main ]
-        [ Hero.view
-            ~eyebrow:"goals · convergence"
-            ~title:"goals"
-            ~tail:(Printf.sprintf "· %d" r.summary.total_goals, `Brass)
-            ~sub:
-              "config-driven goal forest. 각 node는 goal 하나 + 직속 \
-               task들 + 하위 goals. convergence는 child goals의 평균 \
-               progress."
-            ()
-        ; view_meta_strip r
-        ; (match r.tree with
-           | [] ->
-             Node.div
-               ~attrs:[ Style.quiet ]
-               [ Node.text "goal tree is empty." ]
-           | nodes ->
-             Node.div
-               ~attrs:[ Style.tree ]
-               (List.map nodes ~f:(view_node ~depth:0)))
-        ]
+  Shell_view.view
+    ~active:Goals
+    [ Hero.view
+        ~eyebrow:"goals · convergence"
+        ~title:"goals"
+        ~tail:(Printf.sprintf "· %d" r.summary.total_goals, `Brass)
+        ~sub:
+          "config-driven goal forest. 각 node는 goal 하나 + 직속 \
+           task들 + 하위 goals. convergence는 child goals의 평균 \
+           progress."
+        ()
+    ; view_meta_strip r
+    ; (match r.tree with
+       | [] ->
+         Node.div
+           ~attrs:[ Style.quiet ]
+           [ Node.text "goal tree is empty." ]
+       | nodes ->
+         Node.div
+           ~attrs:[ Style.tree ]
+           (List.map nodes ~f:(view_node ~depth:0)))
     ]
 ;;
 

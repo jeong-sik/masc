@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&family=Share+Tech+Mono&display=swap');
+
 /* ══════════════════════════════════════════════════════════════
    MASC — Colors & Type
    The brand runs across 4 themes (Dark Fantasy / Cyberpunk /
@@ -7,21 +9,8 @@
    Paper/Ink dashboard inversion (used as the docs/light surface).
    ══════════════════════════════════════════════════════════════ */
 
-/* Local fonts — copied from viewer/assets/fonts */
-@font-face {
-  font-family: 'Cinzel';
-  src: url('fonts/Cinzel-Regular.ttf') format('truetype');
-  font-weight: 400 700;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Noto Sans KR';
-  src: url('fonts/NotoSansKR-Regular.ttf') format('truetype');
-  font-weight: 300 700;
-  font-display: swap;
-}
-/* Webfonts the viewer also uses — fetched from Google when available */
-@import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&family=Share+Tech+Mono&display=swap');
+/* Bonsai shell loads Cinzel and Noto Sans KR from its HTML prelude. Keep this
+   token file free of local font URLs so /dashboard/b/assets stays self-contained. */
 
 /* ── Dark Fantasy (default) — Visceral · decay-forward ── */
 :root,

@@ -216,32 +216,28 @@ let sidebar ~(active : Route.t) =
 
 let component ~(route : Route.t) (_graph @ local) =
   Bonsai.return
-    (Node.div
-       ~attrs:[ Style.root ]
-       [ sidebar ~active:route
-       ; Node.div
-           ~attrs:[ Style.main ]
-           [ Node.div
-               ~attrs:[ Style.card ]
-               [ Node.span ~attrs:[ Style.badge ] [ Node.text "phase 2 · 작업 중" ]
-               ; Node.h1 ~attrs:[ Style.title ] [ Node.text (Route.label route) ]
-               ; Node.p
-                   ~attrs:[ Style.sub ]
-                   [ Node.text
-                       "이 탭은 아직 Bonsai로 이식되지 않았다. \
-                        logs · 저널이 유일한 이식 탭."
-                   ]
-               ; Node.div
-                   ~attrs:[ Style.link_row ]
-                   [ Node.a
-                       ~attrs:
-                         [ Attr.href (Route.path Logs); Style.link ]
-                       [ Node.text "← 저널로" ]
-                   ; Node.a
-                       ~attrs:
-                         [ Attr.href "/dashboard/"; Style.link ]
-                       [ Node.text "preact 대시보드 →" ]
-                   ]
+    (Shell_view.view
+       ~active:route
+       [ Node.div
+           ~attrs:[ Style.card ]
+           [ Node.span ~attrs:[ Style.badge ] [ Node.text "phase 2 · 작업 중" ]
+           ; Node.h1 ~attrs:[ Style.title ] [ Node.text (Route.label route) ]
+           ; Node.p
+               ~attrs:[ Style.sub ]
+               [ Node.text
+                   "이 탭은 아직 Bonsai로 완전히 이식되지 않았다. \
+                    그래도 chrome은 dashboard_v2 shell을 공유한다."
+               ]
+           ; Node.div
+               ~attrs:[ Style.link_row ]
+               [ Node.a
+                   ~attrs:
+                     [ Attr.href (Route.path Logs); Style.link ]
+                   [ Node.text "저널로" ]
+               ; Node.a
+                   ~attrs:
+                     [ Attr.href "/dashboard/"; Style.link ]
+                   [ Node.text "preact 대시보드" ]
                ]
            ]
        ])

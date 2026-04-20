@@ -63,7 +63,7 @@ check_forbidden_outside() {
 # V2: MASC-specific importance_scores in keeper working_context wrapper
 # These wrap OAS Context.t with domain-specific scoring that should
 # be handled by OAS custom closures instead.
-check "V2-importance-scores" 8 \
+check "V2-importance-scores" 0 \
   'importance_scores' \
   "lib/keeper/"
 
@@ -71,13 +71,13 @@ check "V2-importance-scores" 8 \
 # Allowed: keeper_working_context.ml (goal_prefix, state_block_start),
 #          context_compact_oas.ml (memory_summary_prefix),
 #          tool_goals.ml (goal_prefix)
-check "V4-marker-definitions" 5 \
+check "V4-marker-definitions" 2 \
   'let goal_prefix\|let memory_summary_prefix\|let state_block_start' \
   "lib/"
 
 # V5: Direct OAS Memory.store calls from MASC bridge code
 # Allowed: memory_oas_bridge.ml (2 actual calls + 5 comments/docs)
-check "V5-memory-store-bypass" 5 \
+check "V5-memory-store-bypass" 1 \
   'Memory\.store[^_]' \
   "lib/memory_oas_bridge.ml"
 
@@ -91,20 +91,20 @@ check "V6-oas-orchestration" 5 \
 # V7: MASC-specific safety gates in OAS hook layer
 # Eval_gate destructive detection and keeper deny list should be
 # injected via OAS hook config, not hardcoded in hook callbacks.
-check "V7-masc-hook-gates" 5 \
+check "V7-masc-hook-gates" 4 \
   'Eval_gate\.detect_destructive\|keeper_denied_tools' \
   "lib/keeper/keeper_hooks_oas.ml"
 
 # V8: Direct OAS Agent.state mutation from keeper code
 # Allowed: keeper_extend_turns.ml (2 occurrences)
-check "V8-agent-state-mutation" 2 \
+check "V8-agent-state-mutation" 1 \
   'Agent\.set_state\|Agent_sdk\.Agent\.state[^_]' \
   "lib/keeper/"
 
 # V9: MASC_LLAMA env var coupling (should migrate to MASC_LOCAL_*)
-# 7 remaining: 6 backward-compat fallbacks in env_config_runtime.ml
-# + 1 Deprecated registry entry in feature_flag_registry.ml.
-check "V9-masc-llama-envvar" 7 \
+# 4 remaining after backward-compat fallbacks were trimmed; surface is
+# contained to env_config_runtime.ml + the Deprecated registry entry.
+check "V9-masc-llama-envvar" 4 \
   'MASC_LLAMA' \
   "lib/"
 

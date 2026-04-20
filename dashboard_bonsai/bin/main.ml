@@ -39,9 +39,12 @@ let apply_theme theme =
 ;;
 
 let install_theme_listener () =
+  (* 첫 paint부터 data-theme 를 항상 설정한다. hash 없으면 dark-fantasy.
+     이렇게 해야 cascading selector `html[data-theme="..."]` 기반의
+     active chip 하이라이트가 default 상태에서도 매칭된다. *)
   (match current_hash_theme () with
    | Some t -> apply_theme t
-   | None -> ());
+   | None -> apply_theme "dark-fantasy");
   let on_hashchange _ =
     (match current_hash_theme () with
      | Some t -> apply_theme t

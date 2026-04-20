@@ -387,46 +387,81 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                  "[keepers_json:%s] wait=%.0fms work=%.0fms" name wait_ms
                  work_ms)
            (fun () ->
+         (* Per-sub-op timing for #8822: attribute ~3100ms snapshot cost.
+            Threshold 300ms — lower than outer 500ms for more data. *)
+         let dt_meta = ref 0.0 in
+         let dt_agent = ref 0.0 in
+         let dt_ka = ref 0.0 in
+         let dt_audit = ref 0.0 in
+         let dt_profile = ref 0.0 in
+         let dt_phase = ref 0.0 in
+         let dt_activity = ref 0.0 in
+         let emit_timing_log total_work =
+           if total_work > 0.3 then
+             Log.Dashboard.info
+               "[keepers_json:%s] sub-op: meta=%.0fms agent=%.0fms ka=%.0fms \
+                audit=%.0fms profile=%.0fms phase=%.0fms activity=%.0fms \
+                total=%.0fms"
+               name
+               (!dt_meta *. 1000.0)
+               (!dt_agent *. 1000.0)
+               (!dt_ka *. 1000.0)
+               (!dt_audit *. 1000.0)
+               (!dt_profile *. 1000.0)
+               (!dt_phase *. 1000.0)
+               (!dt_activity *. 1000.0)
+               (total_work *. 1000.0)
+         in
          results.(idx) <-
            (try
+             let t0 = Time_compat.now () in
              match Keeper_types.read_meta config name with
              | Error _ | Ok None -> None
-             | Ok (Some meta) when lightweight && meta.paused ->
-                 let phase_str =
-                   match Keeper_registry.get_phase ~base_path:config.base_path meta.name with
-                   | Some p -> `String (Keeper_state_machine.phase_to_string p)
-                   | None -> `String "paused"
-                 in
-                 Some
-                   (`Assoc
-                     [
-                       ("runtime_class", `String "keeper");
-                       ("pipeline_stage", `String "paused");
-                       ("phase", phase_str);
-                       ("name", `String meta.name);
-                       ("agent_name", `String meta.agent_name);
-                       ("status", `String "paused");
-                       ("paused", `Bool true);
-                       ("goal", `String meta.goal);
-                       ("short_goal", `String meta.short_goal);
-                       ("turn_count", `Int meta.runtime.usage.total_turns);
-                       ("updated_at", `String meta.updated_at);
-                       ("created_at", `String meta.created_at);
-                     ])
              | Ok (Some meta) ->
+                 dt_meta := Time_compat.now () -. t0;
+                 if lightweight && meta.paused then (
+                   let t_ph = Time_compat.now () in
+                   let phase_str =
+                     match Keeper_registry.get_phase ~base_path:config.base_path meta.name with
+                     | Some p -> `String (Keeper_state_machine.phase_to_string p)
+                     | None -> `String "paused"
+                   in
+                   dt_phase := Time_compat.now () -. t_ph;
+                   emit_timing_log (Time_compat.now () -. t_work_start);
+                   Some
+                     (`Assoc
+                       [
+                         ("runtime_class", `String "keeper");
+                         ("pipeline_stage", `String "paused");
+                         ("phase", phase_str);
+                         ("name", `String meta.name);
+                         ("agent_name", `String meta.agent_name);
+                         ("status", `String "paused");
+                         ("paused", `Bool true);
+                         ("goal", `String meta.goal);
+                         ("short_goal", `String meta.short_goal);
+                         ("turn_count", `Int meta.runtime.usage.total_turns);
+                         ("updated_at", `String meta.updated_at);
+                         ("created_at", `String meta.created_at);
+                       ])
+                 ) else begin
+                 let t_agent = Time_compat.now () in
                  let agent_json =
                    Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
                  in
+                 dt_agent := Time_compat.now () -. t_agent;
+                 let t_ka = Time_compat.now () in
                  let keepalive_running =
                    Keeper_status_bridge.runtime_keepalive_running config meta
                  in
+                 let keepalive_started_at =
+                   Keeper_status_bridge.runtime_keepalive_started_at config meta
+                 in
+                 dt_ka := Time_compat.now () -. t_ka;
                  let agent_exists =
                    Safe_ops.json_bool ~default:false "exists" agent_json
                  in
                  let now_ts = Time_compat.now () in
-                 let keepalive_started_at =
-                   Keeper_status_bridge.runtime_keepalive_started_at config meta
-                 in
                  let created_ts =
                    Resilience.Time.parse_iso8601_opt meta.created_at
                    |> Option.value ~default:0.0
@@ -468,6 +503,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    |> Keeper_exec_status.augment_keeper_diagnostic_json
                         ~meta ~keepalive_running ~keepalive_started_at ~now_ts
                  in
+                 let t_audit = Time_compat.now () in
                  let allowed_tool_names, recent_tool_names, latest_tool_names,
                      latest_tool_call_count, latest_action_source,
                      tool_audit_source, tool_audit_at =
@@ -487,6 +523,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        tool_audit_at )
                    else keeper_tool_audit_fields config meta
                  in
+                 dt_audit := Time_compat.now () -. t_audit;
                  let delivery_surface_view =
                    Keeper_social_model.delivery_surface_view_of_meta meta
                    |> Option.map Keeper_social_model.delivery_surface_to_string
@@ -503,9 +540,11 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                      ~diagnostic
                      ~agent_status_json:agent_json ~keepalive_running
                  in
+                 let t_phase = Time_compat.now () in
                  let registry_phase =
                    Keeper_registry.get_phase ~base_path:config.base_path meta.name
                  in
+                 dt_phase := Time_compat.now () -. t_phase;
                  let pipeline_stage =
                    match registry_phase with
                    | Some phase -> Keeper_exec_status.pipeline_stage_of_phase phase
@@ -516,6 +555,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    | Some p -> `String (Keeper_state_machine.phase_to_string p)
                    | None -> `Null
                  in
+                 emit_timing_log (Time_compat.now () -. t_work_start);
                  Some
                    (`Assoc
                      ([
@@ -586,10 +626,12 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        ("proactive_idle_sec", `Int meta.proactive.idle_sec);
                        ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
                        ("turn_budget",
-                         (let profile =
+                         (let t_profile = Time_compat.now () in
+                          let profile =
                             Keeper_types_profile.load_keeper_profile_defaults
                               meta.name
                           in
+                          dt_profile := Time_compat.now () -. t_profile;
                           let env_reactive =
                             Env_config_keeper.KeeperKeepalive
                             .oas_max_turns_per_call
@@ -677,23 +719,29 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        ("updated_at", `String meta.updated_at);
                        ("created_at", `String meta.created_at);
                        ("recent_activity",
-                         if include_recent_activity then
-                           let store = Keeper_types.keeper_metrics_store config name in
-                           let lines =
-                             let dated = Dated_jsonl.read_recent_lines store 5 in
-                             if dated <> [] then dated
-                             else
-                               let metrics_path = Keeper_types.keeper_metrics_path config name in
-                               Keeper_memory.read_file_tail_lines metrics_path
-                                 ~max_bytes:8000 ~max_lines:5
-                           in
-                           `List (List.filter_map (fun line ->
-                             try Some (Yojson.Safe.from_string line)
-                             with Yojson.Json_error _ -> None) lines)
-                         else
-                           `List []);
+                         (let t_act = Time_compat.now () in
+                          let result =
+                            if include_recent_activity then
+                              let store = Keeper_types.keeper_metrics_store config name in
+                              let lines =
+                                let dated = Dated_jsonl.read_recent_lines store 5 in
+                                if dated <> [] then dated
+                                else
+                                  let metrics_path = Keeper_types.keeper_metrics_path config name in
+                                  Keeper_memory.read_file_tail_lines metrics_path
+                                    ~max_bytes:8000 ~max_lines:5
+                              in
+                              `List (List.filter_map (fun line ->
+                                try Some (Yojson.Safe.from_string line)
+                                with Yojson.Json_error _ -> None) lines)
+                            else
+                              `List []
+                          in
+                          dt_activity := Time_compat.now () -. t_act;
+                          result));
                      ]
                      @ Keeper_status_bridge.runtime_blocker_fields_json config meta))
+                 end
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Log.Dashboard.error "keepers_json fiber error (%s): %s"
                name (Printexc.to_string exn);

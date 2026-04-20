@@ -823,16 +823,35 @@ let handle_keeper_bash
          | Worker_dev_tools.Shadow_cannot_parse -> `Shadow_cannot_parse
        in
        Legendary_counters.incr_gate_diff counter_tag;
-       match diff with
-       | Worker_dev_tools.Agree -> ()
-       | _ ->
-         Log.Keeper.info
-           "gate_diff_shadow keeper=%s cmd_hash=%s diff=%s legacy=%s shadow=%s"
-           meta.name
-           (Worker_dev_tools.cmd_hash_for_log cmd)
-           (Worker_dev_tools.gate_diff_to_string diff)
-           (Worker_dev_tools.legacy_verdict_to_tag legacy)
-           (Worker_dev_tools.shadow_verdict_to_tag shadow)
+       (* Histogram refinement of the Shadow_cannot_parse bucket —
+          per-reason counters let operators prioritise A1-PR-N
+          grammar expansion by construct frequency.  Only increments
+          when diff=Shadow_cannot_parse; other diff variants do not
+          map to a parse-reason tag.  The parse_tag inside
+          Shadow_parse_unsupported carries the bare reason
+          (e.g. "too_complex:redirect") emitted by
+          Worker_dev_tools.shadow_parse_outcome. *)
+       (match diff, shadow with
+        | Worker_dev_tools.Shadow_cannot_parse,
+          Worker_dev_tools.Shadow_parse_unsupported { parse_tag } ->
+          Legendary_counters.incr_too_complex_by_tag parse_tag
+        | Worker_dev_tools.Shadow_cannot_parse, _ ->
+          (* Defensive: diff_of_verdicts only returns
+             Shadow_cannot_parse when shadow is
+             Shadow_parse_unsupported.  If that invariant changes,
+             the "other" bucket preserves the count. *)
+          Legendary_counters.incr_too_complex_by_tag "other"
+        | _ -> ());
+       (match diff with
+        | Worker_dev_tools.Agree -> ()
+        | _ ->
+          Log.Keeper.info
+            "gate_diff_shadow keeper=%s cmd_hash=%s diff=%s legacy=%s shadow=%s"
+            meta.name
+            (Worker_dev_tools.cmd_hash_for_log cmd)
+            (Worker_dev_tools.gate_diff_to_string diff)
+            (Worker_dev_tools.legacy_verdict_to_tag legacy)
+            (Worker_dev_tools.shadow_verdict_to_tag shadow))
      end);
     (* Resolve cwd early — needed for playground detection before validation. *)
     match resolve_keeper_shell_write_cwd ~config ~meta ~args with

@@ -202,7 +202,22 @@ Response shape (field names mirror `Legendary_counters.snapshot` 1:1):
   "gate_diff_legacy_deny_shadow_allow": 0,
   "gate_diff_shadow_cannot_parse": 0,
   "auto_bg_observed": 0,
-  "auto_bg_would_have_promoted": 0
+  "auto_bg_would_have_promoted": 0,
+  "too_complex_redirect": 0,
+  "too_complex_logic_op": 0,
+  "too_complex_heredoc": 0,
+  "too_complex_here_string": 0,
+  "too_complex_cmd_subst": 0,
+  "too_complex_proc_subst": 0,
+  "too_complex_subshell": 0,
+  "too_complex_arith_expansion": 0,
+  "too_complex_control_flow": 0,
+  "too_complex_function_def": 0,
+  "too_complex_glob_brace": 0,
+  "too_complex_background": 0,
+  "too_complex_parse_error": 0,
+  "too_complex_parse_aborted": 0,
+  "too_complex_other": 0
 }
 ```
 
@@ -212,6 +227,17 @@ log stream and the counter snapshot are redundant on purpose: logs
 for point-in-time diagnostics, counters for `disagree ratio =
 (legacy_allow_shadow_deny + legacy_deny_shadow_allow) / gate_diff_total`
 trend math over a rolling window.
+
+The `too_complex_*` family is a histogram refinement of the single
+`gate_diff_shadow_cannot_parse` bucket: each subset-excluded bash
+feature gets its own counter, so operators can see which construct
+is driving the parse gap and prioritise future grammar expansion.
+The sum of all `too_complex_*` buckets equals
+`gate_diff_shadow_cannot_parse` — `too_complex_other` catches
+unknown reason strings so the invariant holds even if a future
+variant is added to `Parsed.reason_too_complex` without updating
+the counter routing table.  Top candidates for A1-PR-N grammar
+expansion are simply the top-N buckets over an observation window.
 
 ## Background Task Roster Endpoint
 

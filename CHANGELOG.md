@@ -3,6 +3,28 @@
 
 ## Unreleased
 
+### Added
+
+- **Legendary Bash shadow-counter per-reason `too_complex_*`
+  histogram.**  `Legendary_counters.snapshot` now includes fifteen
+  new fields — one per `Parsed.reason_too_complex` variant plus
+  dedicated `too_complex_parse_error`, `too_complex_parse_aborted`,
+  and `too_complex_other` buckets.  The shadow-observer in
+  `keeper_exec_shell.ml` feeds the `parse_tag` string (e.g.
+  `"too_complex:redirect"`) through the new
+  `Legendary_counters.incr_too_complex_by_tag` routing table
+  whenever `diff=Shadow_cannot_parse`; unknown tags collapse into
+  `too_complex_other` so the histogram sum always equals
+  `gate_diff_shadow_cannot_parse`.  Same zero-cost posture as the
+  other counters — nothing increments until
+  `MASC_BASH_AST_SHADOW_LOG` is on.  Exposed through the existing
+  `/api/v1/legendary_bash/shadow_counters` endpoint (additive
+  fields only, pre-existing consumers unaffected).  Six new unit
+  tests (prefixed / bare / parse_error / parse_aborted / unknown /
+  JSON shape).  `LEGENDARY-BASH-RUNBOOK.md` documents the new
+  buckets and the A1-PR-N prioritisation recipe ("top-N buckets
+  over observation window = next grammar expansion targets").
+
 ### Changed
 
 - **TLA+ specs 이관 완결 (`tla/` → `specs/`).** 기존 top-level

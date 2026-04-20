@@ -119,6 +119,10 @@ turning a flag on only adds new fields or new code branches. No
 field is ever removed by these flags, so downstream consumers
 never break by enabling them.
 
+Operator rollout procedure and dark-launch observer log
+interpretation: see
+[`LEGENDARY-BASH-RUNBOOK.md`](./LEGENDARY-BASH-RUNBOOK.md).
+
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `MASC_BASH_SEMANTIC_EXIT` | **on** (post flip PR) | Emits a `return_code_interpretation` object (typed `semantic_exit`) alongside the raw `status`. Set to `0` / `false` / `no` / `off` to opt out and restore the pre-P1 byte-identical shape. See `lib/exec/exec_semantic.mli`. |

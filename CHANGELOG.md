@@ -5,6 +5,15 @@
 
 ### Added
 
+- **Legendary Bash operator runbook.**  New
+  `docs/LEGENDARY-BASH-RUNBOOK.md` consolidates the P1–P6 rollout
+  surface: current flag state table, authoritative opt-out tokens,
+  dark-launch observer grep recipes for `gate_diff_shadow` and
+  `auto_bg_would_have_promoted`, flip criteria for the remaining
+  `AUTO_BG` / `AST_ONLY` defaults, and a restart-free rollback
+  checklist.  `ENV-CONTRACT.md §4` now cross-links to it.  No code
+  change.
+
 - **`MASC_BASH_AUTO_BG_OBSERVE` dark-launch observer.**  Companion
   to `AST_SHADOW_LOG` (#8902) covering the AUTO_BG rollout axis.
   When the flag is set every foreground-only `keeper_bash` run is

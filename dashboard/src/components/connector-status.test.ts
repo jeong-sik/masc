@@ -649,6 +649,15 @@ describe('ConnectorStatusPanel', () => {
     expect(chip).toBeTruthy()
     expect(chip!.getAttribute('aria-label')).toContain('not running')
     expect(chip!.textContent).toContain('Not running')
+
+    const copyLabels = Array.from(panel!.querySelectorAll<HTMLButtonElement>('[data-copy-button]'))
+      .map(button => button.getAttribute('aria-label'))
+    expect(copyLabels).toEqual([
+      'Copy Discord sidecar start command',
+      'Copy Discord sidecar tail logs command',
+      'Copy Discord sidecar status command',
+      'Copy Discord sidecar stop command',
+    ])
   })
 
   it('shows no-keepers empty state when keeper directory is empty', async () => {

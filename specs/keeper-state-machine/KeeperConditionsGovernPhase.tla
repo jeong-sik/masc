@@ -35,10 +35,10 @@
 \*
 \*   spec variable                | OCaml location                                    | semantic
 \*   -----------------------------+---------------------------------------------------+---------
-\*   phase \in {"Running", "HandingOff"} | lib/keeper/keeper_state_machine.ml:8,12     | type phase = ... | Running | ... | HandingOff | ...
+\*   phase \in {"Running", "HandingOff"} | lib/keeper/keeper_state_machine.ml:phase    | type phase = ... | Running | ... | HandingOff | ...
 \*                                | (full 12-phase variant; this spec projects to 2)  |
-\*   handoff_needed (boolean)     | lib/keeper/keeper_state_machine.ml:61             | conditions.context_handoff_needed : bool
-\*                                | lib/keeper/keeper_state_machine.ml:389            | set from auto_rules.handoff at update_conditions
+\*   handoff_needed (boolean)     | lib/keeper/keeper_state_machine.ml:context_handoff_needed | conditions.context_handoff_needed : bool
+\*                                | lib/keeper/keeper_state_machine.ml:update_conditions | set from auto_rules.handoff at update_conditions
 \*
 \* Producer side (where conditions are stamped):
 \*   lib/keeper/keeper_state_machine.ml:351

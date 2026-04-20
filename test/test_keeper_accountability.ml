@@ -219,6 +219,44 @@ let test_agent_reputation_penalizes_unsupported_claims () =
       check bool "overall reputation penalized" true
         (rep.overall_score < unpenalized))
 
+let test_generated_alias_inherits_accountability_penalty () =
+  with_room ~agent_name:"adversary-eager-viper" (fun config ->
+      let created_at =
+        iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
+      in
+      append_accountability_event config.base_path ~created_at
+        (`Assoc
+           [
+             ("event_type", `String "claim_created");
+             ("claim_id", `String "acct-adversary-unsupported");
+             ("agent_name", `String "keeper-adversary-agent");
+             ("keeper_name", `String "adversary");
+             ("kind", `String "completion_claim");
+             ("subject", `String "Unsupported canonical claim");
+             ("surface", `String "keeper_turn");
+             ("created_at", `String created_at);
+             ("evidence_refs", `List []);
+             ("synthetic", `Bool false);
+           ]);
+      let summary =
+        Keeper_accountability.accountability_summary_json config
+          ~keeper_name:"adversary" ~agent_name:"adversary-eager-viper"
+      in
+      check string "alias summary inherits canonical keeper risk" "high"
+        (string_member "risk_band" summary);
+      check (float 0.0001) "alias summary inherits unsupported rate" 1.0
+        (float_member "unsupported_completion_rate" summary);
+      let rep =
+        Agent_reputation.compute_reputation config
+          ~agent_name:"adversary-eager-viper"
+      in
+      check string "generated alias risk band" "high"
+        rep.accountability_risk_band;
+      check (float 0.0001) "generated alias unsupported rate" 1.0
+        rep.accountability_unsupported_completion_rate;
+      check (float 0.0001) "generated alias accountability score" 0.0
+        rep.accountability_score)
+
 let test_claim_tool_exposes_routing_warning_for_high_risk_keeper () =
   with_room (fun config ->
       let meta = make_test_meta () in
@@ -527,6 +565,8 @@ let () =
             test_stale_completion_claim_sets_high_risk;
           test_case "agent reputation penalizes unsupported claims" `Quick
             test_agent_reputation_penalizes_unsupported_claims;
+          test_case "generated alias inherits accountability penalty" `Quick
+            test_generated_alias_inherits_accountability_penalty;
           test_case "claim tool exposes routing warning for high risk keeper"
             `Quick test_claim_tool_exposes_routing_warning_for_high_risk_keeper;
           test_case "preflight exposes routing hint for high risk keeper"

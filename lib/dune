@@ -505,6 +505,7 @@
    keeper_runtime
    keeper_turn_setup
    keeper_turn_up_args
+   keeper_preset_defaults
    keeper_turn_up_create
    keeper_turn_up_update
    keeper_turn_up

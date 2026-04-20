@@ -245,7 +245,7 @@ let component ~(route : Route.t) (_graph @ local) =
            ; panel ~title:"next" ~text:bp.next_step ~code:bp.endpoint
            ; panel
                ~title:"fallback"
-               ~text:"The journal remains the live room witness while this lane gathers signal."
+               ~text:"The journal remains the live runtime witness while this lane gathers signal."
                ~code:(Route.path Logs)
            ]
        ; Node.div

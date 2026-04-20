@@ -690,7 +690,7 @@ let topbar ~(active : Route.t) =
         ~attrs:[ Style.crumbs ]
         [ Node.span [ Node.text "Runtime" ]
         ; Node.span ~attrs:[ Style.sep ] [ Node.text "." ]
-        ; Node.span [ Node.text "dashboard bonsai" ]
+        ; Node.span [ Node.text "runtime bonsai" ]
         ; Node.span ~attrs:[ Style.sep ] [ Node.text "." ]
         ; Node.strong ~attrs:[ Style.crumbs_current ] [ Node.text (label active) ]
         ]
@@ -723,11 +723,11 @@ let hud_cell ?(tone : tone = `Neutral) ~k ~v () =
 ;;
 
 let default_hud ~(active : Route.t) =
-  [ hud_cell ~k:"Room" ~v:"local" ()
-  ; hud_cell ~tone:`Ok ~k:"Session" ~v:"running" ()
+  [ hud_cell ~k:"Runtime" ~v:"local" ()
+  ; hud_cell ~tone:`Ok ~k:"Snapshot" ~v:"running" ()
   ; hud_cell ~k:"Surface" ~v:"bonsai" ()
   ; hud_cell ~tone:`Warn ~k:"Route" ~v:(label active) ()
-  ; hud_cell ~k:"Prefix" ~v:"/dashboard/b" ()
+  ; hud_cell ~k:"Base" ~v:"/dashboard/b" ()
   ; hud_cell ~tone:`Ok ~k:"Build" ~v:"js_of_ocaml" ()
   ]
 ;;
@@ -785,7 +785,7 @@ let focus_card ~(active : Route.t) =
                     ; Node.div ~attrs:[ Style.stat_v ] [ Node.text "v2" ]
                     ]
                 ; Node.div
-                    [ Node.div ~attrs:[ Style.stat_l ] [ Node.text "Prefix" ]
+                    [ Node.div ~attrs:[ Style.stat_l ] [ Node.text "Base" ]
                     ; Node.div ~attrs:[ Style.stat_v ] [ Node.text "b" ]
                     ]
                 ]

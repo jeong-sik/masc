@@ -1013,9 +1013,22 @@ let test_category_for_tool_task_ops () =
   check bool "masc_add_task" true (Types.category_for_tool "masc_add_task" = Types.TaskOpsLimit);
   check bool "masc_transition" true (Types.category_for_tool "masc_transition" = Types.TaskOpsLimit)
 
+(* Regression guard for #8873: plan-slot writes must share the
+   TaskOpsLimit (30/min) bucket with the other per-task ops, not fall
+   through to GeneralLimit (10/min). *)
+let test_category_for_tool_plan_slot_writes () =
+  check bool "masc_plan_set_task" true
+    (Types.category_for_tool "masc_plan_set_task" = Types.TaskOpsLimit);
+  check bool "masc_plan_clear_task" true
+    (Types.category_for_tool "masc_plan_clear_task" = Types.TaskOpsLimit)
+
 let test_category_for_tool_general () =
   check bool "masc_status" true (Types.category_for_tool "masc_status" = Types.GeneralLimit);
-  check bool "unknown" true (Types.category_for_tool "unknown_tool" = Types.GeneralLimit)
+  check bool "unknown" true (Types.category_for_tool "unknown_tool" = Types.GeneralLimit);
+  (* masc_batch_add_tasks intentionally stays in GeneralLimit until a
+     maintainer call on batch rate-limiting (#8873). *)
+  check bool "masc_batch_add_tasks" true
+    (Types.category_for_tool "masc_batch_add_tasks" = Types.GeneralLimit)
 
 (* ============================================================
    more masc_error_to_string Tests (coverage for all variants)
@@ -1649,6 +1662,7 @@ let () =
     "category_for_tool", [
       test_case "broadcast" `Quick test_category_for_tool_broadcast;
       test_case "task_ops" `Quick test_category_for_tool_task_ops;
+      test_case "plan_slot_writes (#8873)" `Quick test_category_for_tool_plan_slot_writes;
       test_case "general" `Quick test_category_for_tool_general;
     ];
     "masc_error_extended", [

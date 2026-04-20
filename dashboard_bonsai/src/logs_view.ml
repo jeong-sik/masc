@@ -1828,7 +1828,85 @@ let view_swim_lane ~name ~stat ~status ~frames =
     ]
 ;;
 
-let view_swimlanes () =
+(** Map JSON "kind" string to our [swim_frame_kind] variant. Unknown kinds
+    fall back to [`Wait] — neutral grey so unexpected telemetry renders
+    legibly instead of crashing the lane. *)
+let swim_frame_kind_of_string = function
+  | "llm" -> `Llm
+  | "tool" -> `Tool
+  | "think" -> `Think
+  | "err" -> `Err
+  | "wait" | _ -> `Wait
+;;
+
+let swim_lane_status_of (s : Keepers_types.keeper_status) : swim_lane_status =
+  match s with
+  | Live -> `Live
+  | Warn -> `Warn
+  | Dead -> `Dead
+;;
+
+(** Static fallback — matches the hand-coded mock before live wiring. *)
+let view_swim_lanes_static () =
+  [ view_swim_lane
+      ~name:"luna"
+      ~stat:"reading"
+      ~status:`Live
+      ~frames:
+        [ swim_frame ~kind:`Llm ~left:5 ~width:18 ~label:"llm"
+        ; swim_frame ~kind:`Tool ~left:28 ~width:10 ~label:"read"
+        ; swim_frame ~kind:`Think ~left:42 ~width:8 ~label:"think"
+        ; swim_frame ~kind:`Llm ~left:54 ~width:22 ~label:"llm"
+        ; swim_frame ~kind:`Tool ~left:80 ~width:14 ~label:"edit"
+        ]
+  ; view_swim_lane
+      ~name:"brass-owl"
+      ~stat:"retrying"
+      ~status:`Warn
+      ~frames:
+        [ swim_frame ~kind:`Llm ~left:3 ~width:20 ~label:"llm"
+        ; swim_frame ~kind:`Tool ~left:26 ~width:12 ~label:"fetch"
+        ; swim_frame ~kind:`Wait ~left:40 ~width:24 ~label:"wait"
+        ; swim_frame ~kind:`Tool ~left:66 ~width:10 ~label:"fetch"
+        ]
+  ; view_swim_lane
+      ~name:"moth"
+      ~stat:"idle · listening"
+      ~status:`Live
+      ~frames:
+        [ swim_frame ~kind:`Wait ~left:0 ~width:40 ~label:"wait"
+        ; swim_frame ~kind:`Llm ~left:42 ~width:14 ~label:"llm"
+        ; swim_frame ~kind:`Wait ~left:58 ~width:40 ~label:"wait"
+        ]
+  ; view_swim_lane
+      ~name:"ash-hound"
+      ~stat:"crashed t-34"
+      ~status:`Dead
+      ~frames:
+        [ swim_frame ~kind:`Llm ~left:2 ~width:18 ~label:"llm"
+        ; swim_frame ~kind:`Tool ~left:22 ~width:8 ~label:"exec"
+        ; swim_frame ~kind:`Err ~left:32 ~width:6 ~label:"err"
+        ]
+  ]
+;;
+
+let view_swim_lane_of_keeper (k : Keepers_types.keeper) =
+  let frames =
+    List.map k.lane_frames ~f:(fun (f : Keepers_types.lane_frame) ->
+      swim_frame
+        ~kind:(swim_frame_kind_of_string f.kind)
+        ~left:f.left
+        ~width:f.width
+        ~label:f.label)
+  in
+  view_swim_lane
+    ~name:k.name
+    ~stat:k.stat
+    ~status:(swim_lane_status_of k.status)
+    ~frames
+;;
+
+let view_swimlanes ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
   let axis_ticks =
     List.init 6 ~f:(fun i ->
       let left_pct = i * 20 in
@@ -1842,55 +1920,21 @@ let view_swimlanes () =
             [ Node.text (Printf.sprintf "t-%d" ((5 - i) * 12)) ]
         ])
   in
+  let lanes =
+    match keepers.keepers with
+    | [] -> view_swim_lanes_static ()
+    | live_keepers -> List.map live_keepers ~f:view_swim_lane_of_keeper
+  in
   Node.div
     ~attrs:[ Style.swim ]
-    [ Node.div
-        ~attrs:[ Style.swim_axis ]
-        [ Node.div
-            ~attrs:[ Style.swim_axis_sp ]
-            [ Node.text "keeper · cycle" ]
-        ; Node.div ~attrs:[ Style.swim_axis_ax ] axis_ticks
-        ]
-    ; view_swim_lane
-        ~name:"luna"
-        ~stat:"reading"
-        ~status:`Live
-        ~frames:
-          [ swim_frame ~kind:`Llm ~left:5 ~width:18 ~label:"llm"
-          ; swim_frame ~kind:`Tool ~left:28 ~width:10 ~label:"read"
-          ; swim_frame ~kind:`Think ~left:42 ~width:8 ~label:"think"
-          ; swim_frame ~kind:`Llm ~left:54 ~width:22 ~label:"llm"
-          ; swim_frame ~kind:`Tool ~left:80 ~width:14 ~label:"edit"
-          ]
-    ; view_swim_lane
-        ~name:"brass-owl"
-        ~stat:"retrying"
-        ~status:`Warn
-        ~frames:
-          [ swim_frame ~kind:`Llm ~left:3 ~width:20 ~label:"llm"
-          ; swim_frame ~kind:`Tool ~left:26 ~width:12 ~label:"fetch"
-          ; swim_frame ~kind:`Wait ~left:40 ~width:24 ~label:"wait"
-          ; swim_frame ~kind:`Tool ~left:66 ~width:10 ~label:"fetch"
-          ]
-    ; view_swim_lane
-        ~name:"moth"
-        ~stat:"idle · listening"
-        ~status:`Live
-        ~frames:
-          [ swim_frame ~kind:`Wait ~left:0 ~width:40 ~label:"wait"
-          ; swim_frame ~kind:`Llm ~left:42 ~width:14 ~label:"llm"
-          ; swim_frame ~kind:`Wait ~left:58 ~width:40 ~label:"wait"
-          ]
-    ; view_swim_lane
-        ~name:"ash-hound"
-        ~stat:"crashed t-34"
-        ~status:`Dead
-        ~frames:
-          [ swim_frame ~kind:`Llm ~left:2 ~width:18 ~label:"llm"
-          ; swim_frame ~kind:`Tool ~left:22 ~width:8 ~label:"exec"
-          ; swim_frame ~kind:`Err ~left:32 ~width:6 ~label:"err"
-          ]
-    ]
+    ([ Node.div
+         ~attrs:[ Style.swim_axis ]
+         [ Node.div
+             ~attrs:[ Style.swim_axis_sp ]
+             [ Node.text "keeper · cycle" ]
+         ; Node.div ~attrs:[ Style.swim_axis_ax ] axis_ticks
+         ]
+     ] @ lanes)
 ;;
 
 let svg_a k v = Attr.create k v
@@ -2559,7 +2603,7 @@ let render_response
             ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "pending" ]
             ]
         ]
-    ; view_swimlanes ()
+    ; view_swimlanes ~keepers ()
     ; Node.div
         ~attrs:[ Style.sec ]
         [ Node.span ~attrs:[ Style.sec_glyph ] []

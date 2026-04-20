@@ -2214,6 +2214,40 @@ let view_hud (response : Logs_types.response) =
     ]
 ;;
 
+(** Roman numeral for cycle counters. Only small integers (≤ 39) are
+    expected for dashboard display; outside that range we fall back to the
+    decimal form so very large cycles still render. *)
+let roman_of_int (n : int) : string =
+  if n <= 0 || n > 39
+  then Printf.sprintf "%d" n
+  else
+    let pairs =
+      [ 10, "x"; 9, "ix"; 5, "v"; 4, "iv"; 1, "i" ]
+    in
+    let buf = Buffer.create 8 in
+    let rec go n = function
+      | [] -> ()
+      | (v, s) :: rest ->
+        if n >= v
+        then (Buffer.add_string buf s; go (n - v) ((v, s) :: rest))
+        else go n rest
+    in
+    go n pairs;
+    Buffer.contents buf
+;;
+
+(** Count keepers by status. *)
+type fleet_tally = { live : int; warn : int; dead : int }
+
+let tally_fleet (ks : Keepers_types.keeper list) : fleet_tally =
+  List.fold ks ~init:{ live = 0; warn = 0; dead = 0 }
+    ~f:(fun acc (k : Keepers_types.keeper) ->
+      match k.status with
+      | Live -> { acc with live = acc.live + 1 }
+      | Warn -> { acc with warn = acc.warn + 1 }
+      | Dead -> { acc with dead = acc.dead + 1 })
+;;
+
 (** Focus keeper — first entry of the live response, or [None] when empty
     (triggers the legacy static fallback inside [focus_card_of]). *)
 let focus_keeper_of (k : Keepers_types.response) : Keepers_types.keeper option =
@@ -2302,11 +2336,25 @@ let render_response
       ; Node.button ~attrs:[ Style.btn_ghost ] [ Node.text "refresh" ]
       ]
   in
+  let tally = tally_fleet keepers.keepers in
+  let moon_lead_text =
+    match tally with
+    | { live = 0; warn = 0; dead = 0 } -> "the watch is on"
+    | { dead; _ } when dead > 0 -> "the watch stands a casualty"
+    | { warn; _ } when warn > 0 -> "the watch holds uneasy"
+    | _ -> "the watch is on"
+  in
+  let fleet_mono_text =
+    match tally with
+    | { live = 0; warn = 0; dead = 0 } -> "fleet · —"
+    | t ->
+      Printf.sprintf "fleet · %dl / %dw / %dd" t.live t.warn t.dead
+  in
   let moonrise =
     Node.div
       ~attrs:[ Style.moonrise ]
       [ Node.span ~attrs:[ Style.moon_glyph ] []
-      ; Node.span ~attrs:[ Style.moon_lead ] [ Node.text "the watch is on" ]
+      ; Node.span ~attrs:[ Style.moon_lead ] [ Node.text moon_lead_text ]
       ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
       ; Node.span [ Node.text "lit by a half moon" ]
       ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
@@ -2316,6 +2364,10 @@ let render_response
             ; Attr.create "data-moon-clock" ""
             ]
           [ Node.text "—:— local" ]
+      ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
+      ; Node.span
+          ~attrs:[ Style.moon_mono ]
+          [ Node.text fleet_mono_text ]
       ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
       ; Node.span
           ~attrs:[ Style.moon_mono ]
@@ -2606,7 +2658,18 @@ let render_response
              ~attrs:[ Style.page_head_lead ]
              [ Node.div
                  ~attrs:[ Style.page_tag ]
-                 [ Node.text "chronicle · quiet fox · day iv" ]
+                 [ Node.text
+                     (let room =
+                        match keepers.room with
+                        | Some r when String.length r > 0 -> r
+                        | _ -> "chronicle"
+                      in
+                      let day =
+                        if keepers.cycle <= 0
+                        then "—"
+                        else roman_of_int keepers.cycle
+                      in
+                      Printf.sprintf "%s · quiet fox · day %s" room day) ]
              ; Node.h1
                  ~attrs:[ Style.page_h1 ]
                  [ Node.text "the watch "

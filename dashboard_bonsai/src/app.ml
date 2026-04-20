@@ -18,5 +18,6 @@ let root (graph @ local) =
   match Route.of_path (current_path ()) with
   | Logs -> Logs_view.component graph
   | Hello -> Hello_view.component graph
+  | Dead_keepers -> Dead_keepers_view.component graph
   | other -> Placeholder_view.component ~route:other graph
 ;;

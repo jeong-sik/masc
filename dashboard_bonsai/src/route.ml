@@ -61,7 +61,7 @@ let path t = Printf.sprintf "/dashboard/b/%s" (slug t)
 
 (* Bonsai로 이식된 탭 목록. 그 외는 placeholder (Phase 2+). *)
 let is_implemented = function
-  | Logs | Hello -> true
+  | Logs | Hello | Dead_keepers -> true
   | _ -> false
 ;;
 

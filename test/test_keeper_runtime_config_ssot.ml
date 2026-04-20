@@ -644,7 +644,7 @@ tool_preset = "social"
       check string "cascade_name reset to keeper default"
         Keeper_config.default_cascade_name updated.cascade_name
 
-let test_social_model_not_resynced_from_declarative_defaults () =
+let test_social_model_resynced_from_declarative_defaults () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
   Fs_compat.clear_fs ();
@@ -682,7 +682,7 @@ social_model = "magentic_ledger_v1"
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
       check string "goal resynced from TOML" "TOML goal" updated.Keeper_types.goal;
-      check string "social_model remains keeper-owned" "bdi_speech_v1"
+      check string "social_model resynced from TOML" "magentic_ledger_v1"
         updated.social_model
 
 (** Test: room presence sync updates stale agent capabilities from live keeper meta. *)
@@ -848,9 +848,9 @@ let () =
             `Quick
             test_cascade_defaults_resync;
           test_case
-            "declarative defaults do not resync social_model"
+            "declarative defaults resync social_model"
             `Quick
-            test_social_model_not_resynced_from_declarative_defaults;
+            test_social_model_resynced_from_declarative_defaults;
           test_case
             "room presence sync overwrites stale agent capabilities"
             `Quick

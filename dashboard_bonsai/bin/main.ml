@@ -85,9 +85,50 @@ let install_theme_listener () =
   Dom_html.window##.onhashchange := Dom_html.handler on_hashchange
 ;;
 
+(* Moonrise clock — dashboard hero 아래 narrative strip의 "23:50 local"
+   자리에 실제 브라우저 로컬 시각을 매초 투영. Bonsai state 경유
+   안 함 — moonrise 한 element의 textContent 하나만 바꾸면 되니
+   document.querySelectorAll("[data-moon-clock]") 직접 접근이 더 경제적. *)
+
+let pad2 n =
+  if n < 10 then Printf.sprintf "0%d" n else Printf.sprintf "%d" n
+;;
+
+let now_local_text () =
+  let d = new%js Js.date_now in
+  Printf.sprintf
+    "%s:%s:%s local"
+    (pad2 d##getHours)
+    (pad2 d##getMinutes)
+    (pad2 d##getSeconds)
+;;
+
+let tick_moon_clocks () =
+  let nodes =
+    Dom_html.document##querySelectorAll (Js.string "[data-moon-clock]")
+  in
+  let text = Js.string (now_local_text ()) in
+  for i = 0 to nodes##.length - 1 do
+    match Js.Opt.to_option (nodes##item i) with
+    | None -> ()
+    | Some el -> el##.textContent := Js.some text
+  done
+;;
+
+let install_moon_clock () =
+  tick_moon_clocks ();
+  let _id =
+    Dom_html.window##setInterval
+      (Js.wrap_callback tick_moon_clocks)
+      (Js.number_of_float 1000.0)
+  in
+  ()
+;;
+
 let () =
   install_theme_listener ();
   Start.start ~bind_to_element_with_id:"app" Dashboard_bonsai_lib.App.root;
   Dashboard_bonsai_lib.Logs_fetch.run ();
-  Dashboard_bonsai_lib.Logs_fetch.start_polling ()
+  Dashboard_bonsai_lib.Logs_fetch.start_polling ();
+  install_moon_clock ()
 ;;

@@ -1660,7 +1660,12 @@ let render_response (response : Logs_types.response) : Node.t =
       ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
       ; Node.span [ Node.text "lit by a half moon" ]
       ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
-      ; Node.span ~attrs:[ Style.moon_mono ] [ Node.text "23:50 local" ]
+      ; Node.span
+          ~attrs:
+            [ Style.moon_mono
+            ; Attr.create "data-moon-clock" ""
+            ]
+          [ Node.text "—:— local" ]
       ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
       ; Node.span
           ~attrs:[ Style.moon_mono ]

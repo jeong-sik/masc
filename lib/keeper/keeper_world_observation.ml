@@ -324,18 +324,12 @@ let read_context_ratio ~(config : Coord.config) ~(meta : keeper_meta) : float =
       Keeper_model_labels.configured_model_labels_of_meta meta
     in
     let primary_max_context =
-      let min_keeper_context = Keeper_config.min_keeper_context_tokens in
-      let raw =
-        match meta.max_context_override with
-        | Some value -> value
-        | None ->
-              let resolved =
-                Cascade_runtime.resolve_max_cascade_context cascade_models
-              in
-            Cascade_runtime.clamp_context_for_pure_local_labels
-              ~labels:cascade_models ~max_context:resolved
+      let resolution =
+        Keeper_exec_context.resolve_max_context_resolution
+          ~requested_override:meta.max_context_override
+          cascade_models
       in
-      max min_keeper_context raw
+      resolution.effective_budget
     in
     let base_dir = session_base_dir config in
     let _session, ctx_opt =
@@ -363,18 +357,12 @@ let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta)
       Keeper_model_labels.configured_model_labels_of_meta meta
     in
     let primary_max_context =
-      let min_keeper_context = Keeper_config.min_keeper_context_tokens in
-      let raw =
-        match meta.max_context_override with
-        | Some value -> value
-        | None ->
-              let resolved =
-                Cascade_runtime.resolve_max_cascade_context cascade_models
-              in
-            Cascade_runtime.clamp_context_for_pure_local_labels
-              ~labels:cascade_models ~max_context:resolved
+      let resolution =
+        Keeper_exec_context.resolve_max_context_resolution
+          ~requested_override:meta.max_context_override
+          cascade_models
       in
-      max min_keeper_context raw
+      resolution.effective_budget
     in
     let base_dir = session_base_dir config in
     let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in

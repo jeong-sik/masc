@@ -476,20 +476,11 @@ let handle_keeper_status ctx args : tool_result =
         get_bool args "include_compaction_history" (not fast)
       in
       let models = Keeper_model_labels.configured_model_labels_of_meta m in
-      let primary_max_context =
-        let min_keeper_context = Keeper_config.min_keeper_context_tokens in
-        let raw =
-          match m.max_context_override with
-          | Some value -> value
-          | None ->
-              let resolved =
-                Cascade_runtime.resolve_max_cascade_context models
-              in
-              Cascade_runtime.clamp_context_for_pure_local_labels
-                ~labels:models ~max_context:resolved
-        in
-        max min_keeper_context raw
+      let max_context_resolution =
+        Keeper_exec_context.resolve_max_context_resolution
+          ~requested_override:m.max_context_override models
       in
+      let primary_max_context = max_context_resolution.effective_budget in
       let base_dir = session_base_dir ctx.config in
          let ctx_opt =
            if include_context then
@@ -1119,6 +1110,13 @@ let handle_keeper_status ctx args : tool_result =
              ("include_history_tail", `Bool include_history_tail);
              ("include_compaction_history", `Bool include_compaction_history);
              ("tail_order", `String (tail_order_to_string tail_order));
+           ]);
+           ("context_budget", `Assoc [
+             ("requested_override", Json_util.int_opt_to_json max_context_resolution.requested_override);
+             ("primary_budget", `Int max_context_resolution.primary_budget);
+             ("cascade_budget", `Int max_context_resolution.cascade_budget);
+             ("turn_budget", `Int max_context_resolution.turn_budget);
+             ("effective_budget", `Int max_context_resolution.effective_budget);
            ]);
            ("models_resolved", models_resolved);
            ("model_observability", model_observability);

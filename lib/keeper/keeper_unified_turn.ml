@@ -623,43 +623,27 @@ let cascade_budget_logged : (string * int * int, unit) Hashtbl.t =
 let resolved_max_context_for_turn
     ~(meta : keeper_meta)
     (model_labels : string list) : int =
-  let min_keeper_context = Keeper_config.min_keeper_context_tokens in
-  let raw =
-    match meta.max_context_override with
-    | Some v ->
-        Log.Keeper.debug "%s: using max_context_override=%d" meta.name v;
-        v
-    | None ->
-        let primary =
-          let resolved =
-            Cascade_runtime.resolve_primary_max_context model_labels
-          in
-          Cascade_runtime.clamp_context_for_pure_local_labels
-            ~labels:model_labels ~max_context:resolved
-        in
-        let cascade_max =
-          let resolved =
-            Cascade_runtime.resolve_max_cascade_context model_labels
-          in
-          Cascade_runtime.clamp_context_for_pure_local_labels
-            ~labels:model_labels ~max_context:resolved
-        in
-        if primary < cascade_max then begin
-          let key = (meta.name, primary, cascade_max) in
-          if not (Hashtbl.mem cascade_budget_logged key) then begin
-            Hashtbl.add cascade_budget_logged key ();
-            Log.Keeper.info
-              "%s: mixed cascade context budget primary=%d cascade_max=%d; using primary for initial turn budget"
-              meta.name primary cascade_max
-          end
-        end;
-        primary
+  let resolution =
+    Keeper_exec_context.resolve_max_context_resolution
+      ~requested_override:meta.max_context_override model_labels
   in
-  if raw < min_keeper_context then begin
-    Log.Keeper.warn "%s: resolved max_context=%d below minimum %d, clamped"
-      meta.name raw min_keeper_context;
-    min_keeper_context
-  end else raw
+  if resolution.primary_budget < resolution.cascade_budget then begin
+    let key = (meta.name, resolution.primary_budget, resolution.cascade_budget) in
+    if not (Hashtbl.mem cascade_budget_logged key) then begin
+      Hashtbl.add cascade_budget_logged key ();
+      Log.Keeper.info
+        "%s: mixed cascade context budget primary=%d cascade_max=%d; using primary for initial turn budget"
+        meta.name resolution.primary_budget resolution.cascade_budget
+    end
+  end;
+  (match resolution.requested_override with
+   | Some requested ->
+     Log.Keeper.debug
+       "%s: using max_context_override=%d turn_budget=%d primary_budget=%d effective_budget=%d"
+       meta.name requested resolution.turn_budget resolution.primary_budget
+       resolution.effective_budget
+   | None -> ());
+  resolution.turn_budget
 
 let decision_channel_of_observation
     (observation : Keeper_world_observation.world_observation) : string =
@@ -1661,6 +1645,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       match ensure_local_discovery_ready model_labels with
       | Error e -> Error (Oas.Error.Internal e)
       | Ok () ->
+      let max_context_resolution =
+        Keeper_exec_context.resolve_max_context_resolution
+          ~requested_override:meta.max_context_override model_labels
+      in
       let max_context =
         resolved_max_context_for_turn ~meta model_labels
       in
@@ -2074,8 +2062,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                               && attempt <= max_transient_retries then begin
                   let delay = transient_backoff_sec attempt in
                   Log.Keeper.warn
-                    "%s: transient network error cascade=%s max_context=%d retry=%d/%d backoff=%.0fs: %s"
-                    meta.name effective_cascade_name max_context
+                    "%s: transient network error cascade=%s max_context=%d turn_budget=%d primary_budget=%d requested_override=%s retry=%d/%d backoff=%.0fs: %s"
+                    meta.name effective_cascade_name max_context_resolution.effective_budget
+                    max_context
+                    max_context_resolution.primary_budget
+                    (match max_context_resolution.requested_override with
+                     | Some requested -> string_of_int requested
+                     | None -> "none")
                     attempt max_transient_retries delay
                     (short_preview (Oas.Error.to_string err));
                   Eio.Time.sleep clock delay;
@@ -2262,8 +2255,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           Prometheus.inc_counter Prometheus.metric_keeper_turns
             ~labels:[("keeper_name", meta.name); ("outcome", "failure")] ();
           Log.Keeper.error
-            "%s: keeper cycle FAILED cascade=%s max_context=%d latency=%dms%s error=%s"
-            meta.name effective_cascade_name max_context latency_ms
+            "%s: keeper cycle FAILED cascade=%s max_context=%d turn_budget=%d primary_budget=%d requested_override=%s latency=%dms%s error=%s"
+            meta.name effective_cascade_name max_context_resolution.effective_budget
+            max_context
+            max_context_resolution.primary_budget
+            (match max_context_resolution.requested_override with
+             | Some requested -> string_of_int requested
+             | None -> "none")
+            latency_ms
             (if is_ambiguous_partial then
                " (ambiguous partial commit)"
              else if is_server_parse_rejection then

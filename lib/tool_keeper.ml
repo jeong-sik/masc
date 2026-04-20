@@ -607,25 +607,18 @@ let handle_keeper_reset ctx args : tool_result =
 
 (** Resolve the primary model max context for a keeper.
 
-    Follows the same resolution order as
-    [Keeper_unified_turn.resolved_max_context_for_turn]:
-    max_context_override > cascade model resolution > min floor.
+    Returns the resolved primary provider/cascade budget, separate from any
+    requested [max_context_override] turn-budget widening.
     Returns [min_keeper_context_tokens] when meta is unavailable. *)
 let resolve_primary_max_context (meta : Keeper_types.keeper_meta option) : int =
   let min_ctx = Keeper_config.min_keeper_context_tokens in
   match meta with
   | None -> min_ctx
   | Some meta ->
-    let raw =
-      match meta.max_context_override with
-      | Some n when n > 0 -> n
-      | _ ->
-        let labels = Keeper_exec_context.effective_model_labels_for_turn meta in
-        let resolved = Cascade_runtime.resolve_max_cascade_context labels in
-        Cascade_runtime.clamp_context_for_pure_local_labels
-          ~labels ~max_context:resolved
+    let resolution =
+      Keeper_exec_context.resolve_max_context_resolution_of_meta meta
     in
-    max min_ctx raw
+    max min_ctx resolution.effective_budget
 
 (** Operator-initiated context compaction.
 

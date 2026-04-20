@@ -435,9 +435,7 @@ let keeper_sandbox_container_name (meta : keeper_meta) =
     (int_of_float (Unix.gettimeofday () *. 1000.0))
 
 let keeper_private_container_root (meta : keeper_meta) =
-  Filename.concat
-    Env_config_keeper.DockerPlayground.container_playground_root
-    (Playground_paths.sanitize_keeper_name meta.name)
+  Keeper_sandbox.container_root meta.name
 
 let docker_private_workspace_cwd ~(config : Coord.config) ~(meta : keeper_meta)
     host_cwd =

@@ -165,10 +165,10 @@ let absolute_allowed_paths_result ~(config : Coord.config)
   else
     Ok normalized
 
-(** Build a [path_not_in_allowed_paths] error message that teaches the LLM
+(** Build a sandbox boundary error message that teaches the LLM
     *why* the path was rejected — not just *that* it was. Bare "X not allowed"
     triggers retry loops; including the resolved candidate plus the
-    project-root anchor rule lets the keeper correct on the next call without
+    sandbox boundary rule lets the keeper correct on the next call without
     re-trying the same broken interpretation. See
     [memory/feedback_tool-error-messages-teach-llm.md]. *)
 (** Look for a playground-root allowed path (contains ".masc/playground/")
@@ -199,7 +199,7 @@ let format_path_rejection ~(raw : string) ~(resolved : string)
   let resolved_hint =
     if Filename.is_relative raw && resolved <> raw then
       Printf.sprintf
-        "; relative paths anchor at project root, not playground (resolved=%s)"
+        "; relative paths are checked against your sandbox boundary (resolved=%s)"
         resolved
     else
       ""
@@ -209,15 +209,16 @@ let format_path_rejection ~(raw : string) ~(resolved : string)
       match playground_root_of_allowed allowed_norms with
       | Some pg ->
         Printf.sprintf
-          ". Your raw path starts with 'repos/' or 'mind/'; prepend your \
-           playground root (try path=%s/%s) or call keeper_context_status \
-           and use the playground_repos / playground_mind variables."
-          pg raw
+          ". Your raw path already looks sandbox-relative. Use it as-is \
+           (for example path=%S) and do not prepend %s; call \
+           keeper_context_status and use sandbox_repos / sandbox_mind if \
+           unsure."
+          raw pg
       | None -> ""
     else ""
   in
   Printf.sprintf
-    "path_not_in_allowed_paths: %s%s (allowed: [%s])%s"
+    "path_outside_sandbox: %s%s (sandbox roots: [%s])%s"
     raw resolved_hint (String.concat ", " allowed_norms) playground_hint
 
 let resolve_keeper_target_path ~(config : Coord.config)
@@ -268,6 +269,7 @@ let playground_path_of_keeper = Playground_paths.bundle_root
 let playground_mind_path = Playground_paths.mind_path
 let playground_repos_path = Playground_paths.repos_path
 let playground_bundle_paths = Playground_paths.bundle_paths
+let sandbox_path_of_keeper name = Keeper_sandbox.allowed_root_rel ~name
 
 let ensure_playground_bundle ~(config : Coord.config) ~(name : string) : string list =
   let root = project_root_of_config config in
@@ -276,31 +278,31 @@ let ensure_playground_bundle ~(config : Coord.config) ~(name : string) : string 
   |> List.map Keeper_fs.ensure_dir
 
 (** Compute effective read allowed_paths from keeper meta.
-    Returns the playground bundle paths plus any explicit [allowed_paths]
+    Returns the single sandbox root plus any explicit [allowed_paths]
     entries. [["*"]] means full-access opt-in: the resulting empty list is
     interpreted by the OAS worker builder as "skip path restriction".
     Workspace/local scope no longer grants extra hardcoded paths; every
     additional path must be listed explicitly in [allowed_paths]. *)
 let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
-  let playground_paths = playground_bundle_paths meta.name in
+  let sandbox_paths = Keeper_sandbox.allowed_path_roots ~name:meta.name in
   match meta.allowed_paths with
   | ["*"] -> []
-  | explicit -> playground_paths @ explicit
+  | explicit -> sandbox_paths @ explicit
 
 (** Compute effective write allowed_paths from keeper meta.
-    Returns the playground bundle paths plus any explicit [allowed_paths]
+    Returns the single sandbox root plus any explicit [allowed_paths]
     entries. [["*"]] means full-access opt-in (empty allowlist signals
     "skip path restriction" to the OAS worker builder). Workspace/local
     scope no longer grants extra hardcoded paths; every additional path
     must be listed explicitly in [allowed_paths]. *)
 let effective_write_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
-  let playground_paths = playground_bundle_paths meta.name in
+  let sandbox_paths = Keeper_sandbox.allowed_path_roots ~name:meta.name in
   match meta.allowed_paths with
   | ["*"] -> []
-  | explicit -> playground_paths @ explicit
+  | explicit -> sandbox_paths @ explicit
 
 (** Resolve a path for read-only access within the keeper's effective
-    allowlist. The allowlist is usually the keeper playground bundle
+    allowlist. The allowlist is usually the keeper sandbox root
     plus any explicit custom paths; explicit ["*"] still means full
     project-root access. *)
 let resolve_keeper_read_path ~(config : Coord.config)

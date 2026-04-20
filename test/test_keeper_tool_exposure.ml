@@ -375,9 +375,9 @@ let test_path_allowed_paths_filter () =
       ~config ~allowed_paths:["lib"] ~raw_path:"src/bar.ml" in
     check bool "src path rejected" true (Result.is_error err_result);
     let err = Result.get_error err_result in
-    check bool "error mentions allowed_paths" true
+    check bool "error mentions sandbox boundary" true
       (try let _ = Str.search_forward
-        (Str.regexp_string "path_not_in_allowed_paths") err 0 in true
+        (Str.regexp_string "path_outside_sandbox") err 0 in true
        with Not_found -> false)))
 
 let test_path_allowed_paths_filter_strips_all_trailing_slashes () =

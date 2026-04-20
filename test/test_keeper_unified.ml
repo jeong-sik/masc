@@ -712,11 +712,15 @@ let test_prompt_includes_operational_tool_guidance () =
   check bool "mentions server-managed heartbeat" true
     (contains_substring sys "Heartbeat is server-managed")
 
-let test_capabilities_prompt_distinguishes_playground_and_worktree () =
+let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.capabilities" in
-  check bool "playground paths documented" true
-    (contains_substring prompt ".masc/playground/");
-  check bool "playground is default coding workspace" true
+  check bool "sandbox paths documented" true
+    (contains_substring prompt "sandbox_repos");
+  check bool "local backend host path not model-facing" false
+    (contains_substring prompt "ALL tool calls that accept `cwd` or `path` MUST resolve under `.masc/playground");
+  check bool "github shorthand removed" false
+    (contains_substring prompt "keeper_github");
+  check bool "sandbox is default coding workspace" true
     (contains_substring prompt "default coding workspace");
   check bool "git path documented via keeper_bash" true
     (contains_substring prompt "keeper_bash cmd='git status'");
@@ -725,18 +729,18 @@ let test_capabilities_prompt_distinguishes_playground_and_worktree () =
   check bool "legacy pr workflow removed from prompt" false
     (contains_substring prompt "keeper_pr_workflow")
 
-let test_world_prompt_distinguishes_playground_and_worktree () =
+let test_world_prompt_distinguishes_sandbox_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.world" in
-  check bool "world prompt names playground sandbox" true
-    (contains_substring prompt "Playground is your default sandbox");
+  check bool "world prompt names single sandbox" true
+    (contains_substring prompt "Your sandbox is the only filesystem ground");
   (* Keep the containment clause asserted so bare server-root `.worktrees/...`
      paths cannot drift back in. *)
-  check bool "world prompt names worktree workflow inside playground" true
+  check bool "world prompt names worktree workflow inside sandbox" true
     (contains_substring prompt
-       "Repo worktrees live *inside* your playground clone");
-  check bool "world prompt names canonical playground-rooted worktree path" true
+       "Repo worktrees live *inside* your sandbox clone");
+  check bool "world prompt names canonical sandbox-relative worktree path" true
     (contains_substring prompt
-       ".masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/<branch-or-task>/")
+       "repos/<REPO_NAME>/.worktrees/<branch-or-task>/")
 
 let test_system_prompt_prefers_bash_and_gh_pr_lane () =
   let sys =
@@ -757,6 +761,8 @@ let test_system_prompt_prefers_bash_and_gh_pr_lane () =
   check bool "mentions gh create path" true
     (contains_substring sys
        "keeper_shell op=gh (PR/issues via gh CLI; after git push");
+  check bool "does not advertise removed keeper_github" false
+    (contains_substring sys "keeper_github");
   check bool "legacy pr workflow removed" false
     (contains_substring sys "keeper_pr_workflow")
 
@@ -3371,10 +3377,10 @@ let () =
             test_prompt_mentions_extend_turns_guidance;
           test_case "includes operational tool guidance" `Quick
             test_prompt_includes_operational_tool_guidance;
-          test_case "distinguishes playground and worktree" `Quick
-            test_capabilities_prompt_distinguishes_playground_and_worktree;
-          test_case "world prompt distinguishes playground and worktree" `Quick
-            test_world_prompt_distinguishes_playground_and_worktree;
+          test_case "distinguishes sandbox and worktree" `Quick
+            test_capabilities_prompt_distinguishes_sandbox_and_worktree;
+          test_case "world prompt distinguishes sandbox and worktree" `Quick
+            test_world_prompt_distinguishes_sandbox_and_worktree;
           test_case "prefers submit over legacy workflow" `Quick
             test_system_prompt_prefers_bash_and_gh_pr_lane;
           test_case "includes autonomous trigger section" `Quick

@@ -119,10 +119,10 @@ let link_worktree_to_task config ~task_id ~worktree_info =
 
 (** Create worktree for agent - Result version
     @param link_task If true, links worktree info to the task in backlog (default: true)
-    @param repo_name If set, target the keeper's playground clone at
+    @param repo_name If set, target the keeper's sandbox repo clone at
            [.masc/playground/<agent>/repos/<repo_name>/] directly. If
            unset, scan [repos/] and use the first git clone found
-           (alphabetical). A playground clone is required. *)
+           (alphabetical). A sandbox repo clone is required. *)
 let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~base_branch : string masc_result =
   if not (is_initialized config) then
     Error NotInitialized
@@ -132,13 +132,13 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
   | Error e, _ -> Error e
   | _, Error e -> Error e
   | Ok _, Ok _ ->
-    (* Prefer a keeper's playground clone under
+    (* Prefer a keeper's sandbox repo clone under
        [.masc/playground/<agent>/repos/]. The layout is the SSOT in
        [Playground_paths] (masc_config). If [repo_name] is supplied,
        target that clone directly; otherwise scan the directory and
        pick the first git clone (alphabetical). Keepers may work on
        any repo their [tool_policy.toml] allows, but the worktree root
-       must come from a playground clone. *)
+       must come from a sandbox repo clone. *)
     let resolve_keeper_repo_root () =
       let repos_dir =
         Filename.concat config.base_path
@@ -218,7 +218,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
         Error
           (IoError
              (Printf.sprintf
-                "No playground git clone found under %s for agent %s. %s"
+                "No sandbox git clone found under %s for agent %s. %s"
                 repos_dir agent_name hint))
     in
     match resolve_keeper_repo_root () with
@@ -269,10 +269,13 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
             Ok (Printf.sprintf "✅ Worktree already exists:\n  Path: %s\n  Branch: %s\n  Repo: %s%s\n\nNext: cd %s"
                 worktree_path branch_name repo_name link_note worktree_path)
           end else begin
-            (* Fetch origin first *)
-            let _ = run_argv_exit ["git"; "-C"; root; "fetch"; "origin"] in
-
-            match Coord_git.resolve_base_branch root base_branch with
+            (* Fetch origin first; stale remotes must be explicit, not hidden. *)
+            let fetch_exit = run_argv_exit ["git"; "-C"; root; "fetch"; "origin"] in
+            if fetch_exit <> 0 then
+              Error
+                (IoError
+                   "Failed to fetch origin before worktree creation. Verify network/auth and retry so the task starts from the latest remote ref.")
+            else match Coord_git.resolve_base_branch root base_branch with
             | Error e -> Error e
             | Ok (resolved_base, fallback_from) ->
                 let note = match fallback_from with
@@ -379,7 +382,7 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
         Error
           (IoError
              (Printf.sprintf
-                "Worktree %s not found under playground clones in %s"
+                "Worktree %s not found under sandbox repo clones in %s"
                 worktree_name repos_dir))
     in
     match resolve_existing_worktree_root () with

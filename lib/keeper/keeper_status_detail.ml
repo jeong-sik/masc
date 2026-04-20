@@ -1162,9 +1162,17 @@ let handle_keeper_status ctx args : tool_result =
                    (Coord_utils.safe_filename m.name)
                    (Coord_utils.safe_filename (Keeper_id.Trace_id.to_string m.runtime.trace_id)))));
            ]);
-           (let playground_rel = Keeper_alerting_path.playground_path_of_keeper m.name in
+           (let sandbox = Keeper_sandbox.of_meta ~config:ctx.config ~meta:m in
+           let playground_rel = Keeper_alerting_path.playground_path_of_keeper m.name in
            let playground_abs = Filename.concat ctx.config.base_path playground_rel in
            "execution_context", `Assoc [
+             ("sandbox_id", `String sandbox.sandbox_id);
+             ("sandbox_backend", `String (Keeper_sandbox.backend_to_string sandbox.backend));
+             ("sandbox_root", `String sandbox.root_arg);
+             ("sandbox_repos", `String sandbox.repos_arg);
+             ("sandbox_mind", `String sandbox.mind_arg);
+             ("sandbox_host_root", `String sandbox.host_root_abs);
+             ("sandbox_container_root", Json_util.string_opt_to_json sandbox.container_root);
              ("playground_path", `String playground_rel);
              ("default_cwd", `String playground_abs);
              ("private_workspace_root", `String playground_abs);

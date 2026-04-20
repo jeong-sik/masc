@@ -1338,8 +1338,28 @@ let handle_keeper_shell
   in
   let root = Keeper_alerting_path.project_root_of_config config in
   let raw_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
-  let read_target () = resolve_keeper_shell_read_path ~config ~meta ~args in
-  let cwd_target () = resolve_keeper_shell_read_cwd ~config ~meta ~args in
+  (* RFC-0006 Phase B-1.5: pin host-FS read guard for hardened keeper
+     shell read ops. No-op for legacy keepers and when
+     MASC_KEEPER_SYMMETRIC_SANDBOX is off. *)
+  let containment_check target =
+    Keeper_sandbox_containment.check_read_target ~config ~meta ~target
+  in
+  let read_target () =
+    match resolve_keeper_shell_read_path ~config ~meta ~args with
+    | Error _ as e -> e
+    | Ok target ->
+      (match containment_check target with
+       | Ok () -> Ok target
+       | Error msg -> Error msg)
+  in
+  let cwd_target () =
+    match resolve_keeper_shell_read_cwd ~config ~meta ~args with
+    | Error _ as e -> e
+    | Ok cwd ->
+      (match containment_check cwd with
+       | Ok () -> Ok cwd
+       | Error msg -> Error msg)
+  in
   (* Actionable error: Samchon/Claude Code validateInput pattern.
      Returns structured JSON with tried path, playground root, and concrete next action. *)
   let path_error e =

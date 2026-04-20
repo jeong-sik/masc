@@ -162,6 +162,25 @@ let test_cb_cycling_excludes_cooldown_and_busy () =
   check (list string) "cooldown 'a' + busy 'b' filtered, 'c' (unknown) kept"
     ["c"] (names ordered)
 
+let test_cb_cycling_starvation_guard () =
+  (* Cooldown filter passes both 'a' and 'b', but capacity reports 0 for
+     both.  Guard must return the post-cooldown list instead of empty so
+     a real call is attempted (otherwise cascade exhausts with no
+     upstream error signal). *)
+  let h = H.create () in
+  let cands = [mk_cand "a"; mk_cand "b"] in
+  let table = [
+    (List.nth cands 0).url, mk_capacity_info ~total:1 ~active:1;
+    (List.nth cands 1).url, mk_capacity_info ~total:1 ~active:1;
+  ] in
+  let ctx = mk_ctx ~health:h ~capacity:(stub_capacity table) () in
+  let strat = mk_t S.Circuit_breaker_cycling
+      ~cycle:{ max_cycles = 3; backoff_base_ms = 100; backoff_cap_ms = 1000 }
+  in
+  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+  check (list string) "all-busy cooled list → fall through non-empty"
+    ["a"; "b"] (names ordered)
+
 (* ── Cycle policy + backoff ───────────────────────────────────── *)
 
 let test_default_cycle_policy_backward_compat () =
@@ -419,6 +438,22 @@ let test_priority_tier_capacity_filter () =
   let ctx = mk_ctx ~capacity:(stub_capacity table) () in
   let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
   check (list string) "tier 0 with 'a' busy → only 'b'" ["b"] (names ordered)
+
+let test_priority_tier_starvation_guard () =
+  (* All tier candidates report capacity=0.  Without the guard the
+     cascade would exit empty and surface as "all candidates filtered
+     after N cycle(s)"; with it, the tier list itself is returned so
+     at least one real call is attempted. *)
+  let cands = [mk_cand "a"; mk_cand "b"] in
+  let table = [
+    (List.nth cands 0).url, mk_capacity_info ~total:1 ~active:1;
+    (List.nth cands 1).url, mk_capacity_info ~total:1 ~active:1;
+  ] in
+  let strat = mk_t S.Priority_tier ~tiers:[["a"; "b"]] in
+  let ctx = mk_ctx ~capacity:(stub_capacity table) () in
+  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+  check (list string) "all-busy tier → fall through with tier list"
+    ["a"; "b"] (names ordered)
 
 (* ── Phase B: Sticky (S6) ──────────────────────────────────── *)
 
@@ -862,6 +897,8 @@ let () =
     "circuit_breaker_cycling", [
       test_case "excludes cooldown and busy" `Quick
         test_cb_cycling_excludes_cooldown_and_busy;
+      test_case "all-busy cooled list falls through (starvation guard)" `Quick
+        test_cb_cycling_starvation_guard;
     ];
     "cycle_policy", [
       test_case "default policy backward-compat" `Quick
@@ -912,6 +949,8 @@ let () =
         test_priority_tier_clamps_overflow;
       test_case "tier respects capacity filter" `Quick
         test_priority_tier_capacity_filter;
+      test_case "all-busy tier falls through (starvation guard)" `Quick
+        test_priority_tier_starvation_guard;
     ];
     "sticky", [
       test_case "record_choice → pinned on next call" `Quick

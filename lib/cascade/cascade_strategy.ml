@@ -188,9 +188,14 @@ let priority_tier_order adapter ctx ~tiers ~cycle cands =
   | [] -> []
   | _ ->
     let in_tier c = List.mem (adapter.health_key c) allowed in
-    cands
-    |> List.filter in_tier
-    |> filter_capacity adapter ctx
+    let tier_cands = List.filter in_tier cands in
+    (* Starvation guard: if every tier candidate reports capacity=0, fall
+       through with the unfiltered tier list so at least one call is
+       attempted and the real upstream error (rate limit, auth) surfaces
+       instead of silently exhausting the cascade.  Mirrors
+       weighted_shuffle's guard at [weighted_shuffle]:140-145. *)
+    let with_capacity = filter_capacity adapter ctx tier_cands in
+    if with_capacity = [] then tier_cands else with_capacity
 
 (* ── Sticky ─────────────────────────────────────────────────────── *)
 
@@ -249,9 +254,13 @@ let order_candidates t ~adapter ~ctx ~cycle cands =
   | Weighted_random ->
     weighted_shuffle adapter ctx cands
   | Circuit_breaker_cycling ->
-    cands
-    |> filter_cooldown adapter ctx
-    |> filter_capacity adapter ctx
+    let cooled = filter_cooldown adapter ctx cands in
+    (* Starvation guard: same pattern as priority_tier_order.  When all
+       candidates report capacity=0 the cascade would otherwise exit
+       with no real call attempt — prefer to try once and let the real
+       error surface. *)
+    let with_capacity = filter_capacity adapter ctx cooled in
+    if with_capacity = [] then cooled else with_capacity
   | Priority_tier ->
     priority_tier_order adapter ctx ~tiers:t.tiers ~cycle cands
   | Sticky ->

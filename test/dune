@@ -693,6 +693,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_cascade_model_resolve)
+ (modules test_cascade_model_resolve)
+ (libraries masc_test_deps unix))
+
+(test
  (name test_dashboard_tla_specs)
  (modules test_dashboard_tla_specs)
  (libraries masc_test_deps))

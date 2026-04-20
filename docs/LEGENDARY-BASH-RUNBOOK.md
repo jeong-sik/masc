@@ -228,6 +228,25 @@ for point-in-time diagnostics, counters for `disagree ratio =
 (legacy_allow_shadow_deny + legacy_deny_shadow_allow) / gate_diff_total`
 trend math over a rolling window.
 
+### Derived ratios (SSOT)
+
+Dashboards and flip-decision tooling should use the
+`Legendary_counters` helpers rather than re-deriving the math from
+raw fields — three different shell recipes and a UI drifted apart
+twice already. The helpers return `0.0` when their denominator is
+zero so the JSON output stays a finite float even with the observer
+off:
+
+| Helper | Formula | Flip criterion |
+| --- | --- | --- |
+| `disagree_ratio snap` | `(legacy_allow_shadow_deny + legacy_deny_shadow_allow) / gate_diff_total` | `MASC_BASH_AST_ONLY` target: `0.0` over 7-day window |
+| `shadow_parse_coverage snap` | `1.0 - shadow_cannot_parse / gate_diff_total` | `MASC_BASH_AST_ONLY` target: `>= 0.99` (parse gap `< 1%`) |
+| `auto_bg_promotion_rate snap` | `would_have_promoted / auto_bg_observed` | Input to `MASC_BLOCKING_BUDGET_MS` tuning + `MASC_BASH_AUTO_BG` default-flip review |
+
+The signatures live in `lib/legendary_counters.mli`; reach for them
+from any new dashboard chip, Slack formatter, or CI gate before
+open-coding the ratio yourself.
+
 The `too_complex_*` family is a histogram refinement of the single
 `gate_diff_shadow_cannot_parse` bucket: each subset-excluded bash
 feature gets its own counter, so operators can see which construct

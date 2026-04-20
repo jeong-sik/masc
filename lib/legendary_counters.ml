@@ -182,3 +182,26 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     ("too_complex_parse_aborted", `Int s.too_complex_parse_aborted);
     ("too_complex_other", `Int s.too_complex_other);
   ]
+
+let safe_ratio ~num ~den =
+  if den <= 0 then 0.0
+  else float_of_int num /. float_of_int den
+
+let disagree_ratio (s : snapshot) : float =
+  safe_ratio
+    ~num:(s.gate_diff_legacy_allow_shadow_deny
+          + s.gate_diff_legacy_deny_shadow_allow)
+    ~den:s.gate_diff_total
+
+let shadow_parse_coverage (s : snapshot) : float =
+  if s.gate_diff_total <= 0 then 0.0
+  else
+    1.0
+    -. safe_ratio
+         ~num:s.gate_diff_shadow_cannot_parse
+         ~den:s.gate_diff_total
+
+let auto_bg_promotion_rate (s : snapshot) : float =
+  safe_ratio
+    ~num:s.auto_bg_would_have_promoted
+    ~den:s.auto_bg_observed

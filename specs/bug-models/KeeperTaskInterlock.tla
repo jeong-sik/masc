@@ -312,7 +312,8 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 \*      pointing at the dead keeper.
 \*
 \*   2. A separate asynchronous subsystem, Coord_gc.cleanup_zombies
-\*      (lib/coord/coord_gc.ml), periodically scans agents by heartbeat
+\*      (lib/coord/coord_gc.ml:cleanup_zombies), periodically scans agents by
+\*      heartbeat
 \*      last_seen and force-releases Claimed/InProgress tasks whose
 \*      assignee is a zombie agent. This is modelled below as
 \*      ReconcileByGC.
@@ -324,7 +325,7 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 \* it against the TLC runner in tla-check.sh / specs/Makefile.
 
 \* Zombie GC reconciliation: release an orphaned task whose claimer
-\* is dead. Mirrors coord_gc.ml:128-146 Phase 3 cascade.
+\* is dead. Mirrors lib/coord/coord_gc.ml:cleanup_zombies Phase 3 cascade.
 ReconcileByGC(t) ==
     /\ Held(t)
     /\ keeper_phase[task_claimer[t]] = "dead"

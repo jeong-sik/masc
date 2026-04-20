@@ -263,6 +263,14 @@ let list ~keeper =
       (fun tid st acc -> if st.keeper = keeper then tid :: acc else acc)
       registry [])
 
+let list_with_started_at ~keeper =
+  with_reg (fun () ->
+    Hashtbl.fold
+      (fun tid st acc ->
+        if st.keeper = keeper then (tid, st.handle.started_at) :: acc
+        else acc)
+      registry [])
+
 (* Directory walk helpers — avoid Filename.Infix / extra deps. *)
 
 let safe_readdir dir =

@@ -269,6 +269,71 @@ let test_generated_alias_inherits_accountability_penalty () =
         "Inherited from canonical identity: adversary"
         rep.accountability_source_label)
 
+let test_direct_agent_history_exposes_direct_source () =
+  with_room ~agent_name:"keeper-direct-agent" (fun config ->
+      let created_at =
+        iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
+      in
+      append_accountability_event config.base_path ~created_at
+        (`Assoc
+           [
+             ("event_type", `String "claim_created");
+             ("claim_id", `String "acct-direct-agent-unsupported");
+             ("agent_name", `String "keeper-direct-agent");
+             ("keeper_name", `String "keeper-direct");
+             ("kind", `String "completion_claim");
+             ("subject", `String "Unsupported direct claim");
+             ("surface", `String "keeper_turn");
+             ("created_at", `String created_at);
+             ("evidence_refs", `List []);
+             ("synthetic", `Bool false);
+           ]);
+      let summary =
+        Keeper_accountability.accountability_summary_json config
+          ~keeper_name:"keeper-direct" ~agent_name:"keeper-direct-agent"
+      in
+      check string "direct summary source" "direct_agent"
+        (string_member "source" summary);
+      check string "direct summary source label"
+        "Direct runtime alias history"
+        (string_member "source_label" summary);
+      let rep =
+        Agent_reputation.compute_reputation config
+          ~agent_name:"keeper-direct-agent"
+      in
+      check string "direct reputation keeper provenance" "keeper-direct"
+        rep.accountability_keeper_name;
+      check string "direct reputation source" "direct_agent"
+        rep.accountability_source;
+      check string "direct reputation source label"
+        "Direct runtime alias history"
+        rep.accountability_source_label)
+
+let test_unmapped_alias_exposes_no_history_source () =
+  with_room ~agent_name:"orphan-eager-viper" (fun config ->
+      let summary =
+        Keeper_accountability.accountability_summary_json config
+          ~keeper_name:"orphan" ~agent_name:"orphan-eager-viper"
+      in
+      check string "unmapped alias source" "none"
+        (string_member "source" summary);
+      check string "unmapped alias source label"
+        "No accountability history"
+        (string_member "source_label" summary);
+      check string "unmapped alias risk remains low" "low"
+        (string_member "risk_band" summary);
+      let rep =
+        Agent_reputation.compute_reputation config
+          ~agent_name:"orphan-eager-viper"
+      in
+      check string "unmapped alias keeper provenance" "orphan"
+        rep.accountability_keeper_name;
+      check string "unmapped alias reputation source" "none"
+        rep.accountability_source;
+      check string "unmapped alias reputation source label"
+        "No accountability history"
+        rep.accountability_source_label)
+
 let test_claim_tool_exposes_routing_warning_for_high_risk_keeper () =
   with_room (fun config ->
       let meta = make_test_meta () in
@@ -586,6 +651,10 @@ let () =
             test_agent_reputation_penalizes_unsupported_claims;
           test_case "generated alias inherits accountability penalty" `Quick
             test_generated_alias_inherits_accountability_penalty;
+          test_case "direct agent history exposes direct source" `Quick
+            test_direct_agent_history_exposes_direct_source;
+          test_case "unmapped alias exposes no-history source" `Quick
+            test_unmapped_alias_exposes_no_history_source;
           test_case "claim tool exposes routing warning for high risk keeper"
             `Quick test_claim_tool_exposes_routing_warning_for_high_risk_keeper;
           test_case "preflight exposes routing hint for high risk keeper"

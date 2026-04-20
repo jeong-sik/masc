@@ -884,16 +884,10 @@ let make_enum_field_error ~field ~allowed ~received =
     received = Some received;
   }
 
-let make_type_field_error ~field ~expected ~received =
+let make_type_field_error ~field ~constraint_violated ~expected ~received =
   {
     field;
-    constraint_violated =
-      (match expected with
-       | "string" -> Type_string
-       | "integer" -> Type_int
-       | "number" -> Type_float
-       | "boolean" -> Type_bool
-       | _ -> Required);
+    constraint_violated;
     message = Printf.sprintf "%s must be a %s" field expected;
     expected = Some expected;
     received = Some received;
@@ -911,7 +905,8 @@ let parse_optional_horizon args field =
                ~received:raw))
   | json ->
       Error
-        (make_type_field_error ~field ~expected:"string"
+        (make_type_field_error ~field ~constraint_violated:Type_string
+           ~expected:"string"
            ~received:(Yojson.Safe.to_string json))
 
 let parse_optional_goal_status args field =
@@ -926,7 +921,8 @@ let parse_optional_goal_status args field =
                ~received:raw))
   | json ->
       Error
-        (make_type_field_error ~field ~expected:"string"
+        (make_type_field_error ~field ~constraint_violated:Type_string
+           ~expected:"string"
            ~received:(Yojson.Safe.to_string json))
 
 let parse_optional_review_outcome args field =
@@ -941,7 +937,8 @@ let parse_optional_review_outcome args field =
                ~received:raw))
   | json ->
       Error
-        (make_type_field_error ~field ~expected:"string"
+        (make_type_field_error ~field ~constraint_violated:Type_string
+           ~expected:"string"
            ~received:(Yojson.Safe.to_string json))
 
 let parse_optional_priority args field =
@@ -960,7 +957,8 @@ let parse_optional_priority args field =
       else Ok (Some n)
   | json ->
       Error
-        (make_type_field_error ~field ~expected:"integer"
+        (make_type_field_error ~field ~constraint_violated:Type_int
+           ~expected:"integer"
            ~received:(Yojson.Safe.to_string json))
 
 let handle_goal_list (ctx : context) args =

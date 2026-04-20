@@ -11,8 +11,13 @@
       GET /api/v1/legendary_bash/bg_tasks/<keeper>
 
     Response (200) for shadow_counters: JSON shape mirrors
-    [Legendary_counters.snapshot] field-for-field. See
-    [legendary_counters.mli] for the stable contract.
+    [Legendary_counters.snapshot] field-for-field, plus a [ratios]
+    sibling object carrying the three derived flip-decision ratios
+    ([disagree_ratio], [shadow_parse_coverage],
+    [auto_bg_promotion_rate]) so consumers do not have to re-derive
+    them client-side.  See [legendary_counters.mli] for the stable
+    contract and the [Derived ratios (SSOT)] runbook section for the
+    operator interpretation.
 
     Response (200) for bg_tasks: JSON of shape
       { "keeper": "<name>",
@@ -39,7 +44,7 @@ module Http = Http_server_eio
 
 let snapshot_response () : Yojson.Safe.t =
   let snap = Legendary_counters.snapshot () in
-  Legendary_counters.snapshot_to_json snap
+  Legendary_counters.snapshot_to_json_with_ratios snap
 
 let task_detail_json ~now (tid, started_at) : Yojson.Safe.t =
   let elapsed_ms =

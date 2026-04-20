@@ -201,6 +201,66 @@ let test_shadow_parse_coverage_full () =
   check_ratio "coverage = 1.0"
     ~expected:1.0 (Legendary_counters.shadow_parse_coverage s)
 
+let test_snapshot_to_json_with_ratios_shape () =
+  (* Even with observers idle (all counters zero) the helper must
+     still produce a JSON object that round-trips as a string.  The
+     [ratios] sibling exists and carries three finite [0.0] entries,
+     so dashboards can blind-read without NaN/inf handling. *)
+  Legendary_counters.reset ();
+  let json =
+    Legendary_counters.snapshot_to_json_with_ratios
+      (Legendary_counters.snapshot ())
+  in
+  let s = Yojson.Safe.to_string json in
+  Alcotest.(check bool)
+    "flat field preserved"
+    true
+    (Astring.String.is_infix ~affix:"\"gate_diff_total\":0" s);
+  Alcotest.(check bool)
+    "ratios sibling present"
+    true
+    (Astring.String.is_infix ~affix:"\"ratios\":{" s);
+  Alcotest.(check bool)
+    "disagree_ratio finite 0.0"
+    true
+    (Astring.String.is_infix ~affix:"\"disagree_ratio\":0.0" s);
+  Alcotest.(check bool)
+    "shadow_parse_coverage finite 0.0"
+    true
+    (Astring.String.is_infix ~affix:"\"shadow_parse_coverage\":0.0" s);
+  Alcotest.(check bool)
+    "auto_bg_promotion_rate finite 0.0"
+    true
+    (Astring.String.is_infix ~affix:"\"auto_bg_promotion_rate\":0.0" s)
+
+let test_snapshot_to_json_with_ratios_populated () =
+  Legendary_counters.reset ();
+  (* 10 observations with 3 disagreements + 1 parse-bailout. *)
+  for _ = 1 to 6 do Legendary_counters.incr_gate_diff `Agree done;
+  for _ = 1 to 2 do
+    Legendary_counters.incr_gate_diff `Legacy_allow_shadow_deny
+  done;
+  Legendary_counters.incr_gate_diff `Legacy_deny_shadow_allow;
+  Legendary_counters.incr_gate_diff `Shadow_cannot_parse;
+  let json =
+    Legendary_counters.snapshot_to_json_with_ratios
+      (Legendary_counters.snapshot ())
+  in
+  let s = Yojson.Safe.to_string json in
+  (* disagree_ratio = 3/10 = 0.3.  Assert the exact float repr that
+     Yojson emits for 0.3 so regressions in the serializer are
+     caught.  The double-quoted affix also guards against accidental
+     string-vs-number type changes. *)
+  Alcotest.(check bool)
+    "disagree_ratio carries populated value"
+    true
+    (Astring.String.is_infix ~affix:"\"disagree_ratio\":0.3" s);
+  (* shadow_parse_coverage = 1 - 1/10 = 0.9 *)
+  Alcotest.(check bool)
+    "shadow_parse_coverage carries populated value"
+    true
+    (Astring.String.is_infix ~affix:"\"shadow_parse_coverage\":0.9" s)
+
 let test_auto_bg_promotion_rate_math () =
   (* 10 observed, 4 would-have-promoted → 0.4.  Operator reads this
      and decides whether raising MASC_BLOCKING_BUDGET_MS is warranted
@@ -251,5 +311,9 @@ let () =
             test_shadow_parse_coverage_full;
           Alcotest.test_case "auto_bg_promotion_rate math" `Quick
             test_auto_bg_promotion_rate_math;
+          Alcotest.test_case "JSON with ratios sibling (zero)" `Quick
+            test_snapshot_to_json_with_ratios_shape;
+          Alcotest.test_case "JSON with ratios sibling (populated)" `Quick
+            test_snapshot_to_json_with_ratios_populated;
         ] );
     ]

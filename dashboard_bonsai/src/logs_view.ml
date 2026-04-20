@@ -2883,14 +2883,14 @@ let render_response
                      (let room =
                         match keepers.room with
                         | Some r when String.length r > 0 -> r
-                        | _ -> "chronicle"
+                        | _ -> "—"
                       in
                       let day =
                         if keepers.cycle <= 0
                         then "—"
                         else roman_of_int keepers.cycle
                       in
-                      Printf.sprintf "%s · quiet fox · day %s" room day) ]
+                      Printf.sprintf "chronicle · %s · day %s" room day) ]
              ; Node.h1
                  ~attrs:[ Style.page_h1 ]
                  [ Node.text "the watch "

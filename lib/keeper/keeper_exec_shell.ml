@@ -491,74 +491,13 @@ let command_uses_nested_container_runtime cmd =
     lowered_words
   || List.exists (String_util.contains_substring lowered_cmd) sandbox_socket_markers
 
-let docker_info_security_options ~timeout_sec =
-  let st, out =
-    Process_eio.run_argv_with_status
-      ~cwd:(Sys.getcwd ())
-      ~timeout_sec
-      [ "docker"; "info"; "--format"; "{{json .SecurityOptions}}" ]
-  in
-  if st <> Unix.WEXITED 0 then
-    Error
-      (Printf.sprintf "docker info failed while validating sandbox runtime: %s"
-         (Worker_dev_tools.truncate_for_log out))
-  else
-    try
-      match Yojson.Safe.from_string (String.trim out) with
-      | `List items ->
-          Ok
-            (List.filter_map Yojson.Safe.Util.to_string_option items
-            |> List.map String.lowercase_ascii)
-      | `Null -> Ok []
-      | _ ->
-          Error
-            "docker info returned unexpected SecurityOptions payload while validating sandbox runtime"
-    with
-    | Yojson.Json_error err ->
-        Error
-          (Printf.sprintf
-             "failed to parse docker info SecurityOptions JSON: %s"
-             err)
-
+(* Sandbox runtime preflight extracted to [Keeper_sandbox_runtime]
+   (RFC-0006 Phase B-3b) so [Keeper_docker_read] can call it without
+   forming a module cycle through this file. The helper below is the
+   call site retained for compatibility with this module's existing
+   callers. *)
 let ensure_keeper_sandbox_runtime ~timeout_sec =
-  let seccomp_profile =
-    String.trim (Env_config_keeper.KeeperSandbox.seccomp_profile ())
-  in
-  let require_rootless = Env_config_keeper.KeeperSandbox.require_rootless () in
-  let require_userns = Env_config_keeper.KeeperSandbox.require_userns () in
-  let seccomp_args =
-    if seccomp_profile = "" then
-      Ok []
-    else if Sys.file_exists seccomp_profile then
-      Ok [ "--security-opt"; "seccomp=" ^ seccomp_profile ]
-    else
-      Error
-        (Printf.sprintf
-           "sandbox seccomp profile not found: %s"
-           seccomp_profile)
-  in
-  match seccomp_args with
-  | Error _ as err -> err
-  | Ok seccomp_args ->
-      if not require_rootless && not require_userns then
-        Ok seccomp_args
-      else
-        match docker_info_security_options ~timeout_sec:(min 20.0 (max 5.0 timeout_sec)) with
-        | Error _ as err -> err
-        | Ok security_options ->
-            let has needle =
-              List.exists
-                (fun option_text -> String_util.contains_substring option_text needle)
-                security_options
-            in
-            if require_rootless && not (has "rootless") then
-              Error
-                "sandbox runtime requires Docker rootless mode (set MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS=false to disable this check)"
-            else if require_userns && not (has "userns") then
-              Error
-                "sandbox runtime requires Docker userns support (set MASC_KEEPER_SANDBOX_REQUIRE_USERNS=false to disable this check)"
-            else
-              Ok seccomp_args
+  Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec
 
 (* docker_with_git: leading-token check used by per-command dispatch.
    Returns true when the trimmed command's first whitespace-separated word
@@ -1423,38 +1362,98 @@ let handle_keeper_shell
     (match read_target () with
      | Error e -> path_error e
      | Ok target ->
-       let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:io_timeout_sec [ "/bin/ls"; "-la"; target ]
-       in
        let limit = shell_readonly_limit args in
-       Yojson.Safe.to_string
-         (`Assoc
-             [ "ok", `Bool (st = Unix.WEXITED 0)
-             ; "op", `String op
-             ; "path", `String target
-             ; "status", Keeper_alerting_path.process_status_to_json st
-             ; "entries", lines_to_json ~limit out
-             ]))
+       (* RFC-0006 Phase B-3b: when symmetric_sandbox+docker_read are
+          on for a hardened keeper, route ls through the same docker
+          prelude as keeper_fs_read so the container's mount is the
+          load-bearing isolation. The host-side containment guard
+          above remains as defense in depth. *)
+       if Keeper_docker_read.should_route_read ~meta then
+         (match
+            Keeper_docker_read.container_path_of_host ~config ~meta
+              ~host_path:target
+          with
+          | Error e ->
+            error_json
+              ~fields:[ "op", `String op; "path", `String target ] e
+          | Ok cpath ->
+            (match
+               Keeper_docker_read.run_command_in_container ~config ~meta
+                 ~command_argv:[ "ls"; "-la"; cpath ]
+                 ~max_bytes:1_000_000
+                 ~timeout_sec:io_timeout_sec ()
+             with
+             | Error msg ->
+               error_json
+                 ~fields:[ "op", `String op; "path", `String target ] msg
+             | Ok out ->
+               Yojson.Safe.to_string
+                 (`Assoc
+                     [ "ok", `Bool true
+                     ; "op", `String op
+                     ; "path", `String target
+                     ; "via", `String "docker"
+                     ; "entries", lines_to_json ~limit out
+                     ])))
+       else
+         let st, out =
+           Process_eio.run_argv_with_status ~timeout_sec:io_timeout_sec [ "/bin/ls"; "-la"; target ]
+         in
+         Yojson.Safe.to_string
+           (`Assoc
+               [ "ok", `Bool (st = Unix.WEXITED 0)
+               ; "op", `String op
+               ; "path", `String target
+               ; "status", Keeper_alerting_path.process_status_to_json st
+               ; "entries", lines_to_json ~limit out
+               ]))
   | "cat" ->
     (match read_target () with
      | Error e -> path_error e
      | Ok target ->
        let max_bytes = shell_readonly_cat_max_bytes args in
-       let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec [ "/bin/cat"; target ]
-       in
-       let body =
-         if String.length out > max_bytes then String.sub out 0 max_bytes else out
-       in
-       Yojson.Safe.to_string
-         (`Assoc
-             [ "ok", `Bool (st = Unix.WEXITED 0)
-             ; "op", `String op
-             ; "path", `String target
-             ; "status", Keeper_alerting_path.process_status_to_json st
-             ; "truncated", `Bool (String.length out > max_bytes)
-             ; "content", `String body
-             ]))
+       (* RFC-0006 Phase B-3b: docker route via the existing
+          read_file_in_container helper (which is already a [cat]
+          wrapper around run_command_in_container). Symmetry with
+          keeper_fs_read's [via: "docker"] response field. *)
+       if Keeper_docker_read.should_route_read ~meta then
+         (match
+            Keeper_docker_read.read_file_in_container ~config ~meta
+              ~host_path:target ~max_bytes
+              ~timeout_sec:read_timeout_sec ()
+          with
+          | Error msg ->
+            error_json
+              ~fields:[ "op", `String op; "path", `String target ] msg
+          | Ok body ->
+            let total = String.length body in
+            let truncated = total >= max_bytes in
+            Yojson.Safe.to_string
+              (`Assoc
+                  [ "ok", `Bool true
+                  ; "op", `String op
+                  ; "path", `String target
+                  ; "via", `String "docker"
+                  ; "bytes", `Int total
+                  ; "truncated", `Bool truncated
+                  ; "content", `String body
+                  ]))
+       else
+         let st, out =
+           Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec [ "/bin/cat"; target ]
+         in
+         let body =
+           if String.length out > max_bytes then String.sub out 0 max_bytes else out
+         in
+         Yojson.Safe.to_string
+           (`Assoc
+               [ "ok", `Bool (st = Unix.WEXITED 0)
+               ; "op", `String op
+               ; "path", `String target
+               ; "status", Keeper_alerting_path.process_status_to_json st
+               ; "truncated", `Bool (String.length out > max_bytes)
+               ; "content", `String body
+               ]))
   | "rg" ->
     let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
     if pattern = ""

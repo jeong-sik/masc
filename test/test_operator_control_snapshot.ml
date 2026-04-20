@@ -51,6 +51,45 @@ let test_align_keeper_runtime_status_ignores_zombie_runtime_signal () =
   Alcotest.(check string) "zombie runtime does not override inactive" "inactive"
     status
 
+let test_compute_context_ratio_uses_resolved_cli_context_budget () =
+  let base =
+    match
+      Keeper_types.meta_of_json
+        (`Assoc
+          [
+            ("name", `String "ctx-ratio-demo");
+            ("agent_name", `String "keeper-ctx-ratio-demo-agent");
+            ("trace_id", `String "trace-ctx-ratio-demo");
+            ("cascade_name", `String "keeper_unified");
+          ])
+    with
+    | Ok meta -> meta
+    | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
+  in
+  let meta =
+    {
+      base with
+      models = [ "codex_cli:auto" ];
+      runtime =
+        {
+          base.runtime with
+          usage =
+            {
+              base.runtime.usage with
+              last_model_used = "codex";
+              last_input_tokens = 2_106_223;
+            };
+        };
+    }
+  in
+  let ratio =
+    match Operator_control_snapshot.compute_context_ratio meta with
+    | Some value -> value
+    | None -> Alcotest.fail "expected context ratio"
+  in
+  Alcotest.(check (float 0.0001)) "codex bare provider uses 1.05M context"
+    (2106223.0 /. 1050000.0) ratio
+
 let test_snapshot_has_expected_sections () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

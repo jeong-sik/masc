@@ -17,6 +17,10 @@ let () =
             `Quick
             Test_operator_control_snapshot
             .test_align_keeper_runtime_status_ignores_zombie_runtime_signal;
+          Alcotest.test_case "snapshot context ratio resolves cli provider budget"
+            `Quick
+            Test_operator_control_snapshot
+            .test_compute_context_ratio_uses_resolved_cli_context_budget;
           Alcotest.test_case "snapshot sections" `Quick
             Test_operator_control_snapshot.test_snapshot_has_expected_sections;
           Alcotest.test_case "snapshot pending confirm summary tracks actor scope"

@@ -1146,11 +1146,17 @@ let run_turn
                      let preview =
                        List.filteri (fun i _ -> i < n) tasks
                        |> List.map (fun (t : Types.task) ->
+                            (* UTF-8 safe truncation: String.sub cuts on byte
+                               boundary and can split multi-byte codepoints,
+                               producing invalid UTF-8 that codex CLI rejects
+                               with "invalid UTF-8 was detected in one or
+                               more arguments" (fleet 2026-04-20). 83 bytes =
+                               80 byte prefix + 3 byte ellipsis (U+2026). *)
                             Printf.sprintf "  - %s (p%d): %s"
                               t.id t.priority
-                              (if String.length t.title > 80 then
-                                 String.sub t.title 0 80 ^ "…"
-                               else t.title))
+                              (String_util.utf8_safe
+                                 ~max_bytes:83 ~suffix:"…" t.title
+                               |> String_util.to_string))
                        |> String.concat "\n"
                      in
                      Some (Printf.sprintf

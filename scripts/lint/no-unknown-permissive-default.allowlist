@@ -1,11 +1,20 @@
 # Allowlist for scripts/lint/no-unknown-permissive-default.sh
 #
-# Format: one `<path>:<line>` per line. Lines starting with `#` are ignored.
+# Entry formats (both accepted):
+#   path::symbol   — preferred. Stable across line drift; the entry stays
+#                    valid while the enclosing `let <symbol>` declaration
+#                    keeps its name. Rename/remove the symbol → entry goes
+#                    stale (exit 2) and must be cleaned up in the same PR.
+#   path:line      — legacy. Fragile: upstream insertion shifts the line
+#                    number and the entry goes stale even when the pattern
+#                    is still there. Prefer `path::symbol`.
 #
-# Entries below are pre-existing #8605 family instances that the CI gate
-# observed at install time (2026-04-20). They are NOT exonerations — each
-# should be migrated to sound-partial or Unknown variant in follow-up work.
-# File new instances as standalone bugs (see #8832 as an example).
+# Lines starting with `#` are ignored.
+#
+# Entries below (if any) are pre-existing #8605 family instances. They are
+# NOT exonerations — each should be migrated to sound-partial or Unknown
+# variant in follow-up work. File new instances as standalone bugs
+# (see #8832 as an example).
 
 # #8605 umbrella — tracked in https://github.com/jeong-sik/masc-mcp/issues/8605
 #

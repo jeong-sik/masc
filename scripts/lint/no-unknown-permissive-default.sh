@@ -8,10 +8,19 @@
 #      constructor (anything except None / Error / Some / Ok / Unknown / Other /
 #      Unspecified / Null / Nil / *_unknown / *_other / Module.lowercase_fn).
 #
+# Allowlist entry forms (both accepted):
+#   path:line        — legacy. Fragile under refactor: an upstream insertion
+#                      shifts the line number and the entry goes stale even
+#                      when the pattern is still there.
+#   path::symbol     — symbol-anchored. Stable across line drift. Resolves
+#                      to the enclosing top-level `let <symbol>` / `and
+#                      <symbol>` declaration at the violation site. Prefer
+#                      this form.
+#
 # Exit codes:
 #   0 — clean
 #   1 — new violations (not in allowlist)
-#   2 — stale allowlist entries (pattern no longer present at listed line)
+#   2 — stale allowlist entries (pattern no longer present at listed location)
 #
 # Reference: #8605 (family), #8832 (latest instance), event_kind.mli (fix template).
 
@@ -27,20 +36,36 @@ files_scanned=0
 detected_keys=()
 
 # awk scans each .ml file:
+#   - Tracks the enclosing top-level `let`/`and` symbol at each line.
 #   - Tracks whether the last ~40 lines contained a `| "literal" -> ...` arm.
 #   - When a `| _ -> Capital_Constructor` line appears AND the exclusion
-#     list doesn't match, emit `file:line:content`.
+#     list doesn't match, emit `file<TAB>line<TAB>symbol<TAB>content`.
+#
+# Using TAB as a field separator because OCaml `content` may embed `:` in
+# type annotations; `symbol` is always a plain identifier or `<top>`.
 scan_file() {
   awk '
     BEGIN {
       has_string_arm = 0
       arm_line = 0
+      current_symbol = "<top>"
+    }
+    function extract_symbol(s,    n, parts, idx, sym) {
+      n = split(s, parts, /[[:space:]]+/)
+      idx = 2
+      if (n >= 3 && parts[2] == "rec") idx = 3
+      sym = parts[idx]
+      # Strip anything after the identifier (args, type annotations, =, etc.).
+      gsub(/[^a-zA-Z0-9_'\''].*/, "", sym)
+      if (sym == "" || sym == "_") return "<top>"
+      return sym
     }
     {
       line = $0
 
-      # Reset tracker on function boundaries (let / and at column 0).
+      # Track the enclosing top-level let/and binding.
       if (line ~ /^(let|and)[[:space:]]/) {
+        current_symbol = extract_symbol(line)
         has_string_arm = 0
         arm_line = 0
       }
@@ -59,13 +84,12 @@ scan_file() {
       # Detect wildcard-to-constructor.
       if (has_string_arm && line ~ /^[[:space:]]*\|[[:space:]]*_[[:space:]]*->[[:space:]]*[A-Z][a-zA-Z_0-9]+/) {
         # Exclude Module.lowercase_fn (function application, not a constructor).
-        # Match any dotted chain where a lowercase segment appears after a dot.
         if (line ~ /->[[:space:]]*[A-Z][A-Za-z_0-9.]*\.[a-z]/) next
         # Exclude safe / explicit-failure constructors.
         if (line ~ /->[[:space:]]*([A-Z][A-Za-z_0-9]*\.)*(None|Error|Some|Ok|Unknown|Other|Unspecified|Null|Nil|Reject|Fail|Failure|Invalid|Missing|Denied|Skip|Skipped|Absent|NotFound|Not_found)([^A-Za-z0-9_]|$)/) next
         if (line ~ /(_unknown|_other|_unspecified|_invalid|_missing|_error)([^A-Za-z0-9_]|$)/) next
 
-        printf "%s:%d:%s\n", FILENAME, NR, line
+        printf "%s\t%d\t%s\t%s\n", FILENAME, NR, current_symbol, line
       }
     }
   ' "$1"
@@ -76,18 +100,20 @@ while IFS= read -r -d '' file; do
   findings=$(scan_file "$file" || true)
   [[ -z "$findings" ]] && continue
 
-  while IFS=: read -r _ linenum content; do
+  while IFS=$'\t' read -r _ linenum symbol content; do
     [[ -z "$linenum" ]] && continue
-    key="${file}:${linenum}"
-    detected_keys+=("$key")
+    line_key="${file}:${linenum}"
+    sym_key="${file}::${symbol}"
+    detected_keys+=("$line_key" "$sym_key")
 
-    if [[ -f "$ALLOWLIST_FILE" ]] && grep -qxF "$key" "$ALLOWLIST_FILE"; then
+    if [[ -f "$ALLOWLIST_FILE" ]] && \
+       { grep -qxF "$line_key" "$ALLOWLIST_FILE" || grep -qxF "$sym_key" "$ALLOWLIST_FILE"; }; then
       continue
     fi
 
     trimmed="$(echo "$content" | sed 's/^[[:space:]]*//')"
-    printf '::error file=%s,line=%d::#8605 family: permissive default in string-parsing match: %s\n' \
-      "$file" "$linenum" "$trimmed"
+    printf '::error file=%s,line=%d::#8605 family: permissive default in string-parsing match (symbol=%s): %s\n' \
+      "$file" "$linenum" "$symbol" "$trimmed"
     violations=$((violations + 1))
   done <<< "$findings"
 done < <(find lib -type f -name '*.ml' -print0)
@@ -113,21 +139,23 @@ Fix options:
      reference template.
   2. Explicit `Unknown of string` variant: preserves the wire string for
      diagnosis while making the unknown case visible to downstream matches.
-  3. If the coercion is intentional and well-documented, add the `file:line`
-     to scripts/lint/no-unknown-permissive-default.allowlist (one entry per
-     line). Prefer fixing.
+  3. If the coercion is intentional and well-documented, add one entry per
+     line to scripts/lint/no-unknown-permissive-default.allowlist:
+       path::symbol   (preferred — stable across line drift)
+       path:line      (legacy — fragile)
+     Prefer fixing.
 
 EOF
   exit 1
 fi
 
-# Self-verify: fail when an allowlist entry points to a line that no longer
-# matches the #8605 family pattern (upstream fix eliminated it, or the line
-# shifted). Keeps the allowlist an accurate debt ledger — merged fixes remove
-# their entry in the same PR, or the gate flags the drift.
+# Self-verify: fail when an allowlist entry no longer maps to a detected
+# violation (upstream fix eliminated it, or — with symbol anchors — the
+# symbol was renamed / removed). Symbol form eliminates the line-drift
+# false-stale class that the `path:line` form exhibits (cycle 26 / cycle 35).
 #
 # Opt out with SKIP_ALLOWLIST_VERIFY=1 during a transient in-flight migration
-# that lists lines before the fix lands.
+# that lists the location before the fix lands.
 stale=0
 if [[ -f "$ALLOWLIST_FILE" && "${SKIP_ALLOWLIST_VERIFY:-0}" != "1" ]]; then
   detected_set=$'\n'
@@ -142,7 +170,7 @@ if [[ -f "$ALLOWLIST_FILE" && "${SKIP_ALLOWLIST_VERIFY:-0}" != "1" ]]; then
     [[ -z "$entry" ]] && continue
 
     if [[ "$detected_set" != *$'\n'"$entry"$'\n'* ]]; then
-      printf '::error file=%s::stale allowlist entry: %s (no #8605 family pattern detected at this file:line; remove from allowlist)\n' \
+      printf '::error file=%s::stale allowlist entry: %s (no #8605 family pattern detected at this location; remove from allowlist)\n' \
         "$ALLOWLIST_FILE" "$entry"
       stale=$((stale + 1))
     fi
@@ -156,9 +184,10 @@ Stale allowlist entries detected.
 
 Why this fails CI:
   The allowlist is a debt ledger of pre-existing #8605 family sites. When
-  an upstream fix eliminates the pattern, the entry must be removed in the
-  same PR as the fix. Silently-stale entries turn the ledger into noise and
-  let new violations hide behind old listings (cycle 26 / cycle 35 drift
+  an upstream fix eliminates the pattern (or a symbol-anchored entry loses
+  its symbol via rename/removal), the entry must be removed in the same
+  PR. Silently-stale entries turn the ledger into noise and let new
+  violations hide behind old listings (cycle 26 / cycle 35 drift
   incidents).
 
 Fix: remove the listed entries from the allowlist file — mechanical edit,
@@ -173,9 +202,11 @@ fi
 
 echo "No #8605 family violations found."
 if [[ "${#detected_keys[@]}" -gt 0 ]]; then
-  if [[ "${#detected_keys[@]}" -eq 1 ]]; then
-    echo "Allowlist debt: 1 entry (allowlisted)."
+  # Each violation contributes 2 keys (line + symbol). Report unique sites.
+  site_count=$(( ${#detected_keys[@]} / 2 ))
+  if [[ "$site_count" -eq 1 ]]; then
+    echo "Allowlist debt: 1 site (allowlisted)."
   else
-    echo "Allowlist debt: ${#detected_keys[@]} entries (all allowlisted)."
+    echo "Allowlist debt: ${site_count} sites (all allowlisted)."
   fi
 fi

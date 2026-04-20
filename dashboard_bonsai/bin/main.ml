@@ -130,5 +130,7 @@ let () =
   Start.start ~bind_to_element_with_id:"app" Dashboard_bonsai_lib.App.root;
   Dashboard_bonsai_lib.Logs_fetch.run ();
   Dashboard_bonsai_lib.Logs_fetch.start_polling ();
+  Dashboard_bonsai_lib.Keepers_fetch.run ();
+  Dashboard_bonsai_lib.Keepers_fetch.start_polling ();
   install_moon_clock ()
 ;;

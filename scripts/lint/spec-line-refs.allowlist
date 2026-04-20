@@ -39,6 +39,8 @@ specs/keeper-state-machine/KeeperReconcileLiveness.tla  lib/keeper/keeper_keepal
 # Added 2026-04-20: pre-existing drifts surfaced after refactors of
 # state machine / keepalive / coord_gc bodies. Non-blocking baseline,
 # spec text needs re-anchoring (issue: TBD).
-specs/bug-models/KeeperPhaseRace.tla  lib/keeper/keeper_state_machine.ml:311
-specs/bug-models/KeeperPhaseRace.tla  lib/keeper/keeper_keepalive.ml:1566
-specs/bug-models/KeeperTaskInterlock.tla  lib/coord/coord_gc.ml:39
+#
+# Pruned 2026-04-20: KeeperPhaseRace was repurposed in #9080 (no longer
+# references state_machine.ml:311 or keepalive.ml:1566). KeeperTaskInterlock
+# anchors were re-anchored in #9086/#9090 (coord_gc.ml:39 → :128 onward).
+# Removing the now-stale entries restores the self-verify ledger to honest.

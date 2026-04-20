@@ -189,74 +189,7 @@ stylesheet
   .heartbeat_bar_error { background: linear-gradient(180deg, #e84848 0%, #8a1010 100%); box-shadow: 0 0 6px rgba(160, 24, 24, 0.45); }
   .heartbeat_bar_idle  { background: var(--border-main); opacity: 0.6; }
 
-  .hud {
-    position: sticky;
-    top: 0;
-    z-index: 3;
-    display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    gap: 1px;
-    background: var(--border-main);
-    border: 1px solid var(--border-highlight);
-    border-radius: 2px;
-    box-shadow:
-      inset 0 0 0 1px rgba(196, 162, 101, 0.08),
-      0 2px 12px rgba(0, 0, 0, 0.6),
-      0 16px 24px -16px rgba(0, 0, 0, 0.9);
-    backdrop-filter: blur(2px);
-  }
-
-  .hud::before,
-  .hud::after {
-    content: "";
-    position: absolute;
-    width: 14px;
-    height: 14px;
-    border: 1px solid var(--accent-brass);
-    pointer-events: none;
-    z-index: 1;
-  }
-
-  .hud::before {
-    top: -1px;
-    left: -1px;
-    border-right: 0;
-    border-bottom: 0;
-  }
-
-  .hud::after {
-    bottom: -1px;
-    right: -1px;
-    border-left: 0;
-    border-top: 0;
-  }
-
-  .hud_cell {
-    background: var(--bg-panel);
-    padding: 10px 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-
-  .hud_k {
-    font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.25em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-  }
-
-  .hud_v {
-    font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
-    font-variant-numeric: tabular-nums;
-    font-size: 12px;
-    color: var(--text-primary);
-  }
-
-  .hud_v_ok   { color: var(--status-ok); }
-  .hud_v_warn { color: var(--status-warn); }
-  .hud_v_bad  { color: var(--status-bad); }
+  /* hud CSS → Hud 모듈로 이관 (shell 추출 Phase 2.A) */
 
   /* Moonrise strip — narrative interlude between the HUD readout and
      the filter toolbar. Reads as a quiet status bar that names the
@@ -1589,18 +1522,7 @@ let view_entry ~is_first (e : Logs_types.entry) =
     ]
 ;;
 
-let hud_cell ?(v_class = None) ~k ~v () =
-  let v_attrs =
-    match v_class with
-    | None -> [ Style.hud_v ]
-    | Some c -> [ Style.hud_v; c ]
-  in
-  Node.div
-    ~attrs:[ Style.hud_cell ]
-    [ Node.div ~attrs:[ Style.hud_k ] [ Node.text k ]
-    ; Node.div ~attrs:v_attrs [ Node.text v ]
-    ]
-;;
+(* hud_cell → Hud.cell (shell 추출 Phase 2.A) *)
 
 (* Heartbeat strip — 60 bars representing event density across recent cycles.
    Static shape for Phase 1; Phase 1c wires real per-minute buckets. *)
@@ -2092,14 +2014,7 @@ let view_context_pressure
     ]
 ;;
 
-(** Extract "HH:MM:SS" from an ISO-8601 UTC timestamp
-    (e.g. "2026-04-20T04:02:07Z" → "04:02:07"). Falls back to the full
-    string if the shape doesn't match — never throws. *)
-let hhmmss_of_iso (s : string) : string =
-  if String.length s >= 19 && Char.equal s.[10] 'T'
-  then String.sub s ~pos:11 ~len:8
-  else s
-;;
+(* hhmmss_of_iso → Hud.hhmmss_of_iso (shell 추출 Phase 2.A) *)
 
 let view_hud
       ?(keepers : Keepers_types.response = Keepers_types.fixture)
@@ -2112,32 +2027,29 @@ let view_hud
         | Warn -> (l, w + 1, d)
         | Dead -> (l, w, d + 1))
   in
-  let fleet_v, fleet_cls =
+  let fleet_v, (fleet_cls : Hud.v_class) =
     if live_n = 0 && warn_n = 0 && dead_n = 0
-    then "—", None
+    then "—", `Neutral
     else if dead_n > 0
-    then
-      Printf.sprintf "%dl %dw %dd" live_n warn_n dead_n,
-      Some Style.hud_v_bad
+    then Printf.sprintf "%dl %dw %dd" live_n warn_n dead_n, `Bad
     else if warn_n > 0
-    then Printf.sprintf "%dl %dw" live_n warn_n, Some Style.hud_v_warn
-    else Printf.sprintf "%dl" live_n, Some Style.hud_v_ok
+    then Printf.sprintf "%dl %dw" live_n warn_n, `Warn
+    else Printf.sprintf "%dl" live_n, `Ok
   in
   let sync_v =
     match keepers.generated_at with
     | "" -> "—"
-    | ts -> Printf.sprintf "%s UTC" (hhmmss_of_iso ts)
+    | ts -> Printf.sprintf "%s UTC" (Hud.hhmmss_of_iso ts)
   in
-  Node.div
-    ~attrs:[ Style.hud ]
-    [ hud_cell ~k:"Source" ~v:"Log.Ring" ()
-    ; hud_cell ~k:"Total" ~v:(Printf.sprintf "%d" response.total) ()
-    ; hud_cell ~k:"Level" ~v:"INFO+" ()
-    ; hud_cell ~v_class:(Some Style.hud_v_ok) ~k:"Refresh" ~v:"poll · 3s" ()
-    ; hud_cell ~k:"Limit" ~v:"200" ()
-    ; hud_cell ~v_class:(Some Style.hud_v_ok) ~k:"Link" ~v:"fetch · ok" ()
-    ; hud_cell ~v_class:fleet_cls ~k:"Fleet" ~v:fleet_v ()
-    ; hud_cell ~k:"Synced" ~v:sync_v ()
+  Hud.strip
+    [ Hud.cell ~k:"Source" ~v:"Log.Ring" ()
+    ; Hud.cell ~k:"Total" ~v:(Printf.sprintf "%d" response.total) ()
+    ; Hud.cell ~k:"Level" ~v:"INFO+" ()
+    ; Hud.cell ~v_class:`Ok ~k:"Refresh" ~v:"poll · 3s" ()
+    ; Hud.cell ~k:"Limit" ~v:"200" ()
+    ; Hud.cell ~v_class:`Ok ~k:"Link" ~v:"fetch · ok" ()
+    ; Hud.cell ~v_class:fleet_cls ~k:"Fleet" ~v:fleet_v ()
+    ; Hud.cell ~k:"Synced" ~v:sync_v ()
     ]
 ;;
 

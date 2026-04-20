@@ -566,11 +566,23 @@ let observed_state_of_status_json = function
 let retry_backoff_seconds () =
   Env_config_runtime.Sidecar.reconcile_backoff_sec
 
+(** Compare backoff deadline against [now] in unix-epoch seconds. Parses both
+    sides via [Types_core.parse_iso8601_opt] so that an ISO string that
+    serialises before-but-sorts-after (e.g. drift between timezones or a
+    clock skew) still resolves to the correct ordering. Fail-closed: if
+    either side fails to parse (malformed sidecar or boundary layer drift),
+    treat the backoff as inactive so reconcile retries instead of stalling.
+    See #8930 phase 3. *)
 let retry_backoff_active ~now attempt =
-  attempt.generation >= 0
-  && match attempt.next_retry_at with
-     | Some next_retry_at -> String.compare next_retry_at now > 0
-     | None -> false
+  match attempt.next_retry_at with
+  | None -> false
+  | Some next_retry_at ->
+      (match
+         ( Types_core.parse_iso8601_opt next_retry_at,
+           Types_core.parse_iso8601_opt now )
+       with
+      | Some next_unix, Some now_unix -> next_unix > now_unix
+      | _ -> false)
 
 let next_attempt_record ~now ~next_retry_at previous (record : desired_record) =
   let attempt_number =

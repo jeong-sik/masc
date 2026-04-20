@@ -331,6 +331,96 @@ let bonsai_index_html () =
 let serve_bonsai_index _request reqd =
   Http.Response.html (bonsai_index_html ()) reqd
 
+(** [GET /dashboard/b/api/keepers/summary] — projection consumed by
+    Bonsai focus card / roster / swimlane / context pressure chart.
+    Currently returns a static 4-keeper mock that mirrors what the
+    logs_view renders statically. Will be wired to Keeper_status_bridge
+    + cycle trace in a follow-up PR. *)
+let iso8601_utc_now () =
+  let open Unix in
+  let t = gmtime (gettimeofday ()) in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
+    t.tm_hour t.tm_min t.tm_sec
+
+let keepers_summary_mock () : Masc_dashboard_api_types.Keepers.response =
+  let module K = Masc_dashboard_api_types.Keepers in
+  let frames xs =
+    List.map (fun (kind, left, width, label) ->
+      K.{ kind; left; width; label }) xs
+  in
+  let ctx xs =
+    List.map (fun (t_minus_min, ctx_pct) ->
+      K.{ t_minus_min; ctx_pct }) xs
+  in
+  let luna = K.{
+    name = "luna";
+    stat = "reading";
+    status = Live;
+    ctx_pct = 38;
+    turn = 47;
+    turn_cap = 60;
+    mem_kb = 128;
+    latency_ms = 812;
+    last_tool = Some "llm";
+    lane_frames = frames [
+      ("llm",   5, 18, "llm");
+      ("tool", 28, 10, "read");
+      ("think",42,  8, "think");
+      ("llm",  54, 22, "llm");
+      ("tool", 80, 14, "edit");
+    ];
+    ctx_history = ctx [ (60, 38); (48, 40); (36, 37); (24, 40); (12, 42); (0, 38) ];
+  } in
+  let brass_owl = { luna with
+    K.name = "brass-owl"; stat = "retrying"; status = Warn;
+    ctx_pct = 67; turn = 39; mem_kb = 92; latency_ms = 1420;
+    last_tool = Some "fetch";
+    lane_frames = frames [
+      ("llm",   3, 20, "llm");
+      ("tool", 26, 12, "fetch");
+      ("wait", 40, 24, "wait");
+      ("tool", 66, 10, "fetch");
+    ];
+    ctx_history = ctx [ (60, 40); (48, 46); (36, 52); (24, 58); (12, 62); (0, 67) ];
+  } in
+  let moth = { luna with
+    K.name = "moth"; stat = "idle · listening"; status = Live;
+    ctx_pct = 12; turn = 8; mem_kb = 14; latency_ms = 220;
+    last_tool = Some "wait";
+    lane_frames = frames [
+      ("wait",  0, 40, "wait");
+      ("llm",  42, 14, "llm");
+      ("wait", 58, 40, "wait");
+    ];
+    ctx_history = ctx [ (60, 10); (48, 11); (36, 10); (24, 12); (12, 12); (0, 12) ];
+  } in
+  let ash_hound = { luna with
+    K.name = "ash-hound"; stat = "crashed t-34"; status = Dead;
+    ctx_pct = 95; turn = 22; mem_kb = 64; latency_ms = 0;
+    last_tool = Some "err";
+    lane_frames = frames [
+      ("llm",   2, 18, "llm");
+      ("tool", 22,  8, "exec");
+      ("err",  32,  6, "err");
+    ];
+    ctx_history = ctx [ (60, 45); (48, 65); (36, 85); (34, 95) ];
+  } in
+  K.{
+    keepers = [ luna; brass_owl; moth; ash_hound ];
+    cycle = 4;
+    room = Some "chronicle";
+    generated_at = iso8601_utc_now ();
+  }
+
+let bonsai_api_keepers_summary request reqd =
+  let resp = keepers_summary_mock () in
+  let body =
+    Yojson.Safe.to_string
+      (Masc_dashboard_api_types.Keepers.response_to_yojson resp)
+  in
+  respond_public_read_json request reqd body
+
 let serve_bonsai_static name request reqd =
   let path = Filename.concat (bonsai_asset_root ()) name in
   match read_file path with

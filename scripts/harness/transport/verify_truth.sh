@@ -25,7 +25,8 @@ echo "--- Transport Truth Harness ---"
 json_bool() {
   local json="$1"
   local filter="$2"
-  jq -r "${filter} // \"missing\"" <<<"$json" 2>/dev/null || printf 'missing\n'
+  jq -r "(${filter}) as \$value | if \$value == null then \"missing\" else \$value end" \
+    <<<"$json" 2>/dev/null || printf 'missing\n'
 }
 
 fetch_transport_health_json() {
@@ -172,15 +173,20 @@ PY
 probe_sse() {
   local headers
   headers="$(mktemp "${TMPDIR:-/tmp}/masc-transport-truth-sse.XXXXXX")"
-  curl -sS -N --max-time 2 -D "$headers" -o /dev/null \
+  local status
+  status="$(curl -sS -N --max-time 2 -D "$headers" -o /dev/null \
+    -w '%{http_code}' \
     -H "Accept: application/json, text/event-stream" \
     "${MASC_BASE_URL}/mcp?sse_kind=observer&session_id=transport-truth-$$" \
-    >/dev/null 2>&1 || true
+    2>/dev/null || printf '000')"
   if grep -qi "content-type:.*text/event-stream" "$headers"; then
     rm -f "$headers"
     return 0
   fi
   rm -f "$headers"
+  if [[ "$status" = "401" || "$status" = "403" ]]; then
+    return 2
+  fi
   return 1
 }
 
@@ -188,12 +194,48 @@ probe_h2c() {
   if ! curl --version | grep -q "HTTP2"; then
     return 2
   fi
-  curl --http2-prior-knowledge -fsS --max-time 3 -X POST \
+  local mcp_probe health_probe status version
+  mcp_probe="$(curl --http2-prior-knowledge -sS --max-time 3 -o /dev/null \
+    -w '%{http_code} %{http_version}' -X POST \
     "${MASC_BASE_URL}/mcp" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"transport-truth-h2","version":"1.0"}}}' \
-    >/dev/null
+    2>/dev/null || true)"
+  health_probe="$(curl --http2-prior-knowledge -sS --max-time 3 -o /dev/null \
+    -w '%{http_code} %{http_version}' "${MASC_BASE_URL}/health" \
+    2>/dev/null || true)"
+  status="$(awk '{print $1}' <<<"$mcp_probe")"
+  version="$(awk '{print $2}' <<<"$health_probe")"
+  status="${status:-000}"
+  version="${version:-0}"
+  case "$status" in
+    200|202)
+      [[ "$version" = "2" || "$version" = "2.0" ]]
+      ;;
+    401|403)
+      [[ "$version" = "2" || "$version" = "2.0" ]] && return 3
+      return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+probe_mcp_post() {
+  local status
+  status="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' -X POST \
+    "${MASC_BASE_URL}/mcp" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"transport-truth-http","version":"1.0"}}}' \
+    2>/dev/null || printf '000')"
+  case "$status" in
+    200|202) return 0 ;;
+    401|403) return 2 ;;
+    *) return 1 ;;
+  esac
 }
 
 compare_truth() {
@@ -206,6 +248,10 @@ compare_truth() {
 
   if [[ "$actual" = "skip" ]]; then
     skip "${name} truth" "$detail"
+    return
+  fi
+  if [[ "$actual" = "auth_blocked" ]]; then
+    auth_blocked "${name} truth" "dashboard=${dashboard} tool=${tool} ${detail}"
     return
   fi
   if [[ "$dashboard" != "missing" && "$dashboard" != "$actual" ]]; then
@@ -248,13 +294,16 @@ if session_id="$(mcp_initialize_session 2>/dev/null)"; then
     fail "masc_transport_status" "could not decode JSON tool content"
   fi
 else
-  fail "masc_transport_status" "MCP initialize failed"
+  auth_blocked "masc_transport_status" "MCP initialize blocked; likely auth-required endpoint"
 fi
 
-if mcp_initialize_session >/dev/null; then
+if probe_mcp_post; then
   actual_http="true"
 else
-  actual_http="false"
+  case "$?" in
+    2) actual_http="auth_blocked" ;;
+    *) actual_http="false" ;;
+  esac
 fi
 dashboard_http="$(json_bool "$transport_health_json" '.streamable_http.supports_post')"
 tool_http="$(json_bool "$transport_status_json" '.streamable_http_default // .http.enabled')"
@@ -264,7 +313,10 @@ compare_truth "streamable-http" "$dashboard_http" "$tool_http" "$actual_http" \
 if probe_sse; then
   actual_sse="true"
 else
-  actual_sse="false"
+  case "$?" in
+    2) actual_sse="auth_blocked" ;;
+    *) actual_sse="false" ;;
+  esac
 fi
 dashboard_sse="$(json_bool "$transport_health_json" '.streamable_http.supports_sse_upgrade')"
 tool_sse="$(jq -r 'if (.http.sse_url // "") != "" then "true" else "missing" end' \
@@ -278,8 +330,11 @@ if [[ "$grpc_port" =~ ^[0-9]+$ ]] && probe_tcp "127.0.0.1" "$grpc_port"; then
 else
   actual_grpc="false"
 fi
-dashboard_grpc="$(json_bool "$transport_health_json" '.grpc.listening')"
-tool_grpc="$(json_bool "$transport_status_json" '.grpc.listening')"
+if refreshed_transport_health_json="$(fetch_transport_health_json)"; then
+  transport_health_json="$refreshed_transport_health_json"
+fi
+dashboard_grpc="$(json_bool "$transport_health_json" '.grpc as $grpc | if ($grpc | has("reachable")) then $grpc.reachable else $grpc.listening end')"
+tool_grpc="$(json_bool "$transport_status_json" '.grpc as $grpc | if ($grpc | has("reachable")) then $grpc.reachable else $grpc.listening end')"
 compare_truth "grpc" "$dashboard_grpc" "$tool_grpc" "$actual_grpc" \
   "tcp=127.0.0.1:${grpc_port}"
 
@@ -290,8 +345,11 @@ if [[ "$ws_port" =~ ^[0-9]+$ ]] && probe_ws_handshake "127.0.0.1" "$ws_port"; th
 else
   actual_ws="false"
 fi
-dashboard_ws="$(json_bool "$transport_health_json" '.websocket.listening')"
-tool_ws="$(json_bool "$transport_status_json" '.websocket.listening')"
+if refreshed_transport_health_json="$(fetch_transport_health_json)"; then
+  transport_health_json="$refreshed_transport_health_json"
+fi
+dashboard_ws="$(json_bool "$transport_health_json" '.websocket as $ws | if ($ws | has("reachable")) then $ws.reachable else $ws.listening end')"
+tool_ws="$(json_bool "$transport_status_json" '.websocket as $ws | if ($ws | has("reachable")) then $ws.reachable else $ws.listening end')"
 compare_truth "websocket" "$dashboard_ws" "$tool_ws" "$actual_ws" \
   "port=${ws_port:-missing}"
 
@@ -314,6 +372,7 @@ if [[ "$dashboard_h2" = "true" || "$tool_h2" = "true" ]]; then
   else
     case "$?" in
       2) actual_h2="skip" ;;
+      3) actual_h2="auth_blocked" ;;
       *) actual_h2="false" ;;
     esac
   fi

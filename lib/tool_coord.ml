@@ -434,7 +434,7 @@ let status_summary_string (ctx : context) =
   in
   let suggested_next =
     if Option.is_some planning_state.planning_missing_task then
-      [ "masc_plan_init"; "masc_status" ]
+      []
     else if Option.is_some planning_state.deliverable_conflict_task then
       [ "masc_deliver"; "masc_status" ]
     else
@@ -483,7 +483,7 @@ let status_summary_string (ctx : context) =
         items
         @ [
             Printf.sprintf
-              "Owned task %s has no planning context. Initialize or repair planning before continuing claimed work."
+              "Owned task %s has no planning context. Do not retry generic masc_plan_init from a drifted surface; use handoff/worktree/test logs as the temporary SSOT until a credentialed owner repair receipt exists."
               task_id;
           ]
     | None -> items)

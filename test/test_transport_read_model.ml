@@ -63,6 +63,41 @@ let test_transport_status_http_shape_extends_tool_shape () =
      with
     | `Bool _ -> true
     | _ -> false);
+  check bool "http surface exposes streamable configured"
+    true
+    (match
+       Yojson.Safe.Util.(http_json |> member "http" |> member "configured")
+     with
+    | `Bool _ -> true
+    | _ -> false);
+  check bool "http surface exposes streamable protocol capability"
+    true
+    (match
+       Yojson.Safe.Util.(http_json |> member "http" |> member "protocol_capable")
+     with
+    | `Bool _ -> true
+    | _ -> false);
+  check bool "http surface exposes auth policy dimension"
+    true
+    (match
+       Yojson.Safe.Util.(http_json |> member "http" |> member "auth_policy_present")
+     with
+    | `Bool _ -> true
+    | _ -> false);
+  check bool "grpc surface exposes reachability"
+    true
+    (match
+       Yojson.Safe.Util.(http_json |> member "grpc" |> member "reachable")
+     with
+    | `Bool _ -> true
+    | _ -> false);
+  check bool "websocket surface exposes reachability"
+    true
+    (match
+       Yojson.Safe.Util.(http_json |> member "websocket" |> member "reachable")
+     with
+    | `Bool _ -> true
+    | _ -> false);
   check bool "webrtc surface exposes signaling availability"
     true
     (match

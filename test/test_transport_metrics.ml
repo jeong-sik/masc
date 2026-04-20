@@ -225,6 +225,7 @@ let test_transport_health_json () =
   Masc_mcp.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
   let json = TM.transport_health_json ~config in
   let sse_json = json |> U.member "sse" in
+  let streamable_json = json |> U.member "streamable_http" in
   let grpc_json = json |> U.member "grpc" in
   let ws_json = json |> U.member "websocket" in
   let webrtc_json = json |> U.member "webrtc" in
@@ -245,16 +246,32 @@ let test_transport_health_json () =
     (sse_json |> U.member "relay_retry_total" |> U.to_int);
   check int "relay drops total" 4
     (sse_json |> U.member "relay_drop_total" |> U.to_int);
+  check bool "streamable http configured field exists" true
+    (match streamable_json |> U.member "configured" with
+    | `Bool _ -> true
+    | _ -> false);
+  check bool "streamable http protocol_capable field exists" true
+    (match streamable_json |> U.member "protocol_capable" with
+    | `Bool _ -> true
+    | _ -> false);
+  check bool "streamable http auth_policy_present field exists" true
+    (match streamable_json |> U.member "auth_policy_present" with
+    | `Bool _ -> true
+    | _ -> false);
   check int "grpc active streams" 1
     (grpc_json |> U.member "active_streams" |> U.to_int);
   check int "grpc subscribers" 2
     (grpc_json |> U.member "subscribers" |> U.to_int);
   check bool "grpc listening field exists" true
     (match grpc_json |> U.member "listening" with `Bool _ -> true | _ -> false);
+  check bool "grpc reachable field exists" true
+    (match grpc_json |> U.member "reachable" with `Bool _ -> true | _ -> false);
   check bool "grpc listen_status field exists" true
     (match grpc_json |> U.member "listen_status" with `String _ -> true | _ -> false);
   check bool "websocket listening field exists" true
     (match ws_json |> U.member "listening" with `Bool _ -> true | _ -> false);
+  check bool "websocket reachable field exists" true
+    (match ws_json |> U.member "reachable" with `Bool _ -> true | _ -> false);
   check bool "ws listen_status field exists" true
     (match ws_json |> U.member "listen_status" with `String _ -> true | _ -> false);
   check bool "websocket section exists" true

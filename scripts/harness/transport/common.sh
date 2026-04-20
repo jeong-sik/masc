@@ -35,6 +35,7 @@ export MASC_WS_URL
 PASS=0
 FAIL=0
 SKIP=0
+AUTH_BLOCKED=0
 
 TRANSPORT_SERVER_PID=""
 TRANSPORT_SERVER_BASE_PATH=""
@@ -55,10 +56,15 @@ skip() {
   printf '  \033[33mSKIP\033[0m %s: %s\n' "$1" "${2:-}"
 }
 
+auth_blocked() {
+  AUTH_BLOCKED=$((AUTH_BLOCKED + 1))
+  printf '  \033[36mAUTH-BLOCKED\033[0m %s: %s\n' "$1" "${2:-}"
+}
+
 summary() {
   echo ""
-  printf '=== %s: %d passed, %d failed, %d skipped ===\n' \
-    "${HARNESS_NAME:-transport}" "$PASS" "$FAIL" "$SKIP"
+  printf '=== %s: %d passed, %d failed, %d skipped, %d auth-blocked ===\n' \
+    "${HARNESS_NAME:-transport}" "$PASS" "$FAIL" "$SKIP" "$AUTH_BLOCKED"
   [ "$FAIL" -eq 0 ]
 }
 

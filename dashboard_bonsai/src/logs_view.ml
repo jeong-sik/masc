@@ -2452,7 +2452,7 @@ let render_response
                ]
            in
            let tail =
-             [ Node.span ~attrs:[ Style.crumbs_cur ] [ Node.text "logs · 저널" ]
+             [ Node.span ~attrs:[ Style.crumbs_cur ] [ Node.text "저널" ]
              ]
            in
            head @ room_seg @ tail)
@@ -2965,12 +2965,18 @@ let render_response
         ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "keepers" ]
         ; Node.span
             ~attrs:[ Style.sec_sub ]
-            [ Node.text "four hold the halls · one listens through the storm" ]
+            [ Node.text "sorted by heartbeat · ctx spark = last 10 min" ]
         ; Node.span ~attrs:[ Style.sec_hr ] []
         ; Node.span
             ~attrs:[ Style.sec_r ]
             [ Node.text "slot "
-            ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "iv" ]
+            ; Node.span
+                ~attrs:[ Style.sec_r_v ]
+                [ Node.text
+                    (match keepers.keepers with
+                     | [] -> "—"
+                     | ks -> String.lowercase (roman_of_int (List.length ks)))
+                ]
             ]
         ]
     ; view_roster ~keepers ()

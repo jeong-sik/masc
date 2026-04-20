@@ -6,6 +6,10 @@
 
     - [GET /api/v1/verification/requests] — operator view of pending /
       approved / rejected verification requests (see {!Dashboard_verification}).
+    - [GET /api/v1/verification/summary] — one-shot status bucket counts +
+      most recent rejections (verdict_reason carriers). Lets consumers
+      render a compact "X pending / Y approved / Z rejected" card without
+      paging the full request list.
     - [GET /api/v1/verification/specs] — TLA+ spec index with clean / buggy
       cfg coverage (see {!Dashboard_tla_specs}).
     - [POST /api/v1/verification/resolve] — dashboard-initiated approve/reject
@@ -47,6 +51,17 @@ let add_routes router =
          let json =
            Dashboard_verification.requests_json ?task_id ?limit ()
          in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/verification/summary" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let recent =
+           match trimmed_query_param req "recent" with
+           | Some s -> int_of_string_opt s
+           | None -> None
+         in
+         let json = Dashboard_verification.summary_json ?recent () in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)

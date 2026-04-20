@@ -57,3 +57,29 @@ val requests_json :
   ?limit:int ->
   unit ->
   Yojson.Safe.t
+
+(** Build a one-shot summary snapshot: status bucket counts plus the most
+    recent rejections (carriers of verdict_reason / PR / issue refs).
+
+    The [recent] parameter is clamped into [\[0, 20\]] and defaults to 3.
+    When [0], the ["recent_rejections"] array is empty but still present.
+
+    Envelope:
+    {[
+      {
+        "updated_at":        "2026-04-20T...",
+        "total":             N,
+        "by_status":         {"pending": _, "approved": _, "rejected": _,
+                              "timed_out": _},
+        "recent_rejections": [
+          { "request_id":     "vrf-...",
+            "task_id":        "task-...",
+            "task_title":     "...",
+            "keeper":         "keeper-name" | null,
+            "verdict_reason": "...",
+            "created_at":     "2026-04-20T..." },
+          ...
+        ]
+      }
+    ]} *)
+val summary_json : ?recent:int -> unit -> Yojson.Safe.t

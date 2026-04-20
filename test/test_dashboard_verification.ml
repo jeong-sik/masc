@@ -228,6 +228,81 @@ let test_requests_json_surfaces_conflict_triage_fields () =
      | `String "Reconcile board / planning / mutation surfaces before ordinary approval." -> ()
      | _ -> Alcotest.fail "next_action mismatch"))
 
+(* ── summary_json ───────────────────────────────────── *)
+
+let int_field name j =
+  match member name j with
+  | `Int n -> n
+  | _ -> Alcotest.fail (Printf.sprintf "%s not int" name)
+
+let test_summary_empty () =
+  with_temp_base_path (fun _base_path ->
+    let j = D.summary_json () in
+    Alcotest.(check int) "total" 0 (int_field "total" j);
+    let by = member "by_status" j in
+    Alcotest.(check int) "pending" 0 (int_field "pending" by);
+    Alcotest.(check int) "approved" 0 (int_field "approved" by);
+    Alcotest.(check int) "rejected" 0 (int_field "rejected" by);
+    Alcotest.(check int) "timed_out" 0 (int_field "timed_out" by);
+    match member "recent_rejections" j with
+    | `List [] -> ()
+    | _ -> Alcotest.fail "recent_rejections not empty list")
+
+let test_summary_bucket_counts () =
+  with_temp_base_path (fun base_path ->
+    (* 2 pending + 1 approved + 2 rejected *)
+    let _p1 = create_pending_request ~base_path ~task_id:"t-p1"
+        ~worker:"w" ~criteria:[V.Custom "c"] ~evidence:[] in
+    let _p2 = create_pending_request ~base_path ~task_id:"t-p2"
+        ~worker:"w" ~criteria:[V.Custom "c"] ~evidence:[] in
+    let a1 = create_pending_request ~base_path ~task_id:"t-a1"
+        ~worker:"w" ~criteria:[V.Custom "c"] ~evidence:[] in
+    let r1 = create_pending_request ~base_path ~task_id:"t-r1"
+        ~worker:"w" ~criteria:[V.Custom "c"] ~evidence:[] in
+    let r2 = create_pending_request ~base_path ~task_id:"t-r2"
+        ~worker:"w" ~criteria:[V.Custom "c"] ~evidence:[] in
+    let verdict_of req ~verdict =
+      match V.submit_verdict ~base_path ~req_id:req.V.id
+              ~verifier:"v" ~verdict with
+      | Ok _ -> ()
+      | Error e -> Alcotest.fail e
+    in
+    verdict_of a1 ~verdict:V.Pass;
+    verdict_of r1 ~verdict:(V.Fail "r1 reason");
+    verdict_of r2 ~verdict:(V.Fail "r2 reason");
+
+    let j = D.summary_json () in
+    Alcotest.(check int) "total" 5 (int_field "total" j);
+    let by = member "by_status" j in
+    Alcotest.(check int) "pending" 2 (int_field "pending" by);
+    Alcotest.(check int) "approved" 1 (int_field "approved" by);
+    Alcotest.(check int) "rejected" 2 (int_field "rejected" by);
+
+    match member "recent_rejections" j with
+    | `List rows ->
+        Alcotest.(check int) "rejection rows" 2 (List.length rows);
+        List.iter (fun row ->
+          match member "verdict_reason" row with
+          | `String s when s <> "" -> ()
+          | _ -> Alcotest.fail "verdict_reason missing/empty"
+        ) rows
+    | _ -> Alcotest.fail "recent_rejections not list")
+
+let test_summary_recent_clamp () =
+  with_temp_base_path (fun base_path ->
+    (* recent=0 returns empty list even when rejections exist *)
+    let r = create_pending_request ~base_path ~task_id:"t"
+        ~worker:"w" ~criteria:[V.Custom "c"] ~evidence:[] in
+    (match V.submit_verdict ~base_path ~req_id:r.V.id
+             ~verifier:"v" ~verdict:(V.Fail "x") with
+     | Ok _ -> () | Error e -> Alcotest.fail e);
+    let j = D.summary_json ~recent:0 () in
+    (match member "recent_rejections" j with
+     | `List [] -> ()
+     | _ -> Alcotest.fail "expected empty list at recent=0");
+    (* recent > 20 clamps to 20 (smoke: ensures no crash) *)
+    let _ = D.summary_json ~recent:999 () in ())
+
 (* ── Registration ───────────────────────────────────── *)
 
 let () =
@@ -237,5 +312,11 @@ let () =
       Alcotest.test_case "task_id filter" `Quick test_task_id_filter;
       Alcotest.test_case "conflict triage fields" `Quick
         test_requests_json_surfaces_conflict_triage_fields;
+    ];
+    "summary_json", [
+      Alcotest.test_case "empty base_path" `Quick test_summary_empty;
+      Alcotest.test_case "bucket counts + recent rejections"
+        `Quick test_summary_bucket_counts;
+      Alcotest.test_case "recent clamp" `Quick test_summary_recent_clamp;
     ];
   ]

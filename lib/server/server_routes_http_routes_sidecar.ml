@@ -357,6 +357,17 @@ type reconcile_result =
   | Reconcile_started
   | Reconcile_noop of string
 
+type attempt_record = {
+  connector_id : string;
+  generation : int;
+  attempt_id : string;
+  attempt_number : int;
+  last_attempt_result : string;
+  next_retry_at : string option;
+  operator_next_action : string;
+  updated_at : string;
+}
+
 let desired_state_to_string = function
   | Desired_running -> "running"
   | Desired_stopped -> "stopped"
@@ -374,7 +385,58 @@ let reconcile_result_to_string = function
   | Reconcile_started -> "started"
   | Reconcile_noop reason -> "noop:" ^ reason
 
-let desired_record_json record =
+let attempt_record_json (record : attempt_record) =
+  `Assoc [
+    ("connector_id", `String record.connector_id);
+    ("generation", `Int record.generation);
+    ("attempt_id", `String record.attempt_id);
+    ("attempt_number", `Int record.attempt_number);
+    ("last_attempt_result", `String record.last_attempt_result);
+    ( "next_retry_at",
+      match record.next_retry_at with
+      | Some value -> `String value
+      | None -> `Null );
+    ("operator_next_action", `String record.operator_next_action);
+    ("updated_at", `String record.updated_at);
+  ]
+
+let attempt_record_of_json = function
+  | `Assoc fields -> (
+      match
+        ( List.assoc_opt "connector_id" fields,
+          List.assoc_opt "generation" fields,
+          List.assoc_opt "attempt_id" fields,
+          List.assoc_opt "attempt_number" fields,
+          List.assoc_opt "last_attempt_result" fields,
+          List.assoc_opt "next_retry_at" fields,
+          List.assoc_opt "operator_next_action" fields,
+          List.assoc_opt "updated_at" fields )
+      with
+      | Some (`String connector_id), Some (`Int generation),
+        Some (`String attempt_id), Some (`Int attempt_number),
+        Some (`String last_attempt_result), next_retry_at,
+        Some (`String operator_next_action), Some (`String updated_at) ->
+          let next_retry_at =
+            match next_retry_at with
+            | Some (`String value) -> Some value
+            | Some `Null | None -> None
+            | _ -> None
+          in
+          Some
+            {
+              connector_id;
+              generation;
+              attempt_id;
+              attempt_number;
+              last_attempt_result;
+              next_retry_at;
+              operator_next_action;
+              updated_at;
+            }
+      | _ -> None)
+  | _ -> None
+
+let desired_record_json (record : desired_record) =
   `Assoc [
     ("connector_id", `String record.connector_id);
     ("desired_state", `String (desired_state_to_string record.desired_state));
@@ -404,6 +466,10 @@ let sidecar_desired_path ~base_path id =
   Filename.concat base_path
     (Printf.sprintf ".gate/runtime/%s/sidecar_lifecycle_desired.json" id)
 
+let sidecar_attempt_path ~base_path id =
+  Filename.concat base_path
+    (Printf.sprintf ".gate/runtime/%s/sidecar_lifecycle_attempt.json" id)
+
 let read_desired_record ~base_path id =
   let path = sidecar_desired_path ~base_path id in
   if not (Sys.file_exists path) then
@@ -412,8 +478,21 @@ let read_desired_record ~base_path id =
     try read_file path |> Yojson.Safe.from_string |> desired_record_of_json
     with Sys_error _ | Yojson.Json_error _ -> None
 
+let read_attempt_record ~base_path id =
+  let path = sidecar_attempt_path ~base_path id in
+  if not (Sys.file_exists path) then
+    None
+  else
+    try read_file path |> Yojson.Safe.from_string |> attempt_record_of_json
+    with Sys_error _ | Yojson.Json_error _ -> None
+
 let isoish_now () =
   let tm = Unix.gmtime (Unix.time ()) in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min tm.tm_sec
+
+let isoish_at ts =
+  let tm = Unix.gmtime ts in
   Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
     (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min tm.tm_sec
 
@@ -469,6 +548,11 @@ let write_desired_record ?updated_at ~base_path ~id ~updated_by desired_state =
   | Ok () -> Ok record
   | Error _ as error -> error
 
+let write_attempt_record ~base_path ~id record =
+  let path = sidecar_attempt_path ~base_path id in
+  ensure_parent_dir path;
+  atomic_write_file ~path (Yojson.Safe.to_string (attempt_record_json record) ^ "\n")
+
 let observed_state_of_status_json = function
   | `Assoc fields -> (
       match List.assoc_opt "available" fields with
@@ -476,42 +560,118 @@ let observed_state_of_status_json = function
       | _ -> Observed_unavailable)
   | _ -> Observed_unavailable
 
-let reconcile_desired_once ~current_generation ~observed_state ~start_shell record =
+let retry_backoff_seconds = 30.0
+
+let retry_backoff_active ~now attempt =
+  attempt.generation >= 0
+  && match attempt.next_retry_at with
+     | Some next_retry_at -> String.compare next_retry_at now > 0
+     | None -> false
+
+let next_attempt_record ~now ~next_retry_at previous (record : desired_record) =
+  let attempt_number =
+    match previous with
+    | Some attempt when attempt.generation = record.generation ->
+        attempt.attempt_number + 1
+    | _ -> 1
+  in
+  {
+    connector_id = record.connector_id;
+    generation = record.generation;
+    attempt_id = Printf.sprintf "%d:%d" record.generation attempt_number;
+    attempt_number;
+    last_attempt_result = "start_dispatched";
+    next_retry_at = Some next_retry_at;
+    operator_next_action =
+      "wait for observed status, or open logs if the sidecar remains offline after backoff";
+    updated_at = now;
+  }
+
+let reconcile_desired_once
+    ?(now = isoish_now ())
+    ?(next_retry_at = isoish_at (Unix.time () +. retry_backoff_seconds))
+    ?previous_attempt
+    ?(write_attempt = fun (_ : attempt_record) -> ())
+    ~current_generation
+    ~observed_state
+    ~start_shell
+    (record : desired_record) =
   if record.generation <> current_generation then
     Reconcile_noop "stale_generation"
   else
     match (record.desired_state, observed_state) with
     | Desired_running, Observed_unavailable ->
-        start_shell ();
-        Reconcile_started
+        (match previous_attempt with
+         | Some attempt
+           when attempt.generation = record.generation
+                && retry_backoff_active ~now attempt ->
+             Reconcile_noop "backoff_active"
+         | _ ->
+             let attempt =
+               next_attempt_record ~now ~next_retry_at previous_attempt record
+             in
+             write_attempt attempt;
+             start_shell ();
+             Reconcile_started)
     | Desired_running, Observed_available -> Reconcile_noop "already_available"
     | Desired_stopped, _ -> Reconcile_noop "desired_stopped"
 
-let reconcile_preview record observed_state =
+let reconcile_preview ?now ?previous_attempt (record : desired_record) observed_state =
   match (record.desired_state, observed_state) with
-  | Desired_running, Observed_unavailable -> "would_start"
+  | Desired_running, Observed_unavailable -> (
+      let now = Option.value now ~default:(isoish_now ()) in
+      match previous_attempt with
+      | Some attempt
+        when attempt.generation = record.generation
+             && retry_backoff_active ~now attempt ->
+          "noop:backoff_active"
+      | _ -> "would_start")
   | Desired_running, Observed_available -> "noop:already_available"
   | Desired_stopped, _ -> "noop:desired_stopped"
 
+let attempt_fields = function
+  | None ->
+      [
+        ("last_attempt_result", `Null);
+        ("next_retry_at", `Null);
+        ("operator_next_action", `Null);
+      ]
+  | Some attempt ->
+      [
+        ("last_attempt_result", `String attempt.last_attempt_result);
+        ( "next_retry_at",
+          match attempt.next_retry_at with
+          | Some value -> `String value
+          | None -> `Null );
+        ("operator_next_action", `String attempt.operator_next_action);
+        ("attempt_id", `String attempt.attempt_id);
+      ]
+
 let lifecycle_json ~base_path id status_json =
   let observed_state = observed_state_of_status_json status_json in
+  let previous_attempt = read_attempt_record ~base_path id in
   match read_desired_record ~base_path id with
   | None ->
-      `Assoc [
-        ("desired_state", `Null);
-        ("desired_generation", `Null);
-        ("observed_state", `String (observed_state_to_string observed_state));
-        ("reconcile_result", `String "none");
-      ]
+      `Assoc
+        ([
+          ("desired_state", `Null);
+          ("desired_generation", `Null);
+          ("observed_state", `String (observed_state_to_string observed_state));
+          ("reconcile_result", `String "none");
+        ]
+        @ attempt_fields previous_attempt)
   | Some record ->
-      `Assoc [
-        ("desired_state", `String (desired_state_to_string record.desired_state));
-        ("desired_generation", `Int record.generation);
-        ("desired_updated_by", `String record.updated_by);
-        ("desired_updated_at", `String record.updated_at);
-        ("observed_state", `String (observed_state_to_string observed_state));
-        ("reconcile_result", `String (reconcile_preview record observed_state));
-      ]
+      `Assoc
+        ([
+          ("desired_state", `String (desired_state_to_string record.desired_state));
+          ("desired_generation", `Int record.generation);
+          ("desired_updated_by", `String record.updated_by);
+          ("desired_updated_at", `String record.updated_at);
+          ("observed_state", `String (observed_state_to_string observed_state));
+          ( "reconcile_result",
+            `String (reconcile_preview ?previous_attempt record observed_state) );
+        ]
+        @ attempt_fields previous_attempt)
 
 let append_assoc key value = function
   | `Assoc fields -> `Assoc (fields @ [ (key, value) ])
@@ -988,10 +1148,14 @@ let handle_start state request reqd =
                 let cmd = sidecar_start_shell_command ~base_path ~script in
                 let status_json = read_status_json ~base_path id in
                 let observed_state = observed_state_of_status_json status_json in
+                let previous_attempt = read_attempt_record ~base_path id in
                 let reconcile_result =
                   reconcile_desired_once
                     ~current_generation:desired.generation
+                    ?previous_attempt
                     ~observed_state
+                    ~write_attempt:(fun attempt ->
+                      ignore (write_attempt_record ~base_path ~id attempt))
                     ~start_shell:(fun () -> ignore (Sys.command cmd))
                     desired
                 in

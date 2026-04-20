@@ -186,6 +186,7 @@
    worker_container
    worker_container_runners
    worker_dev_tools
+   legendary_counters
    worker_tool_input
    worker_verification
    prompt_defaults

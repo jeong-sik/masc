@@ -5,6 +5,19 @@
 
 ### Added
 
+- **Legendary Bash in-process shadow counters.**  New
+  `lib/legendary_counters.{ml,mli}` exposes `Atomic.t`-backed totals
+  for the P5 gate-diff observer (`total` + 4 buckets mirroring
+  `Worker_dev_tools.gate_diff` 1:1) and the P4 auto-background
+  observer (`observed` + `would_have_promoted`).  The counters are
+  incremented from the same sites that already emit
+  `gate_diff_shadow` / `auto_bg_would_have_promoted` log lines, so
+  the cost remains zero whenever the matching observer env flag is
+  off.  `snapshot_to_json` returns a stable field layout intended
+  for a later dashboard / HTTP endpoint.  5 unit tests
+  (`test_legendary_counters`).  No behavior change on the request
+  path.
+
 - **Legendary Bash operator runbook.**  New
   `docs/LEGENDARY-BASH-RUNBOOK.md` consolidates the P1–P6 rollout
   surface: current flag state table, authoritative opt-out tokens,

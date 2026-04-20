@@ -811,8 +811,18 @@ let handle_keeper_bash
        (Legacy_allow_shadow_deny) from real traffic without
        changing any behavior.  Flag-gated by
        [MASC_BASH_AST_SHADOW_LOG]; default off. *)
-    (if Worker_dev_tools.shadow_diff_log_enabled () then
+    (if Worker_dev_tools.shadow_diff_log_enabled () then begin
        let diff, legacy, shadow = Worker_dev_tools.diff_command cmd in
+       let counter_tag : Legendary_counters.gate_diff_tag =
+         match diff with
+         | Worker_dev_tools.Agree -> `Agree
+         | Worker_dev_tools.Legacy_allow_shadow_deny ->
+           `Legacy_allow_shadow_deny
+         | Worker_dev_tools.Legacy_deny_shadow_allow ->
+           `Legacy_deny_shadow_allow
+         | Worker_dev_tools.Shadow_cannot_parse -> `Shadow_cannot_parse
+       in
+       Legendary_counters.incr_gate_diff counter_tag;
        match diff with
        | Worker_dev_tools.Agree -> ()
        | _ ->
@@ -822,7 +832,8 @@ let handle_keeper_bash
            (Worker_dev_tools.cmd_hash_for_log cmd)
            (Worker_dev_tools.gate_diff_to_string diff)
            (Worker_dev_tools.legacy_verdict_to_tag legacy)
-           (Worker_dev_tools.shadow_verdict_to_tag shadow));
+           (Worker_dev_tools.shadow_verdict_to_tag shadow)
+     end);
     (* Resolve cwd early — needed for playground detection before validation. *)
     match resolve_keeper_shell_write_cwd ~config ~meta ~args with
     | Error e -> error_json e
@@ -1090,7 +1101,10 @@ let handle_keeper_bash
                       let budget_ms =
                         Masc_exec.Exec_run.default_budget_ms ()
                       in
-                      if duration_ms >= budget_ms then
+                      let promoted_candidate = duration_ms >= budget_ms in
+                      Legendary_counters.incr_auto_bg_observed
+                        ~promoted_candidate;
+                      if promoted_candidate then
                         Log.Keeper.info
                           "auto_bg_would_have_promoted keeper=%s \
                            cmd_hash=%s duration_ms=%d budget_ms=%d"

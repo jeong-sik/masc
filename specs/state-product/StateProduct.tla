@@ -14,11 +14,41 @@
 \*   - Deadlock freedom for non-terminal product states
 \*   - Liveness: validation eventually resolves
 \*
-\* Mirrors: lib/state_product.ml
+\* Mirrors: lib/state_product.ml (keeper via [Keeper_state_machine.phase])
 \*
 \* Two-config pattern (KeeperOASAdvanced precedent):
 \*   StateProduct.cfg     — clean spec, all invariants must hold
 \*   StateProduct-buggy.cfg — buggy spec, BoundaryViolated MUST be violated
+\*
+\* ── OCaml ↔ TLA+ KeeperPhases mapping (verified 2026-04-20, issue #8642) ──
+\*
+\* The OCaml [Keeper_state_machine.phase] type defines 12 variants; this
+\* spec projects to 6 to keep the product small (6 × 7 × 7 = 294 product
+\* states). Projection rationale: the invariants this spec verifies are
+\* all parameterised on three kinds of keeper state — (a) terminal, (b)
+\* draining / no-new-work, (c) suppresses-LLM. Each modelled phase stands
+\* in for a cluster of OCaml phases sharing that qualitative behaviour:
+\*
+\*   spec KeeperPhases  ↔ keeper_state_machine.ml phase (cluster)
+\*   ------------------+-------------------------------------------------
+\*   "Offline"          ↔ Offline
+\*   "Running"          ↔ Running, Failing, Restarting  (non-terminal active)
+\*   "Overflowed"       ↔ Overflowed                    (pre-compaction)
+\*   "Compacting"       ↔ Compacting                    (no LLM during compact)
+\*   "Draining"         ↔ Draining, HandingOff, Paused  (no-new-turn cluster)
+\*   "Stopped"          ↔ Stopped, Crashed, Dead        (terminal cluster)
+\*
+\* Sound-partial rationale: the product invariants (Terminal/Draining/
+\* Compacting LLM-gate boundaries) are preserved by each cluster's shared
+\* qualitative behaviour. What this projection does NOT catch: a future
+\* OCaml phase that belongs to a NEW cluster (e.g. a "ReadOnly" phase
+\* that permits some turn stages but not others) — that would need its
+\* own spec name. The OCaml witness [all_phases] in
+\* keeper_state_machine.ml already prevents silent variant addition; the
+\* spec reviewer's job when a new phase lands is to decide which cluster
+\* it joins (or introduce a new one).
+\*
+\* See issue #8642 for the full 12-phase enumeration.
 
 EXTENDS Naturals
 

@@ -355,29 +355,35 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
       | _ -> default
     in
 
-    (* Parse graders *)
+    (* Parse graders.
+       #8605 family: the prior dispatch used a nested string match
+       where the inner [_ -> Contains] branch was provably unreachable
+       (the outer guard already constrained mode_str to one of four
+       literals). Lifting the mode mapping into the outer match
+       eliminates the dead silent-default branch and surfaces a future
+       grader-mode addition as a build hole at the per-arm level. *)
+    let parse_deterministic g mode =
+      Deterministic {
+        field = g_str_opt g "field" "result";
+        expected = (match g |> member "expected" with
+          | `String s -> s
+          | _ -> g |> member "pattern" |> to_string);
+        mode;
+        weight = g_float_opt g "weight" 1.0;
+        description = g_str_opt g "description" "unnamed grader";
+      }
+    in
     let graders =
       match json |> member "graders" with
       | `List items ->
           List.filter_map (fun g ->
             match g |> member "type" |> to_string with
-            | "exact" | "contains" | "regex" | "not_contains" as mode_str ->
-                let mode = match mode_str with
-                  | "exact" -> Exact
-                  | "contains" -> Contains
-                  | "not_contains" -> NotContains
-                  | "regex" -> Regex (g |> member "pattern" |> to_string)
-                  | _ -> Contains
-                in
-                Some (Deterministic {
-                  field = g_str_opt g "field" "result";
-                  expected = (match g |> member "expected" with
-                    | `String s -> s
-                    | _ -> g |> member "pattern" |> to_string);
-                  mode;
-                  weight = g_float_opt g "weight" 1.0;
-                  description = g_str_opt g "description" "unnamed grader";
-                })
+            | "exact" -> Some (parse_deterministic g Exact)
+            | "contains" -> Some (parse_deterministic g Contains)
+            | "not_contains" -> Some (parse_deterministic g NotContains)
+            | "regex" ->
+                Some (parse_deterministic g
+                        (Regex (g |> member "pattern" |> to_string)))
             | "model" ->
                 Some (ModelBased {
                   prompt_template = g |> member "prompt" |> to_string;

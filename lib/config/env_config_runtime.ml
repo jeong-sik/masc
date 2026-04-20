@@ -618,4 +618,18 @@ module InternalTimers = struct
     get_float ~default:300.0 "MASC_STALLED_SESSION_THRESHOLD_SEC"
 end
 
+(** {1 Sidecar reconcile loop}
+
+    Retry/backoff knobs for the connector sidecar lifecycle (#8919). Operator
+    override lets us tune backoff without recompilation when a sidecar is
+    flapping vs. genuinely offline. See #8930 for the SSOT consolidation. *)
+
+module Sidecar = struct
+  (** Backoff window (seconds) between repeated same-generation
+      [running + unavailable] start dispatches. Default: 30 (matches the
+      inline literal that landed in #8919). *)
+  let reconcile_backoff_sec =
+    get_float ~default:30.0 "MASC_SIDECAR_RECONCILE_BACKOFF_SEC"
+end
+
 (** {1 Internal Safety Configuration} *)

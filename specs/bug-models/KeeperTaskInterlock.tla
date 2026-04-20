@@ -44,8 +44,10 @@
 \*   1. Keeper_registry.mark_dead (keeper_registry.ml:237) sets
 \*      entry.phase = Dead but never touches the task FSM. No
 \*      task cascade fires on this call.
-\*   2. cleanup_dead_tombstone (keeper_supervisor.ml:225) writes
-\*      paused=true and unregisters the keeper; task FSM untouched.
+\*   2. cleanup_dead_tombstone (keeper_supervisor.ml:380, called from
+\*      :545) writes paused=true and unregisters the keeper; task FSM
+\*      untouched. Verified 2026-04-20 (line 225 was a stale anchor
+\*      from before later additions to the supervisor file).
 \*   3. Task assignee = keeper's agent identity (the keeper IS the
 \*      claimant), so a dead keeper's Claimed/InProgress tasks have
 \*      task_claimer == keeper_name, and the TLA+ "Held ∧ Dead"
@@ -96,7 +98,10 @@ vars == <<keeper_phase, task_status, task_claimer>>
 
 Phases == {"running", "draining", "dead"}
 \* "cancelled" and "awaiting_verification" are in Statuses for TypeOK
-\* completeness. The real task FSM has 6 states (types_core.ml:265-277).
+\* completeness. The real task FSM has 6 states defined at
+\* types_core.ml:335-348 (verified 2026-04-20: range 265-277 was a
+\* stale anchor predating the schema/witness additions; the type now
+\* lives further down the file).
 \* "awaiting_verification" is entered when an agent with a completion
 \* contract tries Done — the verifier gate redirects to Submit_for_verification.
 \* A different agent must then Approve (->done) or Reject (->in_progress).

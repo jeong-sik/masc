@@ -203,12 +203,12 @@ stylesheet
   .task_title { color: var(--text-primary); }
 |}]
 
-let status_pill_class s =
+let status_pill_color (s : string) : Pill.color =
   match s with
-  | "active" -> Style.status_active
-  | "paused" -> Style.status_paused
-  | "done" | "completed" -> Style.status_done
-  | _ -> Style.status_pill
+  | "active" -> `Ok
+  | "paused" -> `Warn
+  | "done" | "completed" -> `Brass
+  | _ -> `Neutral
 ;;
 
 let task_dot_class status =
@@ -304,9 +304,10 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
              ]
          ; Node.div
              ~attrs:[ Style.goal_meta ]
-             [ Node.span
-                 ~attrs:[ Style.status_pill; status_pill_class n.status ]
-                 [ Node.text (if String.is_empty n.status then "—" else n.status) ]
+             [ Pill.view ~size:`Sm
+                 ~color:(status_pill_color n.status)
+                 ~label:(if String.is_empty n.status then "—" else n.status)
+                 ()
              ; Node.span ~attrs:[]
                  [ Node.text "tasks "
                  ; Node.span

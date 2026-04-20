@@ -288,6 +288,25 @@ let () = test "dispatch_status_surfaces_owned_current_drift" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "dispatch_status_suppresses_lifecycle_guidance_without_credential" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  ignore (Auth.enable_auth ctx.config.base_path ~require_token:true ~agent_name:"admin");
+  ignore (Coord.add_task ctx.config ~title:"Credentialed work" ~priority:3 ~description:"");
+  Planning_eio.set_current_task ctx.config ~task_id:"task-001";
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some (success, result) ->
+      assert success;
+      assert (str_contains result "🔐 Credential: required=yes | available=no | candidates=test-agent");
+      assert (str_contains result "Lifecycle actions are credential-blocked for test-agent");
+      assert (not (str_contains result "💡 Suggested next: masc_status -> masc_transition"));
+      assert (not (str_contains result "💡 Suggested next: masc_claim_next"))
+  | None -> failwith "dispatch returned None"
+)
+
 let () = test "dispatch_check_project_ready_alias" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in

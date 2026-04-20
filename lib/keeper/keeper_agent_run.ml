@@ -1184,22 +1184,25 @@ let run_turn
          | _ ->
            Some (Printf.sprintf
              "## Discovered Work (auto, %ds interval)\n\n%s\n\n\
-              ### Required: emit ONE tool_call this turn\n\
-              Valid tools (registered MCP — copy the name verbatim):\n\
-             \  - `keeper_claim_task` { task_id: \"<id from list above>\" } \
-              — reserve a task\n\
-             \  - `keeper_bash` { command: \"<shell cmd>\" } \
+              ### Required: use ONE structured keeper tool if available\n\
+              Valid keeper tools (copy the name and schema verbatim):\n\
+             \  - `keeper_task_claim` {} \
+              — reserve the next eligible task\n\
+             \  - `keeper_bash` { cmd: \"<single shell command>\" } \
               — execute shell (sandboxed)\n\
-             \  - `keeper_board_comment` { body: \"<note>\" } \
+             \  - `keeper_board_post` { content: \"<note>\" } \
               — coordinate via board\n\
-             \  - `keeper_stay_silent` { reason: \"<why>\" } \
+             \  - `keeper_stay_silent` {} \
               — none of the above fit my role\n\n\
               Anti-pattern: `Bash`, `Read`, `Skill`, `Agent` are NOT \
               registered tools. Calling them is a hallucination — the \
               call fails silently and the turn is wasted. Use the \
               `keeper_*` names exactly as shown above.\n\n\
-              Plain-text replies are ignored. Pick the smallest viable \
-              action and emit it as a structured tool_call now."
+              Do not print fenced pseudo-calls. If this runtime does not \
+              expose a structured tool channel, return exactly \
+              `NO_TOOL_CHANNEL: <brief reason>` instead of pretending a \
+              tool ran. Otherwise pick the smallest viable action and emit \
+              it as a structured tool_call now."
              interval (String.concat "\n\n" sections)))
     | _ -> None
   in

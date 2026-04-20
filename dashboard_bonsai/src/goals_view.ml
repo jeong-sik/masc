@@ -346,40 +346,14 @@ let rec view_node ~(depth : int) (n : Goals_types.node) : Node.t =
 
 let view_meta_strip (r : Goals_types.response) =
   let s = r.summary in
-  Node.div
-    ~attrs:[ Style.meta_strip ]
-    [ Node.div
-        ~attrs:[ Style.meta_item ]
-        [ Node.span ~attrs:[ Style.meta_k ] [ Node.text "goals" ]
-        ; Node.span
-            ~attrs:[ Style.meta_v ]
-            [ Node.text (Printf.sprintf "%d" s.total_goals) ]
-        ]
-    ; Node.div
-        ~attrs:[ Style.meta_item ]
-        [ Node.span ~attrs:[ Style.meta_k ] [ Node.text "active" ]
-        ; Node.span
-            ~attrs:[ Style.meta_v_ok ]
-            [ Node.text (Printf.sprintf "%d" s.active_goals) ]
-        ]
-    ; Node.div
-        ~attrs:[ Style.meta_item ]
-        [ Node.span ~attrs:[ Style.meta_k ] [ Node.text "tasks" ]
-        ; Node.span
-            ~attrs:[ Style.meta_v ]
-            [ Node.text
-                (Printf.sprintf "%d / %d" s.done_tasks s.total_tasks)
-            ]
-        ]
-    ; Node.div
-        ~attrs:[ Style.meta_item ]
-        [ Node.span ~attrs:[ Style.meta_k ] [ Node.text "convergence" ]
-        ; Node.span
-            ~attrs:[ Style.meta_v_brass ]
-            [ Node.text
-                (Printf.sprintf "%d%%" s.overall_convergence_pct)
-            ]
-        ]
+  Meta.strip
+    [ Meta.cell ~k:"goals" ~v:(Printf.sprintf "%d" s.total_goals) ()
+    ; Meta.cell ~color:`Ok ~k:"active"
+        ~v:(Printf.sprintf "%d" s.active_goals) ()
+    ; Meta.cell ~k:"tasks"
+        ~v:(Printf.sprintf "%d / %d" s.done_tasks s.total_tasks) ()
+    ; Meta.cell ~color:`Brass ~k:"convergence"
+        ~v:(Printf.sprintf "%d%%" s.overall_convergence_pct) ()
     ]
 ;;
 

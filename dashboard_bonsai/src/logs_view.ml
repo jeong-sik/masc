@@ -1271,6 +1271,14 @@ stylesheet
     color: var(--accent-blood);
     text-shadow: 0 0 18px rgba(201, 74, 58, 0.32);
   }
+  .page_h1_brass {
+    color: var(--accent-brass);
+    text-shadow: 0 0 18px rgba(138, 106, 40, 0.32);
+  }
+  .page_h1_bright {
+    color: var(--text-bright);
+    text-shadow: 0 0 18px rgba(216, 200, 160, 0.24);
+  }
   .page_sub {
     font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
     font-style: italic;
@@ -2641,16 +2649,35 @@ let render_response
          List.count response.entries ~f:(fun e ->
            String.equal e.normalized_level "ERROR")
        in
+       let head_tally = tally_fleet keepers.keepers in
+       let keeper_count = List.length keepers.keepers in
        let sub_text =
-         match response.entries with
-         | [] ->
+         match response.entries, keeper_count with
+         | [], 0 ->
            "저택은 조용하다. 아무도 아직 말하지 않았고, 폭풍은 아직 문을 두드리지 않았다."
-         | _ ->
+         | [], n ->
            Printf.sprintf
-             "네 명의 키퍼가 홀을 지킨다. 마지막 %d행을 들었고, 경보 %d · 경고 %d이 울렸다."
-             response.total
-             err_n
-             warn_n
+             "%d명의 키퍼가 홀을 지킨다. 저널은 아직 비어 있다 — 폭풍 전의 숨."
+             n
+         | _, 0 ->
+           Printf.sprintf
+             "저널이 마지막 %d행을 기억한다. 경보 %d · 경고 %d이 울렸으나, 키퍼는 아직 도착하지 않았다."
+             response.total err_n warn_n
+         | _, n ->
+           Printf.sprintf
+             "%d명의 키퍼가 홀을 지킨다. 저널은 마지막 %d행을 들었고, 경보 %d · 경고 %d이 울렸다."
+             n response.total err_n warn_n
+       in
+       let h1_suffix, h1_suffix_class =
+         match head_tally with
+         | { dead; _ } when dead > 0 ->
+           "under storm", Style.page_h1_blood
+         | { warn; _ } when warn > 0 ->
+           "under watch", Style.page_h1_brass
+         | { live = 0; _ } ->
+           "before dawn", Style.page_h1_bright
+         | _ ->
+           "in vigil", Style.page_h1_bright
        in
        Node.div
          ~attrs:[ Style.page_head ]
@@ -2674,8 +2701,8 @@ let render_response
                  ~attrs:[ Style.page_h1 ]
                  [ Node.text "the watch "
                  ; Node.span
-                     ~attrs:[ Style.page_h1_blood ]
-                     [ Node.text "under storm" ]
+                     ~attrs:[ h1_suffix_class ]
+                     [ Node.text h1_suffix ]
                  ]
              ; Node.p ~attrs:[ Style.page_sub ] [ Node.text sub_text ]
              ]

@@ -53,11 +53,11 @@
 \*
 \* What actually restores the invariant:
 \*
-\*   Room_gc.cleanup_zombies (room/room_gc.ml:39-150) scans the
+\*   Coord_gc.cleanup_zombies (lib/coord/coord_gc.ml:39-190) scans the
 \*   agents directory on a periodic GC cycle, detects agents whose
 \*   last_seen is older than Env_config.Zombie.keeper_threshold_seconds
 \*   ("zombie" agents), and in Phase 3 iterates the backlog calling
-\*   Room_hooks.force_release_task_fn for every Claimed/InProgress
+\*   Coord_hooks.force_release_task_fn for every Claimed/InProgress
 \*   task whose assignee is a zombie. This is the **asynchronous,
 \*   heartbeat-timeout-driven** path that eventually restores the
 \*   NoDeadKeeperHoldsTask property.
@@ -306,8 +306,8 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 \*      update in keeper_registry.mark_dead leaves task_claimer
 \*      pointing at the dead keeper.
 \*
-\*   2. A separate asynchronous subsystem, Room_gc.cleanup_zombies
-\*      (lib/room/room_gc.ml), periodically scans agents by heartbeat
+\*   2. A separate asynchronous subsystem, Coord_gc.cleanup_zombies
+\*      (lib/coord/coord_gc.ml), periodically scans agents by heartbeat
 \*      last_seen and force-releases Claimed/InProgress tasks whose
 \*      assignee is a zombie agent. This is modelled below as
 \*      ReconcileByGC.
@@ -319,7 +319,7 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 \* it against the TLC runner in tla-check.sh / specs/Makefile.
 
 \* Zombie GC reconciliation: release an orphaned task whose claimer
-\* is dead. Mirrors room_gc.ml:118-132 Phase 3 cascade.
+\* is dead. Mirrors coord_gc.ml:128-146 Phase 3 cascade.
 ReconcileByGC(t) ==
     /\ Held(t)
     /\ keeper_phase[task_claimer[t]] = "dead"

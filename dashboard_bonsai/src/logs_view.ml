@@ -251,6 +251,7 @@ stylesheet
 
   .hud_v_ok   { color: var(--status-ok); }
   .hud_v_warn { color: var(--status-warn); }
+  .hud_v_bad  { color: var(--status-bad); }
 
   /* Moonrise strip — narrative interlude between the HUD readout and
      the filter toolbar. Reads as a quiet status bar that names the
@@ -2223,7 +2224,42 @@ let view_flame_mini ~(segments : (flame_kind * int) list) =
   Node.div ~attrs:[ Style.flame ] [ bar; legend ]
 ;;
 
-let view_hud (response : Logs_types.response) =
+(** Extract "HH:MM:SS" from an ISO-8601 UTC timestamp
+    (e.g. "2026-04-20T04:02:07Z" → "04:02:07"). Falls back to the full
+    string if the shape doesn't match — never throws. *)
+let hhmmss_of_iso (s : string) : string =
+  if String.length s >= 19 && Char.equal s.[10] 'T'
+  then String.sub s ~pos:11 ~len:8
+  else s
+;;
+
+let view_hud
+      ?(keepers : Keepers_types.response = Keepers_types.fixture)
+      (response : Logs_types.response) =
+  let live_n, warn_n, dead_n =
+    List.fold keepers.keepers ~init:(0, 0, 0)
+      ~f:(fun (l, w, d) (k : Keepers_types.keeper) ->
+        match k.status with
+        | Live -> (l + 1, w, d)
+        | Warn -> (l, w + 1, d)
+        | Dead -> (l, w, d + 1))
+  in
+  let fleet_v, fleet_cls =
+    if live_n = 0 && warn_n = 0 && dead_n = 0
+    then "—", None
+    else if dead_n > 0
+    then
+      Printf.sprintf "%dl %dw %dd" live_n warn_n dead_n,
+      Some Style.hud_v_bad
+    else if warn_n > 0
+    then Printf.sprintf "%dl %dw" live_n warn_n, Some Style.hud_v_warn
+    else Printf.sprintf "%dl" live_n, Some Style.hud_v_ok
+  in
+  let sync_v =
+    match keepers.generated_at with
+    | "" -> "—"
+    | ts -> Printf.sprintf "%s UTC" (hhmmss_of_iso ts)
+  in
   Node.div
     ~attrs:[ Style.hud ]
     [ hud_cell ~k:"Source" ~v:"Log.Ring" ()
@@ -2232,6 +2268,8 @@ let view_hud (response : Logs_types.response) =
     ; hud_cell ~v_class:(Some Style.hud_v_ok) ~k:"Refresh" ~v:"poll · 3s" ()
     ; hud_cell ~k:"Limit" ~v:"200" ()
     ; hud_cell ~v_class:(Some Style.hud_v_ok) ~k:"Link" ~v:"fetch · ok" ()
+    ; hud_cell ~v_class:fleet_cls ~k:"Fleet" ~v:fleet_v ()
+    ; hud_cell ~k:"Synced" ~v:sync_v ()
     ]
 ;;
 
@@ -2673,7 +2711,7 @@ let render_response
     [ nav
     ; brand_row
     ; view_heartbeat ()
-    ; view_hud response
+    ; view_hud ~keepers response
     ; (let warn_n =
          List.count response.entries ~f:(fun e ->
            String.equal e.normalized_level "WARN")

@@ -231,14 +231,35 @@ Response shape:
 {
   "keeper": "<name>",
   "count": 2,
-  "tasks": ["<task_id_1>", "<task_id_2>"]
+  "tasks": ["<task_id_1>", "<task_id_2>"],
+  "task_details": [
+    {
+      "task_id": "<task_id_1>",
+      "started_at_unix": 1730000000.123,
+      "elapsed_ms": 4821
+    },
+    {
+      "task_id": "<task_id_2>",
+      "started_at_unix": 1730000030.456,
+      "elapsed_ms": 15234
+    }
+  ]
 }
 ```
 
-Unknown or quiet keepers legitimately return `{"count": 0, "tasks": []}` —
-the endpoint does not gate on keeper existence, matching the
-`shadow_counters` "zero-cost public read" posture. The path param is
-required; a trailing-slash request (`.../bg_tasks/`) returns 400.
+Unknown or quiet keepers legitimately return
+`{"count": 0, "tasks": [], "task_details": []}` — the endpoint does
+not gate on keeper existence, matching the `shadow_counters`
+"zero-cost public read" posture. The path param is required; a
+trailing-slash request (`.../bg_tasks/`) returns 400.
+
+`task_details` mirrors `tasks` in order (`tasks[i]` equals
+`task_details[i].task_id`). `started_at_unix` is the fractional
+seconds-since-epoch captured at spawn and is immutable for a task's
+lifetime. `elapsed_ms` is computed server-side at response time so
+dashboards do not need to reconcile against their local clock — a
+subsequent poll returns a larger `elapsed_ms` for the same
+`started_at_unix` until the task exits (and leaves the roster).
 
 Per-task snapshots (stdout drain, exit status, drop counters) are not
 surfaced by this endpoint — those require a stateful `since_*` offset

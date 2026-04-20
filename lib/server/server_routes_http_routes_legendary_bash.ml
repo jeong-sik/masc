@@ -15,10 +15,20 @@
     [legendary_counters.mli] for the stable contract.
 
     Response (200) for bg_tasks: JSON of shape
-      { "keeper": "<name>", "count": N, "tasks": [ "<task_id>", … ] }
+      { "keeper": "<name>",
+        "count": N,
+        "tasks": [ "<task_id>", … ],
+        "task_details": [
+          { "task_id": "<id>",
+            "started_at_unix": 1.73e9,
+            "elapsed_ms": 1234 }, … ] }
     where [tasks] is the list returned by [Bg_task.list ~keeper] at
-    the moment of the call.  Unknown / quiet keepers legitimately
-    return [count = 0, tasks = []] — the endpoint does not validate
+    the moment of the call; [task_details] attaches [started_at] and
+    a server-computed [elapsed_ms] for observers that want wall-clock
+    age without a second round-trip.  Both arrays share the same
+    order, so [tasks.[i]] and [task_details.[i].task_id] agree.
+    Unknown / quiet keepers legitimately return [count = 0,
+    tasks = [], task_details = []] — the endpoint does not validate
     keeper existence, mirroring [shadow_counters]' "zero-cost read"
     posture. *)
 
@@ -31,13 +41,29 @@ let snapshot_response () : Yojson.Safe.t =
   let snap = Legendary_counters.snapshot () in
   Legendary_counters.snapshot_to_json snap
 
+let task_detail_json ~now (tid, started_at) : Yojson.Safe.t =
+  let elapsed_ms =
+    let seconds = max 0.0 (now -. started_at) in
+    int_of_float (seconds *. 1000.0)
+  in
+  `Assoc [
+    ("task_id", `String (Bg_task.task_id_to_string tid));
+    ("started_at_unix", `Float started_at);
+    ("elapsed_ms", `Int elapsed_ms);
+  ]
+
 let bg_tasks_response ~keeper : Yojson.Safe.t =
-  let ids = Bg_task.list ~keeper in
-  let as_strings = List.map Bg_task.task_id_to_string ids in
+  let rows = Bg_task.list_with_started_at ~keeper in
+  let now = Unix.gettimeofday () in
+  let ids_as_strings =
+    List.map (fun (tid, _) -> Bg_task.task_id_to_string tid) rows
+  in
   `Assoc [
     ("keeper", `String keeper);
-    ("count", `Int (List.length ids));
-    ("tasks", `List (List.map (fun s -> `String s) as_strings));
+    ("count", `Int (List.length rows));
+    ("tasks", `List (List.map (fun s -> `String s) ids_as_strings));
+    ("task_details",
+     `List (List.map (task_detail_json ~now) rows));
   ]
 
 let add_routes router =

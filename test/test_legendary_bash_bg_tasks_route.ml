@@ -26,7 +26,10 @@ let test_empty_keeper_shape () =
     (Astring.String.is_infix ~affix:"\"count\":0" s);
   Alcotest.(check bool)
     "tasks=[] when no tasks" true
-    (Astring.String.is_infix ~affix:"\"tasks\":[]" s)
+    (Astring.String.is_infix ~affix:"\"tasks\":[]" s);
+  Alcotest.(check bool)
+    "task_details=[] when no tasks" true
+    (Astring.String.is_infix ~affix:"\"task_details\":[]" s)
 
 let test_keeper_with_unusual_name () =
   (* Names can contain hyphens, underscores, digits — the endpoint
@@ -59,9 +62,30 @@ let test_field_ordering_stable () =
   let i_keeper = find_key "keeper" in
   let i_count = find_key "count" in
   let i_tasks = find_key "tasks" in
+  let i_details = find_key "task_details" in
   Alcotest.(check bool) "keeper present" true (i_keeper >= 0);
   Alcotest.(check bool) "count present" true (i_count > i_keeper);
-  Alcotest.(check bool) "tasks after count" true (i_tasks > i_count)
+  Alcotest.(check bool) "tasks after count" true (i_tasks > i_count);
+  Alcotest.(check bool)
+    "task_details after tasks" true (i_details > i_tasks)
+
+let test_task_details_shape_on_empty () =
+  (* Even with no live tasks the empty task_details array must parse as
+     a JSON array of objects — dashboards that [].map over it without
+     a null guard would crash if it were serialised as null / missing. *)
+  let json =
+    Server_routes_http_routes_legendary_bash.bg_tasks_response
+      ~keeper:"x"
+  in
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "task_details" fields with
+     | Some (`List []) -> ()
+     | Some other ->
+       Alcotest.failf "expected `List [], got %s"
+         (Yojson.Safe.to_string other)
+     | None -> Alcotest.fail "task_details field missing")
+  | _ -> Alcotest.fail "response is not a JSON object"
 
 let () =
   Alcotest.run "legendary_bash_bg_tasks_route"
@@ -73,5 +97,7 @@ let () =
             test_keeper_with_unusual_name;
           Alcotest.test_case "field ordering stable" `Quick
             test_field_ordering_stable;
+          Alcotest.test_case "task_details empty shape" `Quick
+            test_task_details_shape_on_empty;
         ] );
     ]

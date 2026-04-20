@@ -105,6 +105,14 @@ val kill :
 val list : keeper:string -> task_id list
 (** All currently-tracked tasks owned by [keeper]. *)
 
+val list_with_started_at : keeper:string -> (task_id * float) list
+(** Same roster as {!list}, paired with the unix-timestamp at which
+    each task was spawned.  The timestamp is captured by
+    {!Process_eio.spawn_detached} before the child enters its session
+    and is immutable for the task's lifetime, so observers can compute
+    wall-clock elapsed time without consulting the child process or
+    reading the PID file. *)
+
 val reap_orphans : base_path:string -> int
 (** Startup hook: read PID files under \`.masc/keeper/*/bg/*.pid\`,
     SIGKILL any pgroup whose leader is no longer in the live task

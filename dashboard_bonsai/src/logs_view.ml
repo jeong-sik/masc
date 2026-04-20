@@ -1485,6 +1485,52 @@ stylesheet
   .swim_frame_err  { background: var(--t-err); color: var(--text-bright); }
   .swim_frame_wait { background: var(--t-wait); color: var(--text-dim); }
   .swim_frame_think { background: var(--t-think); color: var(--text-primary); }
+
+  /* ─── context pressure chart ───
+     60-min rolling ctx % per keeper. SVG polyline with 75/90% guides.
+     viewBox 0..600 × 0..100 → 1 px = 0.1 min × 1 %.
+     y = 100 - ctx_pct (SVG y-origin 상단). stroke 색은 --t-* 재사용. */
+  .ctx_chart { display: grid; grid-template-columns: 140px 1fr; }
+  .ctx_meta {
+    border-right: 1px solid var(--border-main);
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+  .ctx_meta_v {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: none;
+    color: var(--text-primary);
+  }
+  .ctx_track {
+    position: relative;
+    height: 120px;
+    background: linear-gradient(180deg,
+      rgba(160,24,24,0.04) 0%,
+      rgba(160,24,24,0.02) 10%,
+      transparent 25%,
+      transparent 100%);
+  }
+  .ctx_svg { display: block; width: 100%; height: 120px; }
+  .ctx_track_lbl {
+    position: absolute;
+    right: 8px;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9px;
+    color: var(--text-dim);
+    pointer-events: none;
+  }
+  .ctx_lbl_warn { top: 22px; color: color-mix(in oklab, var(--accent-brass) 80%, var(--text-dim)); }
+  .ctx_lbl_dang { top: 6px;  color: color-mix(in oklab, var(--accent-blood) 80%, var(--text-dim)); }
 |}]
 
 let level_class level =
@@ -1800,6 +1846,133 @@ let view_swimlanes () =
           ; swim_frame ~kind:`Tool ~left:22 ~width:8 ~label:"exec"
           ; swim_frame ~kind:`Err ~left:32 ~width:6 ~label:"err"
           ]
+    ]
+;;
+
+let svg_a k v = Attr.create k v
+
+let ctx_polyline ~points ~stroke_var ~dashed =
+  let dash_attr =
+    if dashed then [ svg_a "stroke-dasharray" "3,3" ] else []
+  in
+  Node.create_svg "polyline"
+    ~attrs:([
+      svg_a "points" points;
+      svg_a "fill" "none";
+      svg_a "stroke" stroke_var;
+      svg_a "stroke-width" "1.4";
+      svg_a "stroke-linejoin" "round";
+      svg_a "stroke-linecap" "round";
+      svg_a "vector-effect" "non-scaling-stroke";
+    ] @ dash_attr)
+    []
+;;
+
+let ctx_guide ~y ~stroke_var =
+  Node.create_svg "line"
+    ~attrs:[
+      svg_a "x1" "0";
+      svg_a "y1" (Printf.sprintf "%d" y);
+      svg_a "x2" "600";
+      svg_a "y2" (Printf.sprintf "%d" y);
+      svg_a "stroke" stroke_var;
+      svg_a "stroke-width" "1";
+      svg_a "stroke-dasharray" "4,4";
+      svg_a "opacity" "0.55";
+      svg_a "vector-effect" "non-scaling-stroke";
+    ]
+    []
+;;
+
+let ctx_hairline ~x =
+  Node.create_svg "line"
+    ~attrs:[
+      svg_a "x1" (Printf.sprintf "%d" x);
+      svg_a "y1" "0";
+      svg_a "x2" (Printf.sprintf "%d" x);
+      svg_a "y2" "100";
+      svg_a "stroke" "var(--border-main)";
+      svg_a "stroke-width" "1";
+      svg_a "opacity" "0.5";
+      svg_a "vector-effect" "non-scaling-stroke";
+    ]
+    []
+;;
+
+let view_context_pressure () =
+  let hairlines =
+    List.init 7 ~f:(fun i -> ctx_hairline ~x:(i * 100))
+  in
+  let guides =
+    [ ctx_guide ~y:25 ~stroke_var:"var(--accent-brass-dim)"  (* 75 % warn *)
+    ; ctx_guide ~y:10 ~stroke_var:"var(--accent-blood)"      (* 90 % danger *)
+    ]
+  in
+  (* mock: 7 points over 60 min. y = 100 - pct. *)
+  let luna =
+    ctx_polyline
+      ~points:"0,62 100,60 200,63 300,60 400,58 500,62 600,58"
+      ~stroke_var:"var(--t-llm)" ~dashed:false
+  in
+  let brass_owl =
+    ctx_polyline
+      ~points:"0,60 100,54 200,48 300,42 400,38 500,35 600,33"
+      ~stroke_var:"var(--t-tool)" ~dashed:false
+  in
+  let moth =
+    ctx_polyline
+      ~points:"0,90 100,89 200,90 300,88 400,88 500,90 600,88"
+      ~stroke_var:"var(--t-wait)" ~dashed:false
+  in
+  let ash_hound =
+    (* crashes at t-34 (x=260). truncated polyline. *)
+    ctx_polyline
+      ~points:"0,55 100,35 200,15 260,5"
+      ~stroke_var:"var(--t-err)" ~dashed:true
+  in
+  let svg =
+    Node.create_svg "svg"
+      ~attrs:[
+        svg_a "viewBox" "0 0 600 100";
+        svg_a "preserveAspectRatio" "none";
+        Style.ctx_svg;
+      ]
+      (hairlines @ guides @ [ luna; brass_owl; moth; ash_hound ])
+  in
+  Node.div
+    ~attrs:[ Style.swim ]
+    [ Node.div
+        ~attrs:[ Style.swim_axis ]
+        [ Node.div ~attrs:[ Style.swim_axis_sp ] [ Node.text "ctx · 60m" ]
+        ; Node.div
+            ~attrs:[ Style.swim_axis_ax ]
+            (List.init 6 ~f:(fun i ->
+              let left_pct = i * 20 in
+              let style =
+                Attr.create "style" (Printf.sprintf "left:%d%%" left_pct)
+              in
+              Node.div
+                ~attrs:[ Style.swim_tick; style ]
+                [ Node.span
+                    ~attrs:[ Style.swim_tick_lbl ]
+                    [ Node.text (Printf.sprintf "t-%d" ((5 - i) * 12)) ]
+                ]))
+        ]
+    ; Node.div
+        ~attrs:[ Style.ctx_chart ]
+        [ Node.div
+            ~attrs:[ Style.ctx_meta ]
+            [ Node.text "keepers · %"
+            ; Node.span ~attrs:[ Style.ctx_meta_v ] [ Node.text "luna 38 · brass-owl 67" ]
+            ; Node.span ~attrs:[ Style.ctx_meta_v ] [ Node.text "moth 12 · ash ×" ]
+            ]
+        ; Node.div
+            ~attrs:[ Style.ctx_track ]
+            [ svg
+            ; Node.span ~attrs:[ Style.ctx_track_lbl; Style.ctx_lbl_dang ] [ Node.text "90% danger" ]
+            ; Node.span ~attrs:[ Style.ctx_track_lbl; Style.ctx_lbl_warn ] [ Node.text "75% warn" ]
+            ]
+        ]
     ]
 ;;
 
@@ -2257,6 +2430,21 @@ let render_response (response : Logs_types.response) : Node.t =
             ]
         ]
     ; view_swimlanes ()
+    ; Node.div
+        ~attrs:[ Style.sec ]
+        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "context pressure" ]
+        ; Node.span
+            ~attrs:[ Style.sec_sub ]
+            [ Node.text "60m rolling · % of window · warn 75 / danger 90" ]
+        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span
+            ~attrs:[ Style.sec_r ]
+            [ Node.text "mock · keepers endpoint "
+            ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "pending" ]
+            ]
+        ]
+    ; view_context_pressure ()
     ; Node.div ~attrs:[ Style.signet ] [ Node.text "M" ]
     ; aside
     ]

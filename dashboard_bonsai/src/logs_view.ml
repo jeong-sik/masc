@@ -1319,6 +1319,58 @@ stylesheet
     border-radius: 50%;
     background: currentColor;
   }
+
+  /* ─── .sec section marker ───
+     dashboard_v2 전역 section title 패턴 — 작은 lozenge 글리프 + Cinzel
+     제목 + italic sub + hairline gradient + 우측 mono meta. page-head
+     아래 각 섹션(tape, keepers, context pressure 등)에 등장해 "지금
+     무엇을 보고 있는가"를 한 줄로 알린다. */
+  .sec {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin: 8px 0 2px;
+  }
+  .sec_glyph {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-brass);
+    box-shadow: 0 0 6px rgba(138, 106, 40, 0.35);
+    align-self: center;
+  }
+  .sec_h {
+    font-family: 'Cinzel', serif;
+    font-size: 12px;
+    letter-spacing: 0.26em;
+    color: var(--accent-brass);
+    text-transform: uppercase;
+    margin: 0;
+  }
+  .sec_sub {
+    font-family: 'EB Garamond', Georgia, serif;
+    font-style: italic;
+    color: var(--text-dim);
+    font-size: 12px;
+  }
+  .sec_hr {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      var(--border-highlight) 0%,
+      var(--border-main) 60%,
+      transparent 100%
+    );
+  }
+  .sec_r {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+  }
+  .sec_r_v { color: var(--text-bright); }
 |}]
 
 let level_class level =
@@ -1916,7 +1968,44 @@ let render_response (response : Logs_types.response) : Node.t =
             ~attrs:[ Style.meta ]
             [ Node.text (Printf.sprintf "seq up to %d" response.total) ]
         ]
+    ; Node.div
+        ~attrs:[ Style.sec ]
+        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "log ring" ]
+        ; Node.span
+            ~attrs:[ Style.sec_sub ]
+            [ Node.text "in-memory chronicle · newest on top" ]
+        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span
+            ~attrs:[ Style.sec_r ]
+            [ Node.text "rows "
+            ; Node.span
+                ~attrs:[ Style.sec_r_v ]
+                [ Node.text
+                    (Printf.sprintf "%d"
+                       (List.length response.entries))
+                ]
+            ; Node.text " / total "
+            ; Node.span
+                ~attrs:[ Style.sec_r_v ]
+                [ Node.text (Printf.sprintf "%d" response.total) ]
+            ]
+        ]
     ; tape
+    ; Node.div
+        ~attrs:[ Style.sec ]
+        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "keepers" ]
+        ; Node.span
+            ~attrs:[ Style.sec_sub ]
+            [ Node.text "four hold the halls · one listens through the storm" ]
+        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span
+            ~attrs:[ Style.sec_r ]
+            [ Node.text "slot "
+            ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "iv" ]
+            ]
+        ]
     ; view_roster ()
     ; Node.div ~attrs:[ Style.signet ] [ Node.text "M" ]
     ; aside

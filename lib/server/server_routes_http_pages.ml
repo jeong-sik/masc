@@ -316,7 +316,29 @@ let bonsai_index_html () =
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap">
 <link rel="stylesheet" href="/dashboard/b/assets/colors_and_type.css?v=%s">
 <style>
-  html, body { background: #0a0706; margin: 0; }
+  /* Shell defaults — Design System SSOT lives in colors_and_type.css.
+     The grain overlay is a fixed, non-interactive pseudo-element on body.
+     Taken from MASC Design System ui_kits/dashboard_v2 — creates the
+     "oil-painting" Disco-Elysium feel by multiply-blending fractalNoise
+     SVG at 35%% opacity. Cheap: one inline data-URI, no HTTP, no JS. */
+  html, body { background: #0a0706; margin: 0; min-height: 100vh; }
+  body {
+    color: var(--text-primary, #b8a488);
+    background:
+      radial-gradient(ellipse 60%% 40%% at 12%% 8%%, rgba(212,169,64,0.05), transparent 55%%),
+      radial-gradient(ellipse 40%% 50%% at 92%% 95%%, rgba(160,24,24,0.06), transparent 60%%),
+      linear-gradient(170deg, #0e0a08 0%%, #140c08 60%%, #080504 100%%);
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='5'/><feColorMatrix values='0 0 0 0 0.1  0 0 0 0 0.08  0 0 0 0 0.06  0 0 0 0.6 0'/></filter><rect width='100%%25' height='100%%25' filter='url(%%23n)' opacity='0.35'/></svg>");
+    mix-blend-mode: multiply;
+  }
+  #app { position: relative; z-index: 1; }
 </style>
 </head>
 <body>

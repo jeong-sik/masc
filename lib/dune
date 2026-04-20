@@ -411,6 +411,7 @@
    keeper_skill_routing
    keeper_alerting
    keeper_alerting_path
+   keeper_sandbox_containment
    keeper_timing
    keeper_tool_registry
    keeper_tool_diversity
@@ -664,6 +665,7 @@
   tool_autoresearch_cycle
   keeper_skill_routing
   keeper_alerting_path
+  keeper_sandbox_containment
   ;; tool_local_runtime sub-modules
   tool_local_runtime_http
   tool_local_runtime_verify

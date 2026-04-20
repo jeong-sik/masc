@@ -73,17 +73,6 @@ stylesheet
     max-width: 640px;
   }
 
-  .section_h {
-    font-family: 'Cinzel', serif;
-    font-size: 12px;
-    letter-spacing: 0.28em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    margin: 14px 0 4px;
-    padding-bottom: 4px;
-    border-bottom: 1px solid var(--border-main);
-  }
-
   .quiet {
     padding: 28px 20px;
     text-align: center;
@@ -183,13 +172,18 @@ let render (keepers : Keepers_types.response) : Node.t =
            then
              Node.div
                ~attrs:[]
-               [ Node.div ~attrs:[ Style.section_h ] [ Node.text "roster · 현재" ]
+               [ Sec.view ~title:"roster" ~sub:"현재"
+                   ~right:
+                     (Printf.sprintf
+                        "fleet %d"
+                        (List.length keepers.keepers))
+                   ()
                ; Roster.view ~keepers ()
-               ; Node.div ~attrs:[ Style.section_h ] [ Node.text "swim · 60s" ]
+               ; Sec.view ~title:"swim" ~sub:"60s"
+                   ~right:"lane · activity" ()
                ; Swim.view ~keepers ()
-               ; Node.div
-                   ~attrs:[ Style.section_h ]
-                   [ Node.text "pressure · 60m" ]
+               ; Sec.view ~title:"pressure" ~sub:"60m"
+                   ~right:"ctx %" ()
                ; Ctx_chart.view ~keepers ()
                ]
            else

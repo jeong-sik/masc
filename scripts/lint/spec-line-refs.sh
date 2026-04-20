@@ -103,10 +103,29 @@ while IFS= read -r -d '' f; do
       continue
     fi
 
-    # Trim leading range-tail (e.g. "-68" from "N-M"), comment closer, and
-    # leading/trailing whitespace from the snippet text.
-    snippet=$(printf '%s' "$rest" | sed -E '
-      s/^-[0-9]+//
+    # Distinguish snippet from continuation prose by looking at the
+    # whitespace that separates `path:line` from what follows.
+    #
+    # Pattern 1 — snippet (structured, column-aligned):
+    #   *   lib/foo.ml:21   let decide ~accept_on_exhaustion
+    #                   ^^^ two-or-more spaces (or tab) = snippet
+    #
+    # Pattern 2 — continuation prose (single space or punctuation):
+    #   at lib/foo.ml:311; events update conditions and ...
+    #                    ^ single char — this is inline prose, not a snippet.
+    #
+    # Only Pattern 1 is subject to snippet-vs-source drift checking.
+    leading=$(printf '%s' "$rest" | sed -E 's/^(-[0-9]+)?([[:space:]]*).*$/\2/')
+    # Strip leading range-tail first so `-M  snippet` reads as `  snippet`.
+    stripped_tail=$(printf '%s' "$rest" | sed -E 's/^-[0-9]+//')
+    # Separator is everything up to first non-space char.
+    sep=$(printf '%s' "$stripped_tail" | sed -E 's/^([[:space:]]*).*$/\1/')
+    if [[ "$sep" != *$'\t'* && ${#sep} -lt 2 ]]; then
+      # No structured snippet separator → bare ref, skip snippet check.
+      ok_count=$((ok_count + 1))
+      continue
+    fi
+    snippet=$(printf '%s' "$stripped_tail" | sed -E '
       s/^[[:space:]]*\*\)?[[:space:]]*//
       s/^[[:space:]]+//
       s/[[:space:]]+$//

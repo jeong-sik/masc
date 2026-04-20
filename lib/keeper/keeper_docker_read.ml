@@ -104,7 +104,7 @@ let run_command_in_container ~config ~(meta : keeper_meta)
   else if command_argv = [] then
     Error "run_command_in_container: command_argv is empty"
   else
-    match Keeper_exec_shell.ensure_keeper_sandbox_runtime ~timeout_sec with
+    match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec with
     | Error err -> Error err
     | Ok seccomp_args ->
       let host_root = host_playground_root ~config ~meta in

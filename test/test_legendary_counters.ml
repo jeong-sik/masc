@@ -142,6 +142,80 @@ let test_too_complex_json_shape () =
   Alcotest.(check bool) "has other (=0)" true
     (Astring.String.is_infix ~affix:"\"too_complex_other\":0" s)
 
+let approx_eq ~eps a b = Float.abs (a -. b) <= eps
+
+let check_ratio name ~expected actual =
+  Alcotest.(check bool)
+    (Printf.sprintf "%s ≈ %.4f (got %.4f)" name expected actual)
+    true
+    (approx_eq ~eps:1e-9 expected actual)
+
+let test_ratios_zero_denominator () =
+  (* Observer off / fresh process: every ratio must return a finite 0.0,
+     not NaN / inf — shadow_counters JSON would fail to serialise
+     otherwise. *)
+  Legendary_counters.reset ();
+  let s = Legendary_counters.snapshot () in
+  check_ratio "disagree_ratio zero"
+    ~expected:0.0 (Legendary_counters.disagree_ratio s);
+  check_ratio "shadow_parse_coverage zero"
+    ~expected:0.0 (Legendary_counters.shadow_parse_coverage s);
+  check_ratio "auto_bg_promotion_rate zero"
+    ~expected:0.0 (Legendary_counters.auto_bg_promotion_rate s)
+
+let test_disagree_ratio_math () =
+  (* 10 total = 6 agree + 3 disagree (2 legacy_allow_shadow_deny +
+     1 legacy_deny_shadow_allow) + 1 shadow_cannot_parse.
+     disagree_ratio should count only the two *disagreement* buckets
+     — shadow_cannot_parse is its own category per the runbook. *)
+  Legendary_counters.reset ();
+  for _ = 1 to 6 do Legendary_counters.incr_gate_diff `Agree done;
+  for _ = 1 to 2 do
+    Legendary_counters.incr_gate_diff `Legacy_allow_shadow_deny
+  done;
+  Legendary_counters.incr_gate_diff `Legacy_deny_shadow_allow;
+  Legendary_counters.incr_gate_diff `Shadow_cannot_parse;
+  let s = Legendary_counters.snapshot () in
+  Alcotest.(check int) "total = 10" 10 s.gate_diff_total;
+  check_ratio "disagree_ratio = 3/10"
+    ~expected:0.3 (Legendary_counters.disagree_ratio s)
+
+let test_shadow_parse_coverage_math () =
+  (* 100 total, 3 shadow_cannot_parse → coverage 0.97.  Exactly the
+     runbook threshold for the MASC_BASH_AST_ONLY flip criterion. *)
+  Legendary_counters.reset ();
+  for _ = 1 to 97 do Legendary_counters.incr_gate_diff `Agree done;
+  for _ = 1 to 3 do
+    Legendary_counters.incr_gate_diff `Shadow_cannot_parse
+  done;
+  let s = Legendary_counters.snapshot () in
+  check_ratio "coverage = 0.97"
+    ~expected:0.97 (Legendary_counters.shadow_parse_coverage s)
+
+let test_shadow_parse_coverage_full () =
+  (* No parse failures → 1.0 (AST gate would parse everything
+     observed so far). *)
+  Legendary_counters.reset ();
+  for _ = 1 to 5 do Legendary_counters.incr_gate_diff `Agree done;
+  let s = Legendary_counters.snapshot () in
+  check_ratio "coverage = 1.0"
+    ~expected:1.0 (Legendary_counters.shadow_parse_coverage s)
+
+let test_auto_bg_promotion_rate_math () =
+  (* 10 observed, 4 would-have-promoted → 0.4.  Operator reads this
+     and decides whether raising MASC_BLOCKING_BUDGET_MS is warranted
+     before flipping MASC_BASH_AUTO_BG default. *)
+  Legendary_counters.reset ();
+  for _ = 1 to 6 do
+    Legendary_counters.incr_auto_bg_observed ~promoted_candidate:false
+  done;
+  for _ = 1 to 4 do
+    Legendary_counters.incr_auto_bg_observed ~promoted_candidate:true
+  done;
+  let s = Legendary_counters.snapshot () in
+  check_ratio "promotion_rate = 0.4"
+    ~expected:0.4 (Legendary_counters.auto_bg_promotion_rate s)
+
 let () =
   Alcotest.run "legendary_counters"
     [
@@ -164,5 +238,18 @@ let () =
             test_too_complex_parse_aborted;
           Alcotest.test_case "unknown → other" `Quick test_too_complex_unknown_tag;
           Alcotest.test_case "JSON shape" `Quick test_too_complex_json_shape;
+        ] );
+      ( "derived_ratios",
+        [
+          Alcotest.test_case "zero denominator returns 0.0" `Quick
+            test_ratios_zero_denominator;
+          Alcotest.test_case "disagree_ratio math" `Quick
+            test_disagree_ratio_math;
+          Alcotest.test_case "shadow_parse_coverage math" `Quick
+            test_shadow_parse_coverage_math;
+          Alcotest.test_case "shadow_parse_coverage full" `Quick
+            test_shadow_parse_coverage_full;
+          Alcotest.test_case "auto_bg_promotion_rate math" `Quick
+            test_auto_bg_promotion_rate_math;
         ] );
     ]

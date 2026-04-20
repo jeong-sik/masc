@@ -82,3 +82,42 @@ val snapshot : unit -> snapshot
 val snapshot_to_json : snapshot -> Yojson.Safe.t
 (** Stable JSON shape for dashboard / HTTP consumers.  Field names
     mirror the record labels exactly. *)
+
+(** {2 Derived ratios}
+
+    Pure functions over [snapshot] that encapsulate the flip-decision
+    math documented in [LEGENDARY-BASH-RUNBOOK.md].  Dashboards, the
+    [/api/v1/legendary_bash/shadow_counters] JSON surface, and
+    operator shell recipes should prefer these helpers over
+    re-implementing the same numerator / denominator pairing.  All
+    functions return [0.0] when their denominator is zero — the
+    "observer off" read must be safely serialisable as a finite
+    float (no NaN / inf in the JSON output). *)
+
+val disagree_ratio : snapshot -> float
+(** [(gate_diff_legacy_allow_shadow_deny +
+        gate_diff_legacy_deny_shadow_allow)
+     / gate_diff_total].
+
+    Fraction of P5 gate calls where the legacy regex gate and the new
+    AST gate produced opposite verdicts, excluding [`Shadow_cannot_parse].
+    Drives the [MASC_BASH_AST_ONLY] flip criterion (target 0.0 over a
+    rolling 7-day window). *)
+
+val shadow_parse_coverage : snapshot -> float
+(** [1.0 - gate_diff_shadow_cannot_parse / gate_diff_total].
+
+    Fraction of observed P5 calls that the AST gate could fully parse
+    (i.e., the shadow verdict was either [`Agree] or an actual
+    disagreement, not a parser bailout).  Drives the "parse gap
+    < 1%" flip criterion in the runbook — a coverage of [0.99] or
+    higher is the flip target. *)
+
+val auto_bg_promotion_rate : snapshot -> float
+(** [auto_bg_would_have_promoted / auto_bg_observed].
+
+    Fraction of P4 observed foreground calls that exceeded
+    [MASC_BLOCKING_BUDGET_MS].  Guides both the [MASC_BLOCKING_BUDGET_MS]
+    tuning ("would promotion fire too often?") and the
+    [MASC_BASH_AUTO_BG] default-flip decision ("is promotion rare
+    enough to be tolerable?"). *)

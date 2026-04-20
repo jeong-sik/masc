@@ -22,14 +22,14 @@
 \*   continuityGoal/Task  | snapshot.continuity_*                                  | snapshot record
 \*
 \* Verdict mapping ↔ OCaml: spec verdicts come from
-\* lib/keeper/keeper_campaign_fsm.ml:99 (`verdict_of_phase`) — confirms
+\* lib/keeper/keeper_campaign_fsm.ml:verdict_of_phase — confirms
 \* the spec's design goal that verdicts derive ONLY from the campaign FSM
 \* phase, never from the runtime keeper lifecycle phase (which lives in
 \* lib/keeper/keeper_state_machine.ml — orthogonal axis).
 \*
 \* Event mapping ↔ OCaml: spec actions correspond to
-\* lib/keeper/keeper_campaign_fsm.ml:33 (`type event`) — Task_bound_observed,
-\* etc. apply via `apply_event` at line 287.
+\* lib/keeper/keeper_campaign_fsm.ml:event (type event) — Task_bound_observed,
+\* etc. apply via lib/keeper/keeper_campaign_fsm.ml:apply_event.
 \*
 \* Scope: spec models the pure mission FSM. The runtime keeper lifecycle
 \* (Offline / Running / Crashed / etc.) is intentionally OUT OF SCOPE
@@ -38,8 +38,8 @@
 \* spec; adding a new campaign phase DOES.
 \*
 \* Known modelling gap (issue #8946): [ContinuityObserved] models only the
-\* SUCCESS outcome.  The OCaml impl (apply_event at
-\* lib/keeper/keeper_campaign_fsm.ml:336-368) ALSO transitions to
+\* SUCCESS outcome.  The OCaml impl at
+\* lib/keeper/keeper_campaign_fsm.ml:apply_event ALSO transitions to
 \* [Escalated] when goal_matches / task_matches / lifecycle_evidence /
 \* target_reached fail, with a textual reason.  TLC therefore cannot
 \* reach Escalated via the Continuity_observed path; only via

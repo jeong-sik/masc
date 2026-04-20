@@ -95,10 +95,13 @@ let test_release_truth_contracts () =
        "doc_truth: ${{ steps.scope.outputs.doc_truth }}");
   check bool "ci gate aggregates doc truth" true
     (file_contains_pattern ".github/workflows/ci.yml"
-       "check \"doc-truth\"     \"$DOC_TRUTH_RESULT\"");
+       "check \"doc-truth\"       \"$DOC_TRUTH_RESULT\"");
   check bool "ci gate aggregates oas pin check" true
     (file_contains_pattern ".github/workflows/ci.yml"
-       "check \"oas-pin-check\" \"$OAS_PIN_RESULT\"");
+       "check \"oas-pin-check\"   \"$OAS_PIN_RESULT\"");
+  check bool "ci gate aggregates spec line refs" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "check \"spec-line-refs\"  \"$SPEC_REFS_RESULT\"");
   check bool "ci workflow removed odoc documentation lane" true
     (file_not_contains_pattern ".github/workflows/ci.yml" "name: Documentation");
   check bool "ci workflow no longer installs odoc" true

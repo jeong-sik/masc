@@ -372,7 +372,7 @@ export function GoalTree() {
       ${loading && !data ? html`
         <${LoadingState}>목표 트리 불러오는 중...<//>
       ` : data && data.tree.length === 0 ? html`
-        <${EmptyState} message="등록된 목표가 없습니다. masc_goal_upsert 도구로 목표를 등록하세요." />
+        <${EmptyState} message="등록된 목표가 없습니다. masc_goal_upsert로 목표를 등록하세요. 연결 태스크는 제목에 [goal:<id>]를 포함하면 Goal Tree에 반영됩니다." />
       ` : data && isFiltering && visibleTree.length === 0 ? html`
         <section class="py-4 text-center text-xs text-text-dim">
           필터 결과 없음 (${data.tree.length} 목표)

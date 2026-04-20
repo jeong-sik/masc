@@ -451,6 +451,7 @@
         test_governance_yojson_roundtrip
         test_eval_calibration
         test_goal_janitor
+        test_goal_tools
         test_goal_store
         test_string_util
         test_board_core_payload
@@ -614,6 +615,7 @@
         test_governance_yojson_roundtrip
         test_eval_calibration
         test_goal_janitor
+        test_goal_tools
         test_goal_store
         test_string_util
         test_board_core_payload

@@ -102,6 +102,9 @@ module Masc : sig
     | Deliver
     | Dispatch_assign
     | Dispatch_plan
+    | Goal_list
+    | Goal_review
+    | Goal_upsert
     | Find_by_capability
     | Governance_feed
     | Governance_status

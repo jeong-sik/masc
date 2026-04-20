@@ -234,6 +234,123 @@ let test_start_shell_command_quotes_shell_meta () =
        (Filename.quote script))
     (Routes.sidecar_start_shell_command ~base_path ~script)
 
+let test_desired_store_increments_generation () =
+  with_temp_dir "sidecar-desired-store" (fun base_path ->
+      let first =
+        Routes.write_desired_record
+          ~updated_at:"2026-04-20T00:00:00Z"
+          ~base_path
+          ~id:"discord"
+          ~updated_by:"test"
+          Routes.Desired_running
+      in
+      let second =
+        Routes.write_desired_record
+          ~updated_at:"2026-04-20T00:00:01Z"
+          ~base_path
+          ~id:"discord"
+          ~updated_by:"test"
+          Routes.Desired_stopped
+      in
+      match (first, second, Routes.read_desired_record ~base_path "discord") with
+      | Ok first, Ok second, Some persisted ->
+          check int "first generation" 1 first.generation;
+          check int "second generation" 2 second.generation;
+          check int "persisted generation" 2 persisted.generation;
+          check string "persisted desired state" "stopped"
+            (Routes.desired_state_to_string persisted.desired_state)
+      | _ -> failf "desired writes should succeed and persist")
+
+let test_reconcile_stale_generation_does_not_start () =
+  let shell_called = ref false in
+  let delayed : Routes.desired_record =
+    {
+      Routes.connector_id = "discord";
+      desired_state = Routes.Desired_running;
+      generation = 1;
+      updated_by = "test";
+      updated_at = "2026-04-20T00:00:00Z";
+    }
+  in
+  let result =
+    Routes.reconcile_desired_once
+      ~current_generation:2
+      ~observed_state:Routes.Observed_unavailable
+      ~start_shell:(fun () -> shell_called := true)
+      delayed
+  in
+  check bool "stale reconcile must not shell start" false !shell_called;
+  check string "stale generation result"
+    "noop:stale_generation"
+    (Routes.reconcile_result_to_string result)
+
+let test_reconcile_running_unavailable_starts_once () =
+  let shell_calls = ref 0 in
+  let desired : Routes.desired_record =
+    {
+      Routes.connector_id = "discord";
+      desired_state = Routes.Desired_running;
+      generation = 3;
+      updated_by = "test";
+      updated_at = "2026-04-20T00:00:00Z";
+    }
+  in
+  let result =
+    Routes.reconcile_desired_once
+      ~current_generation:3
+      ~observed_state:Routes.Observed_unavailable
+      ~start_shell:(fun () -> incr shell_calls)
+      desired
+  in
+  check int "current running reconcile shells once" 1 !shell_calls;
+  check string "started result" "started" (Routes.reconcile_result_to_string result)
+
+let test_reconcile_stopped_noops () =
+  let shell_called = ref false in
+  let desired : Routes.desired_record =
+    {
+      Routes.connector_id = "discord";
+      desired_state = Routes.Desired_stopped;
+      generation = 4;
+      updated_by = "test";
+      updated_at = "2026-04-20T00:00:00Z";
+    }
+  in
+  let result =
+    Routes.reconcile_desired_once
+      ~current_generation:4
+      ~observed_state:Routes.Observed_unavailable
+      ~start_shell:(fun () -> shell_called := true)
+      desired
+  in
+  check bool "stopped reconcile must not shell start" false !shell_called;
+  check string "stopped result" "noop:desired_stopped"
+    (Routes.reconcile_result_to_string result)
+
+let test_status_json_includes_lifecycle_shape () =
+  with_temp_dir "sidecar-lifecycle-status" (fun base_path ->
+      (match
+         Routes.write_desired_record
+           ~updated_at:"2026-04-20T00:00:00Z"
+           ~base_path
+           ~id:"discord"
+           ~updated_by:"test"
+           Routes.Desired_running
+       with
+       | Ok _ -> ()
+       | Error msg -> failf "desired write failed: %s" msg);
+      let json = Routes.read_status_json ~base_path "discord" in
+      let open Yojson.Safe.Util in
+      let lifecycle = json |> member "sidecar_lifecycle" in
+      check string "desired_state" "running"
+        (lifecycle |> member "desired_state" |> to_string);
+      check int "desired_generation" 1
+        (lifecycle |> member "desired_generation" |> to_int);
+      check string "observed_state" "unavailable"
+        (lifecycle |> member "observed_state" |> to_string);
+      check string "reconcile_result" "would_start"
+        (lifecycle |> member "reconcile_result" |> to_string))
+
 (* ---- Config write helpers (PUT /api/v1/sidecar/config). ---- *)
 
 let test_escape_quotes_and_backslash () =
@@ -388,6 +505,18 @@ let () =
             test_start_shell_command_matches_detached_contract;
           test_case "quotes shell metacharacters" `Quick
             test_start_shell_command_quotes_shell_meta;
+        ] );
+      ( "desired_state",
+        [
+          test_case "desired store increments generation" `Quick
+            test_desired_store_increments_generation;
+          test_case "stale generation reconcile does not start" `Quick
+            test_reconcile_stale_generation_does_not_start;
+          test_case "running + unavailable starts once" `Quick
+            test_reconcile_running_unavailable_starts_once;
+          test_case "stopped desired no-ops" `Quick test_reconcile_stopped_noops;
+          test_case "status JSON includes lifecycle shape" `Quick
+            test_status_json_includes_lifecycle_shape;
         ] );
       ( "config_write_helpers",
         [

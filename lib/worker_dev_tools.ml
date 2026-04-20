@@ -1722,3 +1722,34 @@ let gate_diff_to_string = function
   | Legacy_deny_shadow_allow -> "legacy_deny_shadow_allow"
   | Shadow_cannot_parse -> "shadow_cannot_parse"
 
+(* Tick 22: stable log tags for legacy and shadow verdicts.
+   Exposed for the dark-launch shadow logger in keeper_exec_shell
+   — a per-call [diff_command] invocation emits a structured line
+   using these strings so operators can grep for
+   [Legacy_deny_shadow_allow] (flip blockers) or
+   [Legacy_allow_shadow_deny] (safety regressions) in the keeper
+   log stream without needing a separate metrics pipeline. *)
+let legacy_verdict_to_tag = function
+  | Legacy_allow -> "legacy_allow"
+  | Legacy_reject_by_allowlist -> "legacy_reject_by_allowlist"
+  | Legacy_reject_destructive _ -> "legacy_reject_destructive"
+
+let shadow_verdict_to_tag = function
+  | Shadow_allow _ -> "shadow_allow"
+  | Shadow_parse_unsupported _ -> "shadow_parse_unsupported"
+  | Shadow_deny_destructive _ -> "shadow_deny_destructive"
+
+(* Deterministic 12-hex-char digest of the command.  MD5 is used
+   strictly for log-line de-duplication, never for security; it
+   stops arbitrary shell fragments from leaking into log streams
+   while still letting operators aggregate identical diff
+   occurrences across processes. *)
+let cmd_hash_for_log (cmd : string) : string =
+  let hex = Digest.to_hex (Digest.string cmd) in
+  if String.length hex >= 12 then String.sub hex 0 12 else hex
+
+let shadow_diff_log_enabled () =
+  match Sys.getenv_opt "MASC_BASH_AST_SHADOW_LOG" with
+  | Some ("1" | "true" | "TRUE" | "yes" | "on" | "log") -> true
+  | _ -> false
+

@@ -734,96 +734,7 @@ stylesheet
     position: relative;
   }
 
-  .roster {
-    position: sticky;
-    bottom: 0;
-    z-index: 3;
-    margin-top: 1rem;
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1px;
-    background: var(--border-main);
-    border: 1px solid #3a2a20;
-    border-radius: 2px;
-    box-shadow:
-      inset 0 0 0 1px rgba(196, 162, 101, 0.06),
-      0 -8px 24px -12px rgba(0, 0, 0, 0.85);
-    backdrop-filter: blur(2px);
-  }
-
-  .roster_slot {
-    background: var(--bg-panel);
-    padding: 10px 14px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .roster_sigil {
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    border: 1px solid var(--accent-brass);
-    background: radial-gradient(circle at 35% 30%, rgba(232, 216, 184, 0.22), transparent 55%), var(--bg-panel);
-    display: grid;
-    place-items: center;
-    font-family: 'Cinzel', serif;
-    font-size: 11px;
-    color: var(--text-bright);
-    text-transform: uppercase;
-    box-shadow: inset 0 0 0 1px rgba(232, 216, 184, 0.08), 0 0 8px rgba(138, 106, 40, 0.22);
-    flex-shrink: 0;
-  }
-
-  .roster_body {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    min-width: 0;
-  }
-
-  .roster_name {
-    font-family: 'Cinzel', serif;
-    font-size: 11px;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--text-bright);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .roster_state {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-family: 'Noto Sans KR', -apple-system, sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-  }
-
-  .roster_dot {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--text-dim);
-  }
-
-  .roster_dot_live     { background: var(--status-ok); box-shadow: 0 0 6px var(--status-ok); animation: pulse-beat 1.8s ease-in-out infinite; }
-  .roster_dot_thinking { background: var(--accent-brass); box-shadow: 0 0 6px var(--accent-brass); animation: pulse-beat 1.2s ease-in-out infinite; }
-  .roster_dot_idle     { background: #4a3a32; }
-  .roster_dot_failed   { background: var(--accent-blood); box-shadow: 0 0 8px var(--accent-blood); }
-
-  .roster_when {
-    margin-left: auto;
-    font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
-    font-variant-numeric: tabular-nums;
-    font-size: 10px;
-    color: var(--text-dim);
-    flex-shrink: 0;
-  }
+  /* roster CSS → Roster 모듈로 이관 (shell 추출 Phase 2.A) */
 
   .signet {
     position: fixed;
@@ -1790,81 +1701,7 @@ let view_heartbeat ?(entries : Logs_types.entry list = []) () =
 (* Keeper roster — sticky bottom strip. Four fixed keeper slots as a
    visual placeholder; Phase 1c wires this to a keeper_status Var so the
    state dot, last-heard timestamp, and presence reflect live telemetry. *)
-type keeper_state = [ `Live | `Thinking | `Idle | `Failed ]
-
-(** Map live keeper status to the roster dot state. [Warn] → [`Thinking]
-    (something is happening but concerning), [Dead] → [`Failed]. *)
-let roster_state_of (s : Keepers_types.keeper_status) : keeper_state =
-  match s with
-  | Live -> `Live
-  | Warn -> `Thinking
-  | Dead -> `Failed
-;;
-
-let roster_slot_of ~(state : keeper_state) ~sigil ~name ~state_label ~when_ =
-  let dot_cls =
-    match state with
-    | `Live -> Style.roster_dot_live
-    | `Thinking -> Style.roster_dot_thinking
-    | `Idle -> Style.roster_dot_idle
-    | `Failed -> Style.roster_dot_failed
-  in
-  Node.div
-    ~attrs:[ Style.roster_slot ]
-    [ Node.div ~attrs:[ Style.roster_sigil ] [ Node.text sigil ]
-    ; Node.div
-        ~attrs:[ Style.roster_body ]
-        [ Node.span ~attrs:[ Style.roster_name ] [ Node.text name ]
-        ; Node.div
-            ~attrs:[ Style.roster_state ]
-            [ Node.span ~attrs:[ Style.roster_dot; dot_cls ] []
-            ; Node.text state_label
-            ]
-        ]
-    ; Node.span ~attrs:[ Style.roster_when ] [ Node.text when_ ]
-    ]
-;;
-
-let roster_slot_of_keeper (k : Keepers_types.keeper) =
-  let sigil =
-    if String.length k.name = 0
-    then "·"
-    else Char.to_string (Char.uppercase k.name.[0])
-  in
-  let when_ =
-    match k.latency_ms with
-    | 0 -> "×"
-    | n when n < 1000 -> Printf.sprintf "%dms" n
-    | n -> Printf.sprintf "%.1fs" (Float.of_int n /. 1000.0)
-  in
-  roster_slot_of
-    ~state:(roster_state_of k.status)
-    ~sigil
-    ~name:k.name
-    ~state_label:k.stat
-    ~when_
-;;
-
-let view_roster_static () =
-  [ roster_slot_of ~sigil:"P" ~name:"keeper · poe" ~state:`Live
-      ~state_label:"speaking" ~when_:"3s"
-  ; roster_slot_of ~sigil:"J" ~name:"janitor" ~state:`Thinking
-      ~state_label:"thinking" ~when_:"12s"
-  ; roster_slot_of ~sigil:"G" ~name:"governance" ~state:`Idle
-      ~state_label:"idle · ok" ~when_:"2m"
-  ; roster_slot_of ~sigil:"I" ~name:"improver" ~state:`Failed
-      ~state_label:"paused · auth" ~when_:"7m"
-  ]
-;;
-
-let view_roster ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
-  let slots =
-    match keepers.keepers with
-    | [] -> view_roster_static ()
-    | live -> List.map live ~f:roster_slot_of_keeper
-  in
-  Node.div ~attrs:[ Style.roster ] slots
-;;
+(* roster → Roster 모듈로 이관 (shell 추출 Phase 2.A) *)
 
 (* ─── swimlane mock ───
    lane = keeper activity over the last cycle. frame = tool call span.
@@ -2934,7 +2771,7 @@ let render_response
                 ]
             ]
         ]
-    ; view_roster ~keepers ()
+    ; Roster.view ~keepers ()
     ; Node.div
         ~attrs:[ Style.sec ]
         [ Node.span ~attrs:[ Style.sec_glyph ] []

@@ -104,6 +104,11 @@ stylesheet
 
   .crumbs_sep { color: var(--border-highlight); }
   .crumbs_cur { color: var(--text-bright); letter-spacing: 0.14em; }
+  .crumbs_room {
+    color: var(--accent-brass);
+    letter-spacing: 0.14em;
+    font-variant-numeric: tabular-nums;
+  }
 
   .pulse_slot { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 
@@ -1597,6 +1602,43 @@ stylesheet
     color: var(--text-bright);
     font-variant-numeric: tabular-nums;
   }
+
+  /* ─── tombstrip — 12-state keeper FSM tiles ───
+     design_v2: Offline → Running → {Failing | Overflowed | Compacting |
+     HandingOff | Draining} → Paused / Stopped / Crashed → Restarting → Dead.
+     기본은 dim outline. active=brass glow, danger=blood(Crashed),
+     dead=strikethrough with blood decoration. */
+  .tombstrip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    padding: 6px 14px 12px;
+  }
+  .tomb {
+    padding: 5px 8px;
+    font-family: 'Cinzel', 'Cormorant SC', serif;
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    border: 1px solid var(--border-main);
+    background: #1a120c;
+  }
+  .tomb_active {
+    color: var(--accent-brass);
+    border-color: var(--accent-brass);
+    background: linear-gradient(180deg, #2a1f14, #14100a);
+  }
+  .tomb_danger {
+    color: var(--accent-blood);
+    border-color: color-mix(in oklab, var(--accent-blood) 50%, transparent);
+  }
+  .tomb_dead {
+    color: var(--text-dim);
+    opacity: 0.5;
+    text-decoration: line-through;
+    text-decoration-color: var(--accent-blood);
+  }
 |}]
 
 let level_class level =
@@ -2122,6 +2164,44 @@ let ctx_meta_lines_of (ks : Keepers_types.keeper list) : string list =
   chunks (List.map ks ~f:pair)
 ;;
 
+type tomb_level = [ `Base | `Active | `Danger | `Dead ]
+
+let tomb_class = function
+  | `Base -> Style.tomb
+  | `Active -> Style.tomb_active
+  | `Danger -> Style.tomb_danger
+  | `Dead -> Style.tomb_dead
+;;
+
+(* 12-state keeper FSM per design_v2. active/danger/dead are mocked until
+   keeper phase is wired through Keepers_types. *)
+let keeper_fsm_states : (string * tomb_level) list =
+  [ "Offline",    `Base
+  ; "Running",    `Active
+  ; "Failing",    `Base
+  ; "Overflowed", `Base
+  ; "Compacting", `Active
+  ; "HandingOff", `Base
+  ; "Draining",   `Base
+  ; "Paused",     `Active
+  ; "Stopped",    `Base
+  ; "Crashed",    `Danger
+  ; "Restarting", `Base
+  ; "Dead",       `Dead
+  ]
+;;
+
+let view_tombstrip ?(states = keeper_fsm_states) () =
+  let tile (label, level) =
+    Node.span
+      ~attrs:[ Style.tomb; tomb_class level ]
+      [ Node.text label ]
+  in
+  Node.div
+    ~attrs:[ Style.tombstrip ]
+    (List.map states ~f:tile)
+;;
+
 let view_context_pressure
       ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
   let hairlines =
@@ -2358,10 +2438,24 @@ let render_response
       ; Node.span ~attrs:[ Style.wordmark ] [ Node.text "masc" ]
       ; Node.div
           ~attrs:[ Style.crumbs ]
-          [ Node.span [ Node.text "observatory" ]
-          ; Node.span ~attrs:[ Style.crumbs_sep ] [ Node.text "›" ]
-          ; Node.span ~attrs:[ Style.crumbs_cur ] [ Node.text "logs · 저널" ]
-          ]
+          (let head =
+             [ Node.span [ Node.text "observatory" ]
+             ; Node.span ~attrs:[ Style.crumbs_sep ] [ Node.text "›" ]
+             ]
+           in
+           let room_seg =
+             match keepers.room with
+             | None | Some "" -> []
+             | Some name ->
+               [ Node.span ~attrs:[ Style.crumbs_room ] [ Node.text name ]
+               ; Node.span ~attrs:[ Style.crumbs_sep ] [ Node.text "›" ]
+               ]
+           in
+           let tail =
+             [ Node.span ~attrs:[ Style.crumbs_cur ] [ Node.text "logs · 저널" ]
+             ]
+           in
+           head @ room_seg @ tail)
       ; Node.div
           ~attrs:[ Style.pulse_slot ]
           [ Node.span ~attrs:[ Style.pulse ] []
@@ -2497,7 +2591,12 @@ let render_response
       ; nav_link ~active:true "logs · journal"
       ; nav_link "goals"
       ; nav_section "runtime"
-      ; nav_link "keepers" ~tail:"04"
+      ; (let tail =
+           match keepers.keepers with
+           | [] -> "—"
+           | ks -> Printf.sprintf "%02d" (List.length ks)
+         in
+         nav_link "keepers" ~tail)
       ; nav_link "observatory"
       ; nav_link "intervene"
       ; nav_section "lab"
@@ -2505,7 +2604,19 @@ let render_response
       ; nav_link "sessions"
       ; nav_link "social board"
       ; nav_section "crypt"
-      ; nav_link "dead keepers" ~tail:"00"
+      ; (let tail =
+           match keepers.keepers with
+           | [] -> "—"
+           | ks ->
+             let dead_n =
+               List.count ks ~f:(fun (k : Keepers_types.keeper) ->
+                 match k.status with
+                 | Dead -> true
+                 | _ -> false)
+             in
+             Printf.sprintf "%02d" dead_n
+         in
+         nav_link "dead keepers" ~tail)
       ; nav_link "archive runs"
       ; (let chip name label =
            Node.div
@@ -2893,6 +3004,21 @@ let render_response
             ]
         ]
     ; view_context_pressure ~keepers ()
+    ; Node.div
+        ~attrs:[ Style.sec ]
+        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "keeper rites · 12 states" ]
+        ; Node.span
+            ~attrs:[ Style.sec_sub ]
+            [ Node.text "Offline → Running → {Failing · Overflowed · Compacting · Draining} → Paused / Stopped / Crashed → Restarting → Dead" ]
+        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span
+            ~attrs:[ Style.sec_r ]
+            [ Node.text "mock · keeper phase wire "
+            ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "pending" ]
+            ]
+        ]
+    ; view_tombstrip ()
     ; Node.div ~attrs:[ Style.signet ] [ Node.text "M" ]
     ; aside
     ]

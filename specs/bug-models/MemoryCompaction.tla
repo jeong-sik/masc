@@ -2,13 +2,34 @@
 \* Bug Model: Memory bank compaction drops important notes.
 \*
 \* Models keeper_memory_bank.ml compact_memory_bank_if_needed.
-\* Correct code: selection respects kind caps (constraints:2,
-\* decision:2, long_term:4, ...) + recent floor (44 notes).
+\* Correct code: selection respects kind caps + recent floor.
 \* Bug: priority-only selection lets high-priority long_term notes
 \* fill all slots, starving constraints and other kinds.
 \*
-\* Reference: keeper_memory_bank.ml lines 292-448,
-\*            keeper_memory_policy.ml lines 131-148 (kind_caps).
+\* Reference (verified 2026-04-20):
+\*   lib/keeper/keeper_memory_bank.ml:346
+\*       compact_memory_bank_if_needed entry point
+\*   lib/keeper/keeper_memory_bank.ml:296
+\*       memory_kind_caps_for_compaction (per-target cap derivation)
+\*   lib/keeper/keeper_memory_policy.ml:806
+\*       kind_caps () : (string * int) list — SSOT
+\*
+\* ── Abstraction note ──
+\* The real kind_caps SSOT enumerates 7 kinds:
+\*   constraints:2, decision:2, next:2, goal:2, progress:2,
+\*   open_question:2, long_term:4
+\* This bug model collapses them to 4 representative kinds for the
+\* "starvation under priority-only selection" invariant:
+\*   constraint  — collapses {constraints} (note singular in spec
+\*                 vs plural "constraints" in source kind_caps)
+\*   decision    — collapses {decision}
+\*   progress    — collapses {next, goal, progress, open_question}
+\*                 (all per-cap=2 generic notes)
+\*   long_term   — collapses {long_term} (only kind with cap=4)
+\* Two abstract caps (ConstraintCap, LongTermCap) are sufficient to
+\* express the bug because the asymmetry that causes starvation is
+\* between "the high-priority kind" (long_term) and "the small-cap
+\* kinds" (everything else with cap=2).
 
 EXTENDS Naturals, Sequences, FiniteSets
 

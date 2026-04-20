@@ -281,6 +281,19 @@ let test_span_status_of_string_keeps_legacy_unknown_fallback () =
     (Activity_graph.span_status_of_string "definitely-not-a-status"
      |> Activity_graph.span_status_to_string)
 
+let test_span_status_of_string_opt_returns_none_for_unknown () =
+  (* #8605 family: strict variant exposes unknown wires explicitly so
+     callers can react instead of being silently coerced to Span_ended. *)
+  check (option string) "unknown -> None" None
+    (Activity_graph.span_status_of_string_opt "definitely-not-a-status"
+     |> Option.map Activity_graph.span_status_to_string);
+  check (option string) "ended -> Some ended" (Some "ended")
+    (Activity_graph.span_status_of_string_opt "ended"
+     |> Option.map Activity_graph.span_status_to_string);
+  check (option string) "open -> Some open" (Some "open")
+    (Activity_graph.span_status_of_string_opt "open"
+     |> Option.map Activity_graph.span_status_to_string)
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -305,5 +318,7 @@ let () =
             test_span_status_of_string_handles_ended_round_trip;
           test_case "span_status keeps unknown fallback" `Quick
             test_span_status_of_string_keeps_legacy_unknown_fallback;
+          test_case "span_status_opt None for unknown" `Quick
+            test_span_status_of_string_opt_returns_none_for_unknown;
         ] );
     ]

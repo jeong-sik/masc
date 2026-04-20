@@ -46,7 +46,13 @@ type span_status =
 
 val span_status_to_string : span_status -> string
 
-(** Lenient parser: unknown wire collapses to [Span_ended]. *)
+(** Strict parser: returns [None] on unknown wire so callers can react
+    explicitly. Mirror of {!node_status_of_string_opt}. See #8605. *)
+val span_status_of_string_opt : string -> span_status option
+
+(** Back-compat parser: unknown wire still collapses to [Span_ended]
+    but emits a [Log.Misc.warn] so producer/consumer drift surfaces in
+    operator logs instead of silently misclassifying the span. *)
 val span_status_of_string : string -> span_status
 
 (** {1 Graph entities} *)

@@ -87,8 +87,14 @@ val to_payload : t -> (string * payload_value) list
     Empty for nullary variants. *)
 
 val enabled : unit -> bool
-(** Runtime feature flag reader. Reads [MASC_BASH_SEMANTIC_EXIT]; when
-    set to ["1"] or ["true"] the caller should emit the semantic field.
-    The interpret/to_json functions themselves are always safe to call;
-    the flag only gates whether producers include the result in the
+(** Runtime feature flag reader. Reads [MASC_BASH_SEMANTIC_EXIT].
+
+    Default (post-#8721): [true] — the semantic field is emitted
+    unless an operator explicitly opts out with
+    [MASC_BASH_SEMANTIC_EXIT=0] (or ["false" / "FALSE" / "no" / "off"]).
+
+    The flag survives one more minor bump to let downstream
+    consumers confirm compatibility before it is removed.  The
+    [interpret] / [to_json] functions are always safe to call; the
+    flag only gates whether producers include the result in the
     user-visible response. *)

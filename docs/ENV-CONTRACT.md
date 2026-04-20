@@ -121,7 +121,7 @@ never break by enabling them.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `MASC_BASH_SEMANTIC_EXIT` | off | Emits a `return_code_interpretation` object (typed `semantic_exit`) alongside the raw `status`. See `lib/exec/exec_semantic.mli`. |
+| `MASC_BASH_SEMANTIC_EXIT` | **on** (post flip PR) | Emits a `return_code_interpretation` object (typed `semantic_exit`) alongside the raw `status`. Set to `0` / `false` / `no` / `off` to opt out and restore the pre-P1 byte-identical shape. See `lib/exec/exec_semantic.mli`. |
 | `MASC_BASH_OUTPUT_CAP` | on (500 KB head + 500 KB tail each) | Head+tail truncation via `Exec_buffer`. `MASC_BASH_CAP_HEAD` / `MASC_BASH_CAP_TAIL` override the per-stream caps. See `lib/exec/exec_buffer.mli`. |
 | `MASC_BASH_AUTO_BG` | off | Foreground commands that outrun `MASC_BLOCKING_BUDGET_MS` (default 15 000 ms) auto-promote to a `Bg_task`. Response gains `{promoted, background_task_id, partial_output, …}`. See `lib/exec/exec_run.mli`. |
 | `MASC_BLOCKING_BUDGET_MS` | 15 000 | Foreground race budget. Consumed only when `MASC_BASH_AUTO_BG` is on; otherwise inert. |

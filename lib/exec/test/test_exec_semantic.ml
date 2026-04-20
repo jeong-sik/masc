@@ -117,11 +117,21 @@ let test_payload_tool_missing_has_tool () =
   | [ ("tool", `String "foo") ] -> ()
   | _ -> assert false
 
-let test_enabled_flag_default_off () =
+(* Post-#8721: MASC_BASH_SEMANTIC_EXIT defaults to on.  The flag
+   now serves as an explicit opt-out ("0" / "false" / …) rather
+   than opt-in, and the unset case resolves to [true]. *)
+let test_enabled_flag_default_on () =
   Unix.putenv "MASC_BASH_SEMANTIC_EXIT" "";
-  assert (not (Exec_semantic.enabled ()))
+  assert (Exec_semantic.enabled ())
 
-let test_enabled_flag_on () =
+let test_enabled_flag_explicit_off () =
+  Unix.putenv "MASC_BASH_SEMANTIC_EXIT" "0";
+  assert (not (Exec_semantic.enabled ()));
+  Unix.putenv "MASC_BASH_SEMANTIC_EXIT" "false";
+  assert (not (Exec_semantic.enabled ()));
+  Unix.putenv "MASC_BASH_SEMANTIC_EXIT" ""
+
+let test_enabled_flag_explicit_on () =
   Unix.putenv "MASC_BASH_SEMANTIC_EXIT" "1";
   assert (Exec_semantic.enabled ());
   Unix.putenv "MASC_BASH_SEMANTIC_EXIT" ""
@@ -140,6 +150,7 @@ let () =
   test_payload_nullary_empty ();
   test_payload_fail_has_exit_code ();
   test_payload_tool_missing_has_tool ();
-  test_enabled_flag_default_off ();
-  test_enabled_flag_on ();
+  test_enabled_flag_default_on ();
+  test_enabled_flag_explicit_off ();
+  test_enabled_flag_explicit_on ();
   print_endline "test_exec_semantic: ok"

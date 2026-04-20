@@ -3,6 +3,8 @@
 
 ## Unreleased
 
+## [0.12.0] - 2026-04-20
+
 ### Added
 
 - **`Cdal_judge` go test classifier.**  `of_exec_outcome` now emits

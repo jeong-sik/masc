@@ -1597,6 +1597,43 @@ stylesheet
     color: var(--text-bright);
     font-variant-numeric: tabular-nums;
   }
+
+  /* ─── tombstrip — 12-state keeper FSM tiles ───
+     design_v2: Offline → Running → {Failing | Overflowed | Compacting |
+     HandingOff | Draining} → Paused / Stopped / Crashed → Restarting → Dead.
+     기본은 dim outline. active=brass glow, danger=blood(Crashed),
+     dead=strikethrough with blood decoration. */
+  .tombstrip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    padding: 6px 14px 12px;
+  }
+  .tomb {
+    padding: 5px 8px;
+    font-family: 'Cinzel', 'Cormorant SC', serif;
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    border: 1px solid var(--border-main);
+    background: #1a120c;
+  }
+  .tomb_active {
+    color: var(--accent-brass);
+    border-color: var(--accent-brass);
+    background: linear-gradient(180deg, #2a1f14, #14100a);
+  }
+  .tomb_danger {
+    color: var(--accent-blood);
+    border-color: color-mix(in oklab, var(--accent-blood) 50%, transparent);
+  }
+  .tomb_dead {
+    color: var(--text-dim);
+    opacity: 0.5;
+    text-decoration: line-through;
+    text-decoration-color: var(--accent-blood);
+  }
 |}]
 
 let level_class level =
@@ -2120,6 +2157,44 @@ let ctx_meta_lines_of (ks : Keepers_types.keeper list) : string list =
     | a :: b :: rest -> (a ^ " · " ^ b) :: chunks rest
   in
   chunks (List.map ks ~f:pair)
+;;
+
+type tomb_level = [ `Base | `Active | `Danger | `Dead ]
+
+let tomb_class = function
+  | `Base -> Style.tomb
+  | `Active -> Style.tomb_active
+  | `Danger -> Style.tomb_danger
+  | `Dead -> Style.tomb_dead
+;;
+
+(* 12-state keeper FSM per design_v2. active/danger/dead are mocked until
+   keeper phase is wired through Keepers_types. *)
+let keeper_fsm_states : (string * tomb_level) list =
+  [ "Offline",    `Base
+  ; "Running",    `Active
+  ; "Failing",    `Base
+  ; "Overflowed", `Base
+  ; "Compacting", `Active
+  ; "HandingOff", `Base
+  ; "Draining",   `Base
+  ; "Paused",     `Active
+  ; "Stopped",    `Base
+  ; "Crashed",    `Danger
+  ; "Restarting", `Base
+  ; "Dead",       `Dead
+  ]
+;;
+
+let view_tombstrip ?(states = keeper_fsm_states) () =
+  let tile (label, level) =
+    Node.span
+      ~attrs:[ Style.tomb; tomb_class level ]
+      [ Node.text label ]
+  in
+  Node.div
+    ~attrs:[ Style.tombstrip ]
+    (List.map states ~f:tile)
 ;;
 
 let view_context_pressure
@@ -2893,6 +2968,21 @@ let render_response
             ]
         ]
     ; view_context_pressure ~keepers ()
+    ; Node.div
+        ~attrs:[ Style.sec ]
+        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "keeper rites · 12 states" ]
+        ; Node.span
+            ~attrs:[ Style.sec_sub ]
+            [ Node.text "Offline → Running → {Failing · Overflowed · Compacting · Draining} → Paused / Stopped / Crashed → Restarting → Dead" ]
+        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span
+            ~attrs:[ Style.sec_r ]
+            [ Node.text "mock · keeper phase wire "
+            ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "pending" ]
+            ]
+        ]
+    ; view_tombstrip ()
     ; Node.div ~attrs:[ Style.signet ] [ Node.text "M" ]
     ; aside
     ]

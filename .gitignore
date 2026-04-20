@@ -72,14 +72,9 @@ assets/dashboard_bonsai/
 # TLC model checker artifacts
 specs/**/states/
 specs/**/*_TTrace_*.tla
+specs/**/*_TTrace_*.bin
 specs/**/TraceData.tla
-# Top-level tla/ dir (picked up by scripts/tla-check.sh auto-discovery).
-# TLC drops trace artifacts next to the .tla file it checked, and a
-# sibling states/ dir from any failing run.
-tla/*_TTrace_*.tla
-tla/*_TTrace_*.bin
-tla/states/
-# Fallback for tla/ checks invoked from the repo root with -dump
+# Fallback for checks invoked from the repo root with -dump
 # state-graph — TLC writes into cwd instead of the spec dir.
 /states/
 *.jar

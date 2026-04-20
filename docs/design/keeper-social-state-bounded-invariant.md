@@ -6,7 +6,7 @@ See also:
 
 - `docs/design/keeper-social-model-inventory.md`
 - `docs/design/keeper-social-model-fsm.md`
-- `tla/SocialStateCap.tla`
+- `specs/social-state-cap/SocialStateCap.tla`
 
 ## Contract
 
@@ -84,7 +84,7 @@ double-capping is a noop.
 ## Verification layers
 
 - **Unit tests** — `test_social_state_cap` (6), `test_social_state_cap_on_load` (5), `test_magentic_ledger_cap` (4), `test_snapshot_size_cap` (6)
-- **TLA+ model check** — `tla/SocialStateCap.{tla,cfg,-buggy.cfg}` with `CapHolds` invariant
+- **TLA+ model check** — `specs/social-state-cap/SocialStateCap.{tla,cfg,-buggy.cfg}` with `CapHolds` invariant
   - Clean: 11,665 distinct states, no violation
   - Buggy (cap option fields skipped): `CapHolds` violated after 113 distinct states — proves the invariant has teeth
 
@@ -94,7 +94,8 @@ double-capping is a noop.
 2. At the end of `apply_to_result` / `derive_failure_state`, wrap the
    returned `social_state` with `Types.cap_social_state`.
 3. Add a test mirroring `test_magentic_ledger_cap.ml`.
-4. Re-run `scripts/tla-check.sh tla/SocialStateCap.tla` — it does not
+4. Re-run `scripts/tla-check.sh` (or `make -C specs check-all`) — the
+   spec does not
    need to be amended, but the spec should continue to pass because
    the new model behaves like `EmitClean`.
 

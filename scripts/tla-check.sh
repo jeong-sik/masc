@@ -205,25 +205,4 @@ if [ -d "$BUG_MODELS_DIR" ]; then
   done
 fi
 
-# ── top-level tla/ ─────────────────────────────────────────────
-# Bounded-invariant specs complementing the OCaml cap primitives
-# (keeper_memory_policy, keeper_social_model_types). Same discovery
-# pattern as specs/bug-models above: any .tla with a matching .cfg
-# and/or -buggy.cfg is picked up automatically.
-TLA_DIR="$REPO_ROOT/tla"
-if [ -d "$TLA_DIR" ]; then
-  for tla_path in "$TLA_DIR"/*.tla; do
-    [ -e "$tla_path" ] || continue
-    [ -L "$tla_path" ] && continue
-    tla_name="$(basename "$tla_path")"
-    base="${tla_name%.tla}"
-    if [ -f "$TLA_DIR/${base}.cfg" ]; then
-      run_tlc "$TLA_DIR" "$tla_name"
-    fi
-    if [ -f "$TLA_DIR/${base}-buggy.cfg" ]; then
-      run_tlc_buggy "$TLA_DIR" "$tla_name"
-    fi
-  done
-fi
-
 echo "All TLA+ checks passed."

@@ -18,8 +18,11 @@
 \*     moves the keeper to Running for the owning task (weak fairness on
 \*     the FSM transition).
 \*
-\* This is Layer 3 of the attribution rollout (see
-\* planning/claude-plans/abundant-skipping-sutton.md).
+\* This is Layer 3 of the attribution rollout. The original design plan
+\* (`abundant-skipping-sutton.md`) lived in an out-of-tree planning
+\* directory and is not committed to this repo (verified 2026-04-20:
+\* no `*sutton*` file under masc-mcp). The spec stands on its own
+\* without the plan; this comment is kept for provenance.
 \*
 \* The *BUGGY* configuration (`ContractClosure-buggy.cfg`) enables an
 \* AutoresearchOrphan action that settles the loop but omits the

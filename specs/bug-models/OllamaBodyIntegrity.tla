@@ -1,7 +1,14 @@
 ---- MODULE OllamaBodyIntegrity ----
 \* Bug Model: HTTP request body integrity for Ollama.
 \*
-\* Models complete.ml -> http_client.ml -> Ollama.
+\* Models the OAS-pinned LLM provider request flow:
+\*   complete.ml -> http_client.ml -> Ollama.
+\*
+\* Both files live in the pinned `agent_sdk.llm_provider` library
+\* (see lib/dune for the dependency), not in masc-mcp:
+\*   <oas>/lib/llm_provider/complete.ml
+\*   <oas>/lib/llm_provider/http_client.ml
+\*
 \* Yojson.Safe.to_string produces balanced JSON.
 \* Cohttp_eio transmits the body.
 \* Ollama's yyjson parser validates the received body.

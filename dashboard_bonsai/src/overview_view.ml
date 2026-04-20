@@ -414,21 +414,15 @@ let render (r : Overview_types.response) : Node.t =
     [ Placeholder_view.sidebar ~active:Overview
     ; Node.div
         ~attrs:[ Style.main ]
-        [ Node.p ~attrs:[ Style.eyebrow ] [ Node.text "overview · at a glance" ]
-        ; Node.h1
-            ~attrs:[ Style.title ]
-            [ Node.text "overview "
-            ; Node.span
-                ~attrs:[ Style.title_brass ]
-                [ Node.text (Printf.sprintf "· %s" r.status.cluster) ]
-            ]
-        ; Node.p
-            ~attrs:[ Style.sub ]
-            [ Node.text
-                "room의 current state — identity, build, fleet counts, \
-                 meta-cognition. shell 엔드포인트의 압축된 projection \
-                 으로, 깊은 진단은 각 tab에서 확인."
-            ]
+        [ Hero.view
+            ~eyebrow:"overview · at a glance"
+            ~title:"overview"
+            ~tail:(Printf.sprintf "· %s" r.status.cluster, `Brass)
+            ~sub:
+              "room의 current state — identity, build, fleet counts, \
+               meta-cognition. shell 엔드포인트의 압축된 projection \
+               으로, 깊은 진단은 각 tab에서 확인."
+            ()
         ; Node.div
             ~attrs:[ Style.grid ]
             [ view_hero_panel r

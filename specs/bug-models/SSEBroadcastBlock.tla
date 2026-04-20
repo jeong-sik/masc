@@ -9,12 +9,16 @@
 \* the stream fills up and Eio.Stream.add BLOCKS the broadcast fiber.
 \*
 \* Result: one dead client blocks event delivery to ALL other clients.
-\* The failed-list cleanup (line 483) only runs AFTER the iteration
-\* completes, but iteration is stuck on the blocking add.
+\* The failed-list cleanup runs AFTER the iteration completes, but
+\* iteration is stuck on the blocking add.
 \*
-\* Actual code:
-\*   sse.ml:471  Eio.Stream.add client.event_stream event (blocking!)
-\*   sse.ml:483  List.iter unregister !failed (too late)
+\* Actual code (verified 2026-04-20):
+\*   lib/sse.ml:608  let broadcast_impl target json
+\*   lib/sse.ml:637  Eio.Stream.add client.event_stream event (blocking!)
+\*   lib/sse.ml:649  List.iter unregister !failed (too late)
+\*
+\* (Line drift since spec authoring: previously cited :471 and :483.
+\*  ~165-line shift due to file growth. Recorded for cross-reference.)
 
 EXTENDS Naturals
 

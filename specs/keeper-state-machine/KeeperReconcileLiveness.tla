@@ -56,7 +56,7 @@
 \* The liveness property MUST be violated in the buggy variant.
 \*
 \* Mirrors: lib/keeper/keeper_state_machine.ml (update_conditions)
-\*          lib/keeper/keeper_keepalive.ml:800-835 (heartbeat recovery)
+\*          lib/keeper/keeper_keepalive.ml:write_heartbeat_snapshot (heartbeat recovery)
 
 EXTENDS Naturals
 
@@ -195,7 +195,7 @@ ManualReconcileCleared ==
                    stop_requested, restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete, restart_count>>
 
-\* HeartbeatRecovery: the FIXED code path from keeper_keepalive.ml:800-835.
+\* HeartbeatRecovery: the FIXED code path from keeper_keepalive.ml:write_heartbeat_snapshot.
 \* Dispatches Heartbeat_ok + Turn_succeeded + Manual_reconcile_cleared atomically.
 \* In the real code these are 3 sequential dispatch_event calls, but since
 \* Eio is cooperative and no yield point exists between them, the effect is atomic.

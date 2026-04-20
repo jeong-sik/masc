@@ -4,11 +4,18 @@
 \* Bug class: "Code clears a blocking condition at the data layer but
 \* forgets to dispatch the corresponding FSM event."
 \*
-\* Real-world instance (Bug #1, #6801): maybe_recover_from_failing() in
-\* keeper_keepalive.ml:812-824 called Keeper_manual_reconcile.clear (data)
-\* but did NOT dispatch Manual_reconcile_cleared to the FSM. Result:
-\* derive_phase() stayed in Failing because conditions.manual_reconcile_required
-\* was never set to FALSE, even though the blocking file was deleted.
+\* Historical instance (Bug #1, #6801): maybe_recover_from_failing() in
+\* keeper_keepalive.ml called Keeper_manual_reconcile.clear (data) but did
+\* NOT dispatch Manual_reconcile_cleared to the FSM. Result: derive_phase()
+\* stayed in Failing because conditions.manual_reconcile_required was never
+\* set to FALSE, even though the blocking file was deleted.
+\*
+\* NOTE (2026-04-20, #9032): The Keeper_manual_reconcile mechanism has been
+\* removed from the runtime (only a gravestone comment remains at
+\* keeper_status_detail.ml:118). This spec retains the bug class and the
+\* 4 other mapped blockers (turn, compact, handoff, guardrail) below, which
+\* continue to model live mechanisms. maybe_recover_from_failing() now lives
+\* at keeper_keepalive.ml:940.
 \*
 \* This spec models 5 blocking conditions from the keeper FSM
 \* (keeper_state_machine.ml). Each has a "data layer" boolean and an
@@ -19,11 +26,11 @@
 \*
 \*  # | Data clear             | FSM event                  | OCaml location
 \*  --+------------------------+----------------------------+--------------------------------
-\*  1 | manual_reconcile file  | Manual_reconcile_cleared   | keeper_keepalive.ml:813-825
-\*  2 | turn_failures counter  | Turn_succeeded             | keeper_keepalive.ml:804,1447
-\*  3 | compaction_active flag  | Compaction_completed       | keeper_exec_context.ml:150
-\*  4 | handoff_active flag     | Handoff_completed          | keeper_exec_context.ml:166
-\*  5 | guardrail measurement  | Context_measured(stop=F)   | keeper_keepalive.ml:614-627
+\*  1 | manual_reconcile file  | Manual_reconcile_cleared   | [REMOVED 2026-04-20, see #9032]
+\*  2 | turn_failures counter  | Turn_succeeded             | keeper_keepalive.ml (near recover)
+\*  3 | compaction_active flag  | Compaction_completed       | keeper_exec_context.ml
+\*  4 | handoff_active flag     | Handoff_completed          | keeper_exec_context.ml
+\*  5 | guardrail measurement  | Context_measured(stop=F)   | keeper_keepalive.ml
 \*
 \* ── Abstraction ──
 \* Each blocking condition is modeled as a pair: (data_blocked, fsm_blocked).
@@ -117,8 +124,10 @@ NeverStuckFailing ==
 
 \* ── Bug Model: one blocker omits FSM dispatch ──
 \* The buggy clear sets data_blocked=FALSE but does NOT touch fsm_blocked.
-\* This models the exact bug from keeper_keepalive.ml:812 where
-\* Keeper_manual_reconcile.clear was called without Manual_reconcile_cleared.
+\* Historical instance: keeper_keepalive.ml where Keeper_manual_reconcile.clear
+\* was called without Manual_reconcile_cleared. The mechanism has since been
+\* removed (see #9032), but the bug class generalizes to the 4 live blockers
+\* still mapped above.
 
 BuggyClear(b) ==
     /\ data_blocked[b] = TRUE

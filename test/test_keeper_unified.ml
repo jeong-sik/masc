@@ -712,11 +712,15 @@ let test_prompt_includes_operational_tool_guidance () =
   check bool "mentions server-managed heartbeat" true
     (contains_substring sys "Heartbeat is server-managed")
 
-let test_capabilities_prompt_distinguishes_playground_and_worktree () =
+let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.capabilities" in
-  check bool "playground paths documented" true
-    (contains_substring prompt ".masc/playground/");
-  check bool "playground is default coding workspace" true
+  check bool "sandbox paths documented" true
+    (contains_substring prompt "sandbox_repos");
+  check bool "local backend host path not model-facing" false
+    (contains_substring prompt "ALL tool calls that accept `cwd` or `path` MUST resolve under `.masc/playground");
+  check bool "github shorthand removed" false
+    (contains_substring prompt "keeper_github");
+  check bool "sandbox is default coding workspace" true
     (contains_substring prompt "default coding workspace");
   check bool "git path documented via keeper_bash" true
     (contains_substring prompt "keeper_bash cmd='git status'");
@@ -725,18 +729,18 @@ let test_capabilities_prompt_distinguishes_playground_and_worktree () =
   check bool "legacy pr workflow removed from prompt" false
     (contains_substring prompt "keeper_pr_workflow")
 
-let test_world_prompt_distinguishes_playground_and_worktree () =
+let test_world_prompt_distinguishes_sandbox_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.world" in
-  check bool "world prompt names playground sandbox" true
-    (contains_substring prompt "Playground is your default sandbox");
+  check bool "world prompt names single sandbox" true
+    (contains_substring prompt "Your sandbox is the only filesystem ground");
   (* Keep the containment clause asserted so bare server-root `.worktrees/...`
      paths cannot drift back in. *)
-  check bool "world prompt names worktree workflow inside playground" true
+  check bool "world prompt names worktree workflow inside sandbox" true
     (contains_substring prompt
-       "Repo worktrees live *inside* your playground clone");
-  check bool "world prompt names canonical playground-rooted worktree path" true
+       "Repo worktrees live *inside* your sandbox clone");
+  check bool "world prompt names canonical sandbox-relative worktree path" true
     (contains_substring prompt
-       ".masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/<branch-or-task>/")
+       "repos/<REPO_NAME>/.worktrees/<branch-or-task>/")
 
 let test_system_prompt_prefers_bash_and_gh_pr_lane () =
   let sys =
@@ -757,6 +761,8 @@ let test_system_prompt_prefers_bash_and_gh_pr_lane () =
   check bool "mentions gh create path" true
     (contains_substring sys
        "keeper_shell op=gh (PR/issues via gh CLI; after git push");
+  check bool "does not advertise removed keeper_github" false
+    (contains_substring sys "keeper_github");
   check bool "legacy pr workflow removed" false
     (contains_substring sys "keeper_pr_workflow")
 
@@ -1026,6 +1032,16 @@ let test_prompt_omits_claim_first_guidance_when_paused () =
     (contains_substring sys "Call keeper_task_claim with {}");
   check bool "user prompt omits immediate task move while paused" false
     (contains_substring user "### Immediate Task Move")
+
+let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
+  check bool "obsolete claim alias removed" false
+    (source_file_contains "lib/keeper/keeper_agent_run.ml" "keeper_claim_task");
+  check bool "claim tool uses registered no-arg schema" true
+    (source_file_contains "lib/keeper/keeper_agent_run.ml" "`keeper_task_claim` {}");
+  check bool "bash tool uses cmd field" true
+    (source_file_contains "lib/keeper/keeper_agent_run.ml" "`keeper_bash` { cmd:");
+  check bool "tool-less runtime path is explicit" true
+    (source_file_contains "lib/keeper/keeper_agent_run.ml" "NO_TOOL_CHANNEL")
 
 (* ---------- Config tests ---------- *)
 
@@ -2498,6 +2514,20 @@ let test_resolved_max_context_for_turn_uses_primary_budget () =
   check int "turn budget follows primary available model" expected
     (UT.resolved_max_context_for_turn ~meta:minimal_meta labels)
 
+let test_max_context_resolution_separates_override_and_effective_budget () =
+  let labels = [ "unknown:model" ] in
+  let resolution =
+    KEC.resolve_max_context_resolution
+      ~requested_override:(Some 1_000_000) labels
+  in
+  check int "primary budget uses fallback context window"
+    Masc_mcp.Cascade_runtime.fallback_context_window
+    resolution.primary_budget;
+  check int "turn budget preserves requested override" 1_000_000
+    resolution.turn_budget;
+  check int "effective budget caps to primary budget"
+    resolution.primary_budget resolution.effective_budget
+
 let test_side_effect_reclassification_ignores_keeper_read_only_tools () =
   let original =
     Agent_sdk.Error.Api
@@ -3402,10 +3432,10 @@ let () =
             test_prompt_mentions_extend_turns_guidance;
           test_case "includes operational tool guidance" `Quick
             test_prompt_includes_operational_tool_guidance;
-          test_case "distinguishes playground and worktree" `Quick
-            test_capabilities_prompt_distinguishes_playground_and_worktree;
-          test_case "world prompt distinguishes playground and worktree" `Quick
-            test_world_prompt_distinguishes_playground_and_worktree;
+          test_case "distinguishes sandbox and worktree" `Quick
+            test_capabilities_prompt_distinguishes_sandbox_and_worktree;
+          test_case "world prompt distinguishes sandbox and worktree" `Quick
+            test_world_prompt_distinguishes_sandbox_and_worktree;
           test_case "prefers submit over legacy workflow" `Quick
             test_system_prompt_prefers_bash_and_gh_pr_lane;
           test_case "includes autonomous trigger section" `Quick
@@ -3433,6 +3463,8 @@ let () =
             test_prompt_omits_claim_first_guidance_when_claim_tool_unavailable;
           test_case "claim first guidance omitted when paused" `Quick
             test_prompt_omits_claim_first_guidance_when_paused;
+          test_case "work discovery nudge uses registered tool schemas" `Quick
+            test_work_discovery_nudge_uses_registered_keeper_tool_schemas;
           test_case "prefers silence guidance" `Quick
             test_prompt_prefers_silence_guidance;
           test_case "sanitize_text_utf8 replaces control chars" `Quick
@@ -3676,6 +3708,8 @@ let () =
             test_clamp_context_for_pure_local_labels;
           test_case "turn context budget uses primary model" `Quick
             test_resolved_max_context_for_turn_uses_primary_budget;
+          test_case "max_context resolution separates override and effective budget" `Quick
+            test_max_context_resolution_separates_override_and_effective_budget;
           test_case "read-only keeper tools do not become ambiguous partial" `Quick
             test_side_effect_reclassification_ignores_keeper_read_only_tools;
           test_case "mixed tool sets only keep mutating keeper tools" `Quick
@@ -3746,5 +3780,67 @@ let () =
               check bool "empty mention_targets" false
                 (UT.is_verifier_role_keeper
                    { minimal_meta with mention_targets = [] }));
+          test_case "affordance: verifier sees task_verify when pending>0"
+            `Quick (fun () ->
+              let meta =
+                { minimal_meta with mention_targets = [ "verifier" ] }
+              in
+              let obs =
+                { base_observation with pending_verification_count = 3 }
+              in
+              let affordances =
+                UT.observed_affordances_of_observation ~meta obs
+              in
+              check bool "task_verify present for verifier" true
+                (List.mem "task_verify" affordances));
+          test_case "affordance: non-verifier gated off task_verify" `Quick
+            (fun () ->
+              let meta =
+                { minimal_meta with mention_targets = [ "analyst" ] }
+              in
+              let obs =
+                { base_observation with pending_verification_count = 3 }
+              in
+              let affordances =
+                UT.observed_affordances_of_observation ~meta obs
+              in
+              check bool "task_verify absent for non-verifier" false
+                (List.mem "task_verify" affordances));
+          test_case "affordance: no meta keeps legacy surface-to-all" `Quick
+            (fun () ->
+              let obs =
+                { base_observation with pending_verification_count = 2 }
+              in
+              let affordances =
+                UT.observed_affordances_of_observation obs
+              in
+              check bool "task_verify present without meta" true
+                (List.mem "task_verify" affordances));
+          test_case "trigger: non-verifier gated off pending_verification"
+            `Quick (fun () ->
+              let meta =
+                { minimal_meta with mention_targets = [ "scholar" ] }
+              in
+              let obs =
+                { base_observation with pending_verification_count = 5 }
+              in
+              let triggers =
+                UT.observed_triggers_of_observation ~meta obs
+              in
+              check bool "pending_verification absent for non-verifier" false
+                (List.mem "pending_verification" triggers));
+          test_case "trigger: verifier sees pending_verification" `Quick
+            (fun () ->
+              let meta =
+                { minimal_meta with mention_targets = [ "검증자" ] }
+              in
+              let obs =
+                { base_observation with pending_verification_count = 1 }
+              in
+              let triggers =
+                UT.observed_triggers_of_observation ~meta obs
+              in
+              check bool "pending_verification present for verifier" true
+                (List.mem "pending_verification" triggers));
         ] );
     ]

@@ -348,7 +348,12 @@ let graph_json config ?(kinds = []) ?(limit = 500)
         List.iter (fun (e : event) ->
           let idx = min (num_buckets - 1) ((e.ts_ms - min_ts) / bucket_width) in
           let (count, agents_tbl, tasks_done) = buckets.(idx) in
-          let new_tasks_done = tasks_done + (if e.kind = "task.done" then 1 else 0) in
+          let new_tasks_done =
+            tasks_done
+            + (if String.equal e.kind
+                 (Event_kind.Task.to_string Event_kind.Task.Done)
+               then 1 else 0)
+          in
           (match e.actor with
            | Some actor -> Hashtbl.replace agents_tbl actor.id true
            | None -> ());
@@ -410,23 +415,32 @@ let span_start_kind = function
   | "keeper.autonomy_started" -> Some "autonomy"
   | _ -> None
 
-let span_end_kind = function
-  | "task.done" | "task.released" | "task.cancelled" -> Some "task"
-  | "agent.left" | "agent.retired" -> Some "presence"
-  | "operation.finalized" | "operation.stopped" -> Some "operation"
-  | "keeper.autonomy_completed" -> Some "autonomy"
-  | _ -> None
+(** Issue #8711: single SSOT for span-ending event kinds. The previous
+    [span_end_kind] / [span_end_status] pair reproduced the same
+    8-symbol alphabet in two places; if either gained a constructor
+    without the other being updated the catch-all in [span_end_status]
+    would silently map the new kind to [Span_ended], losing semantic
+    information. Combining them forces both pieces to stay in sync at
+    compile time (Parse, don't validate). *)
+let span_end_classification = function
+  | "task.done"                 -> Some ("task",      Span_completed)
+  | "task.released"             -> Some ("task",      Span_released)
+  | "task.cancelled"            -> Some ("task",      Span_cancelled)
+  | "agent.left"                -> Some ("presence",  Span_left)
+  | "agent.retired"             -> Some ("presence",  Span_retired)
+  | "operation.finalized"       -> Some ("operation", Span_finalized)
+  | "operation.stopped"         -> Some ("operation", Span_stopped)
+  | "keeper.autonomy_completed" -> Some ("autonomy",  Span_completed)
+  | _                           -> None
 
-let span_end_status = function
-  | "task.done" -> Span_completed
-  | "task.released" -> Span_released
-  | "task.cancelled" -> Span_cancelled
-  | "agent.left" -> Span_left
-  | "agent.retired" -> Span_retired
-  | "operation.finalized" -> Span_finalized
-  | "operation.stopped" -> Span_stopped
-  | "keeper.autonomy_completed" -> Span_completed
-  | _ -> Span_ended
+let span_end_kind kind =
+  Option.map fst (span_end_classification kind)
+
+let span_end_status kind =
+  match span_end_classification kind with
+  | Some (_, status) -> status
+  | None -> Span_ended  (* unreachable in practice — call sites first
+                           check [span_end_kind] / [span_end_classification] *)
 
 let agent_spans_json config ?(limit = 500) ?since_ms () =
   let events, events_store_total =
@@ -459,8 +473,8 @@ let agent_spans_json config ?(limit = 500) ?since_ms () =
              in
              Hashtbl.replace open_spans (aid, subject_id) (e.ts_ms, sk, label)
          | None -> ());
-        (match span_end_kind e.kind with
-         | Some ek ->
+        (match span_end_classification e.kind with
+         | Some (ek, status) ->
              let key = (aid, subject_id) in
              (match Hashtbl.find_opt open_spans key with
               | Some (start_ms, sk, label) when String.equal sk ek ->
@@ -471,7 +485,7 @@ let agent_spans_json config ?(limit = 500) ?since_ms () =
                     end_ms = e.ts_ms;
                     span_kind = sk;
                     label;
-                    span_status = span_end_status e.kind;
+                    span_status = status;
                   } :: !closed_spans
               | _ -> ())
          | None -> ())

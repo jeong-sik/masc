@@ -201,9 +201,15 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
   let agent_name =
     match token with
-    (* Generated dashboard/session aliases should not outrank the
-       credential owner encoded by the bearer token. *)
-    | Some t when is_transient_agent_name agent_name ->
+    (* Explicit agent_name is the caller's SSOT for this request.
+       Rewriting an explicit generated alias to the bearer-token owner
+       makes mutation paths operate under a different identity than the
+       one shown in join/status/debug output, which is exactly the
+       #8892 joined/debug/credential-route drift. Keep the explicit
+       alias and let auth preflight reject it if the token does not
+       authorize that identity. We only fall back to token ownership
+       when the request did not explicitly name an agent. *)
+    | Some t when (not has_explicit_agent_name) && is_transient_agent_name agent_name ->
         (match Auth.resolve_agent_from_token config.base_path ~token:t with
          | Ok resolved -> resolved
          | Error _ -> agent_name)
@@ -468,9 +474,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
      Only the matched module's context is created (1 out of 45+).
      Eliminates per-call 40+ context creation and ~210 Hashtbl.replace. *)
 
-  (* Helper: create keeper context (shared by goals) *)
-  let make_keeper_ctx () : _ Tool_keeper.context =
-    { config; agent_name; sw; clock; proc_mgr = state.Mcp_server.proc_mgr; net = state.Mcp_server.net }
+  (* Helper: create keeper tool boundary context (shared by goals) *)
+  let make_keeper_tool_ctx () =
+    Keeper_tool_boundary.create ~config ~agent_name ~sw ~clock
+      ~proc_mgr:state.Mcp_server.proc_mgr ~net:state.Mcp_server.net
   in
 
   (* Dispatch a single module by tag — creates only that module's context.
@@ -519,7 +526,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_library ->
         Tool_library.dispatch { Tool_library.agent_name } ~name ~args:coerced_args
     | Mod_keeper ->
-        Tool_keeper.dispatch (make_keeper_ctx ()) ~name ~args:coerced_args
+        Keeper_tool_boundary.dispatch (make_keeper_tool_ctx ()) ~name
+          ~args:coerced_args
     (* Mod_repair_loop removed: tools pruned *)
     | Mod_autoresearch ->
         let ctx : Tool_autoresearch.context = { base_path = config.base_path;

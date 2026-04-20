@@ -270,7 +270,11 @@ let call_model_and_broadcast ~sw ~agent_type ~prompt ~mention =
         ("capabilities", `List [`String "model-auto-responder"]);
       ]
     in
-    match masc_call ~sw ~tool_name:"masc_join" ~args:join_args with
+    match
+      masc_call ~sw
+        ~tool_name:(Tool_name.Masc.to_string Tool_name.Masc.Join)
+        ~args:join_args
+    with
     | Error e ->
         debug_log (Printf.sprintf "MASC_JOIN_FAILED: %s" e);
         Log.AutoResponder.error "Failed to join MASC (%s)" e
@@ -284,12 +288,20 @@ let call_model_and_broadcast ~sw ~agent_type ~prompt ~mention =
         | Some nickname ->
             let msg = Printf.sprintf "@%s %s" mention response in
             let broadcast_args = `Assoc [("agent_name", `String nickname); ("message", `String msg)] in
-            (try ignore (masc_call ~sw ~tool_name:"masc_broadcast" ~args:broadcast_args)
+            (try
+               ignore
+                 (masc_call ~sw
+                    ~tool_name:(Tool_name.Masc.to_string Tool_name.Masc.Broadcast)
+                    ~args:broadcast_args)
              with
              | Eio.Cancel.Cancelled _ as e -> raise e
              | exn -> Log.AutoResponder.error "broadcast failed: %s" (Printexc.to_string exn));
             let leave_args = `Assoc [("agent_name", `String nickname)] in
-            (try ignore (masc_call ~sw ~tool_name:"masc_leave" ~args:leave_args)
+            (try
+               ignore
+                 (masc_call ~sw
+                    ~tool_name:(Tool_name.Masc.to_string Tool_name.Masc.Leave)
+                    ~args:leave_args)
              with
              | Eio.Cancel.Cancelled _ as e -> raise e
              | exn -> Log.AutoResponder.error "leave failed: %s" (Printexc.to_string exn));

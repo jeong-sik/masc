@@ -190,12 +190,32 @@ let role_to_string (r : Agent_sdk.Types.role) = match r with
   | System -> "system" | User -> "user"
   | Assistant -> "assistant" | Tool -> "tool"
 
-let role_of_string = function
-  | "system" -> Agent_sdk.Types.System | "user" -> Agent_sdk.Types.User
-  | "assistant" -> Agent_sdk.Types.Assistant | "tool" -> Agent_sdk.Types.Tool
-  | unknown ->
-    Log.Misc.warn "keeper_context_core: unknown role %S, defaulting to User" unknown;
-    Agent_sdk.Types.User
+(* Issue #8623: returns [Some] only for the 4 wire-format names.
+   Callers must handle [None] explicitly — the previous Variant
+   shape silently routed unknowns to [User], which misattributes
+   checkpoint messages: a "system" / "assistant" / "tool" decoded as
+   "user" causes the LLM to treat tool output as user instructions,
+   echo prior assistant replies as user input, or downgrade system
+   prompt privileges. Same anti-pattern class as #8605/#8615. *)
+let role_of_string_opt = function
+  | "system" -> Some Agent_sdk.Types.System
+  | "user" -> Some Agent_sdk.Types.User
+  | "assistant" -> Some Agent_sdk.Types.Assistant
+  | "tool" -> Some Agent_sdk.Types.Tool
+  | _ -> None
+
+(* Backwards-compatible wrapper. [Tool] is the safest fallback for an
+   unrecognised role: tool messages are interpretive context, not
+   instructions, so misclassifying System/Assistant/User as Tool hides
+   the message rather than letting the LLM act on it. The warn log
+   preserves operator visibility. *)
+let role_of_string s =
+  match role_of_string_opt s with
+  | Some role -> role
+  | None ->
+    Log.Misc.warn
+      "keeper_context_core: unknown role %S, defaulting to Tool (#8623)" s;
+    Agent_sdk.Types.Tool
 
 let content_blocks_to_json
     (blocks : Agent_sdk.Types.content_block list) : Yojson.Safe.t =
@@ -1217,6 +1237,8 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
        Log.Keeper.error "keeper:%s OAS checkpoint store error: %s" trace_id detail
    | Error (Io_error detail) ->
        Log.Keeper.error "keeper:%s OAS checkpoint I/O error: %s" trace_id detail
+   | Error (Sdk_other_error detail) ->
+       Log.Keeper.error "keeper:%s OAS checkpoint SDK error: %s" trace_id detail
    | Error Not_found | Ok _ -> ());
   let oas_checkpoint = Result.to_option oas_result in
   let legacy_checkpoint =

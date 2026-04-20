@@ -84,7 +84,16 @@ type archetype =
   | Generalist (** 🌐 No specialization *)
 
 val archetype_to_string : archetype -> string
+
+(** Strict parse: returns [None] when the wire string is not one of the
+    canonical archetype labels (with aliases). Prefer this over
+    [archetype_of_string] for new code so drift is visible. Issue #8691. *)
+val archetype_of_string_opt : string -> archetype option
+
+(** Back-compat parse: returns [Generalist] on unknown strings and
+    logs a warning so the typo is operator-visible. Issue #8691. *)
 val archetype_of_string : string -> archetype
+
 val archetype_emoji : archetype -> string
 
 val get_archetype : t -> archetype

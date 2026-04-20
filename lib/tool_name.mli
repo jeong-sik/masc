@@ -6,6 +6,8 @@
 module Keeper : sig
   type t =
     | Bash
+    | Bash_kill
+    | Bash_output
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
@@ -100,6 +102,9 @@ module Masc : sig
     | Deliver
     | Dispatch_assign
     | Dispatch_plan
+    | Goal_list
+    | Goal_review
+    | Goal_upsert
     | Find_by_capability
     | Governance_feed
     | Governance_status

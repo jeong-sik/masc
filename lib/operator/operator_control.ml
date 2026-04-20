@@ -1,5 +1,5 @@
 open Tool_args
-open Result_syntax
+open Result.Syntax
 
 include Operator_control_action
 
@@ -131,12 +131,11 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
       room_action_result request (`String result)
   | _ -> Error (Printf.sprintf "not a namespace action: %s" request.action_type)
 
-let execute_team_action (_ctx : 'a context) (request : action_request) =
-  (* Team session actions removed — all return error *)
-  Error (Printf.sprintf "team session actions removed: action=%s target_type=%s target_id=%s"
-    request.action_type
-    request.target_type
-    (Option.value ~default:"?" request.target_id))
+(* Issue #8394: removed [execute_team_action] — team session execution
+   surface was retired but the dispatch arm + this stub remained,
+   silently turning any team_* operator action into a misleading
+   "team session actions removed: ..." error instead of the cleaner
+   "unsupported action_type" path. *)
 
 let execute_keeper_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
@@ -300,12 +299,13 @@ let execute_action (ctx : 'a context) (request : action_request) :
   match request.action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep" | "task_inject" ->
       execute_room_action ctx request
-  | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject"
-  | "team_worker_spawn_batch" | "team_stop" ->
-      execute_team_action ctx request
   | "keeper_probe" | "keeper_recover" | "keeper_message" ->
       execute_keeper_action ctx request
   | "" -> Error "action_type is required"
+  (* Issue #8394: team_* actions retired — fall through to the standard
+     "unsupported action_type" path. Previously routed to a stub that
+     returned "team session actions removed: ..." which masked the
+     legitimate validation failure as a runtime stub error. *)
   | other -> Error (Printf.sprintf "unsupported action_type: %s" other)
 
 (** All known action_types: available_actions plus legacy/unlisted ones. *)
@@ -316,8 +316,10 @@ let known_action_types =
       Operator_pending_confirm.available_actions
   in
   (* autonomy_tick excluded: canonical_action_type maps it to social_sweep
-     before validate_request runs, so it never reaches here as-is. *)
-  from_registry @ [ "social_sweep"; "team_turn" ]
+     before validate_request runs, so it never reaches here as-is.
+     Issue #8394: removed [team_turn] — team session execution surface is
+     retired. *)
+  from_registry @ [ "social_sweep" ]
 
 let validate_request request =
   if request.action_type = "" then Error "action_type is required"

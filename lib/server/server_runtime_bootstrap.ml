@@ -6,7 +6,7 @@ module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 
 let force_jsonl_fallback_env () =
-  Unix.putenv "MASC_STORAGE_TYPE" "filesystem"
+  Unix.putenv Env_config_core.storage_type_env_key "filesystem"
 
 let requested_backend_mode () =
   Env_config_core.storage_type ()
@@ -42,6 +42,19 @@ let project_root_from_executable () =
     in
     walk_up (Filename.dirname exe)
 
+let config_root_from_ancestor start_dir =
+  let rec walk_up dir =
+    let config_root = Filename.concat dir "config" in
+    let tool_policy =
+      Filename.concat config_root Config_dir_resolver.tool_policy_toml_filename
+    in
+    if Sys.file_exists tool_policy then Some config_root
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None else walk_up parent
+  in
+  walk_up start_dir
+
 let dedupe_keep_order items =
   let seen = Hashtbl.create (List.length items) in
   List.filter
@@ -55,12 +68,13 @@ let dedupe_keep_order items =
 
 let versioned_config_root_candidates () =
   let cwd_candidate = Filename.concat (Sys.getcwd ()) "config" in
+  let cwd_ancestor_candidate = config_root_from_ancestor (Sys.getcwd ()) in
   let exe_candidate =
     match project_root_from_executable () with
     | Some root -> Some (Filename.concat root "config")
     | None -> None
   in
-  [ Some cwd_candidate; exe_candidate ]
+  [ Some cwd_candidate; cwd_ancestor_candidate; exe_candidate ]
   |> List.filter_map (fun x -> x)
   |> dedupe_keep_order
   |> List.filter (fun path -> Sys.file_exists path && Sys.is_directory path)
@@ -182,8 +196,10 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   ensure_default_oas_cascade_timeout_env ();
   Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
   Exec_tap.install_from_env ();
-  Unix.putenv "MASC_BASE_PATH_INPUT" (Option.value ~default:"" input_base_path);
-  Unix.putenv "MASC_BASE_PATH" base_path;
+  Unix.putenv
+    Env_config_core.base_path_input_env_key
+    (Option.value ~default:"" input_base_path);
+  Unix.putenv Env_config_core.base_path_env_key base_path;
   bootstrap_base_path_config_root ~base_path;
   (* Apply keeper runtime overrides from the resolved config root's
      keeper_runtime.toml. Must run before any module that reads

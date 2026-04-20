@@ -18,14 +18,55 @@ val shell_op_to_string : shell_op -> string
 val all_shell_ops : shell_op list
 val valid_shell_op_strings : string list
 
+val readonly_hint_of_category : string -> string
+(** Return the Good:/Bad: rewrite hint shown in
+    [command_blocked_readonly] errors. Exposed so unit tests can assert
+    that each category carries a concrete example, not just a label. *)
+
+val gh_min_timeout_sec : float
+(** Minimum timeout_sec floor applied to gh op. Exposed so regression
+    tests can lock the floor against drift back to sub-network-latency
+    values. See #8688. *)
+
+val cmd_targets_git_or_gh : string -> bool
+(** docker_with_git per-command dispatch predicate. True when the
+    trimmed command's first whitespace-separated word is exactly
+    "git" or "gh". Exposed for unit testing. *)
+
 val handle_keeper_bash :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   args:Yojson.Safe.t ->
   string
 
+val handle_keeper_bash_output :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  args:Yojson.Safe.t ->
+  string
+(** Legendary Bash P2: poll pending stdout/stderr from a background
+    task spawned via [keeper_bash] with [run_in_background=true]. *)
+
+val handle_keeper_bash_kill :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  args:Yojson.Safe.t ->
+  string
+(** Legendary Bash P2: terminate a background task's process group
+    (SIGTERM → grace → SIGKILL). Idempotent. *)
+
 val handle_keeper_shell :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   args:Yojson.Safe.t ->
   string
+
+(** [ensure_keeper_sandbox_runtime ~timeout_sec] preflights the host
+    Docker runtime against the configured hardening requirements
+    (seccomp profile present, optional rootless / userns checks).
+    Returns the [--security-opt seccomp=...] argv fragment when the
+    runtime passes; [Error _] when something is missing. Exposed for
+    [Keeper_docker_read] (RFC-0006 Phase B-2) which reuses the same
+    preflight before spawning a one-shot container for fs reads. *)
+val ensure_keeper_sandbox_runtime :
+  timeout_sec:float -> (string list, string) result

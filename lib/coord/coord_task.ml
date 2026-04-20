@@ -261,7 +261,7 @@ let task_transition_details ~from_status ~to_status ?notes ?reason ?duration_ms
     @ optional_field "duration_ms"
         (Option.map (fun value -> `Int value) duration_ms))
 
-let observe_task_transition config ~agent_name ~task_id ~transition ~details =
+let observe_task_transition config ~agent_name ~task_id ~(transition : Types.task_action) ~details =
   (Atomic.get Coord_hooks.observe_task_transition_fn) config ~agent_name
     ~task_id ~transition ~details
 
@@ -374,7 +374,7 @@ let add_task ?contract ?required_preset config ~title ~priority ~description =
         version = backlog.version + 1;
       } in
       write_backlog config new_backlog;
-      emit_task_activity config ~agent_name:"system" ~task_id ~kind:"task.created"
+      emit_task_activity config ~agent_name:"system" ~task_id ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
         ~payload:
           (`Assoc
             [
@@ -437,7 +437,7 @@ let add_task_with_role ?contract config ~title ~priority ~description
         version = backlog.version + 1;
       } in
       write_backlog config new_backlog;
-      emit_task_activity config ~agent_name:"system" ~task_id ~kind:"task.created"
+      emit_task_activity config ~agent_name:"system" ~task_id ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
         ~payload:
           (`Assoc
             [
@@ -501,7 +501,7 @@ let batch_add_tasks_internal config tasks =
       List.iter
         (fun (task : Types.task) ->
           emit_task_activity config ~agent_name:"system" ~task_id:task.id
-            ~kind:"task.created"
+            ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
             ~payload:
               (`Assoc
                 [
@@ -586,7 +586,7 @@ let claim_task config ~agent_name ~task_id =
             update_local_agent_state config ~agent_name (fun agent ->
               { agent with status = Busy; current_task = Some task_id });
             ignore (broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id));
-            emit_task_activity config ~agent_name ~task_id ~kind:"task.claimed"
+            emit_task_activity config ~agent_name ~task_id ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
               ~payload:(`Assoc [ ("task_id", `String task_id) ]);
             log_event config
               (Yojson.Safe.to_string
@@ -599,7 +599,7 @@ let claim_task config ~agent_name ~task_id =
                      ("ts", `String (now_iso ()));
                    ]));
             observe_task_transition config ~agent_name ~task_id
-              ~transition:"claim"
+              ~transition:Types.Claim
               ~details:
                 (task_transition_details ~from_status:Types.Todo
                    ~to_status:
@@ -618,7 +618,7 @@ let claim_task config ~agent_name ~task_id =
     the claim is rejected if the roles do not match. *)
 let claim_task_r config ~agent_name ~task_id
     ?(agent_role = Types_core.Unassigned) () : string Types.masc_result =
-  let open Result_syntax in
+  let open Result.Syntax in
   let* () = if not (is_initialized config) then Error Types.NotInitialized else Ok () in
   let* () =
     match validate_agent_name_r agent_name, validate_task_id_r task_id with
@@ -657,9 +657,8 @@ let claim_task_r config ~agent_name ~task_id
         else Ok ()
       in
       (* Cycle-prevention gate: refuse claim when do_not_reclaim_reason is set.
-         The reason is populated by the cancel hook (3+ cancels or hard-stop
-         keywords) or by the operator directly. See PRs #7794 (schema),
-         #7798 (cancel hook). *)
+         The reason can come from cancel/release hard-stop logic or be applied
+         directly by an operator. See PRs #7794 (schema), #7798 (cancel hook). *)
       let* () =
         match task.do_not_reclaim_reason with
         | None -> Ok ()
@@ -702,7 +701,7 @@ let claim_task_r config ~agent_name ~task_id
             update_local_agent_state config ~agent_name (fun agent ->
               { agent with status = Busy; current_task = Some task_id });
             ignore (broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id));
-            emit_task_activity config ~agent_name ~task_id ~kind:"task.claimed"
+            emit_task_activity config ~agent_name ~task_id ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
               ~payload:(`Assoc [ ("task_id", `String task_id) ]);
             log_event config
               (Yojson.Safe.to_string
@@ -715,7 +714,7 @@ let claim_task_r config ~agent_name ~task_id
                      ("ts", `String (now_iso ()));
                    ]));
             observe_task_transition config ~agent_name ~task_id
-              ~transition:"claim"
+              ~transition:Types.Claim
               ~details:
                 (task_transition_details ~from_status:Types.Todo
                    ~to_status:
@@ -734,10 +733,69 @@ let claim_task_r config ~agent_name ~task_id
 (** Unified task transition (single entrypoint).
     When [~force:true], release/cancel/done bypass the assignee guard.
     Used by keeper for orphan task cleanup. *)
+let release_handoff_texts handoff_context =
+  match handoff_context with
+  | None -> []
+  | Some handoff_context ->
+      [
+        Some handoff_context.summary;
+        handoff_context.reason;
+        handoff_context.next_step;
+        handoff_context.failure_mode;
+      ]
+      |> List.filter_map (function
+           | None -> None
+           | Some text ->
+               let trimmed = String.trim text in
+               if trimmed = "" then None else Some trimmed)
+
+let release_hard_stop_markers =
+  [
+    "do not reclaim";
+    "scope mismatch";
+    "wrong keeper";
+    "not found";
+    "phantom";
+    "repo access";
+    "repo unavailable";
+    "already done";
+    "already completed";
+    "completed by another";
+    "invalid pr";
+    "invalid issue";
+  ]
+
+let release_should_block_reclaim handoff_context =
+  List.exists
+    (fun text ->
+      let lower = String.lowercase_ascii text in
+      List.exists
+        (fun marker -> String_util.contains_substring lower marker)
+        release_hard_stop_markers)
+    (release_handoff_texts handoff_context)
+
+let derive_release_do_not_reclaim_reason (task : Types.task) handoff_context =
+  match task.do_not_reclaim_reason with
+  | Some _ as existing -> existing
+  | None ->
+      let next_cycle = task.cycle_count + 1 in
+      let first_text =
+        match release_handoff_texts handoff_context with
+        | text :: _ -> Some text
+        | [] -> None
+      in
+      if release_should_block_reclaim handoff_context then
+        Some
+          (Option.value first_text
+             ~default:(Printf.sprintf "auto: %d releases" next_cycle))
+      else if next_cycle >= 3 then
+        Some (Printf.sprintf "auto: %d releases" next_cycle)
+      else None
+
 let transition_task_r config ~agent_name ~task_id ~action
     ?expected_version ?(notes="") ?(reason="") ?handoff_context
     ?(force=false) () : string Types.masc_result =
-  let open Result_syntax in
+  let open Result.Syntax in
   let* () = if not (is_initialized config) then Error Types.NotInitialized else Ok () in
   let* () =
     match validate_agent_name_r agent_name, validate_task_id_r task_id with
@@ -771,128 +829,29 @@ let transition_task_r config ~agent_name ~task_id ~action
       let now = now_iso () in
       let now_ts = Time_compat.now () in
       let action_s = Types.task_action_to_string action in
-      let* (new_status, set_current) =
-        match action, task.task_status with
-        | Types.Claim, Types.Todo ->
-            Ok (Types.Claimed { assignee = agent_name; claimed_at = now }, Some task_id)
-        | Types.Claim, (Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ }) when assignee = agent_name ->
-            (* Idempotent: already claimed by me; do not trigger backlog/activity rewrites. *)
-            Ok (task.task_status, None)
-        | Types.Start, Types.Claimed { assignee; _ } when assignee = agent_name ->
-            Ok (Types.InProgress { assignee = agent_name; started_at = now }, Some task_id)
-        | Types.Start, Types.InProgress { assignee; _ } when assignee = agent_name ->
-            (* Idempotent: already in progress by me; do not trigger backlog/activity rewrites. *)
-            Ok (task.task_status, None)
-        | (Types.Claim | Types.Start), Types.Done _ ->
-            (* Idempotent: already done, no-op *)
-            Ok (task.task_status, None)
-        | Types.Done_action, Types.Claimed { assignee; _ } when assignee = agent_name || force ->
-            (* FSM drift: TLA+ KeeperTaskInterlock.DoneTask requires in_progress.
-               Log WARN so dashboards can surface keepers that skip Start. The
-               jump is still permitted for client compatibility; strictness
-               ratchet follows once keeper_task_start is exposed. *)
-            Log.RoomTask.warn
-              "fsm_drift claimed_to_done_skip task=%s agent=%s force=%b"
-              task_id agent_name force;
-            Ok (Types.Done {
-              assignee = agent_name;
-              completed_at = now;
-              notes = if notes = "" then None else Some notes;
-            }, None)
-        | Types.Done_action, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
-            Ok (Types.Done {
-              assignee = agent_name;
-              completed_at = now;
-              notes = if notes = "" then None else Some notes;
-            }, None)
-        | Types.Done_action, Types.Done _ ->
-            (* Idempotent: already done, return current state unchanged *)
-            Ok (task.task_status, None)
-        | Types.Cancel, Types.Cancelled _ ->
-            (* Idempotent: already cancelled *)
-            Ok (task.task_status, None)
-        | Types.Cancel, Types.Todo ->
-            Ok (Types.Cancelled {
-              cancelled_by = agent_name;
-              cancelled_at = now;
-              reason = if reason = "" then None else Some reason;
-            }, None)
-        | Types.Cancel, Types.Claimed { assignee; _ }
-        | Types.Cancel, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
-            Ok (Types.Cancelled {
-              cancelled_by = agent_name;
-              cancelled_at = now;
-              reason = if reason = "" then None else Some reason;
-            }, None)
-        | Types.Release, Types.Claimed { assignee; _ }
-        | Types.Release, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
-            Ok (Types.Todo, None)
-        | Types.Release, Types.Todo ->
-            (* Idempotent: already in backlog, nothing to release.
-               Logged at debug so that callers passing a wrong task_id
-               (e.g. confused the target of a multi-task release) can
-               still detect the no-op without seeing it as an error. *)
-            Log.RoomTask.debug
-              "release on already-todo task %s — no-op" task_id;
-            Ok (task.task_status, None)
-        | Types.Start, Types.Claimed { assignee; _ } when assignee = agent_name || force ->
-            Ok (Types.InProgress {
-              assignee = agent_name;
-              started_at = now;
-            }, None)
-        | Types.Submit_for_verification, Types.Claimed { assignee; _ }
-        | Types.Submit_for_verification, Types.InProgress { assignee; _ }
-          when assignee = agent_name
-               && Env_config_runtime.Verification.fsm_enabled () ->
-            (* Keepers are prompted with Claim -> Work -> Done and do not
-               always emit an explicit Start transition before completing.
-               Allow submission from Claimed so the verifier FSM matches the
-               public task lifecycle instead of requiring a hidden extra step. *)
-            (* [Random_id] is the shared leaf helper used by both
-               [masc_coord] here and [masc_mcp.Verification.generate_id],
-               so the vrf- id algorithm is now defined once (#7544
-               follow-up — original PR left these two copies because
-               the helper didn't exist yet). *)
-            let verification_id =
-              Random_id.prefixed ~prefix:"vrf-" ~bytes:16
-            in
-            Ok (Types.AwaitingVerification {
-              assignee;
-              submitted_at = now;
-              verification_id;
-              required_verifier_role = Reviewer;
-              deadline = None;
-            }, None)
-        | Types.Approve_verification, Types.AwaitingVerification { assignee; verification_id; _ }
-          when agent_name <> assignee
-               && Env_config_runtime.Verification.fsm_enabled () ->
-            Ok (Types.Done {
-              assignee;
-              completed_at = now;
-              notes = Some (Printf.sprintf "Approved by %s (vrf:%s)%s"
-                agent_name verification_id
-                (if notes = "" then "" else " — " ^ notes));
-            }, None)
-        | Types.Reject_verification, Types.AwaitingVerification { assignee; _ }
-          when agent_name <> assignee
-               && Env_config_runtime.Verification.fsm_enabled () ->
-            Ok (Types.InProgress {
-              assignee;
-              started_at = now;
-            }, None)
-        | Types.Approve_verification, Types.AwaitingVerification { assignee; _ }
-          when agent_name = assignee ->
-            Error (Types.TaskInvalidState
-              "Self-approval not allowed: verifier must be a different agent")
-        | Types.Reject_verification, Types.AwaitingVerification { assignee; _ }
-          when agent_name = assignee ->
-            Error (Types.TaskInvalidState
-              "Self-rejection not allowed: verifier must be a different agent")
-        | (Types.Submit_for_verification | Types.Approve_verification
-          | Types.Reject_verification), _
-          when not (Env_config_runtime.Verification.fsm_enabled ()) ->
-            Error (Types.TaskInvalidState "Verification FSM not enabled (MASC_VERIFICATION_FSM_ENABLED=false)")
-        | _ ->
+      let* decision =
+        match
+          Coord_task_lifecycle.decide
+            ~verification_enabled:(Env_config_runtime.Verification.fsm_enabled ())
+            ~new_verification_id:(fun () ->
+              Random_id.prefixed ~prefix:"vrf-" ~bytes:16)
+            ~agent_name ~task_id ~task_status:task.task_status ~action ~now
+            ~force ~notes ~reason
+        with
+        | Ok decision -> Ok decision
+        | Error Coord_task_lifecycle.Self_approval ->
+            Error
+              (Types.TaskInvalidState
+                 "Self-approval not allowed: verifier must be a different agent")
+        | Error Coord_task_lifecycle.Self_rejection ->
+            Error
+              (Types.TaskInvalidState
+                 "Self-rejection not allowed: verifier must be a different agent")
+        | Error Coord_task_lifecycle.Verification_disabled ->
+            Error
+              (Types.TaskInvalidState
+                 "Verification FSM not enabled (MASC_VERIFICATION_FSM_ENABLED=false)")
+        | Error Coord_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with
               | Some a when a <> agent_name ->
@@ -963,6 +922,26 @@ let transition_task_r config ~agent_name ~task_id ~action
                 (task_status_to_string task.task_status) action_s task_id agent_name
                 assignee_hint actions_hint remediation))
       in
+      let new_status = decision.Coord_task_lifecycle.new_status in
+      let set_current = decision.set_current in
+      (match decision.drift with
+       | Some Coord_task_lifecycle.Claimed_to_done_skip ->
+           (* FSM drift: TLA+ KeeperTaskInterlock.DoneTask requires in_progress.
+              Log WARN so dashboards can surface keepers that skip Start. The
+              jump is still permitted for client compatibility; strictness
+              ratchet follows once keeper_task_start is exposed. *)
+           Log.RoomTask.warn
+             "fsm_drift claimed_to_done_skip task=%s agent=%s force=%b"
+             task_id agent_name force
+       | None -> ());
+      (match action, task.task_status with
+       | Types.Release, Types.Todo ->
+           (* Idempotent: already in backlog, nothing to release.
+              Logged at debug so that callers passing a wrong task_id
+              (e.g. confused the target of a multi-task release) can
+              still detect the no-op without seeing it as an error. *)
+           Log.RoomTask.debug "release on already-todo task %s — no-op" task_id
+       | _ -> ());
       if new_status = task.task_status && set_current = None then
         (* Idempotent no-op: status unchanged, skip write/events.
            Match None explicitly so set_current=Some is never silently dropped. *)
@@ -971,6 +950,13 @@ let transition_task_r config ~agent_name ~task_id ~action
       else begin
         let new_tasks = List.map (fun t ->
           if t.id = task_id then
+            let cycle_count, do_not_reclaim_reason =
+              match action with
+              | Types.Release ->
+                  ( t.cycle_count + 1,
+                    derive_release_do_not_reclaim_reason t handoff_context )
+              | _ -> t.cycle_count, t.do_not_reclaim_reason
+            in
             {
               t with
               task_status = new_status;
@@ -982,6 +968,8 @@ let transition_task_r config ~agent_name ~task_id ~action
                 | Types.Submit_for_verification | Types.Approve_verification
                 | Types.Reject_verification ->
                     None);
+              cycle_count;
+              do_not_reclaim_reason;
             }
           else
             t
@@ -1016,15 +1004,15 @@ let transition_task_r config ~agent_name ~task_id ~action
         (match action with
          | Types.Claim ->
              emit_task_activity config ~agent_name ~task_id
-               ~kind:"task.claimed"
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
                ~payload:(`Assoc [ ("task_id", `String task_id) ])
          | Types.Start ->
              emit_task_activity config ~agent_name ~task_id
-               ~kind:"task.started"
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Started)
                ~payload:(`Assoc [ ("task_id", `String task_id) ])
          | Types.Done_action ->
              emit_task_activity config ~agent_name ~task_id
-               ~kind:"task.done"
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Done)
                ~payload:
                  (`Assoc
                    [
@@ -1033,7 +1021,7 @@ let transition_task_r config ~agent_name ~task_id ~action
                    ])
          | Types.Cancel ->
              emit_task_activity config ~agent_name ~task_id
-               ~kind:"task.cancelled"
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Cancelled)
                ~payload:
                  (`Assoc
                    [
@@ -1042,7 +1030,7 @@ let transition_task_r config ~agent_name ~task_id ~action
                    ])
          | Types.Release ->
              emit_task_activity config ~agent_name ~task_id
-               ~kind:"task.released"
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Released)
                ~payload:
                  (`Assoc
                    ([
@@ -1060,15 +1048,15 @@ let transition_task_r config ~agent_name ~task_id ~action
                    | None -> []))
          | Types.Submit_for_verification ->
              emit_task_activity config ~agent_name ~task_id
-               ~kind:"task.submit_for_verification"
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Submit_for_verification)
                ~payload:(`Assoc [ ("task_id", `String task_id) ])
          | Types.Approve_verification ->
              emit_task_activity config ~agent_name ~task_id
-               ~kind:"task.approved"
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Approved)
                ~payload:(`Assoc [ ("task_id", `String task_id) ])
          | Types.Reject_verification ->
              emit_task_activity config ~agent_name ~task_id
-               ~kind:"task.rejected"
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Rejected)
                ~payload:(`Assoc [ ("task_id", `String task_id) ]));
         let duration_ms =
           match action with
@@ -1084,7 +1072,7 @@ let transition_task_r config ~agent_name ~task_id ~action
           | Types.Reject_verification -> None
         in
         observe_task_transition config ~agent_name ~task_id
-          ~transition:action_s
+          ~transition:action
           ~details:
             (task_transition_details
                ~from_status:task.task_status ~to_status:new_status
@@ -1208,7 +1196,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
               let msg = if reason = "" then Printf.sprintf "🚫 Cancelled %s" task_id else Printf.sprintf "🚫 Cancelled %s - %s" task_id reason in
               ignore (broadcast config ~from_agent:agent_name ~content:msg);
               emit_task_activity config ~agent_name ~task_id
-                ~kind:"task.cancelled"
+                ~kind:(Event_kind.Task.to_string Event_kind.Task.Cancelled)
                 ~payload:
                   (`Assoc
                     [
@@ -1229,7 +1217,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                       ?reason:(if reason = "" then None else Some reason)
                       ()));
               observe_task_transition config ~agent_name ~task_id
-                ~transition:"cancel"
+                ~transition:Types.Cancel
                 ~details:
                   (task_transition_details ~from_status:task.task_status
                      ~to_status:
@@ -1319,7 +1307,7 @@ let link_task_execution_artifacts_r config ~task_id ?session_id ?operation_id
               in
               write_backlog config new_backlog;
               emit_task_activity config ~agent_name:"system" ~task_id
-                ~kind:"task.linked"
+                ~kind:(Event_kind.Task.to_string Event_kind.Task.Linked)
                 ~payload:
                   (`Assoc
                     ([

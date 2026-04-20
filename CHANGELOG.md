@@ -3,7 +3,338 @@
 
 ## Unreleased
 
+### Changed
+
+- **TLA+ specs 이관 완결 (`tla/` → `specs/`).** 기존 top-level
+  `tla/` 디렉토리에 남아 있던 3개 스펙을 `specs/` 서브디렉토리
+  구조로 이동: `specs/task-lifecycle/TaskLifecycle.{tla,cfg,-buggy.cfg}`
+  (#8960), `specs/checkpoint-trim/CheckpointTrim.{tla,cfg,-buggy.cfg}`
+  (#9001), `specs/social-state-cap/SocialStateCap.{tla,cfg,-buggy.cfg}`
+  (#9020). 이관 이유: (1) `specs/Makefile` 의 `find . -name '*.cfg'`
+  auto-discovery 가 `specs/**` 하위만 탐색해 `tla/` 스펙은
+  `make -C specs check-all` 에서 제외되었고, (2) `ci.yml` 의
+  `tla-specs` job path filter (`^(specs/|lib/keeper/|lib/oas_.*\\.ml$
+  |Makefile$)`) 도 `tla/` 변경을 무시해 TaskLifecycle 이 PR #8437
+  merge 이후 로컬 only 로 남아 있었다. 이관 후 `scripts/tla-check.sh`
+  의 legacy `tla/` 루프 제거 및 `.gitignore` 의 `tla/` 전용 패턴
+  정리. `CheckpointTrim.cfg` / `-buggy.cfg` 에는 terminating spec
+  (`pc: "trim" → "done"`) 의 default deadlock 오탐을 막기 위해
+  `CHECK_DEADLOCK FALSE` 를 추가 — safety invariant 로만 검증.
+  CI `TLA+ Model Checking` job 은 SocialStateCap 11,665 distinct
+  states 포함 17 분 런타임에 pass.
+
 ### Added
+
+- **Legendary Bash `bg_tasks/<keeper>` HTTP endpoint.**  New
+  `GET /api/v1/legendary_bash/bg_tasks/<keeper>` returns the
+  per-keeper background task roster as
+  `{"keeper": "<name>", "count": N, "tasks": ["<id>", …]}`.
+  Wraps `Bg_task.list ~keeper` under the same public-read posture
+  as `shadow_counters` (no auth on keeper identity, zero-cost when
+  quiet).  Unknown / quiet keepers return `{"count": 0, "tasks":
+  []}` — the endpoint mirrors the filesystem/PG lookup instead
+  of gating on keeper existence, so a dashboard can poll liberally.
+  Trailing-slash requests (`.../bg_tasks/`) return 400 with
+  `"keeper name is required"`.  Three new route tests cover empty
+  keeper, unusual-name echo (`my-keeper_01`), and stable
+  `keeper → count → tasks` field ordering.
+  `LEGENDARY-BASH-RUNBOOK.md` now documents the endpoint alongside
+  the existing `shadow_counters` snapshot endpoint so dashboards
+  and operator tooling have a single reference.
+
+- **`Cdal_judge` jest / vitest classifier.**  `of_exec_outcome`
+  now emits typed `Test_pass {count}` / `Test_fail {count}`
+  markers for jest and vitest runner output in addition to dune,
+  cargo, alcotest, pytest, and go test.  Detection anchors on the
+  runner-specific summary banners — `Test Suites:` for jest,
+  `Test Files ` for vitest — so bare prose or user-visible text
+  mentioning "Tests" or "passed" cannot false-positive.  Count is
+  extracted from the `Tests:` / `Tests` summary line by scanning
+  for " passed" / " failed" and reading the int immediately
+  before the tag.  This correctly handles vitest's pipe-delimited
+  failure lines (`Tests  2 failed | 3 passed (5)` →
+  `Test_fail {count=2}`).  Banner-required behaviour is covered
+  by a dedicated negative test (`test_jest_vitest_banner_
+  required`).  Verifier cascade now covers dune + cargo + pytest
+  + go test + jest + vitest, bringing JavaScript-ecosystem
+  runner output (Kidsnote FE repos, most npm projects) into the
+  same typed-marker surface the rest of the cascade consumes.
+
+## [0.12.0] - 2026-04-20
+
+### Added
+
+- **Bash parser single-quote string support (P5 parse-gap step).**
+  `lib/exec/parser/bash_lexer.mll` now recognises `'...'` literal
+  strings and emits them as a single `WORD` token with the surrounding
+  quotes stripped.  Lets the AST gate classify commands like
+  `git commit -m 'my message'` or `echo 'foo | bar'` without falling
+  back to `Shadow_cannot_parse`, narrowing the
+  `gate_diff_legacy_allow_shadow_deny` / `..._shadow_allow` signal
+  on the `MASC_BASH_AST_SHADOW_LOG` observer (feeds the
+  `MASC_BASH_AST_ONLY` flip decision per RUNBOOK §P5).  Five new
+  parser tests cover: basic quoted arg, empty `''`, multiple quoted
+  args in one command, pipe-metachar-as-literal-payload, and the
+  unterminated-quote negative.  No grammar change; no behaviour
+  change on commands without single quotes.
+
+- **Bash parser double-quote string support (P5 parse-gap step).**
+  `lib/exec/parser/bash_lexer.mll` now recognises `"..."` double-
+  quoted literals alongside unquoted `WORD` tokens.  The double-
+  quote body is matched by `dq_body = [^ '"' '\n' '\\' '$' '`']*`
+  and emitted as a single `WORD` with the surrounding quotes
+  stripped, so shapes like `rg "error pattern"` /
+  `git commit -m "some message"` / `echo "hello world"` round-trip
+  as one `Shell_ir.Lit` element — spaces preserved, pipe metachar
+  inside the body left literal.  Bash features that `"..."` would
+  otherwise interpret (backslash escapes `\"`/`\\`, variable
+  expansion `$FOO`, command substitution `` ` ``/`$(…)`, embedded
+  newlines) are subset-excluded at the A1 layer: their presence in
+  the body breaks the lex and surfaces as `Parse_error`, which is
+  fail-closed for the subset gate.  The grammar is unchanged
+  (`WORD` production already accepts the token in any argument
+  position).  Follow-up PRs will add an unescape sub-rule for `\"`
+  / `\\` / `\n` / `\$` to widen coverage.  Eight new parser tests
+  cover the happy paths (basic literal, empty string, pipe
+  metachar as literal, `rg "error pattern" src/`) and the four
+  fail-closed negatives (`$FOO`, `\"` escapes, backtick subst,
+  unterminated `"`).  19/19 parser tests green locally.  Narrows
+  the `Shadow_cannot_parse` bucket emitted by the AST gate shadow
+  observer, bringing the `MASC_BASH_AST_ONLY` flip criterion one
+  step closer.
+
+- **`Cdal_judge` go test classifier.**  `of_exec_outcome` now emits
+  typed `Test_pass {count}` / `Test_fail {count}` markers for `go
+  test` output in addition to dune, cargo, alcotest, and pytest.
+  Detection anchors on the runner-specific `--- PASS:` / `--- FAIL:`
+  / `=== RUN` prefaces so that bare `PASS` / `FAIL` tokens elsewhere
+  in stdout (e.g. docstrings or user-visible prose) cannot
+  false-positive. Count is obtained by counting `--- PASS:` /
+  `--- FAIL:` occurrences — one per completed subtest. Banner-
+  required behavior is covered by a dedicated negative test
+  (`test_go_test_banner_required`). Verifier cascade now covers
+  dune + cargo + pytest + go test.
+
+- **Legendary Bash shadow-counters HTTP endpoint.**  New
+  `GET /api/v1/legendary_bash/shadow_counters` returns the
+  `Legendary_counters.snapshot` as JSON.  Public-read (same auth
+  posture as `/api/v1/activity/*`), zero-cost when observers are
+  off (all counters stay at zero).  Wired behind
+  `Server_routes_http_routes_artifacts` in the route pipeline.
+  `LEGENDARY-BASH-RUNBOOK.md` now documents the endpoint and the
+  suggested `disagree_ratio` formula so operators can drive the
+  `MASC_BASH_AST_ONLY` flip decision from a dashboard instead of a
+  log grep pipeline.
+
+- **Legendary Bash in-process shadow counters.**  New
+  `lib/legendary_counters.{ml,mli}` exposes `Atomic.t`-backed totals
+  for the P5 gate-diff observer (`total` + 4 buckets mirroring
+  `Worker_dev_tools.gate_diff` 1:1) and the P4 auto-background
+  observer (`observed` + `would_have_promoted`).  The counters are
+  incremented from the same sites that already emit
+  `gate_diff_shadow` / `auto_bg_would_have_promoted` log lines, so
+  the cost remains zero whenever the matching observer env flag is
+  off.  `snapshot_to_json` returns a stable field layout intended
+  for a later dashboard / HTTP endpoint.  5 unit tests
+  (`test_legendary_counters`).  No behavior change on the request
+  path.
+
+- **`Cdal_judge` pytest classifier.**  `of_exec_outcome` now emits
+  typed `Test_pass` / `Test_fail` markers for pytest output in
+  addition to dune, cargo, and alcotest.  Detection is anchored on
+  the canonical `===== N passed in Ts =====` / `===== N failed`
+  summary banner so that bare "N passed" prose elsewhere in stdout
+  cannot false-positive.  Banner-required behavior is covered by a
+  dedicated negative test
+  (`test_pytest_banner_required`).  Lifts the verifier cascade out
+  of OCaml-only coverage so Python-test keepers get the same typed
+  marker stream as dune keepers.
+
+- **KEEPER-USER-MANUAL §3.1.2 Legendary Bash 도구 표면.**  New
+  subsection documents the three-tool surface (`keeper_bash`,
+  `keeper_bash_output`, `keeper_bash_kill`) at the level a keeper
+  operator reads: call-schema contract, single-command / no-chaining
+  rule, the three flag-gated optional response fields
+  (`return_code_interpretation`, `verifiable_markers`, promoted
+  triple), and the background polling / tree-kill lifecycle.  Points
+  operators at the existing `LEGENDARY-BASH-RUNBOOK.md` /
+  `ENV-CONTRACT.md §4` as SSOT for flag matrices.  Adds both files
+  to the manual's 관련 문서 appendix so new keeper operators land on
+  the procedure docs.  No code change.
+
+- **Legendary Bash operator runbook.**  New
+  `docs/LEGENDARY-BASH-RUNBOOK.md` consolidates the P1–P6 rollout
+  surface: current flag state table, authoritative opt-out tokens,
+  dark-launch observer grep recipes for `gate_diff_shadow` and
+  `auto_bg_would_have_promoted`, flip criteria for the remaining
+  `AUTO_BG` / `AST_ONLY` defaults, and a restart-free rollback
+  checklist.  `ENV-CONTRACT.md §4` now cross-links to it.  No code
+  change.
+
+- **`MASC_BASH_AUTO_BG_OBSERVE` dark-launch observer.**  Companion
+  to `AST_SHADOW_LOG` (#8902) covering the AUTO_BG rollout axis.
+  When the flag is set every foreground-only `keeper_bash` run is
+  timed, and if the elapsed duration would have tripped
+  `MASC_BLOCKING_BUDGET_MS` (default 15 000 ms) the keeper emits
+  `auto_bg_would_have_promoted keeper=… cmd_hash=… duration_ms=N
+  budget_ms=M`.  Inert when `AUTO_BG` itself is already enabled.
+  Evidence for the later `AUTO_BG` default-flip decision without
+  any behavior change.
+
+- **`MASC_BASH_AST_SHADOW_LOG` dark-launch observer.**  With the
+  flag set to a truthy value every `keeper_bash` call runs
+  `Worker_dev_tools.diff_command` side-by-side with the live regex
+  gate and emits a structured log line
+  (`gate_diff_shadow keeper=… cmd_hash=… diff=… legacy=… shadow=…`)
+  for every non-`Agree` outcome.  Command strings are hashed to a
+  12-hex MD5 prefix before logging so no raw shell fragments leak
+  to the log stream.  Default off; behavior is unchanged when
+  disabled.  This is the evidence-collection step before the
+  `MASC_BASH_AST_ONLY` default flip, which still waits on an
+  N=1000 zero-diff window per the plan.
+
+### Changed
+
+- **`MASC_BASH_VERIFIABLE_MARKERS` flipped to on by default.**
+  Post-Legendary-Bash-P6 (#8721) rollout step paralleling the
+  `SEMANTIC_EXIT` flip: every `keeper_bash` response now carries
+  the `verifiable_markers` array (typed `Test_pass {count}`,
+  `Build_ok`, `Lint_clean`, `Git_clean`, each with
+  `Exact | Heuristic` confidence) when the heuristic matches.
+  Empty-result callers are omitted, so consumers that don't parse
+  the key remain byte-compatible.  Explicit opt-out: set the env
+  to `0` / `false` / `no` / `off`.  The flag itself survives one
+  more minor bump before removal.
+
+- **`MASC_BASH_SEMANTIC_EXIT` flipped to on by default.** Post-
+  Legendary-Bash-P1 (#8721) rollout step: every `keeper_bash`
+  response now carries the typed `semantic_exit` variant and the
+  `return_code_interpretation` hint without requiring an operator
+  opt-in.  Fields are purely additive — no existing key is removed
+  or renamed, so consumers that parse `status` directly are
+  unaffected.  Explicit opt-out: set the env to `0` / `false` /
+  `no` / `off`.  The flag itself survives one more minor bump to
+  let downstream consumers confirm compatibility before removal.
+
+### Added
+
+- **`Docker_with_git` sandbox profile + git/gh per-command dispatch.** New `sandbox_profile = "docker_with_git"` keeps every `Docker_hardened` guard (cap-drop, no-new-privs, read-only rootfs, tmpfs, pids/memory limits, no nested runtimes) but adds `--network bridge` and read-only mounts for `~/.config/gh`, `~/.gitconfig`, optionally `~/.ssh` (opt-in via `MASC_KEEPER_SANDBOX_SSH_DIR`). Optional `GH_TOKEN` env forward via `MASC_KEEPER_SANDBOX_GH_TOKEN`. A `Docker_hardened` keeper still gets git/gh access for free: `keeper_bash` automatically routes commands whose first token is `git` or `gh` through the new profile (toggle `MASC_KEEPER_SANDBOX_GIT_DISPATCH=false` to disable). Closes the gap that left coding keepers with `repo clone 차단: allowed org mismatch` board posts and 16 days of zero `keeper_bash` git activity.
+
+- **Legendary Bash P1–P6 (`feature/legendary-bash-p1`, PR #8721).**
+  Reworks `keeper_bash` along six coordinated axes.  Every surface
+  is additive and opt-in; the default JSON shape is unchanged.
+  - **P1 — typed semantic exit.**  New `Exec_semantic` variant
+    (`Ok / Fail / Timeout / Signaled / Git_not_a_repo / Oom_killed /
+    Policy_denied / Tool_missing / Permission_denied`) with
+    heuristic interpretation of exit codes 126/127/128 and dmesg
+    OOM hints.  Gated by `MASC_BASH_SEMANTIC_EXIT`.
+  - **P2 — background task lifecycle.**  `Bg_task.spawn/read/kill`
+    plus `keeper_bash_output` / `keeper_bash_kill` mirror
+    claude-code's `BashOutput` / `KillShell`.  pgid-owned children
+    enable tree-kill; PID-file persistence
+    (`<base>/.masc/keeper/<name>/bg/*.pid`) plus a startup
+    `reap_orphans` hook recover stranded groups after restart.
+  - **P3 — head+tail output cap.**  `Exec_buffer` keeps the first
+    and last 500 KB of each stream in memory with an overlap-aware
+    `bytes_dropped` counter.  Controlled by `MASC_BASH_OUTPUT_CAP`
+    / `MASC_BASH_CAP_HEAD` / `MASC_BASH_CAP_TAIL`.
+  - **P4 — auto-background race.**  `Exec_run.run_with_auto_bg`
+    spawns a `Bg_task` and races its exit against
+    `MASC_BLOCKING_BUDGET_MS` (default 15 000 ms) via
+    `Eio.Fiber.first`.  Budget expiry returns `{promoted: true,
+    background_task_id, partial_output, bytes_dropped, budget_ms,
+    hint}`.  Gated by `MASC_BASH_AUTO_BG`; falls back to the
+    blocking path when no Eio clock is available.
+  - **P5 — AST-shadow safety layer.**  `Worker_dev_tools`
+    classifies every `Eval_gate.destructive_patterns` entry into an
+    8-arm `destructive_class` and runs the existing regex allowlist
+    in parallel with the `Masc_exec_bash_parser` AST gate.  The
+    legacy↔shadow diff harness (`test/test_gate_diff.ml`) pins the
+    flip covenant: no `Eval_gate` pattern may slip into
+    `Legacy_deny_shadow_allow`.
+  - **P6 — verifiable markers.**  `Cdal_judge.of_exec_outcome`
+    translates `(semantic, stdout, stderr)` into a typed marker
+    list (`Test_pass {count}`, `Build_ok`, `Lint_clean`,
+    `Git_clean`, …) with `Exact | Heuristic` confidence, so the
+    verifier cascade can consume structured proofs instead of regex
+    scraping.  Emitted when `MASC_BASH_VERIFIABLE_MARKERS` is set.
+
+  All six phases land behind flags so operators can soak each axis
+  independently before default flip.  See
+  `docs/ENV-CONTRACT.md §4` for the flag matrix.
+
+### Changed
+
+- **OAS pin bump → `main@36490371` (v0.163.0).** Single-commit upstream bump for `pipeline: handle Nudge decision in before_turn` (oas#1065). Without this, `before_turn` hooks returning `Hooks.Nudge` were silently dropped by `pipeline.ml stage_input` (`_ -> ()` fall-through). Effect on masc-mcp: the work-discovery nudge wired in PR #8805 (1089-char Samchon schema text) now actually reaches the LLM. 3 SSOT axes bumped per `feedback_oas-pin-must-bump-version-floor`: `scripts/oas-agent-sdk-pin.sh`, `dune-project`, `masc_mcp.opam`. Generated docs re-synced via `scripts/sync-oas-pin-docs.sh`. Live verification: post-deploy, `keeper:<name> before_turn: injecting work_discovery nudge` log lines should be followed by `tool_call` events from the same keeper (currently 10 fires + 0 follow-up actions over the live server's 2 hour uptime).
+
+- **OAS pin bump → `main@2798831c` (v0.162.0 + 7 follow-ups).** Carries
+  upstream OAS commits since the last `54f4aeab` pin:
+  - `2798831c` #1035 — `fix(hooks): emit OnError on tool-not-found
+    dispatch failure (#1032)`. Surfaces a previously-silent dispatch
+    failure mode through the existing `Hooks.OnError` channel; useful
+    for keeper observability when LLMs hallucinate tool names.
+  - `2a9a8756` #1061 — batch register 15 orphan test executables (OAS
+    internal coverage; no surface change).
+  - `e1578747` #1045 — refactor: split runtime control and memory
+    backend helpers (internal split, public modules unchanged).
+  - `4d7b8489` #1043 — refactor: split context reducer helpers
+    (internal split, `Context` API unchanged).
+  - `98a13ab5` #1041 — refactor(checkpoint): split codec and delta
+    helpers (internal split, `Checkpoint` API unchanged).
+  - `8a5abf2e` #1060 — register orphan `test_memory_advanced` (OAS
+    internal coverage).
+  - `d2b81773` #1059 — `build(dune): bump lang 3.11 → 3.22 to match
+    toolchain` (OAS-side dune version, opaque to consumers).
+
+  Dependency floor and declared base version remain `0.162.0`.
+
+## [0.11.0] - 2026-04-20
+
+### Added
+
+- **Tool-failure root-cause sweep (#8688, RFC #8760).** Server-authored
+  hints now have Good/Bad examples for the top rejection classes and
+  the keeper persona prompt documents how to consume them. Observability
+  script `scripts/sweep-tool-error-signatures.sh` (#8767) buckets daily
+  `tool_calls/*.jsonl` failures by normalized signature so the impact
+  of prompt changes is measurable. Shipped:
+  - `keeper_exec_shell` — raise gh op timeout floor 5s → 15s (#8712),
+    hint on gh `Could not resolve to a Repository` from playground cwd
+    (#8734), Good:/Bad: examples for 5 readonly-shell categories
+    (#8704).
+  - `keeper.capabilities` — tool error grammar (envelope / hint field /
+    same-turn retry / judgment escalation) replaces the weak
+    "do not retry" one-liner (#8775 / RFC R1).
+  - `worker_dev_tools` — Chain_or_redirect and Injection hints name
+    the `cwd=` argument explicitly so `cd X && Y` stops being the
+    default suggestion (#8783).
+  - `keeper_alerting_path` — `path_not_in_allowed_paths` suggests the
+    concrete playground prefix when the raw path starts with `repos/`
+    or `mind/` (#8789).
+  - `tool_task` — completion-rejection message embeds a concrete
+    accepted-notes example (#8708).
+  - `anti_rationalization` — empty evaluator response routes to
+    liveness approval instead of hard rejection (#8722).
+- **Runtime event listener (pilot).** `feat(runtime_events)` (#8792)
+  installs an OCaml `Runtime_events` listener and reserves event handles
+  for MASC turn / tool-call observability (Wave 2A pilot).
+- **Streamable HTTP atomic race fix (pilot).** `session.last_seen`
+  marked `[@atomic]` to remove an unlocked race in the streamable HTTP
+  transport (#8790, Wave 2 pilot).
+- **CDAL attribution on verification legs.** Approve/reject verification
+  transitions now record attribution so the post-hoc CDAL timeline
+  includes who verified (#8731).
+- **Verifier role gating for `task_verify`.** Affordance is now gated
+  to verifier-role keepers (#8715). Default keeper set excludes the
+  verification approvers from ordinary work claim queues.
+- **Multi-assignment current binding semantics.** Task assignments can
+  now express the current active binding vs historical ones; surfaced
+  in `masc_check` and downstream accountability paths (#8776).
+- **Keeper msg observability.** Usage / cost / cache-token counters and
+  the raw model id are surfaced on `keeper_msg` MCP responses so clients
+  and dashboards can attribute cost per keeper turn (#8717).
+
+### Changed
 
 - **Doctor phase 1 — 시스템 전반 진단.** MASC 전체(서버 + 5 sidecar)를
   동일한 `Check/Severity/AutoFix` 모델로 진단하는 Doctor 축을 CLI · HTTP ·
@@ -43,13 +374,39 @@
   후속 (phase 2 / 축 9): server endpoint in-process 전환(Eio.Process ~cwd),
   `--fix` 버튼 HITL approval, 실제 callback 확장.
 
+- **CDAL verdict attribution on verification approve/reject legs (#8731).**
+  `tool_task.ml` 의 `Approve_verification` / `Reject_verification` 핸들러에
+  `Cdal_verdict_gate.gate_check` 호출을 추가. FSM-enabled 경로는
+  `Done_action` 를 우회하기 때문에 기존 CDAL gate 가 verification 승인
+  시점에 동작하지 않아 `/api/v1/attribution/summary` 에 `cdal_verdict`
+  gate 가 0 entries 로 남았다. 이제 `Env_config_runtime.Cdal.gate_enabled()`
+  (default true) 가 켜진 환경에서 approve/reject 양쪽이 verdict lookup +
+  `Dashboard_attribution` ring 기록을 남긴다.
+
+- **Verifier-role affordance gating (#8715).**
+  `keeper_unified_turn.ml` 의 `observed_triggers_of_observation` /
+  `observed_affordances_of_observation` 에 `?meta` optional param 을 추가하고
+  `pending_verification` trigger 및 `task_verify` affordance 를
+  `is_verifier_role_keeper` 가 참인 keeper 에만 노출한다. 그 외 persona 는
+  world observation 에서 verification 관련 신호를 보지 않으므로 fleet 노이즈
+  감소. `?meta=None` 호출은 legacy surface-to-all 유지 (diagnostics / snapshot
+  caller 호환).
+
 ### Changed
 
-- **OAS pin ratchet → `main@cfcd85a9`.** Keeps the `0.160.1` dependency
-  floor but advances the runtime pin past `f70fd95e` to pick up OAS
-  #1018's stale Swarm-semantics doc cleanup, so local `check-oas-pin`
-  drift warnings disappear and MASC tracks the current upstream main
-  truth again.
+- **OAS pin bump → `main@54f4aeab` (v0.162.0 + Gemini policy fix).**
+  Carries upstream OAS `#1048 fix(gemini_cli): use sentinel name to
+  disable MCP, avoiding empty-string policy crash`. Gemini CLI 0.38
+  introduced a Policy Engine that rejects empty `--allowed-mcp-server-names`
+  entries, which crashed every keeper turn that set
+  `OAS_GEMINI_NO_MCP=1` (i.e. all 4 built-in keepers — scholar / analyst
+  / executor / verifier — and any cascade vendoring Gemini). OAS now
+  passes the sentinel name `__oas_no_mcp__`. Dependency floor and
+  declared base version remain `0.162.0`.
+- **OAS pin bump → `v0.162.0`.** Raises the `agent_sdk` dependency floor
+  from `0.161.0` to `0.162.0` and pins OAS `main@3b0409d2`, pulling in
+  the provider-registry context-window fix (#1040) plus the 0.162.0
+  release rollup (#1042) without leaving `check-oas-pin` drift warnings.
 
 ### Reliability
 

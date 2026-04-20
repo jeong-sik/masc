@@ -28,6 +28,27 @@
     rest of the fleet. Pure — does not re-read the persona profile. *)
 val is_verifier_role_keeper : Keeper_types.keeper_meta -> bool
 
+(** Derive the ["pending_verification" / ...] trigger list from the
+    observation.  When [meta] is supplied, verification-specific triggers
+    (currently ["pending_verification"]) are only emitted for keepers whose
+    persona declares the verifier role; other keepers see the rest of the
+    world unchanged.  When [meta] is omitted, legacy surface-to-all
+    behaviour is preserved for diagnostics and snapshot callers. *)
+val observed_triggers_of_observation :
+  ?meta:Keeper_types.keeper_meta ->
+  Keeper_world_observation.world_observation ->
+  string list
+
+(** Derive the [["task_claim"; "task_verify"; ...]] affordance list from
+    the observation.  Verification affordances ([task_verify]) are gated
+    on verifier-role keepers in the same way as
+    [observed_triggers_of_observation]; omitting [meta] retains the
+    legacy behaviour. *)
+val observed_affordances_of_observation :
+  ?meta:Keeper_types.keeper_meta ->
+  Keeper_world_observation.world_observation ->
+  string list
+
 val update_metrics_from_result :
   Keeper_types.keeper_meta ->
   latency_ms:int ->

@@ -65,7 +65,7 @@ check_rule() {
 # SSOT-R1 — .masc path concat bypasses Coord_utils.masc_dir helper.
 # Tracked: #8355 (37 files at filing; current ratchet from main).
 # Excluded: the helper impl + backend setters where the literal IS the SSOT.
-check_rule "R1-masc-path" 26 \
+check_rule "R1-masc-path" 11 \
   "Coord_utils.masc_dir <config>" \
   'Filename\.concat\s+[a-zA-Z_]+\s+"\.masc"' \
   'coord_utils_paths_backend|coord_utils_backend_setup|coord_eio' \

@@ -10,18 +10,21 @@
 \* claimed task is making progress or is orphaned.
 \*
 \* masc-mcp reference:
-\*   lib/keeper/keeper_state_machine.ml (11-phase keeper FSM)
-\*   lib/types/types_core.ml:254-268    (5-state task FSM:
+\*   lib/keeper/keeper_state_machine.ml (12-phase keeper FSM:
+\*     Offline | Running | Failing | Overflowed | Compacting | HandingOff
+\*     | Draining | Paused | Stopped | Crashed | Restarting | Dead)
+\*   lib/types/types_core.ml:task_status (6-state task FSM:
 \*     Todo | Claimed{assignee} | InProgress{assignee} |
+\*     AwaitingVerification{assignee, verification_id, ...} |
 \*     Done{assignee} | Cancelled{cancelled_by})
 \*
 \* A keeper going [Dead] while some task has [claimer = k] must not
-\* leave that task in Claimed / InProgress. Either the task is
-\* Released (back to Todo) or Cancelled as part of the Dead
-\* transition.
+\* leave that task in Claimed / InProgress / AwaitingVerification.
+\* Either the task is Released (back to Todo) or Cancelled as part of
+\* the Dead transition.
 \*
 \* ── Abstraction note ──
-\* The real keeper FSM has 11 phases; for this bug model we use
+\* The real keeper FSM has 12 phases; for this bug model we use
 \* three abstract phases:
 \*   Running       — representative of any dispatchable phase
 \*                   (Running, Paused-and-resumable).

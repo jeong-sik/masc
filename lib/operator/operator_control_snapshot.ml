@@ -6,10 +6,10 @@ let compute_context_ratio (meta : Keeper_types.keeper_meta) : float option =
   let input_tokens = meta.runtime.usage.last_input_tokens in
   if input_tokens = 0 then None
   else
-    let active_model = Keeper_exec_status.active_model_of_meta meta in
-    if active_model = "" then None
+    let active_model_label = Keeper_exec_status.active_model_label_of_meta meta in
+    if active_model_label = "" then None
     else
-      let max_ctx = Cascade_runtime.max_context_of_label active_model in
+      let max_ctx = Cascade_runtime.max_context_of_label active_model_label in
       if max_ctx = 0 then None
       else Some (float_of_int input_tokens /. float_of_int max_ctx)
 
@@ -173,12 +173,87 @@ let recent_messages_json config =
   |> List.map Types.message_to_yojson
   |> fun rows -> `List rows
 
+let merge_tool_name_lists primary secondary =
+  let seen = Hashtbl.create 16 in
+  let add acc raw_name =
+    let name = String.trim raw_name in
+    if name = "" || Hashtbl.mem seen name then acc
+    else (
+      Hashtbl.replace seen name ();
+      name :: acc)
+  in
+  List.rev
+    (List.fold_left add []
+       (List.concat [ primary; secondary ]))
+
+let tool_names_of_recent_json (json : Yojson.Safe.t) =
+  let tools_used =
+    match U.member "tools_used" json with
+    | `List items ->
+        List.filter_map
+          (function
+            | `String value ->
+                let trimmed = String.trim value in
+                if trimmed = "" then None else Some trimmed
+            | _ -> None)
+          items
+    | _ -> []
+  in
+  let single_tool =
+    match U.member "tool" json with
+    | `String value ->
+        let trimmed = String.trim value in
+        if trimmed = "" then [] else [ trimmed ]
+    | _ -> []
+  in
+  merge_tool_name_lists single_tool tools_used
+
+let collect_recent_tool_names ?(limit = 8) (lines : string list) =
+  let ordered = List.rev lines in
+  let rec loop acc remaining = function
+    | _ when remaining <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | line :: rest -> (
+        try
+          let json = Yojson.Safe.from_string line in
+          let tools = tool_names_of_recent_json json in
+          let merged = merge_tool_name_lists (List.rev acc) tools in
+          let capped =
+            if List.length merged <= limit then merged
+            else List.filteri (fun idx _ -> idx < limit) merged
+          in
+          loop (List.rev capped) (limit - List.length capped) rest
+        with Yojson.Json_error _ ->
+          loop acc remaining rest)
+  in
+  loop [] limit ordered
+
+let recent_tool_names_from_files config keeper_name =
+  let decision_lines =
+    let path = Keeper_types.keeper_decision_log_path config keeper_name in
+    if Fs_compat.file_exists path then
+      Keeper_memory.read_file_tail_lines path ~max_bytes:120000 ~max_lines:120
+    else []
+  in
+  let metrics_lines =
+    let store = Keeper_types.keeper_metrics_store config keeper_name in
+    let dated = Dated_jsonl.read_recent_lines store 120 in
+    if dated <> [] then dated
+    else
+      let path = Keeper_types.keeper_metrics_path config keeper_name in
+      Keeper_memory.read_file_tail_lines path ~max_bytes:120000 ~max_lines:120
+  in
+  merge_tool_name_lists
+    (collect_recent_tool_names decision_lines)
+    (collect_recent_tool_names metrics_lines)
+
 let keeper_tool_audit_fields ?(include_allowed_tools = true) config
     (meta : Keeper_types.keeper_meta) =
   let fallback_allowed =
     if include_allowed_tools then Keeper_exec_tools.keeper_allowed_tool_names meta
     else []
   in
+  let recent_tool_names = recent_tool_names_from_files config meta.name in
   let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
   let fallback_snapshot =
     match
@@ -217,6 +292,7 @@ let keeper_tool_audit_fields ?(include_allowed_tools = true) config
   | Some task, Some result ->
       if task.seq > result.seq then
         ( task.allowed_tools,
+          recent_tool_names,
           result.tool_names,
           Some result.tool_call_count,
           fallback_snapshot.latest_action_source,
@@ -224,6 +300,7 @@ let keeper_tool_audit_fields ?(include_allowed_tools = true) config
           Some task.created_at )
       else
         ( task.allowed_tools,
+          merge_tool_name_lists result.tool_names recent_tool_names,
           result.tool_names,
           Some result.tool_call_count,
           fallback_snapshot.latest_action_source,
@@ -231,6 +308,7 @@ let keeper_tool_audit_fields ?(include_allowed_tools = true) config
           Some result.updated_at )
   | Some task, None ->
       ( task.allowed_tools,
+        recent_tool_names,
         [],
         None,
         fallback_snapshot.latest_action_source,
@@ -238,6 +316,7 @@ let keeper_tool_audit_fields ?(include_allowed_tools = true) config
         Some task.created_at )
   | None, Some result ->
       ( fallback_allowed,
+        merge_tool_name_lists result.tool_names recent_tool_names,
         result.tool_names,
         Some result.tool_call_count,
         fallback_snapshot.latest_action_source,
@@ -245,6 +324,7 @@ let keeper_tool_audit_fields ?(include_allowed_tools = true) config
         Some result.updated_at )
   | None, None ->
       ( fallback_allowed,
+        recent_tool_names,
         fallback_snapshot.latest_tool_names,
         fallback_snapshot.latest_tool_call_count,
         fallback_snapshot.latest_action_source,
@@ -252,9 +332,28 @@ let keeper_tool_audit_fields ?(include_allowed_tools = true) config
         fallback_snapshot.tool_audit_at )
 
 (* Concurrency cap for parallel keeper snapshot fibers.
-   Prevents memory bursts when many keepers are processed simultaneously.
-   Each keeper fiber does filesystem I/O + heavy JSON construction (~50 fields). *)
-let _keeper_snapshot_max_concurrency = 4
+   Originally 4 to guard against memory bursts when many keepers are
+   processed simultaneously.  Live measurement via #8829 over 48 samples
+   showed this cap was the dominant cost, not the per-keeper I/O:
+
+       wait avg=1334ms max=4424ms   (queued on semaphore)
+       work avg=604ms  max=3088ms   (meta/agent/profile I/O + JSON)
+       ratio wait/work = 2.21x
+
+   Raising to 16 matches the current fleet size so no fiber queues on
+   the semaphore in the common case.  The original memory concern was
+   written when keepers were a new surface; modern machines absorb the
+   per-fiber JSON construction (~50 fields × 16 keepers ≈ a few MB)
+   without visible pressure.  Env-overridable via
+   [MASC_KEEPER_SNAPSHOT_CONCURRENCY] for operators on tight memory
+   envelopes (e.g. CI runners) who still want the old behaviour. *)
+let _keeper_snapshot_max_concurrency =
+  match Sys.getenv_opt "MASC_KEEPER_SNAPSHOT_CONCURRENCY" with
+  | Some s ->
+      (match int_of_string_opt (String.trim s) with
+       | Some n when n >= 1 && n <= 64 -> n
+       | _ -> 16)
+  | None -> 16
 
 let _keeper_sem = Eio.Semaphore.make _keeper_snapshot_max_concurrency
 
@@ -273,8 +372,23 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
   Eio.Fiber.all
     (List.mapi
        (fun idx name () ->
+         (* Two-phase timing so we can distinguish semaphore contention
+            from per-keeper I/O cost when dashboard snapshots stall.
+            Emits [keepers_json:NAME wait=… work=…] only when either
+            half exceeds the same 500ms threshold used by the outer
+            [timed] helper, keeping the log quiet on healthy snapshots. *)
+         let t_wait_start = Time_compat.now () in
          Eio.Semaphore.acquire _keeper_sem;
-         Fun.protect ~finally:(fun () -> Eio.Semaphore.release _keeper_sem)
+         let t_work_start = Time_compat.now () in
+         let wait_ms = (t_work_start -. t_wait_start) *. 1000.0 in
+         Fun.protect
+           ~finally:(fun () ->
+             Eio.Semaphore.release _keeper_sem;
+             let work_ms = (Time_compat.now () -. t_work_start) *. 1000.0 in
+             if work_ms > 500.0 || wait_ms > 500.0 then
+               Log.Dashboard.info
+                 "[keepers_json:%s] wait=%.0fms work=%.0fms" name wait_ms
+                 work_ms)
            (fun () ->
          results.(idx) <-
            (try
@@ -359,21 +473,31 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    |> Keeper_exec_status.augment_keeper_diagnostic_json
                         ~meta ~keepalive_running ~keepalive_started_at ~now_ts
                  in
-                 let allowed_tool_names, latest_tool_names, latest_tool_call_count,
-                     latest_action_source, tool_audit_source, tool_audit_at =
+                 let allowed_tool_names, recent_tool_names, latest_tool_names,
+                     latest_tool_call_count, latest_action_source,
+                     tool_audit_source, tool_audit_at =
                    if lightweight then
-                     let _, latest_tool_names, latest_tool_call_count,
-                         latest_action_source, tool_audit_source, tool_audit_at =
+                     let _, recent_tool_names, latest_tool_names,
+                         latest_tool_call_count, latest_action_source,
+                         tool_audit_source, tool_audit_at =
                        keeper_tool_audit_fields ~include_allowed_tools:false
                          config meta
                      in
                      ( [],
+                       recent_tool_names,
                        latest_tool_names,
                        latest_tool_call_count,
                        latest_action_source,
                        tool_audit_source,
                        tool_audit_at )
                    else keeper_tool_audit_fields config meta
+                 in
+                 let delivery_surface_view =
+                   Keeper_social_model.delivery_surface_view_of_meta meta
+                   |> Option.map Keeper_social_model.delivery_surface_to_string
+                 in
+                 let delivery_surface_view_source =
+                   Keeper_social_model.delivery_surface_view_source_of_meta meta
                  in
                  let surface_status =
                    if not agent_exists then "offline"
@@ -445,11 +569,24 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        ("noop_turn_count", `Int meta.runtime.noop_turn_count);
                        ("allowed_tool_names", `List (List.map (fun value -> `String value) allowed_tool_names));
                        ("latest_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
-                       ("recent_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
+                       ("recent_tool_names", `List (List.map (fun value -> `String value) recent_tool_names));
                        ("latest_tool_call_count", option_to_json (fun value -> `Int value) latest_tool_call_count);
                        ("latest_action_source", string_option_to_json latest_action_source);
                        ("tool_audit_source", string_option_to_json tool_audit_source);
                        ("tool_audit_at", string_option_to_json tool_audit_at);
+                       ( "last_speech_act",
+                         string_option_to_json
+                           (let value = String.trim meta.runtime.last_speech_act in
+                            if value = "" then None else Some value) );
+                       ("delivery_surface_view", string_option_to_json delivery_surface_view);
+                       ( "delivery_surface_view_source",
+                         string_option_to_json delivery_surface_view_source );
+                       ( "last_social_transition_reason",
+                         string_option_to_json
+                           (let value =
+                              String.trim meta.runtime.last_social_transition_reason
+                            in
+                            if value = "" then None else Some value) );
                        ("proactive_enabled", `Bool meta.proactive.enabled);
                        ("proactive_idle_sec", `Int meta.proactive.idle_sec);
                        ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);

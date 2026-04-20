@@ -50,7 +50,7 @@ let runtime_base_path ?base_path () =
   match trim_opt base_path with
   | Some path -> path
   | None -> (
-      match Sys.getenv_opt "MASC_BASE_PATH" with
+      match Sys.getenv_opt Env_config_core.base_path_env_key with
       | Some p when String.length (String.trim p) > 0 -> String.trim p
       | _ -> Sys.getcwd ())
 
@@ -331,6 +331,370 @@ let runtime_sidecar_script_result ?base_path id =
               `start-masc-mcp.sh --sidecar-root /path/to/masc-mcp`."
              id script)
 
+let sidecar_start_shell_command ~base_path ~script =
+  Printf.sprintf
+    "MASC_BASE_PATH=%s setsid nohup %s start </dev/null >/dev/null 2>&1 &"
+    (Filename.quote base_path)
+    (Filename.quote script)
+
+type desired_state =
+  | Desired_running
+  | Desired_stopped
+
+type desired_record = {
+  connector_id : string;
+  desired_state : desired_state;
+  generation : int;
+  updated_by : string;
+  updated_at : string;
+}
+
+type observed_state =
+  | Observed_available
+  | Observed_unavailable
+
+type reconcile_result =
+  | Reconcile_started
+  | Reconcile_noop of string
+
+type attempt_record = {
+  connector_id : string;
+  generation : int;
+  attempt_id : string;
+  attempt_number : int;
+  last_attempt_result : string;
+  next_retry_at : string option;
+  operator_next_action : string;
+  updated_at : string;
+}
+
+let desired_state_to_string = function
+  | Desired_running -> "running"
+  | Desired_stopped -> "stopped"
+
+let desired_state_of_string = function
+  | "running" -> Some Desired_running
+  | "stopped" -> Some Desired_stopped
+  | _ -> None
+
+let observed_state_to_string = function
+  | Observed_available -> "available"
+  | Observed_unavailable -> "unavailable"
+
+let reconcile_result_to_string = function
+  | Reconcile_started -> "started"
+  | Reconcile_noop reason -> "noop:" ^ reason
+
+let attempt_record_json (record : attempt_record) =
+  `Assoc [
+    ("connector_id", `String record.connector_id);
+    ("generation", `Int record.generation);
+    ("attempt_id", `String record.attempt_id);
+    ("attempt_number", `Int record.attempt_number);
+    ("last_attempt_result", `String record.last_attempt_result);
+    ( "next_retry_at",
+      match record.next_retry_at with
+      | Some value -> `String value
+      | None -> `Null );
+    ("operator_next_action", `String record.operator_next_action);
+    ("updated_at", `String record.updated_at);
+  ]
+
+let attempt_record_of_json = function
+  | `Assoc fields -> (
+      match
+        ( List.assoc_opt "connector_id" fields,
+          List.assoc_opt "generation" fields,
+          List.assoc_opt "attempt_id" fields,
+          List.assoc_opt "attempt_number" fields,
+          List.assoc_opt "last_attempt_result" fields,
+          List.assoc_opt "next_retry_at" fields,
+          List.assoc_opt "operator_next_action" fields,
+          List.assoc_opt "updated_at" fields )
+      with
+      | Some (`String connector_id), Some (`Int generation),
+        Some (`String attempt_id), Some (`Int attempt_number),
+        Some (`String last_attempt_result), next_retry_at,
+        Some (`String operator_next_action), Some (`String updated_at) ->
+          let next_retry_at =
+            match next_retry_at with
+            | Some (`String value) -> Some value
+            | Some `Null | None -> None
+            | _ -> None
+          in
+          Some
+            {
+              connector_id;
+              generation;
+              attempt_id;
+              attempt_number;
+              last_attempt_result;
+              next_retry_at;
+              operator_next_action;
+              updated_at;
+            }
+      | _ -> None)
+  | _ -> None
+
+let desired_record_json (record : desired_record) =
+  `Assoc [
+    ("connector_id", `String record.connector_id);
+    ("desired_state", `String (desired_state_to_string record.desired_state));
+    ("generation", `Int record.generation);
+    ("updated_by", `String record.updated_by);
+    ("updated_at", `String record.updated_at);
+  ]
+
+let desired_record_of_json = function
+  | `Assoc fields -> (
+      match
+        ( List.assoc_opt "connector_id" fields,
+          List.assoc_opt "desired_state" fields,
+          List.assoc_opt "generation" fields,
+          List.assoc_opt "updated_by" fields,
+          List.assoc_opt "updated_at" fields )
+      with
+      | Some (`String connector_id), Some (`String desired_state), Some (`Int generation),
+        Some (`String updated_by), Some (`String updated_at) ->
+          desired_state_of_string desired_state
+          |> Option.map (fun desired_state ->
+                 { connector_id; desired_state; generation; updated_by; updated_at })
+      | _ -> None)
+  | _ -> None
+
+let sidecar_desired_path ~base_path id =
+  Filename.concat base_path
+    (Printf.sprintf ".gate/runtime/%s/sidecar_lifecycle_desired.json" id)
+
+let sidecar_attempt_path ~base_path id =
+  Filename.concat base_path
+    (Printf.sprintf ".gate/runtime/%s/sidecar_lifecycle_attempt.json" id)
+
+let read_desired_record ~base_path id =
+  let path = sidecar_desired_path ~base_path id in
+  if not (Sys.file_exists path) then
+    None
+  else
+    try read_file path |> Yojson.Safe.from_string |> desired_record_of_json
+    with Sys_error _ | Yojson.Json_error _ -> None
+
+let read_attempt_record ~base_path id =
+  let path = sidecar_attempt_path ~base_path id in
+  if not (Sys.file_exists path) then
+    None
+  else
+    try read_file path |> Yojson.Safe.from_string |> attempt_record_of_json
+    with Sys_error _ | Yojson.Json_error _ -> None
+
+let isoish_now () =
+  let tm = Unix.gmtime (Unix.time ()) in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min tm.tm_sec
+
+let isoish_at ts =
+  let tm = Unix.gmtime ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min tm.tm_sec
+
+(** Make sure [.gate/runtime/<id>/] exists before atomic_write_file
+    tries to rename into it. *)
+let ensure_parent_dir path =
+  let dir = Filename.dirname path in
+  let rec mk d =
+    if Sys.file_exists d then ()
+    else begin
+      mk (Filename.dirname d);
+      try Unix.mkdir d 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+    end
+  in
+  mk dir
+
+(** Atomic write: tmp file + rename. POSIX rename is atomic so a
+    concurrent reader sees either the old file or the new one, never a
+    half-written one. Inlined here rather than reaching into
+    Keeper_toml_loader (which keeps it as a private helper). *)
+let atomic_write_file ~(path : string) (content : string) : (unit, string) result =
+  let tmp = path ^ ".tmp" in
+  try
+    let oc = open_out tmp in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc content);
+    Sys.rename tmp path;
+    Ok ()
+  with exn ->
+    (try Sys.remove tmp with Sys_error _ -> ());
+    Error (Printf.sprintf "atomic write failed: %s" (Printexc.to_string exn))
+
+let write_desired_record ?updated_at ~base_path ~id ~updated_by desired_state =
+  let previous = read_desired_record ~base_path id in
+  let generation =
+    match previous with
+    | Some record -> record.generation + 1
+    | None -> 1
+  in
+  let record =
+    {
+      connector_id = id;
+      desired_state;
+      generation;
+      updated_by;
+      updated_at = Option.value updated_at ~default:(isoish_now ());
+    }
+  in
+  let path = sidecar_desired_path ~base_path id in
+  ensure_parent_dir path;
+  match atomic_write_file ~path (Yojson.Safe.to_string (desired_record_json record) ^ "\n") with
+  | Ok () -> Ok record
+  | Error _ as error -> error
+
+let write_attempt_record ~base_path ~id record =
+  let path = sidecar_attempt_path ~base_path id in
+  ensure_parent_dir path;
+  atomic_write_file ~path (Yojson.Safe.to_string (attempt_record_json record) ^ "\n")
+
+let observed_state_of_status_json = function
+  | `Assoc fields -> (
+      match List.assoc_opt "available" fields with
+      | Some (`Bool true) -> Observed_available
+      | _ -> Observed_unavailable)
+  | _ -> Observed_unavailable
+
+(** Backoff window between repeated same-generation reconcile start
+    dispatches. Default 30s, overridable via [MASC_SIDECAR_RECONCILE_BACKOFF_SEC]
+    (#8930 consolidation). *)
+let retry_backoff_seconds () =
+  Env_config_runtime.Sidecar.reconcile_backoff_sec
+
+(** Compare backoff deadline against [now] in unix-epoch seconds. Parses both
+    sides via [Types_core.parse_iso8601_opt] so that an ISO string that
+    serialises before-but-sorts-after (e.g. drift between timezones or a
+    clock skew) still resolves to the correct ordering. Fail-closed: if
+    either side fails to parse (malformed sidecar or boundary layer drift),
+    treat the backoff as inactive so reconcile retries instead of stalling.
+    See #8930 phase 3. *)
+let retry_backoff_active ~now attempt =
+  match attempt.next_retry_at with
+  | None -> false
+  | Some next_retry_at ->
+      (match
+         ( Types_core.parse_iso8601_opt next_retry_at,
+           Types_core.parse_iso8601_opt now )
+       with
+      | Some next_unix, Some now_unix -> next_unix > now_unix
+      | _ -> false)
+
+let next_attempt_record ~now ~next_retry_at previous (record : desired_record) =
+  let attempt_number =
+    match previous with
+    | Some attempt when attempt.generation = record.generation ->
+        attempt.attempt_number + 1
+    | _ -> 1
+  in
+  {
+    connector_id = record.connector_id;
+    generation = record.generation;
+    attempt_id = Printf.sprintf "%d:%d" record.generation attempt_number;
+    attempt_number;
+    last_attempt_result = "start_dispatched";
+    next_retry_at = Some next_retry_at;
+    operator_next_action =
+      "wait for observed status, or open logs if the sidecar remains offline after backoff";
+    updated_at = now;
+  }
+
+let reconcile_desired_once
+    ?(now = isoish_now ())
+    ?(next_retry_at = isoish_at (Unix.time () +. retry_backoff_seconds ()))
+    ?previous_attempt
+    ?(write_attempt = fun (_ : attempt_record) -> Ok ())
+    ~current_generation
+    ~observed_state
+    ~start_shell
+    (record : desired_record) =
+  if record.generation <> current_generation then
+    Reconcile_noop "stale_generation"
+  else
+    match (record.desired_state, observed_state) with
+    | Desired_running, Observed_unavailable ->
+        (match previous_attempt with
+         | Some attempt
+           when attempt.generation = record.generation
+                && retry_backoff_active ~now attempt ->
+             Reconcile_noop "backoff_active"
+         | _ ->
+             let attempt =
+               next_attempt_record ~now ~next_retry_at previous_attempt record
+             in
+             (match write_attempt attempt with
+              | Ok () ->
+                  start_shell ();
+                  Reconcile_started
+              | Error _ -> Reconcile_noop "attempt_write_failed"))
+    | Desired_running, Observed_available -> Reconcile_noop "already_available"
+    | Desired_stopped, _ -> Reconcile_noop "desired_stopped"
+
+let reconcile_preview ?now ?previous_attempt (record : desired_record) observed_state =
+  match (record.desired_state, observed_state) with
+  | Desired_running, Observed_unavailable -> (
+      let now = Option.value now ~default:(isoish_now ()) in
+      match previous_attempt with
+      | Some attempt
+        when attempt.generation = record.generation
+             && retry_backoff_active ~now attempt ->
+          "noop:backoff_active"
+      | _ -> "would_start")
+  | Desired_running, Observed_available -> "noop:already_available"
+  | Desired_stopped, _ -> "noop:desired_stopped"
+
+let attempt_fields = function
+  | None ->
+      [
+        ("last_attempt_result", `Null);
+        ("next_retry_at", `Null);
+        ("operator_next_action", `Null);
+      ]
+  | Some attempt ->
+      [
+        ("last_attempt_result", `String attempt.last_attempt_result);
+        ( "next_retry_at",
+          match attempt.next_retry_at with
+          | Some value -> `String value
+          | None -> `Null );
+        ("operator_next_action", `String attempt.operator_next_action);
+        ("attempt_id", `String attempt.attempt_id);
+      ]
+
+let lifecycle_json ~base_path id status_json =
+  let observed_state = observed_state_of_status_json status_json in
+  let previous_attempt = read_attempt_record ~base_path id in
+  match read_desired_record ~base_path id with
+  | None ->
+      `Assoc
+        ([
+          ("desired_state", `Null);
+          ("desired_generation", `Null);
+          ("observed_state", `String (observed_state_to_string observed_state));
+          ("reconcile_result", `String "none");
+        ]
+        @ attempt_fields previous_attempt)
+  | Some record ->
+      `Assoc
+        ([
+          ("desired_state", `String (desired_state_to_string record.desired_state));
+          ("desired_generation", `Int record.generation);
+          ("desired_updated_by", `String record.updated_by);
+          ("desired_updated_at", `String record.updated_at);
+          ("observed_state", `String (observed_state_to_string observed_state));
+          ( "reconcile_result",
+            `String (reconcile_preview ?previous_attempt record observed_state) );
+        ]
+        @ attempt_fields previous_attempt)
+
+let append_assoc key value = function
+  | `Assoc fields -> `Assoc (fields @ [ (key, value) ])
+  | json -> json
+
 (** Clamp the [?lines=N] query param to [1, 1000]. Pure so unit tests
     can pin the upper bound without a request mock. *)
 let clamp_lines = function
@@ -362,21 +726,27 @@ let read_status_json ~base_path id =
       ~base_path
       id
   in
-  if Sys.file_exists path then
+  let status =
+    if Sys.file_exists path then
     let body = read_file path in
-    let parsed = try Some (Yojson.Safe.from_string body) with _ -> None in
+    let parsed =
+      try Some (Yojson.Safe.from_string body)
+      with Yojson.Json_error _ -> None
+    in
     `Assoc [
       ("ok", `Bool true);
       ("available", `Bool true);
       ("status_path", `String path);
       ("status", Option.value parsed ~default:`Null);
     ]
-  else
+    else
     `Assoc [
       ("ok", `Bool true);
       ("available", `Bool false);
       ("status_path", `String path);
     ]
+  in
+  append_assoc "sidecar_lifecycle" (lifecycle_json ~base_path id status) status
 
 let handle_status state request reqd =
   match parse_name request with
@@ -395,29 +765,40 @@ let handle_stop state request reqd =
            respond_json request reqd ~status:`Service_unavailable
              (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
        | Ok script ->
-           let (_status, stdout) =
-             Process_eio.run_argv_with_status ~timeout_sec:5.0
-               [ script; "stop" ]
-           in
-           let trimmed = String.trim stdout in
-           let signaled_marker =
-             Printf.sprintf "Sent SIGTERM to %s-bot processes." id
-           in
-           let signaled =
-             let needle_len = String.length signaled_marker in
-             let rec contains i =
-               if i + needle_len > String.length trimmed then false
-               else if String.equal (String.sub trimmed i needle_len) signaled_marker then true
-               else contains (i + 1)
-             in
-             contains 0
-           in
-           respond_json request reqd ~status:`OK
-             (`Assoc [
-                ("ok", `Bool true);
-                ("signaled", `Bool signaled);
-                ("note", `String trimmed);
-              ]))
+           (match
+              write_desired_record ~base_path ~id ~updated_by:"http:stop"
+                Desired_stopped
+            with
+            | Error msg ->
+                respond_json request reqd ~status:`Internal_server_error
+                  (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
+            | Ok desired ->
+                let (_status, stdout) =
+                  Process_eio.run_argv_with_status ~timeout_sec:5.0
+                    [ script; "stop" ]
+                in
+                let trimmed = String.trim stdout in
+                let signaled_marker =
+                  Printf.sprintf "Sent SIGTERM to %s-bot processes." id
+                in
+                let signaled =
+                  let needle_len = String.length signaled_marker in
+                  let rec contains i =
+                    if i + needle_len > String.length trimmed then false
+                    else if String.equal (String.sub trimmed i needle_len) signaled_marker then true
+                    else contains (i + 1)
+                  in
+                  contains 0
+                in
+                respond_json request reqd ~status:`OK
+                  (`Assoc [
+                     ("ok", `Bool true);
+                     ("signaled", `Bool signaled);
+                     ("note", `String trimmed);
+                     ("desired_state", `String (desired_state_to_string desired.desired_state));
+                     ("desired_generation", `Int desired.generation);
+                     ("stop_semantics", `String "synchronous_stop_with_desired_fence");
+                   ])))
 
 let handle_logs state request reqd =
   match parse_name request with
@@ -559,15 +940,16 @@ let render_toml (pairs : (string * toml_value) list) : string =
 
 type declared_type = [ `String | `Integer | `Number | `Boolean ]
 
-let parse_declared_type json : declared_type =
+let parse_declared_type json : declared_type option =
   match json with
   | `Assoc _ ->
       (match Yojson.Safe.Util.member "type" json with
-       | `String "integer" -> `Integer
-       | `String "number" -> `Number
-       | `String "boolean" -> `Boolean
-       | _ -> `String)
-  | _ -> `String
+       | `String "string" -> Some `String
+       | `String "integer" -> Some `Integer
+       | `String "number" -> Some `Number
+       | `String "boolean" -> Some `Boolean
+       | _ -> None)
+  | _ -> None
 
 let schema_field_types ?base_path id : (string * declared_type) list =
   match fetch_schema ?base_path id with
@@ -576,7 +958,11 @@ let schema_field_types ?base_path id : (string * declared_type) list =
       (match Yojson.Safe.from_string json_str with
        | j ->
            (match Yojson.Safe.Util.member "properties" j with
-            | `Assoc assoc -> List.map (fun (k, v) -> (k, parse_declared_type v)) assoc
+            | `Assoc assoc ->
+                List.filter_map
+                  (fun (k, v) ->
+                     Option.map (fun typ -> (k, typ)) (parse_declared_type v))
+                  assoc
             | _ -> [])
        | exception _ -> [])
 
@@ -603,36 +989,6 @@ let config_toml_path ~base_path id =
   Filename.concat base_path
     (Printf.sprintf ".gate/runtime/%s/config.toml" id)
 
-(** Atomic write: tmp file + rename. POSIX rename is atomic so a
-    concurrent reader sees either the old file or the new one, never a
-    half-written one. Inlined here rather than reaching into
-    Keeper_toml_loader (which keeps it as a private helper). *)
-let atomic_write_file ~(path : string) (content : string) : (unit, string) result =
-  let tmp = path ^ ".tmp" in
-  try
-    let oc = open_out tmp in
-    Fun.protect
-      ~finally:(fun () -> try close_out oc with _ -> ())
-      (fun () -> output_string oc content);
-    Sys.rename tmp path;
-    Ok ()
-  with exn ->
-    (try Sys.remove tmp with _ -> ());
-    Error (Printf.sprintf "atomic write failed: %s" (Printexc.to_string exn))
-
-(** Make sure [.gate/runtime/<id>/] exists before atomic_write_file
-    tries to rename into it. *)
-let ensure_parent_dir path =
-  let dir = Filename.dirname path in
-  let rec mk d =
-    if Sys.file_exists d then ()
-    else begin
-      mk (Filename.dirname d);
-      try Unix.mkdir d 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-    end
-  in
-  mk dir
-
 (** Parse a JSON body of the form [{"<KEY>": "<VALUE>", ...}] into a
     list of pairs. All values are expected as JSON strings (the
     dashboard form emits them that way) — richer JSON types are
@@ -654,7 +1010,7 @@ let parse_body_pairs body_str : ((string * string) list, string) result =
       ) assoc in
       Ok pairs
   | _ -> Error "body must be a JSON object"
-  | exception _ -> Error "body is not valid JSON"
+  | exception Yojson.Json_error _ -> Error "body is not valid JSON"
 
 (** GET /api/v1/sidecar/config?name=<id>
 
@@ -683,7 +1039,7 @@ let handle_get_config _state request reqd =
       else
         let content =
           try In_channel.with_open_text path In_channel.input_all
-          with _ -> ""
+          with Sys_error _ -> ""
         in
         (match Keeper_toml_loader.parse_toml content with
          | Error msg ->
@@ -800,23 +1156,41 @@ let handle_start state request reqd =
            respond_json request reqd ~status:`Service_unavailable
              (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
        | Ok script ->
-           (* Detach: run via setsid + nohup so the sidecar survives backend
-              restart. Only [script] is interpolated, and the path comes from
-              a resolved directory + fixed filename, so [Filename.quote] gives
-              a closed-shell injection surface. *)
-           let cmd =
-             Printf.sprintf
-               "MASC_BASE_PATH=%s setsid nohup %s start </dev/null >/dev/null 2>&1 &"
-               (Filename.quote base_path)
-               (Filename.quote script)
-           in
-           let _ = Sys.command cmd in
-           respond_json request reqd ~status:`Accepted
-             (`Assoc [
-                ("ok", `Bool true);
-                ("id", `String id);
-                ("note", `String "sidecar spawn requested; poll /api/v1/sidecar/status?name=...");
-              ]))
+           (match
+              write_desired_record ~base_path ~id ~updated_by:"http:start"
+                Desired_running
+            with
+            | Error msg ->
+                respond_json request reqd ~status:`Internal_server_error
+                  (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
+            | Ok desired ->
+                (* Detach: run via setsid + nohup so the sidecar survives backend
+                   restart. Only [script] is interpolated, and the path comes from
+                   a resolved directory + fixed filename, so [Filename.quote] gives
+                   a closed-shell injection surface. *)
+                let cmd = sidecar_start_shell_command ~base_path ~script in
+                let status_json = read_status_json ~base_path id in
+                let observed_state = observed_state_of_status_json status_json in
+                let previous_attempt = read_attempt_record ~base_path id in
+                let reconcile_result =
+                  reconcile_desired_once
+                    ~current_generation:desired.generation
+                    ?previous_attempt
+                    ~observed_state
+                    ~write_attempt:(write_attempt_record ~base_path ~id)
+                    ~start_shell:(fun () -> ignore (Sys.command cmd))
+                    desired
+                in
+                respond_json request reqd ~status:`Accepted
+                  (`Assoc [
+                     ("ok", `Bool true);
+                     ("id", `String id);
+                     ("desired_state", `String (desired_state_to_string desired.desired_state));
+                     ("desired_generation", `Int desired.generation);
+                     ("observed_state", `String (observed_state_to_string observed_state));
+                     ("reconcile_result", `String (reconcile_result_to_string reconcile_result));
+                     ("note", `String "sidecar desired state updated; poll /api/v1/sidecar/status?name=...");
+                   ])))
 
 (** Register sidecar lifecycle routes on the router. *)
 let add_routes ~sw:_ ~clock:_ router =

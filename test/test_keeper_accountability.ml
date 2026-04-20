@@ -36,6 +36,10 @@ let make_test_meta ?(name = "keeper-sangsu") ?(agent_name = "keeper-sangsu-agent
                ("name", `String name);
                ("agent_name", `String agent_name);
                ("trace_id", `String "test-trace-accountability");
+               ( "tool_access",
+                 Keeper_types.tool_access_to_json
+                   (Keeper_types.Preset
+                      { preset = Keeper_types.Full; also_allow = [] }) );
              ])
   with
   | Ok meta -> meta
@@ -163,6 +167,96 @@ let test_stale_completion_claim_sets_high_risk () =
       let first = List.hd history in
       check string "history status" "unsupported" (string_member "status" first))
 
+let test_agent_reputation_penalizes_unsupported_claims () =
+  with_room ~agent_name:"keeper-rep-agent" (fun config ->
+      ignore
+        (Coord.add_task config ~title:"Reputation task" ~priority:1
+           ~description:"desc");
+      ignore
+        (Coord.claim_task config ~agent_name:"keeper-rep-agent"
+           ~task_id:"task-001");
+      (match
+         Coord.transition_task_r config ~agent_name:"keeper-rep-agent"
+           ~task_id:"task-001" ~action:Types.Done_action ()
+       with
+      | Ok _ -> ()
+      | Error err ->
+          Alcotest.failf "done transition failed: %s"
+            (Types.masc_error_to_string err));
+      let created_at =
+        iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
+      in
+      append_accountability_event config.base_path ~created_at
+        (`Assoc
+           [
+             ("event_type", `String "claim_created");
+             ("claim_id", `String "acct-rep-unsupported");
+             ("agent_name", `String "keeper-rep-agent");
+             ("keeper_name", `String "keeper-rep");
+             ("kind", `String "completion_claim");
+             ("subject", `String "Unsupported claim");
+             ("surface", `String "keeper_turn");
+             ("created_at", `String created_at);
+             ("evidence_refs", `List []);
+             ("synthetic", `Bool false);
+           ]);
+      let unpenalized =
+        Agent_reputation.compute_overall_score ~completion_rate:1.0
+          ~response_rate:0.0 ~board_posts:0 ~board_comments:0
+      in
+      let rep =
+        Agent_reputation.compute_reputation config
+          ~agent_name:"keeper-rep-agent"
+      in
+      check int "tasks completed" 1 rep.tasks_completed;
+      check int "tasks claimed" 1 rep.tasks_claimed;
+      check string "accountability risk band" "high"
+        rep.accountability_risk_band;
+      check (float 0.0001) "unsupported completion rate" 1.0
+        rep.accountability_unsupported_completion_rate;
+      check (float 0.0001) "accountability score clamps to zero" 0.0
+        rep.accountability_score;
+      check bool "overall reputation penalized" true
+        (rep.overall_score < unpenalized))
+
+let test_generated_alias_inherits_accountability_penalty () =
+  with_room ~agent_name:"adversary-eager-viper" (fun config ->
+      let created_at =
+        iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
+      in
+      append_accountability_event config.base_path ~created_at
+        (`Assoc
+           [
+             ("event_type", `String "claim_created");
+             ("claim_id", `String "acct-adversary-unsupported");
+             ("agent_name", `String "keeper-adversary-agent");
+             ("keeper_name", `String "adversary");
+             ("kind", `String "completion_claim");
+             ("subject", `String "Unsupported canonical claim");
+             ("surface", `String "keeper_turn");
+             ("created_at", `String created_at);
+             ("evidence_refs", `List []);
+             ("synthetic", `Bool false);
+           ]);
+      let summary =
+        Keeper_accountability.accountability_summary_json config
+          ~keeper_name:"adversary" ~agent_name:"adversary-eager-viper"
+      in
+      check string "alias summary inherits canonical keeper risk" "high"
+        (string_member "risk_band" summary);
+      check (float 0.0001) "alias summary inherits unsupported rate" 1.0
+        (float_member "unsupported_completion_rate" summary);
+      let rep =
+        Agent_reputation.compute_reputation config
+          ~agent_name:"adversary-eager-viper"
+      in
+      check string "generated alias risk band" "high"
+        rep.accountability_risk_band;
+      check (float 0.0001) "generated alias unsupported rate" 1.0
+        rep.accountability_unsupported_completion_rate;
+      check (float 0.0001) "generated alias accountability score" 0.0
+        rep.accountability_score)
+
 let test_claim_tool_exposes_routing_warning_for_high_risk_keeper () =
   with_room (fun config ->
       let meta = make_test_meta () in
@@ -193,6 +287,45 @@ let test_claim_tool_exposes_routing_warning_for_high_risk_keeper () =
       check string "warning present"
         "⚠ Accountability risk is high for this keeper. Prefer manual review or lower-risk routing when equivalent."
         (string_member "routing_warning" result))
+
+let test_preflight_exposes_routing_hint_for_high_risk_keeper () =
+  with_room (fun config ->
+      let meta = make_test_meta () in
+      let created_at =
+        iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
+      in
+      append_accountability_event config.base_path ~created_at
+        (`Assoc
+           [
+             ("event_type", `String "claim_created");
+             ("claim_id", `String "acct-high-risk-preflight");
+             ("agent_name", `String "keeper-sangsu-agent");
+             ("keeper_name", `String "keeper-sangsu");
+             ("kind", `String "completion_claim");
+             ("subject", `String "Prior claim");
+             ("surface", `String "keeper_turn");
+             ("created_at", `String created_at);
+             ("evidence_refs", `List []);
+             ("synthetic", `Bool false);
+           ]);
+      let result =
+        Keeper_exec_tools.execute_keeper_tool_call
+          ~config ~meta ~ctx_work:(make_ctx_work ())
+          ~name:"keeper_preflight_check" ~input:(`Assoc []) ()
+        |> Yojson.Safe.from_string
+      in
+      check bool "accountability risk present" true
+        (Yojson.Safe.Util.(result |> member "accountability_risk" |> to_bool));
+      check string "risk band exposed" "high" (string_member "risk_band" result);
+      check string "routing hint exposed" "manual_review_recommended"
+        (string_member "routing_hint" result);
+      let repo_readiness =
+        Yojson.Safe.Util.(result |> member "repo_readiness")
+      in
+      check string "repo readiness state exposed" "missing_clone"
+        (Yojson.Safe.Util.(repo_readiness |> member "state" |> to_string));
+      check bool "repo readiness blocks code start without clone" false
+        (Yojson.Safe.Util.(repo_readiness |> member "ok" |> to_bool)))
 
 let test_synthetic_claims_do_not_dilute_unsupported_rate () =
   (* Regression: synthetic completion claims (created by task_transition "done")
@@ -257,6 +390,95 @@ let test_synthetic_claims_do_not_dilute_unsupported_rate () =
         (float_member "unsupported_completion_rate" summary);
       check string "risk band should be high" "high"
         (string_member "risk_band" summary))
+
+let test_summary_lookup_reads_window_once_for_multiple_agents () =
+  with_room (fun config ->
+      let created_at =
+        iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
+      in
+      List.iter
+        (fun (claim_id, keeper_name, agent_name, subject) ->
+          append_accountability_event config.base_path ~created_at
+            (`Assoc
+               [
+                 ("event_type", `String "claim_created");
+                 ("claim_id", `String claim_id);
+                 ("agent_name", `String agent_name);
+                 ("keeper_name", `String keeper_name);
+                 ("kind", `String "completion_claim");
+                 ("subject", `String subject);
+                 ("surface", `String "keeper_turn");
+                 ("created_at", `String created_at);
+                 ("evidence_refs", `List []);
+                 ("synthetic", `Bool false);
+               ]))
+        [
+          ("acct-a", "keeper-a", "keeper-a-agent", "Ship A");
+          ("acct-b", "keeper-b", "keeper-b-agent", "Ship B");
+        ];
+      Keeper_accountability.enable_window_read_count_for_testing ();
+      let read_count =
+        Fun.protect
+          ~finally:Keeper_accountability.disable_window_read_count_for_testing
+          (fun () ->
+            let lookup =
+              Keeper_accountability.accountability_summary_lookup config
+            in
+            let summary_a =
+              lookup ~keeper_name:"keeper-a" ~agent_name:"keeper-a-agent"
+            in
+            let summary_b =
+              lookup ~keeper_name:"keeper-b" ~agent_name:"keeper-b-agent"
+            in
+            check string "agent a risk" "high"
+              (string_member "risk_band" summary_a);
+            check string "agent b risk" "high"
+              (string_member "risk_band" summary_b);
+            Keeper_accountability.window_read_count_for_testing ())
+      in
+      check int "window read count" 1 read_count)
+
+let test_summary_json_rereads_window_per_agent () =
+  with_room (fun config ->
+      let created_at =
+        iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
+      in
+      List.iter
+        (fun (claim_id, keeper_name, agent_name, subject) ->
+          append_accountability_event config.base_path ~created_at
+            (`Assoc
+               [
+                 ("event_type", `String "claim_created");
+                 ("claim_id", `String claim_id);
+                 ("agent_name", `String agent_name);
+                 ("keeper_name", `String keeper_name);
+                 ("kind", `String "completion_claim");
+                 ("subject", `String subject);
+                 ("surface", `String "keeper_turn");
+                 ("created_at", `String created_at);
+                 ("evidence_refs", `List []);
+                 ("synthetic", `Bool false);
+               ]))
+        [
+          ("acct-json-a", "keeper-json-a", "keeper-json-a-agent", "Ship A");
+          ("acct-json-b", "keeper-json-b", "keeper-json-b-agent", "Ship B");
+        ];
+      Keeper_accountability.enable_window_read_count_for_testing ();
+      let read_count =
+        Fun.protect
+          ~finally:Keeper_accountability.disable_window_read_count_for_testing
+          (fun () ->
+            ignore
+              (Keeper_accountability.accountability_summary_json config
+                 ~keeper_name:"keeper-json-a"
+                 ~agent_name:"keeper-json-a-agent");
+            ignore
+              (Keeper_accountability.accountability_summary_json config
+                 ~keeper_name:"keeper-json-b"
+                 ~agent_name:"keeper-json-b-agent");
+            Keeper_accountability.window_read_count_for_testing ())
+      in
+      check int "window read count" 2 read_count)
 
 (* --- Attribution tests --- *)
 
@@ -348,10 +570,20 @@ let () =
             test_same_turn_evidence_marks_claim_supported;
           test_case "stale completion claim sets high risk" `Quick
             test_stale_completion_claim_sets_high_risk;
+          test_case "agent reputation penalizes unsupported claims" `Quick
+            test_agent_reputation_penalizes_unsupported_claims;
+          test_case "generated alias inherits accountability penalty" `Quick
+            test_generated_alias_inherits_accountability_penalty;
           test_case "claim tool exposes routing warning for high risk keeper"
             `Quick test_claim_tool_exposes_routing_warning_for_high_risk_keeper;
+          test_case "preflight exposes routing hint for high risk keeper"
+            `Quick test_preflight_exposes_routing_hint_for_high_risk_keeper;
           test_case "synthetic claims do not dilute unsupported rate" `Quick
             test_synthetic_claims_do_not_dilute_unsupported_rate;
+          test_case "summary lookup reads window once" `Quick
+            test_summary_lookup_reads_window_once_for_multiple_agents;
+          test_case "summary json rereads window per agent" `Quick
+            test_summary_json_rereads_window_per_agent;
         ] );
       ( "attribution",
         [

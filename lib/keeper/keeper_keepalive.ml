@@ -60,6 +60,12 @@ let () =
 
 let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit
 
+let turn_semaphore_value_for_test () =
+  Eio.Semaphore.get_value turn_semaphore
+
+let autonomous_turn_semaphore_value_for_test () =
+  Eio.Semaphore.get_value autonomous_turn_semaphore
+
 type autonomous_waiter =
   {
     ticket : int;
@@ -173,6 +179,27 @@ let record_autonomous_completion ~(keeper_name : string) : unit =
   with_completion_table (fun () ->
     Hashtbl.replace last_autonomous_completion keeper_name
       (Time_compat.now ()))
+
+type keeper_turn_slot_state = {
+  acquired_autonomous : bool ref;
+  acquired_turn : bool ref;
+  autonomous_ticket : int option ref;
+}
+
+let release_keeper_turn_slot ~keeper_name state =
+  Option.iter
+    (fun ticket -> drop_autonomous_waiter ~ticket)
+    !(state.autonomous_ticket);
+  (* Release exactly what we acquired. Order does not matter because
+     these two semaphores do not contend with each other. *)
+  if !(state.acquired_turn) then Eio.Semaphore.release turn_semaphore;
+  if !(state.acquired_autonomous) then begin
+    (* Stamp completion time BEFORE releasing the semaphore so that
+       [maybe_yield_for_fairness] can measure the correct interval
+       when this keeper's heartbeat loops back immediately. *)
+    record_autonomous_completion ~keeper_name;
+    Eio.Semaphore.release autonomous_turn_semaphore
+  end
 
 let reset_autonomous_completion_for_test () : unit =
   with_completion_table (fun () ->
@@ -295,9 +322,13 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
      path fires (Semaphore_wait_timeout, Eio.Cancel.Cancelled, or any
      other). This keeps resource cleanup independent of Eio.Semaphore's
      internal cancel-race handling. *)
-  let acquired_autonomous = ref false in
-  let acquired_turn = ref false in
-  let autonomous_ticket = ref None in
+  let slot_state =
+    {
+      acquired_autonomous = ref false;
+      acquired_turn = ref false;
+      autonomous_ticket = ref None;
+    }
+  in
   let acquire_bounded ~label sem =
     match Eio_context.get_clock_opt () with
     | Some clock ->
@@ -326,18 +357,7 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
       Eio.Semaphore.acquire sem
   in
   Fun.protect
-    ~finally:(fun () ->
-      Option.iter (fun ticket -> drop_autonomous_waiter ~ticket) !autonomous_ticket;
-      (* Release exactly what we acquired. Order does not matter because
-         these two semaphores do not contend with each other. *)
-      if !acquired_turn then Eio.Semaphore.release turn_semaphore;
-      if !acquired_autonomous then begin
-        (* Stamp completion time BEFORE releasing the semaphore so that
-           [maybe_yield_for_fairness] can measure the correct interval
-           when this keeper's heartbeat loops back immediately. *)
-        record_autonomous_completion ~keeper_name;
-        Eio.Semaphore.release autonomous_turn_semaphore
-      end)
+    ~finally:(fun () -> release_keeper_turn_slot ~keeper_name slot_state)
     (fun () ->
       if is_autonomous then begin
         (* Fairness cooldown: if this keeper recently completed a turn and
@@ -346,18 +366,22 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
            See [maybe_yield_for_fairness] and #6810. *)
         maybe_yield_for_fairness ~keeper_name;
         let ticket = enqueue_autonomous_waiter ~keeper_name in
-        autonomous_ticket := Some ticket;
+        slot_state.autonomous_ticket := Some ticket;
         wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at:t0;
         acquire_bounded ~label:"autonomous" autonomous_turn_semaphore;
-        acquired_autonomous := true;
+        slot_state.acquired_autonomous := true;
         drop_autonomous_waiter ~ticket;
-        autonomous_ticket := None
+        slot_state.autonomous_ticket := None
       end;
       acquire_bounded ~label:"turn" turn_semaphore;
-      acquired_turn := true;
+      slot_state.acquired_turn := true;
       let semaphore_wait_ms =
         int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
       f ~semaphore_wait_ms)
+;;
+
+let with_keeper_turn_slot_for_test ~keeper_name ~channel f =
+  with_keeper_turn_slot ~keeper_name ~channel f
 ;;
 
 (** Optional gRPC client + env — WORM Atomic: set at server bootstrap
@@ -578,17 +602,12 @@ let write_heartbeat_snapshot
     Cascade_runtime.models_of_cascade_name meta_current.cascade_name
   in
   let max_cascade_context =
-    let min_keeper_context = Keeper_config.min_keeper_context_tokens in
-    let raw = match meta_current.max_context_override with
-      | Some v -> v
-      | None ->
-          let resolved =
-            Cascade_runtime.resolve_max_cascade_context cascade_models
-          in
-          Cascade_runtime.clamp_context_for_pure_local_labels
-            ~labels:cascade_models ~max_context:resolved
+    let resolution =
+      Keeper_exec_context.resolve_max_context_resolution
+        ~requested_override:meta_current.max_context_override
+        cascade_models
     in
-    max min_keeper_context raw
+    resolution.effective_budget
   in
   let base_dir = session_base_dir ctx.config in
   ignore (Keeper_fs.ensure_dir (Filename.concat base_dir (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)));
@@ -1887,12 +1906,15 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
     m
 ;;
 
-let publish_keeper_lifecycle ?phase ~event ~keeper_name ~detail () : unit =
+(* #8856: hook takes the unified
+   [Keeper_lifecycle_events.lifecycle_event] variant. *)
+let publish_keeper_lifecycle
+    ~(event : Keeper_lifecycle_events.lifecycle_event)
+    ~keeper_name ~detail () : unit =
   match get_bus () with
   | Some bus ->
     Oas_events.publish_keeper_lifecycle
       bus
-      ?phase
       ~event
       ~keeper_name
       ~detail
@@ -1900,21 +1922,18 @@ let publish_keeper_lifecycle ?phase ~event ~keeper_name ~detail () : unit =
   | None -> ()
 ;;
 
-(** Issue #8572: phase-derived event helper.
-
-    Use this when the lifecycle event name is the phase itself
-    (e.g. [Stopped → "stopped"]). Keeps [event_to_string] from being
-    hand-recomputed at every call site, eliminating the
-    [~phase:Stopped ~event:"crashed"]-style typo class. *)
+(** Phase-event helper: the wire event name IS the phase name. *)
 let publish_keeper_phase_lifecycle ~phase ~keeper_name ~detail () : unit =
-  let event = Keeper_state_machine.phase_to_string phase in
-  publish_keeper_lifecycle ~phase ~event ~keeper_name ~detail ()
+  publish_keeper_lifecycle
+    ~event:(Keeper_lifecycle_events.Phase_event phase)
+    ~keeper_name ~detail ()
 ;;
 
 let publish_keeper_started ~(live_meta : keeper_meta) : unit =
   publish_keeper_lifecycle
-    ~phase:Keeper_state_machine.Running
-    ~event:"started"
+    ~event:(Keeper_lifecycle_events.Custom_event
+              { verb = Keeper_lifecycle_events.Started;
+                phase = Some Keeper_state_machine.Running })
     ~keeper_name:live_meta.name
     ~detail:"keepalive"
     ()

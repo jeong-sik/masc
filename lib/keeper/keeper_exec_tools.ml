@@ -246,6 +246,12 @@ let execute_keeper_tool_call_with_outcome
     | "keeper_bash" ->
       make_executed_tool_result
         (Keeper_exec_shell.handle_keeper_bash ~config ~meta ~args)
+    | "keeper_bash_output" ->
+      make_executed_tool_result
+        (Keeper_exec_shell.handle_keeper_bash_output ~config ~meta ~args)
+    | "keeper_bash_kill" ->
+      make_executed_tool_result
+        (Keeper_exec_shell.handle_keeper_bash_kill ~config ~meta ~args)
     | "keeper_shell" ->
       make_executed_tool_result
         (Keeper_exec_shell.handle_keeper_shell ~config ~meta ~args)

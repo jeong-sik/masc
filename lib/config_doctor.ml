@@ -71,10 +71,12 @@ let canonicalize_path ~cwd path =
   | Unix.Unix_error _ | Sys_error _ | Invalid_argument _ -> absolute
 
 let local_base_config_root ~base_path =
-  Filename.concat (Filename.concat base_path ".masc") "config"
+  Filename.concat
+    (Coord_utils.masc_dir_from_base_path ~base_path)
+    "config"
 
 let runtime_data_root ~base_path =
-  Filename.concat base_path ".masc"
+  Coord_utils.masc_dir_from_base_path ~base_path
 
 let repo_config_seed_path (inputs : inputs) =
   [
@@ -102,7 +104,7 @@ let current_inputs ~base_path_input ~default_base_path () =
     | Some source -> Some source
     | None ->
         let inherited_env_matches =
-          match Sys.getenv_opt "MASC_BASE_PATH" with
+          match Sys.getenv_opt Env_config_core.base_path_env_key with
           | Some existing ->
               String.equal
                 (Env_config_core.normalize_masc_base_path_input existing)

@@ -33,20 +33,35 @@ let node_status_to_string = function
   | Stopped -> "stopped" | Finalized -> "finalized"
   | Observed -> "observed" | Coord -> "room" | Unset -> ""
 
-let node_status_of_string = function
-  | "active" -> Active | "offline" -> Offline | "spawned" -> Spawned
-  | "retired" -> Retired | "compacting" -> Compacting | "handoff" -> Handoff
-  | "autonomy" -> Autonomy | "guardrail" -> Guardrail
-  | "todo" -> Todo | "claimed" -> Claimed | "in_progress" -> In_progress
-  | "done" -> Done | "cancelled" -> Cancelled
-  | "posted" -> Posted | "discussed" -> Discussed
-  | "open" -> Open | "resolved" -> Resolved
-  | "approved" -> Approved | "denied" -> Denied
-  | "running" -> Running | "paused" -> Paused
-  | "stopped" -> Stopped | "finalized" -> Finalized
-  | "observed" -> Observed | "room" -> Coord
-  | "" -> Unset
-  | _ -> Observed  (* fail-open: unknown status treated as generic *)
+(** Strict parser. Returns [None] on unknown wire so callers can react
+    explicitly (drop / fallback / route). See #8777 / #8605. *)
+let node_status_of_string_opt = function
+  | "active" -> Some Active | "offline" -> Some Offline | "spawned" -> Some Spawned
+  | "retired" -> Some Retired | "compacting" -> Some Compacting | "handoff" -> Some Handoff
+  | "autonomy" -> Some Autonomy | "guardrail" -> Some Guardrail
+  | "todo" -> Some Todo | "claimed" -> Some Claimed | "in_progress" -> Some In_progress
+  | "done" -> Some Done | "cancelled" -> Some Cancelled
+  | "posted" -> Some Posted | "discussed" -> Some Discussed
+  | "open" -> Some Open | "resolved" -> Some Resolved
+  | "approved" -> Some Approved | "denied" -> Some Denied
+  | "running" -> Some Running | "paused" -> Some Paused
+  | "stopped" -> Some Stopped | "finalized" -> Some Finalized
+  | "observed" -> Some Observed | "room" -> Some Coord
+  | "" -> Some Unset
+  | _ -> None
+
+(** Back-compat wrapper: unknown wire still falls back to [Observed] but a
+    [Log.Misc.warn] is emitted so producer/consumer drift surfaces in
+    operator logs instead of silently misclassifying the node. The previous
+    `_ -> Observed` arm was explicitly documented as "fail-open"; that
+    posture is preserved here, just observable. See #8777. *)
+let node_status_of_string s =
+  match node_status_of_string_opt s with
+  | Some v -> v
+  | None ->
+      Log.Misc.warn
+        "activity_graph: unknown node_status wire %S -> Observed (drift; see #8777)" s;
+      Observed
 
 (** Span status: separate from node_status (different lifecycle).
     @since 7182 *)
@@ -61,12 +76,33 @@ let span_status_to_string = function
   | Span_finalized -> "finalized" | Span_stopped -> "stopped"
   | Span_ended -> "ended"
 
-let span_status_of_string = function
-  | "open" -> Span_open | "completed" -> Span_completed
-  | "released" -> Span_released | "cancelled" -> Span_cancelled
-  | "left" -> Span_left | "retired" -> Span_retired
-  | "finalized" -> Span_finalized | "stopped" -> Span_stopped
-  | _ -> Span_ended
+(** Strict parser. Returns [None] on unknown wire so callers can react
+    explicitly (drop / fallback / route). Mirror of [node_status_of_string_opt]
+    introduced in #8779. See #8605. *)
+let span_status_of_string_opt = function
+  | "open" -> Some Span_open
+  | "completed" -> Some Span_completed
+  | "released" -> Some Span_released
+  | "cancelled" -> Some Span_cancelled
+  | "left" -> Some Span_left
+  | "retired" -> Some Span_retired
+  | "finalized" -> Some Span_finalized
+  | "stopped" -> Some Span_stopped
+  | "ended" -> Some Span_ended
+  | _ -> None
+
+(** Back-compat wrapper: unknown wire still falls back to [Span_ended]
+    (the legacy permissive default), but a [Log.Misc.warn] is emitted so
+    producer/consumer drift surfaces in operator logs instead of silently
+    misclassifying the span as terminal. Same template as
+    [node_status_of_string] (#8779). See #8605. *)
+let span_status_of_string s =
+  match span_status_of_string_opt s with
+  | Some v -> v
+  | None ->
+      Log.Misc.warn
+        "activity_graph: unknown span_status wire %S -> Span_ended (drift; see #8605)" s;
+      Span_ended
 
 type entity_ref = {
   kind : string;

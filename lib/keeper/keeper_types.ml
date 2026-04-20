@@ -200,15 +200,16 @@ let legacy_session_min_tool_names =
   (* Legacy keepers historically received canonical masc_* coordination tools,
      not the SDK alias-heavy Session_min surface. Keep this compatibility list
      explicit so missing tool_access migration remains stable after tier removal. *)
-  [
-    "masc_status";
-    "masc_tasks";
-    "masc_claim_next";
-    "masc_plan_set_task";
-    "masc_transition";
-    "masc_add_task";
-    "masc_broadcast";
-  ]
+  List.map Tool_name.Masc.to_string
+    Tool_name.Masc.[
+      Status;
+      Tasks;
+      Claim_next;
+      Plan_set_task;
+      Transition;
+      Add_task;
+      Broadcast;
+    ]
 
 let migrate_legacy_restricted_tools names =
   Custom (normalize_tool_names (legacy_keeper_internal_tool_names @ names))
@@ -1582,9 +1583,20 @@ let keepalive_keeper_names config =
   configured_keeper_names config
   |> List.filter_map (fun name ->
     match read_meta_file_path (keeper_meta_path config name) with
-    | Ok (Some meta) when not meta.paused && meta.autoboot_enabled -> Some meta.name
+    | Ok (Some meta) when not meta.paused && meta.autoboot_enabled ->
+        Some meta.name
+    | Ok (Some _) -> None  (* paused or autoboot disabled *)
     | Ok None -> Some name
-    | _ -> None)
+    | Error msg ->
+        (* Issue #8377: was [_ -> None] which collapsed read/parse
+           failures silently into "name disappeared". Discovery would
+           treat a corrupt meta file as if the keeper was deleted,
+           hiding the operational issue. Now logs and excludes — the
+           degraded state is operator-visible. *)
+        Log.Keeper.warn
+          "keepalive_keeper_names: meta read failed for %s, dropping \
+           from keepalive set: %s" name msg;
+        None)
 ;;
 
 (** Names of keepers that should be running across sessions.
@@ -1598,8 +1610,19 @@ let persistent_agent_names config =
   configured_keeper_names config
   |> List.filter_map (fun name ->
     match read_meta_file_path (keeper_meta_path config name) with
-    | Ok (Some meta) when not meta.paused && meta.autoboot_enabled -> Some meta.name
-    | _ -> None)
+    | Ok (Some meta) when not meta.paused && meta.autoboot_enabled ->
+        Some meta.name
+    | Ok (Some _) -> None  (* paused or autoboot disabled *)
+    | Ok None -> None      (* meta file absent -> not persistent *)
+    | Error msg ->
+        (* Issue #8377: same anti-pattern as keepalive_keeper_names —
+           Error was silently collapsed into None. Operator can't
+           distinguish "keeper intentionally not persistent" from
+           "meta file is corrupt and we couldn't read it". *)
+        Log.Keeper.warn
+          "persistent_agent_names: meta read failed for %s, treating \
+           as non-persistent: %s" name msg;
+        None)
 
 let fresher_meta config (meta : keeper_meta) : keeper_meta =
   match read_meta_file_path (keeper_meta_path config meta.name) with
@@ -1696,7 +1719,15 @@ let read_meta_if_changed config name ~(last_mtime : float)
       | Some mtime when mtime > last_mtime ->
           (match read_meta_file_path path with
           | Ok (Some meta) -> Some (meta, mtime)
-          | _ -> None)
+          | Ok None -> None  (* file existed at mtime check but absent on read *)
+          | Error msg ->
+              (* Issue #8377: was [_ -> None] which silently treated a
+                 read/parse failure as "no change". Now logs so an
+                 operator can correlate stale UI with bad meta JSON. *)
+              Log.Keeper.warn
+                "read_meta_if_changed: parse failed for %s (mtime=%.0f): %s"
+                path mtime msg;
+              None)
       | _ -> None
   in
   match read_candidate requested_name with

@@ -1,6 +1,32 @@
 ---- MODULE KeeperCircuitBreaker ----
 \* Circuit Breaker state machine for keeper tool failure recovery.
 \* Verifies safety (no false trips) and mutation-tests the class isolation property.
+\*
+\* OCaml ↔ TLA+ mapping (see #8642 family):
+\*
+\*   spec variable    | OCaml location                                          | semantic
+\*   -----------------+---------------------------------------------------------+---------
+\*   Threshold        | lib/keeper/keeper_failure_circuit_breaker.ml:118        | `let threshold = 3` (matches spec CONSTANT)
+\*   count            | lib/keeper/keeper_failure_circuit_breaker.ml:64         | `mutable consecutive_count : int`
+\*   currentClass     | lib/keeper/keeper_failure_circuit_breaker.ml:63         | `mutable consecutive_class : error_class`
+\*   tripped          | lib/keeper/keeper_failure_circuit_breaker.ml (record_   | `record_failure` returns whether hint was injected this step
+\*                    | failure return value)                                   |
+\*   ErrorClasses     | lib/keeper/keeper_failure_circuit_breaker.ml:17-22      | `type error_class = Path_not_found | Path_not_allowed | Cwd_not_directory | Shell_exit_nonzero | Other`
+\*
+\* Scope projection: spec models 3 error classes
+\* (path_not_found, path_not_allowed, other); OCaml has 5
+\* (Path_not_found, Path_not_allowed, Cwd_not_directory, Shell_exit_nonzero, Other).
+\* The two extra OCaml classes (Cwd_not_directory, Shell_exit_nonzero)
+\* fold into the spec's "other" partition for class-isolation checking —
+\* the property the spec verifies (a class streak is broken by any
+\* different class) holds independently of how many "different" classes
+\* exist. Adding new OCaml classes does NOT require spec update.
+\*
+\* Bug Model (feedback_tla-spec-audit-outcome-trichotomy):
+\*   Clean cfg : SafetyInvariant + ClassIsolation pass.
+\*   Buggy cfg : models a counter that fails to reset on class change
+\*               (would inject hints based on cross-class accumulation).
+\*               Class-isolation property MUST be violated.
 
 EXTENDS Integers, Sequences, FiniteSets
 

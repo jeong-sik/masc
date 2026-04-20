@@ -45,6 +45,7 @@ import { refreshActivityGraph } from './components/activity-graph'
 import { refreshObservatorySurface } from './components/observatory/observatory'
 import { refreshServerConfig } from './components/server-config'
 import { refreshForRoute, refreshPlanForRoute } from './tab-refresh'
+import { refreshExecution, refreshShell } from './store'
 
 describe('refreshPlanForRoute', () => {
   beforeEach(() => {
@@ -136,6 +137,24 @@ describe('refreshPlanForRoute', () => {
       expect(refreshObservatorySurface).toHaveBeenCalledTimes(1)
       expect(refreshActivityGraph).toHaveBeenCalledTimes(1)
     })
+  })
+
+  it('uses the budgeted shell refresh path on overview navigation', () => {
+    refreshForRoute({
+      tab: 'overview',
+      params: {},
+    })
+
+    expect(refreshShell).toHaveBeenCalledWith()
+  })
+
+  it('uses the scheduler-backed execution refresh path on monitoring navigation', () => {
+    refreshForRoute({
+      tab: 'monitoring',
+      params: { section: 'journey' },
+    })
+
+    expect(refreshExecution).toHaveBeenCalledWith()
   })
 })
 

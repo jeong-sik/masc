@@ -370,15 +370,15 @@ let keeper_context_status_json
            horizon,
            `Int count)
   in
-  (* Give the keeper the three canonical playground paths from the SSOT
-     so it does not need to re-interpolate ".masc/playground/<name>/..."
-     strings every turn. These are relative to the server base_path. *)
+  (* Give the keeper sandbox-relative paths from the SSOT so it never needs
+     to interpolate host storage paths such as ".masc/playground/<name>/". *)
+  let sandbox = Keeper_sandbox.of_meta ~config ~meta in
   let playground_bundle = Playground_paths.bundle_root meta.name in
   let playground_mind = Playground_paths.mind_path meta.name in
   let playground_repos = Playground_paths.repos_path meta.name in
   Yojson.Safe.to_string
     (`Assoc
-        [ "name", `String meta.name
+        ([ "name", `String meta.name
         ; "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ; "generation", `Int meta.runtime.generation
         ; "context_ratio", `Float ctx_ratio
@@ -386,16 +386,18 @@ let keeper_context_status_json
         ; "context_max", `Int ctx_work.max_tokens
         ; "message_count", `Int (List.length (messages_of_context ctx_work))
         ; "last_model_used", `String meta.runtime.usage.last_model_used
-        ; "playground_bundle", `String playground_bundle
+        ]
+        @ Keeper_sandbox.context_status_fields sandbox
+        @
+        [ (* Legacy aliases kept for one release. Prompts use sandbox_*.
+             Values are still present for old keeper continuations. *)
+          "playground_bundle", `String playground_bundle
         ; "playground_mind", `String playground_mind
         ; "playground_repos", `String playground_repos
-        (* Tool-ready short paths: use these directly as path/cwd arguments
-           in keeper_shell, keeper_bash, keeper_fs_read.  The tool handler
-           resolves them relative to your playground root. *)
         ; "tool_paths", `Assoc
-            [ "mind", `String "mind"
-            ; "repos", `String "repos"
-            ; "bundle", `String "."
+            [ "mind", `String sandbox.mind_arg
+            ; "repos", `String sandbox.repos_arg
+            ; "bundle", `String sandbox.root_arg
             ]
         ; ( "continuity_state"
           , match continuity with
@@ -404,7 +406,7 @@ let keeper_context_status_json
         ; "continuity_summary", `String continuity_summary
         ; "recovery_source", `String recovery_source
         ; "memory_tier_summary", `Assoc memory_tier_summary
-        ])
+        ]))
 ;;
 
 (* --- Memory bank search (structured notes from [STATE] blocks) --- *)

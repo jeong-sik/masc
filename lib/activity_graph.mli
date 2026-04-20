@@ -19,7 +19,12 @@ type node_status =
   | Observed | Coord | Unset
 
 val node_status_to_string : node_status -> string
+
+val node_status_of_string_opt : string -> node_status option
+(** Strict: [None] on unknown wire (see #8777 / #8605). *)
+
 val node_status_of_string : string -> node_status
+(** Back-compat: unknown -> [Observed] with [Log.Misc.warn] so drift surfaces. *)
 
 (** Span status variant (separate lifecycle from node status).
     @since 7182 *)

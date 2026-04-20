@@ -29,7 +29,19 @@
 \*   Manual_reconcile_cleared and Fiber_started do), the flag stayed
 \*   TRUE forever, permanently trapping the keeper in Failing.
 \*
-\* IMPORTANT: The existing KeeperStateMachine.tla has a model-to-code
+\* HISTORICAL NOTE (#8987): The IMPORTANT block below references a
+\* discrepancy that no longer exists -- the manual_reconcile_required
+\* mechanism has been REMOVED ENTIRELY from both the canonical spec
+\* and the OCaml impl (verified: zero occurrences in
+\* specs/keeper-state-machine/KeeperStateMachine.tla and
+\* lib/keeper/keeper_state_machine.ml as of 2026-04-20).  The audit
+\* model is retained as a forensic record of the design lesson:
+\* recovery actions must clear ALL latches that block their target
+\* state, not just the most obvious one.  The named TurnSucceeded /
+\* manual_reconcile_required interaction is inactive.
+\*
+\* Original IMPORTANT (no longer applies to the current canonical spec):
+\* The existing KeeperStateMachine.tla has a model-to-code
 \* discrepancy: its TurnSucceeded action sets manual_reconcile_required'
 \* = FALSE, which masks this bug.  This spec models the OCaml behavior
 \* faithfully: TurnSucceeded does NOT clear manual_reconcile_required.
@@ -89,9 +101,27 @@ DerivePhase ==
     ELSE "Offline"
 
 Phase == DerivePhase
+
+\* Issue #8642/#8701 family: explicit OCaml ↔ TLA+ mapping. SSOT for
+\* OCaml side is lib/keeper/keeper_state_machine.ml (12 phases). This
+\* spec uses the same CamelCase constructor names as the OCaml type
+\* but only models the 6 phases relevant to reconcile liveness — the
+\* phases the supervisor must drive to a stable state. Mapping
+\* (CamelCase identical to OCaml constructors):
+\*
+\*   "Stopped"  ↔ Stopped       \*  Terminal
+\*   "Dead"     ↔ Dead          \*  Terminal
+\*   "Running"  ↔ Running       \*  Stable (live)
+\*   "Paused"   ↔ Paused        \*  Stable (operator-held)
+\*   "Crashed"  ↔ Crashed       \*  Stable (awaiting supervisor)
+\*   "Offline"  ↔ Offline       \*  Stable (cold)
+\*
+\* Unmodeled here (covered in companion specs):
+\*   Failing, Overflowed, Compacting, HandingOff, Draining, Restarting
+\*   See KeeperCoreTriad.tla and KeeperContextLifecycle.tla.
 TerminalPhases == {"Stopped", "Dead"}
 NotTerminal == Phase \notin TerminalPhases
-RecoverablePhases == {"Running", "Paused", "Crashed", "Stopped", "Dead", "Offline"}
+StablePhases == {"Running", "Paused", "Crashed", "Stopped", "Dead", "Offline"}
 
 \* ── Initial State ─────────────────────────────────────────
 
@@ -422,13 +452,13 @@ FailingRecoveryLiveness ==
     (Phase = "Failing" /\ fiber_alive) ~> (Phase /= "Failing")
 
 \* L3: Compacting eventually exits (inherited from base spec)
-CompactingResolves == (Phase = "Compacting") ~> (Phase \in RecoverablePhases)
+CompactingResolves == (Phase = "Compacting") ~> (Phase \in StablePhases)
 
 \* L4: HandingOff eventually exits
-HandoffResolves == (Phase = "HandingOff") ~> (Phase \in RecoverablePhases)
+HandoffResolves == (Phase = "HandingOff") ~> (Phase \in StablePhases)
 
 \* L5: Draining eventually exits
-DrainingResolves == (Phase = "Draining") ~> (Phase \in RecoverablePhases)
+DrainingResolves == (Phase = "Draining") ~> (Phase \in StablePhases)
 
 \* ── Deadlock Freedom ──────────────────────────────────────
 

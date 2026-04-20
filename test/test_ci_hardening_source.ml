@@ -65,6 +65,13 @@ let test_health_and_ci_runner_diagnostics () =
     (file_contains_pattern "scripts/ci-run-tests.sh" "TEST_LOG_FILE=");
   check bool "ci runner prints failure markers" true
     (file_contains_pattern "scripts/ci-run-tests.sh" "failure markers (latest 20)");
+  check bool "ci runner records active command pid/pgid" true
+    (file_contains_pattern "scripts/ci-run-tests.sh" "active_cmd_pgid=");
+  check bool "ci runner prints active command process tree snapshot" true
+    (file_contains_pattern "scripts/ci-run-tests.sh"
+       "active command process tree snapshot:");
+  check bool "ci runner tails dune log on failure" true
+    (file_contains_pattern "scripts/ci-run-tests.sh" "tail -n 120 ${dune_log}");
   check bool "ci runner retries dune rpc lock failures in isolated build dir" true
     (file_contains_pattern "scripts/ci-run-tests.sh"
        "detected dune RPC/lock failure; retrying once with isolated build dir");
@@ -345,6 +352,27 @@ let test_http_read_surface_contracts () =
     (file_contains_pattern "lib/server/server_routes_http_routes_room.ml"
        {|"/api/v1/messages" (fun request reqd ->
        with_read_auth|});
+  check bool "room route delegates status reads to protocol boundary" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_room.ml"
+       "Room_protocol.status config");
+  check bool "room route delegates task reads to protocol boundary" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_room.ml"
+       "Room_protocol.tasks ?status_filter");
+  check bool "room route delegates agent reads to protocol boundary" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_room.ml"
+       "Room_protocol.agents ?status_filter config");
+  check bool "room route delegates message reads to protocol boundary" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_room.ml"
+       "Room_protocol.messages ?agent_filter");
+  check bool "room route does not read Coord directly" true
+    (file_not_contains_pattern "lib/server/server_routes_http_routes_room.ml"
+       "Coord.");
+  check bool "room route does not read Tempo directly" true
+    (file_not_contains_pattern "lib/server/server_routes_http_routes_room.ml"
+       "Tempo.");
+  check bool "room protocol owns the Coord read boundary" true
+    (file_contains_pattern "lib/room_protocol.ml"
+       "Coord.get_tasks_raw config");
   check bool "provider run status route now requires read auth" true
     (file_contains_pattern "lib/server/server_routes_http_routes_provider_runs.ml"
        {|"/api/v1/agent-runs/" (fun request reqd ->

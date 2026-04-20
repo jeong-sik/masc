@@ -24,10 +24,34 @@ let word_char = [^ ' ' '\t' '\n' '\r' '|' '<' '>' '&' ';' '(' ')'
                    '\'' '"' '$' '`' '\\' '=' '{' '}' '!' '*' '?']
 let word = word_char+
 
+(* Single-quote string: literal, no escape processing, no nested
+   single quote allowed (bash semantics — there is no way to embed
+   a single quote inside a '...' string).  Matched content becomes
+   a single WORD token so the existing grammar accepts it in any
+   WORD position without change.  Spaces inside quotes are preserved
+   verbatim, so arguments like 'commit message' arrive at
+   [Bin.of_string] / args list as one element. *)
+let sq_body = [^ '\'' '\n']*
+
+(* Double-quote string: A1 skeleton treats it as a literal whose body
+   excludes the four metachars bash would interpret inside "..." —
+   backslash escapes ('\"', '\\', '\$', '\`'), variable expansion ($FOO,
+   ${FOO}), command substitution (`cmd`, $(cmd)), and embedded newlines.
+   Any of those chars inside the body breaks the lex → Parse_error,
+   which is the correct fail-closed behavior for the subset.  The most
+   common caller shapes (rg "pattern", git commit -m "message",
+   echo "hello world") have none of those chars and land as one WORD
+   token, mirroring the single-quote rule's space-preservation guarantee.
+   Upgrade path: later PR widens dq_body to support escape sequences by
+   capturing in a sub-rule that unescapes into a Buffer. *)
+let dq_body = [^ '"' '\n' '\\' '$' '`']*
+
 rule token = parse
   | [' ' '\t']+    { token lexbuf }
   | '\n'           { incr_tokens (); Lexing.new_line lexbuf; token lexbuf }
   | '|'            { incr_tokens (); PIPE }
+  | '\'' (sq_body as s) '\'' { incr_tokens (); WORD s }
+  | '"' (dq_body as s) '"' { incr_tokens (); WORD s }
   | word as w      { incr_tokens (); WORD w }
   | eof            { EOF }
   | _ as c         { raise (Failure (Printf.sprintf "unexpected char %c" c)) }

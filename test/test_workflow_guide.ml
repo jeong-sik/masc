@@ -18,6 +18,16 @@ let check_has_tool steps tool_name =
 let check_not_empty msg steps =
   check bool msg true (List.length steps > 0)
 
+let check_has_precondition g expected =
+  check bool
+    (Printf.sprintf "preconditions contain %s" expected)
+    true (List.mem expected g.WG.preconditions)
+
+let check_lacks_precondition g unexpected =
+  check bool
+    (Printf.sprintf "preconditions omit %s" unexpected)
+    false (List.mem unexpected g.WG.preconditions)
+
 (* ── Golden Path 1: Coord/Task Hygiene ────────────────────────────── *)
 
 let test_start_success () =
@@ -35,7 +45,8 @@ let test_join_success () =
   let g = WG.next_steps ~tool_name:"masc_join" ~success:true in
   check_has_tool g.next_steps "masc_status";
   check_has_tool g.next_steps "masc_transition";
-  check bool "join has preconditions" true (List.length g.preconditions > 0)
+  check_has_precondition g "project_ready";
+  check_lacks_precondition g "room_set"
 
 let test_join_failure () =
   let g = WG.next_steps ~tool_name:"masc_join" ~success:false in
@@ -174,7 +185,23 @@ let test_transition_claim_call_guidance () =
       ~args:(`Assoc [ ("action", `String "claim"); ("task_id", `String "task-001") ])
       ~success:true
   in
-  check_has_tool g.next_steps "masc_plan_set_task"
+  check_has_tool g.next_steps "masc_worktree_create";
+  check bool "claim guidance omits plan_set_task" false
+    (List.exists (fun (s : WG.step) -> s.tool = "masc_plan_set_task") g.next_steps);
+  check_has_precondition g "project_ready";
+  check_lacks_precondition g "room_set"
+
+let test_add_task_success_uses_project_ready () =
+  let g = WG.next_steps ~tool_name:"masc_add_task" ~success:true in
+  check_has_tool g.next_steps "masc_transition";
+  check_has_precondition g "project_ready";
+  check_lacks_precondition g "room_set"
+
+let test_broadcast_success_uses_project_ready () =
+  let g = WG.next_steps ~tool_name:"masc_broadcast" ~success:true in
+  check_has_tool g.next_steps "masc_heartbeat";
+  check_has_precondition g "project_ready";
+  check_lacks_precondition g "room_set"
 
 let test_transition_done_call_guidance () =
   let g =
@@ -247,6 +274,8 @@ let () =
       test_case "complete_task removed" `Quick test_complete_task_removed;
       test_case "transition generic is safe" `Quick test_transition_generic_is_safe;
       test_case "transition claim call guidance" `Quick test_transition_claim_call_guidance;
+      test_case "add_task uses project_ready" `Quick test_add_task_success_uses_project_ready;
+      test_case "broadcast uses project_ready" `Quick test_broadcast_success_uses_project_ready;
       test_case "transition done call guidance" `Quick test_transition_done_call_guidance;
       test_case "transition release call guidance" `Quick test_transition_release_call_guidance;
     ];

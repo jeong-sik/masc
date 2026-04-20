@@ -185,24 +185,18 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
          Progress.Tracker.step turn_tracker ~message:"Building turn prompt" ();
          ignore (Cascade_runtime.refresh_local_discovery_if_possible effective_models);
          let max_cascade_context =
-           let min_keeper_context = Keeper_config.min_keeper_context_tokens in
-           let raw =
-             match meta.max_context_override with
-             | Some v ->
-                 Log.Keeper.debug "%s: using max_context_override=%d (manual turn)" meta.name v;
-                 v
-             | None ->
-                 let resolved =
-                   Cascade_runtime.resolve_max_cascade_context effective_models
-                 in
-                 Cascade_runtime.clamp_context_for_pure_local_labels
-                   ~labels:effective_models ~max_context:resolved
+           let resolution =
+             Keeper_exec_context.resolve_max_context_resolution
+               ~requested_override:meta.max_context_override effective_models
            in
-           if raw < min_keeper_context then begin
-             Log.Keeper.warn "%s: resolved max_context=%d below minimum %d, clamped"
-               meta.name raw min_keeper_context;
-             min_keeper_context
-           end else raw
+           (match resolution.requested_override with
+            | Some requested ->
+              Log.Keeper.debug
+                "%s: using max_context_override=%d turn_budget=%d primary_budget=%d effective_budget=%d (manual turn)"
+                meta.name requested resolution.turn_budget resolution.primary_budget
+                resolution.effective_budget
+            | None -> ());
+           resolution.turn_budget
          in
             let base_dir =
               let root = session_base_dir ctx.config in
@@ -505,11 +499,24 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 ~message:(Printf.sprintf "Turn completed: %d tool calls" result.tool_calls_made) ();
               let reply_json =
                 let surface_model_used = Keeper_agent_run.surface_model_used result in
+                let u = result.usage in
+                let cost_field = match u.cost_usd with
+                  | Some c -> `Float c
+                  | None -> `Null
+                in
                 `Assoc [
                   ("reply", `String result.response_text);
                   ("model", `String surface_model_used);
+                  ("model_used_raw", `String result.model_used);
                   ("turns", `Int result.turn_count);
                   ("tool_calls", `Int result.tool_calls_made);
+                  ("usage", `Assoc [
+                    ("input_tokens", `Int u.input_tokens);
+                    ("output_tokens", `Int u.output_tokens);
+                    ("cache_creation_input_tokens", `Int u.cache_creation_input_tokens);
+                    ("cache_read_input_tokens", `Int u.cache_read_input_tokens);
+                    ("cost_usd", cost_field);
+                  ]);
                 ]
               in
               (true, Yojson.Safe.to_string reply_json)

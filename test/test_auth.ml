@@ -225,6 +225,42 @@ let test_delete_credential () =
   cleanup_test_room dir;
   check int "0 credentials after delete" 0 (List.length creds)
 
+let test_load_credential_nickname_fallback () =
+  (* Exact-name misses fall through to the agent-type prefix so a single
+     credential (e.g. "adversary.json") covers dynamically generated
+     nicknames ("adversary-fair-tapir"). *)
+  let dir = setup_test_room () in
+  let _ = Auth.create_token dir ~agent_name:"adversary" ~role:Types.Worker in
+  let hit = Auth.load_credential dir "adversary-fair-tapir" in
+  let miss_non_nickname = Auth.load_credential dir "unknown_plain" in
+  let miss_different_family = Auth.load_credential dir "stranger-fair-tapir" in
+  cleanup_test_room dir;
+  (match hit with
+   | Some cred when cred.agent_name = "adversary" -> ()
+   | _ -> fail "nickname 'adversary-fair-tapir' should resolve via prefix");
+  (match miss_non_nickname with
+   | None -> ()
+   | Some _ -> fail "plain unknown names must not fall through");
+  (match miss_different_family with
+   | None -> ()
+   | Some _ -> fail "unrelated agent_type must not reuse another keeper's cred")
+
+let test_load_credential_exact_wins_over_fallback () =
+  (* If both the nickname file and the prefix file exist, the exact
+     match wins so a per-nickname override remains possible. *)
+  let dir = setup_test_room () in
+  let _ = Auth.create_token dir ~agent_name:"adversary" ~role:Types.Worker in
+  let _ = Auth.create_token dir ~agent_name:"adversary-fair-tapir" ~role:Types.Reader in
+  let resolved = Auth.load_credential dir "adversary-fair-tapir" in
+  cleanup_test_room dir;
+  match resolved with
+  | Some cred when cred.agent_name = "adversary-fair-tapir" && cred.role = Types.Reader -> ()
+  | Some cred ->
+      fail (Printf.sprintf "unexpected resolution: %s/%s" cred.agent_name
+              (match cred.role with Types.Reader -> "Reader" | Worker -> "Worker"
+               | Admin -> "Admin"))
+  | None -> fail "exact match should resolve"
+
 (* ============================================ *)
 (* Permission tests                             *)
 (* ============================================ *)
@@ -480,6 +516,10 @@ let () =
       test_case "resolve agent from token" `Quick test_resolve_agent_from_token;
       test_case "list credentials" `Quick test_list_credentials;
       test_case "delete credential" `Quick test_delete_credential;
+      test_case "load_credential nickname prefix fallback" `Quick
+        test_load_credential_nickname_fallback;
+      test_case "load_credential exact match wins over fallback" `Quick
+        test_load_credential_exact_wins_over_fallback;
     ];
     "permissions", [
       test_case "reader permissions" `Quick test_reader_permissions;

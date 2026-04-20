@@ -476,20 +476,11 @@ let handle_keeper_status ctx args : tool_result =
         get_bool args "include_compaction_history" (not fast)
       in
       let models = Keeper_model_labels.configured_model_labels_of_meta m in
-      let primary_max_context =
-        let min_keeper_context = Keeper_config.min_keeper_context_tokens in
-        let raw =
-          match m.max_context_override with
-          | Some value -> value
-          | None ->
-              let resolved =
-                Cascade_runtime.resolve_max_cascade_context models
-              in
-              Cascade_runtime.clamp_context_for_pure_local_labels
-                ~labels:models ~max_context:resolved
-        in
-        max min_keeper_context raw
+      let max_context_resolution =
+        Keeper_exec_context.resolve_max_context_resolution
+          ~requested_override:m.max_context_override models
       in
+      let primary_max_context = max_context_resolution.effective_budget in
       let base_dir = session_base_dir ctx.config in
          let ctx_opt =
            if include_context then
@@ -925,6 +916,7 @@ let handle_keeper_status ctx args : tool_result =
          in
          let effective_sandbox_image =
            if m.sandbox_profile = Docker_hardened
+              || m.sandbox_profile = Docker_with_git
               || (m.sandbox_profile = Legacy_local
                   && Env_config_keeper.DockerPlayground.enabled)
            then Some (Env_config_keeper.KeeperSandbox.docker_image ())
@@ -1082,6 +1074,13 @@ let handle_keeper_status ctx args : tool_result =
                if String.trim m.runtime.last_speech_act = ""
                then `Null
                else `String m.runtime.last_speech_act);
+             ("delivery_surface_view",
+               Json_util.string_opt_to_json
+                 (Keeper_social_model.delivery_surface_view_of_meta m
+                  |> Option.map Keeper_social_model.delivery_surface_to_string));
+             ("delivery_surface_view_source",
+               Json_util.string_opt_to_json
+                 (Keeper_social_model.delivery_surface_view_source_of_meta m));
              ("last_transition_reason",
                if String.trim m.runtime.last_social_transition_reason = ""
                then `Null
@@ -1111,6 +1110,13 @@ let handle_keeper_status ctx args : tool_result =
              ("include_history_tail", `Bool include_history_tail);
              ("include_compaction_history", `Bool include_compaction_history);
              ("tail_order", `String (tail_order_to_string tail_order));
+           ]);
+           ("context_budget", `Assoc [
+             ("requested_override", Json_util.int_opt_to_json max_context_resolution.requested_override);
+             ("primary_budget", `Int max_context_resolution.primary_budget);
+             ("cascade_budget", `Int max_context_resolution.cascade_budget);
+             ("turn_budget", `Int max_context_resolution.turn_budget);
+             ("effective_budget", `Int max_context_resolution.effective_budget);
            ]);
            ("models_resolved", models_resolved);
            ("model_observability", model_observability);
@@ -1154,9 +1160,17 @@ let handle_keeper_status ctx args : tool_result =
                    (Coord_utils.safe_filename m.name)
                    (Coord_utils.safe_filename (Keeper_id.Trace_id.to_string m.runtime.trace_id)))));
            ]);
-           (let playground_rel = Keeper_alerting_path.playground_path_of_keeper m.name in
+           (let sandbox = Keeper_sandbox.of_meta ~config:ctx.config ~meta:m in
+           let playground_rel = Keeper_alerting_path.playground_path_of_keeper m.name in
            let playground_abs = Filename.concat ctx.config.base_path playground_rel in
            "execution_context", `Assoc [
+             ("sandbox_id", `String sandbox.sandbox_id);
+             ("sandbox_backend", `String (Keeper_sandbox.backend_to_string sandbox.backend));
+             ("sandbox_root", `String sandbox.root_arg);
+             ("sandbox_repos", `String sandbox.repos_arg);
+             ("sandbox_mind", `String sandbox.mind_arg);
+             ("sandbox_host_root", `String sandbox.host_root_abs);
+             ("sandbox_container_root", Json_util.string_opt_to_json sandbox.container_root);
              ("playground_path", `String playground_rel);
              ("default_cwd", `String playground_abs);
              ("private_workspace_root", `String playground_abs);

@@ -1,7 +1,7 @@
 open Printf
 open Yojson.Safe.Util
 
-open Result_syntax
+open Result.Syntax
 
 (** Exponential moving average weights for latency smoothing.
     ema_decay + ema_alpha = 1.0. Higher decay = more weight to history. *)

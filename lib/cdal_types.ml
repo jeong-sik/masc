@@ -139,7 +139,7 @@ let contract_finding_to_json (f : contract_finding) : Yojson.Safe.t =
 
 let contract_finding_of_json = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* check_id = string_field "check_id" fields in
     let* event_id = string_option_field "event_id" fields in
     let* observed = json_field "observed" fields in
@@ -162,7 +162,7 @@ let completeness_gap_to_json (g : completeness_gap) : Yojson.Safe.t =
 
 let completeness_gap_of_json = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* artifact = string_field "artifact" fields in
     let* reason = string_field "reason" fields in
     let* impact_str = string_field "impact" fields in
@@ -186,7 +186,7 @@ let check_result_to_json (r : check_result) : Yojson.Safe.t =
 
 let check_result_of_json = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* check_id = string_field "check_id" fields in
     let* status_str = string_field "status" fields in
     let* status = contract_status_of_string status_str in
@@ -219,7 +219,7 @@ let contract_verdict_to_json (v : contract_verdict) : Yojson.Safe.t =
 
 let contract_verdict_of_json = function
   | `Assoc fields ->
-    let ( let* ) = Result.bind in
+    let open Result.Syntax in
     let* run_id = string_field "run_id" fields in
     let* contract_id = string_field "contract_id" fields in
     let* claim_scope = string_field "claim_scope" fields in

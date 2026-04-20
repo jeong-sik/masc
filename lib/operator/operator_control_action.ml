@@ -1,7 +1,7 @@
 open Tool_args
 include Operator_control_snapshot
 
-open Result_syntax
+open Result.Syntax
 
 let judgment_surface_enums =
   [ "command.namespace"; "intervene" ]

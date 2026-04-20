@@ -11,6 +11,49 @@ let active_model_of_meta (m : keeper_meta) : string =
     | model :: _ -> model
     | [] -> ""
 
+let model_id_of_label (label : string) : string =
+  match String.index_opt label ':' with
+  | Some idx when idx < String.length label - 1 ->
+      String.sub label (idx + 1) (String.length label - idx - 1) |> String.trim
+  | _ -> String.trim label
+
+let canonical_provider_of_label (label : string) : string option =
+  match String.index_opt label ':' with
+  | Some idx when idx > 0 ->
+      String.sub label 0 idx
+      |> String.trim
+      |> Provider_adapter.resolve_direct_canonical_name
+  | _ -> Provider_adapter.resolve_direct_canonical_name label
+
+let active_model_label_of_meta (m : keeper_meta) : string =
+  let active = String.trim (active_model_of_meta m) in
+  if active = "" then ""
+  else if String.contains active ':' then active
+  else
+    let configured = Keeper_model_labels.configured_model_labels_of_meta m in
+    let active_norm = String.lowercase_ascii active in
+    let matches_model_id label =
+      String.lowercase_ascii (model_id_of_label label) = active_norm
+    in
+    match List.find_opt matches_model_id configured with
+    | Some label -> label
+    | None -> (
+        match Provider_adapter.resolve_direct_adapter active with
+        | Some adapter ->
+            let matches_provider label =
+              canonical_provider_of_label label = Some adapter.canonical_name
+            in
+            (match List.find_opt matches_provider configured with
+             | Some label -> label
+             | None ->
+                 let model_id =
+                   match adapter.default_model_id with
+                   | Some value when String.trim value <> "" -> value
+                   | _ -> "auto"
+                 in
+                 adapter.cascade_prefix ^ ":" ^ model_id)
+        | None -> active)
+
 let next_model_hint_of_meta (m : keeper_meta) : string option =
   let active = active_model_of_meta m in
   let pool =
@@ -38,15 +81,30 @@ let keeper_health_to_string = function
   | KH_zombie -> "zombie"
   | KH_dead -> "dead"
 
-let keeper_health_of_string = function
-  | "healthy" -> KH_healthy
-  | "idle" -> KH_idle
-  | "offline" -> KH_offline
-  | "stale" -> KH_stale
-  | "degraded" -> KH_degraded
-  | "zombie" -> KH_zombie
-  | "dead" -> KH_dead
-  | _ -> KH_offline
+(** Issue #8670: strict parser returning [None] on unknown strings so
+    drift (producer typo, future variant) is visible to callers instead
+    of silently masquerading as [KH_offline]. Mirrors the #8636 lenient
+    parser pattern (option-typed reverse route on the parse boundary). *)
+let keeper_health_of_string_opt = function
+  | "healthy" -> Some KH_healthy
+  | "idle" -> Some KH_idle
+  | "offline" -> Some KH_offline
+  | "stale" -> Some KH_stale
+  | "degraded" -> Some KH_degraded
+  | "zombie" -> Some KH_zombie
+  | "dead" -> Some KH_dead
+  | _ -> None
+
+(** Back-compat wrapper for callers not yet migrated to the option form.
+    Logs the unknown string once per call so drift is operator-visible
+    even when callers do not branch on it. *)
+let keeper_health_of_string s =
+  match keeper_health_of_string_opt s with
+  | Some h -> h
+  | None ->
+      Log.Keeper.warn
+        "keeper_health_of_string: unknown wire string %S → KH_offline fallback (#8670)" s;
+      KH_offline
 
 let keeper_continuity_to_string = function
   | Continuity_healthy -> "healthy"

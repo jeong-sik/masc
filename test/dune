@@ -27,7 +27,8 @@
 ; Group 1: Pure synchronous tests
 ; ============================================================
 (tests
- (names test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_room test_room_state_recovery test_types test_exec_tap test_auth test_audit_log test_http_negotiation
+ (names test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_audit_log test_http_negotiation
+        test_attempt_state
         test_sse test_cancellation test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_spawn
@@ -59,6 +60,7 @@
         test_keeper_registry
         test_keeper_supervisor
         test_keeper_allowed_paths
+        test_keeper_repo_readiness
         test_keeper_tool_surface_guard
         test_keeper_pr_review
         test_keeper_execution_scope
@@ -87,6 +89,11 @@
         test_approval_callback_wired
         test_keeper_discovered_tools
         test_keeper_tool_affinity
+        test_keeper_tool_alias
+        test_keeper_sandbox_containment
+        test_keeper_shell_containment
+        test_keeper_fs_edit_patch
+        test_keeper_docker_read
         test_keeper_github_read_only
         test_worktree_live_context
         test_tool_input_validation
@@ -97,6 +104,7 @@
         ; test_contract_composer removed (team session cleanup)
         test_cdal_conformance
         test_task_stage
+        test_ocaml_north_star_task_lifecycle
         ; test_risk_digest removed (team session cleanup)
         test_artifact_store
         test_tool_blob_store
@@ -134,7 +142,8 @@
         test_memory_hooks
         test_mid_turn_resume
         test_lockfree_atomic)
- (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_room test_room_state_recovery test_types test_exec_tap test_auth test_audit_log test_http_negotiation
+ (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_audit_log test_http_negotiation
+          test_attempt_state
           test_sse test_cancellation test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_spawn
@@ -166,6 +175,7 @@
           test_keeper_registry
           test_keeper_supervisor
           test_keeper_allowed_paths
+          test_keeper_repo_readiness
           test_keeper_tool_surface_guard
           test_keeper_pr_review
           test_keeper_execution_scope
@@ -194,6 +204,11 @@
           test_approval_callback_wired
           test_keeper_discovered_tools
           test_keeper_tool_affinity
+          test_keeper_tool_alias
+          test_keeper_sandbox_containment
+          test_keeper_shell_containment
+          test_keeper_fs_edit_patch
+          test_keeper_docker_read
           test_keeper_github_read_only
           test_worktree_live_context
           test_tool_input_validation
@@ -204,6 +219,7 @@
           ; test_contract_composer removed (team session cleanup)
           test_cdal_conformance
           test_task_stage
+          test_ocaml_north_star_task_lifecycle
           ; test_risk_digest removed (team session cleanup)
           test_artifact_store
           test_tool_blob_store
@@ -314,6 +330,11 @@
         test_tool_local_runtime_probe
         test_board_ttl
         test_worker_dev_tools
+        test_shadow_parse
+        test_destructive_class
+        test_gate_diff
+        test_legendary_counters
+        test_legendary_bash_bg_tasks_route
         test_oas_integration
         test_memory_oas_5tier
         test_verifier_oas_bridge
@@ -329,6 +350,8 @@
         test_json_util
         test_process_eio_coverage
         test_with_process_coverage
+        test_bg_task_stub
+        test_process_eio_detached
         test_provider_adapter
         test_worker_container_coverage
         test_resilience
@@ -361,6 +384,8 @@
         test_task_dispatch
         test_drift_guard_core
         test_verify_handoff_tool
+        test_memory_horizon_classifier
+        test_param_type_classifier
         test_tool_contract_truth
         test_file_lock_eio
         test_error_logging_coverage
@@ -417,6 +442,7 @@
         test_cdal_types
         test_cdal_loader
         test_cdal_judge
+        test_cdal_verifiable_markers
         test_cdal_eval_v1
         test_cdal_friction_projection
         test_cdal_verdict_gate
@@ -425,6 +451,7 @@
         test_governance_yojson_roundtrip
         test_eval_calibration
         test_goal_janitor
+        test_goal_tools
         test_goal_store
         test_string_util
         test_board_core_payload
@@ -467,6 +494,11 @@
         test_tool_local_runtime_probe
         test_board_ttl
         test_worker_dev_tools
+        test_shadow_parse
+        test_destructive_class
+        test_gate_diff
+        test_legendary_counters
+        test_legendary_bash_bg_tasks_route
         test_oas_integration
         test_memory_oas_5tier
         test_verifier_oas_bridge
@@ -482,6 +514,8 @@
         test_json_util
         test_process_eio_coverage
         test_with_process_coverage
+        test_bg_task_stub
+        test_process_eio_detached
         test_provider_adapter
         test_worker_container_coverage
         test_resilience
@@ -514,6 +548,8 @@
         test_task_dispatch
         test_drift_guard_core
         test_verify_handoff_tool
+        test_memory_horizon_classifier
+        test_param_type_classifier
         test_tool_contract_truth
         test_file_lock_eio
         test_error_logging_coverage
@@ -570,6 +606,7 @@
         test_cdal_types
         test_cdal_loader
         test_cdal_judge
+        test_cdal_verifiable_markers
         test_cdal_eval_v1
         test_cdal_friction_projection
         test_cdal_verdict_gate
@@ -578,6 +615,7 @@
         test_governance_yojson_roundtrip
         test_eval_calibration
         test_goal_janitor
+        test_goal_tools
         test_goal_store
         test_string_util
         test_board_core_payload
@@ -631,6 +669,37 @@
  (modules test_keeper_exec_tools)
  (libraries masc_test_deps))
 
+; Ratchet for gh_min_timeout_sec (#8688). 41 gh_command_timed_out
+; rejections on 2026-04-17/18 at timeout_sec=5. Floor must stay
+; at/above network latency budget.
+(test
+ (name test_keeper_gh_timeout_floor)
+ (modules test_keeper_gh_timeout_floor)
+ (libraries masc_test_deps))
+
+; Regression for Tool_task.completion_rejection_message — every
+; rejection must embed completion_notes_example so the keeper sees
+; a concrete density of accepted notes (#8688 root-cause sweep).
+(test
+ (name test_tool_task_completion_example)
+ (modules test_tool_task_completion_example)
+ (libraries masc_test_deps))
+
+; Precondition pin: parse_verdict "" must return exactly
+; Error "empty review output" so the liveness-approve branch in
+; Anti_rationalization.review keeps matching (#8688).
+(test
+ (name test_anti_rationalization_empty_liveness)
+ (modules test_anti_rationalization_empty_liveness)
+ (libraries masc_test_deps))
+
+; Regression for readonly_hint_of_category — every named category
+; must carry a concrete Good:/Bad: example so small-LLM keepers can
+; self-correct (#8688 root-cause sweep follow-up).
+(test
+ (name test_keeper_readonly_hints)
+ (modules test_keeper_readonly_hints)
+ (libraries masc_test_deps))
 (test
  (name test_cascade_health_tracker)
  (modules test_cascade_health_tracker)
@@ -640,6 +709,11 @@
  (name test_cascade_strategy)
  (modules test_cascade_strategy)
  (libraries masc_test_deps))
+
+(test
+ (name test_cascade_model_resolve)
+ (modules test_cascade_model_resolve)
+ (libraries masc_test_deps unix))
 
 (test
  (name test_dashboard_tla_specs)
@@ -655,6 +729,12 @@
 (test
  (name test_tool_name)
  (modules test_tool_name)
+ (libraries masc_test_deps))
+
+; ── Event_kind variant roundtrip (#8455) ────────────────
+(test
+ (name test_event_kind)
+ (modules test_event_kind)
  (libraries masc_test_deps))
 
 ; ── Core Triad: State x Decision x Cascade ──────────────
@@ -914,7 +994,9 @@
  (name test_operator_mcp_e2e)
  (modules test_operator_mcp_e2e)
  (libraries masc_test_deps)
- (deps ../bin/main_eio.exe)
+ (deps
+  ../bin/main_eio.exe
+  (source_tree ../config))
  (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
 
 (test
@@ -996,7 +1078,13 @@
 (test
  (name test_harness_shell_helpers)
  (modules test_harness_shell_helpers)
- (libraries alcotest unix))
+ (deps %{exe:../bin/keeper_campaign_fsm.exe})
+ (action
+  (setenv KEEPER_CAMPAIGN_FSM_EXE %{exe:../bin/keeper_campaign_fsm.exe}
+   (setenv MASC_HARNESS_ALLOW_DUNE_EXEC_FALLBACK 0
+    (run %{test}))))
+ (libraries alcotest unix)
+)
 
 
 (test
@@ -1100,6 +1188,12 @@
 (test
  (name test_otel_trace_context)
  (modules test_otel_trace_context)
+ (libraries masc_test_deps))
+
+; OpenTelemetry GenAI semantic convention helpers
+(test
+ (name test_otel_genai)
+ (modules test_otel_genai)
  (libraries masc_test_deps))
 
 (executable

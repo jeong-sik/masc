@@ -109,7 +109,7 @@ const MERMAID_COMPOSITE: string = `flowchart TB
 
   classDef terminal fill:#1f0f0f,stroke:#7f1d1d,color:#fca5a5
   classDef stable   fill:#0f1a0f,stroke:#166534,color:#86efac
-  classDef motion   fill:#1a1305,stroke:#a16207,color:var(--yellow-100)
+  classDef motion   fill:#1a1305,stroke:#a16207,color:#fde68a
   classDef error    fill:#1e0a0a,stroke:#b91c1c,color:#fca5a5
 
   class ksm_stopped,ksm_dead terminal

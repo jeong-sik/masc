@@ -14,7 +14,7 @@
     @since Phase 5 — OAS Agent.run adapter for workers *)
 
 open Printf
-open Result_syntax
+open Result.Syntax
 
 (* ================================================================ *)
 (* worker_container_meta -> OAS Types.model                          *)
@@ -523,6 +523,9 @@ let rec run_worker_via_oas
     ?contract
     ?worker_run_id
     () : (Worker_container_types.run_result, string) result =
+  Masc_runtime_events.emit_turn_start ();
+  Fun.protect ~finally:Masc_runtime_events.emit_turn_end
+  @@ fun () ->
   let session_id = meta.mcp_session_id in
   let worker_name = meta.worker_name in
   let heartbeat_cbs =
@@ -575,6 +578,9 @@ and resume_worker_via_oas
     ?(approval : Oas.Hooks.approval_callback =
       Approval_callbacks.reject_by_default)
     () : (Worker_container_types.run_result, string) result =
+  Masc_runtime_events.emit_turn_start ();
+  Fun.protect ~finally:Masc_runtime_events.emit_turn_end
+  @@ fun () ->
   let worker_name = meta.worker_name in
   let session_id = meta.mcp_session_id in
   let heartbeat_cbs =

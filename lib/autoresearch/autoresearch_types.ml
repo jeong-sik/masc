@@ -52,7 +52,7 @@ type loop_state = {
   lower_is_better : bool;  (** When true, lower metric scores are better (e.g., val_bpb, loss) *)
 }
 
-type swarm_link = {
+type execution_link = {
   loop_id : string;
   session_id : string;
   operation_id : string option;

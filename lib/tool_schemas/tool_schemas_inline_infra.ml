@@ -41,6 +41,24 @@ Pair with masc_subscription to receive session-scoped event notifications.";
   (* masc_cancellation, masc_subscription, masc_progress,
      masc_governance_set removed: pruned from surfaces *)
 
+  (* masc_approval_get *)
+  {
+    name = "masc_approval_get";
+    description = "Operator/admin-only detail view. Fetch one pending HITL approval by id, including the full input JSON. \
+Use after finding an approval id in the dashboard or pending approval queue when the preview is insufficient for an operator decision. \
+Requires the same privileged approval surface as resolving an approval.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Pending approval id, for example appr_abc123def456");
+        ]);
+      ]);
+      ("required", `List [`String "id"]);
+    ];
+  };
+
   (* masc_spawn *)
   {
     name = "masc_spawn";

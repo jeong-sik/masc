@@ -161,8 +161,27 @@ let compute_outcomes_rollup
         ("unknown", `Int !unknown_v);
         ("top_failure_reasons", `List top_failure_reasons);
       ]);
-      (* cdal_gate: null until CDAL verdict gate (#7531) merges. *)
-      ("cdal_gate", `Null);
+      (* cdal_gate: populate from Dashboard_attribution ring.
+         Scope is global (CDAL attribution is gate-keyed, not per-keeper),
+         but visibility in the per-keeper diagnostic is still useful — it
+         confirms the verdict gate is live and surfaces recent outcomes. *)
+      ("cdal_gate",
+        (match
+           List.find_opt
+             (fun (s : Dashboard_attribution.gate_summary) ->
+               String.equal s.gate "cdal_verdict")
+             (Dashboard_attribution.summary ())
+         with
+         | None -> `Null
+         | Some s ->
+             `Assoc [
+               ("scope", `String "global");
+               ("passed", `Int s.passed);
+               ("policy_failed", `Int s.policy_failed);
+               ("transition_blocked", `Int s.transition_blocked);
+               ("partial_pass", `Int s.partial_pass);
+               ("total", `Int s.total);
+             ]));
       ("last_verdict_at", last_verdict_at);
     ]);
   ]
@@ -232,6 +251,14 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           "keeper dashboard recent_sp_events failed: %s"
           (Printexc.to_string exn);
         []
+  in
+  let accountability_summary =
+    if compact || Keeper_decision_audit.decision_layer_level () < 3 then
+      (fun ~keeper_name ~agent_name ->
+        Keeper_exec_status_metrics.accountability_summary_json config
+          ~keeper_name ~agent_name)
+    else
+      Keeper_exec_status_metrics.accountability_summary_lookup config
   in
   (* Parallel keeper I/O: each keeper's metadata + metrics reads run concurrently.
      Results are collected into a shared ref array, then filter_map'd. *)
@@ -650,8 +677,8 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                     `List (List.filteri (fun i _ -> i < 10) keeper_events)
                   in
                   let accountability =
-                    Keeper_exec_status_metrics.accountability_summary_json config
-                      ~keeper_name:m.name ~agent_name:m.agent_name
+                    accountability_summary ~keeper_name:m.name
+                      ~agent_name:m.agent_name
                   in
                   `Assoc [
                     ("reputation", reputation);
@@ -1102,6 +1129,7 @@ let keeper_config_json (config : Coord.config) (name : string)
       in
       let effective_sandbox_image =
         if m.sandbox_profile = Keeper_types.Docker_hardened
+           || m.sandbox_profile = Keeper_types.Docker_with_git
            || (m.sandbox_profile = Keeper_types.Legacy_local
                && Env_config_keeper.DockerPlayground.enabled)
         then Some (Env_config_keeper.KeeperSandbox.docker_image ())

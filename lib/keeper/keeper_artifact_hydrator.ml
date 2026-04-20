@@ -15,7 +15,13 @@ let try_hydrate ~store ~sha256 ~marker =
     match Tool_blob_store.fetch store ~sha256 with
     | Some bytes -> Some bytes
     | None -> None
-  with _ ->
+  with
+  (* Issue #8619: re-raise Eio cancellation so shutdown / racing fibers
+     are not silently masked as a hydration miss. Other exceptions
+     (filesystem error, blob corruption) keep the prior degraded
+     behaviour: caller falls back to the marker string. *)
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ ->
     ignore marker;
     None
 

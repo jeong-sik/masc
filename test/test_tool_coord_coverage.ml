@@ -159,7 +159,7 @@ let () = test "dispatch_removed_named_room_tools" (fun () ->
   assert (Tool_coord.dispatch ctx ~name:"masc_room_enter" ~args = None)
 )
 
-let () = test "dispatch_check_transition_claim_requires_plan_task" (fun () ->
+let () = test "dispatch_check_transition_claim_auto_binds_current_task" (fun () ->
   Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -181,11 +181,7 @@ let () = test "dispatch_check_transition_claim_requires_plan_task" (fun () ->
   | Some (success, result) ->
       assert success;
       let json = Yojson.Safe.from_string result in
-      assert (Yojson.Safe.Util.member "all_passed" json = `Bool false);
-      assert (
-        Yojson.Safe.Util.member "fix_hint" json
-        = `String
-            "Call masc_plan_set_task after claim paths that did not auto-bind current_task (for example masc_transition(action=claim))")
+      assert (Yojson.Safe.Util.member "all_passed" json = `Bool true)
   | None -> failwith "dispatch returned None"
 )
 
@@ -205,6 +201,200 @@ let () = test "dispatch_check_claim_next_marks_current_task_set" (fun () ->
   let (_success, _result) = Tool_task.handle_claim_next task_ctx (`Assoc []) in
   match Tool_coord.dispatch ctx ~name:"masc_check"
           ~args:(`Assoc [("assertions", `List [`String "task_claimed"; `String "current_task_set"])]) with
+  | Some (success, result) ->
+      assert success;
+      let json = Yojson.Safe.from_string result in
+      assert (Yojson.Safe.Util.member "all_passed" json = `Bool true)
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_status_multi_assignment_current_requires_disambiguation" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  let _ = Coord.add_task ctx.config ~title:"Primary lane" ~priority:2 ~description:"" in
+  let _ = Coord.add_task ctx.config ~title:"Secondary lane" ~priority:2 ~description:"" in
+  ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+  ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-002");
+  Planning_eio.set_current_task ctx.config ~task_id:"task-002";
+  (match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some (success, result) ->
+      assert success;
+      assert (str_contains result "owned=task-001 | current=task-002");
+      assert (str_contains result "assigned_set=[task-001,task-002]");
+      assert (str_contains result "primary_owned=task-001");
+      assert (str_contains result "planning_current=task-002");
+      assert (str_contains result "current_is_assigned=yes");
+      assert (str_contains result "effective_current=task-002");
+      assert (str_contains result "drift_reason=secondary_assignment");
+      assert (str_contains result "claim_first_suppressed=yes");
+      assert (not (str_contains result "task-002 is stale focus"))
+  | None -> failwith "dispatch returned None");
+  match Tool_coord.dispatch ctx ~name:"masc_check"
+          ~args:(`Assoc [("assertions", `List [`String "task_claimed"; `String "current_task_set"])]) with
+  | Some (success, result) ->
+      assert success;
+      let json = Yojson.Safe.from_string result in
+      assert (Yojson.Safe.Util.member "all_passed" json = `Bool false);
+      assert (
+        Yojson.Safe.Util.member "fix_hint" json
+        = `String
+            "Call masc_plan_set_task to choose or re-sync the active task when current_task is unset, stale, or ambiguous")
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_check_owned_current_drift_fails_current_task_set" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  ignore (Coord.add_task ctx.config ~title:"Owned task" ~priority:3 ~description:"");
+  ignore (Coord.add_task ctx.config ~title:"Stale current task" ~priority:3 ~description:"");
+  ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+  Planning_eio.set_current_task ctx.config ~task_id:"task-002";
+  match Tool_coord.dispatch ctx ~name:"masc_check"
+          ~args:(`Assoc [("assertions", `List [`String "task_claimed"; `String "current_task_set"])]) with
+  | Some (success, result) ->
+      assert success;
+      let json = Yojson.Safe.from_string result in
+      assert (Yojson.Safe.Util.member "all_passed" json = `Bool false);
+      assert (
+        Yojson.Safe.Util.member "fix_hint" json
+        = `String
+            "Call masc_plan_set_task to choose or re-sync the active task when current_task is unset, stale, or ambiguous")
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_status_surfaces_owned_current_drift" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  ignore (Coord.add_task ctx.config ~title:"Owned task" ~priority:3 ~description:"");
+  ignore (Coord.add_task ctx.config ~title:"Stale current task" ~priority:3 ~description:"");
+  ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+  Planning_eio.set_current_task ctx.config ~task_id:"task-002";
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some (success, result) ->
+      assert success;
+      assert (str_contains result "owned=task-001");
+      assert (str_contains result "current=task-002");
+      assert (str_contains result "💡 Suggested next: masc_plan_init -> masc_status");
+      assert (str_contains result "planning current_task is unset or drifted")
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_status_suppresses_lifecycle_guidance_without_credential" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  ignore (Auth.enable_auth ctx.config.base_path ~require_token:true ~agent_name:"admin");
+  ignore (Coord.add_task ctx.config ~title:"Credentialed work" ~priority:3 ~description:"");
+  Planning_eio.set_current_task ctx.config ~task_id:"task-001";
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some (success, result) ->
+      assert success;
+      assert (str_contains result "🔐 Credential: required=yes | available=no | candidates=test-agent");
+      assert (str_contains result "Lifecycle actions are credential-blocked for test-agent");
+      assert (not (str_contains result "💡 Suggested next: masc_status -> masc_transition"));
+      assert (not (str_contains result "💡 Suggested next: masc_claim_next"))
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_status_no_owned_prefers_claim_next_over_transition" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  ignore (Coord.add_task ctx.config ~title:"Unclaimed task" ~priority:3 ~description:"");
+  Planning_eio.set_current_task ctx.config ~task_id:"task-001";
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some (success, result) ->
+      assert success;
+      assert (str_contains result "owned=- | current=task-001");
+      assert (str_contains result "drift_reason=no_owned");
+      assert (str_contains result "claim_first_suppressed=no");
+      assert (str_contains result "💡 Suggested next: masc_claim_next -> masc_status");
+      assert (not (str_contains result "💡 Suggested next: masc_status -> masc_transition"))
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_status_surfaces_missing_planning_for_owned_task" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  ignore (Coord.add_task ctx.config ~title:"Claimed without plan" ~priority:3 ~description:"");
+  ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+  Planning_eio.set_current_task ctx.config ~task_id:"task-001";
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some (success, result) ->
+      assert success;
+      assert (str_contains result "owned=task-001 | current=task-001");
+      assert (str_contains result "📝 Planning: missing=yes | task=task-001");
+      assert (str_contains result "Owned task task-001 has no planning context.");
+      assert (str_contains result "💡 Suggested next: masc_plan_init -> masc_status");
+      assert (not (str_contains result "💡 Suggested next: masc_heartbeat"));
+      assert (not (str_contains result "💡 Suggested next: masc_status -> masc_transition"))
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_status_surfaces_completed_deliverable_conflict_for_active_owned_task" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  ignore (Coord.add_task ctx.config ~title:"Claimed with stale deliverable" ~priority:3 ~description:"");
+  ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+  Planning_eio.set_current_task ctx.config ~task_id:"task-001";
+  ignore
+    (Planning_eio.set_deliverable ctx.config ~task_id:"task-001"
+       ~content:"Task-001 completed. stale control-plane artifact.");
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some (success, result) ->
+      assert success;
+      assert (str_contains result "owned=task-001 | current=task-001");
+      assert (str_contains result "📝 Planning: deliverable_conflict=yes | task=task-001");
+      assert (str_contains result "Owned task task-001 already has a completed-looking deliverable");
+      assert (str_contains result "💡 Suggested next: masc_deliver -> masc_status");
+      assert (not (str_contains result "💡 Suggested next: masc_status -> masc_transition"))
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_status_flags_todo_with_completed_deliverable_as_conflict" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  ignore (Coord.add_task ctx.config ~title:"Conflicted todo" ~priority:2 ~description:"");
+  ignore (Coord.add_task ctx.config ~title:"Fresh todo" ~priority:2 ~description:"");
+  ignore
+    (Planning_eio.set_deliverable ctx.config ~task_id:"task-001"
+       ~content:"Task-001 completed. Exercised masc_observe_operations.");
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some (success, result) ->
+      assert success;
+      assert (str_contains result "⚠️ task-001 P2 [todo_conflict] Conflicted todo (unclaimed)");
+      assert (str_contains result "📋 task-002 P2 [todo] Fresh todo (unclaimed)");
+      assert (str_contains result "1 todo task(s) have completed-looking planning deliverables");
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_check_project_ready_alias" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  match Tool_coord.dispatch ctx ~name:"masc_check"
+          ~args:(`Assoc [("assertions", `List [`String "project_ready"])]) with
   | Some (success, result) ->
       assert success;
       let json = Yojson.Safe.from_string result in

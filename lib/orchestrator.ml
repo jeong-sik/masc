@@ -37,7 +37,8 @@ let load_config () =
     agent_timeout_s = get_env_int "MASC_ORCHESTRATOR_TIMEOUT" 300;
     orchestrator_agent = Env_config.Orchestrator.agent_name;
     enabled =
-      Env_config_core.get_bool ~default:false "MASC_ORCHESTRATOR_ENABLED";
+      Env_config_core.get_bool ~default:false
+        Env_config_core.orchestrator_enabled_env_key;
     port = Env_config_core.masc_http_port_int ();
   }
 

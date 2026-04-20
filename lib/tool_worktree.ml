@@ -10,6 +10,8 @@ type context = {
 
 type tool_result = bool * string
 
+let default_base_branch = "auto"
+
 (* Individual handlers *)
 let handle_worktree_create ctx args =
   (* LLM may omit agent_name in args; fall back to context agent_name.
@@ -48,7 +50,7 @@ let handle_worktree_create ctx args =
   | Error msg -> (false, msg)
   | Ok agent_name ->
   let raw_task_id = get_string args "task_id" "" in
-  let base_branch = get_string args "base_branch" "develop" in
+  let base_branch = get_string args "base_branch" default_base_branch in
   (* repo_name comes straight from MCP tool args. Reject anything that
      isn't a single safe directory component so it cannot escape
      [.masc/playground/<keeper>/repos/]. Coord.worktree_create_r also
@@ -72,7 +74,7 @@ let handle_worktree_create ctx args =
       ( None,
         Some (Printf.sprintf
           "repo_name %S is invalid. Use a single directory name \
-           under your playground repos/ (e.g. repo_name='masc-mcp'). \
+           under sandbox repos/ (e.g. repo_name='masc-mcp'). \
            Allowed characters: [A-Za-z0-9._-]. No slashes, no \
            path traversal, no '.'/'..' specials." bad) )
   in

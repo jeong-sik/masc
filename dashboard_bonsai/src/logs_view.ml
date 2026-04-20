@@ -1,0 +1,2472 @@
+(** Phase 1 logs view — MASC Design System (dark-fantasy theme).
+
+    Layout follows MASC's keeper-row grammar: hairline-separated rows, tight
+    8-16 px padding, tiny 2-4 px radii, flat shadows. One brass accent
+    (timestamps, header chrome). Level colors are the MASC status palette
+    (bile / ember / blood) — not generic yellow/red. Body uses EB Garamond;
+    timestamps, module, and source badges use JetBrains Mono or Noto Sans KR
+    UI per the system's type stack.
+
+    Tokens are inlined as literals because ppx_css has no access to the
+    design system's [:root] variables yet. When [colors_and_type.css] is
+    served from [assets/dashboard_bonsai/], the inline values become
+    [var(--bg-deep)] etc. *)
+
+open! Core
+open! Bonsai_web
+open Virtual_dom.Vdom
+open Js_of_ocaml
+
+module Style =
+[%css
+stylesheet
+  {|
+  .root {
+    position: relative;
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 88% 14%, rgba(138, 106, 40, 0.10), transparent 22%),
+      radial-gradient(circle at 8% 88%, rgba(160, 24, 24, 0.05), transparent 28%),
+      var(--bg-deep);
+    color: var(--text-primary);
+    font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
+    font-size: 15px;
+    padding: 1.5rem calc(340px + 24px) 4rem 244px;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    isolation: isolate;
+  }
+
+  @media (max-width: 1280px) {
+    .root { padding-right: 2.5rem; }
+    .aside { display: none; }
+  }
+  @media (max-width: 880px) {
+    .root { padding-left: 1.25rem; }
+    .nav  { display: none; }
+  }
+
+  .root::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    opacity: 0.28;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.2' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.9  0 0 0 0 0.85  0 0 0 0 0.7  0 0 0 0.05 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    mix-blend-mode: overlay;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-main);
+  }
+
+  .rune {
+    width: 22px;
+    height: 22px;
+    border: 1px solid var(--accent-brass);
+    display: grid;
+    place-items: center;
+    color: var(--accent-brass);
+    font-family: 'Cinzel', serif;
+    font-size: 11px;
+    transform: rotate(45deg);
+  }
+
+  .rune_inner {
+    transform: rotate(-45deg);
+  }
+
+  .wordmark {
+    font-family: 'Cinzel', serif;
+    font-size: 13px;
+    letter-spacing: 0.22em;
+    color: var(--accent-brass);
+    text-transform: uppercase;
+  }
+
+  .crumbs {
+    margin-left: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-dim);
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .crumbs_sep { color: var(--border-highlight); }
+  .crumbs_cur { color: var(--text-bright); letter-spacing: 0.14em; }
+  .crumbs_room {
+    color: var(--accent-brass);
+    letter-spacing: 0.14em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .pulse_slot { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+  .pulse {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-brass);
+    box-shadow: 0 0 8px rgba(138, 106, 40, 0.55);
+    animation: pulse-beat 2.4s ease-in-out infinite;
+  }
+
+  @keyframes pulse-beat {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+  }
+
+  .pulse_label {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .heartbeat {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 14px 12px;
+    background:
+      linear-gradient(180deg, var(--bg-panel) 0%, #0f0b09 100%);
+    border: 1px solid var(--border-main);
+    border-radius: 2px;
+    box-shadow: inset 0 0 0 1px rgba(196, 162, 101, 0.04);
+  }
+
+  .heartbeat_head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .heartbeat_eyebrow {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .heartbeat_scale {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    color: #4a3a32;
+  }
+
+  .heartbeat_track {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 2px;
+    height: 36px;
+    align-items: end;
+    padding: 0 1px;
+    border-bottom: 1px solid var(--border-main);
+  }
+
+  .heartbeat_bar {
+    min-width: 2px;
+    background: #3a5a48;
+    border-radius: 1px;
+    opacity: 0.82;
+  }
+
+  .heartbeat_bar_warn  { background: linear-gradient(180deg, var(--status-warn) 0%, #6a3c10 100%); }
+  .heartbeat_bar_error { background: linear-gradient(180deg, #e84848 0%, #8a1010 100%); box-shadow: 0 0 6px rgba(160, 24, 24, 0.45); }
+  .heartbeat_bar_idle  { background: var(--border-main); opacity: 0.6; }
+
+  /* hud CSS → Hud 모듈로 이관 (shell 추출 Phase 2.A) */
+
+  /* Moonrise strip — narrative interlude between the HUD readout and
+     the filter toolbar. Reads as a quiet status bar that names the
+     watch, the time of day, and who is at the helm. */
+  .moonrise {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 8px 14px;
+    background:
+      linear-gradient(90deg,
+        rgba(138, 106, 40, 0.10) 0%,
+        transparent 45%,
+        rgba(160, 24, 24, 0.06) 100%),
+      #0f0b09;
+    border: 1px solid var(--border-main);
+    border-radius: 2px;
+    font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
+    font-variant: small-caps;
+    letter-spacing: 0.08em;
+    font-size: 12px;
+    color: var(--text-primary);
+  }
+
+  .moon_glyph {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 28% 28%, var(--text-bright) 0%, var(--accent-brass) 55%, var(--border-highlight) 100%);
+    box-shadow:
+      0 0 10px rgba(232, 216, 184, 0.22),
+      inset 0 0 0 1px rgba(232, 216, 184, 0.12);
+    flex-shrink: 0;
+  }
+
+  .moon_lead {
+    font-family: 'Cinzel', serif;
+    font-variant: normal;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--text-bright);
+    font-size: 10px;
+  }
+
+  .moon_sep {
+    color: var(--border-highlight);
+    font-variant: normal;
+  }
+
+  .moon_mono {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    font-variant: normal;
+    letter-spacing: 0.04em;
+    color: var(--accent-brass);
+  }
+
+  .moon_tail {
+    margin-left: auto;
+    color: var(--text-dim);
+    font-variant: normal;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+  }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-main);
+    border-radius: 2px;
+    flex-wrap: wrap;
+  }
+
+  .chip_group {
+    display: inline-flex;
+    gap: 4px;
+    padding: 2px;
+    border: 1px solid var(--border-main);
+    border-radius: 999px;
+    background: #0f0b09;
+  }
+
+  .chip {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 999px;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: background 0.18s, color 0.18s;
+  }
+
+  .chip:hover { color: var(--text-primary); }
+  .chip_active {
+    color: var(--text-bright);
+    background: rgba(138, 106, 40, 0.14);
+    box-shadow: inset 0 0 0 1px var(--accent-brass);
+  }
+
+  /* Declarative active state for filter chips — theme chip 패턴과 동일.
+     <html data-log-level="X"> 가 set되면 매칭되는 chip만 active 스타일.
+     기본값 = info (data-log-level 속성 없는 초기 상태도 info chip이 활성). */
+  html[data-log-level="debug"] .chip[data-filter-level="debug"],
+  html[data-log-level="info"]  .chip[data-filter-level="info"],
+  html[data-log-level="warn"]  .chip[data-filter-level="warn"],
+  html[data-log-level="error"] .chip[data-filter-level="error"],
+  html:not([data-log-level])   .chip[data-filter-level="info"] {
+    color: var(--text-bright);
+    background: rgba(138, 106, 40, 0.14);
+    box-shadow: inset 0 0 0 1px var(--accent-brass);
+  }
+
+  .input_shell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--border-main);
+    border-radius: 2px;
+    background: #0f0b09;
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .input_shell_label { letter-spacing: 0.25em; text-transform: uppercase; color: #4a3a32; font-size: 9px; }
+  .input_shell_value { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text-primary); }
+
+  .toolbar_spacer { flex: 1; }
+
+  .btn_ghost {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 5px 12px;
+    border: 1px solid var(--border-main);
+    border-radius: 2px;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: color 0.18s, border-color 0.18s;
+  }
+  .btn_ghost:hover { color: var(--accent-brass); border-color: var(--border-highlight); }
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    border-bottom: 1px solid var(--border-main);
+    padding-bottom: 0.75rem;
+    gap: 1rem;
+  }
+
+  .header_lead { flex: 1; min-width: 0; }
+
+  .eyebrow {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin: 0 0 0.25rem 0;
+  }
+
+  .title {
+    font-family: 'Cinzel', serif;
+    font-weight: 500;
+    font-size: 1.25rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text-bright);
+    margin: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+
+  .versal {
+    font-family: 'EB Garamond', 'Cinzel', serif;
+    font-size: 3.5rem;
+    line-height: 0.82;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: uppercase;
+    background: linear-gradient(180deg, var(--text-bright) 0%, var(--accent-brass) 55%, var(--border-highlight) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 0 18px rgba(138, 106, 40, 0.28);
+    margin-right: 4px;
+    align-self: flex-start;
+    padding-top: 6px;
+  }
+
+  .title_rest {
+    font-family: 'Cinzel', serif;
+    font-weight: 400;
+    font-size: 1rem;
+    letter-spacing: 0.3em;
+    color: var(--text-primary);
+    text-transform: uppercase;
+  }
+
+  .title_rule {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--border-highlight) 0%, transparent 100%);
+    margin-left: 10px;
+    margin-right: 10px;
+    align-self: center;
+  }
+
+  .folio {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: var(--border-highlight);
+    text-transform: none;
+  }
+
+  .meta {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--accent-brass);
+  }
+
+  .tape {
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    padding-left: 1.5rem;
+    isolation: isolate;
+  }
+
+  /* Vertical brass thread running down the left margin — anchors the
+     time gutter and reads as a continuous "spine" for the row sequence. */
+  .tape::before {
+    content: "";
+    position: absolute;
+    left: 0.6rem;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: linear-gradient(180deg,
+      transparent 0%,
+      var(--border-highlight) 6%,
+      var(--border-main) 92%,
+      transparent 100%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Top fade — entries appear out of darkness as they scroll past the HUD. */
+  .tape::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 28px;
+    background: linear-gradient(180deg, var(--bg-deep) 0%, rgba(10, 7, 6, 0) 100%);
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  /* Symmetric bottom fade so old entries dissolve into the page floor
+     before the roster strip. Sibling element (not pseudo) so it can sit
+     after the row stream in DOM order without breaking sticky positioning. */
+  .tape_end {
+    position: relative;
+    height: 32px;
+    background: linear-gradient(180deg, rgba(10, 7, 6, 0) 0%, var(--bg-deep) 100%);
+    margin-top: -8px;
+    pointer-events: none;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 1.75rem 10rem 5rem 9rem 7.5rem minmax(0, 1fr);
+    gap: 1rem;
+    padding: 0.625rem 0.75rem;
+    border-bottom: 1px dashed var(--border-main);
+    border-left: 2px solid var(--border-main);
+    align-items: baseline;
+    transition: background 0.18s ease, box-shadow 0.18s ease, border-left-color 0.18s ease;
+  }
+
+  .sigil {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid var(--accent-brass);
+    background:
+      radial-gradient(circle at 35% 30%, rgba(232, 216, 184, 0.18), transparent 55%),
+      var(--bg-panel);
+    display: grid;
+    place-items: center;
+    font-family: 'Cinzel', serif;
+    font-size: 10px;
+    letter-spacing: 0;
+    color: var(--accent-brass);
+    text-transform: uppercase;
+    box-shadow:
+      inset 0 0 0 1px rgba(232, 216, 184, 0.06),
+      0 0 6px rgba(138, 106, 40, 0.18);
+    align-self: center;
+  }
+
+  .sigil_warn  { color: var(--status-warn); border-color: var(--status-warn); box-shadow: inset 0 0 0 1px rgba(232,216,184,0.06), 0 0 8px rgba(160, 106, 26, 0.35); }
+  .sigil_error { color: var(--text-bright); border-color: var(--accent-blood); background: radial-gradient(circle at 35% 30%, rgba(232,216,184,0.28), transparent 55%), #3a1410; box-shadow: inset 0 0 0 1px rgba(232,216,184,0.08), 0 0 10px rgba(160, 24, 24, 0.45); }
+
+  .message_lead::first-letter {
+    font-family: 'Cinzel', 'EB Garamond', serif;
+    font-weight: 600;
+    font-size: 2.4rem;
+    line-height: 0.85;
+    float: left;
+    padding: 2px 8px 0 0;
+    margin-top: 2px;
+    background: linear-gradient(180deg, var(--text-bright) 0%, var(--accent-brass) 55%, var(--border-highlight) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 0 14px rgba(138, 106, 40, 0.25);
+  }
+
+  .row_debug { border-left-color: #4a3a32; }
+  .row_info  { border-left-color: #3a5a48; }
+
+  .row:hover {
+    background: linear-gradient(90deg, rgba(138, 106, 40, 0.08), transparent 70%);
+    box-shadow: inset 1px 0 0 0 rgba(138, 106, 40, 0.35);
+    border-left-color: var(--accent-brass);
+  }
+
+  .row_error {
+    background: linear-gradient(90deg, rgba(160, 24, 24, 0.08) 0%, transparent 60%);
+    border-left-color: var(--accent-blood);
+  }
+
+  .row_error:hover {
+    background: linear-gradient(90deg, rgba(160, 24, 24, 0.18) 0%, transparent 65%);
+    box-shadow: inset 1px 0 0 0 rgba(160, 24, 24, 0.55);
+    border-left-color: #c94a3a;
+  }
+
+  .row_warn {
+    background: linear-gradient(90deg, rgba(160, 106, 26, 0.06) 0%, transparent 60%);
+    border-left-color: var(--status-warn);
+  }
+
+  .row_warn:hover {
+    background: linear-gradient(90deg, rgba(160, 106, 26, 0.15) 0%, transparent 65%);
+    box-shadow: inset 1px 0 0 0 rgba(160, 106, 26, 0.5);
+    border-left-color: #c4461a;
+  }
+
+  .ts {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .ts_rel {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #4a3a32;
+  }
+
+  .level {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 10px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+
+  .level_debug { color: var(--text-dim); }
+  .level_info  { color: var(--text-primary); }
+  .level_warn  { color: var(--status-warn); }
+  .level_error { color: var(--accent-blood); text-shadow: 0 0 12px rgba(160, 24, 24, 0.32); }
+
+  .mod_col {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .source_badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border: 1px solid var(--border-main);
+    border-radius: 999px;
+    background: #1b1612;
+    color: var(--text-dim);
+    width: fit-content;
+    height: fit-content;
+  }
+
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    display: inline-block;
+  }
+
+  .dot_ok    { background: var(--status-ok); box-shadow: 0 0 6px var(--status-ok); }
+  .dot_warn  { background: var(--status-warn); box-shadow: 0 0 6px var(--status-warn); }
+  .dot_bad   { background: var(--accent-blood); box-shadow: 0 0 6px var(--accent-blood); }
+
+  .message {
+    color: var(--text-primary);
+    font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
+    font-size: 14px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .details {
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-size: 10px;
+    margin-top: 0.25rem;
+    opacity: 0.75;
+  }
+
+  .empty {
+    color: var(--text-dim);
+    font-family: 'EB Garamond', Georgia, serif;
+    font-style: italic;
+    padding: 3rem 0 4rem;
+    text-align: center;
+    font-size: 1rem;
+    line-height: 1.7;
+  }
+
+  .empty_attr {
+    display: block;
+    margin-top: 0.75rem;
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-style: normal;
+    color: #4a3a32;
+  }
+
+  /* Wrapper kept for backward compatibility with the existing render
+     code; the top fade now lives on .tape::after, so the old sticky
+     pseudo is no longer needed. */
+  .tape_fade {
+    position: relative;
+  }
+
+  /* roster CSS → Roster 모듈로 이관 (shell 추출 Phase 2.A) */
+
+  .signet {
+    position: fixed;
+    left: 1.75rem;
+    bottom: 1.25rem;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 32% 28%, #c94a3a 0%, var(--accent-blood) 40%, #5a0a0a 80%, #2a0404 100%);
+    border: 2px solid var(--accent-brass);
+    box-shadow:
+      inset 0 0 0 1px rgba(232, 216, 184, 0.18),
+      inset -6px -8px 14px rgba(0, 0, 0, 0.55),
+      inset 5px 4px 10px rgba(232, 216, 184, 0.15),
+      0 6px 14px rgba(160, 24, 24, 0.35),
+      0 0 22px rgba(138, 106, 40, 0.22);
+    transform: rotate(-14deg);
+    z-index: 4;
+    pointer-events: none;
+    display: grid;
+    place-items: center;
+    font-family: 'Cinzel', serif;
+    font-weight: 600;
+    color: var(--text-bright);
+    font-size: 22px;
+    letter-spacing: 0.04em;
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6), 0 0 8px rgba(232, 216, 184, 0.35);
+  }
+
+  .signet::before {
+    content: "";
+    position: absolute;
+    inset: 6px;
+    border-radius: 50%;
+    border: 1px dashed rgba(232, 216, 184, 0.22);
+    transform: rotate(14deg);
+  }
+
+  .signet::after {
+    content: "masc · seal";
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 50%;
+    transform: translateX(-50%) rotate(14deg);
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 8px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--border-highlight);
+    white-space: nowrap;
+  }
+
+  /* ─── left nav (220px, fixed) ───
+     dashboard_v2 shell의 nav column을 fixed positioning으로 도입.
+     scroll시 항상 보이고, root는 padding-left로 자리만 비워준다. */
+  .nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 220px;
+    height: 100vh;
+    padding: 18px 0 24px;
+    background: linear-gradient(180deg, #18110c 0%, #0e0806 100%);
+    border-right: 1px solid var(--border-main);
+    box-shadow: inset -1px 0 0 rgba(138, 106, 40, 0.08);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    z-index: 5;
+  }
+
+  .nav_brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 18px 18px;
+    border-bottom: 1px solid var(--border-main);
+    margin-bottom: 12px;
+  }
+  .nav_brand_rune {
+    width: 18px;
+    height: 18px;
+    border: 1px solid var(--accent-brass);
+    color: var(--accent-brass);
+    display: grid;
+    place-items: center;
+    font-family: 'Cinzel', serif;
+    font-size: 9px;
+    transform: rotate(45deg);
+  }
+  .nav_brand_rune > span { transform: rotate(-45deg); display: block; }
+  .nav_brand_word {
+    font-family: 'Cinzel', serif;
+    font-size: 12px;
+    letter-spacing: 0.28em;
+    color: var(--text-bright);
+    text-transform: uppercase;
+  }
+  .nav_brand_blood { color: var(--accent-blood); }
+
+  .nav_section {
+    padding: 14px 18px 6px;
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .nav_section::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--border-highlight), transparent);
+  }
+
+  .nav_link {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 8px 18px;
+    color: var(--text-primary);
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    cursor: default;
+    user-select: none;
+  }
+  .nav_link:hover {
+    color: var(--accent-brass);
+    background: rgba(138, 106, 40, 0.05);
+  }
+  .nav_link_active {
+    color: var(--accent-brass);
+    border-left-color: var(--accent-brass);
+    background: linear-gradient(90deg, rgba(138, 106, 40, 0.10), transparent 70%);
+  }
+  .nav_link_glyph {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--border-highlight);
+    flex-shrink: 0;
+  }
+  .nav_link_active .nav_link_glyph {
+    background: var(--accent-brass);
+    box-shadow: 0 0 6px var(--accent-brass);
+  }
+  .nav_link_tail {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--accent-blood);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .nav_foot {
+    margin-top: auto;
+    padding: 14px 18px 0;
+    border-top: 1px solid var(--border-main);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    color: var(--border-highlight);
+    text-transform: uppercase;
+  }
+  .nav_foot_v { color: var(--text-dim); }
+
+  /* ─── theme chips ───
+     클릭 시 location.hash 를 바꾸면 bin/main.ml 의 hashchange listener가
+     <html data-theme="..."> 를 즉시 교체. URL이 SSOT이라 북마크/공유
+     가능. active chip은 document.documentElement.dataset.theme 기준
+     runtime JS가 칠하지 못해 정적으로는 강조 없음 — 추후 Var 연결 시
+     active 스타일 추가. */
+  .theme_chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 10px 18px 6px;
+  }
+  .theme_chip {
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 8px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    padding: 3px 6px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-main);
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+    border-radius: 1px;
+  }
+  .theme_chip:hover {
+    border-color: var(--accent-brass-dim);
+    color: var(--accent-brass);
+  }
+  .theme_chip_active {
+    border-color: var(--accent-brass);
+    color: var(--accent-brass);
+    background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
+    box-shadow: 0 0 0 1px rgba(138, 106, 40, 0.25) inset;
+  }
+
+  /* active chip via declarative CSS only — listener가 <html data-theme>
+     값을 세팅하면 cascading selector가 해당 chip에 active 스타일을 자동
+     적용. Bonsai state 경유 없이도 동작한다. */
+  html[data-theme="dark-fantasy"] .theme_chip[data-chip-theme="dark"],
+  html[data-theme="cyberpunk"]    .theme_chip[data-chip-theme="cyber"],
+  html[data-theme="terminal"]     .theme_chip[data-chip-theme="term"],
+  html[data-theme="parchment"]    .theme_chip[data-chip-theme="parchment"],
+  html[data-theme="paper"]        .theme_chip[data-chip-theme="paper"] {
+    border-color: var(--accent-brass);
+    color: var(--accent-brass);
+    background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
+    box-shadow: 0 0 0 1px rgba(138, 106, 40, 0.25) inset;
+  }
+
+  /* ─── right aside (340px, fixed) ───
+     dashboard_v2 aside: focus card + chronicle evs stream.
+     현재는 static skeleton. 추후 Var 연결. */
+  .aside {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 340px;
+    height: 100vh;
+    padding: 22px 18px 28px;
+    background: linear-gradient(180deg, #16100a 0%, #0e0806 100%);
+    border-left: 1px solid var(--border-main);
+    box-shadow: inset 1px 0 0 rgba(138, 106, 40, 0.06);
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    overflow-y: auto;
+    z-index: 5;
+  }
+
+  .aside_h {
+    font-family: 'Cinzel', serif;
+    font-size: 11px;
+    letter-spacing: 0.28em;
+    color: var(--accent-brass);
+    text-transform: uppercase;
+    margin: 0 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .aside_h::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--border-highlight), transparent);
+  }
+  .aside_h_tail {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+    text-transform: none;
+  }
+
+  /* ─── focus card ─── */
+  .focus {
+    position: relative;
+    padding: 16px 16px 14px;
+    background: linear-gradient(180deg, #241a12 0%, #14100a 100%);
+    border: 1px solid var(--accent-brass-dim);
+  }
+  .focus::before {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border: 1px solid var(--border-highlight);
+    pointer-events: none;
+  }
+  .focus_who {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .focus_portrait {
+    width: 46px;
+    height: 46px;
+    border: 1px solid var(--accent-brass);
+    background: linear-gradient(135deg, #2a1f14, #0e0806);
+    display: grid;
+    place-items: center;
+    font-family: 'Cinzel', serif;
+    font-size: 18px;
+    color: var(--accent-brass);
+    flex-shrink: 0;
+  }
+  .focus_name_col { flex: 1; }
+  .focus_name {
+    font-family: 'Cinzel', serif;
+    font-size: 16px;
+    color: var(--accent-brass);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+  .focus_role {
+    font-family: 'EB Garamond', Georgia, serif;
+    font-style: italic;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  .ctx_bar { margin-top: 14px; position: relative; }
+  .ctx_lbl {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .ctx_lbl_v { color: var(--text-bright); }
+  .vial {
+    height: 8px;
+    background: #0a0604;
+    border: 1px solid var(--border-main);
+    position: relative;
+    overflow: hidden;
+  }
+  .vial_fill {
+    display: block;
+    height: 100%;
+    width: 64%;
+    background: linear-gradient(90deg, #8a6a20, #d4a940);
+    box-shadow: 0 0 6px rgba(138, 106, 40, 0.45);
+  }
+  .vial::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(90deg, transparent 0 19px, rgba(0, 0, 0, 0.5) 19px 20px);
+    pointer-events: none;
+  }
+
+  .focus_stats {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px 14px;
+    margin-top: 14px;
+  }
+  .focus_stat_l {
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+  }
+  .focus_stat_v {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 12px;
+    color: var(--text-bright);
+    margin-top: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ─── chronicle evs stream ─── */
+  .evs { display: flex; flex-direction: column; }
+  .evrow {
+    display: grid;
+    grid-template-columns: 52px 12px 1fr;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px dashed var(--border-main);
+    align-items: baseline;
+  }
+  .evrow:last-child { border-bottom: 0; }
+  .evrow_t {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .evrow_mk {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    align-self: center;
+    justify-self: center;
+    background: var(--accent-brass-dim);
+  }
+  .evrow_ok  .evrow_mk { background: var(--status-ok); box-shadow: 0 0 6px var(--status-ok); }
+  .evrow_warn .evrow_mk { background: var(--accent-brass); box-shadow: 0 0 6px var(--accent-brass); }
+  .evrow_bad  .evrow_mk { background: var(--accent-blood); box-shadow: 0 0 6px var(--accent-blood); }
+  .evrow_b {
+    font-family: 'EB Garamond', Georgia, serif;
+    font-size: 12px;
+    color: var(--text-primary);
+    line-height: 1.45;
+  }
+  .evrow_b_em { color: var(--text-bright); font-style: italic; }
+  .evrow_b_code {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--accent-brass);
+    background: rgba(138, 106, 40, 0.08);
+    padding: 0 5px;
+    border: 1px solid var(--border-main);
+  }
+  .evrow_bad .evrow_b_code {
+    color: var(--accent-blood);
+    background: rgba(160, 24, 24, 0.08);
+  }
+
+  /* ─── page-head (hero) ───
+     dashboard_v2 "The Manor Under Storm" 톤의 hero 타이틀.
+     moonrise 앞, HUD 뒤에 배치되어 "무엇을 보고 있는가"의 나레이티브
+     선언이 된다. action buttons는 아직 기능 없고 cursor: default. */
+  .page_head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    margin: 8px 0 4px;
+  }
+  .page_head_lead {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .page_tag {
+    font-family: 'Noto Sans KR', -apple-system, sans-serif;
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .page_tag::after {
+    content: "";
+    flex: 0 0 40px;
+    height: 1px;
+    background: var(--border-highlight);
+  }
+  .page_h1 {
+    font-family: 'Cinzel', 'Noto Sans KR', serif;
+    font-size: 36px;
+    letter-spacing: 0.16em;
+    color: var(--text-bright);
+    text-transform: uppercase;
+    margin: 6px 0 0;
+    line-height: 1.1;
+  }
+  .page_h1_blood {
+    color: var(--accent-blood);
+    text-shadow: 0 0 18px rgba(201, 74, 58, 0.32);
+  }
+  .page_h1_brass {
+    color: var(--accent-brass);
+    text-shadow: 0 0 18px rgba(138, 106, 40, 0.32);
+  }
+  .page_h1_bright {
+    color: var(--text-bright);
+    text-shadow: 0 0 18px rgba(216, 200, 160, 0.24);
+  }
+  .page_sub {
+    font-family: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
+    font-style: italic;
+    color: var(--text-primary);
+    margin-top: 6px;
+    font-size: 14px;
+    max-width: 540px;
+    line-height: 1.55;
+  }
+  .page_actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .pbtn {
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 10px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    padding: 7px 12px;
+    background: linear-gradient(180deg, #241a12 0%, #14100a 100%);
+    border: 1px solid var(--accent-brass-dim);
+    color: var(--text-primary);
+    cursor: default;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .pbtn:hover {
+    border-color: var(--accent-brass);
+    color: var(--accent-brass);
+  }
+  .pbtn_primary {
+    background: linear-gradient(180deg, #3a2a16 0%, #241810 100%);
+    border-color: var(--accent-brass);
+    color: var(--accent-brass);
+  }
+  .pbtn_primary:hover {
+    background: rgba(138, 106, 40, 0.12);
+    color: var(--text-bright);
+  }
+  .pbtn_glyph {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  /* ─── .sec section marker ───
+     dashboard_v2 전역 section title 패턴 — 작은 lozenge 글리프 + Cinzel
+     제목 + italic sub + hairline gradient + 우측 mono meta. page-head
+     아래 각 섹션(tape, keepers, context pressure 등)에 등장해 "지금
+     무엇을 보고 있는가"를 한 줄로 알린다. */
+  .sec {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin: 8px 0 2px;
+  }
+  .sec_glyph {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-brass);
+    box-shadow: 0 0 6px rgba(138, 106, 40, 0.35);
+    align-self: center;
+  }
+  .sec_h {
+    font-family: 'Cinzel', serif;
+    font-size: 12px;
+    letter-spacing: 0.26em;
+    color: var(--accent-brass);
+    text-transform: uppercase;
+    margin: 0;
+  }
+  .sec_sub {
+    font-family: 'EB Garamond', Georgia, serif;
+    font-style: italic;
+    color: var(--text-dim);
+    font-size: 12px;
+  }
+  .sec_hr {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      var(--border-highlight) 0%,
+      var(--border-main) 60%,
+      transparent 100%
+    );
+  }
+  .sec_r {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+  }
+  .sec_r_v { color: var(--text-bright); }
+
+  /* swimlane CSS → Swim 모듈로 이관 (shell 추출 Phase 2.A) */
+
+  /* ─── context pressure chart ───
+     60-min rolling ctx % per keeper. SVG polyline with 75/90% guides.
+     viewBox 0..600 × 0..100 → 1 px = 0.1 min × 1 %.
+     y = 100 - ctx_pct (SVG y-origin 상단). stroke 색은 --t-* 재사용. */
+  .ctx_chart { display: grid; grid-template-columns: 140px 1fr; }
+  .ctx_meta {
+    border-right: 1px solid var(--border-main);
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    font-family: 'Noto Sans KR', sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+  .ctx_meta_v {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: none;
+    color: var(--text-primary);
+  }
+  .ctx_track {
+    position: relative;
+    height: 120px;
+    background: linear-gradient(180deg,
+      rgba(160,24,24,0.04) 0%,
+      rgba(160,24,24,0.02) 10%,
+      transparent 25%,
+      transparent 100%);
+  }
+  .ctx_svg { display: block; width: 100%; height: 120px; }
+  .ctx_track_lbl {
+    position: absolute;
+    right: 8px;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 9px;
+    color: var(--text-dim);
+    pointer-events: none;
+  }
+  .ctx_lbl_warn { top: 22px; color: color-mix(in oklab, var(--accent-brass) 80%, var(--text-dim)); }
+  .ctx_lbl_dang { top: 6px;  color: color-mix(in oklab, var(--accent-blood) 80%, var(--text-dim)); }
+
+  /* flame mini CSS → Flame 모듈로 이동 (shell 추출 Phase 2.A) */
+
+  /* ─── tombstrip — 12-state keeper FSM tiles ───
+     design_v2: Offline → Running → {Failing | Overflowed | Compacting |
+     HandingOff | Draining} → Paused / Stopped / Crashed → Restarting → Dead.
+     기본은 dim outline. active=brass glow, danger=blood(Crashed),
+     dead=strikethrough with blood decoration. */
+  .tombstrip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    padding: 6px 14px 12px;
+  }
+  .tomb {
+    padding: 5px 8px;
+    font-family: 'Cinzel', 'Cormorant SC', serif;
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    border: 1px solid var(--border-main);
+    background: #1a120c;
+  }
+  .tomb_active {
+    color: var(--accent-brass);
+    border-color: var(--accent-brass);
+    background: linear-gradient(180deg, #2a1f14, #14100a);
+  }
+  .tomb_danger {
+    color: var(--accent-blood);
+    border-color: color-mix(in oklab, var(--accent-blood) 50%, transparent);
+  }
+  .tomb_dead {
+    color: var(--text-dim);
+    opacity: 0.5;
+    text-decoration: line-through;
+    text-decoration-color: var(--accent-blood);
+  }
+|}]
+
+let level_class level =
+  match level with
+  | "DEBUG" -> Style.level_debug
+  | "WARN" -> Style.level_warn
+  | "ERROR" -> Style.level_error
+  | _ -> Style.level_info
+;;
+
+let row_tint level =
+  match level with
+  | "WARN" -> Some Style.row_warn
+  | "ERROR" -> Some Style.row_error
+  | "DEBUG" -> Some Style.row_debug
+  | _ -> Some Style.row_info
+;;
+
+let dot_class level =
+  match level with
+  | "WARN" -> Style.dot_warn
+  | "ERROR" -> Style.dot_bad
+  | _ -> Style.dot_ok
+;;
+
+let sigil_class level =
+  match level with
+  | "WARN" -> Some Style.sigil_warn
+  | "ERROR" -> Some Style.sigil_error
+  | _ -> None
+;;
+
+let sigil_char source =
+  match String.to_list source with
+  | c :: _ -> String.of_char (Char.uppercase c)
+  | [] -> "·"
+;;
+
+let view_entry ~is_first (e : Logs_types.entry) =
+  let row_attrs =
+    match row_tint e.normalized_level with
+    | None -> [ Style.row ]
+    | Some tint -> [ Style.row; tint ]
+  in
+  let sigil_attrs =
+    match sigil_class e.normalized_level with
+    | None -> [ Style.sigil ]
+    | Some c -> [ Style.sigil; c ]
+  in
+  let message_attrs =
+    if is_first then [ Style.message; Style.message_lead ] else [ Style.message ]
+  in
+  let message_block =
+    match e.details with
+    | None -> [ Node.div ~attrs:message_attrs [ Node.text e.message ] ]
+    | Some details_raw ->
+      [ Node.div ~attrs:message_attrs [ Node.text e.message ]
+      ; Node.div ~attrs:[ Style.details ] [ Node.text details_raw ]
+      ]
+  in
+  Node.div
+    ~attrs:row_attrs
+    [ Node.div ~attrs:sigil_attrs [ Node.text (sigil_char e.module_) ]
+    ; Node.div
+        ~attrs:[ Style.ts ]
+        [ Node.span [ Node.text e.ts ]
+        ; Node.span ~attrs:[ Style.ts_rel ] [ Node.text "just now" ]
+        ]
+    ; Node.div
+        ~attrs:[ Style.level; level_class e.normalized_level ]
+        [ Node.text e.normalized_level ]
+    ; Node.div ~attrs:[ Style.mod_col ] [ Node.text e.module_ ]
+    ; Node.div
+        ~attrs:[ Style.source_badge ]
+        [ Node.span ~attrs:[ Style.dot; dot_class e.normalized_level ] []
+        ; Node.text e.source
+        ]
+    ; Node.div message_block
+    ]
+;;
+
+(* hud_cell → Hud.cell (shell 추출 Phase 2.A) *)
+
+(* Heartbeat strip — 60 bars representing event density across recent cycles.
+   Static shape for Phase 1; Phase 1c wires real per-minute buckets. *)
+let heartbeat_bars : (int * [ `Info | `Warn | `Error | `Idle ]) list =
+  [ 18, `Info; 22, `Info; 14, `Info; 8, `Idle; 24, `Info; 31, `Info; 28, `Info
+  ; 16, `Info; 12, `Idle; 34, `Warn; 40, `Warn; 29, `Info; 22, `Info; 18, `Info
+  ; 14, `Info; 6, `Idle; 9, `Idle; 22, `Info; 27, `Info; 33, `Info; 41, `Warn
+  ; 52, `Warn; 38, `Warn; 24, `Info; 19, `Info; 12, `Idle; 27, `Info; 31, `Info
+  ; 36, `Info; 44, `Warn; 58, `Warn; 72, `Error; 61, `Error; 49, `Warn
+  ; 38, `Warn; 28, `Info; 22, `Info; 18, `Info; 14, `Idle; 11, `Idle
+  ; 24, `Info; 31, `Info; 28, `Info; 22, `Info; 17, `Info; 12, `Idle
+  ; 26, `Info; 34, `Info; 41, `Warn; 47, `Warn; 35, `Warn; 28, `Info
+  ; 22, `Info; 19, `Info; 16, `Info; 14, `Info; 28, `Info; 44, `Warn
+  ; 58, `Error; 82, `Error
+  ]
+;;
+
+let heartbeat_bars_of_entries (entries : Logs_types.entry list)
+  : (int * [ `Info | `Warn | `Error | `Idle ]) list
+  =
+  let level_of (e : Logs_types.entry) =
+    match e.normalized_level with
+    | "ERROR" -> `Error
+    | "WARN" -> `Warn
+    | "DEBUG" -> `Idle
+    | _ -> `Info
+  in
+  let height_of (e : Logs_types.entry) =
+    Int.clamp_exn (String.length e.message / 2) ~min:6 ~max:72
+  in
+  let take_last n xs =
+    let total = List.length xs in
+    if total <= n then xs else List.drop xs (total - n)
+  in
+  let selected = take_last 60 entries in
+  let bars = List.map selected ~f:(fun e -> height_of e, level_of e) in
+  let n = List.length bars in
+  if n >= 60
+  then bars
+  else List.append (List.init (60 - n) ~f:(fun _ -> 6, `Idle)) bars
+;;
+
+let view_heartbeat ?(entries : Logs_types.entry list = []) () =
+  let bars =
+    match entries with
+    | [] -> heartbeat_bars
+    | _ -> heartbeat_bars_of_entries entries
+  in
+  let bar i (height, level) =
+    let cls =
+      match level with
+      | `Warn -> Some Style.heartbeat_bar_warn
+      | `Error -> Some Style.heartbeat_bar_error
+      | `Idle -> Some Style.heartbeat_bar_idle
+      | `Info -> None
+    in
+    let level_name =
+      match level with
+      | `Warn -> "WARN"
+      | `Error -> "ERROR"
+      | `Idle -> "idle"
+      | `Info -> "info"
+    in
+    let total = List.length bars in
+    let t_ago = total - 1 - i in
+    let tip =
+      Printf.sprintf "t-%d · %s · ticks %d" t_ago level_name height
+    in
+    let base_attrs =
+      match cls with
+      | None -> [ Style.heartbeat_bar ]
+      | Some c -> [ Style.heartbeat_bar; c ]
+    in
+    let h = Int.max 2 height in
+    let style =
+      Attr.style (Css_gen.create ~field:"height" ~value:(Printf.sprintf "%dpx" h))
+    in
+    let title_attr = Attr.create "title" tip in
+    Node.div ~attrs:(title_attr :: style :: base_attrs) []
+  in
+  Node.div
+    ~attrs:[ Style.heartbeat ]
+    [ Node.div
+        ~attrs:[ Style.heartbeat_head ]
+        [ Node.span
+            ~attrs:[ Style.heartbeat_eyebrow ]
+            [ Node.text "cycle pulse · last 60 ticks" ]
+        ; Node.span
+            ~attrs:[ Style.heartbeat_scale ]
+            [ Node.text "t-60 ·—· t0" ]
+        ]
+    ; Node.div
+        ~attrs:[ Style.heartbeat_track ]
+        (List.mapi ~f:bar bars)
+    ]
+;;
+
+(* Keeper roster — sticky bottom strip. Four fixed keeper slots as a
+   visual placeholder; Phase 1c wires this to a keeper_status Var so the
+   state dot, last-heard timestamp, and presence reflect live telemetry. *)
+(* roster → Roster 모듈로 이관 (shell 추출 Phase 2.A) *)
+
+
+let svg_a k v = Attr.create k v
+
+let ctx_polyline ~points ~stroke_var ~dashed =
+  let dash_attr =
+    if dashed then [ svg_a "stroke-dasharray" "3,3" ] else []
+  in
+  Node.create_svg "polyline"
+    ~attrs:([
+      svg_a "points" points;
+      svg_a "fill" "none";
+      svg_a "stroke" stroke_var;
+      svg_a "stroke-width" "1.4";
+      svg_a "stroke-linejoin" "round";
+      svg_a "stroke-linecap" "round";
+      svg_a "vector-effect" "non-scaling-stroke";
+    ] @ dash_attr)
+    []
+;;
+
+let ctx_guide ~y ~stroke_var =
+  Node.create_svg "line"
+    ~attrs:[
+      svg_a "x1" "0";
+      svg_a "y1" (Printf.sprintf "%d" y);
+      svg_a "x2" "600";
+      svg_a "y2" (Printf.sprintf "%d" y);
+      svg_a "stroke" stroke_var;
+      svg_a "stroke-width" "1";
+      svg_a "stroke-dasharray" "4,4";
+      svg_a "opacity" "0.55";
+      svg_a "vector-effect" "non-scaling-stroke";
+    ]
+    []
+;;
+
+let ctx_hairline ~x =
+  Node.create_svg "line"
+    ~attrs:[
+      svg_a "x1" (Printf.sprintf "%d" x);
+      svg_a "y1" "0";
+      svg_a "x2" (Printf.sprintf "%d" x);
+      svg_a "y2" "100";
+      svg_a "stroke" "var(--border-main)";
+      svg_a "stroke-width" "1";
+      svg_a "opacity" "0.5";
+      svg_a "vector-effect" "non-scaling-stroke";
+    ]
+    []
+;;
+
+(** Rotating palette for per-keeper ctx polylines. Dead keepers always use
+    [--t-err] regardless of index so crashed lanes stand out. *)
+let ctx_palette = [|
+  "var(--t-llm)";
+  "var(--t-tool)";
+  "var(--t-think)";
+  "var(--t-wait)";
+|]
+
+let ctx_stroke_of ~(index : int) ~(status : Keepers_types.keeper_status) =
+  match status with
+  | Dead -> "var(--t-err)"
+  | _ -> ctx_palette.(index mod Array.length ctx_palette)
+;;
+
+(** Build SVG [points] attribute from ctx_history. x = (60 - t_minus_min) * 10
+    (so t-60 → 0, t-0 → 600). y = 100 - pct (SVG origin at top). Samples
+    sorted by descending t_minus_min (older first). *)
+let ctx_points_of (samples : Keepers_types.ctx_sample list) : string =
+  let sorted =
+    List.sort samples ~compare:(fun (a : Keepers_types.ctx_sample)
+                                    (b : Keepers_types.ctx_sample) ->
+      Int.compare b.t_minus_min a.t_minus_min)
+  in
+  List.map sorted ~f:(fun (s : Keepers_types.ctx_sample) ->
+    Printf.sprintf "%d,%d"
+      ((60 - s.t_minus_min) * 10)
+      (100 - s.ctx_pct))
+  |> String.concat ~sep:" "
+;;
+
+(** Static fallback — mirrors the hand-coded 4 polyline mock. *)
+let ctx_polylines_static () =
+  [ ctx_polyline
+      ~points:"0,62 100,60 200,63 300,60 400,58 500,62 600,58"
+      ~stroke_var:"var(--t-llm)" ~dashed:false
+  ; ctx_polyline
+      ~points:"0,60 100,54 200,48 300,42 400,38 500,35 600,33"
+      ~stroke_var:"var(--t-tool)" ~dashed:false
+  ; ctx_polyline
+      ~points:"0,90 100,89 200,90 300,88 400,88 500,90 600,88"
+      ~stroke_var:"var(--t-wait)" ~dashed:false
+  ; ctx_polyline
+      ~points:"0,55 100,35 200,15 260,5"
+      ~stroke_var:"var(--t-err)" ~dashed:true
+  ]
+;;
+
+let ctx_polylines_of_keepers (ks : Keepers_types.keeper list) =
+  List.mapi ks ~f:(fun i (k : Keepers_types.keeper) ->
+    let dashed =
+      match k.status with
+      | Dead -> true
+      | _ -> false
+    in
+    ctx_polyline
+      ~points:(ctx_points_of k.ctx_history)
+      ~stroke_var:(ctx_stroke_of ~index:i ~status:k.status)
+      ~dashed)
+;;
+
+let ctx_meta_lines_of (ks : Keepers_types.keeper list) : string list =
+  let pair (k : Keepers_types.keeper) =
+    match k.status with
+    | Dead -> Printf.sprintf "%s ×" k.name
+    | _ -> Printf.sprintf "%s %d" k.name k.ctx_pct
+  in
+  (* group into 2 items per line for visual density *)
+  let rec chunks = function
+    | [] -> []
+    | [ a ] -> [ a ]
+    | a :: b :: rest -> (a ^ " · " ^ b) :: chunks rest
+  in
+  chunks (List.map ks ~f:pair)
+;;
+
+type tomb_level = [ `Base | `Active | `Danger | `Dead ]
+
+let tomb_class = function
+  | `Base -> Style.tomb
+  | `Active -> Style.tomb_active
+  | `Danger -> Style.tomb_danger
+  | `Dead -> Style.tomb_dead
+;;
+
+(* 12-state keeper FSM per design_v2. active/danger/dead are mocked until
+   keeper phase is wired through Keepers_types. *)
+let keeper_fsm_states : (string * tomb_level) list =
+  [ "Offline",    `Base
+  ; "Running",    `Active
+  ; "Failing",    `Base
+  ; "Overflowed", `Base
+  ; "Compacting", `Active
+  ; "HandingOff", `Base
+  ; "Draining",   `Base
+  ; "Paused",     `Active
+  ; "Stopped",    `Base
+  ; "Crashed",    `Danger
+  ; "Restarting", `Base
+  ; "Dead",       `Dead
+  ]
+;;
+
+let view_tombstrip ?(states = keeper_fsm_states) () =
+  let tile (label, level) =
+    Node.span
+      ~attrs:[ Style.tomb; tomb_class level ]
+      [ Node.text label ]
+  in
+  Node.div
+    ~attrs:[ Style.tombstrip ]
+    (List.map states ~f:tile)
+;;
+
+let view_context_pressure
+      ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
+  let hairlines =
+    List.init 7 ~f:(fun i -> ctx_hairline ~x:(i * 100))
+  in
+  let guides =
+    [ ctx_guide ~y:25 ~stroke_var:"var(--accent-brass-dim)"  (* 75 % warn *)
+    ; ctx_guide ~y:10 ~stroke_var:"var(--accent-blood)"      (* 90 % danger *)
+    ]
+  in
+  let polylines =
+    match keepers.keepers with
+    | [] -> ctx_polylines_static ()
+    | live_keepers -> ctx_polylines_of_keepers live_keepers
+  in
+  let svg =
+    Node.create_svg "svg"
+      ~attrs:[
+        svg_a "viewBox" "0 0 600 100";
+        svg_a "preserveAspectRatio" "none";
+        Style.ctx_svg;
+      ]
+      (hairlines @ guides @ polylines)
+  in
+  let meta_lines =
+    match keepers.keepers with
+    | [] -> [ "luna 38 · brass-owl 67"; "moth 12 · ash ×" ]
+    | live -> ctx_meta_lines_of live
+  in
+  Node.div
+    ~attrs:[ Swim.Style.swim ]
+    [ Node.div
+        ~attrs:[ Swim.Style.axis ]
+        [ Node.div ~attrs:[ Swim.Style.axis_sp ] [ Node.text "ctx · 60m" ]
+        ; Node.div
+            ~attrs:[ Swim.Style.axis_ax ]
+            (List.init 6 ~f:(fun i ->
+              let left_pct = i * 20 in
+              let style =
+                Attr.create "style" (Printf.sprintf "left:%d%%" left_pct)
+              in
+              Node.div
+                ~attrs:[ Swim.Style.tick; style ]
+                [ Node.span
+                    ~attrs:[ Swim.Style.tick_lbl ]
+                    [ Node.text (Printf.sprintf "t-%d" ((5 - i) * 12)) ]
+                ]))
+        ]
+    ; Node.div
+        ~attrs:[ Style.ctx_chart ]
+        [ Node.div
+            ~attrs:[ Style.ctx_meta ]
+            (Node.text "keepers · %"
+             :: List.map meta_lines ~f:(fun line ->
+                  Node.span ~attrs:[ Style.ctx_meta_v ] [ Node.text line ]))
+        ; Node.div
+            ~attrs:[ Style.ctx_track ]
+            [ svg
+            ; Node.span ~attrs:[ Style.ctx_track_lbl; Style.ctx_lbl_dang ] [ Node.text "90% danger" ]
+            ; Node.span ~attrs:[ Style.ctx_track_lbl; Style.ctx_lbl_warn ] [ Node.text "75% warn" ]
+            ]
+        ]
+    ]
+;;
+
+(* hhmmss_of_iso → Hud.hhmmss_of_iso (shell 추출 Phase 2.A) *)
+
+let view_hud
+      ?(keepers : Keepers_types.response = Keepers_types.fixture)
+      (response : Logs_types.response) =
+  let live_n, warn_n, dead_n =
+    List.fold keepers.keepers ~init:(0, 0, 0)
+      ~f:(fun (l, w, d) (k : Keepers_types.keeper) ->
+        match k.status with
+        | Live -> (l + 1, w, d)
+        | Warn -> (l, w + 1, d)
+        | Dead -> (l, w, d + 1))
+  in
+  let fleet_v, (fleet_cls : Hud.v_class) =
+    if live_n = 0 && warn_n = 0 && dead_n = 0
+    then "—", `Neutral
+    else if dead_n > 0
+    then Printf.sprintf "%dl %dw %dd" live_n warn_n dead_n, `Bad
+    else if warn_n > 0
+    then Printf.sprintf "%dl %dw" live_n warn_n, `Warn
+    else Printf.sprintf "%dl" live_n, `Ok
+  in
+  let sync_v =
+    match keepers.generated_at with
+    | "" -> "—"
+    | ts -> Printf.sprintf "%s UTC" (Hud.hhmmss_of_iso ts)
+  in
+  Hud.strip
+    [ Hud.cell ~k:"Source" ~v:"Log.Ring" ()
+    ; Hud.cell ~k:"Total" ~v:(Printf.sprintf "%d" response.total) ()
+    ; Hud.cell ~k:"Level" ~v:"INFO+" ()
+    ; Hud.cell ~v_class:`Ok ~k:"Refresh" ~v:"poll · 3s" ()
+    ; Hud.cell ~k:"Limit" ~v:"200" ()
+    ; Hud.cell ~v_class:`Ok ~k:"Link" ~v:"fetch · ok" ()
+    ; Hud.cell ~v_class:fleet_cls ~k:"Fleet" ~v:fleet_v ()
+    ; Hud.cell ~k:"Synced" ~v:sync_v ()
+    ]
+;;
+
+(** Roman numeral for cycle counters. Only small integers (≤ 39) are
+    expected for dashboard display; outside that range we fall back to the
+    decimal form so very large cycles still render. *)
+let roman_of_int (n : int) : string =
+  if n <= 0 || n > 39
+  then Printf.sprintf "%d" n
+  else
+    let pairs =
+      [ 10, "x"; 9, "ix"; 5, "v"; 4, "iv"; 1, "i" ]
+    in
+    let buf = Buffer.create 8 in
+    let rec go n = function
+      | [] -> ()
+      | (v, s) :: rest ->
+        if n >= v
+        then (Buffer.add_string buf s; go (n - v) ((v, s) :: rest))
+        else go n rest
+    in
+    go n pairs;
+    Buffer.contents buf
+;;
+
+(** Count keepers by status. *)
+type fleet_tally = { live : int; warn : int; dead : int }
+
+let tally_fleet (ks : Keepers_types.keeper list) : fleet_tally =
+  List.fold ks ~init:{ live = 0; warn = 0; dead = 0 }
+    ~f:(fun acc (k : Keepers_types.keeper) ->
+      match k.status with
+      | Live -> { acc with live = acc.live + 1 }
+      | Warn -> { acc with warn = acc.warn + 1 }
+      | Dead -> { acc with dead = acc.dead + 1 })
+;;
+
+(** Focus keeper — first entry of the live response, or [None] when empty
+    (triggers the legacy static fallback inside [focus_card_of]). *)
+let focus_keeper_of (k : Keepers_types.response) : Keepers_types.keeper option =
+  match k.keepers with
+  | [] -> None
+  | head :: _ -> Some head
+;;
+
+(** Display name — capitalize first character of the registry nickname. *)
+let display_name (s : string) : string =
+  if String.length s = 0
+  then s
+  else
+    let first = Char.to_string (Char.uppercase s.[0]) in
+    let rest = String.sub s ~pos:1 ~len:(String.length s - 1) in
+    first ^ rest
+;;
+
+let render_response
+      ?(keepers : Keepers_types.response = Keepers_types.fixture)
+      (response : Logs_types.response)
+    : Node.t =
+  let tape =
+    match response.entries with
+    | [] ->
+      Node.div
+        ~attrs:[ Style.empty ]
+        [ Node.text "저택은 조용하다. 아무도 아직 말하지 않았다."
+        ; Node.span
+            ~attrs:[ Style.empty_attr ]
+            [ Node.text "log ring · empty" ]
+        ]
+    | entries ->
+      let rendered =
+        List.mapi entries ~f:(fun i e -> view_entry ~is_first:(i = 0) e)
+      in
+      Node.div
+        ~attrs:[ Style.tape_fade ]
+        [ Node.div ~attrs:[ Style.tape ] rendered
+        ; Node.div ~attrs:[ Style.tape_end ] []
+        ]
+  in
+  let brand_row =
+    Node.div
+      ~attrs:[ Style.brand ]
+      [ Node.div
+          ~attrs:[ Style.rune ]
+          [ Node.span ~attrs:[ Style.rune_inner ] [ Node.text "M" ] ]
+      ; Node.span ~attrs:[ Style.wordmark ] [ Node.text "masc" ]
+      ; Node.div
+          ~attrs:[ Style.crumbs ]
+          (let head =
+             [ Node.span [ Node.text "observatory" ]
+             ; Node.span ~attrs:[ Style.crumbs_sep ] [ Node.text "›" ]
+             ]
+           in
+           let room_seg =
+             match keepers.room with
+             | None | Some "" -> []
+             | Some name ->
+               [ Node.span ~attrs:[ Style.crumbs_room ] [ Node.text name ]
+               ; Node.span ~attrs:[ Style.crumbs_sep ] [ Node.text "›" ]
+               ]
+           in
+           let tail =
+             [ Node.span ~attrs:[ Style.crumbs_cur ] [ Node.text "저널" ]
+             ]
+           in
+           head @ room_seg @ tail)
+      ; Node.div
+          ~attrs:[ Style.pulse_slot ]
+          [ Node.span ~attrs:[ Style.pulse ] []
+          ; Node.span ~attrs:[ Style.pulse_label ] [ Node.text "live · 3s" ]
+          ]
+      ]
+  in
+  let toolbar =
+    Node.div
+      ~attrs:[ Style.toolbar ]
+      [ (let filter_chip ~level ~label =
+           let click =
+             Attr.on_click (fun _ev ->
+               let effect =
+                 Effect.of_sync_fun
+                   (fun () ->
+                     let doc = Js_of_ocaml.Dom_html.document in
+                     doc##.documentElement##setAttribute
+                       (Js_of_ocaml.Js.string "data-log-level")
+                       (Js_of_ocaml.Js.string level))
+                   ()
+               in
+               effect)
+           in
+           Node.span
+             ~attrs:
+               [ Style.chip
+               ; Attr.create "data-filter-level" level
+               ; click
+               ]
+             [ Node.text label ]
+         in
+         Node.div
+           ~attrs:[ Style.chip_group ]
+           [ filter_chip ~level:"debug" ~label:"debug+"
+           ; filter_chip ~level:"info" ~label:"info+"
+           ; filter_chip ~level:"warn" ~label:"warn+"
+           ; filter_chip ~level:"error" ~label:"error"
+           ])
+      ; Node.div
+          ~attrs:[ Style.input_shell ]
+          [ Node.span ~attrs:[ Style.input_shell_label ] [ Node.text "module" ]
+          ; Node.span ~attrs:[ Style.input_shell_value ] [ Node.text "—" ]
+          ]
+      ; Node.div
+          ~attrs:[ Style.input_shell ]
+          [ Node.span ~attrs:[ Style.input_shell_label ] [ Node.text "limit" ]
+          ; Node.span ~attrs:[ Style.input_shell_value ] [ Node.text "200" ]
+          ]
+      ; Node.div ~attrs:[ Style.toolbar_spacer ] []
+      ; Node.button ~attrs:[ Style.btn_ghost ] [ Node.text "refresh" ]
+      ]
+  in
+  let tally = tally_fleet keepers.keepers in
+  let moon_lead_text =
+    match tally with
+    | { live = 0; warn = 0; dead = 0 } -> "the watch is on"
+    | { dead; _ } when dead > 0 -> "the watch stands a casualty"
+    | { warn; _ } when warn > 0 -> "the watch holds uneasy"
+    | _ -> "the watch is on"
+  in
+  let fleet_mono_text =
+    match tally with
+    | { live = 0; warn = 0; dead = 0 } -> "fleet · —"
+    | t ->
+      Printf.sprintf "fleet · %dl / %dw / %dd" t.live t.warn t.dead
+  in
+  let moonrise =
+    Node.div
+      ~attrs:[ Style.moonrise ]
+      [ Node.span ~attrs:[ Style.moon_glyph ] []
+      ; Node.span ~attrs:[ Style.moon_lead ] [ Node.text moon_lead_text ]
+      ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
+      ; Node.span [ Node.text "lit by a half moon" ]
+      ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
+      ; Node.span
+          ~attrs:
+            [ Style.moon_mono
+            ; Attr.create "data-moon-clock" ""
+            ]
+          [ Node.text "—:— local" ]
+      ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
+      ; Node.span
+          ~attrs:[ Style.moon_mono ]
+          [ Node.text fleet_mono_text ]
+      ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
+      ; Node.span
+          ~attrs:[ Style.moon_mono ]
+          [ Node.text "base=/tmp/masc-bonsai-dev" ]
+      ; Node.span ~attrs:[ Style.moon_tail ] [ Node.text "operator · vincent" ]
+      ]
+  in
+  let nav_section label =
+    Node.div ~attrs:[ Style.nav_section ] [ Node.text label ]
+  in
+  let current_route =
+    let path =
+      Brr.Uri.path (Brr.Window.location Brr.G.window) |> Jstr.to_string
+    in
+    Route.of_path path
+  in
+  let nav_link ?tail (route : Route.t) =
+    let active = Route.equal route current_route in
+    let base = [ Style.nav_link ] in
+    let base = if active then Style.nav_link_active :: base else base in
+    let tail_node =
+      match tail with
+      | None -> []
+      | Some t -> [ Node.span ~attrs:[ Style.nav_link_tail ] [ Node.text t ] ]
+    in
+    Node.a
+      ~attrs:(Attr.href (Route.path route) :: base)
+      ([ Node.span ~attrs:[ Style.nav_link_glyph ] []
+       ; Node.text (Route.label route)
+       ]
+       @ tail_node)
+  in
+  let nav =
+    Node.div
+      ~attrs:[ Style.nav ]
+      [ Node.div
+          ~attrs:[ Style.nav_brand ]
+          [ Node.div
+              ~attrs:[ Style.nav_brand_rune ]
+              [ Node.span [ Node.text "M" ] ]
+          ; Node.span
+              ~attrs:[ Style.nav_brand_word ]
+              [ Node.text "ma"
+              ; Node.span
+                  ~attrs:[ Style.nav_brand_blood ]
+                  [ Node.text "s" ]
+              ; Node.text "c"
+              ]
+          ]
+      ; nav_section "chronicle"
+      ; nav_link Overview
+      ; nav_link Logs
+      ; nav_link Goals
+      ; nav_section "runtime"
+      ; (let tail =
+           match keepers.keepers with
+           | [] -> "—"
+           | ks -> Printf.sprintf "%02d" (List.length ks)
+         in
+         nav_link Keepers ~tail)
+      ; nav_link Observatory
+      ; nav_link Intervene
+      ; nav_section "lab"
+      ; nav_link Tools
+      ; nav_link Sessions
+      ; nav_link Social_board
+      ; nav_section "crypt"
+      ; (let tail =
+           match keepers.keepers with
+           | [] -> "—"
+           | ks ->
+             let dead_n =
+               List.count ks ~f:(fun (k : Keepers_types.keeper) ->
+                 match k.status with
+                 | Dead -> true
+                 | _ -> false)
+             in
+             Printf.sprintf "%02d" dead_n
+         in
+         nav_link Dead_keepers ~tail)
+      ; nav_link Archive_runs
+      ; (let chip name label =
+           Node.div
+             ~attrs:
+               [ Style.theme_chip
+               ; Attr.create "data-chip-theme" name
+               ; Attr.on_click (fun _ ->
+                   Effect.of_sync_fun
+                     (fun () ->
+                       Dom_html.window##.location##.hash
+                       := Js.string ("#" ^ name))
+                     ())
+               ]
+             [ Node.text label ]
+         in
+         Node.div
+           ~attrs:[ Style.theme_chips ]
+           [ chip "dark" "dark"
+           ; chip "cyber" "cyber"
+           ; chip "term" "term"
+           ; chip "parchment" "parch"
+           ; chip "paper" "paper"
+           ])
+      ; Node.div
+          ~attrs:[ Style.nav_foot ]
+          [ Node.text "phase 0 · /b/ · "
+          ; Node.span
+              ~attrs:[ Style.nav_foot_v ]
+              [ Node.text "v0.18-pre" ]
+          ]
+      ]
+  in
+  let aside_h ?tail label =
+    let tail_node =
+      match tail with
+      | None -> []
+      | Some t ->
+        [ Node.span ~attrs:[ Style.aside_h_tail ] [ Node.text t ] ]
+    in
+    Node.div ~attrs:[ Style.aside_h ] (Node.text label :: tail_node)
+  in
+  let focus_stat l v =
+    Node.div
+      ~attrs:[]
+      [ Node.div ~attrs:[ Style.focus_stat_l ] [ Node.text l ]
+      ; Node.div ~attrs:[ Style.focus_stat_v ] [ Node.text v ]
+      ]
+  in
+  let focus_k = focus_keeper_of keepers in
+  let focus_name, focus_portrait, focus_role, focus_ctx_pct,
+      focus_turn, focus_mem, focus_latency =
+    match focus_k with
+    | None ->
+      ("Luna", "L", "dungeon master · alchemist", 64,
+       "47 / 60", "128k", "812ms")
+    | Some (k : Keepers_types.keeper) ->
+      let portrait =
+        if String.length k.name = 0
+        then "·"
+        else Char.to_string (Char.uppercase k.name.[0])
+      in
+      let role =
+        match k.last_tool with
+        | Some t -> Printf.sprintf "%s · %s" k.stat t
+        | None -> k.stat
+      in
+      (display_name k.name, portrait, role, k.ctx_pct,
+       Printf.sprintf "%d / %d" k.turn k.turn_cap,
+       Printf.sprintf "%dk" k.mem_kb,
+       Printf.sprintf "%dms" k.latency_ms)
+  in
+  let vial_style =
+    Attr.create "style" (Printf.sprintf "width:%d%%" focus_ctx_pct)
+  in
+  let focus_card =
+    Node.div
+      ~attrs:[ Style.focus ]
+      [ Node.div
+          ~attrs:[ Style.focus_who ]
+          [ Node.div ~attrs:[ Style.focus_portrait ] [ Node.text focus_portrait ]
+          ; Node.div
+              ~attrs:[ Style.focus_name_col ]
+              [ Node.div ~attrs:[ Style.focus_name ] [ Node.text focus_name ]
+              ; Node.div
+                  ~attrs:[ Style.focus_role ]
+                  [ Node.text focus_role ]
+              ]
+          ]
+      ; Node.div
+          ~attrs:[ Style.ctx_bar ]
+          [ Node.div
+              ~attrs:[ Style.ctx_lbl ]
+              [ Node.span [ Node.text "context" ]
+              ; Node.span
+                  ~attrs:[ Style.ctx_lbl_v ]
+                  [ Node.text (Printf.sprintf "%d%%" focus_ctx_pct) ]
+              ]
+          ; Node.div
+              ~attrs:[ Style.vial ]
+              [ Node.span ~attrs:[ Style.vial_fill; vial_style ] [] ]
+          ]
+      ; Node.div
+          ~attrs:[ Style.focus_stats ]
+          [ focus_stat "turn" focus_turn
+          ; focus_stat "heartbeat" "3s"
+          ; focus_stat "mem" focus_mem
+          ; focus_stat "latency" focus_latency
+          ]
+      ]
+  in
+  let ev ?(level = `Info) t body_inline =
+    let attrs =
+      match level with
+      | `Info -> [ Style.evrow ]
+      | `Ok -> [ Style.evrow; Style.evrow_ok ]
+      | `Warn -> [ Style.evrow; Style.evrow_warn ]
+      | `Bad -> [ Style.evrow; Style.evrow_bad ]
+    in
+    Node.div
+      ~attrs
+      [ Node.div ~attrs:[ Style.evrow_t ] [ Node.text t ]
+      ; Node.div ~attrs:[ Style.evrow_mk ] []
+      ; Node.div ~attrs:[ Style.evrow_b ] body_inline
+      ]
+  in
+  (* live evs: WARN/ERROR만 필터, 최근 5개. mock→real 전환. *)
+  let hhmm_of_ts (ts : string) : string =
+    (* "2026-04-19T17:12:03Z" -> "17:12" *)
+    if String.length ts >= 16
+    then String.sub ts ~pos:11 ~len:5
+    else ts
+  in
+  let ev_of_entry (e : Logs_types.entry) : Node.t =
+    let level : [ `Info | `Ok | `Warn | `Bad ] =
+      match e.normalized_level with
+      | "ERROR" -> `Bad
+      | "WARN" -> `Warn
+      | _ -> `Info
+    in
+    let body =
+      [ Node.text e.message
+      ; Node.text " "
+      ; Node.span ~attrs:[ Style.evrow_b_code ] [ Node.text e.module_ ]
+      ]
+    in
+    ev ~level (hhmm_of_ts e.ts) body
+  in
+  let evs_stream =
+    let filtered =
+      List.filter response.entries ~f:(fun e ->
+        match e.normalized_level with
+        | "WARN" | "ERROR" -> true
+        | _ -> false)
+    in
+    let top_five =
+      match List.length filtered with
+      | n when n <= 5 -> filtered
+      | _ -> List.take filtered 5
+    in
+    match top_five with
+    | [] ->
+      Node.div
+        ~attrs:[ Style.evs ]
+        [ Node.div
+            ~attrs:[ Style.evrow ]
+            [ Node.div ~attrs:[ Style.evrow_t ] [ Node.text "—" ]
+            ; Node.div ~attrs:[ Style.evrow_mk ] []
+            ; Node.div
+                ~attrs:[ Style.evrow_b ]
+                [ Node.text "조용하다 · 경고 없음" ]
+            ]
+        ]
+    | rows -> Node.div ~attrs:[ Style.evs ] (List.map rows ~f:ev_of_entry)
+  in
+  let evs_tail =
+    let total_alarms =
+      List.count response.entries ~f:(fun e ->
+        match e.normalized_level with
+        | "WARN" | "ERROR" -> true
+        | _ -> false)
+    in
+    Printf.sprintf "%d / ∞" total_alarms
+  in
+  let aside =
+    Node.div
+      ~attrs:[ Style.aside ]
+      [ Node.div
+          ~attrs:[]
+          [ aside_h
+              ~tail:(Printf.sprintf "ctx %d%%" focus_ctx_pct)
+              "focus · keeper"
+          ; focus_card
+          ]
+      ; Node.div
+          ~attrs:[]
+          [ aside_h ~tail:"mock · pending trace" "flame · last cycle"
+          ; Flame.view_mini
+              ~segments:
+                [ `Llm, 42
+                ; `Tool, 18
+                ; `Think, 12
+                ; `Wait, 20
+                ; `Err, 8
+                ]
+          ]
+      ; Node.div
+          ~attrs:[]
+          [ aside_h ~tail:evs_tail "chronicle · recent"
+          ; evs_stream
+          ]
+      ]
+  in
+  Node.div
+    ~attrs:[ Style.root ]
+    [ nav
+    ; brand_row
+    ; view_heartbeat ~entries:response.entries ()
+    ; view_hud ~keepers response
+    ; (let warn_n =
+         List.count response.entries ~f:(fun e ->
+           String.equal e.normalized_level "WARN")
+       in
+       let err_n =
+         List.count response.entries ~f:(fun e ->
+           String.equal e.normalized_level "ERROR")
+       in
+       let head_tally = tally_fleet keepers.keepers in
+       let keeper_count = List.length keepers.keepers in
+       let sub_text =
+         match response.entries, keeper_count with
+         | [], 0 ->
+           "저택은 조용하다. 아무도 아직 말하지 않았고, 폭풍은 아직 문을 두드리지 않았다."
+         | [], n ->
+           Printf.sprintf
+             "%d명의 키퍼가 홀을 지킨다. 저널은 아직 비어 있다 — 폭풍 전의 숨."
+             n
+         | _, 0 ->
+           Printf.sprintf
+             "저널이 마지막 %d행을 기억한다. 경보 %d · 경고 %d이 울렸으나, 키퍼는 아직 도착하지 않았다."
+             response.total err_n warn_n
+         | _, n ->
+           Printf.sprintf
+             "%d명의 키퍼가 홀을 지킨다. 저널은 마지막 %d행을 들었고, 경보 %d · 경고 %d이 울렸다."
+             n response.total err_n warn_n
+       in
+       let h1_suffix, h1_suffix_class =
+         match head_tally with
+         | { dead; _ } when dead > 0 ->
+           "under storm", Style.page_h1_blood
+         | { warn; _ } when warn > 0 ->
+           "under watch", Style.page_h1_brass
+         | { live = 0; _ } ->
+           "before dawn", Style.page_h1_bright
+         | _ ->
+           "in vigil", Style.page_h1_bright
+       in
+       Node.div
+         ~attrs:[ Style.page_head ]
+         [ Node.div
+             ~attrs:[ Style.page_head_lead ]
+             [ Node.div
+                 ~attrs:[ Style.page_tag ]
+                 [ Node.text
+                     (let room =
+                        match keepers.room with
+                        | Some r when String.length r > 0 -> r
+                        | _ -> "—"
+                      in
+                      let day =
+                        if keepers.cycle <= 0
+                        then "—"
+                        else roman_of_int keepers.cycle
+                      in
+                      Printf.sprintf "chronicle · %s · day %s" room day) ]
+             ; Node.h1
+                 ~attrs:[ Style.page_h1 ]
+                 [ Node.text "the watch "
+                 ; Node.span
+                     ~attrs:[ h1_suffix_class ]
+                     [ Node.text h1_suffix ]
+                 ]
+             ; Node.p ~attrs:[ Style.page_sub ] [ Node.text sub_text ]
+             ]
+        ; Node.div
+            ~attrs:[ Style.page_actions ]
+            [ Node.button
+                ~attrs:[ Style.pbtn ]
+                [ Node.span ~attrs:[ Style.pbtn_glyph ] []
+                ; Node.text "preflight"
+                ]
+            ; Node.button
+                ~attrs:[ Style.pbtn; Style.pbtn_primary ]
+                [ Node.span ~attrs:[ Style.pbtn_glyph ] []
+                ; Node.text "advance round"
+                ]
+            ]
+        ])
+    ; moonrise
+    ; toolbar
+    ; Node.div
+        ~attrs:[ Style.header ]
+        [ Node.div
+            ~attrs:[ Style.header_lead ]
+            [ Node.p ~attrs:[ Style.eyebrow ] [ Node.text "log ring · in-memory" ]
+            ; Node.h1
+                ~attrs:[ Style.title ]
+                [ Node.span ~attrs:[ Style.versal ] [ Node.text "J" ]
+                ; Node.span ~attrs:[ Style.title_rest ] [ Node.text "ournal" ]
+                ; Node.span ~attrs:[ Style.title_rule ] []
+                ; Node.span
+                    ~attrs:[ Style.folio ]
+                    [ Node.text "folio xii · recto" ]
+                ]
+            ]
+        ; Node.span
+            ~attrs:[ Style.meta ]
+            [ Node.text (Printf.sprintf "seq up to %d" response.total) ]
+        ]
+    ; Node.div
+        ~attrs:[ Style.sec ]
+        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "log ring" ]
+        ; Node.span
+            ~attrs:[ Style.sec_sub ]
+            [ Node.text "in-memory chronicle · newest on top" ]
+        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span
+            ~attrs:[ Style.sec_r ]
+            [ Node.text "rows "
+            ; Node.span
+                ~attrs:[ Style.sec_r_v ]
+                [ Node.text
+                    (Printf.sprintf "%d"
+                       (List.length response.entries))
+                ]
+            ; Node.text " / total "
+            ; Node.span
+                ~attrs:[ Style.sec_r_v ]
+                [ Node.text (Printf.sprintf "%d" response.total) ]
+            ]
+        ]
+    ; tape
+    ; Node.div
+        ~attrs:[ Style.sec ]
+        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "keepers" ]
+        ; Node.span
+            ~attrs:[ Style.sec_sub ]
+            [ Node.text "sorted by heartbeat · ctx spark = last 10 min" ]
+        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span
+            ~attrs:[ Style.sec_r ]
+            [ Node.text "slot "
+            ; Node.span
+                ~attrs:[ Style.sec_r_v ]
+                [ Node.text
+                    (match keepers.keepers with
+                     | [] -> "—"
+                     | ks -> String.lowercase (roman_of_int (List.length ks)))
+                ]
+            ]
+        ]
+    ; Roster.view ~keepers ()
+    ; Node.div
+        ~attrs:[ Style.sec ]
+        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "cycle activity" ]
+        ; Node.span
+            ~attrs:[ Style.sec_sub ]
+            [ Node.text "last 60 minutes · one lane per keeper" ]
+        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span
+            ~attrs:[ Style.sec_r ]
+            [ Node.text "mock · trace endpoint "
+            ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "pending" ]
+            ]
+        ]
+    ; Swim.view ~keepers ()
+    ; Node.div
+        ~attrs:[ Style.sec ]
+        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "context pressure" ]
+        ; Node.span
+            ~attrs:[ Style.sec_sub ]
+            [ Node.text "60m rolling · % of window · warn 75 / danger 90" ]
+        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span
+            ~attrs:[ Style.sec_r ]
+            [ Node.text "mock · keepers endpoint "
+            ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "pending" ]
+            ]
+        ]
+    ; view_context_pressure ~keepers ()
+    ; Node.div
+        ~attrs:[ Style.sec ]
+        [ Node.span ~attrs:[ Style.sec_glyph ] []
+        ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "keeper rites · 12 states" ]
+        ; Node.span
+            ~attrs:[ Style.sec_sub ]
+            [ Node.text "Offline → Running → {Failing · Overflowed · Compacting · Draining} → Paused / Stopped / Crashed → Restarting → Dead" ]
+        ; Node.span ~attrs:[ Style.sec_hr ] []
+        ; Node.span
+            ~attrs:[ Style.sec_r ]
+            [ Node.text "mock · keeper phase wire "
+            ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "pending" ]
+            ]
+        ]
+    ; view_tombstrip ()
+    ; Node.div ~attrs:[ Style.signet ] [ Node.text "M" ]
+    ; aside
+    ]
+;;
+
+let component (_graph @ local) =
+  Bonsai.map2
+    (Bonsai.Expert.Var.value Logs_var.var)
+    (Bonsai.Expert.Var.value Keepers_var.var)
+    ~f:(fun logs_response keepers_response ->
+      render_response ~keepers:keepers_response logs_response)
+;;

@@ -73,4 +73,17 @@ describe('buildCompositeFsmMermaid', () => {
     // the mutator's read-modify-write but is not directly renderable.
     expect(src).toMatch(/kcb_warning\s*-\.->\s*kcb_cooling/)
   })
+
+  it('uses literal hex colors in classDef (no CSS var()), since values are emitted as raw SVG attrs', () => {
+    // Mermaid writes classDef color/fill/stroke verbatim into SVG
+    // attributes. CSS custom properties don't resolve on attr paths
+    // Mermaid uses during layout/text measurement, and a mixed classDef
+    // has caused parse failures that leaked the library's "Syntax error"
+    // bomb SVG into document.body (related: PR #8843).
+    const classDefLines = src.split('\n').filter(l => /^\s*classDef\s+/.test(l))
+    expect(classDefLines.length).toBeGreaterThan(0)
+    for (const line of classDefLines) {
+      expect(line).not.toMatch(/var\(--/)
+    }
+  })
 })

@@ -378,6 +378,12 @@ let test_runtime_surface_exposes_social_model_resolution_fields () =
   check string "last speech act"
     "stay_silent"
     (runtime |> member "last_speech_act" |> to_string);
+  check string "delivery surface view"
+    "silent"
+    (runtime |> member "delivery_surface_view" |> to_string);
+  check string "delivery surface view source"
+    "derived_from_last_speech_act"
+    (runtime |> member "delivery_surface_view_source" |> to_string);
   check string "transition reason"
     "tool_only:stay_silent"
     (runtime |> member "last_social_transition_reason" |> to_string);
@@ -387,9 +393,40 @@ let test_runtime_surface_exposes_social_model_resolution_fields () =
   check (option string) "blank last_need omitted" None
     (runtime |> member "last_need" |> to_string_option)
 
+(* Issue #8670: parser must round-trip every constructor and reject
+   unknown strings. The previous catch-all silently mapped typos to
+   KH_offline, masking drift between dashboard producers and consumers. *)
+let test_parser_roundtrip_all_constructors () =
+  let all : KT.keeper_health list =
+    [ KH_healthy; KH_idle; KH_offline; KH_stale;
+      KH_degraded; KH_zombie; KH_dead ]
+  in
+  List.iter (fun h ->
+    let wire = ES.keeper_health_to_string h in
+    match ES.keeper_health_of_string_opt wire with
+    | Some h' when h' = h -> ()
+    | Some _ -> Alcotest.failf "roundtrip mismatch for %s" wire
+    | None -> Alcotest.failf "of_string_opt rejected canonical wire %S" wire)
+  all
+
+let test_parser_rejects_unknown () =
+  Alcotest.(check (option string)) "typo → None" None
+    (Option.map ES.keeper_health_to_string
+       (ES.keeper_health_of_string_opt "healty"));
+  Alcotest.(check (option string)) "future variant → None" None
+    (Option.map ES.keeper_health_to_string
+       (ES.keeper_health_of_string_opt "compacting"))
+
 let () =
   run "keeper_exec_status"
     [
+      ( "health_state_parser",
+        [
+          test_case "round-trip covers all 7 constructors" `Quick
+            test_parser_roundtrip_all_constructors;
+          test_case "rejects unknown wire strings" `Quick
+            test_parser_rejects_unknown;
+        ] );
       ( "health_state",
         [
           test_case "keepalive running overrides stale last_seen" `Quick

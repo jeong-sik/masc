@@ -80,14 +80,33 @@ module Agent_id : sig
 end = struct
   type t = string
 
-  (* Agent names: alphanumeric, dash, underscore, dot. Max 32 chars *)
-  let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9._-]+$|} |> Re.compile
+  (* Issue #8633: pattern was [^[a-zA-Z0-9._-]+$] which rejected the
+     [keeper:foo] colon-namespacing supported by the canonical
+     [Validation.Agent_id] (used by masc_join / masc_claim_next).
+     Real callers exist (server_routes_http_keeper_stream:413,
+     server_openai_compat:153). Pattern is now a strict superset of
+     both: optional single colon namespace + previously-allowed dots.
+
+     Issue #8625: length cap was 32 — also raised to 64 to match
+     [Validation.Agent_id.validate]. Generated worker IDs like
+     [codex-task-claimer-20260419t102609z] (36 chars) joined fine but
+     were rejected by board posts. (Supersedes PR #8631.) *)
+  let max_agent_id_len = 64
+  let valid_pattern =
+    Re.Pcre.re {|^[a-zA-Z0-9._-]+(:[a-zA-Z0-9._-]+)?$|} |> Re.compile
 
   let of_string s =
     let s = String.trim s in
     let len = String.length s in
-    if len >= 1 && len <= 32 && Re.execp valid_pattern s then Ok s
-    else Error (Validation_error (Printf.sprintf "Invalid agent_id: %s" s))
+    if len >= 1 && len <= max_agent_id_len && Re.execp valid_pattern s then
+      Ok s
+    else
+      Error
+        (Validation_error
+           (Printf.sprintf
+              "Invalid agent_id: %s (max %d chars, must match \
+               [a-zA-Z0-9._-]+(:[a-zA-Z0-9._-]+)?)"
+              s max_agent_id_len))
 
   let to_string t = t
 end

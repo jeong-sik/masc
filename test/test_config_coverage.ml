@@ -6,6 +6,7 @@
 open Alcotest
 
 module Config = Masc_mcp.Config
+module Auth = Masc_mcp.Auth
 module Tool_catalog = Masc_mcp.Tool_catalog
 
 let dummy_schema name : Types.tool_schema =
@@ -36,6 +37,16 @@ let test_all_tool_schemas_non_empty () =
 let test_all_tool_names_contains_pause () =
   check bool "masc_pause registered" true
     (List.mem "masc_pause" (Config.all_tool_names ()))
+
+let test_all_tool_names_contains_approval_get () =
+  check bool "masc_approval_get registered" true
+    (List.mem "masc_approval_get" (Config.all_tool_names ()))
+
+let test_approval_get_requires_admin_permission () =
+  check bool "approval_get admin-only" true
+    (Auth.permission_for_tool "masc_approval_get" = Some Types.CanAdmin);
+  check bool "approval_resolve admin-only" true
+    (Auth.permission_for_tool "masc_approval_resolve" = Some Types.CanAdmin)
 
 let test_all_tool_names_omit_removed_mode_tools () =
   let names = Config.all_tool_names () in
@@ -68,6 +79,10 @@ let () =
             test_all_tool_schemas_non_empty;
           test_case "all_tool_names contains pause" `Quick
             test_all_tool_names_contains_pause;
+          test_case "all_tool_names contains approval_get" `Quick
+            test_all_tool_names_contains_approval_get;
+          test_case "approval get requires admin permission" `Quick
+            test_approval_get_requires_admin_permission;
           test_case "removed mode tools omitted" `Quick
             test_all_tool_names_omit_removed_mode_tools;
           test_case "visible is subset of all" `Quick

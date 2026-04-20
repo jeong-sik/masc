@@ -441,6 +441,9 @@ let run_turn
       ()
   : (run_result, Oas.Error.sdk_error) result
   =
+  Masc_runtime_events.emit_turn_start ();
+  Fun.protect ~finally:Masc_runtime_events.emit_turn_end
+  @@ fun () ->
   (* 0. Resolve inference parameters via Cascade_inference *)
   let temperature =
     match temperature with
@@ -1061,8 +1064,16 @@ let run_turn
      preset (e.g. social keeper seeing keeper_fs_edit) from reaching
      the LLM and triggering tool_not_allowed errors. *)
   let allowed_exec_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  (* RFC-0006 Phase A.2: extend the allowed-execution set with public
+     alias names (Bash/Read/...) whose internal target is already
+     allowed. Without this, the AllowList partition at line ~1476 drops
+     Bash/Read even though [Keeper_tools_oas.make_tools] now registers
+     them with OAS, defeating the dual registration. *)
+  let allowed_exec_names_with_aliases =
+    Keeper_tool_alias.expand_universe allowed_exec_names
+  in
   let allowed_exec_set =
-    let base = Keeper_tool_policy.tool_name_set allowed_exec_names in
+    let base = Keeper_tool_policy.tool_name_set allowed_exec_names_with_aliases in
     (* Core always-tools bypass candidate_set in can_execute, so they
        may be absent from keeper_allowed_tool_names.  Add them back to
        prevent the preset filter from dropping survival-critical tools. *)
@@ -1089,6 +1100,118 @@ let run_turn
      Now: OAS Agent.run completes naturally (max_turns or model end_turn).
      Failure recovery: evidence records + operator notification via board,
      not sticky blocker state. See plan: enchanted-strolling-bonbon. *)
+  (* Work discovery callback (#8773 fix). Returns Some Nudge text only when:
+     1. meta.work_discovery_enabled = Some true
+     2. interval since last_work_discovery_ts has elapsed
+     3. at least one source produced actionable items
+     Otherwise None — hook returns Continue, no token cost.
+
+     Boundary discipline: this closure owns ALL domain logic (which
+     sources to query, how to format). The OAS hook (Hooks.before_turn
+     + Nudge) is generic. Keeps the layer split that #6814 enforced
+     while restoring the work surface that schema declared but had no
+     consumer (lib/ grep for work_discovery_sources = 5 storage refs,
+     0 reads). *)
+  let discover_work_nudge () : string option =
+    let meta = !meta_ref in
+    match meta.work_discovery_enabled with
+    | Some true ->
+      let interval =
+        Option.value ~default:600 meta.work_discovery_interval_sec in
+      let since_last =
+        Time_compat.now ()
+        -. meta.runtime.proactive_rt.last_work_discovery_ts
+      in
+      if since_last < float_of_int interval then None
+      else
+        let sources =
+          Option.value ~default:[] meta.work_discovery_sources in
+        let chunks =
+          List.filter_map
+            (fun src ->
+              match src with
+              | "stale_tasks" | "unclaimed_tasks" ->
+                (try
+                   let backlog = Coord.read_backlog config in
+                   let unclaimed =
+                     List.filter
+                       (fun (t : Types.task) ->
+                         t.task_status = Types.Todo)
+                       backlog.tasks
+                   in
+                   match unclaimed with
+                   | [] -> None
+                   | tasks ->
+                     let n = min 5 (List.length tasks) in
+                     let preview =
+                       List.filteri (fun i _ -> i < n) tasks
+                       |> List.map (fun (t : Types.task) ->
+                            (* UTF-8 safe truncation: String.sub cuts on byte
+                               boundary and can split multi-byte codepoints,
+                               producing invalid UTF-8 that codex CLI rejects
+                               with "invalid UTF-8 was detected in one or
+                               more arguments" (fleet 2026-04-20). 83 bytes =
+                               80 byte prefix + 3 byte ellipsis (U+2026). *)
+                            Printf.sprintf "  - %s (p%d): %s"
+                              t.id t.priority
+                              (String_util.utf8_safe
+                                 ~max_bytes:83 ~suffix:"…" t.title
+                               |> String_util.to_string))
+                       |> String.concat "\n"
+                     in
+                     Some (Printf.sprintf
+                       "**Unclaimed tasks (%d total, showing %d):**\n%s"
+                       (List.length tasks) n preview)
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | _ -> None)
+              | _ -> None)
+            sources
+        in
+        (* L4 fix: meta.work_discovery_guidance was dead schema (declared
+           in 7 sites — types/json/toml/diff — but read by 0 consumers).
+           Inject as a persona-level operator hint that activates the
+           nudge even when [sources] is empty or yields no chunks. This
+           lets keepers like sangsu (local_only cascade, no sources
+           configured) receive directed guidance via the same Nudge
+           pipeline that L1+L2 already delivers to the LLM. *)
+        let guidance_section =
+          match meta.work_discovery_guidance with
+          | Some g when String.trim g <> "" ->
+            Some (Printf.sprintf "**Operator guidance:** %s" (String.trim g))
+          | _ -> None
+        in
+        let sections =
+          chunks
+          @ (match guidance_section with Some s -> [s] | None -> [])
+        in
+        (match sections with
+         | [] -> None
+         | _ ->
+           Some (Printf.sprintf
+             "## Discovered Work (auto, %ds interval)\n\n%s\n\n\
+              ### Required: use ONE structured keeper tool if available\n\
+              Valid keeper tools (copy the name and schema verbatim):\n\
+             \  - `keeper_task_claim` {} \
+              — reserve the next eligible task\n\
+             \  - `keeper_bash` { cmd: \"<single shell command>\" } \
+              — execute shell (sandboxed)\n\
+             \  - `keeper_board_post` { content: \"<note>\" } \
+              — coordinate via board\n\
+             \  - `keeper_stay_silent` {} \
+              — none of the above fit my role\n\n\
+              Anti-pattern: `Bash`, `Read`, `Skill`, `Agent` are NOT \
+              registered tools. Calling them is a hallucination — the \
+              call fails silently and the turn is wasted. Use the \
+              `keeper_*` names exactly as shown above.\n\n\
+              Do not print fenced pseudo-calls. If this runtime does not \
+              expose a structured tool channel, return exactly \
+              `NO_TOOL_CHANNEL: <brief reason>` instead of pretending a \
+              tool ran. Otherwise pick the smallest viable action and emit \
+              it as a structured tool_call now."
+             interval (String.concat "\n\n" sections)))
+    | _ -> None
+  in
   let base_hooks =
     (* Issue #8597 #3-5: dropped ~config / ~session / ~ctx_snapshot —
        the hook closure ignored them; state flows via meta_ref + callbacks. *)
@@ -1097,6 +1220,7 @@ let run_turn
       ~generation
       ?max_cost_usd
       ?trajectory_acc
+      ~discover_work_nudge
       ()
   in
   (* BM25 Tool_selector removed: discovery mode uses core + keeper_tool_search.
@@ -1869,10 +1993,23 @@ let run_turn
        let tool_names =
          Keeper_tool_disclosure.merge_reported_and_observed_tool_names ~reported_tool_names ~observed_tool_names
        in
+       (* RFC-0006 Phase A.3: canonicalize Anthropic Code built-in names
+          (Bash/Read/Edit/Grep/Write) to their keeper_* internal cognates
+          before the surface check. Without this, the disclosure check
+          flags every Bash/Read call as "unexpected" and nukes turns where
+          the LLM only used the alias names (≈18% of turns per #8778).
+
+          Phase A.2 (OAS dual registration) makes the actual call succeed
+          end-to-end. This step alone just stops the turn loss. Names with
+          no cognate (Skill/Agent/WebSearch) remain unexpected and may
+          still trigger a teaching error — see Keeper_tool_alias.is_hallucinated_builtin. *)
+       let canonical_tool_names =
+         Keeper_tool_alias.canonicalize_observed tool_names
+       in
        let unexpected_tool_names =
          Keeper_tool_disclosure.unexpected_tool_names
            ~allowed_tool_names:all_tool_names
-           ~tool_names
+           ~tool_names:canonical_tool_names
        in
        (* Partial tolerance (#8471): when a turn mixes valid tool calls
           with unexpected ones (LLM hallucinating Claude Code built-ins
@@ -1885,7 +2022,7 @@ let run_turn
        let valid_tool_calls_present =
          Keeper_tool_disclosure.has_valid_tool_call
            ~unexpected_tool_names
-           ~tool_names
+           ~tool_names:canonical_tool_names
        in
        if unexpected_tool_names <> [] && not valid_tool_calls_present then
          let reason =

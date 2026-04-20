@@ -208,7 +208,7 @@ let test_cycle_result_parser_rejects_bad_decision () =
       check bool "has decision error" true
         (String.length message > 0)
 
-let test_swarm_link_result_parser_rejects_missing_session_id () =
+let test_execution_link_result_parser_rejects_missing_session_id () =
   let json =
     `Assoc
       [
@@ -217,7 +217,7 @@ let test_swarm_link_result_parser_rejects_missing_session_id () =
         ("linked_at", `Float 1.0);
       ]
   in
-  match Lib.Autoresearch.swarm_link_of_yojson_result json with
+  match Lib.Autoresearch.execution_link_of_yojson_result json with
   | Ok _ -> failwith "expected parser to reject missing session_id"
   | Error message ->
       check bool "has session_id error" true
@@ -259,7 +259,7 @@ let test_loops_json_skips_legacy_persisted_state () =
   check int "no legacy loop entries" 0
     Yojson.Safe.Util.(json |> member "loops" |> to_list |> List.length)
 
-let test_loops_json_tolerates_invalid_swarm_link_for_active_loop () =
+let test_loops_json_tolerates_invalid_execution_link_for_active_loop () =
   with_eio_test @@ fun () ->
   with_clean_loops @@ fun () ->
   with_temp_base @@ fun base_path ->
@@ -276,11 +276,11 @@ let test_loops_json_tolerates_invalid_swarm_link_for_active_loop () =
   in
   Lib.Autoresearch.with_loops_rw (fun () ->
     Hashtbl.replace Lib.Autoresearch.active_loops state.loop_id state);
-  let swarm_path =
+  let execution_link_path =
     Lib.Autoresearch.loop_link_file ~base_path state.loop_id
   in
   (* Missing required session_id should not crash the loops list. *)
-  write_file swarm_path
+  write_file execution_link_path
     (Printf.sprintf {|{"loop_id":"%s","linked_at":0}|} state.loop_id);
   let json =
     Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path ()
@@ -427,7 +427,7 @@ let test_delete_loop_json_removes_bundle_and_branch () =
     error_message = Some "managed worktree missing";
     workdir } in
   Lib.Autoresearch.save_state ~base_path state;
-  let link : Lib.Autoresearch.swarm_link =
+  let link : Lib.Autoresearch.execution_link =
     {
       loop_id;
       session_id = "session-delete";
@@ -439,7 +439,7 @@ let test_delete_loop_json_removes_bundle_and_branch () =
       linked_at = Unix.gettimeofday ();
     }
   in
-  Lib.Autoresearch.save_swarm_link ~base_path link;
+  Lib.Autoresearch.save_execution_link ~base_path link;
   match
     Lib.Dashboard_http_autoresearch.delete_loop_json ~base_path ~loop_id ~requester_agent:None
   with
@@ -497,7 +497,7 @@ let test_linked_status_json_includes_task_id () =
   in
   let state = { state with loop_id; source_workdir = base_path } in
   Lib.Autoresearch.save_state ~base_path state;
-  let link : Lib.Autoresearch.swarm_link =
+  let link : Lib.Autoresearch.execution_link =
     {
       loop_id;
       session_id = "session-task";
@@ -525,7 +525,7 @@ let () =
           test_case "cycle result parser rejects bad decision" `Quick
             test_cycle_result_parser_rejects_bad_decision;
           test_case "swarm link result parser rejects missing session_id" `Quick
-            test_swarm_link_result_parser_rejects_missing_session_id;
+            test_execution_link_result_parser_rejects_missing_session_id;
         ] );
       ( "loops_json",
         [
@@ -534,7 +534,7 @@ let () =
           test_case "skips legacy persisted state" `Quick
             test_loops_json_skips_legacy_persisted_state;
           test_case "tolerates invalid swarm link for active loop" `Quick
-            test_loops_json_tolerates_invalid_swarm_link_for_active_loop;
+            test_loops_json_tolerates_invalid_execution_link_for_active_loop;
           test_case "orders live then recent" `Quick
             test_loops_json_orders_live_then_recent;
           test_case "uses state file mtime for updated_at" `Quick

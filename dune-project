@@ -1,9 +1,9 @@
-(lang dune 3.17)
+(lang dune 3.22)
 
 (using menhir 3.0)
 
 (name masc_mcp)
-(version 0.10.1)
+(version 0.12.0)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -26,7 +26,7 @@
  (description "MASC Protocol: File-based coordination for Claude, Gemini, and Codex agents")
  (depends
   (ocaml (>= 5.4))
-  (dune (>= 3.17))
+  (dune (>= 3.22))
   ; External dependencies (opam pin)
   (mcp_protocol (>= 1.3.0))
   (ocaml-webrtc (>= 0.2.3))
@@ -40,7 +40,7 @@
   (cmdliner (>= 1.1))
   (cohttp (>= 5.0))
   (cohttp-eio (>= 6.0))
-  (agent_sdk (>= 0.161.0))
+  (agent_sdk (>= 0.163.0))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

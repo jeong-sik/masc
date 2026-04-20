@@ -78,6 +78,33 @@ let validate_task_id task_id =
   if task_id = "" then Error (Types.TaskNotFound "")
   else Ok task_id
 
+let sync_planning_current_task_with_owned_task (ctx : context) =
+  let actual_name =
+    try Coord.resolve_agent_name ctx.config ctx.agent_name
+    with
+    | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
+    | exn ->
+        Log.Task.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
+          (Printexc.to_string exn);
+        ctx.agent_name
+  in
+  let matches_you assignee =
+    String.equal assignee ctx.agent_name || String.equal assignee actual_name
+  in
+  let owned_task =
+    Coord.get_tasks_raw ctx.config
+    |> List.find_map (fun (task : Types.task) ->
+           match task.task_status with
+           | Types.Claimed { assignee; _ }
+           | Types.InProgress { assignee; _ }
+           | Types.AwaitingVerification { assignee; _ } ->
+               if matches_you assignee then Some task.id else None
+           | Types.Todo | Types.Done _ | Types.Cancelled _ -> None)
+  in
+  match owned_task with
+  | Some task_id -> Planning_eio.set_current_task ctx.config ~task_id
+  | None -> Planning_eio.clear_current_task ctx.config
+
 let review_completion_notes
     ~(completion_contract : string list option)
     ~(evaluator_cascade : string option)
@@ -131,16 +158,30 @@ let can_review_completion ~(task_opt : Types.task option) ~(agent_name : string)
        | _ -> false)
   | None -> false
 
+(* Concrete example handed to the keeper when the anti-rationalization
+   gate rejects a completion. Prior form said only "describe actual
+   work"; small-LLM keepers retried the same perfunctory notes
+   (37 Tool_task completion rejects observed on 2026-04-17/18 in
+   ~/me/.masc/tool_calls). The example shows the expected density:
+   what changed, which files, what verification ran. See #8688. *)
+let completion_notes_example =
+  "Example of accepted notes: 'Added Event_kind.Board variant to \
+   lib/coord/event_kind.{ml,mli}, migrated 8 call-sites in \
+   coord_task.ml and activity_graph.ml, test_event_kind round-trip \
+   green, CI green on PR #NNNN.'"
+
 let completion_rejection_message ?(allow_force = false) reason =
   if allow_force then
     Printf.sprintf
       "Completion rejected by anti-rationalization gate: %s\n\
        Revise your completion notes to describe actual work, then retry.\n\
-       Use force=true to override (operator only)." reason
+       %s\n\
+       Use force=true to override (operator only)." reason completion_notes_example
   else
     Printf.sprintf
       "Completion rejected by anti-rationalization gate: %s\n\
-       Revise your completion notes to describe actual work, then retry." reason
+       Revise your completion notes to describe actual work, then retry.\n\
+       %s" reason completion_notes_example
 
 let parse_task_contract args =
   match args |> member "contract" with
@@ -464,7 +505,7 @@ let handle_claim ctx args =
        (match preset_warning with
         | Some warning -> Log.Task.warn "%s (agent=%s)" warning ctx.agent_name
         | None -> ());
-       Planning_eio.set_current_task ctx.config ~task_id;
+       sync_planning_current_task_with_owned_task ctx;
        Subscriptions.push_event_to_sessions (`Assoc [
          ("type", `String "masc/task_claimed");
          ("task_id", `String task_id);
@@ -485,13 +526,14 @@ let handle_claim_next ctx _args =
   let task_filter = preset_task_filter ~agent_preset in
   let result = Coord.claim_next_r ctx.config ~agent_name:ctx.agent_name ~task_filter () in
   let message = match result with
-    | Coord.Claim_next_claimed { task_id; message; _ } ->
-        Planning_eio.set_current_task ctx.config ~task_id;
+    | Coord.Claim_next_claimed { message; _ } ->
+        sync_planning_current_task_with_owned_task ctx;
         message
     | Coord.Claim_next_no_unclaimed -> "📋 No unclaimed tasks available"
     | Coord.Claim_next_no_eligible { preset_filtered; _ } when preset_filtered > 0 ->
         Printf.sprintf "📋 No eligible tasks (preset mismatch: %d tasks require different preset)" preset_filtered
-    | Coord.Claim_next_no_eligible _ -> "📋 No unclaimed tasks available"
+    | Coord.Claim_next_no_eligible { excluded_count; _ } ->
+        Printf.sprintf "📋 No eligible tasks available (blocked/excluded: %d)" excluded_count
     | Coord.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
   in
   (true, message)
@@ -512,9 +554,14 @@ let handle_release ctx args =
        then
          (false, "Strict task release requires handoff_context.summary")
        else
-         result_to_response
-           (Coord.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
-              ?expected_version ?handoff_context ()))
+         let result =
+           Coord.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
+             ?expected_version ?handoff_context ()
+         in
+         (match result with
+          | Ok _ -> sync_planning_current_task_with_owned_task ctx
+          | Error _ -> ());
+         result_to_response result)
 
 let transition_known_args =
   [
@@ -561,6 +608,7 @@ and handle_cancel_task ctx args =
   (* Record failed metric on cancellation *)
   (match result with
    | Ok _ ->
+       sync_planning_current_task_with_owned_task ctx;
        let metric : Metrics_store_eio.task_metric = {
          id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Time_compat.now () *. 1000.));
          agent_id = ctx.agent_name;
@@ -795,6 +843,9 @@ and handle_transition ctx args =
     | None -> None
   in
   let result = try_transition 0 in
+  (match result with
+   | Ok _ -> sync_planning_current_task_with_owned_task ctx
+   | Error _ -> ());
   (* Notify A2A subscribers on successful transition *)
   (match result with
    | Ok _ ->
@@ -832,13 +883,27 @@ and handle_transition ctx args =
           let verification_id = Option.value ~default:"" verification_id_before in
           Verification_protocol.on_approve_verification
             ~config:ctx.config ~task_id ~verifier:ctx.agent_name
-            ~verification_id ~notes
+            ~verification_id ~notes;
+          (* Record a CDAL verdict attribution on the approval leg so the
+             dashboard gets a complete audit line.  With the verification
+             FSM enabled, tasks reach Done via approve_verification rather
+             than Done_action, so the gate_check call on the Done_action
+             path (persisted_contract_rejection) never fires and the CDAL
+             gate shows zero entries in Dashboard_attribution even when
+             contracts are present.  The rejection string is intentionally
+             dropped — the verifier keeper has already judged the task,
+             we only want the [Dashboard_attribution] side effect that
+             [gate_check] performs internally. *)
+          if Env_config_runtime.Cdal.gate_enabled () then
+            ignore (Cdal_verdict_gate.gate_check ~task_id ())
         | Types.Reject_verification ->
           let reason = if notes <> "" then notes else reason in
           let verification_id = Option.value ~default:"" verification_id_before in
           Verification_protocol.on_reject_verification
             ~config:ctx.config ~task_id ~verifier:ctx.agent_name
-            ~verification_id ~reason
+            ~verification_id ~reason;
+          if Env_config_runtime.Cdal.gate_enabled () then
+            ignore (Cdal_verdict_gate.gate_check ~task_id ())
         | _ -> ())
    | Error err ->
        Log.Task.error "task transition failed: %s" (Types.masc_error_to_string err));

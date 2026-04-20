@@ -47,7 +47,10 @@ type handoff_payload = {
 (** Context estimation calibration state *)
 type calibration_state = {
   mutable samples: (int * int) list;  (* (estimated, actual) pairs *)
-  mutable correction_factor: float;    (* multiplied to estimate *)
+  mutable correction_factor: float [@atomic];
+    (* Multiplied to estimate. Written under [calibration_lock] together
+       with [samples]; read without the lock by [estimate_context] via the
+       [@atomic] release-store/acquire-load guarantee. *)
 }
 
 let calibration = {
@@ -55,28 +58,39 @@ let calibration = {
   correction_factor = 1.0;
 }
 
+(* Serialises writers of the compound [samples+correction_factor] update.
+   Readers of [correction_factor] rely on [@atomic] and do not take the lock. *)
+let calibration_lock = Mutex.create ()
+
 (** Record actual token count vs estimated for calibration.
     Keeps the last 10 samples and updates a moving-average correction factor. *)
 let record_actual_tokens ~estimated ~actual =
   let enabled = Env_config_core.relay_calibration_enabled () in
   if enabled then begin
-    calibration.samples <- (estimated, actual) :: calibration.samples;
-    if List.length calibration.samples > 10 then
-      calibration.samples <- List.filteri (fun i _ -> i < 10) calibration.samples;
-    let ratios = List.filter_map (fun (e, a) ->
-      if e > 0 then Some (float_of_int a /. float_of_int e) else None
-    ) calibration.samples in
-    match ratios with
-    | [] -> ()
-    | rs ->
-      let sum = List.fold_left (+.) 0.0 rs in
-      let new_factor = sum /. float_of_int (List.length rs) in
-      let prev_factor = calibration.correction_factor in
-      calibration.correction_factor <- new_factor;
+    let log_event =
+      Mutex.protect calibration_lock (fun () ->
+        calibration.samples <- (estimated, actual) :: calibration.samples;
+        if List.length calibration.samples > 10 then
+          calibration.samples <- List.filteri (fun i _ -> i < 10) calibration.samples;
+        let ratios = List.filter_map (fun (e, a) ->
+          if e > 0 then Some (float_of_int a /. float_of_int e) else None
+        ) calibration.samples in
+        match ratios with
+        | [] -> None
+        | rs ->
+          let sum = List.fold_left (+.) 0.0 rs in
+          let new_factor = sum /. float_of_int (List.length rs) in
+          let prev_factor = calibration.correction_factor in
+          calibration.correction_factor <- new_factor;
+          Some (new_factor, prev_factor, List.length rs))
+    in
+    match log_event with
+    | None -> ()
+    | Some (new_factor, prev_factor, n) ->
       if new_factor > 1.5 || new_factor < 0.5 then
         Log.warn ~ctx:"relay"
           "calibration drift: correction_factor=%.2f (was %.2f, %d samples)"
-          new_factor prev_factor (List.length rs)
+          new_factor prev_factor n
       else if abs_float (new_factor -. prev_factor) > 0.1 then
         Log.debug ~ctx:"relay"
           "calibration updated: correction_factor=%.2f (was %.2f)"

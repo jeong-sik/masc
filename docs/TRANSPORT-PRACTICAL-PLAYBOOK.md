@@ -27,6 +27,31 @@
 - 현재 cluster / room / managed unit / active operation
 - transport별 practical path 추천
 
+## Truth Harness
+
+Before changing transport health reporting, run the truth harness:
+
+```bash
+./scripts/harness/transport/verify_truth.sh
+```
+
+This is the explicit drift harness. It is included in
+`./scripts/harness/transport/run_all.sh` and therefore also runs in the CI
+transport harness suite. Run it directly when iterating on transport truth so
+reported truth vs. live probe drift fails fast without waiting for the full
+suite. It returns non-zero when those surfaces disagree.
+
+It bootstraps an isolated server when needed and compares:
+
+- `/health`
+- dashboard read model: `/api/v1/dashboard/transport-health`
+- MCP read model: `masc_transport_status`
+- live reachability probes for Streamable HTTP, observer SSE, gRPC TCP, WebSocket handshake, and h2c when advertised
+
+Mismatch output names the transport and the disagreeing surfaces, for example:
+`grpc truth mismatch: dashboard=true tool=true actual=false tcp=127.0.0.1:8936`.
+Use that output as the regression proof before and after transport truth fixes.
+
 ## Recipes
 
 ### 1. Streamable HTTP POST

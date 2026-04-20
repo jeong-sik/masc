@@ -1,15 +1,20 @@
 ---- MODULE DashboardCacheStampede ----
 \* Bug Model: Dashboard cache stale-while-revalidate zombie slot.
 \*
-\* Models dashboard_cache.ml:get_or_compute_eio.
+\* Models lib/dashboard/dashboard_cache.ml:get_or_compute_eio.
 \* When a background revalidation fiber is cancelled (Eio.Cancel.Cancelled),
 \* the Computing{stale=Some} slot is left orphaned:
 \*   - maybe_evict() only targets Ready entries, not Computing
 \*   - poll-retry only activates for Computing{stale=None}
 \*   - Result: permanent zombie slot returning stale data forever
 \*
-\* Actual code reference: dashboard_cache.ml line 265
-\*   Eio.Cancel.Cancelled _ as e -> raise e  (no cleanup)
+\* Actual code (verified 2026-04-20):
+\*   lib/dashboard/dashboard_cache.ml:60   let maybe_evict map
+\*   lib/dashboard/dashboard_cache.ml:134  let get_or_compute_eio
+\*   lib/dashboard/dashboard_cache.ml:216  | Eio.Cancel.Cancelled _ as e -> ...
+\*
+\* (Path drift: lib/dashboard_cache.ml -> lib/dashboard/dashboard_cache.ml.
+\*  Line drift: 265 -> 216. Recorded for cross-reference.)
 
 EXTENDS Naturals
 

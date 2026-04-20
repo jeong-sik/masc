@@ -933,7 +933,22 @@ function ConnectorLivePanel({
         : null}
 
       ${connectorError || connector?.error
-        ? html`<div class="mt-3 rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]">${connectorError ?? connector?.error}</div>`
+        ? html`
+            <div class="mt-3 rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]" data-connector-warning-panel>
+              <div class="font-semibold text-[var(--text-body)]">
+                ${connectorError ? 'Connector API unavailable' : 'Sidecar status warning'}
+              </div>
+              <div class="mt-1">
+                <span class="font-medium">Cause: </span> ${connectorError ?? connector?.error}
+              </div>
+              <div class="mt-1">
+                <span class="font-medium">Next: </span>
+                ${connectorError
+                  ? html`refresh the dashboard or check <code class="rounded bg-[var(--white-4)] px-1">/api/v1/gate/connectors</code> on ${connector?.gate_base_url || 'the Gate server'}.`
+                  : html`run the ${connectorName} status command and inspect <code class="rounded bg-[var(--white-4)] px-1">${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}</code>.`}
+              </div>
+            </div>
+          `
         : null}
 
       <${SidecarLogViewer} connectorId=${connectorId} />
@@ -952,7 +967,12 @@ function ConnectorLivePanel({
                 <span aria-hidden="true">⚠</span>
                 <span>Directory error</span>
               </span>
-              keeper directory unavailable, manual entry only
+              <div class="mt-1">
+                <span class="font-medium">Cause: </span> keeper directory unavailable, manual entry only.
+              </div>
+              <div class="mt-1">
+                <span class="font-medium">Next: </span> continue with manual entry now, then restore <code class="rounded bg-[var(--white-4)] px-1">config/keepers/</code> or fix <code class="rounded bg-[var(--white-4)] px-1">/api/v1/gate/keepers</code> before relying on directory suggestions.
+              </div>
             </div>
           `
         : null}
@@ -984,6 +1004,12 @@ function ConnectorLivePanel({
       ${showSidecarOffEmpty
         ? (() => {
             const cmds = sidecarCommands(connectorId)
+            const copyLabels = {
+              start: `Copy ${connectorName} sidecar start command`,
+              tail: `Copy ${connectorName} sidecar tail logs command`,
+              status: `Copy ${connectorName} sidecar status command`,
+              stop: `Copy ${connectorName} sidecar stop command`,
+            }
             // Informational amber tone (Railway / Vercel idle-service
             // convention): "needs action, not broken". Earlier this
             // panel inherited the connector accent gradient (iMessage =
@@ -1020,19 +1046,44 @@ function ConnectorLivePanel({
                   </div>
                 </div>
                 <div class="text-2xs text-[var(--warn)]/80">
-                  Click <strong>Start</strong> to spawn via the backend, or copy the command below to run it from a terminal.
+                  <div>
+                    <span class="font-medium">Cause: </span> no sidecar status file has been observed at <code class="rounded bg-[var(--white-4)] px-1">${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}</code>.
+                  </div>
+                  <div class="mt-1">
+                    <span class="font-medium">Next: </span> click <strong>Start</strong> to spawn via the backend, or copy the command below to run it from a terminal. Use <strong>status</strong> and <strong>tail logs</strong> if it stays offline.
+                  </div>
                 </div>
                 <div class="mt-2 grid grid-cols-1 gap-1.5">
-                  <${CopyableCode} label="start" command=${cmds.start} variant="primary" />
+                  <${CopyableCode}
+                    label="start"
+                    command=${cmds.start}
+                    ariaLabel=${copyLabels.start}
+                    variant="primary"
+                  />
                 </div>
                 <div class="mt-2">
                   <div class="mb-1 text-3xs uppercase tracking-4 text-[var(--text-dim)]">
                     Or for diagnostics
                   </div>
                   <div class="grid grid-cols-1 gap-1.5" data-sidecar-secondary-cmds>
-                    <${CopyableCode} label="tail logs" command=${cmds.tail} variant="secondary" />
-                    <${CopyableCode} label="status" command=${cmds.status} variant="secondary" />
-                    <${CopyableCode} label="stop" command=${cmds.stop} variant="secondary" />
+                    <${CopyableCode}
+                      label="tail logs"
+                      command=${cmds.tail}
+                      ariaLabel=${copyLabels.tail}
+                      variant="secondary"
+                    />
+                    <${CopyableCode}
+                      label="status"
+                      command=${cmds.status}
+                      ariaLabel=${copyLabels.status}
+                      variant="secondary"
+                    />
+                    <${CopyableCode}
+                      label="stop"
+                      command=${cmds.stop}
+                      ariaLabel=${copyLabels.stop}
+                      variant="secondary"
+                    />
                   </div>
                 </div>
                 <${SetupGuideCard} connectorId=${connectorId} />

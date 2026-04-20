@@ -46,6 +46,7 @@ type claim_snapshot = {
 
 let store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
 let store_cache_mu = Eio.Mutex.create ()
+let window_read_count_for_testing_ref : int option ref = ref None
 
 let task_commitment_expiry_sec = 72.0 *. 3600.0
 let completion_claim_expiry_sec = 24.0 *. 3600.0
@@ -245,6 +246,9 @@ let resolution_event_of_json json =
   | _ -> None
 
 let read_window_entries (config : Coord_query.config) =
+  (match !window_read_count_for_testing_ref with
+  | Some count -> window_read_count_for_testing_ref := Some (count + 1)
+  | None -> ());
   let now = Time_compat.now () in
   let since = event_date_string (now -. (float_of_int summary_window_days *. 86400.0)) in
   let until = event_date_string now in
@@ -276,10 +280,15 @@ let effective_status ~(now : float) (snapshot : claim_snapshot) =
   | Some resolution -> resolution.status
   | None ->
       let age = now -. created_at_unix snapshot.claim in
+      (* Per-constructor exhaustive match: a new [claim_kind] (e.g.,
+         Verification_claim) triggers a compile error here so its expiry
+         rule is an explicit decision, not silently inherited from the
+         old wildcard arm. See #8768 / #8765 family. *)
       match snapshot.claim.kind with
-      | Task_commitment when age > task_commitment_expiry_sec -> Expired
-      | Completion_claim when age > completion_claim_expiry_sec -> Unsupported
-      | _ -> Pending
+      | Task_commitment ->
+          if age > task_commitment_expiry_sec then Expired else Pending
+      | Completion_claim ->
+          if age > completion_claim_expiry_sec then Unsupported else Pending
 
 let open_recent_claim ~(now : float) snapshots ~agent_name ~kind ~subject ~task_id
     ~max_age_sec =
@@ -427,31 +436,39 @@ let maybe_support_recent_completion_claim config ~agent_name ~task_id ~evidence_
           supporting_evidence_refs = normalize_refs evidence_refs;
         }
 
+(* #8605 family: exhaustive on [Types.task_action]. The previous
+   string match silently no-oped for typos and any future transition
+   string. With the variant the compiler now forces a deliberate
+   decision for every task_action constructor; verification-related
+   actions explicitly produce no commitment side effects -- their
+   accountability tracking lives in [record_completion_claim]. *)
 let record_task_transition (config : Coord_query.config) ~agent_name ~task_id
-    ~transition ~details =
+    ~(transition : Types.task_action) ~details =
   if not (is_keeper_agent_name agent_name) then ()
   else
     match transition with
-    | "claim" | "start" ->
+    | Types.Claim | Types.Start ->
         create_task_commitment config ~agent_name ~task_id
           ~surface:"task_transition"
-    | "done" ->
+    | Types.Done_action ->
         let base_refs = [ "task:" ^ task_id ] in
         resolve_recent_task_commitment config ~agent_name ~task_id
           ~status:Supported ~reason:(Some "task_done")
           ~evidence_refs:base_refs ~max_age_sec:task_commitment_expiry_sec;
         maybe_support_recent_completion_claim config ~agent_name ~task_id
           ~evidence_refs:base_refs
-    | "release" | "cancel" ->
+    | Types.Release | Types.Cancel ->
         let reason =
           match json_string_opt "reason" details with
           | Some value when String.trim value <> "" -> Some (String.trim value)
-          | _ -> Some transition
+          | _ -> Some (Types.task_action_to_string transition)
         in
         resolve_recent_task_commitment config ~agent_name ~task_id
           ~status:Partial ~reason
           ~evidence_refs:[ "task:" ^ task_id ] ~max_age_sec:task_commitment_expiry_sec
-    | _ -> ()
+    | Types.Submit_for_verification
+    | Types.Approve_verification
+    | Types.Reject_verification -> ()
 
 let supporting_refs_for_turn ~trace_id ~turn_number strong_evidence_refs =
   normalize_refs
@@ -531,16 +548,10 @@ let risk_band_of_metrics ~evidence_coverage ~unsupported_completion_rate
   else
     "high"
 
-let accountability_summary_json (config : Coord_query.config) ~keeper_name
-    ~agent_name =
-  let now = Time_compat.now () in
-  let cutoff = now -. (float_of_int summary_window_days *. 86400.0) in
-  let snapshots =
-    materialize_claims (read_window_entries config)
-    |> List.filter (fun snapshot ->
-           String.equal snapshot.claim.agent_name agent_name
-           && created_at_unix snapshot.claim >= cutoff)
-  in
+let summary_cutoff now =
+  now -. (float_of_int summary_window_days *. 86400.0)
+
+let summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots =
   let supported_claims = ref 0 in
   let resolved_claims = ref 0 in
   let unsupported_completion_claims = ref 0 in
@@ -549,6 +560,7 @@ let accountability_summary_json (config : Coord_query.config) ~keeper_name
   let supported_task_commitments = ref 0 in
   let resolved_task_commitments = ref 0 in
   let recent_supported_claims = ref 0 in
+  let cutoff = summary_cutoff now in
   List.iter
     (fun (snapshot : claim_snapshot) ->
       let status = effective_status ~now snapshot in
@@ -657,6 +669,52 @@ let accountability_summary_json (config : Coord_query.config) ~keeper_name
       ("routing_hint", `String routing_hint);
       ("history", `List history);
     ]
+
+let accountability_summary_lookup (config : Coord_query.config) =
+  let now = Time_compat.now () in
+  let cutoff = summary_cutoff now in
+  let by_agent : (string, claim_snapshot list) Hashtbl.t = Hashtbl.create 32 in
+  let by_keeper : (string, claim_snapshot list) Hashtbl.t = Hashtbl.create 32 in
+  let add_snapshot table key snapshot =
+    let existing =
+      match Hashtbl.find_opt table key with
+      | Some items -> items
+      | None -> []
+    in
+    Hashtbl.replace table key (snapshot :: existing)
+  in
+  (* Request-local pre-aggregation: the dashboard rebuilds this lookup per
+     render, so the next request naturally refreshes the window contents. *)
+  materialize_claims (read_window_entries config)
+  |> List.iter (fun snapshot ->
+         if created_at_unix snapshot.claim >= cutoff then (
+           add_snapshot by_agent snapshot.claim.agent_name snapshot;
+           add_snapshot by_keeper snapshot.claim.keeper_name snapshot));
+  fun ~keeper_name ~agent_name ->
+    let snapshots =
+      match Hashtbl.find_opt by_agent agent_name with
+      | Some items -> items
+      | None -> (
+          match Hashtbl.find_opt by_keeper keeper_name with
+          | Some items -> items
+          | None -> [])
+    in
+    summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots
+
+let accountability_summary_json (config : Coord_query.config) ~keeper_name
+    ~agent_name =
+  accountability_summary_lookup config ~keeper_name ~agent_name
+
+let enable_window_read_count_for_testing () =
+  window_read_count_for_testing_ref := Some 0
+
+let disable_window_read_count_for_testing () =
+  window_read_count_for_testing_ref := None
+
+let window_read_count_for_testing () =
+  match !window_read_count_for_testing_ref with
+  | Some count -> count
+  | None -> 0
 
 let accountability_risk_is_high config ~keeper_name ~agent_name =
   match accountability_summary_json config ~keeper_name ~agent_name with

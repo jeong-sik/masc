@@ -52,7 +52,7 @@ let read_json_file path =
 let load ~(store : Agent_sdk.Proof_store.config)
     (proof : Agent_sdk.Cdal_proof.t)
     : (loaded_bundle, load_error) result =
-  let ( let* ) = Result.bind in
+  let open Result.Syntax in
   (* 1. Compute manifest path and read *)
   let manifest_path =
     Agent_sdk.Proof_store.manifest_path store ~run_id:proof.run_id in

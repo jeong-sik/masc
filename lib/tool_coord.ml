@@ -73,6 +73,49 @@ let option_or_dash = function
   | Some value when String.trim value <> "" -> value
   | _ -> "-"
 
+let lifecycle_tools =
+  [
+    "masc_claim_next";
+    "masc_transition";
+  ]
+
+let is_lifecycle_tool tool =
+  List.exists (String.equal tool) lifecycle_tools
+
+let unique_strings items =
+  List.fold_left
+    (fun acc item ->
+      let item = String.trim item in
+      if item = "" || List.exists (String.equal item) acc then acc
+      else item :: acc)
+    [] items
+  |> List.rev
+
+type credential_state = {
+  credential_required : bool;
+  credential_available : bool;
+  credential_candidates : string list;
+}
+
+let credential_state (ctx : context) ~actual_name =
+  let auth_cfg = Auth.load_auth_config ctx.config.base_path in
+  let credential_required = auth_cfg.enabled && auth_cfg.require_token in
+  let credential_candidates = unique_strings [ ctx.agent_name; actual_name ] in
+  let is_initial_admin name =
+    match Auth.read_initial_admin ctx.config.base_path with
+    | Some admin -> String.equal name admin
+    | None -> false
+  in
+  let credential_available =
+    (not credential_required)
+    || List.exists
+         (fun name ->
+           is_initial_admin name
+           || Option.is_some (Auth.load_credential ctx.config.base_path name))
+         credential_candidates
+  in
+  { credential_required; credential_available; credential_candidates }
+
 let status_worktree_active (ctx : context) =
   let wt_dir = Filename.concat ctx.config.base_path ".worktrees" in
   try
@@ -105,7 +148,7 @@ let safe_current_task (ctx : context) ~joined =
     | Sys_error _ | Yojson.Json_error _ -> None
     | exn ->
         Log.Coord.warn "get_current_task failed for %s: %s" ctx.agent_name
-          (Printexc.to_string exn);
+        (Printexc.to_string exn);
         None
 
 let safe_get_agents (ctx : context) =
@@ -141,6 +184,149 @@ let task_assignee = function
   | Types.Cancelled { cancelled_by; _ } -> cancelled_by
   | Types.Todo -> "unclaimed"
 
+let active_task_assignee = function
+  | Types.Claimed { assignee; _ }
+  | Types.InProgress { assignee; _ }
+  | Types.AwaitingVerification { assignee; _ } ->
+      Some assignee
+  | Types.Todo | Types.Done _ | Types.Cancelled _ -> None
+
+let assigned_task_ids ~matches_you tasks =
+  List.filter_map
+    (fun (task : Types.task) ->
+      match active_task_assignee task.task_status with
+      | Some assignee when matches_you assignee -> Some task.id
+      | Some _ | None -> None)
+    tasks
+
+let first_line text =
+  match String.index_opt text '\n' with
+  | Some i -> String.sub text 0 i
+  | None -> text
+
+let deliverable_claims_completion ~task_id deliverable =
+  let normalized =
+    deliverable
+    |> String.trim
+    |> String.lowercase_ascii
+    |> first_line
+  in
+  normalized <> ""
+  && (String.starts_with ~prefix:(String.lowercase_ascii task_id ^ " completed")
+        normalized
+      || String.starts_with ~prefix:"completed" normalized)
+
+let todo_task_has_completed_deliverable_conflict (ctx : context)
+    (task : Types.task) =
+  match task.task_status with
+  | Types.Todo -> (
+      match Planning_eio.load ctx.config ~task_id:task.id with
+      | Ok plan_ctx ->
+          deliverable_claims_completion ~task_id:task.id plan_ctx.deliverable
+      | Error _ -> false)
+  | Types.Claimed _ | Types.InProgress _ | Types.AwaitingVerification _
+  | Types.Done _ | Types.Cancelled _ -> false
+
+let todo_completed_deliverable_conflicts (ctx : context) tasks =
+  List.filter_map
+    (fun ((task : Types.task)) ->
+      Coord_query.safe_yield ();
+      if todo_task_has_completed_deliverable_conflict ctx task then Some task.id
+      else None)
+    tasks
+
+type current_binding = {
+  assigned_task_ids : string list;
+  primary_owned : string option;
+  planning_current : string option;
+  current_is_assigned : bool;
+  effective_current : string option;
+  drift_reason : string option;
+  current_task_set : bool;
+  claim_first_suppressed : bool;
+}
+
+type planning_context_state = {
+  planning_missing_task : string option;
+  deliverable_conflict_task : string option;
+}
+
+let resolve_current_binding ~assigned_task_ids ~planning_current =
+  let primary_owned =
+    match assigned_task_ids with
+    | id :: _ -> Some id
+    | [] -> None
+  in
+  let current_is_assigned =
+    match planning_current with
+    | Some current ->
+        List.exists (fun task_id -> String.equal task_id current)
+          assigned_task_ids
+    | None -> false
+  in
+  let drift_reason =
+    match primary_owned, planning_current with
+    | None, None -> None
+    | Some _, None -> None
+    | None, Some _ -> Some "no_owned"
+    | Some owned, Some current when String.equal owned current -> None
+    | Some _, Some _ when current_is_assigned -> Some "secondary_assignment"
+    | Some _, Some _ -> Some "stale_focus"
+  in
+  let effective_current =
+    match primary_owned, planning_current with
+    | Some owned, Some current when String.equal owned current -> Some current
+    | Some _, Some current when current_is_assigned -> Some current
+    | Some owned, Some _ -> Some owned
+    | Some owned, None -> Some owned
+    | None, Some _ | None, None -> None
+  in
+  let current_task_set =
+    match primary_owned, planning_current with
+    | Some owned, Some current when String.equal owned current -> true
+    | _ -> false
+  in
+  {
+    assigned_task_ids;
+    primary_owned;
+    planning_current;
+    current_is_assigned;
+    effective_current;
+    drift_reason;
+    current_task_set;
+    claim_first_suppressed = assigned_task_ids <> [];
+  }
+
+let planning_context_state (ctx : context) (binding : current_binding)
+    (active_tasks : Types.task list) =
+  match binding.primary_owned with
+  | None ->
+      { planning_missing_task = None; deliverable_conflict_task = None }
+  | Some task_id -> (
+      match Planning_eio.load ctx.config ~task_id with
+      | Error _ ->
+          { planning_missing_task = Some task_id; deliverable_conflict_task = None }
+      | Ok plan_ctx ->
+          let deliverable_conflict_task =
+            match
+              List.find_opt (fun (task : Types.task) -> String.equal task.id task_id)
+                active_tasks
+            with
+            | Some
+                {
+                  task_status = (Types.Claimed _ | Types.InProgress _);
+                  _;
+                }
+              when deliverable_claims_completion ~task_id plan_ctx.deliverable ->
+                Some task_id
+            | Some _ | None -> None
+          in
+          { planning_missing_task = None; deliverable_conflict_task })
+
+let task_id_list_label = function
+  | [] -> "[]"
+  | ids -> "[" ^ String.concat "," ids ^ "]"
+
 let agent_status_icon ~is_zombie = function
   | _ when is_zombie -> "💀"
   | Types.Busy -> "🔴"
@@ -166,6 +352,11 @@ let status_summary_string (ctx : context) =
     with Sys_error _ | Yojson.Json_error _ -> false
   in
   let actual_name = safe_resolve_agent_name ctx ~joined in
+  let credential_state = credential_state ctx ~actual_name in
+  let credential_blocked =
+    credential_state.credential_required
+    && not credential_state.credential_available
+  in
   let matches_you assignee =
     String.equal assignee ctx.agent_name || String.equal assignee actual_name
   in
@@ -225,24 +416,49 @@ let status_summary_string (ctx : context) =
   in
   let active_tasks = List.rev active_tasks in
   let shown_active_tasks = take_items max_active_tasks_display active_tasks in
-  let your_task =
-    active_tasks
-    |> List.find_map (fun (task : Types.task) ->
-           let assignee = task_assignee task.task_status in
-           if matches_you assignee then Some task.id else None)
+  let todo_conflict_task_ids = todo_completed_deliverable_conflicts ctx active_tasks in
+  let todo_conflict_count = List.length todo_conflict_task_ids in
+  let fresh_todo_count = max 0 (todo_count - todo_conflict_count) in
+  let assigned_task_ids = assigned_task_ids ~matches_you active_tasks in
+  let binding =
+    resolve_current_binding ~assigned_task_ids ~planning_current:current_task
   in
+  let planning_state = planning_context_state ctx binding active_tasks in
   let guidance =
     Workflow_guide.current_state_guidance
       ~room_set:true
       ~joined
-      ~task_claimed:(Option.is_some your_task)
-      ~current_task_set:(Option.is_some current_task)
+      ~task_claimed:(binding.assigned_task_ids <> [])
+      ~current_task_set:binding.current_task_set
       ~worktree_active ~session_active:false
   in
   let suggested_next =
-    guidance.next_steps
-    |> take_items 2
-    |> List.map (fun (step : Workflow_guide.step) -> step.tool)
+    if Option.is_some planning_state.planning_missing_task then
+      [ "masc_plan_init"; "masc_status" ]
+    else if Option.is_some planning_state.deliverable_conflict_task then
+      [ "masc_deliver"; "masc_status" ]
+    else
+      guidance.next_steps
+      |> List.map (fun (step : Workflow_guide.step) -> step.tool)
+      |> fun tools ->
+      if credential_blocked then
+        List.filter (fun tool -> not (is_lifecycle_tool tool)) tools
+      else
+        match binding.drift_reason with
+        | Some "no_owned" ->
+            let tools =
+              List.filter (fun tool -> not (String.equal tool "masc_transition"))
+                tools
+            in
+            let tools =
+              if fresh_todo_count > 0 then
+                "masc_claim_next" :: tools
+              else
+                tools
+            in
+            unique_strings tools
+        | Some _ | None -> tools
+      |> take_items 2
   in
   let attention_items =
     []
@@ -252,9 +468,68 @@ let status_summary_string (ctx : context) =
     else
       items
     |> fun items ->
-    if Option.is_some your_task && Option.is_none current_task then
+    if credential_blocked then
       items
-      @ [ "You own a task but planning current_task is unset. Call masc_plan_set_task." ]
+      @ [
+          Printf.sprintf
+            "Lifecycle actions are credential-blocked for %s. Mount a valid credential before claiming or transitioning tasks."
+            (String.concat "/" credential_state.credential_candidates);
+        ]
+    else
+      items
+    |> fun items ->
+    (match planning_state.planning_missing_task with
+    | Some task_id ->
+        items
+        @ [
+            Printf.sprintf
+              "Owned task %s has no planning context. Initialize or repair planning before continuing claimed work."
+              task_id;
+          ]
+    | None -> items)
+    |> fun items ->
+    (match planning_state.deliverable_conflict_task with
+    | Some task_id ->
+        items
+        @ [
+            Printf.sprintf
+              "Owned task %s already has a completed-looking deliverable while the task is still active. Treat this as conflict triage until board, planning, and control-plane state converge."
+              task_id;
+          ]
+    | None -> items)
+    |> fun items ->
+    if Option.is_some binding.primary_owned && not binding.current_task_set then
+      items
+      @ [ "You own a task but planning current_task is unset or drifted. \
+           Treat owned as canonical and call masc_plan_set_task." ]
+    else
+      items
+    |> fun items ->
+    (match binding.drift_reason with
+    | Some "secondary_assignment" ->
+        items
+        @ [
+            "Multiple assigned tasks detected. Current focus is also assigned; choose or reconcile the active lane before claiming new work.";
+          ]
+    | Some "stale_focus" ->
+        items
+        @ [
+            "Owned/current drift detected. Planning current_task is not assigned to you; treat primary_owned as the safe task lane.";
+          ]
+    | Some "no_owned" ->
+        items
+        @ [
+            "Planning current_task is set but no active task is assigned to you; clear or rebind current_task before following it.";
+          ]
+    | Some _ | None -> items)
+    |> fun items ->
+    if todo_conflict_count > 0 then
+      items
+      @ [
+          Printf.sprintf
+            "%d todo task(s) have completed-looking planning deliverables; treat them as control-plane conflicts, not fresh claimable work."
+            todo_conflict_count;
+        ]
     else
       items
     |> fun items ->
@@ -265,10 +540,10 @@ let status_summary_string (ctx : context) =
     else
       items
     |> fun items ->
-    if todo_count > 0 && Option.is_none your_task then
+    if fresh_todo_count > 0 && binding.assigned_task_ids = [] then
       items
       @ [ Printf.sprintf "%d unclaimed task(s) are available right now."
-            todo_count ]
+            fresh_todo_count ]
     else
       items
   in
@@ -288,8 +563,34 @@ let status_summary_string (ctx : context) =
   Buffer.add_string buf
     (Printf.sprintf
        "🧭 You: agent=%s | joined=%s | owned=%s | current=%s | worktree=%s\n"
-       actual_name (bool_flag joined) (option_or_dash your_task)
+       actual_name (bool_flag joined) (option_or_dash binding.primary_owned)
        (option_or_dash current_task) (bool_flag worktree_active));
+  Buffer.add_string buf
+    (Printf.sprintf
+       "🔎 Task binding: assigned_set=%s | primary_owned=%s | planning_current=%s | current_is_assigned=%s | effective_current=%s | drift_reason=%s | claim_first_suppressed=%s\n"
+       (task_id_list_label binding.assigned_task_ids)
+       (option_or_dash binding.primary_owned)
+       (option_or_dash binding.planning_current)
+       (bool_flag binding.current_is_assigned)
+       (option_or_dash binding.effective_current)
+       (option_or_dash binding.drift_reason)
+       (bool_flag binding.claim_first_suppressed));
+  (match planning_state.planning_missing_task with
+  | Some task_id ->
+      Buffer.add_string buf
+        (Printf.sprintf "📝 Planning: missing=yes | task=%s\n" task_id)
+  | None -> ());
+  (match planning_state.deliverable_conflict_task with
+  | Some task_id ->
+      Buffer.add_string buf
+        (Printf.sprintf "📝 Planning: deliverable_conflict=yes | task=%s\n"
+           task_id)
+  | None -> ());
+  if credential_state.credential_required then
+    Buffer.add_string buf
+      (Printf.sprintf "🔐 Credential: required=yes | available=%s | candidates=%s\n"
+         (bool_flag credential_state.credential_available)
+         (String.concat "," credential_state.credential_candidates));
   if suggested_next <> [] then
     Buffer.add_string buf
       (Printf.sprintf "💡 Suggested next: %s\n"
@@ -326,7 +627,12 @@ let status_summary_string (ctx : context) =
   List.iter
     (fun (task : Types.task) ->
       Coord_query.safe_yield ();
-      let (status_icon, status_label) = task_status_badge task.task_status in
+      let (status_icon, status_label) =
+        if List.exists (String.equal task.id) todo_conflict_task_ids then
+          ("⚠️", "todo_conflict")
+        else
+          task_status_badge task.task_status
+      in
       let assignee = task_assignee task.task_status in
       Buffer.add_string buf
         (Printf.sprintf "  %s %s P%d [%s] %s (%s)\n" status_icon task.id
@@ -385,31 +691,31 @@ let inspect_state ctx =
        with Sys_error _ | Yojson.Json_error _ -> false)
     else false
   in
-  let task_claimed =
+  let binding =
     if joined then
-      let actual_name = Coord.resolve_agent_name ctx.config ctx.agent_name in
-      Coord.get_tasks_raw ctx.config
-      |> List.exists (fun (task : Types.task) ->
-             match task.task_status with
-             | Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ }
-             | Types.AwaitingVerification { assignee; _ } ->
-                 assignee = ctx.agent_name || assignee = actual_name
-             | Types.Todo | Types.Done _ | Types.Cancelled _ -> false)
-    else false
+      let actual_name = safe_resolve_agent_name ctx ~joined in
+      let matches_you assignee =
+        String.equal assignee ctx.agent_name || String.equal assignee actual_name
+      in
+      let assigned_task_ids =
+        Coord.get_tasks_raw ctx.config |> assigned_task_ids ~matches_you
+      in
+      resolve_current_binding ~assigned_task_ids
+        ~planning_current:(safe_current_task ctx ~joined)
+    else
+      resolve_current_binding ~assigned_task_ids:[] ~planning_current:None
   in
-  let current_task_set =
-    if joined then Option.is_some (Planning_eio.get_current_task ctx.config)
-    else false
-  in
+  let task_claimed = binding.assigned_task_ids <> [] in
+  let current_task_set = binding.current_task_set in
   let worktree_active =
     if room_set then
       status_worktree_active ctx
     else false
   in
   { room_set; joined; task_claimed; current_task_set; worktree_active }
-
 let state_to_json st =
   `Assoc [
+    ("project_ready", `Bool st.room_set);
     ("namespace_ready", `Bool st.room_set);
     ("room_set", `Bool st.room_set);
     ("joined", `Bool st.joined);
@@ -439,35 +745,89 @@ let handle_workflow_guide ctx _args =
 
 (* ── State check (assertion-based verification) ────────────────── *)
 
+(** Issue #8636: SSOT for [masc_check] assertion vocabulary. Schema
+    enum, handler match, and default fallback used to disagree on
+    which strings were valid. The Variant + helpers below give a
+    single witness that compile-fails when a constructor is added but
+    [assertion_kind_to_string] / [assertion_kind_of_string_lenient]
+    aren't updated. Same shape as #8546 / #8601 / #8592. *)
+type assertion_kind =
+  | Room_set        (* legacy alias: namespace_ready *)
+  | Joined
+  | Task_claimed
+  | Current_task_set
+  | Worktree_active
+
+let assertion_kind_to_string = function
+  | Room_set -> "room_set"
+  | Joined -> "joined"
+  | Task_claimed -> "task_claimed"
+  | Current_task_set -> "current_task_set"
+  | Worktree_active -> "worktree_active"
+
+let all_assertion_kinds =
+  [ Room_set; Joined; Task_claimed; Current_task_set; Worktree_active ]
+
+let valid_assertion_strings =
+  List.map assertion_kind_to_string all_assertion_kinds
+
+let assertion_kind_of_string_lenient = function
+  | "room_set" | "namespace_ready" | "project_ready" -> Some Room_set
+  | "joined" -> Some Joined
+  | "task_claimed" -> Some Task_claimed
+  | "current_task_set" -> Some Current_task_set
+  | "worktree_active" -> Some Worktree_active
+  | _ -> None
+
+let assertion_fix_hint = function
+  | Room_set ->
+      "Call masc_start with your project root path."
+  | Joined ->
+      "Call masc_join to register your agent in the project namespace"
+  | Task_claimed ->
+      "Claim a task with masc_transition(action=claim) or masc_claim_next"
+  | Current_task_set ->
+      "Call masc_plan_set_task to choose or re-sync the active task when \
+       current_task is unset, stale, or ambiguous"
+  | Worktree_active ->
+      "Call masc_worktree_create to work in an isolated branch"
+
+let assertion_passes st = function
+  | Room_set -> st.room_set
+  | Joined -> st.joined
+  | Task_claimed -> st.task_claimed
+  | Current_task_set -> st.current_task_set
+  | Worktree_active -> st.worktree_active
+
 let check_assertion st assertion =
-  let (passed, fix_hint) = match assertion with
-    | "namespace_ready" | "room_set" ->
-        (st.room_set,
-         "Call masc_start with your project root path.")
-    | "joined" ->
-        (st.joined,
-         "Call masc_join to register your agent in the project namespace")
-    | "task_claimed" ->
-        (st.task_claimed,
-         "Claim a task with masc_transition(action=claim) or masc_claim_next")
-    | "current_task_set" ->
-        (st.current_task_set,
-         "Call masc_plan_set_task after claim paths that did not auto-bind current_task (for example masc_transition(action=claim))")
-    | "worktree_active" ->
-        (st.worktree_active,
-         "Call masc_worktree_create to work in an isolated branch")
-    | other ->
-        (false, Printf.sprintf "Unknown assertion: %s" other)
-  in
-  `Assoc [
-    ("assertion", `String assertion);
-    ("passed", `Bool passed);
-    ("fix_hint", if passed then `Null else `String fix_hint);
-  ]
+  match assertion_kind_of_string_lenient assertion with
+  | Some kind ->
+      let passed = assertion_passes st kind in
+      let fix_hint = assertion_fix_hint kind in
+      `Assoc [
+        ("assertion", `String assertion);
+        ("passed", `Bool passed);
+        ("fix_hint", if passed then `Null else `String fix_hint);
+      ]
+  | None ->
+      `Assoc [
+        ("assertion", `String assertion);
+        ("passed", `Bool false);
+        ("fix_hint",
+         `String
+           (Printf.sprintf "Unknown assertion: %s (expected one of: %s)"
+              assertion (String.concat ", " valid_assertion_strings)));
+      ]
 
 let handle_check ctx args =
   let st = inspect_state ctx in
-  let default_assertions = [ "room_set"; "joined"; "task_claimed"; "current_task_set" ] in
+  (* Issue #8636: include every assertion the handler knows about so
+     callers that omit the field get full coverage. The previous list
+     dropped "worktree_active", silently bypassing the worktree
+     precondition check whenever the field was missing. *)
+  let default_assertions =
+    [ "project_ready"; "joined"; "task_claimed"; "current_task_set"; "worktree_active" ]
+  in
   let assertions =
     match Yojson.Safe.Util.member "assertions" args with
     | `List items ->
@@ -510,10 +870,194 @@ let handle_heartbeat ctx _args =
     && Char.code result.[2] = 0xa0) in
   (success, result)
 
+let goal_horizon_strings = [ "short"; "mid"; "long" ]
+let goal_status_strings = [ "active"; "paused"; "done"; "dropped" ]
+let goal_review_outcome_strings = [ "done"; "progress"; "blocked"; "dropped" ]
+
+let make_enum_field_error ~field ~allowed ~received =
+  {
+    field;
+    constraint_violated = One_of allowed;
+    message =
+      Printf.sprintf "%s must be one of: %s" field (String.concat ", " allowed);
+    expected = Some (String.concat "|" allowed);
+    received = Some received;
+  }
+
+let make_type_field_error ~field ~constraint_violated ~expected ~received =
+  {
+    field;
+    constraint_violated;
+    message = Printf.sprintf "%s must be a %s" field expected;
+    expected = Some expected;
+    received = Some received;
+  }
+
+let parse_optional_horizon args field =
+  match Yojson.Safe.Util.member field args with
+  | `Null -> Ok None
+  | `String raw -> (
+      match Goal_store.parse_horizon (Some raw) with
+      | Some horizon -> Ok (Some horizon)
+      | None ->
+          Error
+            (make_enum_field_error ~field ~allowed:goal_horizon_strings
+               ~received:raw))
+  | json ->
+      Error
+        (make_type_field_error ~field ~constraint_violated:Type_string
+           ~expected:"string"
+           ~received:(Yojson.Safe.to_string json))
+
+let parse_optional_goal_status args field =
+  match Yojson.Safe.Util.member field args with
+  | `Null -> Ok None
+  | `String raw -> (
+      match Goal_store.parse_goal_status (Some raw) with
+      | Some status -> Ok (Some status)
+      | None ->
+          Error
+            (make_enum_field_error ~field ~allowed:goal_status_strings
+               ~received:raw))
+  | json ->
+      Error
+        (make_type_field_error ~field ~constraint_violated:Type_string
+           ~expected:"string"
+           ~received:(Yojson.Safe.to_string json))
+
+let parse_optional_review_outcome args field =
+  match Yojson.Safe.Util.member field args with
+  | `Null -> Ok None
+  | `String raw -> (
+      match Goal_store.parse_review_outcome raw with
+      | Some outcome -> Ok (Some outcome)
+      | None ->
+          Error
+            (make_enum_field_error ~field ~allowed:goal_review_outcome_strings
+               ~received:raw))
+  | json ->
+      Error
+        (make_type_field_error ~field ~constraint_violated:Type_string
+           ~expected:"string"
+           ~received:(Yojson.Safe.to_string json))
+
+let parse_optional_priority args field =
+  match Yojson.Safe.Util.member field args with
+  | `Null -> Ok None
+  | `Int n ->
+      if n < 1 || n > 5 then
+        Error
+          {
+            field;
+            constraint_violated = Min_int 1;
+            message = "priority must be between 1 and 5";
+            expected = Some "1..5";
+            received = Some (string_of_int n);
+          }
+      else Ok (Some n)
+  | json ->
+      Error
+        (make_type_field_error ~field ~constraint_violated:Type_int
+           ~expected:"integer"
+           ~received:(Yojson.Safe.to_string json))
+
+let handle_goal_list (ctx : context) args =
+  match parse_optional_horizon args "horizon", parse_optional_goal_status args "status" with
+  | Error err, _
+  | _, Error err ->
+      validation_error_result [ err ]
+  | Ok horizon, Ok status ->
+      let goals = Goal_store.list_goals ctx.config ?horizon ?status () in
+      let rollup = Goal_store.compute_rollup goals in
+      ok_result
+        [
+          ("generated_at", `String (Types.now_iso ()));
+          ("count", `Int (List.length goals));
+          ("goals", `List (List.map Goal_store.goal_to_yojson goals));
+          ("rollup", Goal_store.rollup_to_yojson rollup);
+        ]
+
+let handle_goal_upsert (ctx : context) args =
+  match
+    parse_optional_horizon args "horizon",
+    parse_optional_goal_status args "status",
+    parse_optional_priority args "priority"
+  with
+  | Error err, _, _
+  | _, Error err, _
+  | _, _, Error err ->
+      validation_error_result [ err ]
+  | Ok horizon, Ok status, Ok priority ->
+      let id = get_string_opt args "id" in
+      let title = get_string_opt args "title" in
+      let metric = get_string_opt args "metric" in
+      let target_value = get_string_opt args "target_value" in
+      let due_date = get_string_opt args "due_date" in
+      let parent_goal_id = get_string_opt args "parent_goal_id" in
+      match
+        Goal_store.upsert_goal ctx.config ?id ?horizon ?title ?metric
+          ?target_value ?due_date ?priority ?status ?parent_goal_id ()
+      with
+      | Error msg -> error_result_typed ~code:Validation_error msg
+      | Ok (goal, action) ->
+          let action_name =
+            match action with
+            | `created -> "created"
+            | `updated -> "updated"
+          in
+          let task_marker = Printf.sprintf "[goal:%s]" goal.id in
+          ok_result
+            [
+              ("action", `String action_name);
+              ("goal_id", `String goal.id);
+              ("goal", Goal_store.goal_to_yojson goal);
+              ("task_title_marker", `String task_marker);
+              ( "linked_task_title_example",
+                `String
+                  (Printf.sprintf "%s[child] %s" task_marker goal.title) );
+            ]
+
+let handle_goal_review (ctx : context) args =
+  match validate_string_required args "goal_id", parse_optional_review_outcome args "outcome",
+        parse_optional_horizon args "new_horizon" with
+  | Error err, _, _
+  | _, Error err, _
+  | _, _, Error err ->
+      validation_error_result [ err ]
+  | Ok goal_id, Ok (Some outcome), Ok new_horizon ->
+      let note = get_string_opt args "note" in
+      begin
+        match
+          Goal_store.review_goal ctx.config ~goal_id ~outcome ?new_horizon ?note ()
+        with
+        | Error msg ->
+            error_result_typed ~code:Not_found msg
+        | Ok goal ->
+            ok_result
+              [
+                ("goal_id", `String goal.id);
+                ("goal", Goal_store.goal_to_yojson goal);
+              ]
+      end
+  | Ok _, Ok None, _ ->
+      validation_error_result
+        [
+          {
+            field = "outcome";
+            constraint_violated = Required;
+            message = "outcome is required";
+            expected = Some "string";
+            received = None;
+          };
+        ]
+
 let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_status" -> Some (handle_status ctx args)
   | "masc_heartbeat" -> Some (handle_heartbeat ctx args)
+  | "masc_goal_list" -> Some (handle_goal_list ctx args)
+  | "masc_goal_upsert" -> Some (handle_goal_upsert ctx args)
+  | "masc_goal_review" -> Some (handle_goal_review ctx args)
   | "masc_reset" -> Some (handle_reset ctx args)
   | "masc_workflow_guide" -> Some (handle_workflow_guide ctx args)
   | "masc_check" -> Some (handle_check ctx args)
@@ -525,14 +1069,17 @@ let schemas = Tool_schemas_coord.schemas
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_read_only = [ "masc_status" ]
+let _tool_spec_read_only = [ "masc_status"; "masc_goal_list" ]
 let _tool_spec_system_internal = [ "masc_reset" ]
 
 let _tool_spec_requires_join = [ "masc_heartbeat" ]
 
 let tool_required_permission = function
-  | "masc_status" | "masc_workflow_guide" | "masc_check" ->
+  | "masc_status" | "masc_workflow_guide" | "masc_check"
+  | "masc_goal_list" ->
       Some Types.CanReadState
+  | "masc_goal_upsert" | "masc_goal_review" ->
+      Some Types.CanBroadcast
   | "masc_heartbeat" ->
       Some Types.CanBroadcast
   | "masc_reset" ->

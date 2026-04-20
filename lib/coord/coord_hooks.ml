@@ -77,26 +77,45 @@ let hebbian_on_task_cancelled_fn
      agent_name:string -> active_agents:string list -> unit) Atomic.t
   = Atomic.make (fun _config ~agent_name:_ ~active_agents:_ -> ())
 
+(** Closed enum for the agent lifecycle hook. Replaces the previous
+    [event_kind:string] surface (#8605 family): the variant lets the
+    compiler enforce exhaustive dispatch on every consumer, and the
+    string<->variant mapping is centralised in the helpers below so the
+    JSON wire format ("join" / "rejoin" / "leave") stays exactly the
+    same. *)
+type agent_lifecycle_event =
+  | Lifecycle_join
+  | Lifecycle_rejoin
+  | Lifecycle_leave
+
+let agent_lifecycle_event_to_string = function
+  | Lifecycle_join -> "join"
+  | Lifecycle_rejoin -> "rejoin"
+  | Lifecycle_leave -> "leave"
+
 (** Shared observability hook for join/rejoin/leave events.
     Upper layers can mirror state transitions to audit, telemetry, and logs
     without introducing circular dependencies into room sub-modules. *)
 let observe_agent_lifecycle_fn
   : (Coord_utils_backend_setup.config ->
      agent_id:string ->
-     event_kind:string ->
+     event:agent_lifecycle_event ->
      details:Yojson.Safe.t ->
      unit) Atomic.t
   = Atomic.make
-      (fun _config ~agent_id:_ ~event_kind:_ ~details:_ -> ())
+      (fun _config ~agent_id:_ ~event:_ ~details:_ -> ())
 
 (** Shared observability hook for task transitions.
     Used by room task modules so every successful state transition is logged
-    consistently regardless of which tool or transport triggered it. *)
+    consistently regardless of which tool or transport triggered it.
+    #8605 family: [transition] is the canonical [Types.task_action]
+    variant -- typos at call sites fail to compile and the JSON wire
+    format is centralised in [Types.task_action_to_string]. *)
 let observe_task_transition_fn
   : (Coord_utils_backend_setup.config ->
      agent_name:string ->
      task_id:string ->
-     transition:string ->
+     transition:task_action ->
      details:Yojson.Safe.t ->
      unit) Atomic.t
   = Atomic.make

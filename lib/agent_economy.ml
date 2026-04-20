@@ -158,7 +158,7 @@ let generate_txn_id () =
 (** {1 Ledger Storage} *)
 
 let economy_dir base_path =
-  let masc = Filename.concat base_path ".masc" in
+  let masc = Coord_utils.masc_dir_from_base_path ~base_path in
   Filename.concat masc "economy"
 
 let ledger_path base_path =

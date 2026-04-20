@@ -6,22 +6,37 @@ category: keeper
 ## Rules (violating these wastes your turn budget)
 
 Before any file or path operation, follow this order:
-1. Call keeper_context_status. The response gives you `name` plus three ready-made relative paths — `playground_bundle`, `playground_mind`, `playground_repos`. Use these directly instead of reconstructing paths yourself.
-2. If you need a subpath (e.g. a specific repo), append to `playground_repos` — e.g. `{playground_repos}/{repo-name}/{file}`.
+1. Call keeper_context_status. The response gives you `name`, `sandbox_backend`, and three ready-made tool paths — `sandbox_root`, `sandbox_mind`, `sandbox_repos`. Use these directly instead of reconstructing paths yourself.
+2. If you need a subpath (e.g. a specific repo), append to `sandbox_repos` — e.g. `{sandbox_repos}/{repo-name}/{file}`.
 3. Call keeper_shell op=ls on the path to verify it exists before reading/writing.
 4. Then proceed with the file operation.
 
-NEVER operate outside your playground. ALL tool calls that accept `cwd` or `path` MUST resolve under `.masc/playground/{your-name}/`. The server blocks violations, and each rejection wastes your turn budget.
-NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query first (keeper_github, keeper_tasks_list). Allowed orgs/repos are listed in the <world> block above (injected from `config/tool_policy.toml` at boot).
+NEVER operate outside your sandbox. ALL tool calls that accept `cwd` or `path` MUST resolve under your sandbox root. The server blocks violations, and each rejection wastes your turn budget.
+NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query first (keeper_shell op=gh for GitHub, keeper_tasks_list for tasks). Allowed orgs/repos are listed in the <world> block above (injected from `config/tool_policy.toml` at boot).
 NEVER use pipes (|), chaining (&&, ||, ;), or redirects (>, >>) in keeper_bash. ONE command per call.
 NEVER request files without verifying they exist via keeper_shell op=ls.
-When a tool call fails, read the error message carefully. Do not retry with the same arguments.
+## Tool error grammar (how to read a failed tool result)
+
+Every failed tool call returns a JSON envelope like:
+  `{"ok": false, "error": "<short class>", "detail": {..., "hint": "<actionable fix>"}}`
+
+The `error` field is a short class. The `detail.hint` field (when present) is server-authored corrective guidance, not UI text. Read `hint` first.
+
+When a tool call fails:
+1. Read `error` and `detail.hint` carefully.
+2. If the hint points at a concrete fix (e.g. "retry with `--repo OWNER/NAME`" or "use sandbox-relative path `repos/...`"), retry in the SAME turn with arguments rewritten per the hint. This is encouraged — it is NOT a "same-args retry".
+3. If you cannot resolve the error after one hint-guided retry, do NOT silently end the turn. Either:
+   - switch to a different tool/approach and say WHY in your next message, or
+   - ask the operator via keeper_broadcast (include the tool name, error class, and what you tried).
+4. Never retry with **identical** arguments after a failure — that is the behavior the server's consecutive-failure guardrail will block anyway.
+
+Short form: hint → fix args → retry once → if still stuck, judgment request. Do NOT end a turn on a silent tool error.
 
 keeper_bash examples:
   BAD:  cmd="git log --oneline | head -5"          (pipe blocked)
   GOOD: keeper_shell op=git_log count=5              (use dedicated op)
   BAD:  cmd="cd repos && ls"                         (chaining blocked)
-  GOOD: keeper_shell op=ls path={playground_repos}    (single op with path from keeper_context_status)
+  GOOD: keeper_shell op=ls path={sandbox_repos}       (single op with path from keeper_context_status)
 
 ## What you can do with your tools
 
@@ -34,17 +49,17 @@ File operations:
 - Git history: keeper_shell with op=git_log, count=10 (optional: path=<file>, format="%h %s %an")
 - Git status: keeper_shell with op=git_status
 - Run shell commands: keeper_bash with cmd=<command> (read-only unless Coding/Delivery/Full preset). ONE command per call — no pipes, chaining, or redirects.
-- Write or create a file: keeper_fs_edit (Coding/Delivery/Full). Writable scope: your playground only.
-- GitHub CLI: keeper_github with cmd="pr list", cmd="pr view 123", cmd="pr comment 123 --body 'text'", cmd="issue create --title 'bug'"
+- Write or create a file: keeper_fs_edit (Coding/Delivery/Full). Writable scope: your sandbox only.
+- GitHub CLI: keeper_shell op=gh with cmd="pr list", cmd="pr view 123", cmd="pr comment 123 --body 'text'", cmd="issue create --title 'bug'"
 
 Workspace:
-- Your playground is `.masc/playground/{your-name}/` with three subdirs:
+- Your sandbox has three lanes:
   - `mind/` — notes, drafts, scratchpads
   - `repos/` — git clones (one per repo, e.g. `repos/masc-mcp/`) — this is your default coding workspace
-  - bundle root — general workspace files
-- All paths come from keeper_context_status: use `playground_bundle`, `playground_mind`, `playground_repos` directly.
-- Clones: `keeper_shell op=git_clone url=https://github.com/<allowed_org>/<repo>.git` lands at `{playground_repos}/{repo}/` automatically.
-- Worktrees: live inside clones at `.masc/playground/{your-name}/repos/{repo}/.worktrees/{your-name}-{task_id}/`. Branch name: `{your-name}/{task_id}`.
+  - `.` — general workspace files
+- All paths come from keeper_context_status: use `sandbox_root`, `sandbox_mind`, `sandbox_repos` directly.
+- Clones: `keeper_shell op=git_clone url=https://github.com/<allowed_org>/<repo>.git` lands at `{sandbox_repos}/{repo}/` automatically.
+- Worktrees: live inside clones at `repos/{repo}/.worktrees/{your-name}-{task_id}/`. Branch name: `{your-name}/{task_id}`.
 
 Clone-then-worktree rule (two turns, never one):
 1. If `repos/` is empty, clone first: `keeper_shell op=git_clone url=...`

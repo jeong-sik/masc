@@ -7,6 +7,7 @@
    a2a_types
    a2a_tools
    admission_queue
+   attempt_state
    admission_queue_metrics
    agent_card
    agent_economy
@@ -125,6 +126,7 @@
    server_routes_http_routes_attribution
    server_routes_http_routes_activity
    server_routes_http_routes_artifacts
+   server_routes_http_routes_legendary_bash
    server_routes_http_routes_channel_gate
    server_routes_http_routes_sidecar
    server_h2_gateway
@@ -153,6 +155,7 @@
    web_dashboard
    credits_dashboard
    repo_synthesis_benchmark
+   room_protocol
 
    inference_utils
    ;; WebRTC modules removed — use ocaml-webrtc library directly
@@ -185,6 +188,7 @@
    worker_container
    worker_container_runners
    worker_dev_tools
+   legendary_counters
    worker_tool_input
    worker_verification
    prompt_defaults
@@ -225,7 +229,6 @@
    operator_approval
    operator_pending_confirm
    operator_digest
-   operator_digest_event
    operator_digest_guidance
    operator_digest_types
    opentelemetry_client_cohttp_eio
@@ -241,6 +244,7 @@
    orchestrator
    otel_config
    otel_dispatch_hook
+   otel_genai
    otel_spans
    otel_trace_context
    planning_eio
@@ -408,13 +412,18 @@
    keeper_memory_bank
    keeper_memory_recall
    keeper_skill_routing
+   keeper_sandbox
+   keeper_repo_readiness
    keeper_alerting
    keeper_alerting_path
+   keeper_sandbox_containment
+   keeper_docker_read
    keeper_timing
    keeper_tool_registry
    keeper_tool_diversity
    keeper_tool_policy_config
    keeper_tool_policy
+   keeper_tool_boundary
    keeper_turn_intent
    keeper_discovered_tools
    keeper_tool_affinity
@@ -456,6 +465,7 @@
    keeper_hooks_oas
    keeper_extend_turns
    keeper_llm_bridge
+   keeper_tool_alias
    keeper_tool_disclosure
    keeper_turn_telemetry
    keeper_approval_queue
@@ -495,6 +505,7 @@
    keeper_runtime
    keeper_turn_setup
    keeper_turn_up_args
+   keeper_preset_defaults
    keeper_turn_up_create
    keeper_turn_up_update
    keeper_turn_up
@@ -528,6 +539,8 @@
    env_config_introspect
    runtime_params
    governance_registry
+   governance_pipeline_types
+   governance_pipeline_risk
    governance_pipeline
    approval_callbacks
    tool_compact
@@ -625,6 +638,7 @@
   keeper_rollover
   keeper_approval_queue
   keeper_post_turn
+  keeper_tool_alias
   keeper_tool_disclosure
   keeper_turn_telemetry
   keeper_exec_context
@@ -657,7 +671,10 @@
   tool_autoresearch_broadcast
   tool_autoresearch_cycle
   keeper_skill_routing
+  keeper_sandbox
   keeper_alerting_path
+  keeper_sandbox_containment
+  keeper_docker_read
   ;; tool_local_runtime sub-modules
   tool_local_runtime_http
   tool_local_runtime_verify
@@ -790,6 +807,9 @@
    masc_process
    ;; Typed exec approval substrate (RFC v5)
    masc_mcp.masc_exec
+   ;; Bash subset parser (RFC v5 A1) — for shadow AST telemetry
+   ;; in worker_dev_tools pending regex-to-AST migration.
+   masc_mcp.masc_exec_bash_parser
    ;; Autoresearch leaf modules (types, serde, storage, metric, git, file)
    masc_autoresearch
    ;; Board types (extracted sub-library — first step toward board isolation)
@@ -803,6 +823,9 @@
    masc_mcp.config
    ;; Dashboard utilities (extracted sub-library)
    masc_mcp.dashboard_utils
+   ;; Dashboard API wire contracts (extracted sub-library)
+   ;; Shared typed JSON contracts between OCaml handlers and Bonsai island.
+   masc_mcp.masc_dashboard_api_types
    ;; Team session types removed (Epic #6107)
    ;; MCP tool schema cluster (extracted sub-library)
    masc_mcp.tool_schemas

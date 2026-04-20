@@ -887,7 +887,7 @@ let prompts_json () =
 
 (** Persist overrides to JSON file *)
 let persist_overrides base_path =
-  let masc_dir = Filename.concat base_path ".masc" in
+  let masc_dir = Coord_utils.masc_dir_from_base_path ~base_path in
   Fs_compat.mkdir_p masc_dir;
   let path = Filename.concat masc_dir "prompt_overrides.json" in
   let json = with_mutex (fun () ->
@@ -902,7 +902,11 @@ let persist_overrides base_path =
 (** Restore overrides from JSON file, applying the same validation as
     [set_override] so that stale or manually-edited entries are rejected. *)
 let restore_overrides base_path =
-  let path = Filename.concat (Filename.concat base_path ".masc") "prompt_overrides.json" in
+  let path =
+    Filename.concat
+      (Coord_utils.masc_dir_from_base_path ~base_path)
+      "prompt_overrides.json"
+  in
   if Sys.file_exists path then begin
     try
       let content = In_channel.with_open_text path In_channel.input_all in

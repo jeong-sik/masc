@@ -99,13 +99,19 @@ let effective_discovered_ctx ~static_ctx ~(discovered : int option) : int =
   | Some ctx when ctx >= context_floor -> ctx
   | _ -> static_ctx
 
+let static_context_of_entry
+    (entry : Llm_provider.Provider_registry.entry) : int =
+  match entry.capabilities.Llm_provider.Capabilities.max_context_tokens with
+  | Some caps_ctx when caps_ctx > entry.max_context -> caps_ctx
+  | _ -> entry.max_context
+
 let max_context_of_label (label : string) : int =
   let static_ctx =
     match provider_name_of_label label with
     | None -> fallback_context_window
     | Some pname -> (
         match Llm_provider.Provider_registry.find default_registry pname with
-        | Some entry -> entry.max_context
+        | Some entry -> static_context_of_entry entry
         | None -> fallback_context_window)
   in
   match Cascade_config.resolve_label_context label with
@@ -120,7 +126,7 @@ let context_if_available (label : string) : int option =
       | None -> None
       | Some entry ->
           if entry.is_available () then
-            let static_ctx = entry.max_context in
+            let static_ctx = static_context_of_entry entry in
             let ctx =
               match Cascade_config.resolve_label_context label with
               | Some discovered ->
@@ -259,9 +265,6 @@ let models_of_cascade_name (cascade_name : string) : string list =
         "cascade config resolve failed for %s, using defaults: %s"
         cascade_name (Printexc.to_string exn);
       defaults
-
-let default_model_strings_from_config () : string list =
-  models_of_cascade_name "default"
 
 let resolve_providers_from_model_strings ?provider_filter
     (model_strings : string list)

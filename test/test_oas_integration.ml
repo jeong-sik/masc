@@ -101,7 +101,7 @@ let test_event_bus_task_transition () =
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
   Oas_events.publish_task_transition bus ~agent_name:"worker"
-    ~task_id:"task-1" ~transition:"done";
+    ~task_id:"task-1" ~transition:Types_core.Done_action;
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
   match (List.hd events : Event_bus.event).payload with
@@ -117,9 +117,10 @@ let test_event_bus_keeper_lifecycle_includes_phase () =
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
   Oas_events.publish_keeper_lifecycle bus
-    ~event:"started"
+    ~event:(Masc_mcp.Keeper_lifecycle_events.Custom_event
+              { verb = Masc_mcp.Keeper_lifecycle_events.Started;
+                phase = Some Masc_mcp.Keeper_state_machine.Running })
     ~keeper_name:"keeper-a"
-    ~phase:Masc_mcp.Keeper_state_machine.Running
     ~detail:"supervised"
     ();
   let events = Event_bus.drain sub in
@@ -172,9 +173,10 @@ let test_keeper_lifecycle_envelope_agent_name () =
   Masc_event_bus.set bus;
   let sub = Event_bus.subscribe bus in
   Oas_events.publish_keeper_lifecycle bus
-    ~event:"started"
+    ~event:(Masc_mcp.Keeper_lifecycle_events.Custom_event
+              { verb = Masc_mcp.Keeper_lifecycle_events.Started;
+                phase = Some Masc_mcp.Keeper_state_machine.Running })
     ~keeper_name:"masc-improver"
-    ~phase:Masc_mcp.Keeper_state_machine.Running
     ~detail:"supervised"
     ();
   let events = Event_bus.drain sub in
@@ -264,9 +266,10 @@ let test_oas_sse_bridge_broadcasts_lifecycle_to_observers () =
             Oas_sse_bridge.start_with_interval ~drain_interval_s:0.1
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
             Oas_events.publish_keeper_lifecycle bus
-              ~event:"started"
+              ~event:(Masc_mcp.Keeper_lifecycle_events.Custom_event
+                        { verb = Masc_mcp.Keeper_lifecycle_events.Started;
+                          phase = Some Masc_mcp.Keeper_state_machine.Running })
               ~keeper_name:"keeper-a"
-              ~phase:Masc_mcp.Keeper_state_machine.Running
               ~detail:"supervised"
               ();
             Eio.Time.sleep (Eio.Stdenv.clock env) 0.6;

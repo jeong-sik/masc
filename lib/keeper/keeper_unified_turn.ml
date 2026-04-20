@@ -10,6 +10,21 @@ open Keeper_types
 open Keeper_exec_context
 module Social = Keeper_social_model
 
+(* Interval (seconds) for the per-turn background fiber that drains the
+   `keeper_turn` subscription on the OAS event bus.  See
+   [start_background_turn_event_bus_drain] for context.  Default 0.05s
+   (50 ms); tunable via [MASC_KEEPER_TURN_DRAIN_INTERVAL_SEC] — floats
+   parsed as seconds, invalid values fall back to the default. *)
+let default_turn_event_bus_drain_interval_sec = 0.05
+
+let turn_event_bus_drain_interval_sec () =
+  match Sys.getenv_opt "MASC_KEEPER_TURN_DRAIN_INTERVAL_SEC" with
+  | Some raw ->
+    (match float_of_string_opt (String.trim raw) with
+     | Some v when v > 0. -> v
+     | _ -> default_turn_event_bus_drain_interval_sec)
+  | None -> default_turn_event_bus_drain_interval_sec
+
 let substring_matches_at ~(needle : string) (haystack : string) start_idx =
   let needle_len = String.length needle in
   let rec loop offset =
@@ -608,43 +623,27 @@ let cascade_budget_logged : (string * int * int, unit) Hashtbl.t =
 let resolved_max_context_for_turn
     ~(meta : keeper_meta)
     (model_labels : string list) : int =
-  let min_keeper_context = Keeper_config.min_keeper_context_tokens in
-  let raw =
-    match meta.max_context_override with
-    | Some v ->
-        Log.Keeper.debug "%s: using max_context_override=%d" meta.name v;
-        v
-    | None ->
-        let primary =
-          let resolved =
-            Cascade_runtime.resolve_primary_max_context model_labels
-          in
-          Cascade_runtime.clamp_context_for_pure_local_labels
-            ~labels:model_labels ~max_context:resolved
-        in
-        let cascade_max =
-          let resolved =
-            Cascade_runtime.resolve_max_cascade_context model_labels
-          in
-          Cascade_runtime.clamp_context_for_pure_local_labels
-            ~labels:model_labels ~max_context:resolved
-        in
-        if primary < cascade_max then begin
-          let key = (meta.name, primary, cascade_max) in
-          if not (Hashtbl.mem cascade_budget_logged key) then begin
-            Hashtbl.add cascade_budget_logged key ();
-            Log.Keeper.info
-              "%s: mixed cascade context budget primary=%d cascade_max=%d; using primary for initial turn budget"
-              meta.name primary cascade_max
-          end
-        end;
-        primary
+  let resolution =
+    Keeper_exec_context.resolve_max_context_resolution
+      ~requested_override:meta.max_context_override model_labels
   in
-  if raw < min_keeper_context then begin
-    Log.Keeper.warn "%s: resolved max_context=%d below minimum %d, clamped"
-      meta.name raw min_keeper_context;
-    min_keeper_context
-  end else raw
+  if resolution.primary_budget < resolution.cascade_budget then begin
+    let key = (meta.name, resolution.primary_budget, resolution.cascade_budget) in
+    if not (Hashtbl.mem cascade_budget_logged key) then begin
+      Hashtbl.add cascade_budget_logged key ();
+      Log.Keeper.info
+        "%s: mixed cascade context budget primary=%d cascade_max=%d; using primary for initial turn budget"
+        meta.name resolution.primary_budget resolution.cascade_budget
+    end
+  end;
+  (match resolution.requested_override with
+   | Some requested ->
+     Log.Keeper.debug
+       "%s: using max_context_override=%d turn_budget=%d primary_budget=%d effective_budget=%d"
+       meta.name requested resolution.turn_budget resolution.primary_budget
+       resolution.effective_budget
+   | None -> ());
+  resolution.turn_budget
 
 let decision_channel_of_observation
     (observation : Keeper_world_observation.world_observation) : string =
@@ -777,7 +776,15 @@ let is_verifier_role_keeper (meta : Keeper_types.keeper_meta) : bool =
     (fun token -> List.mem token meta.mention_targets)
     verifier_role_mention_tokens
 
+(* Verification signals (pending_verification trigger / task_verify
+   affordance) are only surfaced to keepers whose persona declares the
+   verifier role. Non-verifier keepers would otherwise steal verification
+   work that their persona is not configured to perform.  When [meta] is
+   omitted the legacy surface-to-all behaviour is kept for backwards
+   compatibility with callers that have no keeper context (e.g. dashboard
+   snapshots, diagnostics). *)
 let observed_triggers_of_observation
+    ?meta
     (observation : Keeper_world_observation.world_observation) : string list =
   let triggers = ref [] in
   let add trigger = triggers := trigger :: !triggers in
@@ -786,13 +793,20 @@ let observed_triggers_of_observation
   if observation.pending_scope_messages <> [] then add "scope_message";
   if observation.unclaimed_task_count > 0 then add "new_unclaimed_task";
   if observation.failed_task_count > 0 then add "failed_task";
-  if observation.pending_verification_count > 0 then add "pending_verification";
+  let verifier_eligible =
+    match meta with
+    | None -> true
+    | Some m -> is_verifier_role_keeper m
+  in
+  if verifier_eligible && observation.pending_verification_count > 0 then
+    add "pending_verification";
   if observation.active_goals <> [] && observation.idle_seconds > 0 then
     add "idle_timeout_candidate";
   if Option.is_some observation.worktree_change_summary then add "worktree_change";
   List.rev !triggers
 
 let observed_affordances_of_observation
+    ?meta
     (observation : Keeper_world_observation.world_observation) : string list =
   let affordances = ref [] in
   let add affordance = affordances := affordance :: !affordances in
@@ -801,7 +815,13 @@ let observed_affordances_of_observation
   if observation.pending_scope_messages <> [] then add "message_sweep";
   if observation.unclaimed_task_count > 0 then add "task_claim";
   if observation.failed_task_count > 0 then add "task_audit";
-  if observation.pending_verification_count > 0 then add "task_verify";
+  let verifier_eligible =
+    match meta with
+    | None -> true
+    | Some m -> is_verifier_role_keeper m
+  in
+  if verifier_eligible && observation.pending_verification_count > 0 then
+    add "task_verify";
   if Option.is_some observation.worktree_change_summary then add "inspect_worktree_delta";
   List.rev !affordances
 
@@ -840,8 +860,8 @@ let append_decision_record
     ?error
     () : unit =
   let now_ts = Time_compat.now () in
-  let trigger_signals = observed_triggers_of_observation observation in
-  let affordances = observed_affordances_of_observation observation in
+  let trigger_signals = observed_triggers_of_observation ~meta observation in
+  let affordances = observed_affordances_of_observation ~meta observation in
   let tools_used =
     match result with
     | Some r -> r.tools_used
@@ -1625,6 +1645,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       match ensure_local_discovery_ready model_labels with
       | Error e -> Error (Oas.Error.Internal e)
       | Ok () ->
+      let max_context_resolution =
+        Keeper_exec_context.resolve_max_context_resolution
+          ~requested_override:meta.max_context_override model_labels
+      in
       let max_context =
         resolved_max_context_for_turn ~meta model_labels
       in
@@ -1689,6 +1713,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let post_commit_failure_reason = ref None in
       let paused_meta_override = ref None in
       let current_turn_overflow_blocker = ref None in
+      let event_bus_drain_active = Atomic.make true in
+      let turn_event_bus_mu = Stdlib.Mutex.create () in
       let mark_paused_after_overflow ~run_meta ~reason =
         let paused_meta =
           pause_keeper_for_overflow
@@ -1716,6 +1742,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
          ToolCompleted pops the oldest input for that tool_name. *)
       let pending_tool_inputs : (string, Yojson.Safe.t Queue.t) Hashtbl.t =
         Hashtbl.create 8
+      in
+      let with_turn_event_bus_lock f =
+        Stdlib.Mutex.lock turn_event_bus_mu;
+        Fun.protect
+          ~finally:(fun () -> Stdlib.Mutex.unlock turn_event_bus_mu)
+          f
       in
       let push_pending_input tool_name input =
         let q =
@@ -1761,18 +1793,60 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           events
       in
       let drain_turn_event_bus () =
-        let events =
-          match event_bus_sub, Keeper_event_bus.get () with
-          | Some sub, Some _bus -> Oas_bus_instrument.drain sub
-          | _ -> []
-        in
-        process_tool_events_for_side_effects events;
-        let summary = summarize_turn_event_bus events in
-        turn_event_bus :=
-          merge_turn_event_bus_summary !turn_event_bus summary;
-        !turn_event_bus
+        with_turn_event_bus_lock (fun () ->
+          let events =
+            match event_bus_sub, Keeper_event_bus.get () with
+            | Some sub, Some _bus -> Oas_bus_instrument.drain sub
+            | _ -> []
+          in
+          process_tool_events_for_side_effects events;
+          let summary = summarize_turn_event_bus events in
+          turn_event_bus :=
+            merge_turn_event_bus_summary !turn_event_bus summary;
+          !turn_event_bus)
+      in
+      let committed_mutating_tools_snapshot () =
+        with_turn_event_bus_lock (fun () ->
+          committed_mutating_tools !mutating_tools_committed)
+      in
+      let start_background_turn_event_bus_drain ~clock =
+        match event_bus_sub, Eio_context.get_switch_opt () with
+        | Some _, Some sw ->
+            Eio.Fiber.fork ~sw (fun () ->
+              let rec loop () =
+                if Atomic.get event_bus_drain_active then begin
+                  (try
+                     ignore (drain_turn_event_bus ())
+                   with
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | exn ->
+                       Log.Keeper.warn
+                         "%s: keeper_turn event-bus drain failed: %s"
+                         meta.name (Printexc.to_string exn));
+                  (* 2026-04-20: 0.25s → 0.05s.  OAS publishes a burst
+                     of events per tool cycle (ToolCalled / ToolResult /
+                     ToolCompleted + assistant / usage).  With 0.25s
+                     polling, a tool-heavy turn could accumulate >256
+                     events for this subscriber before the next drain,
+                     saturating the default Eio.Stream buffer and
+                     blocking [oas_bus_instrument.publish].  Fleet logs
+                     2026-04-20 recorded subscriber_purpose=keeper_turn
+                     depth peaks 219–469 (the 469 sample confirmed
+                     publishers blocked: 469 − 256 buffer ≈ 213 stuck
+                     sends).  50 ms keeps drain latency under the
+                     typical inter-event spacing so depth stays below
+                     the warn threshold outside tool bursts.  Override
+                     via [MASC_KEEPER_TURN_DRAIN_INTERVAL_SEC]. *)
+                  Eio.Time.sleep clock (turn_event_bus_drain_interval_sec ());
+                  loop ()
+                end
+              in
+              loop ())
+        | _ -> ()
       in
       let unsubscribe_event_bus () =
+        Atomic.set event_bus_drain_active false;
+        ignore (drain_turn_event_bus ());
         match event_bus_sub, Keeper_event_bus.get () with
         | Some sub, Some bus -> Oas_bus_instrument.unsubscribe bus sub
         | _ -> ()
@@ -1803,6 +1877,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let timeout_sec =
             Env_config_keeper.KeeperKeepalive.turn_timeout_sec
           in
+          start_background_turn_event_bus_drain ~clock;
           let turn_deadline = Eio.Time.now clock +. timeout_sec in
           let remaining_turn_budget_s () =
             Float.max 0.0 (turn_deadline -. Eio.Time.now clock)
@@ -1824,23 +1899,38 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     .effective_max_turns_per_call_scheduled_autonomous
                       keeper_profile )
             in
-            Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
-              ~max_context ~build_turn_prompt
-              ~user_message ~cascade_name:effective_cascade_name
-              ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
+            Otel_genai.with_keeper_turn_span
+              ~keeper_name:run_meta.name
+              ~agent_name:run_meta.agent_name
+              ~cascade_name:effective_cascade_name
+              ~trace_id:(Keeper_id.Trace_id.to_string run_meta.runtime.trace_id)
               ~generation:run_generation
+              ~max_context
               ~max_turns
               ~max_idle_turns
-              ~history_user_source:"world_state_prompt"
-              ~history_assistant_source:"internal_assistant"
-              ~temperature ~max_tokens
-              ~oas_timeout_s
-              ?max_cost_usd
-              ~trajectory_acc
+              ~channel:(Keeper_world_observation.channel_to_string channel)
               ~is_retry
-              ?shared_context
-              ?event_bus:(Keeper_event_bus.get ())
-              ()
+              ~current_task_id:
+                (Option.map Keeper_id.Task_id.to_string
+                   run_meta.current_task_id)
+              (fun () ->
+                Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
+                  ~max_context ~build_turn_prompt
+                  ~user_message ~cascade_name:effective_cascade_name
+                  ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
+                  ~generation:run_generation
+                  ~max_turns
+                  ~max_idle_turns
+                  ~history_user_source:"world_state_prompt"
+                  ~history_assistant_source:"internal_assistant"
+                  ~temperature ~max_tokens
+                  ~oas_timeout_s
+                  ?max_cost_usd
+                  ~trajectory_acc
+                  ~is_retry
+                  ?shared_context
+                  ?event_bus:(Keeper_event_bus.get ())
+                  ())
           in
           let rec retry_loop ~run_meta ~max_context ~run_generation
               ~attempt ~is_retry
@@ -1905,9 +1995,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 Ok result
             | Error err ->
                 let _ = drain_turn_event_bus () in
-                let committed_tools =
-                  committed_mutating_tools !mutating_tools_committed
-                in
+                let committed_tools = committed_mutating_tools_snapshot () in
                 if committed_tools <> []
                    && Keeper_tool_registry.all_tools_reconcile_safe
                         committed_tools
@@ -1974,8 +2062,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                               && attempt <= max_transient_retries then begin
                   let delay = transient_backoff_sec attempt in
                   Log.Keeper.warn
-                    "%s: transient network error cascade=%s max_context=%d retry=%d/%d backoff=%.0fs: %s"
-                    meta.name effective_cascade_name max_context
+                    "%s: transient network error cascade=%s max_context=%d turn_budget=%d primary_budget=%d requested_override=%s retry=%d/%d backoff=%.0fs: %s"
+                    meta.name effective_cascade_name max_context_resolution.effective_budget
+                    max_context
+                    max_context_resolution.primary_budget
+                    (match max_context_resolution.requested_override with
+                     | Some requested -> string_of_int requested
+                     | None -> "none")
                     attempt max_transient_retries delay
                     (short_preview (Oas.Error.to_string err));
                   Eio.Time.sleep clock delay;
@@ -2081,9 +2174,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             in
             Log.Keeper.error "%s: %s" meta.name msg;
             let _ = drain_turn_event_bus () in
-            let committed_tools =
-              committed_mutating_tools !mutating_tools_committed
-            in
+            let committed_tools = committed_mutating_tools_snapshot () in
             if committed_tools <> []
                && Keeper_tool_registry.all_tools_reconcile_safe
                     committed_tools
@@ -2164,8 +2255,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           Prometheus.inc_counter Prometheus.metric_keeper_turns
             ~labels:[("keeper_name", meta.name); ("outcome", "failure")] ();
           Log.Keeper.error
-            "%s: keeper cycle FAILED cascade=%s max_context=%d latency=%dms%s error=%s"
-            meta.name effective_cascade_name max_context latency_ms
+            "%s: keeper cycle FAILED cascade=%s max_context=%d turn_budget=%d primary_budget=%d requested_override=%s latency=%dms%s error=%s"
+            meta.name effective_cascade_name max_context_resolution.effective_budget
+            max_context
+            max_context_resolution.primary_budget
+            (match max_context_resolution.requested_override with
+             | Some requested -> string_of_int requested
+             | None -> "none")
+            latency_ms
             (if is_ambiguous_partial then
                " (ambiguous partial commit)"
              else if is_server_parse_rejection then
@@ -2201,9 +2298,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                  The keeper is paused and an explicit continue gate is
                  raised for the operator. Approving the gate auto-resumes
                  the keeper; rejecting it leaves the keeper paused. *)
-              let committed_tools =
-                committed_mutating_tools !mutating_tools_committed
-              in
+              let committed_tools = committed_mutating_tools_snapshot () in
               let failure_reason =
                 Option.value
                   ~default:
@@ -2280,9 +2375,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             Keeper_registry.set_failure_reason ~base_path:config.base_path
               meta.name
               (Some failure_reason);
-            let committed_tools =
-              committed_mutating_tools !mutating_tools_committed
-            in
+            let committed_tools = committed_mutating_tools_snapshot () in
             Log.Keeper.info
               "%s: reconcile-required failure latched as %s after committed tools [%s]"
               meta.name

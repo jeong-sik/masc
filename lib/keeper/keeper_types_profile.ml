@@ -10,6 +10,14 @@ let keeper_debug = Env_config.KeeperRuntime.debug
 type sandbox_profile =
   | Legacy_local
   | Docker_hardened
+  | Docker_with_git
+    (** Hardened docker profile with bridge network + read-only mounts of
+        ~/.config/gh and ~/.gitconfig (and optionally ~/.ssh) to permit
+        git/gh CLI operations. All other Docker_hardened guards (cap-drop,
+        no-new-privs, read-only rootfs, tmpfs, pids/memory limits, no
+        nested runtimes) remain in force. Default OFF; per-keeper opt-in
+        via TOML or per-command dispatch when keeper_bash receives
+        cmd starting with "git " or "gh ". *)
 
 type network_mode =
   | Network_none
@@ -22,18 +30,20 @@ type shared_memory_scope =
 let sandbox_profile_to_string = function
   | Legacy_local -> "legacy_local"
   | Docker_hardened -> "docker_hardened"
+  | Docker_with_git -> "docker_with_git"
 
 let sandbox_profile_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
   | "legacy_local" -> Some Legacy_local
   | "docker_hardened" -> Some Docker_hardened
+  | "docker_with_git" -> Some Docker_with_git
   | _ -> None
 
 (* Issue #8467: Variant SSOT — adding a constructor to [sandbox_profile]
    forces [sandbox_profile_to_string] exhaustiveness AND extends
    [valid_sandbox_profile_strings] so [keeper_schema] picks it up via
    the mirror declared there. *)
-let all_sandbox_profiles = [ Legacy_local; Docker_hardened ]
+let all_sandbox_profiles = [ Legacy_local; Docker_hardened; Docker_with_git ]
 let valid_sandbox_profile_strings =
   List.map sandbox_profile_to_string all_sandbox_profiles
 
@@ -72,6 +82,7 @@ let default_sandbox_profile = Legacy_local
 let default_network_mode_for_profile = function
   | Legacy_local -> Network_inherit
   | Docker_hardened -> Network_none
+  | Docker_with_git -> Network_inherit
 
 let default_shared_memory_scope = Shared_memory_disabled
 
@@ -849,6 +860,32 @@ let merge_keeper_profile_defaults
        surviving_base @ overlay.oas_env);
   }
 
+(* Derived transport guards for combinations that are otherwise easy to
+   misconfigure. *)
+let oas_env_truthy value =
+  match String.lowercase_ascii (String.trim value) with
+  | "1" | "true" | "yes" | "on" -> true
+  | _ -> false
+
+let oas_env_has_non_empty key pairs =
+  match List.assoc_opt key pairs with
+  | Some value when String.trim value <> "" -> true
+  | _ -> false
+
+let effective_oas_env pairs =
+  let gemini_mcp_disabled =
+    match List.assoc_opt "OAS_GEMINI_NO_MCP" pairs with
+    | Some value -> oas_env_truthy value
+    | None -> false
+  in
+  if
+    gemini_mcp_disabled
+    && not (oas_env_has_non_empty "OAS_GEMINI_APPROVAL_MODE" pairs)
+  then
+    pairs @ [ ("OAS_GEMINI_APPROVAL_MODE", "plan") ]
+  else
+    pairs
+
 (** Apply [defaults.oas_env] to the process environment via [Unix.putenv].
     Logs each applied key at info level for operator auditability.
     Safe to call repeatedly — putenv is idempotent for identical values.
@@ -858,7 +895,7 @@ let merge_keeper_profile_defaults
     current masc-mcp deployment each keeper lives in its own process,
     which keeps this wiring simple; revisit if multiplexing is added. *)
 let apply_oas_env ~keeper_name (defaults : keeper_profile_defaults) : unit =
-  match defaults.oas_env with
+  match effective_oas_env defaults.oas_env with
   | [] -> ()
   | pairs ->
     List.iter

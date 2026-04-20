@@ -27,7 +27,7 @@ let option_to_yojson to_json = function
   | Some value -> to_json value
   | None -> `Null
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let int_option_of_yojson = function
   | `Null -> Ok None
@@ -172,12 +172,20 @@ let parse_stdout (stdout : string) :
               | Some (`String value) -> value
               | _ -> "worker helper error"
             in
+            (* Issue #8705: log unknown wire-string kinds so subprocess
+               version skew is operator-visible. Missing key still
+               silently defaults to [Internal] - that case is the
+               documented contract. *)
             let kind =
               match List.assoc_opt "kind" fields with
               | Some (`String value) -> (
                   match error_kind_of_string value with
                   | Some kind -> kind
-                  | None -> Internal)
+                  | None ->
+                      Log.Misc.warn
+                        "worker_runtime_helper: unknown error_kind %S → Internal fallback (#8705)"
+                        value;
+                      Internal)
               | _ -> Internal
             in
             Ok (Error { message; kind })

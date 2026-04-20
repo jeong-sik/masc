@@ -428,6 +428,7 @@ let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun 
   if not success_release then failwith result_release;
   match Coord.get_tasks_raw ctx.config with
   | [ task ] -> (
+      assert (task.do_not_reclaim_reason = None);
       match task.handoff_context with
       | Some handoff_context ->
           assert (handoff_context.summary = "blocked on integration fixture");
@@ -792,7 +793,7 @@ let () = test "handle_claim_next_prefers_live_keeper_preset" (fun () ->
   | _ -> failwith ("expected exactly one task: " ^ result)
 )
 
-let () = test "transition_claim_leaves_planning_current_task_unset" (fun () ->
+let () = test "transition_claim_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Transition claim")]) in
   let (success, _result) =
@@ -800,6 +801,44 @@ let () = test "transition_claim_leaves_planning_current_task_unset" (fun () ->
       (`Assoc [("task_id", `String "task-001"); ("action", `String "claim")])
   in
   assert success;
+  assert (Planning_eio.get_current_task ctx.config = Some "task-001")
+)
+
+let () = test "transition_release_clears_planning_current_task" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Transition release")]) in
+  let (success_claim, _result) =
+    Tool_task.handle_transition ctx
+      (`Assoc [("task_id", `String "task-001"); ("action", `String "claim")])
+  in
+  assert success_claim;
+  let (success_release, _result) =
+    Tool_task.handle_transition ctx
+      (`Assoc [("task_id", `String "task-001"); ("action", `String "release")])
+  in
+  assert success_release;
+  assert (Planning_eio.get_current_task ctx.config = None)
+)
+
+let () = test "transition_done_clears_planning_current_task" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Transition done")]) in
+  let (success_claim, _result) =
+    Tool_task.handle_transition ctx
+      (`Assoc [("task_id", `String "task-001"); ("action", `String "claim")])
+  in
+  assert success_claim;
+  let (success_done, result) =
+    Tool_task.handle_transition ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "done");
+          ("notes", `String "Implemented the transport parity checks and verified the result.");
+        ])
+  in
+  assert success_done;
+  assert (not (str_contains result "rejected"));
   assert (Planning_eio.get_current_task ctx.config = None)
 )
 
@@ -1074,6 +1113,38 @@ let () = test "build_verdict_sse_payload: fallback_reason serialized" (fun () ->
     ~now:1234567890.0 ~task_id:"t6" ~req ~result in
   assert (payload_member "fallback_reason" json = `String "llm timeout");
   assert (payload_member "gate" json = `String "fallback")
+)
+
+(* Regression: claim_next should return no_unclaimed when all tasks are terminal (done/cancelled) *)
+let () = test "claim_next_returns_no_unclaimed_when_all_tasks_terminal" (fun () ->
+  let ctx = make_test_ctx () in
+  (* Create a task, mark it as done *)
+  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Done task")]) in
+  let _ = Tool_task.handle_transition ctx (`Assoc [
+    ("task_id", `String "task-001");
+    ("action", `String "done");
+    ("notes", `String "Completed");
+  ]) in
+  (* Now try to claim next from a different agent in same room *)
+  let agent2_ctx = make_test_ctx_with_agent "agent-2" in
+  let (_success, msg) = Tool_task.handle_claim_next agent2_ctx (`Assoc []) in
+  (* Should report no unclaimed tasks (success=true, message contains "No") *)
+  assert (String.length msg > 0);
+  match String.index_opt msg 'N' with
+  | Some _ -> () (* Found "No unclaimed" message *)
+  | None -> failwith (Printf.sprintf "Expected 'No unclaimed' message, got: %s" msg)
+)
+
+(* Regression: claim_next should properly skip cancelled tasks and only claim todo *)
+let () = test "claim_next_filters_out_cancelled_tasks" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Cancelled task")]) in
+  let _ = Coord.cancel_task_r ctx.config ~agent_name:ctx.agent_name ~task_id:"task-001" ~reason:"not needed" in
+  let agent2_ctx = make_test_ctx_with_agent "agent-claim-2" in
+  let (_success, msg) = Tool_task.handle_claim_next agent2_ctx (`Assoc []) in
+  match String.index_opt msg 'N' with
+  | Some _ -> () (* "No unclaimed" is correct *)
+  | None -> failwith (Printf.sprintf "Expected no tasks available, got: %s" msg)
 )
 
 let () =

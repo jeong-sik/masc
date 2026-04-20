@@ -102,6 +102,33 @@ let reset_for_testing () =
   Hashtbl.reset pending_truncation;
   Hashtbl.reset pending_turn_context
 
+(** [blob_aware_output_json safe_output] wraps a tool-output string for
+    persistence as the [output] field. When [safe_output] is the OCaml
+    [%S]-quoted [masc:blob ...] sentinel produced by
+    [Tool_output.encode_for_oas], the wire format escapes the inner
+    preview JSON twice (OCaml string-literal + JSON string), which makes
+    the telemetry record illegible and inflates disk usage by 30-40%.
+
+    We decode the sentinel and emit a structured object instead:
+      {"_blob": {"sha256":"...", "bytes":N, "mime":"...", "preview":"..."}}
+
+    Non-sentinel outputs keep the historical [String _] shape so that
+    older readers (dashboard, jq scripts) keep working. The dashboard
+    consumers are updated in the same change to accept either shape. *)
+let blob_aware_output_json (output : string) : Yojson.Safe.t =
+  match Tool_output.decode_from_oas output with
+  | Tool_output.Stored { sha256; bytes; preview; mime } ->
+      `Assoc
+        [ ("_blob",
+           `Assoc
+             [ ("sha256", `String sha256)
+             ; ("bytes", `Int bytes)
+             ; ("mime", `String mime)
+             ; ("preview", `String preview)
+             ])
+        ]
+  | Tool_output.Inline _ -> `String output
+
 let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
   (* Per-leaf sentinel-aware truncation. Previously
      [String.sub (Yojson.Safe.to_string input) 0 (max - suffix)] chopped
@@ -194,13 +221,14 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
       in
       let safe_input = input_to_json (Observability_redact.redact_json_value input) in
       let safe_output = Observability_redact.redact_preview ~max_len:max_output_len output_text in
+      let output_json = blob_aware_output_json safe_output in
       let json =
         `Assoc
           ([ ("ts", `Float (Time_compat.now ()))
            ; ("keeper", `String keeper_name)
            ; ("tool", `String tool_name)
            ; ("input", safe_input)
-           ; ("output", `String safe_output)
+           ; ("output", output_json)
            ; ("success", `Bool success)
            ; ("duration_ms", `Float duration_ms)
            ]

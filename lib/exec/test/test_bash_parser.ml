@@ -109,6 +109,133 @@ let test_whitespace_only_rejected () =
   (* "whitespace-only must Parse_error" *)
   | _ -> assert false
 
+let test_single_quoted_arg () =
+  (* Single-quoted args preserve internal spaces verbatim and arrive
+     as one Lit element (not split). *)
+  match Bash.parse_string "echo 'hello world'" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Bin.to_string s.bin = "echo");
+    (match s.args with
+     | [ Shell_ir.Lit "hello world" ] -> ()
+     (* "single-quoted content must land as one Lit" *)
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_single_quoted_empty () =
+  match Bash.parse_string "echo ''" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Bin.to_string s.bin = "echo");
+    (match s.args with
+     | [ Shell_ir.Lit "" ] -> ()
+     (* "empty single-quoted string must land as empty Lit" *)
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_multiple_single_quoted_args () =
+  match Bash.parse_string "git commit -m 'my message' --allow-empty" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Bin.to_string s.bin = "git");
+    (match s.args with
+     | [
+         Shell_ir.Lit "commit";
+         Shell_ir.Lit "-m";
+         Shell_ir.Lit "my message";
+         Shell_ir.Lit "--allow-empty";
+       ] -> ()
+     (* "commit message must preserve spaces as one Lit" *)
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_single_quote_with_pipe_metachar () =
+  (* Pipe inside single quotes is literal text, not a pipeline
+     separator — protects the gate from strings that look shell-like
+     but are actually inert literal payload. *)
+  match Bash.parse_string "echo 'foo | bar'" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.args with
+     | [ Shell_ir.Lit "foo | bar" ] -> ()
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_unterminated_single_quote_rejected () =
+  (* Missing closing quote must surface as Parse_error, not silently
+     consume to EOF. *)
+  match Bash.parse_string "echo 'unterminated" with
+  | Parsed.Parse_error _ -> ()
+  | _ -> assert false
+
+let test_double_quoted_arg () =
+  (* Double-quoted args with literal body (no $/\/backtick) preserve
+     internal spaces and arrive as one Lit element — mirrors the
+     common [rg "pattern"] shape.  The surrounding quotes are stripped
+     at lex time, so the Lit carries the payload only. *)
+  match Bash.parse_string "echo \"hello world\"" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Bin.to_string s.bin = "echo");
+    (match s.args with
+     | [ Shell_ir.Lit "hello world" ] -> ()
+     (* "double-quoted content must land as one Lit" *)
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_double_quoted_empty () =
+  match Bash.parse_string "echo \"\"" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Bin.to_string s.bin = "echo");
+    (match s.args with
+     | [ Shell_ir.Lit "" ] -> ()
+     (* "empty double-quoted string must land as empty Lit" *)
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_double_quote_with_pipe_metachar () =
+  (* Pipe inside double quotes is literal text, not a pipeline
+     separator — same safety invariant as single quotes. *)
+  match Bash.parse_string "echo \"foo | bar\"" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    (match s.args with
+     | [ Shell_ir.Lit "foo | bar" ] -> ()
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_double_quote_rg_pattern () =
+  (* The most common caller shape — [rg "error pattern"] style — must
+     round-trip through lex+parse untouched so the gate sees the
+     trusted argv the user intended. *)
+  match Bash.parse_string "rg \"error pattern\" src/" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Bin.to_string s.bin = "rg");
+    (match s.args with
+     | [ Shell_ir.Lit "error pattern"; Shell_ir.Lit "src/" ] -> ()
+     | _ -> assert false)
+  | _ -> assert false
+
+let test_double_quote_with_dollar_rejected () =
+  (* Variable expansion is subset-excluded at the A1 layer — any '$'
+     inside "..." breaks the lex so Parse_error surfaces rather than
+     silently treating the literal as expanded. *)
+  match Bash.parse_string "echo \"value $FOO here\"" with
+  | Parsed.Parse_error _ -> ()
+  | _ -> assert false
+
+let test_double_quote_with_backslash_rejected () =
+  (* Escape sequences ('\"', '\\') are subset-excluded at A1 — reject
+     until a later PR adds the unescape sub-rule. *)
+  match Bash.parse_string "echo \"he said \\\"hi\\\"\"" with
+  | Parsed.Parse_error _ -> ()
+  | _ -> assert false
+
+let test_double_quote_with_backtick_rejected () =
+  (* Command substitution (`cmd`) is subset-excluded — reject. *)
+  match Bash.parse_string "echo \"now `date`\"" with
+  | Parsed.Parse_error _ -> ()
+  | _ -> assert false
+
+let test_unterminated_double_quote_rejected () =
+  match Bash.parse_string "echo \"unterminated" with
+  | Parsed.Parse_error _ -> ()
+  | _ -> assert false
+
 let () =
   test_ls_single_command ();
   test_ls_with_args ();
@@ -121,4 +248,17 @@ let () =
   test_redirect_rejected_in_skeleton ();
   test_empty_input_rejected ();
   test_whitespace_only_rejected ();
+  test_single_quoted_arg ();
+  test_single_quoted_empty ();
+  test_multiple_single_quoted_args ();
+  test_single_quote_with_pipe_metachar ();
+  test_unterminated_single_quote_rejected ();
+  test_double_quoted_arg ();
+  test_double_quoted_empty ();
+  test_double_quote_with_pipe_metachar ();
+  test_double_quote_rg_pattern ();
+  test_double_quote_with_dollar_rejected ();
+  test_double_quote_with_backslash_rejected ();
+  test_double_quote_with_backtick_rejected ();
+  test_unterminated_double_quote_rejected ();
   print_endline "[test_bash_parser] all tests passed"

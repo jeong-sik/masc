@@ -15,6 +15,7 @@ let normalize_failure_text (text : string) : string =
   let prefix_rules =
     [
       ("path_not_in_allowed_paths:", "path_not_in_allowed_paths");
+      ("path_outside_sandbox:", "path_outside_sandbox");
       ("path_not_found_under_allowed_roots:", "path_not_found_under_allowed_roots");
       ("path_outside_project_root:", "path_outside_project_root");
       ("allowed_paths_normalized_empty:", "allowed_paths_normalized_empty");
@@ -244,9 +245,17 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
         (match List.assoc_opt "result_bytes" fields with
          | Some (`Int i) -> i
          | _ ->
-           (* Fallback: use output string length for old entries *)
+           (* Fallback for old entries that pre-date [result_bytes].
+              Output may be either an inline string (legacy) or a
+              normalized blob object {"_blob":{...,"bytes":N,...}}
+              (new format introduced when sentinel double-escape was
+              eliminated from the telemetry layer). *)
            (match List.assoc_opt "output" fields with
             | Some (`String s) -> String.length s
+            | Some (`Assoc [("_blob", `Assoc blob)]) ->
+              (match List.assoc_opt "bytes" blob with
+               | Some (`Int n) -> n
+               | _ -> 0)
             | _ -> 0))
       | _ -> 0
     in
@@ -293,8 +302,19 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     (* failure category *)
     if not ok then begin
       let output =
-        Safe_ops.json_string_opt "output" record
-        |> Option.value ~default:""
+        match record with
+        | `Assoc fields ->
+          (match List.assoc_opt "output" fields with
+           | Some (`String s) -> s
+           | Some (`Assoc [("_blob", `Assoc blob)]) ->
+             (* Normalized blob object — failure classifier wants the
+                preview (where the error JSON body lives) rather than
+                the sentinel envelope. *)
+             (match List.assoc_opt "preview" blob with
+              | Some (`String p) -> p
+              | _ -> "")
+           | _ -> "")
+        | _ -> ""
       in
       let cat = classify_failure_output output
       in

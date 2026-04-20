@@ -541,16 +541,37 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
     [ lifecycle "recovered" "failure counters reset" ]
   | _, Paused ->
     (* Distinguish operator-pause from overflow-induced pause so the
-       dashboard can surface the right message. *)
+       dashboard can surface the right message.
+       Issue #8728: Compact_retry_exhausted (added in #8581 specifically
+       to stop conflating operator pauses with auto-compact budget
+       exhaustion) used to fall into the catch-all and get re-labelled
+       as "operator request" - defeating the new event's whole purpose.
+       List both overflow-class events explicitly so the distinction
+       reaches the dashboard. *)
     let detail =
       match event with
-      | Context_overflow_detected _ -> "auto-compact retry exhausted"
+      | Context_overflow_detected _
+      | Compact_retry_exhausted -> "auto-compact retry exhausted"
       | Operator_pause -> "operator request"
       | _ -> "operator request"
     in
     [ lifecycle "paused" detail ]
   | Paused, Running ->
-    [ lifecycle "resumed" "operator request" ]
+    (* Issue #8732 (sibling of #8728): resume is event-driven, not always
+       operator-initiated. [Compaction_completed] / [Fiber_terminated]
+       clear the latched [compact_retry_exhausted] flag and let
+       [derive_phase] leave Paused; if we hardcode "operator request"
+       the dashboard claims a human resumed the keeper when in fact
+       auto-compact recovered. Mirror the per-event arms used in the
+       Paused-detail label. *)
+    let detail =
+      match event with
+      | Operator_resume -> "operator request"
+      | Compaction_completed _ -> "auto-compact recovered"
+      | Fiber_terminated _ -> "fiber recovered"
+      | _ -> "operator request"
+    in
+    [ lifecycle "resumed" detail ]
   | _ -> []
 
 (* ── apply_event ───────────────────────────────────────── *)

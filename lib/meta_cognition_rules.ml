@@ -150,6 +150,7 @@ let tension_rules =
             [
               "path validator";
               "path_not_in_allowed_paths";
+              "path_outside_sandbox";
               "path-matching function";
               "allowed paths actually match";
               "allowed path string is identical";

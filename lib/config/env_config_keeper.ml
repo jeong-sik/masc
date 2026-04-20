@@ -563,6 +563,70 @@ module KeeperSandbox = struct
   (** Fail closed unless Docker reports userns support. *)
   let require_userns () =
     get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
+
+  (** docker_with_git: when true, route keeper_bash commands beginning with
+      "git " or "gh " to the Docker_with_git profile even when the keeper's
+      default profile is Docker_hardened. Lets a single keeper run network-
+      bound git/gh ops without granting wholesale network for all bash. *)
+  let with_git_dispatch_enabled () =
+    get_bool ~default:true "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
+
+  (** Host path mounted read-only at /root/.config/gh inside docker_with_git.
+      Default $HOME/.config/gh. Empty string disables the mount (no gh auth). *)
+  let gh_creds_host_path () =
+    let default =
+      try Filename.concat (Sys.getenv "HOME") ".config/gh"
+      with Not_found -> ""
+    in
+    get_string ~default "MASC_KEEPER_SANDBOX_GH_CREDS"
+
+  (** Host path mounted read-only at /root/.gitconfig. Default $HOME/.gitconfig. *)
+  let gitconfig_host_path () =
+    let default =
+      try Filename.concat (Sys.getenv "HOME") ".gitconfig"
+      with Not_found -> ""
+    in
+    get_string ~default "MASC_KEEPER_SANDBOX_GITCONFIG"
+
+  (** SSH directory mount (~/.ssh). OFF by default — gh + HTTPS covers most
+      flows; SSH is opt-in to keep the mount surface minimal. *)
+  let ssh_dir_host_path () =
+    get_string ~default:"" "MASC_KEEPER_SANDBOX_SSH_DIR"
+
+  (** Optional GitHub token forwarded as GH_TOKEN env into docker_with_git
+      containers. Defaults to the host GH_TOKEN; empty disables forwarding. *)
+  let gh_token () =
+    let default =
+      try Sys.getenv "GH_TOKEN"
+      with Not_found -> ""
+    in
+    get_string ~default "MASC_KEEPER_SANDBOX_GH_TOKEN"
+
+  (** RFC-0006 Phase B-1: when true, hardened keepers' read-side tools
+      (keeper_fs_read; later keeper_shell op=rg/ls/cat/find/...) are
+      restricted to the keeper's playground bundle on the host even
+      though the path resolver alone would have allowed broader access.
+
+      Closes the asymmetry where keeper_bash gates execution to docker
+      but keeper_fs_read still walks the host. Default off so existing
+      hardened keepers (analyst/janitor/poe/minjae) keep working until
+      operators flip the flag. *)
+  let symmetric_read_containment () =
+    get_bool ~default:false "MASC_KEEPER_SYMMETRIC_SANDBOX"
+
+  (** RFC-0006 Phase B-2: when true (and symmetric_read_containment is
+      also on), hardened keeper read-side ops route through
+      [docker run --rm <image> cat <container_path>] so the
+      container's mount restrictions become the primary boundary.
+
+      The host-side containment check (B-1) remains as defense in
+      depth — if the docker route is misconfigured, the host check
+      still blocks. Default off because docker spawn per read is
+      slower (~hundreds of ms) and only worth it for deployments
+      that can absorb the latency in exchange for mount-level
+      isolation. *)
+  let docker_read_routing () =
+    get_bool ~default:false "MASC_KEEPER_DOCKER_READ"
 end
 
 module DashboardHealth = struct

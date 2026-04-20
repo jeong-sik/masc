@@ -101,7 +101,7 @@ module Orchestrator = struct
     max 10 (min 3600 (get_int ~default:300 "MASC_ORCHESTRATOR_TIMEOUT"))
 
   let enabled =
-    Feature_flag_registry.get_bool "MASC_ORCHESTRATOR_ENABLED"
+    Feature_flag_registry.get_bool Env_config_core.orchestrator_enabled_env_key
 end
 
 (** {1 Relay Configuration} *)
@@ -161,10 +161,16 @@ module Local_runtime = struct
   let worker_model_opt () =
     Sys.getenv_opt "LLAMA_WORKER_MODEL" |> trim_opt
 
+  (** Env var that overrides the default MCP endpoint URL. Exposed as
+      SSOT so out-of-process callers (e.g. [worker_runtime_docker.ml]
+      that need container-local URL rewriting) read the same literal
+      without re-inlining the string. Issue #8352. *)
+  let mcp_url_env_key = "MASC_MCP_URL"
+
   (** MASC MCP endpoint URL (formerly in Chain module).
       Defaults to {base_url}/mcp. *)
   let mcp_url () =
-    match Sys.getenv_opt "MASC_MCP_URL" |> trim_opt with
+    match Sys.getenv_opt mcp_url_env_key |> trim_opt with
     | Some url -> url
     | None -> Env_config_core.masc_http_base_url () ^ "/mcp"
 end
@@ -610,6 +616,35 @@ module InternalTimers = struct
   (** Operator digest stalled session threshold (seconds). Default: 300 (5 min). *)
   let stalled_session_threshold_sec =
     get_float ~default:300.0 "MASC_STALLED_SESSION_THRESHOLD_SEC"
+
+  (** Bootstrap janitor tick interval (seconds). Drives the SSE/session/
+      rate-limit/webrtc reaper loop in [server_bootstrap_loops]. Default:
+      60 (1 min). Shorter interval reclaims stale connections faster at
+      the cost of more wake-ups; longer interval is fine if the process
+      is sized for the steady-state connection count. *)
+  let janitor_interval_sec =
+    get_float ~default:60.0 "MASC_JANITOR_INTERVAL_SEC"
+
+  (** Rate-limit bucket staleness TTL (seconds). Buckets with no traffic for
+      this long are reaped by the janitor loop. Default: 300 (5 min). Raise
+      for longer client quiet periods; lower to free memory faster under
+      churn. [Rate_limit.cleanup] takes an int, so this is int-typed. *)
+  let rate_limit_bucket_ttl_sec =
+    get_int ~default:300 "MASC_RATE_LIMIT_BUCKET_TTL_SEC"
+end
+
+(** {1 Sidecar reconcile loop}
+
+    Retry/backoff knobs for the connector sidecar lifecycle (#8919). Operator
+    override lets us tune backoff without recompilation when a sidecar is
+    flapping vs. genuinely offline. See #8930 for the SSOT consolidation. *)
+
+module Sidecar = struct
+  (** Backoff window (seconds) between repeated same-generation
+      [running + unavailable] start dispatches. Default: 30 (matches the
+      inline literal that landed in #8919). *)
+  let reconcile_backoff_sec =
+    get_float ~default:30.0 "MASC_SIDECAR_RECONCILE_BACKOFF_SEC"
 end
 
 (** {1 Internal Safety Configuration} *)

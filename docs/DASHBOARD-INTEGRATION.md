@@ -49,8 +49,18 @@ Experimental features such as TRPG live under `lab`.
 - `GET /api/v1/dashboard/mission`
   - mission summary derived from operator truth
 - `GET /api/v1/dashboard/execution`
-  - `summary`, `execution_queue`, `operation_briefs`, `worker_support_briefs`, `continuity_briefs`, `offline_worker_briefs`
-  - compatibility payloads remain: `agents`, `tasks`, `messages`, `keepers`
+  - `generated_at`, `status`, `execution_queue`, `operation_briefs`, `worker_support_briefs`, `continuity_briefs`, `offline_worker_briefs`
+  - compatibility payloads remain: `agents`, `tasks`, `keepers`
+  - `messages` is included only in full mode (`?full=true`)
+  - when `compact=false` and `MASC_DECISION_LAYER_LEVEL >= 3`, keeper
+    compatibility payloads may include
+    `trust_observatory.accountability` as an operator-only risk summary
+  - otherwise `trust_observatory` may be `null`
+  - treat `routing_hint` there as soft guidance, not a hard routing gate or
+    public ranking signal
+  - semantics and triage rules live in
+    [KEEPER-ACCOUNTABILITY-RUNBOOK.md](./KEEPER-ACCOUNTABILITY-RUNBOOK.md)
+  - long-term accountability/reputation evolution plan lives in `docs/design/accountability-reputation-v2-roadmap.md`
   - test fixture mode: `?fixture=execution_smoke` or `MASC_DASHBOARD_FIXTURE=execution_smoke`
 - `GET /api/v1/dashboard/board`
   - `posts` plus memory-feed summary

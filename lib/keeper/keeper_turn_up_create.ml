@@ -9,8 +9,14 @@ open Keeper_keepalive
 open Keeper_execution
 open Keeper_turn_up_args
 
+(* #8605 family: warn-and-default parser for profile_defaults.tool_preset
+   lifted to [Keeper_preset_defaults] so this file and
+   [keeper_exec_persona] share one SSOT instead of two diverging copies
+   (#8923). *)
 let preset_of_defaults defaults =
-  Option.bind defaults.tool_preset tool_preset_of_string
+  Keeper_preset_defaults.preset_of_defaults_warn
+    ~call_site:"keeper_turn_up_create"
+    ~defaults_tool_preset:defaults.tool_preset
 
 let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   Log.Keeper.info "create_keeper: starting for name=%s" p.name;
@@ -276,13 +282,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         cascade_name = (match p.profile_defaults.cascade_name with
           | Some name -> name
           | None -> Keeper_config.default_cascade_name);
-        models = (match p.profile_defaults.models with
-          | Some ms -> ms
-          | None ->
-            (* Fallback: read default_models from cascade config (user-declared
-               JSON), not from an OCaml literal. MASC is a config interpreter —
-               it does not know what models exist. *)
-            Cascade_runtime.default_model_strings_from_config ());
+        (* Empty = "use cascade_name". Injecting any default here would silently
+           override the keeper's declared cascade_name in oas_worker_named. *)
+        models = Option.value ~default:[] p.profile_defaults.models;
         will;
         needs;
         desires;

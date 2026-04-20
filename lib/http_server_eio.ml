@@ -622,14 +622,29 @@ let error_handler _client_addr ?request:_ error start_response =
 let run ~sw ~net ~clock config routes =
   Discovery_cache.set_env ~sw ~net;
   let request_handler = make_request_handler routes in
-  (* Parse IP address using Ipaddr library then convert to Eio format *)
-  let ip = match Ipaddr.of_string config.host with
-    | Ok addr -> Eio.Net.Ipaddr.of_raw (Ipaddr.to_octets addr)
-    | Error _ -> Eio.Net.Ipaddr.V4.loopback (* fallback to 127.0.0.1 *)
+  let fallback_host = Masc_network_defaults.masc_http_default_host in
+  (* Parse IP address using Ipaddr library then convert to Eio format.
+     Issue #8725: log + report the effective bind host on parse failure
+     so a typo in [config.host] does not silently degrade to loopback
+     while the startup banner still claims the misconfigured value. *)
+  let ip, effective_host =
+    match Ipaddr.of_string config.host with
+    | Ok addr -> Eio.Net.Ipaddr.of_raw (Ipaddr.to_octets addr), config.host
+    | Error (`Msg msg) ->
+        Log.Http.warn
+          "http_server_eio: invalid host %S (%s) → loopback %s fallback (#8725)"
+          config.host msg fallback_host;
+        Eio.Net.Ipaddr.V4.loopback, fallback_host
   in
   let addr = `Tcp (ip, config.port) in
   let socket = Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:config.max_connections addr in
-  Printf.printf "🚀 MASC MCP Server listening on http://%s:%d\n" config.host config.port;
+  if String.equal effective_host config.host then
+    Printf.printf "🚀 MASC MCP Server listening on http://%s:%d\n"
+      effective_host config.port
+  else
+    Printf.printf
+      "🚀 MASC MCP Server listening on http://%s:%d (configured=%s, parse failed → loopback)\n"
+      effective_host config.port config.host;
   Printf.printf "   Graceful shutdown: SIGTERM/SIGINT supported\n%!";
 
   let initial_backoff_s = 0.05 in
@@ -685,6 +700,7 @@ exception Shutdown
 (** Convenience function to start server *)
 let start ?(config = default_config) ?(routes = default_routes) () =
   Eio_main.run @@ fun env ->
+  Masc_runtime_events.start_listener ();
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
 

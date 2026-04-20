@@ -214,6 +214,243 @@ let test_today_log_file_falls_back_to_project_root_log () =
         log_path
         (Routes.today_log_file ~base_path ~project_root "discord"))
 
+let test_start_shell_command_matches_detached_contract () =
+  let base_path = "/tmp/masc runtime root" in
+  let script = "/tmp/masc runtime root/sidecars/discord-bot/run.sh" in
+  check string "detached start command"
+    (Printf.sprintf
+       "MASC_BASE_PATH=%s setsid nohup %s start </dev/null >/dev/null 2>&1 &"
+       (Filename.quote base_path)
+       (Filename.quote script))
+    (Routes.sidecar_start_shell_command ~base_path ~script)
+
+let test_start_shell_command_quotes_shell_meta () =
+  let base_path = "/tmp/runtime;touch /tmp/pwned" in
+  let script = "/tmp/sidecars/discord-bot/run.sh && id" in
+  check string "shell metacharacters are quoted, not escaped ad hoc"
+    (Printf.sprintf
+       "MASC_BASE_PATH=%s setsid nohup %s start </dev/null >/dev/null 2>&1 &"
+       (Filename.quote base_path)
+       (Filename.quote script))
+    (Routes.sidecar_start_shell_command ~base_path ~script)
+
+let test_desired_store_increments_generation () =
+  with_temp_dir "sidecar-desired-store" (fun base_path ->
+      let first =
+        Routes.write_desired_record
+          ~updated_at:"2026-04-20T00:00:00Z"
+          ~base_path
+          ~id:"discord"
+          ~updated_by:"test"
+          Routes.Desired_running
+      in
+      let second =
+        Routes.write_desired_record
+          ~updated_at:"2026-04-20T00:00:01Z"
+          ~base_path
+          ~id:"discord"
+          ~updated_by:"test"
+          Routes.Desired_stopped
+      in
+      match (first, second, Routes.read_desired_record ~base_path "discord") with
+      | Ok first, Ok second, Some persisted ->
+          check int "first generation" 1 first.generation;
+          check int "second generation" 2 second.generation;
+          check int "persisted generation" 2 persisted.generation;
+          check string "persisted desired state" "stopped"
+            (Routes.desired_state_to_string persisted.desired_state)
+      | _ -> failf "desired writes should succeed and persist")
+
+let test_reconcile_stale_generation_does_not_start () =
+  let shell_called = ref false in
+  let delayed : Routes.desired_record =
+    {
+      Routes.connector_id = "discord";
+      desired_state = Routes.Desired_running;
+      generation = 1;
+      updated_by = "test";
+      updated_at = "2026-04-20T00:00:00Z";
+    }
+  in
+  let result =
+    Routes.reconcile_desired_once
+      ~current_generation:2
+      ~observed_state:Routes.Observed_unavailable
+      ~start_shell:(fun () -> shell_called := true)
+      delayed
+  in
+  check bool "stale reconcile must not shell start" false !shell_called;
+  check string "stale generation result"
+    "noop:stale_generation"
+    (Routes.reconcile_result_to_string result)
+
+let test_reconcile_running_unavailable_starts_once () =
+  let shell_calls = ref 0 in
+  let written_attempt = ref None in
+  let desired : Routes.desired_record =
+    {
+      Routes.connector_id = "discord";
+      desired_state = Routes.Desired_running;
+      generation = 3;
+      updated_by = "test";
+      updated_at = "2026-04-20T00:00:00Z";
+    }
+  in
+  let result =
+    Routes.reconcile_desired_once
+      ~now:"2026-04-20T00:00:00Z"
+      ~next_retry_at:"2099-04-20T00:00:30Z"
+      ~current_generation:3
+      ~observed_state:Routes.Observed_unavailable
+      ~write_attempt:(fun attempt ->
+        written_attempt := Some attempt;
+        Ok ())
+      ~start_shell:(fun () -> incr shell_calls)
+      desired
+  in
+  check int "current running reconcile shells once" 1 !shell_calls;
+  check string "started result" "started" (Routes.reconcile_result_to_string result);
+  (match !written_attempt with
+   | Some attempt ->
+       check string "attempt result is operator-visible" "start_dispatched"
+         attempt.Routes.last_attempt_result;
+       check string "next retry recorded" "2099-04-20T00:00:30Z"
+         (Option.value attempt.next_retry_at ~default:"");
+       check string "next action recorded"
+         "wait for observed status, or open logs if the sidecar remains offline after backoff"
+         attempt.operator_next_action
+  | None -> failf "running reconcile should persist attempt metadata")
+
+let test_reconcile_attempt_write_failure_does_not_start () =
+  let shell_calls = ref 0 in
+  let desired : Routes.desired_record =
+    {
+      Routes.connector_id = "discord";
+      desired_state = Routes.Desired_running;
+      generation = 3;
+      updated_by = "test";
+      updated_at = "2026-04-20T00:00:00Z";
+    }
+  in
+  let result =
+    Routes.reconcile_desired_once
+      ~now:"2026-04-20T00:00:00Z"
+      ~next_retry_at:"2099-04-20T00:00:30Z"
+      ~current_generation:3
+      ~observed_state:Routes.Observed_unavailable
+      ~write_attempt:(fun _ -> Error "disk full")
+      ~start_shell:(fun () -> incr shell_calls)
+      desired
+  in
+  check int "attempt write failure suppresses shell start" 0 !shell_calls;
+  check string "attempt write failure result" "noop:attempt_write_failed"
+    (Routes.reconcile_result_to_string result)
+
+let test_reconcile_running_unavailable_backoff_noops () =
+  let shell_calls = ref 0 in
+  let desired : Routes.desired_record =
+    {
+      Routes.connector_id = "discord";
+      desired_state = Routes.Desired_running;
+      generation = 3;
+      updated_by = "test";
+      updated_at = "2026-04-20T00:00:00Z";
+    }
+  in
+  let previous_attempt : Routes.attempt_record =
+    {
+      connector_id = "discord";
+      generation = 3;
+      attempt_id = "3:1";
+      attempt_number = 1;
+      last_attempt_result = "start_dispatched";
+      next_retry_at = Some "2099-04-20T00:00:30Z";
+      operator_next_action =
+        "wait for observed status, or open logs if the sidecar remains offline after backoff";
+      updated_at = "2026-04-20T00:00:00Z";
+    }
+  in
+  let result =
+    Routes.reconcile_desired_once
+      ~now:"2026-04-20T00:00:10Z"
+      ~previous_attempt
+      ~current_generation:3
+      ~observed_state:Routes.Observed_unavailable
+      ~start_shell:(fun () -> incr shell_calls)
+      desired
+  in
+  check int "backoff suppresses duplicate shell start" 0 !shell_calls;
+  check string "backoff result" "noop:backoff_active"
+    (Routes.reconcile_result_to_string result)
+
+let test_reconcile_stopped_noops () =
+  let shell_called = ref false in
+  let desired : Routes.desired_record =
+    {
+      Routes.connector_id = "discord";
+      desired_state = Routes.Desired_stopped;
+      generation = 4;
+      updated_by = "test";
+      updated_at = "2026-04-20T00:00:00Z";
+    }
+  in
+  let result =
+    Routes.reconcile_desired_once
+      ~current_generation:4
+      ~observed_state:Routes.Observed_unavailable
+      ~start_shell:(fun () -> shell_called := true)
+      desired
+  in
+  check bool "stopped reconcile must not shell start" false !shell_called;
+  check string "stopped result" "noop:desired_stopped"
+    (Routes.reconcile_result_to_string result)
+
+let test_status_json_includes_lifecycle_shape () =
+  with_temp_dir "sidecar-lifecycle-status" (fun base_path ->
+      (match
+         Routes.write_desired_record
+           ~updated_at:"2026-04-20T00:00:00Z"
+           ~base_path
+           ~id:"discord"
+           ~updated_by:"test"
+           Routes.Desired_running
+       with
+       | Ok _ -> ()
+       | Error msg -> failf "desired write failed: %s" msg);
+      let attempt : Routes.attempt_record =
+        {
+          connector_id = "discord";
+          generation = 1;
+          attempt_id = "1:1";
+          attempt_number = 1;
+          last_attempt_result = "start_dispatched";
+          next_retry_at = Some "2099-04-20T00:00:30Z";
+          operator_next_action =
+            "wait for observed status, or open logs if the sidecar remains offline after backoff";
+          updated_at = "2026-04-20T00:00:00Z";
+        }
+      in
+      check (result unit string) "attempt write" (Ok ())
+        (Routes.write_attempt_record ~base_path ~id:"discord" attempt);
+      let json = Routes.read_status_json ~base_path "discord" in
+      let open Yojson.Safe.Util in
+      let lifecycle = json |> member "sidecar_lifecycle" in
+      check string "desired_state" "running"
+        (lifecycle |> member "desired_state" |> to_string);
+      check int "desired_generation" 1
+        (lifecycle |> member "desired_generation" |> to_int);
+      check string "observed_state" "unavailable"
+        (lifecycle |> member "observed_state" |> to_string);
+      check string "reconcile_result" "noop:backoff_active"
+        (lifecycle |> member "reconcile_result" |> to_string);
+      check string "last_attempt_result" "start_dispatched"
+        (lifecycle |> member "last_attempt_result" |> to_string);
+      check string "next_retry_at" "2099-04-20T00:00:30Z"
+        (lifecycle |> member "next_retry_at" |> to_string);
+      check string "operator_next_action"
+        "wait for observed status, or open logs if the sidecar remains offline after backoff"
+        (lifecycle |> member "operator_next_action" |> to_string))
+
 (* ---- Config write helpers (PUT /api/v1/sidecar/config). ---- *)
 
 let test_escape_quotes_and_backslash () =
@@ -290,6 +527,150 @@ let test_coerce_rejects_oversized_value () =
   | Error _ -> ()
   | Ok _ -> failf "9000-byte value should be rejected by max_value_bytes guard"
 
+let string_of_declared_type = function
+  | `String -> "string"
+  | `Integer -> "integer"
+  | `Number -> "number"
+  | `Boolean -> "boolean"
+
+let test_parse_declared_type_accepts_known_schema_types () =
+  check (option string) "string type"
+    (Some "string")
+    (Option.map string_of_declared_type
+       (Routes.parse_declared_type (`Assoc [ ("type", `String "string") ])));
+  check (option string) "integer type"
+    (Some "integer")
+    (Option.map string_of_declared_type
+       (Routes.parse_declared_type (`Assoc [ ("type", `String "integer") ])))
+
+let test_parse_declared_type_rejects_unknown_schema_types () =
+  check (option string) "unknown type rejected"
+    None
+    (Option.map string_of_declared_type
+       (Routes.parse_declared_type (`Assoc [ ("type", `String "object") ])));
+  check (option string) "missing type rejected"
+    None
+    (Option.map string_of_declared_type
+       (Routes.parse_declared_type (`Assoc [])))
+
+let test_parse_body_pairs_coerces_scalar_values () =
+  check (result (list (pair string string)) string)
+    "scalar JSON values are stringified for downstream type coercion"
+    (Ok [ ("PORT", "3000"); ("ENABLED", "true"); ("EMPTY", "") ])
+    (Routes.parse_body_pairs {|{"PORT":3000,"ENABLED":true,"EMPTY":null}|})
+
+let test_parse_body_pairs_rejects_non_object () =
+  check (result (list (pair string string)) string)
+    "non-object JSON rejected"
+    (Error "body must be a JSON object")
+    (Routes.parse_body_pairs {|["PORT",3000]|})
+
+let test_parse_body_pairs_rejects_invalid_json () =
+  check (result (list (pair string string)) string)
+    "invalid JSON rejected"
+    (Error "body is not valid JSON")
+    (Routes.parse_body_pairs {|{"PORT":|})
+
+let test_atomic_write_file_replaces_content () =
+  with_temp_dir "sidecar-atomic-write" (fun dir ->
+      let path = Filename.concat dir "nested/config.toml" in
+      Routes.ensure_parent_dir path;
+      check (result unit string)
+        "initial write"
+        (Ok ())
+        (Routes.atomic_write_file ~path "TOKEN = \"old\"\n");
+      check string "initial content"
+        "TOKEN = \"old\"\n"
+        (In_channel.with_open_text path In_channel.input_all);
+      check (result unit string)
+        "replacement write"
+        (Ok ())
+        (Routes.atomic_write_file ~path "TOKEN = \"new\"\n");
+      check string "replacement content"
+        "TOKEN = \"new\"\n"
+        (In_channel.with_open_text path In_channel.input_all))
+
+(* ── ISO format invariants ────────────────────────────────────────────
+   [retry_backoff_active] compares [next_retry_at : string] against
+   [now : string] with [String.compare]. That is safe only while both
+   sides emit the exact 20-character "YYYY-MM-DDTHH:MM:SSZ" shape, which
+   makes lexical order coincide with chronological order. These tests
+   pin the shape so a future refactor (offset, millisecond, timezone)
+   cannot silently land without also revisiting the backoff comparison.
+   See #8930 for the attempt_state SSOT consolidation. *)
+
+let test_isoish_now_fixed_shape () =
+  let s = Routes.isoish_now () in
+  check int "isoish_now length" 20 (String.length s);
+  (* "1234-67-9012:45:78Z" — positional separators *)
+  check char "isoish_now dash y-m" '-' s.[4];
+  check char "isoish_now dash m-d" '-' s.[7];
+  check char "isoish_now literal T" 'T' s.[10];
+  check char "isoish_now colon h-m" ':' s.[13];
+  check char "isoish_now colon m-s" ':' s.[16];
+  check char "isoish_now trailing Z" 'Z' s.[19]
+
+let test_isoish_at_epoch_round_trip () =
+  check string "isoish_at epoch" "1970-01-01T00:00:00Z"
+    (Routes.isoish_at 0.0);
+  check string "isoish_at one second past epoch" "1970-01-01T00:00:01Z"
+    (Routes.isoish_at 1.0)
+
+let test_isoish_lexical_matches_chronological () =
+  (* If these two lose correspondence, [retry_backoff_active]'s
+     [String.compare next_retry_at now > 0] would silently drift.  *)
+  let earlier = Routes.isoish_at 1_000_000.0 in
+  let later = Routes.isoish_at 2_000_000.0 in
+  check bool "earlier < later lexically" true
+    (String.compare earlier later < 0);
+  check bool "later > earlier lexically" true
+    (String.compare later earlier > 0);
+  check int "equal timestamps compare zero" 0
+    (String.compare earlier (Routes.isoish_at 1_000_000.0))
+
+(* ── retry_backoff_active (#8930 phase 3) ──────────────────────────────
+   After phase 3, [retry_backoff_active] parses both [next_retry_at] and
+   [now] via [Types_core.parse_iso8601_opt] and compares float unix-epoch
+   values. If either side is malformed the function returns false
+   (fail-closed) so a broken sidecar record retries instead of stalling. *)
+
+let make_attempt ~next_retry_at =
+  Routes.{
+    connector_id = "discord";
+    generation = 1;
+    attempt_id = "1:1";
+    attempt_number = 1;
+    last_attempt_result = "start_dispatched";
+    next_retry_at;
+    operator_next_action = "none";
+    updated_at = "2026-01-01T00:00:00Z";
+  }
+
+let test_retry_backoff_active_before_deadline () =
+  let attempt = make_attempt ~next_retry_at:(Some "2026-01-01T00:00:30Z") in
+  check bool "now < next_retry_at → backoff active" true
+    (Routes.retry_backoff_active ~now:"2026-01-01T00:00:00Z" attempt)
+
+let test_retry_backoff_inactive_after_deadline () =
+  let attempt = make_attempt ~next_retry_at:(Some "2026-01-01T00:00:00Z") in
+  check bool "now > next_retry_at → backoff expired" false
+    (Routes.retry_backoff_active ~now:"2026-01-01T00:00:30Z" attempt)
+
+let test_retry_backoff_inactive_when_no_deadline () =
+  let attempt = make_attempt ~next_retry_at:None in
+  check bool "next_retry_at=None → backoff inactive" false
+    (Routes.retry_backoff_active ~now:"2026-01-01T00:00:00Z" attempt)
+
+let test_retry_backoff_fail_closed_on_malformed_next () =
+  let attempt = make_attempt ~next_retry_at:(Some "not-an-iso-stamp") in
+  check bool "malformed next_retry_at → fail-closed" false
+    (Routes.retry_backoff_active ~now:"2026-01-01T00:00:00Z" attempt)
+
+let test_retry_backoff_fail_closed_on_malformed_now () =
+  let attempt = make_attempt ~next_retry_at:(Some "2026-01-01T00:00:30Z") in
+  check bool "malformed now → fail-closed" false
+    (Routes.retry_backoff_active ~now:"not-an-iso-stamp" attempt)
+
 let () =
   run "sidecar_lifecycle_routes"
     [
@@ -325,6 +706,29 @@ let () =
         [
           test_case "known_ids size = 4" `Quick test_known_ids_size_matches_dashboard;
         ] );
+      ( "start_command",
+        [
+          test_case "detached command contract" `Quick
+            test_start_shell_command_matches_detached_contract;
+          test_case "quotes shell metacharacters" `Quick
+            test_start_shell_command_quotes_shell_meta;
+        ] );
+      ( "desired_state",
+        [
+          test_case "desired store increments generation" `Quick
+            test_desired_store_increments_generation;
+          test_case "stale generation reconcile does not start" `Quick
+            test_reconcile_stale_generation_does_not_start;
+          test_case "running + unavailable starts once" `Quick
+            test_reconcile_running_unavailable_starts_once;
+          test_case "attempt write failure does not start" `Quick
+            test_reconcile_attempt_write_failure_does_not_start;
+          test_case "running + unavailable backs off repeated same-generation start" `Quick
+            test_reconcile_running_unavailable_backoff_noops;
+          test_case "stopped desired no-ops" `Quick test_reconcile_stopped_noops;
+          test_case "status JSON includes lifecycle shape" `Quick
+            test_status_json_includes_lifecycle_shape;
+        ] );
       ( "config_write_helpers",
         [
           test_case "escape: quotes + backslash"  `Quick test_escape_quotes_and_backslash;
@@ -334,5 +738,39 @@ let () =
           test_case "coerce: integer ok/err"      `Quick test_coerce_integer_accepts_and_rejects;
           test_case "coerce: boolean variants"    `Quick test_coerce_boolean_accepts_variants;
           test_case "coerce: oversized rejected"  `Quick test_coerce_rejects_oversized_value;
+          test_case "parse declared type: known types" `Quick
+            test_parse_declared_type_accepts_known_schema_types;
+          test_case "parse declared type: unknown types rejected" `Quick
+            test_parse_declared_type_rejects_unknown_schema_types;
+          test_case "parse body pairs: scalars" `Quick
+            test_parse_body_pairs_coerces_scalar_values;
+          test_case "parse body pairs: non-object" `Quick
+            test_parse_body_pairs_rejects_non_object;
+          test_case "parse body pairs: invalid JSON" `Quick
+            test_parse_body_pairs_rejects_invalid_json;
+          test_case "atomic write replaces content" `Quick
+            test_atomic_write_file_replaces_content;
+        ] );
+      ( "iso_format_invariants (#8930)",
+        [
+          test_case "isoish_now has fixed 20-char shape" `Quick
+            test_isoish_now_fixed_shape;
+          test_case "isoish_at epoch round-trip" `Quick
+            test_isoish_at_epoch_round_trip;
+          test_case "lexical compare matches chronological order" `Quick
+            test_isoish_lexical_matches_chronological;
+        ] );
+      ( "retry_backoff_active (#8930 phase 3)",
+        [
+          test_case "now before deadline → active" `Quick
+            test_retry_backoff_active_before_deadline;
+          test_case "now after deadline → inactive" `Quick
+            test_retry_backoff_inactive_after_deadline;
+          test_case "no deadline → inactive" `Quick
+            test_retry_backoff_inactive_when_no_deadline;
+          test_case "malformed next_retry_at → fail-closed" `Quick
+            test_retry_backoff_fail_closed_on_malformed_next;
+          test_case "malformed now → fail-closed" `Quick
+            test_retry_backoff_fail_closed_on_malformed_now;
         ] );
     ]

@@ -68,6 +68,13 @@ let io_timeout_sec = env_float "MASC_KEEPER_IO_TIMEOUT_SEC" 30.0
 let read_timeout_sec = env_float "MASC_KEEPER_READ_TIMEOUT_SEC" 15.0
 let user_timeout_max_sec = env_float "MASC_KEEPER_USER_TIMEOUT_MAX_SEC" 180.0
 
+(* Floor for gh op timeout_sec. GitHub API + gh auth handshake is
+   usually 3-10s; previous floors (1s, then 5s) produced 41
+   gh_command_timed_out rejections in 2 days, every single one at
+   timeout_sec=5 (#8688). 15s keeps keepers from requesting a
+   sub-network-latency timeout without masking genuine hangs. *)
+let gh_min_timeout_sec = 15.0
+
 let normalize_gh_command (cmd : string) : string =
   let tokens =
     cmd
@@ -144,6 +151,40 @@ let readonly_shell_token_match tokens =
   | "curl" :: rest when List.exists (String.equal "--output") rest ->
       Some ("curl --output", "destructive")
   | _ -> None
+
+(* Each branch ends with concrete Good:/Bad: examples so small-LLM keepers
+   can self-correct without a retry loop. Prior form only named the
+   category, which left 57 command_blocked_readonly rejections on
+   2026-04-17/18 without a wire-level rewrite. See masc-mcp#8688. *)
+let readonly_hint_of_category = function
+  | "chaining" ->
+      "`&&`, `||`, and `;` chaining are blocked in readonly shell. \
+       Issue one command per keeper_shell call, or use a dedicated \
+       sub-op: git_log, git_status, git_diff, git_worktree, find, \
+       ls, rg, head, tail, wc, tree, cat, pwd. \
+       Good: command='git status'. Bad: command='git status && git log -1'."
+  | "redirect" ->
+      "Redirects (`>`, `>>`, `| tee`) are blocked in readonly shell. \
+       Use keeper_fs_edit to write files, or keeper_bash with the \
+       coding preset for write operations. \
+       Good: keeper_fs_edit path=notes.md content='...'. \
+       Bad: command='echo hi > notes.md'."
+  | "git_write" ->
+      "Use keeper_bash with coding preset for git write operations. \
+       Good: keeper_bash cmd='git add lib/foo.ml'. \
+       Bad: keeper_shell command='git commit -m x' (readonly shell \
+       does not accept git write commands)."
+  | "package_install" ->
+      "Package installation requires keeper_bash with coding preset. \
+       Good: keeper_bash cmd='opam install -y eio'. \
+       Bad: keeper_shell command='opam install eio' (readonly shell \
+       does not accept package installs)."
+  | "destructive" ->
+      "Use keeper_bash for write operations, not readonly shell. \
+       Good: keeper_bash cmd='rm .tmp/scratch.log'. \
+       Bad: keeper_shell command='rm -rf .tmp/' (readonly shell does \
+       not accept destructive commands)."
+  | _ -> "This operation is not allowed in readonly shell."
 
 let process_status_is_timeout = function
   | Unix.WSIGNALED sig_num -> sig_num = Sys.sigterm
@@ -394,9 +435,7 @@ let keeper_sandbox_container_name (meta : keeper_meta) =
     (int_of_float (Unix.gettimeofday () *. 1000.0))
 
 let keeper_private_container_root (meta : keeper_meta) =
-  Filename.concat
-    Env_config_keeper.DockerPlayground.container_playground_root
-    (Playground_paths.sanitize_keeper_name meta.name)
+  Keeper_sandbox.container_root meta.name
 
 let docker_private_workspace_cwd ~(config : Coord.config) ~(meta : keeper_meta)
     host_cwd =
@@ -521,6 +560,132 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
             else
               Ok seccomp_args
 
+(* docker_with_git: leading-token check used by per-command dispatch.
+   Returns true when the trimmed command's first whitespace-separated word
+   is exactly "git" or "gh" (case-sensitive — both lowercase by convention).
+   Subcommand args do not change the dispatch decision; e.g. "git push --force"
+   still dispatches to docker_with_git, but the existing destructive-bash
+   guard (Worker_dev_tools.is_destructive_bash_operation) already rejects
+   force-push before this point. *)
+let cmd_targets_git_or_gh cmd =
+  let trimmed = String.trim cmd in
+  let first_word =
+    match String.index_opt trimmed ' ' with
+    | Some i -> String.sub trimmed 0 i
+    | None -> trimmed
+  in
+  match first_word with
+  | "git" | "gh" -> true
+  | _ -> false
+
+(* Mount spec helper: only emit the -v flag when the host path is non-empty
+   AND exists on disk. Missing files would cause docker to create them as
+   directories, breaking gh / git config reads. *)
+let optional_ro_mount ~host ~container =
+  if host = "" then []
+  else if not (Sys.file_exists host) then []
+  else [ "-v"; host ^ ":" ^ container ^ ":ro" ]
+
+let run_docker_with_git_bash
+    ~(config : Coord.config)
+    ~(meta : keeper_meta)
+    ~(cwd : string)
+    ~(timeout_sec : float)
+    ~(cmd : string) =
+  let image = Env_config_keeper.KeeperSandbox.docker_image () in
+  let sandbox_error_json message =
+    Keeper_registry.record_error ~base_path:config.base_path meta.name message;
+    error_json message
+  in
+  if String.trim image = "" then
+    sandbox_error_json "keeper sandbox docker image is not configured"
+  else if command_uses_nested_container_runtime cmd then
+    sandbox_error_json
+      "docker_with_git blocks nested container runtimes and host socket references"
+  else
+    match ensure_keeper_sandbox_runtime ~timeout_sec with
+    | Error err -> sandbox_error_json err
+    | Ok seccomp_args ->
+    let host_root =
+      keeper_playground_root ~config ~meta
+      |> Keeper_alerting_path.normalize_path_for_check
+      |> Keeper_alerting_path.strip_trailing_slashes
+    in
+    let container_name = keeper_sandbox_container_name meta in
+    let container_root = keeper_private_container_root meta in
+    let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
+    let uid = Unix.getuid () in
+    let gid = Unix.getgid () in
+    let gh_creds = Env_config_keeper.KeeperSandbox.gh_creds_host_path () in
+    let gitconfig = Env_config_keeper.KeeperSandbox.gitconfig_host_path () in
+    let ssh_dir = Env_config_keeper.KeeperSandbox.ssh_dir_host_path () in
+    let gh_token = Env_config_keeper.KeeperSandbox.gh_token () in
+    let cred_mounts =
+      optional_ro_mount ~host:gh_creds ~container:"/root/.config/gh"
+      @ optional_ro_mount ~host:gitconfig ~container:"/root/.gitconfig"
+      @ optional_ro_mount ~host:ssh_dir ~container:"/root/.ssh"
+    in
+    let token_env =
+      if gh_token = "" then [] else [ "-e"; "GH_TOKEN=" ^ gh_token ]
+    in
+    let argv =
+      [
+        "docker";
+        "run";
+        "--rm";
+        "--name";
+        container_name;
+        "-i";
+        "--user";
+        Printf.sprintf "%d:%d" uid gid;
+        "--read-only";
+        "--tmpfs";
+        (Printf.sprintf "/tmp:rw,nosuid,nodev,noexec,size=%s"
+           (Env_config_keeper.KeeperSandbox.tmpfs_size ()));
+        "--cap-drop=ALL";
+        "--security-opt";
+        "no-new-privileges";
+      ]
+      @ seccomp_args
+      @ [
+        "--pids-limit";
+        string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ());
+        "--memory";
+        Env_config_keeper.KeeperSandbox.memory ();
+        "-v";
+        host_root ^ ":" ^ container_root ^ ":rw";
+        "--workdir";
+        container_cwd;
+        "--network";
+        "bridge";
+      ]
+      @ cred_mounts
+      @ token_env
+      @ [ image; "bash"; "-lc"; cmd ^ " 2>&1" ]
+    in
+    let st, out =
+      Process_eio.run_argv_with_status
+        ~cwd:(Sys.getcwd ()) ~timeout_sec argv
+    in
+    if st <> Unix.WEXITED 0 then
+      Keeper_registry.record_error ~base_path:config.base_path meta.name
+        (Printf.sprintf "sandbox docker exec failed (%s): %s"
+           image
+           (Worker_dev_tools.truncate_for_log out))
+    else
+      Keeper_registry.clear_error ~base_path:config.base_path meta.name;
+    Yojson.Safe.to_string
+      (`Assoc
+         [
+           ("ok", `Bool (st = Unix.WEXITED 0));
+           ("cwd", `String cwd);
+           ("sandbox_profile", `String "docker_with_git");
+           ("network_mode", `String "bridge");
+           ("effective_sandbox_image", `String image);
+           ("status", Keeper_alerting_path.process_status_to_json st);
+           ("output", `String out);
+         ])
+
 let run_docker_hardened_bash
     ~(config : Coord.config)
     ~(meta : keeper_meta)
@@ -625,6 +790,9 @@ let handle_keeper_bash
     |> Worker_dev_tools.truncate_for_log
   in
   let timeout_sec = clamp_shell_timeout ~default:io_timeout_sec args in
+  let run_in_background =
+    Safe_ops.json_bool ~default:false "run_in_background" args
+  in
   (* Write access is config-driven via permissions.shell_write_presets *)
   let write_enabled =
     match Keeper_types.tool_access_preset meta.tool_access with
@@ -634,7 +802,38 @@ let handle_keeper_bash
   if cmd = ""
   then error_json "cmd is required. Good: cmd='ls -la lib/'. Bad: cmd=''."
 
-  else
+  else begin
+    (* Tick 22: dark-launch shadow logger.  Runs
+       [Worker_dev_tools.diff_command] side-by-side with the
+       live gate and emits a structured line for every non-[Agree]
+       outcome so operators can collect flip-blocker evidence
+       (Legacy_deny_shadow_allow) and inverted-gap cases
+       (Legacy_allow_shadow_deny) from real traffic without
+       changing any behavior.  Flag-gated by
+       [MASC_BASH_AST_SHADOW_LOG]; default off. *)
+    (if Worker_dev_tools.shadow_diff_log_enabled () then begin
+       let diff, legacy, shadow = Worker_dev_tools.diff_command cmd in
+       let counter_tag : Legendary_counters.gate_diff_tag =
+         match diff with
+         | Worker_dev_tools.Agree -> `Agree
+         | Worker_dev_tools.Legacy_allow_shadow_deny ->
+           `Legacy_allow_shadow_deny
+         | Worker_dev_tools.Legacy_deny_shadow_allow ->
+           `Legacy_deny_shadow_allow
+         | Worker_dev_tools.Shadow_cannot_parse -> `Shadow_cannot_parse
+       in
+       Legendary_counters.incr_gate_diff counter_tag;
+       match diff with
+       | Worker_dev_tools.Agree -> ()
+       | _ ->
+         Log.Keeper.info
+           "gate_diff_shadow keeper=%s cmd_hash=%s diff=%s legacy=%s shadow=%s"
+           meta.name
+           (Worker_dev_tools.cmd_hash_for_log cmd)
+           (Worker_dev_tools.gate_diff_to_string diff)
+           (Worker_dev_tools.legacy_verdict_to_tag legacy)
+           (Worker_dev_tools.shadow_verdict_to_tag shadow)
+     end);
     (* Resolve cwd early — needed for playground detection before validation. *)
     match resolve_keeper_shell_write_cwd ~config ~meta ~args with
     | Error e -> error_json e
@@ -656,8 +855,19 @@ let handle_keeper_bash
       String.starts_with ~prefix:(playground_abs ^ "/") (cwd_canonical ^ "/")
       || String.equal playground_abs cwd_canonical
     in
-    let sandbox_profile, sandbox_network_mode =
+    let base_profile, base_network_mode =
       effective_sandbox_profile ~meta ~in_playground
+    in
+    (* docker_with_git per-command dispatch. Upgrades a Docker_hardened keeper
+       to Docker_with_git when the command's leading token is git/gh, so the
+       container gets bridge network + read-only credential mounts.
+       Disabled when MASC_KEEPER_SANDBOX_GIT_DISPATCH=false. *)
+    let sandbox_profile, sandbox_network_mode =
+      if base_profile = Docker_hardened
+         && Env_config_keeper.KeeperSandbox.with_git_dispatch_enabled ()
+         && cmd_targets_git_or_gh cmd
+      then (Docker_with_git, Network_inherit)
+      else (base_profile, base_network_mode)
     in
     (* Destructive guard: always active regardless of Docker or preset *)
     if Worker_dev_tools.is_destructive_bash_operation cmd
@@ -673,6 +883,12 @@ let handle_keeper_bash
            ~retryability:Exec_core.Operator_required
            ~extra:[ "cmd", `String cmd_for_log ]
            ()))
+    else if sandbox_profile = Docker_with_git then (
+      Log.Keeper.info
+        "DOCKER_WITH_GIT_EXEC: keeper=%s cwd=%s cmd=%s"
+        meta.name cwd cmd_for_log;
+      run_docker_with_git_bash
+        ~config ~meta ~cwd ~timeout_sec ~cmd)
     else if sandbox_profile = Docker_hardened then (
       Log.Keeper.info
         "DOCKER_HARDENED_EXEC: keeper=%s cwd=%s cmd=%s network=%s"
@@ -787,20 +1003,317 @@ let handle_keeper_bash
                   && Worker_dev_tools.is_write_operation cmd then
                  Log.Keeper.info "WRITE_AUDIT: keeper=%s cwd=%s cmd=%s playground=%b"
                    meta.name cwd cmd_for_log in_playground;
-               let st, out =
-                 Process_eio.run_argv_with_status ~cwd ~timeout_sec
+               (* Tick 7: background mode keeps stdout/stderr separate
+                  so [keeper_bash_output] can report them distinctly.
+                  Foreground mode merges via [2>&1] for backward
+                  compatibility with the single [output] JSON field. *)
+               if run_in_background then begin
+                 let argv = [ "/bin/bash"; "-lc"; cmd ] in
+                 match
+                   Bg_task.spawn
+                     ~base_path:root
+                     ~keeper:meta.name
+                     ~argv
+                     ~cwd
+                     ~envp:(Unix.environment ())
+                     ~timeout_sec
+                     ()
+                 with
+                 | Ok tid ->
+                     Log.Keeper.info
+                       "BG_SPAWN: keeper=%s task_id=%s cmd=%s"
+                       meta.name (Bg_task.task_id_to_string tid) cmd_for_log;
+                     Yojson.Safe.to_string
+                       (`Assoc
+                         [
+                           ("ok", `Bool true);
+                           ( "background_task_id",
+                             `String (Bg_task.task_id_to_string tid) );
+                           ("cmd", `String cmd);
+                           ("cwd", `String cwd);
+                           ( "hint",
+                             `String
+                               "Task running in background. Poll with \
+                                keeper_bash_output or stop with \
+                                keeper_bash_kill." );
+                         ])
+                 | Error (Bg_task.Spawn_failed e) ->
+                     error_json
+                       (Printf.sprintf "background spawn failed: %s" e)
+                 | Error (Bg_task.Too_many_tasks { keeper = k; limit }) ->
+                     error_json
+                       (Printf.sprintf
+                          "keeper %s exceeded background task limit (%d)"
+                          k limit)
+                 | Error (Bg_task.Invalid_cwd msg) ->
+                     error_json (Printf.sprintf "invalid cwd: %s" msg)
+               end
+               else begin
+                 (* Tick 11: Foreground path with optional auto-background
+                    race.  When [MASC_BASH_AUTO_BG] is enabled and an Eio
+                    clock is available, route through
+                    [Masc_exec.Exec_run.run_with_auto_bg]: the command
+                    spawns as a Bg_task, races its exit against
+                    [MASC_BLOCKING_BUDGET_MS] (default 15000), and on
+                    budget expiry returns a [Promoted] handle the LLM
+                    can poll via [keeper_bash_output].  Without the
+                    flag, fall back to the legacy blocking call so
+                    existing consumers see no shape change. *)
+                 let auto_bg_enabled =
+                   match Sys.getenv_opt "MASC_BASH_AUTO_BG" with
+                   | Some ("1" | "true" | "yes" | "on") -> true
+                   | _ -> false
+                 in
+                 let argv_merged =
                    [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ]
-               in
-               Yojson.Safe.to_string
-                 (Exec_core.process_result_json
-                    ~base_path:root
-                    ~keeper_name:meta.name
-                    ~cmd
-                    ~extra:[ "cwd", `String cwd ]
-                    ~status:st
-                    ~output:out
-                    ())))
+                 in
+                 (* Tick 23: AUTO_BG dark-launch observer.  When
+                    [MASC_BASH_AUTO_BG_OBSERVE] is set, time the
+                    foreground run and emit a structured log line
+                    if the elapsed duration would have tripped the
+                    blocking budget had [MASC_BASH_AUTO_BG] been
+                    on.  No behavior change; cheap measurement
+                    feeds future default-flip decisions. *)
+                 let auto_bg_observe_enabled =
+                   match Sys.getenv_opt "MASC_BASH_AUTO_BG_OBSERVE" with
+                   | Some ("1" | "true" | "TRUE" | "yes" | "on" | "log") -> true
+                   | _ -> false
+                 in
+                 match
+                   if auto_bg_enabled
+                   then Eio_context.get_clock_opt ()
+                   else None
+                 with
+                 | None ->
+                   let t0 =
+                     if auto_bg_observe_enabled && not auto_bg_enabled
+                     then Unix.gettimeofday ()
+                     else 0.0
+                   in
+                   let st, out =
+                     Process_eio.run_argv_with_status
+                       ~cwd ~timeout_sec argv_merged
+                   in
+                   (if auto_bg_observe_enabled && not auto_bg_enabled then begin
+                      let duration_ms =
+                        int_of_float ((Unix.gettimeofday () -. t0) *. 1000.)
+                      in
+                      let budget_ms =
+                        Masc_exec.Exec_run.default_budget_ms ()
+                      in
+                      let promoted_candidate = duration_ms >= budget_ms in
+                      Legendary_counters.incr_auto_bg_observed
+                        ~promoted_candidate;
+                      if promoted_candidate then
+                        Log.Keeper.info
+                          "auto_bg_would_have_promoted keeper=%s \
+                           cmd_hash=%s duration_ms=%d budget_ms=%d"
+                          meta.name
+                          (Worker_dev_tools.cmd_hash_for_log cmd)
+                          duration_ms
+                          budget_ms
+                    end);
+                   Yojson.Safe.to_string
+                     (Exec_core.process_result_json
+                        ~base_path:root
+                        ~keeper_name:meta.name
+                        ~cmd
+                        ~extra:[ "cwd", `String cwd ]
+                        ~status:st
+                        ~output:out
+                        ())
+                 | Some clock ->
+                   let budget_ms = Masc_exec.Exec_run.default_budget_ms () in
+                   let outcome =
+                     Masc_exec.Exec_run.run_with_auto_bg
+                       ~clock
+                       ~base_path:root
+                       ~budget_ms
+                       ~keeper:meta.name
+                       ~argv:argv_merged
+                       ~cwd
+                       ~envp:(Unix.environment ())
+                       ~timeout_sec
+                       ()
+                   in
+                   (match outcome with
+                    | Masc_exec.Exec_run.Completed r ->
+                      Yojson.Safe.to_string
+                        (Exec_core.process_result_json
+                           ~base_path:root
+                           ~keeper_name:meta.name
+                           ~cmd
+                           ~extra:[ "cwd", `String cwd ]
+                           ~status:r.status
+                           ~output:r.stdout
+                           ())
+                    | Masc_exec.Exec_run.Promoted p ->
+                      Log.Keeper.info
+                        "BG_PROMOTE: keeper=%s task_id=%s budget_ms=%d cmd=%s"
+                        meta.name
+                        (Bg_task.task_id_to_string p.task_id)
+                        budget_ms
+                        cmd_for_log;
+                      Yojson.Safe.to_string
+                        (`Assoc
+                          [
+                            ("ok", `Bool false);
+                            ("promoted", `Bool true);
+                            ( "background_task_id",
+                              `String
+                                (Bg_task.task_id_to_string p.task_id) );
+                            ("cmd", `String cmd);
+                            ("cwd", `String cwd);
+                            ("partial_output", `String p.partial_stdout);
+                            ( "bytes_dropped",
+                              `Int p.bytes_dropped_stdout );
+                            ("budget_ms", `Int budget_ms);
+                            ( "hint",
+                              `String
+                                (Printf.sprintf
+                                   "Command exceeded \
+                                    MASC_BLOCKING_BUDGET_MS=%d. Still \
+                                    running in background; poll with \
+                                    keeper_bash_output or stop with \
+                                    keeper_bash_kill."
+                                   budget_ms) );
+                          ])
+                    | Masc_exec.Exec_run.Spawn_error
+                        (Bg_task.Spawn_failed e) ->
+                      error_json
+                        (Printf.sprintf
+                           "auto-bg spawn failed: %s" e)
+                    | Masc_exec.Exec_run.Spawn_error
+                        (Bg_task.Too_many_tasks { keeper = k; limit }) ->
+                      error_json
+                        (Printf.sprintf
+                           "keeper %s exceeded background task limit (%d)"
+                           k limit)
+                    | Masc_exec.Exec_run.Spawn_error
+                        (Bg_task.Invalid_cwd msg) ->
+                      error_json (Printf.sprintf "invalid cwd: %s" msg))
+               end))
+  end
 ;;
+
+(* ============================================================ *)
+(* Legendary Bash P2 — background-task siblings (Tick 6b).       *)
+(* keeper_bash_output + keeper_bash_kill mirror claude-code's     *)
+(* BashOutput / KillShell so an agent can poll and stop tasks    *)
+(* spawned with run_in_background = true.                         *)
+(* ============================================================ *)
+
+let status_to_json_opt = function
+  | None -> `Null
+  | Some st -> Keeper_alerting_path.process_status_to_json st
+
+let handle_keeper_bash_output
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t) =
+  let _ = config in
+  let raw_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
+  let since_stdout = Safe_ops.json_int ~default:0 "since_stdout" args in
+  let since_stderr = Safe_ops.json_int ~default:0 "since_stderr" args in
+  if raw_id = "" then
+    error_json
+      "task_id is required. Example: task_id='bgt-<timestamp>-<seq>-<pid>'."
+  else
+    let tid = Bg_task.task_id_of_string_exn raw_id in
+    match Bg_task.read tid ~since_stdout ~since_stderr with
+    | Error (Bg_task.Unknown_task _) ->
+        error_json
+          (Printf.sprintf
+             "no background task with id=%s (already reaped or never spawned)"
+             raw_id)
+    | Error (Bg_task.Read_failed msg) ->
+        error_json (Printf.sprintf "bash_output read failed: %s" msg)
+    | Ok snap ->
+        let tid_str = Bg_task.task_id_to_string tid in
+        let semantic_fields =
+          if not (Masc_exec.Exec_semantic.enabled ()) then []
+          else match snap.status with
+          | None -> []
+          | Some st ->
+              let merged = snap.stdout_since ^ snap.stderr_since in
+              let sem =
+                Masc_exec.Exec_semantic.interpret_cmd
+                  ~cmd:"" ~status:st ~output:merged
+              in
+              [
+                ( "return_code_interpretation",
+                  match Masc_exec.Exec_semantic.to_hint sem with
+                  | None -> `Null
+                  | Some h -> `String h );
+              ]
+        in
+        Log.Keeper.info
+          "BG_OUTPUT: keeper=%s task_id=%s closed=%b"
+          meta.name tid_str snap.closed;
+        Yojson.Safe.to_string
+          (`Assoc
+            ([
+               ("ok", `Bool true);
+               ("task_id", `String tid_str);
+               ("stdout_since", `String snap.stdout_since);
+               ("stderr_since", `String snap.stderr_since);
+               ("closed", `Bool snap.closed);
+               ("status", status_to_json_opt snap.status);
+               ("bytes_dropped_stdout", `Int snap.bytes_dropped_stdout);
+               ("bytes_dropped_stderr", `Int snap.bytes_dropped_stderr);
+             ]
+             @ semantic_fields))
+
+let signal_of_name_or_num args =
+  match Safe_ops.json_string ~default:"" "signal" args |> String.uppercase_ascii with
+  | "" | "TERM" | "SIGTERM" -> Sys.sigterm
+  | "KILL" | "SIGKILL" -> Sys.sigkill
+  | "INT" | "SIGINT" -> Sys.sigint
+  | "HUP" | "SIGHUP" -> Sys.sighup
+  | "QUIT" | "SIGQUIT" -> Sys.sigquit
+  | raw ->
+      (* Accept numeric form too. *)
+      (try int_of_string raw with _ -> Sys.sigterm)
+
+let handle_keeper_bash_kill
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t) =
+  let _ = config in
+  let raw_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
+  let signal = signal_of_name_or_num args in
+  let grace_sec =
+    let raw = Safe_ops.json_float ~default:2.0 "grace_sec" args in
+    if raw < 0.0 then 0.0
+    else if raw > 30.0 then 30.0
+    else raw
+  in
+  if raw_id = "" then
+    error_json
+      "task_id is required. Example: task_id='bgt-<timestamp>-<seq>-<pid>'."
+  else
+    let tid = Bg_task.task_id_of_string_exn raw_id in
+    match Bg_task.kill tid ~signal ~grace_sec with
+    | Error (Bg_task.Unknown_task_kill _) ->
+        error_json
+          (Printf.sprintf
+             "no background task with id=%s (already reaped or never spawned)"
+             raw_id)
+    | Error (Bg_task.Kill_failed msg) ->
+        error_json (Printf.sprintf "bash_kill failed: %s" msg)
+    | Ok () ->
+        let tid_str = Bg_task.task_id_to_string tid in
+        Log.Keeper.info
+          "BG_KILL: keeper=%s task_id=%s signal=%d grace=%.2f"
+          meta.name tid_str signal grace_sec;
+        Yojson.Safe.to_string
+          (`Assoc
+            [
+              ("ok", `Bool true);
+              ("task_id", `String tid_str);
+              ("signal", `Int signal);
+              ("grace_sec", `Float grace_sec);
+            ])
 
 let handle_keeper_shell
       ~(config : Coord.config)
@@ -825,8 +1338,28 @@ let handle_keeper_shell
   in
   let root = Keeper_alerting_path.project_root_of_config config in
   let raw_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
-  let read_target () = resolve_keeper_shell_read_path ~config ~meta ~args in
-  let cwd_target () = resolve_keeper_shell_read_cwd ~config ~meta ~args in
+  (* RFC-0006 Phase B-1.5: pin host-FS read guard for hardened keeper
+     shell read ops. No-op for legacy keepers and when
+     MASC_KEEPER_SYMMETRIC_SANDBOX is off. *)
+  let containment_check target =
+    Keeper_sandbox_containment.check_read_target ~config ~meta ~target
+  in
+  let read_target () =
+    match resolve_keeper_shell_read_path ~config ~meta ~args with
+    | Error _ as e -> e
+    | Ok target ->
+      (match containment_check target with
+       | Ok () -> Ok target
+       | Error msg -> Error msg)
+  in
+  let cwd_target () =
+    match resolve_keeper_shell_read_cwd ~config ~meta ~args with
+    | Error _ as e -> e
+    | Ok cwd ->
+      (match containment_check cwd with
+       | Ok () -> Ok cwd
+       | Error msg -> Error msg)
+  in
   (* Actionable error: Samchon/Claude Code validateInput pattern.
      Returns structured JSON with tried path, playground root, and concrete next action. *)
   let path_error e =
@@ -1133,21 +1666,6 @@ let handle_keeper_shell
     else
       (* Non-overridable deny layer (runs after preset gate).
          First match wins — specific patterns before generic. *)
-      let hint_of_category = function
-        | "chaining"        ->
-          "`&&`, `||`, and `;` chaining are blocked in readonly shell. \
-           Issue one command per keeper_shell call, or use a dedicated \
-           sub-op: git_log, git_status, git_diff, git_worktree, find, \
-           ls, rg, head, tail, wc, tree, cat, pwd."
-        | "redirect"        ->
-          "Redirects (`>`, `>>`, `| tee`) are blocked in readonly shell. \
-           Use keeper_fs_edit to write files, or keeper_bash with the \
-           coding preset for write operations."
-        | "git_write"       -> "Use keeper_bash with coding preset for git write operations."
-        | "package_install" -> "Package installation requires keeper_bash with coding preset."
-        | "destructive"     -> "Use keeper_bash for write operations, not readonly shell."
-        | _                 -> "This operation is not allowed in readonly shell."
-      in
       let substring_rules =
         [ (* chaining *)
           "&&", "chaining"
@@ -1168,7 +1686,7 @@ let handle_keeper_shell
       in
       (match matched with
       | Some (pat, category) ->
-        let hint = hint_of_category category in
+        let hint = readonly_hint_of_category category in
         Yojson.Safe.to_string
           (Exec_core.blocked_result_json
              ~cmd:cmd_str
@@ -1328,13 +1846,17 @@ let handle_keeper_shell
       Safe_ops.json_string ~default:"" "cmd" args
       |> normalize_gh_command
     in
-    (* gh runs against remote network, so 1s floor from shell default is
-       too aggressive (observed: keepers passing timeout_sec=1 kills
-       [gh pr create] mid-TCP). Floor at 5s and default at the configured
+    (* gh runs against remote network. Prior floors (1s, then 5s) kept
+       firing gh_command_timed_out on plain read calls — 41 such
+       rejections on 2026-04-17/18 (#8688), every single one at
+       timeout_sec=5. GitHub API round-trip alone runs 1-8s even on
+       small queries, and `gh` spends additional time on auth handshake
+       and JSON encoding. Floor at 15s so the keeper LLM cannot request
+       a sub-network-latency timeout; default remains the configured
        pr_create timeout (tool_policy.toml, default 30s). *)
     let gh_default_timeout = Keeper_tool_policy.pr_create_timeout_sec () in
     let timeout_sec =
-      clamp_shell_timeout ~min_sec:5.0 ~default:gh_default_timeout args
+      clamp_shell_timeout ~min_sec:gh_min_timeout_sec ~default:gh_default_timeout args
     in
     if cmd_str = "" then
       error_json ~fields:[ "op", `String op ]
@@ -1412,15 +1934,45 @@ let handle_keeper_shell
                    ; "status", Keeper_alerting_path.process_status_to_json st
                    ; "output", `String out
                    ; "hint", `String
-                       "gh network call exceeded timeout_sec. Retry with a \
-                        larger value (e.g. timeout_sec=60) or narrow the \
-                        query (--state, --limit, --json)."
+                       "gh network call exceeded timeout_sec. Retry \
+                        with a larger value — gh round-trip plus auth \
+                        handshake is usually 3-10s, so prefer \
+                        timeout_sec=30 or timeout_sec=60 rather than \
+                        the 15s floor. You may also narrow the query \
+                        (--state, --limit, --json)."
                    ]
                else
-                 gh_base ~ok:(st = Unix.WEXITED 0) ~cwd
+                 let ok = st = Unix.WEXITED 0 in
+                 (* #8688: 37 repo-resolve rejects on 2026-04-17/18 came
+                    back with "Could not resolve to a Repository". All
+                    originated from keeper_shell op=gh run from a
+                    playground cwd that has no upstream
+                    (.masc/playground/<name>), so gh falls through to
+                    the parent working dir and gives up. The keeper LLM
+                    got only gh's raw stderr, which named the fake
+                    repo but not the fix. Attach a concrete hint. *)
+                 let base_fields =
                    [ "status", Keeper_alerting_path.process_status_to_json st
-                   ; "output", `String out
-                   ])))
+                   ; "output", `String out ]
+                 in
+                 let hinted_fields =
+                   if (not ok)
+                      && String_util.contains_substring_ci out
+                           "Could not resolve to a Repository"
+                   then
+                     base_fields @
+                     [ "error", `String "gh_repo_resolve_failed"
+                     ; "hint", `String
+                         "gh ran from a keeper playground cwd with no \
+                          upstream remote, so it resolved the working \
+                          directory name as the repository. Retry with \
+                          an explicit `--repo OWNER/NAME` (e.g. \
+                          `gh pr list --repo jeong-sik/masc-mcp \
+                          --state open`), or git_clone the repo first \
+                          and cd into the clone." ]
+                   else base_fields
+                 in
+                 gh_base ~ok ~cwd hinted_fields)))
   | _ ->
     Yojson.Safe.to_string
       (`Assoc

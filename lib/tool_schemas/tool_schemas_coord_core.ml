@@ -7,6 +7,17 @@
 
 open Types
 
+(** Issue #8636: hand-mirrored from
+    [Tool_coord.valid_assertion_strings]. Cycle constraint —
+    [Tool_schemas_coord_core] is upstream of [Tool_coord] (the schema
+    library lives in [masc_tool_schemas], the handler is in [masc_mcp]).
+    The test [test_types.ml :: assertion_kind_ssot] asserts this mirror
+    stays in sync with the SSOT so adding a 6th assertion kind fails
+    compilation in [assertion_kind_to_string] AND fails the test here,
+    instead of silently dropping from the JSON Schema. *)
+let assertion_kind_enum_strings =
+  [ "room_set"; "joined"; "task_claimed"; "current_task_set"; "worktree_active" ]
+
 let schemas : tool_schema list = [
   {
     name = "masc_status";
@@ -57,12 +68,11 @@ Pair with masc_workflow_guide for next-step recommendations.";
           ("type", `String "array");
           ("items", `Assoc [
             ("type", `String "string");
-            ("enum", `List [
-              `String "room_set"; `String "joined"; `String "task_claimed";
-              `String "current_task_set"; `String "worktree_active";
-            ]);
+            ("enum",
+             `List
+               (List.map (fun s -> `String s) assertion_kind_enum_strings));
           ]);
-          ("description", `String "List of state assertions to check. Each returns true/false with a fix hint if false. Historical key 'room_set' means project scope configured.");
+          ("description", `String "List of state assertions to check. Each returns true/false with a fix hint if false. Canonical readiness key is 'room_set'; 'project_ready' and 'namespace_ready' are accepted aliases at the parser layer.");
         ]);
       ]);
       ("required", `List [`String "assertions"]);

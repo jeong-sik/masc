@@ -23,6 +23,8 @@ let empty = { next_steps = []; preconditions = []; common_mistakes = [] }
 
 let s tool reason = { tool; reason }
 
+let project_ready = "project_ready"
+
 let transition_action args =
   let open Yojson.Safe.Util in
   match args |> member "action" |> to_string_option with
@@ -58,7 +60,7 @@ let after_join ~success =
         [ s "masc_status" "Check current namespace state and available tasks";
           s "masc_transition" "Claim an existing task if available (action=claim)";
           s "masc_add_task" "Create a new task if none exist" ];
-      preconditions = [ "room_set" ];
+      preconditions = [ project_ready ];
       common_mistakes =
         [ "Skipping masc_status — you may duplicate work another agent claimed" ] }
   else
@@ -73,7 +75,7 @@ let after_status ~success =
         [ s "masc_transition" "Claim a task from the available list (action=claim)";
           s "masc_add_task" "Add a new task if the list is empty";
           s "masc_workflow_guide" "Get personalized guidance for your current state" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes = [] }
   else
     { next_steps =
@@ -87,30 +89,29 @@ let after_claim_auto_bound ~success =
     { next_steps =
         [ s "masc_worktree_create" "Create an isolated worktree for this task";
           s "masc_heartbeat" "Signal liveness before starting long work" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes =
         [ "Forgetting masc_worktree_create — working on main branch directly" ] }
   else
     { next_steps =
         [ s "masc_status" "Check which tasks are available";
           s "masc_add_task" "Create a task if none exist" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes = [] }
 
 let after_transition_claim ~success =
   if success then
     { next_steps =
-        [ s "masc_plan_set_task" "Bind claimed task as your planning current_task";
-          s "masc_worktree_create" "Create an isolated worktree for this task" ];
-      preconditions = [ "room_set"; "joined" ];
+        [ s "masc_worktree_create" "Create an isolated worktree for this task";
+          s "masc_heartbeat" "Signal liveness before starting long work" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes =
-        [ "masc_transition(action=claim) only claims backlog ownership — it does not bind planning current_task";
-          "Forgetting masc_worktree_create — working on main branch directly" ] }
+        [ "Forgetting masc_worktree_create — working on main branch directly" ] }
   else
     { next_steps =
         [ s "masc_status" "Check which tasks are available";
           s "masc_add_task" "Create a task if none exist" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes = [] }
 
 let after_transition_start ~success =
@@ -119,13 +120,13 @@ let after_transition_start ~success =
         [ s "masc_heartbeat" "Signal liveness before and during longer work";
           s "masc_broadcast" "Share that you started active implementation";
           s "masc_transition" "Mark the task complete when implementation is finished (action=done)" ];
-      preconditions = [ "room_set"; "joined"; "task_claimed"; "current_task_set" ];
+      preconditions = [ project_ready; "joined"; "task_claimed"; "current_task_set" ];
       common_mistakes = [] }
   else
     { next_steps =
         [ s "masc_status" "Check the task state before retrying the transition";
           s "masc_workflow_guide" "Inspect your current namespace/task readiness" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes = [] }
 
 let after_transition_release_or_cancel ~success =
@@ -134,13 +135,13 @@ let after_transition_release_or_cancel ~success =
         [ s "masc_status" "Check the remaining backlog after releasing or cancelling the task";
           s "masc_transition" "Claim another task if work should continue (action=claim)";
           s "masc_add_task" "Create a replacement task only if the cancelled work still needs tracking" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes = [] }
   else
     { next_steps =
         [ s "masc_status" "Check task state and ownership before retrying";
           s "masc_workflow_guide" "Inspect your current namespace/task readiness" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes = [] }
 
 let after_transition_generic ~success =
@@ -148,14 +149,14 @@ let after_transition_generic ~success =
     { next_steps =
         [ s "masc_status" "Refresh namespace state after the transition";
           s "masc_workflow_guide" "Inspect the next recommended step for your current state" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes =
-        [ "masc_transition follow-up depends on action. claim may require masc_plan_set_task, while done/release/cancel do not." ] }
+        [ "masc_transition follow-up depends on action. claim should auto-bind current_task, while done/release/cancel may clear it." ] }
   else
     { next_steps =
         [ s "masc_status" "Check task state before retrying the transition";
           s "masc_workflow_guide" "Inspect your current namespace/task readiness" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes = [] }
 
 let after_add_task ~success =
@@ -163,13 +164,13 @@ let after_add_task ~success =
     { next_steps =
         [ s "masc_transition" "Claim the task you just created (action=claim)";
           s "masc_status" "Verify the task appears in the list" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes =
         [ "Creating a task without claiming it — another agent may take it" ] }
   else
     { next_steps =
         [ s "masc_status" "Check namespace state for errors" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes = [] }
 
 let after_plan_set_task ~success =
@@ -177,13 +178,13 @@ let after_plan_set_task ~success =
     { next_steps =
         [ s "masc_worktree_create" "Create worktree for isolated work";
           s "masc_heartbeat" "Signal liveness before starting long work" ];
-      preconditions = [ "room_set"; "joined"; "task_claimed" ];
+      preconditions = [ project_ready; "joined"; "task_claimed" ];
       common_mistakes = [] }
   else
     { next_steps =
         [ s "masc_transition" "Claim a task first (action=claim)";
           s "masc_status" "Verify your claimed task exists" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes =
         [ "Calling plan_set_task without a claimed task" ] }
 
@@ -192,7 +193,7 @@ let after_heartbeat ~success =
     { next_steps =
         [ s "masc_broadcast" "Share progress with other agents";
           s "masc_transition" "Mark task complete when finished (action=done)" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes = [] }
   else
     { next_steps =
@@ -206,12 +207,12 @@ let after_done ~success =
         [ s "masc_status" "Check for remaining tasks";
           s "masc_transition" "Pick up the next task (action=claim)";
           s "masc_leave" "Leave the namespace if all work is complete" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes = [] }
   else
     { next_steps =
         [ s "masc_status" "Check task state — it may already be completed" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes = [] }
 
 (* ── Common tools ────────────────────────────────────────────────── *)
@@ -220,12 +221,12 @@ let after_broadcast ~success =
   if success then
     { next_steps =
         [ s "masc_heartbeat" "Keep your presence alive" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes = [] }
   else
     { next_steps =
         [ s "masc_join" "Ensure you are in the namespace" ];
-      preconditions = [ "room_set" ];
+      preconditions = [ project_ready ];
       common_mistakes = [] }
 
 let after_worktree_create ~success =
@@ -233,13 +234,13 @@ let after_worktree_create ~success =
     { next_steps =
         [ s "masc_heartbeat" "Signal liveness before starting work";
           s "masc_broadcast" "Let other agents know you started work" ];
-      preconditions = [ "room_set"; "joined"; "task_claimed" ];
+      preconditions = [ project_ready; "joined"; "task_claimed" ];
       common_mistakes = [] }
   else
     { next_steps =
         [ s "masc_plan_set_task" "Ensure current_task is set";
           s "masc_status" "Check namespace configuration" ];
-      preconditions = [ "room_set"; "joined"; "task_claimed" ];
+      preconditions = [ project_ready; "joined"; "task_claimed" ];
       common_mistakes = [] }
 
 (* ── Main dispatch ───────────────────────────────────────────────── *)
@@ -338,7 +339,7 @@ let current_state_guidance ~room_set ~joined ~task_claimed
   else if not joined then
     { next_steps =
         [ s "masc_join" "Register your agent identity in the project namespace" ];
-      preconditions = [ "room_set" ];
+      preconditions = [ project_ready ];
       common_mistakes =
         [ "Operating without joining — other agents cannot see or coordinate with you" ] }
   else if not task_claimed then
@@ -346,20 +347,20 @@ let current_state_guidance ~room_set ~joined ~task_claimed
         [ s "masc_status" "Check available tasks";
           s "masc_transition" "Claim an existing task (action=claim)";
           s "masc_add_task" "Create a new task if none exist" ];
-      preconditions = [ "room_set"; "joined" ];
+      preconditions = [ project_ready; "joined" ];
       common_mistakes =
         [ "Modifying code without a claimed task — changes are untracked" ] }
   else if not current_task_set then
     { next_steps =
         [ s "masc_plan_set_task" "Bind your claimed task as current_task" ];
-      preconditions = [ "room_set"; "joined"; "task_claimed" ];
+      preconditions = [ project_ready; "joined"; "task_claimed" ];
       common_mistakes =
-        [ "Some claim paths leave planning current_task unset. This commonly happens after masc_transition(action=claim)." ] }
+        [ "Legacy or out-of-band claim paths can leave planning current_task stale. Call masc_plan_set_task to realign." ] }
   else if not worktree_active then
     { next_steps =
         [ s "masc_worktree_create" "Create an isolated git worktree for this task";
           s "masc_heartbeat" "Signal liveness if worktree is not needed" ];
-      preconditions = [ "room_set"; "joined"; "task_claimed"; "current_task_set" ];
+      preconditions = [ project_ready; "joined"; "task_claimed"; "current_task_set" ];
       common_mistakes =
         [ "Working directly on main branch without a worktree" ] }
   else if session_active then
@@ -367,12 +368,12 @@ let current_state_guidance ~room_set ~joined ~task_claimed
         [ s "masc_status" "Refresh repo coordination state";
           s "masc_heartbeat" "Keep your presence alive during work";
           s "masc_transition" "Mark the task complete when work is done (action=done)" ];
-      preconditions = [ "room_set"; "joined"; "task_claimed"; "current_task_set"; "worktree_active"; "session_active" ];
+      preconditions = [ project_ready; "joined"; "task_claimed"; "current_task_set"; "worktree_active"; "session_active" ];
       common_mistakes = [] }
   else
     { next_steps =
         [ s "masc_heartbeat" "Signal liveness while working";
           s "masc_broadcast" "Share progress with teammates";
           s "masc_transition" "Mark task complete when finished (action=done)" ];
-      preconditions = [ "room_set"; "joined"; "task_claimed"; "current_task_set"; "worktree_active" ];
+      preconditions = [ project_ready; "joined"; "task_claimed"; "current_task_set"; "worktree_active" ];
       common_mistakes = [] }

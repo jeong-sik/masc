@@ -329,7 +329,7 @@ let recover_latest_checkpoint_for_overflow_retry
       ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
   in
   (match oas_result with
-   | Error (Parse_error d | Store_error d | Io_error d) ->
+   | Error (Parse_error d | Store_error d | Io_error d | Sdk_other_error d) ->
        Log.Keeper.error "keeper:%s overflow retry OAS load error: %s"
          (Keeper_id.Trace_id.to_string meta.runtime.trace_id) d
    | Error Not_found | Ok _ -> ());

@@ -62,7 +62,7 @@ let to_yojson (t : t) : Yojson.Safe.t =
 
 (* --- Parsing --- *)
 
-let ( let* ) = Result.bind
+open Result.Syntax
 
 let require_field fields key =
   match List.assoc_opt key fields with

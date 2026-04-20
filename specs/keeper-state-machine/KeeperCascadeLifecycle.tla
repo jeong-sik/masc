@@ -6,15 +6,40 @@
 \* than provider-level routing: the runtime persists only the keeper-facing
 \* turn projection, not the full candidate/provider attempt graph.
 \*
-\* Authoritative write points:
-\*   - mark_turn_started
-\*   - mark_turn_measurement
-\*   - set_turn_decision_stage
-\*   - set_turn_cascade_state
-\*   - set_turn_selected_model
-\*   - prepare_turn_retry_after_compaction
-\*   - mark_turn_gate_rejected_by_name
-\*   - mark_turn_finished
+\* Authoritative write points (lib/keeper/keeper_registry.ml):
+\*   - mark_turn_started                       line 386
+\*   - mark_turn_measurement                   line 404
+\*   - set_turn_decision_stage                 line 420
+\*   - set_turn_cascade_state                  line 424
+\*   - set_turn_selected_model                 line 437
+\*   - prepare_turn_retry_after_compaction     line 441
+\*   - mark_turn_gate_rejected_by_name         line 452
+\*   - mark_turn_finished                      line 472
+\*
+\* OCaml ↔ TLA+ mapping (see #8642 family):
+\*
+\*   spec variable      | OCaml type variant                  | source
+\*   -------------------+-------------------------------------+--------
+\*   turn_phase         | type turn_phase = Turn_idle |       | lib/keeper/keeper_registry.ml:63-68
+\*                      |   Turn_prompting | Turn_executing | |
+\*                      |   Turn_compacting | Turn_finalizing |
+\*   decision_stage     | type decision_stage =               | lib/keeper/keeper_registry.ml:70-74
+\*                      |   Decision_undecided |              |
+\*                      |   Decision_guard_ok |               |
+\*                      |   Decision_gate_rejected |          |
+\*                      |   Decision_tool_policy_selected     |
+\*   cascade_state      | type cascade_state = Cascade_idle | | lib/keeper/keeper_registry.ml:76-81
+\*                      |   Cascade_selecting | Cascade_trying|
+\*                      |   Cascade_done | Cascade_exhausted  |
+\*   turn_live          | current_turn_observation = Some _   | record field on keeper_runtime
+\*
+\* Scope projection: spec models the keeper-facing turn projection
+\* only — the full candidate/provider attempt graph (Llm_provider /
+\* cascade_runtime cycle) is intentionally OUT OF SCOPE here.
+\* Adding a new provider attempt outcome does NOT require updating
+\* this spec; adding a new turn_phase / decision_stage / cascade_state
+\* constructor DOES require updating the corresponding spec
+\* PhaseSet / DecisionStageSet / CascadeStateSet constants.
 
 EXTENDS TLC
 

@@ -9,6 +9,27 @@
 \*   - Make the "stalled stays stalled until a new delta arrives" rule explicit.
 \*   - Verify that progress evidence dominates other signals, reactive signals
 \*     dominate idle timeouts, and empty turns settle to Quiet.
+\*
+\* Known topology drift (issue #8949): this spec routes the failure signal
+\* through [ClassifyEvent] (where "failure dominates progress").  The OCaml
+\* impl splits this into two call paths instead:
+\*
+\*   1. Normal path: [classify_event] (no failure parameter)
+\*      handles progress / signals / idle / quiet.
+\*   2. Failure path: [derive_failure_state] in
+\*      [keeper_social_model_magentic_ledger_v1.ml:202] constructs the
+\*      [Failure_observed] event directly and bypasses [classify_event].
+\*
+\* Both topologies reach [Stalled] on failure, so end-state behaviour
+\* matches.  However, the spec's "failure dominates progress" property is
+\* trivially satisfied in OCaml because failure never reaches the
+\* dominance branch.  A future change that adds [has_failure] to the
+\* OCaml input record without re-checking dominance ordering would
+\* re-introduce the question with the OPPOSITE answer (OCaml's
+\* progress-first ordering would override failure).
+\*
+\* See issue #8949 for proposed alignment options
+\* (preferred: re-shape spec to mirror OCaml's two-path topology).
 
 EXTENDS TLC
 

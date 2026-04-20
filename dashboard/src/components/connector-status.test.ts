@@ -412,6 +412,9 @@ describe('ConnectorStatusPanel', () => {
     expect(text).toContain('Gate metrics unavailable')
     expect(text).toContain('Gate-advertised connector runtime is visible')
     expect(text).toContain('keeper directory unavailable, manual entry only')
+    expect(text).toContain('Next: continue with manual entry now')
+    expect(text).toContain('config/keepers/')
+    expect(text).toContain('/api/v1/gate/keepers')
 
     // Directory-error panel uses informational amber + left stripe so
     // operators don't read the accent-gradient-tinted neutral
@@ -424,6 +427,30 @@ describe('ConnectorStatusPanel', () => {
     // Named chip: "Directory error" is what AT hears.
     const dirChip = dirPanel!.querySelector('[aria-label]')
     expect(dirChip?.getAttribute('aria-label')).toContain('unavailable')
+  })
+
+  it('pairs connector API failures with a browser/server next action', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockRejectedValue(new Error('GET /api/v1/gate/connectors: 503 Service Unavailable'))
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const warningPanel = container.querySelector('[data-connector-warning-panel]') as HTMLElement | null
+    expect(warningPanel).not.toBeNull()
+    const text = warningPanel!.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+    expect(text).toContain('Connector API unavailable')
+    expect(text).toContain('Cause: GET /api/v1/gate/connectors: 503 Service Unavailable')
+    expect(text).toContain('Next: refresh the dashboard')
+    expect(text).toContain('/api/v1/gate/connectors')
   })
 
   it('prefers backend-advertised connector status over derived booleans', async () => {
@@ -632,6 +659,9 @@ describe('ConnectorStatusPanel', () => {
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
     expect(text).toContain('Sidecar not started')
     expect(text).toContain('cd sidecars/discord-bot && ./run.sh')
+    expect(text).toContain('Cause: no sidecar status file has been observed at /tmp/discord_status.json')
+    expect(text).toContain('Next: click Start to spawn via the backend')
+    expect(text).toContain('Use status and tail logs if it stays offline')
 
     // Regression guard for the screenshot bug: when a connector card's
     // brand accent is green (iMessage), the outer card renders a green
@@ -649,6 +679,15 @@ describe('ConnectorStatusPanel', () => {
     expect(chip).toBeTruthy()
     expect(chip!.getAttribute('aria-label')).toContain('not running')
     expect(chip!.textContent).toContain('Not running')
+
+    const copyLabels = Array.from(panel!.querySelectorAll<HTMLButtonElement>('[data-copy-button]'))
+      .map(button => button.getAttribute('aria-label'))
+    expect(copyLabels).toEqual([
+      'Copy Discord sidecar start command',
+      'Copy Discord sidecar tail logs command',
+      'Copy Discord sidecar status command',
+      'Copy Discord sidecar stop command',
+    ])
   })
 
   it('shows no-keepers empty state when keeper directory is empty', async () => {

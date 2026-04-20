@@ -78,13 +78,20 @@ type completion_contract =
   | Allow_text_or_tool
   | Require_tool_use
 
+(** Issue #8696: exhaustive match against [Agent_sdk.Types.tool_choice].
+    Previous catch-all silently mapped any future SDK constructor to
+    [Allow_text_or_tool]; on an OAS pin bump that adds a constructor
+    (e.g. requiring tool use under new conditions) the keeper would
+    silently degrade. Listing every variant turns SDK drift into a
+    compile error here so it is reviewed at the boundary. *)
 let completion_contract_of_tool_choice
       (tool_choice : Agent_sdk.Types.tool_choice option)
   : completion_contract
   =
   match tool_choice with
   | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> Require_tool_use
-  | _ -> Allow_text_or_tool
+  | Some (Agent_sdk.Types.Auto | Agent_sdk.Types.None_) -> Allow_text_or_tool
+  | None -> Allow_text_or_tool
 
 let validate_completion_contract
       ~(contract : completion_contract)

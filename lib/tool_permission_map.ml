@@ -33,6 +33,8 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_agent_fitness", CanReadState);
     ("masc_dashboard", CanReadState);
     ("masc_check", CanReadState);
+    ("masc_approval_pending", CanReadState);
+    ("masc_approval_get", CanAdmin);
     ("masc_collaboration_graph", CanReadState);
     ("masc_get_metrics", CanReadState);
     ("masc_plan_get_task", CanReadState);
@@ -61,13 +63,18 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_keeper_compact", CanBroadcast);
     ("masc_keeper_clear", CanBroadcast);
     ("masc_keeper_create_from_persona", CanBroadcast);
+    ("masc_approval_resolve", CanAdmin);
     ("masc_operator_confirm", CanBroadcast);
     ("masc_operation_start", CanBroadcast);
     ("masc_policy_approve", CanBroadcast);
     ("masc_cleanup_zombies", CanBroadcast);
     ("masc_autoresearch_start", CanAdmin);
-    ("masc_autoresearch_swarm_start", CanAdmin);
-    ("masc_repo_synthesis_swarm_start", CanAdmin);
+    (* Issue #8661: dropped masc_autoresearch_swarm_start /
+       masc_repo_synthesis_swarm_start — tools were retired with the
+       swarm cleanup (#8559) and tests in test_tool_access_policy.ml
+       and test_tool_shard_coverage.ml already pin them as not present.
+       Permission map entries were dead surface granting CanAdmin to
+       non-existent tools. *)
     ("masc_autoresearch_cycle", CanAdmin);
     ("masc_autoresearch_inject", CanAdmin);
     ("masc_autoresearch_stop", CanAdmin);

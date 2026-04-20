@@ -611,6 +611,9 @@ let latest_tool_audit_snapshot_from_files config ~keeper_name =
   | Some _ as snapshot -> snapshot
   | None -> latest_tool_audit_snapshot_from_metrics config keeper_name
 
+let accountability_summary_lookup config =
+  Keeper_accountability.accountability_summary_lookup config
+
 let accountability_summary_json config ~keeper_name ~agent_name =
   Keeper_accountability.accountability_summary_json config ~keeper_name
     ~agent_name

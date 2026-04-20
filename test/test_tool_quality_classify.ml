@@ -54,6 +54,13 @@ let test_path_error_is_normalized () =
   check string "path boundary error normalized"
     "path_not_in_allowed_paths" (classify output)
 
+let test_sandbox_path_error_is_normalized () =
+  let output =
+    {|{"ok":false,"error":"path_outside_sandbox: lib/foo.ml (sandbox roots: [/tmp/demo])"}|}
+  in
+  check string "sandbox path boundary error normalized"
+    "path_outside_sandbox" (classify output)
+
 let test_message_error_is_normalized () =
   let output =
     {|{"status":"error","message":"query looks like it may contain secrets; refine it before using web search"}|}
@@ -95,6 +102,8 @@ let () =
            test_case "no error key -> unknown_error" `Quick test_no_error_key_is_unknown;
            test_case "nested JSON after prefix" `Quick test_nested_json_in_error_prefix;
            test_case "path error normalized" `Quick test_path_error_is_normalized;
+           test_case "sandbox path error normalized" `Quick
+             test_sandbox_path_error_is_normalized;
            test_case "message-only error normalized" `Quick test_message_error_is_normalized;
            test_case "signaled status classified" `Quick test_signaled_status_is_classified;
            test_case "timeout error preserved" `Quick test_timeout_error_is_preserved;

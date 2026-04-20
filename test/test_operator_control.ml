@@ -17,6 +17,10 @@ let () =
             `Quick
             Test_operator_control_snapshot
             .test_align_keeper_runtime_status_ignores_zombie_runtime_signal;
+          Alcotest.test_case "snapshot context ratio resolves cli provider budget"
+            `Quick
+            Test_operator_control_snapshot
+            .test_compute_context_ratio_uses_resolved_cli_context_budget;
           Alcotest.test_case "snapshot sections" `Quick
             Test_operator_control_snapshot.test_snapshot_has_expected_sections;
           Alcotest.test_case "snapshot pending confirm summary tracks actor scope"
@@ -35,6 +39,11 @@ let () =
             `Quick
             Test_operator_control_snapshot
             .test_snapshot_lightweight_summary_keeps_tool_audit;
+          Alcotest.test_case
+            "snapshot lightweight summary keeps recent tools distinct from latest"
+            `Quick
+            Test_operator_control_snapshot
+            .test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest;
           Alcotest.test_case "snapshot waiters share inflight result" `Quick
             Test_operator_control_snapshot
             .test_snapshot_waiters_share_inflight_result;
@@ -57,6 +66,10 @@ let () =
             `Quick
             Test_operator_control_judgment
             .test_digest_room_ignores_stale_operator_judgment;
+          Alcotest.test_case
+            "guidance ignores unsupported target type" `Quick
+            Test_operator_control_judgment
+            .test_guidance_ignores_unsupported_target_type;
           Alcotest.test_case "operator judgment write and latest roundtrip"
             `Quick
             Test_operator_control_judgment

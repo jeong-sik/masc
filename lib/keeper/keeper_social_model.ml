@@ -75,12 +75,27 @@ let nonempty_opt value =
   let trimmed = String.trim value in
   if String.equal trimmed "" then None else Some trimmed
 
+let delivery_surface_view_of_meta (meta : Keeper_types.keeper_meta) =
+  match
+    Keeper_social_model_types.speech_act_of_string meta.runtime.last_speech_act
+  with
+  | Some speech_act ->
+      Some
+        (Keeper_social_model_types.default_delivery_surface_of_speech_act
+           speech_act)
+  | None -> None
+
+let delivery_surface_view_source_of_meta (meta : Keeper_types.keeper_meta) =
+  match
+    Keeper_social_model_types.speech_act_of_string meta.runtime.last_speech_act
+  with
+  | Some _ -> Some "derived_from_last_speech_act"
+  | None -> None
+
 let previous_state_of_meta (meta : Keeper_types.keeper_meta) =
   let runtime = meta.runtime in
   let speech_act =
-    match Keeper_social_model_types.speech_act_of_string runtime.last_speech_act with
-    | Some speech_act -> Some speech_act
-    | None -> None
+    Keeper_social_model_types.speech_act_of_string runtime.last_speech_act
   in
   let active_desire = nonempty_opt runtime.last_active_desire in
   let current_intention = nonempty_opt runtime.last_current_intention in
@@ -89,7 +104,22 @@ let previous_state_of_meta (meta : Keeper_types.keeper_meta) =
   match speech_act, active_desire, current_intention, blocker, need with
   | None, None, None, None, None -> None
   | _ ->
-      let speech_act = Option.value ~default:Inform speech_act in
+      (* #8605 family: when carry-state has any field but speech_act is
+         missing or unparseable, default to Inform (the neutral verb).
+         Warn so producer/consumer drift surfaces in operator logs --
+         a future speech_act constructor unknown to this build silently
+         became Inform before this was instrumented. *)
+      let speech_act =
+        match speech_act with
+        | Some v -> v
+        | None ->
+            let raw = runtime.last_speech_act in
+            if String.trim raw <> "" then
+              Log.Keeper.warn
+                "previous_state_of_meta: unparseable last_speech_act %S -> Inform (drift; see #8605)"
+                raw;
+            Keeper_social_model_types.Inform
+      in
       Some
         {
           social_model = normalize_social_model meta.social_model;

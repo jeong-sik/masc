@@ -932,7 +932,9 @@ let test_handle_request_tools_call_transition_claim_guidance () =
     Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
   in
   let steps = workflow_next_step_names response in
-  Alcotest.(check bool) "claim guidance includes plan_set_task" true
+  Alcotest.(check (option string)) "claim binds current_task" (Some "task-001")
+    (Masc_mcp.Planning_eio.get_current_task state.room_config);
+  Alcotest.(check bool) "claim guidance omits plan_set_task" false
     (List.mem "masc_plan_set_task" steps);
   cleanup_dir base_path
 
@@ -1526,6 +1528,150 @@ let test_execute_tool_generated_agent_name_uses_token_identity () =
   (* masc_auth_status tool pruned from registry; dispatch should fail. *)
   Alcotest.(check bool) "auth status fails (tool pruned)" false ok_status;
 
+  cleanup_dir base_path
+
+let check_task_still_todo config task_id =
+  match
+    Masc_mcp.Coord.get_tasks_raw config
+    |> List.find_opt (fun (task : Types.task) -> task.id = task_id)
+  with
+  | Some { Types.task_status = Types.Todo; _ } -> ()
+  | Some task ->
+      Alcotest.failf "expected %s to remain todo, got %s" task_id
+        (Types.task_status_to_string task.task_status)
+  | None -> Alcotest.failf "expected task %s to exist" task_id
+
+let check_auth_preflight_result ~tool_name ok msg =
+  Alcotest.(check bool) (tool_name ^ " rejected before handler") false ok;
+  Alcotest.(check bool) (tool_name ^ " reports auth/credential blocker") true
+    (contains_substring msg "Token required"
+     || contains_substring msg "Unauthorized"
+     || contains_substring msg "No credential")
+
+let test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  let raw_token =
+    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Types.Admin with
+    | Ok (token, _cred) -> token
+    | Error e -> Alcotest.fail (Types.masc_error_to_string e)
+  in
+  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"stable-admin" ~capabilities:[] ());
+  ignore
+    (Masc_mcp.Coord.add_task state.room_config ~title:"explicit-alias-claim-next"
+       ~priority:2 ~description:"");
+  let ok, msg =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
+      ~name:"masc_claim_next"
+      ~arguments:(`Assoc [ ("agent_name", `String "dashboard-eager-manta") ])
+  in
+  check_auth_preflight_result ~tool_name:"masc_claim_next" ok msg;
+  check_task_still_todo state.room_config "task-001";
+  cleanup_dir base_path
+
+let test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  let raw_token =
+    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Types.Admin with
+    | Ok (token, _cred) -> token
+    | Error e -> Alcotest.fail (Types.masc_error_to_string e)
+  in
+  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"stable-admin" ~capabilities:[] ());
+  ignore
+    (Masc_mcp.Coord.add_task state.room_config ~title:"explicit-alias-transition"
+       ~priority:2 ~description:"");
+  let ok, msg =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
+      ~name:"masc_transition"
+      ~arguments:
+        (`Assoc
+          [
+            ("agent_name", `String "dashboard-eager-manta");
+            ("task_id", `String "task-001");
+            ("action", `String "claim");
+          ])
+  in
+  check_auth_preflight_result ~tool_name:"masc_transition" ok msg;
+  check_task_still_todo state.room_config "task-001";
+  cleanup_dir base_path
+
+let test_execute_tool_claim_next_requires_auth_before_mutation () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
+  ignore
+    (Masc_mcp.Coord.add_task state.room_config ~title:"claim-next-auth-preflight"
+       ~priority:2 ~description:"");
+  let ok, msg =
+    Mcp_eio.execute_tool_eio ~sw ~clock state
+      ~name:"masc_claim_next"
+      ~arguments:(`Assoc [ ("agent_name", `String "uncredentialed-agent") ])
+  in
+  check_auth_preflight_result ~tool_name:"masc_claim_next" ok msg;
+  check_task_still_todo state.room_config "task-001";
+  Alcotest.(check (option string)) "no current task after rejected claim_next" None
+    (Masc_mcp.Planning_eio.get_current_task state.room_config);
+  cleanup_dir base_path
+
+let test_execute_tool_transition_requires_auth_before_mutation () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
+  ignore
+    (Masc_mcp.Coord.add_task state.room_config ~title:"transition-auth-preflight"
+       ~priority:2 ~description:"");
+  let ok, msg =
+    Mcp_eio.execute_tool_eio ~sw ~clock state
+      ~name:"masc_transition"
+      ~arguments:
+        (`Assoc
+          [
+            ("agent_name", `String "uncredentialed-agent");
+            ("task_id", `String "task-001");
+            ("action", `String "claim");
+          ])
+  in
+  check_auth_preflight_result ~tool_name:"masc_transition" ok msg;
+  check_task_still_todo state.room_config "task-001";
+  Alcotest.(check (option string)) "no current task after rejected transition" None
+    (Masc_mcp.Planning_eio.get_current_task state.room_config);
   cleanup_dir base_path
 
 let test_execute_tool_mcp_session_ignores_term_persistence () =
@@ -2513,6 +2659,14 @@ let eio_tests = [
   "explicit alias reuses joined nickname", `Quick, test_execute_tool_explicit_alias_reuses_joined_nickname;
   "generated agent_name uses token identity", `Quick,
     test_execute_tool_generated_agent_name_uses_token_identity;
+  "explicit generated alias claim_next not rewritten by token", `Quick,
+    test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token;
+  "explicit generated alias transition not rewritten by token", `Quick,
+    test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token;
+  "claim_next auth preflight blocks mutation", `Quick,
+    test_execute_tool_claim_next_requires_auth_before_mutation;
+  "transition auth preflight blocks mutation", `Quick,
+    test_execute_tool_transition_requires_auth_before_mutation;
   "mcp session ignores term persistence", `Quick, test_execute_tool_mcp_session_ignores_term_persistence;
   (* Legacy governance convo room test removed *)
 ]

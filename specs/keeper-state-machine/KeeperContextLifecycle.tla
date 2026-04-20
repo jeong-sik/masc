@@ -54,6 +54,35 @@ vars == <<keeper_phase, turn_number, context_id, context_tokens, message_count,
           tool_pairs, ckpt_ctx_id, ckpt_turn, ckpt_valid,
           resume_ctx_id, fail_count, next_ctx_id>>
 
+\* Issue #8701: explicit OCaml ↔ TLA+ mapping for the context lifecycle
+\* abstraction. SSOT for OCaml side is lib/keeper/keeper_state_machine.ml
+\* (12 phases). This spec intentionally collapses the 12 OCaml phases into
+\* a 7-symbol alphabet because the context-lifecycle invariants do not
+\* depend on transport/handoff details.
+\*
+\* Mapping (#8979: spec-internal abstract names — five of seven do NOT
+\* match phase_to_string output verbatim; two ("running", "compacting")
+\* coincide with the wire format):
+\*
+\*   spec name         ↔ OCaml constructor   (phase_to_string output)
+\*   ------------------+----------------------+----------------------
+\*   "idle"            ↔ Offline               ("offline")
+\*   "running"         ↔ Running               ("running")          *
+\*   "compacting"      ↔ Compacting            ("compacting")       *
+\*   "overflow_retry"  ↔ Overflowed            ("overflowed")
+\*   "done"            ↔ Stopped               ("stopped")
+\*   "error"           ↔ Failing | Crashed     ("failing"|"crashed")
+\*   "dead"            ↔ Dead                  ("dead")             *
+\*       * = spec name and wire format coincide.
+\*
+\* If trace-driven model checking is later added, the spec strings would
+\* need to be renamed to match the wire format.  Until then, treat the
+\* table above as the authoritative abstraction function.
+\*
+\* Unmodeled here (covered in companion specs):
+\*   HandingOff, Draining, Paused, Restarting
+\* See KeeperGenerationLineage.tla for HandingOff and
+\*     KeeperReconcileLiveness.tla for Paused/Restarting/Draining.
 Phases == {"idle", "running", "compacting", "overflow_retry", "done", "error", "dead"}
 
 \* ── Initial State ────────────────────────────────────────
@@ -118,7 +147,11 @@ TurnProducesOutput(k) ==
                    ckpt_turn, ckpt_valid, resume_ctx_id, fail_count, next_ctx_id>>
 
 \* 3. Token Budget Exceeded: running -> overflow_retry
-\*    Models TokenBudgetExceeded(Input) in keeper_unified_turn.ml:65
+\*    Models TokenBudgetExceeded(Input) recognised in
+\*    keeper_unified_turn.ml:318 (`is_input_overflow` pattern matcher)
+\*    and handled by the per-turn overflow path at line 455. Verified
+\*    2026-04-20: line 65 was a stale anchor predating the @since 2.256.0
+\*    extension that broadened TokenBudgetExceeded handling.
 TokenBudgetExceeded(k) ==
     /\ keeper_phase[k] = "running"
     /\ context_tokens[k] > MaxTokens

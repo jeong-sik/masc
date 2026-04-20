@@ -68,9 +68,21 @@ let limit_for_category config = function
   | BroadcastLimit -> config.broadcast_per_minute
   | TaskOpsLimit -> config.task_ops_per_minute
 
-(** Map tool to rate limit category *)
-let category_for_tool = function
-  | "masc_broadcast" -> BroadcastLimit
+(** Map tool to rate limit category — strict classifier.
+
+    Returns [None] for tools not explicitly bucketed.  Callers should
+    apply [GeneralLimit] as the documented default (see
+    [category_for_tool] wrapper below).  #8605 family: split into
+    sound-partial + explicit caller default so unknown tool names are
+    no longer silently absorbed inside the match. *)
+let category_for_tool_opt = function
+  | "masc_broadcast" -> Some BroadcastLimit
+  (* plan_set_task / plan_clear_task added in #8873: per-task plan-slot
+     writes are semantically equivalent to set_current_task /
+     complete_task, so they belong to the same TaskOpsLimit (30/min)
+     bucket rather than silently falling through to GeneralLimit
+     (10/min). masc_batch_add_tasks intentionally omitted pending a
+     maintainer call on whether a batch burns 1 or N tokens. *)
   | "masc_add_task"
   | "masc_claim_next"
   | "masc_claim_task"
@@ -79,8 +91,18 @@ let category_for_tool = function
   | "masc_release_task"
   | "masc_cancel_task"
   | "masc_update_priority"
-  | "masc_transition" -> TaskOpsLimit
-  | _ -> GeneralLimit
+  | "masc_plan_set_task"
+  | "masc_plan_clear_task"
+  | "masc_transition" -> Some TaskOpsLimit
+  | _ -> None
+
+(** Back-compat wrapper: documented default for tools not explicitly
+    bucketed is [GeneralLimit].  Behaviour identical to the previous
+    catch-all match.  Kept stable for existing callers. *)
+let category_for_tool tool =
+  match category_for_tool_opt tool with
+  | Some category -> category
+  | None -> GeneralLimit
 
 (** Rate limit error - returned when limit exceeded *)
 type rate_limit_error = {

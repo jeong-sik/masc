@@ -62,7 +62,7 @@ val task_transition_details :
 
 val observe_task_transition :
   config -> agent_name:string -> task_id:string ->
-  transition:string -> details:Yojson.Safe.t -> unit
+  transition:Types.task_action -> details:Yojson.Safe.t -> unit
 
 (** {1 Task creation} *)
 

@@ -1,4 +1,4 @@
-open Result_syntax
+open Result.Syntax
 
 module SMap = Map.Make(String)
 

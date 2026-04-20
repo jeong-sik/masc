@@ -22,7 +22,11 @@
 \*
 \* Design intent
 \*   1. shared_measurement is the coordination hub (Context_measured event,
-\*      Keeper_state_machine.mli:131-136, auto_rules_summary).
+\*      Keeper_state_machine.mli:139-144 [type event / Context_measured],
+\*      auto_rules_summary). Verified 2026-04-20: lines 131-136 reference
+\*      a NoDrainTransition / GhostDispatch *.mli docstring callout, not
+\*      the event type. Anchor here is the [type event] declaration that
+\*      starts at line 139 with [Context_measured] at line 144.
 \*   2. The 12-state parent phase from RFC-0002 is projected to the
 \*      7-element set
 \*      {Running, Failing, Overflowed, Compacting, HandingOff, Draining,

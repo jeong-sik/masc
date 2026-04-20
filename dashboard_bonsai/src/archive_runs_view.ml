@@ -211,13 +211,13 @@ stylesheet
   }
 |}]
 
-let pill_class : Archive_runs_types.status -> Attr.t = function
-  | Running -> Style.pill_running
-  | Completed -> Style.pill_completed
-  | Failed -> Style.pill_failed
-  | Stopped -> Style.pill_stopped
-  | Paused -> Style.pill_paused
-  | Unknown -> Style.pill_unknown
+let pill_color : Archive_runs_types.status -> Pill.color = function
+  | Running -> `Ok
+  | Completed -> `Brass
+  | Failed -> `Bad
+  | Stopped -> `Paused
+  | Paused -> `Warn
+  | Unknown -> `Neutral
 ;;
 
 let hhmmss_of_epoch (t : float) : string =
@@ -259,9 +259,10 @@ let view_loop (l : Archive_runs_types.loop) =
   let discards = l.total_discards in
   Node.div
     ~attrs:[ Style.loop ]
-    [ Node.span
-        ~attrs:[ Style.pill; pill_class l.status ]
-        [ Node.text (Archive_runs_types.status_label l.status) ]
+    [ Pill.view
+        ~color:(pill_color l.status)
+        ~label:(Archive_runs_types.status_label l.status)
+        ()
     ; Node.div
         ~attrs:[ Style.goal ]
         (List.concat

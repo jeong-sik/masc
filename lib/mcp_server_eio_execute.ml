@@ -201,9 +201,15 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
   let agent_name =
     match token with
-    (* Generated dashboard/session aliases should not outrank the
-       credential owner encoded by the bearer token. *)
-    | Some t when is_transient_agent_name agent_name ->
+    (* Explicit agent_name is the caller's SSOT for this request.
+       Rewriting an explicit generated alias to the bearer-token owner
+       makes mutation paths operate under a different identity than the
+       one shown in join/status/debug output, which is exactly the
+       #8892 joined/debug/credential-route drift. Keep the explicit
+       alias and let auth preflight reject it if the token does not
+       authorize that identity. We only fall back to token ownership
+       when the request did not explicitly name an agent. *)
+    | Some t when (not has_explicit_agent_name) && is_transient_agent_name agent_name ->
         (match Auth.resolve_agent_from_token config.base_path ~token:t with
          | Ok resolved -> resolved
          | Error _ -> agent_name)

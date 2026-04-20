@@ -108,7 +108,8 @@ let tcp_port_reachable port =
       ~finally:(fun () -> try Unix.close sock with _ -> ())
       (fun () ->
         Unix.connect sock
-          (Unix.ADDR_INET (Unix.inet_addr_of_string "127.0.0.1", port));
+          (Unix.ADDR_INET
+             (Unix.inet_addr_of_string Masc_network_defaults.masc_http_default_host, port));
         true)
   with _ -> false
 

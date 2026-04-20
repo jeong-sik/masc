@@ -1058,16 +1058,49 @@ let handle_keeper_bash
                  let argv_merged =
                    [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ]
                  in
+                 (* Tick 23: AUTO_BG dark-launch observer.  When
+                    [MASC_BASH_AUTO_BG_OBSERVE] is set, time the
+                    foreground run and emit a structured log line
+                    if the elapsed duration would have tripped the
+                    blocking budget had [MASC_BASH_AUTO_BG] been
+                    on.  No behavior change; cheap measurement
+                    feeds future default-flip decisions. *)
+                 let auto_bg_observe_enabled =
+                   match Sys.getenv_opt "MASC_BASH_AUTO_BG_OBSERVE" with
+                   | Some ("1" | "true" | "TRUE" | "yes" | "on" | "log") -> true
+                   | _ -> false
+                 in
                  match
                    if auto_bg_enabled
                    then Eio_context.get_clock_opt ()
                    else None
                  with
                  | None ->
+                   let t0 =
+                     if auto_bg_observe_enabled && not auto_bg_enabled
+                     then Unix.gettimeofday ()
+                     else 0.0
+                   in
                    let st, out =
                      Process_eio.run_argv_with_status
                        ~cwd ~timeout_sec argv_merged
                    in
+                   (if auto_bg_observe_enabled && not auto_bg_enabled then begin
+                      let duration_ms =
+                        int_of_float ((Unix.gettimeofday () -. t0) *. 1000.)
+                      in
+                      let budget_ms =
+                        Masc_exec.Exec_run.default_budget_ms ()
+                      in
+                      if duration_ms >= budget_ms then
+                        Log.Keeper.info
+                          "auto_bg_would_have_promoted keeper=%s \
+                           cmd_hash=%s duration_ms=%d budget_ms=%d"
+                          meta.name
+                          (Worker_dev_tools.cmd_hash_for_log cmd)
+                          duration_ms
+                          budget_ms
+                    end);
                    Yojson.Safe.to_string
                      (Exec_core.process_result_json
                         ~base_path:root

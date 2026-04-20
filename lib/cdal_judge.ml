@@ -323,6 +323,16 @@ let go_test_count ~tag out =
   let needle = "--- " ^ tag ^ ":" in
   count_sub out needle
 
+(* jest / vitest characteristic summary banners.  jest prints a
+   "Test Suites:" section header; vitest prints "Test Files" (no
+   colon, ASCII space follows).  Both tokens are runner-specific —
+   no other runner in this module's scope emits them — so arbitrary
+   stdout prose mentioning "Tests" or "passed" cannot false-positive
+   without at least one of these banners present. *)
+let looks_like_jest_vitest out =
+  contains_sub out "Test Suites:" ||
+  contains_sub out "Test Files "
+
 (* Test count extraction.  Alcotest / cargo-test lines commonly look
    like one of:
 
@@ -419,6 +429,43 @@ let pytest_count_from_output ~tag out =
   in
   per_line (split_lines out)
 
+(* jest / vitest count extraction.  Both runners emit a "Tests" line
+   in their final summary:
+
+     jest   — "Tests:       3 passed, 3 total"
+     jest   — "Tests:       2 failed, 1 passed, 3 total"
+     vitest — "     Tests  5 passed (5)"
+     vitest — "     Tests  2 failed | 3 passed (5)"
+
+   Strategy: per line, require the line to contain the literal
+   "Tests" (matches jest's "Tests:" and vitest's bare "Tests"),
+   locate " <tag>" (" passed" or " failed"), and read the int that
+   precedes it.  This correctly extracts per-tag counts from vitest's
+   pipe-delimited failure lines without double-counting the totals.
+   The banner check (`looks_like_jest_vitest`) has already gated the
+   caller so bare prose cannot reach this function. *)
+let jest_vitest_count ~tag out =
+  let rec per_line = function
+    | [] -> 0
+    | line :: rest ->
+        let is_tests_line =
+          match find_sub_in line "Tests" with
+          | Some _ -> true
+          | None -> false
+        in
+        if is_tests_line then begin
+          let needle = " " ^ tag in
+          match find_sub_in line needle with
+          | None -> per_line rest
+          | Some pos ->
+              (match first_int_before line pos with
+               | Some n -> n
+               | None -> per_line rest)
+        end
+        else per_line rest
+  in
+  per_line (split_lines out)
+
 let test_count_from_output out =
   let markers_before = [ "tests run"; "tests passed"; "test passed" ] in
   let markers_after = [ "test result: ok. "; "passed:" ] in
@@ -459,6 +506,9 @@ let of_exec_outcome ~semantic ~stdout ~stderr =
       else if looks_like_pytest out then
         let n = pytest_count_from_output ~tag:"passed" out in
         [ Test_pass { count = n; confidence = `Heuristic } ]
+      else if looks_like_jest_vitest out then
+        let n = jest_vitest_count ~tag:"passed" out in
+        [ Test_pass { count = n; confidence = `Heuristic } ]
       else if looks_like_dune_runtest out then
         let n = test_count_from_output out in
         [ Test_pass { count = n; confidence = `Heuristic } ]
@@ -487,6 +537,9 @@ let of_exec_outcome ~semantic ~stdout ~stderr =
         [ Test_fail { count = n; confidence = `Heuristic } ]
       else if looks_like_pytest out then
         let n = pytest_count_from_output ~tag:"failed" out in
+        [ Test_fail { count = n; confidence = `Heuristic } ]
+      else if looks_like_jest_vitest out then
+        let n = jest_vitest_count ~tag:"failed" out in
         [ Test_fail { count = n; confidence = `Heuristic } ]
       else if looks_like_dune_runtest out then
         let n = test_count_from_output out in

@@ -3,6 +3,26 @@
 
 ## Unreleased
 
+### Added
+
+- **`Cdal_judge` jest / vitest classifier.**  `of_exec_outcome`
+  now emits typed `Test_pass {count}` / `Test_fail {count}`
+  markers for jest and vitest runner output in addition to dune,
+  cargo, alcotest, pytest, and go test.  Detection anchors on the
+  runner-specific summary banners — `Test Suites:` for jest,
+  `Test Files ` for vitest — so bare prose or user-visible text
+  mentioning "Tests" or "passed" cannot false-positive.  Count is
+  extracted from the `Tests:` / `Tests` summary line by scanning
+  for " passed" / " failed" and reading the int immediately
+  before the tag.  This correctly handles vitest's pipe-delimited
+  failure lines (`Tests  2 failed | 3 passed (5)` →
+  `Test_fail {count=2}`).  Banner-required behaviour is covered
+  by a dedicated negative test (`test_jest_vitest_banner_
+  required`).  Verifier cascade now covers dune + cargo + pytest
+  + go test + jest + vitest, bringing JavaScript-ecosystem
+  runner output (Kidsnote FE repos, most npm projects) into the
+  same typed-marker surface the rest of the cascade consumes.
+
 ## [0.12.0] - 2026-04-20
 
 ### Added

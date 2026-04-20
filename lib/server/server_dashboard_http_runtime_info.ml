@@ -68,7 +68,20 @@ let git_rev_parse_short_cache :
     (string, string option * float) Hashtbl.t =
   Hashtbl.create 4
 
+let git_rev_parse_short_in_flight : (string, unit) Hashtbl.t =
+  Hashtbl.create 4
+
 let git_rev_parse_short_mu = Stdlib.Mutex.create ()
+
+let git_rev_parse_short_probe_hook_for_tests :
+    (string -> string option) option Atomic.t =
+  Atomic.make None
+
+let set_git_rev_parse_short_probe_hook_for_tests hook =
+  Atomic.set git_rev_parse_short_probe_hook_for_tests (Some hook)
+
+let clear_git_rev_parse_short_probe_hook_for_tests () =
+  Atomic.set git_rev_parse_short_probe_hook_for_tests None
 
 let git_rev_parse_short_cached_lookup dir ~now =
   Stdlib.Mutex.lock git_rev_parse_short_mu;
@@ -80,26 +93,79 @@ let git_rev_parse_short_cached_lookup dir ~now =
           Some value
       | _ -> None)
 
-let git_rev_parse_short_cache_store dir value ~now =
+let git_rev_parse_short_cached_any dir =
   Stdlib.Mutex.lock git_rev_parse_short_mu;
   Fun.protect
     ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
     (fun () ->
-      Hashtbl.replace git_rev_parse_short_cache dir (value, now))
+      Hashtbl.find_opt git_rev_parse_short_cache dir
+      |> Option.map fst)
+
+let git_rev_parse_short_try_begin_refresh dir =
+  Stdlib.Mutex.lock git_rev_parse_short_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
+    (fun () ->
+      if Hashtbl.mem git_rev_parse_short_in_flight dir then false
+      else begin
+        Hashtbl.replace git_rev_parse_short_in_flight dir ();
+        true
+      end)
+
+let git_rev_parse_short_finish_refresh dir value ~now =
+  Stdlib.Mutex.lock git_rev_parse_short_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
+    (fun () ->
+      Hashtbl.replace git_rev_parse_short_cache dir (value, now);
+      Hashtbl.remove git_rev_parse_short_in_flight dir)
+
+let git_rev_parse_short_cancel_refresh dir =
+  Stdlib.Mutex.lock git_rev_parse_short_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
+    (fun () -> Hashtbl.remove git_rev_parse_short_in_flight dir)
 
 let git_rev_parse_short_probe dir =
-  let argv = [ "git"; "-C"; dir; "rev-parse"; "--short"; "HEAD" ] in
-  let raw_source = String.concat " " (List.map Filename.quote argv) in
-  match
-    Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"system/runtime_info"
-      ~raw_source
-      ~summary:"dashboard runtime git probe"
-      ~timeout_sec:5.0
-      argv
+  match Atomic.get git_rev_parse_short_probe_hook_for_tests with
+  | Some hook -> hook dir
+  | None ->
+      let argv = [ "git"; "-C"; dir; "rev-parse"; "--short"; "HEAD" ] in
+      let raw_source = String.concat " " (List.map Filename.quote argv) in
+      match
+        Masc_exec.Exec_gate.run_argv_with_status
+          ~actor:"system/runtime_info"
+          ~raw_source
+          ~summary:"dashboard runtime git probe"
+          ~timeout_sec:5.0
+          argv
+      with
+      | Unix.WEXITED 0, output -> trim_to_option output
+      | _ -> None
+
+let git_rev_parse_short_refresh dir =
+  try
+    let value = git_rev_parse_short_probe dir in
+    git_rev_parse_short_finish_refresh dir value ~now:(Time_compat.now ());
+    value
   with
-  | Unix.WEXITED 0, output -> trim_to_option output
-  | _ -> None
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      git_rev_parse_short_cancel_refresh dir;
+      raise exn
+
+let maybe_refresh_git_rev_parse_short_in_background dir =
+  match Eio_context.get_switch_opt () with
+  | None -> ()
+  | Some sw ->
+      if git_rev_parse_short_try_begin_refresh dir then
+        Eio.Fiber.fork ~sw (fun () ->
+          try ignore (git_rev_parse_short_refresh dir) with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+              Log.Dashboard.warn
+                "dashboard runtime git probe refresh failed for %s: %s"
+                dir (Printexc.to_string exn))
 
 let git_rev_parse_short path =
   match trim_to_option path with
@@ -109,16 +175,32 @@ let git_rev_parse_short path =
       let now = Time_compat.now () in
       (match git_rev_parse_short_cached_lookup dir ~now with
        | Some value -> value
-       | None ->
-           let value = git_rev_parse_short_probe dir in
-           git_rev_parse_short_cache_store dir value ~now;
-           value)
+       | None -> (
+           match git_rev_parse_short_cached_any dir with
+           | Some stale ->
+               maybe_refresh_git_rev_parse_short_in_background dir;
+               stale
+           | None ->
+               if git_rev_parse_short_try_begin_refresh dir then
+                 git_rev_parse_short_refresh dir
+               else
+                 git_rev_parse_short_cached_any dir |> Option.value ~default:None))
 
 let clear_git_rev_parse_short_cache_for_tests () =
   Stdlib.Mutex.lock git_rev_parse_short_mu;
   Fun.protect
     ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
-    (fun () -> Hashtbl.clear git_rev_parse_short_cache)
+    (fun () ->
+      Hashtbl.clear git_rev_parse_short_cache;
+      Hashtbl.clear git_rev_parse_short_in_flight)
+
+let seed_git_rev_parse_short_cache_for_tests dir value ~refreshed_at =
+  Stdlib.Mutex.lock git_rev_parse_short_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
+    (fun () ->
+      Hashtbl.replace git_rev_parse_short_cache dir (value, refreshed_at);
+      Hashtbl.remove git_rev_parse_short_in_flight dir)
 
 let path_item_json ~source path =
   `Assoc

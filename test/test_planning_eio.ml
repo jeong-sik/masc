@@ -146,6 +146,87 @@ let test_update_plan () =
   | Error e ->
       fail (Printf.sprintf "Update plan failed: %s" e)
 
+let test_update_plan_full_context_syncs_deliverable () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = make_config () in
+  (match Planning_eio.init config ~task_id:"update-plan-full-context" with
+   | Ok _ -> ()
+   | Error e -> fail (Printf.sprintf "Init failed: %s" e));
+  let stale_deliverable = "Task-163 completed. Stale deliverable." in
+  (match
+     Planning_eio.set_deliverable config ~task_id:"update-plan-full-context"
+       ~content:stale_deliverable
+   with
+   | Ok _ -> ()
+   | Error e -> fail (Printf.sprintf "Set deliverable failed: %s" e));
+  let full_context =
+    {|# Planning Context: update-plan-full-context
+
+## Task Plan (PDCA: Plan)
+- Fix owned/current drift in the MASC task control plane.
+
+## Notes & Observations (PDCA: Do)
+_No notes yet_
+
+## Errors & Failures (PDCA: Check)
+### Unresolved (0)
+_No unresolved errors_
+
+### Resolved (0)
+_No resolved errors_
+
+## Deliverable (PDCA: Act)
+In progress. Do not treat task-163 as completed.
+
+---
+*Created: 2026-04-20T00:00:00Z | Updated: 2026-04-20T00:00:01Z*
+|}
+  in
+  match
+    Planning_eio.update_plan config ~task_id:"update-plan-full-context"
+      ~content:full_context
+  with
+  | Error e -> fail (Printf.sprintf "Full context update failed: %s" e)
+  | Ok ctx ->
+      check string "task_plan extracted"
+        "- Fix owned/current drift in the MASC task control plane."
+        ctx.task_plan;
+      check string "deliverable synced"
+        "In progress. Do not treat task-163 as completed."
+        ctx.deliverable;
+      let deliverable_path =
+        Filename.concat !temp_dir
+          "planning/update-plan-full-context/deliverable.md"
+      in
+      let deliverable_file =
+        let ic = open_in deliverable_path in
+        Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+          really_input_string ic (in_channel_length ic))
+      in
+      check string "deliverable file synced"
+        "In progress. Do not treat task-163 as completed."
+        deliverable_file;
+      (match
+         Planning_eio.load config ~task_id:"update-plan-full-context"
+       with
+       | Error e -> fail (Printf.sprintf "Load after full context update failed: %s" e)
+       | Ok loaded ->
+           check string "loaded deliverable synced"
+             "In progress. Do not treat task-163 as completed."
+             loaded.deliverable;
+           let markdown = Planning_eio.get_context_markdown loaded in
+           let contains substr =
+             try
+               ignore (Str.search_forward (Str.regexp_string substr) markdown 0);
+               true
+             with Not_found -> false
+           in
+           check bool "markdown contains new deliverable" true
+             (contains "In progress. Do not treat task-163 as completed.");
+           check bool "markdown excludes stale deliverable" false
+             (contains stale_deliverable))
+
 let test_add_note () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -332,6 +413,8 @@ let () =
       test_case "load" `Quick test_load;
       test_case "load_nonexistent" `Quick test_load_nonexistent;
       test_case "update_plan" `Quick test_update_plan;
+      test_case "update_plan_full_context_syncs_deliverable" `Quick
+        test_update_plan_full_context_syncs_deliverable;
       test_case "add_note" `Quick test_add_note;
       test_case "set_deliverable" `Quick test_set_deliverable;
       test_case "set_deliverable_auto_init" `Quick test_set_deliverable_auto_init;

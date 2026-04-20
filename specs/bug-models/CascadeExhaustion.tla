@@ -1,14 +1,26 @@
 ---- MODULE CascadeExhaustion ----
 \* Bug Model: Cascade accept_on_exhaustion paradox.
 \*
-\* Models cascade_executor.ml:complete_cascade_with_accept.
-\* When accept_on_exhaustion=TRUE and ALL providers return Ok but are
+\* Models lib/cascade/cascade_fsm.ml:decide (formerly
+\* cascade_executor.ml:complete_cascade_with_accept). When
+\* accept_on_exhaustion=TRUE and ALL providers return Ok but are
 \* rejected by accept, the last provider's response should be accepted.
 \*
 \* Bug hypothesis: the last provider returns Error (not Ok), so
 \* accept_on_exhaustion never fires.  The error message says
 \* "rejected by accept validator" because the PREVIOUS Ok response
 \* was rejected, and that becomes last_err.
+\*
+\* Actual code (verified 2026-04-20):
+\*   lib/cascade/cascade_fsm.ml:21   let decide ~accept_on_exhaustion ~is_last
+\*   lib/cascade/cascade_fsm.ml:29   if is_last && accept_on_exhaustion then ...
+\*   lib/cascade/cascade_fsm.mli:37  accept_on_exhaustion:bool ->
+\*   lib/cascade/cascade_fsm.mli:45  Accept_rejected _ on last + accept_on_exhaustion -> Accept_on_exhaustion
+\*
+\* (Path/symbol drift: cascade_executor.ml:complete_cascade_with_accept
+\*  was extracted into the cascade FSM module + decide function when
+\*  the lib/cascade/ subdir was created. Recorded for cross-reference;
+\*  see also #9011.)
 
 EXTENDS Naturals, Sequences, FiniteSets
 

@@ -602,6 +602,49 @@ let test_isoish_lexical_matches_chronological () =
   check int "equal timestamps compare zero" 0
     (String.compare earlier (Routes.isoish_at 1_000_000.0))
 
+(* ── retry_backoff_active (#8930 phase 3) ──────────────────────────────
+   After phase 3, [retry_backoff_active] parses both [next_retry_at] and
+   [now] via [Types_core.parse_iso8601_opt] and compares float unix-epoch
+   values. If either side is malformed the function returns false
+   (fail-closed) so a broken sidecar record retries instead of stalling. *)
+
+let make_attempt ~next_retry_at =
+  Routes.{
+    connector_id = "discord";
+    generation = 1;
+    attempt_id = "1:1";
+    attempt_number = 1;
+    last_attempt_result = "start_dispatched";
+    next_retry_at;
+    operator_next_action = "none";
+    updated_at = "2026-01-01T00:00:00Z";
+  }
+
+let test_retry_backoff_active_before_deadline () =
+  let attempt = make_attempt ~next_retry_at:(Some "2026-01-01T00:00:30Z") in
+  check bool "now < next_retry_at → backoff active" true
+    (Routes.retry_backoff_active ~now:"2026-01-01T00:00:00Z" attempt)
+
+let test_retry_backoff_inactive_after_deadline () =
+  let attempt = make_attempt ~next_retry_at:(Some "2026-01-01T00:00:00Z") in
+  check bool "now > next_retry_at → backoff expired" false
+    (Routes.retry_backoff_active ~now:"2026-01-01T00:00:30Z" attempt)
+
+let test_retry_backoff_inactive_when_no_deadline () =
+  let attempt = make_attempt ~next_retry_at:None in
+  check bool "next_retry_at=None → backoff inactive" false
+    (Routes.retry_backoff_active ~now:"2026-01-01T00:00:00Z" attempt)
+
+let test_retry_backoff_fail_closed_on_malformed_next () =
+  let attempt = make_attempt ~next_retry_at:(Some "not-an-iso-stamp") in
+  check bool "malformed next_retry_at → fail-closed" false
+    (Routes.retry_backoff_active ~now:"2026-01-01T00:00:00Z" attempt)
+
+let test_retry_backoff_fail_closed_on_malformed_now () =
+  let attempt = make_attempt ~next_retry_at:(Some "2026-01-01T00:00:30Z") in
+  check bool "malformed now → fail-closed" false
+    (Routes.retry_backoff_active ~now:"not-an-iso-stamp" attempt)
+
 let () =
   run "sidecar_lifecycle_routes"
     [
@@ -686,5 +729,18 @@ let () =
             test_isoish_at_epoch_round_trip;
           test_case "lexical compare matches chronological order" `Quick
             test_isoish_lexical_matches_chronological;
+        ] );
+      ( "retry_backoff_active (#8930 phase 3)",
+        [
+          test_case "now before deadline → active" `Quick
+            test_retry_backoff_active_before_deadline;
+          test_case "now after deadline → inactive" `Quick
+            test_retry_backoff_inactive_after_deadline;
+          test_case "no deadline → inactive" `Quick
+            test_retry_backoff_inactive_when_no_deadline;
+          test_case "malformed next_retry_at → fail-closed" `Quick
+            test_retry_backoff_fail_closed_on_malformed_next;
+          test_case "malformed now → fail-closed" `Quick
+            test_retry_backoff_fail_closed_on_malformed_now;
         ] );
     ]

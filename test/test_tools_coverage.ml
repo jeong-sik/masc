@@ -209,6 +209,50 @@ let test_masc_add_task_schema () =
           Alcotest.(check bool) "has contract" true (List.mem_assoc "contract" props)
       | None -> Alcotest.fail "masc_add_task missing properties"
 
+let test_masc_goal_list_schema () =
+  match find_tool "masc_goal_list" with
+  | None -> Alcotest.fail "masc_goal_list not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has horizon" true (List.mem_assoc "horizon" props);
+          Alcotest.(check bool) "has status" true (List.mem_assoc "status" props)
+      | None -> Alcotest.fail "masc_goal_list missing properties"
+
+let test_masc_goal_upsert_schema () =
+  match find_tool "masc_goal_upsert" with
+  | None -> Alcotest.fail "masc_goal_upsert not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has id" true (List.mem_assoc "id" props);
+          Alcotest.(check bool) "has title" true (List.mem_assoc "title" props);
+          Alcotest.(check bool) "has horizon" true (List.mem_assoc "horizon" props);
+          Alcotest.(check bool) "has parent_goal_id" true
+            (List.mem_assoc "parent_goal_id" props)
+      | None -> Alcotest.fail "masc_goal_upsert missing properties"
+
+let test_masc_goal_review_schema () =
+  match find_tool "masc_goal_review" with
+  | None -> Alcotest.fail "masc_goal_review not found"
+  | Some schema ->
+      (match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has goal_id" true
+            (List.mem_assoc "goal_id" props);
+          Alcotest.(check bool) "has outcome" true
+            (List.mem_assoc "outcome" props);
+          Alcotest.(check bool) "has new_horizon" true
+            (List.mem_assoc "new_horizon" props)
+      | None -> Alcotest.fail "masc_goal_review missing properties");
+      match get_json_list "required" schema.input_schema with
+      | Some reqs ->
+          Alcotest.(check bool) "goal_id required" true
+            (List.mem (`String "goal_id") reqs);
+          Alcotest.(check bool) "outcome required" true
+            (List.mem (`String "outcome") reqs)
+      | None -> Alcotest.fail "masc_goal_review missing required field"
+
 let test_remote_operator_action_schema_is_strict () =
   let schema =
     match List.find_opt (fun schema -> schema.name = "masc_operator_action")
@@ -733,6 +777,11 @@ let () =
       Alcotest.test_case "plan_update" `Quick test_masc_plan_update_schema;
       Alcotest.test_case "plan_get" `Quick test_masc_plan_get_schema;
       Alcotest.test_case "deliver" `Quick test_masc_deliver_schema;
+    ];
+    "goal_tools", [
+      Alcotest.test_case "goal_list" `Quick test_masc_goal_list_schema;
+      Alcotest.test_case "goal_upsert" `Quick test_masc_goal_upsert_schema;
+      Alcotest.test_case "goal_review" `Quick test_masc_goal_review_schema;
     ];
     "vote_tools", [
     ];

@@ -12,10 +12,10 @@
 \* was rejected, and that becomes last_err.
 \*
 \* Actual code (verified 2026-04-20):
-\*   lib/cascade/cascade_fsm.ml:21   let decide ~accept_on_exhaustion ~is_last
-\*   lib/cascade/cascade_fsm.ml:29   if is_last && accept_on_exhaustion then ...
-\*   lib/cascade/cascade_fsm.mli:37  accept_on_exhaustion:bool ->
-\*   lib/cascade/cascade_fsm.mli:45  Accept_rejected _ on last + accept_on_exhaustion -> Accept_on_exhaustion
+\*   lib/cascade/cascade_fsm.ml:decide   — accept_on_exhaustion/is_last guard
+\*     (if is_last && accept_on_exhaustion then Accept_on_exhaustion, else Exhausted)
+\*   lib/cascade/cascade_fsm.mli:decide  — signature + doc comment spelling out
+\*     "Accept_rejected on last + accept_on_exhaustion -> Accept_on_exhaustion"
 \*
 \* (Path/symbol drift: cascade_executor.ml:complete_cascade_with_accept
 \*  was extracted into the cascade FSM module + decide function when

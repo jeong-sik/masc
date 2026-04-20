@@ -13,9 +13,9 @@
 \* iteration is stuck on the blocking add.
 \*
 \* Actual code (verified 2026-04-20):
-\*   lib/sse.ml:608  let broadcast_impl target json
-\*   lib/sse.ml:637  Eio.Stream.add client.event_stream event (blocking!)
-\*   lib/sse.ml:649  List.iter unregister !failed (too late)
+\*   lib/sse.ml:broadcast_impl — target/json entry point
+\*     (inside) Eio.Stream.add client.event_stream event (blocking!)
+\*     (after loop) List.iter unregister !failed (too late)
 \*
 \* (Line drift since spec authoring: previously cited :471 and :483.
 \*  ~165-line shift due to file growth. Recorded for cross-reference.)

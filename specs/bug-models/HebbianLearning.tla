@@ -13,11 +13,11 @@
 \* since that operation loaded (graph_version == load_version + 1).
 \*
 \* Reference (verified 2026-04-20):
-\*   lib/hebbian_eio.ml:264  let strengthen — wraps body in
-\*                            with_graph_lock config (load -> compute -> save).
+\*   lib/hebbian_eio.ml:strengthen — wraps body in with_graph_lock config
+\*     (load -> compute -> save).
 \*   The lock-required pattern is enforced by call-site convention
-\*   (every public mutator calls with_graph_lock); there is no
-\*   inline docstring at lines 268-275.
+\*   (every public mutator calls with_graph_lock); there is no inline
+\*   docstring inside the strengthen body.
 
 EXTENDS Naturals
 

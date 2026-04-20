@@ -21,11 +21,6 @@
 # distinguishes structured snippets (≥2 space / tab separator) from
 # continuation prose.
 
-specs/bug-models/CascadeExhaustion.tla  lib/cascade/cascade_fsm.mli:45
-specs/bug-models/HebbianLearning.tla  lib/hebbian_eio.ml:264
-specs/bug-models/SessionRegistryGhost.tla  lib/session.ml:49
-specs/bug-models/SessionRegistryGhost.tla  lib/session.ml:70
-specs/bug-models/SSEBroadcastBlock.tla  lib/sse.ml:649
 # Added 2026-04-20: pre-existing drifts surfaced after refactors of
 # state machine / keepalive / coord_gc bodies. Non-blocking baseline,
 # spec text needs re-anchoring (issue: TBD).

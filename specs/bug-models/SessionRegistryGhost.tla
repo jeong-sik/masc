@@ -19,13 +19,13 @@
 \* ── Status (2026-04-20) ──
 \* The historical bug class this spec models (no-mutex `unregister_sync`
 \* racing against mutex-guarded `register`) was fixed: `unregister` now
-\* takes the same `with_lock registry` as `register` (lib/session.ml:70).
+\* takes the same `with_lock registry` as `register` (lib/session.ml:unregister).
 \* The spec is retained as a regression-prevention contract: it will
 \* fail-fast if the lock is removed again.
 \*
 \* Actual code:
-\*   lib/session.ml:49-67    register   — Hashtbl.replace inside with_lock
-\*   lib/session.ml:70-76    unregister — Hashtbl.remove inside with_lock
+\*   lib/session.ml:register   — Hashtbl.replace inside with_lock
+\*   lib/session.ml:unregister — Hashtbl.remove inside with_lock
 \*   lib/tool_inline_dispatch_coord.ml:200-201
 \*                           Coord.leave then Session.unregister
 \* (Both formerly: `lib/session/session.ml` + `tool_inline_dispatch_room.ml`

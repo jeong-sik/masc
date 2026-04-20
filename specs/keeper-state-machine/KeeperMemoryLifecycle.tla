@@ -31,18 +31,19 @@
 \*     `let long_term_horizon  = "long_term"`
 \*
 \* Producer (kind -> tier classification):
-\*   lib/keeper/keeper_memory_policy.ml:159-164  memory_horizon_of_kind
-\*   lib/keeper/keeper_memory_policy.ml:166-175  memory_horizon_of_json
+\*   lib/keeper/keeper_memory_policy.ml:memory_horizon_of_kind_opt  (strict)
+\*   lib/keeper/keeper_memory_policy.ml:memory_horizon_of_kind      (back-compat wrapper)
+\*   lib/keeper/keeper_memory_policy.ml:memory_horizon_of_json_opt  (JSON variant)
 \*
 \* Persistence / promotion sites:
-\*   lib/keeper/keeper_memory_bank.ml:550   `let horizon = memory_horizon_of_kind kind`
-\*   lib/keeper/keeper_memory_recall.ml:104 recall path uses same horizon function
+\*   lib/keeper/keeper_memory_bank.ml:append_memory_notes_from_reply   — writes via memory_horizon_of_kind
+\*   lib/keeper/keeper_memory_recall.ml:read_recent_memory_texts       — recall path, same horizon fn
 \*   lib/keeper/keeper_compact_policy.ml    overflow + handoff scheduling
 \*   lib/keeper/keeper_compact_audit.ml     ledger trail (provenance source)
 \*
 \* SCOPE DRIFT (worth knowing, NOT a spec violation):
 \*   memory_horizon_of_kind silently routes unknown kinds to mid_term_horizon
-\*   (lib/keeper/keeper_memory_policy.ml:164  `| _ -> mid_term_horizon`).
+\*   (lib/keeper/keeper_memory_policy.ml:memory_horizon_of_kind  `| None -> mid_term_horizon`).
 \*   The spec invariants (ProvenanceRequired, RecoveryBounded, NoSilentLoss)
 \*   hold regardless of WHICH tier a note lands in -- the drift is UPSTREAM
 \*   of the spec vocabulary. A typo'd kind ("goalss") gets the wrong tier

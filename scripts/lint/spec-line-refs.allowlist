@@ -26,7 +26,11 @@ specs/bug-models/HebbianLearning.tla  lib/hebbian_eio.ml:264
 specs/bug-models/SessionRegistryGhost.tla  lib/session.ml:49
 specs/bug-models/SessionRegistryGhost.tla  lib/session.ml:70
 specs/bug-models/SSEBroadcastBlock.tla  lib/sse.ml:649
-specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_bank.ml:550
-specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_policy.ml:159
-specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_policy.ml:164
-specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_policy.ml:166
+# Added 2026-04-20: pre-existing drifts surfaced after refactors of
+# state machine / keepalive / coord_gc bodies. Non-blocking baseline,
+# spec text needs re-anchoring (issue: TBD).
+#
+# Pruned 2026-04-20: KeeperPhaseRace was repurposed in #9080 (no longer
+# references state_machine.ml:311 or keepalive.ml:1566). KeeperTaskInterlock
+# anchors were re-anchored in #9086/#9090 (coord_gc.ml:39 → :128 onward).
+# Removing the now-stale entries restores the self-verify ledger to honest.

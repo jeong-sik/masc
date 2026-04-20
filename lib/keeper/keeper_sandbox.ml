@@ -32,7 +32,8 @@ let strip_trailing_slashes path =
 
 let backend_of_profile = function
   | Keeper_types.Legacy_local -> Local
-  | Keeper_types.Docker_hardened -> Docker_hardened
+  | Keeper_types.Docker_hardened | Keeper_types.Docker_with_git ->
+      Docker_hardened
 
 let backend_to_string = function
   | Local -> "local"

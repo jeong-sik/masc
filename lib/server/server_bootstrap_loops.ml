@@ -535,9 +535,14 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
             if webrtc_expired > 0 then
               Log.Server.info "WebRTC: cleaned %d expired offers" webrtc_expired
           end;
-          (* Rate-limit buckets: evict keys unused for 5 minutes *)
+          (* Rate-limit buckets: evict keys unused for
+             [MASC_RATE_LIMIT_BUCKET_TTL_SEC] (default 5 minutes) *)
           let rl = Eio.Lazy.force Rate_limit.global in
-          let rl_reaped = Rate_limit.cleanup rl ~older_than_seconds:300 in
+          let rl_reaped =
+            Rate_limit.cleanup rl
+              ~older_than_seconds:
+                Env_config_runtime.InternalTimers.rate_limit_bucket_ttl_sec
+          in
           if rl_reaped > 0 then
             Log.Server.info "Reaped %d stale rate-limit buckets" rl_reaped;
           (* Agent registry: remove resolved-name cache for dead sessions *)

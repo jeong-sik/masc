@@ -624,6 +624,13 @@ module InternalTimers = struct
       is sized for the steady-state connection count. *)
   let janitor_interval_sec =
     get_float ~default:60.0 "MASC_JANITOR_INTERVAL_SEC"
+
+  (** Rate-limit bucket staleness TTL (seconds). Buckets with no traffic for
+      this long are reaped by the janitor loop. Default: 300 (5 min). Raise
+      for longer client quiet periods; lower to free memory faster under
+      churn. [Rate_limit.cleanup] takes an int, so this is int-typed. *)
+  let rate_limit_bucket_ttl_sec =
+    get_int ~default:300 "MASC_RATE_LIMIT_BUCKET_TTL_SEC"
 end
 
 (** {1 Sidecar reconcile loop}

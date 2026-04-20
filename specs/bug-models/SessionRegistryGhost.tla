@@ -56,7 +56,7 @@ Init ==
 
 \* ── Leave flow (2 non-atomic steps) ─────────────
 
-\* Step 1: Room.leave — agent leaves room
+\* Step 1: Coord.leave — agent leaves room (Coord_lifecycle.leave)
 LeaveStep1_RoomLeave ==
     /\ leave_phase = "idle"
     /\ room_status = "joined"
@@ -73,7 +73,7 @@ LeaveStep2_Unregister ==
 
 \* ── Reconnect flow (atomic — under mutex) ───────
 
-\* Agent reconnects: Room.join + register (both succeed atomically)
+\* Agent reconnects: Coord.join + register (both succeed atomically)
 ReconnectJoinAndRegister ==
     /\ reconnect_phase = "idle"
     /\ room_status' = "joined"

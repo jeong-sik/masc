@@ -1,13 +1,9 @@
-(** Placeholder view for routes that haven't been migrated to Bonsai yet.
+(** Route staging view for Bonsai tabs that do not yet have a dedicated
+    data-backed page.
 
-    Renders the same dark-fantasy shell (brand + nav + centered card) but
-    the main content is a single "Phase 2" panel with a link back to the
-    Preact counterpart if applicable. Keeps the sidebar fully clickable so
-    the operator can keep exploring without a broken tab trap.
-
-    nav은 logs_view의 것과 구조가 거의 동일하지만 여기서는 단순화 —
-    theme chip이나 brand 상세는 생략. logs_view가 canonical, 여기는
-    "다른 탭이 있다" 사실만 표시하면 됨. *)
+    The shell already gives these routes real dashboard chrome.  This body keeps
+    each route useful as an operator-facing intent panel instead of falling back
+    to the older centered "phase" card. *)
 
 open! Core
 open! Bonsai_web
@@ -17,228 +13,252 @@ module Style =
 [%css
 stylesheet
   {|
-  .root {
+  .grid {
     display: grid;
-    grid-template-columns: 232px 1fr;
-    min-height: 100vh;
-    background:
-      radial-gradient(ellipse 60% 40% at 12% 8%, rgba(212,169,64,0.06), transparent 55%),
-      radial-gradient(ellipse 40% 50% at 92% 95%, rgba(160,24,24,0.08), transparent 60%),
-      linear-gradient(170deg, #0e0a08 0%, #140c08 60%, #080504 100%);
-    color: var(--text-primary);
-    font-family: 'Noto Sans KR', 'EB Garamond', sans-serif;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
   }
 
-  .nav {
-    background: linear-gradient(180deg, #18110c, #0e0806);
-    border-right: 1px solid var(--border-main);
-    padding: 24px 0;
+  .panel {
+    min-height: 148px;
+    border: 1px solid var(--border-main);
+    background:
+      linear-gradient(180deg, rgba(28,18,14,0.68), rgba(14,10,8,0.86));
+    padding: 15px 16px;
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    overflow: auto;
-  }
-  .nav_brand {
-    padding: 0 20px 20px;
-    display: flex;
-    align-items: center;
     gap: 10px;
   }
-  .nav_brand_rune {
-    width: 28px;
-    height: 28px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--accent-brass-dim);
-    color: var(--accent-brass);
-    font-family: 'Cinzel', serif;
-    font-size: 15px;
-    letter-spacing: 0.08em;
-  }
-  .nav_brand_word {
-    font-family: 'Cinzel', serif;
-    font-size: 15px;
-    letter-spacing: 0.24em;
-    color: var(--text-bright);
-    text-transform: uppercase;
-  }
-  .nav_brand_blood { color: var(--accent-blood); }
 
-  .nav_section {
-    padding: 14px 20px 6px;
-    font-family: 'Noto Sans KR', sans-serif;
+  .panel_title {
+    font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
     font-size: 9px;
-    letter-spacing: 0.3em;
+    letter-spacing: 0.28em;
     text-transform: uppercase;
     color: var(--text-dim);
-  }
-  .nav_link {
-    display: flex;
-    align-items: center;
-    gap: 11px;
-    padding: 8px 20px;
-    color: var(--text-primary);
-    font-size: 11px;
-    text-decoration: none;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    border-left: 2px solid transparent;
-    transition: background 0.1s, color 0.1s;
-  }
-  .nav_link:hover {
-    color: var(--accent-brass);
-    background: rgba(212, 169, 64, 0.05);
-  }
-  .nav_link_active {
-    color: var(--accent-brass);
-    border-left-color: var(--accent-brass);
-    background: linear-gradient(90deg, rgba(212, 169, 64, 0.1), transparent 70%);
-  }
-  .nav_link_soon {
-    color: var(--text-dim);
-    opacity: 0.55;
-  }
-  .nav_link_soon:hover {
-    color: var(--accent-brass-dim);
+    margin: 0;
   }
 
-  .main {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 4rem 3rem;
+  .panel_text {
+    font-family: var(--font-body, 'EB Garamond', serif);
+    font-size: 15px;
+    line-height: 1.55;
+    color: var(--text-primary);
+    margin: 0;
   }
-  .card {
-    max-width: 560px;
+
+  .panel_code {
+    margin-top: auto;
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--text-dim);
+    overflow-wrap: anywhere;
+  }
+
+  .cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 14px 16px;
     border: 1px solid var(--border-highlight);
     background:
-      linear-gradient(180deg, rgba(42, 30, 20, 0.4), rgba(20, 12, 8, 0.7));
-    padding: 2rem 2.25rem;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    box-shadow: 0 4px 22px rgba(0, 0, 0, 0.55);
+      linear-gradient(180deg, rgba(42,30,20,0.4), rgba(20,12,8,0.7));
   }
-  .badge {
-    font-family: 'Noto Sans KR', sans-serif;
-    font-size: 10px;
-    letter-spacing: 0.3em;
-    text-transform: uppercase;
-    color: var(--accent-brass);
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 7px 12px;
     border: 1px solid var(--accent-brass-dim);
-    padding: 4px 10px;
-    align-self: flex-start;
-  }
-  .title {
-    font-family: 'Cinzel', serif;
-    font-size: 28px;
-    letter-spacing: 0.16em;
-    color: var(--text-bright);
-    text-transform: uppercase;
-    margin: 0;
-  }
-  .sub {
-    font-family: 'EB Garamond', serif;
-    font-style: italic;
-    font-size: 14px;
+    background: linear-gradient(180deg, #241a12, #14100a);
     color: var(--text-primary);
-    margin: 0;
-  }
-  .link_row {
-    display: flex;
-    gap: 14px;
-    margin-top: 12px;
-  }
-  .link {
-    color: var(--accent-brass);
-    text-decoration: none;
-    font-size: 11px;
-    letter-spacing: 0.2em;
+    font-family: var(--font-ui, 'Noto Sans KR', sans-serif);
+    font-size: 10px;
+    letter-spacing: 0.24em;
     text-transform: uppercase;
-    border-bottom: 1px solid var(--accent-brass-dim);
-    padding-bottom: 2px;
+    text-decoration: none;
   }
-  .link:hover {
-    color: var(--text-bright);
-    border-bottom-color: var(--accent-brass);
+
+  .btn:hover {
+    color: var(--accent-brass);
+    border-color: var(--accent-brass);
+  }
+
+  .btn_primary {
+    color: var(--accent-brass);
+    border-color: var(--accent-brass);
+    background: linear-gradient(180deg, #3a2a16, #241810);
+  }
+
+  .cta_note {
+    margin-left: auto;
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+    font-size: 11px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (max-width: 920px) {
+    .grid { grid-template-columns: 1fr; }
+    .panel { min-height: 0; }
+    .cta_note { width: 100%; margin-left: 0; }
   }
 |}]
 
-let brand =
-  Node.div
-    ~attrs:[ Style.nav_brand ]
-    [ Node.div ~attrs:[ Style.nav_brand_rune ] [ Node.text "M" ]
-    ; Node.span
-        ~attrs:[ Style.nav_brand_word ]
-        [ Node.text "ma"
-        ; Node.span ~attrs:[ Style.nav_brand_blood ] [ Node.text "s" ]
-        ; Node.text "c"
-        ]
-    ]
+type blueprint = {
+  eyebrow : string;
+  title : string;
+  tail : string;
+  signal : string;
+  source : string;
+  cadence : string;
+  vow : string;
+  measure : string;
+  next_step : string;
+  endpoint : string;
+}
+
+let blueprint_of_route : Route.t -> blueprint = function
+  | Observatory ->
+    {
+      eyebrow = "runtime · observatory";
+      title = "observatory";
+      tail = "· sightline";
+      signal = "keeper spans · event loss · pressure drift";
+      source = "trace store · metrics · runtime health";
+      cadence = "live when spans land";
+      vow =
+        "A single sightline for runtime pressure, missing telemetry, and keeper \
+         stall signatures.";
+      measure = "Dropped spans, stale heartbeat windows, and blocked capability claims.";
+      next_step = "Bind span summaries to the pressure and chronicle lanes.";
+      endpoint = "/api/v1/dashboard/*";
+    }
+  | Intervene ->
+    {
+      eyebrow = "runtime · intervene";
+      title = "intervene";
+      tail = "· override";
+      signal = "pause · resume · nudge · handoff";
+      source = "operator control · keeper runtime";
+      cadence = "manual gate";
+      vow =
+        "Operator action should carry intent, target, and evidence before it \
+         touches a live keeper.";
+      measure = "Pending approvals, active holds, and restart budget.";
+      next_step = "Wire guarded actions after the audit trail is visible.";
+      endpoint = "/api/v1/operator/*";
+    }
+  | Tools ->
+    {
+      eyebrow = "lab · tools";
+      title = "tools";
+      tail = "· capability";
+      signal = "public · keeper · privileged";
+      source = "capability registry · OAS catalog";
+      cadence = "on schema drift";
+      vow =
+        "Every callable surface should reveal its audience, risk class, and \
+         evidence path.";
+      measure = "Tool count, hidden capability claims, and schema budget pressure.";
+      next_step = "Project capability groups into a compact registry table.";
+      endpoint = "/api/v1/tools/list";
+    }
+  | Sessions ->
+    {
+      eyebrow = "lab · sessions";
+      title = "sessions";
+      tail = "· memory";
+      signal = "handoff · checkpoint · replay";
+      source = "trace fragments · memory bank · keeper checkpoints";
+      cadence = "after each handoff";
+      vow =
+        "A session should tell where it began, what it changed, and what remains \
+         risky.";
+      measure = "Open handoffs, stale checkpoints, and replay gaps.";
+      next_step = "Join checkpoint summaries with recent handoff notes.";
+      endpoint = "/api/v1/keepers/*";
+    }
+  | Social_board ->
+    {
+      eyebrow = "lab · hearth";
+      title = "social board";
+      tail = "· speech";
+      signal = "claim · block · ask · note";
+      source = "board posts · keeper social model";
+      cadence = "live stream";
+      vow =
+        "Agent speech should surface urgency, blockers, and accountable claims \
+         without burying the operator.";
+      measure = "Unread board posts, unresolved asks, and stale blocker claims.";
+      next_step = "Group board traffic by speech act and current owner.";
+      endpoint = "/api/v1/board/*";
+    }
+  | route ->
+    {
+      eyebrow = "chronicle · route";
+      title = Route.label route;
+      tail = "· staged";
+      signal = "pending";
+      source = "dashboard shell";
+      cadence = "on demand";
+      vow = "The route is named, anchored, and ready for a data projection.";
+      measure = "No route-specific signal yet.";
+      next_step = "Choose the read model and collapse it into one operator view.";
+      endpoint = Route.path route;
+    }
 ;;
 
-let nav_link ~active (route : Route.t) =
-  let classes =
-    let base = [ Style.nav_link ] in
-    let base = if active then Style.nav_link_active :: base else base in
-    if Route.is_implemented route then base else Style.nav_link_soon :: base
-  in
-  Node.a
-    ~attrs:(Attr.href (Route.path route) :: classes)
-    [ Node.text (Route.label route) ]
-;;
-
-let section label = Node.div ~attrs:[ Style.nav_section ] [ Node.text label ]
-
-let sidebar ~(active : Route.t) =
-  let lnk route = nav_link ~active:(Route.equal route active) route in
+let panel ~title ~text ~code =
   Node.div
-    ~attrs:[ Style.nav ]
-    [ brand
-    ; section "chronicle"
-    ; lnk Overview
-    ; lnk Logs
-    ; lnk Goals
-    ; section "runtime"
-    ; lnk Keepers
-    ; lnk Observatory
-    ; lnk Intervene
-    ; section "lab"
-    ; lnk Tools
-    ; lnk Sessions
-    ; lnk Social_board
-    ; section "crypt"
-    ; lnk Dead_keepers
-    ; lnk Archive_runs
+    ~attrs:[ Style.panel ]
+    [ Node.p ~attrs:[ Style.panel_title ] [ Node.text title ]
+    ; Node.p ~attrs:[ Style.panel_text ] [ Node.text text ]
+    ; Node.div ~attrs:[ Style.panel_code ] [ Node.text code ]
     ]
 ;;
 
 let component ~(route : Route.t) (_graph @ local) =
+  let bp = blueprint_of_route route in
   Bonsai.return
     (Shell_view.view
        ~active:route
-       [ Node.div
-           ~attrs:[ Style.card ]
-           [ Node.span ~attrs:[ Style.badge ] [ Node.text "phase 2 · 작업 중" ]
-           ; Node.h1 ~attrs:[ Style.title ] [ Node.text (Route.label route) ]
-           ; Node.p
-               ~attrs:[ Style.sub ]
-               [ Node.text
-                   "이 탭은 아직 Bonsai로 완전히 이식되지 않았다. \
-                    그래도 chrome은 dashboard_v2 shell을 공유한다."
-               ]
-           ; Node.div
-               ~attrs:[ Style.link_row ]
-               [ Node.a
-                   ~attrs:
-                     [ Attr.href (Route.path Logs); Style.link ]
-                   [ Node.text "저널로" ]
-               ; Node.a
-                   ~attrs:
-                     [ Attr.href "/dashboard/"; Style.link ]
-                   [ Node.text "preact 대시보드" ]
-               ]
+       [ Hero.view
+           ~eyebrow:bp.eyebrow
+           ~title:bp.title
+           ~tail:(bp.tail, `Brass)
+           ~sub:bp.vow
+           ()
+       ; Meta.strip
+           [ Meta.cell ~color:`Brass ~k:"signal" ~v:bp.signal ()
+           ; Meta.cell ~k:"source" ~v:bp.source ()
+           ; Meta.cell ~k:"cadence" ~v:bp.cadence ()
+           ]
+       ; Sec.view ~title:"operator contract" ~sub:"target · measure · next" ()
+       ; Node.div
+           ~attrs:[ Style.grid ]
+           [ panel ~title:"measure" ~text:bp.measure ~code:"what must stay visible"
+           ; panel ~title:"next" ~text:bp.next_step ~code:bp.endpoint
+           ; panel
+               ~title:"fallback"
+               ~text:"The journal remains the live room witness while this lane gathers signal."
+               ~code:(Route.path Logs)
+           ]
+       ; Node.div
+           ~attrs:[ Style.cta ]
+           [ Node.a
+               ~attrs:[ Attr.href (Route.path Logs); Style.btn; Style.btn_primary ]
+               [ Node.text "journal" ]
+           ; Node.a
+               ~attrs:[ Attr.href "/dashboard/"; Style.btn ]
+               [ Node.text "legacy" ]
+           ; Node.span
+               ~attrs:[ Style.cta_note ]
+               [ Node.text (Route.path route) ]
            ]
        ])
 ;;

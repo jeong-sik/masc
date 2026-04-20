@@ -5,6 +5,17 @@
 
 ### Added
 
+- **Legendary Bash shadow-counters HTTP endpoint.**  New
+  `GET /api/v1/legendary_bash/shadow_counters` returns the
+  `Legendary_counters.snapshot` as JSON.  Public-read (same auth
+  posture as `/api/v1/activity/*`), zero-cost when observers are
+  off (all counters stay at zero).  Wired behind
+  `Server_routes_http_routes_artifacts` in the route pipeline.
+  `LEGENDARY-BASH-RUNBOOK.md` now documents the endpoint and the
+  suggested `disagree_ratio` formula so operators can drive the
+  `MASC_BASH_AST_ONLY` flip decision from a dashboard instead of a
+  log grep pipeline.
+
 - **Legendary Bash in-process shadow counters.**  New
   `lib/legendary_counters.{ml,mli}` exposes `Atomic.t`-backed totals
   for the P5 gate-diff observer (`total` + 4 buckets mirroring

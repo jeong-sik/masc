@@ -17,4 +17,4 @@ lib/coord.ml:88
 lib/coord.ml:109
 # eval_harness.ml:370 eliminated by lifting nested string match to outer
 # pattern (this PR — was a provably unreachable dead branch).
-lib/types/types_auth.ml:83
+lib/types/types_auth.ml:91

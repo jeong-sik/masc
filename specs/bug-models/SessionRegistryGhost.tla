@@ -1,25 +1,36 @@
 ---- MODULE SessionRegistryGhost ----
 \* Bug Model: Session registry ghost entry from leave/reconnect race.
 \*
-\* Models session.ml + tool_inline_dispatch_room.ml:handle_leave.
+\* Models lib/session.ml + lib/tool_inline_dispatch_coord.ml:handle_leave.
 \*
 \* handle_leave performs two non-atomic steps:
-\*   1. Room.leave(agent)          — removes from room
-\*   2. unregister_sync(agent)     — removes from session (NO mutex)
+\*   1. Coord.leave(agent)         — removes from room/coord
+\*   2. Session.unregister(agent)  — removes from session
 \*
 \* If a reconnect (register) fires between steps 1 and 2:
-\*   1. Room.leave removes agent from room
+\*   1. Coord.leave removes agent from room
 \*   2. register (with mutex) adds session entry
-\*   3. unregister_sync (no mutex) removes the entry register just created
+\*   3. unregister removes the entry register just created
 \*   Result: agent thinks it reconnected, but session is gone.
 \*
-\* Reverse: if register fires AFTER unregister_sync but Room still says
+\* Reverse: if register fires AFTER unregister but Coord still says
 \* "not joined", the session registry has a ghost entry for a non-member.
 \*
+\* ── Status (2026-04-20) ──
+\* The historical bug class this spec models (no-mutex `unregister_sync`
+\* racing against mutex-guarded `register`) was fixed: `unregister` now
+\* takes the same `with_lock registry` as `register` (lib/session.ml:70).
+\* The spec is retained as a regression-prevention contract: it will
+\* fail-fast if the lock is removed again.
+\*
 \* Actual code:
-\*   session.ml:76     unregister_sync — Hashtbl.remove WITHOUT mutex
-\*   session.ml:49-63  register — Hashtbl.replace WITH mutex
-\*   tool_inline_dispatch_room.ml:333-334  Room.leave then unregister_sync
+\*   lib/session.ml:49-67    register   — Hashtbl.replace inside with_lock
+\*   lib/session.ml:70-76    unregister — Hashtbl.remove inside with_lock
+\*   lib/tool_inline_dispatch_coord.ml:200-201
+\*                           Coord.leave then Session.unregister
+\* (Both formerly: `lib/session/session.ml` + `tool_inline_dispatch_room.ml`
+\*  and the no-lock `unregister_sync`. Path/symbol drift recorded here for
+\*  future cross-reference.)
 
 EXTENDS Naturals
 

@@ -149,6 +149,148 @@ let test_partial_tolerance_still_works () =
   Alcotest.(check bool) "Bash counts as valid -> partial tolerance kicks in"
     true has_valid
 
+(* ── Phase A.2 OAS dual registration ─────────────────────────────── *)
+
+let yojson_field name j =
+  match j with
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
+let test_oas_dual_register_subset () =
+  let pairs = Alias.oas_dual_register_aliases () in
+  let names = List.map fst pairs in
+  Alcotest.(check (list string)) "Phase A.2 dual-reg subset"
+    [ "Bash"; "Read" ] names;
+  (* Every entry must also appear in the full alias table. *)
+  let full = List.map fst (Alias.all_aliases ()) in
+  List.iter
+    (fun (public, _) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s is in all_aliases" public)
+        true (List.mem public full))
+    pairs
+
+let test_public_input_schema_present () =
+  Alcotest.(check bool) "Bash has tailored schema"
+    true (Option.is_some (Alias.public_input_schema "Bash"));
+  Alcotest.(check bool) "Read has tailored schema"
+    true (Option.is_some (Alias.public_input_schema "Read"));
+  Alcotest.(check bool) "Edit (deferred) has no tailored schema"
+    true (Option.is_none (Alias.public_input_schema "Edit"));
+  Alcotest.(check bool) "unknown public name has no schema"
+    true (Option.is_none (Alias.public_input_schema "Nope"))
+
+let test_bash_schema_uses_command_field () =
+  let schema = Option.get (Alias.public_input_schema "Bash") in
+  let props = Option.get (yojson_field "properties" schema) in
+  Alcotest.(check bool) "Bash schema exposes 'command' (not 'cmd')"
+    true (Option.is_some (yojson_field "command" props));
+  Alcotest.(check bool) "Bash schema does not expose 'cmd' directly"
+    true (Option.is_none (yojson_field "cmd" props));
+  let required =
+    match yojson_field "required" schema with
+    | Some (`List items) ->
+        List.filter_map
+          (function `String s -> Some s | _ -> None) items
+    | _ -> []
+  in
+  Alcotest.(check (list string)) "Bash requires 'command'"
+    [ "command" ] required
+
+let test_read_schema_uses_file_path () =
+  let schema = Option.get (Alias.public_input_schema "Read") in
+  let props = Option.get (yojson_field "properties" schema) in
+  Alcotest.(check bool) "Read schema exposes 'file_path' (not 'path')"
+    true (Option.is_some (yojson_field "file_path" props));
+  Alcotest.(check bool) "Read schema does not expose 'path' directly"
+    true (Option.is_none (yojson_field "path" props))
+
+let test_translate_bash_input () =
+  let input = `Assoc
+    [ ("command", `String "ls -la");
+      ("timeout", `Int 60);
+      ("description", `String "list files");
+      ("run_in_background", `Bool false) ]
+  in
+  let translated = Alias.translate_input ~public:"Bash" input in
+  let cmd = yojson_field "cmd" translated in
+  let timeout_sec = yojson_field "timeout_sec" translated in
+  let bg = yojson_field "run_in_background" translated in
+  let desc = yojson_field "description" translated in
+  Alcotest.(check (option string)) "command -> cmd"
+    (Some "ls -la")
+    (Option.bind cmd (function `String s -> Some s | _ -> None));
+  Alcotest.(check (option int)) "timeout -> timeout_sec"
+    (Some 60)
+    (Option.bind timeout_sec (function `Int i -> Some i | _ -> None));
+  Alcotest.(check bool) "run_in_background passes through"
+    true (Option.is_some bg);
+  Alcotest.(check bool) "description is dropped"
+    true (Option.is_none desc)
+
+let test_translate_read_input () =
+  let input = `Assoc
+    [ ("file_path", `String "/tmp/foo");
+      ("limit", `Int 4096);
+      ("offset", `Int 100) ]
+  in
+  let translated = Alias.translate_input ~public:"Read" input in
+  let path = yojson_field "path" translated in
+  let max_bytes = yojson_field "max_bytes" translated in
+  let offset = yojson_field "offset" translated in
+  Alcotest.(check (option string)) "file_path -> path"
+    (Some "/tmp/foo")
+    (Option.bind path (function `String s -> Some s | _ -> None));
+  Alcotest.(check (option int)) "limit -> max_bytes"
+    (Some 4096)
+    (Option.bind max_bytes (function `Int i -> Some i | _ -> None));
+  Alcotest.(check bool) "offset is dropped (keeper_fs_read does not support it)"
+    true (Option.is_none offset)
+
+let test_translate_unknown_is_identity () =
+  let input = `Assoc [ ("foo", `String "bar") ] in
+  let translated = Alias.translate_input ~public:"NoSuchTool" input in
+  Alcotest.(check string) "identity for unknown public name"
+    (Yojson.Safe.to_string input) (Yojson.Safe.to_string translated)
+
+let test_translate_malformed_input_is_identity () =
+  let input = `String "not an object" in
+  let translated = Alias.translate_input ~public:"Bash" input in
+  Alcotest.(check string) "non-object payload passes through"
+    (Yojson.Safe.to_string input) (Yojson.Safe.to_string translated)
+
+let test_expand_universe_adds_aliases () =
+  let internal = [ "keeper_bash"; "keeper_fs_read"; "keeper_board_post" ] in
+  let expanded = Alias.expand_universe internal in
+  Alcotest.(check bool) "Bash appears after expansion"
+    true (List.mem "Bash" expanded);
+  Alcotest.(check bool) "Read appears after expansion"
+    true (List.mem "Read" expanded);
+  Alcotest.(check bool) "internal names preserved"
+    true (List.for_all (fun n -> List.mem n expanded) internal);
+  Alcotest.(check bool) "no duplicate Bash entries"
+    true
+    (List.length (List.filter (String.equal "Bash") expanded) = 1)
+
+let test_expand_universe_skips_when_internal_absent () =
+  let internal = [ "keeper_board_post"; "keeper_tasks_list" ] in
+  let expanded = Alias.expand_universe internal in
+  Alcotest.(check bool) "Bash NOT added when keeper_bash absent"
+    true (not (List.mem "Bash" expanded));
+  Alcotest.(check bool) "Read NOT added when keeper_fs_read absent"
+    true (not (List.mem "Read" expanded));
+  Alcotest.(check int) "expanded length unchanged"
+    (List.length internal) (List.length expanded)
+
+let test_expand_universe_dedup_existing_public () =
+  (* If a caller already has the public name in the input list, expand
+     must not duplicate it. *)
+  let internal = [ "keeper_bash"; "Bash"; "keeper_fs_read" ] in
+  let expanded = Alias.expand_universe internal in
+  Alcotest.(check int) "Bash appears exactly once"
+    1
+    (List.length (List.filter (String.equal "Bash") expanded))
+
 let () =
   Alcotest.run "Keeper_tool_alias"
     [
@@ -173,5 +315,19 @@ let () =
             test_hallucinated_builtin_still_unexpected;
           Alcotest.test_case "partial tolerance still works" `Quick
             test_partial_tolerance_still_works;
+        ] );
+      ( "oas-dual-register",
+        [
+          Alcotest.test_case "subset is Bash + Read only" `Quick test_oas_dual_register_subset;
+          Alcotest.test_case "tailored input schema present" `Quick test_public_input_schema_present;
+          Alcotest.test_case "Bash schema uses 'command' field" `Quick test_bash_schema_uses_command_field;
+          Alcotest.test_case "Read schema uses 'file_path' field" `Quick test_read_schema_uses_file_path;
+          Alcotest.test_case "translate Bash input shape" `Quick test_translate_bash_input;
+          Alcotest.test_case "translate Read input shape" `Quick test_translate_read_input;
+          Alcotest.test_case "translate unknown is identity" `Quick test_translate_unknown_is_identity;
+          Alcotest.test_case "translate malformed is identity" `Quick test_translate_malformed_input_is_identity;
+          Alcotest.test_case "expand_universe adds aliases" `Quick test_expand_universe_adds_aliases;
+          Alcotest.test_case "expand_universe skips when internal absent" `Quick test_expand_universe_skips_when_internal_absent;
+          Alcotest.test_case "expand_universe dedup existing public" `Quick test_expand_universe_dedup_existing_public;
         ] );
     ]

@@ -71,6 +71,12 @@ let limit_for_category config = function
 (** Map tool to rate limit category *)
 let category_for_tool = function
   | "masc_broadcast" -> BroadcastLimit
+  (* plan_set_task / plan_clear_task added in #8873: per-task plan-slot
+     writes are semantically equivalent to set_current_task /
+     complete_task, so they belong to the same TaskOpsLimit (30/min)
+     bucket rather than silently falling through to GeneralLimit
+     (10/min). masc_batch_add_tasks intentionally omitted pending a
+     maintainer call on whether a batch burns 1 or N tokens. *)
   | "masc_add_task"
   | "masc_claim_next"
   | "masc_claim_task"
@@ -79,6 +85,8 @@ let category_for_tool = function
   | "masc_release_task"
   | "masc_cancel_task"
   | "masc_update_priority"
+  | "masc_plan_set_task"
+  | "masc_plan_clear_task"
   | "masc_transition" -> TaskOpsLimit
   | _ -> GeneralLimit
 

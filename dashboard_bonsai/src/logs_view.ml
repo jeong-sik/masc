@@ -2572,7 +2572,12 @@ let render_response
       ; nav_link ~active:true "logs · journal"
       ; nav_link "goals"
       ; nav_section "runtime"
-      ; nav_link "keepers" ~tail:"04"
+      ; (let tail =
+           match keepers.keepers with
+           | [] -> "—"
+           | ks -> Printf.sprintf "%02d" (List.length ks)
+         in
+         nav_link "keepers" ~tail)
       ; nav_link "observatory"
       ; nav_link "intervene"
       ; nav_section "lab"
@@ -2580,7 +2585,19 @@ let render_response
       ; nav_link "sessions"
       ; nav_link "social board"
       ; nav_section "crypt"
-      ; nav_link "dead keepers" ~tail:"00"
+      ; (let tail =
+           match keepers.keepers with
+           | [] -> "—"
+           | ks ->
+             let dead_n =
+               List.count ks ~f:(fun (k : Keepers_types.keeper) ->
+                 match k.status with
+                 | Dead -> true
+                 | _ -> false)
+             in
+             Printf.sprintf "%02d" dead_n
+         in
+         nav_link "dead keepers" ~tail)
       ; nav_link "archive runs"
       ; (let chip name label =
            Node.div

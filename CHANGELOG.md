@@ -5,6 +5,16 @@
 
 ### Added
 
+- **CLI auto-model rotation for cascade specs.** `gemini_cli:auto` now
+  expands into a quota-aware concrete Gemini CLI candidate list
+  (Flash/Lite first, Pro last), and `codex_cli:auto` expands through a
+  light-to-heavy Codex order from `gpt-5.1-codex-mini` up to `gpt-5.4`,
+  including `gpt-5.4-mini` and `gpt-5.3-codex-spark`.
+  `claude_code:auto` remains single-entry by default but can be expanded via
+  `MASC_CLAUDE_CODE_AUTO_MODELS`. This lets existing cascade
+  failover/round-robin/cooldown machinery rotate CLI models without
+  relying on interactive `/model` state.
+
 - **Legendary Bash shadow-counter per-reason `too_complex_*`
   histogram.**  `Legendary_counters.snapshot` now includes fifteen
   new fields — one per `Parsed.reason_too_complex` variant plus

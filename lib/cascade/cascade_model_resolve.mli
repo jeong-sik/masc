@@ -14,6 +14,24 @@
 val glm_auto_models : unit -> string list
 val glm_coding_auto_models : unit -> string list
 
+(** Ordered Gemini CLI candidates for [gemini_cli:auto].
+    Configurable via [MASC_GEMINI_CLI_AUTO_MODELS] (comma-separated).
+    When unset, [GEMINI_DEFAULT_MODEL] narrows the list to that single
+    model for backward-compatible explicit override semantics. *)
+val gemini_cli_auto_models : unit -> string list
+
+(** Ordered Codex CLI candidates for [codex_cli:auto].
+    Configurable via [MASC_CODEX_CLI_AUTO_MODELS] (comma-separated).
+    Defaults to a light-to-heavy generation order (5.1 -> 5.4),
+    including mini/spark variants. *)
+val codex_cli_auto_models : unit -> string list
+
+(** Ordered Claude Code candidates for [claude_code:auto].
+    Configurable via [MASC_CLAUDE_CODE_AUTO_MODELS] (comma-separated).
+    Defaults to [["auto"]] so the user's Claude Code default remains in
+    control unless an operator opts into model rotation. *)
+val claude_code_auto_models : unit -> string list
+
 (** Resolve a GLM model alias to the concrete API model ID.
     - ["auto"] -> env var [ZAI_DEFAULT_MODEL] or ["glm-5"]
     - ["flash"] -> ["glm-4.7-flashx"]

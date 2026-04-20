@@ -167,21 +167,15 @@ let render (keepers : Keepers_types.response) : Node.t =
     [ Placeholder_view.sidebar ~active:Dead_keepers
     ; Node.div
         ~attrs:[ Style.main ]
-        [ Node.p ~attrs:[ Style.eyebrow ] [ Node.text "crypt · the fallen" ]
-        ; Node.h1
-            ~attrs:[ Style.title ]
-            [ Node.text "dead keepers "
-            ; Node.span
-                ~attrs:[ Style.title_blood ]
-                [ Node.text (Printf.sprintf "· %02d" dead_n) ]
-            ]
-        ; Node.p
-            ~attrs:[ Style.sub ]
-            [ Node.text
-                "fleet의 추락한 자들. 이 목록은 Keepers 엔드포인트의 status=Dead \
-                 필터링 — 별도 endpoint 없음. 각 slot은 마지막으로 관측된 \
-                 state와 latency를 기록한다."
-            ]
+        [ Hero.view
+            ~eyebrow:"crypt · the fallen"
+            ~title:"dead keepers"
+            ~tail:(Printf.sprintf "· %02d" dead_n, `Blood)
+            ~sub:
+              "fleet의 추락한 자들. 이 목록은 Keepers 엔드포인트의 status=Dead \
+               필터링 — 별도 endpoint 없음. 각 slot은 마지막으로 관측된 \
+               state와 latency를 기록한다."
+            ()
         ; view_meta_strip ~total ~dead:dead_n ~synced
         ; view_dead_list dead
         ]

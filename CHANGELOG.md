@@ -5,6 +5,17 @@
 
 ### Changed
 
+- **`MASC_BASH_VERIFIABLE_MARKERS` flipped to on by default.**
+  Post-Legendary-Bash-P6 (#8721) rollout step paralleling the
+  `SEMANTIC_EXIT` flip: every `keeper_bash` response now carries
+  the `verifiable_markers` array (typed `Test_pass {count}`,
+  `Build_ok`, `Lint_clean`, `Git_clean`, each with
+  `Exact | Heuristic` confidence) when the heuristic matches.
+  Empty-result callers are omitted, so consumers that don't parse
+  the key remain byte-compatible.  Explicit opt-out: set the env
+  to `0` / `false` / `no` / `off`.  The flag itself survives one
+  more minor bump before removal.
+
 - **`MASC_BASH_SEMANTIC_EXIT` flipped to on by default.** Post-
   Legendary-Bash-P1 (#8721) rollout step: every `keeper_bash`
   response now carries the typed `semantic_exit` variant and the

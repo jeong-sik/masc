@@ -525,14 +525,19 @@ let semantic_payload_to_yojson (key, value) =
   in
   (key, v)
 
-(* Tick 16: opt-in flag for verifiable marker emission.  Rolled out
-   separately from [Exec_semantic] (MASC_BASH_SEMANTIC_EXIT) so the
-   cdal_judge heuristic layer can bake in without affecting JSON
-   shape for callers that only care about [semantic_exit]. *)
+(* Tick 16 introduced the flag opt-in; Tick 21 flips it to
+   default-on.  The verifier cascade (#7598) and any agent that
+   consumes [Test_pass {count}] / [Build_ok] / [Lint_clean] /
+   [Git_clean] now get them without an explicit operator switch.
+   Field is additive only (empty list is omitted), so callers
+   that ignore the [verifiable_markers] key remain byte-compatible.
+   Explicit opt-out: [MASC_BASH_VERIFIABLE_MARKERS=0] (or
+   ["false" / "FALSE" / "no" / "off"]).  The flag itself survives
+   one more minor bump before removal. *)
 let markers_enabled () =
   match Sys.getenv_opt "MASC_BASH_VERIFIABLE_MARKERS" with
-  | Some ("1" | "true" | "TRUE" | "yes") -> true
-  | _ -> false
+  | Some ("0" | "false" | "FALSE" | "no" | "off") -> false
+  | _ -> true
 
 let verifiable_marker_to_json (m : Cdal_judge.verifiable_marker) :
     Yojson.Safe.t =

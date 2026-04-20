@@ -242,8 +242,11 @@ let test_semantic_flag_isolation () =
 (* ---------- P6 Tick 16: verifiable_markers JSON integration -------------- *)
 
 let with_markers_flag enabled f =
+  (* Post-flip: the unset env resolves to ON.  Use "0" for the
+     off path so this helper keeps its pre-flip semantics
+     (enabled=false => markers absent) irrespective of the default. *)
   let prev = Sys.getenv_opt "MASC_BASH_VERIFIABLE_MARKERS" in
-  Unix.putenv "MASC_BASH_VERIFIABLE_MARKERS" (if enabled then "1" else "");
+  Unix.putenv "MASC_BASH_VERIFIABLE_MARKERS" (if enabled then "1" else "0");
   let restore () =
     match prev with
     | Some v -> Unix.putenv "MASC_BASH_VERIFIABLE_MARKERS" v

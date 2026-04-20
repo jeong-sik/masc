@@ -258,6 +258,12 @@ let derive_ksm_phase (phase : Keeper_state_machine.phase) : ksm_phase =
   | Keeper_state_machine.Restarting
   | Keeper_state_machine.Dead -> Ksm_stable
 
+(* Exhaustive on [ksm_phase]: the prior wildcard hid the design
+   decision for new ksm_phase variants and made the dashboard report
+   Turn_idle for keepers in Ksm_failing / Ksm_overflowed when there is
+   no live observation. Spelling each branch out turns a future
+   ksm_phase addition into a compile error and makes the chosen
+   mapping auditable. (#8605 family -- exhaustive-match template) *)
 let live_turn_phase (entry : Keeper_registry.registry_entry) =
   match entry.current_turn_observation with
   | Some obs -> obs.turn_phase
@@ -266,7 +272,10 @@ let live_turn_phase (entry : Keeper_registry.registry_entry) =
        | Ksm_compacting -> Turn_compacting
        | Ksm_handing_off
        | Ksm_draining -> Turn_finalizing
-       | _ -> Turn_idle)
+       | Ksm_running
+       | Ksm_failing
+       | Ksm_overflowed
+       | Ksm_stable -> Turn_idle)
 
 let live_decision_stage (entry : Keeper_registry.registry_entry) =
   match entry.current_turn_observation with

@@ -564,6 +564,44 @@ let test_atomic_write_file_replaces_content () =
         "TOKEN = \"new\"\n"
         (In_channel.with_open_text path In_channel.input_all))
 
+(* ── ISO format invariants ────────────────────────────────────────────
+   [retry_backoff_active] compares [next_retry_at : string] against
+   [now : string] with [String.compare]. That is safe only while both
+   sides emit the exact 20-character "YYYY-MM-DDTHH:MM:SSZ" shape, which
+   makes lexical order coincide with chronological order. These tests
+   pin the shape so a future refactor (offset, millisecond, timezone)
+   cannot silently land without also revisiting the backoff comparison.
+   See #8930 for the attempt_state SSOT consolidation. *)
+
+let test_isoish_now_fixed_shape () =
+  let s = Routes.isoish_now () in
+  check int "isoish_now length" 20 (String.length s);
+  (* "1234-67-9012:45:78Z" — positional separators *)
+  check char "isoish_now dash y-m" '-' s.[4];
+  check char "isoish_now dash m-d" '-' s.[7];
+  check char "isoish_now literal T" 'T' s.[10];
+  check char "isoish_now colon h-m" ':' s.[13];
+  check char "isoish_now colon m-s" ':' s.[16];
+  check char "isoish_now trailing Z" 'Z' s.[19]
+
+let test_isoish_at_epoch_round_trip () =
+  check string "isoish_at epoch" "1970-01-01T00:00:00Z"
+    (Routes.isoish_at 0.0);
+  check string "isoish_at one second past epoch" "1970-01-01T00:00:01Z"
+    (Routes.isoish_at 1.0)
+
+let test_isoish_lexical_matches_chronological () =
+  (* If these two lose correspondence, [retry_backoff_active]'s
+     [String.compare next_retry_at now > 0] would silently drift.  *)
+  let earlier = Routes.isoish_at 1_000_000.0 in
+  let later = Routes.isoish_at 2_000_000.0 in
+  check bool "earlier < later lexically" true
+    (String.compare earlier later < 0);
+  check bool "later > earlier lexically" true
+    (String.compare later earlier > 0);
+  check int "equal timestamps compare zero" 0
+    (String.compare earlier (Routes.isoish_at 1_000_000.0))
+
 let () =
   run "sidecar_lifecycle_routes"
     [
@@ -639,5 +677,14 @@ let () =
             test_parse_body_pairs_rejects_invalid_json;
           test_case "atomic write replaces content" `Quick
             test_atomic_write_file_replaces_content;
+        ] );
+      ( "iso_format_invariants (#8930)",
+        [
+          test_case "isoish_now has fixed 20-char shape" `Quick
+            test_isoish_now_fixed_shape;
+          test_case "isoish_at epoch round-trip" `Quick
+            test_isoish_at_epoch_round_trip;
+          test_case "lexical compare matches chronological order" `Quick
+            test_isoish_lexical_matches_chronological;
         ] );
     ]

@@ -3,44 +3,32 @@
 # Format: `<spec_path>  <source_path>:<line>` (two spaces between spec and
 # source ref). Lines starting with `#` and blank lines are ignored.
 #
-# Entries are baseline drift debt observed at install time (2026-04-20).
-# They are NOT exonerations — each represents a stale `(path:line snippet)`
-# comment in a spec file that should be re-anchored to the current source.
+# Entries are baseline drift debt observed at install time. They are NOT
+# exonerations — each represents a stale `(path:line snippet)` comment
+# in a spec file that should be re-anchored to the current source.
 #
-# A stale entry (drift no longer present, because someone re-anchored it)
-# surfaces as exit 2 via the self-verify step, so the ledger stays honest.
+# A stale entry (drift no longer present, because someone re-anchored it
+# or the parser no longer flags it) surfaces as exit 2 via the
+# self-verify step, so the ledger stays honest.
 #
 # To widen coverage: remove the matching entry after fixing the drift.
 #
 # File new drift as standalone work. Symbol-anchor form
-# (`path.ml:symbol_name`) sidesteps this drift class entirely — prefer it
-# when authoring new references.
+# (`path.ml:symbol_name`) sidesteps this drift class entirely — prefer
+# it when authoring new references.
+#
+# Updated 2026-04-20 after ci.yml integration + parser refinement that
+# distinguishes structured snippets (≥2 space / tab separator) from
+# continuation prose.
 
 specs/bug-models/CascadeExhaustion.tla  lib/cascade/cascade_fsm.mli:45
 specs/bug-models/HebbianLearning.tla  lib/hebbian_eio.ml:264
 specs/bug-models/SessionRegistryGhost.tla  lib/session.ml:49
 specs/bug-models/SessionRegistryGhost.tla  lib/session.ml:70
 specs/bug-models/SSEBroadcastBlock.tla  lib/sse.ml:649
-specs/keeper-state-machine/KeeperCampaignLifecycle.tla  lib/keeper/keeper_campaign_fsm.ml:33
-specs/keeper-state-machine/KeeperCampaignLifecycle.tla  lib/keeper/keeper_campaign_fsm.ml:336
-specs/keeper-state-machine/KeeperCampaignLifecycle.tla  lib/keeper/keeper_campaign_fsm.ml:99
 specs/keeper-state-machine/KeeperConditionsGovernPhase.tla  lib/keeper/keeper_state_machine.ml:389
 specs/keeper-state-machine/KeeperConditionsGovernPhase.tla  lib/keeper/keeper_state_machine.ml:61
-specs/keeper-state-machine/KeeperConditionsGovernPhase.tla  lib/keeper/keeper_state_machine.ml:8
-specs/keeper-state-machine/KeeperCounterCausality.tla  lib/dashboard/dashboard_http_keeper.ml:763
 specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_bank.ml:550
 specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_policy.ml:159
 specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_policy.ml:164
 specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_policy.ml:166
-specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_recall.ml:104
-specs/keeper-state-machine/KeeperOutcomesConservation.tla  lib/dashboard/dashboard_http_keeper.ml:65
-specs/keeper-state-machine/KeeperReconcileLiveness.tla  lib/keeper/keeper_keepalive.ml:800
-
-# Added 2026-04-20: pre-existing drifts surfaced after refactors of
-# state machine / keepalive / coord_gc bodies. Non-blocking baseline,
-# spec text needs re-anchoring (issue: TBD).
-#
-# Pruned 2026-04-20: KeeperPhaseRace was repurposed in #9080 (no longer
-# references state_machine.ml:311 or keepalive.ml:1566). KeeperTaskInterlock
-# anchors were re-anchored in #9086/#9090 (coord_gc.ml:39 → :128 onward).
-# Removing the now-stale entries restores the self-verify ledger to honest.

@@ -191,8 +191,12 @@ CompactionCompletes(k) ==
 \* 5b. Compaction Failed: strategy returned an error — context_tokens
 \*     stay above budget, keeper transitions back to overflow_retry for
 \*     another compaction attempt.
-\*     Models keeper_state_machine.ml:383-389 Compaction_failed _ handler:
+\*     Models keeper_state_machine.ml:402-408 Compaction_failed _ handler:
 \*     clears compaction_active but leaves context_overflow=true.
+\*     (Verified 2026-04-20: lines 383-389 were a stale anchor; that
+\*     range now holds the Turn_failed + Context_measured branches.
+\*     The Compaction_failed handler shifted ~20 lines down as new
+\*     event variants were inserted above it.)
 \*     NOTE: the retry-exhaustion latch (compact_retry_exhausted → Paused)
 \*     lives in keeper_unified_turn and is not yet modelled here. Without
 \*     fairness on CompactionCompletes, TLC explores both retry and

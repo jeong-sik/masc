@@ -296,6 +296,16 @@ let looks_like_git_status out =
 let looks_like_lint_eslint out =
   contains_ci out "eslint" || contains_ci out "problem"
 
+(* pytest characteristic banners.  The "test session starts" banner
+   is the canonical signal emitted by pytest >= 3.x (surrounded by
+   variable-length "=" padding).  We also key off the common " pytest"
+   invocation token so that early-exit failures with no session banner
+   (e.g. collection errors) still classify as pytest. *)
+let looks_like_pytest out =
+  contains_sub out "test session starts" ||
+  contains_sub out " pytest " ||
+  contains_sub out "pytest "
+
 (* Test count extraction.  Alcotest / cargo-test lines commonly look
    like one of:
 
@@ -363,6 +373,35 @@ let find_sub_in line sub =
     in
     loop 0
 
+(* pytest summary line:
+     "===== 12 passed in 0.45s ====="
+     "===== 5 failed, 7 passed in 1.2s ====="
+     "===== 12 passed, 1 skipped in 0.4s ====="
+   Strategy: require the leading "=====" banner to distinguish from
+   any other "N passed" substring that might sneak in from framework
+   docs or error context.  [tag] is either "passed" or "failed". *)
+let pytest_count_from_output ~tag out =
+  let has_banner line =
+    match find_sub_in line "=====" with
+    | Some _ -> true
+    | None -> false
+  in
+  let needle = " " ^ tag in
+  let rec per_line = function
+    | [] -> 0
+    | line :: rest ->
+        if has_banner line then
+          match find_sub_in line needle with
+          | None -> per_line rest
+          | Some pos ->
+              (match first_int_before line pos with
+               | Some n -> n
+               | None -> per_line rest)
+        else
+          per_line rest
+  in
+  per_line (split_lines out)
+
 let test_count_from_output out =
   let markers_before = [ "tests run"; "tests passed"; "test passed" ] in
   let markers_after = [ "test result: ok. "; "passed:" ] in
@@ -397,7 +436,10 @@ let of_exec_outcome ~semantic ~stdout ~stderr =
   match semantic with
   | `Git_not_a_repo -> [ Git_not_a_repo ]
   | `Ok ->
-      if looks_like_dune_runtest out then
+      if looks_like_pytest out then
+        let n = pytest_count_from_output ~tag:"passed" out in
+        [ Test_pass { count = n; confidence = `Heuristic } ]
+      else if looks_like_dune_runtest out then
         let n = test_count_from_output out in
         [ Test_pass { count = n; confidence = `Heuristic } ]
       else if looks_like_dune_build out then
@@ -420,7 +462,10 @@ let of_exec_outcome ~semantic ~stdout ~stderr =
       end
       else []
   | `Fail _ ->
-      if looks_like_dune_runtest out then
+      if looks_like_pytest out then
+        let n = pytest_count_from_output ~tag:"failed" out in
+        [ Test_fail { count = n; confidence = `Heuristic } ]
+      else if looks_like_dune_runtest out then
         let n = test_count_from_output out in
         [ Test_fail { count = n; confidence = `Heuristic } ]
       else if looks_like_dune_build out then

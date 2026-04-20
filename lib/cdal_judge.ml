@@ -306,6 +306,23 @@ let looks_like_pytest out =
   contains_sub out " pytest " ||
   contains_sub out "pytest "
 
+(* go test characteristic lines.  The `--- PASS:` / `--- FAIL:`
+   preface and the `=== RUN` banner are unique to the go test
+   runner — dune/cargo/pytest do not emit them.  We require at least
+   one of these signatures so that arbitrary prose containing
+   "PASS" or "FAIL" tokens cannot false-positive. *)
+let looks_like_go_test out =
+  contains_sub out "--- PASS:" ||
+  contains_sub out "--- FAIL:" ||
+  contains_sub out "=== RUN"
+
+(* Count "--- PASS:" or "--- FAIL:" preface lines.  Each line
+   corresponds to one completed subtest in the go test output stream,
+   so summing them gives the total pass/fail count for the invocation. *)
+let go_test_count ~tag out =
+  let needle = "--- " ^ tag ^ ":" in
+  count_sub out needle
+
 (* Test count extraction.  Alcotest / cargo-test lines commonly look
    like one of:
 
@@ -436,7 +453,10 @@ let of_exec_outcome ~semantic ~stdout ~stderr =
   match semantic with
   | `Git_not_a_repo -> [ Git_not_a_repo ]
   | `Ok ->
-      if looks_like_pytest out then
+      if looks_like_go_test out then
+        let n = go_test_count ~tag:"PASS" out in
+        [ Test_pass { count = n; confidence = `Heuristic } ]
+      else if looks_like_pytest out then
         let n = pytest_count_from_output ~tag:"passed" out in
         [ Test_pass { count = n; confidence = `Heuristic } ]
       else if looks_like_dune_runtest out then
@@ -462,7 +482,10 @@ let of_exec_outcome ~semantic ~stdout ~stderr =
       end
       else []
   | `Fail _ ->
-      if looks_like_pytest out then
+      if looks_like_go_test out then
+        let n = go_test_count ~tag:"FAIL" out in
+        [ Test_fail { count = n; confidence = `Heuristic } ]
+      else if looks_like_pytest out then
         let n = pytest_count_from_output ~tag:"failed" out in
         [ Test_fail { count = n; confidence = `Heuristic } ]
       else if looks_like_dune_runtest out then

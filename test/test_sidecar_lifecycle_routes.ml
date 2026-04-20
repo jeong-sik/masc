@@ -286,6 +286,7 @@ let test_reconcile_stale_generation_does_not_start () =
 
 let test_reconcile_running_unavailable_starts_once () =
   let shell_calls = ref 0 in
+  let written_attempt = ref None in
   let desired : Routes.desired_record =
     {
       Routes.connector_id = "discord";
@@ -297,13 +298,63 @@ let test_reconcile_running_unavailable_starts_once () =
   in
   let result =
     Routes.reconcile_desired_once
+      ~now:"2026-04-20T00:00:00Z"
+      ~next_retry_at:"2099-04-20T00:00:30Z"
+      ~current_generation:3
+      ~observed_state:Routes.Observed_unavailable
+      ~write_attempt:(fun attempt -> written_attempt := Some attempt)
+      ~start_shell:(fun () -> incr shell_calls)
+      desired
+  in
+  check int "current running reconcile shells once" 1 !shell_calls;
+  check string "started result" "started" (Routes.reconcile_result_to_string result);
+  (match !written_attempt with
+   | Some attempt ->
+       check string "attempt result is operator-visible" "start_dispatched"
+         attempt.Routes.last_attempt_result;
+       check string "next retry recorded" "2099-04-20T00:00:30Z"
+         (Option.value attempt.next_retry_at ~default:"");
+       check string "next action recorded"
+         "wait for observed status, or open logs if the sidecar remains offline after backoff"
+         attempt.operator_next_action
+   | None -> failf "running reconcile should persist attempt metadata")
+
+let test_reconcile_running_unavailable_backoff_noops () =
+  let shell_calls = ref 0 in
+  let desired : Routes.desired_record =
+    {
+      Routes.connector_id = "discord";
+      desired_state = Routes.Desired_running;
+      generation = 3;
+      updated_by = "test";
+      updated_at = "2026-04-20T00:00:00Z";
+    }
+  in
+  let previous_attempt : Routes.attempt_record =
+    {
+      connector_id = "discord";
+      generation = 3;
+      attempt_id = "3:1";
+      attempt_number = 1;
+      last_attempt_result = "start_dispatched";
+      next_retry_at = Some "2099-04-20T00:00:30Z";
+      operator_next_action =
+        "wait for observed status, or open logs if the sidecar remains offline after backoff";
+      updated_at = "2026-04-20T00:00:00Z";
+    }
+  in
+  let result =
+    Routes.reconcile_desired_once
+      ~now:"2026-04-20T00:00:10Z"
+      ~previous_attempt
       ~current_generation:3
       ~observed_state:Routes.Observed_unavailable
       ~start_shell:(fun () -> incr shell_calls)
       desired
   in
-  check int "current running reconcile shells once" 1 !shell_calls;
-  check string "started result" "started" (Routes.reconcile_result_to_string result)
+  check int "backoff suppresses duplicate shell start" 0 !shell_calls;
+  check string "backoff result" "noop:backoff_active"
+    (Routes.reconcile_result_to_string result)
 
 let test_reconcile_stopped_noops () =
   let shell_called = ref false in
@@ -339,6 +390,21 @@ let test_status_json_includes_lifecycle_shape () =
        with
        | Ok _ -> ()
        | Error msg -> failf "desired write failed: %s" msg);
+      let attempt : Routes.attempt_record =
+        {
+          connector_id = "discord";
+          generation = 1;
+          attempt_id = "1:1";
+          attempt_number = 1;
+          last_attempt_result = "start_dispatched";
+          next_retry_at = Some "2099-04-20T00:00:30Z";
+          operator_next_action =
+            "wait for observed status, or open logs if the sidecar remains offline after backoff";
+          updated_at = "2026-04-20T00:00:00Z";
+        }
+      in
+      check (result unit string) "attempt write" (Ok ())
+        (Routes.write_attempt_record ~base_path ~id:"discord" attempt);
       let json = Routes.read_status_json ~base_path "discord" in
       let open Yojson.Safe.Util in
       let lifecycle = json |> member "sidecar_lifecycle" in
@@ -348,8 +414,15 @@ let test_status_json_includes_lifecycle_shape () =
         (lifecycle |> member "desired_generation" |> to_int);
       check string "observed_state" "unavailable"
         (lifecycle |> member "observed_state" |> to_string);
-      check string "reconcile_result" "would_start"
-        (lifecycle |> member "reconcile_result" |> to_string))
+      check string "reconcile_result" "noop:backoff_active"
+        (lifecycle |> member "reconcile_result" |> to_string);
+      check string "last_attempt_result" "start_dispatched"
+        (lifecycle |> member "last_attempt_result" |> to_string);
+      check string "next_retry_at" "2099-04-20T00:00:30Z"
+        (lifecycle |> member "next_retry_at" |> to_string);
+      check string "operator_next_action"
+        "wait for observed status, or open logs if the sidecar remains offline after backoff"
+        (lifecycle |> member "operator_next_action" |> to_string))
 
 (* ---- Config write helpers (PUT /api/v1/sidecar/config). ---- *)
 
@@ -514,6 +587,8 @@ let () =
             test_reconcile_stale_generation_does_not_start;
           test_case "running + unavailable starts once" `Quick
             test_reconcile_running_unavailable_starts_once;
+          test_case "running + unavailable backs off repeated same-generation start" `Quick
+            test_reconcile_running_unavailable_backoff_noops;
           test_case "stopped desired no-ops" `Quick test_reconcile_stopped_noops;
           test_case "status JSON includes lifecycle shape" `Quick
             test_status_json_includes_lifecycle_shape;

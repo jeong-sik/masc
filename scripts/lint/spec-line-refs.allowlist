@@ -40,3 +40,10 @@ specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_p
 specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_recall.ml:104
 specs/keeper-state-machine/KeeperOutcomesConservation.tla  lib/dashboard/dashboard_http_keeper.ml:65
 specs/keeper-state-machine/KeeperReconcileLiveness.tla  lib/keeper/keeper_keepalive.ml:800
+
+# Added 2026-04-20: pre-existing drifts surfaced after refactors of
+# state machine / keepalive / coord_gc bodies. Non-blocking baseline,
+# spec text needs re-anchoring (issue: TBD).
+specs/bug-models/KeeperPhaseRace.tla  lib/keeper/keeper_state_machine.ml:311
+specs/bug-models/KeeperPhaseRace.tla  lib/keeper/keeper_keepalive.ml:1566
+specs/bug-models/KeeperTaskInterlock.tla  lib/coord/coord_gc.ml:39

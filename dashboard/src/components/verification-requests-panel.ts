@@ -70,6 +70,11 @@ type StatusFilter = VerificationRequestStatus | 'all'
 const statusFilter = signal<StatusFilter>('all')
 const searchQuery = signal('')
 
+export function __resetVerificationRequestsPanelForTest(): void {
+  statusFilter.value = 'all'
+  searchQuery.value = ''
+}
+
 // Per-request mutation state. Signal-valued Map avoids component-local
 // state plumbing: the row reads `rowActions.value.get(request_id)` and the
 // action handler mutates a new Map to preserve signal identity semantics.
@@ -135,6 +140,22 @@ function statusTone(s: VerificationRequestStatus): 'ok' | 'warn' | 'bad' {
     case 'timed_out': return 'bad'
     case 'pending': return 'warn'
   }
+}
+
+function statusLabel(row: VerificationRequest): string {
+  if (row.status === 'pending' && row.request_kind === 'conflict_triage') {
+    return '충돌 triage'
+  }
+  return STATUS_LABEL[row.status]
+}
+
+function statusToneForRow(
+  row: VerificationRequest,
+): 'ok' | 'warn' | 'bad' {
+  if (row.status === 'pending' && row.request_kind === 'conflict_triage') {
+    return 'bad'
+  }
+  return statusTone(row.status)
 }
 
 const VERDICT_LABEL: Record<NonNullable<VerificationRequestVerdict>, string> = {
@@ -307,15 +328,22 @@ function VerificationRow({
   const hasContract = row.completion_contract.length > 0
   const hasEvidence = row.required_evidence.length > 0
   const hasTaskTitle = row.task_title !== ''
+  const hasRequestSummary = row.request_summary !== ''
+  const hasNextAction = row.next_action != null && row.next_action !== ''
   const hasDetails =
-    hasContract || hasEvidence || hasTaskTitle || row.verdict_reason !== ''
+    hasContract ||
+    hasEvidence ||
+    hasTaskTitle ||
+    hasRequestSummary ||
+    hasNextAction ||
+    row.verdict_reason !== ''
   const actionState = rowActions.value.get(row.request_id) ?? { kind: 'idle' as const }
 
   return html`
     <tr class="border-b border-[var(--card-border)] last:border-b-0 align-top">
       <td class="py-2 pr-2">
-        <${StatusChip} tone=${statusTone(row.status)}>
-          ${STATUS_LABEL[row.status]}
+        <${StatusChip} tone=${statusToneForRow(row)}>
+          ${statusLabel(row)}
         <//>
       </td>
       <td class="py-2 pr-2">
@@ -347,7 +375,16 @@ function VerificationRow({
       </td>
       <td class="py-2 pr-2">
         ${row.status === 'pending'
-          ? html`<${RowActions} row=${row} state=${actionState} refresh=${refresh} />`
+          ? html`
+              ${row.request_kind === 'conflict_triage'
+                ? html`
+                    <div class="mb-1 text-3xs text-[var(--text-bad)]">
+                      일반 merged-PR 승인 금지 · triage 우선
+                    </div>
+                  `
+                : null}
+              <${RowActions} row=${row} state=${actionState} refresh=${refresh} />
+            `
           : html`<span class="text-[var(--text-muted)]">—</span>`}
       </td>
       <td class="py-2">
@@ -365,6 +402,26 @@ function VerificationRow({
                             Task Title
                           </div>
                           <div class="text-[var(--text-body)]">${row.task_title}</div>
+                        </div>
+                      `
+                    : null}
+                  ${hasRequestSummary
+                    ? html`
+                        <div>
+                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--text-muted)] mb-1">
+                            Verification Summary
+                          </div>
+                          <div class="text-[var(--text-body)]">${row.request_summary}</div>
+                        </div>
+                      `
+                    : null}
+                  ${hasNextAction
+                    ? html`
+                        <div>
+                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--text-muted)] mb-1">
+                            Next Action
+                          </div>
+                          <div class="text-[var(--text-body)]">${row.next_action}</div>
                         </div>
                       `
                     : null}

@@ -940,15 +940,16 @@ let render_toml (pairs : (string * toml_value) list) : string =
 
 type declared_type = [ `String | `Integer | `Number | `Boolean ]
 
-let parse_declared_type json : declared_type =
+let parse_declared_type json : declared_type option =
   match json with
   | `Assoc _ ->
       (match Yojson.Safe.Util.member "type" json with
-       | `String "integer" -> `Integer
-       | `String "number" -> `Number
-       | `String "boolean" -> `Boolean
-       | _ -> `String)
-  | _ -> `String
+       | `String "string" -> Some `String
+       | `String "integer" -> Some `Integer
+       | `String "number" -> Some `Number
+       | `String "boolean" -> Some `Boolean
+       | _ -> None)
+  | _ -> None
 
 let schema_field_types ?base_path id : (string * declared_type) list =
   match fetch_schema ?base_path id with
@@ -957,7 +958,11 @@ let schema_field_types ?base_path id : (string * declared_type) list =
       (match Yojson.Safe.from_string json_str with
        | j ->
            (match Yojson.Safe.Util.member "properties" j with
-            | `Assoc assoc -> List.map (fun (k, v) -> (k, parse_declared_type v)) assoc
+            | `Assoc assoc ->
+                List.filter_map
+                  (fun (k, v) ->
+                     Option.map (fun typ -> (k, typ)) (parse_declared_type v))
+                  assoc
             | _ -> [])
        | exception _ -> [])
 

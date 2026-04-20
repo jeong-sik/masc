@@ -145,6 +145,50 @@ let test_submit_populates_criteria_from_completion_contract () =
     Alcotest.(check (list string)) "evidence_refs from verify_gate_evidence"
       ["output.json"] persisted_refs)
 
+let test_submit_marks_conflict_triage_when_deliverable_claims_completion () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_strict_task config in
+    ignore
+      (Planning_eio.set_deliverable config ~task_id
+         ~content:"Task-001 completed. Exercised masc_observe_operations.");
+    let task =
+      match get_task config task_id with
+      | Some t -> t
+      | None -> Alcotest.fail "fixture task not retrievable"
+    in
+    let evidence_refs =
+      match task.contract with
+      | Some c -> c.verify_gate_evidence
+      | None -> []
+    in
+    Verification_protocol.on_submit_for_verification ~config ~task
+      ~assignee:"verifier-agent" ~verification_id:"vrf-conflict"
+      ~evidence_refs;
+    let reqs = Verification.list_requests config.Coord.base_path in
+    let req =
+      List.find
+        (fun (r : Verification.verification_request) -> r.task_id = task_id)
+        reqs
+    in
+    let output_fields =
+      match req.output with
+      | `Assoc fields -> fields
+      | _ -> Alcotest.fail "expected output assoc"
+    in
+    let string_field key =
+      match List.assoc_opt key output_fields with
+      | Some (`String value) -> value
+      | _ -> Alcotest.fail (Printf.sprintf "%s missing" key)
+    in
+    Alcotest.(check string) "request_kind" "conflict_triage"
+      (string_field "request_kind");
+    Alcotest.(check string) "request_summary"
+      "Conflict verification required: board / planning / mutation path disagree."
+      (string_field "request_summary");
+    Alcotest.(check string) "next_action"
+      "Reconcile board / planning / mutation surfaces before ordinary approval."
+      (string_field "next_action"))
+
 let test_approve_by_other_agent_moves_to_done () =
   with_temp_config ~fsm_enabled:true (fun config ->
     let task_id = add_strict_task config in
@@ -279,6 +323,8 @@ let () =
         `Quick test_submit_for_verification_from_claimed_moves_to_awaiting;
       Alcotest.test_case "submit splits criteria/evidence by contract field"
         `Quick test_submit_populates_criteria_from_completion_contract;
+      Alcotest.test_case "submit marks conflict triage from completed deliverable"
+        `Quick test_submit_marks_conflict_triage_when_deliverable_claims_completion;
       Alcotest.test_case "cross-agent approve moves to done" `Quick
         test_approve_by_other_agent_moves_to_done;
       Alcotest.test_case "cross-agent reject moves to in_progress" `Quick

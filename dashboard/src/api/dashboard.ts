@@ -1889,6 +1889,9 @@ export interface VerificationRequest {
   request_id: string
   task_id: string
   task_title: string
+  request_kind: 'normal' | 'conflict_triage'
+  request_summary: string
+  next_action: string | null
   keeper: string | null
   status: VerificationRequestStatus
   created_at: string

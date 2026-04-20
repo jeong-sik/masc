@@ -527,6 +527,32 @@ let test_coerce_rejects_oversized_value () =
   | Error _ -> ()
   | Ok _ -> failf "9000-byte value should be rejected by max_value_bytes guard"
 
+let string_of_declared_type = function
+  | `String -> "string"
+  | `Integer -> "integer"
+  | `Number -> "number"
+  | `Boolean -> "boolean"
+
+let test_parse_declared_type_accepts_known_schema_types () =
+  check (option string) "string type"
+    (Some "string")
+    (Option.map string_of_declared_type
+       (Routes.parse_declared_type (`Assoc [ ("type", `String "string") ])));
+  check (option string) "integer type"
+    (Some "integer")
+    (Option.map string_of_declared_type
+       (Routes.parse_declared_type (`Assoc [ ("type", `String "integer") ])))
+
+let test_parse_declared_type_rejects_unknown_schema_types () =
+  check (option string) "unknown type rejected"
+    None
+    (Option.map string_of_declared_type
+       (Routes.parse_declared_type (`Assoc [ ("type", `String "object") ])));
+  check (option string) "missing type rejected"
+    None
+    (Option.map string_of_declared_type
+       (Routes.parse_declared_type (`Assoc [])))
+
 let test_parse_body_pairs_coerces_scalar_values () =
   check (result (list (pair string string)) string)
     "scalar JSON values are stringified for downstream type coercion"
@@ -712,6 +738,10 @@ let () =
           test_case "coerce: integer ok/err"      `Quick test_coerce_integer_accepts_and_rejects;
           test_case "coerce: boolean variants"    `Quick test_coerce_boolean_accepts_variants;
           test_case "coerce: oversized rejected"  `Quick test_coerce_rejects_oversized_value;
+          test_case "parse declared type: known types" `Quick
+            test_parse_declared_type_accepts_known_schema_types;
+          test_case "parse declared type: unknown types rejected" `Quick
+            test_parse_declared_type_rejects_unknown_schema_types;
           test_case "parse body pairs: scalars" `Quick
             test_parse_body_pairs_coerces_scalar_values;
           test_case "parse body pairs: non-object" `Quick

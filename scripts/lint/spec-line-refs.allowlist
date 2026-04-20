@@ -21,11 +21,6 @@
 # distinguishes structured snippets (≥2 space / tab separator) from
 # continuation prose.
 
-specs/bug-models/CascadeExhaustion.tla  lib/cascade/cascade_fsm.mli:45
-specs/bug-models/HebbianLearning.tla  lib/hebbian_eio.ml:264
-specs/bug-models/SessionRegistryGhost.tla  lib/session.ml:49
-specs/bug-models/SessionRegistryGhost.tla  lib/session.ml:70
-specs/bug-models/SSEBroadcastBlock.tla  lib/sse.ml:649
 specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_bank.ml:550
 specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_policy.ml:159
 specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_policy.ml:164

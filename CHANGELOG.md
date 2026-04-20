@@ -3,6 +3,26 @@
 
 ## Unreleased
 
+### Changed
+
+- **TLA+ specs 이관 완결 (`tla/` → `specs/`).** 기존 top-level
+  `tla/` 디렉토리에 남아 있던 3개 스펙을 `specs/` 서브디렉토리
+  구조로 이동: `specs/task-lifecycle/TaskLifecycle.{tla,cfg,-buggy.cfg}`
+  (#8960), `specs/checkpoint-trim/CheckpointTrim.{tla,cfg,-buggy.cfg}`
+  (#9001), `specs/social-state-cap/SocialStateCap.{tla,cfg,-buggy.cfg}`
+  (#9020). 이관 이유: (1) `specs/Makefile` 의 `find . -name '*.cfg'`
+  auto-discovery 가 `specs/**` 하위만 탐색해 `tla/` 스펙은
+  `make -C specs check-all` 에서 제외되었고, (2) `ci.yml` 의
+  `tla-specs` job path filter (`^(specs/|lib/keeper/|lib/oas_.*\\.ml$
+  |Makefile$)`) 도 `tla/` 변경을 무시해 TaskLifecycle 이 PR #8437
+  merge 이후 로컬 only 로 남아 있었다. 이관 후 `scripts/tla-check.sh`
+  의 legacy `tla/` 루프 제거 및 `.gitignore` 의 `tla/` 전용 패턴
+  정리. `CheckpointTrim.cfg` / `-buggy.cfg` 에는 terminating spec
+  (`pc: "trim" → "done"`) 의 default deadlock 오탐을 막기 위해
+  `CHECK_DEADLOCK FALSE` 를 추가 — safety invariant 로만 검증.
+  CI `TLA+ Model Checking` job 은 SocialStateCap 11,665 distinct
+  states 포함 17 분 런타임에 pass.
+
 ### Added
 
 - **Legendary Bash `bg_tasks/<keeper>` HTTP endpoint.**  New

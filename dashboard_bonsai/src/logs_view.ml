@@ -104,6 +104,11 @@ stylesheet
 
   .crumbs_sep { color: var(--border-highlight); }
   .crumbs_cur { color: var(--text-bright); letter-spacing: 0.14em; }
+  .crumbs_room {
+    color: var(--accent-brass);
+    letter-spacing: 0.14em;
+    font-variant-numeric: tabular-nums;
+  }
 
   .pulse_slot { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 
@@ -2433,10 +2438,24 @@ let render_response
       ; Node.span ~attrs:[ Style.wordmark ] [ Node.text "masc" ]
       ; Node.div
           ~attrs:[ Style.crumbs ]
-          [ Node.span [ Node.text "observatory" ]
-          ; Node.span ~attrs:[ Style.crumbs_sep ] [ Node.text "›" ]
-          ; Node.span ~attrs:[ Style.crumbs_cur ] [ Node.text "logs · 저널" ]
-          ]
+          (let head =
+             [ Node.span [ Node.text "observatory" ]
+             ; Node.span ~attrs:[ Style.crumbs_sep ] [ Node.text "›" ]
+             ]
+           in
+           let room_seg =
+             match keepers.room with
+             | None | Some "" -> []
+             | Some name ->
+               [ Node.span ~attrs:[ Style.crumbs_room ] [ Node.text name ]
+               ; Node.span ~attrs:[ Style.crumbs_sep ] [ Node.text "›" ]
+               ]
+           in
+           let tail =
+             [ Node.span ~attrs:[ Style.crumbs_cur ] [ Node.text "logs · 저널" ]
+             ]
+           in
+           head @ room_seg @ tail)
       ; Node.div
           ~attrs:[ Style.pulse_slot ]
           [ Node.span ~attrs:[ Style.pulse ] []

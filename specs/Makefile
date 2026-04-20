@@ -35,7 +35,7 @@ endif
 # action (Failed deliberately preserves context_overflow for retry). Tracked in #8710;
 # proper fix requires discriminating CompactionCompleted vs CompactionFailed in the
 # invariant. Temporary skip unblocks PR queue (30+ PRs inheriting this fail).
-KNOWN_FAILURES ?= KeeperTraceSpec KeeperOASBridge KeeperWorkPipeline KeeperStateMachine
+KNOWN_FAILURES ?= KeeperTraceSpec KeeperWorkPipeline KeeperStateMachine
 
 # Buggy specs whose current invariant/model is documented as non-violating.
 # Remove from this list once the buggy cfg asserts a stronger property.

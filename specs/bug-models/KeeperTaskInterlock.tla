@@ -70,7 +70,7 @@
 \*   without the GC window. Until that cascade exists, a Dead keeper
 \*   can hold a Claimed task for up to ~keeper_threshold_seconds —
 \*   the transient window is visible on the dashboard Keepers section
-\*   (#6556) and is safe because Room.claim_task_r rejects any
+\*   (#6556) and is safe because Coord_task.claim_task_r rejects any
 \*   attempt by another agent to re-claim the orphaned task
 \*   (TaskAlreadyClaimed), so no state corruption is possible.
 \*

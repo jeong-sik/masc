@@ -97,21 +97,14 @@ let view_hero (keepers : Keepers_types.response) =
     then "— offline"
     else Printf.sprintf "· %d live · %d warn · %d dead" live_n warn_n dead_n
   in
-  Node.div
-    ~attrs:[ Style.hero ]
-    [ Node.p ~attrs:[ Style.eyebrow ] [ Node.text "runtime · keepers" ]
-    ; Node.h1
-        ~attrs:[ Style.title ]
-        [ Node.text "fleet"
-        ; Node.span ~attrs:[ Style.title_tail ] [ Node.text tail ]
-        ]
-    ; Node.p
-        ~attrs:[ Style.sub ]
-        [ Node.text
-            "3s 폴링으로 본 fleet 전체. 아래 섹션은 roster(현재) · \
-             swim(60s 활동) · pressure(60m ctx)로 시간축이 짧아진다."
-        ]
-    ]
+  Hero.view
+    ~eyebrow:"runtime · keepers"
+    ~title:"fleet"
+    ~tail:(tail, `Brass)
+    ~sub:
+      "3s 폴링으로 본 fleet 전체. 아래 섹션은 roster(현재) · \
+       swim(60s 활동) · pressure(60m ctx)로 시간축이 짧아진다."
+    ()
 ;;
 
 let view_hud_strip (keepers : Keepers_types.response) =

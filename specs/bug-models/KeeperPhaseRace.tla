@@ -5,13 +5,14 @@
 \* (running -> failing -> cooldown -> handing_off -> idle). That race is
 \* structurally impossible in the current runtime: phase is *derived*
 \* from a `conditions` record by `derive_phase` at
-\* lib/keeper/keeper_state_machine.ml:311; events update conditions and
-\* the new phase is the function of those conditions (line 589). There
+\* lib/keeper/keeper_state_machine.ml:derive_phase; events update conditions
+\* via lib/keeper/keeper_state_machine.ml:update_conditions and the new phase
+\* is derived by lib/keeper/keeper_state_machine.ml:apply_event. There
 \* is no event handler that writes `phase` directly, so two handlers
 \* cannot race a `phase` write.
 \*
 \* The closest live analog — and what this spec now models — is the
-\* fail-cascade contract in lib/keeper/keeper_keepalive.ml:1566-1585:
+\* fail-cascade contract in lib/keeper/keeper_keepalive.ml:start_keepalive:
 \*
 \*   let turn_fail_count = (* read consecutive turn failures *) in
 \*   if turn_fail_count > 0 then

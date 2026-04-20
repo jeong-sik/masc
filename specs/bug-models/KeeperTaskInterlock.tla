@@ -53,7 +53,7 @@
 \*
 \* What actually restores the invariant:
 \*
-\*   Coord_gc.cleanup_zombies (lib/coord/coord_gc.ml:39-190) scans the
+\*   Coord_gc.cleanup_zombies (lib/coord/coord_gc.ml:cleanup_zombies) scans the
 \*   agents directory on a periodic GC cycle, detects agents whose
 \*   last_seen is older than Env_config.Zombie.keeper_threshold_seconds
 \*   ("zombie" agents), and in Phase 3 iterates the backlog calling

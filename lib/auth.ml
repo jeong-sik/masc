@@ -107,12 +107,23 @@ let save_auth_config config (auth_cfg : auth_config) =
 let credential_file config agent_name =
   Filename.concat (agents_dir config) (agent_name ^ ".json")
 
-(** Load agent credential *)
-let load_credential config agent_name : agent_credential option =
-  let file = credential_file config agent_name in
-  if file_exists file then
+(* Inline copy of Nickname.is_generated_nickname / extract_agent_type.
+   Auth lives below masc_coord in the module graph and cannot depend on
+   it. The nickname pattern — three or more hyphen-separated segments,
+   first segment is the agent type — is small enough to duplicate here
+   without drift risk. Covered by the nickname fallback tests. *)
+let is_generated_nickname_shape name =
+  List.length (String.split_on_char '-' name) >= 3
+
+let extract_agent_type_prefix name =
+  match String.split_on_char '-' name with
+  | prefix :: _ when prefix <> "" -> Some prefix
+  | _ -> None
+
+let load_credential_from_path config agent_name path : agent_credential option =
+  if file_exists path then
     try
-      let content = read_text_file file in
+      let content = read_text_file path in
       let json = Yojson.Safe.from_string content in
       match agent_credential_of_yojson json with
       | Ok cred -> Some cred
@@ -122,6 +133,31 @@ let load_credential config agent_name : agent_credential option =
     with Sys_error _ | Yojson.Json_error _ -> None
   else
     None
+
+(** Load agent credential.
+
+    Tries an exact filename match first. If that misses and [agent_name]
+    looks like a generated nickname ({agent_type}-{adj}-{animal}[...]),
+    retry with just the agent_type prefix — shared-token aliases
+    provisioned for stable keeper names (e.g. [adversary.json]) then
+    cover every dynamically generated nickname in that family
+    (e.g. [adversary-fair-tapir]).
+
+    Without this fallback, Coord.join's nickname output caused a
+    chronic "No credential found for <type>-<adj>-<animal>" noise band
+    at ~0.3/min on the live fleet (2026-04-20). *)
+let load_credential config agent_name : agent_credential option =
+  let file = credential_file config agent_name in
+  match load_credential_from_path config agent_name file with
+  | Some _ as c -> c
+  | None ->
+    if is_generated_nickname_shape agent_name then
+      match extract_agent_type_prefix agent_name with
+      | Some prefix when prefix <> agent_name ->
+        let fallback = credential_file config prefix in
+        load_credential_from_path config prefix fallback
+      | _ -> None
+    else None
 
 (** Save agent credential *)
 let save_credential config (cred : agent_credential) =

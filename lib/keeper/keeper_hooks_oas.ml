@@ -287,6 +287,20 @@ let make_hooks
          | None -> Agent_sdk.Hooks.Continue
          | Some text when String.trim text = "" ->
            Agent_sdk.Hooks.Continue
+         | Some text when not (String.is_valid_utf_8 text) ->
+           (* Defensive: nudge path producers (e.g. keeper_agent_run's
+              discover_work_nudge) source strings from external input
+              (task titles, operator guidance, board posts). A byte-
+              level truncation upstream can leave an orphan UTF-8
+              continuation byte, and codex CLI rejects the resulting
+              argv with "invalid UTF-8 was detected in one or more
+              arguments" at parse time (non-cascadable). This gate
+              prevents polluted nudges from ever reaching transport
+              argv, regardless of which producer introduced the
+              drift. See #9036 for the first observed producer fix. *)
+           Log.Keeper.warn "keeper:%s before_turn: dropped invalid UTF-8 nudge (%d bytes)"
+             (!meta_ref).name (String.length text);
+           Agent_sdk.Hooks.Continue
          | Some text ->
            Log.Keeper.info "keeper:%s before_turn: injecting work_discovery nudge (%d chars)"
              (!meta_ref).name (String.length text);

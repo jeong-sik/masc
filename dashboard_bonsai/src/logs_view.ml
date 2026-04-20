@@ -2701,6 +2701,18 @@ let render_response
           ]
       ; Node.div
           ~attrs:[]
+          [ aside_h ~tail:"mock · pending trace" "flame · last cycle"
+          ; view_flame_mini
+              ~segments:
+                [ `Llm, 42
+                ; `Tool, 18
+                ; `Think, 12
+                ; `Wait, 20
+                ; `Err, 8
+                ]
+          ]
+      ; Node.div
+          ~attrs:[]
           [ aside_h ~tail:evs_tail "chronicle · recent"
           ; evs_stream
           ]
@@ -2881,28 +2893,6 @@ let render_response
             ]
         ]
     ; view_context_pressure ~keepers ()
-    ; Node.div
-        ~attrs:[ Style.sec ]
-        [ Node.span ~attrs:[ Style.sec_glyph ] []
-        ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "flame · last cycle" ]
-        ; Node.span
-            ~attrs:[ Style.sec_sub ]
-            [ Node.text "tool category split · single bar + legend" ]
-        ; Node.span ~attrs:[ Style.sec_hr ] []
-        ; Node.span
-            ~attrs:[ Style.sec_r ]
-            [ Node.text "mock · trace endpoint "
-            ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "pending" ]
-            ]
-        ]
-    ; view_flame_mini
-        ~segments:
-          [ `Llm, 42
-          ; `Tool, 18
-          ; `Think, 12
-          ; `Wait, 20
-          ; `Err, 8
-          ]
     ; Node.div ~attrs:[ Style.signet ] [ Node.text "M" ]
     ; aside
     ]

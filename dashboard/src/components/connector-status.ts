@@ -933,7 +933,22 @@ function ConnectorLivePanel({
         : null}
 
       ${connectorError || connector?.error
-        ? html`<div class="mt-3 rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]">${connectorError ?? connector?.error}</div>`
+        ? html`
+            <div class="mt-3 rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]" data-connector-warning-panel>
+              <div class="font-semibold text-[var(--text-body)]">
+                ${connectorError ? 'Connector API unavailable' : 'Sidecar status warning'}
+              </div>
+              <div class="mt-1">
+                <span class="font-medium">Cause: </span> ${connectorError ?? connector?.error}
+              </div>
+              <div class="mt-1">
+                <span class="font-medium">Next: </span>
+                ${connectorError
+                  ? html`refresh the dashboard or check <code class="rounded bg-[var(--white-4)] px-1">/api/v1/gate/connectors</code> on ${connector?.gate_base_url || 'the Gate server'}.`
+                  : html`run the ${connectorName} status command and inspect <code class="rounded bg-[var(--white-4)] px-1">${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}</code>.`}
+              </div>
+            </div>
+          `
         : null}
 
       <${SidecarLogViewer} connectorId=${connectorId} />
@@ -952,7 +967,12 @@ function ConnectorLivePanel({
                 <span aria-hidden="true">⚠</span>
                 <span>Directory error</span>
               </span>
-              keeper directory unavailable, manual entry only
+              <div class="mt-1">
+                <span class="font-medium">Cause: </span> keeper directory unavailable, manual entry only.
+              </div>
+              <div class="mt-1">
+                <span class="font-medium">Next: </span> continue with manual entry now, then restore <code class="rounded bg-[var(--white-4)] px-1">config/keepers/</code> or fix <code class="rounded bg-[var(--white-4)] px-1">/api/v1/gate/keepers</code> before relying on directory suggestions.
+              </div>
             </div>
           `
         : null}
@@ -1026,7 +1046,12 @@ function ConnectorLivePanel({
                   </div>
                 </div>
                 <div class="text-2xs text-[var(--warn)]/80">
-                  Click <strong>Start</strong> to spawn via the backend, or copy the command below to run it from a terminal.
+                  <div>
+                    <span class="font-medium">Cause: </span> no sidecar status file has been observed at <code class="rounded bg-[var(--white-4)] px-1">${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}</code>.
+                  </div>
+                  <div class="mt-1">
+                    <span class="font-medium">Next: </span> click <strong>Start</strong> to spawn via the backend, or copy the command below to run it from a terminal. Use <strong>status</strong> and <strong>tail logs</strong> if it stays offline.
+                  </div>
                 </div>
                 <div class="mt-2 grid grid-cols-1 gap-1.5">
                   <${CopyableCode}

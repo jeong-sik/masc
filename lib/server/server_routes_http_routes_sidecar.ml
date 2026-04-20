@@ -591,7 +591,7 @@ let reconcile_desired_once
     ?(now = isoish_now ())
     ?(next_retry_at = isoish_at (Unix.time () +. retry_backoff_seconds))
     ?previous_attempt
-    ?(write_attempt = fun (_ : attempt_record) -> ())
+    ?(write_attempt = fun (_ : attempt_record) -> Ok ())
     ~current_generation
     ~observed_state
     ~start_shell
@@ -610,9 +610,11 @@ let reconcile_desired_once
              let attempt =
                next_attempt_record ~now ~next_retry_at previous_attempt record
              in
-             write_attempt attempt;
-             start_shell ();
-             Reconcile_started)
+             (match write_attempt attempt with
+              | Ok () ->
+                  start_shell ();
+                  Reconcile_started
+              | Error _ -> Reconcile_noop "attempt_write_failed"))
     | Desired_running, Observed_available -> Reconcile_noop "already_available"
     | Desired_stopped, _ -> Reconcile_noop "desired_stopped"
 
@@ -1154,8 +1156,7 @@ let handle_start state request reqd =
                     ~current_generation:desired.generation
                     ?previous_attempt
                     ~observed_state
-                    ~write_attempt:(fun attempt ->
-                      ignore (write_attempt_record ~base_path ~id attempt))
+                    ~write_attempt:(write_attempt_record ~base_path ~id)
                     ~start_shell:(fun () -> ignore (Sys.command cmd))
                     desired
                 in

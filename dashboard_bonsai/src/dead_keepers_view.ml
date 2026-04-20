@@ -112,27 +112,10 @@ let hhmmss_of_iso (s : string) : string =
 ;;
 
 let view_meta_strip ~(total : int) ~(dead : int) ~(synced : string) =
-  Node.div
-    ~attrs:[ Style.meta_strip ]
-    [ Node.div
-        ~attrs:[ Style.meta_item ]
-        [ Node.span ~attrs:[ Style.meta_k ] [ Node.text "fleet" ]
-        ; Node.span
-            ~attrs:[ Style.meta_v ]
-            [ Node.text (Printf.sprintf "%02d" total) ]
-        ]
-    ; Node.div
-        ~attrs:[ Style.meta_item ]
-        [ Node.span ~attrs:[ Style.meta_k ] [ Node.text "dead" ]
-        ; Node.span
-            ~attrs:[ Style.meta_v_blood ]
-            [ Node.text (Printf.sprintf "%02d" dead) ]
-        ]
-    ; Node.div
-        ~attrs:[ Style.meta_item ]
-        [ Node.span ~attrs:[ Style.meta_k ] [ Node.text "synced" ]
-        ; Node.span ~attrs:[ Style.meta_v ] [ Node.text synced ]
-        ]
+  Meta.strip
+    [ Meta.cell ~k:"fleet" ~v:(Printf.sprintf "%02d" total) ()
+    ; Meta.cell ~color:`Blood ~k:"dead" ~v:(Printf.sprintf "%02d" dead) ()
+    ; Meta.cell ~k:"synced" ~v:synced ()
     ]
 ;;
 

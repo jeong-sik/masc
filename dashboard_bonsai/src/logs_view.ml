@@ -356,6 +356,19 @@ stylesheet
     box-shadow: inset 0 0 0 1px var(--accent-brass);
   }
 
+  /* Declarative active state for filter chips — theme chip 패턴과 동일.
+     <html data-log-level="X"> 가 set되면 매칭되는 chip만 active 스타일.
+     기본값 = info (data-log-level 속성 없는 초기 상태도 info chip이 활성). */
+  html[data-log-level="debug"] .chip[data-filter-level="debug"],
+  html[data-log-level="info"]  .chip[data-filter-level="info"],
+  html[data-log-level="warn"]  .chip[data-filter-level="warn"],
+  html[data-log-level="error"] .chip[data-filter-level="error"],
+  html:not([data-log-level])   .chip[data-filter-level="info"] {
+    color: var(--text-bright);
+    background: rgba(138, 106, 40, 0.14);
+    box-shadow: inset 0 0 0 1px var(--accent-brass);
+  }
+
   .input_shell {
     display: inline-flex;
     align-items: center;
@@ -1740,41 +1753,78 @@ let view_heartbeat () =
    state dot, last-heard timestamp, and presence reflect live telemetry. *)
 type keeper_state = [ `Live | `Thinking | `Idle | `Failed ]
 
-let view_roster () =
-  let slot ~sigil ~name ~(state : keeper_state) ~state_label ~when_ =
-    let dot_cls =
-      match state with
-      | `Live -> Style.roster_dot_live
-      | `Thinking -> Style.roster_dot_thinking
-      | `Idle -> Style.roster_dot_idle
-      | `Failed -> Style.roster_dot_failed
-    in
-    Node.div
-      ~attrs:[ Style.roster_slot ]
-      [ Node.div ~attrs:[ Style.roster_sigil ] [ Node.text sigil ]
-      ; Node.div
-          ~attrs:[ Style.roster_body ]
-          [ Node.span ~attrs:[ Style.roster_name ] [ Node.text name ]
-          ; Node.div
-              ~attrs:[ Style.roster_state ]
-              [ Node.span ~attrs:[ Style.roster_dot; dot_cls ] []
-              ; Node.text state_label
-              ]
-          ]
-      ; Node.span ~attrs:[ Style.roster_when ] [ Node.text when_ ]
-      ]
+(** Map live keeper status to the roster dot state. [Warn] → [`Thinking]
+    (something is happening but concerning), [Dead] → [`Failed]. *)
+let roster_state_of (s : Keepers_types.keeper_status) : keeper_state =
+  match s with
+  | Live -> `Live
+  | Warn -> `Thinking
+  | Dead -> `Failed
+;;
+
+let roster_slot_of ~(state : keeper_state) ~sigil ~name ~state_label ~when_ =
+  let dot_cls =
+    match state with
+    | `Live -> Style.roster_dot_live
+    | `Thinking -> Style.roster_dot_thinking
+    | `Idle -> Style.roster_dot_idle
+    | `Failed -> Style.roster_dot_failed
   in
   Node.div
-    ~attrs:[ Style.roster ]
-    [ slot ~sigil:"P" ~name:"keeper · poe" ~state:`Live
-        ~state_label:"speaking" ~when_:"3s"
-    ; slot ~sigil:"J" ~name:"janitor" ~state:`Thinking
-        ~state_label:"thinking" ~when_:"12s"
-    ; slot ~sigil:"G" ~name:"governance" ~state:`Idle
-        ~state_label:"idle · ok" ~when_:"2m"
-    ; slot ~sigil:"I" ~name:"improver" ~state:`Failed
-        ~state_label:"paused · auth" ~when_:"7m"
+    ~attrs:[ Style.roster_slot ]
+    [ Node.div ~attrs:[ Style.roster_sigil ] [ Node.text sigil ]
+    ; Node.div
+        ~attrs:[ Style.roster_body ]
+        [ Node.span ~attrs:[ Style.roster_name ] [ Node.text name ]
+        ; Node.div
+            ~attrs:[ Style.roster_state ]
+            [ Node.span ~attrs:[ Style.roster_dot; dot_cls ] []
+            ; Node.text state_label
+            ]
+        ]
+    ; Node.span ~attrs:[ Style.roster_when ] [ Node.text when_ ]
     ]
+;;
+
+let roster_slot_of_keeper (k : Keepers_types.keeper) =
+  let sigil =
+    if String.length k.name = 0
+    then "·"
+    else Char.to_string (Char.uppercase k.name.[0])
+  in
+  let when_ =
+    match k.latency_ms with
+    | 0 -> "×"
+    | n when n < 1000 -> Printf.sprintf "%dms" n
+    | n -> Printf.sprintf "%.1fs" (Float.of_int n /. 1000.0)
+  in
+  roster_slot_of
+    ~state:(roster_state_of k.status)
+    ~sigil
+    ~name:k.name
+    ~state_label:k.stat
+    ~when_
+;;
+
+let view_roster_static () =
+  [ roster_slot_of ~sigil:"P" ~name:"keeper · poe" ~state:`Live
+      ~state_label:"speaking" ~when_:"3s"
+  ; roster_slot_of ~sigil:"J" ~name:"janitor" ~state:`Thinking
+      ~state_label:"thinking" ~when_:"12s"
+  ; roster_slot_of ~sigil:"G" ~name:"governance" ~state:`Idle
+      ~state_label:"idle · ok" ~when_:"2m"
+  ; roster_slot_of ~sigil:"I" ~name:"improver" ~state:`Failed
+      ~state_label:"paused · auth" ~when_:"7m"
+  ]
+;;
+
+let view_roster ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
+  let slots =
+    match keepers.keepers with
+    | [] -> view_roster_static ()
+    | live -> List.map live ~f:roster_slot_of_keeper
+  in
+  Node.div ~attrs:[ Style.roster ] slots
 ;;
 
 (* ─── swimlane mock ───
@@ -1828,7 +1878,85 @@ let view_swim_lane ~name ~stat ~status ~frames =
     ]
 ;;
 
-let view_swimlanes () =
+(** Map JSON "kind" string to our [swim_frame_kind] variant. Unknown kinds
+    fall back to [`Wait] — neutral grey so unexpected telemetry renders
+    legibly instead of crashing the lane. *)
+let swim_frame_kind_of_string = function
+  | "llm" -> `Llm
+  | "tool" -> `Tool
+  | "think" -> `Think
+  | "err" -> `Err
+  | "wait" | _ -> `Wait
+;;
+
+let swim_lane_status_of (s : Keepers_types.keeper_status) : swim_lane_status =
+  match s with
+  | Live -> `Live
+  | Warn -> `Warn
+  | Dead -> `Dead
+;;
+
+(** Static fallback — matches the hand-coded mock before live wiring. *)
+let view_swim_lanes_static () =
+  [ view_swim_lane
+      ~name:"luna"
+      ~stat:"reading"
+      ~status:`Live
+      ~frames:
+        [ swim_frame ~kind:`Llm ~left:5 ~width:18 ~label:"llm"
+        ; swim_frame ~kind:`Tool ~left:28 ~width:10 ~label:"read"
+        ; swim_frame ~kind:`Think ~left:42 ~width:8 ~label:"think"
+        ; swim_frame ~kind:`Llm ~left:54 ~width:22 ~label:"llm"
+        ; swim_frame ~kind:`Tool ~left:80 ~width:14 ~label:"edit"
+        ]
+  ; view_swim_lane
+      ~name:"brass-owl"
+      ~stat:"retrying"
+      ~status:`Warn
+      ~frames:
+        [ swim_frame ~kind:`Llm ~left:3 ~width:20 ~label:"llm"
+        ; swim_frame ~kind:`Tool ~left:26 ~width:12 ~label:"fetch"
+        ; swim_frame ~kind:`Wait ~left:40 ~width:24 ~label:"wait"
+        ; swim_frame ~kind:`Tool ~left:66 ~width:10 ~label:"fetch"
+        ]
+  ; view_swim_lane
+      ~name:"moth"
+      ~stat:"idle · listening"
+      ~status:`Live
+      ~frames:
+        [ swim_frame ~kind:`Wait ~left:0 ~width:40 ~label:"wait"
+        ; swim_frame ~kind:`Llm ~left:42 ~width:14 ~label:"llm"
+        ; swim_frame ~kind:`Wait ~left:58 ~width:40 ~label:"wait"
+        ]
+  ; view_swim_lane
+      ~name:"ash-hound"
+      ~stat:"crashed t-34"
+      ~status:`Dead
+      ~frames:
+        [ swim_frame ~kind:`Llm ~left:2 ~width:18 ~label:"llm"
+        ; swim_frame ~kind:`Tool ~left:22 ~width:8 ~label:"exec"
+        ; swim_frame ~kind:`Err ~left:32 ~width:6 ~label:"err"
+        ]
+  ]
+;;
+
+let view_swim_lane_of_keeper (k : Keepers_types.keeper) =
+  let frames =
+    List.map k.lane_frames ~f:(fun (f : Keepers_types.lane_frame) ->
+      swim_frame
+        ~kind:(swim_frame_kind_of_string f.kind)
+        ~left:f.left
+        ~width:f.width
+        ~label:f.label)
+  in
+  view_swim_lane
+    ~name:k.name
+    ~stat:k.stat
+    ~status:(swim_lane_status_of k.status)
+    ~frames
+;;
+
+let view_swimlanes ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
   let axis_ticks =
     List.init 6 ~f:(fun i ->
       let left_pct = i * 20 in
@@ -1842,55 +1970,21 @@ let view_swimlanes () =
             [ Node.text (Printf.sprintf "t-%d" ((5 - i) * 12)) ]
         ])
   in
+  let lanes =
+    match keepers.keepers with
+    | [] -> view_swim_lanes_static ()
+    | live_keepers -> List.map live_keepers ~f:view_swim_lane_of_keeper
+  in
   Node.div
     ~attrs:[ Style.swim ]
-    [ Node.div
-        ~attrs:[ Style.swim_axis ]
-        [ Node.div
-            ~attrs:[ Style.swim_axis_sp ]
-            [ Node.text "keeper · cycle" ]
-        ; Node.div ~attrs:[ Style.swim_axis_ax ] axis_ticks
-        ]
-    ; view_swim_lane
-        ~name:"luna"
-        ~stat:"reading"
-        ~status:`Live
-        ~frames:
-          [ swim_frame ~kind:`Llm ~left:5 ~width:18 ~label:"llm"
-          ; swim_frame ~kind:`Tool ~left:28 ~width:10 ~label:"read"
-          ; swim_frame ~kind:`Think ~left:42 ~width:8 ~label:"think"
-          ; swim_frame ~kind:`Llm ~left:54 ~width:22 ~label:"llm"
-          ; swim_frame ~kind:`Tool ~left:80 ~width:14 ~label:"edit"
-          ]
-    ; view_swim_lane
-        ~name:"brass-owl"
-        ~stat:"retrying"
-        ~status:`Warn
-        ~frames:
-          [ swim_frame ~kind:`Llm ~left:3 ~width:20 ~label:"llm"
-          ; swim_frame ~kind:`Tool ~left:26 ~width:12 ~label:"fetch"
-          ; swim_frame ~kind:`Wait ~left:40 ~width:24 ~label:"wait"
-          ; swim_frame ~kind:`Tool ~left:66 ~width:10 ~label:"fetch"
-          ]
-    ; view_swim_lane
-        ~name:"moth"
-        ~stat:"idle · listening"
-        ~status:`Live
-        ~frames:
-          [ swim_frame ~kind:`Wait ~left:0 ~width:40 ~label:"wait"
-          ; swim_frame ~kind:`Llm ~left:42 ~width:14 ~label:"llm"
-          ; swim_frame ~kind:`Wait ~left:58 ~width:40 ~label:"wait"
-          ]
-    ; view_swim_lane
-        ~name:"ash-hound"
-        ~stat:"crashed t-34"
-        ~status:`Dead
-        ~frames:
-          [ swim_frame ~kind:`Llm ~left:2 ~width:18 ~label:"llm"
-          ; swim_frame ~kind:`Tool ~left:22 ~width:8 ~label:"exec"
-          ; swim_frame ~kind:`Err ~left:32 ~width:6 ~label:"err"
-          ]
-    ]
+    ([ Node.div
+         ~attrs:[ Style.swim_axis ]
+         [ Node.div
+             ~attrs:[ Style.swim_axis_sp ]
+             [ Node.text "keeper · cycle" ]
+         ; Node.div ~attrs:[ Style.swim_axis_ax ] axis_ticks
+         ]
+     ] @ lanes)
 ;;
 
 let svg_a k v = Attr.create k v
@@ -1943,7 +2037,84 @@ let ctx_hairline ~x =
     []
 ;;
 
-let view_context_pressure () =
+(** Rotating palette for per-keeper ctx polylines. Dead keepers always use
+    [--t-err] regardless of index so crashed lanes stand out. *)
+let ctx_palette = [|
+  "var(--t-llm)";
+  "var(--t-tool)";
+  "var(--t-think)";
+  "var(--t-wait)";
+|]
+
+let ctx_stroke_of ~(index : int) ~(status : Keepers_types.keeper_status) =
+  match status with
+  | Dead -> "var(--t-err)"
+  | _ -> ctx_palette.(index mod Array.length ctx_palette)
+;;
+
+(** Build SVG [points] attribute from ctx_history. x = (60 - t_minus_min) * 10
+    (so t-60 → 0, t-0 → 600). y = 100 - pct (SVG origin at top). Samples
+    sorted by descending t_minus_min (older first). *)
+let ctx_points_of (samples : Keepers_types.ctx_sample list) : string =
+  let sorted =
+    List.sort samples ~compare:(fun (a : Keepers_types.ctx_sample)
+                                    (b : Keepers_types.ctx_sample) ->
+      Int.compare b.t_minus_min a.t_minus_min)
+  in
+  List.map sorted ~f:(fun (s : Keepers_types.ctx_sample) ->
+    Printf.sprintf "%d,%d"
+      ((60 - s.t_minus_min) * 10)
+      (100 - s.ctx_pct))
+  |> String.concat ~sep:" "
+;;
+
+(** Static fallback — mirrors the hand-coded 4 polyline mock. *)
+let ctx_polylines_static () =
+  [ ctx_polyline
+      ~points:"0,62 100,60 200,63 300,60 400,58 500,62 600,58"
+      ~stroke_var:"var(--t-llm)" ~dashed:false
+  ; ctx_polyline
+      ~points:"0,60 100,54 200,48 300,42 400,38 500,35 600,33"
+      ~stroke_var:"var(--t-tool)" ~dashed:false
+  ; ctx_polyline
+      ~points:"0,90 100,89 200,90 300,88 400,88 500,90 600,88"
+      ~stroke_var:"var(--t-wait)" ~dashed:false
+  ; ctx_polyline
+      ~points:"0,55 100,35 200,15 260,5"
+      ~stroke_var:"var(--t-err)" ~dashed:true
+  ]
+;;
+
+let ctx_polylines_of_keepers (ks : Keepers_types.keeper list) =
+  List.mapi ks ~f:(fun i (k : Keepers_types.keeper) ->
+    let dashed =
+      match k.status with
+      | Dead -> true
+      | _ -> false
+    in
+    ctx_polyline
+      ~points:(ctx_points_of k.ctx_history)
+      ~stroke_var:(ctx_stroke_of ~index:i ~status:k.status)
+      ~dashed)
+;;
+
+let ctx_meta_lines_of (ks : Keepers_types.keeper list) : string list =
+  let pair (k : Keepers_types.keeper) =
+    match k.status with
+    | Dead -> Printf.sprintf "%s ×" k.name
+    | _ -> Printf.sprintf "%s %d" k.name k.ctx_pct
+  in
+  (* group into 2 items per line for visual density *)
+  let rec chunks = function
+    | [] -> []
+    | [ a ] -> [ a ]
+    | a :: b :: rest -> (a ^ " · " ^ b) :: chunks rest
+  in
+  chunks (List.map ks ~f:pair)
+;;
+
+let view_context_pressure
+      ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
   let hairlines =
     List.init 7 ~f:(fun i -> ctx_hairline ~x:(i * 100))
   in
@@ -1952,27 +2123,10 @@ let view_context_pressure () =
     ; ctx_guide ~y:10 ~stroke_var:"var(--accent-blood)"      (* 90 % danger *)
     ]
   in
-  (* mock: 7 points over 60 min. y = 100 - pct. *)
-  let luna =
-    ctx_polyline
-      ~points:"0,62 100,60 200,63 300,60 400,58 500,62 600,58"
-      ~stroke_var:"var(--t-llm)" ~dashed:false
-  in
-  let brass_owl =
-    ctx_polyline
-      ~points:"0,60 100,54 200,48 300,42 400,38 500,35 600,33"
-      ~stroke_var:"var(--t-tool)" ~dashed:false
-  in
-  let moth =
-    ctx_polyline
-      ~points:"0,90 100,89 200,90 300,88 400,88 500,90 600,88"
-      ~stroke_var:"var(--t-wait)" ~dashed:false
-  in
-  let ash_hound =
-    (* crashes at t-34 (x=260). truncated polyline. *)
-    ctx_polyline
-      ~points:"0,55 100,35 200,15 260,5"
-      ~stroke_var:"var(--t-err)" ~dashed:true
+  let polylines =
+    match keepers.keepers with
+    | [] -> ctx_polylines_static ()
+    | live_keepers -> ctx_polylines_of_keepers live_keepers
   in
   let svg =
     Node.create_svg "svg"
@@ -1981,7 +2135,12 @@ let view_context_pressure () =
         svg_a "preserveAspectRatio" "none";
         Style.ctx_svg;
       ]
-      (hairlines @ guides @ [ luna; brass_owl; moth; ash_hound ])
+      (hairlines @ guides @ polylines)
+  in
+  let meta_lines =
+    match keepers.keepers with
+    | [] -> [ "luna 38 · brass-owl 67"; "moth 12 · ash ×" ]
+    | live -> ctx_meta_lines_of live
   in
   Node.div
     ~attrs:[ Style.swim ]
@@ -2006,10 +2165,9 @@ let view_context_pressure () =
         ~attrs:[ Style.ctx_chart ]
         [ Node.div
             ~attrs:[ Style.ctx_meta ]
-            [ Node.text "keepers · %"
-            ; Node.span ~attrs:[ Style.ctx_meta_v ] [ Node.text "luna 38 · brass-owl 67" ]
-            ; Node.span ~attrs:[ Style.ctx_meta_v ] [ Node.text "moth 12 · ash ×" ]
-            ]
+            (Node.text "keepers · %"
+             :: List.map meta_lines ~f:(fun line ->
+                  Node.span ~attrs:[ Style.ctx_meta_v ] [ Node.text line ]))
         ; Node.div
             ~attrs:[ Style.ctx_track ]
             [ svg
@@ -2069,7 +2227,62 @@ let view_hud (response : Logs_types.response) =
     ]
 ;;
 
-let render_response (response : Logs_types.response) : Node.t =
+(** Roman numeral for cycle counters. Only small integers (≤ 39) are
+    expected for dashboard display; outside that range we fall back to the
+    decimal form so very large cycles still render. *)
+let roman_of_int (n : int) : string =
+  if n <= 0 || n > 39
+  then Printf.sprintf "%d" n
+  else
+    let pairs =
+      [ 10, "x"; 9, "ix"; 5, "v"; 4, "iv"; 1, "i" ]
+    in
+    let buf = Buffer.create 8 in
+    let rec go n = function
+      | [] -> ()
+      | (v, s) :: rest ->
+        if n >= v
+        then (Buffer.add_string buf s; go (n - v) ((v, s) :: rest))
+        else go n rest
+    in
+    go n pairs;
+    Buffer.contents buf
+;;
+
+(** Count keepers by status. *)
+type fleet_tally = { live : int; warn : int; dead : int }
+
+let tally_fleet (ks : Keepers_types.keeper list) : fleet_tally =
+  List.fold ks ~init:{ live = 0; warn = 0; dead = 0 }
+    ~f:(fun acc (k : Keepers_types.keeper) ->
+      match k.status with
+      | Live -> { acc with live = acc.live + 1 }
+      | Warn -> { acc with warn = acc.warn + 1 }
+      | Dead -> { acc with dead = acc.dead + 1 })
+;;
+
+(** Focus keeper — first entry of the live response, or [None] when empty
+    (triggers the legacy static fallback inside [focus_card_of]). *)
+let focus_keeper_of (k : Keepers_types.response) : Keepers_types.keeper option =
+  match k.keepers with
+  | [] -> None
+  | head :: _ -> Some head
+;;
+
+(** Display name — capitalize first character of the registry nickname. *)
+let display_name (s : string) : string =
+  if String.length s = 0
+  then s
+  else
+    let first = Char.to_string (Char.uppercase s.[0]) in
+    let rest = String.sub s ~pos:1 ~len:(String.length s - 1) in
+    first ^ rest
+;;
+
+let render_response
+      ?(keepers : Keepers_types.response = Keepers_types.fixture)
+      (response : Logs_types.response)
+    : Node.t =
   let tape =
     match response.entries with
     | [] ->
@@ -2113,15 +2326,35 @@ let render_response (response : Logs_types.response) : Node.t =
   let toolbar =
     Node.div
       ~attrs:[ Style.toolbar ]
-      [ Node.div
-          ~attrs:[ Style.chip_group ]
-          [ Node.span ~attrs:[ Style.chip ] [ Node.text "debug+" ]
-          ; Node.span
-              ~attrs:[ Style.chip; Style.chip_active ]
-              [ Node.text "info+" ]
-          ; Node.span ~attrs:[ Style.chip ] [ Node.text "warn+" ]
-          ; Node.span ~attrs:[ Style.chip ] [ Node.text "error" ]
-          ]
+      [ (let filter_chip ~level ~label =
+           let click =
+             Attr.on_click (fun _ev ->
+               let effect =
+                 Effect.of_sync_fun
+                   (fun () ->
+                     let doc = Js_of_ocaml.Dom_html.document in
+                     doc##.documentElement##setAttribute
+                       (Js_of_ocaml.Js.string "data-log-level")
+                       (Js_of_ocaml.Js.string level))
+                   ()
+               in
+               effect)
+           in
+           Node.span
+             ~attrs:
+               [ Style.chip
+               ; Attr.create "data-filter-level" level
+               ; click
+               ]
+             [ Node.text label ]
+         in
+         Node.div
+           ~attrs:[ Style.chip_group ]
+           [ filter_chip ~level:"debug" ~label:"debug+"
+           ; filter_chip ~level:"info" ~label:"info+"
+           ; filter_chip ~level:"warn" ~label:"warn+"
+           ; filter_chip ~level:"error" ~label:"error"
+           ])
       ; Node.div
           ~attrs:[ Style.input_shell ]
           [ Node.span ~attrs:[ Style.input_shell_label ] [ Node.text "module" ]
@@ -2136,11 +2369,25 @@ let render_response (response : Logs_types.response) : Node.t =
       ; Node.button ~attrs:[ Style.btn_ghost ] [ Node.text "refresh" ]
       ]
   in
+  let tally = tally_fleet keepers.keepers in
+  let moon_lead_text =
+    match tally with
+    | { live = 0; warn = 0; dead = 0 } -> "the watch is on"
+    | { dead; _ } when dead > 0 -> "the watch stands a casualty"
+    | { warn; _ } when warn > 0 -> "the watch holds uneasy"
+    | _ -> "the watch is on"
+  in
+  let fleet_mono_text =
+    match tally with
+    | { live = 0; warn = 0; dead = 0 } -> "fleet · —"
+    | t ->
+      Printf.sprintf "fleet · %dl / %dw / %dd" t.live t.warn t.dead
+  in
   let moonrise =
     Node.div
       ~attrs:[ Style.moonrise ]
       [ Node.span ~attrs:[ Style.moon_glyph ] []
-      ; Node.span ~attrs:[ Style.moon_lead ] [ Node.text "the watch is on" ]
+      ; Node.span ~attrs:[ Style.moon_lead ] [ Node.text moon_lead_text ]
       ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
       ; Node.span [ Node.text "lit by a half moon" ]
       ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
@@ -2150,6 +2397,10 @@ let render_response (response : Logs_types.response) : Node.t =
             ; Attr.create "data-moon-clock" ""
             ]
           [ Node.text "—:— local" ]
+      ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
+      ; Node.span
+          ~attrs:[ Style.moon_mono ]
+          [ Node.text fleet_mono_text ]
       ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
       ; Node.span
           ~attrs:[ Style.moon_mono ]
@@ -2257,18 +2508,44 @@ let render_response (response : Logs_types.response) : Node.t =
       ; Node.div ~attrs:[ Style.focus_stat_v ] [ Node.text v ]
       ]
   in
+  let focus_k = focus_keeper_of keepers in
+  let focus_name, focus_portrait, focus_role, focus_ctx_pct,
+      focus_turn, focus_mem, focus_latency =
+    match focus_k with
+    | None ->
+      ("Luna", "L", "dungeon master · alchemist", 64,
+       "47 / 60", "128k", "812ms")
+    | Some (k : Keepers_types.keeper) ->
+      let portrait =
+        if String.length k.name = 0
+        then "·"
+        else Char.to_string (Char.uppercase k.name.[0])
+      in
+      let role =
+        match k.last_tool with
+        | Some t -> Printf.sprintf "%s · %s" k.stat t
+        | None -> k.stat
+      in
+      (display_name k.name, portrait, role, k.ctx_pct,
+       Printf.sprintf "%d / %d" k.turn k.turn_cap,
+       Printf.sprintf "%dk" k.mem_kb,
+       Printf.sprintf "%dms" k.latency_ms)
+  in
+  let vial_style =
+    Attr.create "style" (Printf.sprintf "width:%d%%" focus_ctx_pct)
+  in
   let focus_card =
     Node.div
       ~attrs:[ Style.focus ]
       [ Node.div
           ~attrs:[ Style.focus_who ]
-          [ Node.div ~attrs:[ Style.focus_portrait ] [ Node.text "L" ]
+          [ Node.div ~attrs:[ Style.focus_portrait ] [ Node.text focus_portrait ]
           ; Node.div
               ~attrs:[ Style.focus_name_col ]
-              [ Node.div ~attrs:[ Style.focus_name ] [ Node.text "Luna" ]
+              [ Node.div ~attrs:[ Style.focus_name ] [ Node.text focus_name ]
               ; Node.div
                   ~attrs:[ Style.focus_role ]
-                  [ Node.text "dungeon master · alchemist" ]
+                  [ Node.text focus_role ]
               ]
           ]
       ; Node.div
@@ -2278,18 +2555,18 @@ let render_response (response : Logs_types.response) : Node.t =
               [ Node.span [ Node.text "context" ]
               ; Node.span
                   ~attrs:[ Style.ctx_lbl_v ]
-                  [ Node.text "64%" ]
+                  [ Node.text (Printf.sprintf "%d%%" focus_ctx_pct) ]
               ]
           ; Node.div
               ~attrs:[ Style.vial ]
-              [ Node.span ~attrs:[ Style.vial_fill ] [] ]
+              [ Node.span ~attrs:[ Style.vial_fill; vial_style ] [] ]
           ]
       ; Node.div
           ~attrs:[ Style.focus_stats ]
-          [ focus_stat "turn" "47 / 60"
+          [ focus_stat "turn" focus_turn
           ; focus_stat "heartbeat" "3s"
-          ; focus_stat "mem" "128k"
-          ; focus_stat "latency" "812ms"
+          ; focus_stat "mem" focus_mem
+          ; focus_stat "latency" focus_latency
           ]
       ]
   in
@@ -2371,7 +2648,9 @@ let render_response (response : Logs_types.response) : Node.t =
       ~attrs:[ Style.aside ]
       [ Node.div
           ~attrs:[]
-          [ aside_h ~tail:"ctx 64%" "focus · keeper"
+          [ aside_h
+              ~tail:(Printf.sprintf "ctx %d%%" focus_ctx_pct)
+              "focus · keeper"
           ; focus_card
           ]
       ; Node.div
@@ -2412,7 +2691,18 @@ let render_response (response : Logs_types.response) : Node.t =
              ~attrs:[ Style.page_head_lead ]
              [ Node.div
                  ~attrs:[ Style.page_tag ]
-                 [ Node.text "chronicle · quiet fox · day iv" ]
+                 [ Node.text
+                     (let room =
+                        match keepers.room with
+                        | Some r when String.length r > 0 -> r
+                        | _ -> "chronicle"
+                      in
+                      let day =
+                        if keepers.cycle <= 0
+                        then "—"
+                        else roman_of_int keepers.cycle
+                      in
+                      Printf.sprintf "%s · quiet fox · day %s" room day) ]
              ; Node.h1
                  ~attrs:[ Style.page_h1 ]
                  [ Node.text "the watch "
@@ -2495,7 +2785,7 @@ let render_response (response : Logs_types.response) : Node.t =
             ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "iv" ]
             ]
         ]
-    ; view_roster ()
+    ; view_roster ~keepers ()
     ; Node.div
         ~attrs:[ Style.sec ]
         [ Node.span ~attrs:[ Style.sec_glyph ] []
@@ -2510,7 +2800,7 @@ let render_response (response : Logs_types.response) : Node.t =
             ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "pending" ]
             ]
         ]
-    ; view_swimlanes ()
+    ; view_swimlanes ~keepers ()
     ; Node.div
         ~attrs:[ Style.sec ]
         [ Node.span ~attrs:[ Style.sec_glyph ] []
@@ -2525,7 +2815,7 @@ let render_response (response : Logs_types.response) : Node.t =
             ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "pending" ]
             ]
         ]
-    ; view_context_pressure ()
+    ; view_context_pressure ~keepers ()
     ; Node.div
         ~attrs:[ Style.sec ]
         [ Node.span ~attrs:[ Style.sec_glyph ] []
@@ -2554,5 +2844,9 @@ let render_response (response : Logs_types.response) : Node.t =
 ;;
 
 let component (_graph @ local) =
-  Bonsai.map (Bonsai.Expert.Var.value Logs_var.var) ~f:render_response
+  Bonsai.map2
+    (Bonsai.Expert.Var.value Logs_var.var)
+    (Bonsai.Expert.Var.value Keepers_var.var)
+    ~f:(fun logs_response keepers_response ->
+      render_response ~keepers:keepers_response logs_response)
 ;;

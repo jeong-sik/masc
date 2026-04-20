@@ -12,9 +12,8 @@ lib/sdk_tool_contract.ml:377
 # activity_graph_types.ml:89 (span_status_of_string) eliminated by this PR --
 # strict _opt + warn-and-default wrapper template (mirrors #8779 node_status).
 # coord.ml:132 (observe_task_transition) eliminated by #8846.
-# coord.ml:88/109 (observe_agent_lifecycle) migration pending in #8842.
-lib/coord.ml:88
-lib/coord.ml:109
+# coord.ml:88/109 (observe_agent_lifecycle) eliminated by #8842
+# (agent_lifecycle_event variant: join/rejoin/leave).
 # eval_harness.ml:370 eliminated by lifting nested string match to outer
 # pattern (this PR — was a provably unreachable dead branch).
 lib/types/types_auth.ml:91

@@ -42,25 +42,16 @@ val all_aliases : unit -> (string * string) list
 (** {1 OAS dual registration (Phase A.2)} *)
 
 (** [oas_dual_register_aliases ()] is the subset of [all_aliases ()]
-    that is currently safe to register with OAS as additional [Tool.t]
-    entries sharing the keeper handler.
+    safe to register with OAS as additional [Tool.t] entries sharing
+    the keeper handler.
 
     Membership requires (a) a known input-shape translation back to the
     internal tool's schema and (b) a tailored public input_schema so
     the LLM sees the Anthropic-Code shape it expects.
 
-    Phase A.2: [Bash], [Read]. These two account for ~80% of the
-    hallucinated-builtin tool calls measured in #8778.
-
-    Excluded (deferred to Phase A.4): [Edit] (semantic mismatch:
-    Anthropic Edit does string-replace, keeper_fs_edit only overwrites);
-    [Write] (covered when [Edit] is); [Grep] (needs op=rg input
-    synthesis).
-
-    Excluded aliases remain in [all_aliases ()] / [to_internal] so the
-    disclosure-check canonicalization (Phase A.3) keeps treating
-    [Edit]/[Write]/[Grep] as known names — turns are no longer nuked
-    even though OAS still rejects the call. *)
+    Phase A.2: [Bash], [Read].
+    Phase A.4: [Edit] (via new keeper_fs_edit mode=patch), [Write]
+    (via mode=overwrite), [Grep] (synthesized as keeper_shell op=rg). *)
 val oas_dual_register_aliases : unit -> (string * string) list
 
 (** [public_input_schema public_name] returns the LLM-facing JSON schema

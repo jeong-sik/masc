@@ -39,7 +39,7 @@ let memory_kind_enum_strings =
     shape as #8467 / #8480 / #8484). Sync regression test in
     [test_types.ml :: fs_write_mode_ssot] catches drift. *)
 let fs_write_mode_enum_strings =
-  [ "overwrite"; "append" ]
+  [ "overwrite"; "append"; "patch" ]
 
 (** Issue #8513: hand-mirrored from
     [Board_dispatch.valid_sort_order_strings] (#8453 SSOT). Direct

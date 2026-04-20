@@ -77,6 +77,7 @@ let ensure_keeper_meta config name =
             defaults.room_signal_prompt_enabled
     in
     let target_denylist = apply_default defaults.tool_denylist meta.tool_denylist in
+    let target_models = apply_default defaults.models meta.models in
     let target_cascade_name =
       effective_declarative_cascade_name defaults meta
     in
@@ -132,6 +133,7 @@ let ensure_keeper_meta config name =
     let signal_changed =
       meta.room_signal_prompt_enabled <> target_room_signal_prompt_enabled in
     let denylist_changed = meta.tool_denylist <> target_denylist in
+    let models_changed = meta.models <> target_models in
     (* [meta.cascade_name] may be a raw TOML/JSON value while
        [target_cascade_name] is already canonicalized; canonicalize both
        sides so a reload that only normalizes the spelling (e.g.
@@ -168,7 +170,8 @@ let ensure_keeper_meta config name =
       meta.telemetry_feedback_enabled <> target_tf_enabled
       || meta.telemetry_feedback_window_hours <> target_tf_window in
     let any_changed =
-      proactive_changed || signal_changed || denylist_changed || cascade_changed
+      proactive_changed || signal_changed || denylist_changed || models_changed
+      || cascade_changed
       || personality_changed || policy_changed || discovery_changed
       || telemetry_changed in
 
@@ -177,6 +180,7 @@ let ensure_keeper_meta config name =
         (if proactive_changed then Some "proactive" else None);
         (if signal_changed then Some "signal" else None);
         (if denylist_changed then Some "denylist" else None);
+        (if models_changed then Some "models" else None);
         (if cascade_changed then Some "cascade" else None);
         (if personality_changed then Some "personality" else None);
         (if policy_changed then Some "policy" else None);
@@ -195,6 +199,7 @@ let ensure_keeper_meta config name =
         };
         room_signal_prompt_enabled = target_room_signal_prompt_enabled;
         tool_denylist = target_denylist;
+        models = target_models;
         (* Preserve raw [meta.cascade_name] when the cascade itself did
            not change, even if another field (personality, policy, ...)
            triggered a re-sync.  Otherwise a reconcile caused by an

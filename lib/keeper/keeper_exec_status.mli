@@ -1,6 +1,7 @@
 open Keeper_types
 
 val active_model_of_meta : keeper_meta -> string
+val active_model_label_of_meta : keeper_meta -> string
 val next_model_hint_of_meta : keeper_meta -> string option
 val string_of_fiber_health : fiber_health -> string
 val agent_status_text : Yojson.Safe.t -> string

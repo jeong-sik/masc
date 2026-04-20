@@ -8,17 +8,23 @@
 # File new instances as standalone bugs (see #8832 as an example).
 
 # #8605 umbrella — tracked in https://github.com/jeong-sik/masc-mcp/issues/8605
-# sdk_tool_contract.ml:377 -- stale entry (line 377 is `Some Boolean`,
-# the actual `_ -> None` was already migrated by #8832 to a sound-partial
-# `param_type_of_schema_opt` with a warn-and-default wrapper).
-# activity_graph_types.ml:89 (span_status_of_string) eliminated by sound-partial
-# template (mirrors #8779 node_status).
-# coord.ml:132 (observe_task_transition) eliminated by #8846.
-# coord.ml:88/109 (observe_agent_lifecycle) eliminated by #8842
-# (agent_lifecycle_event variant: join/rejoin/leave).
-# eval_harness.ml:370 eliminated by #8889 (lifted nested string match to
-# outer pattern; was a provably unreachable dead branch).
-# types_auth.ml:91 (category_for_tool) eliminated by this PR -- sound-partial
-# `category_for_tool_opt` + back-compat wrapper preserves GeneralLimit default.
 #
-# Allowlist now empty.  Remove this file or keep as a lint contract record.
+# All install-time entries eliminated by upstream migrations. The lint script
+# now self-verifies this file: if an entry points to a line that no longer
+# matches the #8605 family pattern, CI fails with exit 2 (see script header).
+#
+# Historical record of the drain:
+# - sdk_tool_contract.ml:377 (param_type_of_schema) — #8832 split into
+#   param_type_of_schema_opt (sound-partial) + warn-and-default wrapper.
+# - activity_graph_types.ml:89 (span_status_of_string) — #8895 sound-partial
+#   template (mirrors #8779 node_status).
+# - coord.ml:132 (observe_task_transition) eliminated by #8846.
+# - coord.ml:88/109 (observe_agent_lifecycle) eliminated by #8842
+#   (agent_lifecycle_event variant: join/rejoin/leave); allowlist cleanup #8914.
+# - eval_harness.ml:370 — #8889 lifted nested string match (dead branch).
+# - types_auth.ml:91 (category_for_tool) — #8935 sound-partial
+#   category_for_tool_opt + back-compat wrapper preserves GeneralLimit default.
+#
+# Allowlist now empty. Keep this file as a lint contract record — any new
+# entry requires a justifying comment, and self-verify will force removal
+# once the pattern is migrated.

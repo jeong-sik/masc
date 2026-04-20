@@ -8,7 +8,11 @@
 #      constructor (anything except None / Error / Some / Ok / Unknown / Other /
 #      Unspecified / Null / Nil / *_unknown / *_other / Module.lowercase_fn).
 #
-# Exit 0 = clean, 1 = violations found.
+# Exit codes:
+#   0 — clean
+#   1 — new violations (not in allowlist)
+#   2 — stale allowlist entries (pattern no longer present at listed line)
+#
 # Reference: #8605 (family), #8832 (latest instance), event_kind.mli (fix template).
 
 set -euo pipefail
@@ -20,9 +24,10 @@ ALLOWLIST_FILE="${ALLOWLIST_FILE:-scripts/lint/no-unknown-permissive-default.all
 
 violations=0
 files_scanned=0
+detected_keys=()
 
 # awk scans each .ml file:
-#   - Tracks whether the last ~20 lines contained a `| "literal" -> ...` arm.
+#   - Tracks whether the last ~40 lines contained a `| "literal" -> ...` arm.
 #   - When a `| _ -> Capital_Constructor` line appears AND the exclusion
 #     list doesn't match, emit `file:line:content`.
 scan_file() {
@@ -74,6 +79,7 @@ while IFS= read -r -d '' file; do
   while IFS=: read -r _ linenum content; do
     [[ -z "$linenum" ]] && continue
     key="${file}:${linenum}"
+    detected_keys+=("$key")
 
     if [[ -f "$ALLOWLIST_FILE" ]] && grep -qxF "$key" "$ALLOWLIST_FILE"; then
       continue
@@ -115,4 +121,61 @@ EOF
   exit 1
 fi
 
+# Self-verify: fail when an allowlist entry points to a line that no longer
+# matches the #8605 family pattern (upstream fix eliminated it, or the line
+# shifted). Keeps the allowlist an accurate debt ledger — merged fixes remove
+# their entry in the same PR, or the gate flags the drift.
+#
+# Opt out with SKIP_ALLOWLIST_VERIFY=1 during a transient in-flight migration
+# that lists lines before the fix lands.
+stale=0
+if [[ -f "$ALLOWLIST_FILE" && "${SKIP_ALLOWLIST_VERIFY:-0}" != "1" ]]; then
+  detected_set=$'\n'
+  for key in "${detected_keys[@]:-}"; do
+    detected_set+="${key}"$'\n'
+  done
+  while IFS= read -r entry || [[ -n "$entry" ]]; do
+    [[ -z "$entry" ]] && continue
+    [[ "$entry" =~ ^[[:space:]]*# ]] && continue
+    # Trim trailing whitespace.
+    entry="${entry%"${entry##*[![:space:]]}"}"
+    [[ -z "$entry" ]] && continue
+
+    if [[ "$detected_set" != *$'\n'"$entry"$'\n'* ]]; then
+      printf '::error file=%s::stale allowlist entry: %s (no #8605 family pattern detected at this file:line; remove from allowlist)\n' \
+        "$ALLOWLIST_FILE" "$entry"
+      stale=$((stale + 1))
+    fi
+  done < "$ALLOWLIST_FILE"
+fi
+
+if [[ "$stale" -gt 0 ]]; then
+  cat <<'EOF'
+
+Stale allowlist entries detected.
+
+Why this fails CI:
+  The allowlist is a debt ledger of pre-existing #8605 family sites. When
+  an upstream fix eliminates the pattern, the entry must be removed in the
+  same PR as the fix. Silently-stale entries turn the ledger into noise and
+  let new violations hide behind old listings (cycle 26 / cycle 35 drift
+  incidents).
+
+Fix: remove the listed entries from the allowlist file — mechanical edit,
+no code change required.
+
+Opt out only for transient in-flight migrations:
+  SKIP_ALLOWLIST_VERIFY=1 bash scripts/lint/no-unknown-permissive-default.sh
+
+EOF
+  exit 2
+fi
+
 echo "No #8605 family violations found."
+if [[ "${#detected_keys[@]}" -gt 0 ]]; then
+  if [[ "${#detected_keys[@]}" -eq 1 ]]; then
+    echo "Allowlist debt: 1 entry (allowlisted)."
+  else
+    echo "Allowlist debt: ${#detected_keys[@]} entries (all allowlisted)."
+  fi
+fi

@@ -231,7 +231,10 @@ let baseline_risk ~tool_name ~input =
       match List.assoc_opt tool_name risk_overrides with
       | Some level -> level
       | None ->
-          if String.equal tool_name "masc_transition" then
+          if
+            String.equal tool_name
+              (Tool_name.Masc.to_string Tool_name.Masc.Transition)
+          then
             match transition_action input with
             | Some action -> classify_name action
             | None -> Low

@@ -670,6 +670,24 @@ let summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots =
       ("history", `List history);
     ]
 
+let source_label ~source ~keeper_name =
+  match source with
+  | "direct_agent" -> "Direct runtime alias history"
+  | "canonical_keeper_fallback" ->
+      Printf.sprintf "Inherited from canonical identity: %s" keeper_name
+  | _ -> "No accountability history"
+
+let with_accountability_source ~source ~keeper_name json =
+  match json with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+         @ [
+             ("source", `String source);
+             ("source_label", `String (source_label ~source ~keeper_name));
+           ])
+  | other -> other
+
 let accountability_summary_lookup (config : Coord_query.config) =
   let now = Time_compat.now () in
   let cutoff = summary_cutoff now in
@@ -691,15 +709,16 @@ let accountability_summary_lookup (config : Coord_query.config) =
            add_snapshot by_agent snapshot.claim.agent_name snapshot;
            add_snapshot by_keeper snapshot.claim.keeper_name snapshot));
   fun ~keeper_name ~agent_name ->
-    let snapshots =
+    let source, snapshots =
       match Hashtbl.find_opt by_agent agent_name with
-      | Some items -> items
+      | Some items -> ("direct_agent", items)
       | None -> (
           match Hashtbl.find_opt by_keeper keeper_name with
-          | Some items -> items
-          | None -> [])
+          | Some items -> ("canonical_keeper_fallback", items)
+          | None -> ("none", []))
     in
     summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots
+    |> with_accountability_source ~source ~keeper_name
 
 let accountability_summary_json (config : Coord_query.config) ~keeper_name
     ~agent_name =

@@ -244,6 +244,11 @@ let test_generated_alias_inherits_accountability_penalty () =
       in
       check string "alias summary inherits canonical keeper risk" "high"
         (string_member "risk_band" summary);
+      check string "alias summary source" "canonical_keeper_fallback"
+        (string_member "source" summary);
+      check string "alias summary source label"
+        "Inherited from canonical identity: adversary"
+        (string_member "source_label" summary);
       check (float 0.0001) "alias summary inherits unsupported rate" 1.0
         (float_member "unsupported_completion_rate" summary);
       let rep =
@@ -255,7 +260,14 @@ let test_generated_alias_inherits_accountability_penalty () =
       check (float 0.0001) "generated alias unsupported rate" 1.0
         rep.accountability_unsupported_completion_rate;
       check (float 0.0001) "generated alias accountability score" 0.0
-        rep.accountability_score)
+        rep.accountability_score;
+      check string "generated alias keeper provenance" "adversary"
+        rep.accountability_keeper_name;
+      check string "generated alias reputation source"
+        "canonical_keeper_fallback" rep.accountability_source;
+      check string "generated alias reputation source label"
+        "Inherited from canonical identity: adversary"
+        rep.accountability_source_label)
 
 let test_claim_tool_exposes_routing_warning_for_high_risk_keeper () =
   with_room (fun config ->

@@ -22,6 +22,9 @@ type agent_reputation = {
   accountability_evidence_coverage: float; [@default 1.0]
   accountability_unsupported_completion_rate: float; [@default 0.0]
   accountability_open_overdue_commitments: int; [@default 0]
+  accountability_keeper_name: string; [@default ""]
+  accountability_source: string; [@default "none"]
+  accountability_source_label: string; [@default "No accountability history"]
   overall_score: float; [@default 0.0]
 } [@@deriving yojson { strict = false }]
 
@@ -42,6 +45,9 @@ let default_reputation ~(agent_name : string) : agent_reputation =
     accountability_evidence_coverage = 1.0;
     accountability_unsupported_completion_rate = 0.0;
     accountability_open_overdue_commitments = 0;
+    accountability_keeper_name = agent_name;
+    accountability_source = "none";
+    accountability_source_label = "No accountability history";
     overall_score = 0.0;
   }
 
@@ -191,9 +197,10 @@ let keeper_name_of_agent agent_name =
     trimmed
 
 let accountability_metrics (config : Coord.config) ~(agent_name : string) =
+  let keeper_name = keeper_name_of_agent agent_name in
   let summary =
     Keeper_accountability.accountability_summary_json config
-      ~keeper_name:(keeper_name_of_agent agent_name) ~agent_name
+      ~keeper_name ~agent_name
   in
   let evidence_coverage =
     Safe_ops.json_float ~default:1.0 "evidence_coverage" summary
@@ -207,12 +214,19 @@ let accountability_metrics (config : Coord.config) ~(agent_name : string) =
   let risk_band =
     Safe_ops.json_string ~default:"low" "risk_band" summary
   in
+  let source =
+    Safe_ops.json_string ~default:"none" "source" summary
+  in
+  let source_label =
+    Safe_ops.json_string ~default:"No accountability history" "source_label"
+      summary
+  in
   let score =
     compute_accountability_score ~evidence_coverage
       ~unsupported_completion_rate ~open_overdue_commitments
   in
   (score, risk_band, evidence_coverage, unsupported_completion_rate,
-   open_overdue_commitments)
+   open_overdue_commitments, keeper_name, source, source_label)
 
 (** {1 Main Computation} *)
 
@@ -238,7 +252,10 @@ let compute_reputation (config : Coord.config) ~(agent_name : string)
   let (accountability_score, accountability_risk_band,
        accountability_evidence_coverage,
        accountability_unsupported_completion_rate,
-       accountability_open_overdue_commitments) =
+       accountability_open_overdue_commitments,
+       accountability_keeper_name,
+       accountability_source,
+       accountability_source_label) =
     accountability_metrics config ~agent_name
   in
   let overall_score =
@@ -255,5 +272,8 @@ let compute_reputation (config : Coord.config) ~(agent_name : string)
     accountability_evidence_coverage;
     accountability_unsupported_completion_rate;
     accountability_open_overdue_commitments;
+    accountability_keeper_name;
+    accountability_source;
+    accountability_source_label;
     overall_score;
   }

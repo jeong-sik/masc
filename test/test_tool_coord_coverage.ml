@@ -347,6 +347,29 @@ let () = test "dispatch_status_surfaces_missing_planning_for_owned_task" (fun ()
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "dispatch_status_surfaces_completed_deliverable_conflict_for_active_owned_task" (fun () ->
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = make_test_ctx () in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  ignore (Coord.add_task ctx.config ~title:"Claimed with stale deliverable" ~priority:3 ~description:"");
+  ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+  Planning_eio.set_current_task ctx.config ~task_id:"task-001";
+  ignore
+    (Planning_eio.set_deliverable ctx.config ~task_id:"task-001"
+       ~content:"Task-001 completed. stale control-plane artifact.");
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+  | Some (success, result) ->
+      assert success;
+      assert (str_contains result "owned=task-001 | current=task-001");
+      assert (str_contains result "📝 Planning: deliverable_conflict=yes | task=task-001");
+      assert (str_contains result "Owned task task-001 already has a completed-looking deliverable");
+      assert (str_contains result "💡 Suggested next: masc_deliver -> masc_status");
+      assert (not (str_contains result "💡 Suggested next: masc_status -> masc_transition"))
+  | None -> failwith "dispatch returned None"
+)
+
 let () = test "dispatch_status_flags_todo_with_completed_deliverable_as_conflict" (fun () ->
   Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
   Eio_main.run @@ fun env ->

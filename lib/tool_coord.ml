@@ -248,6 +248,7 @@ type current_binding = {
 
 type planning_context_state = {
   planning_missing_task : string option;
+  deliverable_conflict_task : string option;
 }
 
 let resolve_current_binding ~assigned_task_ids ~planning_current =
@@ -296,16 +297,31 @@ let resolve_current_binding ~assigned_task_ids ~planning_current =
     claim_first_suppressed = assigned_task_ids <> [];
   }
 
-let planning_context_state (ctx : context) (binding : current_binding) =
-  let planning_missing_task =
-    match binding.primary_owned with
-    | None -> None
-    | Some task_id -> (
-        match Planning_eio.load ctx.config ~task_id with
-        | Ok _ -> None
-        | Error _ -> Some task_id)
-  in
-  { planning_missing_task }
+let planning_context_state (ctx : context) (binding : current_binding)
+    (active_tasks : Types.task list) =
+  match binding.primary_owned with
+  | None ->
+      { planning_missing_task = None; deliverable_conflict_task = None }
+  | Some task_id -> (
+      match Planning_eio.load ctx.config ~task_id with
+      | Error _ ->
+          { planning_missing_task = Some task_id; deliverable_conflict_task = None }
+      | Ok plan_ctx ->
+          let deliverable_conflict_task =
+            match
+              List.find_opt (fun (task : Types.task) -> String.equal task.id task_id)
+                active_tasks
+            with
+            | Some
+                {
+                  task_status = (Types.Claimed _ | Types.InProgress _);
+                  _;
+                }
+              when deliverable_claims_completion ~task_id plan_ctx.deliverable ->
+                Some task_id
+            | Some _ | None -> None
+          in
+          { planning_missing_task = None; deliverable_conflict_task })
 
 let task_id_list_label = function
   | [] -> "[]"
@@ -407,7 +423,7 @@ let status_summary_string (ctx : context) =
   let binding =
     resolve_current_binding ~assigned_task_ids ~planning_current:current_task
   in
-  let planning_state = planning_context_state ctx binding in
+  let planning_state = planning_context_state ctx binding active_tasks in
   let guidance =
     Workflow_guide.current_state_guidance
       ~room_set:true
@@ -419,6 +435,8 @@ let status_summary_string (ctx : context) =
   let suggested_next =
     if Option.is_some planning_state.planning_missing_task then
       [ "masc_plan_init"; "masc_status" ]
+    else if Option.is_some planning_state.deliverable_conflict_task then
+      [ "masc_deliver"; "masc_status" ]
     else
       guidance.next_steps
       |> List.map (fun (step : Workflow_guide.step) -> step.tool)
@@ -466,6 +484,16 @@ let status_summary_string (ctx : context) =
         @ [
             Printf.sprintf
               "Owned task %s has no planning context. Initialize or repair planning before continuing claimed work."
+              task_id;
+          ]
+    | None -> items)
+    |> fun items ->
+    (match planning_state.deliverable_conflict_task with
+    | Some task_id ->
+        items
+        @ [
+            Printf.sprintf
+              "Owned task %s already has a completed-looking deliverable while the task is still active. Treat this as conflict triage until board, planning, and control-plane state converge."
               task_id;
           ]
     | None -> items)
@@ -551,6 +579,12 @@ let status_summary_string (ctx : context) =
   | Some task_id ->
       Buffer.add_string buf
         (Printf.sprintf "📝 Planning: missing=yes | task=%s\n" task_id)
+  | None -> ());
+  (match planning_state.deliverable_conflict_task with
+  | Some task_id ->
+      Buffer.add_string buf
+        (Printf.sprintf "📝 Planning: deliverable_conflict=yes | task=%s\n"
+           task_id)
   | None -> ());
   if credential_state.credential_required then
     Buffer.add_string buf

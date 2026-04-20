@@ -12,7 +12,8 @@
 \* cannot race a `phase` write.
 \*
 \* The closest live analog — and what this spec now models — is the
-\* fail-cascade contract in lib/keeper/keeper_keepalive.ml:start_keepalive:
+\* fail-cascade contract in lib/keeper/keeper_keepalive.ml:max_consecutive_turn_failures
+\* (call site inside run_heartbeat_loop, see `start_keepalive`):
 \*
 \*   let turn_fail_count = (* read consecutive turn failures *) in
 \*   if turn_fail_count > 0 then

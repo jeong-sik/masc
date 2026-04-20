@@ -23,20 +23,18 @@
 \*          lib/keeper/keeper_unified_turn.ml (turn lifecycle)
 \*
 \* OCaml mapping:
-\*   phase              <-> Keeper_state_machine.phase (simplified to 5)
+\*   phase              <-> Keeper_state_machine.phase (12-phase OCaml type
+\*                          projected to a 6-symbol triad alphabet; see the
+\*                          canonical mapping in the TypeOK preamble below)
 \*   effective_cascade  <-> Keeper_cascade_routing.select_cascade result
 \*   provider_ceiling   <-> Oas_model_resolve.resolve_max_cascade_context
 \*   requested_max_tokens <-> Cascade_inference.resolve_max_tokens
 \*
-\* Phase simplification (12 -> 6):
-\*   Running    = {Running}               -- healthy, can run turns
-\*   Failing    = {Failing}               -- degraded, needs cheap recovery
-\*   Overflowed = {Overflowed}            -- context overflow, no new turns
-\*                                           (added 2026-04, MASC-1)
-\*   Compacting = {Compacting, HandingOff} -- buffer ops, local sufficient
-\*   Draining   = {Draining, Paused}      -- winding down, complete in-progress
-\*   Terminal   = {Stopped, Dead, Offline, Crashed, Restarting}
-\*                                        -- no turns possible
+\* (The canonical 12->6 phase mapping lives next to TypeOK on line ~89.
+\*  An earlier version of this preamble carried a separate "Phase
+\*  simplification (12 -> 6)" mapping that classified HandingOff / Paused /
+\*  Restarting differently from the canonical one.  Removed in #8970 to
+\*  avoid the self-contradiction that TLC could not surface.)
 
 EXTENDS Naturals
 

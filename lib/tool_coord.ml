@@ -73,6 +73,49 @@ let option_or_dash = function
   | Some value when String.trim value <> "" -> value
   | _ -> "-"
 
+let lifecycle_tools =
+  [
+    "masc_claim_next";
+    "masc_transition";
+  ]
+
+let is_lifecycle_tool tool =
+  List.exists (String.equal tool) lifecycle_tools
+
+let unique_strings items =
+  List.fold_left
+    (fun acc item ->
+      let item = String.trim item in
+      if item = "" || List.exists (String.equal item) acc then acc
+      else item :: acc)
+    [] items
+  |> List.rev
+
+type credential_state = {
+  credential_required : bool;
+  credential_available : bool;
+  credential_candidates : string list;
+}
+
+let credential_state (ctx : context) ~actual_name =
+  let auth_cfg = Auth.load_auth_config ctx.config.base_path in
+  let credential_required = auth_cfg.enabled && auth_cfg.require_token in
+  let credential_candidates = unique_strings [ ctx.agent_name; actual_name ] in
+  let is_initial_admin name =
+    match Auth.read_initial_admin ctx.config.base_path with
+    | Some admin -> String.equal name admin
+    | None -> false
+  in
+  let credential_available =
+    (not credential_required)
+    || List.exists
+         (fun name ->
+           is_initial_admin name
+           || Option.is_some (Auth.load_credential ctx.config.base_path name))
+         credential_candidates
+  in
+  { credential_required; credential_available; credential_candidates }
+
 let status_worktree_active (ctx : context) =
   let wt_dir = Filename.concat ctx.config.base_path ".worktrees" in
   try
@@ -242,6 +285,11 @@ let status_summary_string (ctx : context) =
     with Sys_error _ | Yojson.Json_error _ -> false
   in
   let actual_name = safe_resolve_agent_name ctx ~joined in
+  let credential_state = credential_state ctx ~actual_name in
+  let credential_blocked =
+    credential_state.credential_required
+    && not credential_state.credential_available
+  in
   let matches_you assignee =
     String.equal assignee ctx.agent_name || String.equal assignee actual_name
   in
@@ -317,12 +365,27 @@ let status_summary_string (ctx : context) =
     guidance.next_steps
     |> take_items 2
     |> List.map (fun (step : Workflow_guide.step) -> step.tool)
+    |> fun tools ->
+    if credential_blocked then
+      List.filter (fun tool -> not (is_lifecycle_tool tool)) tools
+    else
+      tools
   in
   let attention_items =
     []
     |> fun items ->
     if not joined then
       items @ [ "You are not joined in the project namespace. Call masc_join." ]
+    else
+      items
+    |> fun items ->
+    if credential_blocked then
+      items
+      @ [
+          Printf.sprintf
+            "Lifecycle actions are credential-blocked for %s. Mount a valid credential before claiming or transitioning tasks."
+            (String.concat "/" credential_state.credential_candidates);
+        ]
     else
       items
     |> fun items ->
@@ -393,6 +456,11 @@ let status_summary_string (ctx : context) =
        (option_or_dash binding.effective_current)
        (option_or_dash binding.drift_reason)
        (bool_flag binding.claim_first_suppressed));
+  if credential_state.credential_required then
+    Buffer.add_string buf
+      (Printf.sprintf "🔐 Credential: required=yes | available=%s | candidates=%s\n"
+         (bool_flag credential_state.credential_available)
+         (String.concat "," credential_state.credential_candidates));
   if suggested_next <> [] then
     Buffer.add_string buf
       (Printf.sprintf "💡 Suggested next: %s\n"

@@ -516,6 +516,143 @@ let build_blocked_outcome ~cmd ~error ~reason ?hint ?(retryability = Self_correc
       summary;
     }
 
+let semantic_payload_to_yojson (key, value) =
+  let v : Yojson.Safe.t =
+    match value with
+    | `String s -> `String s
+    | `Int i -> `Int i
+    | `Float f -> `Float f
+  in
+  (key, v)
+
+(* Tick 16: opt-in flag for verifiable marker emission.  Rolled out
+   separately from [Exec_semantic] (MASC_BASH_SEMANTIC_EXIT) so the
+   cdal_judge heuristic layer can bake in without affecting JSON
+   shape for callers that only care about [semantic_exit]. *)
+let markers_enabled () =
+  match Sys.getenv_opt "MASC_BASH_VERIFIABLE_MARKERS" with
+  | Some ("1" | "true" | "TRUE" | "yes") -> true
+  | _ -> false
+
+let verifiable_marker_to_json (m : Cdal_judge.verifiable_marker) :
+    Yojson.Safe.t =
+  let tag (kind : string) ?(count = None) (confidence : string) : Yojson.Safe.t
+    =
+    let base =
+      [ ("kind", `String kind); ("confidence", `String confidence) ]
+    in
+    match count with
+    | None -> `Assoc base
+    | Some n -> `Assoc (base @ [ ("count", `Int n) ])
+  in
+  let conf_str = function `Exact -> "exact" | `Heuristic -> "heuristic" in
+  match m with
+  | Test_pass { count; confidence } ->
+      tag "test_pass" ~count:(Some count) (conf_str confidence)
+  | Test_fail { count; confidence } ->
+      tag "test_fail" ~count:(Some count) (conf_str confidence)
+  | Build_ok { confidence } -> tag "build_ok" (conf_str confidence)
+  | Build_fail { confidence } -> tag "build_fail" (conf_str confidence)
+  | Lint_clean { confidence } -> tag "lint_clean" (conf_str confidence)
+  | Lint_dirty { count; confidence } ->
+      tag "lint_dirty" ~count:(Some count) (conf_str confidence)
+  | Git_clean { confidence } -> tag "git_clean" (conf_str confidence)
+  | Git_dirty { confidence } -> tag "git_dirty" (conf_str confidence)
+  | Git_not_a_repo -> tag "git_not_a_repo" "exact"
+
+let semantic_fields_of_executed (result : executed_result) :
+    (string * Yojson.Safe.t) list =
+  if not (Masc_exec.Exec_semantic.enabled ()) then []
+  else
+    let sem =
+      Masc_exec.Exec_semantic.interpret_cmd
+        ~cmd:result.command
+        ~status:result.process_status
+        ~output:result.output
+    in
+    let kind = Masc_exec.Exec_semantic.to_kind sem in
+    let payload_fields =
+      Masc_exec.Exec_semantic.to_payload sem
+      |> List.map semantic_payload_to_yojson
+    in
+    let hint_field =
+      match Masc_exec.Exec_semantic.to_hint sem with
+      | None -> []
+      | Some h -> [ "hint", `String h ]
+    in
+    let semantic_obj : Yojson.Safe.t =
+      `Assoc (("kind", `String kind) :: payload_fields @ hint_field)
+    in
+    let rci_field =
+      match Masc_exec.Exec_semantic.to_hint sem with
+      | None -> []
+      | Some h -> [ "return_code_interpretation", `String h ]
+    in
+    let marker_field =
+      if not (markers_enabled ()) then []
+      else
+        (* Foreground exec merges stdout+stderr via "2>&1" at the
+           keeper layer, so feed the merged stream as stdout and an
+           empty stderr.  Background tasks (keeper_bash_output) will
+           get a separate path when Tick 7's split reaches here. *)
+        let markers =
+          Cdal_judge.of_exec_outcome ~semantic:sem
+            ~stdout:result.output ~stderr:""
+        in
+        match markers with
+        | [] -> []
+        | _ ->
+            [ ( "verifiable_markers",
+                `List (List.map verifiable_marker_to_json markers) ) ]
+    in
+    ("semantic_exit", semantic_obj) :: (rci_field @ marker_field)
+
+(* Tick 9: head+tail output cap — opt-in via MASC_BASH_OUTPUT_CAP.
+   Defaults match the claude-code EndTruncatingAccumulator shape
+   (500 KB head + 500 KB tail).  Overrides via MASC_BASH_CAP_HEAD /
+   MASC_BASH_CAP_TAIL let keepers experiment without code changes.
+   Applies only to JSON emission; the record keeps the original
+   bytes so semantic interpretation and marker inference see the
+   full stream. *)
+let default_head_cap = 512 * 1024
+let default_tail_cap = 512 * 1024
+
+let env_int key =
+  match Sys.getenv_opt key with
+  | None | Some "" -> None
+  | Some s -> (try Some (int_of_string (String.trim s)) with _ -> None)
+
+let output_cap_enabled () =
+  match Sys.getenv_opt "MASC_BASH_OUTPUT_CAP" with
+  | Some ("1" | "true" | "TRUE" | "yes") -> true
+  | _ -> false
+
+let cap_output_for_json output =
+  if not (output_cap_enabled ()) then (output, None)
+  else
+    let head_cap =
+      Option.value ~default:default_head_cap (env_int "MASC_BASH_CAP_HEAD")
+    in
+    let tail_cap =
+      Option.value ~default:default_tail_cap (env_int "MASC_BASH_CAP_TAIL")
+    in
+    let head_cap = max 0 head_cap and tail_cap = max 0 tail_cap in
+    let b = Masc_exec.Exec_buffer.create ~head_cap ~tail_cap in
+    Masc_exec.Exec_buffer.add_string b output;
+    let rendered = Masc_exec.Exec_buffer.render b in
+    let total = Masc_exec.Exec_buffer.total_bytes b in
+    let dropped = Masc_exec.Exec_buffer.bytes_dropped b in
+    let meta : Yojson.Safe.t =
+      `Assoc
+        [
+          ("total_bytes", `Int total);
+          ("bytes_dropped", `Int dropped);
+          ("head_cap", `Int head_cap);
+          ("tail_cap", `Int tail_cap);
+        ]
+    in
+    (rendered, Some meta)
+
 let outcome_to_json ?(extra = []) = function
   | Executed result ->
       let hint_fields =
@@ -523,6 +660,12 @@ let outcome_to_json ?(extra = []) = function
         | Some hint ->
             [ ("hint", `String hint); ("recovery_hint", `String hint) ]
         | None -> []
+      in
+      let capped_output, output_cap_field = cap_output_for_json result.output in
+      let cap_field =
+        match output_cap_field with
+        | None -> []
+        | Some meta -> [ ("output_cap", meta) ]
       in
       `Assoc
         ([
@@ -532,7 +675,10 @@ let outcome_to_json ?(extra = []) = function
          @ [
              ( "status",
                Keeper_alerting_path.process_status_to_json result.process_status );
-             ("output", `String result.output);
+             ("output", `String capped_output);
+           ]
+         @ cap_field
+         @ [
              ( "semantic_status",
                `String (string_of_semantic_status result.semantic_status) );
              ("classification", classification_to_json result.classification);
@@ -540,7 +686,8 @@ let outcome_to_json ?(extra = []) = function
              ("summary", `String result.summary);
              ("artifact_refs", `List (List.map artifact_ref_to_json result.artifact_refs));
            ]
-         @ hint_fields)
+         @ hint_fields
+         @ semantic_fields_of_executed result)
   | Blocked_result result ->
       `Assoc
         ([

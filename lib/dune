@@ -796,6 +796,9 @@
    masc_process
    ;; Typed exec approval substrate (RFC v5)
    masc_mcp.masc_exec
+   ;; Bash subset parser (RFC v5 A1) — for shadow AST telemetry
+   ;; in worker_dev_tools pending regex-to-AST migration.
+   masc_mcp.masc_exec_bash_parser
    ;; Autoresearch leaf modules (types, serde, storage, metric, git, file)
    masc_autoresearch
    ;; Board types (extracted sub-library — first step toward board isolation)

@@ -1,5 +1,7 @@
 (tests
  (names test_exec_types test_capability_check test_bash_parser
         test_approval_policy test_approval_context test_approval_config
-        test_exec_gate_runtime)
- (libraries masc_exec masc_exec_bash_parser masc_process unix))
+        test_exec_gate_runtime test_exec_semantic test_exec_buffer
+        test_exec_run test_exec_run_json)
+ (libraries masc_exec masc_exec_bash_parser masc_process
+            masc_core alcotest eio eio_main yojson str unix))

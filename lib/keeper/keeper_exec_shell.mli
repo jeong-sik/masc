@@ -39,6 +39,22 @@ val handle_keeper_bash :
   args:Yojson.Safe.t ->
   string
 
+val handle_keeper_bash_output :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  args:Yojson.Safe.t ->
+  string
+(** Legendary Bash P2: poll pending stdout/stderr from a background
+    task spawned via [keeper_bash] with [run_in_background=true]. *)
+
+val handle_keeper_bash_kill :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  args:Yojson.Safe.t ->
+  string
+(** Legendary Bash P2: terminate a background task's process group
+    (SIGTERM → grace → SIGKILL). Idempotent. *)
+
 val handle_keeper_shell :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

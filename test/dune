@@ -318,6 +318,9 @@
         test_tool_local_runtime_probe
         test_board_ttl
         test_worker_dev_tools
+        test_shadow_parse
+        test_destructive_class
+        test_gate_diff
         test_oas_integration
         test_memory_oas_5tier
         test_verifier_oas_bridge
@@ -333,6 +336,8 @@
         test_json_util
         test_process_eio_coverage
         test_with_process_coverage
+        test_bg_task_stub
+        test_process_eio_detached
         test_provider_adapter
         test_worker_container_coverage
         test_resilience
@@ -421,6 +426,7 @@
         test_cdal_types
         test_cdal_loader
         test_cdal_judge
+        test_cdal_verifiable_markers
         test_cdal_eval_v1
         test_cdal_friction_projection
         test_cdal_verdict_gate
@@ -471,6 +477,9 @@
         test_tool_local_runtime_probe
         test_board_ttl
         test_worker_dev_tools
+        test_shadow_parse
+        test_destructive_class
+        test_gate_diff
         test_oas_integration
         test_memory_oas_5tier
         test_verifier_oas_bridge
@@ -486,6 +495,8 @@
         test_json_util
         test_process_eio_coverage
         test_with_process_coverage
+        test_bg_task_stub
+        test_process_eio_detached
         test_provider_adapter
         test_worker_container_coverage
         test_resilience
@@ -574,6 +585,7 @@
         test_cdal_types
         test_cdal_loader
         test_cdal_judge
+        test_cdal_verifiable_markers
         test_cdal_eval_v1
         test_cdal_friction_projection
         test_cdal_verdict_gate

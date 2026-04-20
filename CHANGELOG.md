@@ -7,6 +7,49 @@
 
 - **`Docker_with_git` sandbox profile + git/gh per-command dispatch.** New `sandbox_profile = "docker_with_git"` keeps every `Docker_hardened` guard (cap-drop, no-new-privs, read-only rootfs, tmpfs, pids/memory limits, no nested runtimes) but adds `--network bridge` and read-only mounts for `~/.config/gh`, `~/.gitconfig`, optionally `~/.ssh` (opt-in via `MASC_KEEPER_SANDBOX_SSH_DIR`). Optional `GH_TOKEN` env forward via `MASC_KEEPER_SANDBOX_GH_TOKEN`. A `Docker_hardened` keeper still gets git/gh access for free: `keeper_bash` automatically routes commands whose first token is `git` or `gh` through the new profile (toggle `MASC_KEEPER_SANDBOX_GIT_DISPATCH=false` to disable). Closes the gap that left coding keepers with `repo clone 차단: allowed org mismatch` board posts and 16 days of zero `keeper_bash` git activity.
 
+- **Legendary Bash P1–P6 (`feature/legendary-bash-p1`, PR #8721).**
+  Reworks `keeper_bash` along six coordinated axes.  Every surface
+  is additive and opt-in; the default JSON shape is unchanged.
+  - **P1 — typed semantic exit.**  New `Exec_semantic` variant
+    (`Ok / Fail / Timeout / Signaled / Git_not_a_repo / Oom_killed /
+    Policy_denied / Tool_missing / Permission_denied`) with
+    heuristic interpretation of exit codes 126/127/128 and dmesg
+    OOM hints.  Gated by `MASC_BASH_SEMANTIC_EXIT`.
+  - **P2 — background task lifecycle.**  `Bg_task.spawn/read/kill`
+    plus `keeper_bash_output` / `keeper_bash_kill` mirror
+    claude-code's `BashOutput` / `KillShell`.  pgid-owned children
+    enable tree-kill; PID-file persistence
+    (`<base>/.masc/keeper/<name>/bg/*.pid`) plus a startup
+    `reap_orphans` hook recover stranded groups after restart.
+  - **P3 — head+tail output cap.**  `Exec_buffer` keeps the first
+    and last 500 KB of each stream in memory with an overlap-aware
+    `bytes_dropped` counter.  Controlled by `MASC_BASH_OUTPUT_CAP`
+    / `MASC_BASH_CAP_HEAD` / `MASC_BASH_CAP_TAIL`.
+  - **P4 — auto-background race.**  `Exec_run.run_with_auto_bg`
+    spawns a `Bg_task` and races its exit against
+    `MASC_BLOCKING_BUDGET_MS` (default 15 000 ms) via
+    `Eio.Fiber.first`.  Budget expiry returns `{promoted: true,
+    background_task_id, partial_output, bytes_dropped, budget_ms,
+    hint}`.  Gated by `MASC_BASH_AUTO_BG`; falls back to the
+    blocking path when no Eio clock is available.
+  - **P5 — AST-shadow safety layer.**  `Worker_dev_tools`
+    classifies every `Eval_gate.destructive_patterns` entry into an
+    8-arm `destructive_class` and runs the existing regex allowlist
+    in parallel with the `Masc_exec_bash_parser` AST gate.  The
+    legacy↔shadow diff harness (`test/test_gate_diff.ml`) pins the
+    flip covenant: no `Eval_gate` pattern may slip into
+    `Legacy_deny_shadow_allow`.
+  - **P6 — verifiable markers.**  `Cdal_judge.of_exec_outcome`
+    translates `(semantic, stdout, stderr)` into a typed marker
+    list (`Test_pass {count}`, `Build_ok`, `Lint_clean`,
+    `Git_clean`, …) with `Exact | Heuristic` confidence, so the
+    verifier cascade can consume structured proofs instead of regex
+    scraping.  Emitted when `MASC_BASH_VERIFIABLE_MARKERS` is set.
+
+  All six phases land behind flags so operators can soak each axis
+  independently before default flip.  See
+  `docs/ENV-CONTRACT.md §4` for the flag matrix.
+
 ### Changed
 
 - **OAS pin bump → `main@36490371` (v0.163.0).** Single-commit upstream bump for `pipeline: handle Nudge decision in before_turn` (oas#1065). Without this, `before_turn` hooks returning `Hooks.Nudge` were silently dropped by `pipeline.ml stage_input` (`_ -> ()` fall-through). Effect on masc-mcp: the work-discovery nudge wired in PR #8805 (1089-char Samchon schema text) now actually reaches the LLM. 3 SSOT axes bumped per `feedback_oas-pin-must-bump-version-floor`: `scripts/oas-agent-sdk-pin.sh`, `dune-project`, `masc_mcp.opam`. Generated docs re-synced via `scripts/sync-oas-pin-docs.sh`. Live verification: post-deploy, `keeper:<name> before_turn: injecting work_discovery nudge` log lines should be followed by `tool_call` events from the same keeper (currently 10 fires + 0 follow-up actions over the live server's 2 hour uptime).

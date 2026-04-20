@@ -486,7 +486,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   Eio.Fiber.fork ~sw (fun () ->
       let last_prune = ref (Unix.gettimeofday ()) in
       let rec loop () =
-        Eio.Time.sleep clock 60.0;
+        Eio.Time.sleep clock
+          Env_config_runtime.InternalTimers.janitor_interval_sec;
         (try
           let stale_sids = Sse.cleanup_stale () in
           List.iter Server_routes_http_common.stop_sse_session stale_sids;

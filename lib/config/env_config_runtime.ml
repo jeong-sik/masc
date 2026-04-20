@@ -616,6 +616,14 @@ module InternalTimers = struct
   (** Operator digest stalled session threshold (seconds). Default: 300 (5 min). *)
   let stalled_session_threshold_sec =
     get_float ~default:300.0 "MASC_STALLED_SESSION_THRESHOLD_SEC"
+
+  (** Bootstrap janitor tick interval (seconds). Drives the SSE/session/
+      rate-limit/webrtc reaper loop in [server_bootstrap_loops]. Default:
+      60 (1 min). Shorter interval reclaims stale connections faster at
+      the cost of more wake-ups; longer interval is fine if the process
+      is sized for the steady-state connection count. *)
+  let janitor_interval_sec =
+    get_float ~default:60.0 "MASC_JANITOR_INTERVAL_SEC"
 end
 
 (** {1 Sidecar reconcile loop}

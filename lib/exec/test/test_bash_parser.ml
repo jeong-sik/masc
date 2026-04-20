@@ -83,18 +83,71 @@ let test_single_command_is_simple_not_pipeline () =
   | _ -> assert false
 
 let test_logic_or_rejected () =
-  (* '||' is subset-excluded (Parsed.Too_complex.Logic_op in a
-     follow-up PR).  Today surfaces as Parse_error because the
-     grammar has no production for consecutive PIPE tokens. *)
+  (* '||' is subset-excluded — post-hoc classifier on the Parse_error
+     path now mints Parsed.Too_complex `Logic_op, which the corpus
+     tap uses to bucket the rejection by construct type. *)
   match Bash.parse_string "ls || cat" with
-  | Parsed.Parse_error _ -> ()
-  (* "|| must reject" *)
+  | Parsed.Too_complex `Logic_op -> ()
+  (* "|| must classify as Logic_op" *)
+  | _ -> assert false
+
+let test_logic_and_rejected () =
+  match Bash.parse_string "ls && cat" with
+  | Parsed.Too_complex `Logic_op -> ()
   | _ -> assert false
 
 let test_redirect_rejected_in_skeleton () =
   match Bash.parse_string "echo hi > /tmp/out" with
-  | Parsed.Parse_error _ -> ()
-  (* "redirect must reject in skeleton grammar" *)
+  | Parsed.Too_complex `Redirect -> ()
+  (* "> must classify as Redirect" *)
+  | _ -> assert false
+
+let test_redirect_append_rejected () =
+  match Bash.parse_string "echo hi >> /tmp/out" with
+  | Parsed.Too_complex `Redirect -> ()
+  | _ -> assert false
+
+let test_input_redirect_rejected () =
+  match Bash.parse_string "cat < /etc/hosts" with
+  | Parsed.Too_complex `Redirect -> ()
+  | _ -> assert false
+
+let test_heredoc_rejected () =
+  (* "<<" must out-rank single "<" — order check in classify_too_complex. *)
+  match Bash.parse_string "cat <<EOF" with
+  | Parsed.Too_complex `Heredoc -> ()
+  | _ -> assert false
+
+let test_here_string_rejected () =
+  (* "<<<" must out-rank "<<" — order check in classify_too_complex. *)
+  match Bash.parse_string "cat <<<payload" with
+  | Parsed.Too_complex `Here_string -> ()
+  | _ -> assert false
+
+let test_cmd_subst_paren_rejected () =
+  match Bash.parse_string "echo $(date)" with
+  | Parsed.Too_complex `Cmd_subst -> ()
+  | _ -> assert false
+
+let test_cmd_subst_backtick_rejected () =
+  match Bash.parse_string "echo `date`" with
+  | Parsed.Too_complex `Cmd_subst -> ()
+  | _ -> assert false
+
+let test_arith_expansion_rejected () =
+  (* "$((" must out-rank "$(" — order check in classify_too_complex. *)
+  match Bash.parse_string "echo $((1 + 2))" with
+  | Parsed.Too_complex `Arith_expansion -> ()
+  | _ -> assert false
+
+let test_background_rejected () =
+  match Bash.parse_string "sleep 10 &" with
+  | Parsed.Too_complex `Background -> ()
+  | _ -> assert false
+
+let test_subshell_rejected () =
+  match Bash.parse_string "(ls)" with
+  | Parsed.Too_complex `Subshell -> ()
   | _ -> assert false
 
 let test_empty_input_rejected () =
@@ -226,9 +279,15 @@ let test_double_quote_with_backslash_rejected () =
   | _ -> assert false
 
 let test_double_quote_with_backtick_rejected () =
-  (* Command substitution (`cmd`) is subset-excluded — reject. *)
+  (* Command substitution ('`cmd`') is subset-excluded.  Post-hoc
+     classifier now mints Too_complex `Cmd_subst rather than the
+     opaque Parse_error the earlier skeleton produced — the substring
+     scan does not distinguish between backticks inside vs outside
+     quotes, which is acceptable because anything reaching this arm
+     has already been rejected by the grammar and the more-specific
+     tag is strictly better for corpus-tap telemetry. *)
   match Bash.parse_string "echo \"now `date`\"" with
-  | Parsed.Parse_error _ -> ()
+  | Parsed.Too_complex `Cmd_subst -> ()
   | _ -> assert false
 
 let test_unterminated_double_quote_rejected () =
@@ -245,7 +304,17 @@ let () =
   test_three_stage_pipeline_with_args ();
   test_single_command_is_simple_not_pipeline ();
   test_logic_or_rejected ();
+  test_logic_and_rejected ();
   test_redirect_rejected_in_skeleton ();
+  test_redirect_append_rejected ();
+  test_input_redirect_rejected ();
+  test_heredoc_rejected ();
+  test_here_string_rejected ();
+  test_cmd_subst_paren_rejected ();
+  test_cmd_subst_backtick_rejected ();
+  test_arith_expansion_rejected ();
+  test_background_rejected ();
+  test_subshell_rejected ();
   test_empty_input_rejected ();
   test_whitespace_only_rejected ();
   test_single_quoted_arg ();

@@ -25,6 +25,29 @@
 
 ### Added
 
+- **Bash parser post-hoc `Too_complex` classifier (P5 parse-gap
+  narrowing).**  `Masc_exec_bash_parser.Bash.parse_string` now
+  post-processes lexer/grammar rejections through
+  `classify_too_complex`, a substring scanner that upgrades the
+  response from opaque `Parse_error` to a typed
+  `Parsed.Too_complex reason` variant whenever the rejection is
+  attributable to a subset-excluded bash feature.  Ordered
+  multi-char markers first (`<<<`, `<<`, `>>`, `&&`, `||`, `$(`,
+  `$((`, `<(`, `>(`), then single-char (`<`, `>`, `&`, `(`, `{`,
+  etc.), first match wins.  New variant `Redirect` added to
+  `Parsed.reason_too_complex` for `<`/`>`/`>>`; mapping added to
+  `Worker_dev_tools.too_complex_reason_tag` → `"redirect"`.  Eleven
+  new parser tests cover `Logic_op` (`&&`/`||`), `Redirect`,
+  `Heredoc` (`<<`), `Here_string` (`<<<`), `Cmd_subst` (`` ` ``
+  and `$(`), `Arith_expansion` (`$((`), `Background` (`&`),
+  `Subshell` (`(…)`).  The existing
+  `test_double_quote_with_backtick_rejected` now expects
+  `Too_complex `Cmd_subst` — the substring scan is not
+  quote-aware, and since anything reaching this arm has already
+  been grammar-rejected the more specific tag is strictly better
+  for the corpus-tap telemetry that drives future A1-PR-N grammar
+  expansion priority decisions.
+
 - **Legendary Bash `bg_tasks/<keeper>` HTTP endpoint.**  New
   `GET /api/v1/legendary_bash/bg_tasks/<keeper>` returns the
   per-keeper background task roster as

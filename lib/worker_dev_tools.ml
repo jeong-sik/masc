@@ -1515,6 +1515,7 @@ let too_complex_reason_tag (r : Masc_exec.Parsed.reason_too_complex) =
   | `Function_def -> "function_def"
   | `Glob_brace -> "glob_brace"
   | `Background -> "background"
+  | `Redirect -> "redirect"
   | `Unknown_construct s -> "unknown:" ^ s
 
 let aborted_reason_tag (r : Masc_exec.Parsed.reason_aborted) =

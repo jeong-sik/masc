@@ -19,6 +19,7 @@ type reason_too_complex =
   | `Function_def
   | `Glob_brace
   | `Background
+  | `Redirect
   | `Unknown_construct of string
   ]
 

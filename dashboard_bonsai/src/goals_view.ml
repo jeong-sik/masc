@@ -389,23 +389,15 @@ let render (r : Goals_types.response) : Node.t =
     [ Placeholder_view.sidebar ~active:Goals
     ; Node.div
         ~attrs:[ Style.main ]
-        [ Node.p ~attrs:[ Style.eyebrow ] [ Node.text "goals · convergence" ]
-        ; Node.h1
-            ~attrs:[ Style.title ]
-            [ Node.text "goals "
-            ; Node.span
-                ~attrs:[ Style.title_brass ]
-                [ Node.text
-                    (Printf.sprintf "· %d" r.summary.total_goals)
-                ]
-            ]
-        ; Node.p
-            ~attrs:[ Style.sub ]
-            [ Node.text
-                "config-driven goal forest. 각 node는 goal 하나 + 직속 \
-                 task들 + 하위 goals. convergence는 child goals의 평균 \
-                 progress."
-            ]
+        [ Hero.view
+            ~eyebrow:"goals · convergence"
+            ~title:"goals"
+            ~tail:(Printf.sprintf "· %d" r.summary.total_goals, `Brass)
+            ~sub:
+              "config-driven goal forest. 각 node는 goal 하나 + 직속 \
+               task들 + 하위 goals. convergence는 child goals의 평균 \
+               progress."
+            ()
         ; view_meta_strip r
         ; (match r.tree with
            | [] ->

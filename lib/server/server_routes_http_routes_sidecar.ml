@@ -560,7 +560,11 @@ let observed_state_of_status_json = function
       | _ -> Observed_unavailable)
   | _ -> Observed_unavailable
 
-let retry_backoff_seconds = 30.0
+(** Backoff window between repeated same-generation reconcile start
+    dispatches. Default 30s, overridable via [MASC_SIDECAR_RECONCILE_BACKOFF_SEC]
+    (#8930 consolidation). *)
+let retry_backoff_seconds () =
+  Env_config_runtime.Sidecar.reconcile_backoff_sec
 
 let retry_backoff_active ~now attempt =
   attempt.generation >= 0
@@ -589,7 +593,7 @@ let next_attempt_record ~now ~next_retry_at previous (record : desired_record) =
 
 let reconcile_desired_once
     ?(now = isoish_now ())
-    ?(next_retry_at = isoish_at (Unix.time () +. retry_backoff_seconds))
+    ?(next_retry_at = isoish_at (Unix.time () +. retry_backoff_seconds ()))
     ?previous_attempt
     ?(write_attempt = fun (_ : attempt_record) -> Ok ())
     ~current_generation

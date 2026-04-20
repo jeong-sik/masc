@@ -35,11 +35,19 @@ function tryPrettyJson(s: string): string | null {
 }
 
 // Tool output may be (a) a raw string, (b) a JSON blob we logged as a string,
-// or (c) a [masc:blob ...] sentinel produced by Tool_output.encode_for_oas
-// when the bytes exceeded the inline threshold. Render all three as
-// human-readable pretty JSON when possible so the inspector matches what
-// Input already does via [formatInput].
-export function formatOutput(output: string): string {
+// (c) a [masc:blob ...] sentinel produced by Tool_output.encode_for_oas
+// when the bytes exceeded the inline threshold (legacy encoding, kept for
+// jsonl entries written before the normalization change), or (d) a
+// normalized blob descriptor object {_blob: {...}} written by the current
+// keeper_tool_call_log. Render all four uniformly as human-readable text.
+export function formatOutput(output: string | { _blob: { sha256: string; bytes: number; mime: string; preview: string } }): string {
+  if (output == null) return '(empty)'
+  if (typeof output === 'object') {
+    const { sha256, bytes, mime, preview } = output._blob
+    const prettyPreview = tryPrettyJson(preview) ?? preview
+    const shaShort = sha256.slice(0, 12)
+    return `[masc:blob sha256=${shaShort}\u2026 bytes=${bytes} mime=${mime}]\n${prettyPreview}`
+  }
   if (!output) return '(empty)'
   const marker = parseToolBlobMarker(output)
   if (marker !== null) {

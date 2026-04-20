@@ -48,9 +48,12 @@
 \*     acknowledges the signal.
 \*
 \* Wire path to the dashboard banner consumer:
-\*   lib/keeper/keeper_state_machine.ml:620
+\*   lib/keeper/keeper_state_machine.ml:634
 \*     `"context_handoff_needed", \`Bool c.context_handoff_needed`
 \*     (json export — read by dashboard/src/components/keeper-conditions-divergent.ts).
+\*     Verified 2026-04-20: line 620 was a stale anchor; the json
+\*     serializer body shifted ~14 lines down as adjacent serializer
+\*     fields were inserted above it.
 \*
 \* Scope projection: spec models the 2-phase fragment (Running / HandingOff).
 \* The full 12-phase variant is out of scope here; sibling specs

@@ -1,4 +1,16 @@
-let run_git_capture_lines ~workdir args =
+type git_capture_hook =
+  workdir:string -> string list -> string list option
+
+let git_capture_hook_for_tests : git_capture_hook option Atomic.t =
+  Atomic.make None
+
+let set_git_capture_hook_for_tests hook =
+  Atomic.set git_capture_hook_for_tests (Some hook)
+
+let clear_git_capture_hook_for_tests () =
+  Atomic.set git_capture_hook_for_tests None
+
+let run_git_capture_lines_once ~workdir args =
   try
     let argv = [ "git"; "-C"; workdir ] @ args in
     let raw_source = String.concat " " (List.map Filename.quote argv) in
@@ -18,20 +30,94 @@ let run_git_capture_lines ~workdir args =
     | _ -> None
   with Sys_error _ | Unix.Unix_error _ -> None
 
+let run_git_capture_lines ~workdir args =
+  match Atomic.get git_capture_hook_for_tests with
+  | Some hook -> hook ~workdir args
+  | None ->
+      let rec loop attempts_left =
+        match run_git_capture_lines_once ~workdir args with
+        | Some _ as result -> result
+        | None when attempts_left > 0 -> loop (attempts_left - 1)
+        | None -> None
+      in
+      loop 1
+
+let nearest_git_root path =
+  let rec walk dir =
+    let marker = Filename.concat dir ".git" in
+    if Sys.file_exists marker then Some dir
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None else walk parent
+  in
+  try walk path with Sys_error _ -> None
+
 let repo_root_for ~base_path =
   if not (Coord_git.has_git_marker base_path) then None
-  else
-  match run_git_capture_lines ~workdir:base_path [ "rev-parse"; "--show-toplevel" ] with
-  | Some (root :: _) ->
-      let root = String.trim root in
-      if root = "" then None else Some root
-  | _ -> None
+  else nearest_git_root base_path
 
-let current_status_lines ~repo_root =
-  run_git_capture_lines ~workdir:repo_root [ "status"; "--porcelain" ]
+type status_cache_entry = {
+  lines : string list;
+  refreshed_at : float;
+}
+
+let status_cache : (string, status_cache_entry) Hashtbl.t =
+  Hashtbl.create 4
+
+let status_cache_mu = Stdlib.Mutex.create ()
+
+let status_cache_ttl_sec () =
+  match Sys.getenv_opt "MASC_WORKTREE_STATUS_CACHE_TTL_S" with
+  | Some raw -> (
+      match float_of_string_opt (String.trim raw) with
+      | Some ttl when ttl >= 0.0 && ttl <= 10.0 -> ttl
+      | _ -> 1.0)
+  | None -> 1.0
+
+let status_cache_lookup repo_root ~now ~ttl =
+  if ttl <= 0.0 then None
+  else begin
+    Stdlib.Mutex.lock status_cache_mu;
+    Fun.protect
+      ~finally:(fun () -> Stdlib.Mutex.unlock status_cache_mu)
+      (fun () ->
+        match Hashtbl.find_opt status_cache repo_root with
+        | Some entry when now -. entry.refreshed_at <= ttl ->
+            Some entry.lines
+        | _ -> None)
+  end
+
+let status_cache_store repo_root lines ~now ~ttl =
+  if ttl > 0.0 && lines <> [] then begin
+    Stdlib.Mutex.lock status_cache_mu;
+    Fun.protect
+      ~finally:(fun () -> Stdlib.Mutex.unlock status_cache_mu)
+      (fun () ->
+        Hashtbl.replace status_cache repo_root { lines; refreshed_at = now })
+  end
+
+let clear_status_cache_for_tests () =
+  Stdlib.Mutex.lock status_cache_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock status_cache_mu)
+    (fun () -> Hashtbl.clear status_cache)
+
+let current_status_lines_uncached ~repo_root =
+  run_git_capture_lines ~workdir:repo_root
+    [ "--no-optional-locks"; "status"; "--porcelain" ]
   |> Option.value ~default:[]
   |> List.map String.trim
   |> List.filter (fun line -> line <> "")
+
+let current_status_lines ~repo_root =
+  let now = Time_compat.now () in
+  let ttl = status_cache_ttl_sec () in
+  match status_cache_lookup repo_root ~now ~ttl with
+  | Some lines -> lines
+  | None ->
+      let lines = current_status_lines_uncached ~repo_root in
+      status_cache_store repo_root lines ~now:(Time_compat.now ()) ~ttl;
+      lines
 
 let state_dir ~repo_root =
   Filename.concat (Filename.concat repo_root ".masc") "live-context"

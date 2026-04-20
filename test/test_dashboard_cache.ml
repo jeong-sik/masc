@@ -320,6 +320,38 @@ let test_waiter_timeout_returns_error_not_cached ~clock () =
   in
   check_json "owner result survives waiter timeout" (`String "owner_done") final
 
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect ~finally:(fun () -> Unix.rmdir dir) (fun () -> f dir)
+
+let test_runtime_git_cache_returns_stale_and_refreshes ~clock () =
+  let module Runtime = Server_dashboard_http_runtime_info in
+  Runtime.clear_git_rev_parse_short_cache_for_tests ();
+  with_temp_dir "runtime-git-cache" (fun dir ->
+      Runtime.seed_git_rev_parse_short_cache_for_tests dir (Some "old")
+        ~refreshed_at:(Time_compat.now () -. 120.0);
+      let probes = Atomic.make 0 in
+      Runtime.set_git_rev_parse_short_probe_hook_for_tests (fun _ ->
+          Atomic.incr probes;
+          Eio.Time.sleep clock 0.05;
+          Some "new");
+      Fun.protect
+        ~finally:(fun () ->
+          Runtime.clear_git_rev_parse_short_probe_hook_for_tests ();
+          Runtime.clear_git_rev_parse_short_cache_for_tests ())
+        (fun () ->
+          Alcotest.(check (option string))
+            "expired cache returns stale immediately"
+            (Some "old") (Runtime.git_rev_parse_short dir);
+          Eio.Time.sleep clock 0.15;
+          Alcotest.(check (option string))
+            "background refresh stores fresh value"
+            (Some "new") (Runtime.git_rev_parse_short dir);
+          Alcotest.(check int) "single background probe" 1
+            (Atomic.get probes)))
+
 (* -- Harness ---------------------------------------------------------------- *)
 
 let () =
@@ -353,6 +385,8 @@ let () =
       ( "concurrency",
         [
           test_case "stampede protection" `Quick test_stampede;
+          test_case "runtime git cache stale-first refresh" `Quick
+            (test_runtime_git_cache_returns_stale_and_refreshes ~clock);
         ] );
       ( "timeout",
         [

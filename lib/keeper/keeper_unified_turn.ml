@@ -1710,6 +1710,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let post_commit_failure_reason = ref None in
       let paused_meta_override = ref None in
       let current_turn_overflow_blocker = ref None in
+      let event_bus_drain_active = Atomic.make true in
+      let turn_event_bus_mu = Stdlib.Mutex.create () in
       let mark_paused_after_overflow ~run_meta ~reason =
         let paused_meta =
           pause_keeper_for_overflow
@@ -1737,6 +1739,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
          ToolCompleted pops the oldest input for that tool_name. *)
       let pending_tool_inputs : (string, Yojson.Safe.t Queue.t) Hashtbl.t =
         Hashtbl.create 8
+      in
+      let with_turn_event_bus_lock f =
+        Stdlib.Mutex.lock turn_event_bus_mu;
+        Fun.protect
+          ~finally:(fun () -> Stdlib.Mutex.unlock turn_event_bus_mu)
+          f
       in
       let push_pending_input tool_name input =
         let q =
@@ -1782,18 +1790,46 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           events
       in
       let drain_turn_event_bus () =
-        let events =
-          match event_bus_sub, Keeper_event_bus.get () with
-          | Some sub, Some _bus -> Oas_bus_instrument.drain sub
-          | _ -> []
-        in
-        process_tool_events_for_side_effects events;
-        let summary = summarize_turn_event_bus events in
-        turn_event_bus :=
-          merge_turn_event_bus_summary !turn_event_bus summary;
-        !turn_event_bus
+        with_turn_event_bus_lock (fun () ->
+          let events =
+            match event_bus_sub, Keeper_event_bus.get () with
+            | Some sub, Some _bus -> Oas_bus_instrument.drain sub
+            | _ -> []
+          in
+          process_tool_events_for_side_effects events;
+          let summary = summarize_turn_event_bus events in
+          turn_event_bus :=
+            merge_turn_event_bus_summary !turn_event_bus summary;
+          !turn_event_bus)
+      in
+      let committed_mutating_tools_snapshot () =
+        with_turn_event_bus_lock (fun () ->
+          committed_mutating_tools !mutating_tools_committed)
+      in
+      let start_background_turn_event_bus_drain ~clock =
+        match event_bus_sub, Eio_context.get_switch_opt () with
+        | Some _, Some sw ->
+            Eio.Fiber.fork ~sw (fun () ->
+              let rec loop () =
+                if Atomic.get event_bus_drain_active then begin
+                  (try
+                     ignore (drain_turn_event_bus ())
+                   with
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | exn ->
+                       Log.Keeper.warn
+                         "%s: keeper_turn event-bus drain failed: %s"
+                         meta.name (Printexc.to_string exn));
+                  Eio.Time.sleep clock 0.25;
+                  loop ()
+                end
+              in
+              loop ())
+        | _ -> ()
       in
       let unsubscribe_event_bus () =
+        Atomic.set event_bus_drain_active false;
+        ignore (drain_turn_event_bus ());
         match event_bus_sub, Keeper_event_bus.get () with
         | Some sub, Some bus -> Oas_bus_instrument.unsubscribe bus sub
         | _ -> ()
@@ -1824,6 +1860,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let timeout_sec =
             Env_config_keeper.KeeperKeepalive.turn_timeout_sec
           in
+          start_background_turn_event_bus_drain ~clock;
           let turn_deadline = Eio.Time.now clock +. timeout_sec in
           let remaining_turn_budget_s () =
             Float.max 0.0 (turn_deadline -. Eio.Time.now clock)
@@ -1941,9 +1978,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 Ok result
             | Error err ->
                 let _ = drain_turn_event_bus () in
-                let committed_tools =
-                  committed_mutating_tools !mutating_tools_committed
-                in
+                let committed_tools = committed_mutating_tools_snapshot () in
                 if committed_tools <> []
                    && Keeper_tool_registry.all_tools_reconcile_safe
                         committed_tools
@@ -2117,9 +2152,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             in
             Log.Keeper.error "%s: %s" meta.name msg;
             let _ = drain_turn_event_bus () in
-            let committed_tools =
-              committed_mutating_tools !mutating_tools_committed
-            in
+            let committed_tools = committed_mutating_tools_snapshot () in
             if committed_tools <> []
                && Keeper_tool_registry.all_tools_reconcile_safe
                     committed_tools
@@ -2237,9 +2270,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                  The keeper is paused and an explicit continue gate is
                  raised for the operator. Approving the gate auto-resumes
                  the keeper; rejecting it leaves the keeper paused. *)
-              let committed_tools =
-                committed_mutating_tools !mutating_tools_committed
-              in
+              let committed_tools = committed_mutating_tools_snapshot () in
               let failure_reason =
                 Option.value
                   ~default:
@@ -2316,9 +2347,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             Keeper_registry.set_failure_reason ~base_path:config.base_path
               meta.name
               (Some failure_reason);
-            let committed_tools =
-              committed_mutating_tools !mutating_tools_committed
-            in
+            let committed_tools = committed_mutating_tools_snapshot () in
             Log.Keeper.info
               "%s: reconcile-required failure latched as %s after committed tools [%s]"
               meta.name

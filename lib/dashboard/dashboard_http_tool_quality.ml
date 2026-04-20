@@ -15,6 +15,7 @@ let normalize_failure_text (text : string) : string =
   let prefix_rules =
     [
       ("path_not_in_allowed_paths:", "path_not_in_allowed_paths");
+      ("path_outside_sandbox:", "path_outside_sandbox");
       ("path_not_found_under_allowed_roots:", "path_not_found_under_allowed_roots");
       ("path_outside_project_root:", "path_outside_project_root");
       ("allowed_paths_normalized_empty:", "allowed_paths_normalized_empty");

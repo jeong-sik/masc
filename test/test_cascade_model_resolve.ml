@@ -9,6 +9,7 @@
 
 open Alcotest
 module R = Masc_mcp.Cascade_model_resolve
+module C = Masc_mcp.Cascade_config
 
 let unset_env k =
   try Unix.putenv k "" with _ -> ()
@@ -20,6 +21,9 @@ let with_clean_env f =
     "OPENAI_DEFAULT_MODEL";
     "OPENROUTER_DEFAULT_MODEL";
     "OLLAMA_DEFAULT_MODEL";
+    "MASC_GEMINI_CLI_AUTO_MODELS";
+    "MASC_CODEX_CLI_AUTO_MODELS";
+    "MASC_CLAUDE_CODE_AUTO_MODELS";
   ];
   f ()
 
@@ -53,6 +57,80 @@ let test_gemini_env_override () =
   check string "gemini_cli respects same env override"
     "gemini-2.5-flash" resolved_cli
 
+let test_gemini_cli_auto_models_default_rotation_order () =
+  with_clean_env (fun () ->
+    check (list string) "gemini_cli:auto expands to quota-aware rotation"
+      [
+        "gemini-3-flash-preview";
+        "gemini-3.1-flash-lite-preview";
+        "gemini-2.5-flash";
+        "gemini-2.5-flash-lite";
+        "gemini-3.1-pro-preview";
+        "gemini-2.5-pro";
+      ]
+      (R.gemini_cli_auto_models ()))
+
+let test_gemini_cli_auto_models_env_override () =
+  Unix.putenv "MASC_GEMINI_CLI_AUTO_MODELS"
+    "gemini-a, gemini-b,, gemini-c ";
+  let models = R.gemini_cli_auto_models () in
+  Unix.putenv "MASC_GEMINI_CLI_AUTO_MODELS" "";
+  check (list string) "operator override trims blanks"
+    [ "gemini-a"; "gemini-b"; "gemini-c" ] models
+
+let test_codex_and_claude_cli_auto_models_env_override () =
+  with_clean_env (fun () ->
+    check (list string) "codex default follows 5.1-to-5.4 order"
+      [
+        "gpt-5.1-codex-mini";
+        "gpt-5.1-codex-max";
+        "gpt-5.2";
+        "gpt-5.2-codex";
+        "gpt-5.3-codex-spark";
+        "gpt-5.3-codex";
+        "gpt-5.4-mini";
+        "gpt-5.4";
+      ]
+      (R.codex_cli_auto_models ());
+    check (list string) "claude default delegates to CLI"
+      [ "auto" ] (R.claude_code_auto_models ());
+    Unix.putenv "MASC_CODEX_CLI_AUTO_MODELS" "gpt-a,gpt-b";
+    Unix.putenv "MASC_CLAUDE_CODE_AUTO_MODELS" "sonnet,opus";
+    let codex = R.codex_cli_auto_models () in
+    let claude = R.claude_code_auto_models () in
+    Unix.putenv "MASC_CODEX_CLI_AUTO_MODELS" "";
+    Unix.putenv "MASC_CLAUDE_CODE_AUTO_MODELS" "";
+    check (list string) "codex operator rotation"
+      [ "gpt-a"; "gpt-b" ] codex;
+    check (list string) "claude operator rotation"
+      [ "sonnet"; "opus" ] claude)
+
+let test_expand_auto_models_includes_cli_auto_specs () =
+  with_clean_env (fun () ->
+    let expanded =
+      C.expand_auto_models
+        [ "gemini_cli:auto"; "codex_cli:auto"; "claude_code:auto" ]
+    in
+    check (list string) "CLI auto specs expand in-place"
+      [
+        "gemini_cli:gemini-3-flash-preview";
+        "gemini_cli:gemini-3.1-flash-lite-preview";
+        "gemini_cli:gemini-2.5-flash";
+        "gemini_cli:gemini-2.5-flash-lite";
+        "gemini_cli:gemini-3.1-pro-preview";
+        "gemini_cli:gemini-2.5-pro";
+        "codex_cli:gpt-5.1-codex-mini";
+        "codex_cli:gpt-5.1-codex-max";
+        "codex_cli:gpt-5.2";
+        "codex_cli:gpt-5.2-codex";
+        "codex_cli:gpt-5.3-codex-spark";
+        "codex_cli:gpt-5.3-codex";
+        "codex_cli:gpt-5.4-mini";
+        "codex_cli:gpt-5.4";
+        "claude_code:auto";
+      ]
+      expanded)
+
 let () =
   run "Cascade_model_resolve" [
     "gemini auto", [
@@ -64,5 +142,13 @@ let () =
         `Quick test_gemini_cli_explicit_model_passthrough;
       test_case "GEMINI_DEFAULT_MODEL env override"
         `Quick test_gemini_env_override;
+      test_case "gemini_cli:auto model list"
+        `Quick test_gemini_cli_auto_models_default_rotation_order;
+      test_case "gemini_cli:auto env list override"
+        `Quick test_gemini_cli_auto_models_env_override;
+      test_case "codex/claude cli auto env list override"
+        `Quick test_codex_and_claude_cli_auto_models_env_override;
+      test_case "expand_auto_models covers CLI auto"
+        `Quick test_expand_auto_models_includes_cli_auto_specs;
     ];
   ]

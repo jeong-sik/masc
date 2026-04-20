@@ -26,12 +26,67 @@ let env_or default var =
   | Some v when String.trim v <> "" -> String.trim v
   | _ -> default
 
+let csv_items raw =
+  raw
+  |> String.split_on_char ','
+  |> List.filter_map (fun item ->
+         let item = String.trim item in
+         if item = "" then None else Some item)
+
+let env_csv_or default var =
+  match Sys.getenv_opt var with
+  | Some raw -> (
+      match csv_items raw with
+      | [] -> default
+      | items -> items)
+  | None -> default
+
 (** Default GLM auto-cascade order: quality-first, then speed.
     glm-5.1 = best quality (reasoning), glm-5-turbo = fast tool calling,
     glm-4.7 = stable general, glm-4.7-flashx = fastest/cheapest.
     Configurable via ZAI_AUTO_MODELS env var (comma-separated). *)
 let glm_auto_models = Llm_provider.Zai_catalog.glm_auto_models
 let glm_coding_auto_models = Llm_provider.Zai_catalog.glm_coding_auto_models
+
+let gemini_cli_default_auto_models = [
+  "gemini-3-flash-preview";
+  "gemini-3.1-flash-lite-preview";
+  "gemini-2.5-flash";
+  "gemini-2.5-flash-lite";
+  "gemini-3.1-pro-preview";
+  "gemini-2.5-pro";
+]
+
+let gemini_cli_auto_models () =
+  match Sys.getenv_opt "MASC_GEMINI_CLI_AUTO_MODELS" with
+  | Some raw -> (
+      match csv_items raw with
+      | [] -> gemini_cli_default_auto_models
+      | items -> items)
+  | None -> (
+      match Sys.getenv_opt "GEMINI_DEFAULT_MODEL" with
+      | Some model when String.trim model <> "" -> [ String.trim model ]
+      | _ -> gemini_cli_default_auto_models)
+
+(* Mirrors the Codex CLI models observed locally on 2026-04-20, reordered
+   light-to-heavy by generation (5.1 -> 5.4). Keep this operator-tunable
+   because hosted model menus drift. *)
+let codex_cli_default_auto_models = [
+  "gpt-5.1-codex-mini";
+  "gpt-5.1-codex-max";
+  "gpt-5.2";
+  "gpt-5.2-codex";
+  "gpt-5.3-codex-spark";
+  "gpt-5.3-codex";
+  "gpt-5.4-mini";
+  "gpt-5.4";
+]
+
+let codex_cli_auto_models () =
+  env_csv_or codex_cli_default_auto_models "MASC_CODEX_CLI_AUTO_MODELS"
+
+let claude_code_auto_models () =
+  env_csv_or [ "auto" ] "MASC_CLAUDE_CODE_AUTO_MODELS"
 
 let resolve_glm_model_id model_id =
   Llm_provider.Zai_catalog.resolve_glm_alias

@@ -257,6 +257,48 @@ let parse_weighted_entry_diag
             ?supports_tool_choice_override:entry.supports_tool_choice
             ~provider_name ~model_id reg_entry)
 
+(** Expand provider:auto specs that map to multiple models.
+    "glm:auto" expands to ["glm:glm-5.1"; "glm:glm-5-turbo"; ...].
+    CLI-backed transports expand too, so a single [gemini_cli:auto] can
+    cascade through concrete CLI model overrides instead of delegating to
+    the CLI's interactive/default model picker. Other specs pass through
+    as-is. *)
+let expand_auto_model_string (s : string) : string list =
+  let trimmed = String.trim s in
+  match split_provider_model trimmed with
+  | Some ("glm", model_id)
+    when String.lowercase_ascii model_id = "auto" ->
+    Cascade_model_resolve.glm_auto_models ()
+    |> List.map (fun m -> "glm:" ^ m)
+  | Some ("glm-coding", model_id)
+    when String.lowercase_ascii model_id = "auto" ->
+    Cascade_model_resolve.glm_coding_auto_models ()
+    |> List.map (fun m -> "glm-coding:" ^ m)
+  | Some ("gemini_cli", model_id)
+    when String.lowercase_ascii model_id = "auto" ->
+    Cascade_model_resolve.gemini_cli_auto_models ()
+    |> List.map (fun m -> "gemini_cli:" ^ m)
+  | Some ("codex_cli", model_id)
+    when String.lowercase_ascii model_id = "auto" ->
+    Cascade_model_resolve.codex_cli_auto_models ()
+    |> List.map (fun m -> "codex_cli:" ^ m)
+  | Some ("claude_code", model_id)
+    when String.lowercase_ascii model_id = "auto" ->
+    Cascade_model_resolve.claude_code_auto_models ()
+    |> List.map (fun m -> "claude_code:" ^ m)
+  | _ -> [ trimmed ]
+
+let expand_auto_models (strs : string list) : string list =
+  List.concat_map expand_auto_model_string strs
+
+let expand_weighted_auto_entries
+    (entries : Cascade_config_loader.weighted_entry list) =
+  List.concat_map
+    (fun (entry : Cascade_config_loader.weighted_entry) ->
+       expand_auto_model_string entry.model
+       |> List.map (fun model -> { entry with model }))
+    entries
+
 (** Parse a list of weighted entries, dropping ones that cannot produce a
     provider config. Load-time drops are logged once per call with
     categorised reasons so upstream drift (e.g. a cascade.json entry
@@ -271,6 +313,7 @@ let parse_weighted_entries
     ?(cascade_name = "")
     (entries : Cascade_config_loader.weighted_entry list)
   : Llm_provider.Provider_config.t list =
+  let entries = expand_weighted_auto_entries entries in
   let parsed, unregistered, unavailable, invalid =
     List.fold_left
       (fun (acc, unr, unv, inv) entry ->
@@ -338,24 +381,6 @@ let parse_model_string_exn
     | Some entry ->
       Ok (make_registry_config ~temperature ~max_tokens ?system_prompt
             ~provider_name ~model_id entry)
-
-(** Expand provider:auto specs that map to multiple models.
-    "glm:auto" expands to ["glm:glm-5.1"; "glm:glm-5-turbo"; ...].
-    Other specs pass through as-is. *)
-let expand_auto_models (strs : string list) : string list =
-  List.concat_map (fun s ->
-    let trimmed = String.trim s in
-    match split_provider_model trimmed with
-    | Some ("glm", model_id)
-      when String.lowercase_ascii model_id = "auto" ->
-      Cascade_model_resolve.glm_auto_models ()
-      |> List.map (fun m -> "glm:" ^ m)
-    | Some ("glm-coding", model_id)
-      when String.lowercase_ascii model_id = "auto" ->
-      Cascade_model_resolve.glm_coding_auto_models ()
-      |> List.map (fun m -> "glm-coding:" ^ m)
-    | _ -> [ trimmed ]
-  ) strs
 
 let parse_model_strings
     ?(temperature = Llm_provider.Constants.Inference.default_temperature)
@@ -509,6 +534,7 @@ let weighted_shuffle
 let order_weighted_entries
     ?(rand_int = weighted_random_int)
     (entries : Cascade_config_loader.weighted_entry list) =
+  let entries = expand_weighted_auto_entries entries in
   let has_weights = List.exists
       (fun (e : Cascade_config_loader.weighted_entry) -> e.weight <> 1)
       entries

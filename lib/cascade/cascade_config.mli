@@ -111,7 +111,9 @@ val parse_model_string_exn :
 
 (** Expand provider:auto specs that map to multiple models.
     ["glm:auto"] expands to ["glm:glm-5.1"; "glm:glm-5-turbo"; ...].
-    Other specs pass through unchanged. *)
+    CLI specs such as ["gemini_cli:auto"], ["codex_cli:auto"], and
+    ["claude_code:auto"] expand through their provider-specific
+    auto-model lists. Other specs pass through unchanged. *)
 val expand_auto_models : string list -> string list
 
 (** Parse multiple model strings, skipping unavailable ones.

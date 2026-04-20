@@ -7,20 +7,35 @@
 \*
 \* Cross-domain boundary spec: State (data layer) x FSM (condition layer).
 \*
-\* Models the maybe_recover_from_failing multi-event sequence in
-\* keeper_keepalive.ml:774-836. This function clears the filesystem
-\* reconcile record AND dispatches FSM events. Bug #1 (PR #6834) was
+\* Models the maybe_recover_from_failing multi-event sequence that USED
+\* to live around keeper_keepalive.ml:774-836. The runtime fix described
+\* below has since been generalized: the entire manual_reconcile mechanism
+\* (data record + FSM condition + Manual_reconcile_cleared event) was
+\* removed from both the canonical FSM and the OCaml impl (see #8987,
+\* sibling note in KeeperReconcileLiveness.tla). Bug #1 (PR #6834) was
 \* caused by clearing the data record without dispatching
 \* Manual_reconcile_cleared to the FSM, leaving the keeper stuck in
 \* Failing indefinitely.
 \*
+\* STALE REFERENCE NOTE (verified 2026-04-20):
+\*   - lib/keeper/keeper_manual_reconcile.ml was REMOVED entirely (no
+\*     such file in the tree). Searches for `manual_reconcile` in
+\*     lib/keeper/ return only one comment in keeper_keepalive.ml:398.
+\*   - keeper_keepalive.ml lines 774-836 today contain
+\*     Keeper_measurement.capture and unrelated turn-result wiring,
+\*     not the old maybe_recover_from_failing body.
+\* The spec is retained as a forensic record of the design lesson:
+\* recovery actions must clear ALL latches that block their target state.
+\*
 \* The spec captures the two-store consistency requirement: the data
 \* layer (filesystem JSON) and the FSM condition layer (in-memory
-\* conditions.manual_reconcile_required) must stay synchronized.
+\* conditions.manual_reconcile_required) had to stay synchronized.
 \*
-\* Domain boundary: lib/keeper/keeper_manual_reconcile.ml (data) x
-\*                  lib/keeper/keeper_state_machine.ml (FSM conditions)
-\* Orchestrator:    lib/keeper/keeper_keepalive.ml (recovery sequence)
+\* Domain boundary (HISTORICAL):
+\*   lib/keeper/keeper_manual_reconcile.ml (data — REMOVED) x
+\*   lib/keeper/keeper_state_machine.ml (FSM conditions — manual_reconcile_required REMOVED)
+\* Orchestrator (HISTORICAL):
+\*   lib/keeper/keeper_keepalive.ml (recovery sequence — replaced by KeeperContinueGate)
 
 EXTENDS Naturals
 

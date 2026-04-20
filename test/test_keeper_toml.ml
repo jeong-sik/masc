@@ -13,6 +13,18 @@ let contains_substring s needle =
   in
   if n_len = 0 then true else loop 0
 
+let with_env_restore keys f =
+  let prev = List.map (fun key -> key, Sys.getenv_opt key) keys in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun (key, value) ->
+          match value with
+          | Some v -> Unix.putenv key v
+          | None -> Unix.putenv key "")
+        prev)
+    f
+
 (* ================================================================ *)
 (* TOML parser tests                                                 *)
 (* ================================================================ *)
@@ -890,6 +902,38 @@ OAS_CODEX_CONFIG = "mcp_servers={}"
       check string "codex_config value"
         "mcp_servers={}" (List.assoc "OAS_CODEX_CONFIG" d.oas_env)
 
+let test_apply_oas_env_demotes_gemini_no_mcp_to_plan () =
+  with_env_restore
+    [ "OAS_GEMINI_NO_MCP"; "OAS_GEMINI_APPROVAL_MODE" ]
+    (fun () ->
+      let defaults =
+        { KTP.empty_keeper_profile_defaults with
+          oas_env = [ "OAS_GEMINI_NO_MCP", "1" ];
+        }
+      in
+      KTP.apply_oas_env ~keeper_name:"test-keeper" defaults;
+      check string "no_mcp applied" "1"
+        (Option.value ~default:"" (Sys.getenv_opt "OAS_GEMINI_NO_MCP"));
+      check string "approval mode derived" "plan"
+        (Option.value ~default:"" (Sys.getenv_opt "OAS_GEMINI_APPROVAL_MODE")))
+
+let test_apply_oas_env_preserves_explicit_gemini_approval_mode () =
+  with_env_restore
+    [ "OAS_GEMINI_NO_MCP"; "OAS_GEMINI_APPROVAL_MODE" ]
+    (fun () ->
+      let defaults =
+        { KTP.empty_keeper_profile_defaults with
+          oas_env =
+            [
+              "OAS_GEMINI_NO_MCP", "1";
+              "OAS_GEMINI_APPROVAL_MODE", "yolo";
+            ];
+        }
+      in
+      KTP.apply_oas_env ~keeper_name:"test-keeper" defaults;
+      check string "explicit mode preserved" "yolo"
+        (Option.value ~default:"" (Sys.getenv_opt "OAS_GEMINI_APPROVAL_MODE")))
+
 let test_oas_env_drops_non_oas_prefix () =
   (* Guards against ambient env injection via keeper TOML: keys that
      don't start with OAS_(CLAUDE|CODEX|GEMINI)_ are silently dropped. *)
@@ -1069,6 +1113,10 @@ let () =
         [
           test_case "parses allowed OAS_* keys" `Quick
             test_oas_env_parses_allowed_keys;
+          test_case "demotes Gemini no-MCP runs to plan approval mode" `Quick
+            test_apply_oas_env_demotes_gemini_no_mcp_to_plan;
+          test_case "preserves explicit Gemini approval mode" `Quick
+            test_apply_oas_env_preserves_explicit_gemini_approval_mode;
           test_case "drops non-OAS_* keys (ambient injection guard)" `Quick
             test_oas_env_drops_non_oas_prefix;
           test_case "empty when table absent" `Quick

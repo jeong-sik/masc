@@ -996,6 +996,16 @@ let test_prompt_omits_claim_first_guidance_when_task_claimed () =
   check bool "no immediate task move section once task claimed" false
     (contains_substring user "### Immediate Task Move")
 
+let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
+  check bool "obsolete claim alias removed" false
+    (source_file_contains "lib/keeper/keeper_agent_run.ml" "keeper_claim_task");
+  check bool "claim tool uses registered no-arg schema" true
+    (source_file_contains "lib/keeper/keeper_agent_run.ml" "`keeper_task_claim` {}");
+  check bool "bash tool uses cmd field" true
+    (source_file_contains "lib/keeper/keeper_agent_run.ml" "`keeper_bash` { cmd:");
+  check bool "tool-less runtime path is explicit" true
+    (source_file_contains "lib/keeper/keeper_agent_run.ml" "NO_TOOL_CHANNEL")
+
 (* ---------- Config tests ---------- *)
 
 let test_unified_turn_runtime_defaults () =
@@ -3398,6 +3408,8 @@ let () =
             test_prompt_includes_claim_first_guidance;
           test_case "claim first guidance omitted when task claimed" `Quick
             test_prompt_omits_claim_first_guidance_when_task_claimed;
+          test_case "work discovery nudge uses registered tool schemas" `Quick
+            test_work_discovery_nudge_uses_registered_keeper_tool_schemas;
           test_case "prefers silence guidance" `Quick
             test_prompt_prefers_silence_guidance;
           test_case "sanitize_text_utf8 replaces control chars" `Quick

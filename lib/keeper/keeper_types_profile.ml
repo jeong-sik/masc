@@ -860,6 +860,32 @@ let merge_keeper_profile_defaults
        surviving_base @ overlay.oas_env);
   }
 
+(* Derived transport guards for combinations that are otherwise easy to
+   misconfigure. *)
+let oas_env_truthy value =
+  match String.lowercase_ascii (String.trim value) with
+  | "1" | "true" | "yes" | "on" -> true
+  | _ -> false
+
+let oas_env_has_non_empty key pairs =
+  match List.assoc_opt key pairs with
+  | Some value when String.trim value <> "" -> true
+  | _ -> false
+
+let effective_oas_env pairs =
+  let gemini_mcp_disabled =
+    match List.assoc_opt "OAS_GEMINI_NO_MCP" pairs with
+    | Some value -> oas_env_truthy value
+    | None -> false
+  in
+  if
+    gemini_mcp_disabled
+    && not (oas_env_has_non_empty "OAS_GEMINI_APPROVAL_MODE" pairs)
+  then
+    pairs @ [ ("OAS_GEMINI_APPROVAL_MODE", "plan") ]
+  else
+    pairs
+
 (** Apply [defaults.oas_env] to the process environment via [Unix.putenv].
     Logs each applied key at info level for operator auditability.
     Safe to call repeatedly — putenv is idempotent for identical values.
@@ -869,7 +895,7 @@ let merge_keeper_profile_defaults
     current masc-mcp deployment each keeper lives in its own process,
     which keeps this wiring simple; revisit if multiplexing is added. *)
 let apply_oas_env ~keeper_name (defaults : keeper_profile_defaults) : unit =
-  match defaults.oas_env with
+  match effective_oas_env defaults.oas_env with
   | [] -> ()
   | pairs ->
     List.iter

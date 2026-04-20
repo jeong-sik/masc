@@ -11,7 +11,7 @@ import { journal } from '../../sse'
 import { isErrorJournalEntry } from '../../journal-entry'
 import type { JournalEntry, JournalEventType } from '../../types'
 
-type FilterKind = 'all' | 'heartbeat' | 'message' | 'oas_turn' | 'tool' | 'error' | 'lifecycle'
+export type FilterKind = 'all' | 'heartbeat' | 'message' | 'oas_turn' | 'tool' | 'error' | 'lifecycle'
 
 const activeFilter = signal<FilterKind>('all')
 const autoScroll = signal(true)
@@ -26,7 +26,7 @@ const FILTER_CHIPS: { key: FilterKind; label: string }[] = [
   { key: 'lifecycle', label: 'Lifecycle' },
 ]
 
-function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
+export function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
   if (filter === 'all') return true
   const et = entry.eventType ?? 'unknown'
   switch (filter) {
@@ -37,7 +37,7 @@ function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
     case 'oas_turn':
       return et === 'oas_turn'
     case 'tool':
-      return et === 'keeper_tool_call' || et === 'oas_tool' || entry.text.toLowerCase().includes('tool')
+      return et === 'keeper_tool_call' || et === 'oas_tool'
     case 'error':
       return et === 'keeper_guardrail' || isErrorJournalEntry(entry)
     case 'lifecycle':

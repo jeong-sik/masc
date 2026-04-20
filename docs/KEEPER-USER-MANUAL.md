@@ -43,7 +43,7 @@ OAS 0.159.0부터 비대화형 CLI transport(`transport_claude_code`, `transport
 | `OAS_CODEX_SANDBOX=read-only\|workspace-write\|danger-full-access` | Codex CLI | `-s <v>` |
 | `OAS_CODEX_PROFILE=<name>` | Codex CLI | `-p <name>` (`~/.codex/config.toml`의 profile) |
 | `OAS_CODEX_SKIP_GIT=1` | Codex CLI | `--skip-git-repo-check` |
-| `OAS_GEMINI_NO_MCP=1` | Gemini CLI | `--allowed-mcp-server-names ""` — 빈 whitelist로 MCP 전부 OFF |
+| `OAS_GEMINI_NO_MCP=1` | Gemini CLI | sentinel whitelist(`__oas_no_mcp__`)로 MCP 전부 OFF |
 | `OAS_GEMINI_ALLOWED_MCP=a,b` | Gemini CLI | per-서버 whitelist |
 | `OAS_GEMINI_APPROVAL_MODE=default\|auto_edit\|yolo\|plan` | Gemini CLI | `--approval-mode <v>`, set 되면 `config.yolo` 무시 |
 | `OAS_GEMINI_EXTENSIONS=a,b` | Gemini CLI | 각 항목마다 `-e` |
@@ -52,8 +52,9 @@ OAS 0.159.0부터 비대화형 CLI transport(`transport_claude_code`, `transport
 - Claude Code의 LSP / hooks / auto-memory / CLAUDE.md auto-discovery는 그대로 유지됨. `--bare`는 채택하지 않음(keeper가 코드 편집 시 필요한 보조).
 - Gemini CLI는 hook 런타임 off 플래그가 없다. hook 제어가 필요하면 `gemini hooks <cmd>` subcommand로 keeper 기동 전에 비활성화한다.
 - "empty string = disable all" 구분이 필요한 MCP whitelist만 `OAS_GEMINI_NO_MCP` 불 env로 분리되어 있음(`Unix.putenv`로는 진짜 unset이 불가한 제약 반영).
+- `OAS_GEMINI_NO_MCP=1`인데 `OAS_GEMINI_APPROVAL_MODE`가 비어 있으면 keeper 런타임은 `plan`을 기본 적용한다. MCP를 숨긴 상태에서 Gemini CLI built-in mutating tool이 `--yolo`로 실행되는 것을 막기 위한 보수적 기본값이다. 명시적으로 `yolo`/`auto_edit`가 필요하면 `OAS_GEMINI_APPROVAL_MODE`를 설정한다.
 
-**선언적 설정 (권장)**: process env 대신 `config/keepers/<name>.toml`의 `[keeper.oas_env]` 테이블에 적어두면 턴 시작 시 `Unix.putenv`로 자동 적용된다. 4개 built-in keeper는 `OAS_CLAUDE_STRICT_MCP=1` + `OAS_GEMINI_NO_MCP=1` + `OAS_CODEX_CONFIG=mcp_servers={}` 기본값이 이미 들어있다. 예시:
+**선언적 설정 (권장)**: process env 대신 `config/keepers/<name>.toml`의 `[keeper.oas_env]` 테이블에 적어두면 턴 시작 시 `Unix.putenv`로 자동 적용된다. 4개 built-in keeper는 `OAS_CLAUDE_STRICT_MCP=1` + `OAS_GEMINI_NO_MCP=1` + `OAS_GEMINI_APPROVAL_MODE=plan` + `OAS_CODEX_CONFIG=mcp_servers={}` 기본값이 이미 들어있다. 예시:
 
 ```toml
 [keeper]
@@ -63,6 +64,7 @@ persona_name = "analyst"
 [keeper.oas_env]
 OAS_CLAUDE_STRICT_MCP = "1"
 OAS_GEMINI_NO_MCP = "1"
+OAS_GEMINI_APPROVAL_MODE = "plan"
 # Codex는 -c TOML override로만 제어 가능
 OAS_CODEX_CONFIG = "mcp_servers={},sandbox_mode=read-only"
 ```

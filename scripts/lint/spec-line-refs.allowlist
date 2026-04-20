@@ -21,11 +21,6 @@
 # distinguishes structured snippets (≥2 space / tab separator) from
 # continuation prose.
 
-specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_bank.ml:550
-specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_policy.ml:159
-specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_policy.ml:164
-specs/keeper-state-machine/KeeperMemoryLifecycle.tla  lib/keeper/keeper_memory_policy.ml:166
-
 # Added 2026-04-20: pre-existing drifts surfaced after refactors of
 # state machine / keepalive / coord_gc bodies. Non-blocking baseline,
 # spec text needs re-anchoring (issue: TBD).

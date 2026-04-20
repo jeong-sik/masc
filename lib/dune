@@ -410,6 +410,7 @@
    keeper_memory_recall
    keeper_skill_routing
    keeper_sandbox
+   keeper_repo_readiness
    keeper_alerting
    keeper_alerting_path
    keeper_timing

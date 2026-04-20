@@ -89,14 +89,37 @@ let handle_keeper_preflight_check
     add_check "accountability_risk" (not accountability_risk)
       (if accountability_risk then "RISK_HIGH" else "ok")
   in
-  (* Check 6: playground clone target *)
-  let clone_target =
-    let repos_path = Keeper_alerting_path.playground_repos_path meta.name in
-    if repo <> "" then
-      Filename.concat repos_path (Filename.basename repo)
-    else
-      Filename.concat repos_path (Filename.basename root)
+  (* Check 6: sandbox clone target *)
+  let repo_name_arg =
+    Safe_ops.json_string ~default:"" "repo_name" args |> String.trim
   in
+  let clone_target =
+    let repo_name =
+      if repo_name_arg <> "" then repo_name_arg
+      else Keeper_repo_readiness.repo_name_of_repo_arg ~project_root:root repo
+    in
+    Filename.concat
+      (Keeper_alerting_path.playground_repos_path meta.name)
+      repo_name
+  in
+  (* Check 6: sandbox repo readiness *)
+  let repo_readiness =
+    Keeper_repo_readiness.inspect ~config ~keeper_name:meta.name
+      ?repo_name:(if repo_name_arg = "" then None else Some repo_name_arg)
+      ~repo ~default_branch:!default_branch ()
+  in
+  let repo_ready =
+    match repo_readiness with
+    | `Assoc fields -> (
+        match List.assoc_opt "ok" fields with
+        | Some (`Bool ok) -> ok
+        | _ -> false)
+    | _ -> false
+  in
+  let repo_state =
+    json_string_field "state" repo_readiness |> Option.value ~default:"unknown"
+  in
+  let () = add_check "repo_readiness" repo_ready repo_state in
   Yojson.Safe.to_string
     (`Assoc
         [ "ok", `Bool !all_ok
@@ -110,5 +133,6 @@ let handle_keeper_preflight_check
         ; "risk_band", `String risk_band
         ; "routing_hint", `String routing_hint
         ; "clone_target", `String clone_target
+        ; "repo_readiness", repo_readiness
         ; "keeper", `String meta.name
         ])

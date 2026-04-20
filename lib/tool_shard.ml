@@ -454,12 +454,13 @@ let keeper_preflight_tools : Types.tool_schema list = [
   {
     name = "keeper_preflight_check";
     description = "Validate prerequisites before starting autonomous work: \
-gh auth, repo access, keeper identity, preset level, clone target path. \
+gh auth, repo access, keeper identity, preset level, repo readiness. \
 Returns structured JSON with all check results. Read-only, no side effects.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("repo", `Assoc [("type", `String "string"); ("description", `String "GitHub repo (owner/name) to check access for")]);
+        ("repo_name", `Assoc [("type", `String "string"); ("description", `String "Optional sandbox repo directory name under repos/ when it differs from the GitHub repo basename")]);
       ]);
       ("required", `List [`String "repo"]);
     ];

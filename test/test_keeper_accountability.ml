@@ -280,7 +280,14 @@ let test_preflight_exposes_routing_hint_for_high_risk_keeper () =
         (Yojson.Safe.Util.(result |> member "accountability_risk" |> to_bool));
       check string "risk band exposed" "high" (string_member "risk_band" result);
       check string "routing hint exposed" "manual_review_recommended"
-        (string_member "routing_hint" result))
+        (string_member "routing_hint" result);
+      let repo_readiness =
+        Yojson.Safe.Util.(result |> member "repo_readiness")
+      in
+      check string "repo readiness state exposed" "missing_clone"
+        (Yojson.Safe.Util.(repo_readiness |> member "state" |> to_string));
+      check bool "repo readiness blocks code start without clone" false
+        (Yojson.Safe.Util.(repo_readiness |> member "ok" |> to_bool)))
 
 let test_synthetic_claims_do_not_dilute_unsupported_rate () =
   (* Regression: synthetic completion claims (created by task_transition "done")

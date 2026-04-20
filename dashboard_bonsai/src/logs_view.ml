@@ -2069,7 +2069,28 @@ let view_hud (response : Logs_types.response) =
     ]
 ;;
 
-let render_response (response : Logs_types.response) : Node.t =
+(** Focus keeper — first entry of the live response, or [None] when empty
+    (triggers the legacy static fallback inside [focus_card_of]). *)
+let focus_keeper_of (k : Keepers_types.response) : Keepers_types.keeper option =
+  match k.keepers with
+  | [] -> None
+  | head :: _ -> Some head
+;;
+
+(** Display name — capitalize first character of the registry nickname. *)
+let display_name (s : string) : string =
+  if String.length s = 0
+  then s
+  else
+    let first = Char.to_string (Char.uppercase s.[0]) in
+    let rest = String.sub s ~pos:1 ~len:(String.length s - 1) in
+    first ^ rest
+;;
+
+let render_response
+      ?(keepers : Keepers_types.response = Keepers_types.fixture)
+      (response : Logs_types.response)
+    : Node.t =
   let tape =
     match response.entries with
     | [] ->
@@ -2257,18 +2278,44 @@ let render_response (response : Logs_types.response) : Node.t =
       ; Node.div ~attrs:[ Style.focus_stat_v ] [ Node.text v ]
       ]
   in
+  let focus_k = focus_keeper_of keepers in
+  let focus_name, focus_portrait, focus_role, focus_ctx_pct,
+      focus_turn, focus_mem, focus_latency =
+    match focus_k with
+    | None ->
+      ("Luna", "L", "dungeon master · alchemist", 64,
+       "47 / 60", "128k", "812ms")
+    | Some (k : Keepers_types.keeper) ->
+      let portrait =
+        if String.length k.name = 0
+        then "·"
+        else Char.to_string (Char.uppercase k.name.[0])
+      in
+      let role =
+        match k.last_tool with
+        | Some t -> Printf.sprintf "%s · %s" k.stat t
+        | None -> k.stat
+      in
+      (display_name k.name, portrait, role, k.ctx_pct,
+       Printf.sprintf "%d / %d" k.turn k.turn_cap,
+       Printf.sprintf "%dk" k.mem_kb,
+       Printf.sprintf "%dms" k.latency_ms)
+  in
+  let vial_style =
+    Attr.create "style" (Printf.sprintf "width:%d%%" focus_ctx_pct)
+  in
   let focus_card =
     Node.div
       ~attrs:[ Style.focus ]
       [ Node.div
           ~attrs:[ Style.focus_who ]
-          [ Node.div ~attrs:[ Style.focus_portrait ] [ Node.text "L" ]
+          [ Node.div ~attrs:[ Style.focus_portrait ] [ Node.text focus_portrait ]
           ; Node.div
               ~attrs:[ Style.focus_name_col ]
-              [ Node.div ~attrs:[ Style.focus_name ] [ Node.text "Luna" ]
+              [ Node.div ~attrs:[ Style.focus_name ] [ Node.text focus_name ]
               ; Node.div
                   ~attrs:[ Style.focus_role ]
-                  [ Node.text "dungeon master · alchemist" ]
+                  [ Node.text focus_role ]
               ]
           ]
       ; Node.div
@@ -2278,18 +2325,18 @@ let render_response (response : Logs_types.response) : Node.t =
               [ Node.span [ Node.text "context" ]
               ; Node.span
                   ~attrs:[ Style.ctx_lbl_v ]
-                  [ Node.text "64%" ]
+                  [ Node.text (Printf.sprintf "%d%%" focus_ctx_pct) ]
               ]
           ; Node.div
               ~attrs:[ Style.vial ]
-              [ Node.span ~attrs:[ Style.vial_fill ] [] ]
+              [ Node.span ~attrs:[ Style.vial_fill; vial_style ] [] ]
           ]
       ; Node.div
           ~attrs:[ Style.focus_stats ]
-          [ focus_stat "turn" "47 / 60"
+          [ focus_stat "turn" focus_turn
           ; focus_stat "heartbeat" "3s"
-          ; focus_stat "mem" "128k"
-          ; focus_stat "latency" "812ms"
+          ; focus_stat "mem" focus_mem
+          ; focus_stat "latency" focus_latency
           ]
       ]
   in
@@ -2371,7 +2418,9 @@ let render_response (response : Logs_types.response) : Node.t =
       ~attrs:[ Style.aside ]
       [ Node.div
           ~attrs:[]
-          [ aside_h ~tail:"ctx 64%" "focus · keeper"
+          [ aside_h
+              ~tail:(Printf.sprintf "ctx %d%%" focus_ctx_pct)
+              "focus · keeper"
           ; focus_card
           ]
       ; Node.div
@@ -2554,5 +2603,9 @@ let render_response (response : Logs_types.response) : Node.t =
 ;;
 
 let component (_graph @ local) =
-  Bonsai.map (Bonsai.Expert.Var.value Logs_var.var) ~f:render_response
+  Bonsai.map2
+    (Bonsai.Expert.Var.value Logs_var.var)
+    (Bonsai.Expert.Var.value Keepers_var.var)
+    ~f:(fun logs_response keepers_response ->
+      render_response ~keepers:keepers_response logs_response)
 ;;

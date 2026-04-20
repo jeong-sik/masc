@@ -1064,8 +1064,16 @@ let run_turn
      preset (e.g. social keeper seeing keeper_fs_edit) from reaching
      the LLM and triggering tool_not_allowed errors. *)
   let allowed_exec_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  (* RFC-0006 Phase A.2: extend the allowed-execution set with public
+     alias names (Bash/Read/...) whose internal target is already
+     allowed. Without this, the AllowList partition at line ~1476 drops
+     Bash/Read even though [Keeper_tools_oas.make_tools] now registers
+     them with OAS, defeating the dual registration. *)
+  let allowed_exec_names_with_aliases =
+    Keeper_tool_alias.expand_universe allowed_exec_names
+  in
   let allowed_exec_set =
-    let base = Keeper_tool_policy.tool_name_set allowed_exec_names in
+    let base = Keeper_tool_policy.tool_name_set allowed_exec_names_with_aliases in
     (* Core always-tools bypass candidate_set in can_execute, so they
        may be absent from keeper_allowed_tool_names.  Add them back to
        prevent the preset filter from dropping survival-critical tools. *)

@@ -24,10 +24,20 @@ let word_char = [^ ' ' '\t' '\n' '\r' '|' '<' '>' '&' ';' '(' ')'
                    '\'' '"' '$' '`' '\\' '=' '{' '}' '!' '*' '?']
 let word = word_char+
 
+(* Single-quote string: literal, no escape processing, no nested
+   single quote allowed (bash semantics — there is no way to embed
+   a single quote inside a '...' string).  Matched content becomes
+   a single WORD token so the existing grammar accepts it in any
+   WORD position without change.  Spaces inside quotes are preserved
+   verbatim, so arguments like 'commit message' arrive at
+   [Bin.of_string] / args list as one element. *)
+let sq_body = [^ '\'' '\n']*
+
 rule token = parse
   | [' ' '\t']+    { token lexbuf }
   | '\n'           { incr_tokens (); Lexing.new_line lexbuf; token lexbuf }
   | '|'            { incr_tokens (); PIPE }
+  | '\'' (sq_body as s) '\'' { incr_tokens (); WORD s }
   | word as w      { incr_tokens (); WORD w }
   | eof            { EOF }
   | _ as c         { raise (Failure (Printf.sprintf "unexpected char %c" c)) }

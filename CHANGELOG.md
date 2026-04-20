@@ -5,6 +5,20 @@
 
 ### Added
 
+- **Bash parser single-quote string support (P5 parse-gap step).**
+  `lib/exec/parser/bash_lexer.mll` now recognises `'...'` literal
+  strings and emits them as a single `WORD` token with the surrounding
+  quotes stripped.  Lets the AST gate classify commands like
+  `git commit -m 'my message'` or `echo 'foo | bar'` without falling
+  back to `Shadow_cannot_parse`, narrowing the
+  `gate_diff_legacy_allow_shadow_deny` / `..._shadow_allow` signal
+  on the `MASC_BASH_AST_SHADOW_LOG` observer (feeds the
+  `MASC_BASH_AST_ONLY` flip decision per RUNBOOK §P5).  Five new
+  parser tests cover: basic quoted arg, empty `''`, multiple quoted
+  args in one command, pipe-metachar-as-literal-payload, and the
+  unterminated-quote negative.  No grammar change; no behaviour
+  change on commands without single quotes.
+
 - **`Cdal_judge` go test classifier.**  `of_exec_outcome` now emits
   typed `Test_pass {count}` / `Test_fail {count}` markers for `go
   test` output in addition to dune, cargo, alcotest, and pytest.

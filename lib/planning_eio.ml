@@ -76,6 +76,64 @@ let write_file_content path content =
   ensure_dir (Filename.dirname path);
   Fs_compat.save_file path content
 
+let find_substring_from haystack ~needle ~from =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop i =
+    if i + needle_len > haystack_len then None
+    else if String.sub haystack i needle_len = needle then Some i
+    else loop (i + 1)
+  in
+  loop from
+
+let normalize_placeholder value =
+  match String.trim value with
+  | "_No plan yet_" | "_No deliverable yet_" -> ""
+  | other -> other
+
+let extract_markdown_section content ~heading ~next_headings =
+  match find_substring_from content ~needle:heading ~from:0 with
+  | None -> None
+  | Some heading_idx ->
+      let body_start = heading_idx + String.length heading in
+      let body_end =
+        next_headings
+        |> List.filter_map (fun marker ->
+               find_substring_from content ~needle:marker ~from:body_start)
+        |> List.sort compare
+        |> function
+        | first :: _ -> first
+        | [] -> String.length content
+      in
+      let body =
+        String.sub content body_start (body_end - body_start)
+        |> String.trim
+        |> normalize_placeholder
+      in
+      Some body
+
+type parsed_full_context = {
+  task_plan: string;
+  deliverable: string option;
+}
+
+let parse_full_context_markdown content =
+  let task_heading = "## Task Plan (PDCA: Plan)" in
+  let notes_heading = "## Notes & Observations (PDCA: Do)" in
+  let errors_heading = "## Errors & Failures (PDCA: Check)" in
+  let deliverable_heading = "## Deliverable (PDCA: Act)" in
+  match
+    extract_markdown_section content ~heading:task_heading
+      ~next_headings:[ notes_heading; errors_heading; deliverable_heading ]
+  with
+  | None -> None
+  | Some task_plan ->
+      let deliverable =
+        extract_markdown_section content ~heading:deliverable_heading
+          ~next_headings:[ "\n---"; "\r\n---" ]
+      in
+      Some { task_plan; deliverable }
+
 (* ===== Core Operations (Pure Sync) ===== *)
 
 (** Initialize planning context for a task *)
@@ -120,8 +178,23 @@ let update_plan (config : Coord.config) ~task_id ~content : (planning_context, s
     match load config ~task_id with
     | Error e -> Error e
     | Ok ctx ->
-        let updated = { ctx with task_plan = content; updated_at = now_iso () } in
-        write_file_content (Filename.concat dir "task_plan.md") content;
+        let parsed = parse_full_context_markdown content in
+        let task_plan =
+          match parsed with
+          | Some p -> p.task_plan
+          | None -> content
+        in
+        let deliverable =
+          match parsed with
+          | Some { deliverable = Some value; _ } -> value
+          | _ -> ctx.deliverable
+        in
+        let updated = { ctx with task_plan; deliverable; updated_at = now_iso () } in
+        write_file_content (Filename.concat dir "task_plan.md") task_plan;
+        (match parsed with
+         | Some { deliverable = Some value; _ } ->
+             write_file_content (Filename.concat dir "deliverable.md") value
+         | _ -> ());
         write_file_content (Filename.concat dir "context.json")
           (Yojson.Safe.pretty_to_string (planning_context_to_yojson updated));
         Ok updated

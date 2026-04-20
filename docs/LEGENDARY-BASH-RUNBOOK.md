@@ -213,6 +213,39 @@ for point-in-time diagnostics, counters for `disagree ratio =
 (legacy_allow_shadow_deny + legacy_deny_shadow_allow) / gate_diff_total`
 trend math over a rolling window.
 
+## Background Task Roster Endpoint
+
+The `keeper_bash` P2 background task lifecycle tracks long-running
+shell tasks in an in-process registry (`Bg_task.list`). The roster is
+exposed for a given keeper through a second public-read endpoint so
+that dashboards can render "tasks currently owned by this keeper"
+without scraping logs:
+
+```
+GET /api/v1/legendary_bash/bg_tasks/<keeper>
+```
+
+Response shape:
+
+```json
+{
+  "keeper": "<name>",
+  "count": 2,
+  "tasks": ["<task_id_1>", "<task_id_2>"]
+}
+```
+
+Unknown or quiet keepers legitimately return `{"count": 0, "tasks": []}` —
+the endpoint does not gate on keeper existence, matching the
+`shadow_counters` "zero-cost public read" posture. The path param is
+required; a trailing-slash request (`.../bg_tasks/`) returns 400.
+
+Per-task snapshots (stdout drain, exit status, drop counters) are not
+surfaced by this endpoint — those require a stateful `since_*` offset
+and live inside the `keeper_bash_output` MCP tool. This endpoint is
+intentionally cheap and stateless so a dashboard can poll it on a
+short interval without coordinating cursors across callers.
+
 ## Rollback
 
 Each Legendary flag has an inert opt-out path. No restart required.

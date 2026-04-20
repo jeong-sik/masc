@@ -5,6 +5,23 @@
 
 ### Added
 
+- **Legendary Bash `bg_tasks/<keeper>` HTTP endpoint.**  New
+  `GET /api/v1/legendary_bash/bg_tasks/<keeper>` returns the
+  per-keeper background task roster as
+  `{"keeper": "<name>", "count": N, "tasks": ["<id>", …]}`.
+  Wraps `Bg_task.list ~keeper` under the same public-read posture
+  as `shadow_counters` (no auth on keeper identity, zero-cost when
+  quiet).  Unknown / quiet keepers return `{"count": 0, "tasks":
+  []}` — the endpoint mirrors the filesystem/PG lookup instead
+  of gating on keeper existence, so a dashboard can poll liberally.
+  Trailing-slash requests (`.../bg_tasks/`) return 400 with
+  `"keeper name is required"`.  Three new route tests cover empty
+  keeper, unusual-name echo (`my-keeper_01`), and stable
+  `keeper → count → tasks` field ordering.
+  `LEGENDARY-BASH-RUNBOOK.md` now documents the endpoint alongside
+  the existing `shadow_counters` snapshot endpoint so dashboards
+  and operator tooling have a single reference.
+
 - **`Cdal_judge` jest / vitest classifier.**  `of_exec_outcome`
   now emits typed `Test_pass {count}` / `Test_fail {count}`
   markers for jest and vitest runner output in addition to dune,

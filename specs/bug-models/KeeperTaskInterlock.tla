@@ -13,7 +13,7 @@
 \*   lib/keeper/keeper_state_machine.ml (12-phase keeper FSM:
 \*     Offline | Running | Failing | Overflowed | Compacting | HandingOff
 \*     | Draining | Paused | Stopped | Crashed | Restarting | Dead)
-\*   lib/types/types_core.ml:335        (6-state task FSM:
+\*   lib/types/types_core.ml:task_status (6-state task FSM:
 \*     Todo | Claimed{assignee} | InProgress{assignee} |
 \*     AwaitingVerification{assignee, verification_id, ...} |
 \*     Done{assignee} | Cancelled{cancelled_by})

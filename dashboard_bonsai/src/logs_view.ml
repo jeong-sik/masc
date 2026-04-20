@@ -1243,119 +1243,7 @@ stylesheet
   }
   .sec_r_v { color: var(--text-bright); }
 
-  /* ─── swimlane strip ───
-     dashboard_v2 의 keeper-activity timeline 을 도입. 140px meta |
-     1fr track. track 위의 frame은 도구 카테고리별 배경색 (llm / tool /
-     err / wait). 현재는 static mock — cycle 내 각 키퍼의 "어떤 도구를
-     얼마나 오래" 를 시각화. 추후 session/turn trace endpoint 연결. */
-  .swim {
-    border: 1px solid var(--border-main);
-    background: rgba(14, 10, 8, 0.4);
-    margin-top: 6px;
-  }
-  .swim_axis {
-    display: grid;
-    grid-template-columns: 140px 1fr;
-    border-bottom: 1px solid var(--border-main);
-  }
-  .swim_axis_sp {
-    border-right: 1px solid var(--border-main);
-    padding: 6px 14px;
-    font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.24em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-  }
-  .swim_axis_ax {
-    position: relative;
-    height: 24px;
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
-    color: var(--text-dim);
-  }
-  .swim_tick {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    border-left: 1px solid var(--border-main);
-  }
-  .swim_tick_lbl {
-    position: absolute;
-    top: 6px;
-    left: 4px;
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-  }
-  .swim_lane {
-    display: grid;
-    grid-template-columns: 140px 1fr;
-    border-bottom: 1px solid var(--border-main);
-  }
-  .swim_lane:last-child { border-bottom: 0; }
-  .swim_lane_meta {
-    border-right: 1px solid var(--border-main);
-    padding: 8px 14px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .swim_dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--status-ok);
-    flex-shrink: 0;
-    box-shadow: 0 0 6px var(--status-ok);
-  }
-  .swim_dot_warn { background: var(--status-warn); box-shadow: 0 0 6px var(--status-warn); }
-  .swim_dot_bad { background: var(--accent-blood); box-shadow: 0 0 6px var(--accent-blood); }
-  .swim_nm {
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 12px;
-    color: var(--text-bright);
-    letter-spacing: 0.04em;
-    flex: 1;
-  }
-  .swim_nm_dead {
-    color: var(--text-dim);
-    text-decoration: line-through;
-    text-decoration-color: var(--accent-blood);
-  }
-  .swim_stat {
-    font-family: 'Noto Sans KR', sans-serif;
-    font-size: 9px;
-    letter-spacing: 0.18em;
-    color: var(--text-dim);
-    text-transform: uppercase;
-  }
-  .swim_track {
-    position: relative;
-    height: 32px;
-    background: repeating-linear-gradient(to right, transparent 0 99px, rgba(120, 100, 80, 0.05) 99px 100px);
-  }
-  .swim_frame {
-    position: absolute;
-    top: 9px;
-    height: 14px;
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-    font-size: 10px;
-    color: var(--bg-deep);
-    padding: 0 4px;
-    line-height: 14px;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    border: 1px solid transparent;
-    cursor: default;
-    border-radius: 1px;
-  }
-  .swim_frame:hover { border-color: var(--text-bright); z-index: 2; }
-  .swim_frame_llm  { background: var(--t-llm); }
-  .swim_frame_tool { background: var(--t-tool); }
-  .swim_frame_err  { background: var(--t-err); color: var(--text-bright); }
-  .swim_frame_wait { background: var(--t-wait); color: var(--text-dim); }
-  .swim_frame_think { background: var(--t-think); color: var(--text-primary); }
+  /* swimlane CSS → Swim 모듈로 이관 (shell 추출 Phase 2.A) */
 
   /* ─── context pressure chart ───
      60-min rolling ctx % per keeper. SVG polyline with 75/90% guides.
@@ -1625,165 +1513,6 @@ let view_heartbeat ?(entries : Logs_types.entry list = []) () =
    state dot, last-heard timestamp, and presence reflect live telemetry. *)
 (* roster → Roster 모듈로 이관 (shell 추출 Phase 2.A) *)
 
-(* ─── swimlane mock ───
-   lane = keeper activity over the last cycle. frame = tool call span.
-   left/width는 % (track 가로 기준). 실 데이터 endpoint 생기기 전까지
-   mock. *)
-type swim_frame_kind = [ `Llm | `Tool | `Err | `Wait | `Think ]
-
-let swim_frame_class = function
-  | `Llm -> Style.swim_frame_llm
-  | `Tool -> Style.swim_frame_tool
-  | `Err -> Style.swim_frame_err
-  | `Wait -> Style.swim_frame_wait
-  | `Think -> Style.swim_frame_think
-;;
-
-let swim_frame ~(kind : swim_frame_kind) ~left ~width ~label =
-  let style =
-    Attr.create
-      "style"
-      (Printf.sprintf "left:%d%%; width:%d%%" left width)
-  in
-  Node.div
-    ~attrs:[ Style.swim_frame; swim_frame_class kind; style ]
-    [ Node.text label ]
-;;
-
-type swim_lane_status = [ `Live | `Warn | `Dead ]
-
-let view_swim_lane ~name ~stat ~status ~frames =
-  let dot_cls =
-    match status with
-    | `Live -> Style.swim_dot
-    | `Warn -> Style.swim_dot_warn
-    | `Dead -> Style.swim_dot_bad
-  in
-  let nm_attrs =
-    match status with
-    | `Dead -> [ Style.swim_nm; Style.swim_nm_dead ]
-    | _ -> [ Style.swim_nm ]
-  in
-  Node.div
-    ~attrs:[ Style.swim_lane ]
-    [ Node.div
-        ~attrs:[ Style.swim_lane_meta ]
-        [ Node.span ~attrs:[ Style.swim_dot; dot_cls ] []
-        ; Node.span ~attrs:nm_attrs [ Node.text name ]
-        ; Node.span ~attrs:[ Style.swim_stat ] [ Node.text stat ]
-        ]
-    ; Node.div ~attrs:[ Style.swim_track ] frames
-    ]
-;;
-
-(** Map JSON "kind" string to our [swim_frame_kind] variant. Unknown kinds
-    fall back to [`Wait] — neutral grey so unexpected telemetry renders
-    legibly instead of crashing the lane. *)
-let swim_frame_kind_of_string = function
-  | "llm" -> `Llm
-  | "tool" -> `Tool
-  | "think" -> `Think
-  | "err" -> `Err
-  | "wait" | _ -> `Wait
-;;
-
-let swim_lane_status_of (s : Keepers_types.keeper_status) : swim_lane_status =
-  match s with
-  | Live -> `Live
-  | Warn -> `Warn
-  | Dead -> `Dead
-;;
-
-(** Static fallback — matches the hand-coded mock before live wiring. *)
-let view_swim_lanes_static () =
-  [ view_swim_lane
-      ~name:"luna"
-      ~stat:"reading"
-      ~status:`Live
-      ~frames:
-        [ swim_frame ~kind:`Llm ~left:5 ~width:18 ~label:"llm"
-        ; swim_frame ~kind:`Tool ~left:28 ~width:10 ~label:"read"
-        ; swim_frame ~kind:`Think ~left:42 ~width:8 ~label:"think"
-        ; swim_frame ~kind:`Llm ~left:54 ~width:22 ~label:"llm"
-        ; swim_frame ~kind:`Tool ~left:80 ~width:14 ~label:"edit"
-        ]
-  ; view_swim_lane
-      ~name:"brass-owl"
-      ~stat:"retrying"
-      ~status:`Warn
-      ~frames:
-        [ swim_frame ~kind:`Llm ~left:3 ~width:20 ~label:"llm"
-        ; swim_frame ~kind:`Tool ~left:26 ~width:12 ~label:"fetch"
-        ; swim_frame ~kind:`Wait ~left:40 ~width:24 ~label:"wait"
-        ; swim_frame ~kind:`Tool ~left:66 ~width:10 ~label:"fetch"
-        ]
-  ; view_swim_lane
-      ~name:"moth"
-      ~stat:"idle · listening"
-      ~status:`Live
-      ~frames:
-        [ swim_frame ~kind:`Wait ~left:0 ~width:40 ~label:"wait"
-        ; swim_frame ~kind:`Llm ~left:42 ~width:14 ~label:"llm"
-        ; swim_frame ~kind:`Wait ~left:58 ~width:40 ~label:"wait"
-        ]
-  ; view_swim_lane
-      ~name:"ash-hound"
-      ~stat:"crashed t-34"
-      ~status:`Dead
-      ~frames:
-        [ swim_frame ~kind:`Llm ~left:2 ~width:18 ~label:"llm"
-        ; swim_frame ~kind:`Tool ~left:22 ~width:8 ~label:"exec"
-        ; swim_frame ~kind:`Err ~left:32 ~width:6 ~label:"err"
-        ]
-  ]
-;;
-
-let view_swim_lane_of_keeper (k : Keepers_types.keeper) =
-  let frames =
-    List.map k.lane_frames ~f:(fun (f : Keepers_types.lane_frame) ->
-      swim_frame
-        ~kind:(swim_frame_kind_of_string f.kind)
-        ~left:f.left
-        ~width:f.width
-        ~label:f.label)
-  in
-  view_swim_lane
-    ~name:k.name
-    ~stat:k.stat
-    ~status:(swim_lane_status_of k.status)
-    ~frames
-;;
-
-let view_swimlanes ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
-  let axis_ticks =
-    List.init 6 ~f:(fun i ->
-      let left_pct = i * 20 in
-      let style =
-        Attr.create "style" (Printf.sprintf "left:%d%%" left_pct)
-      in
-      Node.div
-        ~attrs:[ Style.swim_tick; style ]
-        [ Node.span
-            ~attrs:[ Style.swim_tick_lbl ]
-            [ Node.text (Printf.sprintf "t-%d" ((5 - i) * 12)) ]
-        ])
-  in
-  let lanes =
-    match keepers.keepers with
-    | [] -> view_swim_lanes_static ()
-    | live_keepers -> List.map live_keepers ~f:view_swim_lane_of_keeper
-  in
-  Node.div
-    ~attrs:[ Style.swim ]
-    ([ Node.div
-         ~attrs:[ Style.swim_axis ]
-         [ Node.div
-             ~attrs:[ Style.swim_axis_sp ]
-             [ Node.text "keeper · cycle" ]
-         ; Node.div ~attrs:[ Style.swim_axis_ax ] axis_ticks
-         ]
-     ] @ lanes)
-;;
 
 let svg_a k v = Attr.create k v
 
@@ -1979,21 +1708,21 @@ let view_context_pressure
     | live -> ctx_meta_lines_of live
   in
   Node.div
-    ~attrs:[ Style.swim ]
+    ~attrs:[ Swim.Style.swim ]
     [ Node.div
-        ~attrs:[ Style.swim_axis ]
-        [ Node.div ~attrs:[ Style.swim_axis_sp ] [ Node.text "ctx · 60m" ]
+        ~attrs:[ Swim.Style.axis ]
+        [ Node.div ~attrs:[ Swim.Style.axis_sp ] [ Node.text "ctx · 60m" ]
         ; Node.div
-            ~attrs:[ Style.swim_axis_ax ]
+            ~attrs:[ Swim.Style.axis_ax ]
             (List.init 6 ~f:(fun i ->
               let left_pct = i * 20 in
               let style =
                 Attr.create "style" (Printf.sprintf "left:%d%%" left_pct)
               in
               Node.div
-                ~attrs:[ Style.swim_tick; style ]
+                ~attrs:[ Swim.Style.tick; style ]
                 [ Node.span
-                    ~attrs:[ Style.swim_tick_lbl ]
+                    ~attrs:[ Swim.Style.tick_lbl ]
                     [ Node.text (Printf.sprintf "t-%d" ((5 - i) * 12)) ]
                 ]))
         ]
@@ -2698,7 +2427,7 @@ let render_response
             ; Node.span ~attrs:[ Style.sec_r_v ] [ Node.text "pending" ]
             ]
         ]
-    ; view_swimlanes ~keepers ()
+    ; Swim.view ~keepers ()
     ; Node.div
         ~attrs:[ Style.sec ]
         [ Node.span ~attrs:[ Style.sec_glyph ] []

@@ -450,7 +450,14 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
     : Cascade_fsm.provider_outcome option =
   match err with
   | Oas.Error.Api api_err ->
+<<<<<<< HEAD
     let http_err = match[@warning "-8"] api_err with
+||||||| parent of 594cafd21 (fix: avoid Retry.NotFound pin drift)
+    let fallback_message = Llm_provider.Retry.error_message api_err in
+    let http_err = match api_err with
+=======
+    let http_err = match api_err with
+>>>>>>> 594cafd21 (fix: avoid Retry.NotFound pin drift)
       | Llm_provider.Retry.InvalidRequest { message } ->
         Llm_provider.Http_client.HttpError { code = 400; body = message }
       | Llm_provider.Retry.ContextOverflow { message; _ } ->
@@ -473,8 +480,18 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
       | Llm_provider.Retry.NetworkError { message }
       | Llm_provider.Retry.Timeout { message } ->
         Llm_provider.Http_client.NetworkError { message }
+<<<<<<< HEAD
       | Llm_provider.Retry.NotFound { message } ->
         Llm_provider.Http_client.HttpError { code = 404; body = message }
+||||||| parent of 594cafd21 (fix: avoid Retry.NotFound pin drift)
+      | _ ->
+        let code =
+          if api_error_message_looks_like_not_found fallback_message then 404
+          else 500
+        in
+        Llm_provider.Http_client.HttpError { code; body = fallback_message }
+=======
+>>>>>>> 594cafd21 (fix: avoid Retry.NotFound pin drift)
     in
     Some (Cascade_fsm.Call_err http_err)
   (* Model-capability errors: the next provider may handle these.

@@ -1849,10 +1849,10 @@ let render_response
            ])
       ; Node.div
           ~attrs:[ Style.nav_foot ]
-          [ Node.text "phase 0 · /b/ · "
+          [ Node.text "preview · /b/ · "
           ; Node.span
               ~attrs:[ Style.nav_foot_v ]
-              [ Node.text "v0.18-pre" ]
+              [ Node.text "runtime shell" ]
           ]
       ]
   in

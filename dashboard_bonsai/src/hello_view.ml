@@ -79,12 +79,12 @@ let component (_graph @ local) =
            ~attrs:[ Style.sub ]
            [ Node.text
                "네 명의 키퍼, 폭풍 속의 저택. Bonsai 섬은 조용히 숨쉬는 \
-                관찰자이다. 이 페이지는 phase 0 의 자리를 지킬 뿐, 곧 관조 \
+                관찰자이다. 이 페이지는 런타임 입구를 지킬 뿐, 곧 관조 \
                 판이 들어설 예정."
            ]
        ; Node.hr ~attrs:[ Style.divider ] ()
        ; Node.div
            ~attrs:[ Style.meta ]
-           [ Node.text "phase 0 · /dashboard/b · bonsai v0.18~preview" ]
+           [ Node.text "preview · /dashboard/b · runtime shell" ]
        ])
 ;;

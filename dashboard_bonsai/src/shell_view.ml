@@ -699,7 +699,7 @@ let topbar ~(active : Route.t) =
         [ Node.span
             ~attrs:[ Style.clock ]
             [ Node.text "Bonsai "
-            ; Node.b [ Node.text "v0.18" ]
+            ; Node.b [ Node.text "preview" ]
             ]
         ; pill ~tone:`Ok "sse live"
         ; pill "operator"

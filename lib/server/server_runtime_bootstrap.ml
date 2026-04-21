@@ -734,6 +734,13 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                  (Cascade_catalog_runtime.snapshot_to_yojson snapshot));
             None
         | Ok
+            (Cascade_catalog_runtime.Serving_valid_subset
+               { rejected_update; _ }) ->
+            Some
+              (format_catalog_validation_error
+                 "startup accepted active cascade catalog with invalid extra profiles"
+                 rejected_update)
+        | Ok
             (Cascade_catalog_runtime.Serving_last_known_good
                { rejected_update; _ }) ->
             Some

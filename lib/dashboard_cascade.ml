@@ -159,6 +159,10 @@ let validation_summary_json ?config_path () =
         ("invalid_profiles", `List []);
       ]
   | Ok
+      (Cascade_catalog_runtime.Serving_valid_subset
+         { rejected_update; _ }) ->
+      of_rejection ~status:"serving_valid_subset" rejected_update
+  | Ok
       (Cascade_catalog_runtime.Serving_last_known_good
          { rejected_update; _ }) ->
       of_rejection ~status:"serving_last_known_good" rejected_update

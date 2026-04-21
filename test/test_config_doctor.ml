@@ -184,6 +184,35 @@ let test_broken_cascade_catalog_surfaces_errors () =
        ~needle:"Rerun `masc-mcp doctor config` after editing cascade.json."
        report.next_actions)
 
+let test_non_runtime_required_cascade_catalog_warns () =
+  with_temp_dir "config-doctor-cascade-warn" @@ fun dir ->
+  let base_path = Filename.concat dir "base" in
+  let config_root = Filename.concat base_path ".masc/config" in
+  initialize_config_root
+    ~cascade_json:{|{
+  "default_models": [
+    "claude_code:claude-haiku-4-5-20251001"
+  ],
+  "manual_trial_models": [
+    "__nonexistent_provider_sentinel__:fake-model"
+  ],
+  "manual_trial_keeper_assignable": false
+}|}
+    config_root;
+  let report =
+    Config_doctor.analyze_with
+      (make_inputs ~cwd:dir ~base_path_input:base_path ())
+  in
+  check string "status downgrades to warn" "warn" (status report.status);
+  check bool "catalog summary warning present" true
+    (list_contains_substring
+       ~needle:"Cascade catalog check scanned 2 preset(s): 0 error, 1 warn."
+       report.warnings);
+  check bool "non-runtime-required detail surfaced" true
+    (list_contains_substring
+       ~needle:"non-runtime-required profile; runtime can serve a validated subset"
+       report.warnings)
+
 let () =
   run "config_doctor"
     [
@@ -198,5 +227,7 @@ let () =
              test_shadowed_explicit_config_dir;
            test_case "broken cascade catalog surfaces errors" `Quick
              test_broken_cascade_catalog_surfaces_errors;
+           test_case "non-runtime-required cascade catalog warns" `Quick
+             test_non_runtime_required_cascade_catalog_warns;
          ]);
     ]

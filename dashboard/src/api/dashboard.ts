@@ -1799,7 +1799,11 @@ export interface CascadeKeeperProfile {
   canonical: string
 }
 
-export type CascadeValidationStatus = 'validated' | 'serving_last_known_good' | 'invalid'
+export type CascadeValidationStatus =
+  | 'validated'
+  | 'serving_valid_subset'
+  | 'serving_last_known_good'
+  | 'invalid'
 
 export interface CascadeInvalidProfile {
   name: string

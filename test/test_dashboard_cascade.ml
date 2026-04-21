@@ -98,7 +98,7 @@ let test_config_shape () =
    | `String _ | `Null -> ()
    | _ -> fail "config_path should be string or null");
   (match member "validation_status" j with
-   | `String ("validated" | "serving_last_known_good" | "invalid") -> ()
+   | `String ("validated" | "serving_valid_subset" | "serving_last_known_good" | "invalid") -> ()
    | _ -> fail "validation_status should be known string");
   (match member "validation_errors" j with
    | `List _ -> ()

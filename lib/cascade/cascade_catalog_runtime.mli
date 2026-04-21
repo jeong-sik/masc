@@ -25,6 +25,10 @@ type rejection
 
 type state =
   | Validated of snapshot
+  | Serving_valid_subset of {
+      snapshot : snapshot;
+      rejected_update : rejection;
+    }
   | Serving_last_known_good of {
       snapshot : snapshot;
       rejected_update : rejection;
@@ -128,6 +132,10 @@ val state_to_yojson : state -> Yojson.Safe.t
     @since 0.160.1 *)
 val invalidate_path : string -> unit
 
+val runtime_required_profile_names :
+  ?config_path:string ->
+  unit ->
+  string list
 val install_snapshot_for_tests :
   source_path:string ->
   profile_names:string list ->

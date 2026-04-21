@@ -298,8 +298,12 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
     | None ->
         List.filter (fun (task : task) ->
           let status = task.task_status in
-          let is_done = match status with Done _ -> true | _ -> false in
-          let is_cancelled = match status with Cancelled _ -> true | _ -> false in
+          let is_done = Types.task_status_is_done status in
+          let is_cancelled = match status with
+            | Types.Cancelled _ -> true
+            | Types.Todo | Types.Claimed _ | Types.InProgress _
+            | Types.AwaitingVerification _ | Types.Done _ -> false
+          in
           (include_done || not is_done) &&
           (include_cancelled || not is_cancelled)
         ) backlog.tasks

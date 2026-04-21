@@ -391,6 +391,51 @@ let test_runtime_surface_derives_continue_gate_from_persisted_ambiguous_blocker 
     true
     (runtime |> member "runtime_blocker_continue_gate" |> to_bool)
 
+let test_runtime_surface_suppresses_stale_proactive_timeout_reason () =
+  KR.clear ();
+  let now_ts = Time_compat.now () in
+  let base = make_meta ~name:"runtime-stale-proactive-timeout-test" () in
+  let meta =
+    {
+      base with
+      runtime =
+        {
+          base.runtime with
+          usage =
+            {
+              base.runtime.usage with
+              total_turns = 3;
+              last_turn_ts = now_ts;
+            };
+          proactive_rt =
+            {
+              base.runtime.proactive_rt with
+              last_ts = now_ts -. 600.0;
+              last_outcome = KT.Proactive_error;
+              last_reason =
+                "unified:error:Internal error: Turn wall-clock timeout after 1200s (MASC_KEEPER_TURN_TIMEOUT_SEC)";
+              last_preview =
+                "Internal error: Turn wall-clock timeout after 1200s (MASC_KEEPER_TURN_TIMEOUT_SEC)";
+            };
+        };
+    }
+  in
+  let config =
+    Coord.default_config "/tmp/test-keeper-exec-status-stale-proactive-timeout"
+  in
+  ignore (KR.register ~base_path:config.base_path meta.name meta);
+  let runtime = KSB.runtime_surface_json config meta in
+  let open Yojson.Safe.Util in
+  let json_string_opt = function
+    | `Null -> None
+    | `String value -> Some value
+    | _ -> fail "expected string-or-null runtime blocker field"
+  in
+  check (option string) "stale proactive timeout suppressed" None
+    (runtime |> member "runtime_blocker_summary" |> json_string_opt);
+  check (option string) "stale proactive blocker class suppressed" None
+    (runtime |> member "runtime_blocker_class" |> json_string_opt)
+
 let test_runtime_surface_exposes_social_model_resolution_fields () =
   KR.clear ();
   let base = make_meta ~name:"runtime-social-model-test" () in
@@ -554,6 +599,9 @@ let () =
           test_case "runtime surface derives persisted continue-gate blocker"
             `Quick
             test_runtime_surface_derives_continue_gate_from_persisted_ambiguous_blocker;
+          test_case "runtime surface suppresses stale proactive timeout blocker"
+            `Quick
+            test_runtime_surface_suppresses_stale_proactive_timeout_reason;
           test_case "runtime surface exposes social model fields" `Quick
             test_runtime_surface_exposes_social_model_resolution_fields;
           test_case "runtime surface exposes model display labels" `Quick

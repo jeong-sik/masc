@@ -39,6 +39,21 @@ let read_all ic =
    with End_of_file -> ());
   Buffer.contents buf
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then
+      true
+    else if idx + needle_len > haystack_len then
+      false
+    else if String.sub haystack idx needle_len = needle then
+      true
+    else
+      loop (idx + 1)
+  in
+  loop 0
+
 let rec rm_rf path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -411,6 +426,18 @@ let write_partially_invalid_cascade ~base_path ~valid_model =
        {|{
   "keeper_unified_models": ["%s"],
   "broken_profile_models": ["__nonexistent_provider_sentinel__:fake"]
+}|}
+       valid_model)
+
+let write_partially_invalid_default_cascade ~base_path ~valid_model =
+  let config_root = Filename.concat base_path ".masc/config" in
+  mkdir_p config_root;
+  write_file
+    (Filename.concat config_root "cascade.json")
+    (Printf.sprintf
+       {|{
+  "keeper_unified_models": ["custom:flaky@http://127.0.0.1:9/v1"],
+  "tool_rerank_models": ["%s"]
 }|}
        valid_model)
 
@@ -1583,6 +1610,102 @@ let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
             Yojson.Safe.Util.(
               config_json |> member "invalid_profiles" |> to_list |> List.length)))
 
+let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
+  with_temp_dir "startup-invalid-default-partial-cascade" (fun dir ->
+      let exe = find_main_eio_exe () in
+      let port = find_free_port () in
+      let mock_port = find_free_port_from (port + 1) in
+      let mock_pid =
+        start_mock_openai_server ~port:mock_port
+          ~response:(openai_text_response "ok")
+      in
+      let log_file = Filename.concat dir "server.log" in
+      let log_fd =
+        Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+      in
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
+      with_cwd (project_root ()) @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
+      write_partially_invalid_default_cascade ~base_path:dir
+        ~valid_model:(Printf.sprintf "custom:stable@http://127.0.0.1:%d/v1" mock_port);
+      let env =
+        merge_env_overrides
+          [
+            ("MASC_BASE_PATH", dir);
+            ("MASC_STORAGE_TYPE", "filesystem");
+            ("GRAPHQL_API_KEY", "");
+            ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
+            ("MASC_AUTONOMY_ENABLED", "0");
+            ("MASC_ORCHESTRATOR_ENABLED", "0");
+            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_USE_H2", "0");
+            ("DUNE_SOURCEROOT", project_root ());
+          ]
+      in
+      let pid =
+        Unix.create_process_env exe
+          [|
+            exe;
+            "--host";
+            "127.0.0.1";
+            "--port";
+            string_of_int port;
+            "--base-path";
+            dir;
+          |]
+          env Unix.stdin log_fd log_fd
+      in
+      Unix.close log_fd;
+      Fun.protect
+        ~finally:(fun () ->
+          stop_process pid;
+          stop_process mock_pid)
+        (fun () ->
+          if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "degraded") then begin
+            prerr_endline
+              (Printf.sprintf
+                 "main_eio invalid default partial catalog did not reach startup.phase=degraded within timeout in this environment.\nlog:\n%s"
+                 (read_file log_file));
+            Alcotest.skip ()
+          end;
+          let health_headers, health_body =
+            curl_request_capture ~output_dir:dir
+              ~name:"health-invalid-default-partial" ~method_:"GET"
+              ~url:(Printf.sprintf "http://127.0.0.1:%d/health" port) ()
+          in
+          ignore health_headers;
+          let health_json = parse_json_response_file health_body in
+          let startup = Yojson.Safe.Util.member "startup" health_json in
+          Alcotest.(check string) "startup phase degraded" "degraded"
+            Yojson.Safe.Util.(startup |> member "phase" |> to_string);
+          Alcotest.(check bool) "startup remains ready" true
+            Yojson.Safe.Util.(startup |> member "state_ready" |> to_bool);
+          let startup_error =
+            Yojson.Safe.Util.(startup |> member "last_error" |> to_string)
+          in
+          Alcotest.(check bool) "last error mentions catalog validation" true
+            (contains_substring startup_error "startup catalog validation failed:");
+          Alcotest.(check bool) "last error mentions default profile gate" true
+            (contains_substring startup_error
+               "required default profile \"keeper_unified\" failed validation");
+          let config_headers, config_body =
+            curl_request_capture ~output_dir:dir
+              ~name:"cascade-config-invalid-default-partial" ~method_:"GET"
+              ~url:(Printf.sprintf "http://127.0.0.1:%d/api/v1/cascade/config" port)
+              ()
+          in
+          Alcotest.(check (option int)) "cascade config http 200" (Some 200)
+            (http_status_from_headers config_headers);
+          let config_json = parse_json_response_file config_body in
+          Alcotest.(check string) "partial default validation is invalid"
+            "invalid"
+            Yojson.Safe.Util.(
+              config_json |> member "validation_status" |> to_string);
+          Alcotest.(check int) "one invalid profile is surfaced" 1
+            Yojson.Safe.Util.(
+              config_json |> member "invalid_profiles" |> to_list |> List.length)))
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1709,6 +1832,10 @@ let () =
             "main_eio partial catalog stays ready and surfaces rejections"
             `Slow
             test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections;
+          Alcotest.test_case
+            "main_eio invalid default partial catalog stays degraded"
+            `Slow
+            test_main_eio_invalid_default_partial_catalog_stays_degraded;
           Alcotest.test_case
             "main_eio invalid cascade stays degraded but serves dashboard"
             `Slow

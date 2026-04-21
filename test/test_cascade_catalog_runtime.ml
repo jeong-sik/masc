@@ -361,6 +361,52 @@ let test_partial_catalog_keeps_validated_subset_available () =
   check bool "dashboard config_json keeps rejected profile metadata" true
     (contains_substring (Yojson.Safe.to_string config_json) "broken_profile")
 
+let test_partial_catalog_rejects_invalid_default_profile () =
+  with_temp_dir "dashboard-cascade-default-gate" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  with_eio @@ fun ~sw ~net ~clock ~fs:_ ~proc_mgr:_ ->
+  let port = find_free_port () in
+  let base_url, _request_count =
+    start_counting_mock ~sw ~net ~port
+      ~response:(openai_text_response "pong")
+  in
+  let valid_model = Printf.sprintf "custom:stable@%s/v1" base_url in
+  match
+    ignore
+      (write_cascade_json config_dir
+         (Printf.sprintf
+            {|{
+  "keeper_unified_models": ["custom:flaky@http://127.0.0.1:9/v1"],
+  "tool_rerank_models": ["%s"]
+}|}
+            valid_model));
+    Cascade_catalog_runtime.inspect_active ~sw ~net ~clock ()
+  with
+  | Error rejection ->
+      let rejection_json =
+        Cascade_catalog_runtime.rejection_to_yojson rejection
+      in
+      let errors = json_list_field "errors" rejection_json in
+      check bool "default-profile gate is surfaced" true
+        (List.exists
+           (function
+             | `String value ->
+                 contains_substring value
+                   "required default profile \"keeper_unified\" failed validation"
+             | _ -> false)
+           errors);
+      check bool "rejected default profile probe is surfaced" true
+        (contains_substring (Yojson.Safe.to_string rejection_json)
+           "custom:flaky@http://127.0.0.1:9/v1")
+  | Ok (Cascade_catalog_runtime.Validated _) ->
+      fail "expected invalid default profile to hard-fail validation"
+  | Ok (Cascade_catalog_runtime.Validated_with_rejections _) ->
+      fail "expected invalid default profile to be rejected, not partially validated"
+  | Ok (Cascade_catalog_runtime.Serving_last_known_good _) ->
+      fail "expected direct validation against the current file"
+
 let test_config_doctor_live_reports_catalog_validation () =
   with_temp_dir "cascade-doctor-live" @@ fun dir ->
   let base_path = Filename.concat dir "base" in
@@ -462,6 +508,10 @@ let () =
             "partial catalog keeps validated subset available"
             `Quick
             test_partial_catalog_keeps_validated_subset_available;
+          test_case
+            "partial catalog rejects invalid default profile"
+            `Quick
+            test_partial_catalog_rejects_invalid_default_profile;
           test_case
             "config doctor live reports catalog validation"
             `Quick

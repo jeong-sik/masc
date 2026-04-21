@@ -184,8 +184,8 @@ let test_valid_catalog_dedupes_shared_live_probes () =
   let snapshot =
     match Cascade_catalog_runtime.inspect_active ~sw ~net ~clock () with
     | Ok (Cascade_catalog_runtime.Validated snapshot) -> snapshot
-    | Ok (Cascade_catalog_runtime.Serving_valid_subset _) ->
-        fail "expected a freshly validated snapshot"
+    | Ok (Cascade_catalog_runtime.Validated_with_rejections _) ->
+        fail "expected fully validated snapshot without rejected profiles"
     | Ok (Cascade_catalog_runtime.Serving_last_known_good _) ->
         fail "expected a freshly validated snapshot"
     | Error rejection ->
@@ -237,7 +237,7 @@ let test_invalid_hot_reload_preserves_last_known_good () =
   in
   (match Cascade_catalog_runtime.inspect_active ~sw ~net ~clock () with
    | Ok (Cascade_catalog_runtime.Validated _) -> ()
-   | Ok (Cascade_catalog_runtime.Serving_valid_subset _) ->
+   | Ok (Cascade_catalog_runtime.Validated_with_rejections _) ->
        fail "expected the initial snapshot to validate cleanly"
    | Ok (Cascade_catalog_runtime.Serving_last_known_good _) ->
        fail "expected the initial snapshot to validate cleanly"
@@ -273,8 +273,8 @@ let test_invalid_hot_reload_preserves_last_known_good () =
         (contains_substring rejection_json "__nonexistent_provider_sentinel__")
   | Ok (Cascade_catalog_runtime.Validated _) ->
       fail "expected invalid hot reload to be rejected"
-  | Ok (Cascade_catalog_runtime.Serving_valid_subset _) ->
-      fail "expected invalid hot reload to fall back to last-known-good"
+  | Ok (Cascade_catalog_runtime.Validated_with_rejections _) ->
+      fail "expected invalid hot reload to use last-known-good"
   | Error rejection ->
       failf "expected last-known-good fallback, got hard error: %s"
         (Yojson.Safe.to_string
@@ -307,51 +307,7 @@ let test_legacy_runtime_wrapper_does_not_fallback_to_defaults () =
     []
     (Cascade_runtime.models_of_cascade_name "missing_profile")
 
-let test_static_profile_lookup_survives_probe_rejection_without_snapshot () =
-  with_temp_dir "cascade-static-fallback" @@ fun dir ->
-  let config_dir = Filename.concat dir "config" in
-  init_config_root config_dir;
-  with_config_dir config_dir @@ fun () ->
-  with_eio @@ fun ~sw ~net ~clock ~fs:_ ~proc_mgr:_ ->
-  let port = find_free_port () in
-  let refused_model = Printf.sprintf "custom:stable@http://127.0.0.1:%d/v1" port in
-  ignore
-    (write_cascade_json config_dir
-       (Printf.sprintf
-          {|{
-  "keeper_unified_models": ["%s"],
-  "tool_rerank_models": ["%s"]
-}|}
-          refused_model refused_model));
-  (match Cascade_catalog_runtime.inspect_active ~sw ~net ~clock () with
-   | Ok _ -> fail "expected probe rejection without a last-known-good snapshot"
-   | Error rejection ->
-       let rejection_json =
-         Cascade_catalog_runtime.rejection_to_yojson rejection
-         |> Yojson.Safe.to_string
-       in
-       check bool "probe rejection is surfaced" true
-         (contains_substring rejection_json "probe failed"));
-  let resolved_name =
-    require_ok
-      (Cascade_catalog_runtime.resolve_declared_name
-         ~sw ~net ~clock ~raw_name:"" ())
-  in
-  check string "default cascade still resolves statically"
-    Keeper_config.default_cascade_name resolved_name;
-  check (list string) "model strings still resolve statically"
-    [ refused_model ]
-    (require_ok
-       (Cascade_catalog_runtime.models_of_cascade_name
-          ~sw ~net ~clock "keeper_unified"));
-  let providers =
-    require_ok
-      (Cascade_catalog_runtime.resolve_named_providers
-         ~sw ~net ~clock ~cascade_name:"keeper_unified" ())
-  in
-  check int "static provider fallback keeps one provider" 1 (List.length providers)
-
-let test_dashboard_available_profiles_use_validated_snapshot_only () =
+let test_partial_catalog_keeps_validated_subset_available () =
   with_temp_dir "dashboard-cascade-profiles" @@ fun dir ->
   let config_dir = Filename.concat dir "config" in
   init_config_root config_dir;
@@ -369,22 +325,28 @@ let test_dashboard_available_profiles_use_validated_snapshot_only () =
           {|{
   "keeper_unified_models": ["%s"],
   "tool_rerank_models": ["%s"],
-  "broken_profile_models": ["__nonexistent_provider_sentinel__:fake"]
+  "broken_profile_models": ["custom:flaky@http://127.0.0.1:9/v1"]
 }|}
           valid_model valid_model));
-  let _ =
+  let rejection_json =
     match Cascade_catalog_runtime.inspect_active ~sw ~net ~clock () with
-    | Ok (Cascade_catalog_runtime.Serving_valid_subset _) ->
-        fail "expected invalid raw file to be rejected before snapshot priming"
-    | Ok (Cascade_catalog_runtime.Serving_last_known_good _) ->
-        fail "expected direct validation, not last-known-good"
+    | Ok
+        (Cascade_catalog_runtime.Validated_with_rejections
+           { rejected_update; _ }) ->
+        Cascade_catalog_runtime.rejection_to_yojson rejected_update
+        |> Yojson.Safe.to_string
     | Ok (Cascade_catalog_runtime.Validated _) ->
-        fail "expected invalid raw file to be rejected before snapshot priming"
-    | Error _ -> ()
+        fail "expected mixed catalog to keep only the validated subset"
+    | Ok (Cascade_catalog_runtime.Serving_last_known_good _) ->
+        fail "expected direct validation against the current file"
+    | Error rejection ->
+        failf "expected partial validation, got hard error: %s"
+          (Yojson.Safe.to_string
+             (Cascade_catalog_runtime.rejection_to_yojson rejection))
   in
-  Cascade_catalog_runtime.install_snapshot_for_tests
-    ~source_path:(Filename.concat config_dir "cascade.json")
-    ~profile_names:[ Keeper_config.default_cascade_name; "tool_rerank" ];
+  check bool "rejected runtime probe is surfaced" true
+    (contains_substring rejection_json
+       "custom:flaky@http://127.0.0.1:9/v1");
   check (list string) "dashboard only advertises validated profiles"
     [ Keeper_config.default_cascade_name; "tool_rerank" ]
     (Masc_mcp.Server_routes_http_routes_dashboard.available_cascade_profiles ());
@@ -395,95 +357,9 @@ let test_dashboard_available_profiles_use_validated_snapshot_only () =
   in
   check (list string) "dashboard config_json only renders validated profiles"
     [ Keeper_config.default_cascade_name; "tool_rerank" ]
-    profile_names
-
-let test_invalid_extra_profile_serves_valid_subset () =
-  with_temp_dir "cascade-valid-subset" @@ fun dir ->
-  let config_dir = Filename.concat dir "config" in
-  init_config_root config_dir;
-  with_config_dir config_dir @@ fun () ->
-  with_eio @@ fun ~sw ~net ~clock ~fs ~proc_mgr ->
-  let port = find_free_port () in
-  let base_url, _request_count =
-    start_counting_mock ~sw ~net ~port
-      ~response:(openai_text_response "pong")
-  in
-  let valid_model = Printf.sprintf "custom:stable@%s/v1" base_url in
-  ignore
-    (write_cascade_json config_dir
-       (Printf.sprintf
-          {|{
-  "default_models": ["%s"],
-  "keeper_unified_models": ["%s"],
-  "manual_trial_models": ["__nonexistent_provider_sentinel__:fake"],
-  "manual_trial_keeper_assignable": false
-}|}
-          valid_model valid_model));
-  match Cascade_catalog_runtime.inspect_active ~sw ~net ~clock () with
-  | Ok
-      (Cascade_catalog_runtime.Serving_valid_subset
-         { snapshot; rejected_update }) ->
-      let snapshot_json =
-        Cascade_catalog_runtime.snapshot_to_yojson snapshot
-      in
-      let profile_names =
-        json_list_field "profiles" snapshot_json
-        |> List.map (json_string_field "name")
-      in
-      check bool "default remains routable" true
-        (List.mem Keeper_config.default_cascade_name profile_names);
-      check bool "keeper_unified remains routable" true
-        (List.mem "keeper_unified" profile_names);
-      check bool "invalid extra profile omitted from active snapshot" false
-        (List.mem "manual_trial" profile_names);
-      check (list string) "keeper_unified models still resolve"
-        [ valid_model ]
-        (require_ok
-           (Cascade_catalog_runtime.models_of_cascade_name
-              ~sw ~net ~clock "keeper_unified"));
-      (match
-         Cascade_catalog_runtime.models_of_cascade_name
-           ~sw ~net ~clock "manual_trial"
-       with
-       | Ok labels ->
-           failf "expected invalid extra profile to be rejected, got %s"
-             (String.concat ", " labels)
-       | Error detail ->
-           check bool "invalid extra profile detail is surfaced" true
-             (contains_substring detail "manual_trial"));
-      let rejected_json =
-        Cascade_catalog_runtime.rejection_to_yojson rejected_update
-        |> Yojson.Safe.to_string
-      in
-      check bool "rejected_update lists invalid extra profile" true
-        (contains_substring rejected_json "manual_trial");
-      let dashboard_json = Masc_mcp.Dashboard_cascade.config_json () in
-      check string "dashboard reports valid subset status"
-        "serving_valid_subset"
-        (json_string_field "validation_status" dashboard_json);
-      let report =
-        Config_doctor.analyze_live
-          ~sw ~net ~clock ~fs ~proc_mgr
-          ~base_path_input:dir
-          ~default_base_path:dir
-          ()
-      in
-      check string "live doctor status degrades to warn" "warn"
-        (Config_doctor.status_to_string report.status);
-      (match report.catalog_validation with
-       | None -> fail "expected catalog_validation output from analyze_live"
-       | Some json ->
-           check string "doctor reports valid subset status"
-             "serving_valid_subset"
-             (json_string_field "status" json))
-  | Ok (Cascade_catalog_runtime.Validated _) ->
-      fail "expected invalid extra profile to downgrade into serving_valid_subset"
-  | Ok (Cascade_catalog_runtime.Serving_last_known_good _) ->
-      fail "expected current validated subset, not last-known-good"
-  | Error rejection ->
-      failf "expected serving_valid_subset, got hard rejection: %s"
-        (Yojson.Safe.to_string
-           (Cascade_catalog_runtime.rejection_to_yojson rejection))
+    profile_names;
+  check bool "dashboard config_json keeps rejected profile metadata" true
+    (contains_substring (Yojson.Safe.to_string config_json) "broken_profile")
 
 let test_config_doctor_live_reports_catalog_validation () =
   with_temp_dir "cascade-doctor-live" @@ fun dir ->
@@ -520,6 +396,51 @@ let test_config_doctor_live_reports_catalog_validation () =
         (contains_substring (Yojson.Safe.to_string json)
            "__nonexistent_provider_sentinel__")
 
+let test_config_doctor_live_warns_on_partial_catalog_validation () =
+  with_temp_dir "cascade-doctor-live-partial" @@ fun dir ->
+  let base_path = Filename.concat dir "base" in
+  let config_dir = Filename.concat base_path ".masc/config" in
+  init_config_root config_dir;
+  with_eio @@ fun ~sw ~net ~clock ~fs ~proc_mgr ->
+  let port = find_free_port () in
+  let base_url, _request_count =
+    start_counting_mock ~sw ~net ~port
+      ~response:(openai_text_response "pong")
+  in
+  let valid_model = Printf.sprintf "custom:stable@%s/v1" base_url in
+  ignore
+    (write_cascade_json config_dir
+       (Printf.sprintf
+          {|{
+  "keeper_unified_models": ["%s"],
+  "broken_profile_models": ["custom:flaky@http://127.0.0.1:9/v1"]
+}|}
+          valid_model));
+  with_config_dir config_dir @@ fun () ->
+  let report =
+    Config_doctor.analyze_live
+      ~sw ~net ~clock ~fs ~proc_mgr
+      ~base_path_input:base_path
+      ~default_base_path:base_path
+      ()
+  in
+  check string "live doctor partial status" "warn"
+    (Config_doctor.status_to_string report.status);
+  check bool "live partial warning present" true
+    (List.exists
+       (fun warning ->
+          contains_substring warning
+            "kept the usable profile subset and rejected some presets")
+       report.warnings);
+  match report.catalog_validation with
+  | None -> fail "expected catalog_validation output from analyze_live"
+  | Some json ->
+      check string "partial catalog validation status" "validated"
+        (json_string_field "status" json);
+      check bool "rejected profile is surfaced in live doctor json" true
+        (contains_substring (Yojson.Safe.to_string json)
+           "custom:flaky@http://127.0.0.1:9/v1")
+
 let () =
   run "cascade_catalog_runtime"
     [
@@ -538,20 +459,16 @@ let () =
             `Quick
             test_legacy_runtime_wrapper_does_not_fallback_to_defaults;
           test_case
-            "static profile lookup survives probe rejection without snapshot"
+            "partial catalog keeps validated subset available"
             `Quick
-            test_static_profile_lookup_survives_probe_rejection_without_snapshot;
-          test_case
-            "dashboard available profiles use validated snapshot only"
-            `Quick
-            test_dashboard_available_profiles_use_validated_snapshot_only;
-          test_case
-            "invalid extra profile serves validated subset"
-            `Quick
-            test_invalid_extra_profile_serves_valid_subset;
+            test_partial_catalog_keeps_validated_subset_available;
           test_case
             "config doctor live reports catalog validation"
             `Quick
             test_config_doctor_live_reports_catalog_validation;
+          test_case
+            "config doctor live warns on partial catalog validation"
+            `Quick
+            test_config_doctor_live_warns_on_partial_catalog_validation;
         ] );
     ]

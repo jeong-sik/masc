@@ -25,7 +25,7 @@ type rejection
 
 type state =
   | Validated of snapshot
-  | Serving_valid_subset of {
+  | Validated_with_rejections of {
       snapshot : snapshot;
       rejected_update : rejection;
     }
@@ -47,6 +47,9 @@ val validate_path :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   config_path:string ->
   (snapshot, rejection) result
+(** Returns the validated subset of profiles when the catalog is partly
+    usable but some presets are rejected at runtime. Inspect
+    {!inspect_active} when the caller needs the rejected-profile detail. *)
 
 val resolve_declared_name :
   ?sw:Eio.Switch.t ->
@@ -123,19 +126,6 @@ val resolve_selection_trace :
 val snapshot_to_yojson : snapshot -> Yojson.Safe.t
 val rejection_to_yojson : rejection -> Yojson.Safe.t
 val state_to_yojson : state -> Yojson.Safe.t
-
-(** Drop any cached runtime snapshot/rejection derived from [config_path].
-
-    Used by in-process editors/tests after overwriting [cascade.json] so the
-    next {!inspect_active} call revalidates from disk immediately.
-
-    @since 0.160.1 *)
-val invalidate_path : string -> unit
-
-val runtime_required_profile_names :
-  ?config_path:string ->
-  unit ->
-  string list
 
 val install_snapshot_for_tests :
   source_path:string ->

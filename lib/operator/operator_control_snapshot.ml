@@ -97,21 +97,6 @@ let keeper_context_snapshot_of_meta config (meta : Keeper_types.keeper_meta) =
   | None -> fallback_keeper_context_snapshot meta
 
 let keeper_context_snapshot_fields (snapshot : keeper_context_snapshot) =
-  let context_json =
-    if keeper_context_snapshot_is_empty snapshot then
-      `Null
-    else
-      `Assoc
-        [
-          ("source", string_option_to_json snapshot.context_source);
-          ("context_ratio",
-            option_to_json (fun value -> `Float value) snapshot.context_ratio);
-          ("context_tokens",
-            option_to_json (fun value -> `Int value) snapshot.context_tokens);
-          ("context_max",
-            option_to_json (fun value -> `Int value) snapshot.context_max);
-        ]
-  in
   [
     ("context_ratio",
       option_to_json (fun value -> `Float value) snapshot.context_ratio);
@@ -120,7 +105,6 @@ let keeper_context_snapshot_fields (snapshot : keeper_context_snapshot) =
     ("context_max",
       option_to_json (fun value -> `Int value) snapshot.context_max);
     ("context_source", string_option_to_json snapshot.context_source);
-    ("context", context_json);
   ]
 
 type action_result_status = ActionOk | ActionError
@@ -939,7 +923,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                        ("context_tokens", field_or_null "context_tokens");
                        ("context_max", field_or_null "context_max");
                        ("context_source", field_or_null "context_source");
-                       ("context", field_or_null "context");
                        ("last_model_used", field_or_null "last_model_used");
                        ("active_model", field_or_null "active_model");
                        ("next_model_hint", field_or_null "next_model_hint");

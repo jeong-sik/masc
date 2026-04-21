@@ -74,6 +74,7 @@ val resolve_named_providers :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?provider_filter:string list ->
   ?require_tool_choice_support:bool ->
+  ?require_tool_support:bool ->
   cascade_name:string ->
   unit ->
   (Llm_provider.Provider_config.t list, string) result

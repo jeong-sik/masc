@@ -112,10 +112,16 @@ let invalidate_path config_path =
   in
   with_cache_lock (fun () ->
       let current = !cache in
+      let active_snapshot = keep_snapshot current.active_snapshot in
+      let rejected_update = keep_rejection current.rejected_update in
       cache :=
         {
-          active_snapshot = keep_snapshot current.active_snapshot;
-          rejected_update = keep_rejection current.rejected_update;
+          active_snapshot;
+          rejected_update;
+          rejected_mode =
+            (match rejected_update with
+            | Some _ -> current.rejected_mode
+            | None -> None);
         })
 
 let install_snapshot_for_tests ~source_path ~profile_names =

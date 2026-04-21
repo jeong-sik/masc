@@ -1940,6 +1940,54 @@ let test_fail_open_local_only_preserves_healthy_local_only () =
   in
   check string "healthy ollama keeps local_only" "local_only" cascade
 
+let wrapped_claude_limit_error () =
+  Agent_sdk.Error.Api
+    (NetworkError
+       {
+         message =
+           "claude exited with code 1: {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've hit your limit · resets Apr 24 at 4am (Asia/Seoul)\"}";
+       })
+
+let test_fail_open_cascade_after_auto_recoverable_error_falls_back_to_default () =
+  let fallback =
+    UT.fail_open_cascade_after_auto_recoverable_error
+      ~base_cascade:"tool_use_strict"
+      ~effective_cascade:"tool_use_strict"
+      (wrapped_claude_limit_error ())
+  in
+  check (option string) "strict cascade broadens to default"
+    (Some KC.default_cascade_name) fallback
+
+let test_fail_open_cascade_after_auto_recoverable_error_returns_base_after_phase_override () =
+  let fallback =
+    UT.fail_open_cascade_after_auto_recoverable_error
+      ~base_cascade:"tool_use_strict"
+      ~effective_cascade:KC.local_recovery_cascade_name
+      (wrapped_claude_limit_error ())
+  in
+  check (option string) "phase override returns to keeper base"
+    (Some "tool_use_strict") fallback
+
+let test_fail_open_cascade_after_auto_recoverable_error_preserves_explicit_local_only () =
+  let fallback =
+    UT.fail_open_cascade_after_auto_recoverable_error
+      ~base_cascade:KC.local_only_cascade_name
+      ~effective_cascade:KC.local_only_cascade_name
+      (wrapped_claude_limit_error ())
+  in
+  check (option string) "explicit local_only stays authoritative" None
+    fallback
+
+let test_fail_open_cascade_after_auto_recoverable_error_skips_default_cascade () =
+  let fallback =
+    UT.fail_open_cascade_after_auto_recoverable_error
+      ~base_cascade:KC.default_cascade_name
+      ~effective_cascade:KC.default_cascade_name
+      (wrapped_claude_limit_error ())
+  in
+  check (option string) "default cascade has no broader fallback" None
+    fallback
+
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
 let test_context_overflow_limit_parses_common_oas_errors () =
@@ -2446,6 +2494,18 @@ let test_auto_recoverable_turn_error_includes_server_parse_rejection () =
   check bool "server parse rejection is auto-recoverable" true
     (UT.is_auto_recoverable_turn_error err)
 
+let test_auto_recoverable_turn_error_includes_wrapped_hard_quota () =
+  let err =
+    Agent_sdk.Error.Api
+      (NetworkError
+         {
+           message =
+             "claude exited with code 1: {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've hit your limit · resets Apr 24 at 4am (Asia/Seoul)\"}";
+         })
+  in
+  check bool "wrapped hard quota is auto-recoverable" true
+    (UT.is_auto_recoverable_turn_error err)
+
 let test_required_tool_contract_violation_detected () =
   let err =
     Agent_sdk.Error.Agent
@@ -2506,6 +2566,32 @@ let test_auto_recoverable_turn_error_excludes_persistent_errors () =
       (AuthError { message = "Unauthorized" })
   in
   check bool "auth error is persistent" false
+    (UT.is_auto_recoverable_turn_error err)
+
+let test_auto_recoverable_turn_error_includes_wrapped_cascade_exhausted_hard_quota () =
+  let err =
+    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+      (Masc_mcp.Oas_worker_named.Cascade_exhausted
+         {
+           cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+           reason =
+             Keeper_types.Other_detail
+               "claude exited with code 1: {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've hit your limit · resets Apr 24 at 4am (Asia/Seoul)\"}";
+         })
+  in
+  check bool "wrapped cascade hard quota is auto-recoverable" true
+    (UT.is_auto_recoverable_turn_error err)
+
+let test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaustion () =
+  let err =
+    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+      (Masc_mcp.Oas_worker_named.Cascade_exhausted
+         {
+           cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+           reason = Keeper_types.Candidates_filtered_after_cycles;
+         })
+  in
+  check bool "filtered candidates cascade exhaustion is auto-recoverable" true
     (UT.is_auto_recoverable_turn_error err)
 
 let test_bounded_oas_timeout_uses_adaptive_when_budget_is_large () =
@@ -3784,6 +3870,8 @@ let () =
             test_auto_recoverable_turn_error_includes_transient_network;
           test_case "auto-recoverable includes server parse rejection" `Quick
             test_auto_recoverable_turn_error_includes_server_parse_rejection;
+          test_case "auto-recoverable includes wrapped hard quota" `Quick
+            test_auto_recoverable_turn_error_includes_wrapped_hard_quota;
           test_case "required tool contract violation detected from structured error" `Quick
             test_required_tool_contract_violation_detected;
           test_case "legacy internal contract violation is ignored" `Quick
@@ -3796,6 +3884,10 @@ let () =
             test_auto_recoverable_turn_error_excludes_required_tool_contract_violation;
           test_case "auto-recoverable excludes persistent errors" `Quick
             test_auto_recoverable_turn_error_excludes_persistent_errors;
+          test_case "auto-recoverable includes wrapped cascade hard quota" `Quick
+            test_auto_recoverable_turn_error_includes_wrapped_cascade_exhausted_hard_quota;
+          test_case "auto-recoverable includes filtered candidates cascade exhaustion" `Quick
+            test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaustion;
           test_case "bounded OAS timeout keeps adaptive timeout under full budget" `Quick
             test_bounded_oas_timeout_uses_adaptive_when_budget_is_large;
           test_case "bounded OAS timeout caps to remaining turn budget" `Quick
@@ -3851,6 +3943,14 @@ let () =
             test_fail_open_local_only_preserves_explicit_local_only_base;
           test_case "healthy local_only stays selected" `Quick
             test_fail_open_local_only_preserves_healthy_local_only;
+          test_case "strict quota fail-open broadens to default cascade" `Quick
+            test_fail_open_cascade_after_auto_recoverable_error_falls_back_to_default;
+          test_case "phase override fail-open returns to base cascade" `Quick
+            test_fail_open_cascade_after_auto_recoverable_error_returns_base_after_phase_override;
+          test_case "explicit local_only keeps fail-open disabled" `Quick
+            test_fail_open_cascade_after_auto_recoverable_error_preserves_explicit_local_only;
+          test_case "default cascade has no broader fail-open target" `Quick
+            test_fail_open_cascade_after_auto_recoverable_error_skips_default_cascade;
         ] );
       ( "tool_classification",
         [

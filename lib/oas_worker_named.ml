@@ -562,6 +562,9 @@ let cli_wrapped_hard_quota_indicators = [
   "quota_exhausted";
   "exhausted your capacity on this model";
   "quota will reset after";
+  "\"api_error_status\":429";
+  "you've hit your limit";
+  "resets apr ";
 ]
 
 let message_looks_like_cli_wrapped_hard_quota (message : string) : bool =
@@ -1113,20 +1116,41 @@ let run_named
       Cascade_strategy.order_candidates strategy
         ~adapter ~ctx:signal_ctx ~cycle:n candidate_cfgs
     in
+    let all_candidates_in_cooldown =
+      strategy.kind = Cascade_strategy.Circuit_breaker_cycling
+      && candidate_cfgs <> []
+      && List.for_all
+           (fun candidate ->
+             Cascade_health_tracker.is_in_cooldown signal_ctx.health
+               ~provider_key:(adapter.health_key candidate))
+           candidate_cfgs
+    in
     let last_cycle = n + 1 >= strategy.cycle.max_cycles in
     match ordered with
     | [] when last_cycle ->
       record_trace ~cycle:n ~candidates_out:0 ~backoff_ms:0 ~kind:Exhausted;
       cascade_exhausted_after_filter ~cycle:n
     | [] ->
-      let backoff = Cascade_strategy.backoff_ms strategy.cycle ~cycle:(n + 1) in
+      let backoff =
+        if all_candidates_in_cooldown
+        then 0
+        else Cascade_strategy.backoff_ms strategy.cycle ~cycle:(n + 1)
+      in
       record_trace ~cycle:n ~candidates_out:0 ~backoff_ms:backoff
         ~kind:Filtered_empty;
-      Log.Misc.info
-        "cascade %s: cycle %d (%s) filtered all candidates, retrying"
-        cascade_name n (Cascade_strategy.kind_to_string strategy.kind);
-      do_backoff (n + 1);
-      cycle_loop (n + 1)
+      if all_candidates_in_cooldown
+      then begin
+        Log.Misc.info
+          "cascade %s: cycle %d (%s) filtered all candidates because every provider is in cooldown; skipping empty-cycle retries"
+          cascade_name n (Cascade_strategy.kind_to_string strategy.kind);
+        cascade_exhausted_after_filter ~cycle:n
+      end else begin
+        Log.Misc.info
+          "cascade %s: cycle %d (%s) filtered all candidates, retrying"
+          cascade_name n (Cascade_strategy.kind_to_string strategy.kind);
+        do_backoff (n + 1);
+        cycle_loop (n + 1)
+      end
     | _ ->
       record_trace ~cycle:n ~candidates_out:(List.length ordered)
         ~backoff_ms:0 ~kind:Ordered;

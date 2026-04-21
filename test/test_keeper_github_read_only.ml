@@ -36,6 +36,103 @@ let mk_cmd_and_args cmd _args =
 let mk_action action =
   `Assoc [ ("action", `String action) ]
 
+let with_eio_fs f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  f ()
+
+let temp_dir () =
+  let dir = Filename.temp_file "keeper_gh_context_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    match Unix.lstat path with
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+      Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    | _ -> Unix.unlink path
+    | exception Unix.Unix_error _ -> ()
+  in
+  try rm dir with _ -> ()
+
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else (
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    Unix.mkdir path 0o755)
+
+let run_argv argv =
+  let command = String.concat " " (List.map Filename.quote argv) in
+  match Unix.system command with
+  | Unix.WEXITED 0 -> ()
+  | _ ->
+    Alcotest.fail
+      (Printf.sprintf "command failed: %s\n%s"
+         (String.concat " " argv)
+         command)
+
+let make_meta ?current_task_id () =
+  let base_fields =
+    [
+      ("name", `String "sojin");
+      ("agent_name", `String "agent-sojin");
+      ("trace_id", `String "trace-sojin");
+      ("goal", `String "gh context test");
+      ("allowed_paths", `List [ `String "*" ]);
+    ]
+  in
+  let fields =
+    match current_task_id with
+    | None -> base_fields
+    | Some task_id -> ("current_task_id", `String task_id) :: base_fields
+  in
+  match Keeper_types.meta_of_json (`Assoc fields) with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail err
+
+let add_task_with_worktree ~config ~repo_dir ~repo_name =
+  let _ = Coord.add_task config ~title:"GitHub work" ~priority:1 ~description:"" in
+  let backlog = Coord.read_backlog config in
+  match backlog.Types.tasks with
+  | [] -> Alcotest.fail "expected added task"
+  | task :: rest ->
+    let updated_task =
+      { task with
+        worktree =
+          Some
+            {
+              Types.branch = "main";
+              path = repo_dir;
+              git_root = repo_dir;
+              repo_name;
+            };
+      }
+    in
+    Coord.write_backlog config
+      {
+        Types.tasks = updated_task :: rest;
+        last_updated = Types.now_iso ();
+        version = backlog.version + 1;
+      };
+    task.id
+
+let with_repo_context_test_env f =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  let config = Coord.default_config base in
+  ensure_dir (Filename.concat base ".masc");
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  ignore (Coord.init config ~agent_name:None);
+  let repo_dir = Filename.concat base "repo" in
+  ensure_dir repo_dir;
+  run_argv [ "git"; "-C"; repo_dir; "init"; "-q" ];
+  f ~base ~config ~repo_dir
+
 (* ================================================================ *)
 (* Read-only subcommands via cmd                                     *)
 (* ================================================================ *)
@@ -268,6 +365,58 @@ let test_dangerous_gh_command_classifier () =
       expected
       (gh_dangerous_command cmd)
   ) cases
+
+let test_resolve_task_repo_context_uses_current_task_worktree () =
+  with_repo_context_test_env @@ fun ~base:_ ~config ~repo_dir ->
+  run_argv
+    [ "git"; "-C"; repo_dir; "remote"; "add"; "origin"
+    ; "https://github.com/example/project.git"
+    ];
+  let task_id =
+    add_task_with_worktree ~config ~repo_dir ~repo_name:"project"
+  in
+  let meta = make_meta ~current_task_id:task_id () in
+  match Keeper_gh_shared.resolve_task_repo_context ~config ~meta with
+  | Ok ctx ->
+    Alcotest.(check string) "task id" task_id ctx.task_id;
+    Alcotest.(check string) "git root" repo_dir ctx.git_root;
+    Alcotest.(check string) "repo slug" "example/project" ctx.repo_slug
+  | Error _ -> Alcotest.fail "expected task repo context"
+
+let test_resolve_task_repo_context_reports_missing_worktree () =
+  with_repo_context_test_env @@ fun ~base:_ ~config ~repo_dir:_ ->
+  let _ = Coord.add_task config ~title:"GitHub work" ~priority:1 ~description:"" in
+  let backlog = Coord.read_backlog config in
+  let task_id =
+    match backlog.Types.tasks with
+    | task :: _ -> task.id
+    | [] -> Alcotest.fail "expected task"
+  in
+  let meta = make_meta ~current_task_id:task_id () in
+  match Keeper_gh_shared.resolve_task_repo_context ~config ~meta with
+  | Error (Keeper_gh_shared.Current_task_missing_worktree missing_task_id) ->
+    Alcotest.(check string) "task id" task_id missing_task_id
+  | Ok _ -> Alcotest.fail "expected missing worktree error"
+  | Error _ -> Alcotest.fail "unexpected repo context error"
+
+let test_resolve_task_repo_context_rejects_non_github_origin () =
+  with_repo_context_test_env @@ fun ~base:_ ~config ~repo_dir ->
+  run_argv
+    [ "git"; "-C"; repo_dir; "remote"; "add"; "origin"
+    ; "https://gitlab.com/example/project.git"
+    ];
+  let task_id =
+    add_task_with_worktree ~config ~repo_dir ~repo_name:"project"
+  in
+  let meta = make_meta ~current_task_id:task_id () in
+  match Keeper_gh_shared.resolve_task_repo_context ~config ~meta with
+  | Error
+      (Keeper_gh_shared.Current_task_origin_not_github
+         { task_id = actual_task_id; git_root }) ->
+    Alcotest.(check string) "task id" task_id actual_task_id;
+    Alcotest.(check string) "git root" repo_dir git_root
+  | Ok _ -> Alcotest.fail "expected non-github origin error"
+  | Error _ -> Alcotest.fail "unexpected repo context error"
 
 (* Tool-call observability flows through the OAS Event_bus.
    This test verifies a subscriber can receive the equivalent
@@ -576,5 +725,14 @@ let () =
             test_masc_coordination_aliases_bypass_boundary;
           Alcotest.test_case "keeper_board_delete and cleanup bypass boundary" `Quick
             test_keeper_board_delete_and_cleanup_bypass_boundary;
+        ] );
+      ( "repo_context",
+        [
+          Alcotest.test_case "current task worktree resolves repo context"
+            `Quick test_resolve_task_repo_context_uses_current_task_worktree;
+          Alcotest.test_case "missing worktree is structured error" `Quick
+            test_resolve_task_repo_context_reports_missing_worktree;
+          Alcotest.test_case "non-github origin is structured error" `Quick
+            test_resolve_task_repo_context_rejects_non_github_origin;
         ] );
     ]

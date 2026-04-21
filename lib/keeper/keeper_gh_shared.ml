@@ -23,6 +23,25 @@ type validation_result =
   | `Unknown
   ]
 
+type task_repo_context = {
+  task_id : string;
+  git_root : string;
+  repo_slug : string;
+}
+
+type task_repo_context_error =
+  | Missing_current_task
+  | Current_task_not_found of string
+  | Current_task_missing_worktree of string
+  | Current_task_origin_unavailable of {
+      task_id : string;
+      git_root : string;
+    }
+  | Current_task_origin_not_github of {
+      task_id : string;
+      git_root : string;
+    }
+
 type cache_entry = {
   numbers : int list;
   fetched_at : float;
@@ -427,6 +446,19 @@ let args_have_repo_flag args =
 let inject_repo_flag_args ~repo_slug args =
   strip_repo_flags_from_args args @ [ "--repo"; repo_slug ]
 
+let run_argv_first_line_unix ~(prog : string) ~(argv : string array) : string option =
+  try
+    match
+      With_process.with_process_args_in prog argv (fun ic ->
+        With_process.drain_lines ic
+        |> List.map String.trim
+        |> List.find_opt (fun line -> line <> ""))
+    with
+    | line, Unix.WEXITED 0 -> line
+    | _ -> None
+  with
+  | Unix.Unix_error _ | Sys_error _ -> None
+
 (** Cached owner/repo slug from git remote origin. *)
 let _repo_slug_cache : string option option ref = ref None
 
@@ -435,10 +467,12 @@ let project_repo_slug () : string option =
   | Some cached -> cached
   | None ->
       let slug =
-        match Process_eio.run_argv_with_status ~timeout_sec:5.0
-                ["git"; "remote"; "get-url"; "origin"] with
-        | Unix.WEXITED 0, url ->
-            let url = String.trim url in
+        match
+          run_argv_first_line_unix
+            ~prog:"git"
+            ~argv:[| "git"; "remote"; "get-url"; "origin" |]
+        with
+        | Some url ->
             (* git@github.com:owner/repo.git or https://github.com/owner/repo.git *)
             let strip_git s =
               if String.length s > 4 && String.sub s (String.length s - 4) 4 = ".git"
@@ -461,6 +495,43 @@ let project_repo_slug () : string option =
       in
       _repo_slug_cache := Some slug;
       slug
+
+let resolve_task_repo_context
+      ~(config : Coord.config)
+      ~(meta : Keeper_types.keeper_meta)
+  : (task_repo_context, task_repo_context_error) result
+  =
+  match meta.current_task_id with
+  | None -> Error Missing_current_task
+  | Some current_task_id ->
+    let task_id = Keeper_id.Task_id.to_string current_task_id in
+    match
+         Coord_query.get_tasks_safe config
+      |> List.find_opt (fun (task : Types.task) -> String.equal task.id task_id)
+    with
+    | None -> Error (Current_task_not_found task_id)
+    | Some task ->
+      match task.worktree with
+      | None -> Error (Current_task_missing_worktree task_id)
+      | Some wt ->
+        let git_root = wt.git_root in
+        (match
+           run_argv_first_line_unix
+             ~prog:"git"
+             ~argv:[| "git"; "-C"; git_root; "remote"; "get-url"; "origin" |]
+         with
+         | Some origin_url ->
+           let origin_url = String.trim origin_url in
+           (match Tool_code_write.extract_github_org_repo origin_url with
+            | Some repo_slug -> Ok { task_id; git_root; repo_slug }
+            | None ->
+              Error
+                (Current_task_origin_not_github
+                   { task_id; git_root }))
+         | None ->
+           Error
+             (Current_task_origin_unavailable
+                { task_id; git_root }))
 
 (** Replace a wrong --repo/-R slug in cmd with the correct one.
     Returns (corrected_cmd, was_corrected). *)

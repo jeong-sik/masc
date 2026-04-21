@@ -196,7 +196,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
     let sandbox_profile_opt_res =
       parse_enum_string_opt args "sandbox_profile" sandbox_profile_of_string
-        ~allowed_values:"legacy_local, docker_hardened"
+        ~allowed_values:"legacy_local, docker_hardened, docker_with_git"
     in
     let network_mode_opt_res =
       parse_enum_string_opt args "network_mode" network_mode_of_string

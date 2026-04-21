@@ -93,6 +93,27 @@ let completion_contract_of_tool_choice
   | Some (Agent_sdk.Types.Auto | Agent_sdk.Types.None_) -> Allow_text_or_tool
   | None -> Allow_text_or_tool
 
+let run_completion_contract
+      ~(turn_contract : completion_contract)
+      ~(required_tool_use_seen : bool)
+  : completion_contract
+  =
+  if required_tool_use_seen then Require_tool_use else turn_contract
+
+let validate_completion_contract_presence
+      ~(contract : completion_contract)
+      ~(tool_present : bool)
+  : (unit, string) result
+  =
+  match contract with
+  | Allow_text_or_tool -> Ok ()
+  | Require_tool_use ->
+    if tool_present
+    then Ok ()
+    else
+      Error
+        "keeper turn violated required tool contract: no keeper-surface tools were called"
+
 let validate_completion_contract
       ~(contract : completion_contract)
       ~(tool_names : string list)

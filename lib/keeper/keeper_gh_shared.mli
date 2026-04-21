@@ -15,6 +15,25 @@ type validation_result =
   | `Unknown
   ]
 
+type task_repo_context = {
+  task_id : string;
+  git_root : string;
+  repo_slug : string;
+}
+
+type task_repo_context_error =
+  | Missing_current_task
+  | Current_task_not_found of string
+  | Current_task_missing_worktree of string
+  | Current_task_origin_unavailable of {
+      task_id : string;
+      git_root : string;
+    }
+  | Current_task_origin_not_github of {
+      task_id : string;
+      git_root : string;
+    }
+
 (** Check whether [number] is a known-valid PR/issue for [repo_slug].
     On first call per [(repo_slug, kind)] the cache is populated via
     [gh api repos/{slug}/pulls|issues?state=all] (REST). Subsequent calls
@@ -89,6 +108,11 @@ val args_have_repo_flag : string list -> bool
 val inject_repo_flag_args : repo_slug:string -> string list -> string list
 
 val project_repo_slug : unit -> string option
+
+val resolve_task_repo_context :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  (task_repo_context, task_repo_context_error) result
 
 (** Replace a wrong --repo/-R slug in cmd with the correct one.
     Returns (corrected_cmd, was_corrected). *)

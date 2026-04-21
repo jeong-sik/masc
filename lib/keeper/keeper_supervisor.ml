@@ -44,18 +44,17 @@ let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
     in
     updated_ts > 0.0 && now -. updated_ts >= paused_ttl_sec
 
-let ambiguous_partial_commit_prefix =
-  "turn outcome ambiguous after committed mutating tool call(s)"
-
 let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
   meta.paused
   && (match meta.runtime.last_blocker_class with
       | Some Ambiguous_post_commit_timeout | Some Ambiguous_post_commit_failure ->
           true
       | None ->
-          String_util.contains_substring_ci
-            (String.trim meta.runtime.last_blocker)
-            ambiguous_partial_commit_prefix
+          (match Keeper_status_bridge.blocker_class_of_string
+                  meta.runtime.last_blocker with
+           | Some Ambiguous_post_commit_timeout
+           | Some Ambiguous_post_commit_failure -> true
+           | _ -> false)
       | _ -> false)
 
 let committed_tools_of_ambiguous_blocker (blocker : string) =
@@ -321,9 +320,15 @@ let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
         "ambiguous_partial_commit(post_commit_timeout)"
     | Some Ambiguous_post_commit_failure ->
         "ambiguous_partial_commit(post_commit_failure)"
-    | None when String_util.contains_substring_ci blocker "turn wall-clock timeout" ->
-        "ambiguous_partial_commit(post_commit_timeout)"
-    | _ -> "ambiguous_partial_commit(post_commit_failure)"
+    | None ->
+        (match Keeper_status_bridge.blocker_class_of_string blocker with
+         | Some Ambiguous_post_commit_timeout ->
+             "ambiguous_partial_commit(post_commit_timeout)"
+         | Some Ambiguous_post_commit_failure ->
+             "ambiguous_partial_commit(post_commit_failure)"
+         | Some _ -> "ambiguous_partial_commit(post_commit_failure)"
+         | None -> "ambiguous_partial_commit(post_commit_failure)")
+    | Some _ -> "ambiguous_partial_commit(post_commit_failure)"
   in
   let input =
     `Assoc

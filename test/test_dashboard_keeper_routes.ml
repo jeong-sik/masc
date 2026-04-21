@@ -34,6 +34,16 @@ let write_file path content =
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
 ;;
 
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/"
+  then ()
+  else if Sys.file_exists path
+  then ()
+  else (
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755)
+;;
+
 let rec rm_rf path =
   if Sys.file_exists path
   then
@@ -207,6 +217,36 @@ let merge_env_overrides overrides =
   Array.of_list (base @ injected)
 ;;
 
+let with_temp_config_root cascade_json f =
+  let root = Filename.temp_file "dashboard-keeper-config-" "" in
+  (try Sys.remove root with
+   | _ -> ());
+  Unix.mkdir root 0o755;
+  let cleanup () = rm_rf root in
+  Fun.protect
+    ~finally:cleanup
+    (fun () ->
+       mkdir_p (Filename.concat root "personas");
+       mkdir_p (Filename.concat root "keepers");
+       mkdir_p (Filename.concat root "prompts");
+       write_file (Filename.concat root "cascade.json") cascade_json;
+       f root)
+;;
+
+let with_config_dir config_root f =
+  let prev = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+       (match prev with
+        | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+        | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+       Masc_mcp.Config_dir_resolver.reset ())
+    (fun () ->
+       Unix.putenv "MASC_CONFIG_DIR" config_root;
+       Masc_mcp.Config_dir_resolver.reset ();
+       f ())
+;;
+
 let run_curl_post ?body ?token ~port ~path () =
   let header_file = Filename.temp_file "dashboard-keeper-post-" ".hdr" in
   let body_file = Filename.temp_file "dashboard-keeper-post-" ".body" in
@@ -336,6 +376,19 @@ let execution_keeper_paused body keeper_name =
   | None -> fail ("keeper missing from execution payload: " ^ keeper_name)
 ;;
 
+let profile_names body =
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string body in
+  match json |> member "profiles" with
+  | `List items ->
+      List.filter_map
+        (function
+          | `String value -> Some value
+          | _ -> None)
+        items
+  | _ -> []
+;;
+
 let make_keeper_meta_json ?(name = "route-shadow-demo") () =
   match
     Masc_mcp.Keeper_types.meta_of_json
@@ -375,7 +428,7 @@ let seed_auth_and_keeper ~base_path ~keeper_name =
   config, admin_token
 ;;
 
-let with_seeded_server f =
+let with_seeded_server ?(env_overrides = []) f =
   let exe = find_main_eio_exe () in
   let port =
     match find_free_port () with
@@ -394,16 +447,17 @@ let with_seeded_server f =
   in
   let env =
     merge_env_overrides
-      [ "MASC_AUTONOMY_ENABLED", "0"
-      ; "GRAPHQL_API_KEY", ""
-      ; "GRAPHQL_URL", "http://127.0.0.1:9/graphql"
-      ; "MASC_BASE_PATH", base_path
-      ; "MASC_POSTGRES_URL", ""
-      ; "DATABASE_URL", ""
-      ; "SUPABASE_DB_URL", ""
-      ; "SB_PG_URL", ""
-      ; "MASC_BOARD_BACKEND", "jsonl"
-      ]
+      ([ "MASC_AUTONOMY_ENABLED", "0"
+       ; "GRAPHQL_API_KEY", ""
+       ; "GRAPHQL_URL", "http://127.0.0.1:9/graphql"
+       ; "MASC_BASE_PATH", base_path
+       ; "MASC_POSTGRES_URL", ""
+       ; "DATABASE_URL", ""
+       ; "SUPABASE_DB_URL", ""
+       ; "SB_PG_URL", ""
+       ; "MASC_BOARD_BACKEND", "jsonl"
+       ]
+       @ env_overrides)
   in
   let argv =
     [| exe
@@ -616,6 +670,64 @@ let test_keeper_directive_resume_updates_paused_meta () =
       fail ("failed to read keeper meta after directive resume: " ^ err)
 ;;
 
+let test_available_cascade_profiles_filter_invalid_catalog_entries () =
+  with_temp_config_root
+    {|
+      {
+        "default_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
+        "good_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
+        "broken_models": ["__nonexistent_provider_sentinel__:fake-model"]
+      }
+    |}
+  @@ fun config_root ->
+  with_config_dir config_root @@ fun () ->
+  check
+    (list string)
+    "assignable cascades exclude invalid presets"
+    [ "default"; "good" ]
+    (Routes.available_cascade_profiles ());
+  let invalid = Routes.invalid_cascade_profiles () in
+  check bool "invalid preset is surfaced separately" true
+    (List.mem_assoc "broken" invalid)
+;;
+
+let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
+  with_temp_config_root
+    {|
+      {
+        "default_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
+        "good_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
+        "broken_models": ["__nonexistent_provider_sentinel__:fake-model"]
+      }
+    |}
+  @@ fun config_root ->
+  with_seeded_server
+    ~env_overrides:[ "MASC_CONFIG_DIR", config_root ]
+  @@ fun ~port ~config:_ ~admin_token ~keeper_name ->
+  let list_result =
+    run_curl_get ~port ~path:"/api/v1/keeper/cascades" ()
+  in
+  require_status "keeper cascades GET returns 200" 200 list_result;
+  let profiles = profile_names list_result.body in
+  check bool "valid profile remains assignable" true (List.mem "good" profiles);
+  check bool "invalid profile omitted from assignable list" false
+    (List.mem "broken" profiles);
+  let assign_invalid_result =
+    run_curl_post
+      ~body:
+        (Printf.sprintf
+           {|{"keeper":"%s","cascade_name":"broken"}|}
+           keeper_name)
+      ~token:admin_token
+      ~port
+      ~path:"/api/v1/keeper/cascade"
+      ()
+  in
+  require_status "invalid cascade assignment returns 409" 409 assign_invalid_result;
+  check bool "invalid cascade rejection explains config error" true
+    (contains_substr "invalid in active cascade.json" assign_invalid_result.body)
+;;
+
 let test_merge_keeper_trace_lines_includes_internal_history () =
   let base_path = Filename.temp_file "dashboard-keeper-trajectory-" "" in
   (try Sys.remove base_path with
@@ -702,6 +814,14 @@ let () =
             "directive resume updates paused meta"
             `Slow
             test_keeper_directive_resume_updates_paused_meta
+        ; test_case
+            "available cascade profiles filter invalid catalog entries"
+            `Quick
+            test_available_cascade_profiles_filter_invalid_catalog_entries
+        ; test_case
+            "keeper cascade routes filter invalid catalog entries"
+            `Slow
+            test_keeper_cascade_routes_filter_invalid_catalog_entries
         ; test_case
             "merge keeper trace lines includes internal history"
             `Quick

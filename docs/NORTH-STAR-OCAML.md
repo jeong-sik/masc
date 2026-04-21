@@ -11,7 +11,7 @@
 | 축 | masc-mcp | OAS | 평가 |
 |----|----------|-----|------|
 | `.mli` 커버리지 | 370/698 (53%) | 216/218 (99%) | masc-mcp 심각 |
-| `Obj.magic` | 0건 | 3건 (cdal/) | OAS 정밀 |
+| `Obj.magic` | 0건 | 0건 | 깨끗함 |
 | `Stdlib.Mutex` 생성 | 13군데 | 2군데 | masc-mcp 과도 |
 | `Eio.Mutex` 사용 | 88군데 | 19군데 | masc-mcp 과잉 |
 | 와일드카드 `_` (Top 파일) | keeper_status_detail: 35, verification: 28 | runtime_server: 25 | 둘 다 과도 |
@@ -40,19 +40,22 @@
 **실행**: 우선순위 — `lib/types/`, `lib/coord/`, `lib/keeper/` 순.
 타겟: `for f in lib/**/*.ml; do [ ! -f "${f%.ml}.mli" ] && echo "$f"; done`
 
-#### B. 와일드카드 `_` 패턴 799건 → exhaustive match
-**문제**: `| _ ->`가 unknown 입력을 조용히 삼킴. AI 코드 생성의 대표적 안티패턴 (feedback 기록: "Unknown → Permissive Default").
+#### B. 와일드카드 `_` 패턴 — 정밀 분류 후 위험 건만 교체
+**실측** (masc-mcp `lib/` 전체):
+- Cat 1 (JSON decode): 1,405건 — `Yojson` 파싱의 `| _ -> None/Error`. **합리적** (open-world JSON)
+- Cat 2 (HTTP/status): 436건 — HTTP 응답 코드 매칭. **부분 합리적**
+- Cat 3 (variant fallback): 912건 — **이 중 진짜 위험**:
+  - `dashboard_utils.ml:130` `_ -> HL_unknown` — string→enum 변환, 합리적
+  - `keeper_unified_turn.ml:220` `_ -> Post_commit_failure` — **위험**: variant 확장 시 silent wrong behavior
+  - `keeper_unified_turn.ml:761` `_ -> "text_turn"` — **위험**: turn type 분류의 silent fallback
+  - `keeper_unified_turn.ml:1519` `_ -> ()` — side-effect 무시, 맥락에 따라 위험
 
-**실측 핫스팟** (masc-mcp):
-- `keeper_status_detail.ml`: 35건
-- `verification.ml`: 28건
-- `operator_control_snapshot.ml`: 27건
-- `tool_local_runtime_verify.ml`: 26건
-- `keeper_unified_turn.ml`: 26건
+**판단 기준**:
+- `string -> enum` 변환의 `_ -> Unknown` variant: 합리적 (open world)
+- `variant -> variant` 매핑의 `_ -> default`: **위험** (closed world, 컴파일러 경고 상실)
+- `unit -> unit` 무시: 맥락 확인 필요
 
-**근거**: Alexis King "Parse, Don't Validate" — exhaustive match가 컴파일러에게 invariant 증명을 위임. `_`는 증명을 포기하는 것.
-
-**실행**: variant에 새 constructor 추가 후 `_` 브랜치가 컴파일 에러 나도록 `| _ ->`를 명시적 case로 교체. 파일당 최대 5분.
+**실행**: Cat 3 중 `variant -> variant` 매핑만 우선 교체. 예상 ~100건.
 
 #### C. Stdlib.Mutex 정리
 **문제**: Eio 컨텍스트 내부에서 `Stdlib.Mutex` 사용 시:
@@ -149,9 +152,9 @@ OCaml 5.4 추가. 현재 keeper 우선순위 관리를 `List.sort`로 구현한 
 | 지표 | 현재 | 목표 (3개월) | 측정 방법 |
 |------|------|-------------|----------|
 | `.mli` 커버리지 | 53% | 85% | `find lib -name '*.mli' \| wc -l` |
-| 와일드카드 `_` 수 | ~799 | <200 | `grep -c '\| _ ->' lib/**/*.ml` |
+| 와일드카드 `_` (variant→variant) | ~100 | <20 | `grep -n '\| _ ->' lib/**/*.ml` 수동 분류 |
 | `Stdlib.Mutex` (Eio 안) | 13 | <5 | `grep -rl 'Stdlib\.Mutex' lib/` |
-| `Obj.magic` | 3 | 0 | `grep -rl 'Obj\.magic' lib/` |
+| `Obj.magic` | 0 | 0 | `grep -rl 'Obj\.magic' lib/` |
 | Effect handler 사용 | 0 | 1-2 pilot | `grep -rl 'Effect\.' lib/` |
 | GADT 타입 | 7 | 12+ | `grep -c 'type _ .*=' lib/**/*.ml` |
 | Labelled tuple (5.4) | 0 | 신규 타입에 적용 | `grep '~.*:' lib/**/*.ml` |

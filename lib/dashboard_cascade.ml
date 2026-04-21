@@ -26,15 +26,13 @@ let source_to_string = function
 
 (** Profiles to surface in the dashboard.
 
-    We don't try to enumerate every possible profile name the loader might
-    accept — the dashboard cares about the profiles that keepers actively use,
-    plus a few standard ones. Listing them explicitly avoids loading the raw
-    JSON and reimplementing key-name heuristics.
-
-    Keepers run through [Keeper_cascade_profile.canonicalize], so any unknown
-    keeper [cascade_name] from the registry also shows up below by virtue of
-    being included in [keeper_profiles]. *)
-let standard_profiles = Keeper_cascade_profile.known_cascades
+    The cascade manager needs the live catalog from the active
+    [cascade.json], not just the built-in enum. That keeps repo-local
+    or operator-added profiles visible without duplicating the JSON key
+    scan here. Keepers still round-trip their raw [cascade_name], so
+    runtime drift can be shown alongside the live catalog. *)
+let live_profiles ?config_path () =
+  Keeper_cascade_profile.catalog_names ?config_path ()
 
 let profile_json ~config_path name =
   let defaults = Cascade_runtime.default_model_strings ~cascade_name:name in
@@ -85,9 +83,9 @@ let config_json () =
       profile_json ~config_path canonical :: acc
     end
   in
-  (* Start with the standard profiles, then append any runtime-drifted
-     keeper cascade_name values (e.g. a keeper TOML pointing at a
-     non-standard profile). Both paths go through [add_profile] so
+  (* Start with the live config catalog, then append any runtime-drifted
+     keeper cascade_name values (e.g. a keeper TOML pointing at an
+     alias or stale profile). Both paths go through [add_profile] so
      duplicates are filtered by canonical name. *)
   let keeper_entries =
     (* Issue #8619: was [with _ -> []] which silently swallowed
@@ -100,7 +98,7 @@ let config_json () =
     | _ -> []
   in
   let acc_after_standard =
-    List.fold_left add_profile [] standard_profiles
+    List.fold_left add_profile [] (live_profiles ?config_path ())
   in
   let acc_after_keepers =
     List.fold_left

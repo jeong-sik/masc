@@ -123,6 +123,103 @@ let parse_weighted_item = function
      | _ -> None)
   | _ -> None
 
+type catalog_entry = {
+  name : string;
+  keeper_assignable : bool;
+}
+
+module StringMap = Map.Make (String)
+
+type catalog_field =
+  | Schema_field
+  | Keeper_assignable_field
+
+let catalog_key_specs =
+  [
+    ("_models", Schema_field);
+    ("_temperature", Schema_field);
+    ("_max_tokens", Schema_field);
+    ("_api_key_env", Schema_field);
+    ("_strategy", Schema_field);
+    ("_max_cycles", Schema_field);
+    ("_backoff_base_ms", Schema_field);
+    ("_backoff_cap_ms", Schema_field);
+    ("_ollama_max_concurrent", Schema_field);
+    ("_cli_max_concurrent", Schema_field);
+    ("_tiers", Schema_field);
+    ("_sticky_ttl_ms", Schema_field);
+    ("_keeper_assignable", Keeper_assignable_field);
+  ]
+
+let split_catalog_key key =
+  let key_len = String.length key in
+  if key_len = 0 || key.[0] = '_' then None
+  else
+    List.find_map
+      (fun (suffix, field) ->
+        let suffix_len = String.length suffix in
+        if key_len > suffix_len
+           && String.sub key (key_len - suffix_len) suffix_len = suffix
+        then Some (String.sub key 0 (key_len - suffix_len), field)
+        else None)
+      catalog_key_specs
+
+type catalog_builder = {
+  has_schema_field : bool;
+  keeper_assignable : bool option;
+}
+
+let empty_catalog_builder = {
+  has_schema_field = false;
+  keeper_assignable = None;
+}
+
+let update_catalog_builder builder field value =
+  match field with
+  | Schema_field -> { builder with has_schema_field = true }
+  | Keeper_assignable_field ->
+      let keeper_assignable =
+        match value with
+        | `Bool b -> Some b
+        | _ -> builder.keeper_assignable
+      in
+      { builder with keeper_assignable }
+
+let load_catalog ~config_path =
+  match load_json config_path with
+  | Error _ as err -> err
+  | Ok (`Assoc fields) ->
+      let builders =
+        List.fold_left
+          (fun acc (key, value) ->
+            match split_catalog_key key with
+            | None -> acc
+            | Some (name, field) ->
+                let prior =
+                  match StringMap.find_opt name acc with
+                  | Some builder -> builder
+                  | None -> empty_catalog_builder
+                in
+                StringMap.add name (update_catalog_builder prior field value) acc)
+          StringMap.empty
+          fields
+      in
+      let entries =
+        builders
+        |> StringMap.bindings
+        |> List.filter_map (fun (name, builder) ->
+               if not builder.has_schema_field then None
+               else
+                 Some
+                   {
+                     name;
+                     keeper_assignable =
+                       Option.value builder.keeper_assignable ~default:true;
+                   })
+      in
+      Ok entries
+  | Ok _ -> Ok []
+
 let load_profile_weighted ~config_path ~name =
   let key = name ^ "_models" in
   match load_json config_path with

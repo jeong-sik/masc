@@ -26,6 +26,34 @@ type weighted_entry = {
       pattern-matching on [model_id]. *)
 }
 
+(** Catalog metadata for one named cascade profile discovered from
+    [cascade.json].
+
+    A profile enters the catalog when it declares at least one
+    recognized cascade schema key such as ["{name}_models"],
+    ["{name}_temperature"], ["{name}_strategy"], etc. This keeps
+    profile discovery aligned with the loader's typed schema instead of
+    duplicating ad-hoc JSON-key parsing at call sites. *)
+type catalog_entry = {
+  name : string;
+  keeper_assignable : bool;
+  (** Whether the profile may be assigned to keepers. Defaults to [true]
+      when ["{name}_keeper_assignable"] is absent. *)
+}
+
+(** Load the cascade catalog from [config_path].
+
+    Discovery is schema-driven: a profile is included when the JSON
+    contains at least one recognized per-cascade key for that [name].
+    The optional metadata key ["{name}_keeper_assignable"] marks
+    system-only profiles that should remain editable/visible but must
+    not appear in keeper-assignment UIs.
+
+    Returns [Error _] when the file cannot be read or parsed. *)
+val load_catalog :
+  config_path:string ->
+  (catalog_entry list, string) result
+
 (** Load a named model list from a JSON config file.
 
     The JSON file maps ["{name}_models"] keys to string arrays.

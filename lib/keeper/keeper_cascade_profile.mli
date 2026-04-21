@@ -64,11 +64,38 @@ val known_cascades : string list
     that still operate on strings (cascade.json key prefixes, metric
     label allow-list); new code should take {!t} directly. *)
 
+val catalog_names : ?config_path:string -> unit -> string list
+(** Live profile catalog discovered from the active [cascade.json].
+    Discovery is delegated to {!Cascade_config_loader.load_catalog}, so
+    profiles are surfaced from recognized cascade schema keys
+    (for example [{name}_models], [{name}_temperature],
+    [{name}_strategy], ...). When the file cannot be read, returns [[]]
+    rather than synthesizing a hardcoded catalog. *)
+
+val keeper_catalog_names : ?config_path:string -> unit -> string list
+(** Assignable live profile names from {!catalog_names}, filtered by
+    explicit [{name}_keeper_assignable = false] metadata in
+    [cascade.json]. Read failures return [[]]. *)
+
+val system_catalog_names : ?config_path:string -> unit -> string list
+(** Live system-only profile names present in [cascade.json], selected
+    by explicit [{name}_keeper_assignable = false] metadata. Read
+    failures return [[]]. *)
+
+val is_system_only_cascade : string -> bool
+(** Exact-name membership check against the active config's
+    {!system_catalog_names}. *)
+
+val canonicalize_with_catalog : catalog:string list -> string -> string
+(** Like {!canonicalize}, but resolves dynamic profiles against an explicit
+    live catalog instead of the active config path. Intended for tests and
+    server-side validation flows that already loaded the catalog. *)
+
 val canonicalize : string -> string
 (** [canonicalize raw = to_string (canonical raw)]. Existing
-    string-based call sites continue to work; unknown names now fall
-    back to {!default_name} (previously they passed through unchanged,
-    letting typos and dead profile names create ghost metric labels). *)
+    string-based call sites continue to work; legacy aliases collapse to
+    their canonical built-in name, live catalog names pass through, and
+    unknown values fall back to {!default_name}. *)
 
 (** {1 cascade.json key helpers} *)
 

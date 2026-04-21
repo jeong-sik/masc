@@ -299,6 +299,37 @@ let test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta () =
     false
     (runtime |> member "runtime_blocker_continue_gate" |> to_bool)
 
+let test_runtime_surface_derives_cascade_exhausted_from_meta () =
+  KR.clear ();
+  let base = make_meta ~name:"runtime-cascade-exhausted-test" () in
+  let reason =
+    "Internal error: [masc_oas_error] {\"kind\":\"cascade_exhausted\",\"cascade_name\":\"keeper_unified\",\"detail\":\"all providers failed: Connection refused\"}"
+  in
+  let meta =
+    {
+      base with
+      runtime =
+        {
+          base.runtime with
+          last_blocker = reason;
+        };
+    }
+  in
+  let config =
+    Coord.default_config "/tmp/test-keeper-exec-status-cascade-exhausted"
+  in
+  let runtime = KSB.runtime_surface_json config meta in
+  let open Yojson.Safe.Util in
+  check string "runtime blocker class"
+    "cascade_exhausted"
+    (runtime |> member "runtime_blocker_class" |> to_string);
+  check string "runtime blocker summary"
+    "Cascade exhausted after provider failures; local runtime connection refused."
+    (runtime |> member "runtime_blocker_summary" |> to_string);
+  check bool "runtime blocker continue gate stays false"
+    false
+    (runtime |> member "runtime_blocker_continue_gate" |> to_bool)
+
 let test_runtime_surface_derives_continue_gate_from_ambiguous_partial_commit () =
   KR.clear ();
   let meta = make_meta ~name:"runtime-continue-gate-test" () in
@@ -412,6 +443,35 @@ let test_runtime_surface_exposes_social_model_resolution_fields () =
   check (option string) "blank last_need omitted" None
     (runtime |> member "last_need" |> to_string_option)
 
+let test_runtime_surface_exposes_model_display_labels () =
+  KR.clear ();
+  let base = make_meta ~name:"runtime-model-label-test" () in
+  let meta =
+    {
+      base with
+      runtime =
+        {
+          base.runtime with
+          usage =
+            {
+              base.runtime.usage with
+              last_model_used = "codex";
+            };
+        };
+    }
+  in
+  let config =
+    Coord.default_config "/tmp/test-keeper-exec-status-model-display-labels"
+  in
+  let runtime = KSB.runtime_surface_json config meta in
+  let open Yojson.Safe.Util in
+  check string "active model label"
+    "codex_cli:auto"
+    (runtime |> member "active_model_label" |> to_string);
+  check string "last model used label"
+    "codex_cli:auto"
+    (runtime |> member "last_model_used_label" |> to_string)
+
 (* Issue #8670: parser must round-trip every constructor and reject
    unknown strings. The previous catch-all silently mapped typos to
    KH_offline, masking drift between dashboard producers and consumers. *)
@@ -487,6 +547,8 @@ let () =
             test_keeper_status_helpers_tolerate_null_status_json;
           test_case "runtime surface derives slot wait timeout blocker" `Quick
             test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta;
+          test_case "runtime surface derives cascade exhausted blocker" `Quick
+            test_runtime_surface_derives_cascade_exhausted_from_meta;
           test_case "runtime surface derives continue-gate blocker" `Quick
             test_runtime_surface_derives_continue_gate_from_ambiguous_partial_commit;
           test_case "runtime surface derives persisted continue-gate blocker"
@@ -494,5 +556,7 @@ let () =
             test_runtime_surface_derives_continue_gate_from_persisted_ambiguous_blocker;
           test_case "runtime surface exposes social model fields" `Quick
             test_runtime_surface_exposes_social_model_resolution_fields;
+          test_case "runtime surface exposes model display labels" `Quick
+            test_runtime_surface_exposes_model_display_labels;
         ] );
     ]

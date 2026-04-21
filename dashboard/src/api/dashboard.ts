@@ -1026,6 +1026,7 @@ function normalizeRuntimeBlockerClass(value: unknown): KeeperConfig['runtime']['
     case 'turn_timeout_after_queue_wait':
     case 'turn_timeout':
     case 'completion_contract_violation':
+    case 'cascade_exhausted':
       return blockerClass
     default:
       return null
@@ -1100,6 +1101,8 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     execution: {
       models: normalizeStringList(execution.models),
       active_model: asNullableString(execution.active_model) ?? '',
+      active_model_label: asNullableString(execution.active_model_label),
+      last_model_used_label: asNullableString(execution.last_model_used_label),
       verify: asLooseBoolean(execution.verify),
     },
     compaction: {
@@ -1152,6 +1155,8 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       presence_keepalive: asLooseBoolean(runtime.presence_keepalive),
       presence_keepalive_sec: asInt(runtime.presence_keepalive_sec) ?? 0,
       runtime_blocker_class: normalizeRuntimeBlockerClass(runtime.runtime_blocker_class),
+      active_model_label: asNullableString(runtime.active_model_label),
+      last_model_used_label: asNullableString(runtime.last_model_used_label),
       runtime_blocker_summary: asNullableString(runtime.runtime_blocker_summary),
       runtime_blocker_continue_gate:
         typeof runtime.runtime_blocker_continue_gate === 'boolean'

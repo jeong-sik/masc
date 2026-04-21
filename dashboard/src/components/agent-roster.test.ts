@@ -95,7 +95,7 @@ describe('compactModelLabel', () => {
     expect(compactModelLabel('   ')).toBeNull()
   })
 
-  it('returns last segment for colon-separated string', () => {
+  it('drops the provider prefix for provider:model labels', () => {
     expect(compactModelLabel('provider:model-name')).toBe('model-name')
   })
 
@@ -103,8 +103,12 @@ describe('compactModelLabel', () => {
     expect(compactModelLabel('claude-sonnet')).toBe('claude-sonnet')
   })
 
-  it('returns last segment for multi-segment', () => {
-    expect(compactModelLabel('a:b:c')).toBe('c')
+  it('keeps model family and variant after the first colon', () => {
+    expect(compactModelLabel('ollama:qwen3.6:35b-a3b-mlx-bf16')).toBe('qwen3.6:35b-a3b-mlx-bf16')
+  })
+
+  it('falls back to the provider label when the resolved model is auto', () => {
+    expect(compactModelLabel('codex_cli:auto')).toBe('codex')
   })
 
   it('handles spaces around segments', () => {
@@ -113,6 +117,17 @@ describe('compactModelLabel', () => {
 })
 
 describe('rosterModelMeta', () => {
+  it('prefers last_model_used_label when backend provides a display label', () => {
+    expect(
+      rosterModelMeta({
+        last_model_used_label: 'qwen3.6:35b-a3b-mlx-bf16',
+        last_model_used: 'ollama:qwen3.6:35b-a3b-mlx-bf16',
+        active_model_label: 'codex_cli:auto',
+        active_model: 'codex',
+      } as Keeper),
+    ).toEqual({ label: '최근 모델', value: 'qwen3.6:35b-a3b-mlx-bf16' })
+  })
+
   it('prefers last_model_used as recent model', () => {
     expect(
       rosterModelMeta({
@@ -121,6 +136,16 @@ describe('rosterModelMeta', () => {
         model: 'fallback-model',
       } as Keeper),
     ).toEqual({ label: '최근 모델', value: 'openai:gpt-5.4' })
+  })
+
+  it('falls back to active_model_label when last model is absent', () => {
+    expect(
+      rosterModelMeta({
+        active_model_label: 'codex_cli:auto',
+        active_model: 'codex',
+        model: 'fallback-model',
+      } as Keeper),
+    ).toEqual({ label: '현재 모델', value: 'codex_cli:auto' })
   })
 
   it('falls back to active_model when last model is absent', () => {

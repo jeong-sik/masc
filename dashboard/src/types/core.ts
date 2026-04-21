@@ -515,7 +515,9 @@ export interface Keeper {
   model?: string
   primary_model?: string
   active_model?: string
+  active_model_label?: string | null
   last_model_used?: string
+  last_model_used_label?: string | null
   next_model_hint?: string | null
   cascade_name?: string
   status: string
@@ -535,6 +537,7 @@ export interface Keeper {
     | 'turn_timeout_after_queue_wait'
     | 'turn_timeout'
     | 'completion_contract_violation'
+    | 'cascade_exhausted'
     | null
   runtime_blocker_summary?: string | null
   runtime_blocker_continue_gate?: boolean | null
@@ -766,6 +769,8 @@ interface KeeperConfigPrompt {
 interface KeeperConfigExecution {
   models: string[]
   active_model: string
+  active_model_label?: string | null
+  last_model_used_label?: string | null
   verify: boolean
 }
 
@@ -815,7 +820,10 @@ interface KeeperConfigRuntime {
     | 'turn_timeout_after_queue_wait'
     | 'turn_timeout'
     | 'completion_contract_violation'
+    | 'cascade_exhausted'
     | null
+  active_model_label?: string | null
+  last_model_used_label?: string | null
   runtime_blocker_summary?: string | null
   runtime_blocker_continue_gate?: boolean | null
 }

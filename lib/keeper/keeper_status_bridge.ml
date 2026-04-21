@@ -180,6 +180,27 @@ let runtime_blocker_surface_of_reason (reason : string) =
         summary = trimmed;
         continue_gate = true;
       }
+  else if String_util.contains_substring_ci trimmed "cascade_exhausted"
+  then
+    Some
+      {
+        blocker_class = "cascade_exhausted";
+        summary =
+          (if String_util.contains_substring_ci trimmed "connection refused" then
+             "Cascade exhausted after provider failures; local runtime connection refused."
+           else if
+             String_util.contains_substring_ci trimmed
+               "no providers available"
+           then
+             "Cascade exhausted; no providers were available."
+           else if
+             String_util.contains_substring_ci trimmed "all providers failed"
+           then
+             "Cascade exhausted after all configured providers failed."
+           else
+             "Cascade exhausted after provider failures.");
+        continue_gate = false;
+      }
   else if String_util.contains_substring_ci trimmed "autonomous turn slot wait timeout"
   then
     Some
@@ -263,6 +284,17 @@ let trimmed_string_json value =
   let trimmed = String.trim value in
   if trimmed = "" then `Null else `String trimmed
 
+let non_empty_string_opt value =
+  let trimmed = String.trim value in
+  if trimmed = "" then None else Some trimmed
+
+let active_model_label_opt_of_meta (meta : keeper_meta) =
+  Keeper_exec_status.active_model_label_of_meta meta |> non_empty_string_opt
+
+let last_model_used_label_opt_of_meta (meta : keeper_meta) =
+  if String.trim meta.runtime.usage.last_model_used = "" then None
+  else active_model_label_opt_of_meta meta
+
 let social_model_resolution_fields_json (meta : keeper_meta) =
   let resolved = Keeper_social_model.normalize_social_model meta.social_model in
   let recognized = Keeper_social_model.is_known_social_model meta.social_model in
@@ -286,6 +318,10 @@ let social_runtime_fields_json (meta : keeper_meta) =
   in
   social_model_resolution_fields_json meta
   @ [
+      ( "active_model_label",
+        Json_util.string_opt_to_json (active_model_label_opt_of_meta meta) );
+      ( "last_model_used_label",
+        Json_util.string_opt_to_json (last_model_used_label_opt_of_meta meta) );
       ("last_speech_act", trimmed_string_json meta.runtime.last_speech_act);
       ("delivery_surface_view", Json_util.string_opt_to_json delivery_surface_view);
       ( "delivery_surface_view_source",

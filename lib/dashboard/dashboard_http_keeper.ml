@@ -969,6 +969,14 @@ let keeper_config_json (config : Coord.config) (name : string)
       (* bootstrap_runtime is called at server startup — skip here to
          avoid blocking the HTTP handler with Eio.Mutex + file I/O (#3335). *)
       let active_model = Keeper_exec_status.active_model_of_meta m in
+      let active_model_label =
+        let value = Keeper_exec_status.active_model_label_of_meta m |> String.trim in
+        if value = "" then None else Some value
+      in
+      let last_model_used_label =
+        if String.trim m.runtime.usage.last_model_used = "" then None
+        else active_model_label
+      in
       let defaults = Keeper_types_profile.load_keeper_profile_defaults m.name in
       let persona_extended =
         Keeper_types_profile.resolved_persona_name ~keeper_name:m.name defaults
@@ -1012,6 +1020,8 @@ let keeper_config_json (config : Coord.config) (name : string)
               (List.map (fun s -> `String s)
                  (Cascade_runtime.models_of_cascade_name m.cascade_name)) );
           ("active_model", `String active_model);
+          ("active_model_label", Json_util.string_opt_to_json active_model_label);
+          ("last_model_used_label", Json_util.string_opt_to_json last_model_used_label);
           ("verify", `Bool false);
         ]
       in

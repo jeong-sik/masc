@@ -168,6 +168,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         turn_timeout_after_queue_wait: 'Turn timeout after queue wait',
         turn_timeout: 'Turn timeout',
         completion_contract_violation: 'Completion contract violation',
+        cascade_exhausted: 'Cascade exhausted',
       }[runtimeBlockerClass]
     : null
 

@@ -391,7 +391,9 @@ export interface OperatorKeeperSnapshot {
   autonomous_text_turn_count?: number
   autonomous_tool_turn_count?: number
   last_model_used?: string
+  last_model_used_label?: string | null
   active_model?: string
+  active_model_label?: string | null
   diagnostic?: Record<string, unknown>
   recent_activity?: Record<string, unknown>[]
 }

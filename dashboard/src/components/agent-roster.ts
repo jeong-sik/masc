@@ -1,6 +1,6 @@
 // MASC Dashboard — Unified Agent Roster
 // All entities are agents. Keeper = agent with persistent runtime.
-// Keeper state (CTX gauge, generation, autonomy) shown inline on the card.
+// Keeper state (CTX gauge, autonomy) shown inline on the card.
 
 import { html } from 'htm/preact'
 import { useMemo, useState } from 'preact/hooks'
@@ -69,20 +69,34 @@ export function stageBadgeClass(stageKey: string): string {
 export function compactModelLabel(model: string | null | undefined): string | null {
   const value = model?.trim()
   if (!value) return null
-  const parts = value.split(':').map(part => part.trim()).filter(Boolean)
-  if (parts.length >= 2) return parts[parts.length - 1] ?? value
+  const separator = value.indexOf(':')
+  if (separator >= 0 && separator < value.length - 1) {
+    const provider = value.slice(0, separator).trim()
+    const suffix = value.slice(separator + 1).trim()
+    if (!suffix) return value
+    if (suffix === 'auto') return provider.replace(/(?:[_-](?:cli|code))$/i, '')
+    return suffix
+  }
   return value
 }
 
 export function rosterModelMeta(
   source: {
+    last_model_used_label?: string | null
     last_model_used?: string | null
+    active_model_label?: string | null
     active_model?: string | null
     model?: string | null
   } | null | undefined,
 ): { label: string; value: string } | null {
+  const lastModelLabel = source?.last_model_used_label?.trim()
+  if (lastModelLabel) return { label: '최근 모델', value: lastModelLabel }
+
   const lastModel = source?.last_model_used?.trim()
   if (lastModel) return { label: '최근 모델', value: lastModel }
+
+  const activeModelLabel = source?.active_model_label?.trim()
+  if (activeModelLabel) return { label: '현재 모델', value: activeModelLabel }
 
   const activeModel = source?.active_model?.trim()
   if (activeModel) return { label: '현재 모델', value: activeModel }
@@ -706,7 +720,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             ?? agent.name
           const modelMeta = rosterModelMeta(keeperRuntime ?? keeper ?? null)
           const compactModel = compactModelLabel(modelMeta?.value)
-          const generation = keeperRuntime?.generation ?? keeper?.generation ?? null
           const fsmPhaseKey =
             keeperMonitoring?.phase.key && keeperMonitoring.phase.key !== 'unknown'
               ? keeperMonitoring.phase.key
@@ -752,14 +765,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                         </span>
                       ` : null}
                     </div>
-
-                    ${isKeeper && generation != null && generation > 0 ? html`
-                      <div class="mt-1 flex flex-wrap items-center gap-1.5 text-2xs text-[var(--text-muted)]">
-                        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
-                          세대 ${generation}
-                        </span>
-                      </div>
-                    ` : null}
                   </div>
                 </div>
 

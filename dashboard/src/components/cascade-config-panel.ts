@@ -94,6 +94,15 @@ export function sourceTone(source: CascadeProfile['source']): string {
   }
 }
 
+function runtimeKindLabel(kind: string | null | undefined): string | null {
+  switch (kind) {
+    case 'cli_agent': return 'CLI(non-interactive)'
+    case 'direct_api': return 'Direct API'
+    case 'local': return 'Local'
+    default: return null
+  }
+}
+
 function fmtCooldownExpiry(expiresAt: number | null): string {
   if (expiresAt == null) return '—'
   const delta = expiresAt - Date.now() / 1000
@@ -204,18 +213,45 @@ function ProfileCard({
         ? html`<div class="text-xs text-[var(--text-muted)]">no candidates resolved</div>`
         : html`
           <ol class="flex flex-col gap-1 text-xs">
-            ${profile.candidates.map((c, idx) => html`
-              <li class="flex items-center gap-2 py-1 border-b border-[var(--card-border)] last:border-b-0">
+            ${profile.candidates.map((c, idx) => {
+              const expanded = c.expanded_models ?? []
+              const displayModel = c.display_model ?? c.model
+              const displayProvider = c.display_provider_name ?? c.provider_name ?? null
+              const runtimeLabel = runtimeKindLabel(c.runtime_kind)
+              return html`
+              <li class="flex items-start gap-2 py-1 border-b border-[var(--card-border)] last:border-b-0">
                 <span class="tabular-nums text-[var(--text-muted)] w-5">${idx + 1}.</span>
                 <${StatusChip} tone=${candidateTone(c)}>
                   ${c.in_cooldown ? 'cooldown' : fmtPct(c.success_rate)}
                 <//>
-                <code class="flex-1 truncate text-[var(--text-strong)]">${c.model}</code>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <code class="text-[var(--text-strong)]">${displayModel}</code>
+                    ${displayProvider
+                      ? html`<span class="text-[var(--text-muted)]">${displayProvider}</span>`
+                      : null}
+                    ${runtimeLabel
+                      ? html`<span class="text-[var(--text-muted)]">${runtimeLabel}</span>`
+                      : null}
+                  </div>
+                  ${c.model !== displayModel
+                    ? html`<div class="text-[11px] text-[var(--text-muted)] mt-0.5">config: <code>${c.model}</code></div>`
+                    : null}
+                  ${expanded.length > 1
+                    ? html`
+                      <ol class="mt-1 flex flex-col gap-0.5 text-[11px] text-[var(--text-muted)]">
+                        ${expanded.map((model, expandedIdx) => html`
+                          <li><span class="tabular-nums">${expandedIdx + 1}.</span> <code>${model}</code></li>
+                        `)}
+                      </ol>
+                    `
+                    : null}
+                </div>
                 <span class="tabular-nums text-[var(--text-muted)]">
                   w ${c.config_weight}${c.effective_weight === c.config_weight ? '' : ` → ${c.effective_weight}`}
                 </span>
               </li>
-            `)}
+            `})}
           </ol>
         `}
     </article>

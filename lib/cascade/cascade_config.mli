@@ -173,14 +173,13 @@ val resolve_model_strings :
 
 (** Expand execution-time convenience fallbacks while preserving stable order.
 
-    Currently ["glm:auto"] expands to:
-    {[
-      ["glm:auto"; "glm:turbo"; "glm:flash"]
-    ]}
+    Uses the same provider:auto expansion as {!expand_auto_models}, so
+    CLI and GLM family entries execute in the same concrete order the
+    dashboard shows.
 
     Duplicate entries are removed after expansion, keeping the first
     appearance. This lets callers keep config concise while still
-    getting automatic GLM failover at execution time.
+    getting automatic provider-internal failover at execution time.
 
     @since 0.116.2 *)
 val expand_model_strings_for_execution : string list -> string list
@@ -206,6 +205,11 @@ val resolve_model_strings_traced :
     @since 0.139.0 *)
 type candidate_info = {
   model_string : string;        (** "provider:model_id" as written in config *)
+  display_model_string : string; (** User-facing label for the configured candidate *)
+  provider_name : string option; (** Raw provider prefix when present *)
+  display_provider_name : string option; (** User-facing provider family label *)
+  runtime_kind : string option; (** "local" / "cli_agent" / "direct_api" when known *)
+  expanded_models : string list; (** Concrete execution order for this configured candidate *)
   config_weight : int;          (** Weight from [cascade.json] ([1] when absent) *)
   effective_weight : int;       (** Weight after health adjustment; [0] = cooled-down *)
   success_rate : float;         (** Rolling-window success rate, [0.0]–[1.0] *)

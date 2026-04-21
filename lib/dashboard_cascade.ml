@@ -11,6 +11,11 @@ let now_iso () = Types.now_iso ()
 let candidate_to_json (c : CC.candidate_info) : Yojson.Safe.t =
   `Assoc [
     ("model", `String c.model_string);
+    ("display_model", `String c.display_model_string);
+    ("provider_name", Json_util.string_opt_to_json c.provider_name);
+    ("display_provider_name", Json_util.string_opt_to_json c.display_provider_name);
+    ("runtime_kind", Json_util.string_opt_to_json c.runtime_kind);
+    ("expanded_models", `List (List.map (fun model -> `String model) c.expanded_models));
     ("config_weight", `Int c.config_weight);
     ("effective_weight", `Int c.effective_weight);
     ("success_rate", `Float c.success_rate);

@@ -1776,6 +1776,11 @@ export function updateKeeperCascade(keeper: string, cascade_name: string): Promi
 
 export interface CascadeCandidate {
   model: string
+  display_model?: string | null
+  provider_name?: string | null
+  display_provider_name?: string | null
+  runtime_kind?: string | null
+  expanded_models?: string[] | null
   config_weight: number
   effective_weight: number
   success_rate: number

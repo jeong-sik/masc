@@ -16,6 +16,8 @@ let unset_env k =
 
 let with_clean_env f =
   List.iter unset_env [
+    "ZAI_CODING_DEFAULT_MODEL";
+    "ZAI_CODING_AUTO_MODELS";
     "GEMINI_DEFAULT_MODEL";
     "ANTHROPIC_DEFAULT_MODEL";
     "OPENAI_DEFAULT_MODEL";
@@ -54,8 +56,26 @@ let test_gemini_env_override () =
   Unix.putenv "GEMINI_DEFAULT_MODEL" "";
   check string "gemini respects env override"
     "gemini-2.5-flash" resolved_gemini;
-  check string "gemini_cli respects same env override"
+    check string "gemini_cli respects same env override"
     "gemini-2.5-flash" resolved_cli
+
+let test_glm_coding_auto_maps_to_glm_5_1 () =
+  with_clean_env (fun () ->
+    let resolved = R.resolve_auto_model_id "glm-coding" "auto" in
+    check string "glm-coding:auto → glm-5.1"
+      "glm-5.1" resolved)
+
+let test_glm_coding_auto_models_default_order () =
+  with_clean_env (fun () ->
+    check (list string) "glm-coding:auto expands to coding-plan order"
+      [
+        "glm-5.1";
+        "glm-5";
+        "glm-5-turbo";
+        "glm-4.7";
+        "glm-4.5-air";
+      ]
+      (R.glm_coding_auto_models ()))
 
 let test_gemini_cli_auto_models_default_rotation_order () =
   with_clean_env (fun () ->
@@ -131,9 +151,20 @@ let test_expand_auto_models_includes_cli_auto_specs () =
       ]
       expanded)
 
+let test_expand_model_strings_for_execution_matches_auto_expansion () =
+  with_clean_env (fun () ->
+    let items = [ "glm-coding:auto"; "gemini_cli:auto" ] in
+    check (list string) "execution expansion matches auto expansion"
+      (C.expand_auto_models items)
+      (C.expand_model_strings_for_execution items))
+
 let () =
   run "Cascade_model_resolve" [
     "gemini auto", [
+      test_case "glm-coding:auto"
+        `Quick test_glm_coding_auto_maps_to_glm_5_1;
+      test_case "glm-coding:auto model list"
+        `Quick test_glm_coding_auto_models_default_order;
       test_case "gemini:auto"
         `Quick test_gemini_auto_maps_to_flash_preview;
       test_case "gemini_cli:auto (regression 2026-04-20)"
@@ -150,5 +181,7 @@ let () =
         `Quick test_codex_and_claude_cli_auto_models_env_override;
       test_case "expand_auto_models covers CLI auto"
         `Quick test_expand_auto_models_includes_cli_auto_specs;
+      test_case "execution expansion matches auto expansion"
+        `Quick test_expand_model_strings_for_execution_matches_auto_expansion;
     ];
   ]

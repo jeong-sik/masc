@@ -819,6 +819,11 @@ let run_named
     match remaining with
     | [] ->
       let reason : Keeper_types.cascade_exhaustion_reason = match last_err with
+        (* TODO(OAS): NetworkError should expose structured detail so we can
+           match on | NetworkError { detail = Connection_refused } instead of
+           string-matching the message.  Requires OAS PR to add
+           network_error_detail variant to http_client.http_error and
+           retry.api_error. *)
         | Some (Llm_provider.Http_client.NetworkError { message })
           when String_util.contains_substring_ci message "connection refused" ->
             Keeper_types.Connection_refused

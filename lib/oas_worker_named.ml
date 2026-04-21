@@ -841,19 +841,19 @@ let run_named
   let candidate_base_urls =
     List.map (fun (c : Llm_provider.Provider_config.t) -> c.base_url) candidate_cfgs
   in
-  (* CLI providers (Claude_code / Gemini_cli / Kimi_cli / Codex_cli) have an
-     empty [base_url].  Map them to a stable per-kind sentinel so the
-     strategy's capacity probe and the client-capacity registry share
-     the same lookup key.  Any new CLI kind added to OAS will fall
-     through this match and get an empty key (capacity treated as
-     "unknown → optimistically available"), preserving Phase A
-     fail-open semantics until the entry is added explicitly. *)
-  let cli_sentinel_of_kind = function
-    | Llm_provider.Provider_config.Claude_code -> Some "cli:claude_code"
-    | Gemini_cli -> Some "cli:gemini_cli"
-    | Kimi_cli -> Some "cli:kimi_cli"
-    | Codex_cli -> Some "cli:codex_cli"
-    | _ -> None
+  (* CLI providers have an empty [base_url]. Map them to a stable
+     per-kind sentinel so the strategy's capacity probe and the
+     client-capacity registry share the same lookup key. Delegates
+     to the OAS SSOT {!Provider_kind.is_subprocess_cli}: any new CLI
+     kind added to OAS (e.g. future Codex variants) is picked up
+     automatically without touching this site. Sentinel format:
+     ["cli:" ^ canonical-lowercase-name], matching
+     {!Provider_kind.to_string}. *)
+  let cli_sentinel_of_kind kind =
+    if Llm_provider.Provider_config.is_subprocess_cli kind then
+      Some ("cli:" ^ Llm_provider.Provider_config.string_of_provider_kind kind)
+    else
+      None
   in
   let capacity_key_of (c : Llm_provider.Provider_config.t) =
     if c.base_url <> "" then c.base_url

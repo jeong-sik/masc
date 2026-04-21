@@ -61,6 +61,7 @@ export interface DashboardConfigResolution {
   status: 'ready' | 'warn' | 'invalid_env' | 'missing'
   warnings: string[]
   config_root: DashboardConfigResolutionItem
+  cascade_authoring: DashboardConfigResolutionItem
   cascade: DashboardConfigResolutionItem
   prompts: DashboardConfigResolutionItem
   keepers: DashboardConfigResolutionItem

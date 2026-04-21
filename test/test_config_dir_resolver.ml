@@ -129,6 +129,7 @@ let test_env_override_valid () =
     (Lib.Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "env"
     (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
+  check bool "cascade authoring missing" false resolution.cascade_authoring.exists;
   check bool "cascade exists" true resolution.cascade.exists;
   check bool "prompts exists" true resolution.prompts.exists
 
@@ -143,6 +144,10 @@ let test_env_override_valid_with_toml_only_root () =
     (Lib.Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "env"
     (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
+  check bool "cascade authoring exists" true resolution.cascade_authoring.exists;
+  check string "cascade authoring path targets toml"
+    (Filename.concat config "cascade.toml")
+    resolution.cascade_authoring.path;
   check bool "cascade exists via toml source" true resolution.cascade.exists;
   check string "cascade runtime path still targets json"
     (Filename.concat config "cascade.json")

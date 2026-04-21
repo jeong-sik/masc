@@ -76,6 +76,23 @@ let make_noop_tool () =
     ~parameters:[]
     (fun _ -> Ok Oas.Types.{ content = "ok" })
 
+let make_named_noop_tool name =
+  Oas.Tool.create
+    ~name
+    ~description:"No-op test tool"
+    ~parameters:[]
+    (fun _ -> Ok Oas.Types.{ content = "ok" })
+
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
 let openai_text_response ?(id = "chatcmpl-1") text =
   Printf.sprintf
     {|{"id":"%s","object":"chat.completion","model":"mock","choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}|}
@@ -1010,6 +1027,68 @@ let make_codex_cli_provider_cfg ?(model_id = "codex") () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Codex_cli
     ~model_id ~base_url:"" ()
+
+let make_openai_compat_provider_cfg ?(model_id = "gpt-4.1") () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~model_id ~base_url:"http://127.0.0.1:18080/v1" ()
+
+let test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  let tools =
+    [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ]
+  in
+  match
+    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      ~provider_cfg:(make_codex_cli_provider_cfg ())
+      ~tools
+  with
+  | Ok (effective_tools, Some policy) ->
+      Alcotest.(check int) "runtime lane strips inline tools" 0
+        (List.length effective_tools);
+      Alcotest.(check (list string)) "allowed tool names preserve public MCP set"
+        [ "masc_status"; "masc_tasks" ] policy.allowed_tool_names;
+      Alcotest.(check (list string)) "allowed server names"
+        [ "masc" ] policy.allowed_server_names;
+      Alcotest.(check (list string)) "runtime server name"
+        [ "masc" ]
+        (List.map Llm_provider.Llm_transport.runtime_mcp_server_name policy.servers);
+      Alcotest.(check bool) "strict runtime policy" true policy.strict;
+      Alcotest.(check bool) "builtins disabled" true policy.disable_builtin_tools
+  | Ok (_, None) ->
+      Alcotest.fail "expected codex_cli public MCP tools to use runtime MCP lane"
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
+let test_resolve_tool_lane_for_openai_public_tools_keeps_inline_tools () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  let tools =
+    [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ]
+  in
+  match
+    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      ~provider_cfg:(make_openai_compat_provider_cfg ())
+      ~tools
+  with
+  | Ok (effective_tools, None) ->
+      Alcotest.(check int) "inline lane keeps requested tools"
+        (List.length tools) (List.length effective_tools)
+  | Ok (_, Some _) ->
+      Alcotest.fail "expected openai_compat public tools to stay on inline lane"
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
+let test_resolve_tool_lane_for_codex_cli_internal_tools_rejects () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  match
+    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      ~provider_cfg:(make_codex_cli_provider_cfg ())
+      ~tools:[ make_named_noop_tool "keeper_board_get" ]
+  with
+  | Ok _ ->
+      Alcotest.fail
+        "expected codex_cli to reject keeper-internal tools without inline tool support"
+  | Error (Oas.Error.Config (Oas.Error.InvalidConfig { field; _ })) ->
+      Alcotest.(check string) "field" "tool_support" field
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
 let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
   let provider_cfg = make_codex_cli_provider_cfg () in
@@ -2241,6 +2320,12 @@ let () =
         test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback;
       Alcotest.test_case "codex preflight scales retry limit for argv overflow" `Quick
         test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow;
+      Alcotest.test_case "public MCP tools on codex_cli use runtime MCP lane" `Quick
+        test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy;
+      Alcotest.test_case "public MCP tools on openai_compat stay inline" `Quick
+        test_resolve_tool_lane_for_openai_public_tools_keeps_inline_tools;
+      Alcotest.test_case "keeper-internal tools on codex_cli are rejected" `Quick
+        test_resolve_tool_lane_for_codex_cli_internal_tools_rejects;
       Alcotest.test_case "worker build_agent installs retry policy" `Quick
         test_worker_build_agent_uses_default_internal_retry_policy;
       Alcotest.test_case "resume config propagates retry policy" `Quick

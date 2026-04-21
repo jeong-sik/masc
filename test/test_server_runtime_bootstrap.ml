@@ -96,8 +96,7 @@ goal = "example"
 room_scope = "current"
 proactive_enabled = false
 |}
-let find_free_port () =
-  let start = 9200 + (Unix.getpid () mod 1000) in
+let find_free_port_from start =
   let rec loop attempts port =
     if attempts <= 0 then
       Alcotest.skip ()
@@ -117,6 +116,43 @@ let find_free_port () =
                 (Unix.error_message err) fn arg)
   in
   loop 2048 start
+
+let find_free_port () =
+  find_free_port_from (9200 + (Unix.getpid () mod 1000))
+
+let openai_text_response ?(id = "chatcmpl-1") text =
+  Printf.sprintf
+    {|{"id":"%s","object":"chat.completion","model":"mock","choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":1,"total_tokens":11}}|}
+    id text
+
+let start_mock_openai_server ~port ~response =
+  match Unix.fork () with
+  | 0 ->
+      let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+      Unix.setsockopt socket Unix.SO_REUSEADDR true;
+      Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, port));
+      Unix.listen socket 16;
+      let payload =
+        Printf.sprintf
+          "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
+          (String.length response) response
+      in
+      let buffer = Bytes.create 4096 in
+      let rec loop () =
+        let client, _ = Unix.accept socket in
+        Fun.protect
+          ~finally:(fun () -> Unix.close client)
+          (fun () ->
+            ignore
+              (try Unix.read client buffer 0 (Bytes.length buffer)
+               with Unix.Unix_error _ -> 0);
+            ignore (Unix.write_substring client payload 0 (String.length payload)));
+        loop ()
+      in
+      loop ()
+  | pid ->
+      Unix.sleepf 0.1;
+      pid
 
 let merge_env_overrides overrides =
   let override_keys = List.map fst overrides in
@@ -329,8 +365,10 @@ let wait_for_startup_phase ~pid ~port ~timeout_s expected_phase =
     match curl_health_json ~port with
     | Some json -> (
         let phase =
-          Yojson.Safe.Util.(
-            json |> member "startup" |> member "phase" |> to_string_option)
+          match Yojson.Safe.Util.member "startup" json with
+          | `Assoc _ as startup ->
+              Yojson.Safe.Util.(startup |> member "phase" |> to_string_option)
+          | _ -> None
         in
         match phase with
         | Some phase when String.equal phase expected_phase -> true
@@ -363,6 +401,18 @@ let write_invalid_local_only_cascade base_path =
     {|{
   "local_only_models": ["ollama:qwen3.6:35b-a3b-mlx-bf16"]
 }|}
+
+let write_partially_invalid_cascade ~base_path ~valid_model =
+  let config_root = Filename.concat base_path ".masc/config" in
+  mkdir_p config_root;
+  write_file
+    (Filename.concat config_root "cascade.json")
+    (Printf.sprintf
+       {|{
+  "keeper_unified_models": ["%s"],
+  "broken_profile_models": ["__nonexistent_provider_sentinel__:fake"]
+}|}
+       valid_model)
 
 let stop_process pid =
   (try Unix.kill pid Sys.sigterm with _ -> ());
@@ -1444,6 +1494,95 @@ let test_main_eio_invalid_cascade_stays_degraded_but_serves_dashboard () =
             Yojson.Safe.Util.(
               config_json |> member "config_path" |> to_string)))
 
+let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
+  with_temp_dir "startup-partial-cascade" (fun dir ->
+      let exe = find_main_eio_exe () in
+      let port = find_free_port () in
+      let mock_port = find_free_port_from (port + 1) in
+      let mock_pid =
+        start_mock_openai_server ~port:mock_port
+          ~response:(openai_text_response "ok")
+      in
+      let log_file = Filename.concat dir "server.log" in
+      let log_fd =
+        Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+      in
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
+      with_cwd (project_root ()) @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
+      write_partially_invalid_cascade ~base_path:dir
+        ~valid_model:(Printf.sprintf "custom:stable@http://127.0.0.1:%d/v1" mock_port);
+      let env =
+        merge_env_overrides
+          [
+            ("MASC_BASE_PATH", dir);
+            ("MASC_STORAGE_TYPE", "filesystem");
+            ("GRAPHQL_API_KEY", "");
+            ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
+            ("MASC_AUTONOMY_ENABLED", "0");
+            ("MASC_ORCHESTRATOR_ENABLED", "0");
+            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_USE_H2", "0");
+            ("DUNE_SOURCEROOT", project_root ());
+          ]
+      in
+      let pid =
+        Unix.create_process_env exe
+          [|
+            exe;
+            "--host";
+            "127.0.0.1";
+            "--port";
+            string_of_int port;
+            "--base-path";
+            dir;
+          |]
+          env Unix.stdin log_fd log_fd
+      in
+      Unix.close log_fd;
+      Fun.protect
+        ~finally:(fun () ->
+          stop_process pid;
+          stop_process mock_pid)
+        (fun () ->
+          if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "ready") then begin
+            prerr_endline
+              (Printf.sprintf
+                 "main_eio partial catalog did not reach startup.phase=ready within timeout in this environment.\nlog:\n%s"
+                 (read_file log_file));
+            Alcotest.skip ()
+          end;
+          let health_headers, health_body =
+            curl_request_capture ~output_dir:dir ~name:"health-partial" ~method_:"GET"
+              ~url:(Printf.sprintf "http://127.0.0.1:%d/health" port) ()
+          in
+          ignore health_headers;
+          let health_json = parse_json_response_file health_body in
+          let startup = Yojson.Safe.Util.member "startup" health_json in
+          Alcotest.(check string) "startup phase stays ready" "ready"
+            Yojson.Safe.Util.(startup |> member "phase" |> to_string);
+          Alcotest.(check bool) "startup remains ready" true
+            Yojson.Safe.Util.(startup |> member "state_ready" |> to_bool);
+          Alcotest.(check bool) "last error remains unset" true
+            Yojson.Safe.Util.(startup |> member "last_error" |> to_string_option = None);
+          let config_headers, config_body =
+            curl_request_capture ~output_dir:dir ~name:"cascade-config-partial"
+              ~method_:"GET"
+              ~url:(Printf.sprintf "http://127.0.0.1:%d/api/v1/cascade/config" port)
+              ()
+          in
+          Alcotest.(check (option int)) "cascade config http 200" (Some 200)
+            (http_status_from_headers config_headers);
+          let config_json = parse_json_response_file config_body in
+          Alcotest.(check string) "partial validation serves valid subset"
+            "serving_valid_subset"
+            Yojson.Safe.Util.(
+              config_json |> member "validation_status" |> to_string);
+          Alcotest.(check int) "one invalid profile is surfaced" 1
+            Yojson.Safe.Util.(
+              config_json |> member "invalid_profiles" |> to_list |> List.length)))
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1566,6 +1705,10 @@ let () =
           Alcotest.test_case
             "main_eio fresh bootstrap and MCP handshake"
             `Slow test_main_eio_fresh_bootstrap_and_mcp_handshake;
+          Alcotest.test_case
+            "main_eio partial catalog stays ready and surfaces rejections"
+            `Slow
+            test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections;
           Alcotest.test_case
             "main_eio invalid cascade stays degraded but serves dashboard"
             `Slow

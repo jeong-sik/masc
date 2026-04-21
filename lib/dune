@@ -384,6 +384,7 @@
    trajectory
    eval_gate
    eval_harness
+   tool_call_replay_harness
    exec_core
    eval_calibration
    ;; Keeper contract

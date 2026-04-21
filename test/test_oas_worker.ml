@@ -1054,6 +1054,14 @@ let make_openrouter_provider_cfg ?(model_id = "anthropic/claude-3.5") () =
     ~request_path:entry.defaults.request_path
     ()
 
+let make_kimi_provider_cfg ?(model_id = "kimi-k2.5") () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~model_id
+    ~base_url:"https://api.moonshot.ai/v1"
+    ~request_path:"/chat/completions"
+    ()
+
 let test_cascade_provider_labels_keep_glm_and_glm_coding_distinct () =
   let glm = Masc_mcp.Oas_worker_cascade.provider_name_of_config
       (make_glm_provider_cfg ()) in
@@ -1070,6 +1078,14 @@ let test_cascade_provider_labels_preserve_registered_openai_compat_family () =
   Alcotest.(check string) "openrouter provider name" "openrouter" provider_name;
   Alcotest.(check string) "openrouter model label"
     "openrouter:anthropic/claude-3.5" model_label
+
+let test_cascade_provider_labels_detect_kimi_from_model_and_base_url () =
+  let provider_name = Masc_mcp.Oas_worker_cascade.provider_name_of_config
+      (make_kimi_provider_cfg ()) in
+  let model_label = Masc_mcp.Oas_worker_cascade.model_label_of_config
+      (make_kimi_provider_cfg ()) in
+  Alcotest.(check string) "kimi provider name" "kimi" provider_name;
+  Alcotest.(check string) "kimi model label" "kimi:kimi-k2.5" model_label
 
 let test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
@@ -2322,6 +2338,8 @@ let () =
         test_cascade_provider_labels_keep_glm_and_glm_coding_distinct;
       Alcotest.test_case "cascade provider labels preserve registered openai_compat family" `Quick
         test_cascade_provider_labels_preserve_registered_openai_compat_family;
+      Alcotest.test_case "cascade provider labels detect kimi from model/base_url" `Quick
+        test_cascade_provider_labels_detect_kimi_from_model_and_base_url;
       Alcotest.test_case "sdk_error_is_hard_quota detects Gemini CLI wrapper" `Quick
         test_sdk_error_is_hard_quota_detects_gemini_cli_network_wrapper;
       Alcotest.test_case "sdk_error_is_hard_quota keeps transient network errors false" `Quick

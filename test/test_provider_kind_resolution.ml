@@ -8,6 +8,18 @@ module Resolver = Masc_mcp.Provider_kind_resolver
 module Cascade = Masc_mcp.Cascade_config
 module Pk = Llm_provider.Provider_config
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  (match value with
+   | Some v -> Unix.putenv name v
+   | None -> Unix.putenv name "");
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
 let pp_kind fmt (k : Pk.provider_kind) =
   Format.pp_print_string fmt (Pk.string_of_provider_kind k)
 
@@ -50,6 +62,15 @@ let test_claude_prefix_resolves_to_anthropic () =
     check kind_testable "kind is Anthropic" Pk.Anthropic kind
   | Custom_url _ -> fail "claude: resolved to Custom_url"
   | Unknown msg -> fail ("claude: resolved to Unknown: " ^ msg)
+
+let test_kimi_prefix_resolves_to_openai_compat () =
+  match Resolver.resolve "kimi:kimi-for-coding" with
+  | Registered { provider_name; model_id; kind } ->
+    check string "provider_name" "kimi" provider_name;
+    check string "model_id preserved" "kimi-for-coding" model_id;
+    check kind_testable "kind is OpenAI_compat" Pk.OpenAI_compat kind
+  | Custom_url _ -> fail "kimi: resolved to Custom_url"
+  | Unknown msg -> fail ("kimi: resolved to Unknown: " ^ msg)
 
 let test_unknown_vendor_returns_unknown () =
   (* Anti-pattern guard: unknown prefix must NOT fall through to
@@ -111,6 +132,20 @@ let test_cascade_parse_unknown_returns_none () =
   | None -> ()
   | Some _ -> fail "unknown provider should parse to None, not a fallback config"
 
+let test_cascade_parse_kimi_legacy_alias_maps_to_k2_5 () =
+  with_env "MOONSHOT_API_KEY" (Some "dummy-key") (fun () ->
+      match Cascade.parse_model_string "kimi:kimi-for-coding" with
+      | None -> fail "kimi legacy alias should parse when MOONSHOT_API_KEY is set"
+      | Some cfg ->
+        check kind_testable "cfg.kind is OpenAI_compat"
+          Pk.OpenAI_compat cfg.kind;
+        check string "legacy alias normalized to current Kimi model"
+          "kimi-k2.5" cfg.model_id;
+        check string "Moonshot request path"
+          "/chat/completions" cfg.request_path;
+        check string "Moonshot base url"
+          "https://api.moonshot.ai/v1" cfg.base_url)
+
 (* ────────────────────────────────────────────────────────────────── *)
 (* Suite                                                              *)
 (* ────────────────────────────────────────────────────────────────── *)
@@ -123,6 +158,8 @@ let () =
         test_case "openrouter: -> OpenAI_compat; openai: -> Unknown" `Quick
           test_openai_compat_prefix_not_misrouted;
         test_case "claude: -> Anthropic" `Quick test_claude_prefix_resolves_to_anthropic;
+        test_case "kimi: -> OpenAI_compat" `Quick
+          test_kimi_prefix_resolves_to_openai_compat;
         test_case "unknown vendor -> Unknown (no OpenAI_compat fallback)" `Quick
           test_unknown_vendor_returns_unknown;
         test_case "malformed spec -> Unknown" `Quick test_malformed_spec_returns_unknown;
@@ -134,6 +171,8 @@ let () =
       [
         test_case "parse_model_string preserves Gemini kind (#8159)" `Quick
           test_cascade_parse_gemini_preserves_kind;
+        test_case "parse_model_string maps legacy Kimi alias to kimi-k2.5" `Quick
+          test_cascade_parse_kimi_legacy_alias_maps_to_k2_5;
         test_case "parse_model_string(unknown) = None" `Quick
           test_cascade_parse_unknown_returns_none;
       ]

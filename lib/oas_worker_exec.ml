@@ -179,17 +179,20 @@ let provider_caps_of_config (provider_cfg : Llm_provider.Provider_config.t) =
     | Llm_provider.Provider_config.Ollama ->
         Llm_provider.Capabilities.ollama_capabilities
     | Anthropic -> Llm_provider.Capabilities.anthropic_capabilities
+    | Kimi -> Llm_provider.Capabilities.kimi_capabilities
     | Glm -> Llm_provider.Capabilities.glm_capabilities
     | Gemini -> Llm_provider.Capabilities.gemini_capabilities
     | OpenAI_compat -> Llm_provider.Capabilities.openai_chat_capabilities
     | Claude_code -> Llm_provider.Capabilities.claude_code_capabilities
     | Gemini_cli -> Llm_provider.Capabilities.gemini_cli_capabilities
+    | Kimi_cli -> Llm_provider.Capabilities.kimi_cli_capabilities
     | Codex_cli -> Llm_provider.Capabilities.codex_cli_capabilities
   in
   let caps =
     match provider_cfg.kind with
     | Llm_provider.Provider_config.Claude_code
     | Gemini_cli
+    | Kimi_cli
     | Codex_cli -> base_caps
     | _ ->
         (match Llm_provider.Capabilities.for_model_id provider_cfg.model_id with
@@ -348,6 +351,21 @@ let non_http_transport_of_provider
                 (make_per_call_switch_transport (fun ~sw ->
                      Llm_provider.Transport_gemini_cli.create ~sw ~mgr
                        ~config))))
+  | Llm_provider.Provider_config.Kimi_cli ->
+      (match proc_mgr_result () with
+       | Error _ as e -> e
+       | Ok mgr ->
+           let config =
+             {
+               Llm_provider.Transport_kimi_cli.default_config with
+               model = cli_model_override provider_cfg.model_id;
+             }
+           in
+           Ok
+             (Some
+                (make_per_call_switch_transport (fun ~sw ->
+                     Llm_provider.Transport_kimi_cli.create ~sw ~mgr
+                       ~config))))
   | Llm_provider.Provider_config.Codex_cli ->
       (match proc_mgr_result () with
        | Error _ as e -> e
@@ -358,7 +376,7 @@ let non_http_transport_of_provider
                      Llm_provider.Transport_codex_cli.create ~sw ~mgr
                        ~config:
                          Llm_provider.Transport_codex_cli.default_config))))
-  | Anthropic | OpenAI_compat | Ollama | Gemini | Glm ->
+  | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm ->
       Ok None
 
 (* ================================================================ *)

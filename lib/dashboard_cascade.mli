@@ -23,6 +23,7 @@
         "config_path": "/path/to/cascade.json" | null,
         "profiles": [
           { "name": "keeper_unified",
+            "keeper_assignable": true,
             "candidates": [ { "model": "glm-coding:glm-5.1",
                               "config_weight": 50,
                               "effective_weight": 50,
@@ -37,8 +38,11 @@
     ]}
 
     Only validated profiles from the active runtime snapshot are surfaced in
-    [profiles]. Keepers whose raw [cascade_name] drifts from the validated
-    catalog still appear in [keeper_profiles] so the UI can show the mismatch.
+    [profiles]. Each profile also carries [keeper_assignable] metadata from the
+    live [cascade.json] catalog so the UI can distinguish keeper-routing
+    profiles from manual/system-only trial profiles. Keepers whose raw
+    [cascade_name] drifts from the validated catalog still appear in
+    [keeper_profiles] so the UI can show the mismatch.
 
     @since 0.6.0 *)
 val config_json : unit -> Yojson.Safe.t

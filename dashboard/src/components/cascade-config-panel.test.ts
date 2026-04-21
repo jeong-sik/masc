@@ -16,6 +16,8 @@ import {
   traceKindLabel,
   groupKeepersByCanonicalCascade,
   keepersWithUnknownCanonical,
+  profileSummaryText,
+  profileKeeperAssignmentNote,
 } from './cascade-config-panel'
 import type {
   CascadeCandidate,
@@ -388,7 +390,7 @@ describe('groupKeepersByCanonicalCascade', () => {
 
 describe('keepersWithUnknownCanonical', () => {
   function makeProfile(name: string): CascadeProfile {
-    return { name, source: 'named', candidates: [] }
+    return { name, source: 'named', keeper_assignable: true, candidates: [] }
   }
   function makeKeeperProfile(overrides: Partial<CascadeKeeperProfile> = {}): CascadeKeeperProfile {
     return {
@@ -416,5 +418,79 @@ describe('keepersWithUnknownCanonical', () => {
     ]
     const orphans = keepersWithUnknownCanonical(profiles, keepers)
     expect(orphans.map(o => o.keeper)).toEqual(['bob'])
+  })
+})
+
+describe('profileSummaryText', () => {
+  function makeProfile(overrides: Partial<CascadeProfile> = {}): CascadeProfile {
+    return {
+      name: 'keeper_unified',
+      source: 'named',
+      keeper_assignable: true,
+      candidates: [],
+      ...overrides,
+    }
+  }
+
+  function makeKeeperRow(overrides: Partial<CascadeKeeperProfile> = {}): CascadeKeeperProfile {
+    return {
+      keeper: 'alice',
+      cascade_name: 'keeper_unified',
+      canonical: 'keeper_unified',
+      ...overrides,
+    }
+  }
+
+  it('shows keeper count for assignable profiles', () => {
+    const profile = makeProfile({ candidates: [makeCandidate()] })
+    const keepers = groupKeepersByCanonicalCascade([makeKeeperRow()]).get('keeper_unified') ?? []
+    expect(profileSummaryText(profile, keepers)).toBe('1 candidate · 1 keeper')
+  })
+
+  it('omits zero-keeper count for manual/system-only profiles', () => {
+    const profile = makeProfile({
+      name: 'kimi_glm_local_mlx_vlm',
+      keeper_assignable: false,
+      candidates: [makeCandidate(), makeCandidate(), makeCandidate()],
+    })
+    expect(profileSummaryText(profile, [])).toBe('3 candidates')
+  })
+})
+
+describe('profileKeeperAssignmentNote', () => {
+  function makeProfile(overrides: Partial<CascadeProfile> = {}): CascadeProfile {
+    return {
+      name: 'keeper_unified',
+      source: 'named',
+      keeper_assignable: true,
+      candidates: [],
+      ...overrides,
+    }
+  }
+
+  const assignedKeepers = groupKeepersByCanonicalCascade([
+    {
+      keeper: 'alice',
+      cascade_name: 'keeper_unified',
+      canonical: 'keeper_unified',
+    },
+  ]).get('keeper_unified') ?? []
+
+  it('explains manual/system-only profiles without keepers', () => {
+    const profile = makeProfile({ keeper_assignable: false })
+    expect(profileKeeperAssignmentNote(profile, [])).toBe(
+      'manual/system-only profile; not assigned to keepers by design',
+    )
+  })
+
+  it('keeps no-keepers warning for assignable profiles', () => {
+    expect(profileKeeperAssignmentNote(makeProfile(), [])).toBe('no keepers assigned')
+  })
+
+  it('surfaces drift when manual/system-only profile still has keepers', () => {
+    const profile = makeProfile({ keeper_assignable: false })
+    expect(profileKeeperAssignmentNote(profile, assignedKeepers)).toBe(
+      'manual/system-only profile; current keepers still reference it',
+    )
   })
 })

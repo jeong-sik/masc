@@ -1790,6 +1790,7 @@ export interface CascadeCandidate {
 export interface CascadeProfile {
   name: string
   source: 'named' | 'default_fallback' | 'hardcoded_defaults'
+  keeper_assignable: boolean
   candidates: CascadeCandidate[]
 }
 

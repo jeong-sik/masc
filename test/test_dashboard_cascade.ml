@@ -78,6 +78,17 @@ let profile_names json =
         profiles
   | _ -> []
 
+let profile_by_name json target =
+  match member "profiles" json with
+  | `List profiles ->
+      List.find_opt
+        (fun profile ->
+           match member "name" profile with
+           | `String name -> String.equal name target
+           | _ -> false)
+        profiles
+  | _ -> None
+
 let with_dashboard_snapshot f =
   Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
   Masc_mcp.Cascade_catalog_runtime.install_snapshot_for_tests
@@ -146,6 +157,9 @@ let test_config_profile_shape () =
      | `String s when List.mem s ["named"; "default_fallback"; "hardcoded_defaults"] -> ()
      | `String s -> fail (Printf.sprintf "unexpected source: %s" s)
      | _ -> fail "profile.source should be string");
+    (match member "keeper_assignable" p with
+     | `Bool _ -> ()
+     | _ -> fail "profile.keeper_assignable should be bool");
     (match member "candidates" p with
      | `List _ -> () | _ -> fail "profile.candidates should be list")
 
@@ -194,6 +208,17 @@ let test_config_uses_live_catalog () =
         (List.mem "governance_judge" names);
       check bool "includes profiles declared by non-model schema keys" true
         (List.mem "tool_rerank" names);
+      let assert_keeper_assignable name expected =
+        match profile_by_name j name with
+        | Some profile ->
+            check bool (name ^ " keeper_assignable")
+              expected
+              Yojson.Safe.Util.(profile |> member "keeper_assignable" |> to_bool)
+        | None -> fail (Printf.sprintf "missing profile %s" name)
+      in
+      assert_keeper_assignable "custom_live" true;
+      assert_keeper_assignable "governance_judge" false;
+      assert_keeper_assignable "tool_rerank" false;
       check (option string) "config_path reflects active root"
         (Some cascade_path)
         Yojson.Safe.Util.(j |> member "config_path" |> to_string_option))

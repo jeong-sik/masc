@@ -73,28 +73,41 @@ let invalid_profiles_of_rejection_json rejection_json =
 let live_profiles ?config_path () =
   Keeper_cascade_profile.catalog_names ?config_path ()
 
-let profile_json_of_trace name (trace : CC.selection_trace) =
+let keeper_assignable_name_set ?config_path () =
+  Keeper_cascade_profile.keeper_catalog_names ?config_path ()
+  |> List.fold_left
+       (fun acc name -> StringSet.add name acc)
+       StringSet.empty
+
+let profile_json_of_trace ~keeper_assignable name (trace : CC.selection_trace) =
   `Assoc [
     ("name", `String name);
     ("source", `String (source_to_string trace.source));
+    ("keeper_assignable", `Bool keeper_assignable);
     ("candidates", `List (List.map candidate_to_json trace.candidates));
   ]
 
-let profile_json_runtime name =
+let profile_json_runtime ~keeper_assignable_names name =
   match Cascade_catalog_runtime.resolve_selection_trace ~name () with
-  | Ok trace -> Some (profile_json_of_trace name trace)
+  | Ok trace ->
+      Some
+        (profile_json_of_trace
+           ~keeper_assignable:(StringSet.mem name keeper_assignable_names)
+           name trace)
   | Error detail ->
       Log.Keeper.warn
         "dashboard cascade config: skipping profile %s: %s"
         name detail;
       None
 
-let profile_json_raw ~config_path name =
+let profile_json_raw ~config_path ~keeper_assignable_names name =
   let defaults = Cascade_runtime.default_model_strings ~cascade_name:name in
   let (_models, trace) =
     CC.resolve_model_strings_with_trace ?config_path ~name ~defaults ()
   in
-  profile_json_of_trace name trace
+  profile_json_of_trace
+    ~keeper_assignable:(StringSet.mem name keeper_assignable_names)
+    name trace
 
 (* Two-column contract consumed by the dashboard's "Keeper → Cascade
    Mapping" table:
@@ -171,6 +184,7 @@ let validation_summary_json ?config_path () =
 
 let config_json () =
   let config_path = Cascade_runtime.cascade_config_path () in
+  let keeper_assignable_names = keeper_assignable_name_set ?config_path () in
   let keeper_entries =
     (* Issue #8619: was [with _ -> []] which silently swallowed
        Eio.Cancel.Cancelled. Re-raise cancellation; only fall back
@@ -183,7 +197,10 @@ let config_json () =
   in
   let profiles =
     match Cascade_catalog_runtime.known_profile_names () with
-    | Ok names -> List.filter_map profile_json_runtime names
+    | Ok names ->
+        List.filter_map
+          (profile_json_runtime ~keeper_assignable_names)
+          names
     | Error detail ->
         Log.Keeper.warn
           "dashboard cascade config: validated catalog unavailable: %s"
@@ -209,7 +226,9 @@ let config_json () =
             keeper_entries
           |> List.rev
         in
-        List.map (profile_json_raw ~config_path) names
+        List.map
+          (profile_json_raw ~config_path ~keeper_assignable_names)
+          names
   in
   let fields =
     [

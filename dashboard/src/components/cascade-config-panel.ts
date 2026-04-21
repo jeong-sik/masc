@@ -101,6 +101,32 @@ export function sourceTone(source: CascadeProfile['source']): string {
   }
 }
 
+export function profileSummaryText(
+  profile: CascadeProfile,
+  keepers: readonly KeeperCascadeRow[],
+): string {
+  const parts = [
+    `${profile.candidates.length} candidate${profile.candidates.length === 1 ? '' : 's'}`,
+  ]
+  if (profile.keeper_assignable || keepers.length > 0) {
+    parts.push(`${keepers.length} keeper${keepers.length === 1 ? '' : 's'}`)
+  }
+  return parts.join(' · ')
+}
+
+export function profileKeeperAssignmentNote(
+  profile: CascadeProfile,
+  keepers: readonly KeeperCascadeRow[],
+): string | null {
+  if (!profile.keeper_assignable) {
+    return keepers.length === 0
+      ? 'manual/system-only profile; not assigned to keepers by design'
+      : 'manual/system-only profile; current keepers still reference it'
+  }
+  if (keepers.length === 0) return 'no keepers assigned'
+  return null
+}
+
 function validationTone(status: CascadeValidationStatus): 'ok' | 'warn' | 'bad' {
   switch (status) {
     case 'validated': return 'ok'
@@ -225,6 +251,7 @@ function ProfileCard({
   keepers,
 }: { profile: CascadeProfile; keepers: readonly KeeperCascadeRow[] }) {
   const driftCount = keepers.reduce((n, k) => n + (k.drift ? 1 : 0), 0)
+  const assignmentNote = profileKeeperAssignmentNote(profile, keepers)
   return html`
     <article class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] p-3">
       <header class="flex items-center gap-2 mb-2 flex-wrap">
@@ -232,21 +259,26 @@ function ProfileCard({
         <${StatusChip} tone=${sourceTone(profile.source)}>
           ${sourceLabel(profile.source)}
         <//>
+        ${!profile.keeper_assignable
+          ? html`<${StatusChip} tone="neutral" uppercase=${false}>manual/system-only<//>`
+          : null}
         <span class="text-xs text-[var(--text-muted)]">
-          ${profile.candidates.length} candidate${profile.candidates.length === 1 ? '' : 's'}
-          · ${keepers.length} keeper${keepers.length === 1 ? '' : 's'}
+          ${profileSummaryText(profile, keepers)}
         </span>
         ${driftCount > 0
           ? html`<${StatusChip} tone="warn">${driftCount} drift<//>`
           : null}
       </header>
-      ${keepers.length === 0
-        ? html`<div class="text-xs text-[var(--text-muted)] mb-2">no keepers assigned</div>`
-        : html`
+      ${assignmentNote
+        ? html`<div class="text-xs text-[var(--text-muted)] mb-2">${assignmentNote}</div>`
+        : null}
+      ${keepers.length > 0
+        ? html`
           <div class="flex flex-wrap gap-1 mb-2">
             ${keepers.map(k => html`<${KeeperChip} row=${k} />`)}
           </div>
-        `}
+        `
+        : null}
       ${profile.candidates.length === 0
         ? html`<div class="text-xs text-[var(--text-muted)]">no candidates resolved</div>`
         : html`

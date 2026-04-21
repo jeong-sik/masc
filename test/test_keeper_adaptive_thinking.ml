@@ -15,7 +15,12 @@ let test_adaptive_thinking_disabled () =
 
 let test_adaptive_thinking_error_or_retry () =
   let err_res : Agent_sdk.Types.tool_result =
-    Error { Agent_sdk.Types.message = "fail"; recoverable = true }
+    Error
+      {
+        Agent_sdk.Types.message = "fail";
+        recoverable = true;
+        error_class = None;
+      }
   in
   let result1 =
     Masc_mcp.Keeper_agent_run.adaptive_thinking_budget

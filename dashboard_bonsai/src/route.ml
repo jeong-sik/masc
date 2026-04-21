@@ -62,7 +62,7 @@ let path t = Printf.sprintf "/dashboard/b/%s" (slug t)
 (* Bonsai로 이식된 탭 목록. 그 외는 placeholder (Phase 2+). *)
 let is_implemented = function
   | Logs | Hello | Dead_keepers | Keepers | Archive_runs | Overview | Goals -> true
-  | _ -> false
+  | Observatory | Intervene | Tools | Sessions | Social_board -> false
 ;;
 
 (* 사이드바 렌더 순서. design_v2 IA와 동일. Hello는 legacy라 nav에 노출 안 함. *)

@@ -189,7 +189,7 @@ let view_lane ~name ~stat ~(status : lane_status) ~frames =
   let nm_attrs =
     match status with
     | `Dead -> [ Style.nm; Style.nm_dead ]
-    | _ -> [ Style.nm ]
+    | `Live | `Warn -> [ Style.nm ]
   in
   Node.div
     ~attrs:[ Style.lane ]

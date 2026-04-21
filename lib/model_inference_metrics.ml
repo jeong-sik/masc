@@ -18,6 +18,8 @@ type recent_entry = {
   re_input_tokens : int;
   re_output_tokens : int;
   re_latency_ms : float;
+  re_prompt_tok_per_sec : float option;
+  re_peak_memory_gb : float option;
   re_cost_usd : float;
   re_tools_count : int;
 }
@@ -45,6 +47,9 @@ type model_stats = {
   avg_tok_per_sec : float;
   p50_tok_per_sec : float;
   p95_tok_per_sec : float;
+  prompt_avg_tok_per_sec : float option;
+  prompt_p50_tok_per_sec : float option;
+  prompt_p95_tok_per_sec : float option;
   (* Hardware decode rate (eval_count / eval_duration from Ollama), separate
      from wall-clock tok_per_sec which includes queue wait + prefill + thinking.
      None when no entry in the window carried timings (e.g. providers other
@@ -52,6 +57,9 @@ type model_stats = {
   hw_decode_avg_tok_per_sec : float option;
   hw_decode_p50_tok_per_sec : float option;
   hw_decode_p95_tok_per_sec : float option;
+  (* Peak resident memory reported by the provider for the turn. We keep the
+     maximum because summing memory across turns is meaningless. *)
+  max_peak_memory_gb : float option;
   (* Fraction of turns in window where the model received think=true. Reflects
      Keeper_turn_intent adaptive classifier (Cognitive=true, Mechanical=false).
      None when no entry in window reported thinking_enabled (older jsonl rows
@@ -101,9 +109,11 @@ type raw_entry = {
   model : string;
   ts_unix : float;
   tok_per_sec : float;
+  prompt_tok_per_sec : float option;
   (* Hardware decode rate when present in telemetry; None for legacy entries
      and non-Ollama providers whose backend doesn't populate inference_timings. *)
   hw_decode_tok_per_sec : float option;
+  peak_memory_gb : float option;
   (* Per-turn thinking_enabled as sent to the model (adaptive classifier output).
      None for entries that predate the field or providers that don't expose it. *)
   thinking_enabled : bool option;
@@ -159,7 +169,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
                | _ -> "__error__"
            in
            Some { model; ts_unix = ts; tok_per_sec = 0.0;
+                  prompt_tok_per_sec = None;
                   hw_decode_tok_per_sec = None;
+                  peak_memory_gb = None;
                   thinking_enabled = None;
                   latency_ms = 0.0;
                   input_tokens = 0; output_tokens = 0;
@@ -182,6 +194,12 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
              match List.assoc_opt "tokens_per_second" tfields with
              | Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0
            in
+           let prompt_tok_per_sec =
+             match List.assoc_opt "prompt_per_second" tfields with
+             | Some (`Float f) when f > 0.0 -> Some f
+             | Some (`Int n) when n > 0 -> Some (Float.of_int n)
+             | _ -> None
+           in
            (* hw_decode_tokens_per_second — preferred field; fall back to
               provider_tokens_per_second for backward compat. Treat explicit
               null as absent so backfill for older rows is clean. *)
@@ -195,6 +213,17 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
              match read "hw_decode_tokens_per_second" with
              | Some _ as v -> v
              | None -> read "provider_tokens_per_second"
+           in
+           let peak_memory_gb =
+             let read key =
+               match List.assoc_opt key tfields with
+               | Some (`Float f) when f > 0.0 -> Some f
+               | Some (`Int n) when n > 0 -> Some (Float.of_int n)
+               | _ -> None
+             in
+             match read "peak_memory_gb" with
+             | Some _ as v -> v
+             | None -> read "peak_memory"
            in
            let latency_ms =
              match List.assoc_opt "request_latency_ms" tfields with
@@ -233,7 +262,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
              | _ -> None
            in
            Some { model; ts_unix = ts; tok_per_sec;
+                  prompt_tok_per_sec;
                   hw_decode_tok_per_sec;
+                  peak_memory_gb;
                   thinking_enabled;
                   latency_ms;
                   input_tokens; output_tokens;
@@ -298,9 +329,19 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
       if e.tok_per_sec > 0.0 then Some e.tok_per_sec else None
     ) entries |> Array.of_list in
     Array.sort Float.compare tok_vals;
+    let prompt_vals =
+      List.filter_map (fun e -> e.prompt_tok_per_sec) entries
+      |> Array.of_list
+    in
+    Array.sort Float.compare prompt_vals;
     let hw_vals = List.filter_map (fun e -> e.hw_decode_tok_per_sec) entries
                   |> Array.of_list in
     Array.sort Float.compare hw_vals;
+    let peak_vals =
+      List.filter_map (fun e -> e.peak_memory_gb) entries
+      |> Array.of_list
+    in
+    Array.sort Float.compare peak_vals;
     let lat_vals = List.filter_map (fun e ->
       if e.latency_ms > 0.0 then Some e.latency_ms else None
     ) entries |> Array.of_list in
@@ -333,9 +374,14 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
       avg_tok_per_sec = avg tok_vals;
       p50_tok_per_sec = percentile tok_vals 50.0;
       p95_tok_per_sec = percentile tok_vals 95.0;
+      prompt_avg_tok_per_sec = opt_if_any prompt_vals avg;
+      prompt_p50_tok_per_sec = opt_if_any prompt_vals (fun a -> percentile a 50.0);
+      prompt_p95_tok_per_sec = opt_if_any prompt_vals (fun a -> percentile a 95.0);
       hw_decode_avg_tok_per_sec = opt_if_any hw_vals avg;
       hw_decode_p50_tok_per_sec = opt_if_any hw_vals (fun a -> percentile a 50.0);
       hw_decode_p95_tok_per_sec = opt_if_any hw_vals (fun a -> percentile a 95.0);
+      max_peak_memory_gb =
+        opt_if_any peak_vals (fun a -> a.(Array.length a - 1));
       thinking_fraction;
       avg_latency_ms = avg lat_vals;
       p50_latency_ms = percentile lat_vals 50.0;
@@ -374,6 +420,8 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
           re_input_tokens = e.input_tokens;
           re_output_tokens = e.output_tokens;
           re_latency_ms = e.latency_ms;
+          re_prompt_tok_per_sec = e.prompt_tok_per_sec;
+          re_peak_memory_gb = e.peak_memory_gb;
           re_cost_usd = e.cost_usd;
           re_tools_count = e.tool_call_count;
         });
@@ -517,9 +565,13 @@ let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
     ; ("avg_tok_per_sec", `Float s.avg_tok_per_sec)
     ; ("p50_tok_per_sec", `Float s.p50_tok_per_sec)
     ; ("p95_tok_per_sec", `Float s.p95_tok_per_sec)
+    ; ("prompt_avg_tok_per_sec", opt_float s.prompt_avg_tok_per_sec)
+    ; ("prompt_p50_tok_per_sec", opt_float s.prompt_p50_tok_per_sec)
+    ; ("prompt_p95_tok_per_sec", opt_float s.prompt_p95_tok_per_sec)
     ; ("hw_decode_avg_tok_per_sec", opt_float s.hw_decode_avg_tok_per_sec)
     ; ("hw_decode_p50_tok_per_sec", opt_float s.hw_decode_p50_tok_per_sec)
     ; ("hw_decode_p95_tok_per_sec", opt_float s.hw_decode_p95_tok_per_sec)
+    ; ("max_peak_memory_gb", opt_float s.max_peak_memory_gb)
     ; ("thinking_fraction", opt_float s.thinking_fraction)
     ; ("avg_latency_ms", `Float s.avg_latency_ms)
     ; ("p50_latency_ms", `Float s.p50_latency_ms)
@@ -543,6 +595,8 @@ let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
           ("input_tokens", `Int r.re_input_tokens);
           ("output_tokens", `Int r.re_output_tokens);
           ("latency_ms", `Float r.re_latency_ms);
+          ("prompt_tok_per_sec", opt_float r.re_prompt_tok_per_sec);
+          ("peak_memory_gb", opt_float r.re_peak_memory_gb);
           ("cost_usd", `Float r.re_cost_usd);
           ("tools_count", `Int r.re_tools_count);
         ]

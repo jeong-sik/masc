@@ -483,6 +483,9 @@ export interface DashboardRuntimeModelMetric {
   avg_tok_per_sec?: number | null
   p50_tok_per_sec?: number | null
   p95_tok_per_sec?: number | null
+  prompt_avg_tok_per_sec?: number | null
+  prompt_p50_tok_per_sec?: number | null
+  prompt_p95_tok_per_sec?: number | null
   /**
    * Hardware decode rate (eval_count / eval_duration from Ollama) aggregated
    * across the telemetry window. Distinct from `avg_tok_per_sec` which is
@@ -493,6 +496,7 @@ export interface DashboardRuntimeModelMetric {
   hw_decode_avg_tok_per_sec?: number | null
   hw_decode_p50_tok_per_sec?: number | null
   hw_decode_p95_tok_per_sec?: number | null
+  max_peak_memory_gb?: number | null
   /**
    * Fraction [0.0, 1.0] of turns in the window where the model received
    * think=true. Reflects the Keeper_turn_intent adaptive classifier decision
@@ -520,6 +524,8 @@ export interface DashboardRuntimeModelMetric {
     input_tokens: number
     output_tokens: number
     latency_ms: number
+    prompt_tok_per_sec?: number | null
+    peak_memory_gb?: number | null
     cost_usd: number
     tools_count: number
   }> | null
@@ -597,9 +603,13 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
     avg_tok_per_sec: asNumber(raw.avg_tok_per_sec) ?? null,
     p50_tok_per_sec: asNumber(raw.p50_tok_per_sec) ?? null,
     p95_tok_per_sec: asNumber(raw.p95_tok_per_sec) ?? null,
+    prompt_avg_tok_per_sec: asNumber(raw.prompt_avg_tok_per_sec) ?? null,
+    prompt_p50_tok_per_sec: asNumber(raw.prompt_p50_tok_per_sec) ?? null,
+    prompt_p95_tok_per_sec: asNumber(raw.prompt_p95_tok_per_sec) ?? null,
     hw_decode_avg_tok_per_sec: asNumber(raw.hw_decode_avg_tok_per_sec) ?? null,
     hw_decode_p50_tok_per_sec: asNumber(raw.hw_decode_p50_tok_per_sec) ?? null,
     hw_decode_p95_tok_per_sec: asNumber(raw.hw_decode_p95_tok_per_sec) ?? null,
+    max_peak_memory_gb: asNumber(raw.max_peak_memory_gb) ?? null,
     thinking_fraction: asNumber(raw.thinking_fraction) ?? null,
     avg_latency_ms: asNumber(raw.avg_latency_ms) ?? null,
     p50_latency_ms: asNumber(raw.p50_latency_ms) ?? null,
@@ -628,6 +638,8 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
             input_tokens: asNumber(r.input_tokens) ?? 0,
             output_tokens: asNumber(r.output_tokens) ?? 0,
             latency_ms: asNumber(r.latency_ms) ?? 0,
+            prompt_tok_per_sec: asNumber(r.prompt_tok_per_sec) ?? null,
+            peak_memory_gb: asNumber(r.peak_memory_gb) ?? null,
             cost_usd: asNumber(r.cost_usd) ?? 0,
             tools_count: asNumber(r.tools_count) ?? 0,
           }))

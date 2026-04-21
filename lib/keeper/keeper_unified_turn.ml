@@ -1056,6 +1056,7 @@ let append_decision_record
                     [
                       ("system_fingerprint", match t.system_fingerprint with Some s -> `String s | None -> `Null);
                       ("reasoning_tokens", match t.reasoning_tokens with Some n -> `Int n | None -> `Null);
+                      ("peak_memory_gb", match t.peak_memory_gb with Some v -> `Float v | None -> `Null);
                       ("request_latency_ms", `Int t.request_latency_ms);
                     ] @ timings_fields
                 | None -> []
@@ -2515,6 +2516,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   @ (match result.inference_telemetry with
                      | Some t ->
                        (match t.reasoning_tokens with Some n -> [("reasoning_tokens", `Int n)] | None -> [])
+                       @ (match t.peak_memory_gb with Some v -> [("peak_memory_gb", `Float v)] | None -> [])
                        @ (match t.timings with
                           | Some ti ->
                             (match ti.predicted_per_second with Some v -> [("tokens_per_second", `Float v)] | None -> [])

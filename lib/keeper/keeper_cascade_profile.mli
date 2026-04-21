@@ -19,6 +19,7 @@ type t =
   | Keeper_unified
   | Sangsu
   | Local_only
+  | Local_mlx_vlm_qwen36
   | Local_recovery
   | Tool_rerank
   (* v1 active catalog (2026-04-17): keepers route through these via

@@ -86,6 +86,9 @@ let emit_cost_event
     | Some t ->
       (match t.reasoning_tokens with
        | Some n -> [("reasoning_tokens", `Int n)] | None -> [])
+      @ (match t.peak_memory_gb with
+         | Some gb -> [("peak_memory_gb", `Float gb)]
+         | None -> [])
       @ (match t.timings with
          | Some tm ->
            (match tm.cache_n with
@@ -359,18 +362,28 @@ let make_hooks
           | Some v -> Printf.sprintf "%.1f" v
           | None -> "-"
         in
-        let prompt_tok_s, decode_tok_s, latency_ms =
+        let prompt_tok_s, decode_tok_s, peak_mem_gb, latency_ms =
           match response.telemetry with
-          | Some { timings = Some t; request_latency_ms; _ } ->
+          | Some { timings = Some t; peak_memory_gb; request_latency_ms; _ } ->
               fmt_tok_s t.prompt_per_second,
               fmt_tok_s t.predicted_per_second,
+              (match peak_memory_gb with
+               | Some v -> Printf.sprintf "%.2f" v
+               | None -> "-"),
               request_latency_ms
-          | _ -> "-", "-", 0
+          | Some { peak_memory_gb; request_latency_ms; _ } ->
+              "-",
+              "-",
+              (match peak_memory_gb with
+               | Some v -> Printf.sprintf "%.2f" v
+               | None -> "-"),
+              request_latency_ms
+          | _ -> "-", "-", "-", 0
         in
         Log.Keeper.info
-          "keeper:%s turn=%d total_turns=%d model=%s tokens=%d prompt_tok_s=%s decode_tok_s=%s latency_ms=%d"
+          "keeper:%s turn=%d total_turns=%d model=%s tokens=%d prompt_tok_s=%s decode_tok_s=%s peak_mem_gb=%s latency_ms=%d"
           meta.name turn meta.runtime.usage.total_turns model total_tok
-          prompt_tok_s decode_tok_s latency_ms;
+          prompt_tok_s decode_tok_s peak_mem_gb latency_ms;
         (* Emit per-turn cost event for task attribution.
            cost_usd from OAS Pricing.annotate_response_cost (oas#393 resolved). *)
         (match trajectory_acc with

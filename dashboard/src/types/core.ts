@@ -150,6 +150,7 @@ export interface InferenceTelemetry {
     cache_n: number | null
   } | null
   reasoning_tokens: number | null
+  peak_memory_gb: number | null
   request_latency_ms: number
 }
 

@@ -122,12 +122,12 @@ check-bug-models:
 
 check-keeper:
 	@$(MAKE) --no-print-directory \
-	  CLEAN_CFGS="$$(find keeper-state-machine/ -name '*.cfg' ! -name '*-buggy*.cfg' | sort)" \
+	  CLEAN_CFGS="$$(find keeper-state-machine/ -name '*.cfg' ! -name '*-buggy*.cfg' ! -name '*-ci.cfg' | sort)" \
 	  BUGGY_CFGS="$$(find keeper-state-machine/ -name '*-buggy*.cfg' | sort)" check-all
 
 check-supporting:
 	@$(MAKE) --no-print-directory \
-	  CLEAN_CFGS="$$(find $(SUPPORTING_SPEC_DIRS) -name '*.cfg' ! -name '*-buggy*.cfg' | sort)" \
+	  CLEAN_CFGS="$$(find $(SUPPORTING_SPEC_DIRS) -name '*.cfg' ! -name '*-buggy*.cfg' ! -name '*-ci.cfg' | sort)" \
 	  BUGGY_CFGS="$$(find $(SUPPORTING_SPEC_DIRS) -name '*-buggy*.cfg' | sort)" check-all
 
 check-ecosystem:

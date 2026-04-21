@@ -358,6 +358,32 @@ let task_status_to_string = function
 
 let string_of_task_status = task_status_to_string
 
+(** Display icon for task status. Used by coord_status and coord_query
+    rendering. Exhaustive match — adding a constructor forces an update here. *)
+let task_status_icon = function
+  | Todo -> "📋"
+  | Claimed _ | InProgress _ -> "🔄"
+  | AwaitingVerification _ -> "🔍"
+  | Done _ -> "✅"
+  | Cancelled _ -> "🚫"
+
+(** Display assignee for task status.
+    Cancelled surfaces [cancelled_by]; Todo yields "unclaimed".
+    For ownership checks returning [option], use [task_assignee_of_status]. *)
+let task_display_assignee = function
+  | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ }
+  | AwaitingVerification { assignee; _ } -> assignee
+  | Cancelled { cancelled_by; _ } -> cancelled_by
+  | Todo -> "unclaimed"
+
+(** Extract assignee as [Some string], or [None] for Todo/Cancelled.
+    Canonical ownership-check helper — used by coord_task, gRPC, etc. *)
+let task_assignee_of_status = function
+  | Claimed { assignee; _ } -> Some assignee
+  | InProgress { assignee; _ } -> Some assignee
+  | AwaitingVerification { assignee; _ } -> Some assignee
+  | Todo | Done _ | Cancelled _ -> None
+
 (** Issue #8354: schema enums for [task_status] used to be hand-rolled in
     [tool_shard.ml] and [mcp_server.ml], dropping [awaiting_verification].
     [task_status] carries record payloads so we cannot enumerate dummy

@@ -196,11 +196,7 @@ let task_status_to_string = Types.task_status_to_string
     Evidence: 2026-04-16 /loop iter 4 — 12+/15 masc_transition failures
     are "Invalid transition: claimed -> release" from keepers trying to
     release tasks owned by a different keeper. *)
-let task_assignee_of_status = function
-  | Types.Claimed { assignee; _ } -> Some assignee
-  | Types.InProgress { assignee; _ } -> Some assignee
-  | Types.AwaitingVerification { assignee; _ } -> Some assignee
-  | Types.Todo | Types.Done _ | Types.Cancelled _ -> None
+let task_assignee_of_status = Types.task_assignee_of_status
 
 (** Issue #7646: symmetric to [task_assignee_of_status]. When a transition
     fails for a reason other than ownership mismatch, surface what

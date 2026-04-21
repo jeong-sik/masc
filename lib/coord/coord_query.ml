@@ -297,14 +297,9 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
         ) backlog.tasks
     | None ->
         List.filter (fun (task : task) ->
-          let is_done = match task.task_status with
-            | Done _ -> true
-            | _ -> false
-          in
-          let is_cancelled = match task.task_status with
-            | Cancelled _ -> true
-            | _ -> false
-          in
+          let status = task.task_status in
+          let is_done = match status with Done _ -> true | _ -> false in
+          let is_cancelled = match status with Cancelled _ -> true | _ -> false in
           (include_done || not is_done) &&
           (include_cancelled || not is_cancelled)
         ) backlog.tasks
@@ -321,27 +316,9 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
 
     let sorted = List.sort (fun a b -> compare a.priority b.priority) tasks in
     List.iter (fun task ->
-      let status_icon = match task.task_status with
-        | Done _ -> "✅"
-        | Claimed _ | InProgress _ -> "🔄"
-        | AwaitingVerification _ -> "🔍"
-        | Todo -> "📋"
-        | Cancelled _ -> "🚫"
-      in
-      let assignee = match task.task_status with
-        | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ }
-        | AwaitingVerification { assignee; _ } -> assignee
-        | Cancelled { cancelled_by; _ } -> cancelled_by
-        | Todo -> "unclaimed"
-      in
-      let status_str = match task.task_status with
-        | Todo -> "todo"
-        | Claimed _ -> "claimed"
-        | InProgress _ -> "in_progress"
-        | AwaitingVerification _ -> "awaiting_verification"
-        | Done _ -> "done"
-        | Cancelled _ -> "cancelled"
-      in
+      let status_icon = Types.task_status_icon task.task_status in
+      let assignee = Types.task_display_assignee task.task_status in
+      let status_str = Types.string_of_task_status task.task_status in
       Buffer.add_string buf (Printf.sprintf "%s [%d] %s: %s\n" status_icon task.priority task.id task.title);
       Buffer.add_string buf (Printf.sprintf "   └─ %s | %s\n" status_str assignee)
     ) sorted;

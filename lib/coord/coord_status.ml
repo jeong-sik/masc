@@ -88,19 +88,8 @@ let status config =
   let active_tasks = List.rev active_tasks in
   let shown_active_tasks = take max_active_tasks_display active_tasks in
   List.iter (fun task ->
-    let status_icon = match task.task_status with
-      | Done _ -> "✅"
-      | Claimed _ | InProgress _ -> "🔄"
-      | AwaitingVerification _ -> "🔍"
-      | Todo -> "📋"
-      | Cancelled _ -> "🚫"
-    in
-    let assignee = match task.task_status with
-      | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ }
-      | AwaitingVerification { assignee; _ } -> assignee
-      | Cancelled { cancelled_by; _ } -> cancelled_by
-      | Todo -> "unclaimed"
-    in
+    let status_icon = Types.task_status_icon task.task_status in
+    let assignee = Types.task_display_assignee task.task_status in
     Buffer.add_string buf (Printf.sprintf "  %s %s: %s (%s)\n" status_icon task.id task.title assignee)
   ) shown_active_tasks;
 

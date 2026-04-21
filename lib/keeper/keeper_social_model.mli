@@ -80,6 +80,7 @@ val derive_failure_state :
   meta:Keeper_types.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   previous_state:social_state option ->
+  is_auto_recoverable:bool ->
   reason:string ->
   social_state * transition_reason
 

@@ -78,6 +78,7 @@ let callable_tool_required_model_strings =
   [ "custom:remote-model@http://127.0.0.1:18080/v1"
   ; "claude_code:auto"
   ; "codex_cli:auto"
+  ; "kimi_cli:auto"
   ; "gemini_cli:auto"
   ; "ollama:local-model"
   ]
@@ -117,6 +118,20 @@ let test_required_tool_support_filter_keeps_inline_or_runtime_capable_providers 
   check bool "drops gemini_cli without runtime MCP lane" false
     (List.mem "gemini_cli" (provider_kinds providers))
 
+let test_required_tool_gate_filter_keeps_runtime_mcp_capable_cli_providers () =
+  let providers =
+    Masc_mcp.Cascade_runtime.resolve_providers_from_model_strings
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      callable_tool_required_model_strings
+  in
+  check bool "tool gate keeps at least one callable provider" true
+    (providers <> []);
+  check bool "keeps kimi_cli via runtime MCP lane" true
+    (List.mem "kimi_cli" (provider_kinds providers));
+  check bool "drops gemini_cli without runtime MCP lane" false
+    (List.mem "gemini_cli" (provider_kinds providers))
+
 let () =
   run "Cascade_runtime"
     [
@@ -133,5 +148,7 @@ let () =
           test_case "required tool support keeps inline or runtime-capable providers"
             `Quick
             test_required_tool_support_filter_keeps_inline_or_runtime_capable_providers;
+          test_case "tool gate keeps runtime MCP-capable CLI providers" `Quick
+            test_required_tool_gate_filter_keeps_runtime_mcp_capable_cli_providers;
         ] );
     ]

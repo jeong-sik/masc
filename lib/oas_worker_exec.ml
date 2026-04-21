@@ -133,6 +133,12 @@ let cli_model_override =
 let provider_caps_of_config =
   Oas_worker_exec_transport.provider_caps_of_config
 
+let kimi_mcp_config_json_of_policy =
+  Oas_worker_exec_transport.kimi_mcp_config_json_of_policy
+
+let kimi_cli_model_for_provider =
+  Oas_worker_exec_transport.kimi_cli_model_for_provider
+
 let provider_supports_inline_tools =
   Oas_worker_exec_transport.provider_supports_inline_tools
 
@@ -144,6 +150,15 @@ let dedupe_preserve_order =
 
 let public_mcp_tool_names_of_oas_tools =
   Oas_worker_exec_transport.public_mcp_tool_names_of_oas_tools
+
+let runtime_mcp_policy_with_masc_agent_name =
+  Oas_worker_exec_transport.runtime_mcp_policy_with_masc_agent_name
+
+let kimi_cli_runtime_mcp_jsons =
+  Oas_worker_exec_transport.kimi_cli_runtime_mcp_jsons
+
+let public_mcp_tools_of_oas_tools =
+  Oas_worker_exec_transport.public_mcp_tools_of_oas_tools
 
 let tool_names_are_public_mcp =
   Oas_worker_exec_transport.tool_names_are_public_mcp
@@ -159,6 +174,8 @@ let resolve_tool_lane_for_oas_tools =
 
 let make_per_call_switch_transport =
   Oas_worker_exec_transport.make_per_call_switch_transport
+
+module Kimi_cli_transport_local = Oas_worker_exec_transport.Kimi_cli_transport_local
 
 let non_http_transport_of_provider =
   Oas_worker_exec_transport.non_http_transport_of_provider
@@ -194,6 +211,7 @@ let build
   : (Oas.Agent.t, Oas.Error.sdk_error) result =
   match
     non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg
+      ?runtime_mcp_policy:config.runtime_mcp_policy
       ?cli_transport_overrides:config.cli_transport_overrides
       ()
   with
@@ -254,6 +272,7 @@ let resume_from_checkpoint
   : (Oas.Agent.t, Oas.Error.sdk_error) result =
   match
     non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg
+      ?runtime_mcp_policy:config.runtime_mcp_policy
       ?cli_transport_overrides:config.cli_transport_overrides
       ()
   with

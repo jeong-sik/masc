@@ -2044,6 +2044,9 @@ let run_turn
   | Error e -> Error (Oas.Error.Internal e)
   | Ok oas_allowed_paths ->
     let require_tool_choice_support = initial_tool_surface.tool_gate_requested in
+    let require_tool_support =
+      initial_tool_surface.tool_gate_requested && tools <> []
+    in
     let timeout_s =
       match oas_timeout_s with
       | Some value -> value
@@ -2112,9 +2115,11 @@ let run_turn
        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
          Oas_worker.run_named
            ~cascade_name
+           ~keeper_name:meta.name
            ~model_strings:meta.models
            ?provider_filter
            ~require_tool_choice_support
+           ~require_tool_support
            ~goal:user_message
            ~priority
            ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)

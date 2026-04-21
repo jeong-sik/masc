@@ -590,8 +590,8 @@ let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
      | Llm_provider.Retry.ServerError { message; _ } ->
        message_looks_like_cli_wrapped_hard_quota message
      | Llm_provider.Retry.RateLimited _
-     | Llm_provider.Retry.NotFound _
      | Llm_provider.Retry.AuthError _
+     | Llm_provider.Retry.NotFound _
      | Llm_provider.Retry.InvalidRequest _
      | Llm_provider.Retry.ContextOverflow _
      | Llm_provider.Retry.Timeout _ ->
@@ -729,6 +729,15 @@ let run_named
       Oas_worker_exec.resolve_tool_lane_for_oas_tools ~provider_cfg ~tools
       |> Result.map
            (fun (effective_tools, runtime_mcp_policy) ->
+             let runtime_mcp_policy =
+               match runtime_mcp_policy, String.trim keeper_name with
+               | Some policy, keeper_name when keeper_name <> "" ->
+                   Some
+                     (Oas_worker_exec.runtime_mcp_policy_with_masc_agent_name
+                        ~agent_name:(Keeper_types.keeper_agent_name keeper_name)
+                        policy)
+               | _ -> runtime_mcp_policy
+             in
              {
                (Oas_worker_exec.default_config ~name ~provider_cfg
                   ~system_prompt ~tools:effective_tools)

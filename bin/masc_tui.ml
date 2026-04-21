@@ -246,7 +246,7 @@ let main () =
                  | Some k ->
                      state.log_entries <- load_keeper_logs base_path k.k_name 200
                  | None -> ())
-            | _ -> ());
+            | Dashboard | Keeper_list | Keeper_detail | Keeper_message -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" ->
            (* Tab toggles between Dashboard and Keeper_list *)
@@ -274,7 +274,7 @@ let main () =
             | Keeper_message ->
                 state.view <- Keeper_detail;
                 state.detail_scroll <- 0
-            | _ -> ())
+            | Dashboard | Keeper_list -> ())
        | Some "j" | Some "down" ->
            (match state.view with
             | Keeper_list ->
@@ -288,7 +288,7 @@ let main () =
                 state.detail_scroll <- state.detail_scroll + 1
             | Keeper_logs ->
                 state.log_scroll <- state.log_scroll + 1
-            | _ -> ())
+            | Dashboard | Keeper_message -> ())
        | Some "k" | Some "up" ->
            (match state.view with
             | Keeper_list ->
@@ -304,7 +304,7 @@ let main () =
             | Keeper_logs ->
                 if state.log_scroll > 0 then
                   state.log_scroll <- state.log_scroll - 1
-            | _ -> ())
+            | Dashboard | Keeper_message -> ())
        | Some "\r" | Some "\n" ->
            (* Enter opens detail from list *)
            (match state.view with
@@ -315,7 +315,7 @@ let main () =
                      state.detail_scroll <- 0;
                      load_live_context state base_path k.k_name
                  | None -> ())
-            | _ -> ())
+            | Dashboard | Keeper_detail | Keeper_logs | Keeper_message -> ())
        | Some "l" | Some "L" ->
            (* L opens log view from detail *)
            (match state.view with
@@ -326,14 +326,14 @@ let main () =
                      state.log_scroll <- max 0 (List.length state.log_entries - 1);
                      state.view <- Keeper_logs
                  | None -> ())
-            | _ -> ())
+            | Dashboard | Keeper_list | Keeper_logs | Keeper_message -> ())
        | Some "m" | Some "M" ->
            (* M opens message view from detail *)
            (match state.view with
             | Keeper_detail when state.keeper_cursor < List.length state.keepers ->
                 Buffer.clear state.msg_input;
                 state.view <- Keeper_message
-            | _ -> ())
+            | Keeper_detail | Dashboard | Keeper_list | Keeper_logs | Keeper_message -> ())
        | _ -> ());
 
       (* Periodic refresh *)
@@ -347,7 +347,7 @@ let main () =
               | Some k ->
                   state.log_entries <- load_keeper_logs base_path k.k_name 200
               | None -> ())
-         | _ -> ());
+         | Dashboard | Keeper_list | Keeper_detail | Keeper_message -> ());
         last_check := now
       end;
 

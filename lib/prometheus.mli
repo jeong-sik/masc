@@ -1,0 +1,124 @@
+(** Prometheus-Compatible Metrics for masc-mcp.
+
+    Lightweight metrics collection with Prometheus text format export.
+    Thread-safe via [Stdlib.Mutex] — works across OCaml 5 domains and
+    during module initialisation before any Eio scheduler exists.
+
+    @since 0.4.0 *)
+
+(** {1 Types} *)
+
+type label = string * string
+
+type metric_type =
+  | Counter
+  | Gauge
+  | Histogram
+
+type metric = {
+  name : string;
+  help : string;
+  metric_type : metric_type;
+  mutable value : float;
+  labels : label list;
+}
+
+(** {1 Metric Registration} *)
+
+val register_counter :
+  name:string -> help:string -> ?labels:label list -> unit -> unit
+
+val register_gauge :
+  name:string -> help:string -> ?labels:label list -> unit -> unit
+
+val register_histogram :
+  name:string -> help:string -> ?labels:label list -> unit -> unit
+
+(** {1 Metric Updates} *)
+
+val inc_counter :
+  string -> ?labels:label list -> ?delta:float -> unit -> unit
+
+val set_gauge :
+  string -> ?labels:label list -> float -> unit
+
+val inc_gauge :
+  string -> ?labels:label list -> ?delta:float -> unit -> unit
+
+val dec_gauge :
+  string -> ?labels:label list -> ?delta:float -> unit -> unit
+
+val observe_histogram :
+  string -> ?labels:label list -> float -> unit
+
+(** {1 Metric Queries} *)
+
+val get_metric_value :
+  string -> ?labels:label list -> unit -> float option
+
+val metric_value_or_zero :
+  string -> ?labels:label list -> unit -> float
+
+val metric_total : string -> float
+
+(** {1 Metric Name Constants}
+
+    Shared SSOT between registration (in [init]) and call-sites in
+    keeper/bridge modules. Importing [Prometheus.<constant>] ensures
+    the compiler catches typos that would otherwise silently create
+    dead series. *)
+
+val metric_keeper_turns : string
+val metric_keeper_input_tokens : string
+val metric_keeper_output_tokens : string
+val metric_keeper_cache_creation_tokens : string
+val metric_keeper_cache_read_tokens : string
+val metric_keeper_compactions : string
+val metric_keeper_compaction_ratio_change : string
+val metric_keeper_compaction_saved_tokens : string
+val metric_keeper_operator_compact : string
+val metric_keeper_operator_clear : string
+val metric_keeper_heartbeat_successes : string
+val metric_keeper_heartbeat_failures : string
+val metric_keeper_write_meta_failures : string
+val metric_keeper_lifecycle_dispatch_rejections : string
+val metric_keeper_paused_state_persist_errors : string
+val metric_persistence_read_drops : string
+val metric_oas_sse_relay_retries : string
+val metric_oas_sse_relay_drops : string
+val metric_oas_sse_relay_queue_depth : string
+val metric_mcp_tool_schema_count : string
+val metric_mcp_tool_schema_tokens_approx : string
+
+(** {1 Process monitoring} *)
+
+val approximate_open_fd_count : unit -> int
+
+val fd_warn_threshold : int
+
+val set_tool_schema_stats : count:int -> approx_tokens:int -> unit
+
+(** {1 Prometheus Export} *)
+
+val type_to_string : metric_type -> string
+
+val labels_to_string : label list -> string
+
+val to_prometheus_text : unit -> string
+
+(** {1 Convenience Functions} *)
+
+val record_request : unit -> unit
+val record_task_completed : unit -> unit
+val record_task_failed : unit -> unit
+val record_error : ?error_type:string -> unit -> unit
+val set_active_agents : int -> unit
+val set_pending_tasks : int -> unit
+val reconcile_active_agents_gauge : string -> unit
+val update_uptime : unit -> unit
+
+(** {1 Initialisation}
+
+    Called automatically at module load via [let () = init ()].
+    Idempotent — safe to call again. *)
+val init : unit -> unit

@@ -507,7 +507,8 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
     List.filter (fun (t : Types.task) ->
       match t.task_status with
       | Types.Claimed _ -> true (* claimed but not in-progress = potentially blocked *)
-      | _ -> false
+      | Types.Todo | Types.InProgress _ | Types.AwaitingVerification _
+      | Types.Done _ | Types.Cancelled _ -> false
     ) all_tasks
   in
   (* Agent counts by group *)

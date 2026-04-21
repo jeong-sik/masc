@@ -380,8 +380,9 @@ let handle_add_task ctx args =
     | Error error -> (false, error)
     | Ok contract ->
         ( true,
-          Coord.add_task ?contract ?required_preset ctx.config ~title:trimmed_title ~priority
-            ~description )
+          Coord.add_task ?contract ?required_preset
+            ~created_by:ctx.agent_name ctx.config ~title:trimmed_title
+            ~priority ~description )
 
 let handle_batch_add_tasks ctx args =
   let tasks_json = match args |> member "tasks" with
@@ -423,7 +424,8 @@ let handle_batch_add_tasks ctx args =
     let tasks =
       List.filter_map (function Ok t -> Some t | Error _ -> None) validated
     in
-    (true, Coord.batch_add_tasks_with_contracts ctx.config tasks)
+    (true, Coord.batch_add_tasks_with_contracts
+      ~created_by:ctx.agent_name ctx.config tasks)
 
 (** Extract preset token from capabilities (e.g., ["keeper"; "preset:delivery"]). *)
 let preset_from_capabilities caps =
@@ -1020,7 +1022,7 @@ let dispatch ctx ~name ~args : tool_result option =
 (* ================================================================ *)
 
 let _tool_spec_read_only = [ "masc_task_history"; "masc_tasks" ]
-let _tool_spec_requires_join = [ "masc_add_task"; "masc_claim_next"; "masc_transition" ]
+let _tool_spec_requires_join = [ "masc_claim_next"; "masc_transition" ]
 
 let tool_required_permission = function
   | "masc_tasks" | "masc_task_history" ->

@@ -560,6 +560,7 @@ let test_backlog_to_yojson_with_tasks () =
     files = [];
     created_at = "2024-01-15T12:00:00Z";
     worktree = None;
+    created_by = None;
     required_role = Types_core.Unassigned; required_preset = None; stage = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
@@ -1258,6 +1259,7 @@ let test_task_to_yojson () =
     files = ["file1.ml"; "file2.ml"];
     created_at = "2024-01-15T12:00:00Z";
     worktree = None;
+    created_by = None;
     required_role = Types_core.Unassigned; required_preset = None; stage = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
@@ -1285,6 +1287,7 @@ let test_task_to_yojson_with_worktree () =
     files = [];
     created_at = "2024-01-15T12:00:00Z";
     worktree = Some wt;
+    created_by = None;
     required_role = Types_core.Unassigned; required_preset = None; stage = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in

@@ -1,8 +1,7 @@
 (** Tests for Keeper_sandbox_containment.
 
     RFC-0006 Phase B-1: pin the host-FS read guard for hardened keepers.
-    The containment is no-op for legacy keepers and for hardened keepers
-    when MASC_KEEPER_SYMMETRIC_SANDBOX is off. *)
+    The containment is no-op for local keepers. *)
 
 open Masc_mcp
 
@@ -66,33 +65,18 @@ let make_meta ~name ~sandbox =
 (* ── Tests ───────────────────────────────────────────────────────── *)
 
 let test_legacy_keeper_always_allowed () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
   let meta = make_meta ~name:"alice" ~sandbox:Keeper_types.Local in
   let outside = "/etc/passwd" in
   Alcotest.(check bool)
-    "Local keeper bypasses containment even with flag on"
+    "Local keeper bypasses containment"
     true
     (Result.is_ok
        (Keeper_sandbox_containment.check_read_target
           ~config ~meta ~target:outside))
 
-let test_hardened_keeper_with_flag_off_is_passthrough () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "false" @@ fun () ->
-  with_tmp_base @@ fun base ->
-  let config = Coord.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker in
-  let outside = "/etc/passwd" in
-  Alcotest.(check bool)
-    "Docker with flag off allows host paths (legacy behavior)"
-    true
-    (Result.is_ok
-       (Keeper_sandbox_containment.check_read_target
-          ~config ~meta ~target:outside))
-
-let test_hardened_with_flag_on_blocks_outside () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
+let test_docker_keeper_blocks_outside () =
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
   let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker in
@@ -110,8 +94,7 @@ let test_hardened_with_flag_on_blocks_outside () =
          String.length msg >= len
          && String.sub msg 0 len = needle)
 
-let test_hardened_with_flag_on_allows_inside_playground () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
+let test_docker_keeper_allows_inside_playground () =
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
   let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker in
@@ -127,7 +110,6 @@ let test_hardened_with_flag_on_allows_inside_playground () =
           ~config ~meta ~target:inside))
 
 let test_docker_git_creds_contained () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
   let meta = make_meta ~name:"poe" ~sandbox:Keeper_types.Docker in
@@ -139,7 +121,6 @@ let test_docker_git_creds_contained () =
           ~config ~meta ~target:outside))
 
 let test_path_just_outside_playground_blocked () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
   let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker in
@@ -167,12 +148,10 @@ let () =
         [
           Alcotest.test_case "legacy keeper always allowed" `Quick
             test_legacy_keeper_always_allowed;
-          Alcotest.test_case "hardened with flag off is passthrough" `Quick
-            test_hardened_keeper_with_flag_off_is_passthrough;
-          Alcotest.test_case "hardened with flag on blocks /etc/passwd" `Quick
-            test_hardened_with_flag_on_blocks_outside;
-          Alcotest.test_case "hardened with flag on allows inside playground"
-            `Quick test_hardened_with_flag_on_allows_inside_playground;
+          Alcotest.test_case "docker keeper blocks /etc/passwd" `Quick
+            test_docker_keeper_blocks_outside;
+          Alcotest.test_case "docker keeper allows inside playground"
+            `Quick test_docker_keeper_allows_inside_playground;
           Alcotest.test_case "docker git-creds also contained" `Quick
             test_docker_git_creds_contained;
           Alcotest.test_case "lookalike sibling path blocked" `Quick

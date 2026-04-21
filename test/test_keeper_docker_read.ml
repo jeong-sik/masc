@@ -1,7 +1,7 @@
 (** Tests for Keeper_docker_read.
 
-    RFC-0006 Phase B-2: docker-routed reads for hardened keepers.
-    These tests cover the pure path-mapping and flag-gating logic;
+    RFC-0006 Phase B-2: docker-routed reads for Docker keepers.
+    These tests cover the pure path-mapping and routing logic;
     the actual [docker run] call is exercised only in environments
     where docker is available, gated through env-set integration
     tests. *)
@@ -76,50 +76,23 @@ let make_meta ~name ~sandbox =
   | Ok m -> m
   | Error e -> Alcotest.fail e
 
-(* ── should_route_read flag matrix ───────────────────────────────── *)
+(* ── should_route_read profile policy ────────────────────────────── *)
 
 let test_legacy_keeper_never_routes () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
   let meta = make_meta ~name:"alice" ~sandbox:Keeper_types.Local in
   Alcotest.(check bool) "legacy keeper never routes through docker"
     false
     (Keeper_docker_read.should_route_read ~meta)
 
-let test_hardened_with_only_symmetric_does_not_route () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  with_env "MASC_KEEPER_DOCKER_READ" "false" @@ fun () ->
+let test_docker_keeper_routes () =
   let meta =
     make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker
   in
-  Alcotest.(check bool) "B-1 alone does not enable B-2 routing"
-    false
-    (Keeper_docker_read.should_route_read ~meta)
-
-let test_hardened_with_only_docker_read_does_not_route () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "false" @@ fun () ->
-  with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
-  let meta =
-    make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker
-  in
-  Alcotest.(check bool)
-    "DOCKER_READ alone (without SYMMETRIC_SANDBOX) does not route"
-    false
-    (Keeper_docker_read.should_route_read ~meta)
-
-let test_hardened_with_both_flags_routes () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
-  let meta =
-    make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker
-  in
-  Alcotest.(check bool) "hardened + both flags → docker route"
+  Alcotest.(check bool) "docker keeper routes through docker"
     true
     (Keeper_docker_read.should_route_read ~meta)
 
 let test_docker_git_creds_routes () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
   let meta =
     make_meta ~name:"poe" ~sandbox:Keeper_types.Docker
   in
@@ -203,8 +176,6 @@ let test_container_path_outside_playground_errors () =
    (exercised without invoking docker) ──────────────────────────── *)
 
 let test_read_outside_playground_returns_mapping_error () =
-  with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   let base, config, meta = setup_config "minjae" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
@@ -225,8 +196,6 @@ let test_read_outside_playground_returns_mapping_error () =
          loop 0)
 
 let test_read_empty_image_config_errors () =
-  with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   let base, config, meta = setup_config "minjae" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -489,12 +458,8 @@ let () =
         [
           Alcotest.test_case "legacy never routes" `Quick
             test_legacy_keeper_never_routes;
-          Alcotest.test_case "B-1 alone does not enable B-2" `Quick
-            test_hardened_with_only_symmetric_does_not_route;
-          Alcotest.test_case "DOCKER_READ alone does not route" `Quick
-            test_hardened_with_only_docker_read_does_not_route;
-          Alcotest.test_case "hardened + both flags routes" `Quick
-            test_hardened_with_both_flags_routes;
+          Alcotest.test_case "docker keeper routes" `Quick
+            test_docker_keeper_routes;
           Alcotest.test_case "docker git-creds also routes" `Quick
             test_docker_git_creds_routes;
         ] );

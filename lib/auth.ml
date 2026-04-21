@@ -107,18 +107,38 @@ let save_auth_config config (auth_cfg : auth_config) =
 let credential_file config agent_name =
   Filename.concat (agents_dir config) (agent_name ^ ".json")
 
+let trim_nonempty value =
+  let trimmed = String.trim value in
+  if trimmed = "" then None else Some trimmed
+
 (* Inline copy of Nickname.is_generated_nickname / extract_agent_type.
    Auth lives below masc_coord in the module graph and cannot depend on
    it. The nickname pattern — three or more hyphen-separated segments,
    first segment is the agent type — is small enough to duplicate here
-   without drift risk. Covered by the nickname fallback tests. *)
+   without drift risk. Keeper aliases use a different canonical shape
+   (keeper-<name>-agent) and must resolve to the middle segment so
+   keeper-scoped credentials can be stored under the stable keeper name
+   rather than the transport alias. Covered by the nickname fallback
+   tests. *)
 let is_generated_nickname_shape name =
   List.length (String.split_on_char '-' name) >= 3
 
 let extract_agent_type_prefix name =
   match String.split_on_char '-' name with
+  | "keeper" :: rest -> (
+      match List.rev rest with
+      | "agent" :: middle_rev ->
+          List.rev middle_rev
+          |> String.concat "-"
+          |> trim_nonempty
+      | _ -> Some "keeper")
   | prefix :: _ when prefix <> "" -> Some prefix
   | _ -> None
+
+let credential_agent_name agent_name =
+  match extract_agent_type_prefix agent_name with
+  | Some prefix when prefix <> agent_name -> prefix
+  | _ -> agent_name
 
 let load_credential_from_path config agent_name path : agent_credential option =
   if file_exists path then
@@ -203,40 +223,50 @@ let resolve_agent_from_token config ~token : (string, masc_error) result =
   | Ok cred -> Ok cred.agent_name
   | Error e -> Error e
 
+let expires_at_for_auth_config auth_cfg =
+  if auth_cfg.token_expiry_hours > 0 then
+    let expiry = Time_compat.now () +. (float_of_int auth_cfg.token_expiry_hours *. 3600.0) in
+    let tm = Unix.gmtime expiry in
+    Some
+      (Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+         (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+         tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec)
+  else
+    None
+
+let save_raw_token_credential config ~agent_name ~role ~raw_token :
+    (agent_credential, masc_error) result =
+  let auth_cfg = load_auth_config config in
+  let cred =
+    {
+      agent_name;
+      token = sha256_hash raw_token;
+      role;
+      created_at = now_iso ();
+      expires_at = expires_at_for_auth_config auth_cfg;
+    }
+  in
+  try
+    save_credential config cred;
+    Ok cred
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+    let msg =
+      Printf.sprintf "Failed to save agent credential: %s"
+        (Printexc.to_string exn)
+    in
+    Log.Auth.error "%s" msg;
+    Error (IoError msg)
+
 (* ============================================ *)
 (* Token operations                             *)
 (* ============================================ *)
 
 (** Create a new token for an agent *)
 let create_token config ~agent_name ~role : (string * agent_credential, masc_error) result =
-  let auth_cfg = load_auth_config config in
   let raw_token = generate_token () in
-  let token_hash = sha256_hash raw_token in
-  let now = now_iso () in
-  let expires_at =
-    if auth_cfg.token_expiry_hours > 0 then
-      let expiry = Time_compat.now () +. (float_of_int auth_cfg.token_expiry_hours *. 3600.0) in
-      let tm = Unix.gmtime expiry in
-      Some (Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-        (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-        tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec)
-    else
-      None
-  in
-  let cred = {
-    agent_name;
-    token = token_hash;
-    role;
-    created_at = now;
-    expires_at;
-  } in
-  (try
-     save_credential config cred;
-     Ok (raw_token, cred)  (* Return raw token to user, store hash *)
-   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-     let msg = Printf.sprintf "Failed to save agent credential: %s" (Printexc.to_string exn) in
-     Log.Auth.error "%s" msg;
-     Error (IoError msg))
+  match save_raw_token_credential config ~agent_name ~role ~raw_token with
+  | Ok cred -> Ok (raw_token, cred)
+  | Error e -> Error e
 
 let missing_credential_error config ~agent_name ~token : masc_error =
   match find_credential_by_token config ~token with
@@ -266,6 +296,23 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
               Error (TokenExpired agent_name)
             else
               Ok cred
+
+let ensure_keeper_credential config ~agent_name :
+    (string * agent_credential, masc_error) result =
+  let target_agent_name = credential_agent_name agent_name in
+  let env_token =
+    match Sys.getenv_opt "MASC_MCP_TOKEN" with
+    | Some raw -> trim_nonempty raw
+    | None -> None
+  in
+  match env_token with
+  | Some raw_token -> (
+      match verify_token config ~agent_name ~token:raw_token with
+      | Ok cred -> Ok (raw_token, cred)
+      | Error _ ->
+          create_token config ~agent_name:target_agent_name ~role:Admin)
+  | None ->
+      create_token config ~agent_name:target_agent_name ~role:Admin
 
 (** Refresh a token (generate new one, update credential) *)
 let refresh_token config ~agent_name ~old_token : (string * agent_credential, masc_error) result =

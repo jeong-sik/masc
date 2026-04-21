@@ -76,7 +76,55 @@ let run_argv argv =
          (String.concat " " argv)
          command)
 
-let make_meta ?current_task_id () =
+let with_env key value f =
+  let prior = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prior with
+      | Some v -> Unix.putenv key v
+      | None -> Unix.putenv key "")
+    f
+
+let with_fake_gh script f =
+  let dir = temp_dir () in
+  let gh_path = Filename.concat dir "gh" in
+  let oc = open_out_bin gh_path in
+  Fun.protect
+    ~finally:(fun () ->
+      close_out_noerr oc;
+      cleanup_dir dir)
+    (fun () ->
+      output_string oc script;
+      close_out oc;
+      Unix.chmod gh_path 0o755;
+      let path =
+        match Sys.getenv_opt "PATH" with
+        | Some prior when String.trim prior <> "" -> dir ^ ":" ^ prior
+        | _ -> dir
+      in
+      with_env "PATH" path f)
+
+let with_fake_docker script f =
+  let dir = temp_dir () in
+  let docker_path = Filename.concat dir "docker" in
+  let oc = open_out_bin docker_path in
+  Fun.protect
+    ~finally:(fun () ->
+      close_out_noerr oc;
+      cleanup_dir dir)
+    (fun () ->
+      output_string oc script;
+      close_out oc;
+      Unix.chmod docker_path 0o755;
+      let path =
+        match Sys.getenv_opt "PATH" with
+        | Some prior when String.trim prior <> "" -> dir ^ ":" ^ prior
+        | _ -> dir
+      in
+      with_env "PATH" path f)
+
+let make_meta ?current_task_id ?(sandbox_profile = Keeper_types.Local) () =
   let base_fields =
     [
       ("name", `String "sojin");
@@ -84,6 +132,8 @@ let make_meta ?current_task_id () =
       ("trace_id", `String "trace-sojin");
       ("goal", `String "gh context test");
       ("allowed_paths", `List [ `String "*" ]);
+      ( "sandbox_profile",
+        `String (Keeper_types.sandbox_profile_to_string sandbox_profile) );
     ]
   in
   let fields =
@@ -447,6 +497,60 @@ let test_resolve_task_repo_context_rejects_non_github_origin () =
   | Ok _ -> Alcotest.fail "expected non-github origin error"
   | Error _ -> Alcotest.fail "unexpected repo context error"
 
+let fake_docker_gh_script =
+  "#!/bin/sh\n\
+if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" != \"run\" ]; then\n\
+  printf 'unexpected docker invocation\\n' >&2\n\
+  exit 2\n\
+fi\n\
+workdir=''\n\
+shift\n\
+while [ \"$#\" -gt 0 ]; do\n\
+  if [ \"$1\" = \"--workdir\" ]; then\n\
+    workdir=\"$2\"\n\
+    shift 2\n\
+    continue\n\
+  fi\n\
+  if [ \"$1\" = \"alpine:test\" ]; then\n\
+    shift\n\
+    break\n\
+  fi\n\
+  shift\n\
+done\n\
+printf 'docker-gh-ok workdir=%s cmd=%s\\n' \"$workdir\" \"$*\"\n"
+
+let test_keeper_shell_gh_without_current_task_uses_sandbox_context () =
+  with_repo_context_test_env @@ fun ~base:_ ~config ~repo_dir ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
+  let meta = make_meta ~sandbox_profile:Keeper_types.Docker () in
+  let raw =
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("op", `String "gh");
+            ("cwd", `String repo_dir);
+            ("cmd", `String "pr list --repo example/project");
+          ])
+  in
+  let json = Yojson.Safe.from_string raw in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool) "gh fails through docker route without image" false
+    (json |> member "ok" |> to_bool);
+  Alcotest.(check string) "sandbox task marker" "(sandbox)"
+    (json |> member "task_id" |> to_string);
+  Alcotest.(check string) "cwd preserved" repo_dir
+    (json |> member "cwd" |> to_string);
+  Alcotest.(check bool) "repo omitted when sandbox fallback has none" true
+    (json |> member "repo" = `Null);
+  Alcotest.(check string) "docker image error surfaced"
+    "keeper sandbox docker image is not configured"
+    (json |> member "error" |> to_string)
+
 (* Tool-call observability flows through the OAS Event_bus.
    This test verifies a subscriber can receive the equivalent
    signal that MASC-side observers previously emitted. *)
@@ -769,5 +873,8 @@ let () =
             test_resolve_task_repo_context_reports_missing_worktree;
           Alcotest.test_case "non-github origin is structured error" `Quick
             test_resolve_task_repo_context_rejects_non_github_origin;
+          Alcotest.test_case
+            "keeper_shell gh without current task uses sandbox context"
+            `Quick test_keeper_shell_gh_without_current_task_uses_sandbox_context;
         ] );
     ]

@@ -284,6 +284,84 @@ let test_load_credential_exact_wins_over_fallback () =
                | Admin -> "Admin"))
   | None -> fail "exact match should resolve"
 
+let test_extract_agent_type_prefix_keeper_aliases () =
+  check (option string) "keeper simple alias" (Some "sangsu")
+    (Auth.extract_agent_type_prefix "keeper-sangsu-agent");
+  check (option string) "keeper hyphenated alias" (Some "masc-improver")
+    (Auth.extract_agent_type_prefix "keeper-masc-improver-agent");
+  check (option string) "generated nickname" (Some "adversary")
+    (Auth.extract_agent_type_prefix "adversary-fair-tapir");
+  check (option string) "plain name stays plain" (Some "sangsu")
+    (Auth.extract_agent_type_prefix "sangsu");
+  check (option string) "two segment keeper fallback unchanged" (Some "keeper")
+    (Auth.extract_agent_type_prefix "keeper-sangsu")
+
+let test_verify_token_keeper_alias_fallback () =
+  let dir = setup_test_room () in
+  let result =
+    match Auth.create_token dir ~agent_name:"sangsu" ~role:Types.Admin with
+    | Ok (raw_token, _) ->
+        Auth.verify_token dir ~agent_name:"keeper-sangsu-agent" ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_room dir;
+  match result with
+  | Ok cred -> check string "fallback credential owner" "sangsu" cred.agent_name
+  | Error e ->
+      fail
+        (Printf.sprintf
+           "keeper alias should verify via fallback credential: %s"
+           (Types.masc_error_to_string e))
+
+let test_save_raw_token_credential_uses_provided_token () =
+  let dir = setup_test_room () in
+  let raw_token = "fixed-admin-token" in
+  let save_result =
+    Auth.save_raw_token_credential dir ~agent_name:"bootstrap-admin"
+      ~role:Types.Admin ~raw_token
+  in
+  let verify_result =
+    match save_result with
+    | Ok _ ->
+        Auth.verify_token dir ~agent_name:"bootstrap-admin" ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_room dir;
+  match verify_result with
+  | Ok cred ->
+      check string "saved credential owner" "bootstrap-admin" cred.agent_name;
+      check bool "saved credential role is admin" true (cred.role = Types.Admin)
+  | Error e ->
+      fail
+        (Printf.sprintf
+           "provided raw token should verify after save_raw_token_credential: %s"
+           (Types.masc_error_to_string e))
+
+let test_ensure_keeper_credential_uses_keeper_middle_name () =
+  let dir = setup_test_room () in
+  let ensure_result =
+    with_env "MASC_MCP_TOKEN" "" (fun () ->
+      Auth.ensure_keeper_credential dir ~agent_name:"keeper-masc-improver-agent")
+  in
+  let verify_result =
+    match ensure_result with
+    | Ok (raw_token, _) ->
+        Auth.verify_token dir ~agent_name:"keeper-masc-improver-agent"
+          ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_room dir;
+  match ensure_result, verify_result with
+  | Ok (_raw_token, cred), Ok alias_cred ->
+      check string "stored under keeper middle" "masc-improver" cred.agent_name;
+      check string "alias resolves same credential" "masc-improver"
+        alias_cred.agent_name
+  | Error e, _ | _, Error e ->
+      fail
+        (Printf.sprintf
+           "ensure_keeper_credential should mint a keeper-scoped token: %s"
+           (Types.masc_error_to_string e))
+
 (* ============================================ *)
 (* Permission tests                             *)
 (* ============================================ *)
@@ -545,6 +623,14 @@ let () =
         test_load_credential_nickname_fallback;
       test_case "load_credential exact match wins over fallback" `Quick
         test_load_credential_exact_wins_over_fallback;
+      test_case "extract_agent_type_prefix keeper aliases" `Quick
+        test_extract_agent_type_prefix_keeper_aliases;
+      test_case "verify_token keeper alias fallback" `Quick
+        test_verify_token_keeper_alias_fallback;
+      test_case "save_raw_token_credential uses provided token" `Quick
+        test_save_raw_token_credential_uses_provided_token;
+      test_case "ensure_keeper_credential uses keeper middle name" `Quick
+        test_ensure_keeper_credential_uses_keeper_middle_name;
     ];
     "permissions", [
       test_case "reader permissions" `Quick test_reader_permissions;

@@ -641,6 +641,24 @@ module DashboardHealth = struct
   let runtime_warning_ctx_ratio = get_float ~default:0.95 "MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO"
 end
 
+(** {1 Wake-time Payload Telemetry}
+
+    Phase 0 observability for the tiered-hydration redesign (Option C).
+    When enabled, every keeper wake captures an approximation of the LLM
+    request payload size just before [Oas_worker.run_named] is invoked.
+    The record is appended to
+    [$MASC_BASE_PATH/data/keeper-wake-payload/YYYY-MM-DD.jsonl] via
+    [Dashboard_harness_health.record_wake_payload].
+
+    Cost when disabled: a single env var lookup (bool). The entire
+    measurement path is gated behind [payload_telemetry_enabled]. *)
+module KeeperTelemetry = struct
+  (** Master switch for wake-payload measurement. Default off so the hot
+      path is untouched until a baseline sweep is explicitly requested. *)
+  let payload_telemetry_enabled () =
+    get_bool ~default:false "MASC_PAYLOAD_TELEMETRY"
+end
+
 (** {1 Cascade Runtime Overrides}
 
     Runtime-only narrowing of the MASC cascade provider set. The underlying

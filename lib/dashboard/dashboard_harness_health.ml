@@ -32,6 +32,30 @@ type pre_compact_event = {
   trigger : string;
 }
 
+(** Wake-time payload observation.
+
+    Captured once per keeper turn, just before [Oas_worker.run_named] fires.
+    Phase 0 baseline for the tiered-hydration redesign (Option C).
+    [approx_body_bytes] is a MASC-side estimate (sum of content text,
+    tool definition JSON, system prompt). It is NOT the exact HTTP body
+    wire size — provider layers apply further encoding. *)
+type wake_payload_event = {
+  timestamp : float;
+  keeper_name : string;
+  trace_id : string;
+  turn_index : int;
+  model_id : string;
+  context_window : int;
+  approx_body_bytes : int;
+  system_prompt_bytes : int;
+  tool_defs_bytes : int;
+  messages_bytes : int;
+  message_count : int;
+  role_counts : (string * int) list;
+  tool_count : int;
+  has_compact_happened : bool;
+}
+
 type handoff_event = {
   timestamp : float;
   keeper_name : string;
@@ -55,6 +79,10 @@ let runtime_warning_ctx_ratio = Env_config_keeper.DashboardHealth.runtime_warnin
 
 let pre_compact_store_ref : Dated_jsonl.t option ref = ref None
 
+(** Store for wake-time payload observations. Populated lazily on first
+    [record_wake_payload] call when [MASC_PAYLOAD_TELEMETRY] is enabled. *)
+let wake_payload_store_ref : Dated_jsonl.t option ref = ref None
+
 let status_to_string = function
   | Healthy -> "healthy"
   | Warning -> "warning"
@@ -68,6 +96,9 @@ let trim_recent (type a) max_items (values : a list) : a list =
 let pre_compact_store_base_dir () =
   Filename.concat (Env_config.base_path ()) "data/harness-pre-compact"
 
+let wake_payload_store_base_dir () =
+  Filename.concat (Env_config.base_path ()) "data/keeper-wake-payload"
+
 let get_or_create_store store_ref base_dir_fn =
   match !store_ref with
   | Some store -> store
@@ -79,11 +110,18 @@ let get_or_create_store store_ref base_dir_fn =
 let get_pre_compact_store () =
   get_or_create_store pre_compact_store_ref pre_compact_store_base_dir
 
+let get_wake_payload_store () =
+  get_or_create_store wake_payload_store_ref wake_payload_store_base_dir
+
 let reset_runtime_stores_for_testing () =
-  pre_compact_store_ref := None
+  pre_compact_store_ref := None;
+  wake_payload_store_ref := None
 
 let set_pre_compact_store_for_testing ~base_dir =
   pre_compact_store_ref := Some (Dated_jsonl.create ~base_dir ())
+
+let set_wake_payload_store_for_testing ~base_dir =
+  wake_payload_store_ref := Some (Dated_jsonl.create ~base_dir ())
 
 let string_field json key =
   Safe_ops.json_string ~default:"" key json
@@ -189,6 +227,82 @@ let pre_compact_event_of_json json =
         trigger = string_field json "trigger";
       }
 
+let role_counts_to_json (counts : (string * int) list) : Yojson.Safe.t =
+  `Assoc (List.map (fun (role, n) -> (role, `Int n)) counts)
+
+let role_counts_of_json json : (string * int) list =
+  Safe_ops.json_assoc "role_counts" json
+  |> List.filter_map (fun (role, value) ->
+         match value with
+         | `Int n -> Some (role, n)
+         | `Intlit s -> (try Some (role, int_of_string s) with _ -> None)
+         | _ -> None)
+
+let wake_payload_record_json (event : wake_payload_event) =
+  `Assoc
+    [
+      ("record_type", `String "wake_payload");
+      ("timestamp", `Float event.timestamp);
+      ("keeper_name", `String event.keeper_name);
+      ("trace_id", `String event.trace_id);
+      ("turn_index", `Int event.turn_index);
+      ("model_id", `String event.model_id);
+      ("context_window", `Int event.context_window);
+      ("approx_body_bytes", `Int event.approx_body_bytes);
+      ("system_prompt_bytes", `Int event.system_prompt_bytes);
+      ("tool_defs_bytes", `Int event.tool_defs_bytes);
+      ("messages_bytes", `Int event.messages_bytes);
+      ("message_count", `Int event.message_count);
+      ("role_counts", role_counts_to_json event.role_counts);
+      ("tool_count", `Int event.tool_count);
+      ("has_compact_happened", `Bool event.has_compact_happened);
+    ]
+
+let wake_payload_event_json (event : wake_payload_event) =
+  `Assoc
+    [
+      ("timestamp", `Float event.timestamp);
+      ("keeper_name", `String event.keeper_name);
+      ("trace_id", `String event.trace_id);
+      ("turn_index", `Int event.turn_index);
+      ("model_id", `String event.model_id);
+      ("context_window", `Int event.context_window);
+      ("approx_body_bytes", `Int event.approx_body_bytes);
+      ("system_prompt_bytes", `Int event.system_prompt_bytes);
+      ("tool_defs_bytes", `Int event.tool_defs_bytes);
+      ("messages_bytes", `Int event.messages_bytes);
+      ("message_count", `Int event.message_count);
+      ("role_counts", role_counts_to_json event.role_counts);
+      ("tool_count", `Int event.tool_count);
+      ("has_compact_happened", `Bool event.has_compact_happened);
+    ]
+
+let wake_payload_event_of_json json =
+  let record_type = string_field json "record_type" in
+  if record_type <> "" && not (String.equal record_type "wake_payload") then None
+  else
+    Some
+      {
+        timestamp = Safe_ops.json_float ~default:0.0 "timestamp" json;
+        keeper_name = string_field json "keeper_name";
+        trace_id = string_field json "trace_id";
+        turn_index = Safe_ops.json_int ~default:0 "turn_index" json;
+        model_id = string_field json "model_id";
+        context_window =
+          Safe_ops.json_int
+            ~default:Cascade_runtime.fallback_context_window
+            "context_window" json;
+        approx_body_bytes = Safe_ops.json_int ~default:0 "approx_body_bytes" json;
+        system_prompt_bytes = Safe_ops.json_int ~default:0 "system_prompt_bytes" json;
+        tool_defs_bytes = Safe_ops.json_int ~default:0 "tool_defs_bytes" json;
+        messages_bytes = Safe_ops.json_int ~default:0 "messages_bytes" json;
+        message_count = Safe_ops.json_int ~default:0 "message_count" json;
+        role_counts = role_counts_of_json json;
+        tool_count = Safe_ops.json_int ~default:0 "tool_count" json;
+        has_compact_happened =
+          Safe_ops.json_bool ~default:false "has_compact_happened" json;
+      }
+
 let read_recent_verdicts ?since ?until ?(limit = max_recent_verdicts) ()
     : harness_verdict_item list =
   let records = read_store_records (Eval_calibration.get_store ()) ?since ?until () in
@@ -235,6 +349,16 @@ let read_pre_compact_events ?since ?until () =
   in
   List.sort
     (fun (left : pre_compact_event) (right : pre_compact_event) ->
+      Float.compare right.timestamp left.timestamp)
+    events
+
+let read_wake_payload_events ?since ?until () =
+  let records = read_store_records (get_wake_payload_store ()) ?since ?until () in
+  let events : wake_payload_event list =
+    records |> List.filter_map wake_payload_event_of_json
+  in
+  List.sort
+    (fun (left : wake_payload_event) (right : wake_payload_event) ->
       Float.compare right.timestamp left.timestamp)
     events
 
@@ -441,6 +565,41 @@ let record_pre_compact ~keeper_name ~context_ratio ~message_count ~token_count
   record_pre_compact_at ~timestamp:(Time_compat.now ()) ~keeper_name
     ~context_ratio ~message_count ~token_count ~strategies ~context_window
     ~is_local_model ~trigger
+
+let record_wake_payload_at ~timestamp ~keeper_name ~trace_id ~turn_index
+    ~model_id ~context_window ~approx_body_bytes ~system_prompt_bytes
+    ~tool_defs_bytes ~messages_bytes ~message_count ~role_counts ~tool_count
+    ~has_compact_happened =
+  let event =
+    {
+      timestamp;
+      keeper_name;
+      trace_id;
+      turn_index;
+      model_id;
+      context_window;
+      approx_body_bytes;
+      system_prompt_bytes;
+      tool_defs_bytes;
+      messages_bytes;
+      message_count;
+      role_counts;
+      tool_count;
+      has_compact_happened;
+    }
+  in
+  Dated_jsonl.append (get_wake_payload_store ())
+    (wake_payload_record_json event);
+  event
+
+let record_wake_payload ~keeper_name ~trace_id ~turn_index ~model_id
+    ~context_window ~approx_body_bytes ~system_prompt_bytes ~tool_defs_bytes
+    ~messages_bytes ~message_count ~role_counts ~tool_count
+    ~has_compact_happened =
+  record_wake_payload_at ~timestamp:(Time_compat.now ()) ~keeper_name
+    ~trace_id ~turn_index ~model_id ~context_window ~approx_body_bytes
+    ~system_prompt_bytes ~tool_defs_bytes ~messages_bytes ~message_count
+    ~role_counts ~tool_count ~has_compact_happened
 
 let recent_verdicts_json ?since ?until () =
   `List (List.map verdict_item_json (read_recent_verdicts ?since ?until ()))

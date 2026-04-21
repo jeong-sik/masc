@@ -776,8 +776,19 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
           let provider_capabilities_of_config
               (cfg : Llm_provider.Provider_config.t) =
             let registry = Llm_provider.Provider_registry.default () in
+            (* Use the OAS registry's own naming convention, not masc's
+               adapter vocabulary (cn_claude_api / cn_kimi_api /
+               cn_codex_api, …). The registry is keyed on "claude",
+               "kimi", "claude_code", "gemini_cli", …, so calling
+               [Provider_adapter.string_of_provider_kind] — which returns
+               the masc canonical_name — missed every direct-API entry
+               and fell through to [default_capabilities]. Worse, for
+               CLI kinds the masc vocabulary collides with direct-API
+               names: masc maps [Claude_code] to "claude", but "claude"
+               is the registry's Anthropic entry, so the lookup silently
+               returned direct-API capabilities for CLI runs. *)
             let provider_name =
-              Provider_adapter.string_of_provider_kind cfg.kind
+              Llm_provider.Provider_registry.provider_name_of_config cfg
             in
             let caps =
               match Llm_provider.Provider_registry.find registry provider_name with

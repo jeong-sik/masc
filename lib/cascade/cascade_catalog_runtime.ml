@@ -841,7 +841,7 @@ let models_of_cascade_name ?sw ?net ?clock raw_name =
   | Error _ as e -> e
   | Ok (_snapshot, _normalized, profile) ->
       Ok
-        (Cascade_config.order_weighted_entries profile.weighted_entries
+        (expand_weighted_entries profile.weighted_entries
          |> List.map (fun (entry : Cascade_config_loader.weighted_entry) ->
                 entry.model))
 

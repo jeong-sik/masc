@@ -101,7 +101,7 @@ let test_to_oas_error_inlined () =
   Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
   match B.to_oas_tool_result (false, "fail") with
   | Ok _ -> Alcotest.fail "expected Error"
-  | Error { message; recoverable } ->
+  | Error { message; recoverable; _ } ->
       Alcotest.(check string) "message" "fail" message;
       Alcotest.(check bool) "default recoverable=false" false recoverable
 

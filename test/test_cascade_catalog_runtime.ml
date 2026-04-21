@@ -301,6 +301,50 @@ let test_legacy_runtime_wrapper_does_not_fallback_to_defaults () =
     []
     (Cascade_runtime.models_of_cascade_name "missing_profile")
 
+let test_static_profile_lookup_survives_probe_rejection_without_snapshot () =
+  with_temp_dir "cascade-static-fallback" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  with_eio @@ fun ~sw ~net ~clock ~fs:_ ~proc_mgr:_ ->
+  let port = find_free_port () in
+  let refused_model = Printf.sprintf "custom:stable@http://127.0.0.1:%d/v1" port in
+  ignore
+    (write_cascade_json config_dir
+       (Printf.sprintf
+          {|{
+  "keeper_unified_models": ["%s"],
+  "tool_rerank_models": ["%s"]
+}|}
+          refused_model refused_model));
+  (match Cascade_catalog_runtime.inspect_active ~sw ~net ~clock () with
+   | Ok _ -> fail "expected probe rejection without a last-known-good snapshot"
+   | Error rejection ->
+       let rejection_json =
+         Cascade_catalog_runtime.rejection_to_yojson rejection
+         |> Yojson.Safe.to_string
+       in
+       check bool "probe rejection is surfaced" true
+         (contains_substring rejection_json "probe failed"));
+  let resolved_name =
+    require_ok
+      (Cascade_catalog_runtime.resolve_declared_name
+         ~sw ~net ~clock ~raw_name:"" ())
+  in
+  check string "default cascade still resolves statically"
+    Keeper_config.default_cascade_name resolved_name;
+  check (list string) "model strings still resolve statically"
+    [ refused_model ]
+    (require_ok
+       (Cascade_catalog_runtime.models_of_cascade_name
+          ~sw ~net ~clock "keeper_unified"));
+  let providers =
+    require_ok
+      (Cascade_catalog_runtime.resolve_named_providers
+         ~sw ~net ~clock ~cascade_name:"keeper_unified" ())
+  in
+  check int "static provider fallback keeps one provider" 1 (List.length providers)
+
 let test_dashboard_available_profiles_use_validated_snapshot_only () =
   with_temp_dir "dashboard-cascade-profiles" @@ fun dir ->
   let config_dir = Filename.concat dir "config" in
@@ -397,6 +441,10 @@ let () =
             "legacy runtime wrapper does not fallback to defaults"
             `Quick
             test_legacy_runtime_wrapper_does_not_fallback_to_defaults;
+          test_case
+            "static profile lookup survives probe rejection without snapshot"
+            `Quick
+            test_static_profile_lookup_survives_probe_rejection_without_snapshot;
           test_case
             "dashboard available profiles use validated snapshot only"
             `Quick

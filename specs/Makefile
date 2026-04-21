@@ -68,33 +68,33 @@ check-all: check-clean check-buggy
 
 check-clean:
 	@echo "=== Running clean specs (expect no errors) ==="; \
+	set -- $(CLEAN_CFGS); \
+	if [ $$# -eq 0 ]; then echo "(none)"; exit 0; fi; \
 	fail=0; \
-	cfgs="$(CLEAN_CFGS)"; \
-	if [ -z "$$cfgs" ]; then echo "(none)"; exit 0; fi; \
-	for cfg in $$cfgs; do \
+	for cfg in "$$@"; do \
 	  dir=$$(dirname "$$cfg"); \
 	  base=$$(basename "$$cfg" .cfg); \
 	  tla="$$dir/$$base.tla"; \
 	  if [ ! -f "$$tla" ]; then echo "SKIP $$cfg (no .tla)"; continue; fi; \
 	  skip=0; for kf in $(KNOWN_FAILURES); do [ "$$base" = "$$kf" ] && skip=1; done; \
-	  if [ $$skip -eq 1 ]; then printf "SKIP %-40s (KNOWN_FAILURES)\n" "$$base"; continue; fi; \
+	  if [ $$skip -eq 1 ]; then printf 'SKIP %-40s (KNOWN_FAILURES)\n' "$$base"; continue; fi; \
 	  start=$$(date +%s); \
-	  printf "CHECK %-40s START cfg=%s\n" "$$base" "$$cfg"; \
+	  printf 'CHECK %-40s START cfg=%s\n' "$$base" "$$cfg"; \
 	  $(TLC) -config "$$cfg" "$$tla" > /tmp/tlc-$$base.log 2>&1; \
 	  rc=$$?; \
 	  end=$$(date +%s); \
 	  elapsed=$$((end - start)); \
-	  if [ $$rc -eq 0 ]; then printf "CHECK %-40s OK (%ss)\n" "$$base" "$$elapsed"; \
-	  else printf "CHECK %-40s FAIL (exit $$rc, %ss)\n" "$$base" "$$elapsed"; tail -5 /tmp/tlc-$$base.log; fail=1; fi; \
+	  if [ $$rc -eq 0 ]; then printf 'CHECK %-40s OK (%ss)\n' "$$base" "$$elapsed"; \
+	  else printf 'CHECK %-40s FAIL (exit %s, %ss)\n' "$$base" "$$rc" "$$elapsed"; tail -5 /tmp/tlc-$$base.log; fail=1; fi; \
 	done; \
 	if [ $$fail -eq 1 ]; then exit 1; fi
 
 check-buggy:
 	@echo "=== Running buggy specs (expect violations) ==="; \
+	set -- $(BUGGY_CFGS); \
+	if [ $$# -eq 0 ]; then echo "(none)"; exit 0; fi; \
 	fail=0; \
-	cfgs="$(BUGGY_CFGS)"; \
-	if [ -z "$$cfgs" ]; then echo "(none)"; exit 0; fi; \
-	for cfg in $$cfgs; do \
+	for cfg in "$$@"; do \
 	  dir=$$(dirname "$$cfg"); \
 	  stripped=$${cfg%%-buggy*}; \
 	  bugbase=$$(basename "$$stripped"); \
@@ -102,16 +102,16 @@ check-buggy:
 	  tla="$$dir/$$bugbase.tla"; \
 	  if [ ! -f "$$tla" ]; then echo "SKIP $$cfg (no .tla)"; continue; fi; \
 	  skip=0; for kb in $(KNOWN_BUGGY_NO_VIOLATION); do [ "$$bugbase" = "$$kb" ] && skip=1; done; \
-	  if [ $$skip -eq 1 ]; then printf "SKIP %-40s (KNOWN_BUGGY_NO_VIOLATION)\n" "$$bugbase (buggy)"; continue; fi; \
+	  if [ $$skip -eq 1 ]; then printf 'SKIP %-40s (KNOWN_BUGGY_NO_VIOLATION)\n' "$$bugbase (buggy)"; continue; fi; \
 	  start=$$(date +%s); \
-	  printf "CHECK %-40s START cfg=%s\n" "$$cfgtag (buggy)" "$$cfg"; \
+	  printf 'CHECK %-40s START cfg=%s\n' "$$cfgtag (buggy)" "$$cfg"; \
 	  $(TLC) -config "$$cfg" "$$tla" > /tmp/tlc-$$cfgtag.log 2>&1; \
 	  rc=$$?; \
 	  end=$$(date +%s); \
 	  elapsed=$$((end - start)); \
-	  if [ $$rc -eq 12 ] || [ $$rc -eq 13 ]; then printf "CHECK %-40s OK (violation exit $$rc, %ss)\n" "$$cfgtag (buggy)" "$$elapsed"; \
-	  elif [ $$rc -eq 0 ]; then printf "CHECK %-40s FAIL (no violation, %ss)\n" "$$cfgtag (buggy)" "$$elapsed"; fail=1; \
-	  else printf "CHECK %-40s WARN (exit $$rc, %ss)\n" "$$cfgtag (buggy)" "$$elapsed"; fi; \
+	  if [ $$rc -eq 12 ] || [ $$rc -eq 13 ]; then printf 'CHECK %-40s OK (violation exit %s, %ss)\n' "$$cfgtag (buggy)" "$$rc" "$$elapsed"; \
+	  elif [ $$rc -eq 0 ]; then printf 'CHECK %-40s FAIL (no violation, %ss)\n' "$$cfgtag (buggy)" "$$elapsed"; fail=1; \
+	  else printf 'CHECK %-40s WARN (exit %s, %ss)\n' "$$cfgtag (buggy)" "$$rc" "$$elapsed"; fi; \
 	done; \
 	if [ $$fail -eq 1 ]; then exit 1; fi
 

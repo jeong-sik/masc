@@ -387,13 +387,18 @@ let test_partial_catalog_rejects_invalid_default_profile () =
   | Error rejection ->
       let rejection_json =
         Cascade_catalog_runtime.rejection_to_yojson rejection
-        |> Yojson.Safe.to_string
       in
+      let errors = json_list_field "errors" rejection_json in
       check bool "default-profile gate is surfaced" true
-        (contains_substring rejection_json
-           "required default profile \"keeper_unified\" failed validation");
+        (List.exists
+           (function
+             | `String value ->
+                 contains_substring value
+                   "required default profile \"keeper_unified\" failed validation"
+             | _ -> false)
+           errors);
       check bool "rejected default profile probe is surfaced" true
-        (contains_substring rejection_json
+        (contains_substring (Yojson.Safe.to_string rejection_json)
            "custom:flaky@http://127.0.0.1:9/v1")
   | Ok (Cascade_catalog_runtime.Validated _) ->
       fail "expected invalid default profile to hard-fail validation"

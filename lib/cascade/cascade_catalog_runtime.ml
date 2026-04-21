@@ -89,6 +89,23 @@ let with_cache_lock f =
 let reset_cache_for_tests () =
   with_cache_lock (fun () -> cache := { active_snapshot = None; rejected_update = None })
 
+let invalidate_path config_path =
+  let keep_snapshot = function
+    | Some (snapshot : snapshot) when String.equal snapshot.source_path config_path -> None
+    | other -> other
+  in
+  let keep_rejection = function
+    | Some (rejection : rejection) when String.equal rejection.source_path config_path -> None
+    | other -> other
+  in
+  with_cache_lock (fun () ->
+      let current = !cache in
+      cache :=
+        {
+          active_snapshot = keep_snapshot current.active_snapshot;
+          rejected_update = keep_rejection current.rejected_update;
+        })
+
 let install_snapshot_for_tests ~source_path ~profile_names =
   let mtime =
     try (Unix.stat source_path).Unix.st_mtime with
@@ -450,6 +467,37 @@ let validate_profile_static ~config_path name : (profile_build, profile_rejectio
               cli_max_concurrent;
               candidates;
             }
+
+let runtime_required_profiles ~config_path =
+  let keepers_from_catalog =
+    match Cascade_config_loader.load_catalog ~config_path with
+    | Ok entries ->
+        List.filter_map
+          (fun (entry : Cascade_config_loader.catalog_entry) ->
+            if entry.keeper_assignable then Some entry.name else None)
+          entries
+    | Error _ -> []
+  in
+  List.sort_uniq String.compare
+    (Keeper_cascade_profile.known_cascades
+    @ keepers_from_catalog
+    @ [ "governance_judge"; "operator_judge" ])
+
+let runtime_required_profile_names ?config_path () =
+  let config_path =
+    match config_path with
+    | Some path -> path
+    | None -> (
+        match config_path_opt () with
+        | Some path -> path
+        | None -> "")
+  in
+  if String.equal config_path "" then
+    Keeper_cascade_profile.known_cascades
+    @ [ "governance_judge"; "operator_judge" ]
+    |> List.sort_uniq String.compare
+  else
+    runtime_required_profiles ~config_path
 
 let validate_path_result ~sw ~net ~clock ~config_path =
   let checked_at = Unix.gettimeofday () in

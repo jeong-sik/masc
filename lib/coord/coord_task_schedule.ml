@@ -142,9 +142,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
       ) working_tasks in
       (* Identify blocked Todo tasks for observability *)
       let all_todo = List.filter (fun (t : Types.task) ->
-        match t.task_status with
-        | Todo -> true
-        | _ -> false
+        t.task_status = Types.Todo
       ) sorted in
       let blocked_todo = List.filter (fun (t : Types.task) ->
         Option.is_some t.do_not_reclaim_reason

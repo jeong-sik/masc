@@ -38,7 +38,7 @@ let working_agents config =
     List.filter_map (fun (t : task) ->
       match t.task_status with
       | Claimed { assignee; _ } | InProgress { assignee; _ } -> Some assignee
-      | _ -> None
+      | Todo | Done _ | Cancelled _ | AwaitingVerification _ -> None
     ) backlog.tasks
     |> List.sort_uniq String.compare
 

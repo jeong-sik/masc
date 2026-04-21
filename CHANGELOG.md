@@ -3,6 +3,12 @@
 
 ## [0.12.3] - 2026-04-21
 
+### Added
+- `config/cascade.toml` is now the supported human-authored cascade catalog
+  source. When present, the runtime materializes sibling `config/cascade.json`
+  on load and continues serving the existing JSON-backed cascade path without a
+  consumer-facing schema change.
+
 ### Changed
 - Keeper Phase C blocker classification now uses structured
   `masc_internal_error` variants for admission queue timeout, turn timeout,
@@ -11,7 +17,19 @@
 - `Otel_spans` now ships an explicit `.mli` interface that hides mutable
   internal refs and publishes the supported tracing API surface
   (`init`, exporter setup, `shutdown`, span helpers, and trace state accessors).
+- TOML-backed cascade catalogs now fail closed: invalid `cascade.toml` blocks
+  cascade resolution instead of silently falling back to stale generated JSON.
+- Dashboard cascade surfaces now make the authoring/runtime split explicit.
+  The cascade panel shows the active authoring source, raw `cascade.json`
+  editing becomes read-only when TOML-backed, and keeper config surfaces now
+  show both the selected `cascade_name` and the paths that control selection
+  versus generated runtime catalog state.
+- Regression coverage now locks the TOML materialization contract, resolver
+  behavior for TOML-only config roots, dashboard raw-config read-only behavior,
+  and keeper-config source/cascade provenance.
 
+### Deprecated
+- None.
 ## [0.12.2] - 2026-04-21
 
 ### Changed

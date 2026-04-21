@@ -21,6 +21,13 @@ let with_cache_lock f =
 let invalidate_cache_entry path =
   with_cache_lock (fun () -> Hashtbl.remove config_cache path)
 
+let ensure_materialized_json path =
+  match Cascade_toml_materializer.ensure_materialized_json ~config_path:path with
+  | Ok { wrote_json; _ } ->
+      if wrote_json then invalidate_cache_entry path;
+      Ok ()
+  | Error _ as err -> err
+
 let read_json_file path =
   let ic = open_in path in
   let content =
@@ -68,27 +75,30 @@ let load_json path =
         (match outcome with
          | `Returning_cached cached_json -> Ok cached_json
          | `Installed_new prior_mtime ->
-           (* Observability: trace first-load vs reload so operators
-              editing cascade.json can verify their change took effect.
-              Keeping this at traceln (stderr) matches existing OAS
-              convention (see Cascade_config.apply_provider_filter). *)
-           (match prior_mtime with
-            | None ->
-              Eio.traceln
-                "[CascadeConfig] loaded %s mtime=%.0f"
-                path refreshed_mtime
-            | Some old_mtime ->
-              Eio.traceln
-                "[CascadeConfig] reloaded %s old_mtime=%.0f new_mtime=%.0f"
-                path old_mtime refreshed_mtime);
-           Ok json)
+             (* Observability: trace first-load vs reload so operators
+                editing cascade.json can verify their change took effect.
+                Keeping this at traceln (stderr) matches existing OAS
+                convention (see Cascade_config.apply_provider_filter). *)
+             (match prior_mtime with
+              | None ->
+                  Eio.traceln
+                    "[CascadeConfig] loaded %s mtime=%.0f"
+                    path refreshed_mtime
+              | Some old_mtime ->
+                  Eio.traceln
+                    "[CascadeConfig] reloaded %s old_mtime=%.0f new_mtime=%.0f"
+                    path old_mtime refreshed_mtime);
+             Ok json)
   in
-  try load_current () with
-  | Sys_error msg -> Error msg
-  | Unix.Unix_error (err, fn, arg) ->
-    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
-  | Yojson.Json_error msg -> Error (Printf.sprintf "JSON error: %s" msg)
-  | End_of_file -> Error "unexpected end of file"
+  match ensure_materialized_json path with
+  | Error _ as err -> err
+  | Ok () ->
+      (try load_current () with
+       | Sys_error msg -> Error msg
+       | Unix.Unix_error (err, fn, arg) ->
+           Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
+       | Yojson.Json_error msg -> Error (Printf.sprintf "JSON error: %s" msg)
+       | End_of_file -> Error "unexpected end of file")
 
 (** A model entry with an optional weight for weighted cascade selection.
     Weight defaults to 1 when not specified (backward compatible). *)

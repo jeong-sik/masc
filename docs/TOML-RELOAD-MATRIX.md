@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-04-19
+last_verified: 2026-04-21
 code_refs:
   - scripts/check-doc-truth.sh
   - config/
@@ -33,7 +33,8 @@ The key distinction is:
 | `<base_path>/.masc/config/keeper_runtime.toml` | startup env seeding for `MASC_KEEPER_*` knobs | server bootstrap before `Env_config_keeper` consumers initialize | none | `boot_static` | values are recorded in a process-local boot override store; edits require restart |
 | `<resolved-config-root>/tool_policy.toml` | keeper tool preset/group policy | server bootstrap via `init_policy_config` | none | `boot_static` | presets are stored in process memory once loaded |
 | `<resolved-config-root>/keepers/*.toml` | declarative keeper profile defaults | keeper create/up, explicit keeper operations, supervisor reconcile | next supervisor sweep or next keeper create/up | `sweep_dynamic` | running keepers re-sync declarative fields; no standalone file watcher |
-| `<resolved-config-root>/cascade.json` | model cascade order and per-cascade inference settings | model resolve path in OAS/MASC | next resolve / next turn | `request_dynamic` | OAS side uses mtime-based cache for JSON reloads |
+| `<resolved-config-root>/cascade.toml` | human-authored cascade catalog source | model resolve path in OAS/MASC (materializes sibling JSON first) | next resolve / next turn | `request_dynamic` | when present, TOML wins and invalid TOML blocks cascade load |
+| `<resolved-config-root>/cascade.json` | generated runtime artifact for cascade order and per-cascade inference settings | model resolve path in OAS/MASC | next resolve / next turn | `request_dynamic` | direct JSON editing is only the active source when sibling TOML is absent |
 
 ## Current Behavior by File
 
@@ -80,16 +81,21 @@ Operational meaning:
 - They are applied on the next sweep for running keepers, or on the next
   `keeper_up`/create path for inactive keepers.
 
-### `cascade.json`
+### `cascade.toml` / `cascade.json`
 
+- TOML source resolution/materialization lives in
+  [`Cascade_toml_materializer`](../lib/cascade/cascade_toml_materializer.ml)
 - Resolved via
   [`Cascade_runtime.models_of_cascade_name`](../lib/cascade/cascade_runtime.ml)
-- The code explicitly delegates JSON caching/reload to OAS and documents an
-  mtime-based cache
+- The code materializes sibling `cascade.json` before loading and then
+  delegates runtime JSON caching/reload to OAS with the same request-path
+  contract
   ([`cascade_runtime.ml`](../lib/cascade/cascade_runtime.ml))
 
 Operational meaning:
 
+- If `cascade.toml` exists, it is the authoring SSOT and invalid edits fail
+  closed instead of falling back to stale JSON.
 - Path selection is still tied to cached config-root resolution.
 - Content changes are observed on the next resolve/turn, not by a dedicated
   watcher.

@@ -7,7 +7,9 @@
     @since 0.93.1 *)
 
 (** Load and cache a raw JSON config file.
-    Cached with mtime-based hot-reload. *)
+    Cached with mtime-based hot-reload. When a sibling [cascade.toml] exists,
+    it is validated/materialized first and this loader then reads the
+    generated [cascade.json]. *)
 val load_json : string -> (Yojson.Safe.t, string) result
 
 (** Drop the cached JSON entry for one [cascade.json] path.

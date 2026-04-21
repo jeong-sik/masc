@@ -773,6 +773,8 @@ interface KeeperConfigExecution {
   active_model_label?: string | null
   last_model_used_label?: string | null
   verify: boolean
+  selected_cascade_name: string
+  selected_cascade_canonical: string
 }
 
 interface KeeperConfigCompaction {
@@ -855,6 +857,10 @@ interface KeeperConfigSources {
   precedence: string[]
   has_live_override: boolean
   override_fields: string[]
+  cascade_catalog_source_kind: 'json' | 'toml' | null
+  cascade_catalog_source_path: string | null
+  cascade_runtime_json_path: string | null
+  cascade_runtime_json_editable: boolean
 }
 
 interface KeeperConfigMetrics {

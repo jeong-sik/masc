@@ -392,6 +392,18 @@ let optional_existing_path_json ?source = function
   | Some path -> existing_path_json ?source path
   | None -> `Null
 
+let cascade_catalog_source_fields (resolution : Config_dir_resolver.resolution) =
+  let source =
+    Cascade_toml_materializer.source_info ~config_path:resolution.cascade.path
+  in
+  [
+    ( "cascade_catalog_source_kind",
+      `String (Cascade_toml_materializer.source_kind_to_string source.kind) );
+    ("cascade_catalog_source_path", `String source.source_path);
+    ("cascade_runtime_json_path", `String source.json_path);
+    ("cascade_runtime_json_editable", `Bool source.raw_json_editable);
+  ]
+
 let override_field_source_json ~default_source_kind ~default_manifest_path detail =
   let default_missing =
     match detail.default_value with
@@ -426,7 +438,7 @@ let source_provenance_json config (meta : keeper_meta) =
   let default_manifest_path = snapshot.defaults.manifest_path in
   let default_source_kind = snapshot.source_kind in
   `Assoc
-    [
+    ([
       ("live_meta_path", `String live_meta_path);
       ("live_meta", existing_path_json ~source:"runtime_overlay" live_meta_path);
       ("default_manifest_path", Json_util.string_opt_to_json default_manifest_path);
@@ -438,6 +450,9 @@ let source_provenance_json config (meta : keeper_meta) =
         `String (Config_dir_resolver.source_to_string resolution.config_root.source) );
       ("config_resolution", Config_dir_resolver.to_json resolution);
       ("precedence", `List [ `String "live_meta"; `String "toml"; `String "persona" ]);
+    ]
+    @ cascade_catalog_source_fields resolution
+    @ [
       ("has_live_override", `Bool (override_fields <> []));
       ("override_fields", string_list_to_json override_fields);
       ( "override_field_sources",
@@ -445,4 +460,4 @@ let source_provenance_json config (meta : keeper_meta) =
           (List.map
              (override_field_source_json ~default_source_kind ~default_manifest_path)
              override_details) );
-    ]
+    ])

@@ -380,6 +380,9 @@ let rejection_of_path ~config_path ~attempted_mtime ~checked_at
     ~(errors : string list) ~(profiles : profile_rejection list) =
   { source_path = config_path; attempted_mtime; checked_at; errors; profiles }
 
+let active_source_state ~config_path =
+  Cascade_toml_materializer.source_state ~config_path
+
 let validate_profile_static ~config_path name : (profile_build, profile_rejection) result =
   let weighted_entries =
     Cascade_config_loader.load_profile_weighted ~config_path ~name
@@ -476,25 +479,23 @@ let runtime_required_profile_names ?config_path () =
 
 let validate_path_result ~config_path =
   let checked_at = Unix.gettimeofday () in
-  let attempted_mtime =
-    try Some (Unix.stat config_path).Unix.st_mtime
-    with
-    | Unix.Unix_error _ | Sys_error _ -> None
-  in
-  if not (Env_config_core.existing_file config_path) then
+  let source_state = active_source_state ~config_path in
+  let source_path = source_state.info.source_path in
+  let attempted_mtime = source_state.source_mtime in
+  if not source_state.source_exists then
     Error
-      (rejection_of_path ~config_path ~attempted_mtime ~checked_at
-         ~errors:[ Printf.sprintf "active cascade catalog is missing: %s" config_path ]
+      (rejection_of_path ~config_path:source_path ~attempted_mtime ~checked_at
+         ~errors:[ Printf.sprintf "active cascade source is missing: %s" source_path ]
          ~profiles:[])
   else
     match Cascade_config_loader.load_json config_path with
     | Error msg ->
         Error
-          (rejection_of_path ~config_path ~attempted_mtime ~checked_at
+          (rejection_of_path ~config_path:source_path ~attempted_mtime ~checked_at
              ~errors:
                [
                  Printf.sprintf
-                   "active cascade catalog could not be loaded: %s"
+                   "active cascade source could not be loaded: %s"
                    msg;
                ]
              ~profiles:[])
@@ -531,7 +532,8 @@ let validate_path_result ~config_path =
         let statically_rejected_profiles = List.rev statically_rejected_profiles in
         if top_errors <> [] || built_profiles = [] then
           Error
-            (rejection_of_path ~config_path ~attempted_mtime ~checked_at
+            (rejection_of_path ~config_path:source_path ~attempted_mtime
+               ~checked_at
                ~errors:top_errors ~profiles:statically_rejected_profiles)
         else
           let profile_snapshots =
@@ -563,7 +565,7 @@ let validate_path_result ~config_path =
           in
           let snapshot =
             {
-              source_path = config_path;
+              source_path;
               mtime = Option.value attempted_mtime ~default:0.0;
               validated_at = checked_at;
               profiles = profile_snapshots;
@@ -573,7 +575,8 @@ let validate_path_result ~config_path =
             Ok { snapshot; rejected_update = None }
           else
             let rejection =
-              rejection_of_path ~config_path ~attempted_mtime ~checked_at
+              rejection_of_path ~config_path:source_path ~attempted_mtime
+                ~checked_at
                 ~errors:
                   ((if default_profile_validated then
                       []
@@ -639,29 +642,27 @@ let inspect_active ?sw ?net ?clock () =
            Ok (Serving_last_known_good { snapshot; rejected_update = rejection })
        | None -> Error rejection)
   | Some config_path ->
-      let current_mtime =
-        try Some (Unix.stat config_path).Unix.st_mtime
-        with
-        | Unix.Unix_error _ | Sys_error _ -> None
-      in
+      let source_state = active_source_state ~config_path in
+      let source_path = source_state.info.source_path in
+      let current_mtime = source_state.source_mtime in
       let cached_result =
         with_cache_lock (fun () ->
             match !cache.active_snapshot, !cache.rejected_update, current_mtime with
             | Some snapshot, Some rejection, Some mtime
-              when same_snapshot_key snapshot ~path:config_path ~mtime
-                   && same_rejection_key rejection ~path:config_path ~mtime ->
+              when same_snapshot_key snapshot ~path:source_path ~mtime
+                   && same_rejection_key rejection ~path:source_path ~mtime ->
                 Some
                   (Ok
                      (Validated_with_rejections
                         { snapshot; rejected_update = rejection }))
             | Some snapshot, _, Some mtime
-              when same_snapshot_key snapshot ~path:config_path ~mtime ->
+              when same_snapshot_key snapshot ~path:source_path ~mtime ->
                 Some (Ok (Validated snapshot))
             | Some snapshot, Some rejection, Some mtime
-              when same_rejection_key rejection ~path:config_path ~mtime ->
+              when same_rejection_key rejection ~path:source_path ~mtime ->
                 Some (Ok (Serving_last_known_good { snapshot; rejected_update = rejection }))
             | None, Some rejection, Some mtime
-              when same_rejection_key rejection ~path:config_path ~mtime ->
+              when same_rejection_key rejection ~path:source_path ~mtime ->
                 Some (Error rejection)
             | _ -> None)
       in

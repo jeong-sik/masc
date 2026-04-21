@@ -21,6 +21,8 @@
       {
         "updated_at": "2026-04-15T08:15:00Z",
         "config_path": "/path/to/cascade.json" | null,
+        "source_kind": "json" | "toml",
+        "source_path": "/path/to/cascade.json" | "/path/to/cascade.toml",
         "profiles": [
           { "name": "keeper_unified",
             "keeper_assignable": true,
@@ -54,6 +56,9 @@ val config_json : unit -> Yojson.Safe.t
       {
         "updated_at": "2026-04-21T08:15:00Z",
         "config_path": "/path/to/cascade.json" | null,
+        "source_kind": "json" | "toml",
+        "source_path": "/path/to/cascade.json" | "/path/to/cascade.toml",
+        "raw_json_editable": true | false,
         "raw_json": "{ ... }\n"
       }
     ]}
@@ -61,7 +66,9 @@ val config_json : unit -> Yojson.Safe.t
     [config_path] is the resolver's candidate [cascade.json] path under the
     active config root, even when the file does not exist yet. In that missing
     file case, [raw_json] defaults to ["{}\n"] so operators can bootstrap a
-    config from the dashboard editor.
+    config from the dashboard editor. When [source_kind] is ["toml"], the raw
+    JSON remains readable as the generated runtime artifact but
+    [raw_json_editable] is [false] and writes are blocked.
 
     @since 0.160.1 *)
 val raw_config_json : unit -> Yojson.Safe.t
@@ -73,7 +80,8 @@ val raw_config_json : unit -> Yojson.Safe.t
     hard gate here: invalid cascades are still written and surfaced through the
     returned validation metadata so the runtime can continue serving the last
     known good snapshot. Missing parent directories are created on demand under
-    the active config root.
+    the active config root. Returns [Error _] when [cascade.toml] is the active
+    source because the dashboard must not overwrite generated [cascade.json].
 
     @since 0.160.1 *)
 val save_raw_config_json :
@@ -84,7 +92,7 @@ val save_raw_config_json :
     contract can be exercised in tests directly.
 
     The [cascade_name] argument is forwarded as-is (not canonicalized);
-    the [canonical] field is [Keeper_cascade_profile.canonicalize
+    the [canonical] field is [Keeper_cascade_profile.resolve_live
     cascade_name]. When the two match, the UI renders "—" in the
     canonical column.
 

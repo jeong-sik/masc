@@ -4,6 +4,7 @@ module StringSet = Set.Make (String)
     Consumed by the resolver here and by config loaders elsewhere in the
     codebase. Issue #8414. *)
 let cascade_json_filename = "cascade.json"
+let cascade_toml_filename = "cascade.toml"
 let tool_policy_toml_filename = "tool_policy.toml"
 let keeper_runtime_toml_filename = "keeper_runtime.toml"
 
@@ -145,11 +146,13 @@ let to_json (resolution : resolution) =
 
 let config_signature_exists config_dir =
   let cascade = Filename.concat config_dir cascade_json_filename in
+  let cascade_toml = Filename.concat config_dir cascade_toml_filename in
   let prompts = Filename.concat config_dir "prompts" in
   let keepers = Filename.concat config_dir "keepers" in
   let personas = Filename.concat config_dir "personas" in
   existing_dir config_dir
-  && (existing_file cascade || existing_dir prompts || existing_dir keepers
+  && ((existing_file cascade || existing_file cascade_toml)
+     || existing_dir prompts || existing_dir keepers
      || existing_dir personas)
 
 let rec ancestor_dirs path =
@@ -273,6 +276,7 @@ let child_item (root : path_item) name =
   let path = Filename.concat root.path name in
   let exists =
     if String.equal name cascade_json_filename then existing_file path
+      || existing_file (Filename.concat root.path cascade_toml_filename)
     else existing_dir path
   in
   { path; exists; source = root.source }
@@ -343,6 +347,13 @@ let cascade_path_opt () =
 
 let cascade_path_candidate () =
   (resolve ()).cascade.path
+
+let cascade_toml_path_candidate () =
+  Filename.concat (resolve ()).config_root.path cascade_toml_filename
+
+let cascade_toml_path_opt () =
+  let path = cascade_toml_path_candidate () in
+  if existing_file path then Some path else None
 
 let prompts_dir () =
   (resolve ()).prompts.path

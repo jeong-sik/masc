@@ -1,0 +1,198 @@
+open Alcotest
+
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then
+      true
+    else if idx + needle_len > haystack_len then
+      false
+    else if String.sub haystack idx needle_len = needle then
+      true
+    else
+      loop (idx + 1)
+  in
+  loop 0
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/" then
+    ()
+  else if Sys.file_exists path then
+    ()
+  else begin
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755
+  end
+
+let write_file path content =
+  mkdir_p (Filename.dirname path);
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+
+let read_file path =
+  In_channel.with_open_bin path In_channel.input_all
+
+let with_env name value f =
+  let saved = Sys.getenv_opt name in
+  (match value with
+   | Some v -> Unix.putenv name v
+   | None -> Unix.putenv name "");
+  Fun.protect
+    ~finally:(fun () ->
+      match saved with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
+let with_config_dir config_dir f =
+  let reset () =
+    Masc_mcp.Config_dir_resolver.reset ();
+    Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ()
+  in
+  with_env "MASC_BASE_PATH" None @@ fun () ->
+  with_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
+  reset ();
+  Fun.protect ~finally:reset f
+
+let init_config_root config_dir =
+  mkdir_p (Filename.concat config_dir "prompts");
+  mkdir_p (Filename.concat config_dir "keepers");
+  mkdir_p (Filename.concat config_dir "personas")
+
+let repo_toml_path () =
+  match Sys.getenv_opt "MASC_CASCADE_TOML_PATH" with
+  | Some path when String.trim path <> "" -> path
+  | _ -> failwith "MASC_CASCADE_TOML_PATH not set"
+
+let repo_json_path () =
+  match Sys.getenv_opt "MASC_CASCADE_JSON_PATH" with
+  | Some path when String.trim path <> "" -> path
+  | _ -> failwith "MASC_CASCADE_JSON_PATH not set"
+
+let minimal_toml =
+  {|
+[keeper_unified]
+models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+|}
+
+let render_or_fail toml_path =
+  match Masc_mcp.Cascade_toml_materializer.render_toml_file_to_json_string toml_path with
+  | Ok rendered -> rendered
+  | Error msg -> failf "unexpected TOML render failure: %s" msg
+
+let test_repo_toml_renders_to_committed_json () =
+  let rendered = render_or_fail (repo_toml_path ()) in
+  check string "repo cascade json stays in sync with toml"
+    (read_file (repo_json_path ()))
+    rendered
+
+let test_unknown_profile_field_is_rejected () =
+  match
+    Masc_mcp.Cascade_toml_materializer.render_toml_string_to_json_string
+      {|
+[keeper_unified]
+models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+unknown_field = 1
+|}
+  with
+  | Ok _ -> fail "unknown field should be rejected"
+  | Error msg ->
+      check bool "error mentions unknown field" true
+        (contains_substring msg "unknown field")
+
+let test_runtime_materializes_missing_json_on_load () =
+  with_temp_dir "cascade-toml-materialize" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  write_file (Filename.concat config_dir "cascade.toml") minimal_toml;
+  let json_path = Filename.concat config_dir "cascade.json" in
+  check bool "json missing before load" false (Sys.file_exists json_path);
+  with_config_dir config_dir @@ fun () ->
+  match Masc_mcp.Cascade_catalog_runtime.inspect_active () with
+  | Ok (Masc_mcp.Cascade_catalog_runtime.Validated _) ->
+      check bool "json materialized on load" true (Sys.file_exists json_path);
+      check bool "generated json contains profile key" true
+        (contains_substring (read_file json_path) "keeper_unified_models")
+  | Ok _ -> fail "expected fully validated catalog"
+  | Error rejection ->
+      failf "unexpected validation failure: %s"
+        (Yojson.Safe.to_string
+           (Masc_mcp.Cascade_catalog_runtime.rejection_to_yojson rejection))
+
+let test_runtime_rewrites_drifted_json_from_toml () =
+  with_temp_dir "cascade-toml-drift" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  let toml_path = Filename.concat config_dir "cascade.toml" in
+  let json_path = Filename.concat config_dir "cascade.json" in
+  write_file toml_path minimal_toml;
+  write_file json_path {|{"alpha_models":["ollama:qwen3.5:35b-a3b-nvfp4"]}|};
+  let expected_json = render_or_fail toml_path in
+  with_config_dir config_dir @@ fun () ->
+  ignore (Masc_mcp.Cascade_catalog_runtime.inspect_active ());
+  check string "drifted runtime json rewritten from toml"
+    expected_json (read_file json_path)
+
+let test_invalid_toml_blocks_runtime_without_using_stale_json () =
+  with_temp_dir "cascade-toml-invalid" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  write_file
+    (Filename.concat config_dir "cascade.toml")
+    {|
+[keeper_unified]
+models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+unknown_field = 1
+|};
+  write_file
+    (Filename.concat config_dir "cascade.json")
+    {|{"keeper_unified_models":["ollama:qwen3.5:35b-a3b-nvfp4"]}|};
+  with_config_dir config_dir @@ fun () ->
+  match Masc_mcp.Cascade_catalog_runtime.inspect_active () with
+  | Ok _ -> fail "invalid toml should block runtime load"
+  | Error rejection ->
+      let rendered =
+        Masc_mcp.Cascade_catalog_runtime.rejection_to_yojson rejection
+        |> Yojson.Safe.to_string
+      in
+      check bool "rejection mentions unknown field" true
+        (contains_substring rendered "unknown field")
+
+let () =
+  run "cascade_toml_materialization"
+    [
+      ( "repo_sync",
+        [
+          test_case "repo toml renders to committed json" `Quick
+            test_repo_toml_renders_to_committed_json;
+        ] );
+      ( "validation",
+        [
+          test_case "unknown profile field is rejected" `Quick
+            test_unknown_profile_field_is_rejected;
+        ] );
+      ( "runtime",
+        [
+          test_case "missing json materializes on load" `Quick
+            test_runtime_materializes_missing_json_on_load;
+          test_case "drifted json rewrites from toml" `Quick
+            test_runtime_rewrites_drifted_json_from_toml;
+          test_case "invalid toml blocks runtime without stale json fallback"
+            `Quick test_invalid_toml_blocks_runtime_without_using_stale_json;
+        ] );
+    ]

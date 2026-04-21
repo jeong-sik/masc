@@ -1,9 +1,9 @@
 {
   "_comment": "Known keeper-facing cascade profiles remain typed in lib/keeper/keeper_cascade_profile.ml. Live catalog discovery is schema-driven via lib/cascade/cascade_config_loader.ml: any recognized {name}_* cascade key participates in the catalog, and optional {name}_keeper_assignable=false marks system-only profiles that stay visible/editable but must not be assignable to keepers. Personal/playground-only cascades belong in $MASC_BASE_PATH/.masc/playground/<persona>/.../cascade.json, not in this repo config.",
   "default_models": [
-    {"model": "glm-coding:glm-5.1", "weight": 50},
-    {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 30},
-    {"model": "ollama:gemma4:26b", "weight": 20}
+    { "model": "glm-coding:glm-5.1", "weight": 50 },
+    { "model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 30 },
+    { "model": "ollama:gemma4:26b", "weight": 20 }
   ],
   "default_temperature": 0.3,
   "default_max_tokens": 4096,
@@ -11,43 +11,37 @@
     "glm-coding": "ZAI_API_KEY_SB",
     "glm": "ZAI_API_KEY_SB"
   },
-
   "keeper_unified_models": [
-    {"model": "glm-coding:glm-5.1", "weight": 50},
-    {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 30},
-    {"model": "ollama:gemma4:26b", "weight": 20}
+    { "model": "glm-coding:glm-5.1", "weight": 50 },
+    { "model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 30 },
+    { "model": "ollama:gemma4:26b", "weight": 20 }
   ],
   "keeper_unified_temperature": 0.2,
   "keeper_unified_max_tokens": 16384,
-
-  "local_only_models": [
-    "ollama:qwen3.5:35b-a3b-nvfp4"
-  ],
+  "local_only_models": [ "ollama:qwen3.5:35b-a3b-nvfp4" ],
   "local_only_temperature": 0.2,
   "local_only_max_tokens": 32768,
-
   "_comment_local_mlx_vlm_qwen36": "Local OpenAI-compatible mlx-vlm endpoint for Huihui Qwen3.6 35B. Keep repo profile limited to the canonical localhost endpoint and let OAS parser surface mlx-vlm telemetry fields.",
   "local_mlx_vlm_qwen36_models": [
     "custom:mlx-community/Huihui-Qwen3.6-35B-A3B-abliterated-4.4bit-msq@http://127.0.0.1:18080/v1"
   ],
   "local_mlx_vlm_qwen36_temperature": 0.2,
   "local_mlx_vlm_qwen36_max_tokens": 16384,
-
-  "local_recovery_models": [
-    "ollama:qwen3.5:35b-a3b-nvfp4"
-  ],
+  "local_recovery_models": [ "ollama:qwen3.5:35b-a3b-nvfp4" ],
   "local_recovery_temperature": 0.1,
   "local_recovery_max_tokens": 8192,
-
   "_comment_tool_rerank": "inference-only override: tool_rerank has no _models of its own; callers reuse the default cascade's models and apply the short max_tokens here. Short responses for rerank scoring.",
   "tool_rerank_temperature": 0.0,
   "tool_rerank_max_tokens": 200,
   "tool_rerank_keeper_assignable": false,
-
-  "_comment_sangsu": "sangsu is a persona keeper (홍상수-style 40대 남자) whose conversational turns rarely need tool calls.  Bias heavily toward local ollama to keep cost near zero, but include glm-coding as the second link in the cascade so [require_tool_use] turns auto-failover to a tool-capable cloud model instead of leaving the keeper idle.  Lower temperature (0.1) tightens ollama tool-call obedience per memory/reference_ollama-config-2026-04.  Cascade weight ordering acts as a fallback chain: 90% of orderings put ollama first (then glm), 10% put glm first (then ollama).",
+  "_comment_sangsu": "sangsu is a persona keeper (홍상수-style 40대 남자) whose conversational turns rarely need tool calls. Bias heavily toward local ollama to keep cost near zero, but include glm-coding as the second link in the cascade so [require_tool_use] turns auto-failover to a tool-capable cloud model instead of leaving the keeper idle. Lower temperature (0.1) tightens ollama tool-call obedience per memory/reference_ollama-config-2026-04. Cascade weight ordering acts as a fallback chain: 90% of orderings put ollama first (then glm), 10% put glm first (then ollama).",
   "sangsu_models": [
-    {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 90, "supports_tool_choice": true},
-    {"model": "glm-coding:glm-5.1", "weight": 10}
+    {
+      "model": "ollama:qwen3.5:35b-a3b-nvfp4",
+      "weight": 90,
+      "supports_tool_choice": true
+    },
+    { "model": "glm-coding:glm-5.1", "weight": 10 }
   ],
   "sangsu_temperature": 0.1,
   "sangsu_max_tokens": 16384

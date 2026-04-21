@@ -441,6 +441,35 @@ function dockerStatusLabel(c: KeeperConfig): string {
   return 'local'
 }
 
+function cascadeCatalogSourceLabel(c: KeeperConfig): string {
+  switch (c.sources.cascade_catalog_source_kind) {
+    case 'toml':
+      return 'cascade.toml (authoring SSOT)'
+    case 'json':
+      return 'cascade.json (direct runtime edit)'
+    default:
+      return '--'
+  }
+}
+
+function cascadeSelectionSummary(c: KeeperConfig): string {
+  const selected = c.execution.selected_cascade_name || '--'
+  const canonical = c.execution.selected_cascade_canonical || selected
+  const manifest = c.sources.default_manifest_path
+  const catalog = c.sources.cascade_catalog_source_path
+  const selectionPart = manifest
+    ? `선택은 ${manifest} 에서 관리됩니다.`
+    : '선택 source 경로를 확인할 수 없습니다.'
+  const catalogPart = catalog
+    ? `profile 정의는 ${catalog} 에서 materialize됩니다.`
+    : 'profile catalog source 경로를 확인할 수 없습니다.'
+  const canonicalPart =
+    canonical !== '' && canonical !== selected
+      ? ` 현재 값 ${selected} 는 runtime에서 ${canonical} 으로 정규화됩니다.`
+      : ''
+  return `이 keeper는 cascade profile ${selected} 를 사용합니다. ${selectionPart} ${catalogPart}${canonicalPart}`
+}
+
 // ── Main component ───────────────────────────────────────
 
 export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
@@ -616,7 +645,20 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       </div>
 
       <${SectionHeader} title="소스" />
+      <${Callout}
+        title="Cascade 선택"
+        body=${cascadeSelectionSummary(c)}
+      />
       <${ConfigRow} label="기본 소스" value=${c.sources.default_source_kind || '--'} />
+      <${ConfigRow} label="선택 cascade" value=${c.execution.selected_cascade_name || '--'} />
+      ${c.execution.selected_cascade_canonical
+        && c.execution.selected_cascade_canonical !== c.execution.selected_cascade_name
+        ? html`<${ConfigRow}
+            label="정규화 cascade"
+            value=${c.execution.selected_cascade_canonical}
+          />`
+        : null}
+      <${ConfigRow} label="catalog source" value=${cascadeCatalogSourceLabel(c)} />
       <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">라이브 오버라이드</span>
         <${BoolBadge} value=${c.sources.has_live_override} />
@@ -627,6 +669,18 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">기본 매니페스트 경로</div>
         <${LongText} text=${c.sources.default_manifest_path} />
       ` : null}
+      ${c.sources.cascade_catalog_source_path ? html`
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Cascade catalog source</div>
+        <${LongText} text=${c.sources.cascade_catalog_source_path} />
+      ` : null}
+      ${c.sources.cascade_runtime_json_path ? html`
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Generated runtime JSON</div>
+        <${LongText} text=${c.sources.cascade_runtime_json_path} />
+      ` : null}
+      <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
+        <span class="text-xs text-[var(--text-muted)]">cascade.json 직접 수정 가능</span>
+        <${BoolBadge} value=${c.sources.cascade_runtime_json_editable} />
+      </div>
       <div class="mt-1.5">
         <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">우선순위</div>
         <${ModelList} models=${c.sources.precedence} />

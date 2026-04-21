@@ -79,10 +79,10 @@ let status config =
   let active_tasks, done_count, cancelled_count =
     List.fold_left
       (fun (active, done_cnt, cancelled_cnt) task ->
-        match task.task_status with
-        | Done _ -> (active, done_cnt + 1, cancelled_cnt)
-        | Cancelled _ -> (active, done_cnt, cancelled_cnt + 1)
-        | _ -> (task :: active, done_cnt, cancelled_cnt))
+        let s = task.task_status in
+        if Types.task_status_is_done s then (active, done_cnt + 1, cancelled_cnt)
+        else if Types.task_status_is_terminal s then (active, done_cnt, cancelled_cnt + 1)
+        else (task :: active, done_cnt, cancelled_cnt))
       ([], 0, 0) sorted_tasks
   in
   let active_tasks = List.rev active_tasks in

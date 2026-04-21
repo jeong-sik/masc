@@ -187,7 +187,9 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
            match t.task_status with
            | Types.Cancelled _ -> false
            | Types.Done _ -> not compact
-           | _ -> true)
+           | Types.Todo -> true
+           | Types.Claimed _ | Types.InProgress _ -> true
+           | Types.AwaitingVerification _ -> true)
          tasks)
   in
   let agents_json =

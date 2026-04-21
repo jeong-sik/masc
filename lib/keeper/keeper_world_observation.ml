@@ -221,7 +221,10 @@ let read_backlog_counts ~(config : Coord.config) : int * int * int =
       List.length
         (List.filter
            (fun (t : Types.task) ->
-             match t.task_status with Types.Cancelled _ -> true | _ -> false)
+             match t.task_status with
+             | Types.Cancelled _ -> true
+             | Types.Todo | Types.Claimed _ | Types.InProgress _
+             | Types.AwaitingVerification _ | Types.Done _ -> false)
            backlog.tasks)
     in
     let pending_verification =
@@ -229,7 +232,9 @@ let read_backlog_counts ~(config : Coord.config) : int * int * int =
         (List.filter
            (fun (t : Types.task) ->
              match t.task_status with
-             | Types.AwaitingVerification _ -> true | _ -> false)
+             | Types.AwaitingVerification _ -> true
+             | Types.Todo | Types.Claimed _ | Types.InProgress _
+             | Types.Done _ | Types.Cancelled _ -> false)
            backlog.tasks)
     in
     (unclaimed, failed, pending_verification)

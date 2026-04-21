@@ -73,6 +73,118 @@ let normalize_gh_command (cmd : string) : string =
   in
   String.concat " " (drop_leading_gh tokens)
 
+type gh_command_parse_error =
+  | Empty_command
+  | Unsupported_shell_construct of string
+  | Unsupported_command_shape of string
+
+type gh_simple_command = {
+  argv : string list;
+}
+
+let gh_simple_command_argv cmd = cmd.argv
+
+let render_simple_gh_command cmd =
+  cmd.argv
+  |> List.map Filename.quote
+  |> String.concat " "
+
+let too_complex_reason_tag (r : Masc_exec.Parsed.reason_too_complex) =
+  match r with
+  | `Heredoc -> "heredoc"
+  | `Here_string -> "here_string"
+  | `Cmd_subst -> "cmd_subst"
+  | `Proc_subst -> "proc_subst"
+  | `Subshell -> "subshell"
+  | `Arith_expansion -> "arith_expansion"
+  | `Control_flow -> "control_flow"
+  | `Logic_op -> "logic_op"
+  | `Function_def -> "function_def"
+  | `Glob_brace -> "glob_brace"
+  | `Background -> "background"
+  | `Redirect -> "redirect"
+  | `Unknown_construct s -> "unknown:" ^ s
+
+let aborted_reason_tag (r : Masc_exec.Parsed.reason_aborted) =
+  match r with
+  | `Timeout_50ms -> "timeout_50ms"
+  | `Depth_limit -> "depth_limit"
+  | `Token_limit_50k -> "token_limit_50k"
+
+let gh_simple_command_of_simple (simple : Masc_exec.Shell_ir.simple)
+    : (string * gh_simple_command, gh_command_parse_error) result
+  =
+  if simple.env <> [] then
+    Error (Unsupported_command_shape "env_prefix")
+  else
+    match simple.cwd with
+    | Some _ -> Error (Unsupported_command_shape "cwd_scope")
+    | None ->
+      if simple.redirects <> [] then
+        Error (Unsupported_command_shape "redirect")
+      else
+        let rec collect acc = function
+          | [] ->
+            Ok
+              ( Masc_exec.Bin.to_string simple.bin
+              , { argv = List.rev acc } )
+          | Masc_exec.Shell_ir.Lit s :: rest ->
+            collect (s :: acc) rest
+          | Masc_exec.Shell_ir.Concat _ :: _ ->
+            Error (Unsupported_command_shape "concat_arg")
+          | Masc_exec.Shell_ir.Var _ :: _ ->
+            Error (Unsupported_command_shape "var_arg")
+        in
+        collect [] simple.args
+
+let gh_simple_command_of_parsed
+      (parsed : Masc_exec.Shell_ir.t Masc_exec.Parsed.t)
+  : ([ `Gh of gh_simple_command | `Other ], gh_command_parse_error) result
+  =
+  match parsed with
+  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Simple simple) ->
+    (match gh_simple_command_of_simple simple with
+     | Error _ as e -> e
+     | Ok (bin, cmd) ->
+       if String.equal bin "gh"
+       then Ok (`Gh cmd)
+       else Ok `Other)
+  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Pipeline _) ->
+    Error (Unsupported_shell_construct "pipeline")
+  | Masc_exec.Parsed.Parse_error _ ->
+    Error (Unsupported_command_shape "parse_error")
+  | Masc_exec.Parsed.Parse_aborted reason ->
+    Error
+      (Unsupported_shell_construct
+         ("parse_aborted:" ^ aborted_reason_tag reason))
+  | Masc_exec.Parsed.Too_complex reason ->
+    Error
+      (Unsupported_shell_construct (too_complex_reason_tag reason))
+
+let parse_simple_gh_command (source : string)
+    : (gh_simple_command, gh_command_parse_error) result
+  =
+  let trimmed = String.trim source in
+  if trimmed = "" then Error Empty_command
+  else
+    let parse text =
+      Masc_exec_bash_parser.Bash.parse_string text
+      |> gh_simple_command_of_parsed
+    in
+    let accept_gh = function
+      | Ok (`Gh cmd) when cmd.argv <> [] -> Ok cmd
+      | Ok (`Gh _) -> Error Empty_command
+      | Ok `Other -> Error (Unsupported_command_shape "missing_gh_binary")
+      | Error err -> Error err
+    in
+    match parse trimmed with
+    | Ok (`Gh cmd) when cmd.argv <> [] -> Ok cmd
+    | Ok (`Gh _) -> Error Empty_command
+    | Ok `Other
+    | Error (Unsupported_command_shape "parse_error") ->
+      accept_gh (parse ("gh " ^ trimmed))
+    | Error err -> Error err
+
 let parse_numbers_from_jq_output (out : string) : int list =
   out
   |> String.split_on_char '\n'
@@ -444,7 +556,13 @@ let args_have_repo_flag args =
     args
 
 let inject_repo_flag_args ~repo_slug args =
-  strip_repo_flags_from_args args @ [ "--repo"; repo_slug ]
+  [ "--repo"; repo_slug ] @ strip_repo_flags_from_args args
+
+let gh_simple_command_has_repo_flag cmd =
+  args_have_repo_flag cmd.argv
+
+let gh_simple_command_with_repo_flag ~repo_slug cmd =
+  { argv = inject_repo_flag_args ~repo_slug cmd.argv }
 
 let run_argv_first_line_unix ~(prog : string) ~(argv : string array) : string option =
   try

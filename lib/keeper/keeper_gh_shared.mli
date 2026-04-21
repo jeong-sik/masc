@@ -75,6 +75,31 @@ val truncate_gh_output :
 
 (* ---- gh command parsers --------------------------------------- *)
 
+type gh_command_parse_error =
+  | Empty_command
+  | Unsupported_shell_construct of string
+  | Unsupported_command_shape of string
+
+type gh_simple_command
+
+(** Parse a single gh command shape into canonical argv (without the
+    leading [gh] binary). Accepts both ["pr list"] and ["gh pr list"]
+    input forms, but rejects pipelines, redirects, env prefixes, and
+    other shell constructs outside the simple-command subset. *)
+val parse_simple_gh_command :
+  string -> (gh_simple_command, gh_command_parse_error) result
+
+val gh_simple_command_argv : gh_simple_command -> string list
+
+val render_simple_gh_command : gh_simple_command -> string
+
+val gh_simple_command_has_repo_flag : gh_simple_command -> bool
+
+val gh_simple_command_with_repo_flag :
+  repo_slug:string ->
+  gh_simple_command ->
+  gh_simple_command
+
 (** Pure parser: return the target [(kind, number)] when [cmd] is a gh
     subcommand that references a specific PR/issue number. *)
 val extract_gh_target_number :

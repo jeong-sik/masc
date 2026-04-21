@@ -328,6 +328,33 @@ let keeper_tool_audit_fields ?(include_allowed_tools = true) config
         fallback_snapshot.tool_audit_source,
         fallback_snapshot.tool_audit_at )
 
+let cached_tool_audit_json ~lightweight config (meta : Keeper_types.keeper_meta) =
+  let cache_key = "kta:" ^ meta.name in
+  Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+    let allowed_tool_names, recent_tool_names, latest_tool_names,
+        latest_tool_call_count, latest_action_source,
+        tool_audit_source, tool_audit_at =
+      if lightweight then
+        let _, recent_tool_names, latest_tool_names,
+            latest_tool_call_count, latest_action_source,
+            tool_audit_source, tool_audit_at =
+          keeper_tool_audit_fields ~include_allowed_tools:false config meta
+        in
+        ( [], recent_tool_names, latest_tool_names,
+          latest_tool_call_count, latest_action_source,
+          tool_audit_source, tool_audit_at )
+      else keeper_tool_audit_fields config meta
+    in
+    `Assoc [
+      ("allowed_tool_names", `List (List.map (fun v -> `String v) allowed_tool_names));
+      ("recent_tool_names", `List (List.map (fun v -> `String v) recent_tool_names));
+      ("latest_tool_names", `List (List.map (fun v -> `String v) latest_tool_names));
+      ("latest_tool_call_count", option_to_json (fun v -> `Int v) latest_tool_call_count);
+      ("latest_action_source", string_option_to_json latest_action_source);
+      ("tool_audit_source", string_option_to_json tool_audit_source);
+      ("tool_audit_at", string_option_to_json tool_audit_at);
+    ])
+
 (* Concurrency cap for parallel keeper snapshot fibers.
    Originally 4 to guard against memory bursts when many keepers are
    processed simultaneously.  Live measurement via #8829 over 48 samples
@@ -447,7 +474,9 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                  ) else begin
                  let t_agent = Time_compat.now () in
                  let agent_json =
-                   Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
+                   let cache_key = "kas:" ^ meta.agent_name in
+                   Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+                     Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name)
                  in
                  dt_agent := Time_compat.now () -. t_agent;
                  let t_ka = Time_compat.now () in
@@ -504,24 +533,39 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                         ~meta ~keepalive_running ~keepalive_started_at ~now_ts
                  in
                  let t_audit = Time_compat.now () in
-                 let allowed_tool_names, recent_tool_names, latest_tool_names,
-                     latest_tool_call_count, latest_action_source,
-                     tool_audit_source, tool_audit_at =
-                   if lightweight then
-                     let _, recent_tool_names, latest_tool_names,
-                         latest_tool_call_count, latest_action_source,
-                         tool_audit_source, tool_audit_at =
-                       keeper_tool_audit_fields ~include_allowed_tools:false
-                         config meta
-                     in
-                     ( [],
-                       recent_tool_names,
-                       latest_tool_names,
-                       latest_tool_call_count,
-                       latest_action_source,
-                       tool_audit_source,
-                       tool_audit_at )
-                   else keeper_tool_audit_fields config meta
+                 let audit_json =
+                   cached_tool_audit_json ~lightweight config meta
+                 in
+                 let allowed_tool_names =
+                   match U.to_list (U.member "allowed_tool_names" audit_json) with
+                   | l -> List.filter_map (function `String s -> Some s | _ -> None) l
+                   | exception U.Type_error _ -> []
+                 in
+                 let recent_tool_names =
+                   match U.to_list (U.member "recent_tool_names" audit_json) with
+                   | l -> List.filter_map (function `String s -> Some s | _ -> None) l
+                   | exception U.Type_error _ -> []
+                 in
+                 let latest_tool_names =
+                   match U.to_list (U.member "latest_tool_names" audit_json) with
+                   | l -> List.filter_map (function `String s -> Some s | _ -> None) l
+                   | exception U.Type_error _ -> []
+                 in
+                 let latest_tool_call_count =
+                   match U.to_option U.to_int (U.member "latest_tool_call_count" audit_json) with
+                   | v -> v | exception U.Type_error _ -> None
+                 in
+                 let latest_action_source =
+                   match U.to_option U.to_string (U.member "latest_action_source" audit_json) with
+                   | v -> v | exception U.Type_error _ -> None
+                 in
+                 let tool_audit_source =
+                   match U.to_option U.to_string (U.member "tool_audit_source" audit_json) with
+                   | v -> v | exception U.Type_error _ -> None
+                 in
+                 let tool_audit_at =
+                   match U.to_option U.to_string (U.member "tool_audit_at" audit_json) with
+                   | v -> v | exception U.Type_error _ -> None
                  in
                  dt_audit := Time_compat.now () -. t_audit;
                  let delivery_surface_view =
@@ -627,83 +671,88 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
                        ("turn_budget",
                          (let t_profile = Time_compat.now () in
-                          let profile =
-                            Keeper_types_profile.load_keeper_profile_defaults
-                              meta.name
+                          let cache_key = "kpd:" ^ meta.name in
+                          let result =
+                            Dashboard_cache.get_or_compute cache_key ~ttl:10.0 (fun () ->
+                              let profile =
+                                Keeper_types_profile.load_keeper_profile_defaults
+                                  meta.name
+                              in
+                              let env_reactive =
+                                Env_config_keeper.KeeperKeepalive
+                                .oas_max_turns_per_call
+                              in
+                              let env_autonomous =
+                                Env_config_keeper.KeeperKeepalive
+                                .oas_max_turns_per_call_scheduled_autonomous
+                              in
+                              let reactive_effective =
+                                Keeper_types_profile.effective_max_turns_per_call
+                                  profile
+                              in
+                              let classify_source = function
+                                | Some n when n >= 1 && n <= 50 -> "override"
+                                | Some _ -> "override_invalid"
+                                | None -> "env"
+                              in
+                              let reactive_source =
+                                classify_source profile.max_turns_per_call
+                              in
+                              let autonomous_effective =
+                                Keeper_types_profile
+                                .effective_max_turns_per_call_scheduled_autonomous
+                                  profile
+                              in
+                              let autonomous_source =
+                                classify_source
+                                  profile.max_turns_per_call_scheduled_autonomous
+                              in
+                              let raw_override_int = function
+                                | Some n -> `Int n
+                                | None -> `Null
+                              in
+                              let manifest_path_json =
+                                match profile.manifest_path with
+                                | Some p -> `String p
+                                | None -> `Null
+                              in
+                              `Assoc
+                                [
+                                  ( "reactive",
+                                    `Assoc
+                                      [
+                                        ("value", `Int reactive_effective);
+                                        ("source", `String reactive_source);
+                                        ("env_default", `Int env_reactive);
+                                        ( "env_var",
+                                          `String
+                                            "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" );
+                                        ( "raw_override",
+                                          raw_override_int
+                                            profile.max_turns_per_call );
+                                      ] );
+                                  ( "scheduled_autonomous",
+                                    `Assoc
+                                      [
+                                        ("value", `Int autonomous_effective);
+                                        ("source", `String autonomous_source);
+                                        ("env_default", `Int env_autonomous);
+                                        ( "env_var",
+                                          `String
+                                            "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS"
+                                        );
+                                        ( "raw_override",
+                                          raw_override_int
+                                            profile
+                                              .max_turns_per_call_scheduled_autonomous );
+                                      ] );
+                                  ("manifest_path", manifest_path_json);
+                                  ("clamp_min", `Int 1);
+                                  ("clamp_max", `Int 50);
+                                ])
                           in
                           dt_profile := Time_compat.now () -. t_profile;
-                          let env_reactive =
-                            Env_config_keeper.KeeperKeepalive
-                            .oas_max_turns_per_call
-                          in
-                          let env_autonomous =
-                            Env_config_keeper.KeeperKeepalive
-                            .oas_max_turns_per_call_scheduled_autonomous
-                          in
-                          let reactive_effective =
-                            Keeper_types_profile.effective_max_turns_per_call
-                              profile
-                          in
-                          let classify_source = function
-                            | Some n when n >= 1 && n <= 50 -> "override"
-                            | Some _ -> "override_invalid"
-                            | None -> "env"
-                          in
-                          let reactive_source =
-                            classify_source profile.max_turns_per_call
-                          in
-                          let autonomous_effective =
-                            Keeper_types_profile
-                            .effective_max_turns_per_call_scheduled_autonomous
-                              profile
-                          in
-                          let autonomous_source =
-                            classify_source
-                              profile.max_turns_per_call_scheduled_autonomous
-                          in
-                          let raw_override_int = function
-                            | Some n -> `Int n
-                            | None -> `Null
-                          in
-                          let manifest_path_json =
-                            match profile.manifest_path with
-                            | Some p -> `String p
-                            | None -> `Null
-                          in
-                          `Assoc
-                            [
-                              ( "reactive",
-                                `Assoc
-                                  [
-                                    ("value", `Int reactive_effective);
-                                    ("source", `String reactive_source);
-                                    ("env_default", `Int env_reactive);
-                                    ( "env_var",
-                                      `String
-                                        "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" );
-                                    ( "raw_override",
-                                      raw_override_int
-                                        profile.max_turns_per_call );
-                                  ] );
-                              ( "scheduled_autonomous",
-                                `Assoc
-                                  [
-                                    ("value", `Int autonomous_effective);
-                                    ("source", `String autonomous_source);
-                                    ("env_default", `Int env_autonomous);
-                                    ( "env_var",
-                                      `String
-                                        "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS"
-                                    );
-                                    ( "raw_override",
-                                      raw_override_int
-                                        profile
-                                          .max_turns_per_call_scheduled_autonomous );
-                                  ] );
-                              ("manifest_path", manifest_path_json);
-                              ("clamp_min", `Int 1);
-                              ("clamp_max", `Int 50);
-                            ]));
+                          result));
                        ("last_proactive_reason",
                          string_option_to_json
                            (let value = String.trim meta.runtime.proactive_rt.last_reason in
@@ -814,7 +863,9 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
             | Error _ | Ok None -> None
             | Ok (Some meta) ->
                 let agent_json =
-                  Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
+                  let cache_key = "kas:" ^ meta.agent_name in
+                  Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+                    Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name)
                 in
                 let agent_status =
                   match agent_json with

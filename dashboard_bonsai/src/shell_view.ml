@@ -732,6 +732,18 @@ let default_hud ~(active : Route.t) =
   ]
 ;;
 
+let hhmmss_of_iso ts =
+  if String.length ts >= 19 then String.sub ts ~pos:11 ~len:8 else ts
+;;
+
+let short_commit c =
+  if String.length c > 9 then String.sub c ~pos:0 ~len:9 else c
+;;
+
+let short_base path =
+  if String.is_empty path then "—" else Filename.basename path
+;;
+
 let aside_title ?right text =
   Node.h4
     ~attrs:[ Style.aside_title ]
@@ -742,51 +754,101 @@ let aside_title ?right text =
      | None -> [])
 ;;
 
-let focus_card ~(active : Route.t) =
+let focus_card ~(shell : Overview_types.response) ~(active : Route.t) =
+  let project =
+    if String.is_empty shell.status.project then "runtime" else shell.status.project
+  in
+  let cluster =
+    if String.is_empty shell.status.cluster then "default" else shell.status.cluster
+  in
+  let portrait =
+    let seed =
+      if String.is_empty project then label active else project
+    in
+    Char.to_string (Char.uppercase seed.[0])
+  in
+  let snapshot_right =
+    match shell.generated_at with
+    | "" -> "shell pending"
+    | ts -> Printf.sprintf "%s UTC" (hhmmss_of_iso ts)
+  in
+  let focus_role = Printf.sprintf "%s · %s" project cluster in
+  let focus_meter_label, focus_pct, focus_detail =
+    if shell.configured_keepers > 0
+    then
+      ( "Fleet"
+      , Int.min 100 ((shell.counts.keepers * 100) / shell.configured_keepers)
+      , Printf.sprintf
+          " . %d / %d keepers"
+          shell.counts.keepers
+          shell.configured_keepers )
+    else if String.is_empty shell.generated_at
+    then "Snapshot", 0, " . pending"
+    else "Snapshot", 100, " . ready"
+  in
+  let vial_style =
+    Attr.style
+      (Css_gen.create
+         ~field:"width"
+         ~value:(Printf.sprintf "%d%%" focus_pct))
+  in
+  let build_v =
+    if not (String.is_empty shell.status.build.release_version)
+    then shell.status.build.release_version
+    else if not (String.is_empty shell.status.build.commit)
+    then short_commit shell.status.build.commit
+    else "—"
+  in
   Node.div
-    [ aside_title ~right:"shared shell" "Focus"
+    [ aside_title ~right:snapshot_right "Focus"
     ; Node.div
         ~attrs:[ Style.focus ]
         [ Node.div
             ~attrs:[ Style.focus_inner ]
             [ Node.div
                 ~attrs:[ Style.focus_row ]
-                [ Node.div ~attrs:[ Style.portrait ] [ Node.text "M" ]
+                [ Node.div ~attrs:[ Style.portrait ] [ Node.text portrait ]
                 ; Node.div
                     [ Node.div ~attrs:[ Style.focus_name ] [ Node.text (label active) ]
                     ; Node.div
                         ~attrs:[ Style.focus_role ]
-                        [ Node.text "Dashboard v2 chrome absorbed into Bonsai" ]
+                        [ Node.text focus_role ]
                     ]
                 ]
             ; Node.div
                 [ Node.div
                     ~attrs:[ Style.vial_lbl ]
-                    [ Node.span [ Node.text "Context" ]
+                    [ Node.span [ Node.text focus_meter_label ]
                     ; Node.span
-                        [ Node.b [ Node.text "62%" ]
-                        ; Node.text " . compact @ 85%"
+                        [ Node.b [ Node.text (Printf.sprintf "%d%%" focus_pct) ]
+                        ; Node.text focus_detail
                         ]
                     ]
-                ; Node.div ~attrs:[ Style.vial ] [ Node.span [] ]
+                ; Node.div ~attrs:[ Style.vial ] [ Node.span ~attrs:[ vial_style ] [] ]
                 ]
             ; Node.div
                 ~attrs:[ Style.stats ]
                 [ Node.div
-                    [ Node.div ~attrs:[ Style.stat_l ] [ Node.text "Turns" ]
-                    ; Node.div ~attrs:[ Style.stat_v ] [ Node.text "7 / 15" ]
+                    [ Node.div ~attrs:[ Style.stat_l ] [ Node.text "Agents" ]
+                    ; Node.div
+                        ~attrs:[ Style.stat_v ]
+                        [ Node.text (Printf.sprintf "%d" shell.counts.agents) ]
                     ]
                 ; Node.div
-                    [ Node.div ~attrs:[ Style.stat_l ] [ Node.text "Route" ]
-                    ; Node.div ~attrs:[ Style.stat_v ] [ Node.text (label active) ]
+                    [ Node.div ~attrs:[ Style.stat_l ] [ Node.text "Tasks" ]
+                    ; Node.div
+                        ~attrs:[ Style.stat_v ]
+                        [ Node.text (Printf.sprintf "%d" shell.counts.tasks) ]
                     ]
                 ; Node.div
-                    [ Node.div ~attrs:[ Style.stat_l ] [ Node.text "Shell" ]
-                    ; Node.div ~attrs:[ Style.stat_v ] [ Node.text "v2" ]
+                    [ Node.div ~attrs:[ Style.stat_l ] [ Node.text "Build" ]
+                    ; Node.div ~attrs:[ Style.stat_v ] [ Node.text build_v ]
                     ]
                 ; Node.div
                     [ Node.div ~attrs:[ Style.stat_l ] [ Node.text "Base" ]
-                    ; Node.div ~attrs:[ Style.stat_v ] [ Node.text "b" ]
+                    ; Node.div
+                        ~attrs:[ Style.stat_v ]
+                        [ Node.text (short_base shell.base_path) ]
                     ]
                 ]
             ]
@@ -868,16 +930,16 @@ let watch_feed () =
     ]
 ;;
 
-let default_aside ~(active : Route.t) =
+let default_aside ~(shell : Overview_types.response) ~(active : Route.t) =
   Node.div
     ~attrs:[ Style.aside ]
-    [ focus_card ~active
+    [ focus_card ~shell ~active
     ; flame ()
     ; watch_feed ()
     ]
 ;;
 
-let view ?hud ?aside ~(active : Route.t) (children : Node.t list) =
+let view ?(shell = Overview_types.fixture) ?hud ?aside ~(active : Route.t) (children : Node.t list) =
   let hud_nodes =
     match hud with
     | Some nodes -> nodes
@@ -886,7 +948,7 @@ let view ?hud ?aside ~(active : Route.t) (children : Node.t list) =
   let aside_node =
     match aside with
     | Some node -> node
-    | None -> default_aside ~active
+    | None -> default_aside ~shell ~active
   in
   Node.div
     ~attrs:[ Style.shell ]

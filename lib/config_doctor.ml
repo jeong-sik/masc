@@ -39,6 +39,15 @@ type t = {
   next_actions : string list;
 }
 
+type catalog_issue_severity =
+  | Catalog_warn
+  | Catalog_error
+
+type catalog_issue = {
+  severity : catalog_issue_severity;
+  message : string;
+}
+
 let trim_opt = Env_config_core.trim_opt
 
 let init_state_to_string = function
@@ -62,6 +71,48 @@ let dedupe_keep_order values =
         Hashtbl.replace seen value ();
         true))
     values
+
+let contains_substring ~needle s =
+  let needle_len = String.length needle in
+  let s_len = String.length s in
+  if needle_len = 0 || needle_len > s_len then
+    false
+  else
+    let limit = s_len - needle_len in
+    let rec loop i =
+      if i > limit then
+        false
+      else if String.sub s i needle_len = needle then
+        true
+      else
+        loop (i + 1)
+    in
+    loop 0
+
+let has_suffix ~suffix s =
+  let suffix_len = String.length suffix in
+  let s_len = String.length s in
+  s_len > suffix_len
+  && String.sub s (s_len - suffix_len) suffix_len = suffix
+
+let is_provider_unavailable_error msg =
+  contains_substring ~needle:"unavailable" msg
+
+let split_provider_model (s : string) : (string * string) option =
+  match String.index_opt s ':' with
+  | None -> None
+  | Some idx ->
+      if idx = 0 || idx >= String.length s - 1 then
+        None
+      else
+        let provider_name =
+          String.sub s 0 idx |> String.trim |> String.lowercase_ascii
+        in
+        let model_id =
+          String.sub s (idx + 1) (String.length s - idx - 1)
+          |> String.trim
+        in
+        if model_id = "" then None else Some (provider_name, model_id)
 
 let canonicalize_path ~cwd path =
   let absolute =
@@ -94,6 +145,217 @@ let repo_config_seed_path (inputs : inputs) =
 let option_field name = function
   | Some value -> (name, `String value)
   | None -> (name, `Null)
+
+let discover_cascade_profiles = function
+  | `Assoc fields ->
+      fields
+      |> List.filter_map (fun (key, value) ->
+             match value with
+             | `List _ when has_suffix ~suffix:"_models" key ->
+                 let suffix_len = String.length "_models" in
+                 Some (String.sub key 0 (String.length key - suffix_len))
+             | _ -> None)
+      |> List.sort_uniq String.compare
+  | _ -> []
+
+let model_ids_of_specs (specs : string list) : string list =
+  specs
+  |> Cascade_config.expand_auto_models
+  |> List.filter_map (fun spec ->
+         match split_provider_model spec with
+         | Some (_, model_id) when model_id <> "" -> Some model_id
+         | _ -> None)
+  |> List.sort_uniq String.compare
+
+let format_spec_errors specs =
+  specs
+  |> List.map (fun (spec, msg) -> Printf.sprintf "%S (%s)" spec msg)
+  |> String.concat ", "
+
+let priority_tier_issue ~profile configured_specs raw_tiers =
+  let configured_model_ids = model_ids_of_specs configured_specs in
+  if configured_model_ids = [] then
+    Some
+      {
+        severity = Catalog_error;
+        message =
+          Printf.sprintf
+            "Cascade preset %s uses priority_tier but has no configured \
+             models to validate."
+            profile;
+      }
+  else
+    let normalized =
+      raw_tiers
+      |> List.filter_map (fun tier ->
+             let tier_model_ids =
+               model_ids_of_specs tier
+               |> List.filter (fun model_id ->
+                      List.mem model_id configured_model_ids)
+             in
+             if tier_model_ids = [] then None else Some tier_model_ids)
+    in
+    if normalized = [] then
+      Some
+        {
+          severity = Catalog_error;
+          message =
+            Printf.sprintf
+              "Cascade preset %s uses priority_tier, but every tier \
+               collapses after model-id normalization; runtime will fall \
+               back to failover."
+              profile;
+        }
+    else if List.length normalized < List.length raw_tiers then
+      Some
+        {
+          severity = Catalog_warn;
+          message =
+            Printf.sprintf
+              "Cascade preset %s uses priority_tier, but %d/%d tier(s) \
+               collapse after model-id normalization."
+              profile
+              (List.length raw_tiers - List.length normalized)
+              (List.length raw_tiers);
+        }
+    else
+      None
+
+let diagnose_cascade_profile ~config_path ~profile =
+  let model_specs =
+    Cascade_config_loader.load_profile_weighted ~config_path ~name:profile
+    |> List.map (fun (entry : Cascade_config_loader.weighted_entry) ->
+           entry.model)
+  in
+  let invalid_specs =
+    model_specs
+    |> Cascade_config.expand_auto_models
+    |> List.filter_map (fun spec ->
+           match Cascade_config.parse_model_string_exn spec with
+           | Ok _ -> None
+           | Error msg when is_provider_unavailable_error msg -> None
+           | Error msg -> Some (spec, msg))
+  in
+  let invalid_model_issue =
+    if invalid_specs = [] then
+      None
+    else
+      Some
+        {
+          severity = Catalog_error;
+          message =
+            Printf.sprintf
+              "Cascade preset %s has %d hard-invalid model spec(s): %s"
+              profile
+              (List.length invalid_specs)
+              (format_spec_errors invalid_specs);
+        }
+  in
+  let strategy_cfg =
+    Cascade_config_loader.resolve_strategy_config ~config_path ~name:profile
+  in
+  let strategy_issue =
+    match strategy_cfg.kind with
+    | None -> None
+    | Some raw_kind -> (
+        match Cascade_strategy.parse_kind raw_kind with
+        | Error msg ->
+            Some
+              {
+                severity = Catalog_error;
+                message =
+                  Printf.sprintf
+                    "Cascade preset %s has unknown strategy %S: %s"
+                    profile raw_kind msg;
+              }
+        | Ok Cascade_strategy.Priority_tier -> (
+            match strategy_cfg.tiers with
+            | None ->
+                Some
+                  {
+                    severity = Catalog_error;
+                    message =
+                      Printf.sprintf
+                        "Cascade preset %s uses priority_tier without a \
+                         valid non-empty <name>_tiers configuration."
+                        profile;
+                  }
+            | Some raw_tiers ->
+                priority_tier_issue ~profile model_specs raw_tiers)
+        | Ok _ -> None)
+  in
+  [ invalid_model_issue; strategy_issue ]
+  |> List.filter_map (fun issue -> issue)
+
+let diagnose_cascade_catalog ~active_config_root =
+  let config_path =
+    Filename.concat active_config_root Config_dir_resolver.cascade_json_filename
+  in
+  if not (Env_config_core.existing_file config_path) then
+    []
+  else
+    match Cascade_config_loader.load_json config_path with
+    | Error msg ->
+        [
+          {
+            severity = Catalog_error;
+            message =
+              Printf.sprintf
+                "Cascade catalog %s could not be loaded: %s"
+                config_path msg;
+          };
+        ]
+    | Ok json ->
+        let profiles = discover_cascade_profiles json in
+        let issues =
+          profiles
+          |> List.concat_map (fun profile ->
+                 diagnose_cascade_profile ~config_path ~profile)
+        in
+        if issues = [] then
+          []
+        else
+          let error_count =
+            issues
+            |> List.filter (fun issue -> issue.severity = Catalog_error)
+            |> List.length
+          in
+          let warn_count = List.length issues - error_count in
+          {
+            severity = if error_count > 0 then Catalog_error else Catalog_warn;
+            message =
+              Printf.sprintf
+                "Cascade catalog check scanned %d preset(s): %d error, %d \
+                 warn."
+                (List.length profiles)
+                error_count
+                warn_count;
+          }
+          :: issues
+
+let cascade_catalog_next_actions ~config_path issues =
+  if issues = [] then
+    []
+  else
+    let has_errors =
+      List.exists (fun issue -> issue.severity = Catalog_error) issues
+    in
+    let primary_action =
+      if has_errors then
+        Printf.sprintf
+          "Fix or disable the broken cascade preset entries in %s before \
+           assigning keepers to them."
+          config_path
+      else
+        Printf.sprintf
+          "Clean up the degraded cascade preset metadata in %s so doctor \
+           and runtime see the same routing intent."
+          config_path
+    in
+    [
+      primary_action;
+      "Rerun `masc-mcp doctor config` after editing cascade.json.";
+    ]
 
 let current_inputs ~base_path_input ~default_base_path () =
   let normalized_base_path =
@@ -222,6 +484,12 @@ let analyze_with (inputs : inputs) =
       ~effective_masc_root:runtime_data_root
       ()
   in
+  let cascade_catalog_issues =
+    diagnose_cascade_catalog ~active_config_root
+  in
+  let cascade_config_path =
+    Filename.concat active_config_root Config_dir_resolver.cascade_json_filename
+  in
   let warnings =
     [
       (if explicit_config_invalid then
@@ -274,7 +542,15 @@ let analyze_with (inputs : inputs) =
       path_diag.warning;
     ]
     |> List.filter_map (fun warning -> warning)
+    |> fun base_warnings ->
+    base_warnings
+    @ List.map (fun issue -> issue.message) cascade_catalog_issues
     |> dedupe_keep_order
+  in
+  let cascade_actions =
+    cascade_catalog_next_actions
+      ~config_path:cascade_config_path
+      cascade_catalog_issues
   in
   let next_actions =
     match init_state with
@@ -344,13 +620,21 @@ let analyze_with (inputs : inputs) =
            | _ ->
                "No further action needed.");
         ]
+    |> fun base_actions -> base_actions @ cascade_actions
+    |> dedupe_keep_order
+  in
+  let has_catalog_errors =
+    List.exists
+      (fun issue -> issue.severity = Catalog_error)
+      cascade_catalog_issues
   in
   let status =
     match init_state with
     | Invalid_env | Missing_init -> Error
     | Shadowed -> Warn
     | Initialized ->
-        if warnings = [] then Ok else Warn
+        if has_catalog_errors then Error
+        else if warnings = [] then Ok else Warn
   in
   {
     status;

@@ -1502,7 +1502,7 @@ let test_keeper_checkpoint_prefers_oas_checkpoint () =
           Alcotest.(check string) "system prompt from OAS checkpoint"
             "oas system" (ctx_system_prompt loaded);
           Alcotest.(check int) "max_tokens from live primary context" 1024
-            loaded.max_tokens;
+            (Keeper_exec_context.max_tokens_of_context loaded);
           Alcotest.(check string) "loaded OAS message" "oas"
             (Agent_sdk.Types.text_of_message (List.hd (ctx_messages loaded)))
       | None -> Alcotest.fail "expected checkpoint context")
@@ -1927,7 +1927,8 @@ let test_overflow_retry_saves_compacted_checkpoint () =
             (Keeper_exec_context.token_count recovered_ctx < before_tokens);
           Alcotest.(check bool) "token count fits retry budget" true
             (Keeper_exec_context.token_count recovered_ctx <= 512);
-          Alcotest.(check int) "max tokens clamped" 512 recovered_ctx.max_tokens)
+          Alcotest.(check int) "max tokens clamped" 512
+            (Keeper_exec_context.max_tokens_of_context recovered_ctx))
 
 (* ================================================================ *)
 (* Same-trace checkpoint continuity regression (OAS #467)            *)

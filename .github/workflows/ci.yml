@@ -707,11 +707,15 @@ jobs:
         run: scripts/dashboard-drift-check.sh
 
   tla-specs:
-    name: TLA+ Model Checking
+    name: TLA+ Model Checking (${{ matrix.suite }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     needs: [pr-sync-check, changes]
     if: ${{ !cancelled() && needs.changes.outputs.tla == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [check-clean, check-buggy]
 
     steps:
       - name: Checkout
@@ -729,7 +733,7 @@ jobs:
             https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
 
       - name: Run TLA+ model checking
-        run: make -C specs check-all
+        run: make -C specs ${{ matrix.suite }}
 
   spec-line-refs:
     name: Spec Line Refs

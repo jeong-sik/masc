@@ -332,9 +332,10 @@ let view_meta_strip (r : Archive_runs_types.response) =
     ]
 ;;
 
-let render (r : Archive_runs_types.response) : Node.t =
+let render ~(shell : Overview_types.response) (r : Archive_runs_types.response) : Node.t =
   let total = r.total in
   Shell_view.view
+    ~shell
     ~active:Archive_runs
     [ Hero.view
         ~eyebrow:"archive · autoresearch"
@@ -359,5 +360,8 @@ let render (r : Archive_runs_types.response) : Node.t =
 ;;
 
 let component (_graph @ local) =
-  Bonsai.map (Bonsai.Expert.Var.value Archive_runs_var.var) ~f:render
+  Bonsai.map2
+    (Bonsai.Expert.Var.value Archive_runs_var.var)
+    (Bonsai.Expert.Var.value Overview_var.var)
+    ~f:(fun runs shell -> render ~shell runs)
 ;;

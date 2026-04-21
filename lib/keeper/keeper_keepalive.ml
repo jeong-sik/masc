@@ -778,7 +778,9 @@ let write_heartbeat_snapshot
         ~message_count:message_count_v
         ~token_count:token_count_v
         ~max_tokens:
-          (match ctx_opt with Some c -> c.max_tokens | None -> max_cascade_context)
+          (match ctx_opt with
+           | Some c -> Keeper_context_core.max_tokens_of_context c
+           | None -> max_cascade_context)
         ~repetition_risk
         ~goal_alignment
         ~response_alignment
@@ -852,7 +854,11 @@ let write_heartbeat_snapshot
         ; "cost_usd", `Float meta_current.runtime.usage.total_cost_usd
         ; "context_ratio", `Float context_ratio_v
         ; "context_tokens", `Int token_count_v
-        ; "context_max", `Int (match ctx_opt with Some c -> c.max_tokens | None -> max_cascade_context)
+        ; "context_max",
+          `Int
+            (match ctx_opt with
+             | Some c -> Keeper_context_core.max_tokens_of_context c
+             | None -> max_cascade_context)
         ; "message_count", `Int message_count_v
         ; ( "continuity_state"
           , match continuity_snapshot with

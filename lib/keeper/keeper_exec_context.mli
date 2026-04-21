@@ -21,10 +21,13 @@ type session_context = Keeper_types.session_context
 val text_of_message : Agent_sdk.Types.message -> string
 val msg_tokens : Agent_sdk.Types.message -> int
 val count_tokens : string -> Agent_sdk.Types.message list -> int
+val max_tokens_of_context : working_context -> int
 val token_count : working_context -> int
 val message_count : working_context -> int
 val context_ratio : working_context -> float
 val checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
+val oas_context_of_context : working_context -> Agent_sdk.Context.t
+val with_max_tokens : working_context -> int -> working_context
 val system_prompt_of_context : working_context -> string
 val messages_of_context : working_context -> Agent_sdk.Types.message list
 val create : system_prompt:string -> max_tokens:int -> working_context

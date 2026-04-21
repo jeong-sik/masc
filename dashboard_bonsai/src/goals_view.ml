@@ -358,8 +358,9 @@ let view_meta_strip (r : Goals_types.response) =
     ]
 ;;
 
-let render (r : Goals_types.response) : Node.t =
+let render ~(shell : Overview_types.response) (r : Goals_types.response) : Node.t =
   Shell_view.view
+    ~shell
     ~active:Goals
     [ Hero.view
         ~eyebrow:"goals · convergence"
@@ -384,5 +385,8 @@ let render (r : Goals_types.response) : Node.t =
 ;;
 
 let component (_graph @ local) =
-  Bonsai.map (Bonsai.Expert.Var.value Goals_var.var) ~f:render
+  Bonsai.map2
+    (Bonsai.Expert.Var.value Goals_var.var)
+    (Bonsai.Expert.Var.value Overview_var.var)
+    ~f:(fun goals shell -> render ~shell goals)
 ;;

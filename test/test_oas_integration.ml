@@ -472,7 +472,9 @@ let test_oas_context_sync () =
     (Agent_sdk.Types.user_msg "hello") in
   let ctx = Keeper_exec_context.sync_oas_context ctx in
   let msg_count =
-    Context.get_scoped ctx.context Context.Session "message_count" in
+    Context.get_scoped
+      (Keeper_exec_context.oas_context_of_context ctx)
+      Context.Session "message_count" in
   (match msg_count with
    | Some (`Int n) -> Alcotest.(check int) "message count synced" 1 n
    | _ -> Alcotest.fail "expected message_count in oas_context")
@@ -494,7 +496,9 @@ let test_compact_syncs_oas_context () =
     }
   in
   let ratio =
-    Context.get_scoped ctx.context Context.Session "context_ratio" in
+    Context.get_scoped
+      (Keeper_exec_context.oas_context_of_context ctx)
+      Context.Session "context_ratio" in
   (match ratio with
    | Some (`Float r) ->
      Alcotest.(check bool) "ratio is non-negative" true (r >= 0.0)

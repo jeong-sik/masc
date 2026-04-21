@@ -1848,6 +1848,7 @@ let run_turn
   with
   | Error e -> Error (Oas.Error.Internal e)
   | Ok oas_allowed_paths ->
+    let require_tool_choice_support = tools <> [] && max_turns > 1 in
     let timeout_s =
       match oas_timeout_s with
       | Some value -> value
@@ -1860,6 +1861,7 @@ let run_turn
            ~cascade_name
            ~model_strings:meta.models
            ?provider_filter
+           ~require_tool_choice_support
            ~goal:user_message
            ~priority
            ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -2057,48 +2059,41 @@ let run_turn
              ~history_messages
              ~actual_input_tokens:usage.input_tokens
          in
-         (* Text-response trap tolerance: when tool_choice=Any is set but
-            the provider ignores it (e.g. Ollama #14493), the model returns
-            text-only on non-last turns. Instead of hard-failing the turn
-            (which wastes the entire OAS run), log a warning and treat the
-            text response as valid. The turn is counted as text_response
-            in telemetry via keeper_unified_turn. See #5566. *)
-         let text =
+         (* Required-tool turns are filtered onto providers that declare
+            tool support plus tool_choice support. If a text-only response
+            still reaches this point, treat it as a contract failure. *)
+         let text_result =
            match
              Keeper_tool_disclosure.validate_completion_contract
                ~contract:!completion_contract_ref
                ~tool_names
                ()
            with
-           | Ok () -> text
+           | Ok () -> Ok text
            | Error reason ->
              let contract_str =
                match !completion_contract_ref with
                | Keeper_tool_disclosure.Allow_text_or_tool -> "Allow_text_or_tool"
                | Keeper_tool_disclosure.Require_tool_use -> "Require_tool_use"
              in
-             Log.Keeper.warn
-               "keeper:%s text_response trap: tool contract violated \
-                (turn=%d, tools=0, contract=%s). \
-                Provider likely ignored tool_choice=Any. Tolerating text-only \
-                response to avoid wasting OAS run. Reason: %s"
-               meta.name result.turns contract_str reason;
-             (* When both text and tool_names are empty, normalize_response_text
-                would hard-fail. Synthesize minimal text so the turn survives. *)
-             if String.trim text = "" && tool_names = []
-             then "[no output]"
-             else text
+             Log.Keeper.error
+               "keeper:%s required tool contract violated \
+                (turn=%d, tools=%d, contract=%s). \
+                Rejecting text-only response. Reason: %s"
+               meta.name result.turns (List.length tool_names) contract_str reason;
+             Error
+               (Oas.Error.Agent
+                  (Oas.Error.CompletionContractViolation
+                     { contract = "require_tool_use"; reason }))
          in
-         match Keeper_tool_disclosure.normalize_response_text ~text ~tool_names () with
-         | Error e -> Error (Oas.Error.Internal e)
-         | Ok response_text ->
-          (* Ensure every generation has a [STATE] block for continuity.
-             If the model omitted it, synthesize one deterministically
-             from tool usage and stop reason. *)
-          let response_text =
-            match Keeper_memory_policy.find_state_block response_text with
-               | Some _ -> response_text
-               | None ->
+         let finalize_response_text response_text =
+           (* Ensure every generation has a [STATE] block for continuity.
+              If the model omitted it, synthesize one deterministically
+              from tool usage and stop reason. *)
+           let response_text =
+             match Keeper_memory_policy.find_state_block response_text with
+             | Some _ -> response_text
+             | None ->
                  let stop_reason_str =
                    match result.stop_reason with
                    | Oas_worker.Completed -> "completed"
@@ -2122,288 +2117,295 @@ let run_turn
                    (List.length tool_names)
                    stop_reason_str;
                  response_text ^ "\n" ^ block
-             in
-             let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
-             Keeper_exec_context.persist_message
-               ~source:history_assistant_source
-               session
-               assistant_msg;
-          (* ctx_snapshot is immutable — assistant message is persisted
-                via checkpoint (OAS) and persist_message (history file).
-                No in-memory mutation needed; next turn reconstructs
-                context from checkpoint. *)
-          (* Save checkpoint AFTER [STATE] synthesis.  Patch the last
-                assistant message in the OAS checkpoint so that the persisted
-                checkpoint contains the [STATE] block.  Without this patch,
-                read_continuity_summary would find no [STATE] in checkpoint
-                messages and return empty, causing context loss.  #5431 *)
-          let saved_checkpoint =
-            match result.checkpoint with
-            | Some checkpoint ->
-              let patched =
-                Keeper_context_core.patch_checkpoint_last_assistant
-                  checkpoint
-                  ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                  ~response_text
-              in
-              (match
-                 Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir patched
-               with
-               | Ok () -> ()
-               | Error e ->
-                 Log.Keeper.error "keeper:%s OAS checkpoint save failed: %s" meta.name e);
-              Some patched
-            | None ->
-              Log.Keeper.error "keeper:%s missing OAS checkpoint after run" meta.name;
-              None
-          in
-          (match result.proof with
-           | Some p ->
-             Keeper_turn_telemetry.log_keeper_proof ~keeper_name:meta.name p;
-             let store = Agent_sdk.Proof_store.default_config in
-             let outcome = Cdal_eval_v1.evaluate ~store p in
-             let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
-             let task_subject =
-               Option.map
-                 (fun task_id ->
-                   Coord_hooks.
-                     { kind = "task"; id = Keeper_id.Task_id.to_string task_id })
-                 meta.current_task_id
-             in
-             let emit_keeper_activity ~kind ~payload ~tags =
-               try
-                 (Atomic.get Coord_hooks.activity_emit_fn) config
-                   ~actor:Coord_hooks.{ kind = "agent"; id = meta.agent_name }
-                   ?subject:task_subject
-                   ~kind ~payload ~tags ()
-               with
-               | Eio.Cancel.Cancelled _ as e -> raise e
-               | exn ->
-                 Log.Keeper.warn
-                   "keeper:%s activity emit failed (%s): %s"
-                   meta.name
-                   kind
-                   (Printexc.to_string exn)
-             in
-             let task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id in
-             Cdal_eval_v1.persist ?task_id verdict;
-             Keeper_turn_telemetry.log_keeper_contract_verdict ~keeper_name:meta.name verdict;
-             emit_keeper_activity
-               ~kind:"keeper.contract_verdict"
-               ~payload:
-                 (Keeper_turn_telemetry.contract_verdict_activity_payload
-                    ~keeper_name:meta.name verdict)
-               ~tags:
-                 ([ "keeper"; "cdal"; "contract_verdict";
-                    Cdal_types.contract_status_to_string verdict.status ]
-                  @
-                  if List.exists
-                       (fun (gap : Cdal_types.completeness_gap) ->
-                         String.equal gap.artifact "evidence/review_warning.json")
-                       verdict.completeness_gaps
-                  then [ "review_requirement" ]
-                  else []);
-             (match outcome with
-              | Cdal_eval_v1.Load_failure (err, _) ->
-                Log.Keeper.warn
-                  "keeper:%s contract_verdict load failure: %s"
-                  meta.name
-                  (Cdal_loader.load_error_to_string err)
-              | Cdal_eval_v1.Verdict (_, _) -> ());
-             (match Cdal_eval_v1.friction_of_outcome outcome with
-              | Some fp ->
-                Keeper_turn_telemetry.log_keeper_friction ~keeper_name:meta.name fp;
-                emit_keeper_activity
-                  ~kind:"keeper.friction"
-                  ~payload:
-                    (Keeper_turn_telemetry.friction_activity_payload
-                       ~keeper_name:meta.name fp)
-                  ~tags:
-                    ([ "keeper"; "cdal"; "friction" ]
-                     @ if fp.review_tripwires <> [] then [ "tripwire" ] else [])
-              | None -> ())
-           | None -> ());
-          (* Post-turn deterministic memory write.
-            Uses meta-based fallback when [STATE] parsing fails.
-            See RFC #3646 Section 3: Det/NonDet boundary. *)
-          (try
-             let notes_written, kinds_written =
-               Keeper_memory_bank.append_memory_notes_from_reply
-                 config
-                 meta
-                 ~turn:result.turns
-                 ~reply:response_text
-             in
-             if notes_written > 0
-             then
-               Keeper_turn_telemetry.log_keeper_memory_write
-                 ~keeper_name:meta.name
-                 ~notes_written
-                 ~kinds_written
-           with
-           | exn ->
-             Log.Keeper.error
-               "keeper:%s memory_write failed: %s"
-               meta.name
-               (Printexc.to_string exn));
-          (* Episodic memory: create OAS episode from [STATE] snapshot.
-             store_episode adds to Memory.t, then flush_incremental
-             persists to institution_episodes.jsonl. The explicit flush
-             is required because this runs AFTER Agent.run returns, so
-             the AfterTurn hook has already fired for the last turn.
-             Collaboration learning (Hebbian strengthen/weaken) is not
-             recorded here; it is owned by the task lifecycle path. *)
-          (try
-             (match
-                Keeper_memory_policy.parse_state_snapshot_from_reply
-                  response_text
-              with
-             | Some snap ->
-               Memory_oas_bridge.store_episode_from_snapshot ~memory
-                 ~keeper_name:meta.name ~turn:result.turns
-                 ~trace_id:
-                   (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                 snap;
-               let ep, pr =
-                 Memory_oas_bridge.flush_incremental ~memory
-                   ~agent_name:meta.name
+           in
+           let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
+           Keeper_exec_context.persist_message
+             ~source:history_assistant_source
+             session
+             assistant_msg;
+           (* ctx_snapshot is immutable — assistant message is persisted
+                 via checkpoint (OAS) and persist_message (history file).
+                 No in-memory mutation needed; next turn reconstructs
+                 context from checkpoint. *)
+           (* Save checkpoint AFTER [STATE] synthesis.  Patch the last
+                 assistant message in the OAS checkpoint so that the persisted
+                 checkpoint contains the [STATE] block.  Without this patch,
+                 read_continuity_summary would find no [STATE] in checkpoint
+                 messages and return empty, causing context loss.  #5431 *)
+           let saved_checkpoint =
+             match result.checkpoint with
+             | Some checkpoint ->
+               let patched =
+                 Keeper_context_core.patch_checkpoint_last_assistant
+                   checkpoint
+                   ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                   ~response_text
                in
-               if ep > 0 || pr > 0 then begin
-                 Log.Keeper.debug
-                   "keeper:%s post-run flush episodes=%d procedures=%d"
-                   meta.name ep pr;
-                 (* Emit activity event so episode flushes appear in
-                    the activity graph / telemetry surface. *)
-                 (try
-                    (Atomic.get Coord_hooks.activity_emit_fn) config
-                      ~actor:Coord_hooks.{ kind = "keeper"; id = meta.name }
-                      ~kind:"episode.flush"
-                      ~payload:(`Assoc [
-                        ("keeper", `String meta.name);
-                        ("episodes", `Int ep);
-                        ("procedures", `Int pr);
-                        ("turn", `Int result.turns);
-                      ])
-                      ~tags:[ "memory"; "episode"; "flush" ]
-                      ()
-                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
-               end
-             | None -> ())
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-               Log.Keeper.error "keeper:%s episode_create failed: %s"
-                 meta.name (Printexc.to_string exn));
-          (* Memory bank compaction: dedup + consolidate if over threshold. *)
-          (try
-             let compaction =
-               Keeper_memory_bank.compact_memory_bank_if_needed config meta
-             in
-             if compaction.performed then
-               Log.Keeper.info
-                 "keeper:%s memory_compacted before=%d after=%d dropped=%d"
-                 meta.name compaction.before_notes compaction.after_notes
-                 compaction.dropped_notes
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-               Log.Keeper.warn "keeper:%s compaction failed: %s" meta.name
-                 (Printexc.to_string exn));
-          (* Post-turn quality metrics — goal alignment + memory recall.
-            Logged to decisions.jsonl for feedback loop analysis. *)
-          (try
-             let goal_score =
-               Keeper_memory_recall.goal_alignment_score
-                 ~meta
-                 ~user_message:None
-                 ~assistant_reply:(Some response_text)
-             in
-             let used_search =
-               List.exists (fun t -> t = "keeper_memory_search") tool_names
-             in
-             let recall_eval =
-               if used_search
-               then (
-                 let bank_path =
-                   Keeper_types_support.keeper_memory_bank_path config meta.name
-                 in
-                 let candidates =
-                   try
-                     Keeper_memory_recall.load_history_user_messages
-                       ~path:bank_path
-                       ~max_n:50
-                   with
-                   | Eio.Cancel.Cancelled _ as e -> raise e
-                   | exn ->
-                     Log.Keeper.warn
-                       "keeper:%s memory recall history load failed: %s"
-                       meta.name
-                       (Printexc.to_string exn);
-                     []
-                 in
-                 Some
-                   (Keeper_memory_recall.evaluate_memory_recall
-                      ~user_message:""
-                      ~assistant_reply:response_text
-                      ~candidates))
-               else None
-             in
-             let post_turn_ms =
-               Keeper_timing.round1 ((Time_compat.now () -. post_turn_t0) *. 1000.0)
-             in
-             let eval_json =
-               `Assoc
-                 ([ "ts_unix", `Float (Time_compat.now ())
-                  ; "event", `String "post_turn_eval"
-                  ; "keeper_name", `String meta.name
-                  ; "turn", `Int result.turns
-                  ; "goal_alignment", `Float goal_score
-                  ; "tools_used_count", `Int (List.length tool_names)
-                  ; "used_memory_search", `Bool used_search
-                  ; "post_turn_ms", `Float post_turn_ms
-                  ]
-                  @ (match result.response.telemetry with
-                     | Some t ->
-                       [ ( "inference_telemetry"
-                         , Agent_sdk.Types.inference_telemetry_to_yojson t )
-                       ]
-                     | None -> [])
-                  @
-                  match recall_eval with
-                  | Some e ->
-                    [ "memory_recall_performed", `Bool e.performed
-                    ; "memory_recall_passed", `Bool e.passed
-                    ; "memory_recall_score", `Float e.final_score
-                    ; "memory_recall_candidates", `Int e.candidate_count
-                    ]
-                  | None -> [])
-             in
-             Keeper_types_support.append_jsonl_line
-               (Keeper_types_support.keeper_decision_log_path config meta.name)
-               eval_json
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-             Log.Keeper.warn
-               "keeper:%s post_turn_eval jsonl append failed: %s"
-               meta.name
-               (Printexc.to_string exn));
-             Ok
-               { response_text
-               ; model_used = model
-               ; prompt_metrics
-               ; ctx_composition
-               ; cascade_observation = result.cascade_observation
-               ; turn_count = result.turns
-               ; tool_calls_made = List.length tool_names
-               ; usage
-               ; tools_used = tool_names
-               ; checkpoint = saved_checkpoint
-	               ; proof = result.proof
-	               ; trace_ref = result.trace_ref
-	               ; run_validation = result.run_validation
-	               ; stop_reason = result.stop_reason
-	               ; inference_telemetry = result.response.telemetry
-	               })
-	       )
+               (match
+                  Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir patched
+                with
+                | Ok () -> ()
+                | Error e ->
+                  Log.Keeper.error "keeper:%s OAS checkpoint save failed: %s" meta.name e);
+               Some patched
+             | None ->
+               Log.Keeper.error "keeper:%s missing OAS checkpoint after run" meta.name;
+               None
+           in
+           (match result.proof with
+            | Some p ->
+              Keeper_turn_telemetry.log_keeper_proof ~keeper_name:meta.name p;
+              let store = Agent_sdk.Proof_store.default_config in
+              let outcome = Cdal_eval_v1.evaluate ~store p in
+              let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
+              let task_subject =
+                Option.map
+                  (fun task_id ->
+                    Coord_hooks.
+                      { kind = "task"; id = Keeper_id.Task_id.to_string task_id })
+                  meta.current_task_id
+              in
+              let emit_keeper_activity ~kind ~payload ~tags =
+                try
+                  (Atomic.get Coord_hooks.activity_emit_fn) config
+                    ~actor:Coord_hooks.{ kind = "agent"; id = meta.agent_name }
+                    ?subject:task_subject
+                    ~kind ~payload ~tags ()
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                  Log.Keeper.warn
+                    "keeper:%s activity emit failed (%s): %s"
+                    meta.name
+                    kind
+                    (Printexc.to_string exn)
+              in
+              let task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id in
+              Cdal_eval_v1.persist ?task_id verdict;
+              Keeper_turn_telemetry.log_keeper_contract_verdict ~keeper_name:meta.name verdict;
+              emit_keeper_activity
+                ~kind:"keeper.contract_verdict"
+                ~payload:
+                  (Keeper_turn_telemetry.contract_verdict_activity_payload
+                     ~keeper_name:meta.name verdict)
+                ~tags:
+                  ([ "keeper"; "cdal"; "contract_verdict";
+                     Cdal_types.contract_status_to_string verdict.status ]
+                   @
+                   if List.exists
+                        (fun (gap : Cdal_types.completeness_gap) ->
+                          String.equal gap.artifact "evidence/review_warning.json")
+                        verdict.completeness_gaps
+                   then [ "review_requirement" ]
+                   else []);
+              (match outcome with
+               | Cdal_eval_v1.Load_failure (err, _) ->
+                 Log.Keeper.warn
+                   "keeper:%s contract_verdict load failure: %s"
+                   meta.name
+                   (Cdal_loader.load_error_to_string err)
+               | Cdal_eval_v1.Verdict (_, _) -> ());
+              (match Cdal_eval_v1.friction_of_outcome outcome with
+               | Some fp ->
+                 Keeper_turn_telemetry.log_keeper_friction ~keeper_name:meta.name fp;
+                 emit_keeper_activity
+                   ~kind:"keeper.friction"
+                   ~payload:
+                     (Keeper_turn_telemetry.friction_activity_payload
+                        ~keeper_name:meta.name fp)
+                   ~tags:
+                     ([ "keeper"; "cdal"; "friction" ]
+                      @ if fp.review_tripwires <> [] then [ "tripwire" ] else [])
+               | None -> ())
+            | None -> ());
+           (* Post-turn deterministic memory write.
+             Uses meta-based fallback when [STATE] parsing fails.
+             See RFC #3646 Section 3: Det/NonDet boundary. *)
+           (try
+              let notes_written, kinds_written =
+                Keeper_memory_bank.append_memory_notes_from_reply
+                  config
+                  meta
+                  ~turn:result.turns
+                  ~reply:response_text
+              in
+              if notes_written > 0
+              then
+                Keeper_turn_telemetry.log_keeper_memory_write
+                  ~keeper_name:meta.name
+                  ~notes_written
+                  ~kinds_written
+            with
+            | exn ->
+              Log.Keeper.error
+                "keeper:%s memory_write failed: %s"
+                meta.name
+                (Printexc.to_string exn));
+           (* Episodic memory: create OAS episode from [STATE] snapshot.
+              store_episode adds to Memory.t, then flush_incremental
+              persists to institution_episodes.jsonl. The explicit flush
+              is required because this runs AFTER Agent.run returns, so
+              the AfterTurn hook has already fired for the last turn.
+              Collaboration learning (Hebbian strengthen/weaken) is not
+              recorded here; it is owned by the task lifecycle path. *)
+           (try
+              (match
+                 Keeper_memory_policy.parse_state_snapshot_from_reply
+                   response_text
+               with
+              | Some snap ->
+                Memory_oas_bridge.store_episode_from_snapshot ~memory
+                  ~keeper_name:meta.name ~turn:result.turns
+                  ~trace_id:
+                    (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                  snap;
+                let ep, pr =
+                  Memory_oas_bridge.flush_incremental ~memory
+                    ~agent_name:meta.name
+                in
+                if ep > 0 || pr > 0 then begin
+                  Log.Keeper.debug
+                    "keeper:%s post-run flush episodes=%d procedures=%d"
+                    meta.name ep pr;
+                  (* Emit activity event so episode flushes appear in
+                     the activity graph / telemetry surface. *)
+                  (try
+                     (Atomic.get Coord_hooks.activity_emit_fn) config
+                       ~actor:Coord_hooks.{ kind = "keeper"; id = meta.name }
+                       ~kind:"episode.flush"
+                       ~payload:(`Assoc [
+                         ("keeper", `String meta.name);
+                         ("episodes", `Int ep);
+                         ("procedures", `Int pr);
+                         ("turn", `Int result.turns);
+                       ])
+                       ~tags:[ "memory"; "episode"; "flush" ]
+                       ()
+                   with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+                end
+              | None -> ())
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+                Log.Keeper.error "keeper:%s episode_create failed: %s"
+                  meta.name (Printexc.to_string exn));
+           (* Memory bank compaction: dedup + consolidate if over threshold. *)
+           (try
+              let compaction =
+                Keeper_memory_bank.compact_memory_bank_if_needed config meta
+              in
+              if compaction.performed then
+                Log.Keeper.info
+                  "keeper:%s memory_compacted before=%d after=%d dropped=%d"
+                  meta.name compaction.before_notes compaction.after_notes
+                  compaction.dropped_notes
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+                Log.Keeper.warn "keeper:%s compaction failed: %s" meta.name
+                  (Printexc.to_string exn));
+           (* Post-turn quality metrics — goal alignment + memory recall.
+             Logged to decisions.jsonl for feedback loop analysis. *)
+           (try
+              let goal_score =
+                Keeper_memory_recall.goal_alignment_score
+                  ~meta
+                  ~user_message:None
+                  ~assistant_reply:(Some response_text)
+              in
+              let used_search =
+                List.exists (fun t -> t = "keeper_memory_search") tool_names
+              in
+              let recall_eval =
+                if used_search
+                then (
+                  let bank_path =
+                    Keeper_types_support.keeper_memory_bank_path config meta.name
+                  in
+                  let candidates =
+                    try
+                      Keeper_memory_recall.load_history_user_messages
+                        ~path:bank_path
+                        ~max_n:50
+                    with
+                    | Eio.Cancel.Cancelled _ as e -> raise e
+                    | exn ->
+                      Log.Keeper.warn
+                        "keeper:%s memory recall history load failed: %s"
+                        meta.name
+                        (Printexc.to_string exn);
+                      []
+                  in
+                  Some
+                    (Keeper_memory_recall.evaluate_memory_recall
+                       ~user_message:""
+                       ~assistant_reply:response_text
+                       ~candidates))
+                else None
+              in
+              let post_turn_ms =
+                Keeper_timing.round1 ((Time_compat.now () -. post_turn_t0) *. 1000.0)
+              in
+              let eval_json =
+                `Assoc
+                  ([ "ts_unix", `Float (Time_compat.now ())
+                   ; "event", `String "post_turn_eval"
+                   ; "keeper_name", `String meta.name
+                   ; "turn", `Int result.turns
+                   ; "goal_alignment", `Float goal_score
+                   ; "tools_used_count", `Int (List.length tool_names)
+                   ; "used_memory_search", `Bool used_search
+                   ; "post_turn_ms", `Float post_turn_ms
+                   ]
+                   @ (match result.response.telemetry with
+                      | Some t ->
+                        [ ( "inference_telemetry"
+                          , Agent_sdk.Types.inference_telemetry_to_yojson t )
+                        ]
+                      | None -> [])
+                   @
+                   match recall_eval with
+                   | Some e ->
+                     [ "memory_recall_performed", `Bool e.performed
+                     ; "memory_recall_passed", `Bool e.passed
+                     ; "memory_recall_score", `Float e.final_score
+                     ; "memory_recall_candidates", `Int e.candidate_count
+                     ]
+                   | None -> [])
+              in
+              Keeper_types_support.append_jsonl_line
+                (Keeper_types_support.keeper_decision_log_path config meta.name)
+                eval_json
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+              Log.Keeper.warn
+                "keeper:%s post_turn_eval jsonl append failed: %s"
+                meta.name
+                (Printexc.to_string exn));
+           Ok
+             { response_text
+             ; model_used = model
+             ; prompt_metrics
+             ; ctx_composition
+             ; cascade_observation = result.cascade_observation
+             ; turn_count = result.turns
+             ; tool_calls_made = List.length tool_names
+             ; usage
+             ; tools_used = tool_names
+             ; checkpoint = saved_checkpoint
+             ; proof = result.proof
+             ; trace_ref = result.trace_ref
+             ; run_validation = result.run_validation
+             ; stop_reason = result.stop_reason
+             ; inference_telemetry = result.response.telemetry
+             }
+         in
+         match text_result with
+         | Error e -> Error e
+         | Ok text -> (
+             match Keeper_tool_disclosure.normalize_response_text ~text ~tool_names () with
+             | Error e -> Error (Oas.Error.Internal e)
+             | Ok response_text -> finalize_response_text response_text))
+    )
 ;;

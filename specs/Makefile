@@ -75,12 +75,15 @@ check-clean:
 	  tla="$$dir/$$base.tla"; \
 	  if [ ! -f "$$tla" ]; then echo "SKIP $$cfg (no .tla)"; continue; fi; \
 	  skip=0; for kf in $(KNOWN_FAILURES); do [ "$$base" = "$$kf" ] && skip=1; done; \
-	  if [ $$skip -eq 1 ]; then printf "SKIP %-40s (KNOWN_FAILURES)\n" "$$base"; continue; fi; \
-	  printf "CHECK %-40s " "$$base"; \
+	  if [ $$skip -eq 1 ]; then printf "SKIP  %-40s (KNOWN_FAILURES)\n" "$$base"; continue; fi; \
+	  printf "CHECK %-40s ...\n" "$$base"; \
+	  start_ts=$$(date +%s); \
 	  $(TLC) -config "$$cfg" "$$tla" > /tmp/tlc-$$base.log 2>&1; \
 	  rc=$$?; \
-	  if [ $$rc -eq 0 ]; then echo "OK"; \
-	  else echo "FAIL (exit $$rc)"; tail -5 /tmp/tlc-$$base.log; fail=1; fi; \
+	  end_ts=$$(date +%s); \
+	  duration=$$((end_ts - start_ts)); \
+	  if [ $$rc -eq 0 ]; then printf "OK    %-40s (%3ds)\n" "$$base" "$$duration"; \
+	  else printf "FAIL  %-40s (exit $$rc, %3ds)\n" "$$base" "$$duration"; tail -15 /tmp/tlc-$$base.log; fail=1; fi; \
 	done; \
 	if [ $$fail -eq 1 ]; then exit 1; fi
 
@@ -97,13 +100,16 @@ check-buggy:
 	  tla="$$dir/$$bugbase.tla"; \
 	  if [ ! -f "$$tla" ]; then echo "SKIP $$cfg (no .tla)"; continue; fi; \
 	  skip=0; for kb in $(KNOWN_BUGGY_NO_VIOLATION); do [ "$$bugbase" = "$$kb" ] && skip=1; done; \
-	  if [ $$skip -eq 1 ]; then printf "SKIP %-40s (KNOWN_BUGGY_NO_VIOLATION)\n" "$$bugbase (buggy)"; continue; fi; \
-	  printf "CHECK %-40s " "$$cfgtag (buggy)"; \
+	  if [ $$skip -eq 1 ]; then printf "SKIP  %-40s (KNOWN_BUGGY_NO_VIOLATION)\n" "$$bugbase (buggy)"; continue; fi; \
+	  printf "CHECK %-40s ...\n" "$$cfgtag (buggy)"; \
+	  start_ts=$$(date +%s); \
 	  $(TLC) -config "$$cfg" "$$tla" > /tmp/tlc-$$cfgtag.log 2>&1; \
 	  rc=$$?; \
-	  if [ $$rc -eq 12 ] || [ $$rc -eq 13 ]; then echo "OK (violation exit $$rc)"; \
-	  elif [ $$rc -eq 0 ]; then echo "FAIL (no violation)"; fail=1; \
-	  else echo "WARN (exit $$rc)"; fi; \
+	  end_ts=$$(date +%s); \
+	  duration=$$((end_ts - start_ts)); \
+	  if [ $$rc -eq 12 ] || [ $$rc -eq 13 ]; then printf "OK    %-40s (violation exit $$rc, %3ds)\n" "$$cfgtag (buggy)" "$$duration"; \
+	  elif [ $$rc -eq 0 ]; then printf "FAIL  %-40s (no violation, %3ds)\n" "$$cfgtag (buggy)" "$$duration"; fail=1; \
+	  else printf "WARN  %-40s (exit $$rc, %3ds)\n" "$$cfgtag (buggy)" "$$duration"; fi; \
 	done; \
 	if [ $$fail -eq 1 ]; then exit 1; fi
 

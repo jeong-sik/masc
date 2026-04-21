@@ -16,32 +16,35 @@ let base_path =
 
 let run_cmd base_path =
   Eio_main.run @@ fun env ->
-  Mirage_crypto_rng_unix.use_default ();
-  Eio_guard.enable ();
-  Time_compat.set_clock (Eio.Stdenv.clock env);
-  Masc_mcp.Cancellation.TokenStore.init ();
-  Eio.Switch.run @@ fun sw ->
-  let clock, mono_clock, net, _domain_mgr, proc_mgr, fs =
-    Server_runtime_bootstrap.init_runtime_context env
+  let _remaining_work =
+    Gc.ramp_up (fun () ->
+      Mirage_crypto_rng_unix.use_default ();
+      Eio_guard.enable ();
+      Time_compat.set_clock (Eio.Stdenv.clock env);
+      Masc_mcp.Cancellation.TokenStore.init ();
+      Eio.Switch.run @@ fun sw ->
+      let clock, mono_clock, net, _domain_mgr, proc_mgr, fs =
+        Server_runtime_bootstrap.init_runtime_context env
+      in
+      let state =
+        Server_runtime_bootstrap.create_server_state ~sw ~base_path ~clock
+          ~mono_clock ~net ~proc_mgr ~fs
+      in
+      Server_runtime_bootstrap.bootstrap_server_state_blocking state;
+      ignore (Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state);
+      Fun.protect
+        ~finally:(fun () ->
+          (try Board_dispatch.flush ()
+           with
+           | Eio.Cancel.Cancelled _ -> ()
+           | exn ->
+               Log.Misc.warn "shutdown: board flush failed: %s"
+                 (Printexc.to_string exn));
+          Shutdown_hooks.run_all ())
+        (fun () -> Mcp_eio.run_stdio ~sw ~env state)
+    )
   in
-  let state =
-    Server_runtime_bootstrap.create_server_state ~sw ~base_path ~clock
-      ~mono_clock ~net ~proc_mgr ~fs
-  in
-  Server_runtime_bootstrap.bootstrap_server_state_blocking state;
-  (* keeper bootstrap delegated to keeper_autoboot subsystem or
-     Keeper_runtime.start_existing_keepalives if needed *)
-  ignore (Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state);
-  Fun.protect
-    ~finally:(fun () ->
-      (try Board_dispatch.flush ()
-       with
-       | Eio.Cancel.Cancelled _ -> ()
-       | exn ->
-           Log.Misc.warn "shutdown: board flush failed: %s"
-             (Printexc.to_string exn));
-      Shutdown_hooks.run_all ())
-    (fun () -> Mcp_eio.run_stdio ~sw ~env state)
+  ()
 
 let cmd =
   let doc = "MASC MCP Server (stdio, Eio)" in

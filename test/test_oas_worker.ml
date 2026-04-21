@@ -684,31 +684,53 @@ let test_sdk_error_is_hard_quota_preserves_rate_limited_detection () =
 let test_sdk_error_is_hard_quota_keeps_not_found_false () =
   let err =
     Oas.Error.Api
-      (Llm_provider.Retry.NotFound
-         { message = "model endpoint not found" })
+      (Llm_provider.Retry.InvalidRequest
+         { message = {|{"detail":"Not Found"}|} })
   in
-  Alcotest.(check bool) "NotFound stays non-hard-quota" false
+  Alcotest.(check bool) "404-like InvalidRequest stays non-hard-quota" false
     (Oas_worker_named.sdk_error_is_hard_quota err)
 
 let test_sdk_error_to_cascade_outcome_maps_not_found_to_404 () =
   let err =
     Oas.Error.Api
-      (Llm_provider.Retry.NotFound
-         { message = "provider resource missing" })
+      (Llm_provider.Retry.InvalidRequest
+         { message = {|{"detail":"Not Found"}|} })
   in
   match Oas_worker_named.sdk_error_to_cascade_outcome err with
   | Some
       (Cascade_fsm.Call_err
          (Llm_provider.Http_client.HttpError
-            { code = 404; body = "provider resource missing" })) -> ()
+            { code = 404; body = {|{"detail":"Not Found"}|} })) -> ()
   | outcome ->
-      Alcotest.failf "expected Some (Call_err (HttpError 404)) for NotFound, got %s"
+      Alcotest.failf
+        "expected Some (Call_err (HttpError 404)) for 404-like InvalidRequest, got %s"
          (match outcome with
           | Some (Cascade_fsm.Call_err _) -> "some-call-err"
            | Some (Cascade_fsm.Accept_rejected _) -> "some-accept-rejected"
           | Some (Cascade_fsm.Call_ok _) -> "some-call-ok"
           | Some Cascade_fsm.Slot_full -> "some-slot-full"
           | None -> "none")
+
+let test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400 () =
+  let err =
+    Oas.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { message = {|{"detail":"Bad Request"}|} })
+  in
+  match Oas_worker_named.sdk_error_to_cascade_outcome err with
+  | Some
+      (Cascade_fsm.Call_err
+         (Llm_provider.Http_client.HttpError
+            { code = 400; body = {|{"detail":"Bad Request"}|} })) -> ()
+  | outcome ->
+      Alcotest.failf
+        "expected Some (Call_err (HttpError 400)) for ordinary InvalidRequest, got %s"
+        (match outcome with
+         | Some (Cascade_fsm.Call_err _) -> "some-call-err"
+         | Some (Cascade_fsm.Accept_rejected _) -> "some-accept-rejected"
+         | Some (Cascade_fsm.Call_ok _) -> "some-call-ok"
+         | Some Cascade_fsm.Slot_full -> "some-slot-full"
+         | None -> "none")
 
 let test_sdk_error_is_hard_quota_detects_claude_cli_limit_wrapper () =
   let err =
@@ -777,7 +799,7 @@ let test_enrich_sdk_error_for_openai_not_found_includes_endpoint_hint () =
   in
   let err =
     Oas.Error.Api
-      (Llm_provider.Retry.NotFound
+      (Llm_provider.Retry.InvalidRequest
          { message = {|{"detail":"Not Found"}|} })
   in
   let rendered =
@@ -2594,6 +2616,8 @@ let () =
         test_sdk_error_is_hard_quota_keeps_not_found_false;
       Alcotest.test_case "sdk_error_to_cascade_outcome maps NotFound to 404" `Quick
         test_sdk_error_to_cascade_outcome_maps_not_found_to_404;
+      Alcotest.test_case "sdk_error_to_cascade_outcome keeps ordinary InvalidRequest at 400" `Quick
+        test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400;
       Alcotest.test_case "Moonshot auth errors include configured env hint" `Quick
         test_enrich_sdk_error_for_moonshot_auth_includes_env_hint;
       Alcotest.test_case "OpenAI-compatible 404 errors include endpoint hint" `Quick

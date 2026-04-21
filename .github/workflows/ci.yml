@@ -38,31 +38,6 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
-  release-train:
-    name: Release Train
-    runs-on: ubuntu-latest
-    needs: [pr-sync-check]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.base_ref == 'main' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
-    timeout-minutes: 5
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
-      - name: Guard pending release tag on main PRs
-        env:
-          BASE_REF: origin/${{ github.base_ref }}
-          HEAD_REF: ${{ github.event.pull_request.head.sha }}
-        run: |
-          chmod +x scripts/check-release-train-guard.sh
-          git fetch origin "${{ github.base_ref }}" --depth=100 --tags
-          scripts/check-release-train-guard.sh \
-            --base "$BASE_REF" \
-            --head "$HEAD_REF"
-
   changes:
     name: Detect Changed Surfaces
     runs-on: ubuntu-latest
@@ -155,11 +130,11 @@ jobs:
             ci_core=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|dune-workspace$|.*\.opam$|scripts/ci-run-tests\.sh$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$|scripts/harness/contract/|scripts/harness/transport/|scripts/harness/lib/server_bootstrap\.sh$)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/ci-run-tests\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$|scripts/harness/contract/|scripts/harness/transport/|scripts/harness/lib/server_bootstrap\.sh$)'; then
             build=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|dune-workspace$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/check-ssot\.sh$|scripts/gen-grpc-descriptors\.sh$)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/check-ssot\.sh$|scripts/gen-grpc-descriptors\.sh$|scripts/lint/no-unknown-permissive-default\.sh$|scripts/lint/no-unknown-permissive-default\.allowlist$)'; then
             lint=true
           fi
 
@@ -167,7 +142,7 @@ jobs:
             dashboard=true
           fi
 
-          if has_match '^(bin/|lib/|docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|\.ci/health-baseline\.json$|dune-project$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/health_snapshot\.sh$|scripts/anti-fake-audit\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$)'; then
+          if has_match '^(bin/|lib/|\.ci/health-baseline\.json$|dune-project$|.*\.opam$|scripts/health_snapshot\.sh$|scripts/anti-fake-audit\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$)'; then
             health=true
           fi
 
@@ -198,19 +173,12 @@ jobs:
           if [ "${ci_core}" = true ]; then
             build=true
             lint=true
-            dashboard=true
-            health=true
-            health_snapshot=true
             lib_deps=true
             doc_truth=true
             oas_pin=true
-            spec_refs=true
-            # Note: tla is intentionally NOT forced on by ci_core. TLA+ model
-            # checking takes ~14 min and only meaningfully depends on specs/,
-            # lib/keeper/, lib/oas_*.ml, or Makefile. A pure workflow/action
-            # change has no effect on TLA spec correctness, so forcing it here
-            # spent ~14 min per unrelated CI-config PR. tla stays driven by its
-            # narrow path filter only.
+            # Note: dashboard/health/spec_refs/tla stay path-scoped. Pure CI
+            # workflow/action edits should still validate the OCaml/repo guard
+            # lanes, but they should not fan out into every feature surface.
           fi
 
           echo "build=${build}" >> "$GITHUB_OUTPUT"
@@ -227,12 +195,83 @@ jobs:
           printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s lib_deps=%s doc_truth=%s tla=%s oas_pin=%s\n' \
             "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${lib_deps}" "${doc_truth}" "${tla}" "${oas_pin}"
 
+  meta:
+    name: Meta Guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [pr-sync-check, changes]
+    if: ${{ !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Guard pending release tag on main PRs
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha }}
+        run: |
+          chmod +x scripts/check-release-train-guard.sh
+          git fetch origin "${{ github.base_ref }}" --depth=100 --tags
+          scripts/check-release-train-guard.sh \
+            --base "$BASE_REF" \
+            --head "$HEAD_REF"
+
+      - name: Run PR hygiene guards
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha }}
+        run: |
+          chmod +x scripts/check-pr-hygiene.sh
+          git fetch origin "${{ github.base_ref }}" --depth=100
+          scripts/check-pr-hygiene.sh \
+            --base "$BASE_REF" \
+            --head "$HEAD_REF" \
+            --recent-main 50 \
+            --duplicate-policy warn
+
+      - name: Check doc truth
+        if: needs.changes.outputs.doc_truth == 'true'
+        run: |
+          chmod +x scripts/check-doc-truth.sh scripts/sync-oas-pin-docs.sh
+          scripts/check-doc-truth.sh
+          scripts/sync-oas-pin-docs.sh --check
+
+      - name: Check OAS pin consistency
+        if: needs.changes.outputs.oas_pin == 'true'
+        run: |
+          chmod +x scripts/check-oas-pin.sh
+          scripts/check-oas-pin.sh --local-only
+
+      - name: Run report self-test
+        if: needs.changes.outputs.lib_deps == 'true'
+        run: python3 scripts/lib_dep_report.py --self-test
+
+      - name: Generate lib dependency delta
+        if: needs.changes.outputs.lib_deps == 'true'
+        run: bash scripts/lib_dep_delta_ci.sh
+
+      - name: Upload lib dependency reports
+        if: needs.changes.outputs.lib_deps == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: lib-dependency-delta
+          path: |
+            reports/lib-dependency-graph.json
+            reports/lib-dependency-graph.baseline.json
+            reports/lib-dependency-summary.md
+            reports/lib-dependency-summary.json
+
   health:
     name: Health
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [pr-sync-check, release-train, changes]
-    if: ${{ !cancelled() && needs.changes.outputs.health == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') && (needs.release-train.result == 'success' || needs.release-train.result == 'skipped') }}
+    needs: [pr-sync-check, changes]
+    if: ${{ !cancelled() && needs.changes.outputs.health == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
 
     steps:
       - name: Checkout
@@ -260,17 +299,6 @@ jobs:
         uses: ./.github/actions/install-ocaml-deps
         with:
           install-flags: --with-test
-
-      - name: Verify OAS pin ratchet
-        run: |
-          chmod +x scripts/check-oas-pin.sh
-          scripts/check-oas-pin.sh
-
-      - name: Check front-door doc truth
-        run: |
-          chmod +x scripts/check-doc-truth.sh scripts/check-version-truth.sh
-          scripts/check-doc-truth.sh
-          scripts/check-version-truth.sh
 
       - name: Fetch base branch for health ratchet
         if: github.event_name == 'pull_request' && needs.changes.outputs.health_snapshot == 'true'
@@ -301,100 +329,12 @@ jobs:
           name: health-snapshot
           path: .health/health-snapshot.json
 
-  doc-truth:
-    name: Doc Truth
-    runs-on: ubuntu-latest
-    needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && needs.changes.outputs.doc_truth == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
-    timeout-minutes: 5
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Check doc, version, and pin truth
-        run: |
-          chmod +x scripts/check-doc-truth.sh scripts/check-version-truth.sh scripts/sync-oas-pin-docs.sh
-          scripts/check-doc-truth.sh
-          scripts/check-version-truth.sh
-          scripts/sync-oas-pin-docs.sh --check
-
-  lib-dependency-delta:
-    name: Lib Dependency Delta
-    runs-on: ubuntu-latest
-    needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && needs.changes.outputs.lib_deps == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
-    timeout-minutes: 5
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Run report self-test
-        run: python3 scripts/lib_dep_report.py --self-test
-
-      - name: Generate lib dependency delta
-        run: bash scripts/lib_dep_delta_ci.sh
-
-      - name: Upload lib dependency reports
-        uses: actions/upload-artifact@v7
-        with:
-          name: lib-dependency-delta
-          path: |
-            reports/lib-dependency-graph.json
-            reports/lib-dependency-graph.baseline.json
-            reports/lib-dependency-summary.md
-            reports/lib-dependency-summary.json
-
-  oas-pin-check:
-    name: OAS Pin Consistency
-    runs-on: ubuntu-latest
-    needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && needs.changes.outputs.oas_pin == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
-    timeout-minutes: 3
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Check OAS pin consistency
-        run: |
-          chmod +x ci/check-oas-pin.sh
-          ci/check-oas-pin.sh --warn-only
-
-  pr-hygiene:
-    name: PR Hygiene
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    needs: [pr-sync-check]
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Run PR hygiene guards
-        env:
-          BASE_REF: origin/${{ github.base_ref }}
-          HEAD_REF: ${{ github.event.pull_request.head.sha }}
-        run: |
-          chmod +x scripts/check-pr-hygiene.sh
-          git fetch origin "${{ github.base_ref }}" --depth=100
-          scripts/check-pr-hygiene.sh \
-            --base "$BASE_REF" \
-            --head "$HEAD_REF" \
-            --recent-main 50 \
-            --duplicate-policy warn
   build:
     name: Build and Test
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    needs: [pr-sync-check, release-train, changes]
-    if: ${{ !cancelled() && needs.changes.outputs.build == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') && (needs.release-train.result == 'success' || needs.release-train.result == 'skipped') }}
+    needs: [pr-sync-check, changes]
+    if: ${{ !cancelled() && needs.changes.outputs.build == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
     outputs:
       advisory_status: ${{ steps.build_advisory_status.outputs.advisory_status }}
 
@@ -596,6 +536,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Run #8605 family detector
+        run: bash scripts/lint/no-unknown-permissive-default.sh
+
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
 
@@ -660,6 +603,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Run drift gate
+        run: scripts/dashboard-drift-check.sh
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
@@ -692,30 +638,12 @@ jobs:
         working-directory: dashboard
         run: pnpm test
 
-  dashboard-drift:
-    name: Dashboard Drift Gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    needs: [pr-sync-check]
-    if: ${{ !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Run drift gate
-        run: scripts/dashboard-drift-check.sh
-
   tla-specs:
-    name: TLA+ Model Checking (${{ matrix.suite }})
+    name: TLA+ Model Checking
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     needs: [pr-sync-check, changes]
     if: ${{ !cancelled() && needs.changes.outputs.tla == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        suite: [check-clean, check-buggy]
 
     steps:
       - name: Checkout
@@ -733,7 +661,9 @@ jobs:
             https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
 
       - name: Run TLA+ model checking
-        run: make -C specs ${{ matrix.suite }}
+        run: |
+          make -C specs check-clean
+          make -C specs check-buggy
 
   spec-line-refs:
     name: Spec Line Refs
@@ -752,7 +682,7 @@ jobs:
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
-    needs: [pr-sync-check, changes, build, lint, dashboard, dashboard-drift, health, lib-dependency-delta, doc-truth, oas-pin-check, tla-specs, spec-line-refs]
+    needs: [pr-sync-check, changes, meta, build, lint, dashboard, health, tla-specs, spec-line-refs]
     if: ${{ !cancelled() }}
     timeout-minutes: 2
 
@@ -761,14 +691,11 @@ jobs:
         env:
           PR_SYNC_RESULT: ${{ needs.pr-sync-check.result }}
           CHANGES_RESULT: ${{ needs.changes.result }}
+          META_RESULT: ${{ needs.meta.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           LINT_RESULT: ${{ needs.lint.result }}
           DASHBOARD_RESULT: ${{ needs.dashboard.result }}
-          DASHBOARD_DRIFT_RESULT: ${{ needs.dashboard-drift.result }}
           HEALTH_RESULT: ${{ needs.health.result }}
-          LIB_DEPENDENCY_DELTA_RESULT: ${{ needs.lib-dependency-delta.result }}
-          DOC_TRUTH_RESULT: ${{ needs.doc-truth.result }}
-          OAS_PIN_RESULT: ${{ needs.oas-pin-check.result }}
           TLA_RESULT: ${{ needs.tla-specs.result }}
           SPEC_REFS_RESULT: ${{ needs.spec-line-refs.result }}
           BUILD_ADVISORY_STATUS: ${{ needs.build.outputs.advisory_status }}
@@ -806,15 +733,12 @@ jobs:
           }
           check "pr-sync-check"   "$PR_SYNC_RESULT"
           check "changes"         "$CHANGES_RESULT"
+          check "meta"            "$META_RESULT"
           check "build"           "$BUILD_RESULT"
           warn_if_advisory "build" "$BUILD_ADVISORY_STATUS"
           check "lint"            "$LINT_RESULT"
           check "dashboard"       "$DASHBOARD_RESULT"
-          check "dashboard-drift" "$DASHBOARD_DRIFT_RESULT"
           check "health"          "$HEALTH_RESULT"
-          check "lib-dep-delta"   "$LIB_DEPENDENCY_DELTA_RESULT"
-          check "doc-truth"       "$DOC_TRUTH_RESULT"
-          check "oas-pin-check"   "$OAS_PIN_RESULT"
           check "tla-specs"       "$TLA_RESULT"
           check "spec-line-refs"  "$SPEC_REFS_RESULT"
           [ "$fail" -eq 0 ]

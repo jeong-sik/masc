@@ -126,9 +126,94 @@ let find_free_port () =
        match Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0)) with
        | () ->
          (match Unix.getsockname socket with
-          | Unix.ADDR_INET (_, port) -> Some port
-          | _ -> fail "unexpected socket address")
+         | Unix.ADDR_INET (_, port) -> Some port
+         | _ -> fail "unexpected socket address")
        | exception Unix.Unix_error ((Unix.EPERM | Unix.EACCES), "bind", _) -> None)
+;;
+
+let mock_openai_text_response ?(id = "chatcmpl-dashboard-routes") text =
+  Printf.sprintf
+    {|{"id":"%s","object":"chat.completion","model":"mock","choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":1,"total_tokens":11}}|}
+    id text
+;;
+
+let wait_for_tcp_listener ~port ~timeout_s =
+  let deadline = Unix.gettimeofday () +. timeout_s in
+  let rec loop () =
+    let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    Fun.protect
+      ~finally:(fun () -> Unix.close socket)
+      (fun () ->
+         match Unix.connect socket (Unix.ADDR_INET (Unix.inet_addr_loopback, port)) with
+         | () -> true
+         | exception Unix.Unix_error _ ->
+           if Unix.gettimeofday () > deadline
+           then false
+           else (
+             Unix.sleepf 0.05;
+             loop ()))
+  in
+  loop ()
+;;
+
+let with_mock_model f =
+  let port =
+    match find_free_port () with
+    | Some port -> port
+    | None -> Alcotest.skip ()
+  in
+  let rec wait_child_exit ~pid ~deadline =
+    match Unix.waitpid [ Unix.WNOHANG ] pid with
+    | 0, _ ->
+      if Unix.gettimeofday () > deadline
+      then false
+      else (
+        Unix.sleepf 0.05;
+        wait_child_exit ~pid ~deadline)
+    | _pid, _status -> true
+    | exception Unix.Unix_error (Unix.ECHILD, _, _) -> true
+  in
+  let response_body = mock_openai_text_response "pong" in
+  match Unix.fork () with
+  | 0 ->
+    Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+    let server = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+    Unix.setsockopt server Unix.SO_REUSEADDR true;
+    Unix.bind server (Unix.ADDR_INET (Unix.inet_addr_loopback, port));
+    Unix.listen server 16;
+    let response =
+      Printf.sprintf
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
+        (String.length response_body)
+        response_body
+    in
+    let rec serve () =
+      let client, _addr = Unix.accept server in
+      Fun.protect
+        ~finally:(fun () -> Unix.close client)
+        (fun () ->
+           let buffer = Bytes.create 4096 in
+           (try ignore (Unix.read client buffer 0 (Bytes.length buffer)) with
+            | Unix.Unix_error _ -> ());
+           try ignore (Unix.write_substring client response 0 (String.length response)) with
+           | Unix.Unix_error _ -> ());
+      serve ()
+    in
+    serve ()
+  | pid ->
+    let cleanup () =
+      (try Unix.kill pid Sys.sigterm with
+       | _ -> ());
+      ignore (wait_child_exit ~pid ~deadline:(Unix.gettimeofday () +. 1.0))
+    in
+    if not (wait_for_tcp_listener ~port ~timeout_s:2.0)
+    then (
+      cleanup ();
+      fail (Printf.sprintf "mock model server failed to listen on port %d" port));
+    Fun.protect
+      ~finally:cleanup
+      (fun () ->
+         f (Printf.sprintf "custom:mock@http://127.0.0.1:%d/v1" port))
 ;;
 
 let wait_for_health ~port ~timeout_s =
@@ -217,6 +302,14 @@ let merge_env_overrides overrides =
   Array.of_list (base @ injected)
 ;;
 
+let has_env_override key overrides =
+  List.exists (fun (name, _value) -> String.equal name key) overrides
+;;
+
+let repo_config_path name =
+  Filename.concat (Filename.concat (Masc_test_deps.find_project_root ()) "config") name
+;;
+
 let with_temp_config_root cascade_json f =
   let root = Filename.temp_file "dashboard-keeper-config-" "" in
   (try Sys.remove root with
@@ -230,6 +323,9 @@ let with_temp_config_root cascade_json f =
        mkdir_p (Filename.concat root "keepers");
        mkdir_p (Filename.concat root "prompts");
        write_file (Filename.concat root "cascade.json") cascade_json;
+       write_file
+         (Filename.concat root "tool_policy.toml")
+         (read_file (repo_config_path "tool_policy.toml"));
        f root)
 ;;
 
@@ -429,65 +525,78 @@ let seed_auth_and_keeper ~base_path ~keeper_name =
 ;;
 
 let with_seeded_server ?(env_overrides = []) f =
-  let exe = find_main_eio_exe () in
-  let port =
-    match find_free_port () with
-    | Some p -> p
-    | None -> Alcotest.skip ()
-  in
-  let log_file = Filename.temp_file "dashboard-keeper-routes-" ".log" in
-  let base_path = Filename.temp_file "dashboard-keeper-base-" "" in
-  let keeper_name = "route-shadow-demo" in
-  (try Sys.remove base_path with
-   | _ -> ());
-  Unix.mkdir base_path 0o755;
-  let config, admin_token = seed_auth_and_keeper ~base_path ~keeper_name in
-  let log_fd =
-    Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
-  in
-  let env =
-    merge_env_overrides
-      ([ "MASC_AUTONOMY_ENABLED", "0"
-       ; "GRAPHQL_API_KEY", ""
-       ; "GRAPHQL_URL", "http://127.0.0.1:9/graphql"
-       ; "MASC_BASE_PATH", base_path
-       ; "MASC_POSTGRES_URL", ""
-       ; "DATABASE_URL", ""
-       ; "SUPABASE_DB_URL", ""
-       ; "SB_PG_URL", ""
-       ; "MASC_BOARD_BACKEND", "jsonl"
-       ]
-       @ env_overrides)
-  in
-  let argv =
-    [| exe
-     ; "--host"
-     ; "127.0.0.1"
-     ; "--port"
-     ; string_of_int port
-     ; "--base-path"
-     ; base_path
-    |]
-  in
-  let pid = Unix.create_process_env exe argv env Unix.stdin log_fd log_fd in
-  Unix.close log_fd;
-  let cleanup () =
-    (try Unix.kill pid Sys.sigterm with
+  let run_with_env_overrides env_overrides =
+    let exe = find_main_eio_exe () in
+    let port =
+      match find_free_port () with
+      | Some p -> p
+      | None -> Alcotest.skip ()
+    in
+    let log_file = Filename.temp_file "dashboard-keeper-routes-" ".log" in
+    let base_path = Filename.temp_file "dashboard-keeper-base-" "" in
+    let keeper_name = "route-shadow-demo" in
+    (try Sys.remove base_path with
      | _ -> ());
-    if not (wait_pid_exit ~pid ~timeout_s:2.0)
+    Unix.mkdir base_path 0o755;
+    let config, admin_token = seed_auth_and_keeper ~base_path ~keeper_name in
+    let log_fd =
+      Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+    in
+    let env =
+      merge_env_overrides
+        ([ "MASC_AUTONOMY_ENABLED", "0"
+         ; "GRAPHQL_API_KEY", ""
+         ; "GRAPHQL_URL", "http://127.0.0.1:9/graphql"
+         ; "MASC_BASE_PATH", base_path
+         ; "MASC_POSTGRES_URL", ""
+         ; "DATABASE_URL", ""
+         ; "SUPABASE_DB_URL", ""
+         ; "SB_PG_URL", ""
+         ; "MASC_BOARD_BACKEND", "jsonl"
+         ]
+         @ env_overrides)
+    in
+    let argv =
+      [| exe
+       ; "--host"
+       ; "127.0.0.1"
+       ; "--port"
+       ; string_of_int port
+       ; "--base-path"
+       ; base_path
+      |]
+    in
+    let pid = Unix.create_process_env exe argv env Unix.stdin log_fd log_fd in
+    Unix.close log_fd;
+    let cleanup () =
+      (try Unix.kill pid Sys.sigterm with
+       | _ -> ());
+      if not (wait_pid_exit ~pid ~timeout_s:2.0)
+      then (
+        try Unix.kill pid Sys.sigkill with
+        | _ -> ());
+      ignore (wait_pid_exit ~pid ~timeout_s:1.0);
+      rm_rf log_file;
+      rm_rf base_path
+    in
+    if not (wait_for_health ~port ~timeout_s:20.0)
     then (
-      try Unix.kill pid Sys.sigkill with
-      | _ -> ());
-    ignore (wait_pid_exit ~pid ~timeout_s:1.0);
-    rm_rf log_file;
-    rm_rf base_path
+      let logs = read_file log_file in
+      cleanup ();
+      fail (Printf.sprintf "server failed to become ready on port %d\n%s" port logs));
+    Fun.protect ~finally:cleanup (fun () -> f ~port ~config ~admin_token ~keeper_name)
   in
-  if not (wait_for_health ~port ~timeout_s:20.0)
-  then (
-    let logs = read_file log_file in
-    cleanup ();
-    fail (Printf.sprintf "server failed to become ready on port %d\n%s" port logs));
-  Fun.protect ~finally:cleanup (fun () -> f ~port ~config ~admin_token ~keeper_name)
+  if has_env_override "MASC_CONFIG_DIR" env_overrides
+  then run_with_env_overrides env_overrides
+  else
+    with_mock_model @@ fun valid_model ->
+    with_temp_config_root
+      (Printf.sprintf
+         {|{"default_models":["%s"],"keeper_unified_models":["%s"]}|}
+         valid_model
+         valid_model)
+    @@ fun config_root ->
+    run_with_env_overrides (("MASC_CONFIG_DIR", config_root) :: env_overrides)
 ;;
 
 let check_route path expected =
@@ -671,14 +780,18 @@ let test_keeper_directive_resume_updates_paused_meta () =
 ;;
 
 let test_available_cascade_profiles_filter_invalid_catalog_entries () =
+  with_mock_model @@ fun valid_model ->
   with_temp_config_root
-    {|
+    (Printf.sprintf
+       {|
       {
-        "default_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
-        "good_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
+        "default_models": ["%s"],
+        "good_models": ["%s"],
         "broken_models": ["__nonexistent_provider_sentinel__:fake-model"]
       }
     |}
+       valid_model
+       valid_model)
   @@ fun config_root ->
   with_config_dir config_root @@ fun () ->
   check
@@ -692,14 +805,18 @@ let test_available_cascade_profiles_filter_invalid_catalog_entries () =
 ;;
 
 let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
+  with_mock_model @@ fun valid_model ->
   with_temp_config_root
-    {|
+    (Printf.sprintf
+       {|
       {
-        "default_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
-        "good_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
+        "default_models": ["%s"],
+        "good_models": ["%s"],
         "broken_models": ["__nonexistent_provider_sentinel__:fake-model"]
       }
     |}
+       valid_model
+       valid_model)
   @@ fun config_root ->
   with_seeded_server
     ~env_overrides:[ "MASC_CONFIG_DIR", config_root ]

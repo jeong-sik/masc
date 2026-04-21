@@ -11,6 +11,11 @@ type provider = {
   url : string option;
 }
 
+val provider_to_yojson : provider -> Yojson.Safe.t
+val provider_of_yojson : Yojson.Safe.t -> (provider, string) result
+val show_provider : provider -> string
+val equal_provider : provider -> provider -> bool
+
 type skill = {
   id : string;
   name : string;
@@ -21,10 +26,20 @@ type skill = {
   tool_count : int;
 }
 
+val skill_to_yojson : skill -> Yojson.Safe.t
+val skill_of_yojson : Yojson.Safe.t -> (skill, string) result
+val show_skill : skill -> string
+val equal_skill : skill -> skill -> bool
+
 type binding = {
   protocol : string;
   url : string;
 }
+
+val binding_to_yojson : binding -> Yojson.Safe.t
+val binding_of_yojson : Yojson.Safe.t -> (binding, string) result
+val show_binding : binding -> string
+val equal_binding : binding -> binding -> bool
 
 type security_scheme = {
   scheme_type : string;
@@ -32,6 +47,12 @@ type security_scheme = {
   api_key_name : string option;
   api_key_in : string option;
 }
+
+val security_scheme_to_yojson : security_scheme -> Yojson.Safe.t
+val security_scheme_of_yojson :
+  Yojson.Safe.t -> (security_scheme, string) result
+val show_security_scheme : security_scheme -> string
+val equal_security_scheme : security_scheme -> security_scheme -> bool
 
 type agent_capabilities = {
   streaming : bool;
@@ -67,6 +88,9 @@ type agent_card = {
   updated_at : string;
 }
 
+val show_agent_card : agent_card -> string
+val equal_agent_card : agent_card -> agent_card -> bool
+
 (** {1 Serialization} *)
 
 val capabilities_to_json : agent_capabilities -> Yojson.Safe.t
@@ -78,6 +102,7 @@ val from_json : Yojson.Safe.t -> (agent_card, string) result
 
 (** {1 Construction} *)
 
+val now_iso8601 : unit -> string
 val skills_from_tools : Types.tool_schema list -> skill list
 val runtime_supported_interfaces : host:string -> port:int -> binding list
 val generate_default :

@@ -263,6 +263,16 @@ let test_to_json_masks_sensitive_values_and_tracks_sources () =
         (entry |> member "source_detail" |> to_string);
       check string "provenance kind is env" "env"
         (entry |> member "provenance" |> member "kind" |> to_string);
+      check string "provenance env names source var" "MASC_ADMIN_TOKEN"
+        (entry |> member "provenance" |> member "env" |> to_string);
+      check string "provenance raw source is environment" "environment"
+        (entry |> member "provenance" |> member "raw_source" |> to_string);
+      check bool "provenance notes env presence" true
+        (entry |> member "provenance" |> member "raw_env_present" |> to_bool);
+      check bool "provenance notes env is not blank" false
+        (entry |> member "provenance" |> member "raw_env_blank" |> to_bool);
+      check bool "provenance notes redaction" true
+        (entry |> member "provenance" |> member "value_redacted" |> to_bool);
       check bool "marked sensitive" true (entry |> member "sensitive" |> to_bool);
       check string "masked token" "supe***"
         (entry |> member "value" |> to_string))
@@ -274,6 +284,12 @@ let test_to_json_treats_blank_env_as_default () =
       let open Yojson.Safe.Util in
       check string "blank source is default" "default"
         (entry |> member "source" |> to_string);
+      check bool "blank provenance preserves env presence" true
+        (entry |> member "provenance" |> member "raw_env_present" |> to_bool);
+      check bool "blank provenance marks blank env" true
+        (entry |> member "provenance" |> member "raw_env_blank" |> to_bool);
+      check string "blank provenance raw source falls back" "compiled_default"
+        (entry |> member "provenance" |> member "raw_source" |> to_string);
       check bool "blank value omitted" true (entry |> member "value" = `Null))
 
 let test_to_json_exposes_derived_and_runtime_provenance () =
@@ -287,10 +303,14 @@ let test_to_json_exposes_derived_and_runtime_provenance () =
             (base_url |> member "source" |> to_string);
           check string "derived provenance kind" "derived"
             (base_url |> member "provenance" |> member "kind" |> to_string);
+          check string "derived provenance raw source" "derived_runtime"
+            (base_url |> member "provenance" |> member "raw_source" |> to_string);
           check string "runtime source" "runtime"
             (base_path |> member "source" |> to_string);
           check string "runtime provenance kind" "runtime"
-            (base_path |> member "provenance" |> member "kind" |> to_string)))
+            (base_path |> member "provenance" |> member "kind" |> to_string);
+          check string "runtime provenance raw source" "runtime"
+            (base_path |> member "provenance" |> member "raw_source" |> to_string)))
 
 (* ============================================================
    print_summary Tests

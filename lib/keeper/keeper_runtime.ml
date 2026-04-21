@@ -339,7 +339,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
     let max_scan =
       max 0 Env_config.KeeperBootstrap.max_scan
     in
-    let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
+    let max_keepers = Keeper_runtime_resolved.bootstrap_max_active_keepers () in
     let remaining_slots =
       ref
         (if max_keepers > 0 then

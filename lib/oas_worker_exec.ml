@@ -15,6 +15,15 @@ type stop_reason =
   | TurnBudgetExhausted of { turns_used : int; limit : int }
   | MutationBoundaryReached of { turns_used : int; tool_name : string option }
 
+type cli_transport_overrides = {
+  cwd : string option;
+  claude_mcp_config : string option;
+  claude_allowed_tools : string list option;
+  claude_permission_mode : string option;
+  claude_max_turns : int option;
+  gemini_yolo : bool option;
+}
+
 type config = {
   name : string;
   provider_cfg : Llm_provider.Provider_config.t;
@@ -57,6 +66,7 @@ type config = {
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
   summarizer : (Oas.Types.message list -> string) option;
+  cli_transport_overrides : cli_transport_overrides option;
       (** Custom summarizer for OAS [Budget_strategy.reduce_for_budget]
           Emergency-phase compaction. Defaults to OAS's extractive
           default. Keeper workers inject [Keeper_summarizer.keeper_summarizer]
@@ -104,6 +114,7 @@ let default_config
     exit_condition = None;
     exit_condition_result = None;
     summarizer = None;
+    cli_transport_overrides = None;
   }
 
 type run_result = {
@@ -192,8 +203,8 @@ let provider_caps_of_config (provider_cfg : Llm_provider.Provider_config.t) =
     match provider_cfg.kind with
     | Llm_provider.Provider_config.Claude_code
     | Gemini_cli
-    | Kimi_cli
-    | Codex_cli -> base_caps
+    | Codex_cli
+    | Kimi_cli -> base_caps
     | _ ->
         (match Llm_provider.Capabilities.for_model_id provider_cfg.model_id with
          | Some caps -> caps
@@ -313,6 +324,8 @@ let make_per_call_switch_transport
 let non_http_transport_of_provider
     ~(sw : Eio.Switch.t)
     ~(provider_cfg : Llm_provider.Provider_config.t)
+    ?cli_transport_overrides
+    ()
   : (Llm_provider.Llm_transport.t option, Oas.Error.sdk_error) result =
   let _ = sw in
   let proc_mgr_result () =
@@ -325,10 +338,29 @@ let non_http_transport_of_provider
       (match proc_mgr_result () with
        | Error _ as e -> e
        | Ok mgr ->
+           let overrides =
+             Option.value
+               ~default:
+                 {
+                   cwd = None;
+                   claude_mcp_config = None;
+                   claude_allowed_tools = None;
+                   claude_permission_mode = None;
+                   claude_max_turns = None;
+                   gemini_yolo = None;
+                 }
+               cli_transport_overrides
+           in
            let config =
              {
                Llm_provider.Transport_claude_code.default_config with
                model = cli_model_override provider_cfg.model_id;
+               cwd = overrides.cwd;
+               mcp_config = overrides.claude_mcp_config;
+               allowed_tools =
+                 Option.value ~default:[] overrides.claude_allowed_tools;
+               permission_mode = overrides.claude_permission_mode;
+               max_turns = overrides.claude_max_turns;
              }
            in
            Ok
@@ -340,10 +372,25 @@ let non_http_transport_of_provider
       (match proc_mgr_result () with
        | Error _ as e -> e
        | Ok mgr ->
+           let overrides =
+             Option.value
+               ~default:
+                 {
+                   cwd = None;
+                   claude_mcp_config = None;
+                   claude_allowed_tools = None;
+                   claude_permission_mode = None;
+                   claude_max_turns = None;
+                   gemini_yolo = None;
+                 }
+               cli_transport_overrides
+           in
            let config =
              {
                Llm_provider.Transport_gemini_cli.default_config with
                model = cli_model_override provider_cfg.model_id;
+               cwd = overrides.cwd;
+               yolo = Option.value ~default:true overrides.gemini_yolo;
              }
            in
            Ok
@@ -370,13 +417,19 @@ let non_http_transport_of_provider
       (match proc_mgr_result () with
        | Error _ as e -> e
        | Ok mgr ->
+           let cwd =
+             Option.bind cli_transport_overrides (fun overrides -> overrides.cwd)
+           in
            Ok
              (Some
                 (make_per_call_switch_transport (fun ~sw ->
                      Llm_provider.Transport_codex_cli.create ~sw ~mgr
                        ~config:
-                         Llm_provider.Transport_codex_cli.default_config))))
-  | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm ->
+                         {
+                           Llm_provider.Transport_codex_cli.default_config with
+                           cwd;
+                         }))))
+  | Anthropic | OpenAI_compat | Ollama | Gemini | Glm | Kimi ->
       Ok None
 
 (* ================================================================ *)
@@ -567,7 +620,11 @@ let build
     | None -> builder
   in
   let builder =
-    match non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg with
+    match
+      non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg
+        ?cli_transport_overrides:config.cli_transport_overrides
+        ()
+    with
     | Ok (Some transport) -> Ok (Oas.Builder.with_transport transport builder)
     | Ok None -> Ok builder
     | Error _ as e -> e
@@ -714,7 +771,11 @@ let resume_from_checkpoint
     summarizer = config.summarizer;
     priority = config.priority;
   } in
-  match non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg with
+  match
+    non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg
+      ?cli_transport_overrides:config.cli_transport_overrides
+      ()
+  with
   | Error _ as e -> e
   | Ok transport ->
       let options = { options with transport } in

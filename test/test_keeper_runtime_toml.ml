@@ -48,8 +48,11 @@ let parse_or_fail content =
 
 let with_clean_boot_overrides f =
   Config_boot_overrides.reset_for_tests ();
+  Keeper_runtime_resolved.reset_for_tests ();
   Fun.protect
-    ~finally:(fun () -> Config_boot_overrides.reset_for_tests ())
+    ~finally:(fun () ->
+      Config_boot_overrides.reset_for_tests ();
+      Keeper_runtime_resolved.reset_for_tests ())
     f
 
 (* --- Tests using resolve_overrides (pure, no env side effects) --- *)
@@ -256,6 +259,45 @@ let test_float_value_round_trip () =
     (Some "120.5")
     (List.assoc_opt "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC" overrides)
 
+let test_resolved_runtime_freezes_toml_values_after_init () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path
+    "[turn]\n\
+     timeout_sec = 1500\n\
+     [reactive]\n\
+     max_turns_per_call = 12\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" msg
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  Config_boot_overrides.set "MASC_KEEPER_TURN_TIMEOUT_SEC" "900";
+  Config_boot_overrides.set "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" "4";
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "turn timeout frozen from toml"
+    1500.0 runtime.turn_timeout_sec.value;
+  check string "turn timeout source"
+    "toml"
+    (Keeper_runtime_resolved.source_to_string runtime.turn_timeout_sec.source);
+  check int "reactive max turns frozen from toml"
+    12 runtime.reactive_max_turns_per_call.value
+
+let test_resolved_runtime_prefers_env_over_toml () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\ntimeout_sec = 1500\n";
+  with_env "MASC_KEEPER_TURN_TIMEOUT_SEC" (Some "777") @@ fun () ->
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" msg
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "env timeout wins"
+    777.0 runtime.turn_timeout_sec.value;
+  check string "env source"
+    "env"
+    (Keeper_runtime_resolved.source_to_string runtime.turn_timeout_sec.source)
+
 let () =
   run "keeper_runtime_toml"
     [ ( "resolve_overrides"
@@ -272,5 +314,7 @@ let () =
         ; test_case "load_and_apply records disabled turn cost override" `Quick test_load_and_apply_records_disabled_turn_cost_override
         ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path
         ; test_case "float value round trip" `Quick test_float_value_round_trip
+        ; test_case "resolved runtime freezes toml values after init" `Quick test_resolved_runtime_freezes_toml_values_after_init
+        ; test_case "resolved runtime prefers env over toml" `Quick test_resolved_runtime_prefers_env_over_toml
         ] )
     ]

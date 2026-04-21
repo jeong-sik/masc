@@ -256,7 +256,40 @@ let test_stale_preserved_on_timeout ~clock ~sw () =
   in
   Alcotest.(check bool) "no timeout error cached" false is_timeout_error
 
-(* -- 10. Timeout with no stale data returns error JSON (not cached) -------- *)
+(* -- 10. Expired stale falls back to last-good on timeout ------------------- *)
+
+let test_expired_stale_restored_on_timeout ~clock () =
+  Dashboard_cache.invalidate_all ();
+  let original = `String "expired_but_last_good" in
+  let seeded =
+    Dashboard_cache.get_or_compute "expired_stale_timeout" ~ttl:0.05 (fun () ->
+      original)
+  in
+  check_json "seed expired-stale value" original seeded;
+  Eio.Time.sleep clock 0.25;
+  let result =
+    Dashboard_cache.get_or_compute_with_timeout "expired_stale_timeout" ~ttl:0.05
+      ~clock ~timeout_sec:0.05 (fun () ->
+        Eio.Time.sleep clock 1.0;
+        `String "never_reached")
+  in
+  check_json "expired stale restored on timeout" original result;
+  let after =
+    Dashboard_cache.get_or_compute "expired_stale_timeout" ~ttl:0.05 (fun () ->
+      `String "fresh_after_restore")
+  in
+  let is_timeout_error =
+    match after with
+    | `Assoc pairs ->
+      (match List.assoc_opt "error" pairs with
+       | Some (`String "computation_timeout") -> true
+       | _ -> false)
+    | _ -> false
+  in
+  Alcotest.(check bool) "expired stale restore avoids timeout poison" false
+    is_timeout_error
+
+(* -- 11. Timeout with no stale data returns error JSON (not cached) -------- *)
 
 (** When there is no stale data (first compute for a key), timeout should
     return error JSON to the caller but NOT cache it — subsequent calls
@@ -286,7 +319,7 @@ let test_timeout_no_stale_returns_error ~clock () =
   in
   check_json "recompute after timeout" (`String "recovered") v2
 
-(* -- 11. Waiter timeout returns fast error without poisoning cache --------- *)
+(* -- 12. Waiter timeout returns fast error without poisoning cache --------- *)
 
 (** When another fiber already owns the compute slot, waiters should honor the
     caller's timeout budget instead of waiting for the global 130s eviction.
@@ -394,6 +427,8 @@ let () =
             (fun () ->
                Eio.Switch.run @@ fun sw ->
                test_stale_preserved_on_timeout ~clock ~sw ());
+          test_case "expired stale restored on timeout" `Quick
+            (test_expired_stale_restored_on_timeout ~clock);
           test_case "no-stale timeout returns error, not cached" `Quick
             (test_timeout_no_stale_returns_error ~clock);
           test_case "waiter timeout returns error, not cached" `Quick

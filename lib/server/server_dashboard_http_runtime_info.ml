@@ -437,6 +437,7 @@ let runtime_resolution_json (config : Coord.config) =
           resolved_base_commit );
       ("source_mismatch", `Bool source_mismatch);
       ("diagnostics", diagnostics);
+      ("keeper_runtime", Keeper_runtime_resolved.(current () |> to_yojson));
       ("build", Build_identity.to_yojson build);
     ]
 

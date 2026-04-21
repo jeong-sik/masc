@@ -171,7 +171,7 @@ let latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes =
     Fs_compat.parse_jsonl_lines ~source:"keeper_metrics_latest" lines
   in
   match
-    parsed
+    List.rev parsed
     |> List.find_opt (fun json ->
            match Yojson.Safe.Util.member "cascade" json with
            | `Assoc _ -> true
@@ -179,7 +179,7 @@ let latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes =
   with
   | Some json -> Some json
   | None -> (
-      match parsed with
+      match List.rev parsed with
       | json :: _ -> Some json
       | [] -> None)
 
@@ -406,12 +406,13 @@ let latest_cascade_for_current_config ~current_cascade_name ~configured_labels
         | Some observed_name -> String.equal observed_name current_cascade_name
         | None -> true
       in
-      let configured_labels_match =
-        match json_string_list_member cascade "configured_labels" with
-        | [] -> true
-        | observed_labels -> observed_labels = configured_labels
-      in
-      if cascade_name_matches && configured_labels_match then Some cascade
+      let _configured_labels = configured_labels in
+      (* Keeper meta currently surfaces resolved provider candidates, while
+         turn metrics keep the raw cascade labels that produced those
+         candidates. Matching the two verbatim drops valid recent
+         observations. Treat cascade_name as the stable identity and use
+         metrics labels only for display when a matching observation exists. *)
+      if cascade_name_matches then Some cascade
       else None
 
 let model_observability_json ~current_cascade_name ~configured_labels ~active_model
@@ -426,7 +427,14 @@ let model_observability_json ~current_cascade_name ~configured_labels ~active_mo
   let cascade_name =
     Option.value ~default:"" (nonempty_trimmed current_cascade_name)
   in
-  let configured_labels_surface = configured_labels in
+  let configured_labels_surface =
+    match latest_cascade with
+    | Some cascade -> (
+        match json_string_list_member cascade "configured_labels" with
+        | [] -> configured_labels
+        | observed_labels -> observed_labels)
+    | None -> configured_labels
+  in
   let resolved_candidates =
     match latest_cascade with
     | Some cascade ->

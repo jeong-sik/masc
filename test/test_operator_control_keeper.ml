@@ -332,6 +332,26 @@ let test_keeper_status_exposes_model_observability () =
         (`Assoc
           [
             ("ts", `String (Types.now_iso ()));
+            ("model_used", `String "stale:old-path");
+            ( "cascade",
+              `Assoc
+                [
+                  ("cascade_name", `String "stale-cascade");
+                  ( "configured_labels",
+                    `List [ `String "stale:old-path"; `String "stale:fallback" ] );
+                  ( "candidate_models",
+                    `List [ `String "stale:old-path"; `String "stale:fallback" ] );
+                  ("selected_model", `String "stale:old-path");
+                  ("selected_index", `Int 0);
+                  ("fallback_hops", `Int 0);
+                  ("fallback_applied", `Bool false);
+                ] );
+          ]);
+      Dated_jsonl.append
+        (Keeper_types.keeper_metrics_store config keeper_name)
+        (`Assoc
+          [
+            ("ts", `String (Types.now_iso ()));
             ("model_used", `String "llama:qwen3.5-3b-a3b-ud-q8-xl");
             ( "cascade",
               `Assoc
@@ -507,20 +527,23 @@ let test_keeper_status_ignores_stale_cascade_observation () =
       let open Yojson.Safe.Util in
       let observability = status_json |> member "model_observability" in
       let status_dump = Yojson.Safe.pretty_to_string status_json in
+      let sorted_strings = List.sort String.compare in
       Alcotest.(check (option string))
         ("current cascade name wins over stale metrics\n" ^ status_dump)
         (Some meta.cascade_name)
         (observability |> member "cascade_name" |> to_string_option);
       Alcotest.(check bool) "stale observation ignored" false
         (observability |> member "recent_turn_observation" |> to_bool);
-      Alcotest.(check (list string)) "configured labels come from current meta"
-        current_labels
+      Alcotest.(check (list string))
+        "configured labels come from current meta"
+        (sorted_strings current_labels)
         (observability |> member "configured_labels" |> to_list
-       |> List.map to_string);
-      Alcotest.(check (list string)) "resolved candidates fall back to current config"
-        current_labels
+       |> List.map to_string |> sorted_strings);
+      Alcotest.(check (list string))
+        "resolved candidates fall back to current config"
+        (sorted_strings current_labels)
         (observability |> member "resolved_candidates" |> to_list
-       |> List.map to_string);
+       |> List.map to_string |> sorted_strings);
       Alcotest.(check bool) "stale selected model not surfaced" true
         (observability |> member "selected_model" |> to_string_option
        <> Some stale_selected_model);

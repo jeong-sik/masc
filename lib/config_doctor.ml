@@ -467,20 +467,24 @@ let analyze ~base_path_input ~default_base_path () =
 let live_catalog_summary = function
   | Stdlib.Ok (Cascade_catalog_runtime.Validated snapshot) ->
       ( false,
+        false,
         "Live cascade catalog validation passed.",
         Cascade_catalog_runtime.state_to_yojson
           (Cascade_catalog_runtime.Validated snapshot) )
   | Stdlib.Ok
       (Cascade_catalog_runtime.Validated_with_rejections _ as state) ->
       ( false,
+        true,
         "Live cascade catalog validation kept the usable profile subset and rejected some presets.",
         Cascade_catalog_runtime.state_to_yojson state )
   | Stdlib.Ok (Cascade_catalog_runtime.Serving_last_known_good _ as state) ->
       ( true,
+        false,
         "Live cascade catalog validation rejected the current file; runtime is serving last-known-good.",
         Cascade_catalog_runtime.state_to_yojson state )
   | Stdlib.Error rejection ->
       ( true,
+        false,
         "Live cascade catalog validation failed; no validated snapshot is available.",
         `Assoc
           [
@@ -496,12 +500,13 @@ let analyze_live ~sw ~net ~clock ~fs ~proc_mgr ~base_path_input
   let report = analyze ~base_path_input ~default_base_path () in
   Process_eio.init ~cwd_default:Eio.Path.(fs / report.base_path) ~proc_mgr
     ~clock;
-  let live_failed, live_warning, catalog_validation =
+  let live_failed, live_partial, live_warning, catalog_validation =
     match
       Cascade_catalog_runtime.inspect_active ~sw ~net ~clock ()
       |> live_catalog_summary
     with
-    | failed, warning, validation -> (failed, warning, validation)
+    | failed, partial, warning, validation ->
+        (failed, partial, warning, validation)
   in
   let warnings =
     if live_warning = "" then report.warnings
@@ -518,12 +523,14 @@ let analyze_live ~sw ~net ~clock ~fs ~proc_mgr ~base_path_input
       report.next_actions
   in
   let status =
-    match report.status, live_failed, live_warning <> "" with
-    | Error, _, _ -> Error
-    | _, true, _ -> Error
-    | Warn, false, _ -> Warn
-    | Ok, false, true -> Warn
-    | Ok, false, false -> Ok
+    match report.status, report.init_state, live_failed, live_partial, live_warning <> "" with
+    | Error, (Invalid_env | Missing_init), _, _, _ -> Error
+    | _, _, true, _, _ -> Error
+    | Error, _, false, true, _ -> Warn
+    | Error, _, false, false, _ -> Error
+    | Warn, _, false, _, _ -> Warn
+    | Ok, _, false, _, true -> Warn
+    | Ok, _, false, _, false -> Ok
   in
   {
     report with

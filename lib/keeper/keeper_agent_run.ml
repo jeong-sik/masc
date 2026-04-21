@@ -386,24 +386,6 @@ let sdk_error_of_keeper_internal_error err =
     (keeper_internal_error_prefix
      ^ Yojson.Safe.to_string (keeper_internal_error_to_json err))
 
-let oas_env_truthy value =
-  match String.lowercase_ascii (String.trim value) with
-  | "1" | "true" | "yes" | "on" -> true
-  | _ -> false
-
-let gemini_mcp_disabled_from_env () =
-  match Sys.getenv_opt "OAS_GEMINI_NO_MCP" with
-  | Some value -> oas_env_truthy value
-  | None -> false
-
-let approval_mode_from_env () =
-  match Sys.getenv_opt "OAS_GEMINI_APPROVAL_MODE" with
-  | Some value ->
-    let trimmed = String.trim value in
-    if trimmed = "" then None else Some (trimmed, false)
-  | None ->
-    if gemini_mcp_disabled_from_env () then Some ("plan", true) else None
-
 let tool_required_affordances =
   [ "board_post_or_comment"
   ; "message_sweep"
@@ -500,7 +482,7 @@ let run_turn
       ?(turn_affordances = [])
       ?provider_filter
       ~(generation : int)
-      ?(max_turns : int = Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call)
+      ?(max_turns : int = Keeper_runtime_resolved.reactive_max_turns_per_call ())
       (* Per-call turn budget. Keeper resumes via checkpoint if exhausted. *)
       ?(max_idle_turns : int = 3)
       ?(history_user_source = "direct_user")
@@ -593,10 +575,9 @@ let run_turn
   in
   (* 3. Build base system prompt from meta *)
   let profile_defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
-  (* Apply per-keeper OAS transport env vars ([[keeper.oas_env]] table)
-     before any OAS call in this turn.  OAS 0.159+ transports read
-     these at build_args time; an empty [oas_env] list is a no-op. *)
-  Keeper_types_profile.apply_oas_env ~keeper_name:meta.name profile_defaults;
+  let keeper_oas_context =
+    Keeper_types_profile.keeper_oas_context_of_defaults profile_defaults
+  in
   let config_root =
     let inputs = Config_dir_resolver.inputs_from_env () in
     let resolution =
@@ -606,12 +587,9 @@ let run_turn
     resolution.Config_dir_resolver.config_root.path
   in
   let cascade_config_path = Cascade_runtime.cascade_config_path () in
-  let gemini_mcp_disabled = gemini_mcp_disabled_from_env () in
-  let approval_mode_effective, approval_mode_derived =
-    match approval_mode_from_env () with
-    | Some (mode, derived) -> (Some mode, derived)
-    | None -> (None, false)
-  in
+  let gemini_mcp_disabled = keeper_oas_context.gemini_mcp_disabled in
+  let approval_mode_effective = keeper_oas_context.gemini_approval_mode in
+  let approval_mode_derived = keeper_oas_context.gemini_approval_mode_derived in
   let persona_extended =
     Keeper_types_profile.resolved_persona_name ~keeper_name:meta.name
       profile_defaults
@@ -2027,7 +2005,7 @@ let run_turn
   let admission_wait_timeout_sec =
     if Llm_provider.Request_priority.resolve priority
        = Llm_provider.Request_priority.Proactive
-    then Some Env_config_keeper.KeeperKeepalive.admission_wait_timeout_sec
+    then Some (Keeper_runtime_resolved.admission_wait_timeout_sec ())
     else None
   in
   ignore (Keeper_alerting_path.ensure_playground_bundle ~config ~name:meta.name);
@@ -2044,7 +2022,22 @@ let run_turn
       match oas_timeout_s with
       | Some value -> value
       | None ->
-          Env_config_keeper.KeeperKeepalive.oas_timeout_for_context ~max_context
+          Keeper_runtime_resolved.oas_timeout_for_context ~max_context
+    in
+    let cli_transport_overrides =
+      Some
+        ({
+          cwd = None;
+          claude_mcp_config = keeper_oas_context.claude_mcp_config;
+          claude_allowed_tools = None;
+          claude_permission_mode = None;
+          claude_max_turns = Some max_turns;
+          gemini_yolo =
+            (match approval_mode_effective with
+             | Some mode ->
+               Some (String.equal (String.lowercase_ascii mode) "yolo")
+             | None -> None);
+        } : Oas_worker.cli_transport_overrides)
     in
     (match
        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
@@ -2088,6 +2081,7 @@ let run_turn
            ?on_resume
            ~agent_ref
            ?contract
+           ?cli_transport_overrides
            ~allowed_paths:oas_allowed_paths
            ~cache_system_prompt:true
            ~yield_on_tool

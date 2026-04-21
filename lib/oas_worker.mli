@@ -53,6 +53,15 @@ type stop_reason =
   | TurnBudgetExhausted of { turns_used : int; limit : int }
   | MutationBoundaryReached of { turns_used : int; tool_name : string option }
 
+type cli_transport_overrides = Oas_worker_exec.cli_transport_overrides = {
+  cwd : string option;
+  claude_mcp_config : string option;
+  claude_allowed_tools : string list option;
+  claude_permission_mode : string option;
+  claude_max_turns : int option;
+  gemini_yolo : bool option;
+}
+
 type run_result = {
   response : Oas.Types.api_response;
   checkpoint : Oas.Checkpoint.t option;
@@ -110,6 +119,7 @@ val run_named :
   ?proof_ref:Oas.Cdal_proof.t option ref ->
   ?contract:Oas.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
+  ?cli_transport_overrides:cli_transport_overrides ->
   ?allowed_paths:string list ->
   ?checkpoint_sidecar:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->

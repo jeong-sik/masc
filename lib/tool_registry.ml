@@ -55,16 +55,16 @@ let with_registry_ro f = Eio_guard.with_mutex_ro registry_mu f
 (** Use raw_all_tool_schemas to include hidden/internal tools.
     Previously used Config.all_tool_schemas (public-filtered), which caused
     hidden tools to be structurally undercounted in telemetry. *)
-let known_tool_names : (string, unit) Hashtbl.t Eio.Lazy.t =
+module StringSet = Set.Make (String)
+
+let known_tool_names : StringSet.t Eio.Lazy.t =
   Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    let tbl = Hashtbl.create 512 in
-    List.iter
-      (fun (schema : Types.tool_schema) -> Hashtbl.replace tbl schema.name ())
-      Config.raw_all_tool_schemas;
-    tbl)
+    List.fold_left
+      (fun set (schema : Types.tool_schema) -> StringSet.add schema.name set)
+      StringSet.empty Config.raw_all_tool_schemas)
 
 let is_known_tool tool_name =
-  Hashtbl.mem (Eio.Lazy.force known_tool_names) tool_name
+  StringSet.mem tool_name (Eio.Lazy.force known_tool_names)
 
 (** Record a tool call with source attribution.
 

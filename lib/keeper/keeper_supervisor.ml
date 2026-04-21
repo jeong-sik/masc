@@ -258,6 +258,7 @@ let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
         {
           latest_meta.runtime with
           last_blocker = "";
+          last_blocker_class = None;
         };
     }
   in

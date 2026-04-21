@@ -1391,6 +1391,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
          blocker field is a protocol-level signal; runtime last_blocker
          tracks whether the keeper can make progress. *)
       last_blocker = "";
+      last_blocker_class = None;
       last_need = Option.value ~default:"" social_state.need;
     };
   }
@@ -1592,7 +1593,9 @@ let broadcast_lifecycle_events ~(name : string)
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
     ~(reason : string) ?(is_transient = false) ?social_state
-    ?social_transition_reason () : keeper_meta =
+    ?social_transition_reason
+    ?sdk_error
+    () : keeper_meta =
   ignore is_transient; (* Param retained for caller compatibility; no longer
                           used internally after zombie-fix #5594. *)
   let now_ts = Time_compat.now () in
@@ -1661,6 +1664,11 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
          | Some (state : Social.social_state) ->
              Option.value ~default:"" state.blocker
          | None -> short_preview reason);
+      last_blocker_class =
+        (match sdk_error with
+         | Some err ->
+             Keeper_status_bridge.blocker_class_of_sdk_error err
+         | None -> None);
       last_need =
         (match social_state with
          | Some (state : Social.social_state) ->
@@ -2372,6 +2380,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~social_state
               ~social_transition_reason:
                 (Social.transition_reason_to_string social_transition_reason)
+              ~sdk_error:err
               ()
           in
           let err, updated_meta =

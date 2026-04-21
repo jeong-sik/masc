@@ -13,6 +13,24 @@
 
 open Keeper_types
 
+type runtime_blocker_surface = {
+  blocker_class : string;
+  summary : string;
+  continue_gate : bool;
+}
+
+val blocker_class_of_sdk_error :
+  Oas.Error.sdk_error -> blocker_class option
+
+val runtime_blocker_surface_of_typed_class :
+  ?summary:string -> blocker_class -> runtime_blocker_surface
+
+val runtime_blocker_surface_of_failure_reason :
+  Keeper_registry.failure_reason -> runtime_blocker_surface option
+
+val runtime_blocker_surface_of_reason :
+  string -> runtime_blocker_surface option
+
 val string_list_to_json : string list -> Yojson.Safe.t
 
 val drift_surface_json : unit -> Yojson.Safe.t

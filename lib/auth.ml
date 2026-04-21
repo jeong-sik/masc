@@ -238,10 +238,19 @@ let create_token config ~agent_name ~role : (string * agent_credential, masc_err
      Log.Auth.error "%s" msg;
      Error (IoError msg))
 
+let missing_credential_error config ~agent_name ~token : masc_error =
+  match find_credential_by_token config ~token with
+  | Ok owner when owner.agent_name <> agent_name ->
+      Unauthorized
+        (Printf.sprintf
+           "No credential found for %s (bearer token belongs to %s)"
+           agent_name owner.agent_name)
+  | _ -> Unauthorized ("No credential found for " ^ agent_name)
+
 (** Verify a token *)
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
   match load_credential config agent_name with
-  | None -> Error (Unauthorized ("No credential found for " ^ agent_name))
+  | None -> Error (missing_credential_error config ~agent_name ~token)
   | Some cred ->
       let token_hash = sha256_hash token in
       if cred.token <> token_hash then

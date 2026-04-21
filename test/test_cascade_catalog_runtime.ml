@@ -191,6 +191,8 @@ let test_valid_catalog_skips_live_probes_at_bootstrap () =
   in
   let snapshot_json = Cascade_catalog_runtime.snapshot_to_yojson snapshot in
   check int "profile_count" 2 (json_int_field "profile_count" snapshot_json);
+  check bool "bootstrap probe status is skipped" true
+    (contains_substring (Yojson.Safe.to_string snapshot_json) "\"status\":\"skipped\"");
   let blank_name =
     require_ok
       (Cascade_catalog_runtime.resolve_declared_name ~raw_name:"" ())

@@ -12,10 +12,36 @@ module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 module Keeper_api = Server_dashboard_http_keeper_api
 
-let available_cascade_profiles () : string list =
+type cascade_profile_gate = {
+  valid_profiles : string list;
+  invalid_profiles : (string * string list) list;
+}
+
+let cascade_profile_gate () : cascade_profile_gate =
   let config_path = Cascade_runtime.cascade_config_path () in
-  Keeper_cascade_profile.keeper_catalog_names ?config_path ()
-  |> List.sort_uniq String.compare
+  let keeper_profiles =
+    Keeper_cascade_profile.keeper_catalog_names ?config_path ()
+    |> List.sort_uniq String.compare
+  in
+  match config_path with
+  | None -> { valid_profiles = keeper_profiles; invalid_profiles = [] }
+  | Some path ->
+      let invalid_profiles =
+        Cascade_catalog_validator.error_messages_by_profile
+          ~config_path:path
+      in
+      let invalid_names = List.map fst invalid_profiles in
+      let valid_profiles =
+        keeper_profiles
+        |> List.filter (fun profile -> not (List.mem profile invalid_names))
+      in
+      { valid_profiles; invalid_profiles }
+
+let available_cascade_profiles () : string list =
+  (cascade_profile_gate ()).valid_profiles
+
+let invalid_cascade_profiles () : (string * string list) list =
+  (cascade_profile_gate ()).invalid_profiles
 
 (** Broadcast handler: parse JSON body, extract "message" string field, and
     relay via Coord.broadcast.  Error responses are encoded through Yojson so
@@ -952,6 +978,16 @@ and add_autoresearch_routes router =
                  reqd
              | Some name, Some cascade ->
                let known = available_cascade_profiles () in
+               let invalid = invalid_cascade_profiles () in
+               (match List.assoc_opt cascade invalid with
+                | Some reasons ->
+                  Http.Response.json ~status:`Conflict ~request:req
+                    (Printf.sprintf
+                       {|{"ok":false,"error":"cascade %s is invalid in active cascade.json: %s"}|}
+                       (String.escaped cascade)
+                       (String.escaped (String.concat " | " reasons)))
+                    reqd
+                | None ->
                if not (List.mem cascade known) then
                  Http.Response.json ~status:`Bad_request ~request:req
                    (Printf.sprintf
@@ -980,6 +1016,6 @@ and add_autoresearch_routes router =
                      (Printf.sprintf
                        {|{"ok":true,"keeper":"%s","cascade_name":"%s","source":"toml"}|}
                        (String.escaped name) (String.escaped cascade))
-                     reqd
+                     reqd)
          )
        ) request reqd)

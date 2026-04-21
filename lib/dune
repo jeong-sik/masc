@@ -34,6 +34,7 @@
    cascade_inference
    cascade_client_capacity
    cascade_client_capacity_history
+   cascade_catalog_validator
    cascade_config
    cascade_config_loader
    cascade_fsm

@@ -57,6 +57,11 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let read_jsonl_line path =
+  let ic = open_in path in
+  Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+    input_line ic |> Yojson.Safe.from_string)
+
 let contains_substring haystack needle =
   let hay_len = String.length haystack in
   let needle_len = String.length needle in
@@ -1132,6 +1137,7 @@ let sample_tool_surface_metrics () : Masc_mcp.Keeper_agent_run.tool_surface_metr
     approval_mode_derived = false;
   }
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
+    ?(tool_calls = [])
     ?trace_ref
     ?run_validation
     ?cascade_observation
@@ -1146,6 +1152,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     tool_calls_made = List.length tools;
     usage = { input_tokens = input_tok; output_tokens = output_tok; cache_creation_input_tokens = 0; cache_read_input_tokens = 0; cost_usd = None };
     tools_used = tools;
+    tool_calls;
     checkpoint = None;
     proof = None;
     trace_ref;
@@ -1786,6 +1793,68 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
         "tool_use"
         Yojson.Safe.Util.(
           json |> member "scheduled_autonomous_outcome" |> to_string))
+
+let test_append_decision_record_persists_tool_calls () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      let tool_calls : KAR.tool_call_detail list =
+        [ { tool_name = "keeper_shell"
+          ; provider = "codex_cli"
+          ; outcome = "ok"
+          ; latency_ms = 12.5
+          }
+        ; { tool_name = "keeper_board_post"
+          ; provider = "codex_cli"
+          ; outcome = "error"
+          ; latency_ms = 3.0
+          }
+        ]
+      in
+      let result =
+        make_run_result
+          ~text:"Checked GitHub and reported blocker."
+          ~tools:["keeper_shell"; "keeper_board_post"]
+          ~tool_calls
+          ~model:"codex_cli:gpt-5.4"
+          ~input_tok:40
+          ~output_tok:20
+          ()
+      in
+      UT.append_decision_record
+        ~config
+        ~meta:minimal_meta
+        ~observation:base_observation
+        ~latency_ms:42
+        ~outcome:"tool_use"
+        ~selected_mode:"tool_use"
+        ~result:(Some result)
+        ();
+      let json =
+        read_jsonl_line (Keeper_types.keeper_decision_log_path config minimal_meta.name)
+      in
+      check int "tool call count persisted" 2
+        Yojson.Safe.Util.(json |> member "tool_call_count" |> to_int);
+      check (list string) "tools used persisted"
+        ["keeper_shell"; "keeper_board_post"]
+        Yojson.Safe.Util.(json |> member "tools_used" |> to_list |> List.map to_string);
+      let recorded_tool_calls =
+        Yojson.Safe.Util.(json |> member "tool_calls" |> to_list)
+      in
+      check int "tool call details persisted" 2 (List.length recorded_tool_calls);
+      check string "first tool name" "keeper_shell"
+        Yojson.Safe.Util.(List.nth recorded_tool_calls 0 |> member "tool_name" |> to_string);
+      check string "first provider" "codex_cli"
+        Yojson.Safe.Util.(List.nth recorded_tool_calls 0 |> member "provider" |> to_string);
+      check string "second outcome" "error"
+        Yojson.Safe.Util.(List.nth recorded_tool_calls 1 |> member "outcome" |> to_string);
+      check (float 0.001) "second latency" 3.0
+        Yojson.Safe.Util.(List.nth recorded_tool_calls 1 |> member "latency_ms" |> to_float))
 
 let test_run_keeper_cycle_skips_non_executable_phase () =
   Eio_main.run @@ fun env ->
@@ -3787,6 +3856,8 @@ let () =
             test_append_metrics_snapshot_includes_cascade_observation;
           test_case "snapshot treats validated evidence as tool use" `Quick
             test_append_metrics_snapshot_treats_validated_evidence_as_tool_use;
+          test_case "decision record persists tool call details" `Quick
+            test_append_decision_record_persists_tool_calls;
           test_case "social fields" `Quick
             test_metrics_persist_social_state_fields;
           test_case "failure response" `Quick test_metrics_failure_response;

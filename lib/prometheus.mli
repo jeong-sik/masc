@@ -80,6 +80,7 @@ val metric_keeper_operator_compact : string
 val metric_keeper_operator_clear : string
 val metric_keeper_heartbeat_successes : string
 val metric_keeper_heartbeat_failures : string
+val metric_keeper_tool_call_duration : string
 val metric_keeper_write_meta_failures : string
 val metric_keeper_lifecycle_dispatch_rejections : string
 val metric_keeper_paused_state_persist_errors : string

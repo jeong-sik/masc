@@ -84,10 +84,11 @@ let drop_after_id id_of items after_id =
       loop items
 
 let task_status_info_of_task (task : Types.task) =
+  let status = Types.task_status_to_string task.task_status in
   match task.task_status with
   | Types.Todo ->
       {
-        status = "todo";
+        status;
         assignee = None;
         claimed_at = None;
         started_at = None;
@@ -99,7 +100,7 @@ let task_status_info_of_task (task : Types.task) =
       }
   | Types.Claimed { assignee; claimed_at } ->
       {
-        status = "claimed";
+        status;
         assignee = Some assignee;
         claimed_at = Some claimed_at;
         started_at = None;
@@ -111,7 +112,7 @@ let task_status_info_of_task (task : Types.task) =
       }
   | Types.InProgress { assignee; started_at } ->
       {
-        status = "in_progress";
+        status;
         assignee = Some assignee;
         claimed_at = None;
         started_at = Some started_at;
@@ -123,7 +124,7 @@ let task_status_info_of_task (task : Types.task) =
       }
   | Types.Done { assignee; completed_at; notes } ->
       {
-        status = "done";
+        status;
         assignee = Some assignee;
         claimed_at = None;
         started_at = None;
@@ -135,7 +136,7 @@ let task_status_info_of_task (task : Types.task) =
       }
   | Types.Cancelled { cancelled_by; cancelled_at; reason } ->
       {
-        status = "cancelled";
+        status;
         assignee = None;
         claimed_at = None;
         started_at = None;
@@ -147,7 +148,7 @@ let task_status_info_of_task (task : Types.task) =
       }
   | Types.AwaitingVerification { assignee; submitted_at; _ } ->
       {
-        status = "awaiting_verification";
+        status;
         assignee = Some assignee;
         claimed_at = None;
         started_at = Some submitted_at;

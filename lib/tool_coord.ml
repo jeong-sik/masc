@@ -80,12 +80,6 @@ let effective_cluster_name (config : Coord.config) =
 
 (* Handlers *)
 
-let bool_flag value = if value then "yes" else "no"
-
-let option_or_dash = function
-  | Some value when String.trim value <> "" -> value
-  | _ -> "-"
-
 let lifecycle_tools =
   [
     "masc_claim_next";
@@ -268,23 +262,6 @@ let planning_context_state (ctx : context) (binding : current_binding)
             | Some _ | None -> None
           in
           { planning_missing_task = None; deliverable_conflict_task })
-
-let task_id_list_label = function
-  | [] -> "[]"
-  | ids -> "[" ^ String.concat "," ids ^ "]"
-
-let agent_status_icon ~is_zombie = function
-  | _ when is_zombie -> "💀"
-  | Types.Busy -> "🔴"
-  | Types.Active -> "🟢"
-  | Types.Listening -> "🎧"
-  | Types.Inactive -> "⚫"
-
-let agent_focus_label ~is_zombie (agent : Types.agent) =
-  if is_zombie then "stale"
-  else option_or_dash agent.current_task |> function
-    | "-" -> Types.agent_status_to_string agent.status
-    | task -> task
 
 let status_summary_string (ctx : context) =
   Coord.ensure_initialized ctx.config;

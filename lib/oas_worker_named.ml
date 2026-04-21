@@ -469,6 +469,8 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
       | Llm_provider.Retry.NetworkError { message }
       | Llm_provider.Retry.Timeout { message } ->
         Llm_provider.Http_client.NetworkError { message }
+      | Llm_provider.Retry.NotFound { message } ->
+        Llm_provider.Http_client.HttpError { code = 404; body = message }
     in
     Some (Cascade_fsm.Call_err http_err)
   (* Model-capability errors: the next provider may handle these.
@@ -546,16 +548,15 @@ let enrich_sdk_error ~cascade_name
            message =
              append_hint message moonshot_auth_hint_marker detail;
          })
-  | Oas.Error.Api (Llm_provider.Retry.InvalidRequest { message })
-    when provider_cfg.kind = Llm_provider.Provider_config.OpenAI_compat
-         && String_util.contains_substring_ci message "not found" ->
+  | Oas.Error.Api (Llm_provider.Retry.NotFound { message })
+    when provider_cfg.kind = Llm_provider.Provider_config.OpenAI_compat ->
     let detail =
       Printf.sprintf "base_url=%s request_path=%s endpoint=%s"
         provider_cfg.base_url provider_cfg.request_path
         (provider_cfg.base_url ^ provider_cfg.request_path)
     in
     Oas.Error.Api
-      (Llm_provider.Retry.InvalidRequest
+      (Llm_provider.Retry.NotFound
          {
            message =
              append_hint message openai_compat_not_found_hint_marker detail;
@@ -592,6 +593,7 @@ let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
      | Llm_provider.Retry.AuthError _
      | Llm_provider.Retry.NotFound _
      | Llm_provider.Retry.InvalidRequest _
+     | Llm_provider.Retry.NotFound _
      | Llm_provider.Retry.ContextOverflow _
      | Llm_provider.Retry.Timeout _ ->
        false)
@@ -822,6 +824,11 @@ let run_named
     match remaining with
     | [] ->
       let reason : Keeper_types.cascade_exhaustion_reason = match last_err with
+        (* TODO(OAS): NetworkError should expose structured detail so we can
+           match on | NetworkError { detail = Connection_refused } instead of
+           string-matching the message.  Requires OAS PR to add
+           network_error_detail variant to http_client.http_error and
+           retry.api_error. *)
         | Some (Llm_provider.Http_client.NetworkError { message })
           when String_util.contains_substring_ci message "connection refused" ->
             Keeper_types.Connection_refused

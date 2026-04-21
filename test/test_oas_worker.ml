@@ -777,7 +777,7 @@ let test_enrich_sdk_error_for_openai_not_found_includes_endpoint_hint () =
   in
   let err =
     Oas.Error.Api
-      (Llm_provider.Retry.InvalidRequest
+      (Llm_provider.Retry.NotFound
          { message = {|{"detail":"Not Found"}|} })
   in
   let rendered =

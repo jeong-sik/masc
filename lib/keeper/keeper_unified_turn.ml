@@ -179,7 +179,7 @@ let is_server_rejected_parse_error (err : Oas.Error.sdk_error) : bool =
 let is_required_tool_contract_violation (err : Oas.Error.sdk_error) : bool =
   match err with
   | Oas.Error.Agent (Oas.Error.CompletionContractViolation { contract; _ }) ->
-      String.equal contract "require_tool_use"
+      contract = Agent_sdk.Completion_contract_id.Require_tool_use
   | _ -> false
 
 let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =

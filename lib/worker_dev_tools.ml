@@ -71,6 +71,9 @@ let validate_path ?workdir path =
         | Some home -> is_within_dir ~dir:(resolve_path (Filename.concat home "me")) resolved
         | None -> false)
 
+let tool_error ?(recoverable = false) message : Agent_sdk.Types.tool_result =
+  Error { Agent_sdk.Types.message; recoverable; error_class = None }
+
 (** shell_exec intentionally supports only a narrow allowlist of dev/test
     commands and rejects shell control syntax to keep execution predictable. *)
 let dev_allowed_commands =
@@ -1215,7 +1218,7 @@ let make_file_read ?workdir ?on_exec () =
     (fun input ->
        match Worker_tool_input.extract_string "path" input with
        | Error e ->
-         Error { Agent_sdk.Types.message = e; recoverable = false }
+         tool_error e
        | Ok path ->
          let started = Time_compat.now () in
          let resolved_path = resolve_path ?base_dir:workdir path in
@@ -1229,7 +1232,7 @@ let make_file_read ?workdir ?on_exec () =
            Option.iter
              (fun f -> f ~tool_name:"file_read" ~success:false ~duration_ms)
              on_exec;
-           Error { Agent_sdk.Types.message = err; recoverable = false }
+           tool_error err
          else
            try
              let content = In_channel.with_open_text resolved_path In_channel.input_all in
@@ -1251,8 +1254,7 @@ let make_file_read ?workdir ?on_exec () =
              Option.iter
                (fun f -> f ~tool_name:"file_read" ~success:false ~duration_ms)
                on_exec;
-             Error { Agent_sdk.Types.message =
-               Printf.sprintf "Cannot read: %s" msg; recoverable = false })
+             tool_error (Printf.sprintf "Cannot read: %s" msg))
 
 let make_file_write ?workdir ?on_exec () =
   Agent_sdk.Tool.create
@@ -1272,7 +1274,7 @@ let make_file_write ?workdir ?on_exec () =
        match Worker_tool_input.extract_string "path" input,
              Worker_tool_input.extract_string "content" input with
        | Error e, _ | _, Error e ->
-         Error { Agent_sdk.Types.message = e; recoverable = false }
+         tool_error e
        | Ok path, Ok content ->
          let started = Time_compat.now () in
          let resolved_path = resolve_path ?base_dir:workdir path in
@@ -1286,7 +1288,7 @@ let make_file_write ?workdir ?on_exec () =
            Option.iter
              (fun f -> f ~tool_name:"file_write" ~success:false ~duration_ms)
              on_exec;
-           Error { Agent_sdk.Types.message = err; recoverable = false }
+           tool_error err
          else
            try
              mkdir_p (Filename.dirname resolved_path) 0o755;
@@ -1308,8 +1310,7 @@ let make_file_write ?workdir ?on_exec () =
              Option.iter
                (fun f -> f ~tool_name:"file_write" ~success:false ~duration_ms)
                on_exec;
-             Error { Agent_sdk.Types.message =
-               Printf.sprintf "Cannot write: %s" msg; recoverable = false })
+             tool_error (Printf.sprintf "Cannot write: %s" msg))
 
 (* --- Attribution envelope conversion (Layer 1) ---
    Shell command validation is a Det policy gate. The 7 block_reason
@@ -1373,7 +1374,7 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
     (fun input ->
        match Worker_tool_input.extract_string "command" input with
        | Error e ->
-         Error { Agent_sdk.Types.message = e; recoverable = false }
+         tool_error e
        | Ok command ->
          let validation =
            validate_command_with_allowlist ~allowed_commands command
@@ -1382,7 +1383,7 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
            (attribution_of_validation ~cmd:command validation);
          (match validation with
           | Error reason ->
-            Error { Agent_sdk.Types.message = block_reason_to_string reason; recoverable = false }
+            tool_error (block_reason_to_string reason)
           | Ok () ->
            let timeout =
              Worker_tool_input.extract_float "timeout_s" input
@@ -1421,20 +1422,18 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
                  | `Exited 0 ->
                    Ok { Agent_sdk.Types.content = output }
                  | `Exited code ->
-                   Error { Agent_sdk.Types.message =
-                     Printf.sprintf "Exit code %d:\n%s" code output;
-                     recoverable = false }
+                   tool_error (Printf.sprintf "Exit code %d:\n%s" code output)
                  | `Signaled sig_num ->
-                   Error { Agent_sdk.Types.message =
-                     Printf.sprintf "Killed by signal %d:\n%s" sig_num output;
-                     recoverable = sig_num = Sys.sigterm }
+                   tool_error
+                     ~recoverable:(sig_num = Sys.sigterm)
+                     (Printf.sprintf "Killed by signal %d:\n%s" sig_num output)
                with
                | Eio.Time.Timeout ->
                  let output = Buffer.contents buf in
-                 Error { Agent_sdk.Types.message =
-                   Printf.sprintf "Timeout after %.0fs: %s\n%s" timeout command
-                     output;
-                   recoverable = true }
+                 tool_error
+                   ~recoverable:true
+                   (Printf.sprintf "Timeout after %.0fs: %s\n%s" timeout command
+                      output)
              in
              let duration_ms =
                int_of_float ((Time_compat.now () -. started) *. 1000.0)
@@ -1450,9 +1449,8 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
              Option.iter
                (fun f -> f ~tool_name:"shell_exec" ~success:false ~duration_ms)
                on_exec;
-             Error { Agent_sdk.Types.message =
-               Printf.sprintf "Command failed: %s" (Printexc.to_string exn);
-               recoverable = false }))
+             tool_error
+               (Printf.sprintf "Command failed: %s" (Printexc.to_string exn))))
 
 let make_shell_exec ~workdir ~on_exec ~proc_mgr ~clock =
   make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock
@@ -1753,4 +1751,3 @@ let shadow_diff_log_enabled () =
   match Sys.getenv_opt "MASC_BASH_AST_SHADOW_LOG" with
   | Some ("1" | "true" | "TRUE" | "yes" | "on" | "log") -> true
   | _ -> false
-

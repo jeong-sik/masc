@@ -85,7 +85,13 @@ let maybe_externalize ?(mime = "text/plain") (msg : string) : string =
 let to_oas_tool_result ?(recoverable = false) (success, msg)
   : Agent_sdk.Types.tool_result =
   if success then Ok { Agent_sdk.Types.content = maybe_externalize msg }
-  else Error { Agent_sdk.Types.message = maybe_externalize msg; recoverable }
+  else
+    Error
+      {
+        Agent_sdk.Types.message = maybe_externalize msg;
+        recoverable;
+        error_class = None;
+      }
 
 let of_oas_tool_result : Agent_sdk.Types.tool_result -> bool * string = function
   | Ok { content } -> (true, content)

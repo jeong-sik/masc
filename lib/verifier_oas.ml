@@ -208,6 +208,7 @@ let make_pre_tool_hook
     | Agent_sdk.Hooks.PostToolUseFailure _
     | Agent_sdk.Hooks.OnStop _
     | Agent_sdk.Hooks.OnIdle _
+    | Agent_sdk.Hooks.OnIdleEscalated _
     | Agent_sdk.Hooks.OnError _
     | Agent_sdk.Hooks.OnToolError _
     | Agent_sdk.Hooks.PreCompact _

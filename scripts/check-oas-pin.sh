@@ -180,7 +180,7 @@ if command -v opam >/dev/null 2>&1; then
   pin_list_output="$(OPAMCOLOR=never opam pin list 2>/dev/null || true)"
   pin_line="$(awk '$1 ~ /^agent_sdk\./ { print }' <<<"${pin_list_output}")"
   if [[ -n "${pin_line}" ]]; then
-    installed_pin_source="$(awk '{print $3}' <<<"${pin_line}")"
+    installed_pin_source="$(sed -nE 's/.*(git\+[^[:space:]]+).*/\1/p' <<<"${pin_line}")"
     case "${installed_pin_source}" in
       "${expected_opam_pin_source}")
         ;;

@@ -402,7 +402,8 @@ let test_dashboard_exposes_keeper_approval_queue () =
       let id = approval |> member "id" |> to_string in
       (match Lib.Keeper_approval_queue.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
        | Ok () -> ()
-       | Error msg -> fail ("resolve failed: " ^ msg));
+       | Error err ->
+         fail ("resolve failed: " ^ Lib.Keeper_approval_queue.resolve_error_to_string err));
       Eio.Fiber.yield ();
       match !decision_result with
       | Some Agent_sdk.Hooks.Approve -> ()

@@ -636,7 +636,7 @@ let test_pending_approval_blocks_turns_until_resolved () =
     check bool "approval resolve re-opens reactive scheduling" true resumed.should_run;
     check string "resolved approval restores reactive channel" "reactive"
       (WO.channel_to_string resumed.channel)
-  | Error msg -> Alcotest.fail ("resolve failed: " ^ msg)
+  | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err)
 
 let test_task_reactive_cooldown_floor_never_hits_zero () =
   with_env "MASC_KEEPER_PROACTIVE_TASK_MIN_COOLDOWN_SEC" "0" (fun () ->

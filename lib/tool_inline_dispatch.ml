@@ -116,7 +116,8 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
         (match Keeper_approval_queue.resolve ~id ~decision with
          | Ok () ->
            Some (true, Printf.sprintf "{\"resolved\":\"%s\",\"decision\":\"%s\"}" id decision_str)
-         | Error msg -> Some (false, msg))
+         | Error err ->
+           Some (false, Keeper_approval_queue.resolve_error_to_string err))
 
   (* Verification tools removed: pruned *)
 

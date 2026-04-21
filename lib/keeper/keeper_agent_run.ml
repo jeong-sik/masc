@@ -731,6 +731,8 @@ let run_turn
   let completion_contract_ref =
     ref Keeper_tool_disclosure.Allow_text_or_tool
   in
+  let required_tool_use_seen_ref = ref false in
+  let keeper_surface_tool_used_ref = ref false in
   (* L1 Tool Affinity: pre-populate discovered tools from trajectory history.
      Solves the 9B text_response trap by making proven tools visible at
      turn 0 without requiring keeper_tool_search first.  #5566 *)
@@ -1850,10 +1852,14 @@ let run_turn
                 then Some Agent_sdk.Types.Any
                 else current_params.tool_choice
               in
-              completion_contract_ref :=
+              let turn_completion_contract =
                 if computed_surface.tool_gate_requested
                 then Keeper_tool_disclosure.Require_tool_use
-                else Keeper_tool_disclosure.completion_contract_of_tool_choice tool_choice;
+                else Keeper_tool_disclosure.completion_contract_of_tool_choice tool_choice
+              in
+              completion_contract_ref := turn_completion_contract;
+              if turn_completion_contract = Keeper_tool_disclosure.Require_tool_use
+              then required_tool_use_seen_ref := true;
               let lane = computed_surface.lane in
               tool_surface_ref :=
                 {
@@ -2217,6 +2223,8 @@ let run_turn
            ~unexpected_tool_names
            ~tool_names:canonical_tool_names
        in
+       if valid_tool_calls_present then
+         keeper_surface_tool_used_ref := true;
        if unexpected_tool_names <> [] && not valid_tool_calls_present then
          let reason =
            Printf.sprintf
@@ -2246,16 +2254,20 @@ let run_turn
             tool support plus tool_choice support. If a text-only response
             still reaches this point, treat it as a contract failure. *)
          let text_result =
+           let effective_completion_contract =
+             Keeper_tool_disclosure.run_completion_contract
+               ~turn_contract:!completion_contract_ref
+               ~required_tool_use_seen:!required_tool_use_seen_ref
+           in
            match
-             Keeper_tool_disclosure.validate_completion_contract
-               ~contract:!completion_contract_ref
-               ~tool_names
-               ()
+             Keeper_tool_disclosure.validate_completion_contract_presence
+               ~contract:effective_completion_contract
+               ~tool_present:!keeper_surface_tool_used_ref
            with
            | Ok () -> Ok text
            | Error reason ->
              let contract_str =
-               match !completion_contract_ref with
+               match effective_completion_contract with
                | Keeper_tool_disclosure.Allow_text_or_tool -> "Allow_text_or_tool"
                | Keeper_tool_disclosure.Require_tool_use -> "Require_tool_use"
              in

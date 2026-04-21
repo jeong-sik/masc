@@ -1,6 +1,21 @@
 # Changelog
 
 
+## [0.12.2] - 2026-04-21
+
+### Changed
+- Keeper `gh` execution no longer falls back to a hardcoded repository or
+  stderr text matching when the working directory is not itself a Git
+  checkout. It now resolves repo context structurally from the current task's
+  worktree git root and fails with a typed error when that context is missing.
+- `require_tool_use` completion enforcement now latches across the full keeper
+  run and only treats actual keeper-surface tool calls as satisfying the
+  contract. A final optional turn can no longer mask an earlier tool-required
+  turn that never used tools.
+- Keeper sandbox option validation and docs now expose `docker_with_git`
+  consistently, and the new regression tests cover task-derived GitHub repo
+  context plus run-level tool contract enforcement.
+
 ## [0.12.1] - 2026-04-21
 
 ### Changed

@@ -1107,6 +1107,19 @@ let sample_ctx_composition ?(system_prompt = "You are a keeper.")
     ~history_messages:[]
     ~actual_input_tokens
 
+let sample_tool_surface_metrics () : Masc_mcp.Keeper_agent_run.tool_surface_metrics =
+  {
+    turn_lane = "tool_optional";
+    visible_tool_count = 0;
+    tool_gate_enabled = false;
+    tool_surface_fallback_used = false;
+    config_root = "";
+    cascade_config_path = None;
+    gemini_mcp_disabled = false;
+    approval_mode_effective = None;
+    approval_mode_derived = false;
+  }
+
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     ?trace_ref
     ?run_validation
@@ -1128,6 +1141,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     run_validation;
     stop_reason = Masc_mcp.Oas_worker.Completed;
     inference_telemetry = None;
+    tool_surface = sample_tool_surface_metrics ();
   }
 
 let test_prompt_metrics_fingerprint_is_deterministic () =
@@ -2700,6 +2714,42 @@ let test_completion_contract_of_tool_choice_requires_any () =
      | KTD.Require_tool_use -> true
      | KTD.Allow_text_or_tool -> false)
 
+let test_run_completion_contract_latches_required_tool_use () =
+  check bool "required tool use stays latched across run" true
+    (match
+       KTD.run_completion_contract
+         ~turn_contract:KTD.Allow_text_or_tool
+         ~required_tool_use_seen:true
+     with
+     | KTD.Require_tool_use -> true
+     | KTD.Allow_text_or_tool -> false);
+  check bool "optional stays optional when no required turn seen" true
+    (match
+       KTD.run_completion_contract
+         ~turn_contract:KTD.Allow_text_or_tool
+         ~required_tool_use_seen:false
+     with
+     | KTD.Allow_text_or_tool -> true
+     | KTD.Require_tool_use -> false)
+
+let test_validate_completion_contract_presence_requires_keeper_surface_tool () =
+  (match
+     KTD.validate_completion_contract_presence
+       ~contract:KTD.Require_tool_use
+       ~tool_present:true
+   with
+   | Ok () -> ()
+   | Error e -> fail ("unexpected error: " ^ e));
+  match
+    KTD.validate_completion_contract_presence
+      ~contract:KTD.Require_tool_use
+      ~tool_present:false
+  with
+  | Ok () -> fail "expected keeper-surface contract failure"
+  | Error e ->
+    check bool "error mentions keeper-surface tools" true
+      (contains_substring e "keeper-surface tools")
+
 let test_tool_usage_delta_uses_registry_counts () =
   let before =
     [
@@ -3556,6 +3606,12 @@ let () =
             test_completion_contract_of_tool_choice_allows_auto;
           test_case "completion contract mapping requires any" `Quick
             test_completion_contract_of_tool_choice_requires_any;
+          test_case "run completion contract latches required tool use"
+            `Quick test_run_completion_contract_latches_required_tool_use;
+          test_case
+            "completion contract presence requires keeper-surface tool"
+            `Quick
+            test_validate_completion_contract_presence_requires_keeper_surface_tool;
           test_case "tool usage delta uses registry counts" `Quick
             test_tool_usage_delta_uses_registry_counts;
           test_case "tool usage delta ignores removed tools" `Quick

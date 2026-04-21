@@ -86,6 +86,8 @@ val spawn_sync :
 
 (** {1 Result Formatting} *)
 
+val int_opt_to_json : int option -> Yojson.Safe.t
+val float_opt_to_json : float option -> Yojson.Safe.t
 val result_to_json : spawn_result -> Yojson.Safe.t
 val format_token_info : spawn_result -> string
 val result_to_string : spawn_result -> string

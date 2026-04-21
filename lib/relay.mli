@@ -76,6 +76,20 @@ val build_handoff_prompt :
 
 val empty_payload : handoff_payload
 
+val compress_context :
+  summary:string ->
+  task:string option ->
+  todos:string list ->
+  pdca:string option ->
+  files:string list ->
+  ?goal_progress:(string * float) list ->
+  ?goal_blockers:string list ->
+  unit ->
+  string
+
+val get_calibration_info : unit -> Yojson.Safe.t
+val record_actual_tokens : estimated:int -> actual:int -> unit
+
 (** {1 Checkpoints} *)
 
 type checkpoint = {
@@ -94,6 +108,7 @@ val save_checkpoint :
   metrics:context_metrics -> checkpoint
 
 val get_latest_checkpoint : unit -> checkpoint option
+val checkpoint_to_payload : checkpoint -> int -> handoff_payload
 
 (** {1 JSON Serialization} *)
 

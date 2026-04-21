@@ -190,6 +190,15 @@ stylesheet
     color: var(--text-dim);
     border: 1px dashed var(--border-main);
   }
+
+  @media (max-width: 920px) {
+    .grid { grid-template-columns: 1fr; }
+    .panel { min-width: 0; }
+    .kv { grid-template-columns: 96px minmax(0, 1fr); }
+    .counts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .count_cell { padding: 12px 8px; }
+    .count_v { font-size: 28px; }
+  }
 |}]
 
 let hms_of_seconds total =
@@ -221,7 +230,7 @@ let view_hero_panel (r : Overview_types.response) =
   let s = r.status in
   Node.div
     ~attrs:[ Style.panel ]
-    [ Node.p ~attrs:[ Style.panel_title ] [ Node.text "room · identity" ]
+    [ Node.p ~attrs:[ Style.panel_title ] [ Node.text "runtime · identity" ]
     ; Node.div
         ~attrs:[ Style.kv_row ]
         [ Node.div
@@ -416,9 +425,9 @@ let render (r : Overview_types.response) : Node.t =
         ~title:"overview"
         ~tail:(Printf.sprintf "· %s" r.status.cluster, `Brass)
         ~sub:
-          "room의 current state — identity, build, fleet counts, \
-           meta-cognition. shell 엔드포인트의 압축된 projection \
-           으로, 깊은 진단은 각 tab에서 확인."
+          "runtime snapshot — identity, build, fleet counts, \
+           meta-cognition. shell endpoint의 압축 projection으로, \
+           깊은 진단은 각 tab에서 확인."
         ()
     ; Node.div
         ~attrs:[ Style.grid ]

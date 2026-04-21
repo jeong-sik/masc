@@ -2289,7 +2289,7 @@ let run_turn
                (Oas.Error.Agent
                   (Oas.Error.CompletionContractViolation
                      {
-                       contract = Oas.Completion_contract_id.Require_tool_use;
+                       contract = Agent_sdk.Completion_contract_id.Require_tool_use;
                        reason;
                      }))
          in

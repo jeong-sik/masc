@@ -263,39 +263,67 @@ let parse_weighted_entry_diag
     cascade through concrete CLI model overrides instead of delegating to
     the CLI's interactive/default model picker. Other specs pass through
     as-is. *)
-let expand_auto_model_string (s : string) : string list =
+let rotate_list_by offset items =
+  if offset <= 0 then items
+  else
+    let rec split i acc = function
+      | xs when i <= 0 -> (List.rev acc, xs)
+      | [] -> (List.rev acc, [])
+      | x :: rest -> split (i - 1) (x :: acc) rest
+    in
+    let head, tail = split offset [] items in
+    tail @ head
+
+let maybe_rotate_auto_models ?rotation_scope ~spec models =
+  match rotation_scope, models with
+  | Some scope, _ :: _ :: _ ->
+    let cursor =
+      Cascade_state.rotate_round_robin
+        ~cascade:(Printf.sprintf "auto-expand:%s:%s"
+                    scope (String.lowercase_ascii spec))
+        ~bound:(List.length models)
+    in
+    rotate_list_by cursor models
+  | _ -> models
+
+let expand_provider_auto ?rotation_scope ~spec provider models =
+  maybe_rotate_auto_models ?rotation_scope ~spec models
+  |> List.map (fun model -> provider ^ ":" ^ model)
+
+let expand_auto_model_string ?rotation_scope (s : string) : string list =
   let trimmed = String.trim s in
   match split_provider_model trimmed with
   | Some ("glm", model_id)
     when String.lowercase_ascii model_id = "auto" ->
-    Cascade_model_resolve.glm_auto_models ()
-    |> List.map (fun m -> "glm:" ^ m)
+    expand_provider_auto ?rotation_scope ~spec:trimmed "glm"
+      (Cascade_model_resolve.glm_auto_models ())
   | Some ("glm-coding", model_id)
     when String.lowercase_ascii model_id = "auto" ->
-    Cascade_model_resolve.glm_coding_auto_models ()
-    |> List.map (fun m -> "glm-coding:" ^ m)
+    expand_provider_auto ?rotation_scope ~spec:trimmed "glm-coding"
+      (Cascade_model_resolve.glm_coding_auto_models ())
   | Some ("gemini_cli", model_id)
     when String.lowercase_ascii model_id = "auto" ->
-    Cascade_model_resolve.gemini_cli_auto_models ()
-    |> List.map (fun m -> "gemini_cli:" ^ m)
+    expand_provider_auto ?rotation_scope ~spec:trimmed "gemini_cli"
+      (Cascade_model_resolve.gemini_cli_auto_models ())
   | Some ("codex_cli", model_id)
     when String.lowercase_ascii model_id = "auto" ->
-    Cascade_model_resolve.codex_cli_auto_models ()
-    |> List.map (fun m -> "codex_cli:" ^ m)
+    expand_provider_auto ?rotation_scope ~spec:trimmed "codex_cli"
+      (Cascade_model_resolve.codex_cli_auto_models ())
   | Some ("claude_code", model_id)
     when String.lowercase_ascii model_id = "auto" ->
-    Cascade_model_resolve.claude_code_auto_models ()
-    |> List.map (fun m -> "claude_code:" ^ m)
+    expand_provider_auto ?rotation_scope ~spec:trimmed "claude_code"
+      (Cascade_model_resolve.claude_code_auto_models ())
   | _ -> [ trimmed ]
 
 let expand_auto_models (strs : string list) : string list =
   List.concat_map expand_auto_model_string strs
 
 let expand_weighted_auto_entries
+    ?rotation_scope
     (entries : Cascade_config_loader.weighted_entry list) =
   List.concat_map
     (fun (entry : Cascade_config_loader.weighted_entry) ->
-       expand_auto_model_string entry.model
+       expand_auto_model_string ?rotation_scope entry.model
        |> List.map (fun model -> { entry with model }))
     entries
 
@@ -533,8 +561,9 @@ let weighted_shuffle
 
 let order_weighted_entries
     ?(rand_int = weighted_random_int)
+    ?rotation_scope
     (entries : Cascade_config_loader.weighted_entry list) =
-  let entries = expand_weighted_auto_entries entries in
+  let entries = expand_weighted_auto_entries ?rotation_scope entries in
   let has_weights = List.exists
       (fun (e : Cascade_config_loader.weighted_entry) -> e.weight <> 1)
       entries
@@ -758,9 +787,9 @@ let dedupe_stable (items : string list) =
   in
   loop [] [] items
 
-let expand_model_strings_for_execution (items : string list) =
+let expand_model_strings_for_execution ?rotation_scope (items : string list) =
   items
-  |> List.concat_map expand_auto_model_string
+  |> List.concat_map (expand_auto_model_string ?rotation_scope)
   |> dedupe_stable
 
 (* Filter providers by kind name (exact, case-insensitive).

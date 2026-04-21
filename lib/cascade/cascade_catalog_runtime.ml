@@ -742,7 +742,9 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
   | Error _ as e -> e
   | Ok (_snapshot, normalized, profile) ->
       let providers =
-        Cascade_config.order_weighted_entries profile.weighted_entries
+        Cascade_config.order_weighted_entries
+          ~rotation_scope:normalized
+          profile.weighted_entries
         |> Cascade_config.parse_weighted_entries
              ~api_key_env_overrides:profile.api_key_env_overrides
              ~cascade_name:normalized

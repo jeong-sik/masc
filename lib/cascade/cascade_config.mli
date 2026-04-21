@@ -99,12 +99,17 @@ val parse_weighted_entries :
 
 val order_weighted_entries :
   ?rand_int:(int -> int) ->
+  ?rotation_scope:string ->
   Cascade_config_loader.weighted_entry list ->
   Cascade_config_loader.weighted_entry list
 (** Order weighted entries using the same health-adjusted runtime logic as
     {!resolve_model_strings}. Exposed so runtime-authoritative catalog
     snapshots can preserve dynamic health ordering without rereading raw
-    [cascade.json]. *)
+    [cascade.json].
+
+    When [rotation_scope] is provided, each [provider:auto] expansion is
+    round-robined independently within that scope before the usual
+    weight/health ordering is applied. *)
 
 (** Like {!parse_model_string} but returns a [Result] with a diagnostic
     error message explaining why parsing failed (unknown provider, missing
@@ -184,14 +189,21 @@ val resolve_model_strings :
 
     Uses the same provider:auto expansion as {!expand_auto_models}, so
     CLI and GLM family entries execute in the same concrete order the
-    dashboard shows.
+    dashboard shows by default.
+
+    When [rotation_scope] is provided, each [provider:auto] entry is
+    rotated independently within that scope so repeated execution calls
+    do not always start from the same concrete model.
 
     Duplicate entries are removed after expansion, keeping the first
     appearance. This lets callers keep config concise while still
     getting automatic provider-internal failover at execution time.
 
     @since 0.116.2 *)
-val expand_model_strings_for_execution : string list -> string list
+val expand_model_strings_for_execution :
+  ?rotation_scope:string ->
+  string list ->
+  string list
 
 (** Like {!resolve_model_strings} but also returns which resolution
     path was taken. Use this to detect typos: if [source <> Named]

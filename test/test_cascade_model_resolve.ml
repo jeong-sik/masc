@@ -10,6 +10,7 @@
 open Alcotest
 module R = Masc_mcp.Cascade_model_resolve
 module C = Masc_mcp.Cascade_config
+module State = Masc_mcp.Cascade_state
 
 let unset_env k =
   try Unix.putenv k "" with _ -> ()
@@ -158,6 +159,75 @@ let test_expand_model_strings_for_execution_matches_auto_expansion () =
       (C.expand_auto_models items)
       (C.expand_model_strings_for_execution items))
 
+let test_expand_model_strings_for_execution_rotation_scope_rotates () =
+  with_clean_env (fun () ->
+    State.clear_all ();
+    let first =
+      C.expand_model_strings_for_execution
+        ~rotation_scope:"keeper_unified"
+        [ "gemini_cli:auto" ]
+    in
+    let second =
+      C.expand_model_strings_for_execution
+        ~rotation_scope:"keeper_unified"
+        [ "gemini_cli:auto" ]
+    in
+    let other_scope =
+      C.expand_model_strings_for_execution
+        ~rotation_scope:"tool_rerank"
+        [ "gemini_cli:auto" ]
+    in
+    check string "first scoped call starts at default head"
+      "gemini_cli:gemini-3-flash-preview"
+      (List.hd first);
+    check string "second scoped call advances head"
+      "gemini_cli:gemini-3.1-flash-lite-preview"
+      (List.hd second);
+    check string "different scope has its own cursor"
+      "gemini_cli:gemini-3-flash-preview"
+      (List.hd other_scope))
+
+let test_order_weighted_entries_rotation_scope_rotates_generically () =
+  with_clean_env (fun () ->
+    State.clear_all ();
+    let entry model =
+      {
+        Masc_mcp.Cascade_config_loader.model = model;
+        weight = 1;
+        supports_tool_choice = None;
+      }
+    in
+    let first =
+      C.order_weighted_entries
+        ~rotation_scope:"keeper_unified"
+        [ entry "codex_cli:auto" ]
+      |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) ->
+             e.model)
+    in
+    let second =
+      C.order_weighted_entries
+        ~rotation_scope:"keeper_unified"
+        [ entry "codex_cli:auto" ]
+      |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) ->
+             e.model)
+    in
+    let other_scope =
+      C.order_weighted_entries
+        ~rotation_scope:"tool_rerank"
+        [ entry "codex_cli:auto" ]
+      |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) ->
+             e.model)
+    in
+    check string "weighted first call keeps default head"
+      "codex_cli:gpt-5.1-codex-mini"
+      (List.hd first);
+    check string "weighted second call advances head"
+      "codex_cli:gpt-5.1-codex-max"
+      (List.hd second);
+    check string "weighted rotation is scoped"
+      "codex_cli:gpt-5.1-codex-mini"
+      (List.hd other_scope))
+
 let () =
   run "Cascade_model_resolve" [
     "gemini auto", [
@@ -183,5 +253,9 @@ let () =
         `Quick test_expand_auto_models_includes_cli_auto_specs;
       test_case "execution expansion matches auto expansion"
         `Quick test_expand_model_strings_for_execution_matches_auto_expansion;
+      test_case "execution expansion can rotate by scope"
+        `Quick test_expand_model_strings_for_execution_rotation_scope_rotates;
+      test_case "weighted ordering rotates auto by scope"
+        `Quick test_order_weighted_entries_rotation_scope_rotates_generically;
     ];
   ]

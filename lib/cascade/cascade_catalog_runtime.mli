@@ -127,6 +127,13 @@ val snapshot_to_yojson : snapshot -> Yojson.Safe.t
 val rejection_to_yojson : rejection -> Yojson.Safe.t
 val state_to_yojson : state -> Yojson.Safe.t
 
+val invalidate_path : string -> unit
+
+val runtime_required_profile_names :
+  ?config_path:string ->
+  unit ->
+  string list
+
 val install_snapshot_for_tests :
   source_path:string ->
   profile_names:string list ->

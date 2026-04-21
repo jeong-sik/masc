@@ -227,6 +227,64 @@ let config_json () =
   in
   `Assoc fields
 
+let default_raw_config_json = "{}\n"
+
+let load_raw_config_string path =
+  if Fs_compat.file_exists path then
+    Fs_compat.load_file path
+  else
+    default_raw_config_json
+
+let raw_config_json () =
+  Config_dir_resolver.log_warnings ~context:"DashboardCascade" ();
+  let config_path = Some (Config_dir_resolver.cascade_path_candidate ()) in
+  let raw_json =
+    match config_path with
+    | None -> ""
+    | Some path -> (
+        try load_raw_config_string path with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | Sys_error msg ->
+            Log.Keeper.warn
+              "dashboard cascade raw config: failed to read %s: %s"
+              path msg;
+            "")
+  in
+  `Assoc
+    [
+      ("updated_at", `String (now_iso ()));
+      ("config_path", Json_util.string_opt_to_json config_path);
+      ("raw_json", `String raw_json);
+    ]
+
+let save_raw_config_json raw_json =
+  Config_dir_resolver.log_warnings ~context:"DashboardCascade" ();
+  let config_path = Config_dir_resolver.cascade_path_candidate () in
+  let parse_result =
+    try
+      ignore (Yojson.Safe.from_string raw_json);
+      Ok ()
+    with
+    | Yojson.Json_error msg ->
+        Error (Printf.sprintf "invalid JSON: %s" msg)
+    | exn ->
+        Error (Printf.sprintf "failed to parse JSON: %s" (Printexc.to_string exn))
+  in
+  match parse_result with
+  | Error _ as err -> err
+  | Ok () -> (
+      try
+        Fs_compat.mkdir_p (Filename.dirname config_path);
+        match Fs_compat.save_file_atomic config_path raw_json with
+        | Error msg -> Error msg
+        | Ok () ->
+            Cascade_config_loader.invalidate_cache_entry config_path;
+            Cascade_catalog_runtime.invalidate_path config_path;
+            Ok (config_json ())
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | Sys_error msg -> Error msg)
+
 (* ── Health projection ──────────────────────────────── *)
 
 let provider_info_to_json (info : Health.provider_info) : Yojson.Safe.t =

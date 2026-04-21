@@ -983,8 +983,9 @@ let test_prompt_includes_claim_first_guidance () =
     (contains_substring user "Do not wait for keeper_tasks_list");
   check bool "user prompt prefers claim before browsing" true
     (contains_substring user "Prefer keeper_task_claim before keeper_board_list or keeper_shell");
-  check bool "user prompt explains gh requires claim first" true
-    (contains_substring user "If you need keeper_shell op=gh, claim first")
+  check bool "user prompt explains gh sandbox fallback" true
+    (contains_substring user
+       "If you need keeper_shell op=gh, claim first when you need the active task worktree; otherwise, in sandbox keepers, pass an explicit --repo owner/name.")
 
 let test_prompt_omits_claim_first_guidance_when_task_claimed () =
   let current_task_id =
@@ -1050,15 +1051,15 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "branch_name:");
   check bool "tool-less runtime escape hatch removed from nudge" false
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "NO_TOOL_CHANNEL");
-  check bool "work discovery nudge warns gh needs claimed task" true
+  check bool "work discovery nudge documents gh sandbox fallback" true
     (source_file_contains "lib/keeper/keeper_agent_run.ml"
-       "keeper_shell op=gh` derives repo context from the active task worktree/current_task_id");
-  check bool "keeper_shell schema documents gh claim prerequisite" true
+       "sandbox keepers can also inspect with an explicit `--repo owner/name`");
+  check bool "keeper_shell schema documents gh sandbox fallback" true
     (source_file_contains "lib/tool_shard.ml"
-       "Requires an active claimed task/current_task_id");
-  check bool "keeper_shell gh error hints keeper_task_claim" true
+       "In sandbox keepers without a claimed task, pass an explicit --repo owner/name.");
+  check bool "keeper_shell gh runtime allows sandbox fallback" true
     (source_file_contains "lib/keeper/keeper_exec_shell.ml"
-       "Call keeper_task_claim with {} first")
+       "task_id = \"(sandbox)\"")
 
 (* ---------- Config tests ---------- *)
 

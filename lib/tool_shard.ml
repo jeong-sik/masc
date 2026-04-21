@@ -365,7 +365,7 @@ Use cwd to target an explicit allowed directory or cloned repo. \
 find REQUIRES pattern param (e.g. pattern=\"*.ml\"). \
 bash op: single command only, no chaining (&&, ||, |, ; are blocked), no redirects (>, >>). \
 git_clone: clone a repo into your sandbox repos/ lane (url required). \
-gh op: run a gh CLI subcommand with cmd=\"<subcommand>\" (e.g. cmd=\"pr list --state open\"). Requires an active claimed task/current_task_id because repo context is derived from the task worktree. Always run `gh pr list` first before referencing a PR number to avoid hallucinations. Dangerous commands (repo delete, auth logout, secret set/delete) are blocked. \
+gh op: run a gh CLI subcommand with cmd=\"<subcommand>\" (e.g. cmd=\"pr list --repo owner/name --state open\"). With an active claimed task/current_task_id, repo context is derived from the task worktree. In sandbox keepers without a claimed task, pass an explicit --repo owner/name. Always run `gh pr list` first before referencing a PR number to avoid hallucinations. Dangerous commands (repo delete, auth logout, secret set/delete) are blocked. \
 If path not found, clone the repo first with op=git_clone. \
 Use rg for pattern search, find for path discovery, head/tail for line ranges, \
 git_log/git_diff for repo history, bash for curl/jq/env/which, gh for GitHub PR/issue/CI.";
@@ -376,7 +376,7 @@ git_log/git_diff for repo history, bash for curl/jq/env/which, gh for GitHub PR/
            [Keeper_exec_shell.valid_shell_op_strings].  Schema used to
            omit git_worktree even though the handler accepted it. *)
         ("op", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) keeper_shell_op_enum_strings)); ("description", `String "Command to run")]);
-        ("cmd", `Assoc [("type", `String "string"); ("description", `String "gh subcommand for op=gh, e.g. 'pr list --state open'. Requires an active claimed task/current_task_id. The active task worktree determines the repo; any --repo flag is normalized to that repo.")]);
+        ("cmd", `Assoc [("type", `String "string"); ("description", `String "gh subcommand for op=gh, e.g. 'pr list --repo owner/name --state open'. With an active claimed task/current_task_id, the task worktree determines the repo. In sandbox keepers without a claimed task, pass an explicit --repo owner/name.")]);
         ("path", `Assoc [("type", `String "string"); ("description", `String "Target path for ls/cat/rg/find/head/tail/wc/tree")]);
         ("cwd", `Assoc [("type", `String "string"); ("description", `String "Optional working directory for pwd/git_status/git_log/git_diff/git_worktree/bash. Must stay within the keeper sandbox or an explicit allowed path.")]);
         ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg, or name glob for find (REQUIRED for find, e.g. \"*.ml\")")]);

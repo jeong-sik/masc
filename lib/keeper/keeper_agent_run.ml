@@ -1606,8 +1606,8 @@ let run_turn
               Preferred keeper tools (copy the name and schema verbatim):\n\
              \  - `keeper_task_claim` {} \
               — reserve the next eligible task\n\
-             \  - `keeper_shell` { op: \"gh\", cmd: \"pr list --state open\" } \
-              — inspect GitHub PRs/issues/checks after you already hold a claimed task/current_task_id\n\
+             \  - `keeper_shell` { op: \"gh\", cmd: \"pr list --repo owner/name --state open\" } \
+              — inspect GitHub PRs/issues/checks; in sandbox keepers use an explicit `--repo owner/name` when no task is claimed\n\
              \  - `keeper_bash` { cmd: \"<single shell command>\" } \
               — run one shell command, including raw git in a worktree\n\
              \  - `masc_worktree_create` { task_id: \"<task-id>\", repo_name: \"masc-mcp\" } \
@@ -1616,8 +1616,8 @@ let run_turn
               — coordinate via board\n\
              \  - `keeper_stay_silent` {} \
               — none of the above fit my role\n\n\
-              GitHub/code workflow: if you do not already hold a task, call `keeper_task_claim` first; \
-              `keeper_shell op=gh` derives repo context from the active task worktree/current_task_id. \
+              GitHub/code workflow: if you do not already hold a task, claim first when you need a task worktree or repo-bound coding flow. \
+              `keeper_shell op=gh` derives repo context from the active task worktree/current_task_id when claimed, and sandbox keepers can also inspect with an explicit `--repo owner/name`. \
               Then inspect with `keeper_shell op=gh`; \
               if code change is needed, `masc_worktree_create` -> edit -> \
               `keeper_bash` for `git add` / `git commit` / `git push` -> \

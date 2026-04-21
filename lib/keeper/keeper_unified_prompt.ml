@@ -194,8 +194,8 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
             It auto-claims the next eligible task; you do not need task_id or keeper_tasks_list first.\n"
          else "");
         (if show_claim_guidance then
-           "- Need GitHub or PR inspection via keeper_shell op=gh? Claim first. \
-            gh repo context is derived from your active task worktree/current_task_id.\n"
+           "- Need GitHub or PR inspection via keeper_shell op=gh? \
+            Claim first when you need task-bound repo context; otherwise, in sandbox keepers, pass an explicit `--repo owner/name`.\n"
          else "");
         "- Have a finding or update? Call keeper_board_post.\n\
          - Need to share broadly? Call keeper_broadcast.\n\
@@ -279,7 +279,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf
       "- Prefer keeper_task_claim before keeper_board_list or keeper_shell when you have no claimed task.\n";
     Buffer.add_string ubuf
-      "- If you need keeper_shell op=gh, claim first so gh can derive repo context from your active task worktree/current_task_id.\n\n");
+      "- If you need keeper_shell op=gh, claim first when you need the active task worktree; otherwise, in sandbox keepers, pass an explicit --repo owner/name.\n\n");
   (* 5. Board activity — reactive trigger *)
   if observation.pending_board_events <> [] then (
     Buffer.add_string ubuf

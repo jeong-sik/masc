@@ -26,17 +26,18 @@ import { TimeAgo } from './common/time-ago'
 import {
   keeperIdentitySearchTerms,
   keeperPrimaryName,
-  runtimeAgentName,
 } from './common/keeper-identity'
 import { AgentAvatar } from './overview/agent-avatar'
 import { openAgentDetail } from './agent-detail'
 import { openKeeperDetail } from './keeper-detail'
 import { formatDuration, trimText } from './mission-utils'
+import { formatTokens } from '../lib/format-number'
 import { namespaceTruth } from '../namespace-truth-store'
 import {
   keeperPhaseForDisplay,
   runtimeBandMeta,
   runtimeBandMetaForAgent,
+  summarizeMonitoringEvidence,
   summarizeKeeperMonitoring,
   type RuntimeBand,
 } from '../lib/monitoring-runtime'
@@ -71,6 +72,69 @@ export function compactModelLabel(model: string | null | undefined): string | nu
   const parts = value.split(':').map(part => part.trim()).filter(Boolean)
   if (parts.length >= 2) return parts[parts.length - 1] ?? value
   return value
+}
+
+export function rosterModelMeta(
+  source: {
+    last_model_used?: string | null
+    active_model?: string | null
+    model?: string | null
+  } | null | undefined,
+): { label: string; value: string } | null {
+  const lastModel = source?.last_model_used?.trim()
+  if (lastModel) return { label: '최근 모델', value: lastModel }
+
+  const activeModel = source?.active_model?.trim()
+  if (activeModel) return { label: '현재 모델', value: activeModel }
+
+  const fallbackModel = source?.model?.trim()
+  if (fallbackModel) return { label: '모델', value: fallbackModel }
+  return null
+}
+
+export function rosterContextMeta(
+  source: {
+    context_ratio?: number | null
+    context_tokens?: number | null
+    context_max?: number | null
+  } | null | undefined,
+): { pct: number; detail: string | null } | null {
+  const ratio = source?.context_ratio
+  if (ratio == null || !Number.isFinite(ratio)) return null
+
+  const pct = Math.round(ratio * 100)
+  const tokens = source?.context_tokens
+  const max = source?.context_max
+  const detail =
+    tokens != null && max != null
+      ? `${formatTokens(tokens)} / ${formatTokens(max)}`
+      : tokens != null
+        ? formatTokens(tokens)
+        : null
+
+  return { pct, detail }
+}
+
+export function rosterStateNote(
+  keeper: {
+    runtime_blocker_summary?: string | null
+    last_blocker?: string | null
+    diagnostic?: { last_error?: string | null } | null
+  } | null | undefined,
+  monitoringHint?: string | null,
+): { label: string; text: string } | null {
+  const runtimeBlocker = keeper?.runtime_blocker_summary?.trim()
+  if (runtimeBlocker) return { label: '최근 차단', text: runtimeBlocker }
+
+  const lastBlocker = keeper?.last_blocker?.trim()
+  if (lastBlocker) return { label: '최근 차단', text: lastBlocker }
+
+  const diagnosticError = keeper?.diagnostic?.last_error?.trim()
+  if (diagnosticError) return { label: '최근 오류', text: diagnosticError }
+
+  const hint = monitoringHint?.trim()
+  if (hint) return { label: '상태 메모', text: hint }
+  return null
 }
 
 interface KeeperInfo {
@@ -436,10 +500,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     [scopedAgents, keeperInfoLookup, keeperList, keeperBriefs],
   )
   const pageDescription = keeperFilter === 'keeper-only'
-    ? '주 이름을 먼저 보고, runtime alias와 FSM 상태는 보조 정보로 확인합니다.'
+    ? '주 이름을 먼저 보고, 필요할 때만 상태와 최근 근거를 확인합니다.'
     : keeperFilter === 'agent-only'
       ? '키퍼가 연결되지 않은 일반 에이전트만 따로 봅니다.'
-      : '주 이름 기준으로 훑고, 최근 활동과 FSM 상태가 필요한 카드만 열어봅니다.'
+      : '주 이름 기준으로 훑고, 최근 활동과 운영 상태가 필요한 카드만 열어봅니다.'
 
   const filtered = scopedAgents
     .filter((a: Agent) => {
@@ -587,6 +651,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           const keeperRuntime = keeperRuntimeLookup.get(agent.name) ?? findKeeperRuntime(agent.name, keeperList)
           const band = bandByAgent.get(agent.name) ?? runtimeBandMeta('attention')
           const keeperMonitoring = keeperRuntime ? summarizeKeeperMonitoring(keeperRuntime) : null
+          const monitoringEvidence = keeperMonitoring ? summarizeMonitoringEvidence(keeperMonitoring) : null
           const fsmPhase = keeperRuntime ? keeperPhaseForDisplay(keeperRuntime) : null
           const isKeeper = keeper != null
           const currentWork = keeper?.current_work ?? brief?.current_work ?? agent.current_task ?? null
@@ -598,9 +663,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             ?? keeperRuntime?.last_heartbeat
             ?? agent.last_seen
             ?? null
-          const ctxPct = (keeperRuntime?.context_ratio ?? keeper?.context_ratio) != null
-            ? Math.round((keeperRuntime?.context_ratio ?? keeper?.context_ratio ?? 0) * 100)
-            : null
+          const contextMeta =
+            rosterContextMeta(keeperRuntime ?? keeper ?? null)
           const workPreview =
             trimText(currentWork, 140)
             ?? trimText(brief?.recent_output_preview, 140)
@@ -608,10 +672,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             ?? trimText(brief?.recent_input_preview, 140)
             ?? trimText(keeperRuntime?.recent_input_preview, 140)
             ?? '최근 활동 요약 없음'
-          const summaryText =
-            band.key === 'active'
-              ? workPreview
-              : keeperMonitoring?.hint ?? workPreview
+          const summaryText = workPreview
+          const stateNote =
+            keeperRuntime
+              ? rosterStateNote(keeperRuntime, band.key === 'active' ? null : keeperMonitoring?.hint ?? null)
+              : null
           const recentTools = uniqueToolNames(
             brief?.recent_tool_names,
             brief?.latest_tool_names,
@@ -639,20 +704,16 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               keeperRuntime?.agent_name ?? keeper?.agent_name ?? agent.name,
             )
             ?? agent.name
-          const runtimeName = isKeeper
-            ? runtimeAgentName(displayName, keeperRuntime?.agent_name ?? keeper?.agent_name ?? agent.name)
-            : null
-          const identityLabel = runtimeName ? 'runtime alias' : 'agent runtime'
-          const model = keeperRuntime?.model ?? keeper?.model
-          const compactModel = compactModelLabel(model)
+          const modelMeta = rosterModelMeta(keeperRuntime ?? keeper ?? null)
+          const compactModel = compactModelLabel(modelMeta?.value)
           const generation = keeperRuntime?.generation ?? keeper?.generation ?? null
           const fsmPhaseKey =
             keeperMonitoring?.phase.key && keeperMonitoring.phase.key !== 'unknown'
               ? keeperMonitoring.phase.key
               : fsmPhase
-          const fsmStageKey = keeperMonitoring?.stage.key ?? 'offline'
-          const fsmStageLabel = keeperMonitoring?.stage.label ?? '활동 없음'
-          const fsmStageText = fsmStageLabel === '활동 없음' ? fsmStageLabel : `활동 ${fsmStageLabel}`
+          const fsmStageKey = monitoringEvidence?.stage?.key ?? null
+          const fsmStageLabel = monitoringEvidence?.stage?.label ?? null
+          const fsmStageText = fsmStageLabel ? `활동 ${fsmStageLabel}` : null
           const detailLabel = keeperRuntime ? `${displayName} keeper 상세 보기` : `${displayName} 상세 보기`
           const openDetail = () => {
             if (keeperRuntime) {
@@ -692,13 +753,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                       ` : null}
                     </div>
 
-                    <div class="mt-1 flex flex-wrap items-center gap-1.5 text-2xs text-[var(--text-muted)]">
-                      <span class="uppercase tracking-1">${identityLabel}</span>
-                      ${runtimeName ? html`
-                        <span class="text-[var(--text-dim)]">/</span>
-                        <span class="font-mono text-3xs" translate="no">${runtimeName}</span>
-                      ` : null}
-                    </div>
+                    ${isKeeper && generation != null && generation > 0 ? html`
+                      <div class="mt-1 flex flex-wrap items-center gap-1.5 text-2xs text-[var(--text-muted)]">
+                        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
+                          세대 ${generation}
+                        </span>
+                      </div>
+                    ` : null}
                   </div>
                 </div>
 
@@ -709,23 +770,26 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
               <p class="m-0 text-sm leading-paragraph text-[var(--text-body)] break-words line-clamp-2" title=${summaryText}>${summaryText}</p>
 
-              ${isKeeper ? html`
+              ${stateNote ? html`
+                <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--text-muted)]">
+                  <span class="inline-flex items-center rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5 text-3xs font-semibold text-[var(--warn)]">
+                    ${stateNote.label}
+                  </span>
+                  <span class="min-w-0 flex-1 text-xs leading-relaxed text-[var(--text-body)] break-words line-clamp-2" title=${stateNote.text}>
+                    ${stateNote.text}
+                  </span>
+                </div>
+              ` : null}
+
+              ${isKeeper && (monitoringEvidence?.phase || monitoringEvidence?.stage) ? html`
                 <div class="rounded-[16px] border border-[var(--border-slate-12)] bg-[linear-gradient(180deg,var(--white-3),var(--white-1))] px-3 py-2.5">
                   <div class="flex flex-wrap items-center gap-2">
-                    <span class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">FSM</span>
-                    ${fsmPhaseKey
+                    ${monitoringEvidence?.phase && fsmPhaseKey
                       ? html`<${KeeperPhaseBadge} phase=${fsmPhaseKey} compact />`
-                      : html`
-                        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-medium text-[var(--text-muted)]">
-                          생명주기 확인 필요
-                        </span>
-                      `}
-                    <span class="inline-flex items-center rounded-sm border px-2 py-0.5 text-3xs font-medium ${stageBadgeClass(fsmStageKey)}" title=${keeperMonitoring?.stage.description ?? '활동 단계 정보가 없습니다.'}>
-                      ${fsmStageText}
-                    </span>
-                    ${generation != null && generation > 0 ? html`
-                      <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-3)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">
-                        세대 ${generation}
+                      : null}
+                    ${fsmStageKey && fsmStageText ? html`
+                      <span class="inline-flex items-center rounded-sm border px-2 py-0.5 text-3xs font-medium ${stageBadgeClass(fsmStageKey)}" title=${monitoringEvidence?.stage?.description ?? '활동 단계 정보가 없습니다.'}>
+                        ${fsmStageText}
                       </span>
                     ` : null}
                   </div>
@@ -743,19 +807,22 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                         : '기록 없음'}
                   </span>
                 </span>
-                ${isKeeper && ctxPct != null ? html`
+                ${isKeeper && contextMeta ? html`
                   <span class="inline-flex items-center gap-1.5 rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
                     <span>CTX</span>
-                    <span class="font-mono font-medium ${ctxPct > 85 ? 'text-[var(--bad)]' : ctxPct > 60 ? 'text-[var(--warn)]' : 'text-[var(--text-strong)]'}">${ctxPct}%</span>
+                    <span class="font-mono font-medium ${contextMeta.pct > 85 ? 'text-[var(--bad)]' : contextMeta.pct > 60 ? 'text-[var(--warn)]' : 'text-[var(--text-strong)]'}">${contextMeta.pct}%</span>
+                    ${contextMeta.detail ? html`
+                      <span class="font-mono text-3xs text-[var(--text-muted)]">${contextMeta.detail}</span>
+                    ` : null}
                     <span class="inline-block h-1.5 w-12 overflow-hidden rounded-sm bg-[var(--white-6)]">
-                      <span class="block h-full rounded-sm ${ctxPct > 85 ? 'bg-[var(--bad)]' : ctxPct > 60 ? 'bg-[var(--warn)]' : 'bg-[var(--ok)]'}" style="width:${ctxPct}%"></span>
+                      <span class="block h-full rounded-sm ${contextMeta.pct > 85 ? 'bg-[var(--bad)]' : contextMeta.pct > 60 ? 'bg-[var(--warn)]' : 'bg-[var(--ok)]'}" style="width:${contextMeta.pct}%"></span>
                     </span>
                   </span>
                 ` : null}
-                ${compactModel ? html`
+                ${modelMeta && compactModel ? html`
                   <span class="inline-flex items-center gap-1.5 rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
-                    <span>model</span>
-                    <span class="font-mono text-3xs text-[var(--text-body)]" translate="no" title=${model ?? undefined}>${compactModel}</span>
+                    <span>${modelMeta.label}</span>
+                    <span class="font-mono text-3xs text-[var(--text-body)]" translate="no" title=${modelMeta.value}>${compactModel}</span>
                   </span>
                 ` : null}
               </div>

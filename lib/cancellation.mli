@@ -32,9 +32,9 @@ end
 (** {1 Token Operations} *)
 
 val is_cancelled : token -> bool
-val cancel : ?reason:string option -> token -> unit
+val cancel : ?reason:string -> token -> unit
 val on_cancel : token -> (unit -> unit) -> unit
-val cancel_by_id : ?reason:string option -> string -> bool
+val cancel_by_id : ?reason:string -> string -> bool
 val create_for_task : task_id:string -> token
 val token_to_json : token -> Yojson.Safe.t
 

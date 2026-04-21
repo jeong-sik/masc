@@ -64,6 +64,7 @@
         test_keeper_allowed_paths
         test_keeper_repo_readiness
         test_keeper_tool_surface_guard
+        test_keeper_benchmark_canary
         test_keeper_pr_review
         test_keeper_execution_scope
         test_playground_paths
@@ -121,6 +122,7 @@
         test_adversarial_eval
         test_labeling
         test_tool_deep_review
+        test_tool_call_quality_benchmark
         test_typed_state
         test_keeper_prompt_metrics
         test_cache_metrics_wiring
@@ -182,6 +184,7 @@
           test_keeper_allowed_paths
           test_keeper_repo_readiness
           test_keeper_tool_surface_guard
+          test_keeper_benchmark_canary
           test_keeper_pr_review
           test_keeper_execution_scope
           test_playground_paths
@@ -239,6 +242,7 @@
           test_adversarial_eval
           test_labeling
           test_tool_deep_review
+          test_tool_call_quality_benchmark
           test_typed_state
           test_keeper_prompt_metrics
           test_cache_metrics_wiring
@@ -662,17 +666,6 @@
  (action
   (setenv MASC_CASCADE_JSON_PATH %{workspace_root}/config/cascade.json
    (run %{test})))
- (libraries masc_test_deps))
-
-(test
- (name test_cascade_toml_materialization)
- (modules test_cascade_toml_materialization)
- (deps %{workspace_root}/config/cascade.toml
-       %{workspace_root}/config/cascade.json)
- (action
-  (setenv MASC_CASCADE_TOML_PATH %{workspace_root}/config/cascade.toml
-   (setenv MASC_CASCADE_JSON_PATH %{workspace_root}/config/cascade.json
-    (run %{test}))))
  (libraries masc_test_deps))
 
 (test
@@ -1157,6 +1150,11 @@
 (executable
  (name test_repo_synthesis_benchmark)
  (modules test_repo_synthesis_benchmark)
+ (libraries masc_test_deps))
+
+(executable
+ (name tool_call_quality_benchmark_cli)
+ (modules tool_call_quality_benchmark_cli)
  (libraries masc_test_deps))
 
 (executable

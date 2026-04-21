@@ -158,6 +158,13 @@
    web_dashboard
    credits_dashboard
    repo_synthesis_benchmark
+   keeper_benchmark_canary
+   tool_call_quality_benchmark_types
+   tool_call_quality_benchmark_loader
+   tool_call_quality_benchmark_scoring
+   tool_call_quality_benchmark_summary
+   tool_call_quality_benchmark_render
+   tool_call_quality_benchmark
    room_protocol
 
    inference_utils
@@ -687,7 +694,6 @@
   keeper_alerting_path
   keeper_sandbox_containment
   keeper_sandbox_runtime
-  keeper_turn_sandbox_runtime
   keeper_docker_read
   ;; tool_local_runtime sub-modules
   tool_local_runtime_http

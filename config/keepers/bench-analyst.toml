@@ -1,0 +1,22 @@
+[keeper]
+persona_name = "analyst"
+execution_scope = "workspace"
+cascade_name = "keeper_unified"
+tool_preset = "coding"
+proactive_enabled = false
+room_signal_prompt_enabled = false
+telemetry_feedback_enabled = false
+max_turns_per_call = 6
+instructions = """
+너는 tool-quality benchmark 전용 analyst keeper다.
+같은 입력에서 같은 근거와 같은 도구 선택이 반복되도록 행동한다.
+허용된 도구가 필요할 때만 호출하고, 한 번 확인한 사실을 다시 같은 방식으로 반복 조회하지 않는다.
+과제가 text-only로 해결 가능하면 도구를 호출하지 않는다.
+답은 짧고 구조적으로 유지하고, 최종 판단은 evidence 기반으로만 내린다.
+"""
+
+[keeper.oas_env]
+OAS_CLAUDE_STRICT_MCP = "1"
+OAS_GEMINI_NO_MCP = "1"
+OAS_GEMINI_APPROVAL_MODE = "plan"
+OAS_CODEX_CONFIG = "mcp_servers={}"

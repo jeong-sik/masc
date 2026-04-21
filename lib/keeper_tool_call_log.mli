@@ -32,6 +32,7 @@ val set_turn_context :
   ?tool_choice:string ->
   ?thinking_enabled:bool ->
   ?thinking_budget:int ->
+  ?prompt_fingerprint:string ->
   ?trace_id:string ->
   ?session_id:string ->
   ?turn:int ->
@@ -44,9 +45,9 @@ val get_turn_context :
   keeper_name:string ->
   unit ->
   string option * string option * bool option * int option
-  * string option * string option * int option
+  * string option * string option * string option * int option
 (** Returns [(lane, tool_choice, thinking_enabled, thinking_budget, trace_id,
-    session_id, turn)] for the keeper, or [None] values when no turn context
+    prompt_fingerprint, session_id, turn)] for the keeper, or [None] values when no turn context
     has been recorded. *)
 
 val init : ?cluster_name:string -> base_path:string -> unit -> unit
@@ -61,11 +62,11 @@ val log_call :
   success:bool ->
   duration_ms:float ->
   ?model:string ->
-  ?provider:string ->
   ?lane:string ->
   ?tool_choice:string ->
   ?thinking_enabled:bool ->
   ?thinking_budget:int ->
+  ?prompt_fingerprint:string ->
   ?trace_id:string ->
   ?session_id:string ->
   ?turn:int ->
@@ -75,8 +76,7 @@ val log_call :
   unit
 (** [log_call ...] persists a single tool call record with full I/O.
     Output is truncated to 4000 bytes. [model] records which LLM generated
-    the tool call. [provider] records the canonical provider label when
-    the caller knows it. Turn-policy fields ([lane], [tool_choice],
+    the tool call. Turn-policy fields ([lane], [tool_choice],
     [thinking_enabled], [thinking_budget]) capture the effective tool
     selection context. [result_bytes] is the original output size before
     any truncation. [truncated_to] is present when Tool_output_validation

@@ -741,8 +741,8 @@ let run_turn
               (fun (e : Keeper_tool_affinity.affinity_entry) ->
                  Printf.sprintf "%s(%.1f)" e.tool_name e.score)
               entries)));
-  let keeper_tool_bundle =
-    Keeper_tools_oas.make_tool_bundle
+  let keeper_tools =
+    Keeper_tools_oas.make_tools
       ~config
       ~meta
       ~ctx_snapshot
@@ -752,7 +752,7 @@ let run_turn
       ()
   in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
-  let tools = extend_turns_tool :: keeper_tool_bundle.tools in
+  let tools = extend_turns_tool :: keeper_tools in
   let tool_usage_before =
     Keeper_tool_disclosure.keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
   in
@@ -890,7 +890,7 @@ let run_turn
     }
   in
   let tool_entries =
-    List.map (tool_index_entry_of_tool ~korean_kw_tbl) keeper_tool_bundle.tools
+    List.map (tool_index_entry_of_tool ~korean_kw_tbl) keeper_tools
   in
   (* Full-universe search index for keeper_tool_search.
      Separate from the preset-scoped Tool_selector used for progressive disclosure:
@@ -909,7 +909,7 @@ let run_turn
     let preset_tools =
       List.filter
         (fun (t : Agent_sdk.Tool.t) -> Hashtbl.mem preset_set t.schema.name)
-        keeper_tool_bundle.tools
+        keeper_tools
     in
     let progressive_tool_index_config =
       { Agent_sdk.Tool_index.default_config with
@@ -926,17 +926,17 @@ let run_turn
      Two maps: description (string) and full schema (tool_schema).
      Covers both keeper_* and masc_* tools from the OAS Tool.t list. *)
   let oas_description_map =
-    let tbl = Hashtbl.create (List.length keeper_tool_bundle.tools) in
+    let tbl = Hashtbl.create (List.length keeper_tools) in
     List.iter
       (fun (t : Agent_sdk.Tool.t) ->
          Hashtbl.replace tbl t.schema.name t.schema.description)
-      keeper_tool_bundle.tools;
+      keeper_tools;
     tbl
   in
   (* Map tool name → OAS input_schema JSON for keeper_tool_search enrichment.
      Covers keeper_* tools that don't appear in masc_schemas_ref. *)
   let oas_input_schema_map =
-    let tbl = Hashtbl.create (List.length keeper_tool_bundle.tools) in
+    let tbl = Hashtbl.create (List.length keeper_tools) in
     List.iter
       (fun (t : Agent_sdk.Tool.t) ->
          let param_type_str (pt : Agent_sdk.Types.param_type) =
@@ -971,7 +971,7 @@ let run_turn
              ]
          in
          Hashtbl.replace tbl t.schema.name schema)
-      keeper_tool_bundle.tools;
+      keeper_tools;
     tbl
   in
   (* Wire keeper_tool_search: update session-local ref with the real BM25 impl.
@@ -1114,7 +1114,7 @@ let run_turn
     Log.Keeper.debug
       "keeper:%s tool visibility: total=%d search_indexed=%d"
       meta.name
-      (List.length keeper_tool_bundle.tools)
+      (List.length keeper_tools)
       (List.length tool_entries);
   (* Layer 0: Core tools — always visible to the LLM regardless of preset.
      Kept to 5 survival-critical tools (#4961).  Status and other coordination tools
@@ -1127,10 +1127,7 @@ let run_turn
      this includes all candidate tools minus denied.  BM25 retrieval
      and Tool_op.Add operate within this scope. *)
   let all_tool_names =
-    "extend_turns"
-    :: List.map
-         (fun (t : Agent_sdk.Tool.t) -> t.schema.name)
-         keeper_tool_bundle.tools
+    "extend_turns" :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
   (* Precompute membership table for AllowList validation below.
      all_tool_names is constant for the session; building universe_set
@@ -1878,6 +1875,7 @@ let run_turn
                   tool_choice)
                 ~thinking_enabled:thinking_enabled_effective
                 ?thinking_budget:current_params.thinking_budget
+                ~prompt_fingerprint:prompt_metrics.fingerprint
                 ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                 ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                 ~turn
@@ -2006,21 +2004,6 @@ let run_turn
       Some (fun () -> Log.Misc.debug "keeper %s: slot resumed (next LLM turn)" meta.name)
     else None
   in
-  let with_scoped_env bindings f =
-    let previous =
-      List.map (fun (key, _) -> (key, Sys.getenv_opt key)) bindings
-    in
-    List.iter (fun (key, value) -> Unix.putenv key value) bindings;
-    Fun.protect
-      ~finally:(fun () ->
-        List.iter
-          (fun (key, value) ->
-             match value with
-             | Some prior -> Unix.putenv key prior
-             | None -> Unix.putenv key "")
-          previous)
-      f
-  in
   let priority = Option.value priority ~default:Llm_provider.Request_priority.Proactive in
   let admission_wait_timeout_sec =
     if Llm_provider.Request_priority.resolve priority
@@ -2044,149 +2027,126 @@ let run_turn
       | None ->
           Keeper_runtime_resolved.oas_timeout_for_context ~max_context
     in
-    let env_bindings_result =
-      if Auth.is_auth_enabled config.base_path then
-        match
-          Auth.ensure_keeper_credential config.base_path
-            ~agent_name:meta.agent_name
-        with
-        | Ok (token, _cred) -> Ok [ ("MASC_MCP_TOKEN", token) ]
-        | Error err ->
-            Error
-              (Printf.sprintf
-                 "keeper credential bootstrap failed for %s: %s"
-                 meta.agent_name
-                 (Types.masc_error_to_string err))
-      else
-        Ok []
+    let cli_transport_overrides =
+      Some
+        ({
+          cwd = None;
+          claude_mcp_config = keeper_oas_context.claude_mcp_config;
+          claude_allowed_tools = None;
+          claude_permission_mode = None;
+          claude_max_turns = Some max_turns;
+          gemini_yolo =
+            (match approval_mode_effective with
+             | Some mode ->
+               Some (String.equal (String.lowercase_ascii mode) "yolo")
+             | None -> None);
+        } : Oas_worker.cli_transport_overrides)
     in
-    match env_bindings_result with
-    | Error msg -> Error (Oas.Error.Internal msg)
-    | Ok env_bindings ->
-      let cli_transport_overrides =
-        Some
-          ({
-            cwd = None;
-            claude_mcp_config = keeper_oas_context.claude_mcp_config;
-            claude_allowed_tools = None;
-            claude_permission_mode = None;
-            claude_max_turns = Some max_turns;
-            gemini_yolo =
-              (match approval_mode_effective with
-               | Some mode ->
-                 Some (String.equal (String.lowercase_ascii mode) "yolo")
-               | None -> None);
-          } : Oas_worker.cli_transport_overrides)
-      in
-      (* Phase 0: wake-time payload telemetry (Option C baseline).
-         Entire block is dead code when MASC_PAYLOAD_TELEMETRY is unset.
-         Compute logic lives in [Keeper_wake_telemetry] for unit tests;
-         exceptions from the telemetry path never abort the LLM call. *)
-      let () =
-        if Env_config_keeper.KeeperTelemetry.payload_telemetry_enabled () then
-          try
-            let sizes =
-              Keeper_wake_telemetry.compute_sizes
-                ~system_prompt:turn_system_prompt
-                ~tools
-                ~history_messages
-                ~user_message
-            in
-            let model_id =
-              match meta.models with
-              | m :: _ -> m
-              | [] -> "auto"
-            in
-            let _event : Dashboard_harness_health.wake_payload_event =
-              Dashboard_harness_health.record_wake_payload
-                ~keeper_name:meta.name
-                ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                ~turn_index:start_turn_count
-                ~model_id
-                ~context_window:max_context
-                ~approx_body_bytes:sizes.approx_body_bytes
-                ~system_prompt_bytes:sizes.system_prompt_bytes
-                ~tool_defs_bytes:sizes.tool_defs_bytes
-                ~messages_bytes:sizes.messages_bytes
-                ~message_count:sizes.message_count
-                ~role_counts:sizes.role_counts
-                ~tool_count:sizes.tool_count
-                ~has_compact_happened:false
-            in
-            ()
-          with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            Log.Harness.warn
-              "[wake_payload] telemetry failed keeper=%s: %s"
-              meta.name (Printexc.to_string exn)
-      in
-      (match
-         Fun.protect
-           ~finally:keeper_tool_bundle.cleanup
-           (fun () ->
-             with_scoped_env env_bindings (fun () ->
-               Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
-                 Oas_worker.run_named
-                   ~cascade_name
-                   ~model_strings:meta.models
-                   ?provider_filter
-                   ~require_tool_choice_support
-                   ~goal:user_message
-                   ~priority
-                   ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                   ~system_prompt:turn_system_prompt
-                   ~tools
-                   ~compact_ratio:meta.compaction.ratio_gate
-                   ~initial_messages:history_messages
-                   ~hooks
-                   ~context_reducer:reducer
-                   ~summarizer:Keeper_summarizer.keeper_summarizer
-                   ~memory
-                     (* Keepers use turn-level retry for transient errors but benefit
-                        from OAS per-call retry for validation errors (malformed tool
-                        args). retry_on_validation_error=true lets OAS re-prompt the
-                        LLM with structured feedback instead of wasting a full turn.
-                        retry_on_recoverable_tool_error remains false — tool-level
-                        errors are handled by MASC's consecutive failure guardrail. *)
-                   ~tool_retry_policy:{
-                     Oas.Tool_retry_policy.max_retries = 2;
-                     retry_on_validation_error = true;
-                     retry_on_recoverable_tool_error = false;
-                     feedback_style = Oas.Tool_retry_policy.Structured_tool_result;
-                   }
-                   ~max_turns
-                   ~max_idle_turns
-                   ~temperature
-                   ~max_tokens
-                   ?max_cost_usd
-                   ?wait_timeout_sec:admission_wait_timeout_sec
-                   ?guardrails
-                   ?on_event
-                   ?on_yield
-                   ?on_resume
-                   ~agent_ref
-                   ?contract
-                   ?cli_transport_overrides
-                   ~allowed_paths:oas_allowed_paths
-                   ~cache_system_prompt:true
-                   ~yield_on_tool
-                   ~checkpoint_dir:session_dir
-                   ~context_injector
-                   ~context:shared_context
-                   ?slot_id:(Keeper_config.keeper_slot_id meta.name)
-                   ~approval:(Governance_pipeline.to_oas_approval_callback
-                                ~governance_level:(Env_config_core.governance_level ())
-                                ~keeper_name:meta.name)
-                   ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
-                   (* exit_condition removed with mutation_boundary — OAS runs to
-                      natural completion (max_turns or model end_turn). *)
-                   ?oas_checkpoint:raw_oas_checkpoint
-                   ?event_bus
-                   ())))
-      with
-      | Error e -> Error e
-      | Ok result ->
+    (* Phase 0: wake-time payload telemetry (Option C baseline).
+       Entire block is dead code when MASC_PAYLOAD_TELEMETRY is unset.
+       Compute logic lives in [Keeper_wake_telemetry] for unit tests;
+       exceptions from the telemetry path never abort the LLM call. *)
+    let () =
+      if Env_config_keeper.KeeperTelemetry.payload_telemetry_enabled () then
+        try
+          let sizes =
+            Keeper_wake_telemetry.compute_sizes
+              ~system_prompt:turn_system_prompt
+              ~tools
+              ~history_messages
+              ~user_message
+          in
+          let model_id =
+            match meta.models with
+            | m :: _ -> m
+            | [] -> "auto"
+          in
+          let _event : Dashboard_harness_health.wake_payload_event =
+            Dashboard_harness_health.record_wake_payload
+              ~keeper_name:meta.name
+              ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+              ~turn_index:start_turn_count
+              ~model_id
+              ~context_window:max_context
+              ~approx_body_bytes:sizes.approx_body_bytes
+              ~system_prompt_bytes:sizes.system_prompt_bytes
+              ~tool_defs_bytes:sizes.tool_defs_bytes
+              ~messages_bytes:sizes.messages_bytes
+              ~message_count:sizes.message_count
+              ~role_counts:sizes.role_counts
+              ~tool_count:sizes.tool_count
+              ~has_compact_happened:false
+          in
+          ()
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Harness.warn
+            "[wake_payload] telemetry failed keeper=%s: %s"
+            meta.name (Printexc.to_string exn)
+    in
+    (match
+       Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
+         Oas_worker.run_named
+           ~cascade_name
+           ~model_strings:meta.models
+           ?provider_filter
+           ~require_tool_choice_support
+           ~goal:user_message
+           ~priority
+           ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+           ~system_prompt:turn_system_prompt
+           ~tools
+           ~compact_ratio:meta.compaction.ratio_gate
+           ~initial_messages:history_messages
+           ~hooks
+           ~context_reducer:reducer
+           ~summarizer:Keeper_summarizer.keeper_summarizer
+           ~memory
+             (* Keepers use turn-level retry for transient errors but benefit
+               from OAS per-call retry for validation errors (malformed tool
+               args). retry_on_validation_error=true lets OAS re-prompt the
+               LLM with structured feedback instead of wasting a full turn.
+               retry_on_recoverable_tool_error remains false — tool-level
+               errors are handled by MASC's consecutive failure guardrail. *)
+           ~tool_retry_policy:{
+             Oas.Tool_retry_policy.max_retries = 2;
+             retry_on_validation_error = true;
+             retry_on_recoverable_tool_error = false;
+             feedback_style = Oas.Tool_retry_policy.Structured_tool_result;
+           }
+           ~max_turns
+           ~max_idle_turns
+           ~temperature
+           ~max_tokens
+           ?max_cost_usd
+           ?wait_timeout_sec:admission_wait_timeout_sec
+           ?guardrails
+           ?on_event
+           ?on_yield
+           ?on_resume
+           ~agent_ref
+           ?contract
+           ?cli_transport_overrides
+           ~allowed_paths:oas_allowed_paths
+           ~cache_system_prompt:true
+           ~yield_on_tool
+           ~checkpoint_dir:session_dir
+           ~context_injector
+           ~context:shared_context
+           ?slot_id:(Keeper_config.keeper_slot_id meta.name)
+           ~approval:(Governance_pipeline.to_oas_approval_callback
+                        ~governance_level:(Env_config_core.governance_level ())
+                        ~keeper_name:meta.name)
+           ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
+           (* exit_condition removed with mutation_boundary — OAS runs to
+              natural completion (max_turns or model end_turn). *)
+           ?oas_checkpoint:raw_oas_checkpoint
+           ?event_bus
+           ())
+     with
+     | Error e -> Error e
+     | Ok result ->
        let post_turn_t0 = Time_compat.now () in
        (* Checkpoint save is deferred until after [STATE] synthesis so the
            persisted checkpoint includes the synthesized continuity block.
@@ -2322,10 +2282,9 @@ let run_turn
              meta.name
              (String.concat ", " unexpected_tool_names);
          let actual_keeper_tool_names =
-           Keeper_tool_disclosure.final_keeper_tool_names
-             ~reported_tool_names
-             ~observed_tool_names
-             ~allowed_tool_names:all_tool_names
+           observed_tool_names
+           |> Keeper_tool_alias.canonicalize_observed
+           |> List.filter (fun tool_name -> List.mem tool_name all_tool_names)
          in
          let usage = Keeper_exec_context.usage_of_response result.response in
          let ctx_composition =

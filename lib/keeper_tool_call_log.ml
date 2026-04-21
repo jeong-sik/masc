@@ -27,6 +27,7 @@ type turn_context = {
   tool_choice: string option;
   thinking_enabled: bool option;
   thinking_budget: int option;
+  prompt_fingerprint: string option;
   trace_id: string option;
   session_id: string option;
   turn: int option;
@@ -37,6 +38,7 @@ let empty_turn_context = {
   tool_choice = None;
   thinking_enabled = None;
   thinking_budget = None;
+  prompt_fingerprint = None;
   trace_id = None;
   session_id = None;
   turn = None;
@@ -53,13 +55,14 @@ let consume_truncation_info ~keeper_name () =
   | None -> (0, None)
 
 let set_turn_context ~keeper_name ?lane ?tool_choice ?thinking_enabled
-    ?thinking_budget ?trace_id ?session_id ?turn () =
+    ?thinking_budget ?prompt_fingerprint ?trace_id ?session_id ?turn () =
   Hashtbl.replace pending_turn_context keeper_name
     {
       lane;
       tool_choice;
       thinking_enabled;
       thinking_budget;
+      prompt_fingerprint;
       trace_id;
       session_id;
       turn;
@@ -75,6 +78,7 @@ let get_turn_context ~keeper_name () =
   , ctx.tool_choice
   , ctx.thinking_enabled
   , ctx.thinking_budget
+  , ctx.prompt_fingerprint
   , ctx.trace_id
   , ctx.session_id
   , ctx.turn )
@@ -145,8 +149,8 @@ let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
 
 let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
     ~(output_text : string) ~(success : bool) ~(duration_ms : float)
-    ?(model : string = "") ?provider ?lane ?tool_choice ?thinking_enabled
-    ?thinking_budget ?trace_id ?session_id ?turn ?result_bytes ?truncated_to () =
+    ?(model : string = "") ?lane ?tool_choice ?thinking_enabled
+    ?thinking_budget ?prompt_fingerprint ?trace_id ?session_id ?turn ?result_bytes ?truncated_to () =
   if Observability_redact.is_denied_tool ~tool_name then ()
   else
     match !store_ref with
@@ -156,6 +160,7 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
           , ctx_tool_choice
           , ctx_thinking_enabled
           , ctx_thinking_budget
+          , ctx_prompt_fingerprint
           , ctx_trace_id
           , ctx_session_id
           , ctx_turn ) =
@@ -175,6 +180,11 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
         | Some _ -> thinking_budget
         | None -> ctx_thinking_budget
       in
+      let prompt_fingerprint =
+        match prompt_fingerprint with
+        | Some _ -> prompt_fingerprint
+        | None -> ctx_prompt_fingerprint
+      in
       let trace_id = match trace_id with Some _ -> trace_id | None -> ctx_trace_id in
       let session_id =
         match session_id with Some _ -> session_id | None -> ctx_session_id
@@ -182,12 +192,6 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
       let turn = match turn with Some _ -> turn | None -> ctx_turn in
       let model_field =
         if model = "" then [] else [("model", `String model)]
-      in
-      let provider_field =
-        match provider with
-        | Some value when String.trim value <> "" ->
-          [("provider", `String value)]
-        | _ -> []
       in
       let result_bytes_field = match result_bytes with
         | Some n -> [("result_bytes", `Int n)]
@@ -211,6 +215,10 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
       in
       let thinking_budget_field = match thinking_budget with
         | Some value -> [("thinking_budget", `Int value)]
+        | None -> []
+      in
+      let prompt_fingerprint_field = match prompt_fingerprint with
+        | Some value -> [("prompt_fingerprint", `String value)]
         | None -> []
       in
       let trace_id_field = match trace_id with
@@ -238,8 +246,9 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
            ; ("success", `Bool success)
            ; ("duration_ms", `Float duration_ms)
            ]
-           @ model_field @ provider_field @ lane_field @ tool_choice_field
+           @ model_field @ lane_field @ tool_choice_field
            @ thinking_enabled_field @ thinking_budget_field
+           @ prompt_fingerprint_field
            @ trace_id_field @ session_id_field @ turn_field
            @ result_bytes_field @ truncated_to_field)
       in

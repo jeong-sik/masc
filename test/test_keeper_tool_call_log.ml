@@ -115,16 +115,12 @@ let test_model_field_stored () =
       ~keeper_name:"k" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"ok"
       ~success:true ~duration_ms:2.0
-      ~model:"glm-4-9b" ~provider:"glm-coding" ();
+      ~model:"glm-4-9b" ();
     let entries = Keeper_tool_call_log.read_recent () in
     Alcotest.(check int) "one entry" 1 (List.length entries);
-    let entry = List.hd entries in
-    let entry_str = Yojson.Safe.to_string entry in
+    let entry_str = Yojson.Safe.to_string (List.hd entries) in
     Alcotest.(check bool) "model field present" true
-      (Observability_redact.contains_substring ~sub:"glm-4-9b" entry_str);
-    Alcotest.(check (option string)) "provider field present"
-      (Some "glm-coding")
-      (Safe_ops.json_string_opt "provider" entry))
+      (Observability_redact.contains_substring ~sub:"glm-4-9b" entry_str))
 
 let test_turn_context_fields_stored () =
   with_tmp_log (fun () ->
@@ -134,6 +130,7 @@ let test_turn_context_fields_stored () =
       ~tool_choice:"required"
       ~thinking_enabled:false
       ~thinking_budget:1024
+      ~prompt_fingerprint:"prompt-fp-k"
       ~trace_id:"trace-k"
       ~session_id:"trace-k"
       ~turn:7
@@ -157,6 +154,9 @@ let test_turn_context_fields_stored () =
        | _ -> false);
     Alcotest.(check int) "thinking_budget field" 1024
       (Safe_ops.json_int ~default:0 "thinking_budget" entry);
+    Alcotest.(check (option string)) "prompt_fingerprint field"
+      (Some "prompt-fp-k")
+      (Safe_ops.json_string_opt "prompt_fingerprint" entry);
     Alcotest.(check (option string)) "trace_id field"
       (Some "trace-k")
       (Safe_ops.json_string_opt "trace_id" entry);
@@ -187,6 +187,10 @@ let test_turn_context_fields_absent_without_context () =
        | _ -> false);
     Alcotest.(check bool) "thinking_budget absent" true
       (match Yojson.Safe.Util.member "thinking_budget" entry with
+       | `Null -> true
+       | _ -> false);
+    Alcotest.(check bool) "prompt_fingerprint absent" true
+      (match Yojson.Safe.Util.member "prompt_fingerprint" entry with
        | `Null -> true
        | _ -> false);
     Alcotest.(check bool) "trace_id absent" true

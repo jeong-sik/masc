@@ -198,6 +198,7 @@ export async function fetchWithTimeout(path: string, init: RequestInit, timeoutM
 
 const DASHBOARD_BOOTSTRAP_WARM_PATHS = new Set([
   '/api/v1/dashboard/shell',
+  '/api/v1/dashboard/project-snapshot',
   '/api/v1/dashboard/namespace-truth',
   '/api/v1/dashboard/room-truth',
   '/api/v1/dashboard/execution',
@@ -330,6 +331,7 @@ function bootstrapInitializingPayload(path: string): unknown | null {
         config_resolution: null,
         runtime_resolution: null,
       }
+    case '/api/v1/dashboard/project-snapshot':
     case '/api/v1/dashboard/namespace-truth':
     case '/api/v1/dashboard/room-truth':
       return {

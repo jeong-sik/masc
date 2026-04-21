@@ -76,7 +76,7 @@ let body_of_snapshot snapshot (summary : Meta_cognition.summary_input)
   let evidence_refs = String.concat ", " interpretation.evidence_refs in
   let lines =
     [
-      Some "namespace-truth promoted a meta-cognition signal into shared attention.";
+      Some "project snapshot promoted a meta-cognition signal into shared attention.";
       json_string_field_opt "reason" focus;
       Some
         (Printf.sprintf "primary signal: %s"

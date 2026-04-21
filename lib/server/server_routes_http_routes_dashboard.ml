@@ -302,6 +302,11 @@ let rec add_routes ~sw ~clock router =
                  (Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String "Invalid JSON body")])) reqd
            )
          ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/project-snapshot" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = dashboard_namespace_truth_http_json ~state ~sw ~clock req in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/namespace-truth" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_namespace_truth_http_json ~state ~sw ~clock req in

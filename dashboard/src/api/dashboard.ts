@@ -163,7 +163,7 @@ export function fetchDashboardConfig(): Promise<DashboardConfigResponse> {
 }
 
 export function fetchDashboardNamespaceTruth(opts?: AbortableRequestOptions): Promise<DashboardNamespaceTruthResponse> {
-  return get('/api/v1/dashboard/namespace-truth', {
+  return get('/api/v1/dashboard/project-snapshot', {
     timeoutMs: NAMESPACE_TRUTH_GET_TIMEOUT_MS,
     signal: opts?.signal,
   })

@@ -53,7 +53,7 @@ export function App() {
     initRouter()
 
     // Prime the lightweight shell status first so build/version metadata lands
-    // while namespace-truth warms heavier execution/command projections.
+    // while the project snapshot warms heavier execution/command projections.
     void refreshShell()
     requestNamespaceTruthNow()
 

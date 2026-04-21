@@ -9,6 +9,9 @@ const apiMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('./api', () => apiMocks)
+vi.mock('./api/dashboard', () => ({
+  fetchDashboardNamespaceTruth: apiMocks.fetchDashboardNamespaceTruth,
+}))
 
 afterEach(() => {
   vi.clearAllMocks()
@@ -16,7 +19,7 @@ afterEach(() => {
 })
 
 describe('refreshNamespaceTruth', () => {
-  it('hydrates build identity into serverStatus from namespace truth', async () => {
+  it('hydrates build identity into serverStatus from project snapshot', async () => {
     apiMocks.fetchDashboardNamespaceTruth.mockResolvedValue({
       generated_at: '2026-03-25T08:16:21Z',
       root: {
@@ -67,7 +70,7 @@ describe('refreshNamespaceTruth', () => {
     })
   }, 20000)
 
-  it('normalizes latest meta-cognition digest from namespace truth', async () => {
+  it('normalizes latest meta-cognition digest from project snapshot', async () => {
     apiMocks.fetchDashboardNamespaceTruth.mockResolvedValue({
       generated_at: '2026-03-25T08:16:21Z',
       root: {

@@ -547,6 +547,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                  ~status:`Bad_request ~extra_headers:cors
           )
 
+      | `GET, "/api/v1/dashboard/project-snapshot"
       | `GET, "/api/v1/dashboard/namespace-truth"
       | `GET, "/api/v1/dashboard/room-truth" ->
           let state = get_server_state () in

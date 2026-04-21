@@ -6,7 +6,7 @@ import {
 } from './runtime-counts'
 
 describe('resolveRuntimeCounts', () => {
-  it('uses namespace-truth counts while execution is still warming', () => {
+  it('uses project-snapshot counts while execution is still warming', () => {
     expect(resolveRuntimeCounts({
       executionLoaded: false,
       agentsCount: 0,
@@ -20,11 +20,11 @@ describe('resolveRuntimeCounts', () => {
       tasks: 12,
       totalRuntimes: 5,
       configuredKeepers: 5,
-      source: 'namespace-truth',
+      source: 'project-snapshot',
     })
   })
 
-  it('falls back to shell counts when namespace-truth is unavailable', () => {
+  it('falls back to shell counts when project-snapshot is unavailable', () => {
     expect(resolveRuntimeCounts({
       executionLoaded: false,
       agentsCount: 0,
@@ -72,7 +72,7 @@ describe('resolveRuntimeCounts', () => {
       tasks: 12,
       totalRuntimes: 5,
       configuredKeepers: 4,
-      source: 'namespace-truth',
+      source: 'project-snapshot',
     })
   })
 })
@@ -80,7 +80,7 @@ describe('resolveRuntimeCounts', () => {
 describe('runtimeCountSourceLabel', () => {
   it('maps count source ids to user-facing labels', () => {
     expect(runtimeCountSourceLabel('execution')).toBe('execution 상세')
-    expect(runtimeCountSourceLabel('namespace-truth')).toBe('namespace-truth')
+    expect(runtimeCountSourceLabel('project-snapshot')).toBe('project snapshot')
     expect(runtimeCountSourceLabel('shell')).toBe('shell')
   })
 })

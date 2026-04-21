@@ -64,6 +64,72 @@ describe('normalizeNamespaceTruth', () => {
     expect(status!.version).toBe('1.0.0')
   })
 
+  it('reuses the shared server-status normalizer for shell-derived truth fields', () => {
+    const result = normalizeNamespaceTruth({
+      root: {
+        status: {
+          coordination_root: '/path/to/root',
+          workspace_path: '/path/to/ws',
+          version: '1.0.0',
+          generated_at: '2026-04-17T10:00:00Z',
+          build: {
+            release_version: '1.0.0',
+            commit: '2897da06',
+            started_at: '2026-04-17T09:50:00Z',
+            uptime_seconds: 600,
+          },
+          tempo: 'steady',
+          tool_call_health: {
+            window_hours: 6,
+            tool_calls: 42,
+            failures: 3,
+            failure_rate: 0.071,
+            since_epoch: 1775000000,
+            distinct_tools: 8,
+          },
+          alert_thresholds: {
+            proactive_fallback_warn: 0.15,
+            proactive_fallback_bad: 0.3,
+            proactive_similarity_warn: 0.25,
+            proactive_similarity_bad: 0.5,
+            toast_cooldown_sec: 120,
+          },
+          monitoring: {
+            board: {
+              stale_posts: 2,
+            },
+          },
+          data_quality: {
+            board_contract_ok: true,
+            governance_feed_ok: false,
+            last_sync_at: '2026-04-17T09:55:00Z',
+          },
+        },
+      },
+    })
+
+    expect(result.root.status).toMatchObject({
+      tempo: 'steady',
+      tool_call_health: {
+        tool_calls: 42,
+        distinct_tools: 8,
+      },
+      alert_thresholds: {
+        toast_cooldown_sec: 120,
+      },
+      monitoring: {
+        board: {
+          stale_posts: 2,
+        },
+      },
+      data_quality: {
+        board_contract_ok: true,
+        governance_feed_ok: false,
+        last_sync_at: '2026-04-17T09:55:00Z',
+      },
+    })
+  })
+
   it('extracts root.counts', () => {
     const result = normalizeNamespaceTruth({
       root: {
@@ -354,7 +420,7 @@ describe('normalizeNamespaceTruth', () => {
 
   // ── full integration ──
 
-  it('parses a full namespace truth response', () => {
+  it('parses a full project snapshot response', () => {
     const result = normalizeNamespaceTruth({
       generated_at: '2026-04-17T12:00:00Z',
       root: {

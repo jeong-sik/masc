@@ -120,4 +120,32 @@ describe('setupSSEReaction reconnect hydration', () => {
     vi.clearAllTimers()
     cleanup()
   })
+
+  it('hydrates the canonical project_snapshot SSE event without an HTTP fetch', async () => {
+    const { sseStore, sse } = await loadSseStore()
+    const cleanup = sseStore.setupSSEReaction()
+
+    sse.lastEvent.value = {
+      type: 'project_snapshot',
+      payload: {
+        root: {
+          status: {
+            project: 'default',
+          },
+        },
+      },
+    }
+    await flushAsyncWork()
+
+    expect(namespaceTruth.value).toEqual({
+      root: {
+        status: {
+          project: 'default',
+        },
+      },
+    })
+    expect(requestNamespaceTruthNow).not.toHaveBeenCalled()
+
+    cleanup()
+  })
 })

@@ -64,6 +64,7 @@ export type SSEEventType =
   // newer runtime bridges do not get dropped at the schema boundary.
   | `oas:${string}`
   // Server-push snapshot events (proactive cache broadcasts)
+  | 'project_snapshot'
   | 'room_truth_snapshot'
   | 'namespace_truth_snapshot'
   | 'execution_snapshot'

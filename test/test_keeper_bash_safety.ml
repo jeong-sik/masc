@@ -319,6 +319,7 @@ let test_docker_blocks_nested_docker_command () =
   let meta = make_docker_meta "docker-nested" in
   let raw =
     Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_runtime:None
       ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "docker run --rm alpine true") ])
   in
@@ -338,6 +339,7 @@ let test_docker_blocks_docker_socket_reference () =
   let meta = make_docker_meta "docker-sock" in
   let raw =
     Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_runtime:None
       ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "cat /var/run/docker.sock") ])
   in
@@ -360,6 +362,7 @@ let test_docker_missing_seccomp_profile_fails_closed () =
     (fun () ->
       let raw =
         Keeper_exec_shell.handle_keeper_bash
+          ~turn_sandbox_runtime:None
           ~config ~meta
           ~args:(`Assoc [ ("cmd", `String "pwd") ])
       in
@@ -433,6 +436,7 @@ let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
   in
   let raw =
     Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_runtime:None
       ~config ~meta
       ~args:(`Assoc [
         ("op", `String "ls");
@@ -455,6 +459,7 @@ let test_readonly_chaining_hint_lists_subops () =
   let meta = make_readonly_meta "chain-hint" in
   let raw =
     Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_runtime:None
       ~config ~meta
       ~args:(`Assoc [
         ("op", `String "bash");
@@ -483,6 +488,7 @@ let test_readonly_redirect_hint_points_at_fs_edit () =
   let meta = make_readonly_meta "redirect-hint" in
   let raw =
     Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_runtime:None
       ~config ~meta
       ~args:(`Assoc [
         ("op", `String "bash");

@@ -181,7 +181,7 @@ let assert_docker_route_fires ~config ~meta ~playground =
   List.iter
     (fun (op, args) ->
       let raw =
-        Keeper_exec_shell.handle_keeper_shell ~config ~meta ~args
+        Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta ~args
       in
       Alcotest.(check bool)
         (Printf.sprintf "%s surfaces docker image config error (docker route fired)" op)
@@ -209,7 +209,7 @@ let test_cat_legacy_keeper_skips_docker () =
   ensure_dir (Filename.dirname host_path);
   ignore (Fs_compat.save_file_atomic host_path "matrix");
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String host_path) ])
   in
   Alcotest.(check bool)
@@ -227,7 +227,7 @@ let test_cat_flag_off_skips_docker () =
   ensure_dir (Filename.dirname host_path);
   ignore (Fs_compat.save_file_atomic host_path "matrix");
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String host_path) ])
   in
   Alcotest.(check bool)
@@ -270,7 +270,7 @@ let test_rg_no_match_remains_successful_in_docker_route () =
   ensure_dir (Filename.dirname host_path);
   ignore (Fs_compat.save_file_atomic host_path "alpha\nbeta\ngamma\n");
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
       ~args:
         (`Assoc
             [

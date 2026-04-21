@@ -8,6 +8,7 @@
 
 module Coord = Masc_mcp.Coord
 module Keeper_docker_read = Masc_mcp.Keeper_docker_read
+module Keeper_turn_sandbox_runtime = Masc_mcp.Keeper_turn_sandbox_runtime
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
@@ -45,6 +46,19 @@ let write_file path content =
   let oc = open_out_bin path in
   Fun.protect ~finally:(fun () -> close_out oc) @@ fun () ->
   output_string oc content
+
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
+  really_input_string ic (in_channel_length ic)
+
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else (
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    Unix.mkdir path 0o755)
 
 let make_meta ~name ~sandbox =
   let json =
@@ -317,6 +331,33 @@ done\n\
 printf '%s\\n' \"$*\"\n\
 exit 0\n"
 
+let fake_docker_turn_runtime_script =
+  "#!/bin/sh\n\
+log_file=${KEEPER_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+case \"$1\" in\n\
+  info)\n\
+    printf '[]\\n'\n\
+    exit 0\n\
+    ;;\n\
+  run)\n\
+    printf 'runtime-container\\n'\n\
+    exit 0\n\
+    ;;\n\
+  exec)\n\
+    printf 'exec ok\\n'\n\
+    exit 0\n\
+    ;;\n\
+  rm)\n\
+    printf 'removed\\n'\n\
+    exit 0\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
 let test_run_command_nonzero_exit_errors_by_default () =
   with_fake_docker fake_docker_exit_1_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -387,6 +428,60 @@ let test_run_command_preserves_bare_command_argv () =
       Alcotest.(check string) "preserves bare head argv"
         "head -n 1 /home/keeper/playground/minjae/mind/demo.txt\n" out
 
+let test_turn_runtime_reuses_single_container () =
+  with_fake_docker fake_docker_turn_runtime_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  let log_path = Filename.concat base "docker.log" in
+  let host_root =
+    Filename.concat (Keeper_alerting_path.project_root_of_config config)
+      (Keeper_alerting_path.playground_path_of_keeper meta.name)
+  in
+  ensure_dir host_root;
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta in
+  Fun.protect ~finally:(fun () ->
+    Keeper_turn_sandbox_runtime.cleanup runtime;
+    cleanup_dir base) @@ fun () ->
+  let run_once () =
+    match
+      Keeper_docker_read.run_command_in_container_with_status
+        ~turn_sandbox_runtime:runtime
+        ~config ~meta
+        ~command_argv:[ "cat"; "/home/keeper/playground/minjae/mind/demo.txt" ]
+        ~max_bytes:4096 ~timeout_sec:5.0 ()
+    with
+    | Error msg -> Alcotest.failf "expected turn runtime command success, got %s" msg
+    | Ok (st, out) ->
+        Alcotest.(check (pair string int)) "runtime exec exits cleanly"
+          ("exit", 0)
+          (match st with
+           | Unix.WEXITED code -> ("exit", code)
+           | Unix.WSIGNALED code -> ("signaled", code)
+           | Unix.WSTOPPED code -> ("stopped", code));
+        Alcotest.(check string) "runtime exec output preserved" "exec ok\n" out
+  in
+  run_once ();
+  run_once ();
+  Keeper_turn_sandbox_runtime.cleanup runtime;
+  let lines =
+    read_file log_path
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> String.trim line <> "")
+  in
+  let count prefix =
+    List.fold_left
+      (fun acc line ->
+        if String.starts_with ~prefix line then acc + 1 else acc)
+      0 lines
+  in
+  Alcotest.(check int) "docker run happens once" 1 (count "run -d ");
+  Alcotest.(check int) "docker exec happens twice" 2 (count "exec ");
+  Alcotest.(check int) "docker rm happens once" 1 (count "rm -f ")
+
 let () =
   Alcotest.run "Keeper_docker_read"
     [
@@ -431,5 +526,7 @@ let () =
             test_run_command_allows_configured_nonzero_exit;
           Alcotest.test_case "preserves bare command argv" `Quick
             test_run_command_preserves_bare_command_argv;
+          Alcotest.test_case "turn runtime reuses single container" `Quick
+            test_turn_runtime_reuses_single_container;
         ] );
     ]

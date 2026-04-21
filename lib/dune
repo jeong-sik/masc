@@ -426,6 +426,7 @@
    keeper_alerting_path
    keeper_sandbox_containment
    keeper_sandbox_runtime
+   keeper_turn_sandbox_runtime
    keeper_docker_read
    keeper_timing
    keeper_tool_registry
@@ -685,6 +686,7 @@
   keeper_alerting_path
   keeper_sandbox_containment
   keeper_sandbox_runtime
+  keeper_turn_sandbox_runtime
   keeper_docker_read
   ;; tool_local_runtime sub-modules
   tool_local_runtime_http

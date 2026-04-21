@@ -11,12 +11,14 @@ val all_fs_write_modes : fs_write_mode list
 val valid_fs_write_mode_strings : string list
 
 val handle_keeper_fs_read :
+  turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   args:Yojson.Safe.t ->
   string
 
 val handle_keeper_fs_edit :
+  turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   args:Yojson.Safe.t ->

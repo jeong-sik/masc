@@ -51,6 +51,7 @@ let is_missing_read_path_error (e : string) =
   || String.starts_with ~prefix:"path_not_found_under_allowed_roots:" e
 
 let handle_keeper_fs_read
+      ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -89,7 +90,7 @@ let handle_keeper_fs_read
     if Keeper_docker_read.should_route_read ~meta then
       let timeout_sec = 30.0 in
       match
-        Keeper_docker_read.read_file_in_container ~config ~meta
+        Keeper_docker_read.read_file_in_container ?turn_sandbox_runtime ~config ~meta
           ~host_path:target ~max_bytes ~timeout_sec ()
       with
       | Error msg ->
@@ -174,6 +175,7 @@ let apply_patch ~old_string ~new_string ~replace_all text =
       Ok (Buffer.contents buf, occurrences)
 
 let handle_keeper_fs_edit
+      ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -220,7 +222,17 @@ let handle_keeper_fs_edit
               | Error msg ->
                 error_json ~fields:[ "path", `String target ] msg
               | Ok (updated, occurrences) ->
-                Fs_compat.save_file target updated;
+                (match turn_sandbox_runtime with
+                 | Some runtime ->
+                   (match
+                      Keeper_turn_sandbox_runtime.overwrite_file runtime
+                        ~host_path:target ~content:updated
+                        ~timeout_sec:30.0 ()
+                    with
+                    | Ok () -> ()
+                    | Error msg -> raise (Sys_error msg))
+                 | None ->
+                   Fs_compat.save_file target updated);
                 Log.Keeper.info
                   "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=patch \
                    replace_all=%b occurrences=%d bytes=%d"
@@ -251,12 +263,31 @@ let handle_keeper_fs_edit
   | Error e -> error_json e
   | Ok target ->
     (try
-       let parent = Filename.dirname target in
-       Fs_compat.mkdir_p parent;
-       (match mode with
-        | Append -> Fs_compat.append_file target content
-        | Overwrite -> Fs_compat.save_file target content
-        | Patch -> ()  (* unreachable: caught above *));
+       (match turn_sandbox_runtime with
+        | Some runtime ->
+          (match mode with
+           | Append ->
+             (match
+                Keeper_turn_sandbox_runtime.append_file runtime
+                  ~host_path:target ~content ~timeout_sec:30.0 ()
+              with
+              | Ok () -> ()
+              | Error msg -> raise (Sys_error msg))
+           | Overwrite ->
+             (match
+                Keeper_turn_sandbox_runtime.overwrite_file runtime
+                  ~host_path:target ~content ~timeout_sec:30.0 ()
+              with
+              | Ok () -> ()
+              | Error msg -> raise (Sys_error msg))
+           | Patch -> ())
+        | None ->
+          let parent = Filename.dirname target in
+          Fs_compat.mkdir_p parent;
+          (match mode with
+           | Append -> Fs_compat.append_file target content
+           | Overwrite -> Fs_compat.save_file target content
+           | Patch -> ()  (* unreachable: caught above *)));
        Log.Keeper.info "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d"
          meta.name target mode_label
          (String.length content);

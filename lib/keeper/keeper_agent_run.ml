@@ -741,8 +741,8 @@ let run_turn
               (fun (e : Keeper_tool_affinity.affinity_entry) ->
                  Printf.sprintf "%s(%.1f)" e.tool_name e.score)
               entries)));
-  let keeper_tools =
-    Keeper_tools_oas.make_tools
+  let keeper_tool_bundle =
+    Keeper_tools_oas.make_tool_bundle
       ~config
       ~meta
       ~ctx_snapshot
@@ -752,7 +752,7 @@ let run_turn
       ()
   in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
-  let tools = extend_turns_tool :: keeper_tools in
+  let tools = extend_turns_tool :: keeper_tool_bundle.tools in
   let tool_usage_before =
     Keeper_tool_disclosure.keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
   in
@@ -890,7 +890,7 @@ let run_turn
     }
   in
   let tool_entries =
-    List.map (tool_index_entry_of_tool ~korean_kw_tbl) keeper_tools
+    List.map (tool_index_entry_of_tool ~korean_kw_tbl) keeper_tool_bundle.tools
   in
   (* Full-universe search index for keeper_tool_search.
      Separate from the preset-scoped Tool_selector used for progressive disclosure:
@@ -909,7 +909,7 @@ let run_turn
     let preset_tools =
       List.filter
         (fun (t : Agent_sdk.Tool.t) -> Hashtbl.mem preset_set t.schema.name)
-        keeper_tools
+        keeper_tool_bundle.tools
     in
     let progressive_tool_index_config =
       { Agent_sdk.Tool_index.default_config with
@@ -926,17 +926,17 @@ let run_turn
      Two maps: description (string) and full schema (tool_schema).
      Covers both keeper_* and masc_* tools from the OAS Tool.t list. *)
   let oas_description_map =
-    let tbl = Hashtbl.create (List.length keeper_tools) in
+    let tbl = Hashtbl.create (List.length keeper_tool_bundle.tools) in
     List.iter
       (fun (t : Agent_sdk.Tool.t) ->
          Hashtbl.replace tbl t.schema.name t.schema.description)
-      keeper_tools;
+      keeper_tool_bundle.tools;
     tbl
   in
   (* Map tool name → OAS input_schema JSON for keeper_tool_search enrichment.
      Covers keeper_* tools that don't appear in masc_schemas_ref. *)
   let oas_input_schema_map =
-    let tbl = Hashtbl.create (List.length keeper_tools) in
+    let tbl = Hashtbl.create (List.length keeper_tool_bundle.tools) in
     List.iter
       (fun (t : Agent_sdk.Tool.t) ->
          let param_type_str (pt : Agent_sdk.Types.param_type) =
@@ -971,7 +971,7 @@ let run_turn
              ]
          in
          Hashtbl.replace tbl t.schema.name schema)
-      keeper_tools;
+      keeper_tool_bundle.tools;
     tbl
   in
   (* Wire keeper_tool_search: update session-local ref with the real BM25 impl.
@@ -1114,7 +1114,7 @@ let run_turn
     Log.Keeper.debug
       "keeper:%s tool visibility: total=%d search_indexed=%d"
       meta.name
-      (List.length keeper_tools)
+      (List.length keeper_tool_bundle.tools)
       (List.length tool_entries);
   (* Layer 0: Core tools — always visible to the LLM regardless of preset.
      Kept to 5 survival-critical tools (#4961).  Status and other coordination tools
@@ -1127,7 +1127,10 @@ let run_turn
      this includes all candidate tools minus denied.  BM25 retrieval
      and Tool_op.Add operate within this scope. *)
   let all_tool_names =
-    "extend_turns" :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
+    "extend_turns"
+    :: List.map
+         (fun (t : Agent_sdk.Tool.t) -> t.schema.name)
+         keeper_tool_bundle.tools
   in
   (* Precompute membership table for AllowList validation below.
      all_tool_names is constant for the session; building universe_set
@@ -2085,46 +2088,49 @@ let run_turn
             meta.name (Printexc.to_string exn)
     in
     (match
-       Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
-         Oas_worker.run_named
-           ~cascade_name
-           ~model_strings:meta.models
-           ?provider_filter
-           ~require_tool_choice_support
-           ~goal:user_message
-           ~priority
-           ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-           ~system_prompt:turn_system_prompt
-           ~tools
-           ~compact_ratio:meta.compaction.ratio_gate
-           ~initial_messages:history_messages
-           ~hooks
-           ~context_reducer:reducer
-           ~summarizer:Keeper_summarizer.keeper_summarizer
-           ~memory
-             (* Keepers use turn-level retry for transient errors but benefit
-               from OAS per-call retry for validation errors (malformed tool
-               args). retry_on_validation_error=true lets OAS re-prompt the
-               LLM with structured feedback instead of wasting a full turn.
-               retry_on_recoverable_tool_error remains false — tool-level
-               errors are handled by MASC's consecutive failure guardrail. *)
-           ~tool_retry_policy:{
-             Oas.Tool_retry_policy.max_retries = 2;
-             retry_on_validation_error = true;
-             retry_on_recoverable_tool_error = false;
-             feedback_style = Oas.Tool_retry_policy.Structured_tool_result;
-           }
-           ~max_turns
-           ~max_idle_turns
-           ~temperature
-           ~max_tokens
-           ?max_cost_usd
-           ?wait_timeout_sec:admission_wait_timeout_sec
-           ?guardrails
-           ?on_event
-           ?on_yield
-           ?on_resume
-           ~agent_ref
+       Fun.protect
+         ~finally:keeper_tool_bundle.cleanup
+         (fun () ->
+           Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
+             Oas_worker.run_named
+               ~cascade_name
+               ~model_strings:meta.models
+               ?provider_filter
+               ~require_tool_choice_support
+               ~goal:user_message
+               ~priority
+               ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+               ~system_prompt:turn_system_prompt
+               ~tools
+               ~compact_ratio:meta.compaction.ratio_gate
+               ~initial_messages:history_messages
+               ~hooks
+               ~context_reducer:reducer
+               ~summarizer:Keeper_summarizer.keeper_summarizer
+               ~memory
+                 (* Keepers use turn-level retry for transient errors but benefit
+                   from OAS per-call retry for validation errors (malformed tool
+                   args). retry_on_validation_error=true lets OAS re-prompt the
+                   LLM with structured feedback instead of wasting a full turn.
+                   retry_on_recoverable_tool_error remains false — tool-level
+                   errors are handled by MASC's consecutive failure guardrail. *)
+               ~tool_retry_policy:{
+                 Oas.Tool_retry_policy.max_retries = 2;
+                 retry_on_validation_error = true;
+                 retry_on_recoverable_tool_error = false;
+                 feedback_style = Oas.Tool_retry_policy.Structured_tool_result;
+               }
+               ~max_turns
+               ~max_idle_turns
+               ~temperature
+               ~max_tokens
+               ?max_cost_usd
+               ?wait_timeout_sec:admission_wait_timeout_sec
+               ?guardrails
+               ?on_event
+               ?on_yield
+               ?on_resume
+               ~agent_ref
            ?contract
            ?cli_transport_overrides
            ~allowed_paths:oas_allowed_paths
@@ -2143,6 +2149,7 @@ let run_turn
            ?oas_checkpoint:raw_oas_checkpoint
            ?event_bus
            ())
+         )
      with
      | Error e -> Error e
      | Ok result ->
@@ -2281,9 +2288,10 @@ let run_turn
              meta.name
              (String.concat ", " unexpected_tool_names);
          let actual_keeper_tool_names =
-           observed_tool_names
-           |> Keeper_tool_alias.canonicalize_observed
-           |> List.filter (fun tool_name -> List.mem tool_name all_tool_names)
+           Keeper_tool_disclosure.final_keeper_tool_names
+             ~reported_tool_names
+             ~observed_tool_names
+             ~allowed_tool_names:all_tool_names
          in
          let usage = Keeper_exec_context.usage_of_response result.response in
          let ctx_composition =

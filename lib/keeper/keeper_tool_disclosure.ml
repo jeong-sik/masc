@@ -41,6 +41,19 @@ let merge_reported_and_observed_tool_names
         reported_tool_names
 ;;
 
+let final_keeper_tool_names
+      ~(reported_tool_names : string list)
+      ~(observed_tool_names : string list)
+      ~(allowed_tool_names : string list)
+  : string list
+  =
+  merge_reported_and_observed_tool_names
+    ~reported_tool_names
+    ~observed_tool_names
+  |> Keeper_tool_alias.canonicalize_observed
+  |> List.filter (fun tool_name -> List.mem tool_name allowed_tool_names)
+;;
+
 let unexpected_tool_names
       ~(allowed_tool_names : string list)
       ~(tool_names : string list)

@@ -79,6 +79,38 @@ let container_missing_error out =
   String_util.contains_substring_ci out "no such container"
   || String_util.contains_substring_ci out "is not running"
 
+let run_argv_with_status_retry_eintr ~timeout_sec argv =
+  let max_eintr_retries = 8 in
+  let rec loop attempts_left =
+    let st, out =
+      Process_eio.run_argv_with_status
+        ~cwd:(Sys.getcwd ()) ~timeout_sec argv
+    in
+    match st with
+    | Unix.WEXITED 127
+      when attempts_left > 0
+           && String_util.contains_substring_ci out "interrupted system call" ->
+        loop (attempts_left - 1)
+    | _ -> st, out
+  in
+  loop max_eintr_retries
+
+let run_argv_with_stdin_and_status_retry_eintr ~timeout_sec ~stdin_content argv =
+  let max_eintr_retries = 8 in
+  let rec loop attempts_left =
+    let st, out =
+      Process_eio.run_argv_with_stdin_and_status
+        ~cwd:(Sys.getcwd ()) ~timeout_sec ~stdin_content argv
+    in
+    match st with
+    | Unix.WEXITED 127
+      when attempts_left > 0
+           && String_util.contains_substring_ci out "interrupted system call" ->
+        loop (attempts_left - 1)
+    | _ -> st, out
+  in
+  loop max_eintr_retries
+
 let start_container (t : t) ~(timeout_sec : float) =
   let image = Env_config_keeper.KeeperSandbox.docker_image () in
   if String.trim image = "" then
@@ -124,10 +156,7 @@ let start_container (t : t) ~(timeout_sec : float) =
               "trap : TERM INT; while :; do sleep 3600; done";
             ]
         in
-        let st, out =
-          Process_eio.run_argv_with_status
-            ~cwd:(Sys.getcwd ()) ~timeout_sec argv
-        in
+        let st, out = run_argv_with_status_retry_eintr ~timeout_sec argv in
         match st with
         | Unix.WEXITED 0 ->
             t.state <- Running { container_name };
@@ -167,11 +196,9 @@ let run_exec_with_status_once
       let st, out =
         match stdin_content with
         | Some content ->
-            Process_eio.run_argv_with_stdin_and_status
-              ~cwd:(Sys.getcwd ()) ~timeout_sec ~stdin_content:content argv
-        | None ->
-            Process_eio.run_argv_with_status
-              ~cwd:(Sys.getcwd ()) ~timeout_sec argv
+            run_argv_with_stdin_and_status_retry_eintr
+              ~timeout_sec ~stdin_content:content argv
+        | None -> run_argv_with_status_retry_eintr ~timeout_sec argv
       in
       Ok (st, out)
 
@@ -259,8 +286,5 @@ let cleanup (t : t) =
   | Running { container_name } ->
       t.state <- Not_started;
       let argv = [ "docker"; "rm"; "-f"; container_name ] in
-      let _st, _out =
-        Process_eio.run_argv_with_status
-          ~cwd:(Sys.getcwd ()) ~timeout_sec:5.0 argv
-      in
+      let _st, _out = run_argv_with_status_retry_eintr ~timeout_sec:5.0 argv in
       ()

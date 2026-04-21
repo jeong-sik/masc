@@ -307,6 +307,45 @@ let test_legacy_runtime_wrapper_does_not_fallback_to_defaults () =
     []
     (Cascade_runtime.models_of_cascade_name "missing_profile")
 
+let test_legacy_runtime_wrapper_preserves_configured_label_order () =
+  with_temp_dir "cascade-runtime-order" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  with_eio @@ fun ~sw ~net ~clock ~fs:_ ~proc_mgr:_ ->
+  let port = find_free_port () in
+  let base_url, _request_count =
+    start_counting_mock ~sw ~net ~port
+      ~response:(openai_text_response "pong")
+  in
+  let alpha_model = Printf.sprintf "custom:alpha@%s/v1" base_url in
+  let beta_model = Printf.sprintf "custom:beta@%s/v1" base_url in
+  let gamma_model = Printf.sprintf "custom:gamma@%s/v1" base_url in
+  let expected = [ alpha_model; beta_model; gamma_model ] in
+  ignore
+    (write_cascade_json config_dir
+       (Printf.sprintf
+          {|{
+  "keeper_unified_models": [
+    {"model": "%s", "weight": 2},
+    {"model": "%s", "weight": 2},
+    {"model": "%s", "weight": 2}
+  ]
+}|}
+          alpha_model beta_model gamma_model));
+  ignore (Cascade_catalog_runtime.inspect_active ~sw ~net ~clock ());
+  let observed_orders =
+    List.init 8 (fun _ ->
+        Cascade_runtime.models_of_cascade_name Keeper_config.default_cascade_name)
+  in
+  check (list string) "legacy wrapper keeps configured order" expected
+    (List.hd observed_orders);
+  check int "legacy wrapper order is stable across calls" 1
+    (observed_orders
+    |> List.map (String.concat "\n")
+    |> List.sort_uniq String.compare
+    |> List.length)
+
 let test_partial_catalog_keeps_validated_subset_available () =
   with_temp_dir "dashboard-cascade-profiles" @@ fun dir ->
   let config_dir = Filename.concat dir "config" in
@@ -504,6 +543,10 @@ let () =
             "legacy runtime wrapper does not fallback to defaults"
             `Quick
             test_legacy_runtime_wrapper_does_not_fallback_to_defaults;
+          test_case
+            "legacy runtime wrapper preserves configured label order"
+            `Quick
+            test_legacy_runtime_wrapper_preserves_configured_label_order;
           test_case
             "partial catalog keeps validated subset available"
             `Quick

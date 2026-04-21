@@ -226,6 +226,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
           cache_n: asNumber(rawTimings.cache_n) ?? null,
         } : null,
         reasoning_tokens: asNumber(rawTel.reasoning_tokens) ?? null,
+        peak_memory_gb: asNumber(rawTel.peak_memory_gb) ?? null,
         request_latency_ms: asNumber(rawTel.request_latency_ms) ?? 0,
       } : null
       const cascadeObj = isRecord(item.cascade) ? item.cascade : null

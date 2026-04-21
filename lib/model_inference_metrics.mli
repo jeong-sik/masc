@@ -11,6 +11,8 @@ type recent_entry = {
   re_input_tokens : int;
   re_output_tokens : int;
   re_latency_ms : float;
+  re_prompt_tok_per_sec : float option;
+  re_peak_memory_gb : float option;
   re_cost_usd : float;
   re_tools_count : int;
 }
@@ -43,9 +45,13 @@ type model_stats = {
   avg_tok_per_sec : float;
   p50_tok_per_sec : float;
   p95_tok_per_sec : float;
+  prompt_avg_tok_per_sec : float option;
+  prompt_p50_tok_per_sec : float option;
+  prompt_p95_tok_per_sec : float option;
   hw_decode_avg_tok_per_sec : float option;
   hw_decode_p50_tok_per_sec : float option;
   hw_decode_p95_tok_per_sec : float option;
+  max_peak_memory_gb : float option;
   thinking_fraction : float option;
     (** Fraction [0.0, 1.0] of turns in window where the model was sent
         think=true (Keeper_turn_intent adaptive classifier decision).

@@ -11,6 +11,7 @@ let active_names =
     "keeper_unified";
     "sangsu";
     "local_only";
+    "local_mlx_vlm_qwen36";
     "local_recovery";
     "tool_rerank";
     "nick0cave";

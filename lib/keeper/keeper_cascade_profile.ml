@@ -10,6 +10,7 @@ type t =
   | Keeper_unified
   | Sangsu
   | Local_only
+  | Local_mlx_vlm_qwen36
   | Local_recovery
   | Tool_rerank
   | Nick0cave
@@ -26,6 +27,7 @@ let to_string = function
   | Keeper_unified -> "keeper_unified"
   | Sangsu -> "sangsu"
   | Local_only -> "local_only"
+  | Local_mlx_vlm_qwen36 -> "local_mlx_vlm_qwen36"
   | Local_recovery -> "local_recovery"
   | Tool_rerank -> "tool_rerank"
   | Nick0cave -> "nick0cave"
@@ -38,7 +40,8 @@ let to_string = function
   | Resilient_breaker -> "resilient_breaker"
 
 let all =
-  [ Default; Keeper_unified; Sangsu; Local_only; Local_recovery; Tool_rerank;
+  [ Default; Keeper_unified; Sangsu; Local_only; Local_mlx_vlm_qwen36;
+    Local_recovery; Tool_rerank;
     Nick0cave; Capacity_queue_trio; Vendor_mix_balanced; Cost_tier_ladder;
     Oauth_cli_rotate; Quality_sticky_glm51; Tool_use_strict; Resilient_breaker ]
 
@@ -64,6 +67,7 @@ let of_string_opt (raw : string) : t option =
   | "keeper_turn" | "keeper_reply" -> Some default
   | "sangsu" -> Some Sangsu
   | "local_only" -> Some Local_only
+  | "local_mlx_vlm_qwen36" -> Some Local_mlx_vlm_qwen36
   | "local_recovery" -> Some Local_recovery
   | "tool_rerank" -> Some Tool_rerank
   | "nick0cave" -> Some Nick0cave

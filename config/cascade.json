@@ -26,6 +26,13 @@
   "local_only_temperature": 0.2,
   "local_only_max_tokens": 32768,
 
+  "_comment_local_mlx_vlm_qwen36": "Local OpenAI-compatible mlx-vlm endpoint for Huihui Qwen3.6 35B. Keep repo profile limited to the canonical localhost endpoint and let OAS parser surface mlx-vlm telemetry fields.",
+  "local_mlx_vlm_qwen36_models": [
+    "custom:mlx-community/Huihui-Qwen3.6-35B-A3B-abliterated-4.4bit-msq@http://127.0.0.1:18080/v1"
+  ],
+  "local_mlx_vlm_qwen36_temperature": 0.2,
+  "local_mlx_vlm_qwen36_max_tokens": 16384,
+
   "local_recovery_models": [
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],

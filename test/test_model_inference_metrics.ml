@@ -46,12 +46,22 @@ let write_decisions path entries =
 let now_unix () = Unix.gettimeofday ()
 
 let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
-    ?(latency_ms=500) ?(cost_usd=0.01) ?(tools_used=[]) () =
+    ?(latency_ms=500) ?prompt_per_second ?peak_memory_gb
+    ?(cost_usd=0.01) ?(tools_used=[]) () =
+  let extra_telemetry_fields =
+    (match prompt_per_second with
+     | Some v -> [("prompt_per_second", `Float v)]
+     | None -> [])
+    @
+    (match peak_memory_gb with
+     | Some v -> [("peak_memory_gb", `Float v)]
+     | None -> [])
+  in
   `Assoc [
     ("ts_unix", `Float ts);
     ("tool_call_count", `Int (List.length tools_used));
     ("tools_used", `List (List.map (fun s -> `String s) tools_used));
-    ("telemetry", `Assoc [
+    ("telemetry", `Assoc ([
       ("model_used", `String model);
       ("tokens_per_second", `Float (Float.of_int output_tokens /. (Float.of_int latency_ms /. 1000.0)));
       ("request_latency_ms", `Int latency_ms);
@@ -61,7 +71,7 @@ let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
       ("reasoning_tokens", `Int 0);
       ("fallback_applied", `Bool false);
       ("cost_usd", `Float cost_usd);
-    ]);
+    ] @ extra_telemetry_fields));
   ]
 
 let error_entry ~cascade_name ~ts () =
@@ -231,6 +241,46 @@ let test_json_roundtrip () =
       (match m |> member "recent_entries" with `List _ -> true | _ -> false);
     check int "total_error_entries" 0
       (json |> member "total_error_entries" |> to_int))
+
+let test_prompt_tps_and_peak_memory_aggregates () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "mlx_vlm" in
+    let ts = now_unix () in
+    write_decisions path [
+      success_entry ~model:"mlx-vlm" ~ts:(ts -. 15.0)
+        ~prompt_per_second:1200.0 ~peak_memory_gb:18.5 ();
+      success_entry ~model:"mlx-vlm" ~ts:(ts -. 5.0)
+        ~prompt_per_second:1500.0 ~peak_memory_gb:20.25 ();
+    ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let s = List.hd agg.models in
+    check bool "prompt avg present" true (Option.is_some s.prompt_avg_tok_per_sec);
+    check (float 0.001) "prompt avg" 1350.0
+      (Option.value ~default:0.0 s.prompt_avg_tok_per_sec);
+    check (float 0.001) "prompt p50" 1350.0
+      (Option.value ~default:0.0 s.prompt_p50_tok_per_sec);
+    check (float 0.001) "prompt p95" 1485.0
+      (Option.value ~default:0.0 s.prompt_p95_tok_per_sec);
+    check (float 0.001) "max peak mem" 20.25
+      (Option.value ~default:0.0 s.max_peak_memory_gb);
+    let first_recent = List.hd s.recent_entries in
+    check (float 0.001) "recent prompt tok/s" 1500.0
+      (Option.value ~default:0.0 first_recent.re_prompt_tok_per_sec);
+    check (float 0.001) "recent peak memory" 20.25
+      (Option.value ~default:0.0 first_recent.re_peak_memory_gb);
+    let json = M.to_json agg in
+    let open Yojson.Safe.Util in
+    let m = json |> member "models" |> to_list |> List.hd in
+    check (float 0.001) "prompt avg json" 1350.0
+      (m |> member "prompt_avg_tok_per_sec" |> to_float);
+    check (float 0.001) "max peak mem json" 20.25
+      (m |> member "max_peak_memory_gb" |> to_float);
+    let recent = m |> member "recent_entries" |> to_list |> List.hd in
+    check (float 0.001) "recent prompt json" 1500.0
+      (recent |> member "prompt_tok_per_sec" |> to_float);
+    check (float 0.001) "recent peak mem json" 20.25
+      (recent |> member "peak_memory_gb" |> to_float))
 
 (* ── thinking_fraction tests ─────────────────────── *)
 
@@ -422,6 +472,7 @@ let () =
     "enrichment", [
       test_case "top tools per model" `Quick test_top_tools_per_model;
       test_case "recent entries capped" `Quick test_recent_entries;
+      test_case "prompt tps and peak memory aggregates" `Quick test_prompt_tps_and_peak_memory_aggregates;
       test_case "json roundtrip" `Quick test_json_roundtrip;
     ];
     "thinking_fraction", [

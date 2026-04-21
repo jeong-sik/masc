@@ -1,19 +1,18 @@
 (** Keeper docker-routed read execution.
 
-    RFC-0006 Phase B-2: when [MASC_KEEPER_SYMMETRIC_SANDBOX] and
-    [MASC_KEEPER_DOCKER_READ] are both true and the keeper has a
-    hardened sandbox profile, read-side operations route through
-    [docker run --rm <image> cat <container_path>] so the container's
-    mount restrictions are the load-bearing boundary instead of a
-    host-side string check.
+    RFC-0006 Phase B-2: hardened keepers route read-side operations
+    through [docker run --rm <image> cat <container_path>] so the
+    container's mount restrictions are the load-bearing boundary
+    instead of a host-side string check.
 
     The host-side containment check from Phase B-1 remains as
     defense in depth and is still applied before this module is
     consulted. *)
 
 (** [should_route_read ~meta] is [true] iff this keeper's reads
-    should go through docker. Encapsulates the (sandbox_profile,
-    env flag) triplet so callers do not have to repeat it. *)
+    should go through docker. Encapsulates the
+    [sandbox_profile=docker] policy so callers do not have to repeat
+    it. *)
 val should_route_read : meta:Keeper_types.keeper_meta -> bool
 
 (** [container_path_of_host ~config ~meta ~host_path] maps a

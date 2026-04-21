@@ -6,6 +6,8 @@
 open Alcotest
 open Masc_mcp
 
+let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
+
 let rec rm_rf path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -217,6 +219,65 @@ shared_memory_scope = "room"
         (Keeper_types.network_mode_to_string updated.network_mode);
       check string "shared_memory_scope" "room"
         (Keeper_types.shared_memory_scope_to_string updated.shared_memory_scope)
+
+let test_keeper_up_create_uses_profile_default_sandbox_policy () =
+  with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
+  with_config_dir @@ fun config_dir ->
+  Fs_compat.clear_fs ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let keeper_name = "keeper-up-sandbox-defaults-test" in
+  let keepers_toml_dir = Filename.concat config_dir "keepers" in
+  Unix.mkdir keepers_toml_dir 0o755;
+  write_file
+    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
+{|[keeper]
+goal = "test"
+sandbox_profile = "docker"
+network_mode = "inherit"
+shared_memory_scope = "room"
+|};
+  let config = Coord.default_config room_dir in
+  ignore (Coord.init config ~agent_name:(Some "operator"));
+  let keeper_ctx : _ Tool_keeper.context =
+    {
+      config;
+      agent_name = "operator";
+      sw;
+      clock = Eio.Stdenv.clock env;
+      proc_mgr = Some (Eio.Stdenv.process_mgr env);
+      net = None;
+    }
+  in
+  Fun.protect
+    ~finally:(fun () -> Keeper_keepalive.stop_keepalive keeper_name)
+    (fun () ->
+      let () =
+        match
+          Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_up"
+            ~args:
+              (`Assoc
+                [
+                  ("name", `String keeper_name);
+                  ("proactive_enabled", `Bool false);
+                  ("autoboot_enabled", `Bool false);
+                ])
+        with
+        | Some (true, _) -> ()
+        | Some (false, err) -> fail ("keeper_up failed: " ^ err)
+        | None -> fail "missing keeper_up dispatch"
+      in
+      match Keeper_types.read_meta config keeper_name with
+      | Ok (Some meta) ->
+          check string "sandbox_profile from defaults" "docker"
+            (Keeper_types.sandbox_profile_to_string meta.sandbox_profile);
+          check string "network_mode from defaults" "inherit"
+            (Keeper_types.network_mode_to_string meta.network_mode);
+          check string "shared_memory_scope from defaults" "room"
+            (Keeper_types.shared_memory_scope_to_string meta.shared_memory_scope)
+      | Ok None -> fail "keeper meta missing after keeper_up"
+      | Error e -> fail ("read_meta failed: " ^ e))
 
 (** Test: TOML tool policy and allowed_paths overwrite stale runtime JSON values. *)
 let test_tool_policy_resync () =
@@ -878,6 +939,10 @@ let () =
             "TOML sandbox policy fields overwrite stale runtime JSON"
             `Quick
             test_sandbox_policy_resync;
+          test_case
+            "keeper_up create path uses TOML sandbox policy defaults"
+            `Quick
+            test_keeper_up_create_uses_profile_default_sandbox_policy;
           test_case
             "TOML tool policy fields overwrite stale runtime JSON"
             `Quick

@@ -1677,6 +1677,49 @@ let test_execute_tool_transition_requires_auth_before_mutation () =
     (Masc_mcp.Planning_eio.get_current_task state.room_config);
   cleanup_dir base_path
 
+let test_execute_tool_add_task_with_admin_token_without_join () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  let raw_token =
+    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Types.Admin with
+    | Ok (token, _cred) -> token
+    | Error e -> Alcotest.fail (Types.masc_error_to_string e)
+  in
+  let ok, msg =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
+      ~name:"masc_add_task"
+      ~arguments:
+        (`Assoc
+          [
+            ("title", `String "admin add without join");
+            ("priority", `Int 2);
+            ("description", `String "");
+          ])
+  in
+  Alcotest.(check bool) "add_task succeeds" true ok;
+  Alcotest.(check bool) "response mentions added task" true
+    (contains_substring msg "Added task-001");
+  let task =
+    match Masc_mcp.Coord.get_tasks_raw state.room_config with
+    | [ task ] -> task
+    | tasks ->
+        Alcotest.failf "expected exactly one task, found %d" (List.length tasks)
+  in
+  Alcotest.(check (option string)) "created_by set from token owner"
+    (Some "stable-admin") task.created_by;
+  Alcotest.(check string) "task remains todo" "todo"
+    (Types.task_status_to_string task.task_status);
+  cleanup_dir base_path
+
 let test_execute_tool_mcp_session_ignores_term_persistence () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2670,6 +2713,8 @@ let eio_tests = [
     test_execute_tool_claim_next_requires_auth_before_mutation;
   "transition auth preflight blocks mutation", `Quick,
     test_execute_tool_transition_requires_auth_before_mutation;
+  "add_task admin token works without join", `Quick,
+    test_execute_tool_add_task_with_admin_token_without_join;
   "mcp session ignores term persistence", `Quick, test_execute_tool_mcp_session_ignores_term_persistence;
   (* Legacy governance convo room test removed *)
 ]

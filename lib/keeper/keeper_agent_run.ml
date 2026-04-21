@@ -2006,6 +2006,21 @@ let run_turn
       Some (fun () -> Log.Misc.debug "keeper %s: slot resumed (next LLM turn)" meta.name)
     else None
   in
+  let with_scoped_env bindings f =
+    let previous =
+      List.map (fun (key, _) -> (key, Sys.getenv_opt key)) bindings
+    in
+    List.iter (fun (key, value) -> Unix.putenv key value) bindings;
+    Fun.protect
+      ~finally:(fun () ->
+        List.iter
+          (fun (key, value) ->
+             match value with
+             | Some prior -> Unix.putenv key prior
+             | None -> Unix.putenv key "")
+          previous)
+      f
+  in
   let priority = Option.value priority ~default:Llm_provider.Request_priority.Proactive in
   let admission_wait_timeout_sec =
     if Llm_provider.Request_priority.resolve priority
@@ -2029,130 +2044,149 @@ let run_turn
       | None ->
           Keeper_runtime_resolved.oas_timeout_for_context ~max_context
     in
-    let cli_transport_overrides =
-      Some
-        ({
-          cwd = None;
-          claude_mcp_config = keeper_oas_context.claude_mcp_config;
-          claude_allowed_tools = None;
-          claude_permission_mode = None;
-          claude_max_turns = Some max_turns;
-          gemini_yolo =
-            (match approval_mode_effective with
-             | Some mode ->
-               Some (String.equal (String.lowercase_ascii mode) "yolo")
-             | None -> None);
-        } : Oas_worker.cli_transport_overrides)
-    in
-    (* Phase 0: wake-time payload telemetry (Option C baseline).
-       Entire block is dead code when MASC_PAYLOAD_TELEMETRY is unset.
-       Compute logic lives in [Keeper_wake_telemetry] for unit tests;
-       exceptions from the telemetry path never abort the LLM call. *)
-    let () =
-      if Env_config_keeper.KeeperTelemetry.payload_telemetry_enabled () then
-        try
-          let sizes =
-            Keeper_wake_telemetry.compute_sizes
-              ~system_prompt:turn_system_prompt
-              ~tools
-              ~history_messages
-              ~user_message
-          in
-          let model_id =
-            match meta.models with
-            | m :: _ -> m
-            | [] -> "auto"
-          in
-          let _event : Dashboard_harness_health.wake_payload_event =
-            Dashboard_harness_health.record_wake_payload
-              ~keeper_name:meta.name
-              ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-              ~turn_index:start_turn_count
-              ~model_id
-              ~context_window:max_context
-              ~approx_body_bytes:sizes.approx_body_bytes
-              ~system_prompt_bytes:sizes.system_prompt_bytes
-              ~tool_defs_bytes:sizes.tool_defs_bytes
-              ~messages_bytes:sizes.messages_bytes
-              ~message_count:sizes.message_count
-              ~role_counts:sizes.role_counts
-              ~tool_count:sizes.tool_count
-              ~has_compact_happened:false
-          in
-          ()
+    let env_bindings_result =
+      if Auth.is_auth_enabled config.base_path then
+        match
+          Auth.ensure_keeper_credential config.base_path
+            ~agent_name:meta.agent_name
         with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Harness.warn
-            "[wake_payload] telemetry failed keeper=%s: %s"
-            meta.name (Printexc.to_string exn)
+        | Ok (token, _cred) -> Ok [ ("MASC_MCP_TOKEN", token) ]
+        | Error err ->
+            Error
+              (Printf.sprintf
+                 "keeper credential bootstrap failed for %s: %s"
+                 meta.agent_name
+                 (Types.masc_error_to_string err))
+      else
+        Ok []
     in
-    (match
-       Fun.protect
-         ~finally:keeper_tool_bundle.cleanup
-         (fun () ->
-           Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
-             Oas_worker.run_named
-               ~cascade_name
-               ~model_strings:meta.models
-               ?provider_filter
-               ~require_tool_choice_support
-               ~goal:user_message
-               ~priority
-               ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-               ~system_prompt:turn_system_prompt
-               ~tools
-               ~compact_ratio:meta.compaction.ratio_gate
-               ~initial_messages:history_messages
-               ~hooks
-               ~context_reducer:reducer
-               ~summarizer:Keeper_summarizer.keeper_summarizer
-               ~memory
-                 (* Keepers use turn-level retry for transient errors but benefit
-                   from OAS per-call retry for validation errors (malformed tool
-                   args). retry_on_validation_error=true lets OAS re-prompt the
-                   LLM with structured feedback instead of wasting a full turn.
-                   retry_on_recoverable_tool_error remains false — tool-level
-                   errors are handled by MASC's consecutive failure guardrail. *)
-               ~tool_retry_policy:{
-                 Oas.Tool_retry_policy.max_retries = 2;
-                 retry_on_validation_error = true;
-                 retry_on_recoverable_tool_error = false;
-                 feedback_style = Oas.Tool_retry_policy.Structured_tool_result;
-               }
-               ~max_turns
-               ~max_idle_turns
-               ~temperature
-               ~max_tokens
-               ?max_cost_usd
-               ?wait_timeout_sec:admission_wait_timeout_sec
-               ?guardrails
-               ?on_event
-               ?on_yield
-               ?on_resume
-               ~agent_ref
-           ?contract
-           ?cli_transport_overrides
-           ~allowed_paths:oas_allowed_paths
-           ~cache_system_prompt:true
-           ~yield_on_tool
-           ~checkpoint_dir:session_dir
-           ~context_injector
-           ~context:shared_context
-           ?slot_id:(Keeper_config.keeper_slot_id meta.name)
-           ~approval:(Governance_pipeline.to_oas_approval_callback
-                        ~governance_level:(Env_config_core.governance_level ())
-                        ~keeper_name:meta.name)
-           ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
-           (* exit_condition removed with mutation_boundary — OAS runs to
-              natural completion (max_turns or model end_turn). *)
-           ?oas_checkpoint:raw_oas_checkpoint
-           ?event_bus
-           ())
-         )
-     with
-     | Error e -> Error e
-     | Ok result ->
+    match env_bindings_result with
+    | Error msg -> Error (Oas.Error.Internal msg)
+    | Ok env_bindings ->
+      let cli_transport_overrides =
+        Some
+          ({
+            cwd = None;
+            claude_mcp_config = keeper_oas_context.claude_mcp_config;
+            claude_allowed_tools = None;
+            claude_permission_mode = None;
+            claude_max_turns = Some max_turns;
+            gemini_yolo =
+              (match approval_mode_effective with
+               | Some mode ->
+                 Some (String.equal (String.lowercase_ascii mode) "yolo")
+               | None -> None);
+          } : Oas_worker.cli_transport_overrides)
+      in
+      (* Phase 0: wake-time payload telemetry (Option C baseline).
+         Entire block is dead code when MASC_PAYLOAD_TELEMETRY is unset.
+         Compute logic lives in [Keeper_wake_telemetry] for unit tests;
+         exceptions from the telemetry path never abort the LLM call. *)
+      let () =
+        if Env_config_keeper.KeeperTelemetry.payload_telemetry_enabled () then
+          try
+            let sizes =
+              Keeper_wake_telemetry.compute_sizes
+                ~system_prompt:turn_system_prompt
+                ~tools
+                ~history_messages
+                ~user_message
+            in
+            let model_id =
+              match meta.models with
+              | m :: _ -> m
+              | [] -> "auto"
+            in
+            let _event : Dashboard_harness_health.wake_payload_event =
+              Dashboard_harness_health.record_wake_payload
+                ~keeper_name:meta.name
+                ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                ~turn_index:start_turn_count
+                ~model_id
+                ~context_window:max_context
+                ~approx_body_bytes:sizes.approx_body_bytes
+                ~system_prompt_bytes:sizes.system_prompt_bytes
+                ~tool_defs_bytes:sizes.tool_defs_bytes
+                ~messages_bytes:sizes.messages_bytes
+                ~message_count:sizes.message_count
+                ~role_counts:sizes.role_counts
+                ~tool_count:sizes.tool_count
+                ~has_compact_happened:false
+            in
+            ()
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+            Log.Harness.warn
+              "[wake_payload] telemetry failed keeper=%s: %s"
+              meta.name (Printexc.to_string exn)
+      in
+      (match
+         Fun.protect
+           ~finally:keeper_tool_bundle.cleanup
+           (fun () ->
+             with_scoped_env env_bindings (fun () ->
+               Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
+                 Oas_worker.run_named
+                   ~cascade_name
+                   ~model_strings:meta.models
+                   ?provider_filter
+                   ~require_tool_choice_support
+                   ~goal:user_message
+                   ~priority
+                   ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                   ~system_prompt:turn_system_prompt
+                   ~tools
+                   ~compact_ratio:meta.compaction.ratio_gate
+                   ~initial_messages:history_messages
+                   ~hooks
+                   ~context_reducer:reducer
+                   ~summarizer:Keeper_summarizer.keeper_summarizer
+                   ~memory
+                     (* Keepers use turn-level retry for transient errors but benefit
+                        from OAS per-call retry for validation errors (malformed tool
+                        args). retry_on_validation_error=true lets OAS re-prompt the
+                        LLM with structured feedback instead of wasting a full turn.
+                        retry_on_recoverable_tool_error remains false — tool-level
+                        errors are handled by MASC's consecutive failure guardrail. *)
+                   ~tool_retry_policy:{
+                     Oas.Tool_retry_policy.max_retries = 2;
+                     retry_on_validation_error = true;
+                     retry_on_recoverable_tool_error = false;
+                     feedback_style = Oas.Tool_retry_policy.Structured_tool_result;
+                   }
+                   ~max_turns
+                   ~max_idle_turns
+                   ~temperature
+                   ~max_tokens
+                   ?max_cost_usd
+                   ?wait_timeout_sec:admission_wait_timeout_sec
+                   ?guardrails
+                   ?on_event
+                   ?on_yield
+                   ?on_resume
+                   ~agent_ref
+                   ?contract
+                   ?cli_transport_overrides
+                   ~allowed_paths:oas_allowed_paths
+                   ~cache_system_prompt:true
+                   ~yield_on_tool
+                   ~checkpoint_dir:session_dir
+                   ~context_injector
+                   ~context:shared_context
+                   ?slot_id:(Keeper_config.keeper_slot_id meta.name)
+                   ~approval:(Governance_pipeline.to_oas_approval_callback
+                                ~governance_level:(Env_config_core.governance_level ())
+                                ~keeper_name:meta.name)
+                   ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
+                   (* exit_condition removed with mutation_boundary — OAS runs to
+                      natural completion (max_turns or model end_turn). *)
+                   ?oas_checkpoint:raw_oas_checkpoint
+                   ?event_bus
+                   ())))
+      with
+      | Error e -> Error e
+      | Ok result ->
        let post_turn_t0 = Time_compat.now () in
        (* Checkpoint save is deferred until after [STATE] synthesis so the
            persisted checkpoint includes the synthesized continuity block.

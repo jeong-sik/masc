@@ -72,21 +72,18 @@ let handle_keeper_fs_read
     missing_file_error_json ~config ~target ~fallback_dir ~error:e
   | Error e -> error_json e
   | Ok target ->
-    (* RFC-0006 Phase B-1: symmetric sandbox guard. For hardened keepers
-       (sandbox_profile=docker) with MASC_KEEPER_SYMMETRIC_SANDBOX=true,
-       the resolver-level allowed_paths check is augmented by a strict
-       playground-bundle containment so the host FS cannot leak through
-       keeper_fs_read while keeper_bash is container-isolated. No-op
-       for local keepers and when the env flag is off. *)
+    (* RFC-0006 Phase B-1: Docker keepers are always contained to their
+       playground bundle on the host before any read-side I/O proceeds.
+       The resolver-level allowed_paths check is augmented by this
+       strict containment so host FS cannot leak through keeper_fs_read
+       while keeper_bash is container-isolated. *)
     (match Keeper_sandbox_containment.check_read_target ~config ~meta ~target with
      | Error e -> error_json ~fields:[ "path", `String target ] e
      | Ok () ->
-    (* RFC-0006 Phase B-2: when MASC_KEEPER_DOCKER_READ is on (and
-       symmetric_sandbox is also on, and the keeper is hardened),
-       route the actual byte read through [docker run --rm <image>
-       cat <container_path>] so the container's mount restrictions
-       are the load-bearing isolation. The host containment check
-       above remains as defense-in-depth. *)
+    (* RFC-0006 Phase B-2: Docker keepers route the actual byte read
+       through [docker run --rm <image> cat <container_path>] so the
+       container's mount restrictions are the load-bearing isolation.
+       The host containment check above remains as defense-in-depth. *)
     if Keeper_docker_read.should_route_read ~meta then
       let timeout_sec = 30.0 in
       match

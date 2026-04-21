@@ -468,6 +468,53 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
   let (_init_msg : string) = Coord.init state.room_config ~agent_name:None in
   Mcp_server.set_sse_callback state Sse.broadcast
 
+let sync_admin_token_env (state : Mcp_server.server_state) =
+  let base_path = state.Mcp_server.room_config.base_path in
+  let admin_agent_name =
+    match Auth.read_initial_admin base_path with
+    | Some name when String.trim name <> "" -> String.trim name
+    | _ -> "admin"
+  in
+  match Env_config_core.admin_token_opt () with
+  | Some raw_token ->
+      let already_synced =
+        match Auth.verify_token base_path ~agent_name:admin_agent_name ~token:raw_token with
+        | Ok cred -> cred.role = Types.Admin
+        | Error _ -> false
+      in
+      (match
+         Auth.save_raw_token_credential base_path
+           ~agent_name:admin_agent_name ~role:Types.Admin ~raw_token
+       with
+       | Ok _ ->
+           if already_synced then
+             Log.Server.info
+               "startup admin token verified for %s via %s"
+               admin_agent_name Env_config_core.admin_token_env_key
+           else
+             Log.Server.warn
+               "startup admin token drift repaired for %s via %s"
+               admin_agent_name Env_config_core.admin_token_env_key
+       | Error err ->
+           Log.Server.error
+             "startup admin token sync failed for %s: %s"
+             admin_agent_name
+             (Types.masc_error_to_string err))
+  | None ->
+      (match
+         Auth.create_token base_path ~agent_name:admin_agent_name ~role:Types.Admin
+       with
+       | Ok (raw_token, _cred) ->
+           Unix.putenv Env_config_core.admin_token_env_key raw_token;
+           Log.Server.warn
+             "startup minted %s for %s because env was unset"
+             Env_config_core.admin_token_env_key admin_agent_name
+       | Error err ->
+           Log.Server.error
+             "startup admin token mint failed for %s: %s"
+             admin_agent_name
+             (Types.masc_error_to_string err))
+
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
   Config_dir_resolver.log_resolution ~context:"ServerBootstrap" ();
@@ -766,6 +813,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let t1 = Eio.Time.now clock in
       Log.Server.info "State created (PG pool) in %.1fs" (t1 -. t0);
       bootstrap_server_state_blocking state;
+      sync_admin_token_env state;
       let path_diagnostics =
         runtime_path_diagnostics ~input_base_path:base_path state
       in

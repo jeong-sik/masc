@@ -67,6 +67,7 @@ let test_task_with_stage () =
     task_status = Todo; priority = 3; files = [];
     created_at = "2026-01-01T00:00:00Z";
     worktree = None; required_role = Unassigned; required_preset = None;
+    created_by = None;
     stage = Some Task_stage.Implement;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
@@ -83,6 +84,7 @@ let test_task_without_stage () =
     task_status = Todo; priority = 3; files = [];
     created_at = "2026-01-01T00:00:00Z";
     worktree = None; required_role = Unassigned; required_preset = None;
+    created_by = None;
     stage = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in

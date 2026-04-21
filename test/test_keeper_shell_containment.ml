@@ -2,8 +2,9 @@
 
     RFC-0006 Phase B-1.5: extend the host-FS read guard from B-1
     (handle_keeper_fs_read) to keeper_shell read ops (ls/cat/rg/find/
-    head/tail/wc/tree/git_status/git_log/git_diff). Same env flag
-    [MASC_KEEPER_SYMMETRIC_SANDBOX], same containment module. *)
+    head/tail/wc/tree/git_status/git_log/git_diff). Docker keepers are
+    always contained to their playground via the same containment
+    module. *)
 
 module Coord = Masc_mcp.Coord
 module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
@@ -206,7 +207,6 @@ let blocked_by_symmetric_sandbox raw =
       String.length err >= len && String.sub err 0 len = needle
 
 let test_legacy_keeper_unaffected () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   setup ~keeper_name:"alice" ~sandbox:Keeper_types.Local
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "secret.txt" in
@@ -217,20 +217,7 @@ let test_legacy_keeper_unaffected () =
   Alcotest.(check bool) "legacy bypasses symmetric containment" false
     (blocked_by_symmetric_sandbox raw)
 
-let test_hardened_flag_off_passthrough () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "false" @@ fun () ->
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
-  @@ fun ~base ~config ~meta ~playground:_ ->
-  let outside = outside_in_root ~base "secret.txt" in
-  let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
-      ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])
-  in
-  Alcotest.(check bool) "flag off → containment passthrough" false
-    (blocked_by_symmetric_sandbox raw)
-
-let test_hardened_flag_on_blocks_ls_outside () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
+let test_docker_keeper_blocks_ls_outside () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside_dir = Filename.concat base "outside_playground" in
@@ -243,8 +230,7 @@ let test_hardened_flag_on_blocks_ls_outside () =
   Alcotest.(check bool) "ls outside playground blocked" true
     (blocked_by_symmetric_sandbox raw)
 
-let test_hardened_flag_on_blocks_cat_outside () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
+let test_docker_keeper_blocks_cat_outside () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "host_secret.txt" in
@@ -255,8 +241,7 @@ let test_hardened_flag_on_blocks_cat_outside () =
   Alcotest.(check bool) "cat outside playground blocked" true
     (blocked_by_symmetric_sandbox raw)
 
-let test_hardened_flag_on_blocks_rg_outside () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
+let test_docker_keeper_blocks_rg_outside () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside_dir = Filename.concat base "outside_playground" in
@@ -278,8 +263,7 @@ let test_hardened_flag_on_blocks_rg_outside () =
   Alcotest.(check bool) "rg outside playground blocked" true
     (blocked_by_symmetric_sandbox raw)
 
-let test_hardened_flag_on_blocks_find_outside () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
+let test_docker_keeper_blocks_find_outside () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside_dir = Filename.concat base "outside_playground" in
@@ -297,8 +281,7 @@ let test_hardened_flag_on_blocks_find_outside () =
   Alcotest.(check bool) "find outside playground blocked" true
     (blocked_by_symmetric_sandbox raw)
 
-let test_hardened_flag_on_allows_inside_playground () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
+let test_docker_keeper_allows_inside_playground () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   let demo = Filename.concat playground "demo.txt" in
@@ -314,7 +297,6 @@ let test_hardened_flag_on_allows_inside_playground () =
     (blocked_by_symmetric_sandbox raw)
 
 let test_docker_git_creds_contained () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   setup ~keeper_name:"poe" ~sandbox:Keeper_types.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "git_secret.txt" in
@@ -370,9 +352,8 @@ let test_gh_binds_repo_from_active_task_worktree () =
   let recorded_pwd = read_file gh_pwd_file in
   Alcotest.(check bool) "repo flag injected"
     true
-    (String_util.contains_substring recorded_args "pr list --state open"
-     && String_util.contains_substring recorded_args
-          "--repo jeong-sik/masc-mcp");
+    (String_util.contains_substring recorded_args
+       "--repo jeong-sik/masc-mcp pr list --state open");
   Alcotest.(check string) "gh runs from task worktree cwd"
     (normalize_realpath worktree_cwd)
     (normalize_realpath recorded_pwd);
@@ -417,18 +398,16 @@ let () =
         [
           Alcotest.test_case "legacy keeper unaffected" `Quick
             test_legacy_keeper_unaffected;
-          Alcotest.test_case "hardened flag off passthrough" `Quick
-            test_hardened_flag_off_passthrough;
-          Alcotest.test_case "hardened flag on blocks ls outside" `Quick
-            test_hardened_flag_on_blocks_ls_outside;
-          Alcotest.test_case "hardened flag on blocks cat outside" `Quick
-            test_hardened_flag_on_blocks_cat_outside;
-          Alcotest.test_case "hardened flag on blocks rg outside" `Quick
-            test_hardened_flag_on_blocks_rg_outside;
-          Alcotest.test_case "hardened flag on blocks find outside" `Quick
-            test_hardened_flag_on_blocks_find_outside;
-          Alcotest.test_case "hardened flag on allows inside playground"
-            `Quick test_hardened_flag_on_allows_inside_playground;
+          Alcotest.test_case "docker keeper blocks ls outside" `Quick
+            test_docker_keeper_blocks_ls_outside;
+          Alcotest.test_case "docker keeper blocks cat outside" `Quick
+            test_docker_keeper_blocks_cat_outside;
+          Alcotest.test_case "docker keeper blocks rg outside" `Quick
+            test_docker_keeper_blocks_rg_outside;
+          Alcotest.test_case "docker keeper blocks find outside" `Quick
+            test_docker_keeper_blocks_find_outside;
+          Alcotest.test_case "docker keeper allows inside playground"
+            `Quick test_docker_keeper_allows_inside_playground;
           Alcotest.test_case "docker git-creds also contained" `Quick
             test_docker_git_creds_contained;
           Alcotest.test_case "gh binds repo from active task worktree" `Quick

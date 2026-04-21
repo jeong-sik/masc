@@ -332,9 +332,10 @@ let find_duplicate_task (backlog : backlog) (title : string) : string option =
 (** Add task — file-locked to prevent task ID collision under concurrency.
     Rejects tasks with duplicate titles (exact match after normalization)
     to prevent the same work from being created multiple times. *)
-let add_task ?contract ?required_preset config ~title ~priority ~description =
+let add_task ?contract ?required_preset ?created_by config ~title ~priority ~description =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  let actor = Option.value ~default:"system" created_by in
   try
     with_file_lock config backlog_path (fun () ->
       let backlog = read_backlog_or_raise config in
@@ -355,6 +356,7 @@ let add_task ?contract ?required_preset config ~title ~priority ~description =
         priority;
         files = [];
         created_at = now_iso ();
+        created_by;
         worktree = None;
         required_role = Types_core.Unassigned;
         required_preset;
@@ -371,13 +373,19 @@ let add_task ?contract ?required_preset config ~title ~priority ~description =
         version = backlog.version + 1;
       } in
       write_backlog config new_backlog;
-      emit_task_activity config ~agent_name:"system" ~task_id ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
+      let created_by_json =
+        match created_by with
+        | Some value -> `String value
+        | None -> `Null
+      in
+      emit_task_activity config ~agent_name:actor ~task_id ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
         ~payload:
           (`Assoc
             [
               ("task_id", `String task_id);
               ("title", `String title);
               ("priority", `Int priority);
+              ("created_by", created_by_json);
               ( "strict_contract",
                 `Bool
                   (match contract with
@@ -386,7 +394,7 @@ let add_task ?contract ?required_preset config ~title ~priority ~description =
             ]);
 
       (Atomic.get Coord_hooks.on_task_mutation_fn) ();
-      ignore (broadcast config ~from_agent:"system" ~content:(Printf.sprintf "📋 New quest: %s" title));
+      ignore (broadcast config ~from_agent:actor ~content:(Printf.sprintf "📋 New quest: %s" title));
       Printf.sprintf "✅ Added %s: %s" task_id title))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -395,10 +403,11 @@ let add_task ?contract ?required_preset config ~title ~priority ~description =
 
 (** Add task with a required role constraint — file-locked.
     Same dedup guard as [add_task]. *)
-let add_task_with_role ?contract config ~title ~priority ~description
+let add_task_with_role ?contract ?created_by config ~title ~priority ~description
     ~required_role =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  let actor = Option.value ~default:"system" created_by in
   try
     with_file_lock config backlog_path (fun () ->
       let backlog = read_backlog_or_raise config in
@@ -418,6 +427,7 @@ let add_task_with_role ?contract config ~title ~priority ~description
         priority;
         files = [];
         created_at = now_iso ();
+        created_by;
         worktree = None;
         required_role;
         required_preset = None;
@@ -434,13 +444,19 @@ let add_task_with_role ?contract config ~title ~priority ~description
         version = backlog.version + 1;
       } in
       write_backlog config new_backlog;
-      emit_task_activity config ~agent_name:"system" ~task_id ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
+      let created_by_json =
+        match created_by with
+        | Some value -> `String value
+        | None -> `Null
+      in
+      emit_task_activity config ~agent_name:actor ~task_id ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
         ~payload:
           (`Assoc
             [
               ("task_id", `String task_id);
               ("title", `String title);
               ("priority", `Int priority);
+              ("created_by", created_by_json);
               ( "required_role",
                 `String (Types_core.role_to_string required_role) );
               ( "strict_contract",
@@ -451,7 +467,7 @@ let add_task_with_role ?contract config ~title ~priority ~description
             ]);
 
       let role_str = Types_core.role_to_string required_role in
-      ignore (broadcast config ~from_agent:"system"
+      ignore (broadcast config ~from_agent:actor
         ~content:(Printf.sprintf "📋 New quest: %s (requires: %s)" title role_str));
       Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str))
   with
@@ -460,9 +476,10 @@ let add_task_with_role ?contract config ~title ~priority ~description
       Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
 
 (** Add multiple tasks in a batch *)
-let batch_add_tasks_internal config tasks =
+let batch_add_tasks_internal ?created_by config tasks =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  let actor = Option.value ~default:"system" created_by in
   with_file_lock config backlog_path (fun () ->
     try
       let backlog = read_backlog_or_raise config in
@@ -479,6 +496,7 @@ let batch_add_tasks_internal config tasks =
           priority;
           files = [];
           created_at = now_iso ();
+          created_by;
           worktree = None;
           required_role = Types_core.Unassigned;
           required_preset = None;
@@ -497,7 +515,12 @@ let batch_add_tasks_internal config tasks =
       write_backlog config new_backlog;
       List.iter
         (fun (task : Types.task) ->
-          emit_task_activity config ~agent_name:"system" ~task_id:task.id
+          let created_by_json =
+            match task.created_by with
+            | Some value -> `String value
+            | None -> `Null
+          in
+          emit_task_activity config ~agent_name:actor ~task_id:task.id
             ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
             ~payload:
               (`Assoc
@@ -505,6 +528,7 @@ let batch_add_tasks_internal config tasks =
                   ("task_id", `String task.id);
                   ("title", `String task.title);
                   ("priority", `Int task.priority);
+                  ("created_by", created_by_json);
                   ( "strict_contract",
                     `Bool
                       (match task.contract with
@@ -515,7 +539,7 @@ let batch_add_tasks_internal config tasks =
       let summary = String.concat ", " (List.map (fun (t : Types.task) -> t.id) added_tasks) in
       (Atomic.get Coord_hooks.on_task_mutation_fn) ();
       let msg = Printf.sprintf "📋 New batch of %d quests added: %s" (List.length added_tasks) summary in
-      ignore (broadcast config ~from_agent:"system" ~content:msg);
+      ignore (broadcast config ~from_agent:actor ~content:msg);
       Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -523,14 +547,14 @@ let batch_add_tasks_internal config tasks =
       Printf.sprintf "❌ Error adding batch tasks: %s" (Printexc.to_string e)
   )
 
-let batch_add_tasks config tasks =
-  batch_add_tasks_internal config
+let batch_add_tasks ?created_by config tasks =
+  batch_add_tasks_internal ?created_by config
     (List.map (fun (title, priority, description) ->
          (title, priority, description, None))
        tasks)
 
-let batch_add_tasks_with_contracts config tasks =
-  batch_add_tasks_internal config tasks
+let batch_add_tasks_with_contracts ?created_by config tasks =
+  batch_add_tasks_internal ?created_by config tasks
 
 (** Claim task with file locking (TOCTOU prevention) *)
 let claim_task config ~agent_name ~task_id =

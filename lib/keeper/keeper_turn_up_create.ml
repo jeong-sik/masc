@@ -51,18 +51,18 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   let sandbox_profile =
     resolve_sandbox_profile
       ~preferred:p.sandbox_profile_opt
-      ~fallback:None
+      ~fallback:p.profile_defaults.sandbox_profile
   in
   let network_mode =
     resolve_network_mode
       ~sandbox_profile
       ~preferred:p.network_mode_opt
-      ~fallback:None
+      ~fallback:p.profile_defaults.network_mode
   in
   let shared_memory_scope =
     resolve_shared_memory_scope
       ~preferred:p.shared_memory_scope_opt
-      ~fallback:None
+      ~fallback:p.profile_defaults.shared_memory_scope
   in
   let voice_enabled =
     Option.value ~default:(default_voice_enabled_for p.name) p.voice_enabled_opt

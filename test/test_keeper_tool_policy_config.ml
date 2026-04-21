@@ -156,6 +156,7 @@ let test_task_required_preset_roundtrip () =
     task_status = Todo; priority = 3; files = [];
     created_at = "2026-01-01T00:00:00Z";
     worktree = None;
+    created_by = None;
     required_role = Types_core.Unassigned;
     required_preset = Some "delivery";
     stage = None; contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
@@ -172,6 +173,7 @@ let test_task_required_preset_none_compat () =
     task_status = Todo; priority = 3; files = [];
     created_at = "2026-01-01T00:00:00Z";
     worktree = None;
+    created_by = None;
     required_role = Types_core.Unassigned;
     required_preset = None;
     stage = None; contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;

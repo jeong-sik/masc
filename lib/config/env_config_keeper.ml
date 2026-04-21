@@ -606,29 +606,19 @@ module KeeperSandbox = struct
     in
     get_string ~default "MASC_KEEPER_SANDBOX_GH_TOKEN"
 
-  (** RFC-0006 Phase B-1: when true, hardened keepers' read-side tools
-      (keeper_fs_read; later keeper_shell op=rg/ls/cat/find/...) are
-      restricted to the keeper's playground bundle on the host even
-      though the path resolver alone would have allowed broader access.
+  (** Legacy RFC-0006 Phase B-1 flag.
 
-      Closes the asymmetry where keeper_bash gates execution to docker
-      but keeper_fs_read still walks the host. Default off so existing
-      hardened keepers (analyst/janitor/poe/minjae) keep working until
-      operators flip the flag. *)
+      Read-side containment now follows [sandbox_profile=docker]
+      unconditionally. This getter remains only for backward-compatible
+      config surfaces and should not gate runtime sandbox policy. *)
   let symmetric_read_containment () =
     get_bool ~default:false "MASC_KEEPER_SYMMETRIC_SANDBOX"
 
-  (** RFC-0006 Phase B-2: when true (and symmetric_read_containment is
-      also on), hardened keeper read-side ops route through
-      [docker run --rm <image> cat <container_path>] so the
-      container's mount restrictions become the primary boundary.
+  (** Legacy RFC-0006 Phase B-2 flag.
 
-      The host-side containment check (B-1) remains as defense in
-      depth — if the docker route is misconfigured, the host check
-      still blocks. Default off because docker spawn per read is
-      slower (~hundreds of ms) and only worth it for deployments
-      that can absorb the latency in exchange for mount-level
-      isolation. *)
+      Docker read routing now follows [sandbox_profile=docker]
+      unconditionally. This getter remains only for backward-compatible
+      config surfaces and should not gate runtime sandbox policy. *)
   let docker_read_routing () =
     get_bool ~default:false "MASC_KEEPER_DOCKER_READ"
 end

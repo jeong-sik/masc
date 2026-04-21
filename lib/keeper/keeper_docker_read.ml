@@ -15,8 +15,6 @@ let is_hardened = function
 
 let should_route_read ~(meta : keeper_meta) : bool =
   is_hardened meta.sandbox_profile
-  && Env_config_keeper.KeeperSandbox.symmetric_read_containment ()
-  && Env_config_keeper.KeeperSandbox.docker_read_routing ()
 
 let strip_trailing_slashes path =
   let rec loop i =

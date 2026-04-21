@@ -1,16 +1,26 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { act } from 'preact/test-utils'
 import * as Vitest from 'vitest'
 import type { DashboardGovernanceResponse, GovernanceCaseBundle, KeeperApprovalQueueItem } from '../types'
 import { filterApprovalQueue } from './governance'
 
-const { afterEach, beforeEach, describe, expect, it } = Vitest
+const { afterEach, beforeEach, describe, expect, it, vi } = Vitest
 
 async function flushUi(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await Promise.resolve()
     await new Promise(resolve => setTimeout(resolve, 0))
   }
+}
+
+async function flushUiWithFakeTimers(): Promise<void> {
+  await act(async () => {
+    for (let i = 0; i < 4; i += 1) {
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(0)
+    }
+  })
 }
 
 function governanceBundle(): GovernanceCaseBundle {
@@ -105,6 +115,58 @@ describe('Governance surface', () => {
     expect(container.textContent).not.toContain('청원 콘솔')
     expect(container.textContent).not.toContain('사건 수신함')
     expect(container.textContent).not.toContain('심의 의견 제출')
+  }, 20000)
+
+  it('auto-refreshes the live judge surface while visible', async () => {
+    const response: DashboardGovernanceResponse = {
+      generated_at: '2026-04-21T00:00:00Z',
+      summary: { judge_online: true },
+      items: [],
+      activity: [],
+      judgments: [],
+      pending_actions: [],
+      judge: { judge_online: true, model_used: 'gemini', keeper_name: 'governance-judge' },
+    }
+    const originalVisibility = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState')
+    const fetchDashboardGovernance = vi.fn<() => Promise<DashboardGovernanceResponse>>()
+      .mockResolvedValue(response)
+
+    vi.useFakeTimers()
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    })
+
+    try {
+      const { Governance } = await loadComponentWithApi({
+        decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
+        fetchDashboardGovernance,
+        fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(governanceBundle()),
+        resolveGovernanceApproval: vi.fn().mockResolvedValue({ ok: true, id: 'appr-1', decision: 'approve' }),
+        submitGovernanceCaseBrief: vi.fn().mockResolvedValue(governanceBundle()),
+        submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+      })
+
+      await act(async () => {
+        render(html`<${Governance} />`, container)
+        await Promise.resolve()
+      })
+      await flushUiWithFakeTimers()
+
+      expect(fetchDashboardGovernance).toHaveBeenCalledTimes(1)
+      expect(container.textContent).toContain('30초 자동 갱신')
+
+      await vi.advanceTimersByTimeAsync(30_000)
+      await flushUiWithFakeTimers()
+
+      expect(fetchDashboardGovernance).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+      if (originalVisibility) {
+        Object.defineProperty(document, 'visibilityState', originalVisibility)
+      }
+    }
   }, 20000)
 
   it('renders judgments section with recommended action', async () => {

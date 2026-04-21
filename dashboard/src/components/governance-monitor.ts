@@ -6,7 +6,9 @@ import { EmptyState } from './common/empty-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatCell } from './common/stat-cell'
 import { StatusChip } from './common/status-chip'
+import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
+import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { useSavedSignal } from '../lib/saved-signal'
 import { get, type GetOptions } from '../api/core'
 
@@ -115,7 +117,11 @@ export function GovernanceMonitor() {
 
   useEffect(() => {
     void load()
-    return () => { resource.cancel() }
+    const disposeAutoRefresh = setupVisibleAutoRefresh(() => void load(), TELEMETRY_AUTO_REFRESH_MS)
+    return () => {
+      disposeAutoRefresh()
+      resource.cancel()
+    }
   }, [resource, windowMinutes.value])
 
   const current = resource.state.value
@@ -144,6 +150,7 @@ export function GovernanceMonitor() {
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
           onClick=${() => void load()}
         >새로고침</button>
+        <span class="text-xs text-[var(--text-muted)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
         ${current.loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
       </div>
 

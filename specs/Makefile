@@ -52,8 +52,8 @@ TLC = $(JAVA) $(JAVA_OPTS) \
 	-DTLA2-Library="$(SPEC_DIRS)" \
 	-cp $(TLA2TOOLS) tlc2.TLC $(TLC_FLAGS)
 
-CLEAN_CFGS := $(shell find . -name '*.cfg' ! -name '*-buggy*.cfg' ! -name '*-ci.cfg' | sort)
-BUGGY_CFGS := $(shell find . -name '*-buggy*.cfg' | sort)
+CLEAN_CFGS := $(shell find . -name '*.cfg' ! -name '*-buggy*.cfg' ! -name '*-ci.cfg' | sort | tr '\n' ' ')
+BUGGY_CFGS := $(shell find . -name '*-buggy*.cfg' | sort | tr '\n' ' ')
 SUPPORTING_SPEC_DIRS := boundary checkpoint-trim closure masc-ecosystem social-state-cap state-product task-lifecycle
 
 .PHONY: check-all check-clean check-buggy check-bug-models check-keeper check-supporting check-ecosystem check-boundary check-closure list clean clean-artefacts
@@ -68,10 +68,10 @@ check-all: check-clean check-buggy
 
 check-clean:
 	@echo "=== Running clean specs (expect no errors) ==="; \
-	set -- $(CLEAN_CFGS); \
-	if [ $$# -eq 0 ]; then echo "(none)"; exit 0; fi; \
 	fail=0; \
-	for cfg in "$$@"; do \
+	cfgs="$(CLEAN_CFGS)"; \
+	if [ -z "$$cfgs" ]; then echo "(none)"; exit 0; fi; \
+	for cfg in $$cfgs; do \
 	  dir=$$(dirname "$$cfg"); \
 	  base=$$(basename "$$cfg" .cfg); \
 	  tla="$$dir/$$base.tla"; \
@@ -91,10 +91,10 @@ check-clean:
 
 check-buggy:
 	@echo "=== Running buggy specs (expect violations) ==="; \
-	set -- $(BUGGY_CFGS); \
-	if [ $$# -eq 0 ]; then echo "(none)"; exit 0; fi; \
 	fail=0; \
-	for cfg in "$$@"; do \
+	cfgs="$(BUGGY_CFGS)"; \
+	if [ -z "$$cfgs" ]; then echo "(none)"; exit 0; fi; \
+	for cfg in $$cfgs; do \
 	  dir=$$(dirname "$$cfg"); \
 	  stripped=$${cfg%%-buggy*}; \
 	  bugbase=$$(basename "$$stripped"); \
@@ -117,33 +117,33 @@ check-buggy:
 
 check-bug-models:
 	@$(MAKE) --no-print-directory \
-	  CLEAN_CFGS="$$(find bug-models/ -name '*.cfg' ! -name '*-buggy*.cfg' | sort)" \
-	  BUGGY_CFGS="$$(find bug-models/ -name '*-buggy*.cfg' | sort)" check-all
+	  CLEAN_CFGS="$$(find bug-models/ -name '*.cfg' ! -name '*-buggy*.cfg' | sort | tr '\n' ' ')" \
+	  BUGGY_CFGS="$$(find bug-models/ -name '*-buggy*.cfg' | sort | tr '\n' ' ')" check-all
 
 check-keeper:
 	@$(MAKE) --no-print-directory \
-	  CLEAN_CFGS="$$(find keeper-state-machine/ -name '*.cfg' ! -name '*-buggy*.cfg' ! -name '*-ci.cfg' | sort)" \
-	  BUGGY_CFGS="$$(find keeper-state-machine/ -name '*-buggy*.cfg' | sort)" check-all
+	  CLEAN_CFGS="$$(find keeper-state-machine/ -name '*.cfg' ! -name '*-buggy*.cfg' ! -name '*-ci.cfg' | sort | tr '\n' ' ')" \
+	  BUGGY_CFGS="$$(find keeper-state-machine/ -name '*-buggy*.cfg' | sort | tr '\n' ' ')" check-all
 
 check-supporting:
 	@$(MAKE) --no-print-directory \
-	  CLEAN_CFGS="$$(find $(SUPPORTING_SPEC_DIRS) -name '*.cfg' ! -name '*-buggy*.cfg' ! -name '*-ci.cfg' | sort)" \
-	  BUGGY_CFGS="$$(find $(SUPPORTING_SPEC_DIRS) -name '*-buggy*.cfg' | sort)" check-all
+	  CLEAN_CFGS="$$(find $(SUPPORTING_SPEC_DIRS) -name '*.cfg' ! -name '*-buggy*.cfg' ! -name '*-ci.cfg' | sort | tr '\n' ' ')" \
+	  BUGGY_CFGS="$$(find $(SUPPORTING_SPEC_DIRS) -name '*-buggy*.cfg' | sort | tr '\n' ' ')" check-all
 
 check-ecosystem:
 	@$(MAKE) --no-print-directory \
-	  CLEAN_CFGS="$$(find masc-ecosystem/ -name '*.cfg' ! -name '*-buggy*.cfg' | sort)" \
+	  CLEAN_CFGS="$$(find masc-ecosystem/ -name '*.cfg' ! -name '*-buggy*.cfg' | sort | tr '\n' ' ')" \
 	  BUGGY_CFGS="" check-all
 
 check-boundary:
 	@$(MAKE) --no-print-directory \
-	  CLEAN_CFGS="$$(find boundary/ -name '*.cfg' ! -name '*-buggy*.cfg' | sort)" \
-	  BUGGY_CFGS="$$(find boundary/ -name '*-buggy*.cfg' | sort)" check-all
+	  CLEAN_CFGS="$$(find boundary/ -name '*.cfg' ! -name '*-buggy*.cfg' | sort | tr '\n' ' ')" \
+	  BUGGY_CFGS="$$(find boundary/ -name '*-buggy*.cfg' | sort | tr '\n' ' ')" check-all
 
 check-closure:
 	@$(MAKE) --no-print-directory \
-	  CLEAN_CFGS="$$(find closure/ -name '*.cfg' ! -name '*-buggy*.cfg' | sort)" \
-	  BUGGY_CFGS="$$(find closure/ -name '*-buggy*.cfg' | sort)" check-all
+	  CLEAN_CFGS="$$(find closure/ -name '*.cfg' ! -name '*-buggy*.cfg' | sort | tr '\n' ' ')" \
+	  BUGGY_CFGS="$$(find closure/ -name '*-buggy*.cfg' | sort | tr '\n' ' ')" check-all
 
 list:
 	@echo "Clean specs ($(words $(CLEAN_CFGS))):"; \

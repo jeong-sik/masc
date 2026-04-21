@@ -282,16 +282,6 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     context_tokens: asNumber(raw.context_tokens) ?? asNumber(contextRaw?.context_tokens),
     context_max: asNumber(raw.context_max) ?? asNumber(contextRaw?.context_max),
     context_source: asString(raw.context_source) ?? asString(contextRaw?.source),
-    context: contextRaw
-      ? {
-          source: asString(contextRaw.source),
-          context_ratio: asNumber(contextRaw.context_ratio),
-          context_tokens: asNumber(contextRaw.context_tokens),
-          context_max: asNumber(contextRaw.context_max),
-          message_count: asNumber(contextRaw.message_count),
-          has_checkpoint: asBoolean(contextRaw.has_checkpoint),
-        }
-      : undefined,
     generation: asNumber(raw.generation),
     active_goal_ids: asStringArray(raw.active_goal_ids),
     last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,

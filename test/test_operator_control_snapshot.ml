@@ -194,7 +194,9 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
       Alcotest.(check int) "metrics max retained" 128000
         Yojson.Safe.Util.(keeper |> member "context_max" |> to_int);
       Alcotest.(check string) "metrics source retained" "keeper_context_status"
-        Yojson.Safe.Util.(keeper |> member "context_source" |> to_string))
+        Yojson.Safe.Util.(keeper |> member "context_source" |> to_string);
+      Alcotest.(check bool) "nested context payload omitted" true
+        (Yojson.Safe.Util.member "context" keeper = `Null))
 
 let test_snapshot_has_expected_sections () =
   Eio_main.run @@ fun env ->

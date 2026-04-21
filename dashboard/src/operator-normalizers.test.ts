@@ -254,7 +254,6 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.keepers[0]!.context_tokens).toBe(16312)
     expect(result.keepers[0]!.context_max).toBe(128000)
     expect(result.keepers[0]!.context_source).toBe('keeper_context_status')
-    expect(result.keepers[0]!.context?.source).toBe('keeper_context_status')
   })
 
   it('filters keepers without name', () => {

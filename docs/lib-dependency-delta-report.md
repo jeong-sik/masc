@@ -10,6 +10,12 @@ python3 scripts/analyze_lib_deps.py --json
 
 This writes `reports/lib-dependency-graph.json`.
 
+CI uses the same analyzer and summary generator through:
+
+```sh
+bash scripts/lib_dep_delta_ci.sh
+```
+
 ## Generate The Summary
 
 ```sh
@@ -21,6 +27,7 @@ python3 scripts/lib_dep_report.py \
 The summary includes:
 
 - SCC count and largest SCC size
+- SCC count delta and added/removed SCC member sets when a baseline is provided
 - Room/coordination dependent counts
 - Top hub modules by dependent count
 - Heaviest importers by dependency count
@@ -49,5 +56,21 @@ python3 scripts/lib_dep_report.py \
   --output reports/lib-dependency-summary.json
 ```
 
-The JSON shape is stable enough for CI checks to read `largest_scc_size`,
+The JSON shape is stable enough for CI checks to read `scc_count_delta`,
+`largest_scc_size`, `largest_scc_delta`, `scc_delta`,
 `room_coordination_dependents`, and `batch2_candidate_delta`.
+
+## CI Report
+
+The `Lib Dependency Delta` CI job runs automatically when PRs touch `lib/`,
+the dependency-report scripts, or core build metadata. It writes the Markdown
+summary to the GitHub Actions step summary and uploads:
+
+- `reports/lib-dependency-graph.json`
+- `reports/lib-dependency-graph.baseline.json`
+- `reports/lib-dependency-summary.md`
+- `reports/lib-dependency-summary.json`
+
+On pull requests, the baseline graph is generated from the base branch so SCC
+count, largest SCC size, room/coordination dependents, and extraction candidate
+deltas are visible without a manual local compare.

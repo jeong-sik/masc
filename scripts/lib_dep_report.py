@@ -123,6 +123,29 @@ def largest_scc(raw: Json) -> int:
     return max((len(component) for component in cycles(raw)), default=0)
 
 
+def scc_key(component: list[str]) -> tuple[str, ...]:
+    return tuple(sorted(component))
+
+
+def scc_delta(current: Json, baseline: Json, *, limit: int) -> list[Json]:
+    current_sccs = {scc_key(component) for component in cycles(current)}
+    baseline_sccs = {scc_key(component) for component in cycles(baseline)}
+    changes: list[Json] = []
+    for status, components in (
+        ("added", current_sccs - baseline_sccs),
+        ("removed", baseline_sccs - current_sccs),
+    ):
+        for component in sorted(components, key=lambda item: (-len(item), item)):
+            changes.append(
+                {
+                    "status": status,
+                    "size": len(component),
+                    "members": list(component),
+                }
+            )
+    return changes[:limit]
+
+
 def room_dependents(raw: Json) -> list[Pair]:
     reverse: dict[str, set[str]] = {}
     for node, deps in graph(raw).items():
@@ -231,8 +254,14 @@ def build_report(
         if baseline is not None
         else None,
         "scc_count": len(cycles(current)),
+        "scc_count_delta": len(cycles(current)) - len(cycles(baseline))
+        if baseline is not None
+        else None,
         "largest_scc_size": largest_scc(current),
         "largest_scc_delta": largest_scc(current) - largest_scc(baseline)
+        if baseline is not None
+        else None,
+        "scc_delta": scc_delta(current, baseline, limit=limit)
         if baseline is not None
         else None,
         "room_coordination_dependents": current_room,
@@ -283,7 +312,11 @@ def render_markdown(report: Json) -> str:
             for name in ("total_modules", "total_edges", "avg_out_degree")
         ]
         + [
-            ["scc_count", str(report["scc_count"]), "-"],
+            [
+                "scc_count",
+                str(report["scc_count"]),
+                fmt_delta(report["scc_count_delta"]),
+            ],
             [
                 "largest_scc_size",
                 str(report["largest_scc_size"]),
@@ -363,6 +396,24 @@ def render_markdown(report: Json) -> str:
         "",
         candidates,
     ]
+    if report["scc_delta"] is not None:
+        scc_delta_rows = [
+            [
+                str(item["status"]),
+                str(item["size"]),
+                ", ".join(str(member) for member in item["members"][:12])
+                + ("..." if len(item["members"]) > 12 else ""),
+            ]
+            for item in report["scc_delta"]
+        ]
+        sections += [
+            "",
+            "## SCC Delta",
+            "",
+            table(["Status", "Size", "Members"], scc_delta_rows)
+            if scc_delta_rows
+            else "No SCC changes.",
+        ]
     if report["batch2_candidate_delta"] is not None:
         delta_rows = [
             [
@@ -455,6 +506,11 @@ def self_test() -> None:
         "total_modules": -1,
     }
     assert report["largest_scc_delta"] == -1
+    assert report["scc_count_delta"] == 0
+    assert report["scc_delta"] == [
+        {"status": "added", "size": 3, "members": ["A", "B", "C"]},
+        {"status": "removed", "size": 4, "members": ["A", "B", "C", "D"]},
+    ]
     assert report["room_coordination_dependents_delta"] == [
         {"module": "Coord", "count": -1}
     ]

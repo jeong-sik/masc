@@ -75,6 +75,7 @@ jobs:
       dashboard: ${{ steps.scope.outputs.dashboard }}
       health: ${{ steps.scope.outputs.health }}
       health_snapshot: ${{ steps.scope.outputs.health_snapshot }}
+      lib_deps: ${{ steps.scope.outputs.lib_deps }}
       doc_truth: ${{ steps.scope.outputs.doc_truth }}
       tla: ${{ steps.scope.outputs.tla }}
       oas_pin: ${{ steps.scope.outputs.oas_pin }}
@@ -98,7 +99,7 @@ jobs:
           set -euo pipefail
 
           emit_all_true() {
-            for key in build lint dashboard health health_snapshot doc_truth tla oas_pin spec_refs; do
+            for key in build lint dashboard health health_snapshot lib_deps doc_truth tla oas_pin spec_refs; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
           }
@@ -144,6 +145,7 @@ jobs:
           dashboard=false
           health=false
           health_snapshot=false
+          lib_deps=false
           doc_truth=false
           tla=false
           oas_pin=false
@@ -173,6 +175,10 @@ jobs:
             health_snapshot=true
           fi
 
+          if has_match '^(\.github/workflows/ci\.yml|lib/|dune-project$|dune-workspace$|.*\.opam$|scripts/analyze_lib_deps\.py$|scripts/lib_dep_report\.py$|scripts/lib_dep_delta_ci\.sh$)'; then
+            lib_deps=true
+          fi
+
           if has_match '^(docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$)'; then
             doc_truth=true
           fi
@@ -195,6 +201,7 @@ jobs:
             dashboard=true
             health=true
             health_snapshot=true
+            lib_deps=true
             doc_truth=true
             oas_pin=true
             spec_refs=true
@@ -211,13 +218,14 @@ jobs:
           echo "dashboard=${dashboard}" >> "$GITHUB_OUTPUT"
           echo "health=${health}" >> "$GITHUB_OUTPUT"
           echo "health_snapshot=${health_snapshot}" >> "$GITHUB_OUTPUT"
+          echo "lib_deps=${lib_deps}" >> "$GITHUB_OUTPUT"
           echo "doc_truth=${doc_truth}" >> "$GITHUB_OUTPUT"
           echo "tla=${tla}" >> "$GITHUB_OUTPUT"
           echo "oas_pin=${oas_pin}" >> "$GITHUB_OUTPUT"
           echo "spec_refs=${spec_refs}" >> "$GITHUB_OUTPUT"
 
-          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s doc_truth=%s tla=%s oas_pin=%s\n' \
-            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${doc_truth}" "${tla}" "${oas_pin}"
+          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s lib_deps=%s doc_truth=%s tla=%s oas_pin=%s\n' \
+            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${lib_deps}" "${doc_truth}" "${tla}" "${oas_pin}"
 
   health:
     name: Health
@@ -310,6 +318,35 @@ jobs:
           scripts/check-doc-truth.sh
           scripts/check-version-truth.sh
           scripts/sync-oas-pin-docs.sh --check
+
+  lib-dependency-delta:
+    name: Lib Dependency Delta
+    runs-on: ubuntu-latest
+    needs: [pr-sync-check, changes]
+    if: ${{ !cancelled() && needs.changes.outputs.lib_deps == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Run report self-test
+        run: python3 scripts/lib_dep_report.py --self-test
+
+      - name: Generate lib dependency delta
+        run: bash scripts/lib_dep_delta_ci.sh
+
+      - name: Upload lib dependency reports
+        uses: actions/upload-artifact@v7
+        with:
+          name: lib-dependency-delta
+          path: |
+            reports/lib-dependency-graph.json
+            reports/lib-dependency-graph.baseline.json
+            reports/lib-dependency-summary.md
+            reports/lib-dependency-summary.json
 
   oas-pin-check:
     name: OAS Pin Consistency
@@ -651,7 +688,7 @@ jobs:
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
-    needs: [pr-sync-check, changes, build, lint, dashboard, dashboard-drift, health, doc-truth, oas-pin-check, tla-specs, spec-line-refs]
+    needs: [pr-sync-check, changes, build, lint, dashboard, dashboard-drift, health, lib-dependency-delta, doc-truth, oas-pin-check, tla-specs, spec-line-refs]
     if: ${{ !cancelled() }}
     timeout-minutes: 2
 
@@ -665,6 +702,7 @@ jobs:
           DASHBOARD_RESULT: ${{ needs.dashboard.result }}
           DASHBOARD_DRIFT_RESULT: ${{ needs.dashboard-drift.result }}
           HEALTH_RESULT: ${{ needs.health.result }}
+          LIB_DEPENDENCY_DELTA_RESULT: ${{ needs.lib-dependency-delta.result }}
           DOC_TRUTH_RESULT: ${{ needs.doc-truth.result }}
           OAS_PIN_RESULT: ${{ needs.oas-pin-check.result }}
           TLA_RESULT: ${{ needs.tla-specs.result }}
@@ -703,6 +741,7 @@ jobs:
           check "dashboard"       "$DASHBOARD_RESULT"
           check "dashboard-drift" "$DASHBOARD_DRIFT_RESULT"
           check "health"          "$HEALTH_RESULT"
+          check "lib-dep-delta"   "$LIB_DEPENDENCY_DELTA_RESULT"
           check "doc-truth"       "$DOC_TRUTH_RESULT"
           check "oas-pin-check"   "$OAS_PIN_RESULT"
           check "tla-specs"       "$TLA_RESULT"

@@ -44,10 +44,19 @@ type rejection = {
 
 type state =
   | Validated of snapshot
+  | Validated_with_rejections of {
+      snapshot : snapshot;
+      rejected_update : rejection;
+    }
   | Serving_last_known_good of {
       snapshot : snapshot;
       rejected_update : rejection;
     }
+
+type validation_result = {
+  snapshot : snapshot;
+  rejected_update : rejection option;
+}
 
 type candidate_runtime = {
   model_string : string;
@@ -209,6 +218,14 @@ let state_to_yojson = function
           ("serving_last_known_good", `Bool false);
           ("snapshot", snapshot_to_yojson snapshot);
           ("rejected_update", `Null);
+        ]
+  | Validated_with_rejections { snapshot; rejected_update } ->
+      `Assoc
+        [
+          ("status", `String "validated");
+          ("serving_last_known_good", `Bool false);
+          ("snapshot", snapshot_to_yojson snapshot);
+          ("rejected_update", rejection_to_yojson rejected_update);
         ]
   | Serving_last_known_good { snapshot; rejected_update } ->
       `Assoc
@@ -434,7 +451,7 @@ let validate_profile_static ~config_path name : (profile_build, profile_rejectio
               candidates;
             }
 
-let validate_path ~sw ~net ~clock ~config_path =
+let validate_path_result ~sw ~net ~clock ~config_path =
   let checked_at = Unix.gettimeofday () in
   let attempted_mtime =
     try Some (Unix.stat config_path).Unix.st_mtime
@@ -478,7 +495,7 @@ let validate_path ~sw ~net ~clock ~config_path =
                 Keeper_config.default_cascade_name;
             ]
         in
-        let built_profiles, rejected_profiles =
+        let built_profiles, statically_rejected_profiles =
           List.fold_left
             (fun (ok_acc, err_acc) name ->
               match validate_profile_static ~config_path name with
@@ -488,11 +505,11 @@ let validate_path ~sw ~net ~clock ~config_path =
             profiles
         in
         let built_profiles = List.rev built_profiles in
-        let rejected_profiles = List.rev rejected_profiles in
-        if top_errors <> [] || rejected_profiles <> [] then
+        let statically_rejected_profiles = List.rev statically_rejected_profiles in
+        if top_errors <> [] || built_profiles = [] then
           Error
             (rejection_of_path ~config_path ~attempted_mtime ~checked_at
-               ~errors:top_errors ~profiles:rejected_profiles)
+               ~errors:top_errors ~profiles:statically_rejected_profiles)
         else
           let unique_candidates = Hashtbl.create 16 in
           List.iter
@@ -515,7 +532,7 @@ let validate_path ~sw ~net ~clock ~config_path =
           List.iter
             (fun (key, probe) -> Hashtbl.replace probe_table key probe)
             probe_results;
-          let profile_snapshots, rejected_profiles =
+          let profile_snapshots, probe_rejected_profiles =
             List.fold_left
               (fun (ok_acc, err_acc) (profile : profile_build) ->
                 let probes =
@@ -561,26 +578,40 @@ let validate_path ~sw ~net ~clock ~config_path =
               built_profiles
           in
           let profile_snapshots = List.rev profile_snapshots in
-          let rejected_profiles = List.rev rejected_profiles in
-          if rejected_profiles <> [] then
-            Error
-              (rejection_of_path ~config_path ~attempted_mtime ~checked_at
-                 ~errors:
-                   [
-                     Printf.sprintf
-                       "catalog validation rejected %d/%d profile(s)"
-                       (List.length rejected_profiles)
-                       (List.length built_profiles);
-                   ]
-                 ~profiles:rejected_profiles)
+          let rejected_profiles =
+            statically_rejected_profiles @ List.rev probe_rejected_profiles
+          in
+          let snapshot =
+            {
+              source_path = config_path;
+              mtime = Option.value attempted_mtime ~default:0.0;
+              validated_at = checked_at;
+              profiles = profile_snapshots;
+            }
+          in
+          if rejected_profiles = [] then
+            Ok { snapshot; rejected_update = None }
           else
-            Ok
-              {
-                source_path = config_path;
-                mtime = Option.value attempted_mtime ~default:0.0;
-                validated_at = checked_at;
-                profiles = profile_snapshots;
-              }
+            let rejection =
+              rejection_of_path ~config_path ~attempted_mtime ~checked_at
+                ~errors:
+                  [
+                    Printf.sprintf
+                      "catalog validation rejected %d/%d profile(s)"
+                      (List.length rejected_profiles)
+                      (List.length profiles);
+                  ]
+                ~profiles:rejected_profiles
+            in
+            if profile_snapshots = [] then
+              Error rejection
+            else
+              Ok { snapshot; rejected_update = Some rejection }
+
+let validate_path ~sw ~net ~clock ~config_path =
+  match validate_path_result ~sw ~net ~clock ~config_path with
+  | Ok result -> Ok result.snapshot
+  | Error _ as e -> e
 
 let same_snapshot_key (snapshot : snapshot) ~path ~mtime =
   String.equal snapshot.source_path path && Float.equal snapshot.mtime mtime
@@ -624,6 +655,13 @@ let inspect_active ?sw ?net ?clock () =
       let cached_result =
         with_cache_lock (fun () ->
             match !cache.active_snapshot, !cache.rejected_update, current_mtime with
+            | Some snapshot, Some rejection, Some mtime
+              when same_snapshot_key snapshot ~path:config_path ~mtime
+                   && same_rejection_key rejection ~path:config_path ~mtime ->
+                Some
+                  (Ok
+                     (Validated_with_rejections
+                        { snapshot; rejected_update = rejection }))
             | Some snapshot, _, Some mtime
               when same_snapshot_key snapshot ~path:config_path ~mtime ->
                 Some (Ok (Validated snapshot))
@@ -662,8 +700,8 @@ let inspect_active ?sw ?net ?clock () =
                         { snapshot; rejected_update = rejection })
                | None -> Error rejection)
           | Ok (sw, net, clock) -> (
-              match validate_path ~sw ~net ~clock ~config_path with
-              | Ok snapshot ->
+              match validate_path_result ~sw ~net ~clock ~config_path with
+              | Ok { snapshot; rejected_update = None } ->
                   with_cache_lock (fun () ->
                       cache :=
                         {
@@ -671,6 +709,16 @@ let inspect_active ?sw ?net ?clock () =
                           rejected_update = None;
                         });
                   Ok (Validated snapshot)
+              | Ok { snapshot; rejected_update = Some rejection } ->
+                  with_cache_lock (fun () ->
+                      cache :=
+                        {
+                          active_snapshot = Some snapshot;
+                          rejected_update = Some rejection;
+                        });
+                  Ok
+                    (Validated_with_rejections
+                       { snapshot; rejected_update = rejection })
               | Error rejection ->
                   (match with_cache_lock (fun () -> !cache.active_snapshot) with
                    | Some snapshot ->
@@ -695,6 +743,7 @@ let inspect_active ?sw ?net ?clock () =
 let require_snapshot ?sw ?net ?clock () =
   match inspect_active ?sw ?net ?clock () with
   | Ok (Validated snapshot) -> Ok snapshot
+  | Ok (Validated_with_rejections { snapshot; _ }) -> Ok snapshot
   | Ok (Serving_last_known_good { snapshot; _ }) -> Ok snapshot
   | Error rejection ->
       let detail =

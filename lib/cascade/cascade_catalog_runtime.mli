@@ -25,6 +25,10 @@ type rejection
 
 type state =
   | Validated of snapshot
+  | Validated_with_rejections of {
+      snapshot : snapshot;
+      rejected_update : rejection;
+    }
   | Serving_last_known_good of {
       snapshot : snapshot;
       rejected_update : rejection;
@@ -43,6 +47,9 @@ val validate_path :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   config_path:string ->
   (snapshot, rejection) result
+(** Returns the validated subset of profiles when the catalog is partly
+    usable but some presets are rejected at runtime. Inspect
+    {!inspect_active} when the caller needs the rejected-profile detail. *)
 
 val resolve_declared_name :
   ?sw:Eio.Switch.t ->

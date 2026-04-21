@@ -159,6 +159,10 @@ let validation_summary_json ?config_path () =
         ("invalid_profiles", `List []);
       ]
   | Ok
+      (Cascade_catalog_runtime.Validated_with_rejections
+         { rejected_update; _ }) ->
+      of_rejection ~status:"validated" rejected_update
+  | Ok
       (Cascade_catalog_runtime.Serving_last_known_good
          { rejected_update; _ }) ->
       of_rejection ~status:"serving_last_known_good" rejected_update

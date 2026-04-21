@@ -470,6 +470,11 @@ let live_catalog_summary = function
         "Live cascade catalog validation passed.",
         Cascade_catalog_runtime.state_to_yojson
           (Cascade_catalog_runtime.Validated snapshot) )
+  | Stdlib.Ok
+      (Cascade_catalog_runtime.Validated_with_rejections _ as state) ->
+      ( false,
+        "Live cascade catalog validation kept the usable profile subset and rejected some presets.",
+        Cascade_catalog_runtime.state_to_yojson state )
   | Stdlib.Ok (Cascade_catalog_runtime.Serving_last_known_good _ as state) ->
       ( true,
         "Live cascade catalog validation rejected the current file; runtime is serving last-known-good.",
@@ -513,11 +518,12 @@ let analyze_live ~sw ~net ~clock ~fs ~proc_mgr ~base_path_input
       report.next_actions
   in
   let status =
-    match report.status, live_failed with
-    | Error, _ -> Error
-    | _, true -> Error
-    | Ok, false -> Ok
-    | Warn, false -> Warn
+    match report.status, live_failed, live_warning <> "" with
+    | Error, _, _ -> Error
+    | _, true, _ -> Error
+    | Warn, false, _ -> Warn
+    | Ok, false, true -> Warn
+    | Ok, false, false -> Ok
   in
   {
     report with

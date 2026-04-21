@@ -101,7 +101,7 @@ let compute_diversity ~(available_tools : string list)
   let threshold = max 1 (total_calls / 100) in
   let underused = available_tools
     |> List.filter (fun tool ->
-      not (String.equal tool "keeper_stay_silent")
+      not (String.equal tool (Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent))
       && (not (SS.mem tool used_set)
           || List.exists (fun s -> s.name = tool && s.count < threshold) stats))
   in

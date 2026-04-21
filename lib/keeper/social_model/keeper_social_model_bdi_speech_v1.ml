@@ -144,7 +144,7 @@ let inferred_text_reply_state ~(meta : keeper_meta)
     { speech_act = Types.Inform; delivery_surface = Types.Visible_reply } )
 
 let inferred_tool_surface tools =
-  if tools = [ "keeper_stay_silent" ] then
+  if tools = [ Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent ] then
     Some
       ( { speech_act = Types.Stay_silent; delivery_surface = Types.Silent }
       , Types.Tool_only_stay_silent )

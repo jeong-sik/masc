@@ -148,7 +148,7 @@ let suggest_alternatives ~(allowed_tools : string list)
   allowed_tools
   |> List.filter (fun t ->
        not (SS.mem t repeated_set)
-       && t <> "keeper_stay_silent")
+       && t <> Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent)
   |> fun candidates ->
      let len = List.length candidates in
      if len <= max_suggestions then candidates

@@ -874,6 +874,7 @@ let mock_completion_request () : Llm_provider.Llm_transport.completion_request =
         ();
     messages = [];
     tools = [];
+    runtime_mcp_policy = None;
   }
 
 let mock_api_response () : Oas.Types.api_response =

@@ -565,6 +565,9 @@ let cli_wrapped_hard_quota_indicators = [
   "quota_exhausted";
   "exhausted your capacity on this model";
   "quota will reset after";
+  "\"api_error_status\":429";
+  "you've hit your limit";
+  "resets apr ";
 ]
 
 let message_looks_like_cli_wrapped_hard_quota (message : string) : bool =

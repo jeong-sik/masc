@@ -5,6 +5,8 @@
 
 open Masc_mcp
 
+module Dashboard_projection_cache = Dashboard_projection_cache
+
 let check_json msg expected actual =
   Alcotest.(check string) msg
     (Yojson.Safe.to_string expected)
@@ -86,6 +88,41 @@ let test_seed_stale_if_missing_refreshes_in_background ~clock () =
   in
   check_json "background refresh stores fresh value"
     (`String "fresh") refreshed
+
+let test_projection_snapshot_cache_reuses_actor_key () =
+  Dashboard_cache.invalidate_all ();
+  let config = Coord.default_config "/tmp/projection-cache-room" in
+  let counter = ref 0 in
+  let compute actor_name =
+    incr counter;
+    `Assoc [("actor", `String actor_name); ("count", `Int !counter)]
+  in
+  let v1 =
+    Dashboard_projection_cache.get_or_compute_snapshot_json
+      ~config ~actor:(Some "dashboard") compute
+  in
+  let v2 =
+    Dashboard_projection_cache.get_or_compute_snapshot_json
+      ~config ~actor:(Some "dashboard") compute
+  in
+  check_json "snapshot helper reuses cached actor entry" v1 v2;
+  Alcotest.(check int) "snapshot compute once per actor" 1 !counter
+
+let test_projection_digest_cache_separates_actors () =
+  Dashboard_cache.invalidate_all ();
+  let config = Coord.default_config "/tmp/projection-cache-room-actors" in
+  let counter = ref 0 in
+  let compute actor_name =
+    incr counter;
+    `Assoc [("actor", `String actor_name); ("count", `Int !counter)]
+  in
+  ignore
+    (Dashboard_projection_cache.get_or_compute_digest_json
+       ~config ~actor:(Some "dashboard") compute);
+  ignore
+    (Dashboard_projection_cache.get_or_compute_digest_json
+       ~config ~actor:(Some "operator") compute);
+  Alcotest.(check int) "digest compute once per actor key" 2 !counter
 
 (* -- 4. Invalidate removes entry -------------------------------------------- *)
 
@@ -408,6 +445,10 @@ let () =
             (test_seed_stale_if_missing_refreshes_in_background ~clock);
           test_case "peek returns cached value" `Quick
             test_peek_returns_cached_value;
+          test_case "projection snapshot helper reuses actor cache" `Quick
+            test_projection_snapshot_cache_reuses_actor_key;
+          test_case "projection digest helper separates actors" `Quick
+            test_projection_digest_cache_separates_actors;
           test_case "invalidate" `Quick test_invalidate;
           test_case "invalidate_prefix" `Quick test_invalidate_prefix;
           test_case "stats" `Quick test_stats;

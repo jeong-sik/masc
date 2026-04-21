@@ -37,13 +37,6 @@ type attention_context = Dashboard_mission_assembly.attention_context = {
   json : Yojson.Safe.t;
 }
 
-let room_scope_cache_segment (_config : Coord_utils.config) = "default"
-
-let room_scoped_cache_key (config : Coord_utils.config) prefix actor_name =
-  Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
-    (room_scope_cache_segment config) actor_name
-
-
 let dedup_strings items =
   List.sort_uniq String.compare
     (List.filter_map trim_to_option items)
@@ -580,11 +573,7 @@ type mission_projection = {
 
 let build_projection ?actor ~config ~sw ~clock
     ~proc_mgr () =
-  let actor_name =
-    match actor with
-    | Some value when String.trim value <> "" -> String.trim value
-    | _ -> "dashboard"
-  in
+  let actor_name = Dashboard_projection_cache.normalize_actor_name actor in
   let ctx : _ Operator_control.context =
     {
       config;
@@ -597,10 +586,8 @@ let build_projection ?actor ~config ~sw ~clock
     }
   in
   let snapshot_json =
-    Dashboard_cache.get_or_compute
-      (room_scoped_cache_key config "snapshot" actor_name)
-      ~ttl:3.0
-      (fun () ->
+    Dashboard_projection_cache.get_or_compute_snapshot_json
+      ~config ~actor:(Some actor_name) (fun actor_name ->
         Operator_control.snapshot_json
           ~actor:actor_name
           ~view:"summary"
@@ -611,10 +598,8 @@ let build_projection ?actor ~config ~sw ~clock
           ctx)
   in
   let digest_json =
-    Dashboard_cache.get_or_compute
-      (room_scoped_cache_key config "digest" actor_name)
-      ~ttl:5.0
-      (fun () ->
+    Dashboard_projection_cache.get_or_compute_digest_json
+      ~config ~actor:(Some actor_name) (fun actor_name ->
         match Operator_control.digest_json ~actor:actor_name ctx with
         | Ok json -> json
         | Error message ->

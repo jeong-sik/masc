@@ -21,12 +21,6 @@ let task_status_matches status_filter (task : Types.task) =
   | Some status ->
       String.equal status (Types.string_of_task_status task.task_status)
 
-let is_terminal_task (task : Types.task) =
-  match task.task_status with
-  | Types.Done _ -> `Done
-  | Types.Cancelled _ -> `Cancelled
-  | _ -> `Active
-
 let tasks ?status_filter ?(include_done = false) ?(include_cancelled = false)
     config =
   Coord.get_tasks_raw config
@@ -34,11 +28,11 @@ let tasks ?status_filter ?(include_done = false) ?(include_cancelled = false)
   |> List.filter (fun task ->
          match status_filter with
          | Some _ -> true
-         | None -> (
-             match is_terminal_task task with
-             | `Done -> include_done
-             | `Cancelled -> include_cancelled
-             | `Active -> true))
+         | None ->
+             let s = task.task_status in
+             if Types.task_status_is_done s then include_done
+             else if Types.task_status_is_terminal s then include_cancelled
+             else true)
 
 let task_assignee (task : Types.task) =
   Types.task_assignee_of_status task.task_status

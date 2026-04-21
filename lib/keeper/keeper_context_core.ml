@@ -311,7 +311,6 @@ let message_of_json (json : Yojson.Safe.t) : Oas.Types.message =
       tool_call_id =
         (json |> member "tool_call_id" |> to_string_option
          |> Option.map Inference_utils.sanitize_text_utf8);
-      metadata = [];
     }
 
 (** Extract human-readable text from a single history.jsonl line that was

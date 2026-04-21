@@ -162,7 +162,6 @@ let probe_chat_completion_compatible
             content = [ Oas_types.Text "hi" ];
             name = None;
             tool_call_id = None;
-            metadata = [];
           };
         ]
       in

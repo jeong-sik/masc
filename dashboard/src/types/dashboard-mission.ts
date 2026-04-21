@@ -385,6 +385,16 @@ export interface OperatorKeeperSnapshot {
   short_goal?: string
   turn_count?: number
   context_tokens?: number
+  context_max?: number
+  context_source?: string
+  context?: {
+    source?: string
+    context_ratio?: number
+    context_tokens?: number
+    context_max?: number
+    message_count?: number
+    has_checkpoint?: boolean
+  }
   keepalive_running?: boolean
   autonomous_action_count?: number
   autonomous_turn_count?: number

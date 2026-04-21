@@ -99,6 +99,103 @@ let test_compute_context_ratio_uses_resolved_cli_context_budget () =
   Alcotest.(check (float 0.0001)) "codex bare provider uses 1.05M context"
     (2106223.0 /. 1050000.0) ratio
 
+let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "owner"));
+      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "owner";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let keeper_name = "ctx-truth" in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Prefer metrics context truth");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      Keeper_keepalive.stop_keepalive keeper_name;
+      let meta =
+        match Keeper_types.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "expected keeper meta"
+        | Error err -> Alcotest.fail err
+      in
+      let updated_meta =
+        {
+          meta with
+          models = [ "codex_cli:auto" ];
+          runtime =
+            {
+              meta.runtime with
+              usage =
+                {
+                  meta.runtime.usage with
+                  last_model_used = "codex";
+                  last_input_tokens = 6_637_033;
+                  last_total_tokens = 6_670_646;
+                };
+            };
+        }
+      in
+      (match Keeper_types.write_meta config updated_meta with
+      | Ok () -> ()
+      | Error err -> Alcotest.fail err);
+      let metrics_store = Keeper_types.keeper_metrics_store config keeper_name in
+      Dated_jsonl.append metrics_store
+        (`Assoc
+          [
+            ("ts", `String (Types.now_iso ()));
+            ("channel", `String "heartbeat");
+            ("snapshot_source", `String "keeper_context_status");
+            ("context_ratio", `Float 0.1274375);
+            ("context_tokens", `Int 16312);
+            ("context_max", `Int 128000);
+          ]);
+      Operator_control.invalidate_snapshot_cache ();
+      let json =
+        Operator_control.snapshot_json ~view:"summary"
+          ~include_keepers:true ~include_messages:false
+          ~lightweight_summary:true
+          (operator_ctx env sw config "owner")
+      in
+      let keeper =
+        match
+          Yojson.Safe.Util.(json |> member "keepers" |> member "items" |> to_list)
+          |> List.find_opt (fun row ->
+                 Yojson.Safe.Util.(row |> member "name" |> to_string) = keeper_name)
+        with
+        | Some keeper -> keeper
+        | None -> Alcotest.fail "expected keeper in snapshot"
+      in
+      Alcotest.(check (float 0.000001)) "metrics ratio wins over usage fallback"
+        0.1274375 Yojson.Safe.Util.(keeper |> member "context_ratio" |> to_float);
+      Alcotest.(check int) "metrics tokens retained" 16312
+        Yojson.Safe.Util.(keeper |> member "context_tokens" |> to_int);
+      Alcotest.(check int) "metrics max retained" 128000
+        Yojson.Safe.Util.(keeper |> member "context_max" |> to_int);
+      Alcotest.(check string) "metrics source retained" "keeper_context_status"
+        Yojson.Safe.Util.(keeper |> member "context_source" |> to_string))
+
 let test_snapshot_has_expected_sections () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

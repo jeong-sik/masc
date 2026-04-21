@@ -25,6 +25,10 @@ let () =
             `Quick
             Test_operator_control_snapshot
             .test_compute_context_ratio_uses_resolved_cli_context_budget;
+          Alcotest.test_case "snapshot prefers metrics context truth over usage counters"
+            `Quick
+            Test_operator_control_snapshot
+            .test_snapshot_prefers_metrics_context_truth_over_usage_counters;
           Alcotest.test_case "snapshot sections" `Quick
             Test_operator_control_snapshot.test_snapshot_has_expected_sections;
           Alcotest.test_case "snapshot pending confirm summary tracks actor scope"

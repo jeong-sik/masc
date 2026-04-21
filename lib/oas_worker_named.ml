@@ -382,6 +382,36 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
       (Llm_provider.Http_client.AcceptRejected { reason }))
   | _ -> None
 
+let cli_wrapped_hard_quota_indicators = [
+  "terminalquotaerror";
+  "quota_exhausted";
+  "exhausted your capacity on this model";
+  "quota will reset after";
+]
+
+let message_looks_like_cli_wrapped_hard_quota (message : string) : bool =
+  List.exists
+    (String_util.contains_substring_ci message)
+    cli_wrapped_hard_quota_indicators
+
+let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
+  match err with
+  | Oas.Error.Api api_err ->
+    Llm_provider.Retry.is_hard_quota api_err
+    ||
+    (match api_err with
+     | Llm_provider.Retry.NetworkError { message }
+     | Llm_provider.Retry.Overloaded { message }
+     | Llm_provider.Retry.ServerError { message; _ } ->
+       message_looks_like_cli_wrapped_hard_quota message
+     | Llm_provider.Retry.RateLimited _
+     | Llm_provider.Retry.AuthError _
+     | Llm_provider.Retry.InvalidRequest _
+     | Llm_provider.Retry.ContextOverflow _
+     | Llm_provider.Retry.Timeout _ ->
+       false)
+  | _ -> false
+
 (** Run a single Agent.run() call with MASC-driven cascade model fallback.
 
     MASC drives the cascade FSM directly:
@@ -688,11 +718,10 @@ let run_named
            ([hard_quota_cooldown_sec], default 1h) so weighted_random
            re-selection doesn't waste cascade turns on a provider that
            is terminally unavailable. *)
-        (match sdk_err with
-         | Oas.Error.Api api_err when Llm_provider.Retry.is_hard_quota api_err ->
-           Cascade_health_tracker.(record_hard_quota global ~provider_key:provider_cfg.model_id)
-         | _ ->
-           Cascade_health_tracker.(record_failure global ~provider_key:provider_cfg.model_id));
+        if sdk_error_is_hard_quota sdk_err then
+          Cascade_health_tracker.(record_hard_quota global ~provider_key:provider_cfg.model_id)
+        else
+          Cascade_health_tracker.(record_failure global ~provider_key:provider_cfg.model_id);
         (* FSM: Call_err → decide *)
         (match sdk_error_to_cascade_outcome sdk_err with
          | Some outcome ->

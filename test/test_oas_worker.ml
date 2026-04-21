@@ -572,6 +572,38 @@ let test_cascade_audit_persists_observation () =
       | _ ->
           Alcotest.fail "expected one cascade audit record")
 
+let test_sdk_error_is_hard_quota_detects_gemini_cli_network_wrapper () =
+  let err =
+    Oas.Error.Api
+      (Llm_provider.Retry.NetworkError
+         {
+           message =
+             "gemini exited with code 1: TerminalQuotaError: You have exhausted \
+              your capacity on this model. Your quota will reset after 4h41m7s. \
+              reason=QUOTA_EXHAUSTED";
+         })
+  in
+  Alcotest.(check bool) "Gemini CLI quota wrapper counts as hard quota" true
+    (Oas_worker_named.sdk_error_is_hard_quota err)
+
+let test_sdk_error_is_hard_quota_keeps_transient_network_errors_false () =
+  let err =
+    Oas.Error.Api
+      (Llm_provider.Retry.NetworkError
+         { message = "gemini exited with code 1: connection reset by peer" })
+  in
+  Alcotest.(check bool) "transient network error stays transient" false
+    (Oas_worker_named.sdk_error_is_hard_quota err)
+
+let test_sdk_error_is_hard_quota_preserves_rate_limited_detection () =
+  let err =
+    Oas.Error.Api
+      (Llm_provider.Retry.RateLimited
+         { retry_after = None; message = "resource exhausted" })
+  in
+  Alcotest.(check bool) "existing RateLimited hard quota still works" true
+    (Oas_worker_named.sdk_error_is_hard_quota err)
+
 let make_worker_meta ?(effective_model = "local-qwen") () :
     Worker_container_types.worker_container_meta =
   {
@@ -2168,6 +2200,12 @@ let () =
         test_cascade_metrics_evicts_lowest_call_key;
       Alcotest.test_case "cascade audit persists observation" `Quick
         test_cascade_audit_persists_observation;
+      Alcotest.test_case "sdk_error_is_hard_quota detects Gemini CLI wrapper" `Quick
+        test_sdk_error_is_hard_quota_detects_gemini_cli_network_wrapper;
+      Alcotest.test_case "sdk_error_is_hard_quota keeps transient network errors false" `Quick
+        test_sdk_error_is_hard_quota_keeps_transient_network_errors_false;
+      Alcotest.test_case "sdk_error_is_hard_quota preserves RateLimited detection" `Quick
+        test_sdk_error_is_hard_quota_preserves_rate_limited_detection;
     ];
     "resume_config", [
       Alcotest.test_case "checkpoint model wins" `Quick

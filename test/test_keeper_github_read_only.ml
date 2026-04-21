@@ -598,8 +598,13 @@ let test_side_effect_tracking_via_event_bus () =
     (Agent_sdk.Event_bus.mk_event
        (Agent_sdk.Event_bus.ToolCompleted
           { agent_name = "keeper-a"; tool_name = "keeper_shell";
-            output = Error { Agent_sdk.Types.message = "boom";
-                             recoverable = false } }));
+            output =
+              Error
+                {
+                  Agent_sdk.Types.message = "boom";
+                  recoverable = false;
+                  error_class = None;
+                } }));
   let events = Agent_sdk.Event_bus.drain sub in
   Agent_sdk.Event_bus.unsubscribe bus sub;
   process events;

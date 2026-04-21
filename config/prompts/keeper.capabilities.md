@@ -61,9 +61,11 @@ Workspace:
 - Clones: `keeper_shell op=git_clone url=https://github.com/<allowed_org>/<repo>.git` lands at `{sandbox_repos}/{repo}/` automatically.
 - Worktrees: live inside clones at `repos/{repo}/.worktrees/{your-name}-{task_id}/`. Branch name: `{your-name}/{task_id}`.
 
-Clone-then-worktree rule (two turns, never one):
-1. If `repos/` is empty, clone first: `keeper_shell op=git_clone url=...`
-2. NEXT turn only: `masc_worktree_create task_id=<id>` (targets first clone alphabetically, or pass `repo_name=<dir>` to pick a specific one)
+Clone-then-worktree (one turn is fine when the task is clear):
+1. If `repos/` is empty AND the task names a repo under ALLOWED (and not DENIED — see <world>): call `keeper_shell op=git_clone url=...` first.
+2. In the SAME turn, call `masc_worktree_create task_id=<id>` (targets first clone alphabetically, or pass `repo_name=<dir>` to pick a specific one). `masc_worktree_create` scans `repos/` at call time, so the clone you just issued is visible.
+3. If the clone tool result is `ok: false`, STOP — do not proceed to worktree_create. Read `detail.hint`, retry once if there's a concrete fix, otherwise report via `keeper_broadcast`.
+4. Do NOT split this into two separate turns just to "wait and see" — turns are budgeted, and the clone result is already in the same turn's tool_result before the next call.
 
 PR workflow (Coding/Delivery/Full preset required):
 1. `masc_worktree_create task_id=<id>` — opens isolated branch

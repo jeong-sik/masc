@@ -41,10 +41,24 @@ Including a host storage prefix causes path doubling errors. The tool maps your 
 
 ## Project
 
-- Clone targets are restricted by `config/tool_policy.toml` `[git_clone]`.
-- Allowed orgs (runtime): {{allowed_orgs}}
-- Denied repos (runtime): {{denied_repos}}
-- Never invent an org/repo outside the allowed list. The task you claim tells you which repo to work in; if unclear, ask on the board before cloning.
+Clone targets are controlled by `config/tool_policy.toml` `[git_clone]`.
+Two lists combine as **ALLOWED minus DENIED** — read both carefully.
+
+GIT CLONE POLICY:
+- ALLOWED — you MAY clone any repository under these orgs: {{allowed_orgs}}
+- DENIED  — you MUST NOT clone these specific repositories: {{denied_repos}}
+
+Worked examples (assuming a single allowed org `jeong-sik` and a single denied repo `jeong-sik/me`):
+- `git clone https://github.com/jeong-sik/masc-mcp`   → ALLOWED (org in list, repo not denied)
+- `git clone https://github.com/jeong-sik/daw-mcp`    → ALLOWED (same reason)
+- `git clone https://github.com/jeong-sik/me`         → DENIED (repo explicitly denied)
+- `git clone https://github.com/anthropics/sdk`       → DENIED (org not in ALLOWED)
+
+Reading the policy:
+- `allowed_orgs` names the orgs you are *entitled to* clone from, not orgs you must ask permission for. If the task you claim names a repo under ALLOWED (and not in DENIED), clone it directly.
+- Only ask the board when the task does not name a repo and you cannot infer one from context. Do NOT post a "may I clone?" board question when the task already names a repo that passes the ALLOWED/DENIED check.
+
+Never invent an org or repo that is not in ALLOWED.
 
 ## Environment
 

@@ -225,6 +225,12 @@ let runtime_blocker_surface_of_reason (reason : string) =
   else
     None
 
+let proactive_runtime_reason_is_current (meta : keeper_meta) =
+  let proactive_ts = meta.runtime.proactive_rt.last_ts in
+  let last_turn_ts = meta.runtime.usage.last_turn_ts in
+  proactive_ts > 0.0
+  && (last_turn_ts <= 0.0 || proactive_ts >= last_turn_ts)
+
 let runtime_blocker_fields_json (config : Coord_utils.config)
     (meta : keeper_meta) =
   let derived =
@@ -238,12 +244,14 @@ let runtime_blocker_fields_json (config : Coord_utils.config)
   let derived =
     match derived with
     | Some blocker -> Some blocker
-    | None ->
-        (match runtime_blocker_surface_of_reason meta.runtime.last_blocker with
-         | Some blocker -> Some blocker
-         | None ->
-             runtime_blocker_surface_of_reason
-               meta.runtime.proactive_rt.last_reason)
+    | None -> (
+        match runtime_blocker_surface_of_reason meta.runtime.last_blocker with
+        | Some blocker -> Some blocker
+        | None
+          when proactive_runtime_reason_is_current meta ->
+            runtime_blocker_surface_of_reason
+              meta.runtime.proactive_rt.last_reason
+        | None -> None)
   in
   match derived with
   | Some blocker ->

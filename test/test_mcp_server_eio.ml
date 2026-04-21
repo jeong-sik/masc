@@ -1159,6 +1159,9 @@ let test_handle_request_tools_list_include_hidden_metadata () =
     (Yojson.Safe.Util.member "icons" status_tool <> `Null);
   Alcotest.(check bool) "standard tools expose annotations" true
     (Yojson.Safe.Util.member "annotations" status_tool <> `Null);
+  Alcotest.(check bool) "standard tools do not advertise outputSchema prematurely"
+    true
+    (Yojson.Safe.Util.member "outputSchema" status_tool = `Null);
   Alcotest.(check bool) "visibility metadata exposed" true
     (Yojson.Safe.Util.member "visibility" status_tool <> `Null);
   Alcotest.(check bool) "implementation status exposed" true

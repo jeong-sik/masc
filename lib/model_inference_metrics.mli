@@ -8,6 +8,7 @@
 
 type recent_entry = {
   re_ts_unix : float;
+  re_provider : string option;
   re_input_tokens : int;
   re_output_tokens : int;
   re_latency_ms : float;
@@ -41,6 +42,7 @@ type model_bucketed = {
 
 type model_stats = {
   model_id : string;
+  provider : string option;
   entry_count : int;
   avg_tok_per_sec : float;
   p50_tok_per_sec : float;

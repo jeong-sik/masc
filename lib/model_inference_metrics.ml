@@ -15,6 +15,7 @@ module IntMap = Map.Make (Int)
 
 type recent_entry = {
   re_ts_unix : float;
+  re_provider : string option;
   re_input_tokens : int;
   re_output_tokens : int;
   re_latency_ms : float;
@@ -43,6 +44,7 @@ type model_bucketed = {
 
 type model_stats = {
   model_id : string;
+  provider : string option;
   entry_count : int;
   avg_tok_per_sec : float;
   p50_tok_per_sec : float;
@@ -107,6 +109,7 @@ let percentile (sorted : float array) (p : float) : float =
 
 type raw_entry = {
   model : string;
+  provider : string option;
   ts_unix : float;
   tok_per_sec : float;
   prompt_tok_per_sec : float option;
@@ -128,6 +131,16 @@ type raw_entry = {
   tools_used : string list;
   is_error : bool;
 }
+
+let provider_opt_of_model (model : string) : string option =
+  let provider = Keeper_hooks_oas.provider_of_model model in
+  if String.equal provider "unknown" then None else Some provider
+
+let provider_opt_of_fields ~(model : string) (fields : (string * Yojson.Safe.t) list)
+    : string option =
+  match List.assoc_opt "provider" fields with
+  | Some (`String s) when String.trim s <> "" -> Some s
+  | _ -> provider_opt_of_model model
 
 let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
   let ts = Safe_ops.json_float_opt "ts_unix" json |> Option.value ~default:0.0 in
@@ -168,7 +181,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
                  Keeper_cascade_profile.canonicalize s ^ " (cascade)"
                | _ -> "__error__"
            in
+           let provider = provider_opt_of_fields ~model tfields in
            Some { model; ts_unix = ts; tok_per_sec = 0.0;
+                  provider;
                   prompt_tok_per_sec = None;
                   hw_decode_tok_per_sec = None;
                   peak_memory_gb = None;
@@ -187,9 +202,10 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
               | Some (`String s) -> s
               | _ ->
                 match List.assoc_opt "model_used" tfields with
-                | Some (`String s) -> s
-                | _ -> "unknown")
+                   | Some (`String s) -> s
+                   | _ -> "unknown")
            in
+           let provider = provider_opt_of_fields ~model tfields in
            let tok_per_sec =
              match List.assoc_opt "tokens_per_second" tfields with
              | Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0
@@ -262,6 +278,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
              | _ -> None
            in
            Some { model; ts_unix = ts; tok_per_sec;
+                  provider;
                   prompt_tok_per_sec;
                   hw_decode_tok_per_sec;
                   peak_memory_gb;
@@ -368,8 +385,14 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
         let on_count = List.length (List.filter (fun x -> x) xs) in
         Some (float_of_int on_count /. float_of_int total)
     in
+    let provider =
+      match List.find_map (fun e -> e.provider) entries with
+      | Some _ as p -> p
+      | None -> provider_opt_of_model model_id
+    in
     let stats = {
       model_id;
+      provider;
       entry_count = n;
       avg_tok_per_sec = avg tok_vals;
       p50_tok_per_sec = percentile tok_vals 50.0;
@@ -417,6 +440,7 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
         |> (fun l -> if List.length l > 5 then List.filteri (fun i _ -> i < 5) l else l)
         |> List.map (fun e -> {
           re_ts_unix = e.ts_unix;
+          re_provider = e.provider;
           re_input_tokens = e.input_tokens;
           re_output_tokens = e.output_tokens;
           re_latency_ms = e.latency_ms;
@@ -559,8 +583,10 @@ let bucket_metric_to_json (b : bucket_metric) : Yojson.Safe.t =
 
 let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
   let opt_float = function Some f -> `Float f | None -> `Null in
+  let opt_string = function Some s -> `String s | None -> `Null in
   `Assoc
     [ ("model_id", `String s.model_id)
+    ; ("provider", opt_string s.provider)
     ; ("entry_count", `Int s.entry_count)
     ; ("avg_tok_per_sec", `Float s.avg_tok_per_sec)
     ; ("p50_tok_per_sec", `Float s.p50_tok_per_sec)
@@ -592,6 +618,7 @@ let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
     ; ("recent_entries", `List (List.map (fun (r : recent_entry) ->
         `Assoc [
           ("ts_unix", `Float r.re_ts_unix);
+          ("provider", opt_string r.re_provider);
           ("input_tokens", `Int r.re_input_tokens);
           ("output_tokens", `Int r.re_output_tokens);
           ("latency_ms", `Float r.re_latency_ms);

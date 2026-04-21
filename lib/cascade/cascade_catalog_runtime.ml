@@ -434,6 +434,87 @@ let validate_profile_static ~config_path name : (profile_build, profile_rejectio
               candidates;
             }
 
+let load_static_snapshot ~config_path : (snapshot, rejection) result =
+  let checked_at = Unix.gettimeofday () in
+  let attempted_mtime =
+    try Some (Unix.stat config_path).Unix.st_mtime
+    with
+    | Unix.Unix_error _ | Sys_error _ -> None
+  in
+  if not (Env_config_core.existing_file config_path) then
+    Error
+      (rejection_of_path ~config_path ~attempted_mtime ~checked_at
+         ~errors:[ Printf.sprintf "active cascade catalog is missing: %s" config_path ]
+         ~profiles:[])
+  else
+    match Cascade_config_loader.load_json config_path with
+    | Error msg ->
+        Error
+          (rejection_of_path ~config_path ~attempted_mtime ~checked_at
+             ~errors:
+               [
+                 Printf.sprintf
+                   "active cascade catalog could not be loaded: %s"
+                   msg;
+               ]
+             ~profiles:[])
+    | Ok json ->
+        let profiles = discover_profiles json in
+        let top_errors =
+          let base =
+            if profiles = [] then
+              [ "active cascade catalog has no <name>_models profiles" ]
+            else
+              []
+          in
+          if List.mem Keeper_config.default_cascade_name profiles then
+            base
+          else
+            base
+            @
+            [
+              Printf.sprintf
+                "required default profile %S is missing"
+                Keeper_config.default_cascade_name;
+            ]
+        in
+        let built_profiles, rejected_profiles =
+          List.fold_left
+            (fun (ok_acc, err_acc) name ->
+              match validate_profile_static ~config_path name with
+              | Ok profile -> (profile :: ok_acc, err_acc)
+              | Error rejection -> (ok_acc, rejection :: err_acc))
+            ([], [])
+            profiles
+        in
+        let built_profiles = List.rev built_profiles in
+        let rejected_profiles = List.rev rejected_profiles in
+        if top_errors <> [] || rejected_profiles <> [] then
+          Error
+            (rejection_of_path ~config_path ~attempted_mtime ~checked_at
+               ~errors:top_errors ~profiles:rejected_profiles)
+        else
+          Ok
+            {
+              source_path = config_path;
+              mtime = Option.value attempted_mtime ~default:0.0;
+              validated_at = checked_at;
+              profiles =
+                List.map
+                  (fun (profile : profile_build) ->
+                    {
+                      name = profile.name;
+                      weighted_entries = profile.weighted_entries;
+                      inference_params = profile.inference_params;
+                      api_key_env_overrides = profile.api_key_env_overrides;
+                      strategy = profile.strategy;
+                      ollama_max_concurrent = profile.ollama_max_concurrent;
+                      cli_max_concurrent = profile.cli_max_concurrent;
+                      probes = [];
+                    })
+                  built_profiles;
+            }
+
 let validate_path ~sw ~net ~clock ~config_path =
   let checked_at = Unix.gettimeofday () in
   let attempted_mtime =
@@ -711,7 +792,21 @@ let normalize_declared_name raw =
 let lookup_active_profile ?sw ?net ?clock raw_name =
   let normalized = normalize_declared_name raw_name in
   match require_snapshot ?sw ?net ?clock () with
-  | Error _ as e -> e
+  | Error active_detail -> (
+      match config_path_opt () with
+      | None -> Error active_detail
+      | Some config_path -> (
+          match load_static_snapshot ~config_path with
+          | Error _ -> Error active_detail
+          | Ok snapshot -> (
+              match profile_lookup snapshot.profiles normalized with
+              | Some profile -> Ok (snapshot, normalized, profile)
+              | None ->
+                  let known = profile_names_of_snapshot snapshot |> String.concat ", " in
+                  Error
+                    (Printf.sprintf
+                       "unknown cascade_name %S (active profiles: %s)"
+                       normalized known))))
   | Ok snapshot -> (
       match profile_lookup snapshot.profiles normalized with
       | Some profile -> Ok (snapshot, normalized, profile)

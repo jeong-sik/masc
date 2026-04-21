@@ -22,11 +22,17 @@ type t = {
   oas_timeout_per_turn : float field;
 }
 
-let source_of_env_name name =
+(** Sound-partial classifier for the string label returned by
+    {!Config_boot_overrides.source}. Returns [None] for any label
+    that is not one of the two values the underlying override
+    machinery actually emits — callers choose the default policy at
+    the use site instead of the parser silently coercing garbage.
+    See [scripts/lint/no-unknown-permissive-default.sh]. *)
+let source_of_env_name name : source option =
   match Config_boot_overrides.source name with
-  | "env" -> Env
-  | "boot_override" -> Toml
-  | _ -> Default
+  | "env" -> Some Env
+  | "boot_override" -> Some Toml
+  | _ -> None
 
 let source_to_string = function
   | Env -> "env"
@@ -79,7 +85,10 @@ let oas_timeout_override_sec_live ~turn_timeout_sec =
   | None -> None
 
 let freeze_from_current () =
-  let source_field name value = { value; source = source_of_env_name name } in
+  let source_field name value =
+    { value;
+      source = Option.value ~default:Default (source_of_env_name name) }
+  in
   let turn_timeout_sec_value = turn_timeout_sec_live () in
   let bootstrap_max_active_keepers =
     source_field
@@ -94,8 +103,8 @@ let freeze_from_current () =
   let autonomous_max_turns_per_call =
     let source =
       match source_of_env_name "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS" with
-      | Default -> Derived
-      | other -> other
+      | None | Some Default -> Derived
+      | Some other -> other
     in
     {
       value = autonomous_max_turns_per_call_live ();
@@ -125,7 +134,9 @@ let freeze_from_current () =
   let oas_timeout_override_sec =
     {
       value = oas_timeout_override_sec_live ~turn_timeout_sec:turn_timeout_sec_value;
-      source = source_of_env_name "MASC_KEEPER_OAS_TIMEOUT_SEC";
+      source =
+        Option.value ~default:Default
+          (source_of_env_name "MASC_KEEPER_OAS_TIMEOUT_SEC");
     }
   in
   let oas_timeout_per_1k =

@@ -191,18 +191,17 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       (* Yield between heavy phases so SSE / health-check fibers can progress *)
       Eio.Fiber.yield ();
       let t_start = Time_compat.now () in
-      (* Compute directly without Dashboard_cache to avoid nested
-         get_or_compute deadlock — the caller (dashboard_execution_http_json)
-         already wraps this entire function in a cache entry. *)
       let snapshot_json =
-        Operator_control.snapshot_json
-          ~actor:effective_actor
-          ~view:"summary"
-          ~include_messages:false
-          ~include_keepers:true
-          ~include_summary_fields:false
-          ~lightweight_summary:true
-          ctx
+        Dashboard_projection_cache.get_or_compute_snapshot_json
+          ~config ~actor:(Some effective_actor) (fun actor_name ->
+            Operator_control.snapshot_json
+              ~actor:actor_name
+              ~view:"summary"
+              ~include_messages:false
+              ~include_keepers:true
+              ~include_summary_fields:false
+              ~lightweight_summary:true
+              ctx)
       in
       Eio.Fiber.yield ();
       (* Yield between heavy computation phases to prevent fiber starvation.
@@ -322,7 +321,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           ])
 
 let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
-  let effective_actor = Option.value ~default:"dashboard" actor in
+  let effective_actor = Dashboard_projection_cache.normalize_actor_name actor in
   match dashboard_fixture_name ?fixture () with
   | Some "execution_smoke" -> execution_smoke_fixture_json ()
   | _ ->

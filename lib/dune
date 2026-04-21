@@ -62,6 +62,7 @@
    dashboard_attention
    dashboard_attribution
    dashboard_cache
+   dashboard_projection_cache
    dashboard_tool_host_events
    dashboard_governance
    dashboard_governance_judge

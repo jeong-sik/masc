@@ -360,6 +360,7 @@ let codex_cli_prompt_preflight ~(config : Oas_worker_exec.config) ~(goal : strin
         ~context_reducer:config.context_reducer
         ~tiered_memory:None
         ~turn_params:Oas.Hooks.default_turn_params
+        ~tiered_memory:None
     in
     let req_config =
       match String.trim config.system_prompt with
@@ -460,6 +461,9 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
         Llm_provider.Http_client.HttpError { code = 404; body = message }
       | Llm_provider.Retry.ServerError { status; message } ->
         Llm_provider.Http_client.HttpError { code = status; body = message }
+      | Llm_provider.Retry.NotFound _ ->
+        Llm_provider.Http_client.HttpError
+          { code = 404; body = "resource not found" }
       | Llm_provider.Retry.AuthError { message } ->
         Llm_provider.Http_client.HttpError { code = 401; body = message }
       | Llm_provider.Retry.NotFound { message } ->

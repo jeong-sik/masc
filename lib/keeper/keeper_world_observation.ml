@@ -99,6 +99,10 @@ let channel_to_string = function
   | Reactive -> "reactive"
   | Scheduled_autonomous -> "scheduled_autonomous"
 
+let is_autonomous_channel (channel : string) : bool =
+  String.equal channel "scheduled_autonomous"
+  || String.equal channel "proactive"
+
 let verdict_reasons_to_strings = function
   | Run { reasons = (first, rest) } ->
       List.map turn_reason_to_string (first :: rest)

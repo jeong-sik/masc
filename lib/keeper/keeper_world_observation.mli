@@ -134,6 +134,10 @@ val skip_reason_to_string : skip_reason -> string
 (** Convert channel to string tag. *)
 val channel_to_string : keeper_cycle_channel -> string
 
+(** Check if a string channel tag represents an autonomous cycle
+    (scheduled_autonomous or proactive). *)
+val is_autonomous_channel : string -> bool
+
 (** Extract all reasons as flat string tags from a verdict.
     Tags map 1:1 to the typed reasons carried by the verdict and do not
     include variant payloads. *)

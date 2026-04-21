@@ -95,8 +95,8 @@ let empty_tool_audit_snapshot =
     tool_audit_at = None;
   }
 
-let is_scheduled_autonomous_channel (channel : string) : bool =
-  channel = "scheduled_autonomous" || channel = "proactive"
+let is_scheduled_autonomous_channel =
+  Keeper_world_observation.is_autonomous_channel
 
 let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
   let interaction_points = s.turn_points + s.proactive_points in

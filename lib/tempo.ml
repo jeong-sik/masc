@@ -99,15 +99,8 @@ let set_tempo (config : Coord_utils.config) ~interval_s ~reason : tempo_state =
 let get_tempo (config : Coord_utils.config) : tempo_state =
   load_state config
 
-(** Check if task is pending (not done/cancelled) *)
 let is_pending_task (task : Types.task) : bool =
-  match task.task_status with
-  | Types.Todo -> true
-  | Types.Claimed _ -> true
-  | Types.InProgress _ -> true
-  | Types.AwaitingVerification _ -> true
-  | Types.Done _ -> false
-  | Types.Cancelled _ -> false
+  not (Types.task_status_is_terminal task.task_status)
 
 (** Calculate adaptive tempo based on task urgency *)
 let calculate_adaptive_tempo (tasks : Types.task list) : float * string =

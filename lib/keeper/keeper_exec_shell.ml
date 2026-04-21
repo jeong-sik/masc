@@ -75,21 +75,6 @@ let user_timeout_max_sec = env_float "MASC_KEEPER_USER_TIMEOUT_MAX_SEC" 180.0
    sub-network-latency timeout without masking genuine hangs. *)
 let gh_min_timeout_sec = 15.0
 
-let normalize_gh_command (cmd : string) : string =
-  let tokens =
-    cmd
-    |> String.trim
-    |> String.split_on_char ' '
-    |> List.map String.trim
-    |> List.filter (fun token -> token <> "")
-  in
-  let rec drop_leading_gh = function
-    | token :: rest when String.lowercase_ascii token = "gh" ->
-        drop_leading_gh rest
-    | remaining -> remaining
-  in
-  String.concat " " (drop_leading_gh tokens)
-
 let clamp_shell_timeout ?(min_sec = 1.0) ~default args =
   Safe_ops.json_float ~default "timeout_sec" args
   |> fun n -> max min_sec (min user_timeout_max_sec n)
@@ -2095,10 +2080,27 @@ let handle_keeper_shell
                  ])
           else
             let ok = st = Unix.WEXITED 0 in
+            let base_fields =
+              gh_context_fields ctx
+              @ [ "status", Keeper_alerting_path.process_status_to_json st
+                ; "output", `String out ]
+            in
+            let hinted_fields =
+              if (not ok)
+                 && String_util.contains_substring_ci out
+                      "Could not resolve to a Repository"
+              then
+                base_fields
+                @ [ "error", `String "gh_repo_resolve_failed"
+                  ; "hint", `String
+                      "gh is bound to the active task worktree repo. \
+                       Ensure the linked sandbox clone still has a valid \
+                       origin remote and recreate the task worktree if needed."
+                  ]
+              else base_fields
+            in
             gh_base ~command ~ok ~cwd:ctx.worktree_cwd
-              (gh_context_fields ctx
-               @ [ "status", Keeper_alerting_path.process_status_to_json st
-                 ; "output", `String out ])
+              hinted_fields
         in
         (match reversibility with
          | Worker_dev_tools.R2_Irreversible ->

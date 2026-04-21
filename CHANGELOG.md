@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [0.12.3] - 2026-04-21
+
+### Changed
+- Keeper Phase C blocker classification now uses structured
+  `masc_internal_error` variants for admission queue timeout, turn timeout,
+  and ambiguous post-commit cases instead of relying on formatted-string
+  matching across the worker and supervisor surfaces.
+- `Otel_spans` now ships an explicit `.mli` interface that hides mutable
+  internal refs and publishes the supported tracing API surface
+  (`init`, exporter setup, `shutdown`, span helpers, and trace state accessors).
+
 ## [0.12.2] - 2026-04-21
 
 ### Changed

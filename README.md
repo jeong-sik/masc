@@ -251,6 +251,7 @@ See [docs/ENV-CONTRACT.md](docs/ENV-CONTRACT.md) and
 - Each keeper can override the repo default via `cascade_name` in its TOML.
 - For committed defaults, prefer explicit `provider:model_id` labels instead of convenience labels.
 - Checked-in defaults must stay limited to providers that the currently pinned OAS runtime can actually execute once selected.
+- For copy-paste local/private examples, see [docs/CASCADE-COOKBOOK.md](docs/CASCADE-COOKBOOK.md).
 - See [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md), [docs/spec/13-oas-integration.md](docs/spec/13-oas-integration.md), and [docs/spec/14-configuration.md](docs/spec/14-configuration.md).
 
 ## Safe Starting Paths

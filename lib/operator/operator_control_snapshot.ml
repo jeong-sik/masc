@@ -328,6 +328,33 @@ let keeper_tool_audit_fields ?(include_allowed_tools = true) config
         fallback_snapshot.tool_audit_source,
         fallback_snapshot.tool_audit_at )
 
+let cached_tool_audit_json ~lightweight config (meta : Keeper_types.keeper_meta) =
+  let cache_key = "kta:" ^ meta.name in
+  Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+    let allowed_tool_names, recent_tool_names, latest_tool_names,
+        latest_tool_call_count, latest_action_source,
+        tool_audit_source, tool_audit_at =
+      if lightweight then
+        let _, recent_tool_names, latest_tool_names,
+            latest_tool_call_count, latest_action_source,
+            tool_audit_source, tool_audit_at =
+          keeper_tool_audit_fields ~include_allowed_tools:false config meta
+        in
+        ( [], recent_tool_names, latest_tool_names,
+          latest_tool_call_count, latest_action_source,
+          tool_audit_source, tool_audit_at )
+      else keeper_tool_audit_fields config meta
+    in
+    `Assoc [
+      ("allowed_tool_names", `List (List.map (fun v -> `String v) allowed_tool_names));
+      ("recent_tool_names", `List (List.map (fun v -> `String v) recent_tool_names));
+      ("latest_tool_names", `List (List.map (fun v -> `String v) latest_tool_names));
+      ("latest_tool_call_count", option_to_json (fun v -> `Int v) latest_tool_call_count);
+      ("latest_action_source", string_option_to_json latest_action_source);
+      ("tool_audit_source", string_option_to_json tool_audit_source);
+      ("tool_audit_at", string_option_to_json tool_audit_at);
+    ])
+
 (* Concurrency cap for parallel keeper snapshot fibers.
    Originally 4 to guard against memory bursts when many keepers are
    processed simultaneously.  Live measurement via #8829 over 48 samples
@@ -506,24 +533,39 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                         ~meta ~keepalive_running ~keepalive_started_at ~now_ts
                  in
                  let t_audit = Time_compat.now () in
-                 let allowed_tool_names, recent_tool_names, latest_tool_names,
-                     latest_tool_call_count, latest_action_source,
-                     tool_audit_source, tool_audit_at =
-                   if lightweight then
-                     let _, recent_tool_names, latest_tool_names,
-                         latest_tool_call_count, latest_action_source,
-                         tool_audit_source, tool_audit_at =
-                       keeper_tool_audit_fields ~include_allowed_tools:false
-                         config meta
-                     in
-                     ( [],
-                       recent_tool_names,
-                       latest_tool_names,
-                       latest_tool_call_count,
-                       latest_action_source,
-                       tool_audit_source,
-                       tool_audit_at )
-                   else keeper_tool_audit_fields config meta
+                 let audit_json =
+                   cached_tool_audit_json ~lightweight config meta
+                 in
+                 let allowed_tool_names =
+                   match U.to_list (U.member "allowed_tool_names" audit_json) with
+                   | l -> List.filter_map (function `String s -> Some s | _ -> None) l
+                   | exception U.Type_error _ -> []
+                 in
+                 let recent_tool_names =
+                   match U.to_list (U.member "recent_tool_names" audit_json) with
+                   | l -> List.filter_map (function `String s -> Some s | _ -> None) l
+                   | exception U.Type_error _ -> []
+                 in
+                 let latest_tool_names =
+                   match U.to_list (U.member "latest_tool_names" audit_json) with
+                   | l -> List.filter_map (function `String s -> Some s | _ -> None) l
+                   | exception U.Type_error _ -> []
+                 in
+                 let latest_tool_call_count =
+                   match U.to_option U.to_int (U.member "latest_tool_call_count" audit_json) with
+                   | v -> v | exception U.Type_error _ -> None
+                 in
+                 let latest_action_source =
+                   match U.to_option U.to_string (U.member "latest_action_source" audit_json) with
+                   | v -> v | exception U.Type_error _ -> None
+                 in
+                 let tool_audit_source =
+                   match U.to_option U.to_string (U.member "tool_audit_source" audit_json) with
+                   | v -> v | exception U.Type_error _ -> None
+                 in
+                 let tool_audit_at =
+                   match U.to_option U.to_string (U.member "tool_audit_at" audit_json) with
+                   | v -> v | exception U.Type_error _ -> None
                  in
                  dt_audit := Time_compat.now () -. t_audit;
                  let delivery_surface_view =

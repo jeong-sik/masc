@@ -671,17 +671,17 @@ let scheduled_autonomous_outcome_of_result
   | true, true -> Proactive_mixed_response
 
 let has_substantive_tool_calls (tools_used : string list) : bool =
-  List.exists (fun name ->
-    not (String.equal name "keeper_stay_silent")) tools_used
+  let stay_silent = Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent in
+  List.exists (fun name -> not (String.equal name stay_silent)) tools_used
 
 (** Observation-only tools that do not constitute productive work.
     A cycle using only these tools (or none) is a "noop" and triggers
     exponential cooldown backoff to prevent token waste. *)
-let observation_only_tools =
-  [ "keeper_stay_silent"
-  ; "keeper_board_list"
-  ; "keeper_context_status"
-  ; "keeper_tool_search"
+let observation_only_tool_strings =
+  [ Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent
+  ; Tool_name.Keeper.to_string Tool_name.Keeper.Board_list
+  ; Tool_name.Keeper.to_string Tool_name.Keeper.Context_status
+  ; Tool_name.Keeper.to_string Tool_name.Keeper.Tool_search
   ]
 
 (** A cycle is noop when it produced no text AND all tools used (if any)
@@ -689,7 +689,7 @@ let observation_only_tools =
 let is_noop_cycle ~has_text ~(tools_used : string list) : bool =
   not has_text
   && List.for_all (fun name ->
-       List.mem name observation_only_tools) tools_used
+       List.mem name observation_only_tool_strings) tools_used
 
 let visible_run_validation (result : Keeper_agent_run.run_result) :
     Agent_sdk.Raw_trace.run_validation option =
@@ -717,10 +717,11 @@ let accountability_evidence_refs
     ~(result : Keeper_agent_run.run_result)
     ~(validated_evidence : Agent_sdk.Raw_trace.run_validation option) =
   let tool_refs =
+    let stay_silent = Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent in
     result.tools_used
     |> List.filter_map (fun tool_name ->
            let trimmed = String.trim tool_name in
-           if trimmed = "" || String.equal trimmed "keeper_stay_silent" then None
+           if trimmed = "" || String.equal trimmed stay_silent then None
            else Some ("tool:" ^ trimmed))
   in
   let validation_refs =
@@ -1166,10 +1167,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       ~input_tokens:result.usage.input_tokens
       ~output_tokens:result.usage.output_tokens ()
   in
+  let stay_silent = Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent in
   let substantive_tool_call_count =
     result.tools_used
     |> List.filter (fun name ->
-         not (String.equal name "keeper_stay_silent"))
+         not (String.equal name stay_silent))
     |> List.length
   in
   let has_substantive_tools = has_substantive_tool_calls result.tools_used in

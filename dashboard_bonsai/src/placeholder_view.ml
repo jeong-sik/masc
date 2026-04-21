@@ -224,41 +224,42 @@ let panel ~title ~text ~code =
 
 let component ~(route : Route.t) (_graph @ local) =
   let bp = blueprint_of_route route in
-  Bonsai.return
-    (Shell_view.view
-       ~active:route
-       [ Hero.view
-           ~eyebrow:bp.eyebrow
-           ~title:bp.title
-           ~tail:(bp.tail, `Brass)
-           ~sub:bp.vow
-           ()
-       ; Meta.strip
-           [ Meta.cell ~color:`Brass ~k:"signal" ~v:bp.signal ()
-           ; Meta.cell ~k:"source" ~v:bp.source ()
-           ; Meta.cell ~k:"cadence" ~v:bp.cadence ()
-           ]
-       ; Sec.view ~title:"operator contract" ~sub:"target · measure · next" ()
-       ; Node.div
-           ~attrs:[ Style.grid ]
-           [ panel ~title:"measure" ~text:bp.measure ~code:"what must stay visible"
-           ; panel ~title:"next" ~text:bp.next_step ~code:bp.endpoint
-           ; panel
-               ~title:"fallback"
-               ~text:"The journal remains the live runtime witness while this lane gathers signal."
-               ~code:(Route.path Logs)
-           ]
-       ; Node.div
-           ~attrs:[ Style.cta ]
-           [ Node.a
-               ~attrs:[ Attr.href (Route.path Logs); Style.btn; Style.btn_primary ]
-               [ Node.text "journal" ]
-           ; Node.a
-               ~attrs:[ Attr.href "/dashboard/"; Style.btn ]
-               [ Node.text "legacy" ]
-           ; Node.span
-               ~attrs:[ Style.cta_note ]
-               [ Node.text (Route.path route) ]
-           ]
-       ])
+  Bonsai.map (Bonsai.Expert.Var.value Overview_var.var) ~f:(fun shell ->
+    Shell_view.view
+      ~shell
+      ~active:route
+      [ Hero.view
+          ~eyebrow:bp.eyebrow
+          ~title:bp.title
+          ~tail:(bp.tail, `Brass)
+          ~sub:bp.vow
+          ()
+      ; Meta.strip
+          [ Meta.cell ~color:`Brass ~k:"signal" ~v:bp.signal ()
+          ; Meta.cell ~k:"source" ~v:bp.source ()
+          ; Meta.cell ~k:"cadence" ~v:bp.cadence ()
+          ]
+      ; Sec.view ~title:"operator contract" ~sub:"target · measure · next" ()
+      ; Node.div
+          ~attrs:[ Style.grid ]
+          [ panel ~title:"measure" ~text:bp.measure ~code:"what must stay visible"
+          ; panel ~title:"next" ~text:bp.next_step ~code:bp.endpoint
+          ; panel
+              ~title:"fallback"
+              ~text:"The journal remains the live runtime witness while this lane gathers signal."
+              ~code:(Route.path Logs)
+          ]
+      ; Node.div
+          ~attrs:[ Style.cta ]
+          [ Node.a
+              ~attrs:[ Attr.href (Route.path Logs); Style.btn; Style.btn_primary ]
+              [ Node.text "journal" ]
+          ; Node.a
+              ~attrs:[ Attr.href "/dashboard/"; Style.btn ]
+              [ Node.text "legacy" ]
+          ; Node.span
+              ~attrs:[ Style.cta_note ]
+              [ Node.text (Route.path route) ]
+          ]
+      ])
 ;;

@@ -419,6 +419,7 @@ let view_meta_panel (r : Overview_types.response) =
 
 let render (r : Overview_types.response) : Node.t =
   Shell_view.view
+    ~shell:r
     ~active:Overview
     [ Hero.view
         ~eyebrow:"overview · at a glance"

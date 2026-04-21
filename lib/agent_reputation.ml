@@ -183,18 +183,9 @@ let compute_overall_score ~completion_rate ~response_rate
 (** {1 Accountability Penalty} *)
 
 let keeper_name_of_agent agent_name =
-  let trimmed = String.trim agent_name in
-  let suffix = "-agent" in
-  let suffix_len = String.length suffix in
-  let len = String.length trimmed in
-  if len > suffix_len
-     && String.sub trimmed (len - suffix_len) suffix_len = suffix
-  then
-    String.sub trimmed 0 (len - suffix_len)
-  else if Nickname.is_generated_nickname trimmed then
-    Option.value (Nickname.extract_agent_type trimmed) ~default:trimmed
-  else
-    trimmed
+  match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
+  | Some keeper_name -> keeper_name
+  | None -> String.trim agent_name
 
 let accountability_metrics (config : Coord.config) ~(agent_name : string) =
   let keeper_name = keeper_name_of_agent agent_name in

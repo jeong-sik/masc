@@ -278,6 +278,8 @@ val persistent_agent_names : Coord.config -> string list
 val fresher_meta : Coord.config -> keeper_meta -> keeper_meta
 val write_meta : ?force:bool -> Coord.config -> keeper_meta -> (unit, string) result
 val keeper_name_from_agent_name : string -> string option
+val canonical_keeper_name_from_agent_name : string -> string option
+val canonical_keeper_name : string -> string option
 val read_meta_resolved :
   Coord.config -> string -> ((string * keeper_meta) option, string) result
 val read_meta : Coord.config -> string -> (keeper_meta option, string) result

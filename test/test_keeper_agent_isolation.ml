@@ -298,6 +298,16 @@ let test_keeper_name_from_agent_name_rejects_plain_name () =
     "plain keeper name is not treated as agent alias" None
     (Keeper_types.keeper_name_from_agent_name "sangsu")
 
+let test_canonical_keeper_name_from_generated_nickname () =
+  Alcotest.(check (option string))
+    "generated nickname resolves to canonical keeper" (Some "claude")
+    (Keeper_types.canonical_keeper_name_from_agent_name "claude-swift-fox")
+
+let test_canonical_keeper_name_from_legacy_keeper_name () =
+  Alcotest.(check (option string))
+    "legacy keeper-prefixed name normalizes" (Some "sangsu")
+    (Keeper_types.canonical_keeper_name "keeper-sangsu")
+
 (* ============================================================
    Test runner
    ============================================================ *)
@@ -348,5 +358,9 @@ let () =
         test_keeper_name_from_generated_nickname;
       Alcotest.test_case "plain name is not alias" `Quick
         test_keeper_name_from_agent_name_rejects_plain_name;
+      Alcotest.test_case "generated nickname canonicalizes" `Quick
+        test_canonical_keeper_name_from_generated_nickname;
+      Alcotest.test_case "legacy keeper name canonicalizes" `Quick
+        test_canonical_keeper_name_from_legacy_keeper_name;
     ]);
   ]

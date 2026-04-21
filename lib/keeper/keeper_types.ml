@@ -1728,23 +1728,12 @@ let write_meta ?(force = false) config (m : keeper_meta) : (unit, string) result
     Error (Printf.sprintf "failed to write meta %s: %s" path (Printexc.to_string exn))
 ;;
 
-let keeper_name_from_agent_name agent_name =
-  let prefix = "keeper-" and suffix = "-agent" in
-  let plen = String.length prefix and slen = String.length suffix in
-  let alen = String.length agent_name in
-  if alen > plen + slen
-     && String.sub agent_name 0 plen = prefix
-     && String.sub agent_name (alen - slen) slen = suffix
-  then
-    (* Full keeper-xxx-agent format *)
-    let keeper_name = String.sub agent_name plen (alen - plen - slen) in
-    if validate_name keeper_name then Some keeper_name else None
-  else
-    (* Only generated nicknames should alias directly to keeper names. *)
-    if Nickname.is_generated_nickname agent_name && validate_name agent_name
-    then Some agent_name
-    else None
-;;
+let keeper_name_from_agent_name = Keeper_identity.keeper_name_from_agent_name
+
+let canonical_keeper_name_from_agent_name =
+  Keeper_identity.canonical_keeper_name_from_agent_name
+
+let canonical_keeper_name = Keeper_identity.canonical_keeper_name
 
 let read_meta_resolved config name : ((string * keeper_meta) option, string) result =
   let requested_name = String.trim name in

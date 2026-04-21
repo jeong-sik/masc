@@ -1056,7 +1056,7 @@ let invalidate_snapshot_cache () =
     let conds =
       Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
         let cs = Hashtbl.fold (fun _key slot acc ->
-          match slot with Computing { cond } -> cond :: acc | _ -> acc
+          match slot with Computing { cond } -> cond :: acc | Cached _ -> acc
         ) _snapshot_table [] in
         Hashtbl.clear _snapshot_table;
         cs)
@@ -1192,7 +1192,7 @@ let snapshot_json ?actor ?view ?(include_messages = true)
   let summary_fields = timed "summary_fields" (fun () ->
     if include_summary_fields
        && initialized
-       && (match view with Summary | Full -> true | _ -> false)
+       && (match view with Summary | Full -> true | Sessions | Keepers | Messages -> false)
     then
       let room_attention =
         build_room_attention_items config

@@ -469,7 +469,7 @@ let keeper_continuity_state
     ~(now_ts : float) : keeper_continuity =
   let _ = meta in
   let healthy_like =
-    match health_state with KH_healthy | KH_idle -> true | _ -> false
+    match health_state with KH_healthy | KH_idle -> true | KH_offline | KH_stale | KH_degraded | KH_zombie | KH_dead -> false
   in
   let recently_started =
     match keepalive_started_at with

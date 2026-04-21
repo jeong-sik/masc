@@ -145,6 +145,41 @@ let runtime_keepalive_started_at (config : Coord_utils.config)
    cascade_exhaustion_summary, blocker_class_continue_gate
    are defined in Keeper_types (keeper_types.ml). *)
 
+let blocker_class_of_string (reason : string) : blocker_class option =
+  let trimmed = String.trim reason in
+  if trimmed = "" then None
+  else if
+    String_util.contains_substring_ci trimmed
+      "turn outcome ambiguous after committed mutating tool call(s)"
+  then
+    Some
+      (if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
+       then Ambiguous_post_commit_timeout
+       else Ambiguous_post_commit_failure)
+  else if String_util.contains_substring_ci trimmed "cascade_exhausted" then
+    let reason =
+      if String_util.contains_substring_ci trimmed "connection refused" then
+        Connection_refused
+      else if
+        String_util.contains_substring_ci trimmed "no providers available"
+      then
+        No_providers_available
+      else if String_util.contains_substring_ci trimmed "all providers failed"
+      then
+        All_providers_failed
+      else
+        Other_detail trimmed
+    in
+    Some (Cascade_exhausted reason)
+  else if String_util.contains_substring_ci trimmed "admission queue wait timeout"
+  then
+    Some Admission_queue_wait_timeout
+  else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
+  then
+    Some Turn_timeout
+  else
+    None
+
 let blocker_class_of_sdk_error (err : Oas.Error.sdk_error) : blocker_class option =
   match Oas_worker_named.classify_masc_internal_error err with
   | Some (Oas_worker_named.Cascade_exhausted { reason; _ }) ->
@@ -162,24 +197,8 @@ let blocker_class_of_sdk_error (err : Oas.Error.sdk_error) : blocker_class optio
         (if is_timeout then Ambiguous_post_commit_timeout
          else Ambiguous_post_commit_failure)
   | None -> (
-      (* Legacy fallback for pre-Phase-C persisted errors *)
       match err with
-      | Oas.Error.Internal msg ->
-          let trimmed = String.trim msg in
-          if String_util.contains_substring_ci trimmed
-               "turn outcome ambiguous after committed mutating tool call(s)"
-          then
-            Some
-              (if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
-               then Ambiguous_post_commit_timeout
-               else Ambiguous_post_commit_failure)
-          else if String_util.contains_substring_ci trimmed "admission queue wait timeout"
-          then
-            Some Admission_queue_wait_timeout
-          else if String_util.contains_substring_ci trimmed "turn wall-clock timeout" then
-            Some Turn_timeout
-          else
-            None
+      | Oas.Error.Internal msg -> blocker_class_of_string msg
       | _ -> None)
 
 (* ── Runtime blocker surface ───────────────────────────────── *)
@@ -220,63 +239,6 @@ let runtime_blocker_surface_of_failure_reason
         }
   | _ -> None
 
-let runtime_blocker_surface_of_reason (reason : string) =
-  let trimmed = String.trim reason in
-  if trimmed = "" then
-    None
-  else if
-    String_util.contains_substring_ci trimmed
-      "turn outcome ambiguous after committed mutating tool call(s)"
-  then
-    Some
-      {
-        blocker_class =
-          (if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
-           then "ambiguous_post_commit_timeout"
-           else "ambiguous_post_commit_failure");
-        summary = trimmed;
-        continue_gate = true;
-      }
-  else if String_util.contains_substring_ci trimmed "cascade_exhausted"
-  then
-    Some
-      {
-        blocker_class = "cascade_exhausted";
-        summary =
-          (if String_util.contains_substring_ci trimmed "connection refused" then
-             "Cascade exhausted after provider failures; local runtime connection refused."
-           else if
-             String_util.contains_substring_ci trimmed
-               "no providers available"
-           then
-             "Cascade exhausted; no providers were available."
-           else if
-             String_util.contains_substring_ci trimmed "all providers failed"
-           then
-             "Cascade exhausted after all configured providers failed."
-           else
-             "Cascade exhausted after provider failures.");
-        continue_gate = false;
-      }
-  else if String_util.contains_substring_ci trimmed "admission queue wait timeout"
-  then
-    Some
-      {
-        blocker_class = "admission_queue_wait_timeout";
-        summary = trimmed;
-        continue_gate = false;
-      }
-  else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
-  then
-    Some
-      {
-        blocker_class = "turn_timeout";
-        summary = trimmed;
-        continue_gate = false;
-      }
-  else
-    None
-
 let proactive_runtime_reason_is_current (meta : keeper_meta) =
   let proactive_ts = meta.runtime.proactive_rt.last_ts in
   let last_turn_ts = meta.runtime.usage.last_turn_ts in
@@ -303,12 +265,19 @@ let runtime_blocker_fields_json (config : Coord_utils.config)
     match derived with
     | Some blocker -> Some blocker
     | None -> (
-        match runtime_blocker_surface_of_reason meta.runtime.last_blocker with
-        | Some blocker -> Some blocker
+        match blocker_class_of_string meta.runtime.last_blocker with
+        | Some cls ->
+            Some
+              (runtime_blocker_surface_of_typed_class
+                 ~summary:meta.runtime.last_blocker cls)
         | None
           when proactive_runtime_reason_is_current meta ->
-            runtime_blocker_surface_of_reason
-              meta.runtime.proactive_rt.last_reason
+            (match blocker_class_of_string meta.runtime.proactive_rt.last_reason with
+             | Some cls ->
+                 Some
+                   (runtime_blocker_surface_of_typed_class
+                      ~summary:meta.runtime.proactive_rt.last_reason cls)
+             | None -> None)
         | None -> None)
   in
   match derived with

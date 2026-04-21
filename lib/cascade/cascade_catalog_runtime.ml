@@ -581,6 +581,12 @@ let validate_path_result ~sw ~net ~clock ~config_path =
           let rejected_profiles =
             statically_rejected_profiles @ List.rev probe_rejected_profiles
           in
+          let default_profile_validated =
+            List.exists
+              (fun (profile : profile_snapshot) ->
+                String.equal profile.name Keeper_config.default_cascade_name)
+              profile_snapshots
+          in
           let snapshot =
             {
               source_path = config_path;
@@ -595,15 +601,24 @@ let validate_path_result ~sw ~net ~clock ~config_path =
             let rejection =
               rejection_of_path ~config_path ~attempted_mtime ~checked_at
                 ~errors:
-                  [
-                    Printf.sprintf
-                      "catalog validation rejected %d/%d profile(s)"
-                      (List.length rejected_profiles)
-                      (List.length profiles);
-                  ]
+                  ((if default_profile_validated then
+                      []
+                    else
+                      [
+                        Printf.sprintf
+                          "required default profile %S failed validation"
+                          Keeper_config.default_cascade_name;
+                      ])
+                   @
+                   [
+                     Printf.sprintf
+                       "catalog validation rejected %d/%d profile(s)"
+                       (List.length rejected_profiles)
+                       (List.length profiles);
+                   ])
                 ~profiles:rejected_profiles
             in
-            if profile_snapshots = [] then
+            if profile_snapshots = [] || not default_profile_validated then
               Error rejection
             else
               Ok { snapshot; rejected_update = Some rejection }

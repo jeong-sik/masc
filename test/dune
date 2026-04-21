@@ -47,6 +47,7 @@
         test_post_verifier
         test_keeper_cascade_profile
         test_keeper_hooks_oas_provider
+        test_keeper_hooks_oas_telemetry
         test_keeper_memory
         test_keeper_accountability
         test_keeper_exec_status
@@ -163,6 +164,7 @@
           test_post_verifier
           test_keeper_cascade_profile
           test_keeper_hooks_oas_provider
+          test_keeper_hooks_oas_telemetry
           test_keeper_memory
           test_keeper_accountability
           test_keeper_exec_status

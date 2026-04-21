@@ -82,15 +82,25 @@ let emit_cost_event
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
     () : unit =
   let path = Filename.concat masc_root "costs.jsonl" in
+  let int_field name = function
+    | Some n -> [ (name, `Int n) ]
+    | None -> []
+  in
+  let float_field name = function
+    | Some v -> [ (name, `Float v) ]
+    | None -> []
+  in
   let telemetry_fields = match telemetry with
     | Some t ->
-      (match t.reasoning_tokens with
-       | Some n -> [("reasoning_tokens", `Int n)] | None -> [])
+      int_field "reasoning_tokens" t.reasoning_tokens
       @ (match t.timings with
          | Some tm ->
-           (match tm.cache_n with
-            | Some n -> [("cache_n", `Int n)] | None -> [])
+           int_field "cache_n" tm.cache_n
+           @ float_field "prompt_per_second" tm.prompt_per_second
+           @ float_field "provider_tokens_per_second" tm.predicted_per_second
+           @ float_field "hw_decode_tokens_per_second" tm.predicted_per_second
          | None -> [])
+      @ float_field "peak_memory_gb" t.peak_memory_gb
       @ [("request_latency_ms", `Int t.request_latency_ms)]
     | None -> []
   in

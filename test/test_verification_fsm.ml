@@ -73,6 +73,33 @@ let status_string config task_id =
   | None -> "not_found"
   | Some t -> Types.string_of_task_status t.task_status
 
+let expect_claim_next_claimed result ~task_id ~released_task_id =
+  match result with
+  | Coord.Claim_next_claimed
+      { task_id = actual_task_id; released_task_id = actual_released; _ } ->
+      Alcotest.(check string) "claimed task" task_id actual_task_id;
+      Alcotest.(check (option string)) "released task" released_task_id
+        actual_released
+  | Coord.Claim_next_no_unclaimed ->
+      Alcotest.fail "expected claim_next to claim a task, got no_unclaimed"
+  | Coord.Claim_next_no_eligible _ ->
+      Alcotest.fail "expected claim_next to claim a task, got no_eligible"
+  | Coord.Claim_next_error message ->
+      Alcotest.failf "expected claim_next to claim a task, got error: %s"
+        message
+
+let expect_claim_next_no_eligible result =
+  match result with
+  | Coord.Claim_next_no_eligible _ -> ()
+  | Coord.Claim_next_no_unclaimed ->
+      Alcotest.fail "expected claim_next to report no_eligible, got no_unclaimed"
+  | Coord.Claim_next_claimed { task_id; _ } ->
+      Alcotest.failf "expected claim_next to report no_eligible, got %s"
+        task_id
+  | Coord.Claim_next_error message ->
+      Alcotest.failf "expected claim_next to report no_eligible, got error: %s"
+        message
+
 (* ================================================================ *)
 (* FSM transitions (enabled)                                         *)
 (* ================================================================ *)
@@ -215,6 +242,39 @@ let test_reject_by_other_agent_moves_to_in_progress () =
       Alcotest.(check string) "status" "in_progress"
         (status_string config task_id))
 
+let test_claim_next_skips_pending_verification_tasks () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_1 = add_strict_task config in
+    let task_2 = add_strict_task config in
+    claim_and_start config "worker" task_1;
+    (match Coord.transition_task_r config ~agent_name:"worker"
+             ~task_id:task_1 ~action:Types.Submit_for_verification () with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e));
+    Coord.claim_next_r config ~agent_name:"worker" ()
+    |> expect_claim_next_claimed ~task_id:task_2 ~released_task_id:(Some task_1);
+    Coord.claim_next_r config ~agent_name:"other" ()
+    |> expect_claim_next_no_eligible)
+
+let test_claim_next_skips_rejected_verification_tasks () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_1 = add_strict_task config in
+    let task_2 = add_strict_task config in
+    claim_and_start config "worker" task_1;
+    (match Coord.transition_task_r config ~agent_name:"worker"
+             ~task_id:task_1 ~action:Types.Submit_for_verification () with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e));
+    (match Coord.transition_task_r config ~agent_name:"verifier"
+             ~task_id:task_1 ~action:Types.Reject_verification
+             ~reason:"CI checks failed at plan commit and PR head" () with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("reject failed: " ^ Types.show_masc_error e));
+    Coord.claim_next_r config ~agent_name:"worker" ()
+    |> expect_claim_next_claimed ~task_id:task_2 ~released_task_id:(Some task_1);
+    Coord.claim_next_r config ~agent_name:"other" ()
+    |> expect_claim_next_no_eligible)
+
 let test_self_approval_blocked () =
   with_temp_config ~fsm_enabled:true (fun config ->
     let task_id = add_strict_task config in
@@ -329,6 +389,10 @@ let () =
         test_approve_by_other_agent_moves_to_done;
       Alcotest.test_case "cross-agent reject moves to in_progress" `Quick
         test_reject_by_other_agent_moves_to_in_progress;
+      Alcotest.test_case "claim_next skips pending verification tasks" `Quick
+        test_claim_next_skips_pending_verification_tasks;
+      Alcotest.test_case "claim_next skips rejected verification tasks" `Quick
+        test_claim_next_skips_rejected_verification_tasks;
       Alcotest.test_case "self-approval blocked" `Quick
         test_self_approval_blocked;
       Alcotest.test_case "self-rejection blocked" `Quick

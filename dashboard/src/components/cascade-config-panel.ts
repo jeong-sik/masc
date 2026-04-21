@@ -104,6 +104,7 @@ export function sourceTone(source: CascadeProfile['source']): string {
 function validationTone(status: CascadeValidationStatus): 'ok' | 'warn' | 'bad' {
   switch (status) {
     case 'validated': return 'ok'
+    case 'serving_valid_subset': return 'warn'
     case 'serving_last_known_good': return 'warn'
     case 'invalid': return 'bad'
   }
@@ -112,6 +113,7 @@ function validationTone(status: CascadeValidationStatus): 'ok' | 'warn' | 'bad' 
 function validationLabel(status: CascadeValidationStatus): string {
   switch (status) {
     case 'validated': return 'validated'
+    case 'serving_valid_subset': return 'valid subset'
     case 'serving_last_known_good': return 'last known good'
     case 'invalid': return 'invalid'
   }
@@ -121,6 +123,8 @@ function validationDescription(status: CascadeValidationStatus): string {
   switch (status) {
     case 'validated':
       return '현재 cascade catalog 이 정상 검증되었습니다.'
+    case 'serving_valid_subset':
+      return '현재 cascade.json 일부 profile 이 검증에 실패해 invalid profile 은 제외하고 유효한 subset 만 계속 서빙 중입니다.'
     case 'serving_last_known_good':
       return '새 cascade.json 업데이트가 검증에 실패해 마지막 검증 성공 snapshot 을 계속 서빙 중입니다.'
     case 'invalid':

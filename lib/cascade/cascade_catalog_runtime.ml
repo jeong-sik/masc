@@ -44,10 +44,18 @@ type rejection = {
 
 type state =
   | Validated of snapshot
+  | Serving_valid_subset of {
+      snapshot : snapshot;
+      rejected_update : rejection;
+    }
   | Serving_last_known_good of {
       snapshot : snapshot;
       rejected_update : rejection;
     }
+
+type rejected_mode =
+  | Rejected_valid_subset
+  | Rejected_last_known_good
 
 type candidate_runtime = {
   model_string : string;
@@ -68,9 +76,16 @@ type profile_build = {
 type cache = {
   active_snapshot : snapshot option;
   rejected_update : rejection option;
+  rejected_mode : rejected_mode option;
 }
 
-let cache = ref { active_snapshot = None; rejected_update = None }
+let cache =
+  ref
+    {
+      active_snapshot = None;
+      rejected_update = None;
+      rejected_mode = None;
+    }
 let cache_mu = Mutex.create ()
 
 let with_cache_lock f =
@@ -78,7 +93,13 @@ let with_cache_lock f =
   Fun.protect ~finally:(fun () -> Mutex.unlock cache_mu) f
 
 let reset_cache_for_tests () =
-  with_cache_lock (fun () -> cache := { active_snapshot = None; rejected_update = None })
+  with_cache_lock (fun () ->
+      cache :=
+        {
+          active_snapshot = None;
+          rejected_update = None;
+          rejected_mode = None;
+        })
 
 let invalidate_path config_path =
   let keep_snapshot = function
@@ -91,10 +112,16 @@ let invalidate_path config_path =
   in
   with_cache_lock (fun () ->
       let current = !cache in
+      let active_snapshot = keep_snapshot current.active_snapshot in
+      let rejected_update = keep_rejection current.rejected_update in
       cache :=
         {
-          active_snapshot = keep_snapshot current.active_snapshot;
-          rejected_update = keep_rejection current.rejected_update;
+          active_snapshot;
+          rejected_update;
+          rejected_mode =
+            (match rejected_update with
+            | Some _ -> current.rejected_mode
+            | None -> None);
         })
 
 let install_snapshot_for_tests ~source_path ~profile_names =
@@ -130,6 +157,7 @@ let install_snapshot_for_tests ~source_path ~profile_names =
         {
           active_snapshot = Some snapshot;
           rejected_update = None;
+          rejected_mode = None;
         })
 
 let has_suffix ~suffix s =
@@ -224,14 +252,25 @@ let state_to_yojson = function
         [
           ("status", `String "validated");
           ("serving_last_known_good", `Bool false);
+          ("serving_valid_subset", `Bool false);
           ("snapshot", snapshot_to_yojson snapshot);
           ("rejected_update", `Null);
+        ]
+  | Serving_valid_subset { snapshot; rejected_update } ->
+      `Assoc
+        [
+          ("status", `String "serving_valid_subset");
+          ("serving_last_known_good", `Bool false);
+          ("serving_valid_subset", `Bool true);
+          ("snapshot", snapshot_to_yojson snapshot);
+          ("rejected_update", rejection_to_yojson rejected_update);
         ]
   | Serving_last_known_good { snapshot; rejected_update } ->
       `Assoc
         [
           ("status", `String "serving_last_known_good");
           ("serving_last_known_good", `Bool true);
+          ("serving_valid_subset", `Bool false);
           ("snapshot", snapshot_to_yojson snapshot);
           ("rejected_update", rejection_to_yojson rejected_update);
         ]
@@ -262,8 +301,23 @@ let expand_weighted_entries
 let profile_lookup profiles name =
   List.find_opt (fun (profile : profile_snapshot) -> String.equal profile.name name) profiles
 
+let profile_rejection_lookup profiles name =
+  List.find_opt (fun (profile : profile_rejection) -> String.equal profile.name name) profiles
+
 let profile_names_of_snapshot (snapshot : snapshot) =
   List.map (fun (profile : profile_snapshot) -> profile.name) snapshot.profiles
+
+let snapshot_of_state = function
+  | Validated snapshot
+  | Serving_valid_subset { snapshot; _ }
+  | Serving_last_known_good { snapshot; _ } ->
+      snapshot
+
+let rejected_update_of_state = function
+  | Validated _ -> None
+  | Serving_valid_subset { rejected_update; _ }
+  | Serving_last_known_good { rejected_update; _ } ->
+      Some rejected_update
 
 let eio_caps ?sw ?net ?clock () =
   let sw =
@@ -532,7 +586,53 @@ let load_static_snapshot ~config_path : (snapshot, rejection) result =
                   built_profiles;
             }
 
-let validate_path ~sw ~net ~clock ~config_path =
+let runtime_required_profiles ~config_path =
+  let keepers_from_catalog =
+    match Cascade_config_loader.load_catalog ~config_path with
+    | Ok entries ->
+        List.filter_map
+          (fun (entry : Cascade_config_loader.catalog_entry) ->
+            if entry.keeper_assignable then Some entry.name else None)
+          entries
+    | Error _ -> []
+  in
+  List.sort_uniq String.compare
+    (Keeper_cascade_profile.known_cascades
+    @ keepers_from_catalog
+    @ [ "governance_judge"; "operator_judge" ])
+
+let runtime_required_profile_names ?config_path () =
+  let config_path =
+    match config_path with
+    | Some path -> path
+    | None -> (
+        match config_path_opt () with
+        | Some path -> path
+        | None -> "")
+  in
+  if String.equal config_path "" then
+    Keeper_cascade_profile.known_cascades
+    @ [ "governance_judge"; "operator_judge" ]
+    |> List.sort_uniq String.compare
+  else
+    runtime_required_profiles ~config_path
+
+let partition_profile_rejections ~required_profiles rejected_profiles =
+  List.partition
+    (fun (rejection : profile_rejection) ->
+      List.mem rejection.name required_profiles)
+    rejected_profiles
+
+let validated_snapshot_of_profiles ~config_path ~attempted_mtime ~checked_at
+    profile_snapshots =
+  {
+    source_path = config_path;
+    mtime = Option.value attempted_mtime ~default:0.0;
+    validated_at = checked_at;
+    profiles = profile_snapshots;
+  }
+
+let validate_path_state ~sw ~net ~clock ~config_path =
   let checked_at = Unix.gettimeofday () in
   let attempted_mtime =
     try Some (Unix.stat config_path).Unix.st_mtime
@@ -558,6 +658,7 @@ let validate_path ~sw ~net ~clock ~config_path =
              ~profiles:[])
     | Ok json ->
         let profiles = discover_profiles json in
+        let required_profiles = runtime_required_profiles ~config_path in
         let top_errors =
           let base =
             if profiles = [] then
@@ -587,10 +688,14 @@ let validate_path ~sw ~net ~clock ~config_path =
         in
         let built_profiles = List.rev built_profiles in
         let rejected_profiles = List.rev rejected_profiles in
-        if top_errors <> [] || rejected_profiles <> [] then
+        let required_rejections, optional_rejections =
+          partition_profile_rejections ~required_profiles rejected_profiles
+        in
+        if top_errors <> [] || required_rejections <> [] then
           Error
             (rejection_of_path ~config_path ~attempted_mtime ~checked_at
-               ~errors:top_errors ~profiles:rejected_profiles)
+               ~errors:top_errors
+               ~profiles:(required_rejections @ optional_rejections))
         else
           let unique_candidates = Hashtbl.create 16 in
           List.iter
@@ -660,25 +765,52 @@ let validate_path ~sw ~net ~clock ~config_path =
           in
           let profile_snapshots = List.rev profile_snapshots in
           let rejected_profiles = List.rev rejected_profiles in
-          if rejected_profiles <> [] then
+          let required_probe_rejections, optional_probe_rejections =
+            partition_profile_rejections ~required_profiles rejected_profiles
+          in
+          if required_probe_rejections <> [] then
             Error
               (rejection_of_path ~config_path ~attempted_mtime ~checked_at
                  ~errors:
                    [
                      Printf.sprintf
-                       "catalog validation rejected %d/%d profile(s)"
-                       (List.length rejected_profiles)
+                       "catalog validation rejected %d/%d runtime-required profile(s)"
+                       (List.length required_probe_rejections)
                        (List.length built_profiles);
                    ]
-                 ~profiles:rejected_profiles)
+                 ~profiles:
+                   (optional_rejections @ required_probe_rejections
+                  @ optional_probe_rejections))
+          else if optional_rejections <> [] || optional_probe_rejections <> [] then
+            let snapshot =
+              validated_snapshot_of_profiles ~config_path ~attempted_mtime
+                ~checked_at profile_snapshots
+            in
+            let rejected_update =
+              rejection_of_path ~config_path ~attempted_mtime ~checked_at
+                ~errors:
+                  [
+                    Printf.sprintf
+                      "catalog validation rejected %d non-runtime-required profile(s); runtime is serving the validated subset"
+                      (List.length optional_rejections
+                     + List.length optional_probe_rejections);
+                  ]
+                ~profiles:(optional_rejections @ optional_probe_rejections)
+            in
+            Ok (Serving_valid_subset { snapshot; rejected_update })
           else
             Ok
-              {
-                source_path = config_path;
-                mtime = Option.value attempted_mtime ~default:0.0;
-                validated_at = checked_at;
-                profiles = profile_snapshots;
-              }
+              (Validated
+                 (validated_snapshot_of_profiles ~config_path ~attempted_mtime
+                    ~checked_at profile_snapshots))
+
+let validate_path ~sw ~net ~clock ~config_path =
+  match validate_path_state ~sw ~net ~clock ~config_path with
+  | Ok (Validated snapshot)
+  | Ok (Serving_valid_subset { snapshot; _ })
+  | Ok (Serving_last_known_good { snapshot; _ }) ->
+      Ok snapshot
+  | Error rejection -> Error rejection
 
 let same_snapshot_key (snapshot : snapshot) ~path ~mtime =
   String.equal snapshot.source_path path && Float.equal snapshot.mtime mtime
@@ -710,6 +842,7 @@ let inspect_active ?sw ?net ?clock () =
                  {
                    active_snapshot = Some snapshot;
                    rejected_update = Some rejection;
+                   rejected_mode = Some Rejected_last_known_good;
                  });
            Ok (Serving_last_known_good { snapshot; rejected_update = rejection })
        | None -> Error rejection)
@@ -721,14 +854,23 @@ let inspect_active ?sw ?net ?clock () =
       in
       let cached_result =
         with_cache_lock (fun () ->
-            match !cache.active_snapshot, !cache.rejected_update, current_mtime with
-            | Some snapshot, _, Some mtime
-              when same_snapshot_key snapshot ~path:config_path ~mtime ->
-                Some (Ok (Validated snapshot))
-            | Some snapshot, Some rejection, Some mtime
+            match
+              !cache.active_snapshot,
+              !cache.rejected_update,
+              !cache.rejected_mode,
+              current_mtime
+            with
+            | Some snapshot, Some rejection, Some Rejected_valid_subset, Some mtime
+              when same_rejection_key rejection ~path:config_path ~mtime ->
+                Some
+                  (Ok (Serving_valid_subset { snapshot; rejected_update = rejection }))
+            | Some snapshot, Some rejection, Some Rejected_last_known_good, Some mtime
               when same_rejection_key rejection ~path:config_path ~mtime ->
                 Some (Ok (Serving_last_known_good { snapshot; rejected_update = rejection }))
-            | None, Some rejection, Some mtime
+            | Some snapshot, _, _, Some mtime
+              when same_snapshot_key snapshot ~path:config_path ~mtime ->
+                Some (Ok (Validated snapshot))
+            | None, Some rejection, _, Some mtime
               when same_rejection_key rejection ~path:config_path ~mtime ->
                 Some (Error rejection)
             | _ -> None)
@@ -754,21 +896,33 @@ let inspect_active ?sw ?net ?clock () =
                          {
                            active_snapshot = Some snapshot;
                            rejected_update = Some rejection;
+                           rejected_mode = Some Rejected_last_known_good;
                          });
                    Ok
                      (Serving_last_known_good
                         { snapshot; rejected_update = rejection })
                | None -> Error rejection)
           | Ok (sw, net, clock) -> (
-              match validate_path ~sw ~net ~clock ~config_path with
-              | Ok snapshot ->
+              match validate_path_state ~sw ~net ~clock ~config_path with
+              | Ok (Validated snapshot as state) ->
                   with_cache_lock (fun () ->
                       cache :=
                         {
                           active_snapshot = Some snapshot;
                           rejected_update = None;
+                          rejected_mode = None;
                         });
-                  Ok (Validated snapshot)
+                  Ok state
+              | Ok (Serving_valid_subset { snapshot; rejected_update } as state) ->
+                  with_cache_lock (fun () ->
+                      cache :=
+                        {
+                          active_snapshot = Some snapshot;
+                          rejected_update = Some rejected_update;
+                          rejected_mode = Some Rejected_valid_subset;
+                        });
+                  Ok state
+              | Ok (Serving_last_known_good _) -> assert false
               | Error rejection ->
                   (match with_cache_lock (fun () -> !cache.active_snapshot) with
                    | Some snapshot ->
@@ -777,6 +931,7 @@ let inspect_active ?sw ?net ?clock () =
                              {
                                active_snapshot = Some snapshot;
                                rejected_update = Some rejection;
+                               rejected_mode = Some Rejected_last_known_good;
                              });
                        Ok
                          (Serving_last_known_good
@@ -787,12 +942,14 @@ let inspect_active ?sw ?net ?clock () =
                              {
                                active_snapshot = None;
                                rejected_update = Some rejection;
+                               rejected_mode = None;
                              });
                        Error rejection)))
 
 let require_snapshot ?sw ?net ?clock () =
   match inspect_active ?sw ?net ?clock () with
   | Ok (Validated snapshot) -> Ok snapshot
+  | Ok (Serving_valid_subset { snapshot; _ }) -> Ok snapshot
   | Ok (Serving_last_known_good { snapshot; _ }) -> Ok snapshot
   | Error rejection ->
       let detail =
@@ -808,31 +965,56 @@ let normalize_declared_name raw =
 
 let lookup_active_profile ?sw ?net ?clock raw_name =
   let normalized = normalize_declared_name raw_name in
-  match require_snapshot ?sw ?net ?clock () with
-  | Error active_detail -> (
-      match config_path_opt () with
-      | None -> Error active_detail
-      | Some config_path -> (
-          match load_static_snapshot ~config_path with
-          | Error _ -> Error active_detail
-          | Ok snapshot -> (
-              match profile_lookup snapshot.profiles normalized with
-              | Some profile -> Ok (snapshot, normalized, profile)
-              | None ->
-                  let known = profile_names_of_snapshot snapshot |> String.concat ", " in
-                  Error
-                    (Printf.sprintf
-                       "unknown cascade_name %S (active profiles: %s)"
-                       normalized known))))
-  | Ok snapshot -> (
+  match inspect_active ?sw ?net ?clock () with
+  | Error active_rejection ->
+      let active_detail =
+        if active_rejection.errors = [] then
+          "active catalog validation failed"
+        else
+          String.concat "; " active_rejection.errors
+      in
+      (match config_path_opt () with
+       | None -> Error active_detail
+       | Some config_path -> (
+           match load_static_snapshot ~config_path with
+           | Error _ -> Error active_detail
+           | Ok snapshot -> (
+               match profile_lookup snapshot.profiles normalized with
+               | Some profile -> Ok (snapshot, normalized, profile)
+               | None ->
+                   let known = profile_names_of_snapshot snapshot |> String.concat ", " in
+                   Error
+                     (Printf.sprintf
+                        "unknown cascade_name %S (active profiles: %s)"
+                        normalized known))))
+  | Ok state ->
+      let snapshot = snapshot_of_state state in
+      let unknown_cascade () =
+        let known = profile_names_of_snapshot snapshot |> String.concat ", " in
+        Error
+          (Printf.sprintf
+             "unknown cascade_name %S (active profiles: %s)"
+             normalized known)
+      in
       match profile_lookup snapshot.profiles normalized with
       | Some profile -> Ok (snapshot, normalized, profile)
       | None ->
-          let known = profile_names_of_snapshot snapshot |> String.concat ", " in
-          Error
-            (Printf.sprintf
-               "unknown cascade_name %S (active profiles: %s)"
-               normalized known))
+          (match rejected_update_of_state state with
+           | Some rejected_update -> (
+               match
+                 profile_rejection_lookup rejected_update.profiles normalized
+               with
+               | Some rejected_profile ->
+                   let detail =
+                     match rejected_profile.errors with
+                     | [] -> "profile validation rejected"
+                     | errors -> String.concat "; " errors
+                   in
+                   Error
+                     (Printf.sprintf "invalid cascade_name %S: %s"
+                        normalized detail)
+               | None -> unknown_cascade ())
+           | None -> unknown_cascade ())
 
 let resolve_declared_name ?sw ?net ?clock ~raw_name () =
   match lookup_active_profile ?sw ?net ?clock raw_name with

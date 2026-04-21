@@ -47,17 +47,26 @@ let with_temp_config_root contents f =
 let profile_names json =
   match member "profiles" json with
   | `List profiles ->
-    List.filter_map
-      (fun profile ->
-        match member "name" profile with
-        | `String name -> Some name
-        | _ -> None)
-      profiles
+      List.filter_map
+        (fun profile ->
+           match member "name" profile with
+           | `String name -> Some name
+           | _ -> None)
+        profiles
   | _ -> []
 
+let with_dashboard_snapshot f =
+  Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
+  Masc_mcp.Cascade_catalog_runtime.install_snapshot_for_tests
+    ~source_path:"/tmp/dashboard-cascade-test.json"
+    ~profile_names:[ Masc_mcp.Keeper_config.default_cascade_name ];
+  Fun.protect
+    ~finally:Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests
+    f
 (* ── config_json ───────────────────────────────────── *)
 
 let test_config_shape () =
+  with_dashboard_snapshot @@ fun () ->
   let j = Masc_mcp.Dashboard_cascade.config_json () in
   (* Required top-level keys *)
   (match member "updated_at" j with
@@ -71,6 +80,7 @@ let test_config_shape () =
    | `List _ -> () | _ -> fail "keeper_profiles should be list")
 
 let test_config_profile_shape () =
+  with_dashboard_snapshot @@ fun () ->
   let j = Masc_mcp.Dashboard_cascade.config_json () in
   match to_list_opt (member "profiles" j) with
   | None | Some [] -> fail "expected at least one profile"
@@ -85,6 +95,7 @@ let test_config_profile_shape () =
      | `List _ -> () | _ -> fail "profile.candidates should be list")
 
 let test_config_candidate_shape () =
+  with_dashboard_snapshot @@ fun () ->
   let j = Masc_mcp.Dashboard_cascade.config_json () in
   let rec first_nonempty_candidates = function
     | [] -> None

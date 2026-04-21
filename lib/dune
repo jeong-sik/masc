@@ -32,6 +32,7 @@
    bounded
    cache_eio
    cascade_inference
+   cascade_catalog_runtime
    cascade_client_capacity
    cascade_client_capacity_history
    cascade_catalog_validator

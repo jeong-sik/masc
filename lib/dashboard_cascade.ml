@@ -26,24 +26,35 @@ let source_to_string = function
 
 (** Profiles to surface in the dashboard.
 
-    The cascade manager needs the live catalog from the active
-    [cascade.json], not just the built-in enum. That keeps repo-local
-    or operator-added profiles visible without duplicating the JSON key
-    scan here. Keepers still round-trip their raw [cascade_name], so
-    runtime drift can be shown alongside the live catalog. *)
+    When the validated runtime snapshot is unavailable (for example
+    before first successful validation), fall back to the active
+    [cascade.json] catalog so the dashboard still renders a best-effort
+    raw projection instead of failing hard. *)
 let live_profiles ?config_path () =
   Keeper_cascade_profile.catalog_names ?config_path ()
 
-let profile_json ~config_path name =
-  let defaults = Cascade_runtime.default_model_strings ~cascade_name:name in
-  let (_models, trace) =
-    CC.resolve_model_strings_with_trace ?config_path ~name ~defaults ()
-  in
+let profile_json_of_trace name (trace : CC.selection_trace) =
   `Assoc [
     ("name", `String name);
     ("source", `String (source_to_string trace.source));
     ("candidates", `List (List.map candidate_to_json trace.candidates));
   ]
+
+let profile_json_runtime name =
+  match Cascade_catalog_runtime.resolve_selection_trace ~name () with
+  | Ok trace -> Some (profile_json_of_trace name trace)
+  | Error detail ->
+      Log.Keeper.warn
+        "dashboard cascade config: skipping profile %s: %s"
+        name detail;
+      None
+
+let profile_json_raw ~config_path name =
+  let defaults = Cascade_runtime.default_model_strings ~cascade_name:name in
+  let (_models, trace) =
+    CC.resolve_model_strings_with_trace ?config_path ~name ~defaults ()
+  in
+  profile_json_of_trace name trace
 
 (* Two-column contract consumed by the dashboard's "Keeper → Cascade
    Mapping" table:
@@ -72,21 +83,16 @@ let keeper_profile_json (entry : Keeper_registry.registry_entry) : Yojson.Safe.t
        ~keeper:entry.name
        ~cascade_name:entry.meta.cascade_name)
 
+let invalid_name_set = function
+  | None -> StringSet.empty
+  | Some path ->
+      Cascade_catalog_validator.error_messages_by_profile ~config_path:path
+      |> List.fold_left
+           (fun acc (name, _reasons) -> StringSet.add name acc)
+           StringSet.empty
+
 let config_json () =
   let config_path = Cascade_runtime.cascade_config_path () in
-  let seen = ref StringSet.empty in
-  let add_profile acc name =
-    let canonical = Keeper_cascade_profile.canonicalize name in
-    if StringSet.mem canonical !seen then acc
-    else begin
-      seen := StringSet.add canonical !seen;
-      profile_json ~config_path canonical :: acc
-    end
-  in
-  (* Start with the live config catalog, then append any runtime-drifted
-     keeper cascade_name values (e.g. a keeper TOML pointing at an
-     alias or stale profile). Both paths go through [add_profile] so
-     duplicates are filtered by canonical name. *)
   let keeper_entries =
     (* Issue #8619: was [with _ -> []] which silently swallowed
        Eio.Cancel.Cancelled. Re-raise cancellation; only fall back
@@ -97,17 +103,36 @@ let config_json () =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | _ -> []
   in
-  let acc_after_standard =
-    List.fold_left add_profile [] (live_profiles ?config_path ())
+  let profiles =
+    match Cascade_catalog_runtime.known_profile_names () with
+    | Ok names -> List.filter_map profile_json_runtime names
+    | Error detail ->
+        Log.Keeper.warn
+          "dashboard cascade config: validated catalog unavailable: %s"
+          detail;
+        let invalid_names = invalid_name_set config_path in
+        let seen = ref StringSet.empty in
+        let add_profile_name acc name =
+          let canonical = Keeper_cascade_profile.canonicalize name in
+          if StringSet.mem canonical invalid_names || StringSet.mem canonical !seen
+          then acc
+          else (
+            seen := StringSet.add canonical !seen;
+            canonical :: acc)
+        in
+        let acc_after_catalog =
+          List.fold_left add_profile_name [] (live_profiles ?config_path ())
+        in
+        let names =
+          List.fold_left
+            (fun acc (e : Keeper_registry.registry_entry) ->
+               add_profile_name acc e.meta.cascade_name)
+            acc_after_catalog
+            keeper_entries
+          |> List.rev
+        in
+        List.map (profile_json_raw ~config_path) names
   in
-  let acc_after_keepers =
-    List.fold_left
-      (fun acc (e : Keeper_registry.registry_entry) ->
-         add_profile acc e.meta.cascade_name)
-      acc_after_standard
-      keeper_entries
-  in
-  let profiles = List.rev acc_after_keepers in
   `Assoc [
     ("updated_at", `String (now_iso ()));
     ("config_path",

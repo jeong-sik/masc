@@ -287,19 +287,21 @@ let cascade_config_path () : string option =
   Config_dir_resolver.log_warnings ~context:"CascadeRuntime" ();
   Config_dir_resolver.cascade_path_opt ()
 
+let models_of_cascade_name_result (cascade_name : string) :
+    (string list, string) result =
+  Cascade_catalog_runtime.models_of_cascade_name cascade_name
+
 let models_of_cascade_name (cascade_name : string) : string list =
-  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
-  let defaults = default_model_strings ~cascade_name in
-  let config_path = cascade_config_path () in
-  try
-    Cascade_config.resolve_model_strings ?config_path ~name:cascade_name ~defaults ()
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
+  match models_of_cascade_name_result cascade_name with
+  | Ok labels -> labels
+  | Error detail ->
+      let normalized =
+        Keeper_cascade_profile.normalize_declared_name cascade_name
+      in
       Log.warn ~ctx:"CascadeRuntime"
-        "cascade config resolve failed for %s, using defaults: %s"
-        cascade_name (Printexc.to_string exn);
-      defaults
+        "cascade config resolve failed for %s, returning []: %s"
+        normalized detail;
+      []
 
 let resolve_providers_from_model_strings ?provider_filter
     ?(require_tool_choice_support = false)
@@ -320,37 +322,22 @@ let resolve_providers_from_model_strings ?provider_filter
       (List.length model_strings);
     [])
 
+let resolve_named_providers_result ?provider_filter
+    ?(require_tool_choice_support = false) ~cascade_name ()
+    : (Llm_provider.Provider_config.t list, string) result =
+  Cascade_catalog_runtime.resolve_named_providers ?provider_filter
+    ~require_tool_choice_support ~cascade_name ()
+
 let resolve_named_providers ?provider_filter
     ?(require_tool_choice_support = false) ~cascade_name ()
     : Llm_provider.Provider_config.t list =
-  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
-  let defaults = default_model_strings ~cascade_name in
-  let config_path = cascade_config_path () in
-  let weighted =
-    match config_path with
-    | Some path ->
-      Cascade_config_loader.load_profile_weighted ~config_path:path
-        ~name:cascade_name
-    | None -> []
-  in
-  let specs =
-    (if weighted <> [] then
-       Cascade_config.parse_weighted_entries ~cascade_name weighted
-     else
-       Cascade_config.parse_model_strings
-         (models_of_cascade_name cascade_name))
-    |> Cascade_config.apply_provider_filter ~provider_filter ~label:cascade_name
-    |> apply_required_tool_choice_filter ~require_tool_choice_support
-         ~label:cascade_name
-  in
-  if specs <> [] then specs
-  else if models_of_cascade_name cascade_name = defaults then (
-    Log.Misc.warn "cascade %s: no callable models from built-in defaults"
-      cascade_name;
-    [])
-  else (
-    Log.Misc.warn
-      "cascade %s: configured models unavailable — retrying built-in defaults"
-      cascade_name;
-    resolve_providers_from_model_strings ?provider_filter
-      ~require_tool_choice_support defaults)
+  match
+    resolve_named_providers_result ?provider_filter
+      ~require_tool_choice_support ~cascade_name ()
+  with
+  | Ok providers -> providers
+  | Error detail ->
+      Log.Misc.warn "cascade %s: %s"
+        (Keeper_cascade_profile.normalize_declared_name cascade_name)
+        detail;
+      []

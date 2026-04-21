@@ -35,9 +35,11 @@ let effective_declarative_cascade_name
     (defaults : keeper_profile_defaults)
     (meta : keeper_meta) =
   match defaults.cascade_name, defaults.manifest_path with
-  | Some cascade_name, _ -> Keeper_cascade_profile.canonicalize cascade_name
+  | Some cascade_name, _ ->
+      Keeper_cascade_profile.normalize_declared_name cascade_name
   | None, Some _ -> Keeper_config.default_cascade_name
-  | None, None -> Keeper_cascade_profile.canonicalize meta.cascade_name
+  | None, None ->
+      Keeper_cascade_profile.normalize_declared_name meta.cascade_name
 
 type override_field_detail = {
   field : string;

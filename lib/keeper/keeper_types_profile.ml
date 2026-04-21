@@ -142,7 +142,7 @@ let normalize_name_list_opt items =
 
 let normalize_cascade_name_opt = function
   | None -> None
-  | Some raw -> Some (Keeper_cascade_profile.canonicalize raw)
+  | Some raw -> Some (Keeper_cascade_profile.normalize_declared_name raw)
 
 let normalize_social_model_opt = function
   | None -> None

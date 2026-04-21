@@ -145,6 +145,13 @@ let canonicalize_with_catalog ~catalog raw =
 let canonicalize (raw : string) : string =
   canonicalize_with_catalog ~catalog:(catalog_names ()) raw
 
+let normalize_declared_name (raw : string) : string =
+  let trimmed = String.trim raw in
+  match of_string_opt trimmed with
+  | Some t -> to_string t
+  | None when trimmed = "" -> default_name
+  | None -> trimmed
+
 let models_key_t t = to_string t ^ "_models"
 let temperature_key_t t = to_string t ^ "_temperature"
 let max_tokens_key_t t = to_string t ^ "_max_tokens"

@@ -47,12 +47,16 @@ let eio_context_error_to_sdk_error detail =
   Oas.Error.Config
     (Oas.Error.InvalidConfig { field = "eio_context"; detail })
 
+let cascade_catalog_error_to_sdk_error detail =
+  Oas.Error.Config
+    (Oas.Error.InvalidConfig { field = "cascade_name"; detail })
+
 (** Resolve cascade provider configs via MASC Cascade_config.
     Returns Provider_config.t list for the downstream OAS runtime,
     bypassing the old Model_spec facade. *)
 let resolve_cascade_providers ?provider_filter
     ?(require_tool_choice_support = false) ~cascade_name () =
-  Cascade_runtime.resolve_named_providers ?provider_filter
+  Cascade_runtime.resolve_named_providers_result ?provider_filter
     ~require_tool_choice_support ~cascade_name ()
 
 (** Resolve from an explicit model string list (user-declared in keeper TOML).
@@ -444,21 +448,28 @@ let run_named
   match require_eio ?sw ?net () with
   | Error e -> Error (eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
-  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
-  let configured_labels, candidate_cfgs =
+  let cascade_name =
+    Keeper_cascade_profile.normalize_declared_name cascade_name
+  in
+  let configured_labels_result, candidate_cfgs_result =
     match model_strings with
     | Some ms when ms <> [] ->
       (* Direct model strings from keeper TOML — skip named preset lookup.
          MASC passes these strings through without interpretation. *)
-      ( ms,
-        resolve_providers_from_model_strings ?provider_filter
-          ~require_tool_choice_support ms )
+      ( Ok ms,
+        Ok
+          (resolve_providers_from_model_strings ?provider_filter
+             ~require_tool_choice_support ms) )
     | _ ->
-      let labels = Cascade_runtime.models_of_cascade_name cascade_name in
-      ( labels,
+      ( Cascade_runtime.models_of_cascade_name_result cascade_name,
         resolve_cascade_providers ?provider_filter
           ~require_tool_choice_support ~cascade_name () )
   in
+  (match configured_labels_result, candidate_cfgs_result with
+   | Error detail, _ | _, Error detail ->
+       Log.Misc.error "cascade %s: %s" cascade_name detail;
+       Error (cascade_catalog_error_to_sdk_error detail)
+   | Ok configured_labels, Ok candidate_cfgs ->
   let capture, _metrics = Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs () in
   let name = Printf.sprintf "oas-%s" cascade_name in
   match candidate_cfgs with
@@ -727,23 +738,28 @@ let run_named
      with [max_cycles = 1].  In that case [cycle_loop] invokes
      [try_cascade] exactly once on the original [candidate_cfgs] —
      bit-identical to the pre-strategy behaviour (linear failover). *)
-  let strategy =
-    Cascade_config.resolve_strategy
-      ?config_path:(default_config_path ())
-      ~name:cascade_name
-      ()
+  let* strategy =
+    match Cascade_catalog_runtime.resolve_strategy ~name:cascade_name () with
+    | Ok strategy -> Ok strategy
+    | Error detail ->
+        Log.Misc.error "cascade %s: %s" cascade_name detail;
+        Error (cascade_catalog_error_to_sdk_error detail)
   in
-  let ollama_max =
-    Cascade_config.resolve_ollama_max_concurrent
-      ?config_path:(default_config_path ())
-      ~name:cascade_name
-      ()
+  let* ollama_max =
+    match
+      Cascade_catalog_runtime.resolve_ollama_max_concurrent ~name:cascade_name ()
+    with
+    | Ok value -> Ok value
+    | Error detail ->
+        Log.Misc.error "cascade %s: %s" cascade_name detail;
+        Error (cascade_catalog_error_to_sdk_error detail)
   in
-  let cli_max =
-    Cascade_config.resolve_cli_max_concurrent
-      ?config_path:(default_config_path ())
-      ~name:cascade_name
-      ()
+  let* cli_max =
+    match Cascade_catalog_runtime.resolve_cli_max_concurrent ~name:cascade_name () with
+    | Ok value -> Ok value
+    | Error detail ->
+        Log.Misc.error "cascade %s: %s" cascade_name detail;
+        Error (cascade_catalog_error_to_sdk_error detail)
   in
   let candidate_base_urls =
     List.map (fun (c : Llm_provider.Provider_config.t) -> c.base_url) candidate_cfgs
@@ -893,7 +909,7 @@ let run_named
   with
   | Admission_queue.Wait_timeout wait_ms ->
       admission_wait_timeout_error ~keeper_name:name ~cascade_name
-        ~priority:queue_priority wait_ms
+        ~priority:queue_priority wait_ms)
 
 (** Run a single Agent.run() using a model label string (e.g. "llama:qwen3.5").
     Validates the label parses before attempting execution. *)

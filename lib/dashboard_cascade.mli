@@ -1,13 +1,13 @@
 (** Dashboard projection for cascade configuration and runtime health.
 
-    Exposes the current cascade.json profiles (raw JSON, parsed with weights)
-    alongside the live {!Cascade_health_tracker.global} snapshot
-    so operators can see *why* a given provider is preferred without
-    re-running a turn.
+    Exposes the validated runtime cascade catalog alongside the live
+    {!Cascade_health_tracker.global} snapshot so operators can see *why*
+    a given provider is preferred without re-running a turn.
 
     Contracts:
-    - {!config_json} reads {!Cascade_runtime.cascade_config_path} through the
-      existing mtime-cached loader. No mutation, no network.
+    - {!config_json} reads the validated runtime snapshot from
+      {!Cascade_catalog_runtime}; rejected hot reloads do not change the
+      advertised profile set.
     - {!health_json} reads the global health tracker singleton.
     - Both return JSON suitable for dashboard consumption; callers are
       expected to forward via an HTTP handler without further massaging.
@@ -35,6 +35,10 @@
                                "cascade_name": "keeper_unified" }, ... ]
       }
     ]}
+
+    Only validated profiles from the active runtime snapshot are surfaced in
+    [profiles]. Keepers whose raw [cascade_name] drifts from the validated
+    catalog still appear in [keeper_profiles] so the UI can show the mismatch.
 
     @since 0.6.0 *)
 val config_json : unit -> Yojson.Safe.t

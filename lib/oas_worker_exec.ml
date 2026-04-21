@@ -78,7 +78,35 @@ let default_config
     ~(provider_cfg : Llm_provider.Provider_config.t)
     ~system_prompt
     ~tools : config =
-  let provider = Oas.Provider.config_of_provider_config provider_cfg in
+  let provider =
+    let provider = Oas.Provider.config_of_provider_config provider_cfg in
+    match provider_cfg.kind, provider.provider with
+    | Llm_provider.Provider_config.OpenAI_compat, Oas.Provider.Local { base_url }
+      when not
+             (String.equal provider_cfg.request_path
+                Masc_network_defaults.openai_chat_completions_path) ->
+      let auth_header =
+        if String.trim provider_cfg.api_key = "" then None
+        else Some "Authorization"
+      in
+      let static_token =
+        match String.trim provider_cfg.api_key with
+        | "" -> None
+        | token -> Some token
+      in
+      {
+        provider with
+        provider =
+          Oas.Provider.OpenAICompat
+            {
+              base_url;
+              auth_header;
+              path = provider_cfg.request_path;
+              static_token;
+            };
+      }
+    | _ -> provider
+  in
   { name; provider_cfg; provider; model_id = provider_cfg.model_id;
     priority = None; system_prompt; tools;
     runtime_mcp_policy = None;

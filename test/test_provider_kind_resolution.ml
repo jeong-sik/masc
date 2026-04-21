@@ -132,6 +132,17 @@ let test_cascade_parse_unknown_returns_none () =
   | None -> ()
   | Some _ -> fail "unknown provider should parse to None, not a fallback config"
 
+let test_cascade_parse_custom_v1_base_url_dedupes_request_path () =
+  match Cascade.parse_model_string "custom:remote-model@http://127.0.0.1:18080/v1" with
+  | None -> fail "custom v1 endpoint should parse"
+  | Some cfg ->
+    check kind_testable "cfg.kind is OpenAI_compat"
+      Pk.OpenAI_compat cfg.kind;
+    check string "custom request_path strips duplicated /v1 prefix"
+      "/chat/completions" cfg.request_path;
+    check string "base_url stays unchanged"
+      "http://127.0.0.1:18080/v1" cfg.base_url
+
 let test_cascade_parse_kimi_legacy_alias_maps_to_k2_5 () =
   with_env "MOONSHOT_API_KEY" (Some "dummy-key") (fun () ->
       match Cascade.parse_model_string "kimi:kimi-for-coding" with
@@ -171,6 +182,8 @@ let () =
       [
         test_case "parse_model_string preserves Gemini kind (#8159)" `Quick
           test_cascade_parse_gemini_preserves_kind;
+        test_case "custom v1 base_url dedupes request_path" `Quick
+          test_cascade_parse_custom_v1_base_url_dedupes_request_path;
         test_case "parse_model_string maps legacy Kimi alias to kimi-k2.5" `Quick
           test_cascade_parse_kimi_legacy_alias_maps_to_k2_5;
         test_case "parse_model_string(unknown) = None" `Quick

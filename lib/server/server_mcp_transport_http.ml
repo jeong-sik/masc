@@ -470,7 +470,11 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
   let auth_result =
     match profile with
     | Full | Managed_agent ->
-        deps.verify_mcp_auth ~base_path request
+        (match sse_kind with
+         | Sse.Observer ->
+             deps.verify_mcp_observer_stream_auth ~base_path request
+         | Sse.Coordinator ->
+             deps.verify_mcp_auth ~base_path request)
     | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
   in

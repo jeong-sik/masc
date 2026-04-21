@@ -19,6 +19,8 @@ type deps = Server_mcp_transport_http_types.deps = {
     unit -> (Server_mcp_transport_http_types.runtime, string) result;
   get_base_path : unit -> string;
   verify_mcp_auth : base_path:string -> Httpun.Request.t -> (unit, string) result;
+  verify_mcp_observer_stream_auth :
+    base_path:string -> Httpun.Request.t -> (unit, string) result;
   verify_operator_mcp_auth :
     base_path:string -> Httpun.Request.t -> (unit, string) result;
 }

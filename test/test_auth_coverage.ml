@@ -429,6 +429,51 @@ let test_http_auth_rejects_query_token_fallback () =
   check (option string) "query token ignored" None
     (Server_auth.auth_token_from_request request)
 
+let test_observer_sse_auth_accepts_query_token_fallback () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
+      let raw_token =
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        | Ok (token, _cred) -> token
+        | Error e -> fail (Types.masc_error_to_string e)
+      in
+      let request =
+        Httpun.Request.create `GET
+          ("/mcp?sse_kind=observer&session_id=dash_test&token=" ^ raw_token)
+      in
+      match Server_auth.verify_mcp_observer_stream_auth ~base_path:dir request with
+      | Ok (Some cred) ->
+          check string "observer query token resolves credential" "stable-admin"
+            cred.Types.agent_name
+      | Ok None -> fail "expected observer SSE auth credential"
+      | Error e -> fail e)
+
+let test_observer_sse_auth_rejects_query_token_on_non_observer_path () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
+      let raw_token =
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        | Ok (token, _cred) -> token
+        | Error e -> fail (Types.masc_error_to_string e)
+      in
+      let request =
+        Httpun.Request.create `GET
+          ("/mcp?session_id=dash_test&token=" ^ raw_token)
+      in
+      match Server_auth.verify_mcp_observer_stream_auth ~base_path:dir request with
+      | Ok _ -> fail "expected non-observer query token to be rejected"
+      | Error msg ->
+          check bool "non-observer path still requires header" true
+            (String.starts_with ~prefix:"Authentication required." msg))
+
 let test_permission_for_tool_approve () =
   match Auth.permission_for_tool "masc_approve" with
   | None -> ()
@@ -828,6 +873,10 @@ let () =
       test_case "header token only" `Quick test_http_auth_token_from_header_only;
       test_case "reject query token fallback" `Quick
         test_http_auth_rejects_query_token_fallback;
+      test_case "observer sse accepts query token fallback" `Quick
+        test_observer_sse_auth_accepts_query_token_fallback;
+      test_case "observer sse rejects query token on non-observer path" `Quick
+        test_observer_sse_auth_rejects_query_token_on_non_observer_path;
       test_case "generated actor prefers token subject" `Quick
         test_resolve_agent_name_prefers_token_for_generated_actor;
       test_case "stable actor preserved" `Quick

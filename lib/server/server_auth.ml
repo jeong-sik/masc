@@ -76,6 +76,26 @@ let auth_token_from_request request =
     (Httpun.Headers.get request.Httpun.Request.headers "authorization")
     bearer_token_from_header
 
+let observer_sse_query_token_from_request request =
+  let path = Http_server_eio.Request.path request in
+  let observer_stream_requested =
+    match query_param request "sse_kind" with
+    | Some raw ->
+        String.equal "observer" (String.lowercase_ascii (String.trim raw))
+    | None -> false
+  in
+  match request.Httpun.Request.meth with
+  | `GET
+    when observer_stream_requested
+         && (String.equal path "/mcp" || String.equal path "/sse") ->
+      trim_opt (query_param request "token")
+  | _ -> None
+
+let observer_sse_auth_token_from_request request =
+  match auth_token_from_request request with
+  | Some _ as token -> token
+  | None -> observer_sse_query_token_from_request request
+
 (** Verify Bearer token for MCP endpoints *)
 let verify_mcp_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
@@ -91,6 +111,26 @@ let verify_mcp_auth ~base_path request =
         | None ->
             Error
               "Authentication required. Use 'Authorization: Bearer <token>' header."
+        | Some token -> (
+            match Auth.find_credential_by_token base_path ~token with
+            | Ok cred -> Ok (Some cred)
+            | Error err -> Error (Types.masc_error_to_string err))
+
+let verify_mcp_observer_stream_auth ~base_path request =
+  let auth_config = Auth.load_auth_config base_path in
+  match ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config with
+  | Error msg -> Error msg
+  | Ok auth_config ->
+      if not auth_config.Types.enabled then
+        Ok None
+      else
+        match observer_sse_auth_token_from_request request with
+        | None when not auth_config.require_token ->
+            Ok None
+        | None ->
+            Error
+              "Authentication required. Use 'Authorization: Bearer <token>' header \
+               or 'token' query param for the observer SSE stream."
         | Some token -> (
             match Auth.find_credential_by_token base_path ~token with
             | Ok cred -> Ok (Some cred)

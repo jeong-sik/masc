@@ -3362,6 +3362,73 @@ let test_social_model_previous_state_of_meta_falls_back_for_unknown_model () =
       check string "delivery surface inferred under fallback" "board_post"
         (KSM.delivery_surface_to_string state.delivery_surface)
 
+let test_social_model_bdi_failure_state_rewrites_claim_retry_loop () =
+  let observation = { base_observation with unclaimed_task_count = 12 } in
+  let previous_state =
+    Some
+      KSM.
+        {
+          social_model = "bdi_speech_v1";
+          belief_summary = "unclaimed_tasks=12; idle=406s";
+          active_desire = Some "claim_next_task";
+          current_intention = Some "keeper_task_claim {}";
+          blocker = None;
+          need = Some "available task";
+          speech_act = Inform;
+          delivery_surface = Visible_reply;
+        }
+  in
+  let state, transition_reason =
+    KSM.derive_failure_state ~meta:minimal_meta ~observation ~previous_state
+      ~is_auto_recoverable:true
+      ~reason:
+        "Internal error: [masc_oas_error] {\"kind\":\"cascade_exhausted\",\"cascade_name\":\"tool_use_strict\"}"
+  in
+  check string "transition reason" "failure:run_error"
+    (KSM.transition_reason_to_string transition_reason);
+  check string "speech act stays defer" "defer"
+    (KSM.speech_act_to_string state.speech_act);
+  check string "delivery surface stays silent" "silent"
+    (KSM.delivery_surface_to_string state.delivery_surface);
+  check (option string) "active desire rewrites to route recovery"
+    (Some "recover_tool_route") state.active_desire;
+  check (option string) "stale claim intention is replaced"
+    (Some "retry_claim_after_recovery") state.current_intention;
+  check (option string) "need requests recovery guidance"
+    (Some "provider_recovery_or_operator_guidance") state.need;
+  check bool "blocker keeps failure detail" true
+    (match state.blocker with
+    | Some blocker -> contains_substring blocker "cascade_exhausted"
+    | None -> false)
+
+let test_social_model_bdi_failure_state_keeps_existing_carry_without_claim_context
+    () =
+  let previous_state =
+    Some
+      KSM.
+        {
+          social_model = "bdi_speech_v1";
+          belief_summary = "mentions=1";
+          active_desire = Some "seek_help";
+          current_intention = Some "recover_tool_route";
+          blocker = Some "tool route unavailable";
+          need = Some "operator guidance";
+          speech_act = Request_help;
+          delivery_surface = Board_post;
+        }
+  in
+  let state, _ =
+    KSM.derive_failure_state ~meta:minimal_meta ~observation:base_observation
+      ~previous_state ~is_auto_recoverable:false
+      ~reason:"local config error"
+  in
+  check (option string) "active desire still carries on ordinary failure"
+    (Some "seek_help") state.active_desire;
+  check (option string) "current intention still carries on ordinary failure"
+    (Some "recover_tool_route") state.current_intention;
+  check (option string) "need still carries on ordinary failure"
+    (Some "operator guidance") state.need
+
 let test_social_model_magentic_ledger_stalled_state_carries_until_delta () =
   let meta = { minimal_meta with social_model = "magentic_ledger_v1" } in
   let previous_state =
@@ -3797,6 +3864,10 @@ let () =
             test_social_model_magentic_ledger_previous_state_of_meta_restores_model;
           test_case "social model previous state falls back for unknown model" `Quick
             test_social_model_previous_state_of_meta_falls_back_for_unknown_model;
+          test_case "bdi failure rewrites stale claim retry loop" `Quick
+            test_social_model_bdi_failure_state_rewrites_claim_retry_loop;
+          test_case "bdi failure keeps ordinary carry state" `Quick
+            test_social_model_bdi_failure_state_keeps_existing_carry_without_claim_context;
           test_case "magentic ledger stalled state carries until delta" `Quick
             test_social_model_magentic_ledger_stalled_state_carries_until_delta;
           test_case "render_inline deny" `Quick

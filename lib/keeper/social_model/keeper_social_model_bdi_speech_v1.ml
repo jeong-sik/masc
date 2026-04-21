@@ -419,15 +419,24 @@ let apply_to_result ~(meta : keeper_meta)
 let derive_failure_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(previous_state : Types.social_state option)
+    ~(is_auto_recoverable : bool)
     ~(reason : string) =
+  let previous_state = Option.map state_of_social_state previous_state in
+  let blocker =
+    match String.trim reason with
+    | "" -> None
+    | value -> Some (short_preview value)
+  in
   let state =
-    make_state ~meta ~observation
-      ?previous_state:(Option.map state_of_social_state previous_state)
-      ?blocker:
-        (match String.trim reason with
-        | "" -> None
-        | value -> Some (short_preview value))
-      ()
+    if is_auto_recoverable && observation.unclaimed_task_count > 0 then
+      make_state ~meta ~observation ?previous_state
+        ~active_desire:"recover_tool_route"
+        ~current_intention:"retry_claim_after_recovery"
+        ?blocker
+        ~need:"provider_recovery_or_operator_guidance"
+        ()
+    else
+      make_state ~meta ~observation ?previous_state ?blocker ()
   in
   let output =
     { speech_act = Types.Defer; delivery_surface = Types.Silent }

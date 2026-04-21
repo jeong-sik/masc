@@ -40,6 +40,7 @@ val derive_failure_state :
   meta:keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   previous_state:Keeper_social_model_types.social_state option ->
+  is_auto_recoverable:bool ->
   reason:string ->
   Keeper_social_model_types.social_state
   * Keeper_social_model_types.transition_reason

@@ -29,6 +29,9 @@ let raw_json_of_body body_str =
       | _ -> Error "expected JSON body with string field raw_json")
   | _ -> Error "expected JSON object body"
 
+let is_toml_source_error msg =
+  String.starts_with ~prefix:"active cascade source is TOML" msg
+
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/cascade/config" (fun request reqd ->
@@ -64,7 +67,10 @@ let add_routes router =
                      Http.Response.json ~request:req
                        (Yojson.Safe.to_string json) reqd
                  | Error msg ->
-                     response `Bad_request msg))
+                     response
+                       (if is_toml_source_error msg then `Conflict
+                        else `Bad_request)
+                       msg))
          ) request reqd)
   |> Http.Router.get "/api/v1/cascade/health" (fun request reqd ->
        with_public_read (fun _state req reqd ->

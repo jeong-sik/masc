@@ -1015,6 +1015,9 @@ let keeper_config_json (config : Coord.config) (name : string)
       in
       let execution =
         `Assoc [
+          ("selected_cascade_name", `String m.cascade_name);
+          ( "selected_cascade_canonical",
+            `String (Keeper_cascade_profile.canonicalize m.cascade_name) );
           ( "models",
             `List
               (List.map (fun s -> `String s)

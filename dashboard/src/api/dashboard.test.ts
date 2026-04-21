@@ -215,6 +215,8 @@ describe('fetchKeeperConfig', () => {
         models: 'llama:test-balanced',
         active_model: 'llama:test-balanced',
         verify: 'true',
+        selected_cascade_name: 'keeper_unified',
+        selected_cascade_canonical: 'keeper_unified',
       },
       compaction: {
         profile: 'balanced',
@@ -289,6 +291,10 @@ describe('fetchKeeperConfig', () => {
         precedence: 'live_meta',
         has_live_override: 'true',
         override_fields: 'goal',
+        cascade_catalog_source_kind: 'toml',
+        cascade_catalog_source_path: '/tmp/config/cascade.toml',
+        cascade_runtime_json_path: '/tmp/config/cascade.json',
+        cascade_runtime_json_editable: 'false',
       },
       metrics: {
         generation: '3',
@@ -339,10 +345,16 @@ describe('fetchKeeperConfig', () => {
     expect(result.sandbox_environment?.require_userns).toBe(true)
     expect(result.execution.models).toEqual(['llama:test-balanced'])
     expect(result.execution.verify).toBe(true)
+    expect(result.execution.selected_cascade_name).toBe('keeper_unified')
+    expect(result.execution.selected_cascade_canonical).toBe('keeper_unified')
     expect(result.hooks?.destructive_check_tools).toEqual(['dynamic_boundary (Tool_dispatch.is_destructive)'])
     expect(result.hooks?.slots.pre_tool_use?.gates).toEqual(['keeper_deny_list'])
     expect(result.tools.tool_also_allow).toEqual(['keeper_board_post'])
     expect(result.sources.precedence).toEqual(['live_meta'])
+    expect(result.sources.cascade_catalog_source_kind).toBe('toml')
+    expect(result.sources.cascade_catalog_source_path).toBe('/tmp/config/cascade.toml')
+    expect(result.sources.cascade_runtime_json_path).toBe('/tmp/config/cascade.json')
+    expect(result.sources.cascade_runtime_json_editable).toBe(false)
     expect(result.metrics.total_cost_usd).toBe(0.12)
     expect(result.runtime.presence_keepalive_sec).toBe(30)
   })

@@ -69,6 +69,8 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       models: ['llama:test-balanced'],
       active_model: 'llama:test-balanced',
       verify: true,
+      selected_cascade_name: 'keeper_unified',
+      selected_cascade_canonical: 'keeper_unified',
     },
     compaction: {
       profile: 'balanced',
@@ -124,6 +126,10 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       precedence: ['live_meta', 'toml', 'persona'],
       has_live_override: true,
       override_fields: ['goal', 'instructions'],
+      cascade_catalog_source_kind: 'toml',
+      cascade_catalog_source_path: '/tmp/config/cascade.toml',
+      cascade_runtime_json_path: '/tmp/config/cascade.json',
+      cascade_runtime_json_editable: false,
     },
     tools: {
       tool_access: { kind: 'preset', preset: 'coding' },
@@ -421,6 +427,11 @@ describe('KeeperConfigPanel', () => {
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('편집 가능 범위')
     expect(container.textContent).toContain('resolved config root의 cascade.json')
+    expect(container.textContent).toContain('Cascade 선택')
+    expect(container.textContent).toContain('keeper_unified')
+    expect(container.textContent).toContain('/tmp/config/keepers/default.toml')
+    expect(container.textContent).toContain('/tmp/config/cascade.toml')
+    expect(container.textContent).toContain('/tmp/config/cascade.json')
     expect(container.textContent).toContain('런타임 설정')
     expect(container.textContent).toContain('/tmp/.masc/keepers/keeper-sangsu/live.json')
     expect(container.textContent).toContain('활성 모델')

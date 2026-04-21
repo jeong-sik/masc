@@ -1028,6 +1028,19 @@ function normalizeDefaultSourceKind(value: unknown): KeeperConfig['sources']['de
   }
 }
 
+function normalizeCascadeCatalogSourceKind(
+  value: unknown,
+): KeeperConfig['sources']['cascade_catalog_source_kind'] {
+  const sourceKind = asNullableString(value)
+  switch (sourceKind) {
+    case 'json':
+    case 'toml':
+      return sourceKind
+    default:
+      return null
+  }
+}
+
 function normalizeRuntimeBlockerClass(value: unknown): KeeperConfig['runtime']['runtime_blocker_class'] {
   const blockerClass = asNullableString(value)
   switch (blockerClass) {
@@ -1116,6 +1129,11 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       active_model_label: asNullableString(execution.active_model_label),
       last_model_used_label: asNullableString(execution.last_model_used_label),
       verify: asLooseBoolean(execution.verify),
+      selected_cascade_name: asNullableString(execution.selected_cascade_name) ?? '',
+      selected_cascade_canonical:
+        asNullableString(execution.selected_cascade_canonical)
+        ?? asNullableString(execution.selected_cascade_name)
+        ?? '',
     },
     compaction: {
       profile: asNullableString(compaction.profile) ?? 'balanced',
@@ -1201,6 +1219,16 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       precedence: normalizeStringList(sources.precedence),
       has_live_override: asLooseBoolean(sources.has_live_override),
       override_fields: normalizeStringList(sources.override_fields),
+      cascade_catalog_source_kind:
+        normalizeCascadeCatalogSourceKind(sources.cascade_catalog_source_kind),
+      cascade_catalog_source_path:
+        asNullableString(sources.cascade_catalog_source_path),
+      cascade_runtime_json_path:
+        asNullableString(sources.cascade_runtime_json_path),
+      cascade_runtime_json_editable:
+        typeof sources.cascade_runtime_json_editable === 'boolean'
+          ? sources.cascade_runtime_json_editable
+          : asLooseBoolean(sources.cascade_runtime_json_editable),
     },
     metrics: {
       generation: asInt(metrics.generation) ?? 0,
@@ -1814,6 +1842,8 @@ export interface CascadeInvalidProfile {
 export interface CascadeConfigResponse {
   updated_at: string
   config_path: string | null
+  source_kind: 'json' | 'toml'
+  source_path: string
   validation_status: CascadeValidationStatus
   validation_errors: string[]
   invalid_profiles: CascadeInvalidProfile[]
@@ -1824,6 +1854,9 @@ export interface CascadeConfigResponse {
 export interface CascadeRawConfigResponse {
   updated_at: string
   config_path: string | null
+  source_kind: 'json' | 'toml'
+  source_path: string
+  raw_json_editable: boolean
   raw_json: string
 }
 

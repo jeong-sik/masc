@@ -35,6 +35,7 @@
   ; Standard dependencies
   (re (>= 1.10))
   (yojson (>= 2.0))
+  (otoml (>= 1.0))
   (graphql (>= 0.14.0))
   (graphql_parser (>= 0.14.0))
   (cmdliner (>= 1.1))

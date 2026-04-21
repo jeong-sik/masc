@@ -26,6 +26,11 @@
  (modules public_tool_manifest)
  (libraries masc_mcp yojson))
 
+(executable
+ (name cascade_materialize)
+ (modules cascade_materialize)
+ (libraries masc_mcp))
+
 ;; Compaction audit CLI: inspect .masc/data/harness-compact/ JSONL
 (executable
  (name masc_compaction_audit)

@@ -38,6 +38,7 @@
    cascade_catalog_validator
    cascade_config
    cascade_config_loader
+   cascade_toml_materializer
    cascade_fsm
    cascade_health_filter
    cascade_health_tracker
@@ -725,6 +726,7 @@
    mcp_protocol
    mcp_protocol.eio
    yojson
+   otoml
    base64
    graphql
    graphql_parser

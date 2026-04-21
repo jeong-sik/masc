@@ -101,6 +101,12 @@ export function sourceTone(source: CascadeProfile['source']): string {
   }
 }
 
+function catalogSourceSummary(config: CascadeConfigResponse): string {
+  const kind = config.source_kind === 'toml' ? 'authoring TOML' : 'runtime JSON'
+  const path = config.source_path ?? config.config_path ?? 'config 없음'
+  return `${kind} · ${path}`
+}
+
 export function profileSummaryText(
   profile: CascadeProfile,
   keepers: readonly KeeperCascadeRow[],
@@ -783,6 +789,8 @@ function CascadeRawConfigEditor({
   const editorDirty = useSignal(false)
   const saving = useSignal(false)
   const saveMessage = useSignal<string | null>(null)
+  const rawEditable = raw?.raw_json_editable !== false
+  const sourcePath = raw?.source_path ?? raw?.config_path ?? 'unresolved'
 
   useEffect(() => {
     if (!raw || editorDirty.value) return
@@ -792,6 +800,7 @@ function CascadeRawConfigEditor({
   const syntaxError = validateJsonText(editorText.value)
   const saveDisabled = saving.value
     || !editorDirty.value
+    || !rawEditable
     || raw?.config_path == null
     || syntaxError != null
 
@@ -810,6 +819,10 @@ function CascadeRawConfigEditor({
     }
     if (raw?.config_path == null) {
       saveMessage.value = 'Resolved cascade config path is unavailable.'
+      return
+    }
+    if (!rawEditable) {
+      saveMessage.value = `Active source is TOML: edit ${sourcePath}`
       return
     }
     saving.value = true
@@ -832,22 +845,33 @@ function CascadeRawConfigEditor({
   }
 
   return html`
-    <${Card} title="Raw cascade.json Editor">
+    <${Card} title=${rawEditable ? 'Raw cascade.json Editor' : 'Raw cascade.json Runtime View'}>
       <div class="flex flex-col gap-3 p-4">
         <p class="text-sm text-[var(--text-muted)]">
-          dashboard에서 바로 <code>cascade.json</code> 을 수정합니다.
-          저장 경로는
-          <code>${raw?.config_path ?? 'unresolved'}</code>
-          이고, 저장 후 current cascade snapshot 을 다시 읽습니다.
+          ${rawEditable
+            ? html`
+                dashboard에서 바로 <code>cascade.json</code> 을 수정합니다.
+                저장 경로는
+                <code>${raw?.config_path ?? 'unresolved'}</code>
+                이고, 저장 후 current cascade snapshot 을 다시 읽습니다.
+              `
+            : html`
+                현재 active source는 <code>${sourcePath}</code> 이라서
+                이 editor는 read-only 입니다. 아래 내용은 generated
+                <code>cascade.json</code> runtime artifact 입니다.
+              `}
         </p>
         <p class="text-xs text-[var(--text-muted)]">
-          semantics invalid profile 도 저장은 허용됩니다. 저장 후 위의 validation banner 에서 invalid/last-known-good 상태를 바로 확인하면 됩니다.
+          ${rawEditable
+            ? 'semantics invalid profile 도 저장은 허용됩니다. 저장 후 위의 validation banner 에서 invalid/last-known-good 상태를 바로 확인하면 됩니다.'
+            : '수정은 cascade.toml source에서 하고, 여기서는 materialized runtime JSON만 확인합니다.'}
         </p>
 
         <form class="flex flex-col gap-3" onSubmit=${handleSave}>
           <textarea
             class="h-96 w-full rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-2 font-mono text-xs text-[var(--text-strong)]"
             spellcheck="false"
+            readonly=${!rawEditable}
             value=${editorText.value}
             onInput=${(event: Event) => {
               editorText.value = (event.target as HTMLTextAreaElement).value
@@ -881,7 +905,7 @@ function CascadeRawConfigEditor({
               class="rounded border border-[var(--accent-primary)] bg-[var(--accent-primary)] px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
               disabled=${saveDisabled}
             >
-              ${saving.value ? 'Saving...' : 'Save cascade.json'}
+              ${saving.value ? 'Saving...' : rawEditable ? 'Save cascade.json' : 'TOML-backed (read-only)'}
             </button>
             <button
               type="button"
@@ -966,7 +990,7 @@ export function CascadeConfigPanel() {
                   <${StatCell}
                     label="Profiles"
                     value=${config.profiles.length}
-                    detail=${config.config_path ?? 'config 없음'}
+                    detail=${catalogSourceSummary(config)}
                   />
                   <${StatCell}
                     label="Keepers"

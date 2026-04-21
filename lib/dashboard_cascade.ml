@@ -62,6 +62,22 @@ let invalid_profiles_of_rejection_json rejection_json =
         profiles
   | _ -> []
 
+let source_info ?config_path () =
+  let config_path =
+    match config_path with
+    | Some path -> path
+    | None -> Config_dir_resolver.cascade_path_candidate ()
+  in
+  Cascade_toml_materializer.source_info ~config_path
+
+let source_json_fields (source : Cascade_toml_materializer.source_info) =
+  [
+    ( "source_kind",
+      `String
+        (Cascade_toml_materializer.source_kind_to_string source.kind) );
+    ("source_path", `String source.source_path);
+  ]
+
 (* ── Config projection ──────────────────────────────── *)
 
 (** Profiles to surface in the dashboard.
@@ -184,6 +200,9 @@ let validation_summary_json ?config_path () =
 
 let config_json () =
   let config_path = Cascade_runtime.cascade_config_path () in
+  let source : Cascade_toml_materializer.source_info =
+    source_info ?config_path ()
+  in
   let keeper_assignable_names = keeper_assignable_name_set ?config_path () in
   let keeper_entries =
     (* Issue #8619: was [with _ -> []] which silently swallowed
@@ -238,6 +257,7 @@ let config_json () =
        | Some p -> `String p
        | None -> `Null);
     ]
+    @ source_json_fields source
     @ validation_summary_json ?config_path ()
     @ [
         ("profiles", `List profiles);
@@ -256,7 +276,12 @@ let load_raw_config_string path =
 
 let raw_config_json () =
   Config_dir_resolver.log_warnings ~context:"DashboardCascade" ();
-  let config_path = Some (Config_dir_resolver.cascade_path_candidate ()) in
+  let source : Cascade_toml_materializer.source_info = source_info () in
+  let config_path = Some source.json_path in
+  let _ =
+    Cascade_toml_materializer.ensure_materialized_json
+      ~config_path:source.json_path
+  in
   let raw_json =
     match config_path with
     | None -> ""
@@ -273,36 +298,49 @@ let raw_config_json () =
     [
       ("updated_at", `String (now_iso ()));
       ("config_path", Json_util.string_opt_to_json config_path);
+      ( "source_kind",
+        `String
+          (Cascade_toml_materializer.source_kind_to_string source.kind) );
+      ("source_path", `String source.source_path);
+      ("raw_json_editable", `Bool source.raw_json_editable);
       ("raw_json", `String raw_json);
     ]
 
 let save_raw_config_json raw_json =
   Config_dir_resolver.log_warnings ~context:"DashboardCascade" ();
-  let config_path = Config_dir_resolver.cascade_path_candidate () in
-  let parse_result =
-    try
-      ignore (Yojson.Safe.from_string raw_json);
-      Ok ()
-    with
-    | Yojson.Json_error msg ->
-        Error (Printf.sprintf "invalid JSON: %s" msg)
-    | exn ->
-        Error (Printf.sprintf "failed to parse JSON: %s" (Printexc.to_string exn))
-  in
-  match parse_result with
-  | Error _ as err -> err
-  | Ok () -> (
+  let source : Cascade_toml_materializer.source_info = source_info () in
+  let config_path = source.json_path in
+  if not source.raw_json_editable then
+    Error
+      (Printf.sprintf
+         "active cascade source is TOML: edit %s instead of %s"
+         source.source_path source.json_path)
+  else
+    let parse_result =
       try
-        Fs_compat.mkdir_p (Filename.dirname config_path);
-        match Fs_compat.save_file_atomic config_path raw_json with
-        | Error msg -> Error msg
-        | Ok () ->
-            Cascade_config_loader.invalidate_cache_entry config_path;
-            Cascade_catalog_runtime.invalidate_path config_path;
-            Ok (config_json ())
+        ignore (Yojson.Safe.from_string raw_json);
+        Ok ()
       with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | Sys_error msg -> Error msg)
+      | Yojson.Json_error msg ->
+          Error (Printf.sprintf "invalid JSON: %s" msg)
+      | exn ->
+          Error
+            (Printf.sprintf "failed to parse JSON: %s" (Printexc.to_string exn))
+    in
+    match parse_result with
+    | Error _ as err -> err
+    | Ok () -> (
+        try
+          Fs_compat.mkdir_p (Filename.dirname config_path);
+          match Fs_compat.save_file_atomic config_path raw_json with
+          | Error msg -> Error msg
+          | Ok () ->
+              Cascade_config_loader.invalidate_cache_entry config_path;
+              Cascade_catalog_runtime.invalidate_path config_path;
+              Ok (config_json ())
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | Sys_error msg -> Error msg)
 
 (* ── Health projection ──────────────────────────────── *)
 

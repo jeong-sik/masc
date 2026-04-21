@@ -33,6 +33,15 @@ let contains_substring haystack needle =
   in
   loop 0
 
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
 let write_file path contents =
   let oc = open_out path in
   Fun.protect
@@ -47,12 +56,10 @@ let read_file path =
        let len = in_channel_length ic in
        really_input_string ic len)
 
-let with_temp_config_root contents f =
+let with_temp_config_root_setup setup f =
   let dir = Filename.temp_file "dashboard-cascade-" "" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
-  let cascade_path = Filename.concat dir "cascade.json" in
-  write_file cascade_path contents;
   let prev_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Fun.protect
     ~finally:(fun () ->
@@ -60,12 +67,17 @@ let with_temp_config_root contents f =
        | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
        | None -> Unix.putenv "MASC_CONFIG_DIR" "");
       Masc_mcp.Config_dir_resolver.reset ();
-      (try Sys.remove cascade_path with _ -> ());
-      try Unix.rmdir dir with _ -> ())
+      rm_rf dir)
     (fun () ->
+      setup dir;
       Unix.putenv "MASC_CONFIG_DIR" dir;
       Masc_mcp.Config_dir_resolver.reset ();
-      f cascade_path)
+      f dir)
+
+let with_temp_config_root contents f =
+  with_temp_config_root_setup
+    (fun dir -> write_file (Filename.concat dir "cascade.json") contents)
+    (fun dir -> f (Filename.concat dir "cascade.json"))
 
 let profile_names json =
   match member "profiles" json with
@@ -108,6 +120,12 @@ let test_config_shape () =
   (match member "config_path" j with
    | `String _ | `Null -> ()
    | _ -> fail "config_path should be string or null");
+  (match member "source_kind" j with
+   | `String ("json" | "toml") -> ()
+   | _ -> fail "source_kind should be json or toml");
+  (match member "source_path" j with
+   | `String _ -> ()
+   | _ -> fail "source_path should be string");
   (match member "validation_status" j with
    | `String ("validated" | "serving_valid_subset" | "serving_last_known_good" | "invalid") -> ()
    | _ -> fail "validation_status should be known string");
@@ -266,6 +284,12 @@ let test_raw_config_shape () =
       check (option string) "config_path reflects active root"
         (Some cascade_path)
         Yojson.Safe.Util.(j |> member "config_path" |> to_string_option);
+      check string "json source kind" "json"
+        Yojson.Safe.Util.(j |> member "source_kind" |> to_string);
+      check string "json source path" cascade_path
+        Yojson.Safe.Util.(j |> member "source_path" |> to_string);
+      check bool "json raw is editable" true
+        Yojson.Safe.Util.(j |> member "raw_json_editable" |> to_bool);
       check bool "raw_json includes current file contents" true
         (contains_substring raw_json "keeper_unified_models"))
 
@@ -277,9 +301,42 @@ let test_raw_config_defaults_when_file_missing () =
       check (option string) "config_path still known"
         (Some cascade_path)
         Yojson.Safe.Util.(j |> member "config_path" |> to_string_option);
+      check bool "still editable in json mode" true
+        Yojson.Safe.Util.(j |> member "raw_json_editable" |> to_bool);
       check string "missing file seeds default object"
         "{}\n"
         Yojson.Safe.Util.(j |> member "raw_json" |> to_string))
+
+let test_raw_config_toml_source_is_read_only () =
+  let toml =
+    {|
+comment = "test"
+
+[keeper_unified]
+models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+|}
+  in
+  with_temp_config_root_setup
+    (fun dir -> write_file (Filename.concat dir "cascade.toml") toml)
+    (fun dir ->
+      let json_path = Filename.concat dir "cascade.json" in
+      let toml_path = Filename.concat dir "cascade.toml" in
+      let j = Masc_mcp.Dashboard_cascade.raw_config_json () in
+      check (option string) "runtime json path still surfaced"
+        (Some json_path)
+        Yojson.Safe.Util.(j |> member "config_path" |> to_string_option);
+      check string "toml source kind" "toml"
+        Yojson.Safe.Util.(j |> member "source_kind" |> to_string);
+      check string "toml source path" toml_path
+        Yojson.Safe.Util.(j |> member "source_path" |> to_string);
+      check bool "read-only when toml active" false
+        Yojson.Safe.Util.(j |> member "raw_json_editable" |> to_bool);
+      check bool "generated runtime json visible" true
+        (contains_substring
+           Yojson.Safe.Util.(j |> member "raw_json" |> to_string)
+           "keeper_unified_models");
+      check bool "runtime json materialized on read" true
+        (Sys.file_exists json_path))
 
 let test_save_raw_config_json_rejects_invalid_json () =
   with_temp_config_root "{}\n"
@@ -318,6 +375,25 @@ let test_save_raw_config_json_persists_and_refreshes_projection () =
           check string "file persisted verbatim"
             next_raw
             (read_file cascade_path))
+
+let test_save_raw_config_json_rejects_toml_source () =
+  let toml =
+    {|
+[keeper_unified]
+models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+|}
+  in
+  with_temp_config_root_setup
+    (fun dir -> write_file (Filename.concat dir "cascade.toml") toml)
+    (fun _dir ->
+      match
+        Masc_mcp.Dashboard_cascade.save_raw_config_json
+          {|{"beta_models":["ollama:qwen3.5:35b-a3b-nvfp4"]}|}
+      with
+      | Ok _ -> fail "toml-backed source should reject raw json save"
+      | Error msg ->
+          check bool "error mentions TOML source" true
+            (contains_substring msg "active cascade source is TOML"))
 
 (* ── health_json ───────────────────────────────────── *)
 
@@ -528,8 +604,12 @@ let () =
       test_case "top-level shape" `Quick test_raw_config_shape;
       test_case "missing file seeds default object" `Quick
         test_raw_config_defaults_when_file_missing;
+      test_case "toml source is read-only" `Quick
+        test_raw_config_toml_source_is_read_only;
       test_case "invalid JSON is rejected" `Quick
         test_save_raw_config_json_rejects_invalid_json;
+      test_case "toml source rejects save" `Quick
+        test_save_raw_config_json_rejects_toml_source;
       test_case "save persists and refreshes config projection" `Quick
         test_save_raw_config_json_persists_and_refreshes_projection;
     ];

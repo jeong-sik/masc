@@ -384,6 +384,12 @@ let task_assignee_of_status = function
   | AwaitingVerification { assignee; _ } -> Some assignee
   | Todo | Done _ | Cancelled _ -> None
 
+(** Terminal states: [Done] or [Cancelled]. No further transitions possible.
+    Exhaustive match — adding a constructor forces an update here. *)
+let task_status_is_terminal = function
+  | Done _ | Cancelled _ -> true
+  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ -> false
+
 (** Issue #8354: schema enums for [task_status] used to be hand-rolled in
     [tool_shard.ml] and [mcp_server.ml], dropping [awaiting_verification].
     [task_status] carries record payloads so we cannot enumerate dummy

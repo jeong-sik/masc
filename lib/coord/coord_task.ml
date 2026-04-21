@@ -324,7 +324,7 @@ let find_duplicate_task (backlog : backlog) (title : string) : string option =
   else
     List.find_opt (fun (t : task) ->
       let t_norm = normalize_title_for_dedup t.title in
-      t_norm = norm && (match t.task_status with Done _ | Cancelled _ -> false | _ -> true)
+      t_norm = norm && not (Types.task_status_is_terminal t.task_status)
     ) backlog.tasks
     |> Option.map (fun t -> t.id)
 

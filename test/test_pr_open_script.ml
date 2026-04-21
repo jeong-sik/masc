@@ -242,6 +242,45 @@ let test_script_rejects_body_missing_required_sections () =
       check bool "gh never invoked before validation" false
         (Sys.file_exists gh_log))
 
+let test_script_rejects_staged_changes_before_push () =
+  with_temp_dir "pr-open-script-staged-changes" (fun dir ->
+      init_repo_with_remote dir;
+      let fake_gh_dir = make_fake_gh dir in
+      let gh_log = Filename.concat dir "gh.log" in
+      let gh_labels = Filename.concat dir "gh-labels.json" in
+      let body_file = Filename.concat dir "body.md" in
+      write_file body_file
+        "## Summary\nTest body\n\n## Product impact\n- Promise affected: `none/internal`\n- User-visible change: none\n\n## Evidence\n- local script test\n\n## Review evidence\n- not applicable for script test\n\n## Linked issue\n- Refs #1234\n";
+      write_file (Filename.concat dir "lib/staged.ml") "let staged = true\n";
+      ignore (run_shell_ok ~cwd:dir "git add lib/staged.ml");
+      let path =
+        Printf.sprintf "%s:%s" fake_gh_dir
+          (match Sys.getenv_opt "PATH" with Some p -> p | None -> "")
+      in
+      let env =
+        [
+          ("PATH", path);
+          ("FAKE_GH_LOG", gh_log);
+          ("FAKE_GH_LABELS", gh_labels);
+        ]
+      in
+      let cmd =
+        Printf.sprintf "/bin/bash %s --repo %s --title %s --body-file %s --no-watch"
+          (quote (script_path ()))
+          (quote "example/test")
+          (quote "fix: reject staged changes")
+          (quote body_file)
+      in
+      let code, stdout, stderr = run_shell ~cwd:dir ~env cmd in
+      check bool "command fails" true (code <> 0);
+      check bool "stdout empty" true (String.trim stdout = "");
+      check bool "mentions staged changes" true
+        (contains_substring stderr "staged changes detected");
+      check bool "mentions staged path" true
+        (contains_substring stderr "lib/staged.ml");
+      check bool "gh never invoked before staged validation" false
+        (Sys.file_exists gh_log))
+
 let () =
   run "pr_open_script"
     [
@@ -253,5 +292,7 @@ let () =
             test_script_runs_under_system_bash_without_watch;
           test_case "rejects body missing required sections" `Quick
             test_script_rejects_body_missing_required_sections;
+          test_case "rejects staged changes before push" `Quick
+            test_script_rejects_staged_changes_before_push;
         ] );
     ]

@@ -651,9 +651,8 @@ let decision_channel_of_observation
   else
     "scheduled_autonomous"
 
-let is_scheduled_autonomous_channel (channel : string) : bool =
-  String.equal channel "scheduled_autonomous"
-  || String.equal channel "proactive"
+let is_scheduled_autonomous_channel =
+  Keeper_world_observation.is_autonomous_channel
 
 let is_scheduled_autonomous_cycle_of_observation
     (observation : Keeper_world_observation.world_observation) : bool =

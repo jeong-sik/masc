@@ -28,21 +28,6 @@ let require_eio ?sw ?net () =
   | None, _ -> Error "Eio switch not available (running outside server context)"
   | _, None -> Error "Eio net not available (running outside server context)"
 
-let admission_wait_timeout_error
-    ~(keeper_name : string)
-    ~(cascade_name : string)
-    ~(priority : Llm_provider.Request_priority.t)
-    (wait_ms : int) =
-  let wait_sec = float_of_int wait_ms /. 1000.0 in
-  let msg =
-    Printf.sprintf
-      "Admission queue wait timeout after %.1fs (wait_ms=%d, keeper=%s, cascade=%s, priority=%s)"
-      wait_sec wait_ms keeper_name cascade_name
-      (Llm_provider.Request_priority.to_string priority)
-  in
-  Log.Misc.warn "%s" msg;
-  Error (Oas.Error.Internal msg)
-
 let eio_context_error_to_sdk_error detail =
   Oas.Error.Config
     (Oas.Error.InvalidConfig { field = "eio_context"; detail })
@@ -85,6 +70,19 @@ type masc_internal_error =
       model : string option;
       reason : string;
     }
+  | Admission_queue_timeout of {
+      keeper_name : string;
+      cascade_name : string;
+      wait_sec : float;
+    }
+  | Turn_timeout of {
+      elapsed_sec : float;
+    }
+  | Ambiguous_post_commit of {
+      is_timeout : bool;
+      tools : string list;
+      original_error : string;
+    }
 
 let masc_internal_error_prefix = "[masc_oas_error] "
 
@@ -119,10 +117,49 @@ let masc_internal_error_to_json = function
         ("model", Json_util.string_opt_to_json model);
         ("reason", `String reason);
       ]
+  | Admission_queue_timeout { keeper_name; cascade_name; wait_sec } ->
+    `Assoc
+      [
+        ("kind", `String "admission_queue_timeout");
+        ("keeper_name", `String keeper_name);
+        ("cascade_name", `String cascade_name);
+        ("wait_sec", `Float wait_sec);
+      ]
+  | Turn_timeout { elapsed_sec } ->
+    `Assoc
+      [
+        ("kind", `String "turn_timeout");
+        ("elapsed_sec", `Float elapsed_sec);
+      ]
+  | Ambiguous_post_commit { is_timeout; tools; original_error } ->
+    `Assoc
+      [
+        ("kind", `String "ambiguous_post_commit");
+        ("is_timeout", `Bool is_timeout);
+        ("tools", `List (List.map (fun v -> `String v) tools));
+        ("original_error", `String original_error);
+      ]
 
 let sdk_error_of_masc_internal_error err =
   Oas.Error.Internal
     (masc_internal_error_prefix ^ Yojson.Safe.to_string (masc_internal_error_to_json err))
+
+let admission_wait_timeout_error
+    ~(keeper_name : string)
+    ~(cascade_name : string)
+    ~(priority : Llm_provider.Request_priority.t)
+    (wait_ms : int) =
+  let wait_sec = float_of_int wait_ms /. 1000.0 in
+  let msg =
+    Printf.sprintf
+      "Admission queue wait timeout after %.1fs (wait_ms=%d, keeper=%s, cascade=%s, priority=%s)"
+      wait_sec wait_ms keeper_name cascade_name
+      (Llm_provider.Request_priority.to_string priority)
+  in
+  Log.Misc.warn "%s" msg;
+  Error
+    (sdk_error_of_masc_internal_error
+       (Admission_queue_timeout { keeper_name; cascade_name; wait_sec }))
 
 let classify_masc_internal_error (err : Oas.Error.sdk_error) :
     masc_internal_error option =
@@ -187,6 +224,54 @@ let classify_masc_internal_error (err : Oas.Error.sdk_error) :
                         model = string_opt_of_assoc "model" json;
                         reason;
                       })
+               | _ -> None)
+           | Some (`String "admission_queue_timeout") -> (
+               match string_opt_of_assoc "keeper_name" json,
+                     string_opt_of_assoc "cascade_name" json
+               with
+               | Some keeper_name, Some cascade_name ->
+                 let wait_sec =
+                   match json with
+                   | `Assoc fields -> (
+                       match List.assoc_opt "wait_sec" fields with
+                       | Some (`Float v) -> v
+                       | _ -> 0.0)
+                   | _ -> 0.0
+                 in
+                 Some (Admission_queue_timeout { keeper_name; cascade_name; wait_sec })
+               | _ -> None)
+           | Some (`String "turn_timeout") -> (
+               match json with
+               | `Assoc fields -> (
+                   match List.assoc_opt "elapsed_sec" fields with
+                   | Some (`Float v) ->
+                     Some (Turn_timeout { elapsed_sec = v })
+                   | _ -> None)
+               | _ -> None)
+           | Some (`String "ambiguous_post_commit") -> (
+               match string_opt_of_assoc "original_error" json with
+               | Some original_error ->
+                 let is_timeout =
+                   match json with
+                   | `Assoc fields -> (
+                       match List.assoc_opt "is_timeout" fields with
+                       | Some (`Bool b) -> b
+                       | _ -> false)
+                   | _ -> false
+                 in
+                 let tools =
+                   match json with
+                   | `Assoc fields -> (
+                       match List.assoc_opt "tools" fields with
+                       | Some (`List values) ->
+                         values
+                         |> List.filter_map (function
+                              | `String value -> Some value
+                              | _ -> None)
+                       | _ -> [])
+                   | _ -> []
+                 in
+                 Some (Ambiguous_post_commit { is_timeout; tools; original_error })
                | _ -> None)
            | _ -> None)
        | _ -> None

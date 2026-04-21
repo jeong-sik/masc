@@ -244,10 +244,14 @@ let committed_mutating_tools tool_names =
   |> List.filter Keeper_exec_tools.has_mutating_side_effect
 
 let is_ambiguous_side_effect_error (err : Oas.Error.sdk_error) : bool =
-  match err with
-  | Oas.Error.Internal msg ->
-      string_contains_substring
-        ~needle:ambiguous_side_effect_error_prefix msg
+  match Oas_worker_named.classify_masc_internal_error err with
+  | Some (Oas_worker_named.Ambiguous_post_commit _) -> true
+  | None -> (
+      match err with
+      | Oas.Error.Internal msg ->
+          string_contains_substring
+            ~needle:ambiguous_side_effect_error_prefix msg
+      | _ -> false)
   | _ -> false
 
 let reclassify_error_after_side_effect
@@ -256,12 +260,12 @@ let reclassify_error_after_side_effect
   let committed_tools = committed_mutating_tools tool_names in
   if committed_tools = [] || is_ambiguous_side_effect_error err then err
   else
-    let tools = String.concat ", " committed_tools in
+    let tools = committed_tools in
     let original = short_preview (Oas.Error.to_string err) in
-    Oas.Error.Internal
-        (Printf.sprintf
-         "%s: [%s]; retry disabled to avoid duplicate mutation; original_error=%s"
-         ambiguous_side_effect_error_prefix tools original)
+    let is_timeout = match err with Oas.Error.Api (Timeout _) -> true | _ -> false in
+    Oas_worker_named.sdk_error_of_masc_internal_error
+      (Oas_worker_named.Ambiguous_post_commit
+         { is_timeout; tools; original_error = original })
 
 let post_commit_failure_kind_of_error (err : Oas.Error.sdk_error) =
   match err with
@@ -367,6 +371,9 @@ let is_cascade_exhausted_error (err : Oas.Error.sdk_error) : bool =
   | Some (Oas_worker_named.Cascade_exhausted _)
   | Some (Oas_worker_named.No_tool_capable_provider _)
   | Some (Oas_worker_named.Accept_rejected _) -> true
+  | Some (Oas_worker_named.Admission_queue_timeout _)
+  | Some (Oas_worker_named.Turn_timeout _)
+  | Some (Oas_worker_named.Ambiguous_post_commit _) -> false
   | None -> false
 
 type overflow_retry_plan = {
@@ -2323,7 +2330,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               Keeper_registry.set_turn_phase
                 ~base_path:config.base_path meta.name
                 Keeper_registry.Turn_finalizing;
-              Error (Oas.Error.Internal msg)
+              Error
+                (Oas_worker_named.sdk_error_of_masc_internal_error
+                   (Oas_worker_named.Turn_timeout
+                      { elapsed_sec = timeout_sec }))
             end)))
       in
       let turn_event_bus = drain_turn_event_bus () in

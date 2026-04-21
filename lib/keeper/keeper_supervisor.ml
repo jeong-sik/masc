@@ -49,21 +49,47 @@ let ambiguous_partial_commit_prefix =
 
 let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
   meta.paused
-  && String_util.contains_substring_ci
-       (String.trim meta.runtime.last_blocker)
-       ambiguous_partial_commit_prefix
+  && (match meta.runtime.last_blocker_class with
+      | Some Ambiguous_post_commit_timeout | Some Ambiguous_post_commit_failure ->
+          true
+      | None ->
+          String_util.contains_substring_ci
+            (String.trim meta.runtime.last_blocker)
+            ambiguous_partial_commit_prefix
+      | _ -> false)
 
 let committed_tools_of_ambiguous_blocker (blocker : string) =
   let trimmed = String.trim blocker in
-  match String.index_opt trimmed '[' with
-  | None -> []
-  | Some open_idx -> (
-      match String.index_from_opt trimmed (open_idx + 1) ']' with
-      | Some close_idx when close_idx > open_idx + 1 ->
-          String.sub trimmed (open_idx + 1) (close_idx - open_idx - 1)
-          |> String.split_on_char ','
-          |> List.map String.trim
-          |> List.filter (fun tool -> tool <> "")
+  (* Try structured JSON extraction first (new masc_internal_error format) *)
+  if String.starts_with ~prefix:"[masc_oas_error]" trimmed then
+    let payload =
+      String.sub trimmed
+        (String.length "[masc_oas_error]")
+        (String.length trimmed - String.length "[masc_oas_error]")
+    in
+    (try
+       match Yojson.Safe.from_string payload with
+       | `Assoc fields ->
+           (match List.assoc_opt "tools" fields with
+            | Some (`List values) ->
+                values
+                |> List.filter_map (function
+                     | `String value -> Some value
+                     | _ -> None)
+            | _ -> [])
+       | _ -> []
+     with Yojson.Json_error _ -> [])
+  else
+    (* Legacy: extract from bracket notation "prefix: [tool1, tool2]; ..." *)
+    match String.index_opt trimmed '[' with
+    | None -> []
+    | Some open_idx -> (
+        match String.index_from_opt trimmed (open_idx + 1) ']' with
+        | Some close_idx when close_idx > open_idx + 1 ->
+            String.sub trimmed (open_idx + 1) (close_idx - open_idx - 1)
+            |> String.split_on_char ','
+            |> List.map String.trim
+            |> List.filter (fun tool -> tool <> "")
       | _ -> [])
 
 (* ── Event publishing ────────────────────────────────────── *)
@@ -290,9 +316,14 @@ let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
   let blocker = String.trim meta.runtime.last_blocker in
   let committed_tools = committed_tools_of_ambiguous_blocker blocker in
   let failure_reason =
-    if String_util.contains_substring_ci blocker "turn wall-clock timeout"
-    then "ambiguous_partial_commit(post_commit_timeout)"
-    else "ambiguous_partial_commit(post_commit_failure)"
+    match meta.runtime.last_blocker_class with
+    | Some Ambiguous_post_commit_timeout ->
+        "ambiguous_partial_commit(post_commit_timeout)"
+    | Some Ambiguous_post_commit_failure ->
+        "ambiguous_partial_commit(post_commit_failure)"
+    | None when String_util.contains_substring_ci blocker "turn wall-clock timeout" ->
+        "ambiguous_partial_commit(post_commit_timeout)"
+    | _ -> "ambiguous_partial_commit(post_commit_failure)"
   in
   let input =
     `Assoc

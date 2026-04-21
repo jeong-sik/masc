@@ -269,6 +269,37 @@ let test_generated_alias_inherits_accountability_penalty () =
         "Inherited from canonical identity: adversary"
         rep.accountability_source_label)
 
+let test_generated_alias_inherits_legacy_keeper_history () =
+  with_room ~agent_name:"adversary-eager-viper" (fun config ->
+      let created_at =
+        iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
+      in
+      append_accountability_event config.base_path ~created_at
+        (`Assoc
+           [
+             ("event_type", `String "claim_created");
+             ("claim_id", `String "acct-adversary-legacy-unsupported");
+             ("agent_name", `String "keeper-adversary-agent");
+             ("keeper_name", `String "keeper-adversary");
+             ("kind", `String "completion_claim");
+             ("subject", `String "Unsupported legacy claim");
+             ("surface", `String "keeper_turn");
+             ("created_at", `String created_at);
+             ("evidence_refs", `List []);
+             ("synthetic", `Bool false);
+           ]);
+      let summary =
+        Keeper_accountability.accountability_summary_json config
+          ~keeper_name:"adversary" ~agent_name:"adversary-eager-viper"
+      in
+      check string "legacy keeper summary source" "canonical_keeper_fallback"
+        (string_member "source" summary);
+      check string "legacy keeper source label"
+        "Inherited from canonical identity: adversary"
+        (string_member "source_label" summary);
+      check (float 0.0001) "legacy keeper unsupported rate" 1.0
+        (float_member "unsupported_completion_rate" summary))
+
 let test_direct_agent_history_exposes_direct_source () =
   with_room ~agent_name:"keeper-direct-agent" (fun config ->
       let created_at =
@@ -301,13 +332,28 @@ let test_direct_agent_history_exposes_direct_source () =
         Agent_reputation.compute_reputation config
           ~agent_name:"keeper-direct-agent"
       in
-      check string "direct reputation keeper provenance" "keeper-direct"
+      check string "direct reputation keeper provenance" "direct"
         rep.accountability_keeper_name;
       check string "direct reputation source" "direct_agent"
         rep.accountability_source;
       check string "direct reputation source label"
         "Direct runtime alias history"
         rep.accountability_source_label)
+
+let test_task_transition_normalizes_keeper_name_in_history () =
+  with_room ~agent_name:"keeper-sangsu-agent" (fun config ->
+      Keeper_accountability.record_task_transition config
+        ~agent_name:"keeper-sangsu-agent" ~task_id:"task-legacy"
+        ~transition:Types.Claim ~details:(`Assoc []);
+      let summary =
+        Keeper_accountability.accountability_summary_json config
+          ~keeper_name:"sangsu" ~agent_name:"keeper-sangsu-agent"
+      in
+      let history = Yojson.Safe.Util.(summary |> member "history" |> to_list) in
+      check int "history count" 1 (List.length history);
+      let first = List.hd history in
+      check string "history keeper_name is canonical" "sangsu"
+        (string_member "keeper_name" first))
 
 let test_unmapped_alias_exposes_no_history_source () =
   with_room ~agent_name:"orphan-eager-viper" (fun config ->
@@ -651,8 +697,12 @@ let () =
             test_agent_reputation_penalizes_unsupported_claims;
           test_case "generated alias inherits accountability penalty" `Quick
             test_generated_alias_inherits_accountability_penalty;
+          test_case "generated alias inherits legacy keeper history" `Quick
+            test_generated_alias_inherits_legacy_keeper_history;
           test_case "direct agent history exposes direct source" `Quick
             test_direct_agent_history_exposes_direct_source;
+          test_case "task transition canonicalizes keeper name in history"
+            `Quick test_task_transition_normalizes_keeper_name_in_history;
           test_case "unmapped alias exposes no-history source" `Quick
             test_unmapped_alias_exposes_no_history_source;
           test_case "claim tool exposes routing warning for high risk keeper"

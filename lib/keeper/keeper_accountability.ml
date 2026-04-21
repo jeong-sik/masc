@@ -84,21 +84,17 @@ let normalize_refs refs =
   |> List.sort_uniq String.compare
 
 let is_keeper_agent_name agent_name =
-  Resilience.Zombie.is_keeper_name
-    (String.lowercase_ascii (String.trim agent_name))
+  Option.is_some (Keeper_identity.canonical_keeper_name_from_agent_name agent_name)
 
 let keeper_name_of_agent agent_name =
-  let trimmed = String.trim agent_name in
-  let suffix = "-agent" in
-  if String.length trimmed > String.length suffix
-     && String.sub trimmed
-          (String.length trimmed - String.length suffix)
-          (String.length suffix)
-        = suffix
-  then
-    String.sub trimmed 0 (String.length trimmed - String.length suffix)
-  else
-    trimmed
+  match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
+  | Some keeper_name -> keeper_name
+  | None -> String.trim agent_name
+
+let normalize_keeper_name keeper_name =
+  match Keeper_identity.canonical_keeper_name keeper_name with
+  | Some keeper_name -> keeper_name
+  | None -> String.trim keeper_name
 
 let accountability_dir base_path =
   Filename.concat base_path ".masc/accountability"
@@ -197,7 +193,7 @@ let claim_event_of_json json =
           let agent_name = Safe_ops.json_string ~default:"" "agent_name" json in
           let keeper_name =
             match json_string_opt "keeper_name" json with
-            | Some value when String.trim value <> "" -> String.trim value
+            | Some value when String.trim value <> "" -> normalize_keeper_name value
             | _ -> keeper_name_of_agent agent_name
           in
           let subject = Safe_ops.json_string ~default:"" "subject" json in
@@ -508,7 +504,7 @@ let record_completion_claim (config : Coord_query.config) ~keeper_name ~agent_na
               {
                 claim_id;
                 agent_name;
-                keeper_name;
+                keeper_name = normalize_keeper_name keeper_name;
                 trace_id = Some trace_id;
                 turn_number = Some turn_number;
                 task_id = normalized_task_id;
@@ -709,6 +705,7 @@ let accountability_summary_lookup (config : Coord_query.config) =
            add_snapshot by_agent snapshot.claim.agent_name snapshot;
            add_snapshot by_keeper snapshot.claim.keeper_name snapshot));
   fun ~keeper_name ~agent_name ->
+    let keeper_name = normalize_keeper_name keeper_name in
     let source, snapshots =
       match Hashtbl.find_opt by_agent agent_name with
       | Some items -> ("direct_agent", items)

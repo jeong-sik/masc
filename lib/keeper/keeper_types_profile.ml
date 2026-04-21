@@ -920,24 +920,64 @@ let effective_oas_env pairs =
   else
     pairs
 
-(** Apply [defaults.oas_env] to the process environment via [Unix.putenv].
-    Logs each applied key at info level for operator auditability.
-    Safe to call repeatedly — putenv is idempotent for identical values.
+type keeper_oas_context = {
+  env_pairs : (string * string) list;
+  gemini_mcp_disabled : bool;
+  gemini_approval_mode : string option;
+  gemini_approval_mode_derived : bool;
+  claude_mcp_config : string option;
+}
 
-    Scope note: [Unix.putenv] is process-global, so concurrent turns
-    from different keepers in the same process would race.  In the
-    current masc-mcp deployment each keeper lives in its own process,
-    which keeps this wiring simple; revisit if multiplexing is added. *)
-let apply_oas_env ~keeper_name (defaults : keeper_profile_defaults) : unit =
-  match effective_oas_env defaults.oas_env with
-  | [] -> ()
-  | pairs ->
-    List.iter
-      (fun (k, v) ->
-        Unix.putenv k v;
-        Log.Keeper.info
-          "keeper %s applied OAS env %s=%s" keeper_name k v)
-      pairs
+let empty_keeper_oas_context =
+  {
+    env_pairs = [];
+    gemini_mcp_disabled = false;
+    gemini_approval_mode = None;
+    gemini_approval_mode_derived = false;
+    claude_mcp_config = None;
+  }
+
+let keeper_oas_context_of_defaults (defaults : keeper_profile_defaults) :
+    keeper_oas_context =
+  let env_pairs = effective_oas_env defaults.oas_env in
+  let gemini_mcp_disabled =
+    match List.assoc_opt "OAS_GEMINI_NO_MCP" env_pairs with
+    | Some value -> oas_env_truthy value
+    | None -> false
+  in
+  let gemini_approval_mode_explicit =
+    List.assoc_opt "OAS_GEMINI_APPROVAL_MODE" defaults.oas_env
+    |> Option.map String.trim
+    |> fun value -> Option.bind value (fun trimmed -> if trimmed = "" then None else Some trimmed)
+  in
+  let gemini_approval_mode =
+    List.assoc_opt "OAS_GEMINI_APPROVAL_MODE" env_pairs
+    |> Option.map String.trim
+    |> fun value -> Option.bind value (fun trimmed -> if trimmed = "" then None else Some trimmed)
+  in
+  let gemini_approval_mode_derived =
+    gemini_mcp_disabled
+    && Option.is_none gemini_approval_mode_explicit
+    && Option.is_some gemini_approval_mode
+  in
+  let claude_mcp_config =
+    match List.assoc_opt "OAS_CLAUDE_MCP_CONFIG" env_pairs with
+    | Some raw when String.trim raw <> "" -> Some raw
+    | _ ->
+      if
+        match List.assoc_opt "OAS_CLAUDE_STRICT_MCP" env_pairs with
+        | Some value -> oas_env_truthy value
+        | None -> false
+      then Some {|{"mcpServers":{}}|}
+      else None
+  in
+  {
+    env_pairs;
+    gemini_mcp_disabled;
+    gemini_approval_mode;
+    gemini_approval_mode_derived;
+    claude_mcp_config;
+  }
 
 let resolved_persona_name ~keeper_name
     (defaults : keeper_profile_defaults) : string =
@@ -977,15 +1017,15 @@ let clamp_max_turns_override : int option -> int option = function
 let effective_max_turns_per_call (profile : keeper_profile_defaults) : int =
   match clamp_max_turns_override profile.max_turns_per_call with
   | Some n -> n
-  | None -> Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call
+  | None -> Keeper_runtime_resolved.reactive_max_turns_per_call ()
 
 let effective_max_turns_per_call_scheduled_autonomous
     (profile : keeper_profile_defaults) : int =
-  let global_cap = Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call in
+  let global_cap = Keeper_runtime_resolved.reactive_max_turns_per_call () in
   match clamp_max_turns_override profile.max_turns_per_call_scheduled_autonomous with
   | Some n -> min n global_cap
   | None ->
-    Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
+    Keeper_runtime_resolved.autonomous_max_turns_per_call ()
 
 type keeper_default_source_snapshot = {
   source_kind : string option;

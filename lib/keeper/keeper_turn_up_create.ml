@@ -107,7 +107,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           p.name err;
         (false, err)
     | Ok () ->
-    let max_active_keepers = Env_config.KeeperBootstrap.max_active_keepers in
+    let max_active_keepers = Keeper_runtime_resolved.bootstrap_max_active_keepers () in
     let active_keepers = Keeper_registry.count_running () in
     if max_active_keepers > 0 && active_keepers >= max_active_keepers then begin
       Log.Keeper.warn "create_keeper failed: max active keepers reached (%d/%d) for name=%s"

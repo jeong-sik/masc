@@ -347,7 +347,7 @@ let bounded_oas_timeout_for_turn_budget_with_turn_budget ~(max_context : int)
 let bounded_oas_timeout_for_turn_budget ~(max_context : int)
     ~(remaining_turn_budget_s : float) : float option =
   bounded_oas_timeout_for_turn_budget_with_turn_budget ~max_context
-    ~max_turns:Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call
+    ~max_turns:(Keeper_runtime_resolved.reactive_max_turns_per_call ())
     ~remaining_turn_budget_s
 
 (** Detect context overflow errors via structured OAS error types.
@@ -1963,7 +1963,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         Keeper_exec_context.timed (fun () ->
           let clock = Eio_context.get_clock () in
           let timeout_sec =
-            Env_config_keeper.KeeperKeepalive.turn_timeout_sec
+            Keeper_runtime_resolved.turn_timeout_sec ()
           in
           start_background_turn_event_bus_drain ~clock;
           let turn_deadline = Eio.Time.now clock +. timeout_sec in
@@ -1978,11 +1978,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             let max_idle_turns, max_turns =
               match channel with
               | Keeper_world_observation.Reactive ->
-                  ( Env_config_keeper.KeeperKeepalive.max_idle_turns_reactive,
+                  ( Keeper_runtime_resolved.reactive_max_idle_turns (),
                     Keeper_types_profile.effective_max_turns_per_call
                       keeper_profile )
               | Keeper_world_observation.Scheduled_autonomous ->
-                  ( Env_config_keeper.KeeperKeepalive.max_idle_turns_autonomous,
+                  ( Keeper_runtime_resolved.autonomous_max_idle_turns (),
                     Keeper_types_profile
                     .effective_max_turns_per_call_scheduled_autonomous
                       keeper_profile )

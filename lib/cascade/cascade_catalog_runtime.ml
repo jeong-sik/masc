@@ -1,5 +1,6 @@
 type candidate_probe_status =
   | Probe_ok
+  | Probe_skipped of string
   | Probe_error of string
 
 let probe_timeout_sec = 5.0
@@ -173,11 +174,13 @@ let candidate_probe_to_yojson (probe : candidate_probe) =
       ( "status",
         match probe.status with
         | Probe_ok -> `String "ok"
+        | Probe_skipped _ -> `String "skipped"
         | Probe_error message ->
             `String "error" );
       ( "error",
         match probe.status with
         | Probe_ok -> `Null
+        | Probe_skipped message -> `String message
         | Probe_error message -> `String message );
     ]
 
@@ -324,6 +327,15 @@ let candidate_probe_ok (candidate : candidate_runtime) =
     status = Probe_ok;
   }
 
+let candidate_probe_skipped (candidate : candidate_runtime) reason =
+  {
+    model_string = candidate.model_string;
+    provider_kind = provider_kind_string candidate.provider_cfg;
+    model_id = candidate.provider_cfg.model_id;
+    base_url = candidate.provider_cfg.base_url;
+    status = Probe_skipped reason;
+  }
+
 let validate_strategy ~config_path ~name =
   let cfg =
     Cascade_config_loader.resolve_strategy_config ~config_path ~name
@@ -363,40 +375,6 @@ let validate_strategy ~config_path ~name =
       ( Cascade_config.resolve_strategy ~config_path ~name (),
         Cascade_config.resolve_ollama_max_concurrent ~config_path ~name (),
         Cascade_config.resolve_cli_max_concurrent ~config_path ~name () )
-
-let probe_provider ~sw ~net ~clock (candidate : candidate_runtime) =
-  let provider_cfg = candidate.provider_cfg in
-  let config =
-    Oas_worker_exec.default_config
-      ~name:"catalog_probe"
-      ~provider_cfg
-      ~system_prompt:"Reply with one short token."
-      ~tools:[]
-    |> fun config ->
-    {
-      config with
-      max_turns = 1;
-      max_idle_turns = 1;
-      max_tokens = 1;
-      temperature = 0.0;
-      description =
-        Some
-          (Printf.sprintf "catalog-probe:%s/%s"
-             (provider_kind_string provider_cfg)
-             provider_cfg.model_id);
-      transport = Masc_grpc_transport.Local;
-    }
-  in
-  let run () = Oas_worker_exec.run ~sw ~net ~config "ping" in
-  try
-    match Eio.Time.with_timeout_exn clock probe_timeout_sec run with
-    | Ok _ -> candidate_probe_ok candidate
-    | Error sdk_err ->
-        candidate_probe_error candidate (Oas.Error.to_string sdk_err)
-  with
-  | Eio.Time.Timeout ->
-      candidate_probe_error candidate
-        (Printf.sprintf "probe timeout after %.0fs" probe_timeout_sec)
 
 let rejection_of_path ~config_path ~attempted_mtime ~checked_at
     ~(errors : string list) ~(profiles : profile_rejection list) =
@@ -496,7 +474,7 @@ let runtime_required_profile_names ?config_path () =
   else
     runtime_required_profiles ~config_path
 
-let validate_path_result ~sw ~net ~clock ~config_path =
+let validate_path_result ~config_path =
   let checked_at = Unix.gettimeofday () in
   let attempted_mtime =
     try Some (Unix.stat config_path).Unix.st_mtime
@@ -556,76 +534,27 @@ let validate_path_result ~sw ~net ~clock ~config_path =
             (rejection_of_path ~config_path ~attempted_mtime ~checked_at
                ~errors:top_errors ~profiles:statically_rejected_profiles)
         else
-          let unique_candidates = Hashtbl.create 16 in
-          List.iter
-            (fun (profile : profile_build) ->
-              List.iter
-                (fun (candidate : candidate_runtime) ->
-                  Hashtbl.replace unique_candidates
-                    (candidate_key_of_cfg candidate.provider_cfg)
-                    candidate)
-                profile.candidates)
-            built_profiles;
-          let probe_results =
-            Hashtbl.to_seq_values unique_candidates
-            |> List.of_seq
-            |> List.map (fun candidate ->
-                   (candidate_key_of_cfg candidate.provider_cfg,
-                    probe_provider ~sw ~net ~clock candidate))
-          in
-          let probe_table = Hashtbl.create (List.length probe_results) in
-          List.iter
-            (fun (key, probe) -> Hashtbl.replace probe_table key probe)
-            probe_results;
-          let profile_snapshots, probe_rejected_profiles =
-            List.fold_left
-              (fun (ok_acc, err_acc) (profile : profile_build) ->
-                let probes =
-                  List.map
-                    (fun (candidate : candidate_runtime) ->
-                      Hashtbl.find probe_table
-                        (candidate_key_of_cfg candidate.provider_cfg))
-                    profile.candidates
-                in
-                let probe_errors =
-                  probes
-                  |> List.filter_map (fun probe ->
-                         match probe.status with
-                         | Probe_ok -> None
-                         | Probe_error message ->
-                             Some
-                               (Printf.sprintf
-                                  "candidate %S probe failed: %s"
-                                  probe.model_string message))
-                in
-                if probe_errors <> [] then
-                  ( ok_acc,
-                    {
-                      name = profile.name;
-                      errors = probe_errors;
-                      probes;
-                    }
-                    :: err_acc )
-                else
-                  ( {
-                      name = profile.name;
-                      weighted_entries = profile.weighted_entries;
-                      inference_params = profile.inference_params;
-                      api_key_env_overrides = profile.api_key_env_overrides;
-                      strategy = profile.strategy;
-                      ollama_max_concurrent = profile.ollama_max_concurrent;
-                      cli_max_concurrent = profile.cli_max_concurrent;
-                      probes;
-                    }
-                    :: ok_acc,
-                    err_acc ))
-              ([], [])
+          let profile_snapshots =
+            List.map
+              (fun (profile : profile_build) ->
+                {
+                  name = profile.name;
+                  weighted_entries = profile.weighted_entries;
+                  inference_params = profile.inference_params;
+                  api_key_env_overrides = profile.api_key_env_overrides;
+                  strategy = profile.strategy;
+                  ollama_max_concurrent = profile.ollama_max_concurrent;
+                  cli_max_concurrent = profile.cli_max_concurrent;
+                  probes =
+                    List.map
+                      (fun (candidate : candidate_runtime) ->
+                        candidate_probe_skipped candidate
+                          "runtime provider health is advisory; bootstrap skips live probe")
+                      profile.candidates;
+                })
               built_profiles
           in
-          let profile_snapshots = List.rev profile_snapshots in
-          let rejected_profiles =
-            statically_rejected_profiles @ List.rev probe_rejected_profiles
-          in
+          let rejected_profiles = statically_rejected_profiles in
           let default_profile_validated =
             List.exists
               (fun (profile : profile_snapshot) ->
@@ -668,8 +597,11 @@ let validate_path_result ~sw ~net ~clock ~config_path =
             else
               Ok { snapshot; rejected_update = Some rejection }
 
-let validate_path ~sw ~net ~clock ~config_path =
-  match validate_path_result ~sw ~net ~clock ~config_path with
+let validate_path ?sw ?net ?clock ~config_path () =
+  let (_ : Eio.Switch.t option) = sw in
+  let (_ : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option) = net in
+  let (_ : float Eio.Time.clock_ty Eio.Resource.t option) = clock in
+  match validate_path_result ~config_path with
   | Ok result -> Ok result.snapshot
   | Error _ as e -> e
 
@@ -736,17 +668,26 @@ let inspect_active ?sw ?net ?clock () =
       match cached_result with
       | Some result -> result
       | None -> (
-          match eio_caps ?sw ?net ?clock () with
-          | Error detail ->
-              let rejection =
-                {
-                  source_path = config_path;
-                  attempted_mtime = current_mtime;
-                  checked_at = Unix.gettimeofday ();
-                  errors = [ detail ];
-                  profiles = [];
-                }
-              in
+          match validate_path_result ~config_path with
+          | Ok { snapshot; rejected_update = None } ->
+              with_cache_lock (fun () ->
+                  cache :=
+                    {
+                      active_snapshot = Some snapshot;
+                      rejected_update = None;
+                    });
+              Ok (Validated snapshot)
+          | Ok { snapshot; rejected_update = Some rejection } ->
+              with_cache_lock (fun () ->
+                  cache :=
+                    {
+                      active_snapshot = Some snapshot;
+                      rejected_update = Some rejection;
+                    });
+              Ok
+                (Validated_with_rejections
+                   { snapshot; rejected_update = rejection })
+          | Error rejection ->
               (match with_cache_lock (fun () -> !cache.active_snapshot) with
                | Some snapshot ->
                    with_cache_lock (fun () ->
@@ -758,47 +699,14 @@ let inspect_active ?sw ?net ?clock () =
                    Ok
                      (Serving_last_known_good
                         { snapshot; rejected_update = rejection })
-               | None -> Error rejection)
-          | Ok (sw, net, clock) -> (
-              match validate_path_result ~sw ~net ~clock ~config_path with
-              | Ok { snapshot; rejected_update = None } ->
-                  with_cache_lock (fun () ->
-                      cache :=
-                        {
-                          active_snapshot = Some snapshot;
-                          rejected_update = None;
-                        });
-                  Ok (Validated snapshot)
-              | Ok { snapshot; rejected_update = Some rejection } ->
-                  with_cache_lock (fun () ->
-                      cache :=
-                        {
-                          active_snapshot = Some snapshot;
-                          rejected_update = Some rejection;
-                        });
-                  Ok
-                    (Validated_with_rejections
-                       { snapshot; rejected_update = rejection })
-              | Error rejection ->
-                  (match with_cache_lock (fun () -> !cache.active_snapshot) with
-                   | Some snapshot ->
-                       with_cache_lock (fun () ->
-                           cache :=
-                             {
-                               active_snapshot = Some snapshot;
-                               rejected_update = Some rejection;
-                             });
-                       Ok
-                         (Serving_last_known_good
-                            { snapshot; rejected_update = rejection })
-                   | None ->
-                       with_cache_lock (fun () ->
-                           cache :=
-                             {
-                               active_snapshot = None;
-                               rejected_update = Some rejection;
-                             });
-                       Error rejection)))
+               | None ->
+                   with_cache_lock (fun () ->
+                       cache :=
+                         {
+                           active_snapshot = None;
+                           rejected_update = Some rejection;
+                         });
+                   Error rejection))
 
 let require_snapshot ?sw ?net ?clock () =
   match inspect_active ?sw ?net ?clock () with

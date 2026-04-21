@@ -1,15 +1,16 @@
 (** Runtime-authoritative validated cascade catalog.
 
     The active runtime [cascade.json] is the only authoritative catalog.
-    This module validates the active file, probes every configured
-    candidate through the same OAS execution surface as production turns,
-    and keeps serving the last-known-good snapshot when a hot reload is
-    rejected.
+    This module validates the active file statically and keeps serving the
+    last-known-good snapshot when a hot reload is rejected. Provider liveness
+    is advisory runtime state and does not invalidate an otherwise-correct
+    catalog.
 
     @stability Internal *)
 
 type candidate_probe_status =
   | Probe_ok
+  | Probe_skipped of string
   | Probe_error of string
 
 type candidate_probe = {
@@ -42,10 +43,11 @@ val inspect_active :
   (state, rejection) result
 
 val validate_path :
-  sw:Eio.Switch.t ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  ?sw:Eio.Switch.t ->
+  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   config_path:string ->
+  unit ->
   (snapshot, rejection) result
 (** Returns the validated subset of profiles when the catalog is partly
     usable but some presets are rejected at runtime. Inspect

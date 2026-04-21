@@ -211,6 +211,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
        Log.Server.info "keeper_runtime.toml: applied %d override(s)" n
    | Error msg ->
        Log.Server.warn "keeper_runtime.toml load failed: %s (continuing with env defaults)" msg);
+  Keeper_runtime_resolved.init ();
   (* RFC-0001 Gate A: initialize instrumentation stores *)
   Heuristic_metrics.init ~base_path;
   Agent_stress.init ~base_path;

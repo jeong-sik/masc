@@ -460,6 +460,7 @@ let run_named
     ?proof_ref
     ?contract
     ?transport
+    ?cli_transport_overrides
     ?(allowed_paths = [])
     ?checkpoint_sidecar
     ?(cache_system_prompt = false)
@@ -592,6 +593,7 @@ let run_named
                  raw_trace;
                  yield_on_tool;
                  runtime_mcp_policy;
+                 cli_transport_overrides;
              })
     in
     let local_agent_ref : Oas.Agent.t option ref = ref None in

@@ -134,6 +134,8 @@ let start_counting_mock ~sw ~net ~port ~response =
       Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
   (Printf.sprintf "http://127.0.0.1:%d" port, request_count)
 
+let dummy_base_url = "http://127.0.0.1:1"
+
 let json_member name json = Yojson.Safe.Util.member name json
 
 let json_string_field name json =
@@ -161,18 +163,12 @@ let require_ok = function
   | Ok value -> value
   | Error detail -> failf "expected Ok, got Error: %s" detail
 
-let test_valid_catalog_dedupes_shared_live_probes () =
+let test_valid_catalog_skips_live_probes_at_bootstrap () =
   with_temp_dir "cascade-catalog-runtime" @@ fun dir ->
   let config_dir = Filename.concat dir "config" in
   init_config_root config_dir;
   with_config_dir config_dir @@ fun () ->
-  with_eio @@ fun ~sw ~net ~clock ~fs:_ ~proc_mgr:_ ->
-  let port = find_free_port () in
-  let base_url, request_count =
-    start_counting_mock ~sw ~net ~port
-      ~response:(openai_text_response "pong")
-  in
-  let shared_model = Printf.sprintf "custom:mock@%s/v1" base_url in
+  let shared_model = Printf.sprintf "custom:mock@%s/v1" dummy_base_url in
   ignore
     (write_cascade_json config_dir
        (Printf.sprintf
@@ -182,7 +178,7 @@ let test_valid_catalog_dedupes_shared_live_probes () =
 }|}
           shared_model shared_model));
   let snapshot =
-    match Cascade_catalog_runtime.inspect_active ~sw ~net ~clock () with
+    match Cascade_catalog_runtime.inspect_active () with
     | Ok (Cascade_catalog_runtime.Validated snapshot) -> snapshot
     | Ok (Cascade_catalog_runtime.Validated_with_rejections _) ->
         fail "expected fully validated snapshot without rejected profiles"
@@ -195,17 +191,14 @@ let test_valid_catalog_dedupes_shared_live_probes () =
   in
   let snapshot_json = Cascade_catalog_runtime.snapshot_to_yojson snapshot in
   check int "profile_count" 2 (json_int_field "profile_count" snapshot_json);
-  check int "shared candidate probed once" 1 (Atomic.get request_count);
   let blank_name =
     require_ok
-      (Cascade_catalog_runtime.resolve_declared_name
-         ~sw ~net ~clock ~raw_name:"" ())
+      (Cascade_catalog_runtime.resolve_declared_name ~raw_name:"" ())
   in
   check string "blank name defaults to keeper_unified"
     Keeper_config.default_cascade_name blank_name;
   match
-    Cascade_catalog_runtime.resolve_declared_name
-      ~sw ~net ~clock ~raw_name:"missing_profile" ()
+    Cascade_catalog_runtime.resolve_declared_name ~raw_name:"missing_profile" ()
   with
   | Ok resolved ->
       failf "expected missing profile to be rejected, got %s" resolved
@@ -220,13 +213,7 @@ let test_invalid_hot_reload_preserves_last_known_good () =
   let config_dir = Filename.concat dir "config" in
   init_config_root config_dir;
   with_config_dir config_dir @@ fun () ->
-  with_eio @@ fun ~sw ~net ~clock ~fs:_ ~proc_mgr:_ ->
-  let port = find_free_port () in
-  let base_url, request_count =
-    start_counting_mock ~sw ~net ~port
-      ~response:(openai_text_response "pong")
-  in
-  let valid_model = Printf.sprintf "custom:stable@%s/v1" base_url in
+  let valid_model = Printf.sprintf "custom:stable@%s/v1" dummy_base_url in
   let config_path =
     write_cascade_json config_dir
       (Printf.sprintf
@@ -235,7 +222,7 @@ let test_invalid_hot_reload_preserves_last_known_good () =
 }|}
          valid_model)
   in
-  (match Cascade_catalog_runtime.inspect_active ~sw ~net ~clock () with
+  (match Cascade_catalog_runtime.inspect_active () with
    | Ok (Cascade_catalog_runtime.Validated _) -> ()
    | Ok (Cascade_catalog_runtime.Validated_with_rejections _) ->
        fail "expected the initial snapshot to validate cleanly"
@@ -245,13 +232,12 @@ let test_invalid_hot_reload_preserves_last_known_good () =
        failf "initial validation failed: %s"
          (Yojson.Safe.to_string
             (Cascade_catalog_runtime.rejection_to_yojson rejection)));
-  check int "initial live probe count" 1 (Atomic.get request_count);
   ignore
     (write_cascade_json config_dir
        {|{
   "keeper_unified_models": ["__nonexistent_provider_sentinel__:fake"]
 }|});
-  match Cascade_catalog_runtime.inspect_active ~sw ~net ~clock () with
+  match Cascade_catalog_runtime.inspect_active () with
   | Ok
       (Cascade_catalog_runtime.Serving_last_known_good
          { snapshot; rejected_update }) ->
@@ -260,11 +246,9 @@ let test_invalid_hot_reload_preserves_last_known_good () =
         config_path (json_string_field "source_path" served_json);
       let labels =
         require_ok
-          (Cascade_catalog_runtime.models_of_cascade_name
-             ~sw ~net ~clock "keeper_unified")
+          (Cascade_catalog_runtime.models_of_cascade_name "keeper_unified")
       in
       check (list string) "served snapshot keeps prior model" [ valid_model ] labels;
-      check int "invalid hot reload does not probe again" 1 (Atomic.get request_count);
       let rejection_json =
         Cascade_catalog_runtime.rejection_to_yojson rejected_update
         |> Yojson.Safe.to_string
@@ -285,13 +269,7 @@ let test_legacy_runtime_wrapper_does_not_fallback_to_defaults () =
   let config_dir = Filename.concat dir "config" in
   init_config_root config_dir;
   with_config_dir config_dir @@ fun () ->
-  with_eio @@ fun ~sw ~net ~clock ~fs:_ ~proc_mgr:_ ->
-  let port = find_free_port () in
-  let base_url, _request_count =
-    start_counting_mock ~sw ~net ~port
-      ~response:(openai_text_response "pong")
-  in
-  let valid_model = Printf.sprintf "custom:stable@%s/v1" base_url in
+  let valid_model = Printf.sprintf "custom:stable@%s/v1" dummy_base_url in
   ignore
     (write_cascade_json config_dir
        (Printf.sprintf
@@ -299,7 +277,7 @@ let test_legacy_runtime_wrapper_does_not_fallback_to_defaults () =
   "keeper_unified_models": ["%s"]
 }|}
           valid_model));
-  ignore (Cascade_catalog_runtime.inspect_active ~sw ~net ~clock ());
+  ignore (Cascade_catalog_runtime.inspect_active ());
   check (list string) "legacy wrapper still resolves known profile"
     [ valid_model ]
     (Cascade_runtime.models_of_cascade_name Keeper_config.default_cascade_name);
@@ -351,24 +329,18 @@ let test_partial_catalog_keeps_validated_subset_available () =
   let config_dir = Filename.concat dir "config" in
   init_config_root config_dir;
   with_config_dir config_dir @@ fun () ->
-  with_eio @@ fun ~sw ~net ~clock ~fs:_ ~proc_mgr:_ ->
-  let port = find_free_port () in
-  let base_url, _request_count =
-    start_counting_mock ~sw ~net ~port
-      ~response:(openai_text_response "pong")
-  in
-  let valid_model = Printf.sprintf "custom:stable@%s/v1" base_url in
+  let valid_model = Printf.sprintf "custom:stable@%s/v1" dummy_base_url in
   ignore
     (write_cascade_json config_dir
        (Printf.sprintf
           {|{
   "keeper_unified_models": ["%s"],
   "tool_rerank_models": ["%s"],
-  "broken_profile_models": ["custom:flaky@http://127.0.0.1:9/v1"]
+  "broken_profile_models": ["__nonexistent_provider_sentinel__:fake"]
 }|}
           valid_model valid_model));
   let rejection_json =
-    match Cascade_catalog_runtime.inspect_active ~sw ~net ~clock () with
+    match Cascade_catalog_runtime.inspect_active () with
     | Ok
         (Cascade_catalog_runtime.Validated_with_rejections
            { rejected_update; _ }) ->
@@ -383,9 +355,9 @@ let test_partial_catalog_keeps_validated_subset_available () =
           (Yojson.Safe.to_string
              (Cascade_catalog_runtime.rejection_to_yojson rejection))
   in
-  check bool "rejected runtime probe is surfaced" true
+  check bool "rejected invalid candidate is surfaced" true
     (contains_substring rejection_json
-       "custom:flaky@http://127.0.0.1:9/v1");
+       "__nonexistent_provider_sentinel__:fake");
   check (list string) "dashboard only advertises validated profiles"
     [ Keeper_config.default_cascade_name; "tool_rerank" ]
     (Masc_mcp.Server_routes_http_routes_dashboard.available_cascade_profiles ());
@@ -417,7 +389,7 @@ let test_partial_catalog_rejects_invalid_default_profile () =
       (write_cascade_json config_dir
          (Printf.sprintf
             {|{
-  "keeper_unified_models": ["custom:flaky@http://127.0.0.1:9/v1"],
+  "keeper_unified_models": ["__nonexistent_provider_sentinel__:fake"],
   "tool_rerank_models": ["%s"]
 }|}
             valid_model));
@@ -436,9 +408,9 @@ let test_partial_catalog_rejects_invalid_default_profile () =
                    "required default profile \"keeper_unified\" failed validation"
              | _ -> false)
            errors);
-      check bool "rejected default profile probe is surfaced" true
+      check bool "rejected default profile invalid candidate is surfaced" true
         (contains_substring (Yojson.Safe.to_string rejection_json)
-           "custom:flaky@http://127.0.0.1:9/v1")
+           "__nonexistent_provider_sentinel__:fake")
   | Ok (Cascade_catalog_runtime.Validated _) ->
       fail "expected invalid default profile to hard-fail validation"
   | Ok (Cascade_catalog_runtime.Validated_with_rejections _) ->
@@ -498,7 +470,7 @@ let test_config_doctor_live_warns_on_partial_catalog_validation () =
        (Printf.sprintf
           {|{
   "keeper_unified_models": ["%s"],
-  "broken_profile_models": ["custom:flaky@http://127.0.0.1:9/v1"]
+  "broken_profile_models": ["__nonexistent_provider_sentinel__:fake"]
 }|}
           valid_model));
   with_config_dir config_dir @@ fun () ->
@@ -524,7 +496,7 @@ let test_config_doctor_live_warns_on_partial_catalog_validation () =
         (json_string_field "status" json);
       check bool "rejected profile is surfaced in live doctor json" true
         (contains_substring (Yojson.Safe.to_string json)
-           "custom:flaky@http://127.0.0.1:9/v1")
+           "__nonexistent_provider_sentinel__:fake")
 
 let () =
   run "cascade_catalog_runtime"
@@ -532,9 +504,9 @@ let () =
       ( "runtime",
         [
           test_case
-            "valid catalog dedupes shared live probes"
+            "valid catalog skips live probes at bootstrap"
             `Quick
-            test_valid_catalog_dedupes_shared_live_probes;
+            test_valid_catalog_skips_live_probes_at_bootstrap;
           test_case
             "invalid hot reload preserves last-known-good"
             `Quick

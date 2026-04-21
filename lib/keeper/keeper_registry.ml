@@ -560,7 +560,7 @@ let started_at ~base_path name =
   | None -> None
 
 let spawn_slots_available () =
-  let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
+  let max_keepers = Keeper_runtime_resolved.bootstrap_max_active_keepers () in
   max_keepers <= 0
   || Atomic.get running_count_atomic < max_keepers
 

@@ -95,6 +95,20 @@ let bg_revalidate_backoff_factor = 2.0
 
 exception Compute_timeout of string * bool
 
+let is_internal_race_cancel exn =
+  match exn with
+  | Eio.Cancel.Cancelled _ ->
+      let msg = Printexc.to_string exn in
+      String.equal msg "Cancelled: Eio__core__Fiber.Not_first"
+      || String.ends_with ~suffix:"Eio__core__Fiber.Not_first" msg
+  | _ -> false
+
+let should_restore_stale_after_failure exn =
+  match exn with
+  | Compute_timeout _ -> true
+  | Eio.Cancel.Cancelled _ -> true
+  | _ -> false
+
 let timeout_json ~key ~timeout_sec ~timeout_kind =
   `Assoc
     [
@@ -171,7 +185,11 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           action := Some (`Wait token);
           map
         end
-      | Some (Ready _) | None ->
+      | Some (Ready entry) ->
+        let token = next_token () in
+        action := Some (`Compute token);
+        SMap.add key (Computing { token; started_at = now (); stale = Some entry.value }) map
+      | None ->
         let token = next_token () in
         action := Some (`Compute token);
         SMap.add key (Computing { token; started_at = now (); stale = None }) map
@@ -198,6 +216,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
         | exception exn ->
           (match exn with
            | Compute_timeout _ -> ()
+           | _ when is_internal_race_cancel exn -> ()
            | _ -> Log.Dashboard.warn "cache bg-revalidate failed (%s): %s" key (Printexc.to_string exn));
           atomic_update table (fun map ->
             match SMap.find_opt key map with
@@ -207,23 +226,31 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
               SMap.add key (Ready { value = stale_value; expires_at = ts; stale_until = ts +. backoff_grace }) map
             | _ -> map
           )
+      and restore_stale_ready () =
+        atomic_update table (fun map ->
+          match SMap.find_opt key map with
+          | Some (Computing { token = c; _ }) when c = token ->
+              let ts = now () in
+              let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
+              SMap.add key
+                (Ready { value = stale_value; expires_at = ts; stale_until = ts +. backoff_grace })
+                map
+          | _ -> map
+        )
       in
       (match Eio_context.get_switch_opt () with
        | Some sw ->
-           (try Eio.Fiber.fork ~sw (fun () ->
-              try do_bg_compute ()
-              with
-              | Eio.Cancel.Cancelled _ as e ->
-                atomic_update table (fun map ->
-                  match SMap.find_opt key map with
-                  | Some (Computing { token = c; _ }) when c = token ->
-                    let ts = now () in
-                    let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-                    SMap.add key (Ready { value = stale_value; expires_at = ts; stale_until = ts +. backoff_grace }) map
-                  | _ -> map
-                );
-                raise e)
-            with Eio.Cancel.Cancelled _ -> ())
+           (try
+              Eio.Fiber.fork ~sw (fun () ->
+                try do_bg_compute ()
+                with
+                | Eio.Cancel.Cancelled _ as e ->
+                    restore_stale_ready ();
+                    raise e)
+            with
+            | Invalid_argument _ ->
+                restore_stale_ready ()
+            | Eio.Cancel.Cancelled _ -> ())
        | None ->
            Log.Dashboard.warn "cache: no switch for background revalidation, computing inline";
            do_bg_compute ());
@@ -263,13 +290,27 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            );
            value
        | Some (Error exn) ->
-           Log.Dashboard.error "cache revalidation failed: %s" (Printexc.to_string exn);
+           let fallback_val = ref None in
+           if not (is_internal_race_cancel exn) then
+             Log.Dashboard.error "cache revalidation failed: %s" (Printexc.to_string exn);
            atomic_update table (fun map ->
              match SMap.find_opt key map with
-             | Some (Computing { token = c; _ }) when c = token -> SMap.remove key map
+             | Some (Computing { token = c; stale = Some stale_value; _ }) when c = token ->
+                 fallback_val := Some stale_value;
+                 let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
+                 SMap.add key
+                   (Ready { value = stale_value; expires_at = ts; stale_until = ts +. backoff_grace })
+                   map
+             | Some (Computing { token = c; stale = None; _ }) when c = token ->
+                 SMap.remove key map
              | _ -> map
            );
-           raise exn
+           if should_restore_stale_after_failure exn then
+             match !fallback_val with
+             | Some value -> value
+             | None -> raise exn
+           else
+             raise exn
        | None ->
            let fallback_val = ref None in
            atomic_update table (fun map ->

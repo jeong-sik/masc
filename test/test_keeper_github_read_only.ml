@@ -177,6 +177,35 @@ let test_prefixed_gh_command_normalization () =
     true
     (has_side_effect ~tool_name:"keeper_shell" ~input:(mk_cmd "gh pr merge 123"))
 
+let test_parse_simple_gh_command_preserves_quoted_args () =
+  match
+    Keeper_gh_shared.parse_simple_gh_command
+      "pr comment 123 --body 'looks good to me'"
+  with
+  | Ok cmd ->
+    Alcotest.(check (list string)) "quoted arg preserved"
+      [ "pr"; "comment"; "123"; "--body"; "looks good to me" ]
+      (Keeper_gh_shared.gh_simple_command_argv cmd)
+  | Error _ -> Alcotest.fail "expected simple gh command parse"
+
+let test_parse_simple_gh_command_rejects_pipeline () =
+  match Keeper_gh_shared.parse_simple_gh_command "pr list | cat" with
+  | Error (Keeper_gh_shared.Unsupported_shell_construct "pipeline") -> ()
+  | Ok _ -> Alcotest.fail "expected pipeline rejection"
+  | Error _ -> Alcotest.fail "expected pipeline rejection tag"
+
+let test_repo_flag_injection_prefixes_args () =
+  match Keeper_gh_shared.parse_simple_gh_command "--repo old/repo pr view 123" with
+  | Ok cmd ->
+    let updated =
+      Keeper_gh_shared.gh_simple_command_with_repo_flag
+        ~repo_slug:"new/repo" cmd
+    in
+    Alcotest.(check (list string)) "repo flag injected at front"
+      [ "--repo"; "new/repo"; "pr"; "view"; "123" ]
+      (Keeper_gh_shared.gh_simple_command_argv updated)
+  | Error _ -> Alcotest.fail "expected simple gh command parse"
+
 (* ================================================================ *)
 (* Read-only subcommands via args                                    *)
 (* ================================================================ *)
@@ -675,6 +704,12 @@ let () =
             test_read_only_case_insensitive;
           Alcotest.test_case "prefixed gh command normalization" `Quick
             test_prefixed_gh_command_normalization;
+          Alcotest.test_case "simple gh parser preserves quoted args" `Quick
+            test_parse_simple_gh_command_preserves_quoted_args;
+          Alcotest.test_case "simple gh parser rejects pipeline" `Quick
+            test_parse_simple_gh_command_rejects_pipeline;
+          Alcotest.test_case "repo flag injection prefixes args" `Quick
+            test_repo_flag_injection_prefixes_args;
         ] );
       ( "read_only_args",
         [

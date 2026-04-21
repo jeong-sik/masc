@@ -139,10 +139,11 @@ let audit_orphan_tasks config : (Types.task * string) list =
     List.filter_map (fun (task : Types.task) ->
       match task.task_status with
       | Types.Claimed { assignee; _ }
-      | Types.InProgress { assignee; _ } ->
+      | Types.InProgress { assignee; _ }
+      | Types.AwaitingVerification { assignee; _ } ->
           if is_active_agent assignee then None
           else Some (task, assignee)
-      | _ -> None
+      | Types.Todo | Types.Done _ | Types.Cancelled _ -> None
     ) backlog.tasks
 
 let is_agent_active_at_path config path =

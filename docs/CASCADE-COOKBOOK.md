@@ -1,11 +1,13 @@
 # Cascade Cookbook
 
-Copy-paste examples for `config/cascade.json`.
+Copy-paste examples for `config/cascade.toml`.
 
 Use this document for local/private live config under:
 
-- `~/.masc/config/cascade.json`
-- `$MASC_BASE_PATH/.masc/config/cascade.json`
+- `~/.masc/config/cascade.toml`
+- `$MASC_BASE_PATH/.masc/config/cascade.toml`
+
+The runtime will materialize sibling `cascade.json` automatically.
 
 Do not treat these examples as a mandate for checked-in repo defaults. Repo
 defaults must stay limited to providers that the currently pinned OAS runtime
@@ -14,12 +16,13 @@ can execute when selected.
 ## Quick Rules
 
 - Use explicit `provider:model_id` labels in committed defaults.
-- A cascade profile is any `{name}_...` key group such as
-  `keeper_unified_models`, `keeper_unified_temperature`,
-  `keeper_unified_strategy`.
-- `default_*` acts as fallback for cascades that omit per-profile values.
-- `{name}_keeper_assignable = false` keeps a profile visible in the catalog but
-  hides it from keeper assignment dropdowns.
+- A cascade profile is a top-level TOML table such as `[keeper_unified]`.
+- `comment` at the root maps to the runtime `_comment`; `[profile].comment`
+  maps to `_comment_<profile>`.
+- `[default]` acts as fallback for cascades that omit per-profile values.
+- `[profile].keeper_assignable = false` keeps a profile visible in the catalog
+  but hides it from keeper assignment dropdowns.
+- `[profile.api_key_env]` maps provider ids to env var names.
 - Kimi direct uses the built-in Moonshot/OpenAI-compatible `kimi:` lane here.
   Prefer current model IDs such as `kimi:kimi-k2.5`.
 - Legacy `kimi:kimi-for-coding` is normalized to `kimi:kimi-k2.5` at parse time for
@@ -33,45 +36,46 @@ Use this when your keepers are primarily coding/text agents and you want:
 - `kimi` direct as the secondary coding cloud path
 - local `ollama` as the cheap fallback/recovery lane
 
-```json
-{
-  "_comment": "Local/private live config example. Requires valid GLM/Kimi credentials and local fallback runtime health.",
-  "default_models": [
-    {"model": "glm-coding:glm-5.1", "weight": 45},
-    {"model": "kimi:kimi-for-coding", "weight": 35},
-    {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 20, "supports_tool_choice": true}
-  ],
-  "default_temperature": 0.2,
-  "default_max_tokens": 8192,
-  "default_api_key_env": {
-    "glm": "ZAI_API_KEY_SB",
-    "glm-coding": "ZAI_API_KEY_SB",
-    "kimi": "KIMI_API_KEY_SB"
-  },
+```toml
+comment = "Local/private live config example. Requires valid GLM/Kimi credentials and local fallback runtime health."
 
-  "keeper_unified_models": [
-    {"model": "glm-coding:glm-5.1", "weight": 45},
-    {"model": "kimi:kimi-for-coding", "weight": 35},
-    {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 20, "supports_tool_choice": true}
-  ],
-  "keeper_unified_temperature": 0.2,
-  "keeper_unified_max_tokens": 16384,
-  "keeper_unified_strategy": "circuit_breaker_cycling",
-  "keeper_unified_max_cycles": 2,
-  "keeper_unified_backoff_base_ms": 250,
-  "keeper_unified_backoff_cap_ms": 2000,
-  "keeper_unified_ollama_max_concurrent": 1,
+[default]
+temperature = 0.2
+max_tokens = 8192
+models = [
+  { model = "glm-coding:glm-5.1", weight = 45 },
+  { model = "kimi:kimi-for-coding", weight = 35 },
+  { model = "ollama:qwen3.5:35b-a3b-nvfp4", weight = 20, supports_tool_choice = true },
+]
 
-  "local_recovery_models": [
-    "ollama:qwen3.5:35b-a3b-nvfp4"
-  ],
-  "local_recovery_temperature": 0.1,
-  "local_recovery_max_tokens": 8192,
+[default.api_key_env]
+glm = "ZAI_API_KEY_SB"
+"glm-coding" = "ZAI_API_KEY_SB"
+kimi = "KIMI_API_KEY_SB"
 
-  "tool_rerank_temperature": 0.0,
-  "tool_rerank_max_tokens": 200,
-  "tool_rerank_keeper_assignable": false
-}
+[keeper_unified]
+temperature = 0.2
+max_tokens = 16384
+strategy = "circuit_breaker_cycling"
+max_cycles = 2
+backoff_base_ms = 250
+backoff_cap_ms = 2000
+ollama_max_concurrent = 1
+models = [
+  { model = "glm-coding:glm-5.1", weight = 45 },
+  { model = "kimi:kimi-for-coding", weight = 35 },
+  { model = "ollama:qwen3.5:35b-a3b-nvfp4", weight = 20, supports_tool_choice = true },
+]
+
+[local_recovery]
+temperature = 0.1
+max_tokens = 8192
+models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+
+[tool_rerank]
+temperature = 0.0
+max_tokens = 200
+keeper_assignable = false
 ```
 
 Operational notes:
@@ -87,44 +91,47 @@ Operational notes:
 Use this when the local lane is an OpenAI-compatible MLX-VLM endpoint instead
 of `ollama`.
 
-```json
-{
-  "_comment": "Local/private live config example. Requires valid GLM/Kimi credentials and an OpenAI-compatible MLX-VLM endpoint.",
-  "default_models": [
-    {"model": "glm-coding:glm-5.1", "weight": 45},
-    {"model": "kimi:kimi-for-coding", "weight": 35},
-    {"model": "custom:mlx-community/Huihui-Qwen3.6-35B-A3B-abliterated-4.4bit-msq@http://127.0.0.1:18080/v1", "weight": 20}
-  ],
-  "default_temperature": 0.2,
-  "default_max_tokens": 8192,
-  "default_api_key_env": {
-    "glm": "ZAI_API_KEY_SB",
-    "glm-coding": "ZAI_API_KEY_SB",
-    "kimi": "KIMI_API_KEY_SB"
-  },
+```toml
+comment = "Local/private live config example. Requires valid GLM/Kimi credentials and an OpenAI-compatible MLX-VLM endpoint."
 
-  "keeper_unified_models": [
-    {"model": "glm-coding:glm-5.1", "weight": 45},
-    {"model": "kimi:kimi-for-coding", "weight": 35},
-    {"model": "custom:mlx-community/Huihui-Qwen3.6-35B-A3B-abliterated-4.4bit-msq@http://127.0.0.1:18080/v1", "weight": 20}
-  ],
-  "keeper_unified_temperature": 0.2,
-  "keeper_unified_max_tokens": 16384,
-  "keeper_unified_strategy": "circuit_breaker_cycling",
-  "keeper_unified_max_cycles": 2,
-  "keeper_unified_backoff_base_ms": 250,
-  "keeper_unified_backoff_cap_ms": 2000,
+[default]
+temperature = 0.2
+max_tokens = 8192
+models = [
+  { model = "glm-coding:glm-5.1", weight = 45 },
+  { model = "kimi:kimi-for-coding", weight = 35 },
+  { model = "custom:mlx-community/Huihui-Qwen3.6-35B-A3B-abliterated-4.4bit-msq@http://127.0.0.1:18080/v1", weight = 20 },
+]
 
-  "local_mlx_vlm_qwen36_models": [
-    "custom:mlx-community/Huihui-Qwen3.6-35B-A3B-abliterated-4.4bit-msq@http://127.0.0.1:18080/v1"
-  ],
-  "local_mlx_vlm_qwen36_temperature": 0.2,
-  "local_mlx_vlm_qwen36_max_tokens": 16384,
+[default.api_key_env]
+glm = "ZAI_API_KEY_SB"
+"glm-coding" = "ZAI_API_KEY_SB"
+kimi = "KIMI_API_KEY_SB"
 
-  "tool_rerank_temperature": 0.0,
-  "tool_rerank_max_tokens": 200,
-  "tool_rerank_keeper_assignable": false
-}
+[keeper_unified]
+temperature = 0.2
+max_tokens = 16384
+strategy = "circuit_breaker_cycling"
+max_cycles = 2
+backoff_base_ms = 250
+backoff_cap_ms = 2000
+models = [
+  { model = "glm-coding:glm-5.1", weight = 45 },
+  { model = "kimi:kimi-for-coding", weight = 35 },
+  { model = "custom:mlx-community/Huihui-Qwen3.6-35B-A3B-abliterated-4.4bit-msq@http://127.0.0.1:18080/v1", weight = 20 },
+]
+
+[local_mlx_vlm_qwen36]
+temperature = 0.2
+max_tokens = 16384
+models = [
+  "custom:mlx-community/Huihui-Qwen3.6-35B-A3B-abliterated-4.4bit-msq@http://127.0.0.1:18080/v1",
+]
+
+[tool_rerank]
+temperature = 0.0
+max_tokens = 200
+keeper_assignable = false
 ```
 
 Operational notes:
@@ -147,5 +154,6 @@ Operational notes:
 ## Where This Connects
 
 - Schema reference: [docs/spec/14-configuration.md](./spec/14-configuration.md)
-- Checked-in seed example: [config/cascade.json](../config/cascade.json)
+- Checked-in authoring seed: [config/cascade.toml](../config/cascade.toml)
+- Materialized runtime artifact: [config/cascade.json](../config/cascade.json)
 - Reload contract: [README.md](../README.md)

@@ -238,7 +238,7 @@ Reload contracts:
 
 - env vars are a boot contract unless a runtime control plane says otherwise
 - `config/keepers/*.toml` is reconciled on the next supervisor sweep
-- `config/cascade.json` is applied on the next model resolve/turn
+- `config/cascade.toml` materializes sibling `config/cascade.json` on the next model resolve/turn
 - `config/keeper_runtime.toml` and `config/tool_policy.toml` require restart
 
 See [docs/ENV-CONTRACT.md](docs/ENV-CONTRACT.md) and
@@ -246,7 +246,8 @@ See [docs/ENV-CONTRACT.md](docs/ENV-CONTRACT.md) and
 
 ## Model Cascade
 
-- `config/cascade.json` is a MASC runtime contract.
+- `config/cascade.toml` is the supported human-authored cascade catalog when present.
+- `config/cascade.json` remains the runtime contract and generated artifact served to existing consumers.
 - MASC owns cascade schema, parsing, and selection policy; OAS only sees the resolved concrete provider/model choice passed per call.
 - Each keeper can override the repo default via `cascade_name` in its TOML.
 - For committed defaults, prefer explicit `provider:model_id` labels instead of convenience labels.

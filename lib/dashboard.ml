@@ -326,13 +326,13 @@ let agent_workflow_section now (_config : Coord_utils.config) (agents : Types.ag
   let content =
     agents
     |> List.filter (fun (a : Types.agent) ->
-           match a.status with Types.Active | Types.Busy -> true | _ -> false)
+           match a.status with Types.Active | Types.Busy -> true | Types.Listening | Types.Inactive -> false)
     |> List.map (fun (agent : Types.agent) ->
            let status_icon =
              match agent.status with
              | Types.Active -> "[active]"
              | Types.Busy -> "[busy]"
-             | _ -> "[idle]"
+             | Types.Listening | Types.Inactive -> "[idle]"
            in
            let task_info =
              match agent.current_task with

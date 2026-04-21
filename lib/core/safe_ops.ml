@@ -115,6 +115,21 @@ let read_json_file_logged ~label path : Yojson.Safe.t option =
     Log.Misc.warn "[%s] failed to read JSON from %s: %s" label path msg;
     None
 
+let persistence_read_drop_reason_list_dir_error = "list_dir_error"
+let persistence_read_drop_reason_entry_load_error = "entry_load_error"
+let persistence_read_drop_reason_invalid_payload = "invalid_payload"
+
+let report_persistence_read_drop ~on_drop ~surface ~reason ~path ~detail =
+  Log.Misc.warn "[%s] persistence read drop (%s) path=%s: %s"
+    surface reason path detail;
+  on_drop ()
+
+let result_to_option_logged ~on_drop ~surface ~reason ~path = function
+  | Ok value -> Some value
+  | Error detail ->
+    report_persistence_read_drop ~on_drop ~surface ~reason ~path ~detail;
+    None
+
 (** Read JSON file via Eio-native I/O (Fs_compat).
     Drop-in replacement for [Yojson.Safe.from_file] in Eio fiber contexts.
     Falls back to blocking I/O when Eio fs is not set. *)

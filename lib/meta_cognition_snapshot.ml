@@ -40,23 +40,56 @@ let load_board_vote_count config =
   List.length (load_jsonl_safe path)
 
 let load_governance_cases config =
+  let surface = "meta_cognition_snapshot" in
+  let observe_drop ~reason =
+    Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+      ~labels:[("surface", surface); ("reason", reason)] ()
+  in
+  let report_drop ~reason ~path ~detail =
+    Safe_ops.report_persistence_read_drop
+      ~on_drop:(fun () -> observe_drop ~reason)
+      ~surface
+      ~reason
+      ~path
+      ~detail
+  in
   let dir = Filename.concat (Coord.masc_dir config) "governance_v2/cases" in
-  match Safe_ops.list_dir_safe dir with
-  | Error _ -> []
-  | Ok names ->
-      names
-      |> List.filter (fun name ->
-             Filename.check_suffix name ".json"
-             && not (String.starts_with ~prefix:"_" name))
-      |> List.filter_map (fun name ->
-             let path = Filename.concat dir name in
-             match Safe_ops.read_json_file_safe path with
-             | Error _ -> None
-             | Ok json ->
-                 let id = Safe_ops.json_string ~default:"" "id" json in
-                 let title = Safe_ops.json_string ~default:"" "title" json in
-                 let status = Safe_ops.json_string ~default:"" "status" json in
-                 if id = "" then None else Some { id; title; status })
+  if not (Sys.file_exists dir) then
+    []
+  else
+    match Safe_ops.list_dir_safe dir with
+    | Error detail ->
+      report_drop ~reason:Safe_ops.persistence_read_drop_reason_list_dir_error ~path:dir ~detail;
+      []
+    | Ok names ->
+        names
+        |> List.filter (fun name ->
+               Filename.check_suffix name ".json"
+               && not (String.starts_with ~prefix:"_" name))
+        |> List.filter_map (fun name ->
+               let path = Filename.concat dir name in
+               match
+                 Safe_ops.result_to_option_logged
+                   ~on_drop:(fun () ->
+                     observe_drop ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error)
+                   ~surface
+                   ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+                   ~path
+                   (Safe_ops.read_json_file_safe path)
+               with
+               | None -> None
+               | Some json ->
+                   let id = Safe_ops.json_string ~default:"" "id" json in
+                   if id = "" then (
+                     report_drop
+                       ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                       ~path
+                       ~detail:"missing required id";
+                     None
+                   ) else
+                     let title = Safe_ops.json_string ~default:"" "title" json in
+                     let status = Safe_ops.json_string ~default:"" "status" json in
+                     Some { id; title; status })
 
 (* ================================================================ *)
 (* Source extraction                                                *)

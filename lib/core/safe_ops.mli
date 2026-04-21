@@ -43,6 +43,29 @@ val read_json_file_logged : label:string -> string -> Yojson.Safe.t option
 (** Read JSON file safely, logging errors instead of silently discarding them.
     Returns [Some json] on success, [None] on failure with a warning log. *)
 
+val persistence_read_drop_reason_list_dir_error : string
+val persistence_read_drop_reason_entry_load_error : string
+val persistence_read_drop_reason_invalid_payload : string
+
+val report_persistence_read_drop :
+  on_drop:(unit -> unit) ->
+  surface:string ->
+  reason:string ->
+  path:string ->
+  detail:string ->
+  unit
+(** Report a persisted read-model drop via WARN log + Prometheus counter. *)
+
+val result_to_option_logged :
+  on_drop:(unit -> unit) ->
+  surface:string ->
+  reason:string ->
+  path:string ->
+  ('a, string) result ->
+  'a option
+(** Convert a [Result] into an option while reporting [Error] as an
+    observable persisted-read drop. *)
+
 val read_json_eio : string -> Yojson.Safe.t
 (** Read JSON file via Eio-native I/O (Fs_compat).
     Drop-in replacement for [Yojson.Safe.from_file] in Eio fiber contexts. *)

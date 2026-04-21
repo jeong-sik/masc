@@ -26,6 +26,7 @@ import {
   type CascadeConfigResponse,
   type CascadeHealthProvider,
   type CascadeHealthResponse,
+  type CascadeInvalidProfile,
   type CascadeKeeperProfile,
   type CascadeProfile,
   type CascadeStrategyTraceEvent,
@@ -33,6 +34,7 @@ import {
   type CascadeStrategyTraceResponse,
   type CascadeSloResponse,
   type CascadeSloStatus,
+  type CascadeValidationStatus,
 } from '../api/dashboard'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
@@ -91,6 +93,33 @@ export function sourceTone(source: CascadeProfile['source']): string {
     case 'named': return 'ok'
     case 'default_fallback': return 'warn'
     case 'hardcoded_defaults': return 'warn'
+  }
+}
+
+function validationTone(status: CascadeValidationStatus): 'ok' | 'warn' | 'bad' {
+  switch (status) {
+    case 'validated': return 'ok'
+    case 'serving_last_known_good': return 'warn'
+    case 'invalid': return 'bad'
+  }
+}
+
+function validationLabel(status: CascadeValidationStatus): string {
+  switch (status) {
+    case 'validated': return 'validated'
+    case 'serving_last_known_good': return 'last known good'
+    case 'invalid': return 'invalid'
+  }
+}
+
+function validationDescription(status: CascadeValidationStatus): string {
+  switch (status) {
+    case 'validated':
+      return '현재 cascade catalog 이 정상 검증되었습니다.'
+    case 'serving_last_known_good':
+      return '새 cascade.json 업데이트가 검증에 실패해 마지막 검증 성공 snapshot 을 계속 서빙 중입니다.'
+    case 'invalid':
+      return '현재 cascade.json 검증에 실패했습니다. 서버와 dashboard 는 degraded 로 계속 동작하지만 유효하지 않은 profile 은 라우팅에서 제외될 수 있습니다.'
   }
 }
 
@@ -278,6 +307,70 @@ function OrphanKeeperList({ orphans }: { orphans: readonly CascadeKeeperProfile[
           </li>
         `)}
       </ul>
+    </div>
+  `
+}
+
+function InvalidProfileSummary({
+  invalidProfile,
+}: { invalidProfile: CascadeInvalidProfile }) {
+  const firstError = invalidProfile.errors[0] ?? 'validation rejected'
+  const extraErrors = Math.max(0, invalidProfile.errors.length - 1)
+  return html`
+    <li class="flex flex-wrap items-start gap-2">
+      <code class="text-[var(--text-strong)]">${invalidProfile.name}</code>
+      <span class="text-[var(--text-muted)]">${firstError}</span>
+      ${extraErrors > 0
+        ? html`<span class="text-[var(--text-muted)]">+${extraErrors} more</span>`
+        : null}
+    </li>
+  `
+}
+
+function CascadeValidationBanner({ config }: { config: CascadeConfigResponse }) {
+  if (config.validation_status === 'validated') return null
+  const tone = validationTone(config.validation_status)
+  const boxTone = tone === 'bad'
+    ? 'border-[var(--bad)]/40 bg-[var(--bad)]/10'
+    : 'border-[var(--warn)]/40 bg-[var(--warn)]/10'
+  const visibleErrors = config.validation_errors.slice(0, 3)
+  const visibleProfiles = config.invalid_profiles.slice(0, 4)
+  return html`
+    <div class=${`rounded border ${boxTone} p-3 text-xs mb-3`}>
+      <div class="flex items-center gap-2 flex-wrap mb-2">
+        <${StatusChip} tone=${tone}>${validationLabel(config.validation_status)}<//>
+        <span class="text-[var(--text-muted)]">
+          ${config.invalid_profiles.length} invalid profile${config.invalid_profiles.length === 1 ? '' : 's'}
+          · ${config.validation_errors.length} error${config.validation_errors.length === 1 ? '' : 's'}
+        </span>
+      </div>
+      <div class="text-[var(--text-strong)] mb-2">
+        ${validationDescription(config.validation_status)}
+      </div>
+      ${visibleErrors.length > 0
+        ? html`
+          <ul class="flex flex-col gap-1 mb-2 text-[var(--text-muted)]">
+            ${visibleErrors.map(error => html`<li>${error}</li>`)}
+          </ul>
+        `
+        : null}
+      ${visibleProfiles.length > 0
+        ? html`
+          <div class="text-[var(--text-strong)] mb-1">Rejected Profiles</div>
+          <ul class="flex flex-col gap-1 text-[var(--text-muted)]">
+            ${visibleProfiles.map(invalidProfile => html`
+              <${InvalidProfileSummary} invalidProfile=${invalidProfile} />
+            `)}
+          </ul>
+        `
+        : null}
+      ${config.invalid_profiles.length > visibleProfiles.length
+        ? html`
+          <div class="mt-2 text-[var(--text-muted)]">
+            + ${config.invalid_profiles.length - visibleProfiles.length} more invalid profiles
+          </div>
+        `
+        : null}
     </div>
   `
 }
@@ -679,6 +772,7 @@ export function CascadeConfigPanel() {
                 0,
               )
               return html`
+                <${CascadeValidationBanner} config=${config} />
                 <div class="grid grid-cols-3 gap-3 mb-3">
                   <${StatCell}
                     label="Profiles"
@@ -696,11 +790,15 @@ export function CascadeConfigPanel() {
                     detail="raw ≠ canonical"
                   />
                 </div>
-                <div class="grid gap-3 md:grid-cols-2 mb-3">
-                  ${config.profiles.map(p => html`
-                    <${ProfileCard} profile=${p} keepers=${keeperGroups.get(p.name) ?? []} />
-                  `)}
-                </div>
+                ${config.profiles.length === 0
+                  ? html`<${EmptyState}>표시할 유효 cascade profile 이 없습니다.<//>`
+                  : html`
+                    <div class="grid gap-3 md:grid-cols-2 mb-3">
+                      ${config.profiles.map(p => html`
+                        <${ProfileCard} profile=${p} keepers=${keeperGroups.get(p.name) ?? []} />
+                      `)}
+                    </div>
+                  `}
                 <${OrphanKeeperList} orphans=${orphans} />
               `
             })()

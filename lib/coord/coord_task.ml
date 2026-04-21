@@ -196,11 +196,7 @@ let task_status_to_string = Types.task_status_to_string
     Evidence: 2026-04-16 /loop iter 4 — 12+/15 masc_transition failures
     are "Invalid transition: claimed -> release" from keepers trying to
     release tasks owned by a different keeper. *)
-let task_assignee_of_status = function
-  | Types.Claimed { assignee; _ } -> Some assignee
-  | Types.InProgress { assignee; _ } -> Some assignee
-  | Types.AwaitingVerification { assignee; _ } -> Some assignee
-  | Types.Todo | Types.Done _ | Types.Cancelled _ -> None
+let task_assignee_of_status = Types.task_assignee_of_status
 
 (** Issue #7646: symmetric to [task_assignee_of_status]. When a transition
     fails for a reason other than ownership mismatch, surface what
@@ -328,7 +324,7 @@ let find_duplicate_task (backlog : backlog) (title : string) : string option =
   else
     List.find_opt (fun (t : task) ->
       let t_norm = normalize_title_for_dedup t.title in
-      t_norm = norm && (match t.task_status with Done _ | Cancelled _ -> false | _ -> true)
+      t_norm = norm && not (Types.task_status_is_terminal t.task_status)
     ) backlog.tasks
     |> Option.map (fun t -> t.id)
 

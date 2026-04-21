@@ -39,12 +39,10 @@ let safe_filename name =
     then c
     else '_') name
 
-let task_assignee_of_status = function
-  | Types.Claimed { assignee; _ }
-  | Types.InProgress { assignee; _ }
-  | Types.AwaitingVerification { assignee; _ }
-  | Types.Done { assignee; _ } -> assignee
-  | Types.Todo | Types.Cancelled _ -> ""
+let task_assignee_of_status status =
+  match Types.task_assignee_of_status status with
+  | Some a -> a
+  | None -> ""
 
 let task_info_of_task (task : Types.task) : T.task_info =
   {

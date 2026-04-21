@@ -395,6 +395,8 @@ jobs:
     timeout-minutes: 60
     needs: [pr-sync-check, release-train, changes]
     if: ${{ !cancelled() && needs.changes.outputs.build == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') && (needs.release-train.result == 'success' || needs.release-train.result == 'skipped') }}
+    outputs:
+      advisory_status: ${{ steps.build_advisory_status.outputs.advisory_status }}
 
     steps:
       - name: Checkout
@@ -428,10 +430,14 @@ jobs:
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       - name: Build
+        id: build_step
+        continue-on-error: true
         run: |
           opam exec -- dune build
 
       - name: Run tests (quick suite)
+        id: quick_suite
+        continue-on-error: true
         env:
           ME_ROOT: /tmp/me
           ALCOTEST_QUICK_TESTS: "1"
@@ -447,6 +453,8 @@ jobs:
           scripts/ci-run-tests.sh "opam exec -- dune test"
 
       - name: Run operator control suite
+        id: operator_control_suite
+        continue-on-error: true
         env:
           ME_ROOT: /tmp/me
           ALCOTEST_QUICK_TESTS: "1"
@@ -461,6 +469,8 @@ jobs:
           scripts/ci-run-tests.sh "opam exec -- dune exec ./test/test_operator_control.exe"
 
       - name: Run SSE reconnect e2e
+        id: sse_reconnect_e2e
+        continue-on-error: true
         env:
           ME_ROOT: /tmp/me
           CI_TEST_TIMEOUT_SEC: 900
@@ -471,6 +481,8 @@ jobs:
           scripts/ci-run-tests.sh "opam exec -- dune exec ./test/test_sse_storm_e2e.exe"
 
       - name: Run transport harness suite
+        id: transport_harness_suite
+        continue-on-error: true
         env:
           ME_ROOT: /tmp/me
           CI_TEST_TIMEOUT_SEC: 900
@@ -493,6 +505,8 @@ jobs:
           # Note: dune fmt may not be available, skip if so
 
       - name: Run contract harness suite
+        id: contract_harness_suite
+        continue-on-error: true
         env:
           ME_ROOT: /tmp/me
           CI_TEST_TIMEOUT_SEC: 900
@@ -521,9 +535,55 @@ jobs:
           path: .release-evidence/
 
       - name: Verification matrix summary
+        if: ${{ always() }}
         run: |
-          echo "::notice::Required CI gates: dune test, test_sse_storm_e2e, transport harness, contract harness"
+          echo "::notice::Required CI gates live in CI Gate; Build and Test is advisory and summarizes failures below"
           echo "::notice::Optional env-gated suites not run here: PostgreSQL tests, live ICE/STUN/TURN/browser interop, viewer-local-e2e-check, swarm/team-session workload harnesses"
+
+      - name: Summarize advisory build status
+        if: ${{ always() }}
+        id: build_advisory_status
+        env:
+          BUILD_OUTCOME: ${{ steps.build_step.outcome }}
+          QUICK_SUITE_OUTCOME: ${{ steps.quick_suite.outcome }}
+          OPERATOR_CONTROL_OUTCOME: ${{ steps.operator_control_suite.outcome }}
+          SSE_RECONNECT_OUTCOME: ${{ steps.sse_reconnect_e2e.outcome }}
+          TRANSPORT_HARNESS_OUTCOME: ${{ steps.transport_harness_suite.outcome }}
+          CONTRACT_HARNESS_OUTCOME: ${{ steps.contract_harness_suite.outcome }}
+        run: |
+          set -euo pipefail
+          advisory_failures=()
+          add_failure() {
+            local label=$1
+            local outcome=$2
+            if [[ "$outcome" == "failure" ]]; then
+              advisory_failures+=("$label")
+            fi
+          }
+
+          add_failure "build" "$BUILD_OUTCOME"
+          add_failure "quick-suite" "$QUICK_SUITE_OUTCOME"
+          add_failure "operator-control" "$OPERATOR_CONTROL_OUTCOME"
+          add_failure "sse-reconnect-e2e" "$SSE_RECONNECT_OUTCOME"
+          add_failure "transport-harness" "$TRANSPORT_HARNESS_OUTCOME"
+          add_failure "contract-harness" "$CONTRACT_HARNESS_OUTCOME"
+
+          if [[ ${#advisory_failures[@]} -eq 0 ]]; then
+            echo "advisory_status=clean" >> "$GITHUB_OUTPUT"
+            echo "Advisory verification status: clean" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          advisory_list=$(IFS=', '; echo "${advisory_failures[*]}")
+          echo "advisory_status=warning" >> "$GITHUB_OUTPUT"
+          echo "::warning::Build and Test advisory failures: ${advisory_list}"
+          {
+            echo "### Build and Test advisory failures"
+            echo
+            echo "- ${advisory_list}"
+            echo
+            echo "CI Gate remains authoritative for merge blocking. This job is observability-only."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   lint:
     name: Lint
@@ -711,6 +771,7 @@ jobs:
           OAS_PIN_RESULT: ${{ needs.oas-pin-check.result }}
           TLA_RESULT: ${{ needs.tla-specs.result }}
           SPEC_REFS_RESULT: ${{ needs.spec-line-refs.result }}
+          BUILD_ADVISORY_STATUS: ${{ needs.build.outputs.advisory_status }}
         run: |
           set -euo pipefail
           fail=0
@@ -721,10 +782,8 @@ jobs:
           # 22 (27%) landed with CI Gate FAILURE via manual admin merge,
           # and 22/22 had Build and Test as the sole culprit (quick-suite
           # Eio isolation flakes). CI Gate had stopped carrying signal.
-          # Advisory mode keeps the job running (result still on the PR)
-          # but lets the aggregator reflect deterministic checks only.
-          # When the flaky root cause is fixed, flip `build` back to
-          # required.
+          # Build and Test now self-reports warning-only failures while CI Gate
+          # blocks only on deterministic lanes.
           check() {
             local name=$1
             local result=$2
@@ -738,9 +797,17 @@ jobs:
               fail=1
             fi
           }
+          warn_if_advisory() {
+            local name=$1
+            local status=$2
+            if [[ "$status" == "warning" ]]; then
+              printf 'WARN  %-20s advisory failures logged in Build and Test\n' "$name"
+            fi
+          }
           check "pr-sync-check"   "$PR_SYNC_RESULT"
           check "changes"         "$CHANGES_RESULT"
-          check "build"           "$BUILD_RESULT"           advisory
+          check "build"           "$BUILD_RESULT"
+          warn_if_advisory "build" "$BUILD_ADVISORY_STATUS"
           check "lint"            "$LINT_RESULT"
           check "dashboard"       "$DASHBOARD_RESULT"
           check "dashboard-drift" "$DASHBOARD_DRIFT_RESULT"

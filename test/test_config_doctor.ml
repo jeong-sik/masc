@@ -45,6 +45,22 @@ let status = function
   | Config_doctor.Warn -> "warn"
   | Config_doctor.Error -> "error"
 
+let contains_substring ~needle s =
+  let nl = String.length needle in
+  let sl = String.length s in
+  if nl = 0 || nl > sl then false
+  else
+    let limit = sl - nl in
+    let rec loop i =
+      if i > limit then false
+      else if String.sub s i nl = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let list_contains_substring ~needle values =
+  List.exists (contains_substring ~needle) values
+
 let make_inputs ?env_config_dir ?env_personas_dir ~cwd ~base_path_input () =
   Config_doctor.
     {
@@ -58,8 +74,8 @@ let make_inputs ?env_config_dir ?env_personas_dir ~cwd ~base_path_input () =
       repo_config_fallback_enabled = false;
     }
 
-let initialize_config_root root =
-  write_file (Filename.concat root "cascade.json") "{}";
+let initialize_config_root ?(cascade_json="{}") root =
+  write_file (Filename.concat root "cascade.json") cascade_json;
   mkdir_p (Filename.concat root "personas")
 
 let test_invalid_explicit_config_dir () =
@@ -106,7 +122,8 @@ let test_initialized_local_base_config () =
     (init_state report.init_state);
   check string "status" "ok" (status report.status);
   check string "source" "local_masc" report.config_root_source;
-  check bool "keeper runtime optional" false report.keeper_runtime_toml_present
+  check bool "keeper runtime optional" false report.keeper_runtime_toml_present;
+  check (list string) "no warnings" [] report.warnings
 
 let test_shadowed_explicit_config_dir () =
   with_temp_dir "config-doctor-shadowed" @@ fun dir ->
@@ -126,6 +143,47 @@ let test_shadowed_explicit_config_dir () =
   check string "active root" (canonical_path explicit_root) report.active_config_root;
   check bool "local base initialized" true report.local_base_config_initialized
 
+let test_broken_cascade_catalog_surfaces_errors () =
+  with_temp_dir "config-doctor-cascade-bad" @@ fun dir ->
+  let base_path = Filename.concat dir "base" in
+  let config_root = Filename.concat base_path ".masc/config" in
+  initialize_config_root
+    ~cascade_json:{|{
+  "bad_provider_models": [
+    "__nonexistent_provider_sentinel__:fake-model"
+  ],
+  "bad_strategy_models": [
+    "claude_code:claude-haiku-4-5-20251001"
+  ],
+  "bad_strategy_strategy": "priority_tier",
+  "bad_strategy_tiers": [
+    ["codex_cli:auto"]
+  ]
+}|}
+    config_root;
+  let report =
+    Config_doctor.analyze_with
+      (make_inputs ~cwd:dir ~base_path_input:base_path ())
+  in
+  check string "status escalates to error" "error" (status report.status);
+  check bool "catalog summary warning present" true
+    (list_contains_substring
+       ~needle:"Cascade catalog check scanned 2 preset(s): 2 error, 0 warn."
+       report.warnings);
+  check bool "invalid provider warning present" true
+    (list_contains_substring
+       ~needle:"Cascade preset bad_provider has 1 hard-invalid model spec"
+       report.warnings);
+  check bool "priority_tier collapse warning present" true
+    (list_contains_substring
+       ~needle:
+         "Cascade preset bad_strategy uses priority_tier, but every tier collapses after model-id normalization"
+       report.warnings);
+  check bool "next action mentions doctor rerun" true
+    (list_contains_substring
+       ~needle:"Rerun `masc-mcp doctor config` after editing cascade.json."
+       report.next_actions)
+
 let () =
   run "config_doctor"
     [
@@ -138,5 +196,7 @@ let () =
              test_initialized_local_base_config;
            test_case "shadowed explicit config dir" `Quick
              test_shadowed_explicit_config_dir;
+           test_case "broken cascade catalog surfaces errors" `Quick
+             test_broken_cascade_catalog_surfaces_errors;
          ]);
     ]

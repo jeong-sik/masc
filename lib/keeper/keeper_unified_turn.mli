@@ -71,6 +71,7 @@ val update_metrics_from_failure :
   ?is_transient:bool ->
   ?social_state:Keeper_social_model.social_state ->
   ?social_transition_reason:string ->
+  ?sdk_error:Oas.Error.sdk_error ->
   unit ->
   Keeper_types.keeper_meta
 

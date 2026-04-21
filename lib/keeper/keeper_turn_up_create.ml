@@ -393,6 +393,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           last_active_desire = "";
           last_current_intention = "";
           last_blocker = "";
+          last_blocker_class = None;
           last_need = "";
         };
       } in

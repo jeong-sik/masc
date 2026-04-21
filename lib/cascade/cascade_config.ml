@@ -31,18 +31,18 @@ let resolve_api_key_env = Cascade_config_loader.resolve_api_key_env
 let default_registry = Llm_provider.Provider_registry.default ()
 
 (* Build headers list with Authorization when api_key is present.
-   Anthropic uses x-api-key; OpenAI-compat (including GLM) uses Bearer. *)
+   Anthropic/Kimi use x-api-key; OpenAI-compat (including GLM) uses Bearer. *)
 let headers_with_auth ~(kind : Llm_provider.Provider_config.provider_kind) ~api_key =
   let base = [("Content-Type", "application/json")] in
   if api_key = "" then base
   else match kind with
-    | Anthropic ->
+    | Anthropic | Kimi ->
         ("x-api-key", api_key)
         :: ("anthropic-version", "2023-06-01")
         :: base
     | OpenAI_compat | Ollama | Gemini | Glm | Claude_code ->
         ("Authorization", "Bearer " ^ api_key) :: base
-    | Gemini_cli | Codex_cli -> []
+    | Gemini_cli | Kimi_cli | Codex_cli -> []
 
 (* ── String splitting helper ──────────────────────────────── *)
 
@@ -104,6 +104,76 @@ let resolve_effective_api_key_env
     match find_non_empty "*" with
     | Some env -> env
     | None -> registry_default
+
+let nonempty_env name =
+  match Sys.getenv_opt name with
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let env_url_or ~env ~default =
+  match nonempty_env env with
+  | Some url -> url
+  | None -> default
+
+let kimi_provider_name = "kimi"
+let moonshot_base_url_env = "MOONSHOT_BASE_URL"
+let moonshot_api_key_env = "MOONSHOT_API_KEY"
+let moonshot_default_base_url = "https://api.moonshot.ai/v1"
+let kimi_default_max_context = 256_000
+
+let is_kimi_provider provider_name =
+  String.equal provider_name kimi_provider_name
+
+let moonshot_api_url () =
+  env_url_or ~env:moonshot_base_url_env ~default:moonshot_default_base_url
+
+let moonshot_request_path () =
+  let path = Uri.path (Uri.of_string (moonshot_api_url ())) in
+  if String.equal path "/v1" || String.equal path "/v1/" then
+    "/chat/completions"
+  else
+    Masc_network_defaults.openai_chat_completions_path
+
+let resolve_kimi_api_key_env ~api_key_env_overrides =
+  resolve_effective_api_key_env
+    ~api_key_env_overrides
+    ~provider_name:kimi_provider_name
+    ~registry_default:moonshot_api_key_env
+
+let kimi_is_available ~api_key_env_overrides =
+  match resolve_kimi_api_key_env ~api_key_env_overrides with
+  | "" -> false
+  | env_name -> Option.is_some (nonempty_env env_name)
+
+let make_kimi_config ~temperature ~max_tokens ?system_prompt
+    ?(api_key_env_overrides = []) ?supports_tool_choice_override model_id =
+  let effective_api_key_env =
+    resolve_kimi_api_key_env ~api_key_env_overrides
+  in
+  let api_key =
+    match nonempty_env effective_api_key_env with
+    | Some value -> value
+    | None -> ""
+  in
+  let headers = headers_with_auth ~kind:OpenAI_compat ~api_key in
+  let resolved_model_id =
+    resolve_auto_model_id kimi_provider_name model_id
+  in
+  Llm_provider.Provider_config.make
+    ~kind:OpenAI_compat
+    ~model_id:resolved_model_id
+    ~base_url:(moonshot_api_url ())
+    ~api_key
+    ~headers
+    ~request_path:(moonshot_request_path ())
+    ~temperature
+    ~max_tokens
+    ~max_context:kimi_default_max_context
+    ?system_prompt
+    ?supports_tool_choice_override
+    ()
 
 (** Build a {!Llm_provider.Provider_config.t} from a registry entry. *)
 let make_registry_config ~temperature ~max_tokens ?system_prompt
@@ -177,34 +247,41 @@ let parse_model_string
     ?system_prompt ?(api_key_env_overrides = [])
     ?supports_tool_choice_override
     (s : string) : Llm_provider.Provider_config.t option =
+  let trimmed = String.trim s in
+  match split_provider_model trimmed with
+  | Some ("custom", model_id) ->
+    (match make_custom_config ~temperature ~max_tokens ?system_prompt
+             ?supports_tool_choice_override model_id with
+     | Some cfg -> Some cfg
+     | None -> None)
+  | Some (provider_name, model_id) when is_kimi_provider provider_name ->
+    if kimi_is_available ~api_key_env_overrides then
+      Some
+        (make_kimi_config ~temperature ~max_tokens ?system_prompt
+           ~api_key_env_overrides ?supports_tool_choice_override model_id)
+    else None
+  | _ ->
   (* Kind classification goes through [Provider_kind_resolver] — a sum-typed
      resolver that consults Provider_registry as SSOT and never flattens
      unknown specs to [OpenAI_compat]. This keeps ["gemini:gemini-2.5-flash"]
      from being misclassified by any downstream substring heuristic
      (issue #8159). *)
-  match Provider_kind_resolver.resolve s with
-  | Unknown _ -> None
-  | Custom_url _ ->
-    (* Delegate to the existing custom-URL constructor; it produces the
-       OpenAI_compat kind *by contract* for self-hosted endpoints. *)
-    (match split_provider_model (String.trim s) with
-     | Some ("custom", model_id) ->
-       make_custom_config ~temperature ~max_tokens ?system_prompt
-         ?supports_tool_choice_override model_id
-     | _ -> None)
-  | Registered { provider_name; model_id; kind = resolved_kind } ->
-    match Llm_provider.Provider_registry.find default_registry provider_name with
-    | None -> None  (* registry lookup race or unloaded entry *)
-    | Some entry when not (entry.is_available ()) -> None
-    | Some entry ->
-      (* Defensive invariant: the resolver and the registry must agree on
-         the kind. If they diverge we have a registry bug or a resolver
-         bug; fail closed rather than emit a degraded config. *)
-      if entry.defaults.kind <> resolved_kind then None
-      else
-        Some (make_registry_config ~temperature ~max_tokens ?system_prompt
-                ~api_key_env_overrides ?supports_tool_choice_override
-                ~provider_name ~model_id entry)
+    match Provider_kind_resolver.resolve s with
+    | Unknown _ -> None
+    | Custom_url _ -> None
+    | Registered { provider_name; model_id; kind = resolved_kind } ->
+      match Llm_provider.Provider_registry.find default_registry provider_name with
+      | None -> None  (* registry lookup race or unloaded entry *)
+      | Some entry when not (entry.is_available ()) -> None
+      | Some entry ->
+        (* Defensive invariant: the resolver and the registry must agree on
+           the kind. If they diverge we have a registry bug or a resolver
+           bug; fail closed rather than emit a degraded config. *)
+        if entry.defaults.kind <> resolved_kind then None
+        else
+          Some (make_registry_config ~temperature ~max_tokens ?system_prompt
+                  ~api_key_env_overrides ?supports_tool_choice_override
+                  ~provider_name ~model_id entry)
 
 (** Parse a {!Cascade_config_loader.weighted_entry} into a
     {!Llm_provider.Provider_config.t}, forwarding the entry's
@@ -245,6 +322,15 @@ let parse_weighted_entry_diag
              ?supports_tool_choice_override:entry.supports_tool_choice model_id with
      | Some c -> Ok c
      | None -> Error (Drop_invalid_syntax raw))
+  | Some (provider_name, model_id) when is_kimi_provider provider_name ->
+    if kimi_is_available ~api_key_env_overrides then
+      Ok
+        (make_kimi_config ~temperature ~max_tokens ?system_prompt
+           ~api_key_env_overrides
+           ?supports_tool_choice_override:entry.supports_tool_choice
+           model_id)
+    else
+      Error (Drop_unavailable_scheme { model = raw; scheme = provider_name })
   | Some (provider_name, model_id) ->
     match Llm_provider.Provider_registry.find default_registry provider_name with
     | None ->
@@ -399,6 +485,14 @@ let parse_model_string_exn
      | Some cfg -> Ok cfg
      | None ->
        Error (Printf.sprintf "invalid custom model spec %S: empty model after @" s))
+  | Some (provider_name, model_id) when is_kimi_provider provider_name ->
+    if kimi_is_available ~api_key_env_overrides:[] then
+      Ok (make_kimi_config ~temperature ~max_tokens ?system_prompt model_id)
+    else
+      Error
+        (Printf.sprintf "provider %S unavailable (missing env var %S)"
+           provider_name
+           (resolve_kimi_api_key_env ~api_key_env_overrides:[]))
   | Some (provider_name, model_id) ->
     match Llm_provider.Provider_registry.find default_registry provider_name with
     | None ->

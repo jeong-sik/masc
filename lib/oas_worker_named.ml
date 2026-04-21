@@ -829,7 +829,7 @@ let run_named
   let candidate_base_urls =
     List.map (fun (c : Llm_provider.Provider_config.t) -> c.base_url) candidate_cfgs
   in
-  (* CLI providers (Claude_code / Gemini_cli / Codex_cli) have an
+  (* CLI providers (Claude_code / Gemini_cli / Kimi_cli / Codex_cli) have an
      empty [base_url].  Map them to a stable per-kind sentinel so the
      strategy's capacity probe and the client-capacity registry share
      the same lookup key.  Any new CLI kind added to OAS will fall
@@ -839,6 +839,7 @@ let run_named
   let cli_sentinel_of_kind = function
     | Llm_provider.Provider_config.Claude_code -> Some "cli:claude_code"
     | Gemini_cli -> Some "cli:gemini_cli"
+    | Kimi_cli -> Some "cli:kimi_cli"
     | Codex_cli -> Some "cli:codex_cli"
     | _ -> None
   in

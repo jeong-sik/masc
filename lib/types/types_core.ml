@@ -99,7 +99,10 @@ let role_satisfies ~(required : role) ~(agent_role : role) : bool =
   | Writer, Writer -> true
   | Reviewer, Reviewer -> true
   | Admin, _ -> false
-  | _ -> false
+  | Writer, Reviewer -> false
+  | Writer, Unassigned -> false
+  | Reviewer, Writer -> false
+  | Reviewer, Unassigned -> false
 
 (** Agent status - compile-time state machine *)
 type agent_status =

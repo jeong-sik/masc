@@ -71,13 +71,32 @@ type t =
 
 (** Check if an error is recoverable (safe to retry) *)
 let is_recoverable = function
+  | Coord (RoomNotFound _) -> false
+  | Coord (RoomAlreadyExists _) -> false
   | Coord (RoomLocked _) -> true
+  | Coord (RoomFull _) -> false
+  | Task (TaskNotFound _) -> false
   | Task (TaskAlreadyClaimed _) -> true
+  | Task (TaskInvalidState _) -> false
+  | Task TaskCycleDetected -> false
+  | Agent (AgentNotFound _) -> false
   | Agent (AgentTimeout _) -> true
   | Agent (AgentHeartbeatMissing _) -> true
+  | Agent (AgentCapabilityMismatch _) -> false
+  | Federation (PortalConnectionFailed _) -> false
+  | Federation (PortalAuthFailed _) -> false
   | Federation (PortalTimeout _) -> true
+  | Federation (PortalProtocolError _) -> false
+  | Storage (FileNotFound _) -> false
+  | Storage (FilePermissionDenied _) -> false
   | Storage (FileLocked _) -> true
-  | _ -> false
+  | Storage (GitError _) -> false
+  | Mcp (McpParseError _) -> false
+  | Mcp (McpMethodNotFound _) -> false
+  | Mcp (McpInvalidParams _) -> false
+  | Mcp (McpAuthError _) -> false
+  | Mcp (McpInternalError _) -> false
+  | Internal _ -> false
 
 (** Get a human-readable error message *)
 let to_string = function
@@ -154,7 +173,24 @@ let severity_of_error = function
   | Storage (FileLocked _) -> Warning
   | Mcp (McpMethodNotFound _) -> Warning
   | Internal _ -> Critical
-  | _ -> Error
+  | Coord (RoomNotFound _) -> Error
+  | Coord (RoomAlreadyExists _) -> Error
+  | Coord (RoomFull _) -> Error
+  | Task (TaskNotFound _) -> Error
+  | Task (TaskInvalidState _) -> Error
+  | Task TaskCycleDetected -> Error
+  | Agent (AgentNotFound _) -> Error
+  | Agent (AgentCapabilityMismatch _) -> Error
+  | Federation (PortalConnectionFailed _) -> Error
+  | Federation (PortalAuthFailed _) -> Error
+  | Federation (PortalProtocolError _) -> Error
+  | Storage (FileNotFound _) -> Error
+  | Storage (FilePermissionDenied _) -> Error
+  | Storage (GitError _) -> Error
+  | Mcp (McpParseError _) -> Error
+  | Mcp (McpInvalidParams _) -> Error
+  | Mcp (McpAuthError _) -> Error
+  | Mcp (McpInternalError _) -> Error
 
 let string_of_severity = function
   | Debug -> "DEBUG"

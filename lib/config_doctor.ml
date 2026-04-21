@@ -114,26 +114,7 @@ let diagnose_cascade_catalog ~active_config_root =
     []
   else
     let profiles = Cascade_catalog_validator.discover_profiles ~config_path in
-    let runtime_required_profiles =
-      Cascade_catalog_runtime.runtime_required_profile_names ~config_path ()
-    in
-    let issues =
-      Cascade_catalog_validator.diagnose_catalog ~config_path
-      |> List.map (fun (issue : catalog_issue) ->
-             match issue.profile, issue.severity with
-             | Some profile, Catalog_error
-               when not (List.mem profile runtime_required_profiles) ->
-                 {
-                   issue with
-                   severity = Catalog_warn;
-                   message =
-                     Printf.sprintf
-                       "%s (non-runtime-required profile; runtime can serve \
-                        a validated subset)"
-                       issue.message;
-                 }
-             | _ -> issue)
-    in
+    let issues = Cascade_catalog_validator.diagnose_catalog ~config_path in
     if issues = [] then
       []
     else
@@ -483,27 +464,23 @@ let analyze ~base_path_input ~default_base_path () =
   current_inputs ~base_path_input ~default_base_path ()
   |> analyze_with
 
-type live_catalog_status =
-  | Live_ok
-  | Live_warn
-  | Live_error
-
 let live_catalog_summary = function
   | Stdlib.Ok (Cascade_catalog_runtime.Validated snapshot) ->
-      ( Live_ok,
+      ( false,
         "Live cascade catalog validation passed.",
         Cascade_catalog_runtime.state_to_yojson
           (Cascade_catalog_runtime.Validated snapshot) )
-  | Stdlib.Ok (Cascade_catalog_runtime.Serving_valid_subset _ as state) ->
-      ( Live_warn,
-        "Live cascade catalog validation rejected non-runtime-required profiles; runtime is serving the validated subset.",
+  | Stdlib.Ok
+      (Cascade_catalog_runtime.Validated_with_rejections _ as state) ->
+      ( false,
+        "Live cascade catalog validation kept the usable profile subset and rejected some presets.",
         Cascade_catalog_runtime.state_to_yojson state )
   | Stdlib.Ok (Cascade_catalog_runtime.Serving_last_known_good _ as state) ->
-      ( Live_error,
+      ( true,
         "Live cascade catalog validation rejected the current file; runtime is serving last-known-good.",
         Cascade_catalog_runtime.state_to_yojson state )
   | Stdlib.Error rejection ->
-      ( Live_error,
+      ( true,
         "Live cascade catalog validation failed; no validated snapshot is available.",
         `Assoc
           [
@@ -519,33 +496,34 @@ let analyze_live ~sw ~net ~clock ~fs ~proc_mgr ~base_path_input
   let report = analyze ~base_path_input ~default_base_path () in
   Process_eio.init ~cwd_default:Eio.Path.(fs / report.base_path) ~proc_mgr
     ~clock;
-  let live_status, live_warning, catalog_validation =
+  let live_failed, live_warning, catalog_validation =
     match
       Cascade_catalog_runtime.inspect_active ~sw ~net ~clock ()
       |> live_catalog_summary
     with
-    | status, warning, validation -> (status, warning, validation)
+    | failed, warning, validation -> (failed, warning, validation)
   in
   let warnings =
     if live_warning = "" then report.warnings
     else report.warnings @ [ live_warning ]
   in
   let next_actions =
-    if live_status = Live_ok then
-      report.next_actions
-    else
+    if live_failed then
       report.next_actions
       @
       [
         "Fix the active cascade catalog candidates/strategy and rerun `masc-mcp doctor config`.";
       ]
+    else
+      report.next_actions
   in
   let status =
-    match report.status, live_status with
-    | Error, _ -> Error
-    | _, Live_error -> Error
-    | Warn, _ | _, Live_warn -> Warn
-    | Ok, Live_ok -> Ok
+    match report.status, live_failed, live_warning <> "" with
+    | Error, _, _ -> Error
+    | _, true, _ -> Error
+    | Warn, false, _ -> Warn
+    | Ok, false, true -> Warn
+    | Ok, false, false -> Ok
   in
   {
     report with

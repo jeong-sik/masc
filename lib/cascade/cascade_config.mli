@@ -97,6 +97,15 @@ val parse_weighted_entries :
   Cascade_config_loader.weighted_entry list ->
   Llm_provider.Provider_config.t list
 
+val order_weighted_entries :
+  ?rand_int:(int -> int) ->
+  Cascade_config_loader.weighted_entry list ->
+  Cascade_config_loader.weighted_entry list
+(** Order weighted entries using the same health-adjusted runtime logic as
+    {!resolve_model_strings}. Exposed so runtime-authoritative catalog
+    snapshots can preserve dynamic health ordering without rereading raw
+    [cascade.json]. *)
+
 (** Like {!parse_model_string} but returns a [Result] with a diagnostic
     error message explaining why parsing failed (unknown provider, missing
     API key, bad format).  Intended for MCP tool boundaries where callers
@@ -234,6 +243,18 @@ type selection_trace = {
   candidates : candidate_info list;
   source : cascade_source;
 }
+
+(** Build a live selection trace from already-known weighted entries.
+
+    Applies {!order_weighted_entries} and snapshots current health signals
+    without rereading raw [cascade.json]. Useful when callers already hold
+    validated runtime profile data and need the same dashboard trace shape.
+
+    @since 0.150.4 *)
+val selection_trace_of_weighted_entries :
+  ?source:cascade_source ->
+  Cascade_config_loader.weighted_entry list ->
+  selection_trace
 
 (** Like {!resolve_model_strings_traced} but also returns per-candidate
     health signals that influenced the ordering. Useful for rendering
@@ -434,6 +455,15 @@ val resolve_strategy :
     - non-positive [backoff_base_ms] → clamped to 1.
     - [backoff_cap_ms < backoff_base_ms] → clamped up to
       [backoff_base_ms]. *)
+
+val normalize_priority_tiers :
+  config_path:string ->
+  name:string ->
+  string list list ->
+  (string list list, string) result
+(** Validate and normalize a [priority_tier] tier matrix against the
+    configured candidate model ids for [name]. Returns [Error] when all
+    tiers collapse or when the profile has no configured candidates. *)
 
 val resolve_ollama_max_concurrent :
   ?config_path:string ->

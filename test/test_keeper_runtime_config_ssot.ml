@@ -26,18 +26,43 @@ let write_file path content =
   output_string oc content;
   close_out oc
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then
+      true
+    else if idx + needle_len > haystack_len then
+      false
+    else if String.sub haystack idx needle_len = needle then
+      true
+    else
+      loop (idx + 1)
+  in
+  loop 0
+
 let with_config_dir f =
   with_temp_dir "keeper-config-ssot" @@ fun config_dir ->
+  let cascade_path = Filename.concat config_dir "cascade.json" in
   let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Fun.protect
     ~finally:(fun () ->
       (match original with
       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
-      Config_dir_resolver.reset ())
+      Config_dir_resolver.reset ();
+      Cascade_catalog_runtime.reset_cache_for_tests ())
     (fun () ->
+      write_file
+        cascade_path
+        {|{
+  "keeper_unified_models": ["test-only:model"]
+}|};
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
       Config_dir_resolver.reset ();
+      Cascade_catalog_runtime.install_snapshot_for_tests
+        ~source_path:cascade_path
+        ~profile_names:[ Keeper_config.default_cascade_name ];
       f config_dir)
 
 (** Test: TOML personality fields overwrite stale runtime JSON values. *)
@@ -685,6 +710,50 @@ social_model = "magentic_ledger_v1"
       check string "social_model resynced from TOML" "magentic_ledger_v1"
         updated.social_model
 
+(** Test: authored nonblank unknown cascade_name is rejected. *)
+let test_unknown_cascade_name_rejected () =
+  with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
+  with_config_dir @@ fun config_dir ->
+  Fs_compat.clear_fs ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let keeper_name = "unknown-cascade-name-test" in
+  let keepers_toml_dir = Filename.concat config_dir "keepers" in
+  Unix.mkdir keepers_toml_dir 0o755;
+  write_file
+    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
+    {|[keeper]
+goal = "TOML goal"
+cascade_name = "missing_profile"
+|};
+  let config = Coord.default_config room_dir in
+  let initial_meta =
+    match
+      Keeper_types.meta_of_json
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String keeper_name);
+            ("trace_id", `String "trace-unknown-cascade-name");
+            ("goal", `String "stale goal");
+          ])
+    with
+    | Ok meta -> meta
+    | Error e -> fail ("meta_of_json failed: " ^ e)
+  in
+  (match Keeper_types.write_meta ~force:true config initial_meta with
+  | Error e -> fail ("write_meta failed: " ^ e)
+  | Ok () -> ());
+  match Keeper_runtime.ensure_keeper_meta config keeper_name with
+  | Ok updated ->
+      failf "expected unknown cascade_name to be rejected, got %s"
+        updated.cascade_name
+  | Error detail ->
+      check bool "points at profile.cascade_name" true
+        (contains_substring detail "profile.cascade_name");
+      check bool "mentions unknown cascade_name" true
+        (contains_substring detail "unknown cascade_name")
+
 (** Test: room presence sync updates stale agent capabilities from live keeper meta. *)
 let test_room_presence_syncs_capabilities () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -851,6 +920,10 @@ let () =
             "declarative defaults resync social_model"
             `Quick
             test_social_model_resynced_from_declarative_defaults;
+          test_case
+            "unknown nonblank cascade_name is rejected"
+            `Quick
+            test_unknown_cascade_name_rejected;
           test_case
             "room presence sync overwrites stale agent capabilities"
             `Quick

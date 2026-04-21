@@ -27,9 +27,11 @@ let effective_declarative_cascade_name
     (defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) =
   match defaults.cascade_name, defaults.manifest_path with
-  | Some cascade_name, _ -> Keeper_cascade_profile.canonicalize cascade_name
+  | Some cascade_name, _ ->
+      Keeper_cascade_profile.normalize_declared_name cascade_name
   | None, Some _ -> Keeper_config.default_cascade_name
-  | None, None -> Keeper_cascade_profile.canonicalize meta.cascade_name
+  | None, None ->
+      Keeper_cascade_profile.normalize_declared_name meta.cascade_name
 
 let resynced_tool_access
     (defaults : Keeper_types_profile.keeper_profile_defaults)
@@ -56,6 +58,8 @@ let resynced_tool_access
 let ensure_keeper_meta config name =
   match read_meta config name with
   | Ok (Some meta) ->
+    let exception Invalid_cascade_name of string in
+    (try
     (* Re-sync ALL declarative keeper fields from profile/env defaults on bootstrap.
        Persisted meta may have stale values from a previous session;
        persona config (TOML) plus explicit env overrides are the source of truth.
@@ -83,6 +87,34 @@ let ensure_keeper_meta config name =
       |> Keeper_social_model.normalize_social_model in
     let target_cascade_name =
       effective_declarative_cascade_name defaults meta
+    in
+    let resolved_target_cascade_name =
+      match
+        Cascade_catalog_runtime.resolve_declared_name
+          ~raw_name:target_cascade_name
+          ()
+      with
+      | Ok cascade_name -> cascade_name
+      | Error detail ->
+          let field =
+            match defaults.cascade_name, defaults.manifest_path with
+            | Some _, _ -> "profile.cascade_name"
+            | None, Some _ -> "manifest.default_cascade_name"
+            | None, None -> "meta.cascade_name"
+          in
+          let raw_value =
+            match defaults.cascade_name, defaults.manifest_path with
+            | Some cascade_name, _ -> cascade_name
+            | None, Some _ -> Keeper_config.default_cascade_name
+            | None, None -> meta.cascade_name
+          in
+          let msg =
+            Printf.sprintf
+              "invalid %s %S for keeper %s: %s"
+              field raw_value meta.name detail
+          in
+          Log.Keeper.error "%s" msg;
+          raise (Invalid_cascade_name msg)
     in
     let target_tool_access = resynced_tool_access defaults meta in
 
@@ -139,13 +171,12 @@ let ensure_keeper_meta config name =
     let models_changed = meta.models <> target_models in
     let social_model_changed = meta.social_model <> target_social_model in
     (* [meta.cascade_name] may be a raw TOML/JSON value while
-       [target_cascade_name] is already canonicalized; canonicalize both
-       sides so a reload that only normalizes the spelling (e.g.
-       whitespace, historical aliases like "oas-keeper_unified") does not
-       register as a change. *)
+       [resolved_target_cascade_name] is the validated runtime catalog
+       name. Normalize the meta side only so alias cleanup does not
+       register as a semantic change. *)
     let cascade_changed =
-      Keeper_cascade_profile.canonicalize meta.cascade_name
-      <> target_cascade_name
+      Keeper_cascade_profile.normalize_declared_name meta.cascade_name
+      <> resolved_target_cascade_name
     in
     let personality_changed =
       meta.goal <> target_goal
@@ -213,7 +244,7 @@ let ensure_keeper_meta config name =
            unrelated field would silently canonicalize cascade_name and
            hide drift from the dashboard [canonical] column. *)
         cascade_name =
-          if cascade_changed then target_cascade_name
+          if cascade_changed then resolved_target_cascade_name
           else meta.cascade_name;
         goal = target_goal;
         short_goal = target_short_goal;
@@ -246,6 +277,8 @@ let ensure_keeper_meta config name =
         Ok meta
     end
     else Ok meta
+    with
+    | Invalid_cascade_name msg -> Error msg)
   | Ok None ->
     Log.Keeper.warn
       "ensure_keeper_meta: no persistent meta for %s — run keeper_up to initialize" name;

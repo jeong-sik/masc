@@ -704,6 +704,13 @@ let candidate_info_of_weighted (e : Cascade_config_loader.weighted_entry) =
     in_cooldown;
   }
 
+let selection_trace_of_weighted_entries
+    ?(source = Named)
+    (entries : Cascade_config_loader.weighted_entry list) : selection_trace =
+  let ordered = order_weighted_entries entries in
+  let candidates = List.map candidate_info_of_weighted ordered in
+  { candidates; source }
+
 let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
   match config_path with
   | Some path ->

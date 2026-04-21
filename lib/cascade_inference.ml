@@ -51,17 +51,15 @@ let for_json ~(name : string) (json : Yojson.Safe.t) : t =
     Delegates to MASC [Cascade_config.resolve_inference_params].
     Returns [empty] on any error (malformed config, read failure). *)
 let for_cascade ~(name : string) : t =
-  let name = Keeper_cascade_profile.canonicalize name in
-  match Cascade_runtime.cascade_config_path () with
-  | None -> empty
-  | Some config_path ->
-      (try of_oas (Cascade_config.resolve_inference_params ~config_path ~name)
-       with Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            Log.warn ~ctx:"cascade"
-              "%s: config load failed for %s (%s), using empty defaults"
-              name config_path (Printexc.to_string exn);
-            empty)
+  let name = Keeper_cascade_profile.normalize_declared_name name in
+  match Cascade_catalog_runtime.resolve_inference_params ~name () with
+  | Ok params ->
+      { temperature = params.temperature; max_tokens = params.max_tokens }
+  | Error detail ->
+      Log.warn ~ctx:"cascade"
+        "%s: runtime catalog inference lookup failed (%s), using empty defaults"
+        name detail;
+      empty
 
 (** Resolve a temperature value: cascade config -> fallback. *)
 let resolve_temperature ~(cascade_name : string) ~(fallback : unit -> float) : float =

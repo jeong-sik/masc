@@ -660,6 +660,11 @@
  (modules test_cascade_runtime)
  (libraries masc_test_deps))
 
+(test
+ (name test_cascade_catalog_runtime)
+ (modules test_cascade_catalog_runtime)
+ (libraries masc_test_deps))
+
 ; Issue #8159: gemini: prefix must resolve to Gemini kind, not OpenAI_compat.
 (test
  (name test_provider_kind_resolution)

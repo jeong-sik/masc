@@ -31,7 +31,12 @@ val resolve_primary_model_id : string list -> string
 val default_local_model_label_and_id : unit -> string * string
 val ensure_api_keys_for_labels : string list -> (unit, string) result
 val default_model_strings : cascade_name:string -> string list
+val models_of_cascade_name_result : string -> (string list, string) result
 val models_of_cascade_name : string -> string list
+val resolve_named_providers_result :
+  ?provider_filter:string list ->
+  ?require_tool_choice_support:bool ->
+  cascade_name:string -> unit -> (Llm_provider.Provider_config.t list, string) result
 val resolve_named_providers :
   ?provider_filter:string list ->
   ?require_tool_choice_support:bool ->

@@ -37,6 +37,7 @@ type t = {
   keeper_runtime_toml_present : bool;
   warnings : string list;
   next_actions : string list;
+  catalog_validation : Yojson.Safe.t option;
 }
 
 type catalog_issue_severity = Cascade_catalog_validator.severity =
@@ -456,11 +457,75 @@ let analyze_with (inputs : inputs) =
     keeper_runtime_toml_present;
     warnings;
     next_actions;
+    catalog_validation = None;
   }
 
 let analyze ~base_path_input ~default_base_path () =
   current_inputs ~base_path_input ~default_base_path ()
   |> analyze_with
+
+let live_catalog_summary = function
+  | Stdlib.Ok (Cascade_catalog_runtime.Validated snapshot) ->
+      ( false,
+        "Live cascade catalog validation passed.",
+        Cascade_catalog_runtime.state_to_yojson
+          (Cascade_catalog_runtime.Validated snapshot) )
+  | Stdlib.Ok (Cascade_catalog_runtime.Serving_last_known_good _ as state) ->
+      ( true,
+        "Live cascade catalog validation rejected the current file; runtime is serving last-known-good.",
+        Cascade_catalog_runtime.state_to_yojson state )
+  | Stdlib.Error rejection ->
+      ( true,
+        "Live cascade catalog validation failed; no validated snapshot is available.",
+        `Assoc
+          [
+            ("status", `String "invalid");
+            ("serving_last_known_good", `Bool false);
+            ("snapshot", `Null);
+            ( "rejected_update",
+              Cascade_catalog_runtime.rejection_to_yojson rejection );
+          ] )
+
+let analyze_live ~sw ~net ~clock ~fs ~proc_mgr ~base_path_input
+    ~default_base_path () =
+  let report = analyze ~base_path_input ~default_base_path () in
+  Process_eio.init ~cwd_default:Eio.Path.(fs / report.base_path) ~proc_mgr
+    ~clock;
+  let live_failed, live_warning, catalog_validation =
+    match
+      Cascade_catalog_runtime.inspect_active ~sw ~net ~clock ()
+      |> live_catalog_summary
+    with
+    | failed, warning, validation -> (failed, warning, validation)
+  in
+  let warnings =
+    if live_warning = "" then report.warnings
+    else report.warnings @ [ live_warning ]
+  in
+  let next_actions =
+    if live_failed then
+      report.next_actions
+      @
+      [
+        "Fix the active cascade catalog candidates/strategy and rerun `masc-mcp doctor config`.";
+      ]
+    else
+      report.next_actions
+  in
+  let status =
+    match report.status, live_failed with
+    | Error, _ -> Error
+    | _, true -> Error
+    | Ok, false -> Ok
+    | Warn, false -> Warn
+  in
+  {
+    report with
+    status;
+    warnings;
+    next_actions;
+    catalog_validation = Some catalog_validation;
+  }
 
 let to_yojson (report : t) =
   `Assoc
@@ -481,6 +546,10 @@ let to_yojson (report : t) =
       ("keeper_runtime_toml_present", `Bool report.keeper_runtime_toml_present);
       ("warnings", `List (List.map (fun value -> `String value) report.warnings));
       ("next_actions", `List (List.map (fun value -> `String value) report.next_actions));
+      ( "catalog_validation",
+        match report.catalog_validation with
+        | Some value -> value
+        | None -> `Null );
     ]
 
 let render_text (report : t) =
@@ -521,6 +590,12 @@ let render_text (report : t) =
   add_line
     (Printf.sprintf "keeper_runtime.toml: %s"
        (if report.keeper_runtime_toml_present then "present" else "missing"));
+  (match report.catalog_validation with
+   | Some validation ->
+       add_line "";
+       add_line "catalog_validation:";
+       add_line (Yojson.Safe.pretty_to_string validation)
+   | None -> ());
   if report.warnings <> [] then begin
     add_line "";
     add_line "warnings:";

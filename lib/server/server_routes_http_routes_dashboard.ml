@@ -23,14 +23,28 @@ let cascade_profile_gate () : cascade_profile_gate =
     Keeper_cascade_profile.keeper_catalog_names ?config_path ()
     |> List.sort_uniq String.compare
   in
-  match config_path with
-  | None -> { valid_profiles = keeper_profiles; invalid_profiles = [] }
-  | Some path ->
-      let invalid_profiles =
+  let invalid_profiles =
+    match config_path with
+    | None -> []
+    | Some path ->
         Cascade_catalog_validator.error_messages_by_profile
           ~config_path:path
+  in
+  let invalid_names = List.map fst invalid_profiles in
+  match Cascade_catalog_runtime.known_profile_names () with
+  | Ok validated_profiles ->
+      let valid_profiles =
+        let filtered =
+          keeper_profiles
+          |> List.filter (fun profile -> List.mem profile validated_profiles)
+        in
+        if filtered = [] then validated_profiles else filtered
       in
-      let invalid_names = List.map fst invalid_profiles in
+      { valid_profiles; invalid_profiles }
+  | Error detail ->
+      Log.Keeper.warn
+        "cascade_profile_gate: validated runtime snapshot unavailable: %s"
+        detail;
       let valid_profiles =
         keeper_profiles
         |> List.filter (fun profile -> not (List.mem profile invalid_names))

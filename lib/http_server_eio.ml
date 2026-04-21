@@ -461,7 +461,12 @@ let health_handler _request reqd =
 
 (** Readiness probe - Kubernetes *)
 let ready_handler _request reqd =
-  Response.json {|{"status":"ready"}|} reqd
+  let body = Yojson.Safe.to_string (Server_startup_state.to_yojson ()) in
+  let status =
+    if (!Server_startup_state.state).state_ready then `OK
+    else `Service_unavailable
+  in
+  Response.json ~status body reqd
 
 (** Prometheus metrics endpoint *)
 let metrics_handler _request reqd =

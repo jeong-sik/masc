@@ -178,13 +178,8 @@ let is_server_rejected_parse_error (err : Oas.Error.sdk_error) : bool =
 
 let is_required_tool_contract_violation (err : Oas.Error.sdk_error) : bool =
   match err with
-  | Oas.Error.Agent (Oas.Error.CompletionContractViolation { contract; reason }) ->
+  | Oas.Error.Agent (Oas.Error.CompletionContractViolation { contract; _ }) ->
       String.equal contract "require_tool_use"
-      || let lower = String.lowercase_ascii reason in
-         string_contains_substring
-           ~needle:"tool_choice requested tool use"
-           lower
-         && string_contains_substring ~needle:"no tooluse block" lower
   | _ -> false
 
 let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =

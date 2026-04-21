@@ -50,15 +50,18 @@ let eio_context_error_to_sdk_error detail =
 (** Resolve cascade provider configs via MASC Cascade_config.
     Returns Provider_config.t list for the downstream OAS runtime,
     bypassing the old Model_spec facade. *)
-let resolve_cascade_providers ?provider_filter ~cascade_name () =
-  Cascade_runtime.resolve_named_providers ?provider_filter ~cascade_name ()
+let resolve_cascade_providers ?provider_filter
+    ?(require_tool_choice_support = false) ~cascade_name () =
+  Cascade_runtime.resolve_named_providers ?provider_filter
+    ~require_tool_choice_support ~cascade_name ()
 
 (** Resolve from an explicit model string list (user-declared in keeper TOML).
     MASC parses the strings via its local [Cascade_config] and passes the
     resulting provider configs into OAS execution. *)
-let resolve_providers_from_model_strings ?provider_filter model_strings =
+let resolve_providers_from_model_strings ?provider_filter
+    ?(require_tool_choice_support = false) model_strings =
   Cascade_runtime.resolve_providers_from_model_strings ?provider_filter
-    model_strings
+    ~require_tool_choice_support model_strings
 
 type masc_internal_error =
   | Cascade_exhausted of {
@@ -357,6 +360,7 @@ let run_named
     ?model_strings
     ~goal
     ?provider_filter
+    ?(require_tool_choice_support = false)
     ?priority
     ?session_id
     ?(system_prompt = "")
@@ -412,10 +416,14 @@ let run_named
     | Some ms when ms <> [] ->
       (* Direct model strings from keeper TOML — skip named preset lookup.
          MASC passes these strings through without interpretation. *)
-      (ms, resolve_providers_from_model_strings ?provider_filter ms)
+      ( ms,
+        resolve_providers_from_model_strings ?provider_filter
+          ~require_tool_choice_support ms )
     | _ ->
       let labels = Cascade_runtime.models_of_cascade_name cascade_name in
-      (labels, resolve_cascade_providers ?provider_filter ~cascade_name ())
+      ( labels,
+        resolve_cascade_providers ?provider_filter
+          ~require_tool_choice_support ~cascade_name () )
   in
   let capture, _metrics = Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs () in
   let name = Printf.sprintf "oas-%s" cascade_name in
@@ -427,7 +435,12 @@ let run_named
          (Cascade_exhausted
             {
               cascade_name;
-              detail = Some "no callable models available";
+              detail =
+                Some
+                  (if require_tool_choice_support then
+                     "no callable models support required tool use"
+                   else
+                     "no callable models available");
             }))
   | _ ->
   let transport_resolved = match transport with

@@ -248,6 +248,41 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
            (String.concat ", " labels)
            (String.concat ", " missing))
 
+let provider_capabilities_of_config (cfg : Llm_provider.Provider_config.t) =
+  let registry = Llm_provider.Provider_registry.default () in
+  let provider_name = Provider_adapter.string_of_provider_kind cfg.kind in
+  let caps =
+    match Llm_provider.Provider_registry.find registry provider_name with
+    | Some entry -> entry.capabilities
+    | None -> Llm_provider.Capabilities.default_capabilities
+  in
+  match cfg.supports_tool_choice_override with
+  | Some supports_tool_choice -> { caps with supports_tool_choice }
+  | None -> caps
+
+let apply_required_tool_choice_filter ~require_tool_choice_support ~label
+    (providers : Llm_provider.Provider_config.t list) =
+  if not require_tool_choice_support then
+    providers
+  else
+    let supports_required_tool_use cfg =
+      let caps = provider_capabilities_of_config cfg in
+      caps.supports_tools && caps.supports_tool_choice
+    in
+    let filtered = List.filter supports_required_tool_use providers in
+    if filtered = [] && providers <> [] then
+      Log.Misc.warn
+        "cascade %s: required tool-use gate removed all providers (providers=[%s])"
+        label
+        (String.concat ", "
+           (List.map
+              (fun (cfg : Llm_provider.Provider_config.t) ->
+                Printf.sprintf "%s:%s"
+                  (Llm_provider.Provider_config.string_of_provider_kind cfg.kind)
+                  cfg.model_id)
+              providers));
+    filtered
+
 let cascade_config_path () : string option =
   Config_dir_resolver.log_warnings ~context:"CascadeRuntime" ();
   Config_dir_resolver.cascade_path_opt ()
@@ -267,6 +302,7 @@ let models_of_cascade_name (cascade_name : string) : string list =
       defaults
 
 let resolve_providers_from_model_strings ?provider_filter
+    ?(require_tool_choice_support = false)
     (model_strings : string list)
     : Llm_provider.Provider_config.t list =
   let specs = Cascade_config.parse_model_strings model_strings in
@@ -275,6 +311,8 @@ let resolve_providers_from_model_strings ?provider_filter
       ~provider_filter
       ~label:"direct_model_strings"
       specs
+    |> apply_required_tool_choice_filter ~require_tool_choice_support
+         ~label:"direct_model_strings"
   in
   if filtered <> [] then filtered
   else (
@@ -282,7 +320,8 @@ let resolve_providers_from_model_strings ?provider_filter
       (List.length model_strings);
     [])
 
-let resolve_named_providers ?provider_filter ~cascade_name ()
+let resolve_named_providers ?provider_filter
+    ?(require_tool_choice_support = false) ~cascade_name ()
     : Llm_provider.Provider_config.t list =
   let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
   let defaults = default_model_strings ~cascade_name in
@@ -301,6 +340,8 @@ let resolve_named_providers ?provider_filter ~cascade_name ()
        Cascade_config.parse_model_strings
          (models_of_cascade_name cascade_name))
     |> Cascade_config.apply_provider_filter ~provider_filter ~label:cascade_name
+    |> apply_required_tool_choice_filter ~require_tool_choice_support
+         ~label:cascade_name
   in
   if specs <> [] then specs
   else if models_of_cascade_name cascade_name = defaults then (
@@ -311,4 +352,5 @@ let resolve_named_providers ?provider_filter ~cascade_name ()
     Log.Misc.warn
       "cascade %s: configured models unavailable — retrying built-in defaults"
       cascade_name;
-    resolve_providers_from_model_strings ?provider_filter defaults)
+    resolve_providers_from_model_strings ?provider_filter
+      ~require_tool_choice_support defaults)

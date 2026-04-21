@@ -82,6 +82,7 @@ val run_named :
   ?model_strings:string list ->
   goal:string ->
   ?provider_filter:string list ->
+  ?require_tool_choice_support:bool ->
   ?priority:Llm_provider.Request_priority.t ->
   ?session_id:string ->
   ?system_prompt:string ->

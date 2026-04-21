@@ -23,16 +23,18 @@ let cascade_profile_gate () : cascade_profile_gate =
     Keeper_cascade_profile.keeper_catalog_names ?config_path ()
     |> List.sort_uniq String.compare
   in
-  let invalid_profiles =
+  let fallback_invalid_profiles =
     match config_path with
     | None -> []
     | Some path ->
         Cascade_catalog_validator.error_messages_by_profile
           ~config_path:path
   in
-  let invalid_names = List.map fst invalid_profiles in
   match Cascade_catalog_runtime.known_profile_names () with
   | Ok validated_profiles ->
+      let invalid_profiles =
+        Cascade_catalog_runtime.invalid_profile_errors ()
+      in
       let valid_profiles =
         let filtered =
           keeper_profiles
@@ -45,6 +47,8 @@ let cascade_profile_gate () : cascade_profile_gate =
       Log.Keeper.warn
         "cascade_profile_gate: validated runtime snapshot unavailable: %s"
         detail;
+      let invalid_profiles = fallback_invalid_profiles in
+      let invalid_names = List.map fst invalid_profiles in
       let valid_profiles =
         keeper_profiles
         |> List.filter (fun profile -> not (List.mem profile invalid_names))
@@ -963,10 +967,20 @@ and add_autoresearch_routes router =
 
   |> Http.Router.get "/api/v1/keeper/cascades" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
-         let profiles = available_cascade_profiles () in
+         let gate = cascade_profile_gate () in
          Http.Response.json ~request:request
            (Yojson.Safe.to_string (`Assoc [
-             ("profiles", `List (List.map (fun s -> `String s) profiles));
+             ("profiles", `List (List.map (fun s -> `String s) gate.valid_profiles));
+             ( "invalid_profiles",
+               `List
+                 (List.map
+                    (fun (name, errors) ->
+                      `Assoc
+                        [
+                          ("name", `String name);
+                          ("errors", `List (List.map (fun err -> `String err) errors));
+                        ])
+                    gate.invalid_profiles) );
            ])) reqd
        ) request reqd)
 

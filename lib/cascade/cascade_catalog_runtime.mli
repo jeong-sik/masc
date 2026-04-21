@@ -119,6 +119,15 @@ val known_profile_names :
   unit ->
   (string list, string) result
 
+val invalid_profile_errors :
+  ?sw:Eio.Switch.t ->
+  ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  unit ->
+  (string * string list) list
+(** Profile-scoped validation errors from the active runtime catalog
+    view. Returns [[]] when the catalog is fully validated. *)
+
 val resolve_selection_trace :
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->

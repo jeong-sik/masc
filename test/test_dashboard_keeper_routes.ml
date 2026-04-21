@@ -485,6 +485,20 @@ let profile_names body =
   | _ -> []
 ;;
 
+let invalid_profile_names body =
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string body in
+  match json |> member "invalid_profiles" with
+  | `List items ->
+      List.filter_map
+        (fun item ->
+           match item |> member "name" with
+           | `String value -> Some value
+           | _ -> None)
+        items
+  | _ -> []
+;;
+
 let make_keeper_meta_json ?(name = "route-shadow-demo") () =
   match
     Masc_mcp.Keeper_types.meta_of_json
@@ -826,9 +840,12 @@ let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
   in
   require_status "keeper cascades GET returns 200" 200 list_result;
   let profiles = profile_names list_result.body in
+  let invalid_profiles = invalid_profile_names list_result.body in
   check bool "valid profile remains assignable" true (List.mem "good" profiles);
   check bool "invalid profile omitted from assignable list" false
     (List.mem "broken" profiles);
+  check bool "invalid profile is surfaced in payload" true
+    (List.mem "broken" invalid_profiles);
   let assign_invalid_result =
     run_curl_post
       ~body:

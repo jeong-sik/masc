@@ -1792,8 +1792,14 @@ export function fetchMemorySubsystems(
 
 // --- Keeper Cascade Config ---
 
-export function fetchCascadeProfiles(): Promise<{ profiles: string[] }> {
-  return get<{ profiles: string[] }>('/api/v1/keeper/cascades')
+export function fetchCascadeProfiles(): Promise<{
+  profiles: string[]
+  invalid_profiles: CascadeInvalidProfile[]
+}> {
+  return get<{
+    profiles: string[]
+    invalid_profiles: CascadeInvalidProfile[]
+  }>('/api/v1/keeper/cascades')
 }
 
 export function updateKeeperCascade(keeper: string, cascade_name: string): Promise<{ ok: boolean }> {

@@ -1271,27 +1271,70 @@ export function KeeperDetailOverlay() {
                   `
                 })()}
                 ${(() => {
-                  const [profiles, setProfiles] = useState<string[]>([])
+                  const [cascadeProfiles, setCascadeProfiles] = useState<{
+                    profiles: string[]
+                    invalid_profiles: { name: string; errors: string[] }[]
+                  } | null>(null)
                   const [currentCascade, setCurrentCascade] = useState(keeper.cascade_name || 'default')
-                  if (profiles.length === 0) {
-                    fetchCascadeProfiles().then(r => setProfiles(r.profiles)).catch(() => {})
+                  if (!cascadeProfiles) {
+                    fetchCascadeProfiles().then(setCascadeProfiles).catch(() => {})
                   }
-                  if (profiles.length <= 1) return null
+                  const profiles = cascadeProfiles?.profiles ?? []
+                  const invalidProfiles = cascadeProfiles?.invalid_profiles ?? []
+                  if (profiles.length + invalidProfiles.length <= 1) return null
+                  const invalidSummary = invalidProfiles
+                    .map((profile) => `${profile.name}: ${profile.errors.join(' | ')}`)
+                    .join('\n')
+                  const knownValues = new Set([
+                    ...profiles,
+                    ...invalidProfiles.map((profile) => profile.name),
+                  ])
                   return html`
-                    <select
-                      class="py-0.5 px-1 rounded text-3xs font-mono bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)] cursor-pointer"
-                      title="Cascade profile"
-                      value=${currentCascade}
-                      onChange=${(e: Event) => {
-                        const val = (e.target as HTMLSelectElement).value
-                        setCurrentCascade(val)
-                        updateKeeperCascade(keeper.name, val).then(() => {
-                          refreshDashboard()
-                        })
-                      }}
-                    >
-                      ${profiles.map(p => html`<option value=${p}>${p}</option>`)}
-                    </select>
+                    <div class="flex items-center gap-1.5">
+                      <select
+                        class="py-0.5 px-1 rounded text-3xs font-mono bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)] cursor-pointer"
+                        title=${invalidProfiles.length > 0
+                          ? `Cascade profile\n\nDisabled invalid presets:\n${invalidSummary}`
+                          : 'Cascade profile'}
+                        value=${currentCascade}
+                        onChange=${(e: Event) => {
+                          const val = (e.target as HTMLSelectElement).value
+                          setCurrentCascade(val)
+                          updateKeeperCascade(keeper.name, val)
+                            .then(() => {
+                              refreshDashboard()
+                            })
+                            .catch((err) => {
+                              setCurrentCascade(keeper.cascade_name || 'default')
+                              const msg = err instanceof Error ? err.message : 'Cascade 변경 실패'
+                              showToast(msg, 'error')
+                            })
+                        }}
+                      >
+                        ${!knownValues.has(currentCascade) && currentCascade
+                          ? html`<option value=${currentCascade}>${currentCascade} (current)</option>`
+                          : null}
+                        ${profiles.map((p) => html`<option value=${p}>${p}</option>`)}
+                        ${invalidProfiles.length > 0
+                          ? html`<option disabled>──────── invalid ────────</option>`
+                          : null}
+                        ${invalidProfiles.map((profile) => html`
+                          <option
+                            value=${profile.name}
+                            disabled
+                            title=${profile.errors.join(' | ')}
+                          >${profile.name} (invalid)</option>
+                        `)}
+                      </select>
+                      ${invalidProfiles.length > 0
+                        ? html`
+                            <span
+                              class="inline-flex items-center py-0.5 px-1.5 rounded text-3xs font-semibold bg-[var(--bad-10)] text-[var(--rose-light)] border border-[var(--bad-30)]"
+                              title=${invalidSummary}
+                            >${invalidProfiles.length} invalid</span>
+                          `
+                        : null}
+                    </div>
                   `
                 })()}
               </div>

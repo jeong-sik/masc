@@ -444,8 +444,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
             | None ->
                 Error
                   (Printf.sprintf
-                     "invalid sandbox_profile '%s' (allowed: legacy_local, docker_hardened, docker_with_git)"
-                     raw))
+                     "invalid sandbox_profile '%s' (allowed: %s)"
+                     raw
+                     (String.concat ", " valid_sandbox_profile_strings)))
         | None -> Ok ())
   in
   let result =

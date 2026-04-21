@@ -140,8 +140,8 @@ persona_name = "analyst"
 | `persona_name` | Required | Which persona blueprint this keeper uses | Primary field in the target model. |
 | `name` | Optional | Override keeper handle | Usually redundant because filename is already the keeper name. |
 | `execution_scope` | Optional | Deployment-specific execution scope | Only when different from the default. |
-| `sandbox_profile` | Optional | Process/filesystem sandbox profile | `docker_hardened` is the new hardened path; `legacy_local` preserves current behavior. |
-| `network_mode` | Optional | Sandbox network policy | `docker_hardened` defaults to `none`; `legacy_local` defaults to `inherit`. |
+| `sandbox_profile` | Optional | Process/filesystem sandbox profile | `docker_hardened` is the new hardened path; `docker_with_git` is the git/gh-enabled hardened variant; `legacy_local` preserves current behavior. |
+| `network_mode` | Optional | Sandbox network policy | `docker_hardened` defaults to `none`; `docker_with_git` and `legacy_local` default to `inherit`. |
 | `shared_memory_scope` | Optional | Typed shared-memory lane | `room` enables keeper-authorized `masc_team_memory_*` exchange on the flattened `default` namespace. |
 | `cascade_name` | Optional | Deployment-specific cascade override | Only when not using the default cascade. |
 | `tool_preset` | Optional | Deployment-specific policy override | Only when intentionally overriding persona default. |
@@ -179,7 +179,7 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 | Field | Allowed values |
 | --- | --- |
 | `execution_scope` | `observe_only`, `workspace`, `local` |
-| `sandbox_profile` | `legacy_local`, `docker_hardened` |
+| `sandbox_profile` | `legacy_local`, `docker_hardened`, `docker_with_git` |
 | `network_mode` | `none`, `inherit` |
 | `shared_memory_scope` | `disabled`, `room` |
 | `tool_preset` | `minimal`, `social`, `messaging`, `coding`, `research`, `delivery`, `full` |

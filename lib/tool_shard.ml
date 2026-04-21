@@ -376,7 +376,7 @@ git_log/git_diff for repo history, bash for curl/jq/env/which, gh for GitHub PR/
            [Keeper_exec_shell.valid_shell_op_strings].  Schema used to
            omit git_worktree even though the handler accepted it. *)
         ("op", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) keeper_shell_op_enum_strings)); ("description", `String "Command to run")]);
-        ("cmd", `Assoc [("type", `String "string"); ("description", `String "gh subcommand for op=gh, e.g. 'pr list --state open'. Do NOT put --repo in cmd; current working dir determines the repo.")]);
+        ("cmd", `Assoc [("type", `String "string"); ("description", `String "gh subcommand for op=gh, e.g. 'pr list --state open'. The active task worktree determines the repo; any --repo flag is normalized to that repo.")]);
         ("path", `Assoc [("type", `String "string"); ("description", `String "Target path for ls/cat/rg/find/head/tail/wc/tree")]);
         ("cwd", `Assoc [("type", `String "string"); ("description", `String "Optional working directory for pwd/git_status/git_log/git_diff/git_worktree/bash. Must stay within the keeper sandbox or an explicit allowed path.")]);
         ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg, or name glob for find (REQUIRED for find, e.g. \"*.ml\")")]);

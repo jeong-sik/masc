@@ -78,6 +78,16 @@ type completion_contract =
   | Allow_text_or_tool
   | Require_tool_use
 
+let merge_completion_contract
+      ~(previous : completion_contract)
+      ~(current : completion_contract)
+  : completion_contract
+  =
+  match previous, current with
+  | Require_tool_use, _
+  | _, Require_tool_use -> Require_tool_use
+  | Allow_text_or_tool, Allow_text_or_tool -> Allow_text_or_tool
+
 (** Issue #8696: exhaustive match against [Agent_sdk.Types.tool_choice].
     Previous catch-all silently mapped any future SDK constructor to
     [Allow_text_or_tool]; on an OAS pin bump that adds a constructor

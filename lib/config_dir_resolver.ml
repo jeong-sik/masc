@@ -33,6 +33,7 @@ type resolution = {
   status : status;
   warnings : string list;
   config_root : path_item;
+  cascade_authoring : path_item;
   cascade : path_item;
   prompts : path_item;
   keepers : path_item;
@@ -138,6 +139,7 @@ let to_json (resolution : resolution) =
       ( "warnings",
         `List (List.map (fun warning -> `String warning) resolution.warnings) );
       ("config_root", item_to_json resolution.config_root);
+      ("cascade_authoring", item_to_json resolution.cascade_authoring);
       ("cascade", item_to_json resolution.cascade);
       ("prompts", item_to_json resolution.prompts);
       ("keepers", item_to_json resolution.keepers);
@@ -281,6 +283,11 @@ let child_item (root : path_item) name =
   in
   { path; exists; source = root.source }
 
+let file_item (root : path_item) name =
+  let path = Filename.concat root.path name in
+  let exists = existing_file path in
+  { path; exists; source = root.source }
+
 let personas_item (inputs : inputs) root =
   match trim_opt inputs.env_personas_dir with
   | Some raw ->
@@ -306,12 +313,13 @@ let inputs_from_env () =
 
 let resolve_with inputs =
   let config_root, root_warnings = config_root_resolution inputs in
+  let cascade_authoring = file_item config_root cascade_toml_filename in
   let cascade = child_item config_root cascade_json_filename in
   let prompts = child_item config_root "prompts" in
   let keepers = child_item config_root "keepers" in
   let personas, persona_warnings = personas_item inputs config_root in
   let missing_child_warnings =
-    [ (cascade_json_filename, cascade.exists); ("prompts", prompts.exists); ("keepers", keepers.exists); ("personas", personas.exists) ]
+    [ ("cascade.json/cascade.toml", cascade.exists); ("prompts", prompts.exists); ("keepers", keepers.exists); ("personas", personas.exists) ]
     |> List.filter_map (fun (label, exists) ->
            if exists then None
            else
@@ -326,7 +334,16 @@ let resolve_with inputs =
     | Env | Local_masc | Home_masc | Exe_relative | Cwd ->
         if warnings = [] then Ready else Warn
   in
-  { status; warnings; config_root; cascade; prompts; keepers; personas }
+  {
+    status;
+    warnings;
+    config_root;
+    cascade_authoring;
+    cascade;
+    prompts;
+    keepers;
+    personas;
+  }
 
 let _cached_resolution : resolution option ref = ref None
 

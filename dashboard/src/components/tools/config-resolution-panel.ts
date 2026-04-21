@@ -439,7 +439,7 @@ export function ConfigResolutionPanel({
   return html`
     <${Card} title="설정 경로" class="section mb-4">
       <div class="mb-4 text-xs leading-relaxed text-[var(--text-muted)]">
-        서버가 실제로 해석한 config root와 runtime/data root를 함께 보여줍니다. 체크인된 repo config는 fallback/default source일 뿐이며, 현재 실행이 바라보는 경로와는 다를 수 있습니다.
+        서버가 실제로 해석한 config root와 runtime/data root를 함께 보여줍니다. cascade는 human-authored cascade.toml과 runtime cascade.json을 분리해 보여주며, 현재 실행이 바라보는 경로와 체크인된 seed config는 다를 수 있습니다.
       </div>
 
       ${resolution
@@ -464,7 +464,13 @@ export function ConfigResolutionPanel({
                   isRoot=${true}
                 />
                 <${ConfigRow}
-                  label="cascade"
+                  label="cascade authoring"
+                  item=${resolution.cascade_authoring}
+                  rootPath=${rootPath}
+                  rootSource=${rootSource}
+                />
+                <${ConfigRow}
+                  label="cascade runtime"
                   item=${resolution.cascade}
                   rootPath=${rootPath}
                   rootSource=${rootSource}

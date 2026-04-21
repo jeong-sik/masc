@@ -1074,6 +1074,13 @@ let test_startup_state_json_includes_runtime_resolution () =
               ("exists", `Bool true);
               ("source", `String "local_masc");
             ] );
+        ( "cascade_authoring",
+          `Assoc
+            [
+              ("path", `String "/tmp/runtime-root/.masc/config/cascade.toml");
+              ("exists", `Bool false);
+              ("source", `String "local_masc");
+            ] );
       ]
   in
   Server_startup_state.note_runtime_resolution ~path_diagnostics
@@ -1088,6 +1095,11 @@ let test_startup_state_json_includes_runtime_resolution () =
     "/tmp/runtime-root/.masc/config"
     (json |> member "config_resolution" |> member "config_root" |> member "path"
    |> to_string)
+  ;
+  Alcotest.(check bool) "startup cascade authoring path surfaced" true
+    (match json |> member "config_resolution" |> member "cascade_authoring" |> member "path" with
+     | `String value -> String.length value > 0
+     | _ -> false)
 
 let test_create_server_state_records_runtime_resolution () =
   with_temp_dir "startup-create-state" (fun dir ->
@@ -1112,6 +1124,10 @@ let test_create_server_state_records_runtime_resolution () =
       Alcotest.(check string) "create_server_state records config root"
         (Filename.concat dir ".masc/config")
         (json |> member "config_resolution" |> member "config_root" |> member "path"
+       |> to_string);
+      Alcotest.(check string) "create_server_state records cascade authoring path"
+        (Filename.concat dir ".masc/config/cascade.toml")
+        (json |> member "config_resolution" |> member "cascade_authoring" |> member "path"
        |> to_string);
       Alcotest.(check string) "create_server_state records effective masc root"
         (Unix.realpath (Filename.concat dir ".masc"))

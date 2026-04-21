@@ -1061,9 +1061,9 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
   check bool "keeper_shell schema documents gh claim prerequisite" true
     (source_file_contains "lib/tool_shard.ml"
        "Requires an active claimed task/current_task_id");
-  check bool "keeper_shell gh error hints keeper_task_claim" true
+  check bool "keeper_shell gh runtime allows sandbox fallback" true
     (source_file_contains "lib/keeper/keeper_exec_shell.ml"
-       "Call keeper_task_claim with {} first")
+       "task_id = \"(sandbox)\"")
 
 (* ---------- Config tests ---------- *)
 

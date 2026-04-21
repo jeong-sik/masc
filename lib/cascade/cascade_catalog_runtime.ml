@@ -755,7 +755,8 @@ let models_of_cascade_name ?sw ?net ?clock raw_name =
                 entry.model))
 
 let resolve_named_providers ?sw ?net ?clock ?provider_filter
-    ?(require_tool_choice_support = false) ~cascade_name () =
+    ?(require_tool_choice_support = false)
+    ?(require_tool_support = false) ~cascade_name () =
   match lookup_active_profile ?sw ?net ?clock cascade_name with
   | Error _ as e -> e
   | Ok (_snapshot, normalized, profile) ->
@@ -771,7 +772,7 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
              ~label:normalized
       in
       let providers =
-        if not require_tool_choice_support then
+        if not require_tool_choice_support && not require_tool_support then
           providers
         else
           let provider_capabilities_of_config
@@ -802,7 +803,17 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
           in
           let supports_required_tool_use cfg =
             let caps = provider_capabilities_of_config cfg in
-            caps.supports_tools && caps.supports_tool_choice
+            let inline_tools = caps.supports_tools in
+            let inline_tool_choice = inline_tools && caps.supports_tool_choice in
+            let runtime_mcp =
+              caps.supports_runtime_mcp_tools
+              && caps.supports_runtime_tool_events
+            in
+            match require_tool_choice_support, require_tool_support with
+            | true, true -> inline_tool_choice || runtime_mcp
+            | true, false -> inline_tool_choice
+            | false, true -> inline_tools || runtime_mcp
+            | false, false -> true
           in
           List.filter supports_required_tool_use providers
       in

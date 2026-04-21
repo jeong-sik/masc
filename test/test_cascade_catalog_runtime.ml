@@ -163,6 +163,42 @@ let require_ok = function
   | Ok value -> value
   | Error detail -> failf "expected Ok, got Error: %s" detail
 
+let provider_kinds providers =
+  List.map
+    (fun (cfg : Llm_provider.Provider_config.t) ->
+      Llm_provider.Provider_config.string_of_provider_kind cfg.kind)
+    providers
+
+let provider_supports_required_tool_use (cfg : Llm_provider.Provider_config.t) =
+  let registry = Llm_provider.Provider_registry.default () in
+  let provider_name =
+    Llm_provider.Provider_registry.provider_name_of_config cfg
+  in
+  let caps =
+    match Llm_provider.Provider_registry.find registry provider_name with
+    | Some entry -> entry.capabilities
+    | None -> Llm_provider.Capabilities.default_capabilities
+  in
+  let caps =
+    match cfg.supports_tool_choice_override with
+    | Some supports_tool_choice -> { caps with supports_tool_choice }
+    | None -> caps
+  in
+  caps.supports_tools && caps.supports_tool_choice
+
+let provider_supports_callable_tool_use (cfg : Llm_provider.Provider_config.t) =
+  let registry = Llm_provider.Provider_registry.default () in
+  let provider_name =
+    Llm_provider.Provider_registry.provider_name_of_config cfg
+  in
+  let caps =
+    match Llm_provider.Provider_registry.find registry provider_name with
+    | Some entry -> entry.capabilities
+    | None -> Llm_provider.Capabilities.default_capabilities
+  in
+  caps.supports_tools
+  || (caps.supports_runtime_mcp_tools && caps.supports_runtime_tool_events)
+
 let test_valid_catalog_skips_live_probes_at_bootstrap () =
   with_temp_dir "cascade-catalog-runtime" @@ fun dir ->
   let config_dir = Filename.concat dir "config" in
@@ -420,6 +456,67 @@ let test_partial_catalog_rejects_invalid_default_profile () =
   | Ok (Cascade_catalog_runtime.Serving_last_known_good _) ->
       fail "expected direct validation against the current file"
 
+let test_resolve_named_providers_tool_choice_filters_runtime_only_providers () =
+  with_temp_dir "cascade-catalog-tool-choice" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  ignore
+    (write_cascade_json config_dir
+       {|{
+  "keeper_unified_models": [
+    "custom:remote-model@http://127.0.0.1:18080/v1",
+    "codex_cli:auto",
+    "gemini_cli:auto",
+    "ollama:local-model"
+  ]
+}|});
+  let providers =
+    require_ok
+      (Cascade_catalog_runtime.resolve_named_providers
+         ~require_tool_choice_support:true
+         ~cascade_name:Keeper_config.default_cascade_name
+         ())
+  in
+  check bool "every surviving provider supports inline tool choice" true
+    (List.for_all provider_supports_required_tool_use providers);
+  check bool "drops codex_cli without inline tool choice" false
+    (List.mem "codex_cli" (provider_kinds providers));
+  check bool "drops gemini_cli without inline tool choice" false
+    (List.mem "gemini_cli" (provider_kinds providers))
+
+let test_resolve_named_providers_tool_support_keeps_runtime_mcp_providers () =
+  with_temp_dir "cascade-catalog-tool-support" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  ignore
+    (write_cascade_json config_dir
+       {|{
+  "keeper_unified_models": [
+    "custom:remote-model@http://127.0.0.1:18080/v1",
+    "claude_code:auto",
+    "codex_cli:auto",
+    "gemini_cli:auto",
+    "ollama:local-model"
+  ]
+}|});
+  let providers =
+    require_ok
+      (Cascade_catalog_runtime.resolve_named_providers
+         ~require_tool_support:true
+         ~cascade_name:Keeper_config.default_cascade_name
+         ())
+  in
+  check bool "tool-support path keeps at least one callable provider" true
+    (providers <> []);
+  check bool "every surviving provider supports inline or runtime MCP tools" true
+    (List.for_all provider_supports_callable_tool_use providers);
+  check bool "keeps codex_cli via runtime MCP lane" true
+    (List.mem "codex_cli" (provider_kinds providers));
+  check bool "drops gemini_cli without runtime MCP lane" false
+    (List.mem "gemini_cli" (provider_kinds providers))
+
 let test_config_doctor_live_reports_catalog_validation () =
   with_temp_dir "cascade-doctor-live" @@ fun dir ->
   let base_path = Filename.concat dir "base" in
@@ -529,6 +626,14 @@ let () =
             "partial catalog rejects invalid default profile"
             `Quick
             test_partial_catalog_rejects_invalid_default_profile;
+          test_case
+            "resolve_named_providers tool choice drops runtime-only providers"
+            `Quick
+            test_resolve_named_providers_tool_choice_filters_runtime_only_providers;
+          test_case
+            "resolve_named_providers tool support keeps runtime MCP providers"
+            `Quick
+            test_resolve_named_providers_tool_support_keeps_runtime_mcp_providers;
           test_case
             "config doctor live reports catalog validation"
             `Quick

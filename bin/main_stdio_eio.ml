@@ -24,13 +24,12 @@ let run_cmd base_path =
   let clock, mono_clock, net, _domain_mgr, proc_mgr, fs =
     Server_runtime_bootstrap.init_runtime_context env
   in
-  let state =
-    Server_runtime_bootstrap.create_server_state ~sw ~base_path ~clock
-      ~mono_clock ~net ~proc_mgr ~fs
+  let state, _remaining_work =
+    Gc.ramp_up (fun () ->
+      Server_runtime_bootstrap.create_server_state ~sw ~base_path ~clock
+        ~mono_clock ~net ~proc_mgr ~fs)
   in
   Server_runtime_bootstrap.bootstrap_server_state_blocking state;
-  (* keeper bootstrap delegated to keeper_autoboot subsystem or
-     Keeper_runtime.start_existing_keepalives if needed *)
   ignore (Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state);
   Fun.protect
     ~finally:(fun () ->

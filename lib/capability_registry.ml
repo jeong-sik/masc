@@ -8,6 +8,7 @@
 open Types
 
 module StringSet = Set.Make (String)
+module StringMap = Map.Make (String)
 
 type risk_class =
   | Safe
@@ -66,37 +67,35 @@ let max_risk left right =
 let unique_preserve_order = Json_util.dedupe_keep_order
 
 let dedupe_schemas (schemas : Types.tool_schema list) =
-  let seen = ref StringSet.empty in
-  List.filter
-    (fun (schema : Types.tool_schema) ->
-      if StringSet.mem schema.name !seen then
-        false
-      else (
-        seen := StringSet.add schema.name !seen;
-        true))
-    schemas
+  let _, results =
+    List.fold_left
+      (fun (seen, acc) (schema : Types.tool_schema) ->
+        if StringSet.mem schema.name seen then (seen, acc)
+        else (StringSet.add schema.name seen, schema :: acc))
+      (StringSet.empty, []) schemas
+  in
+  List.rev results
 
 let dedupe_projections projections =
-  let seen = ref StringSet.empty in
-  List.filter
-    (fun (projection : projection) ->
-      let key =
-        Printf.sprintf "%s|%s"
-          (match projection.surface with
-          | Public_mcp -> "public_mcp"
-          | Spawned_agent_mcp -> "spawned_agent_mcp"
-          | Local_worker -> "local_worker"
-          | Keeper_standard -> "keeper_standard"
-          | Keeper_privileged -> "keeper_privileged"
-          | Privileged_executor_surface -> "privileged_executor")
-          projection.tool_name
-      in
-      if StringSet.mem key !seen then
-        false
-      else (
-        seen := StringSet.add key !seen;
-        true))
-    projections
+  let _, results =
+    List.fold_left
+      (fun (seen, acc) (projection : projection) ->
+        let key =
+          Printf.sprintf "%s|%s"
+            (match projection.surface with
+            | Public_mcp -> "public_mcp"
+            | Spawned_agent_mcp -> "spawned_agent_mcp"
+            | Local_worker -> "local_worker"
+            | Keeper_standard -> "keeper_standard"
+            | Keeper_privileged -> "keeper_privileged"
+            | Privileged_executor_surface -> "privileged_executor")
+            projection.tool_name
+        in
+        if StringSet.mem key seen then (seen, acc)
+        else (StringSet.add key seen, projection :: acc))
+      (StringSet.empty, []) projections
+  in
+  List.rev results
 
 let prefixed_tool_names names =
   names |> List.map (fun name -> "mcp__masc__" ^ name)
@@ -293,40 +292,44 @@ let all_projection_seeds_from (public_tool_source_schemas : Types.tool_schema li
 
 let all_capabilities_from (public_tool_source_schemas : Types.tool_schema list) :
     capability_def list =
-  let tbl : (string, capability_def) Hashtbl.t = Hashtbl.create 256 in
-  let ordered_ids = ref [] in
-  List.iter
-    (fun (seed : capability_seed) ->
-      match Hashtbl.find_opt tbl seed.capability_id with
-      | None ->
-          ordered_ids := !ordered_ids @ [ seed.capability_id ];
-          Hashtbl.replace tbl seed.capability_id
-            {
-              capability_id = seed.capability_id;
-              risk_class = seed.risk_class;
-              audiences = unique_preserve_order seed.audiences;
-              supports_audit_evidence = seed.supports_audit_evidence;
-              supports_direct_user_discovery = seed.supports_direct_user_discovery;
-              projections = [ seed.projection ];
-            }
-      | Some existing ->
-          Hashtbl.replace tbl seed.capability_id
-            {
-              capability_id = existing.capability_id;
-              risk_class = max_risk existing.risk_class seed.risk_class;
-              audiences =
-                unique_preserve_order (existing.audiences @ seed.audiences);
-              supports_audit_evidence =
-                existing.supports_audit_evidence || seed.supports_audit_evidence;
-              supports_direct_user_discovery =
-                existing.supports_direct_user_discovery
-                || seed.supports_direct_user_discovery;
-              projections =
-                dedupe_projections (existing.projections @ [ seed.projection ]);
-            })
-    (all_projection_seeds_from public_tool_source_schemas);
-  !ordered_ids
-  |> List.filter_map (fun capability_id -> Hashtbl.find_opt tbl capability_id)
+  let seeds = all_projection_seeds_from public_tool_source_schemas in
+  let tbl, ordered_ids =
+    List.fold_left
+      (fun (tbl, ordered_ids) (seed : capability_seed) ->
+        match StringMap.find_opt seed.capability_id tbl with
+        | None ->
+            let def =
+              {
+                capability_id = seed.capability_id;
+                risk_class = seed.risk_class;
+                audiences = unique_preserve_order seed.audiences;
+                supports_audit_evidence = seed.supports_audit_evidence;
+                supports_direct_user_discovery = seed.supports_direct_user_discovery;
+                projections = [ seed.projection ];
+              }
+            in
+            ( StringMap.add seed.capability_id def tbl,
+              seed.capability_id :: ordered_ids )
+        | Some existing ->
+            let def =
+              {
+                capability_id = existing.capability_id;
+                risk_class = max_risk existing.risk_class seed.risk_class;
+                audiences =
+                  unique_preserve_order (existing.audiences @ seed.audiences);
+                supports_audit_evidence =
+                  existing.supports_audit_evidence || seed.supports_audit_evidence;
+                supports_direct_user_discovery =
+                  existing.supports_direct_user_discovery
+                  || seed.supports_direct_user_discovery;
+                projections =
+                  dedupe_projections (existing.projections @ [ seed.projection ]);
+              }
+            in
+            (StringMap.add seed.capability_id def tbl, ordered_ids))
+      (StringMap.empty, []) seeds
+  in
+  List.rev ordered_ids |> List.filter_map (fun id -> StringMap.find_opt id tbl)
 
 let surface_tool_schemas_from (public_tool_source_schemas : Types.tool_schema list)
     surface : Types.tool_schema list =

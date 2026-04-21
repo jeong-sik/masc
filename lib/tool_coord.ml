@@ -1,18 +1,31 @@
 (** Tool_coord - Coord management operations
-
     Handles: status, reset, init, workflow_guide, check
-
     Note: join, leave, set_room, who require state/registry and remain in mcp_server_eio.ml
 *)
 
-type tool_result = bool * string
-
-type context = {
-  config: Coord.config;
-  agent_name: string;
-}
+open Coord_types
 
 open Tool_args
+
+type tool_result = Coord_types.tool_result
+
+type context = Coord_types.context = {
+  config : Coord.config;
+  agent_name : string;
+}
+
+type assertion_kind = Coord_assertions.assertion_kind =
+  | Room_set
+  | Joined
+  | Task_claimed
+  | Current_task_set
+  | Worktree_active
+
+let assertion_kind_to_string = Coord_assertions.assertion_kind_to_string
+let all_assertion_kinds = Coord_assertions.all_assertion_kinds
+let valid_assertion_strings = Coord_assertions.valid_assertion_strings
+let assertion_kind_of_string_lenient =
+  Coord_assertions.assertion_kind_of_string_lenient
 
 let take_items limit items =
   let rec loop remaining acc = function
@@ -91,12 +104,6 @@ let unique_strings items =
     [] items
   |> List.rev
 
-type credential_state = {
-  credential_required : bool;
-  credential_available : bool;
-  credential_candidates : string list;
-}
-
 let credential_state (ctx : context) ~actual_name =
   let auth_cfg = Auth.load_auth_config ctx.config.base_path in
   let credential_required = auth_cfg.enabled && auth_cfg.require_token in
@@ -168,61 +175,14 @@ let safe_is_zombie_agent ~agent_name last_seen =
         (Printexc.to_string exn);
       false
 
-let task_status_badge = function
-  | Types.Todo -> ("📋", "todo")
-  | Types.Claimed _ -> ("🟡", "claimed")
-  | Types.InProgress _ -> ("🟢", "in_progress")
-  | Types.AwaitingVerification _ -> ("🔍", "awaiting_verification")
-  | Types.Done _ -> ("✅", "done")
-  | Types.Cancelled _ -> ("🚫", "cancelled")
-
-let task_assignee = function
-  | Types.Claimed { assignee; _ }
-  | Types.InProgress { assignee; _ }
-  | Types.AwaitingVerification { assignee; _ }
-  | Types.Done { assignee; _ } -> assignee
-  | Types.Cancelled { cancelled_by; _ } -> cancelled_by
-  | Types.Todo -> "unclaimed"
-
-let active_task_assignee = function
-  | Types.Claimed { assignee; _ }
-  | Types.InProgress { assignee; _ }
-  | Types.AwaitingVerification { assignee; _ } ->
-      Some assignee
-  | Types.Todo | Types.Done _ | Types.Cancelled _ -> None
-
-let assigned_task_ids ~matches_you tasks =
-  List.filter_map
-    (fun (task : Types.task) ->
-      match active_task_assignee task.task_status with
-      | Some assignee when matches_you assignee -> Some task.id
-      | Some _ | None -> None)
-    tasks
-
-let first_line text =
-  match String.index_opt text '\n' with
-  | Some i -> String.sub text 0 i
-  | None -> text
-
-let deliverable_claims_completion ~task_id deliverable =
-  let normalized =
-    deliverable
-    |> String.trim
-    |> String.lowercase_ascii
-    |> first_line
-  in
-  normalized <> ""
-  && (String.starts_with ~prefix:(String.lowercase_ascii task_id ^ " completed")
-        normalized
-      || String.starts_with ~prefix:"completed" normalized)
-
 let todo_task_has_completed_deliverable_conflict (ctx : context)
     (task : Types.task) =
   match task.task_status with
   | Types.Todo -> (
       match Planning_eio.load ctx.config ~task_id:task.id with
       | Ok plan_ctx ->
-          deliverable_claims_completion ~task_id:task.id plan_ctx.deliverable
+          Coord_status_rendering.deliverable_claims_completion
+            ~task_id:task.id plan_ctx.deliverable
       | Error _ -> false)
   | Types.Claimed _ | Types.InProgress _ | Types.AwaitingVerification _
   | Types.Done _ | Types.Cancelled _ -> false
@@ -234,22 +194,6 @@ let todo_completed_deliverable_conflicts (ctx : context) tasks =
       if todo_task_has_completed_deliverable_conflict ctx task then Some task.id
       else None)
     tasks
-
-type current_binding = {
-  assigned_task_ids : string list;
-  primary_owned : string option;
-  planning_current : string option;
-  current_is_assigned : bool;
-  effective_current : string option;
-  drift_reason : string option;
-  current_task_set : bool;
-  claim_first_suppressed : bool;
-}
-
-type planning_context_state = {
-  planning_missing_task : string option;
-  deliverable_conflict_task : string option;
-}
 
 let resolve_current_binding ~assigned_task_ids ~planning_current =
   let primary_owned =
@@ -312,12 +256,14 @@ let planning_context_state (ctx : context) (binding : current_binding)
               List.find_opt (fun (task : Types.task) -> String.equal task.id task_id)
                 active_tasks
             with
-            | Some
-                {
-                  task_status = (Types.Claimed _ | Types.InProgress _);
-                  _;
-                }
-              when deliverable_claims_completion ~task_id plan_ctx.deliverable ->
+              | Some
+                  {
+                    task_status = (Types.Claimed _ | Types.InProgress _);
+                    _;
+                  }
+              when
+                Coord_status_rendering.deliverable_claims_completion ~task_id
+                  plan_ctx.deliverable ->
                 Some task_id
             | Some _ | None -> None
           in
@@ -343,10 +289,7 @@ let agent_focus_label ~is_zombie (agent : Types.agent) =
 let status_summary_string (ctx : context) =
   Coord.ensure_initialized ctx.config;
   let state = Coord.read_state ctx.config in
-  let current_room = "default" in
   let backlog = Coord.read_backlog ctx.config in
-  let max_agents_display = 40 in
-  let max_active_tasks_display = 30 in
   let joined =
     try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name
     with Sys_error _ | Yojson.Json_error _ -> false
@@ -357,12 +300,9 @@ let status_summary_string (ctx : context) =
     credential_state.credential_required
     && not credential_state.credential_available
   in
-  let matches_you assignee =
-    String.equal assignee ctx.agent_name || String.equal assignee actual_name
-  in
   let current_task = safe_current_task ctx ~joined in
   let worktree_active = status_worktree_active ctx in
-  let cluster_name = effective_cluster_name ctx.config in
+  let effective_cluster_name = effective_cluster_name ctx.config in
   let agents =
     safe_get_agents ctx
     |> List.sort (fun (a : Types.agent) (b : Types.agent) ->
@@ -378,8 +318,6 @@ let status_summary_string (ctx : context) =
         (agent, is_zombie))
       agents
   in
-  let shown_agents = take_items max_agents_display agents_with_state in
-  let agent_count = List.length agents_with_state in
   let zombie_count =
     List.fold_left
       (fun acc (_, is_zombie) -> if is_zombie then acc + 1 else acc)
@@ -415,11 +353,20 @@ let status_summary_string (ctx : context) =
       backlog.tasks
   in
   let active_tasks = List.rev active_tasks in
-  let shown_active_tasks = take_items max_active_tasks_display active_tasks in
   let todo_conflict_task_ids = todo_completed_deliverable_conflicts ctx active_tasks in
   let todo_conflict_count = List.length todo_conflict_task_ids in
   let fresh_todo_count = max 0 (todo_count - todo_conflict_count) in
-  let assigned_task_ids = assigned_task_ids ~matches_you active_tasks in
+  let matches_you assignee =
+    String.equal assignee ctx.agent_name || String.equal assignee actual_name
+  in
+  let assigned_task_ids =
+    List.filter_map
+      (fun (task : Types.task) ->
+        match Coord_status_rendering.active_task_assignee task.task_status with
+        | Some assignee when matches_you assignee -> Some task.id
+        | Some _ | None -> None)
+      active_tasks
+  in
   let binding =
     resolve_current_binding ~assigned_task_ids ~planning_current:current_task
   in
@@ -547,116 +494,13 @@ let status_summary_string (ctx : context) =
     else
       items
   in
-  let buf = Buffer.create 256 in
-  Buffer.add_string buf (Printf.sprintf "🏢 Cluster: %s\n" cluster_name);
-  if cluster_name <> state.project then
-    Buffer.add_string buf (Printf.sprintf "📦 Project: %s\n" state.project);
-  Buffer.add_string buf
-    (Printf.sprintf "📍 Scope: %s (flattened)\n" current_room);
-  Buffer.add_string buf (Printf.sprintf "📁 Path: %s\n" ctx.config.base_path);
-  Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
-  Buffer.add_string buf
-    (Printf.sprintf
-       "⚡ Snapshot: agents=%d zombies=%d | tasks active=%d todo=%d claimed=%d in_progress=%d | messages=%d\n"
-       agent_count zombie_count (List.length active_tasks) todo_count claimed_count
-       in_progress_count (max 0 state.message_seq));
-  Buffer.add_string buf
-    (Printf.sprintf
-       "🧭 You: agent=%s | joined=%s | owned=%s | current=%s | worktree=%s\n"
-       actual_name (bool_flag joined) (option_or_dash binding.primary_owned)
-       (option_or_dash current_task) (bool_flag worktree_active));
-  Buffer.add_string buf
-    (Printf.sprintf
-       "🔎 Task binding: assigned_set=%s | primary_owned=%s | planning_current=%s | current_is_assigned=%s | effective_current=%s | drift_reason=%s | claim_first_suppressed=%s\n"
-       (task_id_list_label binding.assigned_task_ids)
-       (option_or_dash binding.primary_owned)
-       (option_or_dash binding.planning_current)
-       (bool_flag binding.current_is_assigned)
-       (option_or_dash binding.effective_current)
-       (option_or_dash binding.drift_reason)
-       (bool_flag binding.claim_first_suppressed));
-  (match planning_state.planning_missing_task with
-  | Some task_id ->
-      Buffer.add_string buf
-        (Printf.sprintf "📝 Planning: missing=yes | task=%s\n" task_id)
-  | None -> ());
-  (match planning_state.deliverable_conflict_task with
-  | Some task_id ->
-      Buffer.add_string buf
-        (Printf.sprintf "📝 Planning: deliverable_conflict=yes | task=%s\n"
-           task_id)
-  | None -> ());
-  if credential_state.credential_required then
-    Buffer.add_string buf
-      (Printf.sprintf "🔐 Credential: required=yes | available=%s | candidates=%s\n"
-         (bool_flag credential_state.credential_available)
-         (String.concat "," credential_state.credential_candidates));
-  if suggested_next <> [] then
-    Buffer.add_string buf
-      (Printf.sprintf "💡 Suggested next: %s\n"
-         (String.concat " -> " suggested_next));
-  if attention_items <> [] then begin
-    Buffer.add_string buf "\n⚠️ Attention:\n";
-    List.iter
-      (fun item ->
-        Buffer.add_string buf (Printf.sprintf "  - %s\n" item))
-      attention_items
-  end;
-  Buffer.add_string buf "📌 Players:\n";
-  (match shown_agents with
-  | [] ->
-      Buffer.add_string buf "  (no agents)\n"
-  | _ ->
-      List.iter
-        (fun ((agent : Types.agent), is_zombie) ->
-          Coord_query.safe_yield ();
-          let icon = agent_status_icon ~is_zombie agent.status in
-          let you_marker =
-            if String.equal agent.name actual_name then " (you)" else ""
-          in
-          Buffer.add_string buf
-            (Printf.sprintf "  %s %s%s -> %s\n" icon agent.name you_marker
-               (agent_focus_label ~is_zombie agent)))
-        shown_agents;
-      if agent_count > max_agents_display then
-        Buffer.add_string buf
-          (Printf.sprintf
-             "  … and %d more agents (use masc_who for full list)\n"
-             (agent_count - max_agents_display)));
-  Buffer.add_string buf "\n📋 Quest Board:\n";
-  List.iter
-    (fun (task : Types.task) ->
-      Coord_query.safe_yield ();
-      let (status_icon, status_label) =
-        if List.exists (String.equal task.id) todo_conflict_task_ids then
-          ("⚠️", "todo_conflict")
-        else
-          task_status_badge task.task_status
-      in
-      let assignee = task_assignee task.task_status in
-      Buffer.add_string buf
-        (Printf.sprintf "  %s %s P%d [%s] %s (%s)\n" status_icon task.id
-           task.priority status_label task.title assignee))
-    shown_active_tasks;
-  if active_tasks = [] then
-    Buffer.add_string buf "  (no active tasks)\n";
-  if List.length active_tasks > max_active_tasks_display then
-    Buffer.add_string buf
-      (Printf.sprintf
-         "  … and %d more active tasks (use masc_tasks for full list)\n"
-         (List.length active_tasks - max_active_tasks_display));
-  Buffer.add_string buf
-    (Printf.sprintf "  Summary: active=%d, done=%d, cancelled=%d, total=%d\n"
-       (List.length active_tasks) done_count cancelled_count
-       (List.length backlog.tasks));
-  let total_messages = max 0 state.message_seq in
-  if total_messages > 0 then begin
-    Buffer.add_string buf
-      (Printf.sprintf "\n💬 Messages: %d (cumulative)\n" total_messages);
-    Buffer.add_string buf "   Use masc_messages for recent details\n"
-  end else
-    Buffer.add_string buf "\n💬 Messages: 0\n";
-  Buffer.contents buf
+  Coord_status_rendering.status_summary_string
+    ~ctx ~joined ~actual_name ~credential_state ~credential_blocked
+    ~current_task ~worktree_active ~effective_cluster_name
+    ~agents_with_state ~active_tasks ~todo_count ~claimed_count
+    ~in_progress_count ~done_count ~cancelled_count
+    ~todo_conflict_task_ids ~binding ~planning_state
+    ~suggested_next ~attention_items ~state ~backlog
 
 let handle_status ctx _args =
   let cache_key = Printf.sprintf "%s::%s" ctx.config.base_path ctx.agent_name in
@@ -698,7 +542,8 @@ let inspect_state ctx =
         String.equal assignee ctx.agent_name || String.equal assignee actual_name
       in
       let assigned_task_ids =
-        Coord.get_tasks_raw ctx.config |> assigned_task_ids ~matches_you
+        Coord.get_tasks_raw ctx.config
+        |> Coord_status_rendering.assigned_task_ids ~matches_you
       in
       resolve_current_binding ~assigned_task_ids
         ~planning_current:(safe_current_task ctx ~joined)
@@ -751,116 +596,6 @@ let handle_workflow_guide ctx _args =
     single witness that compile-fails when a constructor is added but
     [assertion_kind_to_string] / [assertion_kind_of_string_lenient]
     aren't updated. Same shape as #8546 / #8601 / #8592. *)
-type assertion_kind =
-  | Room_set        (* legacy alias: namespace_ready *)
-  | Joined
-  | Task_claimed
-  | Current_task_set
-  | Worktree_active
-
-let assertion_kind_to_string = function
-  | Room_set -> "room_set"
-  | Joined -> "joined"
-  | Task_claimed -> "task_claimed"
-  | Current_task_set -> "current_task_set"
-  | Worktree_active -> "worktree_active"
-
-let all_assertion_kinds =
-  [ Room_set; Joined; Task_claimed; Current_task_set; Worktree_active ]
-
-let valid_assertion_strings =
-  List.map assertion_kind_to_string all_assertion_kinds
-
-let assertion_kind_of_string_lenient = function
-  | "room_set" | "namespace_ready" | "project_ready" -> Some Room_set
-  | "joined" -> Some Joined
-  | "task_claimed" -> Some Task_claimed
-  | "current_task_set" -> Some Current_task_set
-  | "worktree_active" -> Some Worktree_active
-  | _ -> None
-
-let assertion_fix_hint = function
-  | Room_set ->
-      "Call masc_start with your project root path."
-  | Joined ->
-      "Call masc_join to register your agent in the project namespace"
-  | Task_claimed ->
-      "Claim a task with masc_transition(action=claim) or masc_claim_next"
-  | Current_task_set ->
-      "Call masc_plan_set_task to choose or re-sync the active task when \
-       current_task is unset, stale, or ambiguous"
-  | Worktree_active ->
-      "Call masc_worktree_create to work in an isolated branch"
-
-let assertion_passes st = function
-  | Room_set -> st.room_set
-  | Joined -> st.joined
-  | Task_claimed -> st.task_claimed
-  | Current_task_set -> st.current_task_set
-  | Worktree_active -> st.worktree_active
-
-let check_assertion st assertion =
-  match assertion_kind_of_string_lenient assertion with
-  | Some kind ->
-      let passed = assertion_passes st kind in
-      let fix_hint = assertion_fix_hint kind in
-      `Assoc [
-        ("assertion", `String assertion);
-        ("passed", `Bool passed);
-        ("fix_hint", if passed then `Null else `String fix_hint);
-      ]
-  | None ->
-      `Assoc [
-        ("assertion", `String assertion);
-        ("passed", `Bool false);
-        ("fix_hint",
-         `String
-           (Printf.sprintf "Unknown assertion: %s (expected one of: %s)"
-              assertion (String.concat ", " valid_assertion_strings)));
-      ]
-
-let handle_check ctx args =
-  let st = inspect_state ctx in
-  (* Issue #8636: include every assertion the handler knows about so
-     callers that omit the field get full coverage. The previous list
-     dropped "worktree_active", silently bypassing the worktree
-     precondition check whenever the field was missing. *)
-  let default_assertions =
-    [ "project_ready"; "joined"; "task_claimed"; "current_task_set"; "worktree_active" ]
-  in
-  let assertions =
-    match Yojson.Safe.Util.member "assertions" args with
-    | `List items ->
-        let parsed = List.filter_map (function `String s -> Some s | _ -> None) items in
-        if parsed = [] then default_assertions else parsed
-    | _ -> default_assertions
-  in
-  let results = List.map (check_assertion st) assertions in
-  let all_passed = List.for_all (fun r ->
-    match Yojson.Safe.Util.member "passed" r with
-    | `Bool b -> b | _ -> false) results
-  in
-  let fix_hint =
-    if all_passed then `Null
-    else
-      let first_fail = List.find_opt (fun r ->
-        match Yojson.Safe.Util.member "passed" r with
-        | `Bool false -> true | _ -> false) results
-      in
-      match first_fail with
-      | Some r -> Yojson.Safe.Util.member "fix_hint" r
-      | None -> `Null
-  in
-  let result =
-    `Assoc [
-      ("assertions", `List results);
-      ("all_passed", `Bool all_passed);
-      ("fix_hint", fix_hint);
-    ]
-  in
-  (true, Yojson.Safe.to_string result)
-
-(* Dispatch function *)
 let handle_heartbeat ctx _args =
   let result = Coord.heartbeat ctx.config ~agent_name:ctx.agent_name in
   (* Coord.heartbeat returns "⚠ ..." on failure (agent not found, invalid file) *)
@@ -870,197 +605,27 @@ let handle_heartbeat ctx _args =
     && Char.code result.[2] = 0xa0) in
   (success, result)
 
-let goal_horizon_strings = [ "short"; "mid"; "long" ]
-let goal_status_strings = [ "active"; "paused"; "done"; "dropped" ]
-let goal_review_outcome_strings = [ "done"; "progress"; "blocked"; "dropped" ]
-
-let make_enum_field_error ~field ~allowed ~received =
-  {
-    field;
-    constraint_violated = One_of allowed;
-    message =
-      Printf.sprintf "%s must be one of: %s" field (String.concat ", " allowed);
-    expected = Some (String.concat "|" allowed);
-    received = Some received;
-  }
-
-let make_type_field_error ~field ~constraint_violated ~expected ~received =
-  {
-    field;
-    constraint_violated;
-    message = Printf.sprintf "%s must be a %s" field expected;
-    expected = Some expected;
-    received = Some received;
-  }
-
-let parse_optional_horizon args field =
-  match Yojson.Safe.Util.member field args with
-  | `Null -> Ok None
-  | `String raw -> (
-      match Goal_store.parse_horizon (Some raw) with
-      | Some horizon -> Ok (Some horizon)
-      | None ->
-          Error
-            (make_enum_field_error ~field ~allowed:goal_horizon_strings
-               ~received:raw))
-  | json ->
-      Error
-        (make_type_field_error ~field ~constraint_violated:Type_string
-           ~expected:"string"
-           ~received:(Yojson.Safe.to_string json))
-
-let parse_optional_goal_status args field =
-  match Yojson.Safe.Util.member field args with
-  | `Null -> Ok None
-  | `String raw -> (
-      match Goal_store.parse_goal_status (Some raw) with
-      | Some status -> Ok (Some status)
-      | None ->
-          Error
-            (make_enum_field_error ~field ~allowed:goal_status_strings
-               ~received:raw))
-  | json ->
-      Error
-        (make_type_field_error ~field ~constraint_violated:Type_string
-           ~expected:"string"
-           ~received:(Yojson.Safe.to_string json))
-
-let parse_optional_review_outcome args field =
-  match Yojson.Safe.Util.member field args with
-  | `Null -> Ok None
-  | `String raw -> (
-      match Goal_store.parse_review_outcome raw with
-      | Some outcome -> Ok (Some outcome)
-      | None ->
-          Error
-            (make_enum_field_error ~field ~allowed:goal_review_outcome_strings
-               ~received:raw))
-  | json ->
-      Error
-        (make_type_field_error ~field ~constraint_violated:Type_string
-           ~expected:"string"
-           ~received:(Yojson.Safe.to_string json))
-
-let parse_optional_priority args field =
-  match Yojson.Safe.Util.member field args with
-  | `Null -> Ok None
-  | `Int n ->
-      if n < 1 || n > 5 then
-        Error
-          {
-            field;
-            constraint_violated = Min_int 1;
-            message = "priority must be between 1 and 5";
-            expected = Some "1..5";
-            received = Some (string_of_int n);
-          }
-      else Ok (Some n)
-  | json ->
-      Error
-        (make_type_field_error ~field ~constraint_violated:Type_int
-           ~expected:"integer"
-           ~received:(Yojson.Safe.to_string json))
-
-let handle_goal_list (ctx : context) args =
-  match parse_optional_horizon args "horizon", parse_optional_goal_status args "status" with
-  | Error err, _
-  | _, Error err ->
-      validation_error_result [ err ]
-  | Ok horizon, Ok status ->
-      let goals = Goal_store.list_goals ctx.config ?horizon ?status () in
-      let rollup = Goal_store.compute_rollup goals in
-      ok_result
-        [
-          ("generated_at", `String (Types.now_iso ()));
-          ("count", `Int (List.length goals));
-          ("goals", `List (List.map Goal_store.goal_to_yojson goals));
-          ("rollup", Goal_store.rollup_to_yojson rollup);
-        ]
-
-let handle_goal_upsert (ctx : context) args =
-  match
-    parse_optional_horizon args "horizon",
-    parse_optional_goal_status args "status",
-    parse_optional_priority args "priority"
-  with
-  | Error err, _, _
-  | _, Error err, _
-  | _, _, Error err ->
-      validation_error_result [ err ]
-  | Ok horizon, Ok status, Ok priority ->
-      let id = get_string_opt args "id" in
-      let title = get_string_opt args "title" in
-      let metric = get_string_opt args "metric" in
-      let target_value = get_string_opt args "target_value" in
-      let due_date = get_string_opt args "due_date" in
-      let parent_goal_id = get_string_opt args "parent_goal_id" in
-      match
-        Goal_store.upsert_goal ctx.config ?id ?horizon ?title ?metric
-          ?target_value ?due_date ?priority ?status ?parent_goal_id ()
-      with
-      | Error msg -> error_result_typed ~code:Validation_error msg
-      | Ok (goal, action) ->
-          let action_name =
-            match action with
-            | `created -> "created"
-            | `updated -> "updated"
-          in
-          let task_marker = Printf.sprintf "[goal:%s]" goal.id in
-          ok_result
-            [
-              ("action", `String action_name);
-              ("goal_id", `String goal.id);
-              ("goal", Goal_store.goal_to_yojson goal);
-              ("task_title_marker", `String task_marker);
-              ( "linked_task_title_example",
-                `String
-                  (Printf.sprintf "%s[child] %s" task_marker goal.title) );
-            ]
-
-let handle_goal_review (ctx : context) args =
-  match validate_string_required args "goal_id", parse_optional_review_outcome args "outcome",
-        parse_optional_horizon args "new_horizon" with
-  | Error err, _, _
-  | _, Error err, _
-  | _, _, Error err ->
-      validation_error_result [ err ]
-  | Ok goal_id, Ok (Some outcome), Ok new_horizon ->
-      let note = get_string_opt args "note" in
-      begin
-        match
-          Goal_store.review_goal ctx.config ~goal_id ~outcome ?new_horizon ?note ()
-        with
-        | Error msg ->
-            error_result_typed ~code:Not_found msg
-        | Ok goal ->
-            ok_result
-              [
-                ("goal_id", `String goal.id);
-                ("goal", Goal_store.goal_to_yojson goal);
-              ]
-      end
-  | Ok _, Ok None, _ ->
-      validation_error_result
-        [
-          {
-            field = "outcome";
-            constraint_violated = Required;
-            message = "outcome is required";
-            expected = Some "string";
-            received = None;
-          };
-        ]
-
 let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_status" -> Some (handle_status ctx args)
   | "masc_heartbeat" -> Some (handle_heartbeat ctx args)
-  | "masc_goal_list" -> Some (handle_goal_list ctx args)
-  | "masc_goal_upsert" -> Some (handle_goal_upsert ctx args)
-  | "masc_goal_review" -> Some (handle_goal_review ctx args)
+  | "masc_goal_list" -> Some (Coord_goals.handle_goal_list ctx args)
+  | "masc_goal_upsert" -> Some (Coord_goals.handle_goal_upsert ctx args)
+  | "masc_goal_review" -> Some (Coord_goals.handle_goal_review ctx args)
   | "masc_reset" -> Some (handle_reset ctx args)
   | "masc_workflow_guide" -> Some (handle_workflow_guide ctx args)
-  | "masc_check" -> Some (handle_check ctx args)
+  | "masc_check" ->
+      let inspect ctx =
+        let s = inspect_state ctx in
+        {
+          Coord_assertions.room_set = s.room_set;
+          joined = s.joined;
+          task_claimed = s.task_claimed;
+          current_task_set = s.current_task_set;
+          worktree_active = s.worktree_active;
+        }
+      in
+      Some (Coord_assertions.handle_check ~inspect_state:inspect ctx args)
   | _ -> None
 
 let schemas = Tool_schemas_coord.schemas

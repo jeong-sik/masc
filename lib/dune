@@ -294,8 +294,13 @@
    tool_task
    tool_task_schemas
    task_dispatch
+   coord_types
+   coord_status_rendering
+   coord_goals
+   coord_assertions
    tool_coord
    workflow_guide
+
    tool_control
    tool_misc
    tool_team_memory

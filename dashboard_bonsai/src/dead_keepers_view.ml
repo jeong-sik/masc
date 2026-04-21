@@ -137,7 +137,7 @@ let render ~(shell : Overview_types.response) (keepers : Keepers_types.response)
     List.filter keepers.keepers ~f:(fun (k : Keepers_types.keeper) ->
       match k.status with
       | Dead -> true
-      | _ -> false)
+      | Live | Warn -> false)
   in
   let dead_n = List.length dead in
   let synced =

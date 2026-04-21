@@ -302,16 +302,18 @@ let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
         [ Agent_sdk.Types.Text text ]
   in
   Inference_utils.sanitize_message_utf8
-    {
-      Agent_sdk.Types.role;
-      content;
-      name =
-        (json |> member "name" |> to_string_option
-         |> Option.map Inference_utils.sanitize_text_utf8);
-      tool_call_id =
-        (json |> member "tool_call_id" |> to_string_option
-         |> Option.map Inference_utils.sanitize_text_utf8);
-    }
+    ({
+       Agent_sdk.Types.role;
+       content;
+       name =
+         (json |> member "name" |> to_string_option
+          |> Option.map Inference_utils.sanitize_text_utf8);
+       tool_call_id =
+         (json |> member "tool_call_id" |> to_string_option
+          |> Option.map Inference_utils.sanitize_text_utf8);
+       metadata = [];
+     }
+      : Agent_sdk.Types.message)
 
 (** Extract human-readable text from a single history.jsonl line that was
     produced by [message_to_json].  Reads structured [content_blocks]
@@ -328,6 +330,7 @@ let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
           content = blocks;
           name = None;
           tool_call_id = None;
+          metadata = [];
         }
       in
       Inference_utils.sanitize_text_utf8 (text_of_message msg)

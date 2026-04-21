@@ -155,13 +155,14 @@ let probe_chat_completion_compatible
           ~request_path:Masc_network_defaults.openai_chat_completions_path
           ~max_tokens:1 ~temperature:Oas_worker_cascade.deterministic_temperature ()
       in
-      let messages =
+      let messages : Oas_types.message list =
         [
           {
             Oas_types.role = Oas_types.User;
             content = [ Oas_types.Text "hi" ];
             name = None;
             tool_call_id = None;
+            metadata = [];
           };
         ]
       in

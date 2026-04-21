@@ -187,12 +187,13 @@ let metric_of_block
            | None -> 0)
     | _ -> 0
   in
-  let msg =
+  let msg : Agent_sdk.Types.message =
     {
       Agent_sdk.Types.role;
       content = [block];
       name = None;
       tool_call_id = None;
+      metadata = [];
     }
   in
   {

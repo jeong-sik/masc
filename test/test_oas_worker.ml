@@ -1993,6 +1993,7 @@ let tool_result_msg ?(id = "tool-1") text : Agent_sdk.Types.message =
       ];
     name = None;
     tool_call_id = None;
+    metadata = [];
   }
 
 let tool_use_msg ?(id = "tool-1") ?(name = "keeper_fs_read") input
@@ -2003,6 +2004,7 @@ let tool_use_msg ?(id = "tool-1") ?(name = "keeper_fs_read") input
       [ Agent_sdk.Types.ToolUse { id; name; input } ];
     name = None;
     tool_call_id = None;
+    metadata = [];
   }
 
 let test_keeper_checkpoint_store_oas_roundtrip () =
@@ -2716,6 +2718,7 @@ let make_assistant_tool_use_msg name : Agent_sdk.Types.message =
       ];
     name = None;
     tool_call_id = None;
+    metadata = [];
   }
 
 (** Idle error with a preceding tool-use: should append "(tool: <name>)". *)
@@ -2731,10 +2734,10 @@ let test_enrich_idle_detail_with_tool () =
 (** Idle error with no tool use in messages: detail should be unchanged. *)
 let test_enrich_idle_detail_no_tool () =
   let detail = "Idle detected after 3 identical turns" in
-  let messages =
+  let messages : Agent_sdk.Types.message list =
     [ { Agent_sdk.Types.role = Agent_sdk.Types.User;
         content = [ Agent_sdk.Types.Text "hello" ];
-        name = None; tool_call_id = None } ]
+        name = None; tool_call_id = None; metadata = [] } ]
   in
   let result = Oas_worker_exec.enrich_idle_detail detail messages in
   Alcotest.(check string) "unchanged when no tool" detail result

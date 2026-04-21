@@ -101,16 +101,19 @@ let summarize_chunk (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.mess
   match lines with
   | [] -> None
   | _ ->
-    Some {
-      Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
-      content = [
-        Agent_sdk.Types.Text
-          (Printf.sprintf "[Compacted %d messages into summary]\n%s"
-             (List.length msgs) (String.concat "\n" lines))
-      ];
-      name = None;
-      tool_call_id = None;
-    }
+    Some
+      ({
+         Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
+         content = [
+           Agent_sdk.Types.Text
+             (Printf.sprintf "[Compacted %d messages into summary]\n%s"
+                (List.length msgs) (String.concat "\n" lines))
+         ];
+         name = None;
+         tool_call_id = None;
+         metadata = [];
+       }
+        : Agent_sdk.Types.message)
 
 let mask_tool_result_content ~(tool_name : string option) ~(tool_use_id : string)
     ~(content : string) : string =

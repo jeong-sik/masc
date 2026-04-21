@@ -87,6 +87,7 @@ val cn_claude_api : string
 val cn_codex_api : string
 val cn_gemini_api : string
 val cn_glm : string
+val cn_glm_coding_plan : string
 val cn_openrouter : string
 val cn_custom : string
 
@@ -108,6 +109,11 @@ val voice_adapters : voice_adapter list
 
 (** Normalize a label to lowercase trimmed form. *)
 val normalize_label : string -> string
+
+(** User-facing provider label for cascade/dashboard surfaces.
+    Keeps wire/config prefixes stable while presenting distinct names for
+    ambiguous providers such as [glm] vs [glm-coding]. *)
+val display_provider_name : string -> string
 
 (** SSOT cascade prefix for local models. *)
 val local_cascade_prefix : string

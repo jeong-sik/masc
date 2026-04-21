@@ -17,7 +17,8 @@ let test_alias_roundtrip () =
       ("google", "gemini-api"); ("Gemini", "gemini");
       ("openai", "codex-api"); ("OpenAI", "codex-api");
       ("llama", "llama"); ("llamacpp", "llama");
-      ("glm", "glm"); ("zai", "glm");
+      ("glm", "glm-api"); ("zai", "glm-api");
+      ("glm-coding", "glm-coding-plan");
       ("openrouter", "openrouter") ]
   in
   List.iter (fun (input, expected) ->
@@ -79,12 +80,26 @@ let test_dashboard_provider_snapshots_include_cli_and_api () =
     let open Masc_mcp.Dashboard_provider_runs in
     let claude_cli = provider_snapshot_by_name "claude" in
     let claude_api = provider_snapshot_by_name "claude-api" in
+    let gemini_cli = provider_snapshot_by_name "gemini" in
+    let glm_api = provider_snapshot_by_name "glm-api" in
+    let glm_coding_plan = provider_snapshot_by_name "glm-coding-plan" in
     check bool "cli snapshot present" true (Option.is_some claude_cli);
     check bool "api snapshot present" true (Option.is_some claude_api);
+    check bool "gemini cli snapshot present" true (Option.is_some gemini_cli);
+    check bool "glm api snapshot present" true (Option.is_some glm_api);
+    check bool "glm coding snapshot present" true (Option.is_some glm_coding_plan);
     check string "cli runtime kind" "cli_agent"
       (Option.get claude_cli).runtime_kind;
     check string "api runtime kind" "direct_api"
-      (Option.get claude_api).runtime_kind)
+      (Option.get claude_api).runtime_kind;
+    check string "glm api runtime kind" "direct_api"
+      (Option.get glm_api).runtime_kind;
+    check string "glm coding runtime kind" "direct_api"
+      (Option.get glm_coding_plan).runtime_kind;
+    check bool "gemini cli expands concrete models" true
+      ((Option.get gemini_cli).models <> []);
+    check bool "gemini cli does not expose bare auto" false
+      (List.mem "auto" (Option.get gemini_cli).models))
 
 let test_default_registry_populated () =
   (* Verify default_registry is usable by resolving a known provider.

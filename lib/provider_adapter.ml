@@ -94,8 +94,15 @@ let cn_gemini = "gemini"
 let cn_claude_api = "claude-api"
 let cn_codex_api = "codex-api"
 let cn_gemini_api = "gemini-api"
-let cn_glm = "glm"
+let cn_glm = "glm-api"
+let cn_glm_coding_plan = "glm-coding-plan"
 let cn_openrouter = "openrouter"
+
+let display_provider_name label =
+  match normalize_label label with
+  | "glm" | "glm-api" -> cn_glm
+  | "glm-coding" | "glm-coding-plan" -> cn_glm_coding_plan
+  | _ -> String.trim label
 
 (** Default API base URLs — overridable via env var for proxying/testing. *)
 
@@ -115,6 +122,12 @@ let openrouter_api_url () =
 
 let gemini_generative_api_url () =
   env_url_or ~env:"GEMINI_API_URL" ~default:"https://generativelanguage.googleapis.com"
+
+let glm_api_url () =
+  env_url_or ~env:"ZAI_BASE_URL" ~default:Llm_provider.Zai_catalog.general_base_url
+
+let glm_coding_api_url () =
+  env_url_or ~env:"ZAI_CODING_BASE_URL" ~default:Llm_provider.Zai_catalog.coding_base_url
 
 (** SSOT cascade prefix for local llama-server instances.
     All cascade label construction for local models must use this constant.
@@ -247,11 +260,22 @@ let direct_adapters =
       canonical_name = cn_glm;
       runtime_kind = Direct_api;
       auth_mode = Api_key "ZAI_API_KEY";
-      aliases = [ cn_glm; "glm_cloud"; "zai" ];
+      aliases = [ cn_glm; "glm"; "glm_cloud"; "zai" ];
       spawn_key = None;
       cascade_prefix = "glm";
       default_voice = None;
-      endpoint_url = Some Env_config_runtime.Glm.server_url;
+      endpoint_url = Some (glm_api_url ());
+      default_model_id = Some "auto";
+    };
+    {
+      canonical_name = cn_glm_coding_plan;
+      runtime_kind = Direct_api;
+      auth_mode = Api_key "ZAI_API_KEY";
+      aliases = [ cn_glm_coding_plan; "glm-coding" ];
+      spawn_key = None;
+      cascade_prefix = "glm-coding";
+      default_voice = None;
+      endpoint_url = Some (glm_coding_api_url ());
       default_model_id = Some "auto";
     };
     {

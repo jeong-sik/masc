@@ -147,20 +147,37 @@ let model_id_of_label label =
 (* auth_kind_for_provider and endpoint_url_for_provider removed.
    Use Provider_adapter.auth_detail_of_provider instead. *)
 
+let catalog_models_for_provider provider =
+  match Provider_adapter.resolve_direct_adapter provider with
+  | Some { canonical_name; _ } when canonical_name = Provider_adapter.cn_llama -> []
+  | Some { canonical_name; _ } when canonical_name = Provider_adapter.cn_gemini ->
+      Cascade_model_resolve.gemini_cli_auto_models ()
+  | Some { canonical_name; _ } when canonical_name = Provider_adapter.cn_codex ->
+      Cascade_model_resolve.codex_cli_auto_models ()
+  | Some { canonical_name; _ } when canonical_name = Provider_adapter.cn_claude ->
+      Cascade_model_resolve.claude_code_auto_models ()
+  | Some { canonical_name; _ } when canonical_name = Provider_adapter.cn_glm ->
+      Cascade_model_resolve.glm_auto_models ()
+  | Some { canonical_name; _ }
+    when canonical_name = Provider_adapter.cn_glm_coding_plan ->
+      Cascade_model_resolve.glm_coding_auto_models ()
+  | Some _ -> [ "auto" ]
+  | None -> []
+
 let default_model_for_provider provider =
   match Provider_adapter.resolve_direct_adapter provider with
   | Some { canonical_name; _ } when canonical_name = Provider_adapter.cn_llama -> (
       match Provider_adapter.explicit_llama_model_id_result () with
       | Ok model_id -> trim_nonempty model_id
       | Error _ -> None)
-  | Some { default_model_id; _ } -> default_model_id
+  | Some { default_model_id; _ } -> (
+      match catalog_models_for_provider provider with
+      | first :: _ when String.trim first <> "" && first <> "auto" -> Some first
+      | _ -> default_model_id)
   | None -> None
 
 let candidate_models_for_provider provider =
-  match Provider_adapter.resolve_direct_adapter provider with
-  | Some { canonical_name; _ } when canonical_name = Provider_adapter.cn_llama -> []
-  | Some _ -> [ "auto" ]
-  | None -> []
+  catalog_models_for_provider provider
 
 let llama_snapshot () =
   let discovered_models, status, available, note =

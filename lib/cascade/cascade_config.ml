@@ -600,6 +600,11 @@ let resolve_model_strings ?config_path ~name ~defaults () =
 
 type candidate_info = {
   model_string : string;
+  display_model_string : string;
+  provider_name : string option;
+  display_provider_name : string option;
+  runtime_kind : string option;
+  expanded_models : string list;
   config_weight : int;
   effective_weight : int;
   success_rate : float;
@@ -618,20 +623,81 @@ let provider_key_of_model_string s =
   | _ :: rest when rest <> [] -> String.concat ":" rest
   | _ -> s
 
+let display_model_string s =
+  match split_provider_model s with
+  | Some (provider_name, model_id) ->
+      Printf.sprintf "%s:%s"
+        (Provider_adapter.display_provider_name provider_name)
+        model_id
+  | None -> s
+
+let runtime_kind_of_provider_name provider_name =
+  match Provider_adapter.resolve_direct_adapter provider_name with
+  | Some adapter -> Some (Provider_adapter.string_of_runtime_kind adapter.runtime_kind)
+  | None -> None
+
 (** Build a [candidate_info] for a model string given its config weight.
     Reads current health tracker state for [success_rate] / [in_cooldown]
     / [effective_weight], so the trace reflects state at call time. *)
 let candidate_info_of_weighted (e : Cascade_config_loader.weighted_entry) =
   let health = Cascade_health_tracker.global in
-  let key = provider_key_of_model_string e.model in
-  let success_rate = Cascade_health_tracker.success_rate health ~provider_key:key in
-  let in_cooldown = Cascade_health_tracker.is_in_cooldown health ~provider_key:key in
+  let expanded_raw_models = expand_auto_model_string e.model in
+  let provider_keys = List.map provider_key_of_model_string expanded_raw_models in
+  let health_rows =
+    List.map
+      (fun provider_key ->
+         let success_rate =
+           Cascade_health_tracker.success_rate health ~provider_key
+         in
+         let in_cooldown =
+           Cascade_health_tracker.is_in_cooldown health ~provider_key
+         in
+         let effective_weight =
+           Cascade_health_tracker.effective_weight health
+             ~provider_key ~config_weight:e.weight
+         in
+         (success_rate, in_cooldown, effective_weight))
+      provider_keys
+  in
+  let success_rate =
+    let preferred =
+      health_rows
+      |> List.filter_map (fun (rate, cooled_down, _weight) ->
+             if cooled_down then None else Some rate)
+    in
+    let source =
+      match preferred with
+      | _ :: _ -> preferred
+      | [] -> List.map (fun (rate, _cooled_down, _weight) -> rate) health_rows
+    in
+    List.fold_left Float.max 0.0 source
+  in
+  let in_cooldown =
+    match health_rows with
+    | [] -> false
+    | rows -> List.for_all (fun (_rate, cooled_down, _weight) -> cooled_down) rows
+  in
   let effective_weight =
-    Cascade_health_tracker.effective_weight health
-      ~provider_key:key ~config_weight:e.weight
+    List.fold_left
+      (fun acc (_rate, _cooled_down, weight) -> Int.max acc weight)
+      0
+      health_rows
+  in
+  let provider_name, display_provider_name, runtime_kind =
+    match split_provider_model e.model with
+    | Some (provider_name, _model_id) ->
+        let display_name = Provider_adapter.display_provider_name provider_name in
+        (Some provider_name, Some display_name,
+         runtime_kind_of_provider_name provider_name)
+    | None -> (None, None, None)
   in
   {
     model_string = e.model;
+    display_model_string = display_model_string e.model;
+    provider_name;
+    display_provider_name;
+    runtime_kind;
+    expanded_models = List.map display_model_string expanded_raw_models;
     config_weight = e.weight;
     effective_weight;
     success_rate;
@@ -686,22 +752,8 @@ let dedupe_stable (items : string list) =
   loop [] [] items
 
 let expand_model_strings_for_execution (items : string list) =
-  let expand_one raw =
-    let item = String.trim raw in
-    if item = "" then []
-    else
-      match split_provider_model item with
-      | Some ("glm", model_id)
-        when String.lowercase_ascii model_id = "auto" ->
-        [item; "glm:turbo"; "glm:flash"]
-      | Some ("glm-coding", model_id)
-        when String.lowercase_ascii model_id = "auto" ->
-        [item; "glm-coding:glm-5-turbo"; "glm-coding:glm-5.1";
-         "glm-coding:glm-4.5-air"]
-      | _ -> [item]
-  in
   items
-  |> List.concat_map expand_one
+  |> List.concat_map expand_auto_model_string
   |> dedupe_stable
 
 (* Filter providers by kind name (exact, case-insensitive).

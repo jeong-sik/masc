@@ -6,7 +6,7 @@
 
 type backend =
   | Local
-  | Docker_hardened
+  | Docker
 
 type t =
   { keeper_name : string
@@ -31,13 +31,12 @@ let strip_trailing_slashes path =
   if len = String.length path then path else String.sub path 0 len
 
 let backend_of_profile = function
-  | Keeper_types.Legacy_local -> Local
-  | Keeper_types.Docker_hardened | Keeper_types.Docker_with_git ->
-      Docker_hardened
+  | Keeper_types.Local -> Local
+  | Keeper_types.Docker -> Docker
 
 let backend_to_string = function
   | Local -> "local"
-  | Docker_hardened -> "docker_hardened"
+  | Docker -> "docker"
 
 let sandbox_id_of_name name =
   "keeper:" ^ Playground_paths.sanitize_keeper_name name
@@ -65,7 +64,7 @@ let of_meta ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) : t =
   ; container_root =
       (match backend with
        | Local -> None
-       | Docker_hardened -> Some (container_root meta.name))
+       | Docker -> Some (container_root meta.name))
   ; root_arg = "."
   ; mind_arg = "mind"
   ; repos_arg = "repos"

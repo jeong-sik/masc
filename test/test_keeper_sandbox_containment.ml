@@ -69,10 +69,10 @@ let test_legacy_keeper_always_allowed () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
-  let meta = make_meta ~name:"alice" ~sandbox:Keeper_types.Legacy_local in
+  let meta = make_meta ~name:"alice" ~sandbox:Keeper_types.Local in
   let outside = "/etc/passwd" in
   Alcotest.(check bool)
-    "Legacy_local keeper bypasses containment even with flag on"
+    "Local keeper bypasses containment even with flag on"
     true
     (Result.is_ok
        (Keeper_sandbox_containment.check_read_target
@@ -82,10 +82,10 @@ let test_hardened_keeper_with_flag_off_is_passthrough () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "false" @@ fun () ->
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker_hardened in
+  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker in
   let outside = "/etc/passwd" in
   Alcotest.(check bool)
-    "Docker_hardened with flag off allows host paths (legacy behavior)"
+    "Docker with flag off allows host paths (legacy behavior)"
     true
     (Result.is_ok
        (Keeper_sandbox_containment.check_read_target
@@ -95,7 +95,7 @@ let test_hardened_with_flag_on_blocks_outside () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker_hardened in
+  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker in
   let outside = "/etc/passwd" in
   match
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target:outside
@@ -114,7 +114,7 @@ let test_hardened_with_flag_on_allows_inside_playground () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker_hardened in
+  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker in
   let bundle =
     Filename.concat base
       (Keeper_alerting_path.playground_path_of_keeper meta.name)
@@ -130,9 +130,9 @@ let test_docker_with_git_also_contained () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
-  let meta = make_meta ~name:"poe" ~sandbox:Keeper_types.Docker_with_git in
+  let meta = make_meta ~name:"poe" ~sandbox:Keeper_types.Docker in
   let outside = "/etc/passwd" in
-  Alcotest.(check bool) "Docker_with_git is also subject to containment"
+  Alcotest.(check bool) "Docker is also subject to containment"
     true
     (Result.is_error
        (Keeper_sandbox_containment.check_read_target
@@ -142,7 +142,7 @@ let test_path_just_outside_playground_blocked () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker_hardened in
+  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker in
   (* Sibling directory with a name that LOOKS like a prefix of the playground
      path; must still be blocked (prevents the classic prefix-without-slash
      containment bypass). *)

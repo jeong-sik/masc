@@ -462,7 +462,7 @@ let () =
           if not (List.mem actual valid_sandbox_profile_strings) then
             Alcotest.failf "sandbox_profile_to_string %S not in valid_sandbox_profile_strings" actual
         in
-        witness Legacy_local; witness Docker_hardened; witness Docker_with_git;
+        witness Local; witness Docker; witness Docker;
         Alcotest.(check int) "count" 3 (List.length valid_sandbox_profile_strings));
       Alcotest.test_case "cmd_targets_git_or_gh dispatch predicate" `Quick (fun () ->
         let p = Masc_mcp.Keeper_exec_shell.cmd_targets_git_or_gh in

@@ -207,7 +207,7 @@ let blocked_by_symmetric_sandbox raw =
 
 let test_legacy_keeper_unaffected () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  setup ~keeper_name:"alice" ~sandbox:Keeper_types.Legacy_local
+  setup ~keeper_name:"alice" ~sandbox:Keeper_types.Local
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "secret.txt" in
   let raw =
@@ -219,7 +219,7 @@ let test_legacy_keeper_unaffected () =
 
 let test_hardened_flag_off_passthrough () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "false" @@ fun () ->
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker_hardened
+  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "secret.txt" in
   let raw =
@@ -231,7 +231,7 @@ let test_hardened_flag_off_passthrough () =
 
 let test_hardened_flag_on_blocks_ls_outside () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker_hardened
+  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside_dir = Filename.concat base "outside_playground" in
   ensure_dir outside_dir;
@@ -245,7 +245,7 @@ let test_hardened_flag_on_blocks_ls_outside () =
 
 let test_hardened_flag_on_blocks_cat_outside () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker_hardened
+  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "host_secret.txt" in
   let raw =
@@ -257,7 +257,7 @@ let test_hardened_flag_on_blocks_cat_outside () =
 
 let test_hardened_flag_on_blocks_rg_outside () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker_hardened
+  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside_dir = Filename.concat base "outside_playground" in
   ensure_dir outside_dir;
@@ -280,7 +280,7 @@ let test_hardened_flag_on_blocks_rg_outside () =
 
 let test_hardened_flag_on_blocks_find_outside () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker_hardened
+  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside_dir = Filename.concat base "outside_playground" in
   ensure_dir outside_dir;
@@ -299,7 +299,7 @@ let test_hardened_flag_on_blocks_find_outside () =
 
 let test_hardened_flag_on_allows_inside_playground () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker_hardened
+  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   let demo = Filename.concat playground "demo.txt" in
   ignore (Fs_compat.save_file_atomic demo "hello inside playground");
@@ -315,7 +315,7 @@ let test_hardened_flag_on_allows_inside_playground () =
 
 let test_docker_with_git_also_contained () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  setup ~keeper_name:"poe" ~sandbox:Keeper_types.Docker_with_git
+  setup ~keeper_name:"poe" ~sandbox:Keeper_types.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "git_secret.txt" in
   let raw =
@@ -326,7 +326,7 @@ let test_docker_with_git_also_contained () =
     (blocked_by_symmetric_sandbox raw)
 
 let test_gh_binds_repo_from_active_task_worktree () =
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Legacy_local
+  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Local
   @@ fun ~base ~config ~meta ~playground ->
   let git_root = Filename.concat playground "repos/masc-mcp" in
   let worktree_rel = ".worktrees/task-001" in
@@ -380,7 +380,7 @@ let test_gh_binds_repo_from_active_task_worktree () =
     (parse_field raw "repo")
 
 let test_gh_missing_worktree_returns_typed_error () =
-  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Legacy_local
+  setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Local
   @@ fun ~base:_ ~config ~meta ~playground:_ ->
   ignore (Coord.init config ~agent_name:(Some meta.agent_name));
   ignore

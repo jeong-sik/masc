@@ -564,10 +564,12 @@ module KeeperSandbox = struct
   let require_userns () =
     get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
 
-  (** docker_with_git: when true, route keeper_bash commands beginning with
-      "git " or "gh " to the Docker_with_git profile even when the keeper's
-      default profile is Docker_hardened. Lets a single keeper run network-
-      bound git/gh ops without granting wholesale network for all bash. *)
+  (** Docker git-credential dispatch: when true, keeper_bash commands
+      beginning with "git " or "gh " run in a Docker container with
+      network_mode=inherit and read-only mounts of ~/.config/gh and
+      ~/.gitconfig. Default commands stay on network_mode=none. Lets a
+      single [sandbox_profile=docker] keeper run network-bound git/gh ops
+      without granting wholesale network for all bash. *)
   let with_git_dispatch_enabled () =
     get_bool ~default:true "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
 

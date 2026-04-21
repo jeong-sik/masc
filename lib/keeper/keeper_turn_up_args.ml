@@ -427,13 +427,13 @@ let validate_sandbox_settings
     ~network_mode
     ~allowed_paths =
   match sandbox_profile with
-  | Legacy_local -> (
+  | Local -> (
       match network_mode with
       | Network_inherit -> Ok ()
       | Network_none ->
           Error
-            "network_mode=none requires sandbox_profile=docker_hardened")
-  | Docker_hardened | Docker_with_git ->
+            "network_mode=none requires sandbox_profile=docker")
+  | Docker ->
       let profile_label = sandbox_profile_to_string sandbox_profile in
       if allowed_paths = [ "*" ] then
         Error

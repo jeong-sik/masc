@@ -1156,9 +1156,8 @@ let keeper_config_json (config : Coord.config) (name : string)
         | None -> None
       in
       let effective_sandbox_image =
-        if m.sandbox_profile = Keeper_types.Docker_hardened
-           || m.sandbox_profile = Keeper_types.Docker_with_git
-           || (m.sandbox_profile = Keeper_types.Legacy_local
+        if m.sandbox_profile = Keeper_types.Docker
+           || (m.sandbox_profile = Keeper_types.Local
                && Env_config_keeper.DockerPlayground.enabled)
         then Some (Env_config_keeper.KeeperSandbox.docker_image ())
         else None

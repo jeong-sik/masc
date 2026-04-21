@@ -448,11 +448,11 @@ let docker_private_workspace_cwd ~(config : Coord.config) ~(meta : keeper_meta)
     container_root
 
 let effective_sandbox_profile ~(meta : keeper_meta) ~in_playground =
-  if meta.sandbox_profile = Legacy_local
+  if meta.sandbox_profile = Local
      && Env_config_keeper.DockerPlayground.enabled
      && in_playground
   then
-    (Docker_hardened, Network_inherit)
+    (Docker, Network_inherit)
   else
     (meta.sandbox_profile, meta.network_mode)
 
@@ -801,16 +801,20 @@ let handle_keeper_bash
     let base_profile, base_network_mode =
       effective_sandbox_profile ~meta ~in_playground
     in
-    (* docker_with_git per-command dispatch. Upgrades a Docker_hardened keeper
-       to Docker_with_git when the command's leading token is git/gh, so the
-       container gets bridge network + read-only credential mounts.
-       Disabled when MASC_KEEPER_SANDBOX_GIT_DISPATCH=false. *)
-    let sandbox_profile, sandbox_network_mode =
-      if base_profile = Docker_hardened
+    (* Docker git-credential dispatch. When base profile is Docker and the
+       command's leading token is git/gh, upgrade network to inherit and
+       enable read-only mounts of ~/.config/gh and ~/.gitconfig for the
+       duration of this command. Disabled when
+       MASC_KEEPER_SANDBOX_GIT_DISPATCH=false.
+       [git_creds_enabled] replaces the former Docker_with_git variant:
+       the external profile stays Docker; the dispatcher reads this flag
+       to choose between run_docker_with_git_bash and run_docker_hardened_bash. *)
+    let sandbox_profile, sandbox_network_mode, git_creds_enabled =
+      if base_profile = Docker
          && Env_config_keeper.KeeperSandbox.with_git_dispatch_enabled ()
          && cmd_targets_git_or_gh cmd
-      then (Docker_with_git, Network_inherit)
-      else (base_profile, base_network_mode)
+      then (Docker, Network_inherit, true)
+      else (base_profile, base_network_mode, false)
     in
     (* Destructive guard: always active regardless of Docker or preset *)
     if Worker_dev_tools.is_destructive_bash_operation cmd
@@ -826,15 +830,15 @@ let handle_keeper_bash
            ~retryability:Exec_core.Operator_required
            ~extra:[ "cmd", `String cmd_for_log ]
            ()))
-    else if sandbox_profile = Docker_with_git then (
+    else if sandbox_profile = Docker && git_creds_enabled then (
       Log.Keeper.info
-        "DOCKER_WITH_GIT_EXEC: keeper=%s cwd=%s cmd=%s"
+        "DOCKER_GIT_EXEC: keeper=%s cwd=%s cmd=%s"
         meta.name cwd cmd_for_log;
       run_docker_with_git_bash
         ~config ~meta ~cwd ~timeout_sec ~cmd)
-    else if sandbox_profile = Docker_hardened then (
+    else if sandbox_profile = Docker then (
       Log.Keeper.info
-        "DOCKER_HARDENED_EXEC: keeper=%s cwd=%s cmd=%s network=%s"
+        "DOCKER_EXEC: keeper=%s cwd=%s cmd=%s network=%s"
         meta.name cwd cmd_for_log (network_mode_to_string sandbox_network_mode);
       run_docker_hardened_bash
         ~config ~meta ~cwd ~timeout_sec ~cmd

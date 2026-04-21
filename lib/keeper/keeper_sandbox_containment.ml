@@ -20,9 +20,8 @@ let target_is_inside_playground ~playground ~target =
   target = playground || starts_with ~prefix:(playground ^ "/") target
 
 let is_hardened_profile = function
-  | Keeper_types.Docker_hardened
-  | Keeper_types.Docker_with_git -> true
-  | Keeper_types.Legacy_local -> false
+  | Keeper_types.Docker -> true
+  | Keeper_types.Local -> false
 
 let check_read_target ~config ~meta ~target =
   if not (is_hardened_profile meta.Keeper_types.sandbox_profile)
@@ -36,9 +35,8 @@ let check_read_target ~config ~meta ~target =
       Error
         (Printf.sprintf
            "symmetric_sandbox_blocked: target %s is outside keeper playground \
-            %s. Hardened keepers (sandbox_profile=docker_hardened or \
-            docker_with_git) with MASC_KEEPER_SYMMETRIC_SANDBOX=true may only \
-            read inside their playground. Clone the source into your \
-            playground via keeper_shell op=git_clone, or operate inside \
-            %s/repos/."
+            %s. Keepers with sandbox_profile=docker and \
+            MASC_KEEPER_SYMMETRIC_SANDBOX=true may only read inside their \
+            playground. Clone the source into your playground via keeper_shell \
+            op=git_clone, or operate inside %s/repos/."
            target_norm playground playground)

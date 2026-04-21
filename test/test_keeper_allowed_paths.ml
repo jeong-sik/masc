@@ -417,7 +417,7 @@ let test_docker_hardened_rejects_wildcard_allowed_paths () =
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"sangsu"
-        ~sandbox_profile:KT.Docker_hardened
+        ~sandbox_profile:KT.Docker
         ~network_mode:KT.Network_none
         ~allowed_paths:["*"]
     with
@@ -432,7 +432,7 @@ let test_docker_hardened_rejects_paths_outside_private_root () =
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"sangsu"
-        ~sandbox_profile:KT.Docker_hardened
+        ~sandbox_profile:KT.Docker
         ~network_mode:KT.Network_none
         ~allowed_paths:["workspace/other-repo"]
     with
@@ -447,7 +447,7 @@ let test_docker_hardened_rejects_root_allowed_path () =
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"sangsu"
-        ~sandbox_profile:KT.Docker_hardened
+        ~sandbox_profile:KT.Docker
         ~network_mode:KT.Network_none
         ~allowed_paths:["/"]
     with
@@ -462,7 +462,7 @@ let test_docker_hardened_rejects_glob_like_allowed_path () =
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"sangsu"
-        ~sandbox_profile:KT.Docker_hardened
+        ~sandbox_profile:KT.Docker
         ~network_mode:KT.Network_none
         ~allowed_paths:["/tmp/**"]
     with
@@ -478,7 +478,7 @@ let test_docker_hardened_rejects_traversal_allowed_path () =
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"sangsu"
-        ~sandbox_profile:KT.Docker_hardened
+        ~sandbox_profile:KT.Docker
         ~network_mode:KT.Network_none
         ~allowed_paths:
           [ private_root ^ "/repos/demo/../../../../../../etc/passwd" ]
@@ -507,7 +507,7 @@ let test_docker_hardened_accepts_private_root_paths () =
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"sangsu"
-        ~sandbox_profile:KT.Docker_hardened
+        ~sandbox_profile:KT.Docker
         ~network_mode:KT.Network_none
         ~allowed_paths:[private_root ^ "/repos/demo"]
     with
@@ -520,7 +520,7 @@ let test_legacy_local_rejects_network_none () =
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"sangsu"
-        ~sandbox_profile:KT.Legacy_local
+        ~sandbox_profile:KT.Local
         ~network_mode:KT.Network_none
         ~allowed_paths:[]
     with

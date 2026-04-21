@@ -10,8 +10,8 @@
 open Keeper_types
 
 let is_hardened = function
-  | Docker_hardened | Docker_with_git -> true
-  | Legacy_local -> false
+  | Docker -> true
+  | Local -> false
 
 let should_route_read ~(meta : keeper_meta) : bool =
   is_hardened meta.sandbox_profile

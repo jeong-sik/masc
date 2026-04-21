@@ -54,6 +54,9 @@ TLC = $(JAVA) $(JAVA_OPTS) \
 CLEAN_CFGS := $(shell find . -name '*.cfg' ! -name '*-buggy*.cfg' ! -name '*-ci.cfg' | sort)
 BUGGY_CFGS := $(shell find . -name '*-buggy*.cfg' | sort)
 
+clean_cfgs_in = $(shell find $(1) -name '*.cfg' ! -name '*-buggy*.cfg' | sort)
+buggy_cfgs_in = $(shell find $(1) -name '*-buggy*.cfg' | sort)
+
 .PHONY: check-all check-clean check-buggy check-bug-models check-keeper check-ecosystem check-boundary check-closure list clean clean-artefacts
 
 clean: clean-artefacts
@@ -113,30 +116,25 @@ check-buggy:
 	done; \
 	if [ $$fail -eq 1 ]; then exit 1; fi
 
-check-bug-models:
-	@$(MAKE) --no-print-directory \
-	  CLEAN_CFGS="$$(find bug-models/ -name '*.cfg' ! -name '*-buggy*.cfg' | sort)" \
-	  BUGGY_CFGS="$$(find bug-models/ -name '*-buggy*.cfg' | sort)" check-all
+check-bug-models: CLEAN_CFGS := $(call clean_cfgs_in,bug-models/)
+check-bug-models: BUGGY_CFGS := $(call buggy_cfgs_in,bug-models/)
+check-bug-models: check-all
 
-check-keeper:
-	@$(MAKE) --no-print-directory \
-	  CLEAN_CFGS="$$(find keeper-state-machine/ -name '*.cfg' ! -name '*-buggy*.cfg' | sort)" \
-	  BUGGY_CFGS="$$(find keeper-state-machine/ -name '*-buggy*.cfg' | sort)" check-all
+check-keeper: CLEAN_CFGS := $(call clean_cfgs_in,keeper-state-machine/)
+check-keeper: BUGGY_CFGS := $(call buggy_cfgs_in,keeper-state-machine/)
+check-keeper: check-all
 
-check-ecosystem:
-	@$(MAKE) --no-print-directory \
-	  CLEAN_CFGS="$$(find masc-ecosystem/ -name '*.cfg' ! -name '*-buggy*.cfg' | sort)" \
-	  BUGGY_CFGS="" check-all
+check-ecosystem: CLEAN_CFGS := $(call clean_cfgs_in,masc-ecosystem/)
+check-ecosystem: BUGGY_CFGS :=
+check-ecosystem: check-all
 
-check-boundary:
-	@$(MAKE) --no-print-directory \
-	  CLEAN_CFGS="$$(find boundary/ -name '*.cfg' ! -name '*-buggy*.cfg' | sort)" \
-	  BUGGY_CFGS="$$(find boundary/ -name '*-buggy*.cfg' | sort)" check-all
+check-boundary: CLEAN_CFGS := $(call clean_cfgs_in,boundary/)
+check-boundary: BUGGY_CFGS := $(call buggy_cfgs_in,boundary/)
+check-boundary: check-all
 
-check-closure:
-	@$(MAKE) --no-print-directory \
-	  CLEAN_CFGS="$$(find closure/ -name '*.cfg' ! -name '*-buggy*.cfg' | sort)" \
-	  BUGGY_CFGS="$$(find closure/ -name '*-buggy*.cfg' | sort)" check-all
+check-closure: CLEAN_CFGS := $(call clean_cfgs_in,closure/)
+check-closure: BUGGY_CFGS := $(call buggy_cfgs_in,closure/)
+check-closure: check-all
 
 list:
 	@echo "Clean specs ($(words $(CLEAN_CFGS))):"; \

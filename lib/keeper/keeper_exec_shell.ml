@@ -2080,27 +2080,10 @@ let handle_keeper_shell
                  ])
           else
             let ok = st = Unix.WEXITED 0 in
-            let base_fields =
-              gh_context_fields ctx
-              @ [ "status", Keeper_alerting_path.process_status_to_json st
-                ; "output", `String out ]
-            in
-            let hinted_fields =
-              if (not ok)
-                 && String_util.contains_substring_ci out
-                      "Could not resolve to a Repository"
-              then
-                base_fields
-                @ [ "error", `String "gh_repo_resolve_failed"
-                  ; "hint", `String
-                      "gh is bound to the active task worktree repo. \
-                       Ensure the linked sandbox clone still has a valid \
-                       origin remote and recreate the task worktree if needed."
-                  ]
-              else base_fields
-            in
             gh_base ~command ~ok ~cwd:ctx.worktree_cwd
-              hinted_fields
+              (gh_context_fields ctx
+               @ [ "status", Keeper_alerting_path.process_status_to_json st
+                 ; "output", `String out ])
         in
         (match reversibility with
          | Worker_dev_tools.R2_Irreversible ->

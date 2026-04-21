@@ -127,7 +127,7 @@ let empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens
     top_k = None;
     min_p = None;
     enable_thinking = None;
-    response_format = Agent_sdk.Types.Off;
+    response_format_json = false;
     thinking_budget = None;
     cache_system_prompt = false;
     max_input_tokens = None;

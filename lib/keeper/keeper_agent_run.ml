@@ -2281,10 +2281,7 @@ let run_turn
              Error
                (Oas.Error.Agent
                   (Oas.Error.CompletionContractViolation
-                     {
-                       contract = Oas.Completion_contract_id.Require_tool_use;
-                       reason;
-                     }))
+                     { contract = "require_tool_use"; reason }))
          in
          let finalize_response_text response_text =
            (* Ensure every generation has a [STATE] block for continuity.

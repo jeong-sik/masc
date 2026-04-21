@@ -25,7 +25,7 @@ let tasks ?status_filter ?(include_done = false) ?(include_cancelled = false)
     config =
   Coord.get_tasks_raw config
   |> List.filter (task_status_matches status_filter)
-  |> List.filter (fun task ->
+  |> List.filter (fun (task : Types.task) ->
          match status_filter with
          | Some _ -> true
          | None ->

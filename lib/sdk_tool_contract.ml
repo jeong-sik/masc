@@ -459,7 +459,7 @@ let sdk_alias_json binding =
   let inject_agent_name =
     List.exists
       (fun (_target, source) ->
-        match source with Agent_name -> true | _ -> false)
+        match source with Agent_name -> true | Input_field _ | Static _ -> false)
       binding.arg_bindings
   in
   `Assoc

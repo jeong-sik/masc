@@ -67,7 +67,7 @@ let make_meta ~name ~sandbox =
 let test_legacy_keeper_never_routes () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
-  let meta = make_meta ~name:"alice" ~sandbox:Keeper_types.Legacy_local in
+  let meta = make_meta ~name:"alice" ~sandbox:Keeper_types.Local in
   Alcotest.(check bool) "legacy keeper never routes through docker"
     false
     (Keeper_docker_read.should_route_read ~meta)
@@ -76,7 +76,7 @@ let test_hardened_with_only_symmetric_does_not_route () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_env "MASC_KEEPER_DOCKER_READ" "false" @@ fun () ->
   let meta =
-    make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker_hardened
+    make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker
   in
   Alcotest.(check bool) "B-1 alone does not enable B-2 routing"
     false
@@ -86,7 +86,7 @@ let test_hardened_with_only_docker_read_does_not_route () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "false" @@ fun () ->
   with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
   let meta =
-    make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker_hardened
+    make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker
   in
   Alcotest.(check bool)
     "DOCKER_READ alone (without SYMMETRIC_SANDBOX) does not route"
@@ -97,19 +97,19 @@ let test_hardened_with_both_flags_routes () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
   let meta =
-    make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker_hardened
+    make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker
   in
   Alcotest.(check bool) "hardened + both flags → docker route"
     true
     (Keeper_docker_read.should_route_read ~meta)
 
-let test_docker_with_git_also_routes () =
+let test_docker_git_creds_routes () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
   let meta =
-    make_meta ~name:"poe" ~sandbox:Keeper_types.Docker_with_git
+    make_meta ~name:"poe" ~sandbox:Keeper_types.Docker
   in
-  Alcotest.(check bool) "docker_with_git also routes" true
+  Alcotest.(check bool) "docker git-creds also routes" true
     (Keeper_docker_read.should_route_read ~meta)
 
 (* ── container_path_of_host pure mapping ─────────────────────────── *)
@@ -119,7 +119,7 @@ let setup_config name =
   Unix.mkdir (Filename.concat base ".masc") 0o755;
   let config = Coord.default_config base in
   let meta =
-    make_meta ~name ~sandbox:Keeper_types.Docker_hardened
+    make_meta ~name ~sandbox:Keeper_types.Docker
   in
   base, config, meta
 
@@ -400,8 +400,8 @@ let () =
             test_hardened_with_only_docker_read_does_not_route;
           Alcotest.test_case "hardened + both flags routes" `Quick
             test_hardened_with_both_flags_routes;
-          Alcotest.test_case "docker_with_git also routes" `Quick
-            test_docker_with_git_also_routes;
+          Alcotest.test_case "docker git-creds also routes" `Quick
+            test_docker_git_creds_routes;
         ] );
       ( "container_path_of_host",
         [

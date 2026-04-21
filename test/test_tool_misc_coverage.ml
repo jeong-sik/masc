@@ -779,7 +779,7 @@ let () = test "keeper_up update recomputes network_mode for sandbox profile chan
             (`Assoc
               [
                 ("name", `String keeper_name);
-                ("sandbox_profile", `String "docker_hardened");
+                ("sandbox_profile", `String "docker");
               ])
       with
       | Some (true, _) -> (
@@ -787,7 +787,7 @@ let () = test "keeper_up update recomputes network_mode for sandbox profile chan
           | Ok (Some meta) ->
               Alcotest.(check string)
                 "sandbox profile updated"
-                "docker_hardened"
+                "docker"
                 (Keeper_types.sandbox_profile_to_string meta.sandbox_profile);
               Alcotest.(check string)
                 "network mode follows hardened default"

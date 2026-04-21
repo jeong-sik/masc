@@ -9,7 +9,7 @@
 
 type backend =
   | Local
-  | Docker_hardened
+  | Docker
 
 type t = {
   keeper_name : string;

@@ -195,7 +195,7 @@ let test_readonly_ops_route_through_docker () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker_hardened
+  setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   assert_docker_route_fires ~config ~meta ~playground
 
@@ -203,7 +203,7 @@ let test_cat_legacy_keeper_skips_docker () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup ~sandbox:Keeper_types.Legacy_local
+  setup ~sandbox:Keeper_types.Local
   @@ fun ~config ~meta ~playground ->
   let host_path = Filename.concat playground "mind/x" in
   ensure_dir (Filename.dirname host_path);
@@ -221,7 +221,7 @@ let test_cat_flag_off_skips_docker () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_env "MASC_KEEPER_DOCKER_READ" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker_hardened
+  setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   let host_path = Filename.concat playground "mind/x" in
   ensure_dir (Filename.dirname host_path);
@@ -264,7 +264,7 @@ let test_rg_no_match_remains_successful_in_docker_route () =
   with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_rg_no_match_script @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker_hardened
+  setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   let host_path = Filename.concat playground "mind/demo.txt" in
   ensure_dir (Filename.dirname host_path);

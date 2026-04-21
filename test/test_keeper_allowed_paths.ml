@@ -246,7 +246,7 @@ let test_sandbox_contract_reports_docker_container_root () =
       ("trace_id", `String "trace-keeper");
       ("goal", `String "test");
       ("execution_scope", `String "workspace");
-      ("sandbox_profile", `String "docker_hardened");
+      ("sandbox_profile", `String "docker");
       ("network_mode", `String "none");
     ] in
     match KT.meta_of_json json with
@@ -255,7 +255,7 @@ let test_sandbox_contract_reports_docker_container_root () =
   in
   with_temp_config (fun config ->
     let sb = KS.of_meta ~config ~meta in
-    check string "docker backend" "docker_hardened"
+    check string "docker backend" "docker"
       (KS.backend_to_string sb.backend);
     check (option string) "docker has private container root"
       (Some "/home/keeper/playground/keeper") sb.container_root)
@@ -411,84 +411,84 @@ let test_multi_sandbox_repo_relative_path_is_ambiguous () =
       check bool "mentions second candidate" true
         (contains_substring ~haystack:err ~needle:"other-repo"))
 
-let test_docker_hardened_rejects_wildcard_allowed_paths () =
+let test_docker_rejects_wildcard_allowed_paths () =
   with_temp_config (fun config ->
     match
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"sangsu"
-        ~sandbox_profile:KT.Docker_hardened
+        ~sandbox_profile:KT.Docker
         ~network_mode:KT.Network_none
         ~allowed_paths:["*"]
     with
-    | Ok () -> fail "expected docker_hardened wildcard rejection"
+    | Ok () -> fail "expected docker wildcard rejection"
     | Error err ->
         check bool "mentions wildcard" true
           (String_util.contains_substring err "allowed_paths=[\"*\"]"))
 
-let test_docker_hardened_rejects_paths_outside_private_root () =
+let test_docker_rejects_paths_outside_private_root () =
   with_temp_config (fun config ->
     match
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"sangsu"
-        ~sandbox_profile:KT.Docker_hardened
+        ~sandbox_profile:KT.Docker
         ~network_mode:KT.Network_none
         ~allowed_paths:["workspace/other-repo"]
     with
-    | Ok () -> fail "expected docker_hardened path rejection"
+    | Ok () -> fail "expected docker path rejection"
     | Error err ->
         check bool "mentions private playground" true
           (String_util.contains_substring err ".masc/playground/sangsu"))
 
-let test_docker_hardened_rejects_root_allowed_path () =
+let test_docker_rejects_root_allowed_path () =
   with_temp_config (fun config ->
     match
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"sangsu"
-        ~sandbox_profile:KT.Docker_hardened
+        ~sandbox_profile:KT.Docker
         ~network_mode:KT.Network_none
         ~allowed_paths:["/"]
     with
-    | Ok () -> fail "expected docker_hardened root-path rejection"
+    | Ok () -> fail "expected docker root-path rejection"
     | Error err ->
         check bool "mentions private playground" true
           (String_util.contains_substring err ".masc/playground/sangsu"))
 
-let test_docker_hardened_rejects_glob_like_allowed_path () =
+let test_docker_rejects_glob_like_allowed_path () =
   with_temp_config (fun config ->
     match
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"sangsu"
-        ~sandbox_profile:KT.Docker_hardened
+        ~sandbox_profile:KT.Docker
         ~network_mode:KT.Network_none
         ~allowed_paths:["/tmp/**"]
     with
-    | Ok () -> fail "expected docker_hardened glob-like path rejection"
+    | Ok () -> fail "expected docker glob-like path rejection"
     | Error err ->
         check bool "mentions rejected path" true
           (String_util.contains_substring err "/tmp/**"))
 
-let test_docker_hardened_rejects_traversal_allowed_path () =
+let test_docker_rejects_traversal_allowed_path () =
   with_temp_config (fun config ->
     let private_root = KTU.private_workspace_root_rel "sangsu" in
     match
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"sangsu"
-        ~sandbox_profile:KT.Docker_hardened
+        ~sandbox_profile:KT.Docker
         ~network_mode:KT.Network_none
         ~allowed_paths:
           [ private_root ^ "/repos/demo/../../../../../../etc/passwd" ]
     with
-    | Ok () -> fail "expected docker_hardened traversal rejection"
+    | Ok () -> fail "expected docker traversal rejection"
     | Error err ->
         check bool "mentions private playground" true
           (String_util.contains_substring err ".masc/playground/sangsu"))
 
-let test_docker_hardened_accepts_private_root_paths () =
+let test_docker_accepts_private_root_paths () =
   with_temp_config (fun config ->
     let private_root = KTU.private_workspace_root_rel "sangsu" in
     ignore (KAP.ensure_playground_bundle ~config ~name:"sangsu");
@@ -507,27 +507,27 @@ let test_docker_hardened_accepts_private_root_paths () =
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"sangsu"
-        ~sandbox_profile:KT.Docker_hardened
+        ~sandbox_profile:KT.Docker
         ~network_mode:KT.Network_none
         ~allowed_paths:[private_root ^ "/repos/demo"]
     with
     | Error err -> fail ("expected private-root allow path, got: " ^ err)
     | Ok () -> ())
 
-let test_legacy_local_rejects_network_none () =
+let test_local_rejects_network_none () =
   with_temp_config (fun config ->
     match
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"sangsu"
-        ~sandbox_profile:KT.Legacy_local
+        ~sandbox_profile:KT.Local
         ~network_mode:KT.Network_none
         ~allowed_paths:[]
     with
-    | Ok () -> fail "expected legacy_local network rejection"
+    | Ok () -> fail "expected local network rejection"
     | Error err ->
-        check bool "mentions docker_hardened" true
-          (String_util.contains_substring err "docker_hardened"))
+        check bool "mentions docker" true
+          (String_util.contains_substring err "docker"))
 
 (* ── Runner ── *)
 
@@ -604,19 +604,19 @@ let () =
         ] );
       ( "sandbox_validation",
         [
-          test_case "docker_hardened rejects wildcard allowed_paths" `Quick
-            test_docker_hardened_rejects_wildcard_allowed_paths;
-          test_case "docker_hardened rejects root allowed path" `Quick
-            test_docker_hardened_rejects_root_allowed_path;
-          test_case "docker_hardened rejects glob-like allowed path" `Quick
-            test_docker_hardened_rejects_glob_like_allowed_path;
-          test_case "docker_hardened rejects traversal allowed path" `Quick
-            test_docker_hardened_rejects_traversal_allowed_path;
-          test_case "docker_hardened rejects paths outside private root" `Quick
-            test_docker_hardened_rejects_paths_outside_private_root;
-          test_case "docker_hardened accepts private root paths" `Quick
-            test_docker_hardened_accepts_private_root_paths;
-          test_case "legacy_local rejects network none" `Quick
-            test_legacy_local_rejects_network_none;
+          test_case "docker rejects wildcard allowed_paths" `Quick
+            test_docker_rejects_wildcard_allowed_paths;
+          test_case "docker rejects root allowed path" `Quick
+            test_docker_rejects_root_allowed_path;
+          test_case "docker rejects glob-like allowed path" `Quick
+            test_docker_rejects_glob_like_allowed_path;
+          test_case "docker rejects traversal allowed path" `Quick
+            test_docker_rejects_traversal_allowed_path;
+          test_case "docker rejects paths outside private root" `Quick
+            test_docker_rejects_paths_outside_private_root;
+          test_case "docker accepts private root paths" `Quick
+            test_docker_accepts_private_root_paths;
+          test_case "local rejects network none" `Quick
+            test_local_rejects_network_none;
         ] );
     ]

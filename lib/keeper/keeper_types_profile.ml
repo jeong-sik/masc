@@ -8,16 +8,20 @@ include Keeper_config
 let keeper_debug = Env_config.KeeperRuntime.debug
 
 type sandbox_profile =
-  | Legacy_local
-  | Docker_hardened
-  | Docker_with_git
-    (** Hardened docker profile with bridge network + read-only mounts of
-        ~/.config/gh and ~/.gitconfig (and optionally ~/.ssh) to permit
-        git/gh CLI operations. All other Docker_hardened guards (cap-drop,
-        no-new-privs, read-only rootfs, tmpfs, pids/memory limits, no
-        nested runtimes) remain in force. Default OFF; per-keeper opt-in
-        via TOML or per-command dispatch when keeper_bash receives
-        cmd starting with "git " or "gh ". *)
+  | Local
+    (** Host-process execution. Filesystem scope is bound to
+        [~/me/.masc/playground/<keeper>/] (see [Playground_paths]).
+        Network inherits the server's namespace. Intended for keepers
+        whose work stays on local files and does not need container-grade
+        isolation. *)
+  | Docker
+    (** Containerized execution with hardened defaults: cap-drop,
+        no-new-privs, read-only rootfs, tmpfs, pids/memory limits.
+        Network defaults to [Network_none]; the internal git/gh
+        dispatcher (see [Keeper_exec_shell.cmd_targets_git_or_gh])
+        upgrades the container to [Network_inherit] with read-only
+        mounts of ~/.config/gh and ~/.gitconfig (and optionally ~/.ssh)
+        for the duration of a git/gh command. *)
 
 type network_mode =
   | Network_none
@@ -28,22 +32,48 @@ type shared_memory_scope =
   | Shared_memory_room
 
 let sandbox_profile_to_string = function
-  | Legacy_local -> "legacy_local"
-  | Docker_hardened -> "docker_hardened"
-  | Docker_with_git -> "docker_with_git"
+  | Local -> "local"
+  | Docker -> "docker"
 
+(** Parse a sandbox profile string. Canonical values are ["local"] and
+    ["docker"]. Legacy names ["legacy_local"], ["docker_hardened"], and
+    ["docker_with_git"] are still accepted for backward compatibility
+    with existing keeper JSON/TOML; they map to the new variants and
+    [load_keeper_sandbox_profile_with_warning] below emits a warning. *)
 let sandbox_profile_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
-  | "legacy_local" -> Some Legacy_local
-  | "docker_hardened" -> Some Docker_hardened
-  | "docker_with_git" -> Some Docker_with_git
+  | "local" -> Some Local
+  | "docker" -> Some Docker
+  (* Temporary compatibility layer — remove after all config/state files
+     have been migrated to the canonical names. Keep in ONE place so the
+     eventual removal is a single diff. *)
+  | "legacy_local" -> Some Local
+  | "docker_hardened" -> Some Docker
+  | "docker_with_git" -> Some Docker
   | _ -> None
+
+(** Same as [sandbox_profile_of_string] but emits a warning when a
+    deprecated string is encountered. Call from the boundary that reads
+    keeper state/config files so operators see drift in the server log. *)
+let sandbox_profile_of_string_with_warning ~source raw =
+  let trimmed = String.trim (String.lowercase_ascii raw) in
+  (match trimmed with
+   | "legacy_local" | "docker_hardened" | "docker_with_git" ->
+       Log.Keeper.warn
+         "%s: sandbox_profile %S is deprecated, mapped to %S"
+         source trimmed
+         (match trimmed with
+          | "legacy_local" -> "local"
+          | "docker_hardened" | "docker_with_git" -> "docker"
+          | _ -> trimmed)
+   | _ -> ());
+  sandbox_profile_of_string raw
 
 (* Issue #8467: Variant SSOT — adding a constructor to [sandbox_profile]
    forces [sandbox_profile_to_string] exhaustiveness AND extends
    [valid_sandbox_profile_strings] so [keeper_schema] picks it up via
    the mirror declared there. *)
-let all_sandbox_profiles = [ Legacy_local; Docker_hardened; Docker_with_git ]
+let all_sandbox_profiles = [ Local; Docker ]
 let valid_sandbox_profile_strings =
   List.map sandbox_profile_to_string all_sandbox_profiles
 
@@ -77,12 +107,15 @@ let all_shared_memory_scopes = [ Shared_memory_disabled; Shared_memory_room ]
 let valid_shared_memory_scope_strings =
   List.map shared_memory_scope_to_string all_shared_memory_scopes
 
-let default_sandbox_profile = Legacy_local
+let default_sandbox_profile = Local
 
 let default_network_mode_for_profile = function
-  | Legacy_local -> Network_inherit
-  | Docker_hardened -> Network_none
-  | Docker_with_git -> Network_inherit
+  | Local -> Network_inherit
+  | Docker -> Network_none
+  (* git/gh dispatch in Docker upgrades to Network_inherit at runtime
+     via Keeper_exec_shell.cmd_targets_git_or_gh; that upgrade is not
+     visible here because it's a per-command decision, not a profile
+     default. *)
 
 let default_shared_memory_scope = Shared_memory_disabled
 

@@ -2,8 +2,8 @@
     keepers (RFC-0006 Phase B-1).
 
     The keeper sandbox boundary historically followed the tool name:
-    [keeper_bash] for [sandbox_profile=Docker_hardened] keepers ran in
-    a container, but [keeper_fs_read] / [keeper_shell] read directly
+    [keeper_bash] for [sandbox_profile=Docker] keepers ran in a
+    container, but [keeper_fs_read] / [keeper_shell] read directly
     from the host. The result was a one-way leak — write was gated,
     read was not.
 
@@ -11,8 +11,8 @@
     every tool" on the host side without spinning up a per-call
     container. When the symmetric-sandbox env flag is set
     ([MASC_KEEPER_SYMMETRIC_SANDBOX=true]) AND the keeper's profile is
-    [Docker_hardened], read targets must lie within the keeper's
-    playground bundle ([.masc/playground/<keeper>/]).
+    [Docker], read targets must lie within the keeper's playground
+    bundle ([.masc/playground/<keeper>/]).
 
     Phase B-2 will route the same tools through [docker exec] so the
     container's mount restrictions become the actual primary boundary;
@@ -23,7 +23,7 @@
     effective sandbox containment policy.
 
     Returns [Error msg] only when ALL of the following hold:
-    - [meta.sandbox_profile = Docker_hardened]
+    - [meta.sandbox_profile = Docker]
     - [Env_config_keeper.KeeperSandbox.symmetric_read_containment ()] is true
     - [target] does NOT resolve under the keeper's playground bundle root
 

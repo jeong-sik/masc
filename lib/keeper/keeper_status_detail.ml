@@ -938,9 +938,8 @@ let handle_keeper_status ctx args : tool_result =
            | None -> None
          in
          let effective_sandbox_image =
-           if m.sandbox_profile = Docker_hardened
-              || m.sandbox_profile = Docker_with_git
-              || (m.sandbox_profile = Legacy_local
+           if m.sandbox_profile = Docker
+              || (m.sandbox_profile = Local
                   && Env_config_keeper.DockerPlayground.enabled)
            then Some (Env_config_keeper.KeeperSandbox.docker_image ())
            else None

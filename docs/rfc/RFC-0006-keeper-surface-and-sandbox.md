@@ -117,3 +117,24 @@ Each phase is independently mergeable and revertable.
 ## 7. Rollback
 
 Each phase guarded by an env flag (`MASC_KEEPER_TOOL_ALIAS=true`, `MASC_KEEPER_SYMMETRIC_SANDBOX=true`). Disable to revert immediately. Decisions.jsonl shape unchanged → dashboards unaffected by rollback.
+
+## 8. Addendum — 2026-04-21 profile rename
+
+After deploying, the three-variant external surface (`Legacy_local | Docker_hardened | Docker_with_git`) proved to mix two concerns: (a) execution location (host vs container) and (b) per-command credential mounting for git/gh. Only (a) is a stable profile attribute; (b) is a runtime dispatch decision.
+
+The external surface is now collapsed to two variants:
+
+| Old external variant | New external variant | Notes |
+|----------------------|----------------------|-------|
+| `Legacy_local`       | `Local`              | Same semantics. Fs scoped to `~/.masc/playground/<keeper>/`. |
+| `Docker_hardened`    | `Docker`             | Same base semantics (hardened container with network=none). |
+| `Docker_with_git`    | `Docker` + per-command dispatch | No longer a profile. When `sandbox_profile=Docker` and the `keeper_bash` cmd's leading token is `git`/`gh`, the container is launched with network=inherit + gh/git credential mounts *for that one command*. Surfaced in response JSON as `git_creds_enabled: true`. |
+
+The 3→2 containment matrix (section 3.3) now reads:
+
+| Keeper sandbox | Bash | Read | Edit/Write | Grep / keeper_shell |
+|----------------|------|------|------------|----------------------|
+| `Local` (default) | host (validated) | host | host | host |
+| `Docker`          | container | container | container | container |
+
+Compat: `sandbox_profile_of_string` accepts the three old strings and warns via `sandbox_profile_of_string_with_warning`. The compat arm is removable once all state JSON/TOML files are rewritten. No other RFC-0006 semantics change.

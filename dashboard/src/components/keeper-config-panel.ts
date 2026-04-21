@@ -100,7 +100,7 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
 
 // Runtime config draft for proactive/compaction/handoff inline editing
 type ExecutionScope = 'observe_only' | 'workspace' | 'local'
-export type SandboxProfile = 'legacy_local' | 'docker_hardened'
+export type SandboxProfile = 'local' | 'docker'
 export type SandboxNetworkMode = 'none' | 'inherit'
 export type SharedMemoryScope = 'disabled' | 'room'
 
@@ -126,7 +126,7 @@ const runtimeDraft = signal<RuntimeDraft | null>(null)
 const runtimeSaving = signal(false)
 
 export function coerceSandboxProfile(raw: string | undefined): SandboxProfile {
-  return raw === 'docker_hardened' ? 'docker_hardened' : 'legacy_local'
+  return raw === 'docker' ? 'docker' : 'local'
 }
 
 export function coerceNetworkMode(raw: string | undefined): SandboxNetworkMode {
@@ -183,10 +183,10 @@ function updateRuntimeDraft(field: keyof RuntimeDraft, value: boolean | number |
   const d = runtimeDraft.value
   if (!d) return
   const next = { ...d, [field]: value } as RuntimeDraft
-  if (field === 'sandbox_profile' && next.sandbox_profile !== 'docker_hardened' && next.network_mode === 'none') {
+  if (field === 'sandbox_profile' && next.sandbox_profile !== 'docker' && next.network_mode === 'none') {
     next.network_mode = 'inherit'
   }
-  if (field === 'network_mode' && next.sandbox_profile !== 'docker_hardened' && next.network_mode === 'none') {
+  if (field === 'network_mode' && next.sandbox_profile !== 'docker' && next.network_mode === 'none') {
     next.network_mode = 'inherit'
   }
   runtimeDraft.value = next
@@ -436,9 +436,9 @@ function sandboxAnchorText(c: KeeperConfig): string {
 }
 
 function dockerStatusLabel(c: KeeperConfig): string {
-  if (c.sandbox_profile === 'docker_hardened') return 'docker_hardened'
-  if (c.sandbox_environment?.docker_playground_enabled) return 'legacy_local + docker_playground'
-  return 'legacy_local'
+  if (c.sandbox_profile === 'docker') return 'docker'
+  if (c.sandbox_environment?.docker_playground_enabled) return 'local + docker_playground'
+  return 'local'
 }
 
 // ── Main component ───────────────────────────────────────
@@ -678,13 +678,13 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${InlineSelectRow}
           label="sandbox_profile"
           value=${rd.sandbox_profile}
-          options=${['legacy_local', 'docker_hardened'] as const}
+          options=${['local', 'docker'] as const}
           onChange=${(value: string) => updateRuntimeDraft('sandbox_profile', value as SandboxProfile)}
         />
         <${InlineSelectRow}
           label="network_mode"
           value=${rd.network_mode}
-          options=${rd.sandbox_profile === 'docker_hardened' ? ['inherit', 'none'] as const : ['inherit'] as const}
+          options=${rd.sandbox_profile === 'docker' ? ['inherit', 'none'] as const : ['inherit'] as const}
           onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
         />
         <${InlineSelectRow}
@@ -710,19 +710,19 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}
           </div>
         ` : null}
-        ${rd.sandbox_profile === 'docker_hardened' ? html`
+        ${rd.sandbox_profile === 'docker' ? html`
           <${SetupGuideCard} connectorId="sandbox_hardened" />
         ` : null}
         <${Callout}
           title="Base Path Anchor"
           body=${sandboxAnchorText(c)}
         />
-        ${rd.sandbox_profile === 'docker_hardened' ? html`
+        ${rd.sandbox_profile === 'docker' ? html`
           <${SetupGuideCard} connectorId="sandbox_hardened" />
         ` : null}
       ` : html`
         <${ConfigRow} label="execution_scope" value=${c.execution_scope ?? 'workspace'} />
-        <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'legacy_local'} />
+        <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'local'} />
         <${ConfigRow} label="network_mode" value=${c.network_mode ?? 'inherit'} />
         <${ConfigRow} label="shared_memory_scope" value=${c.shared_memory_scope ?? 'disabled'} />
         <${ConfigRow} label="effective_sandbox_image" value=${c.effective_sandbox_image || '--'} />

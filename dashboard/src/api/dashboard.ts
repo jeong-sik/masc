@@ -1085,7 +1085,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   return {
     name: asNullableString(data.name) ?? requestedName,
     execution_scope: asNullableString(data.execution_scope) ?? 'workspace',
-    sandbox_profile: asNullableString(data.sandbox_profile) ?? 'legacy_local',
+    sandbox_profile: asNullableString(data.sandbox_profile) ?? 'local',
     network_mode: asNullableString(data.network_mode) ?? 'inherit',
     shared_memory_scope: asNullableString(data.shared_memory_scope) ?? 'disabled',
     sandbox_last_error: asNullableString(data.sandbox_last_error),
@@ -1228,7 +1228,7 @@ export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
     .then(raw => normalizeKeeperConfig(raw, name))
 }
 
-export type SandboxProfile = 'legacy_local' | 'docker_hardened'
+export type SandboxProfile = 'local' | 'docker'
 export type SandboxNetworkMode = 'none' | 'inherit'
 export type SharedMemoryScope = 'disabled' | 'room'
 

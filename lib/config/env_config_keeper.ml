@@ -532,7 +532,7 @@ module DockerPlayground = struct
 end
 
 module KeeperSandbox = struct
-  (** Ephemeral Docker image used by sandbox_profile=docker_hardened.
+  (** Ephemeral Docker image used by sandbox_profile=docker.
       Must contain bash and the CLI tools the keeper needs. *)
   let docker_image () =
     get_string
@@ -564,15 +564,18 @@ module KeeperSandbox = struct
   let require_userns () =
     get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
 
-  (** docker_with_git: when true, route keeper_bash commands beginning with
-      "git " or "gh " to the Docker_with_git profile even when the keeper's
-      default profile is Docker_hardened. Lets a single keeper run network-
-      bound git/gh ops without granting wholesale network for all bash. *)
+  (** Docker git-credential dispatch: when true, keeper_bash commands
+      beginning with "git " or "gh " run in a Docker container with
+      network_mode=inherit and read-only mounts of ~/.config/gh and
+      ~/.gitconfig. Default commands stay on network_mode=none. Lets a
+      single [sandbox_profile=docker] keeper run network-bound git/gh ops
+      without granting wholesale network for all bash. *)
   let with_git_dispatch_enabled () =
     get_bool ~default:true "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
 
-  (** Host path mounted read-only at /root/.config/gh inside docker_with_git.
-      Default $HOME/.config/gh. Empty string disables the mount (no gh auth). *)
+  (** Host path mounted read-only at /root/.config/gh inside the docker
+      git-creds execution path. Default $HOME/.config/gh. Empty string
+      disables the mount (no gh auth). *)
   let gh_creds_host_path () =
     let default =
       try Filename.concat (Sys.getenv "HOME") ".config/gh"
@@ -593,8 +596,9 @@ module KeeperSandbox = struct
   let ssh_dir_host_path () =
     get_string ~default:"" "MASC_KEEPER_SANDBOX_SSH_DIR"
 
-  (** Optional GitHub token forwarded as GH_TOKEN env into docker_with_git
-      containers. Defaults to the host GH_TOKEN; empty disables forwarding. *)
+  (** Optional GitHub token forwarded as GH_TOKEN env into the docker
+      git-creds execution path. Defaults to the host GH_TOKEN; empty
+      disables forwarding. *)
   let gh_token () =
     let default =
       try Sys.getenv "GH_TOKEN"

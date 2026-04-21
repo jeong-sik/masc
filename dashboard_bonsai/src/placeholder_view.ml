@@ -200,7 +200,7 @@ let blueprint_of_route : Route.t -> blueprint = function
     }
   | route ->
     {
-      eyebrow = "chronicle · route";
+      eyebrow = "runtime · route";
       title = Route.label route;
       tail = "· staged";
       signal = "pending";

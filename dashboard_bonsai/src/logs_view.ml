@@ -1604,6 +1604,11 @@ let render_response
       ?(keepers : Keepers_types.response = Keepers_types.fixture)
       (response : Logs_types.response)
     : Node.t =
+  let runtime_name =
+    match keepers.room with
+    | Some name when String.length name > 0 -> name
+    | _ -> "local"
+  in
   let tape =
     match response.entries with
     | [] ->
@@ -1634,23 +1639,20 @@ let render_response
       ; Node.div
           ~attrs:[ Style.crumbs ]
           (let head =
-             [ Node.span [ Node.text "observatory" ]
+             [ Node.span [ Node.text "runtime" ]
              ; Node.span ~attrs:[ Style.crumbs_sep ] [ Node.text "›" ]
              ]
            in
-           let room_seg =
-             match keepers.room with
-             | None | Some "" -> []
-             | Some name ->
-               [ Node.span ~attrs:[ Style.crumbs_room ] [ Node.text name ]
-               ; Node.span ~attrs:[ Style.crumbs_sep ] [ Node.text "›" ]
-               ]
+           let runtime_seg =
+             [ Node.span ~attrs:[ Style.crumbs_room ] [ Node.text runtime_name ]
+             ; Node.span ~attrs:[ Style.crumbs_sep ] [ Node.text "›" ]
+             ]
            in
            let tail =
              [ Node.span ~attrs:[ Style.crumbs_cur ] [ Node.text "저널" ]
              ]
            in
-           head @ room_seg @ tail)
+           head @ runtime_seg @ tail)
       ; Node.div
           ~attrs:[ Style.pulse_slot ]
           [ Node.span ~attrs:[ Style.pulse ] []
@@ -2079,17 +2081,12 @@ let render_response
              [ Node.div
                  ~attrs:[ Style.page_tag ]
                  [ Node.text
-                     (let room =
-                        match keepers.room with
-                        | Some r when String.length r > 0 -> r
-                        | _ -> "—"
-                      in
-                      let day =
+                     (let cycle =
                         if keepers.cycle <= 0
                         then "—"
                         else roman_of_int keepers.cycle
                       in
-                      Printf.sprintf "chronicle · %s · day %s" room day) ]
+                      Printf.sprintf "runtime · %s · cycle %s" runtime_name cycle) ]
              ; Node.h1
                  ~attrs:[ Style.page_h1 ]
                  [ Node.text "the watch "

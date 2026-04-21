@@ -2,16 +2,126 @@ module U = Yojson.Safe.Util
 include Operator_pending_confirm
 include Operator_digest
 
+let resolved_context_budget_of_meta (meta : Keeper_types.keeper_meta) : int option =
+  let active_model_label = Keeper_exec_status.active_model_label_of_meta meta in
+  if active_model_label = "" then None
+  else
+    let max_ctx = Cascade_runtime.max_context_of_label active_model_label in
+    if max_ctx = 0 then None else Some max_ctx
+
 let compute_context_ratio (meta : Keeper_types.keeper_meta) : float option =
   let input_tokens = meta.runtime.usage.last_input_tokens in
   if input_tokens = 0 then None
   else
-    let active_model_label = Keeper_exec_status.active_model_label_of_meta meta in
-    if active_model_label = "" then None
+    match resolved_context_budget_of_meta meta with
+    | Some max_ctx -> Some (float_of_int input_tokens /. float_of_int max_ctx)
+    | None -> None
+
+type keeper_context_snapshot = {
+  context_ratio : float option;
+  context_tokens : int option;
+  context_max : int option;
+  context_source : string option;
+}
+
+let keeper_context_snapshot_is_empty (snapshot : keeper_context_snapshot) =
+  snapshot.context_ratio = None
+  && snapshot.context_tokens = None
+  && snapshot.context_max = None
+  && snapshot.context_source = None
+
+let keeper_context_snapshot_from_metrics_json (json : Yojson.Safe.t) =
+  let snapshot =
+    {
+      context_ratio = Safe_ops.json_float_opt "context_ratio" json;
+      context_tokens = Safe_ops.json_int_opt "context_tokens" json;
+      context_max = Safe_ops.json_int_opt "context_max" json;
+      context_source =
+        (match Safe_ops.json_string_opt "snapshot_source" json with
+        | Some source when String.trim source <> "" -> Some source
+        | _ -> (
+            match Safe_ops.json_string_opt "channel" json with
+            | Some channel when String.trim channel <> "" ->
+                Some ("metrics_" ^ String.trim channel)
+            | _ -> Some "metrics_log"));
+    }
+  in
+  if keeper_context_snapshot_is_empty snapshot then None else Some snapshot
+
+let latest_keeper_context_snapshot_from_files config keeper_name =
+  let metrics_lines =
+    let store = Keeper_types.keeper_metrics_store config keeper_name in
+    let dated = Dated_jsonl.read_recent_lines store 32 in
+    if dated <> [] then dated
     else
-      let max_ctx = Cascade_runtime.max_context_of_label active_model_label in
-      if max_ctx = 0 then None
-      else Some (float_of_int input_tokens /. float_of_int max_ctx)
+      let path = Keeper_types.keeper_metrics_path config keeper_name in
+      Keeper_memory.read_file_tail_lines path ~max_bytes:32000 ~max_lines:32
+  in
+  let snapshots =
+    List.rev metrics_lines
+    |> List.filter_map (fun line ->
+           try
+             let json = Yojson.Safe.from_string line in
+             keeper_context_snapshot_from_metrics_json json
+           with Yojson.Json_error _ -> None)
+  in
+  match
+    List.find_opt
+      (fun snapshot ->
+        snapshot.context_source = Some "keeper_context_status")
+      snapshots
+  with
+  | Some snapshot -> Some snapshot
+  | None -> (
+      match snapshots with
+      | snapshot :: _ -> Some snapshot
+      | [] -> None)
+
+let fallback_keeper_context_snapshot (meta : Keeper_types.keeper_meta) =
+  {
+    context_ratio = compute_context_ratio meta;
+    context_tokens =
+      (match meta.runtime.usage.last_input_tokens with
+      | n when n > 0 -> Some n
+      | _ -> None);
+    context_max = resolved_context_budget_of_meta meta;
+    context_source =
+      (match meta.runtime.usage.last_input_tokens, resolved_context_budget_of_meta meta with
+      | n, Some _ when n > 0 -> Some "usage_last_input_tokens"
+      | _ -> None);
+  }
+
+let keeper_context_snapshot_of_meta config (meta : Keeper_types.keeper_meta) =
+  match latest_keeper_context_snapshot_from_files config meta.name with
+  | Some snapshot -> snapshot
+  | None -> fallback_keeper_context_snapshot meta
+
+let keeper_context_snapshot_fields (snapshot : keeper_context_snapshot) =
+  let context_json =
+    if keeper_context_snapshot_is_empty snapshot then
+      `Null
+    else
+      `Assoc
+        [
+          ("source", string_option_to_json snapshot.context_source);
+          ("context_ratio",
+            option_to_json (fun value -> `Float value) snapshot.context_ratio);
+          ("context_tokens",
+            option_to_json (fun value -> `Int value) snapshot.context_tokens);
+          ("context_max",
+            option_to_json (fun value -> `Int value) snapshot.context_max);
+        ]
+  in
+  [
+    ("context_ratio",
+      option_to_json (fun value -> `Float value) snapshot.context_ratio);
+    ("context_tokens",
+      option_to_json (fun value -> `Int value) snapshot.context_tokens);
+    ("context_max",
+      option_to_json (fun value -> `Int value) snapshot.context_max);
+    ("context_source", string_option_to_json snapshot.context_source);
+    ("context", context_json);
+  ]
 
 type action_result_status = ActionOk | ActionError
 
@@ -599,6 +709,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    | Some p -> `String (Keeper_state_machine.phase_to_string p)
                    | None -> `Null
                  in
+                 let context_snapshot = keeper_context_snapshot_of_meta config meta in
                  emit_timing_log (Time_compat.now () -. t_work_start);
                  Some
                    (`Assoc
@@ -617,11 +728,6 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        ("agent", agent_json);
                        ("generation", `Int meta.runtime.generation);
                        ("turn_count", `Int meta.runtime.usage.total_turns);
-                       ("context_ratio",
-                         (match compute_context_ratio meta with
-                          | Some r -> `Float r
-                          | None -> `Null));
-                       ("context_tokens", `Int meta.runtime.usage.last_total_tokens);
                        ("last_turn_ago_s", `Float last_turn_ago_s);
                        ("last_handoff_ago_s", `Float last_handoff_ago_s);
                        ("last_compaction_ago_s", `Float last_compaction_ago_s);
@@ -789,6 +895,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                           dt_activity := Time_compat.now () -. t_act;
                           result));
                      ]
+                     @ keeper_context_snapshot_fields context_snapshot
                      @ Keeper_status_bridge.runtime_blocker_fields_json config meta))
                  end
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
@@ -830,6 +937,9 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                        ("turn_count", field_or_null "turn_count");
                        ("context_ratio", field_or_null "context_ratio");
                        ("context_tokens", field_or_null "context_tokens");
+                       ("context_max", field_or_null "context_max");
+                       ("context_source", field_or_null "context_source");
+                       ("context", field_or_null "context");
                        ("last_model_used", field_or_null "last_model_used");
                        ("active_model", field_or_null "active_model");
                        ("next_model_hint", field_or_null "next_model_hint");
@@ -875,9 +985,10 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                       | _ -> "unknown")
                   | _ -> "unknown"
                 in
+                let context_snapshot = keeper_context_snapshot_of_meta config meta in
                 Some
                   (`Assoc
-                    [
+                    ([
                       ("runtime_class", `String "keeper");
                       ("name", `String meta.name);
                       ("agent_name", `String meta.agent_name);
@@ -889,11 +1000,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                       ("status", `String agent_status);
                       ("generation", `Int meta.runtime.generation);
                       ("turn_count", `Int meta.runtime.usage.total_turns);
-                      ("context_ratio",
-                        (match compute_context_ratio meta with
-                         | Some r -> `Float r
-                         | None -> `Null));
-                      ("context_tokens", `Int meta.runtime.usage.last_total_tokens);
                       ("last_model_used", `String meta.runtime.usage.last_model_used);
                       ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
                       ("next_model_hint", string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta));
@@ -903,7 +1009,8 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                       ("autonomous_action_count", `Int meta.runtime.autonomous_action_count);
                       ("updated_at", `String meta.updated_at);
                       ("created_at", `String meta.created_at);
-                    ]))
+                    ]
+                    @ keeper_context_snapshot_fields context_snapshot)))
           names
   in
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]

@@ -235,6 +235,28 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.keepers[0]!.generation).toBe(10)
   })
 
+  it('preserves keeper context fields from nested context payloads', () => {
+    const result = normalizeOperatorSnapshot({
+      keepers: [
+        {
+          name: 'sojin',
+          context: {
+            source: 'keeper_context_status',
+            context_ratio: 0.1274375,
+            context_tokens: 16312,
+            context_max: 128000,
+          },
+        },
+      ],
+    })
+    expect(result.keepers).toHaveLength(1)
+    expect(result.keepers[0]!.context_ratio).toBe(0.1274375)
+    expect(result.keepers[0]!.context_tokens).toBe(16312)
+    expect(result.keepers[0]!.context_max).toBe(128000)
+    expect(result.keepers[0]!.context_source).toBe('keeper_context_status')
+    expect(result.keepers[0]!.context?.source).toBe('keeper_context_status')
+  })
+
   it('filters keepers without name', () => {
     const result = normalizeOperatorSnapshot({
       keepers: [

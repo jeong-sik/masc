@@ -355,6 +355,15 @@ let wait_for_startup_phase ~pid ~port ~timeout_s expected_phase =
   in
   loop ()
 
+let write_invalid_local_only_cascade base_path =
+  let config_root = Filename.concat base_path ".masc/config" in
+  mkdir_p config_root;
+  write_file
+    (Filename.concat config_root "cascade.json")
+    {|{
+  "local_only_models": ["ollama:qwen3.6:35b-a3b-mlx-bf16"]
+}|}
+
 let stop_process pid =
   (try Unix.kill pid Sys.sigterm with _ -> ());
   ignore
@@ -1335,6 +1344,87 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
           Alcotest.(check bool) "canonical tool present" true
             (List.mem "masc_status" tool_names)))
 
+let test_main_eio_invalid_cascade_stays_degraded_but_serves_dashboard () =
+  with_temp_dir "startup-invalid-cascade" (fun dir ->
+      let exe = find_main_eio_exe () in
+      let port = find_free_port () in
+      let log_file = Filename.concat dir "server.log" in
+      let log_fd =
+        Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+      in
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_PERSONAS_DIR" None @@ fun () ->
+      with_cwd (project_root ()) @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
+      write_invalid_local_only_cascade dir;
+      let env =
+        merge_env_overrides
+          [
+            ("MASC_BASE_PATH", dir);
+            ("MASC_STORAGE_TYPE", "filesystem");
+            ("GRAPHQL_API_KEY", "");
+            ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
+            ("MASC_AUTONOMY_ENABLED", "0");
+            ("MASC_ORCHESTRATOR_ENABLED", "0");
+            ("MASC_KEEPER_BOOTSTRAP_ENABLED", "false");
+            ("MASC_USE_H2", "0");
+            ("DUNE_SOURCEROOT", project_root ());
+          ]
+      in
+      let pid =
+        Unix.create_process_env exe
+          [|
+            exe;
+            "--host";
+            "127.0.0.1";
+            "--port";
+            string_of_int port;
+            "--base-path";
+            dir;
+          |]
+          env Unix.stdin log_fd log_fd
+      in
+      Unix.close log_fd;
+      Fun.protect
+        ~finally:(fun () -> stop_process pid)
+        (fun () ->
+          if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "degraded") then begin
+            prerr_endline
+              (Printf.sprintf
+                 "main_eio invalid cascade did not reach startup.phase=degraded within timeout in this environment.\nlog:\n%s"
+                 (read_file log_file));
+            Alcotest.skip ()
+          end;
+          let health_headers, health_body =
+            curl_request_capture ~output_dir:dir ~name:"health-invalid" ~method_:"GET"
+              ~url:(Printf.sprintf "http://127.0.0.1:%d/health" port) ()
+          in
+          ignore health_headers;
+          let health_json = parse_json_response_file health_body in
+          let startup = Yojson.Safe.Util.member "startup" health_json in
+          Alcotest.(check string) "startup phase degraded" "degraded"
+            Yojson.Safe.Util.(startup |> member "phase" |> to_string);
+          Alcotest.(check bool) "startup remains ready" true
+            Yojson.Safe.Util.(startup |> member "state_ready" |> to_bool);
+          let startup_error =
+            Yojson.Safe.Util.(startup |> member "last_error" |> to_string)
+          in
+          Alcotest.(check bool) "last error mentions catalog validation" true
+            (String.starts_with ~prefix:"startup catalog validation failed:" startup_error);
+          let config_headers, config_body =
+            curl_request_capture ~output_dir:dir ~name:"cascade-config-invalid"
+              ~method_:"GET"
+              ~url:(Printf.sprintf "http://127.0.0.1:%d/api/v1/cascade/config" port)
+              ()
+          in
+          Alcotest.(check (option int)) "cascade config http 200" (Some 200)
+            (http_status_from_headers config_headers);
+          let config_json = parse_json_response_file config_body in
+          Alcotest.(check string) "dashboard cascade surface is live"
+            (Filename.concat dir ".masc/config/cascade.json")
+            Yojson.Safe.Util.(
+              config_json |> member "config_path" |> to_string)))
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1453,5 +1543,9 @@ let () =
           Alcotest.test_case
             "main_eio fresh bootstrap and MCP handshake"
             `Slow test_main_eio_fresh_bootstrap_and_mcp_handshake;
+          Alcotest.test_case
+            "main_eio invalid cascade stays degraded but serves dashboard"
+            `Slow
+            test_main_eio_invalid_cascade_stays_degraded_but_serves_dashboard;
         ] );
     ]

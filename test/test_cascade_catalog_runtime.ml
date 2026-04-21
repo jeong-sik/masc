@@ -134,6 +134,32 @@ let start_counting_mock ~sw ~net ~port ~response =
       Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
   (Printf.sprintf "http://127.0.0.1:%d" port, request_count)
 
+let start_path_checked_mock ~sw ~net ~port ~expected_path ~response =
+  let request_count = Atomic.make 0 in
+  let last_path = Atomic.make None in
+  let handler _conn req body =
+    let _ = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let path = req |> Cohttp.Request.uri |> Uri.path in
+    Atomic.set last_path (Some path);
+    ignore (Atomic.fetch_and_add request_count 1);
+    let status, body =
+      if String.equal path expected_path then
+        (`OK, response)
+      else
+        (`Not_found,
+         Printf.sprintf {|{"detail":"Not Found","path":"%s"}|} path)
+    in
+    Cohttp_eio.Server.respond_string ~status ~body ()
+  in
+  let socket =
+    Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  (Printf.sprintf "http://127.0.0.1:%d" port, request_count, last_path)
+
 let dummy_base_url = "http://127.0.0.1:1"
 
 let json_member name json = Yojson.Safe.Util.member name json
@@ -207,6 +233,40 @@ let test_valid_catalog_skips_live_probes_at_bootstrap () =
         (contains_substring detail "unknown cascade_name");
       check bool "active profile list is included" true
         (contains_substring detail "tool_rerank")
+
+let test_custom_v1_base_url_live_probe_uses_single_v1_path () =
+  with_temp_dir "cascade-catalog-runtime-path" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  with_eio @@ fun ~sw ~net ~clock ~fs:_ ~proc_mgr:_ ->
+  let port = find_free_port () in
+  let base_url, request_count, last_path =
+    start_path_checked_mock ~sw ~net ~port
+      ~expected_path:"/v1/chat/completions"
+      ~response:(openai_text_response "pong")
+  in
+  let valid_model = Printf.sprintf "custom:stable@%s/v1" base_url in
+  ignore
+    (write_cascade_json config_dir
+       (Printf.sprintf
+          {|{
+  "keeper_unified_models": ["%s"]
+}|}
+          valid_model));
+  (match Cascade_catalog_runtime.inspect_active ~sw ~net ~clock () with
+   | Ok (Cascade_catalog_runtime.Validated _) -> ()
+   | Ok (Cascade_catalog_runtime.Validated_with_rejections _) ->
+       fail "expected v1 custom endpoint to validate cleanly"
+   | Ok (Cascade_catalog_runtime.Serving_last_known_good _) ->
+       fail "expected v1 custom endpoint to validate cleanly"
+   | Error rejection ->
+       failf "v1 custom endpoint validation failed: %s"
+         (Yojson.Safe.to_string
+            (Cascade_catalog_runtime.rejection_to_yojson rejection)));
+  check int "live probe count" 1 (Atomic.get request_count);
+  check (option string) "probe path" (Some "/v1/chat/completions")
+    (Atomic.get last_path)
 
 let test_invalid_hot_reload_preserves_last_known_good () =
   with_temp_dir "cascade-catalog-lkg" @@ fun dir ->
@@ -507,6 +567,10 @@ let () =
             "valid catalog skips live probes at bootstrap"
             `Quick
             test_valid_catalog_skips_live_probes_at_bootstrap;
+          test_case
+            "custom v1 base_url live probe uses single v1 path"
+            `Quick
+            test_custom_v1_base_url_live_probe_uses_single_v1_path;
           test_case
             "invalid hot reload preserves last-known-good"
             `Quick

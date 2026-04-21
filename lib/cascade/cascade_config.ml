@@ -44,6 +44,31 @@ let headers_with_auth ~(kind : Llm_provider.Provider_config.provider_kind) ~api_
         ("Authorization", "Bearer " ^ api_key) :: base
     | Gemini_cli | Kimi_cli | Codex_cli -> []
 
+let trim_trailing_slash path =
+  if String.length path > 1 && String.ends_with ~suffix:"/" path then
+    String.sub path 0 (String.length path - 1)
+  else path
+
+let normalize_openai_compat_request_path ~base_url ~request_path =
+  let request_path =
+    match String.trim request_path with
+    | "" -> Masc_network_defaults.openai_chat_completions_path
+    | path -> path
+  in
+  let base_path =
+    Uri.path (Uri.of_string base_url) |> trim_trailing_slash
+  in
+  if base_path = "" || base_path = "/" then
+    request_path
+  else
+    let duplicated_prefix = base_path ^ "/" in
+    if String.starts_with ~prefix:duplicated_prefix request_path then
+      let suffix_start = String.length base_path + 1 in
+      "/"
+      ^ String.sub request_path suffix_start
+          (String.length request_path - suffix_start)
+    else request_path
+
 (* ── String splitting helper ──────────────────────────────── *)
 
 (** Split a "provider:model_id" string at the first colon.
@@ -74,7 +99,10 @@ let make_custom_config ~temperature ~max_tokens ?system_prompt
                ~kind:OpenAI_compat
                ~model_id:actual_model
                ~base_url
-               ~request_path:"/v1/chat/completions"
+               ~request_path:
+                 (normalize_openai_compat_request_path
+                    ~base_url
+                    ~request_path:Masc_network_defaults.openai_chat_completions_path)
                ~temperature
                ~max_tokens
                ?system_prompt
@@ -130,11 +158,9 @@ let moonshot_api_url () =
   env_url_or ~env:moonshot_base_url_env ~default:moonshot_default_base_url
 
 let moonshot_request_path () =
-  let path = Uri.path (Uri.of_string (moonshot_api_url ())) in
-  if String.equal path "/v1" || String.equal path "/v1/" then
-    "/chat/completions"
-  else
-    Masc_network_defaults.openai_chat_completions_path
+  normalize_openai_compat_request_path
+    ~base_url:(moonshot_api_url ())
+    ~request_path:Masc_network_defaults.openai_chat_completions_path
 
 let resolve_kimi_api_key_env ~api_key_env_overrides =
   resolve_effective_api_key_env
@@ -215,6 +241,14 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
       | None -> Llm_provider.Provider_registry.next_llama_endpoint ()
     else defaults.base_url
   in
+  let request_path =
+    match defaults.kind with
+    | OpenAI_compat ->
+      normalize_openai_compat_request_path
+        ~base_url
+        ~request_path:defaults.request_path
+    | _ -> defaults.request_path
+  in
   let resolved_model_id = resolve_auto_model_id provider_name effective_model_id in
   (* Resolve max_context: per-model capabilities override registry default *)
   let max_context =
@@ -231,7 +265,7 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
     ~model_id:resolved_model_id
     ~base_url
     ~api_key ~headers
-    ~request_path:defaults.request_path
+    ~request_path
     ~temperature
     ~max_tokens
     ~max_context

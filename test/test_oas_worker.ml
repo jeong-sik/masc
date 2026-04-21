@@ -39,6 +39,16 @@ let temp_dir prefix =
   Unix.mkdir dir 0o755;
   dir
 
+let rec mkdir_p dir =
+  if dir = "" || dir = "." || dir = "/" then
+    ()
+  else if Sys.file_exists dir then
+    ()
+  else begin
+    mkdir_p (Filename.dirname dir);
+    Unix.mkdir dir 0o755
+  end
+
 let cleanup_dir dir =
   let rec rm path =
     if Sys.file_exists path then
@@ -91,6 +101,33 @@ let with_env name value f =
       match previous with
       | Some v -> Unix.putenv name v
       | None -> Unix.putenv name "")
+    f
+
+let with_temp_masc_config cascade_json f =
+  let base = temp_dir "test_masc_config" in
+  let config_dir = Filename.concat base ".masc/config" in
+  let cascade_path = Filename.concat config_dir "cascade.json" in
+  mkdir_p config_dir;
+  let oc = open_out cascade_path in
+  output_string oc cascade_json;
+  close_out oc;
+  let prev_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  let prev_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Config_dir_resolver.reset ();
+  Cascade_catalog_runtime.reset_cache_for_tests ();
+  Unix.putenv "MASC_BASE_PATH" base;
+  Unix.putenv "MASC_CONFIG_DIR" config_dir;
+  Fun.protect
+    ~finally:(fun () ->
+      (match prev_base_path with
+       | Some value -> Unix.putenv "MASC_BASE_PATH" value
+       | None -> Unix.putenv "MASC_BASE_PATH" "");
+      (match prev_config_dir with
+       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      Config_dir_resolver.reset ();
+      Cascade_catalog_runtime.reset_cache_for_tests ();
+      cleanup_dir base)
     f
 
 let openai_text_response ?(id = "chatcmpl-1") text =
@@ -295,8 +332,10 @@ let test_default_model_strings_local_only () =
 
 (** Test default_config_path with a controlled fixture so the result
     is deterministic regardless of CWD or inherited env.
-    Creates a temp directory with .masc/config/cascade.json, sets MASC_BASE_PATH
-    to point there, and verifies the function finds the file. *)
+    Creates a temp config root, points MASC_CONFIG_DIR at it, and verifies
+    the function finds the file. Test executables intentionally sanitize
+    inherited MASC_BASE_PATH overrides, so config-path fixtures must use the
+    explicit config-dir env. *)
 let test_default_config_path () =
   let base = temp_dir "test_config_path" in
   (* Build the nested directory tree *)
@@ -312,17 +351,26 @@ let test_default_config_path () =
   let oc = open_out cascade_path in
   output_string oc "{}";
   close_out oc;
-  (* Save and override MASC_BASE_PATH *)
+  (* Save and override MASC_CONFIG_DIR explicitly. *)
+  let old_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
   let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
-  Unix.putenv "MASC_BASE_PATH" base;
+  Config_dir_resolver.reset ();
+  Cascade_catalog_runtime.reset_cache_for_tests ();
+  Unix.putenv "MASC_CONFIG_DIR" masc_config_dir;
+  Unix.putenv "MASC_BASE_PATH" "";
   Fun.protect
     ~finally:(fun () ->
+      (match old_config_dir with
+       | Some v -> Unix.putenv "MASC_CONFIG_DIR" v
+       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
       (match old_base_path with
        | Some v -> Unix.putenv "MASC_BASE_PATH" v
        | None ->
            (* OCaml stdlib has no unsetenv; set to empty string
               which env_opt treats as absent. *)
            Unix.putenv "MASC_BASE_PATH" "");
+      Config_dir_resolver.reset ();
+      Cascade_catalog_runtime.reset_cache_for_tests ();
       cleanup_dir base)
     (fun () ->
       match Oas_worker.default_config_path () with
@@ -333,7 +381,7 @@ let test_default_config_path () =
         Alcotest.(check bool) "file exists" true (Sys.file_exists path)
       | None ->
         Alcotest.fail
-          "default_config_path returned None despite fixture at MASC_BASE_PATH/.masc/config")
+          "default_config_path returned None despite explicit MASC_CONFIG_DIR fixture")
 
 let test_cascade_names_produce_models () =
   let cascades = [
@@ -620,6 +668,104 @@ let test_sdk_error_is_hard_quota_preserves_rate_limited_detection () =
   in
   Alcotest.(check bool) "existing RateLimited hard quota still works" true
     (Oas_worker_named.sdk_error_is_hard_quota err)
+
+let make_openai_compat_provider_cfg ?(model_id = "mock-model")
+    ?(base_url = "http://127.0.0.1:18080/v1")
+    ?(request_path = "/chat/completions") ?(api_key = "") () =
+  Llm_provider.Provider_config.make
+    ~kind:OpenAI_compat
+    ~model_id
+    ~base_url
+    ~api_key
+    ~headers:[]
+    ~request_path
+    ~temperature:0.2
+    ~max_tokens:1024
+    ()
+
+let test_enrich_sdk_error_for_moonshot_auth_includes_env_hint () =
+  with_temp_masc_config
+    {|{
+  "default_api_key_env": {
+    "kimi": "KIMI_API_KEY_SB"
+  }
+}|}
+  @@ fun () ->
+  let provider_cfg =
+    make_openai_compat_provider_cfg
+      ~model_id:"kimi-k2.5"
+      ~base_url:"https://api.moonshot.ai/v1"
+      ~api_key:"sk-test"
+      ()
+  in
+  let err =
+    Oas.Error.Api
+      (Llm_provider.Retry.AuthError
+         { message = "Invalid Authentication" })
+  in
+  let rendered =
+    Oas_worker_named.enrich_sdk_error
+      ~cascade_name:"keeper_unified"
+      ~provider_cfg
+      err
+    |> Oas.Error.to_string
+  in
+  Alcotest.(check bool) "env hint included" true
+    (contains_substring ~needle:"KIMI_API_KEY_SB" rendered);
+  Alcotest.(check bool) "key presence hint included" true
+    (contains_substring ~needle:"auth header was populated" rendered)
+
+let test_enrich_sdk_error_for_openai_not_found_includes_endpoint_hint () =
+  let provider_cfg =
+    make_openai_compat_provider_cfg
+      ~base_url:"http://127.0.0.1:18080/v1"
+      ~request_path:"/chat/completions"
+      ()
+  in
+  let err =
+    Oas.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { message = {|{"detail":"Not Found"}|} })
+  in
+  let rendered =
+    Oas_worker_named.enrich_sdk_error
+      ~cascade_name:"keeper_unified"
+      ~provider_cfg
+      err
+    |> Oas.Error.to_string
+  in
+  Alcotest.(check bool) "base_url hint included" true
+    (contains_substring ~needle:"base_url=http://127.0.0.1:18080/v1" rendered);
+  Alcotest.(check bool) "endpoint hint included" true
+    (contains_substring
+       ~needle:"endpoint=http://127.0.0.1:18080/v1/chat/completions"
+       rendered)
+
+let test_default_config_preserves_custom_local_request_path () =
+  let provider_cfg =
+    make_openai_compat_provider_cfg
+      ~base_url:"http://127.0.0.1:18080/v1"
+      ~request_path:"/chat/completions"
+      ()
+  in
+  let config =
+    Oas_worker_exec.default_config
+      ~name:"custom-local-path"
+      ~provider_cfg
+      ~system_prompt:"system"
+      ~tools:[]
+  in
+  match config.provider.provider with
+  | Oas.Provider.OpenAICompat { base_url; path; _ } ->
+    Alcotest.(check string) "base_url preserved"
+      "http://127.0.0.1:18080/v1" base_url;
+    Alcotest.(check string) "request_path preserved"
+      "/chat/completions" path
+  | Oas.Provider.Local _ ->
+    Alcotest.fail "custom local OpenAI-compatible provider regressed to Local"
+  | _ ->
+    Alcotest.fail
+      "custom local OpenAI-compatible provider should stay OpenAICompat"
 
 let make_worker_meta ?(effective_model = "local-qwen") () :
     Worker_container_types.worker_container_meta =
@@ -2389,6 +2535,12 @@ let () =
         test_sdk_error_is_hard_quota_keeps_transient_network_errors_false;
       Alcotest.test_case "sdk_error_is_hard_quota preserves RateLimited detection" `Quick
         test_sdk_error_is_hard_quota_preserves_rate_limited_detection;
+      Alcotest.test_case "Moonshot auth errors include configured env hint" `Quick
+        test_enrich_sdk_error_for_moonshot_auth_includes_env_hint;
+      Alcotest.test_case "OpenAI-compatible 404 errors include endpoint hint" `Quick
+        test_enrich_sdk_error_for_openai_not_found_includes_endpoint_hint;
+      Alcotest.test_case "default_config preserves custom local request_path" `Quick
+        test_default_config_preserves_custom_local_request_path;
     ];
     "resume_config", [
       Alcotest.test_case "checkpoint model wins" `Quick

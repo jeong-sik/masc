@@ -394,6 +394,84 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
       (Llm_provider.Http_client.AcceptRejected { reason }))
   | _ -> None
 
+let moonshot_auth_hint_marker = "Moonshot returned 401"
+let openai_compat_not_found_hint_marker =
+  "OpenAI-compatible endpoint returned 404"
+
+let is_moonshot_provider (provider_cfg : Llm_provider.Provider_config.t) =
+  String_util.contains_substring_ci provider_cfg.base_url "moonshot.ai"
+  || String.starts_with ~prefix:"kimi" provider_cfg.model_id
+
+let resolve_kimi_api_key_env_name ~cascade_name =
+  let fallback_env = "MOONSHOT_API_KEY" in
+  let resolve_from_overrides overrides =
+    let find_non_empty key =
+      match List.assoc_opt key overrides with
+      | Some value when String.trim value <> "" -> Some value
+      | _ -> None
+    in
+    match find_non_empty "kimi" with
+    | Some env_name -> env_name
+    | None ->
+      (match find_non_empty "*" with
+       | Some env_name -> env_name
+       | None -> fallback_env)
+  in
+  match default_config_path () with
+  | Some config_path ->
+    let overrides =
+      Cascade_config.resolve_api_key_env ~config_path ~name:cascade_name
+    in
+    resolve_from_overrides overrides
+  | None -> fallback_env
+
+let enrich_sdk_error ~cascade_name
+    ~(provider_cfg : Llm_provider.Provider_config.t)
+    (err : Oas.Error.sdk_error) =
+  let append_hint message hint_marker detail =
+    if String_util.contains_substring_ci message hint_marker then
+      message
+    else
+      Printf.sprintf "%s (%s: %s)" message hint_marker detail
+  in
+  match err with
+  | Oas.Error.Api (Llm_provider.Retry.AuthError { message })
+    when is_moonshot_provider provider_cfg ->
+    let env_name =
+      match resolve_kimi_api_key_env_name ~cascade_name with
+      | "" -> "configured kimi API key env"
+      | value -> value
+    in
+    let detail =
+      if String.trim provider_cfg.api_key = "" then
+        Printf.sprintf "%s is empty or unset in this process" env_name
+      else
+        Printf.sprintf
+          "%s was loaded and the auth header was populated; verify that it is a valid Moonshot API key"
+          env_name
+    in
+    Oas.Error.Api
+      (Llm_provider.Retry.AuthError
+         {
+           message =
+             append_hint message moonshot_auth_hint_marker detail;
+         })
+  | Oas.Error.Api (Llm_provider.Retry.InvalidRequest { message })
+    when provider_cfg.kind = Llm_provider.Provider_config.OpenAI_compat
+         && String_util.contains_substring_ci message "not found" ->
+    let detail =
+      Printf.sprintf "base_url=%s request_path=%s endpoint=%s"
+        provider_cfg.base_url provider_cfg.request_path
+        (provider_cfg.base_url ^ provider_cfg.request_path)
+    in
+    Oas.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         {
+           message =
+             append_hint message openai_compat_not_found_hint_marker detail;
+         })
+  | _ -> err
+
 let cli_wrapped_hard_quota_indicators = [
   "terminalquotaerror";
   "quota_exhausted";
@@ -624,6 +702,11 @@ let run_named
     | Error err ->
       (Error err, None)
     | Ok result ->
+      let result =
+        Result.map_error
+          (enrich_sdk_error ~cascade_name ~provider_cfg)
+          result
+      in
       (* Extract checkpoint from the agent if it made progress.
          The agent's mutable state reflects all completed turns even on Error. *)
       let checkpoint_after = match !local_agent_ref with

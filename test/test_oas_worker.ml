@@ -1033,6 +1033,44 @@ let make_openai_compat_provider_cfg ?(model_id = "gpt-4.1") () =
     ~kind:Llm_provider.Provider_config.OpenAI_compat
     ~model_id ~base_url:"http://127.0.0.1:18080/v1" ()
 
+let make_glm_provider_cfg ?(base_url = Llm_provider.Zai_catalog.general_base_url)
+    ?(model_id = "glm-5.1") () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.Glm
+    ~model_id ~base_url ()
+
+let provider_registry_entry_exn name =
+  let registry = Llm_provider.Provider_registry.default () in
+  match Llm_provider.Provider_registry.find registry name with
+  | Some entry -> entry
+  | None -> Alcotest.failf "expected provider registry entry %S" name
+
+let make_openrouter_provider_cfg ?(model_id = "anthropic/claude-3.5") () =
+  let entry = provider_registry_entry_exn "openrouter" in
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~model_id
+    ~base_url:entry.defaults.base_url
+    ~request_path:entry.defaults.request_path
+    ()
+
+let test_cascade_provider_labels_keep_glm_and_glm_coding_distinct () =
+  let glm = Masc_mcp.Oas_worker_cascade.provider_name_of_config
+      (make_glm_provider_cfg ()) in
+  let glm_coding = Masc_mcp.Oas_worker_cascade.provider_name_of_config
+      (make_glm_provider_cfg ~base_url:Llm_provider.Zai_catalog.coding_base_url ()) in
+  Alcotest.(check string) "general GLM label" "glm" glm;
+  Alcotest.(check string) "coding GLM label" "glm-coding" glm_coding
+
+let test_cascade_provider_labels_preserve_registered_openai_compat_family () =
+  let provider_name = Masc_mcp.Oas_worker_cascade.provider_name_of_config
+      (make_openrouter_provider_cfg ()) in
+  let model_label = Masc_mcp.Oas_worker_cascade.model_label_of_config
+      (make_openrouter_provider_cfg ()) in
+  Alcotest.(check string) "openrouter provider name" "openrouter" provider_name;
+  Alcotest.(check string) "openrouter model label"
+    "openrouter:anthropic/claude-3.5" model_label
+
 let test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   let tools =
@@ -2280,6 +2318,10 @@ let () =
         test_cascade_metrics_evicts_lowest_call_key;
       Alcotest.test_case "cascade audit persists observation" `Quick
         test_cascade_audit_persists_observation;
+      Alcotest.test_case "cascade provider labels keep glm and glm-coding distinct" `Quick
+        test_cascade_provider_labels_keep_glm_and_glm_coding_distinct;
+      Alcotest.test_case "cascade provider labels preserve registered openai_compat family" `Quick
+        test_cascade_provider_labels_preserve_registered_openai_compat_family;
       Alcotest.test_case "sdk_error_is_hard_quota detects Gemini CLI wrapper" `Quick
         test_sdk_error_is_hard_quota_detects_gemini_cli_network_wrapper;
       Alcotest.test_case "sdk_error_is_hard_quota keeps transient network errors false" `Quick

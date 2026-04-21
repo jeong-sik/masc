@@ -151,48 +151,11 @@ let reset_cascade_counters_for_test () =
 (* ================================================================ *)
 
 (** Map provider_kind to cascade-label prefix (e.g. "claude", "gemini").
-    Uses OAS provider resolution so endpoint-distinct providers such as
-    [glm] and [glm-coding] remain distinguishable. *)
-let normalize_url value =
-  let trimmed = String.trim value in
-  if trimmed = "" then trimmed
-  else
-    let rec strip_trailing_slash s =
-      let len = String.length s in
-      if len > 1 && s.[len - 1] = '/' then
-        strip_trailing_slash (String.sub s 0 (len - 1))
-      else
-        s
-    in
-    strip_trailing_slash trimmed
+    Delegates to the current OAS registry helper so endpoint-distinct
+    providers such as [glm], [glm-coding], and [openrouter] track the
+    pinned agent_sdk behavior exactly. *)
 let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
-  match cfg.kind with
-  | Anthropic -> "claude"
-  | Gemini -> "gemini"
-  | Glm ->
-      if Llm_provider.Zai_catalog.is_coding_base_url cfg.base_url then
-        "glm-coding"
-      else "glm"
-  | Claude_code -> "claude_code"
-  | Gemini_cli -> "gemini_cli"
-  | Codex_cli -> "codex_cli"
-  | Ollama -> "ollama"
-  | OpenAI_compat ->
-      if Llm_provider.Provider_config.is_local cfg then
-        "llama"
-      else
-        let request_path = String.trim cfg.request_path in
-        let base_url = normalize_url cfg.base_url in
-        let registry = Llm_provider.Provider_registry.default () in
-        match
-          Llm_provider.Provider_registry.all registry
-          |> List.find_opt (fun (entry : Llm_provider.Provider_registry.entry) ->
-                 entry.defaults.kind = cfg.kind
-                 && String.equal (normalize_url entry.defaults.base_url) base_url
-                 && String.equal (String.trim entry.defaults.request_path) request_path)
-        with
-        | Some entry -> entry.name
-        | None -> "openai"
+  Llm_provider.Provider_registry.provider_name_of_config cfg
 
 let display_provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
   Provider_adapter.display_provider_name (provider_name_of_config cfg)

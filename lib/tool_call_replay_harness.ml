@@ -18,6 +18,9 @@ let ( let* ) = Result.bind
 let errorf fmt =
   Printf.ksprintf (fun msg -> Error msg) fmt
 
+type response_format =
+  | Openai_chat_completions
+
 let assoc label = function
   | `Assoc fields -> Ok fields
   | _ -> errorf "%s: expected object" label
@@ -96,6 +99,29 @@ let load_snapshots_from_jsonl path =
       in
       parse 0 [] rows
 
+let response_format_of_provider provider =
+  let canonical =
+    match Provider_adapter.resolve_direct_canonical_name provider with
+    | Some name -> name
+    | None -> String.lowercase_ascii (String.trim provider)
+  in
+  (* The seed harness only knows the OpenAI-compatible chat-completions
+     tool-call envelope; unsupported providers must add an explicit extractor
+     instead of silently reusing this parser. *)
+  match canonical with
+  | "codex-api"
+  | "glm-api"
+  | "glm-coding-plan"
+  | "kimi-api"
+  | "openrouter"
+  | "ollama"
+  | "llama" ->
+      Ok Openai_chat_completions
+  | _ ->
+      errorf
+        "snapshot provider '%s' (canonical '%s') is not supported by replay harness yet"
+        provider canonical
+
 let extract_openai_tool_calls response =
   let* fields = assoc "response" response in
   let* choices = list_field fields "choices" in
@@ -146,7 +172,10 @@ let validate_snapshot (snapshot : snapshot) =
       if not (tool_declared expected.name) then
         push "expected tool '%s' is not declared in snapshot.tools" expected.name)
     snapshot.expected_tool_calls;
-  (match extract_openai_tool_calls snapshot.response with
+  (match response_format_of_provider snapshot.provider with
+   | Error msg -> push "%s" msg
+   | Ok Openai_chat_completions ->
+       (match extract_openai_tool_calls snapshot.response with
    | Error msg -> push "%s" msg
    | Ok actual_tool_calls ->
        List.iter
@@ -170,7 +199,7 @@ let validate_snapshot (snapshot : snapshot) =
                push
                  "arguments mismatch for tool '%s'"
                  expected.name)
-           snapshot.expected_tool_calls actual_tool_calls);
+           snapshot.expected_tool_calls actual_tool_calls));
   match List.rev !errors with
   | [] -> Ok ()
   | errs -> Error errs

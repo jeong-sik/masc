@@ -1366,6 +1366,9 @@ let gh_repo_context_error
     worktree_path;
   }
 
+let gh_claim_first_hint =
+  "Call keeper_task_claim with {} first to bind an active task before using keeper_shell op=gh."
+
 let gh_repo_context_error_json ~op ~cmd_display err =
   let extra_fields =
     [
@@ -1419,7 +1422,8 @@ let resolve_gh_repo_context ~(config : Coord.config) ~(meta : keeper_meta)
                ~detail:
                  "current_task_id is set, but the task is not present in the backlog."
                ~hint:
-                 "Refresh the keeper task binding, then retry the gh command."
+                 (gh_claim_first_hint
+                  ^ " If you already claimed a task, refresh the keeper task binding, then retry the gh command.")
                ())
       | Some task ->
           (match task.worktree with
@@ -1430,7 +1434,8 @@ let resolve_gh_repo_context ~(config : Coord.config) ~(meta : keeper_meta)
                     ~detail:
                       "The active task has no linked worktree, so gh cannot bind repository context structurally."
                     ~hint:
-                      "Create/link a task worktree first, for example with masc_worktree_create { task_id, repo_name }."
+                      (gh_claim_first_hint
+                       ^ " If the task is already claimed, create/link a task worktree first, for example with masc_worktree_create { task_id, repo_name }.")
                     ())
            | Some worktree ->
                let git_root = worktree.git_root in
@@ -1442,14 +1447,15 @@ let resolve_gh_repo_context ~(config : Coord.config) ~(meta : keeper_meta)
                if String.trim worktree.path = ""
                   || not (safe_is_dir worktree_cwd)
                then
-                 Error
-                   (gh_repo_context_error ~task_id ~git_root
-                      ~worktree_path:worktree_cwd
-                      ~code:"gh_repo_context_missing_worktree_path"
-                      ~detail:
-                        "The active task worktree path is missing or not a directory."
-                      ~hint:
-                        "Recreate the linked task worktree, then retry the gh command."
+                  Error
+                    (gh_repo_context_error ~task_id ~git_root
+                       ~worktree_path:worktree_cwd
+                       ~code:"gh_repo_context_missing_worktree_path"
+                       ~detail:
+                         "The active task worktree path is missing or not a directory."
+                       ~hint:
+                        (gh_claim_first_hint
+                         ^ " If the task is already claimed, recreate the linked task worktree, then retry the gh command.")
                       ())
                else
                  match Keeper_gh_shared.repo_slug_of_git_root ~git_root with
@@ -1469,7 +1475,8 @@ let resolve_gh_repo_context ~(config : Coord.config) ~(meta : keeper_meta)
                           ~detail:
                             "The task git root has no readable origin remote owner/repo slug."
                           ~hint:
-                            "Ensure the linked task worktree points at a sandbox clone with a valid origin remote."
+                            (gh_claim_first_hint
+                             ^ " If the task is already claimed, ensure the linked task worktree points at a sandbox clone with a valid origin remote.")
                           ()))
 
 let handle_keeper_shell

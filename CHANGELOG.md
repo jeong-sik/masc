@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.12.4] - 2026-04-22
+
+### Changed
+- `oas_worker_exec` 2차 분리로 shared config/build-resume assembly를
+  `oas_worker_exec_agent.ml`, transport/runtime MCP resolution을
+  `oas_worker_exec_transport.ml`, checkpoint/lifecycle helpers를
+  `oas_worker_exec_checkpoint.ml`로 이동했다. Public surface는 유지하고
+  structural approval wiring은 `oas_worker_exec.ml`에 남겼다.
+- `Oas_worker_named` now handles `Llm_provider.Retry.NotFound` in
+  cascade outcome mapping and hard-quota classification so the worker build
+  remains exhaustive with current `agent_sdk`.
+
+### Deprecated
+- None.
 
 ## [0.12.3] - 2026-04-21
 

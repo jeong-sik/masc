@@ -550,7 +550,10 @@
    oas_events
    oas_worker
    oas_worker_cascade
+   oas_worker_exec_agent
    oas_worker_exec
+   oas_worker_exec_checkpoint
+   oas_worker_exec_transport
    oas_worker_named
    masc_oas_bridge
    oas_bus_instrument
@@ -715,7 +718,10 @@
   tool_misc_web_search
   ;; godsplit-oas-worker: oas_worker decomposition
   oas_worker_cascade
+  oas_worker_exec_agent
   oas_worker_exec
+  oas_worker_exec_checkpoint
+  oas_worker_exec_transport
   oas_worker_named
   ;; godsplit-meta-cognition: meta_cognition decomposition
   meta_cognition_types

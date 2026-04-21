@@ -1109,8 +1109,10 @@ let docker_auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.
     else auth_env_keys_of_provider_kind cfg.kind
   | Llm_provider.Provider_config.Gemini -> [ gemini_api_key_env ]
   | Llm_provider.Provider_config.Anthropic
+  | Llm_provider.Provider_config.Kimi
   | Llm_provider.Provider_config.Ollama
   | Llm_provider.Provider_config.Gemini_cli
+  | Llm_provider.Provider_config.Kimi_cli
   | Llm_provider.Provider_config.Glm
   | Llm_provider.Provider_config.Claude_code
   | Llm_provider.Provider_config.Codex_cli ->

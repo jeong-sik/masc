@@ -10,6 +10,7 @@
 ## Evidence
 
 <!-- Tests, harness runs, screenshots, logs, or other proof. -->
+- If tool-call behavior or provider tool support changed: include replay-harness or `ToolCallContract` evidence.
 
 ## Review evidence
 

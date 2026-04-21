@@ -372,7 +372,7 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
   match fiber_health with
   | Fiber_zombie -> KH_zombie
   | Fiber_dead -> KH_dead
-  | _ ->
+  | Fiber_alive | Fiber_unknown ->
   let agent_exists = json_bool "exists" agent_status false in
   let agent_status_text =
     json_string_opt "status" agent_status

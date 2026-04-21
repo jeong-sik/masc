@@ -1190,16 +1190,24 @@ let run_turn
          | _ ->
            Some (Printf.sprintf
              "## Discovered Work (auto, %ds interval)\n\n%s\n\n\
-              ### Required: use ONE structured keeper tool if available\n\
-              Valid keeper tools (copy the name and schema verbatim):\n\
+              ### Use the smallest real action now\n\
+              Preferred keeper tools (copy the name and schema verbatim):\n\
              \  - `keeper_task_claim` {} \
               — reserve the next eligible task\n\
+             \  - `keeper_shell` { op: \"gh\", cmd: \"pr list --state open\" } \
+              — inspect GitHub PRs/issues/checks\n\
              \  - `keeper_bash` { cmd: \"<single shell command>\" } \
-              — execute shell (sandboxed)\n\
+              — run one shell command, including raw git in a worktree\n\
+             \  - `masc_worktree_create` { repo_name: \"masc-mcp\", branch_name: \"<branch>\" } \
+              — create a worktree before editing code\n\
              \  - `keeper_board_post` { content: \"<note>\" } \
               — coordinate via board\n\
              \  - `keeper_stay_silent` {} \
               — none of the above fit my role\n\n\
+              GitHub/code workflow: inspect with `keeper_shell op=gh`; \
+              if code change is needed, `masc_worktree_create` -> edit -> \
+              `keeper_bash` for `git add` / `git commit` / `git push` -> \
+              `keeper_shell op=gh` with `cmd=\"pr create --draft ...\"`.\n\n\
               Anti-pattern: `Bash`, `Read`, `Skill`, `Agent` are NOT \
               registered tools. Calling them is a hallucination — the \
               call fails silently and the turn is wasted. Use the \
@@ -1208,7 +1216,7 @@ let run_turn
               expose a structured tool channel, return exactly \
               `NO_TOOL_CHANNEL: <brief reason>` instead of pretending a \
               tool ran. Otherwise pick the smallest viable action and emit \
-              it as a structured tool_call now."
+              one or more structured tool calls now."
              interval (String.concat "\n\n" sections)))
     | _ -> None
   in

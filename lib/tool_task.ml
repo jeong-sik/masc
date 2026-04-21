@@ -155,7 +155,10 @@ let can_review_completion ~(task_opt : Types.task option) ~(agent_name : string)
        | Types.Claimed { assignee; _ }
        | Types.InProgress { assignee; _ } ->
            String.equal assignee agent_name
-       | _ -> false)
+       | Types.Todo
+       | Types.AwaitingVerification _
+       | Types.Done _
+       | Types.Cancelled _ -> false)
   | None -> false
 
 (* Concrete example handed to the keeper when the anti-rationalization

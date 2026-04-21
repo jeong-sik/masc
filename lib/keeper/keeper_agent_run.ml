@@ -2241,6 +2241,11 @@ let run_turn
              "keeper:%s unexpected_tool_partial_tolerance tools=%s (cycle continues; valid tools present)"
              meta.name
              (String.concat ", " unexpected_tool_names);
+         let actual_keeper_tool_names =
+           observed_tool_names
+           |> Keeper_tool_alias.canonicalize_observed
+           |> List.filter (fun tool_name -> List.mem tool_name all_tool_names)
+         in
          let usage = Keeper_exec_context.usage_of_response result.response in
          let ctx_composition =
            build_ctx_composition_metrics
@@ -2270,6 +2275,7 @@ let run_turn
            | Error reason ->
              let contract_str =
                match effective_completion_contract with
+               match effective_completion_contract with
                | Keeper_tool_disclosure.Allow_text_or_tool -> "Allow_text_or_tool"
                | Keeper_tool_disclosure.Require_tool_use -> "Require_tool_use"
              in
@@ -2277,7 +2283,9 @@ let run_turn
                "keeper:%s required tool contract violated \
                 (turn=%d, tools=%d, contract=%s). \
                 Rejecting text-only response. Reason: %s"
-               meta.name result.turns (List.length tool_names) contract_str reason;
+               meta.name result.turns
+               (List.length actual_keeper_tool_names)
+               contract_str reason;
              Error
                (Oas.Error.Agent
                   (Oas.Error.CompletionContractViolation
@@ -2306,7 +2314,7 @@ let run_turn
                  let synth =
                    Keeper_memory_policy.synthesize_state_from_run_result
                      ~goal:meta.goal
-                     ~tools_used:tool_names
+                     ~tools_used:actual_keeper_tool_names
                      ~stop_reason:stop_reason_str
                      ~response_text
                  in
@@ -2314,7 +2322,7 @@ let run_turn
                  Log.Keeper.info
                    "keeper:%s [STATE] missing, synthesized from %d tools (stop=%s)"
                    meta.name
-                   (List.length tool_names)
+                   (List.length actual_keeper_tool_names)
                    stop_reason_str;
                  response_text ^ "\n" ^ block
            in
@@ -2514,7 +2522,9 @@ let run_turn
                   ~assistant_reply:(Some response_text)
               in
               let used_search =
-                List.exists (fun t -> t = "keeper_memory_search") tool_names
+                List.exists
+                  (fun t -> t = "keeper_memory_search")
+                  actual_keeper_tool_names
               in
               let recall_eval =
                 if used_search
@@ -2553,7 +2563,7 @@ let run_turn
                    ; "keeper_name", `String meta.name
                    ; "turn", `Int result.turns
                    ; "goal_alignment", `Float goal_score
-                   ; "tools_used_count", `Int (List.length tool_names)
+                   ; "tools_used_count", `Int (List.length actual_keeper_tool_names)
                    ; "used_memory_search", `Bool used_search
                    ; "post_turn_ms", `Float post_turn_ms
                    ]
@@ -2590,9 +2600,9 @@ let run_turn
              ; ctx_composition
              ; cascade_observation = result.cascade_observation
              ; turn_count = result.turns
-             ; tool_calls_made = List.length tool_names
+             ; tool_calls_made = List.length actual_keeper_tool_names
              ; usage
-             ; tools_used = tool_names
+             ; tools_used = actual_keeper_tool_names
              ; checkpoint = saved_checkpoint
              ; proof = result.proof
              ; trace_ref = result.trace_ref
@@ -2605,7 +2615,10 @@ let run_turn
          match text_result with
          | Error e -> Error e
          | Ok text -> (
-             match Keeper_tool_disclosure.normalize_response_text ~text ~tool_names () with
+             match
+               Keeper_tool_disclosure.normalize_response_text
+                 ~text ~tool_names:actual_keeper_tool_names ()
+             with
              | Error e -> Error (Oas.Error.Internal e)
              | Ok response_text -> finalize_response_text response_text))
     )

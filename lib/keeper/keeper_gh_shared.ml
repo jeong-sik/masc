@@ -459,39 +459,87 @@ let run_argv_first_line_unix ~(prog : string) ~(argv : string array) : string op
   with
   | Unix.Unix_error _ | Sys_error _ -> None
 
+let inject_repo_flag_cmd ~repo_slug cmd =
+  let normalized = normalize_gh_command cmd in
+  if has_repo_flag normalized
+  then normalized
+  else String.trim (normalized ^ " --repo " ^ repo_slug)
+
+let repo_slug_of_remote_url url =
+  let url = String.trim url in
+  let strip_git s =
+    if String.length s > 4 && String.sub s (String.length s - 4) 4 = ".git"
+    then String.sub s 0 (String.length s - 4)
+    else s
+  in
+  match String.split_on_char ':' url with
+  | [ _; path ] when String.contains url '@' ->
+      validate_repo_slug (strip_git path) |> Result.to_option
+  | _ ->
+      let parts = String.split_on_char '/' url in
+      let n = List.length parts in
+      if n >= 2
+      then
+        let owner = List.nth parts (n - 2) in
+        let repo = strip_git (List.nth parts (n - 1)) in
+        validate_repo_slug (owner ^ "/" ^ repo) |> Result.to_option
+      else
+        None
+
 (** Cached owner/repo slug from git remote origin. *)
 let _repo_slug_cache : string option option ref = ref None
+
+let repo_slug_of_git_config ~git_root =
+  let config_path = Filename.concat git_root ".git/config" in
+  if not (Sys.file_exists config_path)
+  then None
+  else
+    let ic = open_in_bin config_path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let rec loop ~in_origin =
+          match input_line ic with
+          | line ->
+            let trimmed = String.trim line in
+            if trimmed = "" || String.starts_with ~prefix:";" trimmed
+            then loop ~in_origin
+            else if String.starts_with ~prefix:"[" trimmed
+            then
+              loop
+                ~in_origin:(String.equal trimmed "[remote \"origin\"]")
+            else if in_origin
+                    && (String.starts_with ~prefix:"url = " trimmed
+                        || String.starts_with ~prefix:"url=" trimmed)
+            then
+              let value =
+                if String.starts_with ~prefix:"url = " trimmed
+                then String.sub trimmed 6 (String.length trimmed - 6)
+                else String.sub trimmed 4 (String.length trimmed - 4)
+              in
+              repo_slug_of_remote_url value
+            else loop ~in_origin
+          | exception End_of_file -> None
+        in
+        loop ~in_origin:false)
+
+let repo_slug_of_git_root ~git_root =
+  match repo_slug_of_git_config ~git_root with
+  | Some slug -> Some slug
+  | None ->
+    (match
+       Process_eio.run_argv_with_status ~cwd:git_root ~timeout_sec:5.0
+         [ "git"; "remote"; "get-url"; "origin" ]
+     with
+     | Unix.WEXITED 0, url -> repo_slug_of_remote_url url
+     | _ -> None)
 
 let project_repo_slug () : string option =
   match !_repo_slug_cache with
   | Some cached -> cached
   | None ->
       let slug =
-        match
-          run_argv_first_line_unix
-            ~prog:"git"
-            ~argv:[| "git"; "remote"; "get-url"; "origin" |]
-        with
-        | Some url ->
-            (* git@github.com:owner/repo.git or https://github.com/owner/repo.git *)
-            let strip_git s =
-              if String.length s > 4 && String.sub s (String.length s - 4) 4 = ".git"
-              then String.sub s 0 (String.length s - 4)
-              else s
-            in
-            (match String.split_on_char ':' url with
-             | [_; path] when String.contains url '@' ->
-                 Some (strip_git path)
-             | _ ->
-                 (* https://github.com/owner/repo.git *)
-                 let parts = String.split_on_char '/' url in
-                 let n = List.length parts in
-                 if n >= 2 then
-                   let owner = List.nth parts (n - 2) in
-                   let repo = strip_git (List.nth parts (n - 1)) in
-                   Some (owner ^ "/" ^ repo)
-                 else None)
-        | _ -> None
+        repo_slug_of_git_root ~git_root:(Sys.getcwd ())
       in
       _repo_slug_cache := Some slug;
       slug

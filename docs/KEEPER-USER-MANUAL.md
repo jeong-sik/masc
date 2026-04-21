@@ -277,8 +277,8 @@ spawn 시 인자로 직접 설정하는 필드.
 | `auto_handoff` | bool | `true` | context 초과 시 자동 handoff | `masc_keeper_up`의 `auto_handoff` 인자 |
 | `handoff_threshold` | float | `0.85` | handoff 트리거 context_ratio | `masc_keeper_up`의 `handoff_threshold` 인자 |
 | `verify` | bool | `false` | 저비용 모델로 action 검증 | `masc_keeper_up`의 `verify` 인자 |
-| `sandbox_profile` | string | `legacy_local` | 실행 샌드박스 프로필 | `masc_keeper_up`의 `sandbox_profile` 인자 |
-| `network_mode` | string | `inherit` 또는 `none` | 샌드박스 네트워크 정책. `docker_hardened`는 기본 `none` | `masc_keeper_up`의 `network_mode` 인자 |
+| `sandbox_profile` | string | `legacy_local` | 실행 샌드박스 프로필 (`legacy_local`, `docker_hardened`, `docker_with_git`) | `masc_keeper_up`의 `sandbox_profile` 인자 |
+| `network_mode` | string | `inherit` 또는 `none` | 샌드박스 네트워크 정책. `docker_hardened`는 기본 `none`, `docker_with_git`는 기본 `inherit` | `masc_keeper_up`의 `network_mode` 인자 |
 | `shared_memory_scope` | string | `disabled` | typed shared-memory lane. `room`이면 keeper-authorized `masc_team_memory_*`를 flattened `default` namespace에서 사용 가능 | `masc_keeper_up`의 `shared_memory_scope` 인자 |
 
 ### 3.1.1 Sandbox Core V1 사용법

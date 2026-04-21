@@ -1119,7 +1119,6 @@ let sample_tool_surface_metrics () : Masc_mcp.Keeper_agent_run.tool_surface_metr
     approval_mode_effective = None;
     approval_mode_derived = false;
   }
-
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     ?trace_ref
     ?run_validation
@@ -2749,7 +2748,6 @@ let test_validate_completion_contract_presence_requires_keeper_surface_tool () =
   | Error e ->
     check bool "error mentions keeper-surface tools" true
       (contains_substring e "keeper-surface tools")
-
 let test_tool_usage_delta_uses_registry_counts () =
   let before =
     [

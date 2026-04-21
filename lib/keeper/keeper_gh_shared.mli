@@ -107,6 +107,8 @@ val args_have_repo_flag : string list -> bool
 
 val inject_repo_flag_args : repo_slug:string -> string list -> string list
 
+val inject_repo_flag_cmd : repo_slug:string -> string -> string
+
 val project_repo_slug : unit -> string option
 
 val resolve_task_repo_context :
@@ -114,6 +116,7 @@ val resolve_task_repo_context :
   meta:Keeper_types.keeper_meta ->
   (task_repo_context, task_repo_context_error) result
 
+val repo_slug_of_git_root : git_root:string -> string option
 (** Replace a wrong --repo/-R slug in cmd with the correct one.
     Returns (corrected_cmd, was_corrected). *)
 val correct_repo_flag :

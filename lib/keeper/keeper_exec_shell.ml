@@ -1280,6 +1280,127 @@ let handle_keeper_bash_kill
               ("grace_sec", `Float grace_sec);
             ])
 
+type gh_repo_context =
+  {
+    task_id : string;
+    git_root : string;
+    worktree_cwd : string;
+    repo_slug : string;
+  }
+
+type gh_repo_context_error =
+  {
+    code : string;
+    detail : string;
+    hint : string;
+    task_id : string option;
+    git_root : string option;
+    worktree_path : string option;
+  }
+
+let gh_repo_context_error
+      ?task_id ?git_root ?worktree_path ~code ~detail ~hint () =
+  {
+    code;
+    detail;
+    hint;
+    task_id;
+    git_root;
+    worktree_path;
+  }
+
+let gh_repo_context_error_json ~op ~cmd_display err =
+  let extra_fields =
+    [
+      Option.map (fun task_id -> "task_id", `String task_id) err.task_id;
+      Option.map (fun git_root -> "git_root", `String git_root) err.git_root;
+      Option.map (fun worktree_path -> "worktree_path", `String worktree_path)
+        err.worktree_path;
+    ]
+    |> List.filter_map (fun value -> value)
+  in
+  Yojson.Safe.to_string
+    (`Assoc
+        ([ "ok", `Bool false
+         ; "op", `String op
+         ; "command", `String cmd_display
+         ; "error", `String err.code
+         ; "error_category", `String "gh_repo_context"
+         ; "detail", `String err.detail
+         ; "hint", `String err.hint
+         ] @ extra_fields))
+
+let resolve_gh_repo_context ~(config : Coord.config) ~(meta : keeper_meta) =
+  match meta.current_task_id with
+  | None ->
+      Error
+        (gh_repo_context_error
+           ~code:"gh_repo_context_missing_current_task"
+           ~detail:
+             "keeper_shell op=gh needs an active current_task_id bound to a task worktree."
+           ~hint:
+             "Claim/bind a task first so gh can derive repo context from the active task worktree."
+           ())
+  | Some task_id ->
+      let task_id = Keeper_id.Task_id.to_string task_id in
+      match
+        Coord_query.get_tasks_safe config
+        |> List.find_opt (fun (task : Types.task) -> String.equal task.id task_id)
+      with
+      | None ->
+          Error
+            (gh_repo_context_error ~task_id
+               ~code:"gh_repo_context_task_not_found"
+               ~detail:
+                 "current_task_id is set, but the task is not present in the backlog."
+               ~hint:
+                 "Refresh the keeper task binding, then retry the gh command."
+               ())
+      | Some task ->
+          (match task.worktree with
+           | None ->
+               Error
+                 (gh_repo_context_error ~task_id
+                    ~code:"gh_repo_context_missing_worktree"
+                    ~detail:
+                      "The active task has no linked worktree, so gh cannot bind repository context structurally."
+                    ~hint:
+                      "Create/link a task worktree first, for example with masc_worktree_create { task_id, repo_name }."
+                    ())
+           | Some worktree ->
+               let git_root = worktree.git_root in
+               let worktree_cwd =
+                 if Filename.is_relative worktree.path
+                 then Filename.concat git_root worktree.path
+                 else worktree.path
+               in
+               if String.trim worktree.path = ""
+                  || not (safe_is_dir worktree_cwd)
+               then
+                 Error
+                   (gh_repo_context_error ~task_id ~git_root
+                      ~worktree_path:worktree_cwd
+                      ~code:"gh_repo_context_missing_worktree_path"
+                      ~detail:
+                        "The active task worktree path is missing or not a directory."
+                      ~hint:
+                        "Recreate the linked task worktree, then retry the gh command."
+                      ())
+               else
+                 match Keeper_gh_shared.repo_slug_of_git_root ~git_root with
+                 | Some repo_slug ->
+                     Ok { task_id; git_root; worktree_cwd; repo_slug }
+                 | None ->
+                     Error
+                       (gh_repo_context_error ~task_id ~git_root
+                          ~worktree_path:worktree_cwd
+                          ~code:"gh_repo_context_origin_missing"
+                          ~detail:
+                            "The task git root has no readable origin remote owner/repo slug."
+                          ~hint:
+                            "Ensure the linked task worktree points at a sandbox clone with a valid origin remote."
+                          ()))
+
 let handle_keeper_shell
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -1329,58 +1450,6 @@ let handle_keeper_shell
      Returns structured JSON with tried path, playground root, and concrete next action. *)
   let path_error e =
     actionable_path_error ~op ~keeper_name:meta.name ~raw_path ~error:e
-  in
-  let gh_command_with_repo_context ~cwd ~(cmd_str : string)
-    : ((string * (string * Yojson.Safe.t) list), (string * Yojson.Safe.t) list) result
-    =
-    if Keeper_gh_shared.has_repo_flag cmd_str || Coord_git.is_git_repo ~base_path:cwd
-    then Ok (cmd_str, [])
-    else
-      match Keeper_gh_shared.resolve_task_repo_context ~config ~meta with
-      | Ok ctx ->
-        Ok
-          ( Printf.sprintf "--repo %s %s" ctx.repo_slug cmd_str
-          , [ "repo_source", `String "current_task_worktree"
-            ; "task_id", `String ctx.task_id
-            ; "repo_slug", `String ctx.repo_slug
-            ; "repo_git_root", `String ctx.git_root
-            ] )
-      | Error repo_error ->
-        let error, hint, extra_fields =
-          match repo_error with
-          | Keeper_gh_shared.Missing_current_task ->
-            ( "gh_repo_context_missing"
-            , "gh ran outside a git repository and this keeper has no current task. Claim or bind a task with a linked worktree, run gh from a repo clone/worktree, or pass explicit `--repo OWNER/NAME`."
-            , [] )
-          | Keeper_gh_shared.Current_task_not_found task_id ->
-            ( "gh_repo_context_missing"
-            , "gh ran outside a git repository and the keeper's current task record was not found. Rebind the task, run gh from a repo clone/worktree, or pass explicit `--repo OWNER/NAME`."
-            , [ "task_id", `String task_id ] )
-          | Keeper_gh_shared.Current_task_missing_worktree task_id ->
-            ( "gh_repo_context_missing"
-            , "gh ran outside a git repository and the current task has no linked worktree. Create/link a worktree for the task, run gh from a repo clone/worktree, or pass explicit `--repo OWNER/NAME`."
-            , [ "repo_source", `String "current_task_worktree"
-              ; "task_id", `String task_id
-              ] )
-          | Keeper_gh_shared.Current_task_origin_unavailable { task_id; git_root } ->
-            ( "gh_repo_context_missing"
-            , "gh ran outside a git repository and the current task worktree has no readable origin remote. Restore the worktree's origin remote, run gh from a repo clone/worktree, or pass explicit `--repo OWNER/NAME`."
-            , [ "repo_source", `String "current_task_worktree"
-              ; "task_id", `String task_id
-              ; "repo_git_root", `String git_root
-              ] )
-          | Keeper_gh_shared.Current_task_origin_not_github { task_id; git_root } ->
-            ( "gh_repo_context_missing"
-            , "gh ran outside a git repository and the current task worktree origin is not a GitHub remote. Use a GitHub-backed worktree, run gh from the intended repo, or pass explicit `--repo OWNER/NAME`."
-            , [ "repo_source", `String "current_task_worktree"
-              ; "task_id", `String task_id
-              ; "repo_git_root", `String git_root
-              ] )
-        in
-        Error
-          ([ "error", `String error
-           ; "hint", `String hint
-           ] @ extra_fields)
   in
   let render_process_result ?cwd ~cmd argv =
     let st, out =
@@ -1923,6 +1992,7 @@ let handle_keeper_shell
       Safe_ops.json_string ~default:"" "cmd" args
       |> normalize_gh_command
     in
+    let cmd_has_repo_flag = Keeper_gh_shared.has_repo_flag cmd_str in
     (* gh runs against remote network. Prior floors (1s, then 5s) kept
        firing gh_command_timed_out on plain read calls — 41 such
        rejections on 2026-04-17/18 (#8688), every single one at
@@ -1943,12 +2013,11 @@ let handle_keeper_shell
       (* Reversibility gate (Thariq / Anthropic auto-mode principle):
          - R0 read / R1 reversible mutation: allowed; R1 is audit-logged.
          - R2 irreversible: rejected with a structured-tool hint so the
-           LLM can self-recover toward an operator-approval path without
+         LLM can self-recover toward an operator-approval path without
            a second round-trip. *)
       let reversibility = Worker_dev_tools.classify_gh_reversibility cmd_str in
       let rev_tag = Worker_dev_tools.string_of_gh_reversibility reversibility in
-      let gh_cmd_display cmd = Printf.sprintf "gh %s" cmd in
-      let gh_base ~ok ~cwd ~command extras =
+      let gh_base ~command ~ok ~cwd extras =
         Yojson.Safe.to_string
           (`Assoc
               ([ "ok", `Bool ok
@@ -1957,6 +2026,62 @@ let handle_keeper_shell
                ; "command", `String command
                ; "reversibility", `String rev_tag
                ] @ extras))
+      in
+      let run_gh_command ~command ~cwd ~(ctx : gh_repo_context option) =
+        if reversibility = Worker_dev_tools.R1_Reversible then
+          Log.Keeper.info
+            "gh_audit: keeper=%s reversibility=R1 cwd=%s cmd=%s"
+            meta.name cwd command;
+        let full_cmd =
+          Keeper_gh_env.with_env config
+            (Printf.sprintf "%s 2>&1" command)
+        in
+        let st, out =
+          Process_eio.run_argv_with_status ~cwd ~timeout_sec
+            [ "bash"; "-lc"; full_cmd ]
+        in
+        if process_status_is_timeout st then
+          gh_base ~command ~ok:false ~cwd
+            [ "error", `String "gh_command_timed_out"
+            ; "timeout_sec", `Float timeout_sec
+            ; "status", Keeper_alerting_path.process_status_to_json st
+            ; "output", `String out
+            ; "hint", `String
+                "gh network call exceeded timeout_sec. Retry \
+                 with a larger value — gh round-trip plus auth \
+                 handshake is usually 3-10s, so prefer \
+                 timeout_sec=30 or timeout_sec=60 rather than \
+                 the 15s floor. You may also narrow the query \
+                 (--state, --limit, --json)."
+            ]
+        else
+          let ok = st = Unix.WEXITED 0 in
+          let base_fields =
+            (match ctx with
+             | Some ctx ->
+               [ "task_id", `String ctx.task_id
+               ; "repo", `String ctx.repo_slug
+               ; "git_root", `String ctx.git_root
+               ]
+             | None -> [])
+            @
+            [ "status", Keeper_alerting_path.process_status_to_json st
+            ; "output", `String out ]
+          in
+          let hinted_fields =
+            if (not ok)
+               && String_util.contains_substring_ci out
+                    "Could not resolve to a Repository"
+            then
+              base_fields @
+              [ "error", `String "gh_repo_resolve_failed"
+              ; "hint", `String
+                  "gh is bound to the active task worktree repo. \
+                   Ensure the linked sandbox clone still has a valid \
+                   origin remote and recreate the task worktree if needed." ]
+            else base_fields
+          in
+          gh_base ~command ~ok ~cwd hinted_fields
       in
       (match reversibility with
        | Worker_dev_tools.R2_Irreversible ->
@@ -1971,69 +2096,44 @@ let handle_keeper_shell
          Log.Keeper.warn
            "keeper_shell op=gh R2 blocked: %s (keeper=%s)"
            cmd_str meta.name;
-         gh_base ~ok:false ~cwd:"" ~command:(gh_cmd_display cmd_str)
+         gh_base ~command:(Printf.sprintf "gh %s" cmd_str) ~ok:false ~cwd:""
            [ "error", `String "gh_irreversible_blocked"
            ; "hint", `String hint ]
        | R0_Read | R1_Reversible ->
-         begin
-           match Worker_dev_tools.validate_gh_command ~allowed_orgs cmd_str with
-           | Error reason ->
-             Yojson.Safe.to_string
-               (`Assoc
-                   [ "ok", `Bool false
-                   ; "op", `String op
-                   ; "error", `String "gh_command_blocked"
-                   ; "reason", `String reason
+         (match Worker_dev_tools.validate_gh_command ~allowed_orgs cmd_str with
+          | Error reason ->
+            Yojson.Safe.to_string
+              (`Assoc
+                  [ "ok", `Bool false
+                  ; "op", `String op
+                  ; "error", `String "gh_command_blocked"
+                  ; "reason", `String reason
                    ; "hint", `String
                        "Run `gh --help` shapes: pr/issue/repo/release/label/run/\
-                        workflow/api/project/ruleset/search/status/cache/gist. \
-                        auth/secret/ssh-key are blocked."
-                   ])
-           | Ok () ->
-             match cwd_target () with
-             | Error e -> path_error e
-             | Ok cwd ->
-               (match gh_command_with_repo_context ~cwd ~cmd_str with
-                | Error repo_fields ->
-                  gh_base ~ok:false ~cwd ~command:(gh_cmd_display cmd_str)
-                    repo_fields
-                | Ok (effective_cmd_str, repo_fields) ->
-                  if reversibility = Worker_dev_tools.R1_Reversible then
-                    Log.Keeper.info
-                      "gh_audit: keeper=%s reversibility=R1 cwd=%s cmd=%s"
-                      meta.name cwd (gh_cmd_display effective_cmd_str);
-                  let full_cmd =
-                    Keeper_gh_env.with_env config
-                      (Printf.sprintf "gh %s 2>&1" effective_cmd_str)
-                  in
-                  let st, out =
-                    Process_eio.run_argv_with_status ~cwd ~timeout_sec
-                      [ "bash"; "-lc"; full_cmd ]
-                  in
-                  if process_status_is_timeout st then
-                    gh_base ~ok:false ~cwd
-                      ~command:(gh_cmd_display effective_cmd_str)
-                      (repo_fields @
-                       [ "error", `String "gh_command_timed_out"
-                       ; "timeout_sec", `Float timeout_sec
-                       ; "status", Keeper_alerting_path.process_status_to_json st
-                       ; "output", `String out
-                       ; "hint", `String
-                           "gh network call exceeded timeout_sec. Retry \
-                            with a larger value — gh round-trip plus auth \
-                            handshake is usually 3-10s, so prefer \
-                            timeout_sec=30 or timeout_sec=60 rather than \
-                            the 15s floor. You may also narrow the query \
-                            (--state, --limit, --json)."
-                       ])
-                  else
-                    let ok = st = Unix.WEXITED 0 in
-                    gh_base ~ok ~cwd
-                      ~command:(gh_cmd_display effective_cmd_str)
-                      (repo_fields @
-                       [ "status", Keeper_alerting_path.process_status_to_json st
-                       ; "output", `String out ]))
-         end)
+                       workflow/api/project/ruleset/search/status/cache/gist. \
+                       auth/secret/ssh-key are blocked."
+                  ])
+          | Ok () ->
+            (match resolve_gh_repo_context ~config ~meta with
+             | Error err ->
+               gh_repo_context_error_json
+                 ~op
+                 ~cmd_display:(Printf.sprintf "gh %s" cmd_str) err
+             | Ok ctx ->
+               let cmd_to_run =
+                 if cmd_has_repo_flag
+                 then
+                   fst
+                     (Keeper_gh_shared.correct_repo_flag
+                        ~correct_slug:ctx.repo_slug cmd_str)
+                 else
+                   Keeper_gh_shared.inject_repo_flag_cmd
+                     ~repo_slug:ctx.repo_slug cmd_str
+               in
+               run_gh_command
+                 ~command:(Printf.sprintf "gh %s" cmd_to_run)
+                 ~cwd:ctx.worktree_cwd
+                 ~ctx:(Some ctx))))
   | _ ->
     Yojson.Safe.to_string
       (`Assoc

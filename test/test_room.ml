@@ -1221,6 +1221,43 @@ let test_audit_orphan_tasks () =
     Alcotest.(check string) "orphan task id" "task-001" task.id
   )
 
+let test_audit_orphan_awaiting_verification_tasks () =
+  with_test_env (fun config ->
+    let previous = Sys.getenv_opt "MASC_VERIFICATION_FSM_ENABLED" in
+    Fun.protect
+      ~finally:(fun () ->
+        match previous with
+        | Some value -> Unix.putenv "MASC_VERIFICATION_FSM_ENABLED" value
+        | None -> Unix.putenv "MASC_VERIFICATION_FSM_ENABLED" "")
+      (fun () ->
+        Unix.putenv "MASC_VERIFICATION_FSM_ENABLED" "true";
+        let _ =
+          Coord.add_task config ~title:"Verification Orphan Candidate"
+            ~priority:1 ~description:""
+        in
+        let _ = Coord.join config ~agent_name:test_agent_a ~capabilities:[] () in
+        let _ = Coord.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+        match
+          Coord.transition_task_r config ~agent_name:test_agent_a
+            ~task_id:"task-001" ~action:Types.Submit_for_verification ()
+        with
+        | Error err ->
+            Alcotest.failf "submit for verification failed: %s"
+              (Types.show_masc_error err)
+        | Ok _ ->
+            let orphans_before = Coord.audit_orphan_tasks config in
+            Alcotest.(check int) "no verification orphans while active" 0
+              (List.length orphans_before);
+            let _ = Coord.leave config ~agent_name:test_agent_a in
+            let orphans_after = Coord.audit_orphan_tasks config in
+            Alcotest.(check int) "one verification orphan detected" 1
+              (List.length orphans_after);
+            let (task, assignee) = List.hd orphans_after in
+            Alcotest.(check string) "verification orphan assignee" test_agent_a
+              assignee;
+            Alcotest.(check string) "verification orphan task id" "task-001"
+              task.id))
+
 let test_cleanup_zombies_releases_tasks () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Zombie Task" ~priority:1 ~description:"" in
@@ -1712,6 +1749,10 @@ let () =
       Alcotest.test_case "force release bypasses assignee" `Quick test_force_release_bypasses_assignee;
       Alcotest.test_case "force done bypasses assignee" `Quick test_force_done_bypasses_assignee;
       Alcotest.test_case "audit orphan tasks" `Quick test_audit_orphan_tasks;
+      Alcotest.test_case
+        "audit orphan awaiting verification tasks"
+        `Quick
+        test_audit_orphan_awaiting_verification_tasks;
       Alcotest.test_case "cleanup zombies cascade" `Quick test_cleanup_zombies_releases_tasks;
     ];
 

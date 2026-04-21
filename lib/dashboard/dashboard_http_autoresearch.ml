@@ -135,7 +135,7 @@ let safe_active_entry_json ~(base_path : string)
       {
         live_rank = 0;
         status_rank =
-          (match state.status with Running -> 0 | _ -> 1);
+          (match state.status with Running -> 0 | Completed | Stopped | Error -> 1);
         neg_updated_at = -. state.updated_at;
       }
     in
@@ -156,7 +156,7 @@ let safe_persisted_entry_json ~(base_path : string)
       {
         live_rank = 1;
         status_rank =
-          (match summary.status with Running -> 0 | _ -> 1);
+          (match summary.status with Running -> 0 | Completed | Stopped | Error -> 1);
         neg_updated_at =
           -. Option.value ~default:0.0 summary.updated_at;
       }

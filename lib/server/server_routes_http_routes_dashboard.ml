@@ -411,17 +411,14 @@ let rec add_routes ~sw ~clock router =
              match dashboard_governance_approval_resolve_http_json ~args with
              | Ok json ->
                  respond_json_with_cors request reqd (Yojson.Safe.to_string json)
-             | Error message ->
-                 (* Stale/expired approval ids → 404 so the dashboard can
-                    refresh the queue rather than treating it as a malformed
-                    request. Validation errors stay as 400. *)
-                 let is_stale =
-                   String_util.contains_substring_ci message "not found"
-                   || String_util.contains_substring_ci message "already resolved"
-                 in
-                 let status = if is_stale then `Not_found else `Bad_request in
-                 respond_json_with_cors ~status request reqd
-                   (Yojson.Safe.to_string (operator_error_json message))
+             | Error (Gone _ as err) ->
+                 respond_json_with_cors ~status:`Not_found request reqd
+                   (Yojson.Safe.to_string
+                      (operator_error_json (approval_resolve_http_error_to_string err)))
+             | Error (Bad_request _ as err) ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string
+                      (operator_error_json (approval_resolve_http_error_to_string err)))
            with Yojson.Json_error msg ->
              respond_json_with_cors ~status:`Bad_request request reqd
                (Yojson.Safe.to_string

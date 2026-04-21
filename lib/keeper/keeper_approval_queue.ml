@@ -265,11 +265,22 @@ let submit_pending ~keeper_name ~tool_name ~input ~risk_level ~on_resolution
 
 (* ── Resolve (operator action) ────────────────────────────── *)
 
-(** Resolve a pending approval. Returns [Ok ()] if found, [Error msg] if not.
+type resolve_error =
+  | Not_found of string
+  | Already_resolved of string
+
+let resolve_error_to_string = function
+  | Not_found id -> Printf.sprintf "approval %s not found" id
+  | Already_resolved id -> Printf.sprintf "approval %s already resolved" id
+
+(** Resolve a pending approval. Returns [Ok ()] if found and resolved,
+    [Error (Not_found _)] if the id is not in the queue, or
+    [Error (Already_resolved _)] if the atomic update found no matching
+    entry (concurrent resolve race).
     Called from the dashboard approval HTTP handler
-    ([server_dashboard_http.ml]). *)
-let resolve ~id ~(decision : Oas.Hooks.approval_decision) : (unit, string) result =
-  let result = ref (Error (Printf.sprintf "approval %s not found or already resolved" id)) in
+    ([server_dashboard_http.ml]) and MCP inline dispatch. *)
+let resolve ~id ~(decision : Oas.Hooks.approval_decision) : (unit, resolve_error) result =
+  let result = ref (Error (Not_found id)) in
   atomic_update pending (fun map ->
     match SMap.find_opt id map with
     | None -> map

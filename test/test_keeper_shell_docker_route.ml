@@ -1,12 +1,13 @@
-(** Tests for keeper_shell docker routing (RFC-0006 Phase B-3b).
+(** Tests for keeper_shell docker routing (RFC-0006 Phase B-3b+).
 
-    Verifies that the [should_route_read] branch fires for [cat] and
-    [ls] when symmetric_sandbox + docker_read are both on for a
-    hardened keeper. The docker process itself is not invoked because
-    the test environment sets [MASC_KEEPER_SANDBOX_DOCKER_IMAGE=""],
-    so the response must surface the structured "docker image is not
-    configured" error from [Keeper_docker_read] — proof that control
-    reached the docker route. *)
+    Verifies that the [should_route_read] branch fires for path-based
+    readonly keeper_shell ops when symmetric_sandbox + docker_read are
+    both on for a hardened keeper. The docker process itself is not
+    invoked because the test environment sets
+    [MASC_KEEPER_SANDBOX_DOCKER_IMAGE=""], so the response must
+    surface the structured "docker image is not configured" error from
+    [Keeper_docker_read] — proof that control reached the docker
+    route. *)
 
 module Coord = Masc_mcp.Coord
 module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
@@ -111,40 +112,66 @@ let response_mentions raw field needle =
       in
       loop 0
 
+let assert_docker_route_fires ~config ~meta ~playground =
+  let host_path = Filename.concat playground "mind/demo.txt" in
+  ensure_dir (Filename.dirname host_path);
+  ignore (Fs_compat.save_file_atomic host_path "alpha\nbeta\ngamma\n");
+  let cases =
+    [
+      ("cat", `Assoc [ ("op", `String "cat"); ("path", `String host_path) ]);
+      ("ls", `Assoc [ ("op", `String "ls"); ("path", `String playground) ]);
+      ( "rg",
+        `Assoc
+          [
+            ("op", `String "rg");
+            ("pattern", `String "alpha");
+            ("path", `String playground);
+          ] );
+      ( "find",
+        `Assoc
+          [
+            ("op", `String "find");
+            ("pattern", `String "*.txt");
+            ("path", `String playground);
+          ] );
+      ( "head",
+        `Assoc
+          [
+            ("op", `String "head");
+            ("lines", `Int 1);
+            ("path", `String host_path);
+          ] );
+      ( "tail",
+        `Assoc
+          [
+            ("op", `String "tail");
+            ("lines", `Int 1);
+            ("path", `String host_path);
+          ] );
+      ("wc", `Assoc [ ("op", `String "wc"); ("path", `String host_path) ]);
+      ("tree", `Assoc [ ("op", `String "tree"); ("path", `String playground) ]);
+    ]
+  in
+  List.iter
+    (fun (op, args) ->
+      let raw =
+        Keeper_exec_shell.handle_keeper_shell ~config ~meta ~args
+      in
+      Alcotest.(check bool)
+        (Printf.sprintf "%s surfaces docker image config error (docker route fired)" op)
+        true
+        (response_mentions raw "error" "docker image"))
+    cases
+
 (* ── Tests ───────────────────────────────────────────────────────── *)
 
-let test_cat_routes_through_docker () =
+let test_readonly_ops_route_through_docker () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types.Docker_hardened
   @@ fun ~config ~meta ~playground ->
-  let host_path = Filename.concat playground "mind/x" in
-  ensure_dir (Filename.dirname host_path);
-  ignore (Fs_compat.save_file_atomic host_path "matrix");
-  let raw =
-    Keeper_exec_shell.handle_keeper_shell ~config ~meta
-      ~args:(`Assoc [ ("op", `String "cat"); ("path", `String host_path) ])
-  in
-  Alcotest.(check bool)
-    "cat surfaces docker image config error (docker route fired)"
-    true
-    (response_mentions raw "error" "docker image")
-
-let test_ls_routes_through_docker () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker_hardened
-  @@ fun ~config ~meta ~playground ->
-  let raw =
-    Keeper_exec_shell.handle_keeper_shell ~config ~meta
-      ~args:(`Assoc [ ("op", `String "ls"); ("path", `String playground) ])
-  in
-  Alcotest.(check bool)
-    "ls surfaces docker image config error (docker route fired)"
-    true
-    (response_mentions raw "error" "docker image")
+  assert_docker_route_fires ~config ~meta ~playground
 
 let test_cat_legacy_keeper_skips_docker () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
@@ -187,10 +214,9 @@ let () =
     [
       ( "docker_route_fires",
         [
-          Alcotest.test_case "cat routes through docker for hardened+flags"
-            `Quick test_cat_routes_through_docker;
-          Alcotest.test_case "ls routes through docker for hardened+flags"
-            `Quick test_ls_routes_through_docker;
+          Alcotest.test_case
+            "path-based readonly ops route through docker for hardened+flags"
+            `Quick test_readonly_ops_route_through_docker;
         ] );
       ( "docker_route_skipped",
         [

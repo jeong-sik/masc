@@ -51,17 +51,21 @@ let eio_context_error_to_sdk_error detail =
     Returns Provider_config.t list for the downstream OAS runtime,
     bypassing the old Model_spec facade. *)
 let resolve_cascade_providers ?provider_filter
-    ?(require_tool_choice_support = false) ~cascade_name () =
+    ?(require_tool_choice_support = false)
+    ?(require_tool_support = false)
+    ~cascade_name () =
   Cascade_runtime.resolve_named_providers ?provider_filter
-    ~require_tool_choice_support ~cascade_name ()
+    ~require_tool_choice_support ~require_tool_support ~cascade_name ()
 
 (** Resolve from an explicit model string list (user-declared in keeper TOML).
     MASC parses the strings via its local [Cascade_config] and passes the
     resulting provider configs into OAS execution. *)
 let resolve_providers_from_model_strings ?provider_filter
-    ?(require_tool_choice_support = false) model_strings =
+    ?(require_tool_choice_support = false)
+    ?(require_tool_support = false)
+    model_strings =
   Cascade_runtime.resolve_providers_from_model_strings ?provider_filter
-    ~require_tool_choice_support model_strings
+    ~require_tool_choice_support ~require_tool_support model_strings
 
 type masc_internal_error =
   | Cascade_exhausted of {
@@ -361,6 +365,7 @@ let run_named
     ~goal
     ?provider_filter
     ?(require_tool_choice_support = false)
+    ?(require_tool_support = false)
     ?priority
     ?session_id
     ?(system_prompt = "")
@@ -418,12 +423,13 @@ let run_named
          MASC passes these strings through without interpretation. *)
       ( ms,
         resolve_providers_from_model_strings ?provider_filter
-          ~require_tool_choice_support ms )
+          ~require_tool_choice_support ~require_tool_support ms )
     | _ ->
       let labels = Cascade_runtime.models_of_cascade_name cascade_name in
       ( labels,
         resolve_cascade_providers ?provider_filter
-          ~require_tool_choice_support ~cascade_name () )
+          ~require_tool_choice_support ~require_tool_support ~cascade_name ()
+      )
   in
   let capture, _metrics = Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs () in
   let name = Printf.sprintf "oas-%s" cascade_name in
@@ -439,6 +445,8 @@ let run_named
                 Some
                   (if require_tool_choice_support then
                      "no callable models support required tool use"
+                   else if require_tool_support then
+                     "no callable models support inline or runtime MCP tool use"
                    else
                      "no callable models available");
             }))
@@ -459,49 +467,74 @@ let run_named
      and the agent's checkpoint (if progress was made). try_cascade
      threads this checkpoint to the next provider without mutable state. *)
   let try_provider ?resume_checkpoint (provider_cfg : Llm_provider.Provider_config.t) =
-    let config : Oas_worker_exec.config =
-      { (Oas_worker_exec.default_config ~name ~provider_cfg
-        ~system_prompt ~tools)
-      with
-        priority;
-        max_turns; max_tokens; max_input_tokens; max_cost_usd; temperature; max_idle_turns;
-        guardrails; hooks; context_reducer; memory; tool_retry_policy;
-        description = Some (Printf.sprintf "cascade:%s/%s" cascade_name provider_cfg.model_id);
-        transport = transport_resolved;
-        allowed_paths;
-        checkpoint_sidecar;
-        session_id;
-        cache_system_prompt;
-        compact_ratio;
-        contract;
-        checkpoint_dir;
-        context_injector;
-        context;
-        slot_id;
-        enable_thinking;
-        event_bus;
-        approval;
-        exit_condition;
-        exit_condition_result;
-        summarizer;
-        initial_messages; raw_trace; yield_on_tool;
-      }
+    let config_result =
+      Oas_worker_exec.resolve_tool_lane_for_oas_tools ~provider_cfg ~tools
+      |> Result.map
+           (fun (effective_tools, runtime_mcp_policy) ->
+             {
+               (Oas_worker_exec.default_config ~name ~provider_cfg
+                  ~system_prompt ~tools:effective_tools)
+               with
+                 priority;
+                 max_turns;
+                 max_tokens;
+                 max_input_tokens;
+                 max_cost_usd;
+                 temperature;
+                 max_idle_turns;
+                 guardrails;
+                 hooks;
+                 context_reducer;
+                 memory;
+                 tool_retry_policy;
+                 description =
+                   Some
+                     (Printf.sprintf "cascade:%s/%s" cascade_name
+                        provider_cfg.model_id);
+                 transport = transport_resolved;
+                 allowed_paths;
+                 checkpoint_sidecar;
+                 session_id;
+                 cache_system_prompt;
+                 compact_ratio;
+                 contract;
+                 checkpoint_dir;
+                 context_injector;
+                 context;
+                 slot_id;
+                 enable_thinking;
+                 event_bus;
+                 approval;
+                 exit_condition;
+                 exit_condition_result;
+                 summarizer;
+                 initial_messages;
+                 raw_trace;
+                 yield_on_tool;
+                 runtime_mcp_policy;
+             })
     in
     let local_agent_ref : Oas.Agent.t option ref = ref None in
-    match
-      with_codex_cli_preflight
-        ~scope:(Printf.sprintf "cascade:%s/%s" cascade_name provider_cfg.model_id)
-        ~config ~goal
-        (fun () ->
-          let effective_checkpoint = match resume_checkpoint with
-            | Some _ -> resume_checkpoint
-            | None -> oas_checkpoint
-          in
-          let result =
-            Oas_worker_exec.run ~sw ~net ~config ?oas_checkpoint:effective_checkpoint ?on_event
-              ?on_yield ?on_resume ~agent_ref:local_agent_ref ?proof_ref ?contract goal
-          in
-          Ok result)
+    match config_result with
+    | Error err ->
+      (Error err, None)
+    | Ok config ->
+      match
+        with_codex_cli_preflight
+          ~scope:(Printf.sprintf "cascade:%s/%s" cascade_name provider_cfg.model_id)
+          ~config ~goal
+          (fun () ->
+            let effective_checkpoint = match resume_checkpoint with
+              | Some _ -> resume_checkpoint
+              | None -> oas_checkpoint
+            in
+            let result =
+              Oas_worker_exec.run ~sw ~net ~config
+                ?oas_checkpoint:effective_checkpoint ?on_event
+                ?on_yield ?on_resume ~agent_ref:local_agent_ref ?proof_ref
+                ?contract goal
+            in
+            Ok result)
     with
     | Error err ->
       (Error err, None)
@@ -975,6 +1008,7 @@ let run_named_with_masc_tools
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
   run_named ~cascade_name ~goal ?priority ~system_prompt ~tools:oas_tools
+    ~require_tool_support:(masc_tools <> [])
     ~max_turns ~temperature ~max_tokens ?max_input_tokens ?max_cost_usd
     ?wait_timeout_sec ?guardrails ?hooks ?memory
     ?tool_retry_policy

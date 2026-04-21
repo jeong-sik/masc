@@ -250,7 +250,10 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
 
 let provider_capabilities_of_config (cfg : Llm_provider.Provider_config.t) =
   let registry = Llm_provider.Provider_registry.default () in
-  let provider_name = Provider_adapter.string_of_provider_kind cfg.kind in
+  (* Use the exact OAS provider kind name here. Provider_adapter collapses
+     CLI kinds onto shared canonical families ("gemini", "codex"), which
+     makes Gemini_cli incorrectly inherit direct-API capabilities. *)
+  let provider_name = Llm_provider.Provider_config.string_of_provider_kind cfg.kind in
   let caps =
     match Llm_provider.Provider_registry.find registry provider_name with
     | Some entry -> entry.capabilities
@@ -260,14 +263,24 @@ let provider_capabilities_of_config (cfg : Llm_provider.Provider_config.t) =
   | Some supports_tool_choice -> { caps with supports_tool_choice }
   | None -> caps
 
-let apply_required_tool_choice_filter ~require_tool_choice_support ~label
+let apply_required_tool_choice_filter ~require_tool_choice_support
+    ~require_tool_support ~label
     (providers : Llm_provider.Provider_config.t list) =
-  if not require_tool_choice_support then
+  if not require_tool_choice_support && not require_tool_support then
     providers
   else
     let supports_required_tool_use cfg =
       let caps = provider_capabilities_of_config cfg in
-      caps.supports_tools && caps.supports_tool_choice
+      let inline_tools = caps.supports_tools in
+      let inline_tool_choice = inline_tools && caps.supports_tool_choice in
+      let runtime_mcp =
+        caps.supports_runtime_mcp_tools && caps.supports_runtime_tool_events
+      in
+      match require_tool_choice_support, require_tool_support with
+      | true, true -> inline_tool_choice || runtime_mcp
+      | true, false -> inline_tool_choice
+      | false, true -> inline_tools || runtime_mcp
+      | false, false -> true
     in
     let filtered = List.filter supports_required_tool_use providers in
     if filtered = [] && providers <> [] then
@@ -303,6 +316,7 @@ let models_of_cascade_name (cascade_name : string) : string list =
 
 let resolve_providers_from_model_strings ?provider_filter
     ?(require_tool_choice_support = false)
+    ?(require_tool_support = false)
     (model_strings : string list)
     : Llm_provider.Provider_config.t list =
   let specs = Cascade_config.parse_model_strings model_strings in
@@ -312,6 +326,7 @@ let resolve_providers_from_model_strings ?provider_filter
       ~label:"direct_model_strings"
       specs
     |> apply_required_tool_choice_filter ~require_tool_choice_support
+         ~require_tool_support
          ~label:"direct_model_strings"
   in
   if filtered <> [] then filtered
@@ -321,7 +336,9 @@ let resolve_providers_from_model_strings ?provider_filter
     [])
 
 let resolve_named_providers ?provider_filter
-    ?(require_tool_choice_support = false) ~cascade_name ()
+    ?(require_tool_choice_support = false)
+    ?(require_tool_support = false)
+    ~cascade_name ()
     : Llm_provider.Provider_config.t list =
   let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
   let defaults = default_model_strings ~cascade_name in
@@ -341,6 +358,7 @@ let resolve_named_providers ?provider_filter
          (models_of_cascade_name cascade_name))
     |> Cascade_config.apply_provider_filter ~provider_filter ~label:cascade_name
     |> apply_required_tool_choice_filter ~require_tool_choice_support
+         ~require_tool_support
          ~label:cascade_name
   in
   if specs <> [] then specs
@@ -353,4 +371,4 @@ let resolve_named_providers ?provider_filter
       "cascade %s: configured models unavailable — retrying built-in defaults"
       cascade_name;
     resolve_providers_from_model_strings ?provider_filter
-      ~require_tool_choice_support defaults)
+      ~require_tool_choice_support ~require_tool_support defaults)

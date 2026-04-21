@@ -322,7 +322,9 @@ let evaluate ctx =
   let diff_findings =
     List.filter_map
       (fun input ->
-        match input with Diff content -> check_diff_size content | _ -> None)
+        match input with
+        | Diff content -> check_diff_size content
+        | Changed_file _ | Type_signature _ | Interface_contract _ -> None)
       ctx.inputs
   in
   let interface_findings = check_missing_interface ctx.inputs in

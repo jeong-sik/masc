@@ -198,7 +198,7 @@ let tick t trigger =
     trigger;
   } in
   t.last_beat_v <- Some beat;
-  (match trigger with Nudge _ -> t.total_nudges <- t.total_nudges + 1 | _ -> ());
+  (match trigger with Nudge _ -> t.total_nudges <- t.total_nudges + 1 | Rhythm | Demand -> ());
   Log.Pulse.debug "beat #%d trigger=%s" beat.seq (trigger_to_string trigger);
   dispatch_consumers_with_recovery t beat;
   (* Check bounded lifecycle *)

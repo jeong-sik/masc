@@ -132,6 +132,36 @@ normalize_version_triplet() {
   fi
 }
 
+extract_opam_pin_source() {
+  local pin_line="$1"
+  local token
+  for token in ${pin_line}; do
+    case "${token}" in
+      git+*|file://*)
+        printf '%s' "${token}"
+        return 0
+        ;;
+    esac
+  done
+}
+
+local_pin_path_from_source() {
+  local pin_source="$1"
+  local local_pin_path
+  case "${pin_source}" in
+    git+file://*)
+      local_pin_path="${pin_source#git+file://}"
+      ;;
+    file://*)
+      local_pin_path="${pin_source#file://}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  printf '%s' "${local_pin_path%%#*}"
+}
+
 version_gte() {
   local lhs rhs
   lhs="$(normalize_version_triplet "$1")"
@@ -180,13 +210,12 @@ if command -v opam >/dev/null 2>&1; then
   pin_list_output="$(OPAMCOLOR=never opam pin list 2>/dev/null || true)"
   pin_line="$(awk '$1 ~ /^agent_sdk\./ { print }' <<<"${pin_list_output}")"
   if [[ -n "${pin_line}" ]]; then
-    installed_pin_source="$(sed -nE 's/.*(git\+[^[:space:]]+).*/\1/p' <<<"${pin_line}")"
+    installed_pin_source="$(extract_opam_pin_source "${pin_line}")"
     case "${installed_pin_source}" in
       "${expected_opam_pin_source}")
         ;;
-      git+file://*)
-        local_pin_path="${installed_pin_source#git+file://}"
-        local_pin_path="${local_pin_path%%#*}"
+      git+file://*|file://*)
+        local_pin_path="$(local_pin_path_from_source "${installed_pin_source}")"
         local_pin_head="$(git -C "${local_pin_path}" rev-parse HEAD 2>/dev/null || true)"
         if [[ "${local_pin_head}" != "${OAS_AGENT_SDK_SHA}" ]]; then
           echo "local agent_sdk pin points to ${local_pin_path}@${local_pin_head:-unknown}, expected ${OAS_AGENT_SDK_SHA}" >&2

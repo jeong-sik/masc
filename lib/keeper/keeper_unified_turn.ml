@@ -131,6 +131,55 @@ let ensure_local_discovery_ready
              (String.concat ", " labels)
              (Printexc.to_string exn))
 
+let fail_open_local_only_when_unavailable
+    ?resolve_label
+    ?probe_ollama_base_url
+    ~(base_cascade : string)
+    ~(effective_cascade : string)
+    (labels : string list) : string =
+  let resolve_label =
+    match resolve_label with
+    | Some resolve_label -> resolve_label
+    | None -> fun label -> Cascade_config.parse_model_string label
+  in
+  let normalized_base =
+    Keeper_cascade_profile.normalize_declared_name base_cascade
+  in
+  let normalized_effective =
+    Keeper_cascade_profile.normalize_declared_name effective_cascade
+  in
+  if not (String.equal normalized_effective Keeper_config.local_only_cascade_name)
+     || String.equal normalized_base Keeper_config.local_only_cascade_name
+  then normalized_effective
+  else
+    let ollama_urls =
+      labels
+      |> List.filter_map resolve_label
+      |> List.filter_map (fun (cfg : Llm_provider.Provider_config.t) ->
+             if Cascade_ollama_probe.is_ollama_url cfg.base_url then
+               Some cfg.base_url
+             else None)
+      |> dedupe_keep_order
+    in
+    match ollama_urls with
+    | [] -> normalized_effective
+    | _ ->
+      let probe_ollama_base_url =
+        match probe_ollama_base_url with
+        | Some probe -> Some probe
+        | None ->
+          (match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+           | Some sw, Some net ->
+             Some (fun base_url ->
+               Option.is_some (Cascade_ollama_probe.try_probe ~sw ~net base_url))
+           | _ -> None)
+      in
+      (match probe_ollama_base_url with
+       | None -> normalized_effective
+       | Some probe ->
+         if List.exists probe ollama_urls then normalized_effective
+         else normalized_base)
+
 (** {1 Retry & Side-Effect Safety}
 
     @boundary-contract
@@ -1649,9 +1698,23 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         let routing = Keeper_cascade_routing.select_cascade
           ~base_cascade:meta.cascade_name ~phase
         in
+        let routed_meta = { meta with cascade_name = routing.effective_cascade } in
+        let routed_labels =
+          Keeper_model_labels.configured_model_labels_of_meta routed_meta
+        in
+        let resolved_cascade =
+          fail_open_local_only_when_unavailable
+            ~base_cascade:meta.cascade_name
+            ~effective_cascade:routing.effective_cascade
+            routed_labels
+        in
         Log.Keeper.debug "%s: cascade routing: %s -> %s (reason: %s)"
           meta.name meta.cascade_name routing.effective_cascade routing.reason;
-        routing.effective_cascade
+        if not (String.equal resolved_cascade routing.effective_cascade) then
+          Log.Keeper.warn
+            "%s: local_only unavailable for labels [%s]; falling back to base cascade %s"
+            meta.name (String.concat ", " routed_labels) resolved_cascade;
+        resolved_cascade
       in
       (* 1. Check API keys *)
       let meta_for_cascade = { meta with cascade_name = effective_cascade_name } in

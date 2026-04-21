@@ -2409,7 +2409,7 @@ let test_required_tool_contract_violation_detected () =
     Agent_sdk.Error.Agent
       (CompletionContractViolation
          {
-           contract = "require_tool_use";
+           contract = Agent_sdk.Completion_contract_id.Require_tool_use;
            reason =
              "required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block";
          })
@@ -2450,7 +2450,7 @@ let test_auto_recoverable_turn_error_excludes_required_tool_contract_violation (
     Agent_sdk.Error.Agent
       (CompletionContractViolation
          {
-           contract = "require_tool_use";
+           contract = Agent_sdk.Completion_contract_id.Require_tool_use;
            reason =
              "required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block";
          })

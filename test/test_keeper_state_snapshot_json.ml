@@ -132,7 +132,7 @@ let make_test_checkpoint ?(working_context = None) ~response_text () =
     top_k = None;
     min_p = None;
     enable_thinking = None;
-    response_format_json = false;
+    response_format = Agent_sdk.Types.Off;
     thinking_budget = None;
     cache_system_prompt = false;
     max_input_tokens = None;

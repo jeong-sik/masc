@@ -28,6 +28,16 @@ val gh_min_timeout_sec : float
     tests can lock the floor against drift back to sub-network-latency
     values. See #8688. *)
 
+val rewrite_turn_runtime_paths_to_host :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  string ->
+  string
+(** Rewrites occurrences of the keeper sandbox container root back to the
+    corresponding host playground root in path-bearing output. Used by
+    turn-scoped sandbox responses that must preserve host-path contracts
+    for follow-up tool calls. *)
+
 val cmd_targets_git_or_gh : string -> bool
 (** Docker git-credentials per-command dispatch predicate. True when
     the trimmed command's first whitespace-separated word is exactly

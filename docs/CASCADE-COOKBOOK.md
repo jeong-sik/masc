@@ -20,9 +20,10 @@ can execute when selected.
 - `default_*` acts as fallback for cascades that omit per-profile values.
 - `{name}_keeper_assignable = false` keeps a profile visible in the catalog but
   hides it from keeper assignment dropdowns.
-- Kimi direct is not a generic OpenAI-compatible `custom:` endpoint here. Use
-  `kimi:kimi-for-coding` only when your OAS runtime exposes the first-class
-  `kimi` provider.
+- Kimi direct uses the built-in Moonshot/OpenAI-compatible `kimi:` lane here.
+  Prefer current model IDs such as `kimi:kimi-k2.5`.
+- Legacy `kimi:kimi-for-coding` is normalized to `kimi:kimi-k2.5` at parse time for
+  backward compatibility with older live configs.
 
 ## Example 1: GLM Coding + Kimi Direct + Local Ollama Fallback
 
@@ -34,7 +35,7 @@ Use this when your keepers are primarily coding/text agents and you want:
 
 ```json
 {
-  "_comment": "Local/private live config example. Requires an OAS runtime that supports the kimi direct provider.",
+  "_comment": "Local/private live config example. Requires valid GLM/Kimi credentials and local fallback runtime health.",
   "default_models": [
     {"model": "glm-coding:glm-5.1", "weight": 45},
     {"model": "kimi:kimi-for-coding", "weight": 35},
@@ -88,7 +89,7 @@ of `ollama`.
 
 ```json
 {
-  "_comment": "Local/private live config example. Requires a kimi-capable OAS runtime and an OpenAI-compatible MLX-VLM endpoint.",
+  "_comment": "Local/private live config example. Requires valid GLM/Kimi credentials and an OpenAI-compatible MLX-VLM endpoint.",
   "default_models": [
     {"model": "glm-coding:glm-5.1", "weight": 45},
     {"model": "kimi:kimi-for-coding", "weight": 35},

@@ -98,6 +98,17 @@ let resolve_glm_coding_model_id model_id =
     ~default_model:(env_or "glm-5.1" "ZAI_CODING_DEFAULT_MODEL")
     model_id
 
+let resolve_kimi_model_id model_id =
+  let normalized = String.trim model_id |> String.lowercase_ascii in
+  match normalized with
+  | "auto"
+  | "kimi-for-coding" ->
+    (* Moonshot's current official coding/agent default is kimi-k2.5.
+       Keep the legacy kimi-for-coding alias working so older
+       cascade.json examples do not hard-fail. *)
+    env_or "kimi-k2.5" "MOONSHOT_DEFAULT_MODEL"
+  | _ -> String.trim model_id
+
 (** Resolve "auto" and aliases to concrete model IDs.
     Cloud APIs generally require concrete model names, and local
     providers (llama, ollama) also cannot accept the literal "auto" model ID.
@@ -118,6 +129,7 @@ let resolve_auto_model_id provider_name model_id =
     else model_id
   | "glm" -> resolve_glm_model_id model_id
   | "glm-coding" -> resolve_glm_coding_model_id model_id
+  | "kimi" -> resolve_kimi_model_id model_id
   | "gemini" | "gemini_cli" ->
     (* Default bumped from gemini-2.5-flash to gemini-3-flash-preview on
        2026-04-16 (PR C Cadd follow-up). Capabilities are inherited via

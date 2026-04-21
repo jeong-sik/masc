@@ -124,7 +124,7 @@ val local_cascade_prefix : string
     Single entry point; other modules must not concatenate prefix manually. *)
 val make_local_label : string -> string
 
-(** Map OAS [Provider_config.provider_kind] to MASC adapter canonical_name. *)
+(** SSOT string form of OAS [Provider_config.provider_kind]. *)
 val string_of_provider_kind :
   Llm_provider.Provider_config.provider_kind -> string
 

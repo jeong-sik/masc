@@ -62,6 +62,7 @@
    dashboard_attention
    dashboard_attribution
    dashboard_cache
+   dashboard_projection_cache
    dashboard_tool_host_events
    dashboard_governance
    dashboard_governance_judge
@@ -384,6 +385,7 @@
    trajectory
    eval_gate
    eval_harness
+   tool_call_replay_harness
    exec_core
    eval_calibration
    ;; Keeper contract

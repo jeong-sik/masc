@@ -66,6 +66,35 @@ let provider_of_model (model : string) : string =
     else bare_heuristic ()
   | None -> bare_heuristic ()
 
+type tool_execution_summary =
+  { tool_name : string
+  ; provider : string
+  ; outcome : string
+  ; duration_ms : float
+  }
+
+let tool_execution_summary ~tool_name ~model ~success ~duration_ms :
+    tool_execution_summary =
+  { tool_name
+  ; provider = provider_of_model model
+  ; outcome = if success then "ok" else "error"
+  ; duration_ms = max 0.0 duration_ms
+  }
+
+let record_keeper_tool_duration_metric
+    ~(keeper_name : string)
+    (summary : tool_execution_summary)
+  : unit =
+  Prometheus.observe_histogram
+    Prometheus.metric_keeper_tool_call_duration
+    ~labels:
+      [ "keeper", keeper_name
+      ; "provider", summary.provider
+      ; "tool", summary.tool_name
+      ; "outcome", summary.outcome
+      ]
+    (summary.duration_ms /. 1000.0)
+
 (** Append a cost event to .masc/costs.jsonl for per-task cost attribution.
     Schema matches bin/masc_cost.ml with an additional "source" field to
     distinguish automatic entries from manual CLI entries.
@@ -247,8 +276,8 @@ let make_hooks
         fun ~tool_name:_ ~input:_ -> None)
     ?(on_tool_executed :
         tool_name:string -> input:Yojson.Safe.t -> output_text:string ->
-        success:bool -> unit =
-        fun ~tool_name:_ ~input:_ ~output_text:_ ~success:_ -> ())
+        success:bool -> duration_ms:float -> provider:string -> unit =
+        fun ~tool_name:_ ~input:_ ~output_text:_ ~success:_ ~duration_ms:_ ~provider:_ -> ())
     ?(trajectory_acc : Trajectory.accumulator option)
     ?(discover_work_nudge : unit -> string option =
         fun () -> None)
@@ -450,6 +479,20 @@ let make_hooks
           then hook_duration_ms
           else (Time_compat.now () -. !tool_start_time) *. 1000.0
         in
+        let model =
+          let m = (!meta_ref).runtime.usage.last_model_used in
+          if m = "" then (!meta_ref).cascade_name else m
+        in
+        let summary =
+          tool_execution_summary
+            ~tool_name
+            ~model
+            ~success:(outcome = "ok")
+            ~duration_ms
+        in
+        record_keeper_tool_duration_metric
+          ~keeper_name:(!meta_ref).name
+          summary;
         (* Consume truncation info set by keeper_tools_oas before returning
            the (possibly truncated) result to OAS. Falls back to out_len
            when no truncation info was set (e.g. OAS-internal tool calls). *)
@@ -487,6 +530,8 @@ let make_hooks
              ~input
              ~output_text
              ~success:(outcome = "ok")
+             ~duration_ms:summary.duration_ms
+             ~provider:summary.provider
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
               Log.Keeper.error "keeper:%s on_tool_executed callback failed for %s: %s"

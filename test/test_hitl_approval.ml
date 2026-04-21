@@ -195,7 +195,7 @@ let test_approval_queue_submit_and_resolve () =
   (* Operator resolves: approve *)
   (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
    | Ok () -> ()
-   | Error msg -> Alcotest.fail ("resolve failed: " ^ msg));
+   | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
   (* Agent fiber should resume *)
   Eio.Fiber.yield ();
   match !result with
@@ -231,7 +231,7 @@ let test_approval_queue_reject () =
   in
   (match AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "too dangerous") with
    | Ok () -> ()
-   | Error msg -> Alcotest.fail ("resolve failed: " ^ msg));
+   | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
   Eio.Fiber.yield ();
   match !result with
   | Some (Agent_sdk.Hooks.Reject reason) ->
@@ -266,9 +266,11 @@ let test_approval_queue_expire_stale () =
 let test_approval_resolve_nonexistent () =
   Eio_main.run @@ fun _env ->
   match AQ.resolve ~id:"nonexistent_id" ~decision:Agent_sdk.Hooks.Approve with
-  | Error msg ->
+  | Error (AQ.Not_found _ as err) ->
     Alcotest.(check bool) "error message" true
-      (String.length msg > 0)
+      (String.length (AQ.resolve_error_to_string err) > 0)
+  | Error (AQ.Already_resolved _) ->
+    Alcotest.fail "expected Not_found, got Already_resolved"
   | Ok () -> Alcotest.fail "expected error for nonexistent id"
 
 let test_approval_queue_cancel_cleans_up () =
@@ -313,7 +315,7 @@ let test_background_pending_callback_and_keeper_lookup () =
     (initial_count + 1) (AQ.pending_count ());
   (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
    | Ok () -> ()
-   | Error msg -> Alcotest.fail ("resolve failed: " ^ msg));
+   | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
   Alcotest.(check bool) "keeper pending cleared" false
     (AQ.has_pending_for_keeper ~keeper_name:"gate-keeper");
   Alcotest.(check int) "background entry removed"
@@ -352,7 +354,7 @@ let test_background_pending_reuses_existing_entry () =
     after_first (AQ.pending_count ());
   (match AQ.resolve ~id:id1 ~decision:Agent_sdk.Hooks.Approve with
    | Ok () -> ()
-   | Error msg -> Alcotest.fail ("resolve failed: " ^ msg));
+   | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
   Alcotest.(check bool) "first callback fired" true
     (match !first_callback with Some Agent_sdk.Hooks.Approve -> true | _ -> false);
   Alcotest.(check bool) "second callback not attached to duplicate submit" true
@@ -399,7 +401,7 @@ let test_approval_queue_get_pending_detail () =
     (Option.is_none (AQ.get_pending_json ~id:"missing-approval"));
   (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
    | Ok () -> ()
-   | Error msg -> Alcotest.fail ("resolve failed: " ^ msg));
+   | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
   Alcotest.(check bool) "callback fired" true
     (match !callback_result with Some Agent_sdk.Hooks.Approve -> true | _ -> false);
   Alcotest.(check int) "entry removed"
@@ -516,7 +518,7 @@ let test_callback_production_keeper_write_requires_approval () =
   in
   (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
    | Ok () -> ()
-   | Error msg -> Alcotest.fail ("resolve failed: " ^ msg));
+   | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
   Eio.Fiber.yield ();
   match !result with
   | Some Agent_sdk.Hooks.Approve -> ()

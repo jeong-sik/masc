@@ -212,11 +212,19 @@ let dashboard_governance_tool_events_http_json request : Yojson.Safe.t =
   Dashboard_governance_metrics.governance_tool_events_json
     ~window_minutes:window ()
 
+type approval_resolve_http_error =
+  | Bad_request of string
+  | Gone of Keeper_approval_queue.resolve_error
+
+let approval_resolve_http_error_to_string = function
+  | Bad_request msg -> msg
+  | Gone err -> Keeper_approval_queue.resolve_error_to_string err
+
 let dashboard_governance_approval_resolve_http_json ~(args : Yojson.Safe.t) :
-    (Yojson.Safe.t, string) result =
+    (Yojson.Safe.t, approval_resolve_http_error) result =
   match Safe_ops.json_string_opt "id" args with
   | None ->
-      Error "id is required"
+      Error (Bad_request "id is required")
   | Some id ->
       let decision_name =
         Safe_ops.json_string_opt "decision" args
@@ -234,7 +242,7 @@ let dashboard_governance_approval_resolve_http_json ~(args : Yojson.Safe.t) :
             in
             Ok (Oas.Hooks.Reject reason)
         | _ ->
-            Error "decision must be 'approve' or 'reject'"
+            Error (Bad_request "decision must be 'approve' or 'reject'")
       in
       match decision with
       | Error _ as err -> err
@@ -248,7 +256,8 @@ let dashboard_governance_approval_resolve_http_json ~(args : Yojson.Safe.t) :
                      ("id", `String id);
                      ("decision", `String decision_name);
                    ])
-           | Error message -> Error message)
+           | Error err ->
+               Error (Gone err))
 
 (* Dashboard-initiated verification verdict. Mirrors the 2-step path that
    tool_task uses for Approve_verification / Reject_verification: first

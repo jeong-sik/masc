@@ -143,7 +143,7 @@ let profile_json_raw ~config_path ~keeper_assignable_names name =
 let keeper_profile_fields ~keeper ~cascade_name : (string * Yojson.Safe.t) list =
   [ ("keeper", `String keeper);
     ("cascade_name", `String cascade_name);
-    ("canonical", `String (Keeper_cascade_profile.canonicalize cascade_name));
+    ("canonical", `String (Keeper_cascade_profile.resolve_live cascade_name));
   ]
 
 let keeper_profile_json (entry : Keeper_registry.registry_entry) : Yojson.Safe.t =

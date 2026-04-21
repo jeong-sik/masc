@@ -142,15 +142,22 @@ let canonicalize_with_catalog ~catalog raw =
       | None ->
           if List.mem trimmed catalog then trimmed else default_name)
 
-let canonicalize (raw : string) : string =
-  canonicalize_with_catalog ~catalog:(catalog_names ()) raw
-
 let normalize_declared_name (raw : string) : string =
   let trimmed = String.trim raw in
   match of_string_opt trimmed with
   | Some t -> to_string t
   | None when trimmed = "" -> default_name
   | None -> trimmed
+
+let resolve_live_with_catalog ~catalog raw =
+  let normalized = normalize_declared_name raw in
+  if List.mem normalized catalog then normalized else default_name
+
+let resolve_live ?config_path raw =
+  resolve_live_with_catalog ~catalog:(catalog_names ?config_path ()) raw
+
+let canonicalize (raw : string) : string =
+  canonicalize_with_catalog ~catalog:(catalog_names ()) raw
 
 let models_key_t t = to_string t ^ "_models"
 let temperature_key_t t = to_string t ^ "_temperature"

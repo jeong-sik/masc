@@ -107,6 +107,29 @@ let test_catalog_names_follow_live_config () =
         "keeper_unified"
         (Profile.canonicalize_with_catalog ~catalog "missing_profile"))
 
+let test_resolve_live_with_catalog_requires_active_membership () =
+  with_temp_config
+    {|
+      {
+        "default_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
+        "custom_live_models": ["ollama:qwen3.5:35b-a3b-nvfp4"]
+      }
+    |}
+    (fun path ->
+      let catalog = Profile.catalog_names ~config_path:path () in
+      check string "active custom profile survives live resolution"
+        "custom_live"
+        (Profile.resolve_live_with_catalog ~catalog "custom_live");
+      check string "legacy alias resolves through active default"
+        "keeper_unified"
+        (Profile.resolve_live_with_catalog ~catalog "oas-keeper_unified");
+      check string "inactive built-in profile falls back to default"
+        "keeper_unified"
+        (Profile.resolve_live_with_catalog ~catalog "vendor_mix_balanced");
+      check string "unknown profile falls back to default"
+        "keeper_unified"
+        (Profile.resolve_live_with_catalog ~catalog "missing_profile"))
+
 let test_catalog_read_failures_do_not_fallback_to_hardcoded_names () =
   let missing = Filename.concat (Filename.get_temp_dir_name ()) "missing-cascade.json" in
   check (list string) "catalog_names stays empty on read failure"
@@ -127,6 +150,8 @@ let () =
           test_case "legacy aliases collapse" `Quick test_legacy_aliases_collapse_to_keeper_unified;
           test_case "unknown falls back to default" `Quick test_unknown_falls_back_to_default;
           test_case "catalog_names follow live config" `Quick test_catalog_names_follow_live_config;
+          test_case "resolve_live_with_catalog requires active membership" `Quick
+            test_resolve_live_with_catalog_requires_active_membership;
           test_case "catalog read failures stay empty" `Quick
             test_catalog_read_failures_do_not_fallback_to_hardcoded_names ] )
     ]

@@ -92,7 +92,7 @@ val save_raw_config_json :
     contract can be exercised in tests directly.
 
     The [cascade_name] argument is forwarded as-is (not canonicalized);
-    the [canonical] field is [Keeper_cascade_profile.canonicalize
+    the [canonical] field is [Keeper_cascade_profile.resolve_live
     cascade_name]. When the two match, the UI renders "—" in the
     canonical column.
 

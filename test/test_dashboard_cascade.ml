@@ -533,11 +533,12 @@ let test_slo_top_level_shape () =
    the two-column contract the dashboard UI depends on:
 
    - [cascade_name] = raw string from TOML / state JSON
-   - [canonical]   = [Keeper_cascade_profile.canonicalize] of the raw
+   - [canonical]   = active-catalog resolution of the raw
 
-   When the two match (declared cascade is in the canonicalize variant),
+   When the two match (declared cascade is active in the live catalog),
    the UI collapses the canonical cell to "—"; when they diverge (e.g.
-   TOML references an unknown cascade, or a legacy alias), the UI surfaces
+   TOML references an unknown cascade, a legacy alias, or a stale inactive
+   built-in), the UI surfaces
    the mismatch as config drift. *)
 
 let lookup fields key =
@@ -587,6 +588,26 @@ let test_keeper_profile_canonical_matches_when_raw_is_canonical () =
   check bool "raw == canonical → UI renders —"
     true (lookup fs "cascade_name" = lookup fs "canonical")
 
+let test_keeper_profile_stale_builtin_falls_back_to_live_default () =
+  with_temp_config_root
+    {|
+      {
+        "default_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
+        "keeper_unified_models": ["ollama:qwen3.5:35b-a3b-nvfp4"]
+      }
+    |}
+    (fun _cascade_path ->
+      let fs =
+        Masc_mcp.Dashboard_cascade.keeper_profile_fields
+          ~keeper:"minjae" ~cascade_name:"vendor_mix_balanced"
+      in
+      check string "stale built-in raw value preserved"
+        "vendor_mix_balanced" (lookup fs "cascade_name");
+      check string "stale built-in falls back to live default"
+        "keeper_unified" (lookup fs "canonical");
+      check bool "raw and canonical differ for inactive built-in"
+        true (lookup fs "cascade_name" <> lookup fs "canonical"))
+
 (* ── Suite ─────────────────────────────────────────── *)
 
 let () =
@@ -630,6 +651,8 @@ let () =
         `Quick test_keeper_profile_preserves_raw_unknown_cascade;
       test_case "legacy alias preserves raw, canonicalizes at point-of-use"
         `Quick test_keeper_profile_preserves_raw_legacy_alias;
+      test_case "inactive built-in cascade falls back to live default"
+        `Quick test_keeper_profile_stale_builtin_falls_back_to_live_default;
       test_case "canonical cascade: raw == canonical (UI renders —)"
         `Quick test_keeper_profile_canonical_matches_when_raw_is_canonical;
     ];

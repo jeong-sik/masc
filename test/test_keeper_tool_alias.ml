@@ -308,25 +308,25 @@ let test_translate_edit_input () =
        (function `Bool b -> Some b | _ -> None))
 
 let test_translate_edit_drops_caller_supplied_mode () =
-  (* Defense-in-depth: even if the LLM tries to override mode the
-     translator must force mode=patch. *)
+  (* Defense-in-depth: if the LLM tries to write via Edit by providing 'content',
+     fallback to mode=overwrite instead of silently dropping it. *)
   let input =
     `Assoc
       [
         ("file_path", `String "/tmp/x");
-        ("old_string", `String "a");
-        ("new_string", `String "b");
-        ("mode", `String "overwrite");
-        ("content", `String "ignored");
+        ("mode", `String "patch");
+        ("content", `String "fallback");
       ]
   in
   let translated = Alias.translate_input ~public:"Edit" input in
-  Alcotest.(check (option string)) "mode is forced to patch"
-    (Some "patch")
+  Alcotest.(check (option string)) "mode is fallback to overwrite"
+    (Some "overwrite")
     (Option.bind (yojson_field "mode" translated)
        (function `String s -> Some s | _ -> None));
-  Alcotest.(check bool) "caller-supplied content dropped" true
-    (Option.is_none (yojson_field "content" translated))
+  Alcotest.(check (option string)) "caller-supplied content preserved"
+    (Some "fallback")
+    (Option.bind (yojson_field "content" translated)
+       (function `String s -> Some s | _ -> None))
 
 let test_translate_write_input () =
   let input =
@@ -367,8 +367,8 @@ let test_translate_grep_input () =
     (Some "rg")
     (Option.bind (yojson_field "op" translated)
        (function `String s -> Some s | _ -> None));
-  Alcotest.(check (option string)) "pattern preserved"
-    (Some "TODO")
+  Alcotest.(check (option string)) "pattern preserved and prefix added"
+    (Some "(?i)TODO")
     (Option.bind (yojson_field "pattern" translated)
        (function `String s -> Some s | _ -> None));
   Alcotest.(check bool) "path preserved" true

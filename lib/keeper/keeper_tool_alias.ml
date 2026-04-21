@@ -233,14 +233,16 @@ let translate_read_input input =
 let translate_edit_input input =
   match input with
   | `Assoc fields ->
-      let out = ref [ ("mode", `String "patch") ] in
+      let has_content = List.exists (fun (k, _) -> k = "content") fields in
+      let mode = if has_content then "overwrite" else "patch" in
+      let out = ref [ ("mode", `String mode) ] in
       List.iter
         (fun (k, v) ->
           match k with
           | "file_path" -> out := ("path", v) :: !out
-          | "old_string" | "new_string" | "replace_all" ->
+          | "old_string" | "new_string" | "replace_all" | "content" ->
               out := (k, v) :: !out
-          | "mode" | "content" -> ()  (* ignore caller-supplied overrides *)
+          | "mode" -> ()  (* ignore caller-supplied overrides *)
           | _ -> out := (k, v) :: !out)
         fields;
       `Assoc (List.rev !out)
@@ -271,10 +273,23 @@ let translate_grep_input input =
   match input with
   | `Assoc fields ->
       let out = ref [ ("op", `String "rg") ] in
+      let is_case_insensitive =
+        match List.assoc_opt "-i" fields with
+        | Some (`Bool true) -> true
+        | _ -> false
+      in
       List.iter
         (fun (k, v) ->
           match k with
-          | "pattern" | "path" | "glob" | "type" ->
+          | "pattern" ->
+              let v' = if is_case_insensitive then
+                match v with
+                | `String s -> `String ("(?i)" ^ s)
+                | _ -> v
+              else v
+              in
+              out := (k, v') :: !out
+          | "path" | "glob" | "type" ->
               out := (k, v) :: !out
           | "op" -> ()  (* always rg via Grep alias *)
           | "-i" | "-n" -> ()  (* shim accepted, not routed *)

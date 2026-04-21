@@ -159,6 +159,8 @@ run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperCircuitBreaker.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCircuitBreaker.tla"
 run_tlc "$REPO_ROOT/specs/boundary" "KeeperContinueGate.tla"
 run_tlc_buggy "$REPO_ROOT/specs/boundary" "KeeperContinueGate.tla"
+run_tlc "$REPO_ROOT/specs/boundary" "ToolCallContract.tla"
+run_tlc_buggy "$REPO_ROOT/specs/boundary" "ToolCallContract.tla"
 
 # Optional: run TraceSpec if --trace flag provided
 if [ "${1:-}" = "--trace" ]; then

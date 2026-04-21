@@ -8,7 +8,7 @@
 (** {1 Agent Construction} *)
 
 val build_agent :
-  net:([> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t) ->
+  net:([ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t) ->
   meta:Worker_container_types.worker_container_meta ->
   provider:Oas.Provider.config ->
   system_prompt:string ->
@@ -16,8 +16,8 @@ val build_agent :
   hooks:Oas.Hooks.hooks ->
   raw_trace:Oas.Raw_trace.t ->
   heartbeat_callbacks:Oas.Agent.periodic_callback list ->
-  ?gate_config:Eval_gate.gate_config option ->
-  ?context_injector:Oas.Context_injector.t ->
+  ?gate_config:Eval_gate.gate_config ->
+  ?context_injector:Oas.Hooks.context_injector ->
   ?context:Oas.Context.t ->
   ?approval:Oas.Hooks.approval_callback ->
   unit ->
@@ -40,7 +40,7 @@ val gate_config_of_execution_scope :
 
 val run_worker_via_oas :
   sw:Eio.Switch.t ->
-  net:([> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t) ->
+  net:([ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t) ->
   base_path:string ->
   auth_token:string option ->
   meta:Worker_container_types.worker_container_meta ->
@@ -49,15 +49,15 @@ val run_worker_via_oas :
   prompt:string ->
   tools:Oas.Tool.t list ->
   raw_trace:Oas.Raw_trace.t ->
-  ?gate_config:Eval_gate.gate_config option ->
-  ?contract:string ->
+  ?gate_config:Eval_gate.gate_config ->
+  ?contract:Oas.Risk_contract.t ->
   ?worker_run_id:string ->
   unit ->
   (Worker_container_types.run_result, string) result
 
 val resume_worker_via_oas :
   sw:Eio.Switch.t ->
-  net:([> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t) ->
+  net:([ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t) ->
   base_path:string ->
   auth_token:string option ->
   meta:Worker_container_types.worker_container_meta ->
@@ -65,7 +65,7 @@ val resume_worker_via_oas :
   prompt:string ->
   tools:Oas.Tool.t list ->
   raw_trace:Oas.Raw_trace.t ->
-  ?contract:string ->
+  ?contract:Oas.Risk_contract.t ->
   ?worker_run_id:string ->
   ?approval:Oas.Hooks.approval_callback ->
   unit ->

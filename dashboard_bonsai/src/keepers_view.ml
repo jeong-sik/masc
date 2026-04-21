@@ -152,9 +152,10 @@ let view_hud_strip (keepers : Keepers_types.response) =
     ]
 ;;
 
-let render (keepers : Keepers_types.response) : Node.t =
+let render ~(shell : Overview_types.response) (keepers : Keepers_types.response) : Node.t =
   let has_fleet = not (List.is_empty keepers.keepers) in
   Shell_view.view
+    ~shell
     ~active:Keepers
     [ view_hero keepers
     ; view_hud_strip keepers
@@ -186,5 +187,8 @@ let render (keepers : Keepers_types.response) : Node.t =
 ;;
 
 let component (_graph @ local) =
-  Bonsai.map (Bonsai.Expert.Var.value Keepers_var.var) ~f:render
+  Bonsai.map2
+    (Bonsai.Expert.Var.value Keepers_var.var)
+    (Bonsai.Expert.Var.value Overview_var.var)
+    ~f:(fun keepers shell -> render ~shell keepers)
 ;;

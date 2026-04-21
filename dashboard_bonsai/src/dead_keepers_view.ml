@@ -131,7 +131,7 @@ let view_dead_list (dead : Keepers_types.keeper list) =
       (List.map ks ~f:Roster.view_slot_of_keeper)
 ;;
 
-let render (keepers : Keepers_types.response) : Node.t =
+let render ~(shell : Overview_types.response) (keepers : Keepers_types.response) : Node.t =
   let total = List.length keepers.keepers in
   let dead =
     List.filter keepers.keepers ~f:(fun (k : Keepers_types.keeper) ->
@@ -146,6 +146,7 @@ let render (keepers : Keepers_types.response) : Node.t =
     | ts -> Printf.sprintf "%s UTC" (hhmmss_of_iso ts)
   in
   Shell_view.view
+    ~shell
     ~active:Dead_keepers
     [ Hero.view
         ~eyebrow:"crypt · the fallen"
@@ -162,5 +163,8 @@ let render (keepers : Keepers_types.response) : Node.t =
 ;;
 
 let component (_graph @ local) =
-  Bonsai.map (Bonsai.Expert.Var.value Keepers_var.var) ~f:render
+  Bonsai.map2
+    (Bonsai.Expert.Var.value Keepers_var.var)
+    (Bonsai.Expert.Var.value Overview_var.var)
+    ~f:(fun keepers shell -> render ~shell keepers)
 ;;

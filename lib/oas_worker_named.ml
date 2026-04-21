@@ -462,6 +462,8 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
         Llm_provider.Http_client.HttpError { code = status; body = message }
       | Llm_provider.Retry.AuthError { message } ->
         Llm_provider.Http_client.HttpError { code = 401; body = message }
+      | Llm_provider.Retry.NotFound { message } ->
+        Llm_provider.Http_client.HttpError { code = 404; body = message }
       | Llm_provider.Retry.Overloaded { message } ->
         Llm_provider.Http_client.HttpError { code = 529; body = message }
       | Llm_provider.Retry.NetworkError { message }
@@ -565,6 +567,9 @@ let cli_wrapped_hard_quota_indicators = [
   "quota_exhausted";
   "exhausted your capacity on this model";
   "quota will reset after";
+  "\"api_error_status\":429";
+  "you've hit your limit";
+  "resets apr ";
 ]
 
 let message_looks_like_cli_wrapped_hard_quota (message : string) : bool =
@@ -585,6 +590,7 @@ let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
      | Llm_provider.Retry.RateLimited _
      | Llm_provider.Retry.NotFound _
      | Llm_provider.Retry.AuthError _
+     | Llm_provider.Retry.NotFound _
      | Llm_provider.Retry.InvalidRequest _
      | Llm_provider.Retry.ContextOverflow _
      | Llm_provider.Retry.Timeout _ ->

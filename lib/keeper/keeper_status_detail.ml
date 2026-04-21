@@ -510,7 +510,7 @@ let handle_keeper_status ctx args : tool_result =
                  ("has_checkpoint", `Bool true);
                  ("context_ratio", `Float (Keeper_exec_context.context_ratio c));
                  ("context_tokens", `Int (Keeper_exec_context.token_count c));
-                 ("context_max", `Int c.max_tokens);
+                 ("context_max", `Int (Keeper_exec_context.max_tokens_of_context c));
                  ("message_count", `Int (Keeper_exec_context.message_count c));
                ]
          in

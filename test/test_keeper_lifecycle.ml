@@ -218,7 +218,7 @@ let test_load_context_prefers_live_primary_max_tokens_over_checkpoint_limit () =
       with
       | Some loaded ->
           check int "restore uses live primary max tokens" 32768
-            loaded.max_tokens
+            (KEC.max_tokens_of_context loaded)
       | None -> fail "expected checkpoint context to load")
 
 let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
@@ -591,7 +591,8 @@ let test_recover_latest_checkpoint_for_overflow_retry_compacts_oas_checkpoint ()
                ~max_tokens:256
           with
           | Some loaded ->
-              check int "checkpoint max tokens clamped" 256 loaded.max_tokens;
+              check int "checkpoint max tokens clamped" 256
+                (KEC.max_tokens_of_context loaded);
           | None -> fail "expected compacted OAS checkpoint")
       | None -> fail "expected overflow retry recovery from OAS checkpoint")
 
@@ -625,7 +626,8 @@ let test_recover_latest_checkpoint_for_overflow_retry_uses_legacy_checkpoint () 
                ~max_tokens:192
            with
           | Some loaded ->
-              check int "legacy retry max tokens clamped" 192 loaded.max_tokens;
+              check int "legacy retry max tokens clamped" 192
+                (KEC.max_tokens_of_context loaded);
           | None -> fail "expected compacted checkpoint after legacy recovery")
       | None -> fail "expected overflow retry recovery from legacy checkpoint")
 
@@ -663,7 +665,8 @@ let test_recover_latest_checkpoint_for_overflow_retry_ignores_checkpoint_system_
                ~max_tokens:512
            with
           | Some loaded ->
-              check int "history retry max tokens clamped" 512 loaded.max_tokens;
+              check int "history retry max tokens clamped" 512
+                (KEC.max_tokens_of_context loaded);
           | None -> fail "expected overflow retry checkpoint to be saved")
       | None ->
           fail

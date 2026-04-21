@@ -90,6 +90,17 @@ let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) 
 
 let checkpoint_of_context (ctx : working_context) = ctx.checkpoint
 
+let oas_context_of_context (ctx : working_context) = ctx.checkpoint.context
+
+let max_tokens_of_context (ctx : working_context) =
+  ctx.max_tokens
+
+let with_max_tokens (ctx : working_context) max_tokens =
+  let checkpoint =
+    { ctx.checkpoint with max_total_tokens = Some max_tokens }
+  in
+  { max_tokens; checkpoint }
+
 let system_prompt_of_context (ctx : working_context) =
   Option.value ~default:"" ctx.checkpoint.system_prompt
 
@@ -133,15 +144,16 @@ let message_count (ctx : working_context) =
   List.length (messages_of_context ctx)
 
 let context_ratio (ctx : working_context) : float =
-  if ctx.max_tokens = 0 then 0.0
-  else float_of_int (token_count ctx) /. float_of_int ctx.max_tokens
+  let max_tokens = max_tokens_of_context ctx in
+  if max_tokens = 0 then 0.0
+  else float_of_int (token_count ctx) /. float_of_int max_tokens
 
 let create ~system_prompt ~max_tokens =
   let context = Agent_sdk.Context.create () in
   let checkpoint =
     empty_runtime_checkpoint ~system_prompt ~messages:[] ~max_tokens ~context
   in
-  { checkpoint; max_tokens; context }
+  { checkpoint; max_tokens }
 
 let set_system_prompt (ctx : working_context) ~system_prompt =
   let messages =
@@ -167,12 +179,13 @@ let append_many ctx msgs =
   List.fold_left append ctx msgs
 
 let sync_oas_context (ctx : working_context) : working_context =
-  let context = ctx.context in
+  let context = oas_context_of_context ctx in
   let message_count = message_count ctx in
   let token_count = token_count ctx in
   let context_ratio =
-    if ctx.max_tokens = 0 then 0.0
-    else float_of_int token_count /. float_of_int ctx.max_tokens
+    let max_tokens = max_tokens_of_context ctx in
+    if max_tokens = 0 then 0.0
+    else float_of_int token_count /. float_of_int max_tokens
   in
   Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
     "message_count" (`Int message_count);
@@ -505,7 +518,7 @@ let serialize_context (ctx : working_context) : string =
         (Inference_utils.sanitize_text_utf8 (system_prompt_of_context ctx)) );
     ("messages", `List (List.map message_to_json (messages_of_context ctx)));
     ("token_count", `Int (token_count ctx));
-    ("max_tokens", `Int ctx.max_tokens);
+    ("max_tokens", `Int (max_tokens_of_context ctx));
   ] in
   Yojson.Safe.to_string json
 
@@ -523,7 +536,7 @@ let deserialize_context (s : string) ~max_tokens : working_context =
     empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens ~context
   in
   sync_oas_context
-    { checkpoint; max_tokens; context }
+    { checkpoint; max_tokens }
 
 let context_to_json (ctx : working_context) : Yojson.Safe.t =
   `Assoc [
@@ -532,7 +545,7 @@ let context_to_json (ctx : working_context) : Yojson.Safe.t =
         (Inference_utils.sanitize_text_utf8 (system_prompt_of_context ctx)) );
     ("messages", `List (List.map message_to_json (messages_of_context ctx)));
     ("token_count", `Int (token_count ctx));
-    ("max_tokens", `Int ctx.max_tokens);
+    ("max_tokens", `Int (max_tokens_of_context ctx));
   ]
 
 let create_checkpoint ctx ~generation =
@@ -1134,7 +1147,7 @@ let context_of_oas_checkpoint
     { cp with system_prompt = Some system_prompt; messages; context }
   in
   sync_oas_context
-    { checkpoint; max_tokens; context }
+    { checkpoint; max_tokens }
 
 let context_of_legacy_checkpoint
     (ckpt : checkpoint)
@@ -1157,7 +1170,7 @@ let save_oas_checkpoint
     ~(ctx : working_context)
     ~(generation : int)
   : (Agent_sdk.Checkpoint.t, string) result =
-  let checkpoint_context = Agent_sdk.Context.copy ctx.context in
+  let checkpoint_context = Agent_sdk.Context.copy (oas_context_of_context ctx) in
   Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
     checkpoint_generation_key (`Int generation);
   (* Truncate messages at save time to match the load-time cap.
@@ -1196,7 +1209,7 @@ let save_oas_checkpoint
       system_prompt = Some (system_prompt_of_context ctx);
       messages = capped_messages;
       created_at = Time_compat.now ();
-      max_total_tokens = Some ctx.max_tokens;
+      max_total_tokens = Some (max_tokens_of_context ctx);
       context = checkpoint_context;
     }
   in

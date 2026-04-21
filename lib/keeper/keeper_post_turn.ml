@@ -419,7 +419,10 @@ let recover_latest_checkpoint_for_overflow_retry
       let now_ts = Time_compat.now () in
       let ctx =
         if primary_model_max_tokens <= 0 then ctx
-        else sync_oas_context { ctx with max_tokens = min ctx.max_tokens primary_model_max_tokens }
+        else
+          sync_oas_context
+            (with_max_tokens ctx
+               (min (max_tokens_of_context ctx) primary_model_max_tokens))
       in
       let before_tokens = token_count ctx in
       let retry_meta =

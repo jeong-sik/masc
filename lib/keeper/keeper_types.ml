@@ -1788,7 +1788,6 @@ type tool_call_entry =
 type working_context =
   { checkpoint : Agent_sdk.Checkpoint.t
   ; max_tokens : int
-  ; context : Agent_sdk.Context.t
   }
 
 type checkpoint =

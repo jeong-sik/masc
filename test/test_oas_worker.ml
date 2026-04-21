@@ -762,6 +762,44 @@ let test_oas_worker_exec_build_applies_priority () =
       Oas.Agent.close agent
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
+let test_oas_worker_exec_build_supports_kimi_direct () =
+  let provider_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Kimi
+      ~model_id:"kimi-for-coding"
+      ~base_url:"https://api.kimi.com/coding" ()
+  in
+  let config =
+    Oas_worker_exec.default_config
+      ~name:"oas-worker-kimi-direct"
+      ~provider_cfg
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  Eio.Switch.run @@ fun sw ->
+  match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
+  | Ok agent -> Oas.Agent.close agent
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
+let test_oas_worker_exec_build_supports_kimi_cli () =
+  let provider_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Kimi_cli
+      ~model_id:"kimi-for-coding"
+      ~base_url:"" ()
+  in
+  let config =
+    Oas_worker_exec.default_config
+      ~name:"oas-worker-kimi-cli"
+      ~provider_cfg
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  Eio.Switch.run @@ fun sw ->
+  match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
+  | Ok agent -> Oas.Agent.close agent
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
 (* Resume parity: fields that [build] threads from [config] via the
    Builder must also propagate through [resume_from_checkpoint]. Each
    missing field used to fail silently — the run continued with
@@ -2281,6 +2319,10 @@ let () =
   test_net := Some env#net;
   test_proc_mgr := Some (Eio.Stdenv.process_mgr env);
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Process_eio.init
+    ~cwd_default:(Eio.Stdenv.cwd env)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
   Eio_guard.enable ();
   Alcotest.run "OAS Worker" [
     "sse_event_bridge", [
@@ -2342,6 +2384,10 @@ let () =
         test_oas_worker_exec_build_default_priority_unset;
       Alcotest.test_case "oas_worker applies explicit priority" `Quick
         test_oas_worker_exec_build_applies_priority;
+      Alcotest.test_case "oas_worker builds Kimi direct config" `Quick
+        test_oas_worker_exec_build_supports_kimi_direct;
+      Alcotest.test_case "oas_worker builds Kimi CLI config" `Quick
+        test_oas_worker_exec_build_supports_kimi_cli;
       Alcotest.test_case "resume propagates approval (no silent ApprovalRequired drift)" `Quick
         test_resume_propagates_approval;
       Alcotest.test_case "resume propagates slot_id" `Quick

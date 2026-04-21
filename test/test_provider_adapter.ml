@@ -20,7 +20,9 @@ let test_resolve_direct_aliases () =
   let gemini = Option.get (Adapter.resolve_direct_adapter "google") in
   check string "gemini alias" "gemini-api" gemini.canonical_name;
   let codex = Option.get (Adapter.resolve_direct_adapter "openai") in
-  check string "codex-api alias" "codex-api" codex.canonical_name
+  check string "codex-api alias" "codex-api" codex.canonical_name;
+  let kimi = Option.get (Adapter.resolve_direct_adapter "kimi-api") in
+  check string "kimi direct canonical" "kimi-api" kimi.canonical_name
 
 let test_resolve_cli_canonical_names () =
   let claude = Option.get (Adapter.resolve_direct_adapter "claude") in
@@ -29,8 +31,20 @@ let test_resolve_cli_canonical_names () =
     (Adapter.string_of_runtime_kind claude.runtime_kind);
   let gemini = Option.get (Adapter.resolve_direct_adapter "gemini") in
   check string "gemini canonical" "gemini" gemini.canonical_name;
+  let kimi = Option.get (Adapter.resolve_direct_adapter "kimi") in
+  check string "kimi canonical" "kimi" kimi.canonical_name;
   let codex = Option.get (Adapter.resolve_direct_adapter "codex") in
   check string "codex canonical" "codex" codex.canonical_name
+
+let test_kimi_direct_auth_accepts_primary_and_fallback_envs () =
+  with_env "KIMI_API_KEY_SB" None (fun () ->
+      with_env "KIMI_API_KEY" (Some "kimi-key") (fun () ->
+          check bool "kimi direct auth available via fallback env" true
+            (Adapter.provider_auth_available "kimi-api");
+          check (list string) "kimi direct env keys"
+            [ "KIMI_API_KEY_SB"; "KIMI_API_KEY" ]
+            (Adapter.auth_env_keys_of_provider_kind
+               Llm_provider.Provider_config.Kimi)))
 
 let test_gemini_direct_auth_vertex_adc () =
   with_env "GOOGLE_CLOUD_PROJECT" (Some "demo-project") (fun () ->
@@ -223,6 +237,8 @@ let () =
         [
           test_case "resolve direct aliases" `Quick test_resolve_direct_aliases;
           test_case "resolve cli canonicals" `Quick test_resolve_cli_canonical_names;
+          test_case "kimi direct auth accepts fallback envs" `Quick
+            test_kimi_direct_auth_accepts_primary_and_fallback_envs;
           test_case "gemini vertex adc" `Quick test_gemini_direct_auth_vertex_adc;
           test_case "gemini api key fallback" `Quick
             test_gemini_direct_auth_api_key_fallback;

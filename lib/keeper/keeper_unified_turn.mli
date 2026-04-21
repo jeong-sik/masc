@@ -205,6 +205,18 @@ val ensure_local_discovery_ready :
   string list ->
   (unit, string) result
 
+(** When phase routing temporarily forces [local_only], fail open to the
+    keeper's configured base cascade if the local Ollama endpoint is
+    unavailable. Explicit [local_only] keepers are preserved. Exposed for
+    targeted tests. *)
+val fail_open_local_only_when_unavailable :
+  ?resolve_label:(string -> Llm_provider.Provider_config.t option) ->
+  ?probe_ollama_base_url:(string -> bool) ->
+  base_cascade:string ->
+  effective_cascade:string ->
+  string list ->
+  string
+
 val run_keeper_cycle :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

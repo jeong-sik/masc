@@ -1897,6 +1897,37 @@ let test_ensure_local_discovery_ready_surfaces_refresh_failure () =
       check int "refresh called once" 1 !refresh_calls;
       check bool "error includes label" true
         (contains_substring msg "llama:auto")
+
+let test_fail_open_local_only_when_probe_fails () =
+  let cascade =
+    UT.fail_open_local_only_when_unavailable
+      ~probe_ollama_base_url:(fun _ -> false)
+      ~base_cascade:"keeper_unified"
+      ~effective_cascade:"local_only"
+      [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
+  in
+  check string "falls back to base cascade" "keeper_unified" cascade
+
+let test_fail_open_local_only_preserves_explicit_local_only_base () =
+  let cascade =
+    UT.fail_open_local_only_when_unavailable
+      ~probe_ollama_base_url:(fun _ -> false)
+      ~base_cascade:"local_only"
+      ~effective_cascade:"local_only"
+      [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
+  in
+  check string "explicit local_only stays local_only" "local_only" cascade
+
+let test_fail_open_local_only_preserves_healthy_local_only () =
+  let cascade =
+    UT.fail_open_local_only_when_unavailable
+      ~probe_ollama_base_url:(fun _ -> true)
+      ~base_cascade:"keeper_unified"
+      ~effective_cascade:"local_only"
+      [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
+  in
+  check string "healthy ollama keeps local_only" "local_only" cascade
+
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
 let test_context_overflow_limit_parses_common_oas_errors () =
@@ -3802,6 +3833,12 @@ let () =
             test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_registry;
           test_case "local discovery guard surfaces refresh failure" `Quick
             test_ensure_local_discovery_ready_surfaces_refresh_failure;
+          test_case "local_only fail-open falls back when ollama is down" `Quick
+            test_fail_open_local_only_when_probe_fails;
+          test_case "explicit local_only does not fail-open" `Quick
+            test_fail_open_local_only_preserves_explicit_local_only_base;
+          test_case "healthy local_only stays selected" `Quick
+            test_fail_open_local_only_preserves_healthy_local_only;
         ] );
       ( "tool_classification",
         [

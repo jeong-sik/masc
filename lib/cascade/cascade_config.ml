@@ -804,6 +804,17 @@ let warn_unknown_strategy ~name ~raw ~msg =
       "[warn] cascade %s: %s; falling back to failover\n%!" name msg
   end
 
+let invalid_priority_tier_warned : (string * string, unit) Hashtbl.t =
+  Hashtbl.create 4
+
+let warn_invalid_priority_tier ~name ~msg =
+  let key = (name, msg) in
+  if not (Hashtbl.mem invalid_priority_tier_warned key) then begin
+    Hashtbl.add invalid_priority_tier_warned key ();
+    Printf.eprintf
+      "[warn] cascade %s: %s; falling back to failover\n%!" name msg
+  end
+
 let parse_kind_or_default ~name = function
   | None -> Cascade_strategy.Failover
   | Some raw ->
@@ -830,19 +841,65 @@ let cycle_policy_from_loader (cfg : Cascade_config_loader.strategy_config) =
   in
   { Cascade_strategy.max_cycles; backoff_base_ms; backoff_cap_ms }
 
+let model_ids_of_specs (specs : string list) : string list =
+  specs
+  |> List.concat_map expand_auto_model_string
+  |> List.filter_map (fun spec ->
+         match split_provider_model spec with
+         | Some (_, model_id) when model_id <> "" -> Some model_id
+         | _ -> None)
+  |> List.sort_uniq String.compare
+
+let normalize_priority_tiers ~config_path ~name raw_tiers =
+  let configured_model_ids =
+    Cascade_config_loader.load_profile_weighted ~config_path ~name
+    |> List.map (fun (entry : Cascade_config_loader.weighted_entry) -> entry.model)
+    |> model_ids_of_specs
+  in
+  if configured_model_ids = [] then
+    Error "priority_tier has no configured models to validate against"
+  else
+    let normalized =
+      raw_tiers
+      |> List.filter_map (fun tier ->
+             let tier_model_ids =
+               model_ids_of_specs tier
+               |> List.filter (fun model_id ->
+                      List.mem model_id configured_model_ids)
+             in
+             if tier_model_ids = [] then None else Some tier_model_ids)
+    in
+    if normalized = [] then
+      Error
+        "priority_tier tiers did not match any configured candidate model ids"
+    else
+      Ok normalized
+
 let resolve_strategy ?config_path ~name () =
   match config_path with
   | None -> Cascade_strategy.failover
   | Some path ->
     let cfg = Cascade_config_loader.resolve_strategy_config
                 ~config_path:path ~name in
-    let kind = parse_kind_or_default ~name cfg.kind in
+    let parsed_kind = parse_kind_or_default ~name cfg.kind in
     let cycle = cycle_policy_from_loader cfg in
-    let tiers =
-      match kind, cfg.tiers with
-      | Cascade_strategy.Priority_tier, Some t -> t
-      | Cascade_strategy.Priority_tier, None -> []  (* misconfig → empty tier *)
-      | _, _ -> []
+    let kind, tiers =
+      match parsed_kind with
+      | Cascade_strategy.Priority_tier ->
+          let result =
+            match cfg.tiers with
+            | Some raw_tiers ->
+                normalize_priority_tiers ~config_path:path ~name raw_tiers
+            | None ->
+                Error
+                  "priority_tier requires a non-empty <name>_tiers configuration"
+          in
+          (match result with
+           | Ok tiers -> (parsed_kind, tiers)
+           | Error msg ->
+               warn_invalid_priority_tier ~name ~msg;
+               (Cascade_strategy.Failover, []))
+      | _ -> (parsed_kind, [])
     in
     let sticky_ttl_ms =
       match kind, cfg.sticky_ttl_ms with

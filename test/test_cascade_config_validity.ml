@@ -180,6 +180,66 @@ let test_unknown_provider_is_dropped () =
         true
         (List.length parsed < List.length strings))
 
+let with_temp_cascade_json body =
+  let tmp = Filename.temp_file "cascade-strategy-" ".json" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove tmp with _ -> ())
+    (fun () -> body tmp)
+
+let test_priority_tier_label_tiers_normalize_to_model_ids () =
+  with_temp_cascade_json @@ fun tmp ->
+  let oc = open_out tmp in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      output_string oc
+        {|{
+  "regression_models": [
+    "claude_code:claude-haiku-4-5-20251001",
+    "gemini_cli:gemini-3-flash-preview"
+  ],
+  "regression_strategy": "priority_tier",
+  "regression_tiers": [
+    ["claude_code:claude-haiku-4-5-20251001"],
+    ["gemini_cli:gemini-3-flash-preview"]
+  ]
+}|});
+  let strategy =
+    Masc_mcp.Cascade_config.resolve_strategy
+      ~config_path:tmp ~name:"regression" ()
+  in
+  check string "priority_tier preserved"
+    "priority_tier"
+    (Masc_mcp.Cascade_strategy.kind_to_string strategy.kind);
+  check (list (list string)) "tiers normalized to model ids"
+    [ [ "claude-haiku-4-5-20251001" ]; [ "gemini-3-flash-preview" ] ]
+    strategy.tiers
+
+let test_priority_tier_invalid_tiers_fall_back_to_failover () =
+  with_temp_cascade_json @@ fun tmp ->
+  let oc = open_out tmp in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      output_string oc
+        {|{
+  "regression_models": [
+    "claude_code:claude-haiku-4-5-20251001"
+  ],
+  "regression_strategy": "priority_tier",
+  "regression_tiers": [
+    ["codex_cli:auto"]
+  ]
+}|});
+  let strategy =
+    Masc_mcp.Cascade_config.resolve_strategy
+      ~config_path:tmp ~name:"regression" ()
+  in
+  check string "invalid tiers demote to failover"
+    "failover"
+    (Masc_mcp.Cascade_strategy.kind_to_string strategy.kind);
+  check (list (list string)) "failover carries no tiers" [] strategy.tiers
+
 let () =
   let path = cascade_path () in
   let profiles = discover_profiles path in
@@ -201,5 +261,13 @@ let () =
             "unknown provider dropped (meta-guard)"
             `Quick
             test_unknown_provider_is_dropped;
+          test_case
+            "priority_tier label tiers normalize to model ids"
+            `Quick
+            test_priority_tier_label_tiers_normalize_to_model_ids;
+          test_case
+            "priority_tier invalid tiers fall back to failover"
+            `Quick
+            test_priority_tier_invalid_tiers_fall_back_to_failover;
         ] );
     ]

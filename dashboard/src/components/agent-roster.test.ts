@@ -3,12 +3,15 @@ import {
   runtimeBadgeClass,
   stageBadgeClass,
   compactModelLabel,
+  rosterContextMeta,
+  rosterModelMeta,
+  rosterStateNote,
   uniqueToolNames,
   keeperRuntimeName,
   mergeRosterAgent,
   filterAgentRoster,
 } from './agent-roster'
-import type { Agent } from '../types'
+import type { Agent, Keeper } from '../types'
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -106,6 +109,111 @@ describe('compactModelLabel', () => {
 
   it('handles spaces around segments', () => {
     expect(compactModelLabel('provider : model-name')).toBe('model-name')
+  })
+})
+
+describe('rosterModelMeta', () => {
+  it('prefers last_model_used as recent model', () => {
+    expect(
+      rosterModelMeta({
+        last_model_used: 'openai:gpt-5.4',
+        active_model: 'anthropic:claude-sonnet-4-6',
+        model: 'fallback-model',
+      } as Keeper),
+    ).toEqual({ label: '최근 모델', value: 'openai:gpt-5.4' })
+  })
+
+  it('falls back to active_model when last model is absent', () => {
+    expect(
+      rosterModelMeta({
+        active_model: 'anthropic:claude-sonnet-4-6',
+        model: 'fallback-model',
+      } as Keeper),
+    ).toEqual({ label: '현재 모델', value: 'anthropic:claude-sonnet-4-6' })
+  })
+
+  it('uses generic model label as last fallback', () => {
+    expect(rosterModelMeta({ model: 'fallback-model' } as Keeper)).toEqual({
+      label: '모델',
+      value: 'fallback-model',
+    })
+  })
+
+  it('returns null when no model field is populated', () => {
+    expect(rosterModelMeta({} as Keeper)).toBeNull()
+  })
+})
+
+describe('rosterContextMeta', () => {
+  it('returns percent and token budget summary when available', () => {
+    expect(
+      rosterContextMeta({
+        context_ratio: 0.112,
+        context_tokens: 22000,
+        context_max: 200000,
+      } as Keeper),
+    ).toEqual({
+      pct: 11,
+      detail: '22.0K / 200.0K',
+    })
+  })
+
+  it('returns only token count when max is absent', () => {
+    expect(
+      rosterContextMeta({
+        context_ratio: 0.4,
+        context_tokens: 4200,
+      } as Keeper),
+    ).toEqual({
+      pct: 40,
+      detail: '4.2K',
+    })
+  })
+
+  it('returns null when ratio is missing', () => {
+    expect(rosterContextMeta({ context_tokens: 4200 } as Keeper)).toBeNull()
+  })
+})
+
+describe('rosterStateNote', () => {
+  it('prefers runtime blocker as recent blocker note', () => {
+    expect(
+      rosterStateNote({
+        runtime_blocker_summary: 'Turn wall-clock timeout after 1200s',
+      } as Keeper, 'fallback hint'),
+    ).toEqual({
+      label: '최근 차단',
+      text: 'Turn wall-clock timeout after 1200s',
+    })
+  })
+
+  it('uses diagnostic last_error when blocker is absent', () => {
+    expect(
+      rosterStateNote({
+        name: 'keeper-a',
+        status: 'offline',
+        diagnostic: {
+          last_error: 'provider timeout',
+          health_state: 'offline',
+          next_action_path: 'probe',
+          last_reply_status: 'never',
+        },
+      } as Keeper),
+    ).toEqual({
+      label: '최근 오류',
+      text: 'provider timeout',
+    })
+  })
+
+  it('falls back to monitoring hint as state note', () => {
+    expect(rosterStateNote(null, '오래 응답이 없어 실제 상태 확인이 필요합니다.')).toEqual({
+      label: '상태 메모',
+      text: '오래 응답이 없어 실제 상태 확인이 필요합니다.',
+    })
+  })
+
+  it('returns null when no note source is available', () => {
+    expect(rosterStateNote(null, null)).toBeNull()
   })
 })
 

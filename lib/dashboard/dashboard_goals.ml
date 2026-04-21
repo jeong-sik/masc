@@ -34,16 +34,10 @@ let task_status_label (task : Types.task) : string =
   | Types.Cancelled _ -> "cancelled"
 
 let task_is_terminal (task : Types.task) : bool =
-  match task.task_status with
-  | Types.Done _ | Types.Cancelled _ -> true
-  | Types.Todo | Types.Claimed _ | Types.InProgress _
-  | Types.AwaitingVerification _ -> false
+  Types.task_status_is_terminal task.task_status
 
 let task_is_done (task : Types.task) : bool =
-  match task.task_status with
-  | Types.Done _ -> true
-  | Types.Todo | Types.Claimed _ | Types.InProgress _
-  | Types.AwaitingVerification _ | Types.Cancelled _ -> false
+  Types.task_status_is_done task.task_status
 
 let compute_convergence (goal : Goal_store.goal) linked_tasks children =
   (* Convergence = weighted average of own task completion + child convergence.

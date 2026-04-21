@@ -390,6 +390,13 @@ let task_status_is_terminal = function
   | Done _ | Cancelled _ -> true
   | Todo | Claimed _ | InProgress _ | AwaitingVerification _ -> false
 
+(** Completed state: [Done]. Distinct from [task_status_is_terminal] which
+    also includes [Cancelled]. Use this when only successful completion
+    matters (e.g. convergence ratios, reputation counting). *)
+let task_status_is_done = function
+  | Done _ -> true
+  | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Cancelled _ -> false
+
 (** Issue #8354: schema enums for [task_status] used to be hand-rolled in
     [tool_shard.ml] and [mcp_server.ml], dropping [awaiting_verification].
     [task_status] carries record payloads so we cannot enumerate dummy

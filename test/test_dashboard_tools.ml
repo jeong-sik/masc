@@ -50,6 +50,10 @@ let test_dashboard_tools_projection () =
         (match config_resolution |> member "warnings" with
          | `List _ -> true
          | _ -> false);
+      check bool "cascade authoring path surfaced" true
+        (match config_resolution |> member "cascade_authoring" |> member "path" with
+         | `String value -> String.length value > 0
+         | _ -> false);
       check bool "runtime data_root path surfaced" true
         (match runtime_resolution |> member "data_root" |> member "path" with
          | `String value -> String.length value > 0

@@ -47,7 +47,7 @@ let now_unix () = Unix.gettimeofday ()
 
 let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
     ?(latency_ms=500) ?prompt_per_second ?peak_memory_gb
-    ?(cost_usd=0.01) ?(tools_used=[]) () =
+    ?provider ?(cost_usd=0.01) ?(tools_used=[]) () =
   let extra_telemetry_fields =
     (match prompt_per_second with
      | Some v -> [("prompt_per_second", `Float v)]
@@ -55,6 +55,10 @@ let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
     @
     (match peak_memory_gb with
      | Some v -> [("peak_memory_gb", `Float v)]
+     | None -> [])
+    @
+    (match provider with
+     | Some v -> [("provider", `String v)]
      | None -> [])
   in
   `Assoc [
@@ -74,12 +78,16 @@ let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
     ] @ extra_telemetry_fields));
   ]
 
-let error_entry ~cascade_name ~ts () =
+let error_entry ~cascade_name ~ts ?provider () =
   `Assoc [
     ("ts_unix", `Float ts);
     ("tool_call_count", `Int 0);
     ("tools_used", `List []);
     ("telemetry", `Assoc [
+      ("provider",
+        match provider with
+        | Some v -> `String v
+        | None -> `Null);
       ("cascade_name", `String cascade_name);
       ("candidate_models", `List [`String "model-a"; `String "model-b"]);
       ("error_category", `String "timeout");
@@ -116,6 +124,7 @@ let test_single_model_success () =
     check int "models" 1 (List.length agg.models);
     let s = List.hd agg.models in
     check string "model_id" "claude-sonnet" s.model_id;
+    check (option string) "provider" (Some "claude") s.provider;
     check int "entry_count" 2 s.entry_count;
     check int "success_count" 2 s.success_count;
     check int "error_count" 0 s.error_count;
@@ -144,6 +153,7 @@ let test_error_turns_counted () =
       s.model_id = "model-a") agg.models in
     check bool "error model found" true (Option.is_some error_model);
     let em = Option.get error_model in
+    check (option string) "error provider unresolved" None em.provider;
     check int "error_count" 1 em.error_count;
     check int "success_count" 0 em.success_count)
 
@@ -232,6 +242,8 @@ let test_json_roundtrip () =
     let models = json |> member "models" |> to_list in
     check bool "has models" true (List.length models > 0);
     let m = List.hd models in
+    check bool "provider unresolved -> null" true
+      (match m |> member "provider" with `Null -> true | _ -> false);
     check int "success_count" 1 (m |> member "success_count" |> to_int);
     check bool "total_cost_usd = 0.05" true
       (Float.abs (m |> member "total_cost_usd" |> to_float) -. 0.05 < 0.001);
@@ -265,6 +277,8 @@ let test_prompt_tps_and_peak_memory_aggregates () =
     check (float 0.001) "max peak mem" 20.25
       (Option.value ~default:0.0 s.max_peak_memory_gb);
     let first_recent = List.hd s.recent_entries in
+    check (option string) "recent provider derived"
+      None first_recent.re_provider;
     check (float 0.001) "recent prompt tok/s" 1500.0
       (Option.value ~default:0.0 first_recent.re_prompt_tok_per_sec);
     check (float 0.001) "recent peak memory" 20.25
@@ -277,6 +291,8 @@ let test_prompt_tps_and_peak_memory_aggregates () =
     check (float 0.001) "max peak mem json" 20.25
       (m |> member "max_peak_memory_gb" |> to_float);
     let recent = m |> member "recent_entries" |> to_list |> List.hd in
+    check bool "recent provider null" true
+      (match recent |> member "provider" with `Null -> true | _ -> false);
     check (float 0.001) "recent prompt json" 1500.0
       (recent |> member "prompt_tok_per_sec" |> to_float);
     check (float 0.001) "recent peak mem json" 20.25

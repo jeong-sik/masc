@@ -145,7 +145,7 @@ let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
 
 let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
     ~(output_text : string) ~(success : bool) ~(duration_ms : float)
-    ?(model : string = "") ?lane ?tool_choice ?thinking_enabled
+    ?(model : string = "") ?provider ?lane ?tool_choice ?thinking_enabled
     ?thinking_budget ?trace_id ?session_id ?turn ?result_bytes ?truncated_to () =
   if Observability_redact.is_denied_tool ~tool_name then ()
   else
@@ -182,6 +182,12 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
       let turn = match turn with Some _ -> turn | None -> ctx_turn in
       let model_field =
         if model = "" then [] else [("model", `String model)]
+      in
+      let provider_field =
+        match provider with
+        | Some value when String.trim value <> "" ->
+          [("provider", `String value)]
+        | _ -> []
       in
       let result_bytes_field = match result_bytes with
         | Some n -> [("result_bytes", `Int n)]
@@ -232,7 +238,7 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
            ; ("success", `Bool success)
            ; ("duration_ms", `Float duration_ms)
            ]
-           @ model_field @ lane_field @ tool_choice_field
+           @ model_field @ provider_field @ lane_field @ tool_choice_field
            @ thinking_enabled_field @ thinking_budget_field
            @ trace_id_field @ session_id_field @ turn_field
            @ result_bytes_field @ truncated_to_field)

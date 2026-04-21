@@ -176,7 +176,37 @@ let process_status_is_timeout = function
   | Unix.WEXITED 124 -> true  (* Process_eio returns 124 on Eio.Time.Timeout *)
   | _ -> false
 
+let replace_all_substrings ~needle ~replacement text =
+  let needle_len = String.length needle in
+  if needle_len = 0 || not (String_util.contains_substring text needle) then text
+  else
+    let text_len = String.length text in
+    let buf = Buffer.create text_len in
+    let rec loop i =
+      if i >= text_len then ()
+      else if i + needle_len <= text_len
+              && String.sub text i needle_len = needle then (
+        Buffer.add_string buf replacement;
+        loop (i + needle_len))
+      else (
+        Buffer.add_char buf text.[i];
+        loop (i + 1))
+    in
+    loop 0;
+    Buffer.contents buf
+
+let rewrite_turn_runtime_paths_to_host
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      text
+  =
+  replace_all_substrings
+    ~needle:(Keeper_sandbox.container_root meta.name)
+    ~replacement:(Keeper_sandbox.host_root_abs ~config meta.name)
+    text
+
 let run_argv_with_status_retry_eintr ?cwd ~timeout_sec argv =
+  let max_eintr_retries = 8 in
   let rec loop attempts_left =
     let result = Process_eio.run_argv_with_status ?cwd ~timeout_sec argv in
     match result with
@@ -186,7 +216,7 @@ let run_argv_with_status_retry_eintr ?cwd ~timeout_sec argv =
         loop (attempts_left - 1)
     | _ -> result
   in
-  loop 3
+  loop max_eintr_retries
 
 let shell_command_available name =
   let probe =
@@ -1537,6 +1567,9 @@ let handle_keeper_shell
   let docker_read_error ~target msg =
     error_json ~fields:[ "op", `String op; "path", `String target ] msg
   in
+  let hostify_turn_runtime_output out =
+    rewrite_turn_runtime_paths_to_host ~config ~meta out
+  in
   let run_readonly_in_docker ?(ok_exit_codes = [ 0 ]) ~target ~command_argv
       ~max_bytes ~timeout_sec () =
     match
@@ -1554,7 +1587,7 @@ let handle_keeper_shell
         | Ok payload -> Ok payload)
   in
   let run_in_turn_runtime ?(ok_exit_codes = [ 0 ]) ~cwd ~cmd ~command_argv
-      ~max_bytes ~timeout_sec ?(extra = []) () =
+      ~max_bytes ~timeout_sec ?(map_output = fun out -> out) ?(extra = []) () =
     match turn_sandbox_runtime with
     | Some runtime ->
       (match
@@ -1565,7 +1598,7 @@ let handle_keeper_shell
          error_json
            ~fields:([ "op", `String op; "cwd", `String cwd ] @ extra) msg
        | Ok (st, out) ->
-         render_completed_process_result ~cwd ~cmd ~extra st out)
+         render_completed_process_result ~cwd ~cmd ~extra st (map_output out))
     | None ->
       render_process_result ~cwd ~cmd command_argv
   in
@@ -1609,6 +1642,7 @@ let handle_keeper_shell
            ~timeout_sec:io_timeout_sec
        else
          run_in_turn_runtime ~cwd ~cmd:"pwd" ~command_argv:[ "/bin/pwd" ]
+           ~map_output:hostify_turn_runtime_output
            ~max_bytes:4096 ~timeout_sec:io_timeout_sec ())
   | "git_status" ->
     (match cwd_target () with
@@ -1645,7 +1679,8 @@ let handle_keeper_shell
               ~fields:[ "op", `String op; "path", `String target ] e
           | Ok cpath ->
             (match
-               Keeper_docker_read.run_command_in_container ~config ~meta
+               Keeper_docker_read.run_command_in_container
+                 ?turn_sandbox_runtime ~config ~meta
                  ~command_argv:[ "ls"; "-la"; cpath ]
                  ~max_bytes:1_000_000
                  ~timeout_sec:io_timeout_sec
@@ -1688,7 +1723,8 @@ let handle_keeper_shell
           keeper_fs_read's [via: "docker"] response field. *)
        if Keeper_docker_read.should_route_read ~meta then
          (match
-            Keeper_docker_read.read_file_in_container ~config ~meta
+            Keeper_docker_read.read_file_in_container
+              ?turn_sandbox_runtime ~config ~meta
               ~host_path:target ~max_bytes
               ~timeout_sec:read_timeout_sec
               ()
@@ -2116,6 +2152,7 @@ let handle_keeper_shell
        | Error e -> path_error e
        | Ok cwd ->
          run_in_turn_runtime ~cwd ~cmd:"git worktree list"
+           ~map_output:hostify_turn_runtime_output
            ~command_argv:[ "git"; "worktree"; "list" ]
            ~max_bytes:1_000_000 ~timeout_sec:read_timeout_sec ())
     | "add" ->

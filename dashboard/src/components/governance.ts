@@ -3,6 +3,8 @@ import { useSignal } from '@preact/signals'
 import { AlertTriangle } from 'lucide-preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import type { KeeperApprovalQueueItem } from '../types'
+import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
+import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { Card } from './common/card'
 import { KpiCard } from './common/stat-row'
 import { TimeAgo } from './common/time-ago'
@@ -64,6 +66,7 @@ function GovernanceSummaryStrip() {
       </div>
       <div class="flex items-center gap-3 shrink-0">
         ${data?.generated_at ? html`<span class="text-2xs text-text-dim font-mono">${data.generated_at}</span>` : null}
+        <span class="text-2xs text-text-dim">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
         <${ActionButton}
           variant="ghost"
           size="sm"
@@ -488,6 +491,10 @@ function KeeperApprovalQueueSection() {
 export function Governance() {
   useEffect(() => {
     void refreshGovernance()
+    const disposeAutoRefresh = setupVisibleAutoRefresh(refreshGovernance, TELEMETRY_AUTO_REFRESH_MS)
+    return () => {
+      disposeAutoRefresh()
+    }
   }, [])
 
   return html`

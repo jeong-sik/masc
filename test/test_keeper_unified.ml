@@ -1107,6 +1107,19 @@ let sample_ctx_composition ?(system_prompt = "You are a keeper.")
     ~history_messages:[]
     ~actual_input_tokens
 
+let sample_tool_surface_metrics () : Masc_mcp.Keeper_agent_run.tool_surface_metrics =
+  {
+    turn_lane = "tool_optional";
+    visible_tool_count = 0;
+    tool_gate_enabled = false;
+    tool_surface_fallback_used = false;
+    config_root = "";
+    cascade_config_path = None;
+    gemini_mcp_disabled = false;
+    approval_mode_effective = None;
+    approval_mode_derived = false;
+  }
+
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     ?trace_ref
     ?run_validation
@@ -1128,6 +1141,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     run_validation;
     stop_reason = Masc_mcp.Oas_worker.Completed;
     inference_telemetry = None;
+    tool_surface = sample_tool_surface_metrics ();
   }
 
 let test_prompt_metrics_fingerprint_is_deterministic () =

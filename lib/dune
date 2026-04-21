@@ -587,6 +587,8 @@
    tool_misc_transport
    tool_misc_admin
    tool_misc_web_search
+  ;; godsplit-safety: variant unification & godfile decomposition
+  gate_diff_types
 )
 (private_modules
  dashboard_http_keeper_metrics

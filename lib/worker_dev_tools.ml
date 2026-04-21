@@ -5,7 +5,12 @@
     file modifications).
 
     file_read/file_write use OCaml stdlib (no Eio filesystem capability needed).
-    shell_exec uses Eio.Process with fiber-based timeout. *)
+    shell_exec uses Eio.Process with fiber-based timeout.
+
+    Safety classification types (destructive_class, gate_diff, etc.) are
+    defined in [Gate_diff_types] and re-exported here for backward compat. *)
+
+include Gate_diff_types
 
 (* --- Safety validation --- *)
 
@@ -1541,140 +1546,9 @@ let shadow_parse_outcome (cmd : string) : string =
 let cross_check_command ~legacy cmd =
   (legacy, shadow_parse_outcome cmd)
 
-(* ================================================================ *)
-(* Tick 13 (P5 continued) — typed destructive classes.              *)
-(*                                                                  *)
-(* [Eval_gate.destructive_patterns] currently exposes a flat list   *)
-(* of (substring, description) tuples.  The verifier cascade and    *)
-(* the shadow AST gate both want a typed discriminant so routing    *)
-(* logic does not depend on the free-form description string.       *)
-(*                                                                  *)
-(* [destructive_class_of_cmd] is the pure mapping used by Tick 14's *)
-(* golden diff: for every one of Eval_gate's 19 patterns there must *)
-(* be exactly one [destructive_class] that matches — the test suite *)
-(* enforces the covenant.                                           *)
-(* ================================================================ *)
-
-type destructive_class =
-  | Recursive_delete        (* rm -rf / rm -r / rmdir *)
-  | Sql_destructive         (* drop table, drop database, truncate, delete from *)
-  | Forced_git_mutation     (* git push --force, git reset --hard, git clean -f *)
-  | Privilege_escalation    (* chmod 777 *)
-  | Filesystem_format       (* mkfs *)
-  | Device_write            (* > /dev/, dd if= *)
-  | Process_signal          (* kill -9, pkill *)
-  | System_control          (* shutdown, reboot *)
-
-let destructive_class_to_string = function
-  | Recursive_delete -> "recursive_delete"
-  | Sql_destructive -> "sql_destructive"
-  | Forced_git_mutation -> "forced_git_mutation"
-  | Privilege_escalation -> "privilege_escalation"
-  | Filesystem_format -> "filesystem_format"
-  | Device_write -> "device_write"
-  | Process_signal -> "process_signal"
-  | System_control -> "system_control"
-
-(* Substring → class mapping.  Each entry mirrors one row in
-   [Eval_gate.destructive_patterns].  Order matters: longer
-   substrings come first so "rm -rf" matches before "rm -r". *)
-let destructive_class_substrings : (string * destructive_class) list = [
-  "rm -rf",            Recursive_delete;
-  "rm -r",             Recursive_delete;
-  "rmdir",             Recursive_delete;
-  "drop table",        Sql_destructive;
-  "drop database",     Sql_destructive;
-  "truncate table",    Sql_destructive;
-  "delete from",       Sql_destructive;
-  "git push --force",  Forced_git_mutation;
-  "git push -f",       Forced_git_mutation;
-  "git reset --hard",  Forced_git_mutation;
-  "git clean -f",      Forced_git_mutation;
-  "chmod 777",         Privilege_escalation;
-  "mkfs",              Filesystem_format;
-  "> /dev/",           Device_write;
-  "dd if=",            Device_write;
-  "kill -9",           Process_signal;
-  "pkill",             Process_signal;
-  "shutdown",          System_control;
-  "reboot",            System_control;
-]
-
-(* Case-insensitive substring-hit test without a regex engine. *)
-let contains_sub_ci (s : string) (sub : string) : bool =
-  let ls = String.length s and lsub = String.length sub in
-  if lsub = 0 then true
-  else if lsub > ls then false
-  else
-    let s = String.lowercase_ascii s and sub = String.lowercase_ascii sub in
-    let rec loop i =
-      if i + lsub > ls then false
-      else if String.sub s i lsub = sub then true
-      else loop (i + 1)
-    in
-    loop 0
-
-(* Returns the matching class (first hit in declaration order) plus
-   the literal substring that triggered, so callers can log both
-   the typed tag and the provenance.  [None] means "no known
-   destructive pattern found" — the caller is still free to apply
-   structural checks (rm with -r -f split flags, git push to a
-   protected branch, etc.) on top. *)
-let classify_destructive cmd : (destructive_class * string) option =
-  List.find_map (fun (sub, cls) ->
-    if contains_sub_ci cmd sub then Some (cls, sub) else None)
-    destructive_class_substrings
-
-(* ================================================================ *)
-(* Tick 14 (P5 continued) — legacy ↔ shadow diff harness.           *)
-(*                                                                  *)
-(* Pure diff producer: given a command string, render both the      *)
-(* legacy regex verdict and the shadow AST/destructive verdict      *)
-(* into a single [gate_diff] record.  The flag flip (plan decision  *)
-(* point 2) is gated on this harness showing zero                   *)
-(* [Legacy_allow_shadow_deny] OR [Legacy_deny_shadow_allow] rows    *)
-(* across N=1000 prod calls.  Until then the record is consumed by  *)
-(* telemetry only.                                                  *)
-(* ================================================================ *)
-
-type legacy_verdict =
-  | Legacy_allow
-  | Legacy_reject_by_allowlist
-  | Legacy_reject_destructive of string
-      (** The matching substring from [Eval_gate.destructive_patterns],
-          NOT the description.  Callers that need the free-form
-          description can look it up in [destructive_patterns]. *)
-
-type shadow_verdict =
-  | Shadow_allow of { parse_tag : string }
-      (** Parser and destructive classifier both clean. [parse_tag] is
-          the tag from [shadow_parse_outcome] so callers can tell
-          [parsed_simple] apart from the too_complex family at triage
-          time. *)
-  | Shadow_parse_unsupported of { parse_tag : string }
-      (** Grammar did not accept the command (parse_error, or any of
-          the parse_aborted / too_complex subtags).  Not a deny — means the
-          AST gate cannot yet express an opinion.  Callers in
-          observation mode should still fall back to the regex
-          verdict; in flip mode they must conservatively reject. *)
-  | Shadow_deny_destructive of destructive_class * string
-      (** [classify_destructive] matched; the [string] is the
-          triggering substring. *)
-
-type gate_diff =
-  | Agree
-      (** Legacy and shadow reached the same allow/deny decision. *)
-  | Legacy_allow_shadow_deny
-      (** Legacy regex allowed but shadow identified destructive
-          content. Indicates legacy under-blocks — must be fixed
-          BEFORE flip (otherwise flip is a safety regression). *)
-  | Legacy_deny_shadow_allow
-      (** Legacy rejected but shadow saw nothing dangerous.
-          Indicates legacy over-blocks — needs analysis to
-          determine whether legacy is too conservative or shadow
-          is missing coverage. *)
-  | Shadow_cannot_parse
-      (** Grammar upgrade needed; legacy decision stands. *)
+(* Classification functions that depend on worker_dev_tools internals
+   (validate_command, shadow_parse_outcome). Types come from
+   Gate_diff_types via [include Gate_diff_types] at the top. *)
 
 let classify_legacy cmd : legacy_verdict =
   match validate_command cmd with
@@ -1696,59 +1570,7 @@ let classify_shadow cmd : shadow_verdict =
       if parse_tag = "parsed_simple" then Shadow_allow { parse_tag }
       else Shadow_parse_unsupported { parse_tag }
 
-let diff_of_verdicts ~legacy ~shadow : gate_diff =
-  match legacy, shadow with
-  (* Grammar gap is surfaced first — the flip is blocked on a
-     shadow opinion, so Shadow_parse_unsupported is always a signal
-     worth tracking regardless of the legacy decision. *)
-  | _, Shadow_parse_unsupported _ -> Shadow_cannot_parse
-  | Legacy_allow, Shadow_allow _ -> Agree
-  (* Allowlist rejects are policy (which bins are permitted),
-     orthogonal to the destructive/safety gate — treat as agreement
-     since shadow is not authoritative on binary selection. *)
-  | Legacy_reject_by_allowlist, _ -> Agree
-  | Legacy_reject_destructive _, Shadow_deny_destructive _ -> Agree
-  | Legacy_allow, Shadow_deny_destructive _ -> Legacy_allow_shadow_deny
-  | Legacy_reject_destructive _, Shadow_allow _ -> Legacy_deny_shadow_allow
-
 let diff_command cmd : gate_diff * legacy_verdict * shadow_verdict =
   let legacy = classify_legacy cmd in
   let shadow = classify_shadow cmd in
   (diff_of_verdicts ~legacy ~shadow, legacy, shadow)
-
-let gate_diff_to_string = function
-  | Agree -> "agree"
-  | Legacy_allow_shadow_deny -> "legacy_allow_shadow_deny"
-  | Legacy_deny_shadow_allow -> "legacy_deny_shadow_allow"
-  | Shadow_cannot_parse -> "shadow_cannot_parse"
-
-(* Tick 22: stable log tags for legacy and shadow verdicts.
-   Exposed for the dark-launch shadow logger in keeper_exec_shell
-   — a per-call [diff_command] invocation emits a structured line
-   using these strings so operators can grep for
-   [Legacy_deny_shadow_allow] (flip blockers) or
-   [Legacy_allow_shadow_deny] (safety regressions) in the keeper
-   log stream without needing a separate metrics pipeline. *)
-let legacy_verdict_to_tag = function
-  | Legacy_allow -> "legacy_allow"
-  | Legacy_reject_by_allowlist -> "legacy_reject_by_allowlist"
-  | Legacy_reject_destructive _ -> "legacy_reject_destructive"
-
-let shadow_verdict_to_tag = function
-  | Shadow_allow _ -> "shadow_allow"
-  | Shadow_parse_unsupported _ -> "shadow_parse_unsupported"
-  | Shadow_deny_destructive _ -> "shadow_deny_destructive"
-
-(* Deterministic 12-hex-char digest of the command.  MD5 is used
-   strictly for log-line de-duplication, never for security; it
-   stops arbitrary shell fragments from leaking into log streams
-   while still letting operators aggregate identical diff
-   occurrences across processes. *)
-let cmd_hash_for_log (cmd : string) : string =
-  let hex = Digest.to_hex (Digest.string cmd) in
-  if String.length hex >= 12 then String.sub hex 0 12 else hex
-
-let shadow_diff_log_enabled () =
-  match Sys.getenv_opt "MASC_BASH_AST_SHADOW_LOG" with
-  | Some ("1" | "true" | "TRUE" | "yes" | "on" | "log") -> true
-  | _ -> false

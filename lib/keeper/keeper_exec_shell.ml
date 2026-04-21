@@ -804,16 +804,7 @@ let handle_keeper_bash
        [MASC_BASH_AST_SHADOW_LOG]; default off. *)
     (if Worker_dev_tools.shadow_diff_log_enabled () then begin
        let diff, legacy, shadow = Worker_dev_tools.diff_command cmd in
-       let counter_tag : Legendary_counters.gate_diff_tag =
-         match diff with
-         | Worker_dev_tools.Agree -> `Agree
-         | Worker_dev_tools.Legacy_allow_shadow_deny ->
-           `Legacy_allow_shadow_deny
-         | Worker_dev_tools.Legacy_deny_shadow_allow ->
-           `Legacy_deny_shadow_allow
-         | Worker_dev_tools.Shadow_cannot_parse -> `Shadow_cannot_parse
-       in
-       Legendary_counters.incr_gate_diff counter_tag;
+       Legendary_counters.incr_gate_diff diff;
        (* Histogram refinement of the Shadow_cannot_parse bucket —
           per-reason counters let operators prioritise A1-PR-N
           grammar expansion by construct frequency.  Only increments

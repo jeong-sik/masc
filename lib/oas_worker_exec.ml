@@ -11,11 +11,13 @@
 (* ================================================================ *)
 
 type stop_reason =
+  Oas_worker_exec_agent.stop_reason =
   | Completed
   | TurnBudgetExhausted of { turns_used : int; limit : int }
   | MutationBoundaryReached of { turns_used : int; tool_name : string option }
 
-type cli_transport_overrides = {
+type cli_transport_overrides =
+  Oas_worker_exec_transport.cli_transport_overrides = {
   cwd : string option;
   claude_mcp_config : string option;
   claude_allowed_tools : string list option;
@@ -24,7 +26,8 @@ type cli_transport_overrides = {
   gemini_yolo : bool option;
 }
 
-type config = {
+type config =
+  Oas_worker_exec_agent.config = {
   name : string;
   provider_cfg : Llm_provider.Provider_config.t;
   provider : Oas.Provider.config;
@@ -73,77 +76,7 @@ type config = {
           to scrub [STATE] blocks before the 100-char truncation. *)
 }
 
-let default_config
-    ~name
-    ~(provider_cfg : Llm_provider.Provider_config.t)
-    ~system_prompt
-    ~tools : config =
-  let provider =
-    let provider = Oas.Provider.config_of_provider_config provider_cfg in
-    match provider_cfg.kind, provider.provider with
-    | Llm_provider.Provider_config.OpenAI_compat, Oas.Provider.Local { base_url }
-      when not
-             (String.equal provider_cfg.request_path
-                Masc_network_defaults.openai_chat_completions_path) ->
-      let auth_header =
-        if String.trim provider_cfg.api_key = "" then None
-        else Some "Authorization"
-      in
-      let static_token =
-        match String.trim provider_cfg.api_key with
-        | "" -> None
-        | token -> Some token
-      in
-      {
-        provider with
-        provider =
-          Oas.Provider.OpenAICompat
-            {
-              base_url;
-              auth_header;
-              path = provider_cfg.request_path;
-              static_token;
-            };
-      }
-    | _ -> provider
-  in
-  { name; provider_cfg; provider; model_id = provider_cfg.model_id;
-    priority = None; system_prompt; tools;
-    runtime_mcp_policy = None;
-    max_turns = 20;
-    max_idle_turns = 3;
-    max_tokens = Oas_worker_cascade.default_max_tokens;
-    max_input_tokens = None;
-    max_cost_usd = None;
-    temperature = Oas_worker_cascade.default_temperature;
-    hooks = None;
-    context_reducer = None;
-    guardrails = None;
-    event_bus = None;
-    checkpoint_dir = None;
-    session_id = None;
-    description = None;
-    memory = None;
-    initial_messages = [];
-    raw_trace = None;
-    tool_retry_policy = None;
-    contract = None;
-    enable_thinking = None;
-    transport = Masc_grpc_transport.from_env ();
-    allowed_paths = [];
-    checkpoint_sidecar = None;
-    cache_system_prompt = false;
-    yield_on_tool = false;
-    compact_ratio = None;
-    context_injector = None;
-    context = None;
-    slot_id = None;
-    approval = None;
-    exit_condition = None;
-    exit_condition_result = None;
-    summarizer = None;
-    cli_transport_overrides = None;
-  }
+let default_config = Oas_worker_exec_agent.default_config
 
 type run_result = {
   response : Oas.Types.api_response;
@@ -179,339 +112,76 @@ let proof_result_status_to_string status =
     discovery-only model. Callers are expected to validate labels
     before reaching this helper. *)
 type label_resolution_error =
+  Oas_worker_exec_transport.label_resolution_error =
   | Invalid_model_label of string
 
-let label_resolution_error_to_string = function
-  | Invalid_model_label label ->
-    Printf.sprintf "invalid model label %S" label
+let label_resolution_error_to_string =
+  Oas_worker_exec_transport.label_resolution_error_to_string
 
-let label_resolution_error_to_sdk_error err =
-  Oas.Error.Config
-    (Oas.Error.InvalidConfig
-       {
-         field = "model_label";
-         detail = label_resolution_error_to_string err;
-       })
+let label_resolution_error_to_sdk_error =
+  Oas_worker_exec_transport.label_resolution_error_to_sdk_error
 
-let resolve_provider_config_of_label (label : string) :
-    (Llm_provider.Provider_config.t, label_resolution_error) result =
-  match Cascade_config.parse_model_string label with
-  | Some pc -> Ok pc
-  | None ->
-      Log.error ~ctx:"oas_worker_exec"
-        "refusing unresolved explicit model label=%S; execution never falls back to discovery-only models"
-        label;
-      Error (Invalid_model_label label)
+let resolve_provider_config_of_label =
+  Oas_worker_exec_transport.resolve_provider_config_of_label
 
-let invalid_runtime_config field detail =
-  Oas.Error.Config
-    (Oas.Error.InvalidConfig { field; detail })
+let invalid_runtime_config =
+  Oas_worker_exec_transport.invalid_runtime_config
 
-let cli_model_override model_id =
-  match String.lowercase_ascii (String.trim model_id) with
-  | "" | "auto" -> None
-  | _ -> Some (String.trim model_id)
+let cli_model_override =
+  Oas_worker_exec_transport.cli_model_override
 
-let provider_caps_of_config (provider_cfg : Llm_provider.Provider_config.t) =
-  let base_caps =
-    match provider_cfg.kind with
-    | Llm_provider.Provider_config.Ollama ->
-        Llm_provider.Capabilities.ollama_capabilities
-    | Anthropic -> Llm_provider.Capabilities.anthropic_capabilities
-    | Kimi -> Llm_provider.Capabilities.kimi_capabilities
-    | Glm -> Llm_provider.Capabilities.glm_capabilities
-    | Gemini -> Llm_provider.Capabilities.gemini_capabilities
-    | OpenAI_compat -> Llm_provider.Capabilities.openai_chat_capabilities
-    | Claude_code -> Llm_provider.Capabilities.claude_code_capabilities
-    | Gemini_cli -> Llm_provider.Capabilities.gemini_cli_capabilities
-    | Kimi_cli -> Llm_provider.Capabilities.kimi_cli_capabilities
-    | Codex_cli -> Llm_provider.Capabilities.codex_cli_capabilities
-  in
-  let caps =
-    match provider_cfg.kind with
-    | Llm_provider.Provider_config.Claude_code
-    | Gemini_cli
-    | Codex_cli
-    | Kimi_cli -> base_caps
-    | _ ->
-        (match Llm_provider.Capabilities.for_model_id provider_cfg.model_id with
-         | Some caps -> caps
-         | None -> base_caps)
-  in
-  match provider_cfg.supports_tool_choice_override with
-  | Some supports_tool_choice -> { caps with supports_tool_choice }
-  | None -> caps
+let provider_caps_of_config =
+  Oas_worker_exec_transport.provider_caps_of_config
 
-let provider_supports_inline_tools (provider_cfg : Llm_provider.Provider_config.t) =
-  (provider_caps_of_config provider_cfg).supports_tools
+let provider_supports_inline_tools =
+  Oas_worker_exec_transport.provider_supports_inline_tools
 
-let provider_supports_runtime_mcp_lane
-    (provider_cfg : Llm_provider.Provider_config.t) =
-  let caps = provider_caps_of_config provider_cfg in
-  caps.supports_runtime_mcp_tools && caps.supports_runtime_tool_events
+let provider_supports_runtime_mcp_lane =
+  Oas_worker_exec_transport.provider_supports_runtime_mcp_lane
 
-let dedupe_preserve_order (items : string list) =
-  let seen = Hashtbl.create (List.length items) in
-  List.filter
-    (fun item ->
-      if Hashtbl.mem seen item then
-        false
-      else (
-        Hashtbl.add seen item ();
-        true))
-    items
+let dedupe_preserve_order =
+  Oas_worker_exec_transport.dedupe_preserve_order
 
-let public_mcp_tool_names_of_oas_tools (tools : Oas.Tool.t list) =
-  List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools
+let public_mcp_tool_names_of_oas_tools =
+  Oas_worker_exec_transport.public_mcp_tool_names_of_oas_tools
 
-let tool_names_are_public_mcp (tool_names : string list) =
-  tool_names <> [] && List.for_all Tool_catalog.is_public_mcp tool_names
+let tool_names_are_public_mcp =
+  Oas_worker_exec_transport.tool_names_are_public_mcp
 
-let public_mcp_runtime_policy_of_tool_names (tool_names : string list) :
-    Llm_provider.Llm_transport.runtime_mcp_policy option =
-  let tool_names = dedupe_preserve_order tool_names in
-  if not (tool_names_are_public_mcp tool_names) then
-    None
-  else
-    Some
-      {
-        Llm_provider.Llm_transport.empty_runtime_mcp_policy with
-        servers =
-          [
-            Llm_provider.Llm_transport.Http_server
-              {
-                name = "masc";
-                url = Env_config_runtime.Local_runtime.mcp_url ();
-                headers = [];
-              };
-          ];
-        allowed_server_names = [ "masc" ];
-        allowed_tool_names = tool_names;
-        strict = true;
-        disable_builtin_tools = true;
-      }
+let public_mcp_runtime_policy_of_tool_names =
+  Oas_worker_exec_transport.public_mcp_runtime_policy_of_tool_names
 
-let provider_label (provider_cfg : Llm_provider.Provider_config.t) =
-  Printf.sprintf "%s:%s"
-    (Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind)
-    provider_cfg.model_id
+let provider_label =
+  Oas_worker_exec_transport.provider_label
 
-let resolve_tool_lane_for_oas_tools
-    ~(provider_cfg : Llm_provider.Provider_config.t)
-    ~(tools : Oas.Tool.t list)
-  : (Oas.Tool.t list
-     * Llm_provider.Llm_transport.runtime_mcp_policy option,
-     Oas.Error.sdk_error)
-    result =
-  let tool_names = public_mcp_tool_names_of_oas_tools tools in
-  match public_mcp_runtime_policy_of_tool_names tool_names with
-  | Some runtime_mcp_policy
-    when provider_supports_runtime_mcp_lane provider_cfg ->
-      Ok ([], Some runtime_mcp_policy)
-  | _ when tools = [] ->
-      Ok (tools, None)
-  | _ when provider_supports_inline_tools provider_cfg ->
-      Ok (tools, None)
-  | _ ->
-      let detail =
-        if tool_names_are_public_mcp tool_names then
-          Printf.sprintf
-            "%s does not support inline tools or request-scoped runtime MCP tools"
-            (provider_label provider_cfg)
-        else
-          Printf.sprintf "%s does not support inline tools"
-            (provider_label provider_cfg)
-      in
-      Error (invalid_runtime_config "tool_support" detail)
+let resolve_tool_lane_for_oas_tools =
+  Oas_worker_exec_transport.resolve_tool_lane_for_oas_tools
 
-(** Wrap CLI transports in a per-call sub-switch.
+let make_per_call_switch_transport =
+  Oas_worker_exec_transport.make_per_call_switch_transport
 
-    agent_sdk's CLI subprocess helper binds stdout/stderr pipes to the
-    switch passed at transport construction time. Reusing a long-lived
-    keeper/server switch across many calls can therefore retain those pipe
-    resources until the outer switch exits. By instantiating the real CLI
-    transport inside a fresh sub-switch for each completion call, any
-    leftover pipe resources are deterministically released at the end of the
-    call even when the outer keeper lifetime is long-lived. *)
-let make_per_call_switch_transport
-    (factory : sw:Eio.Switch.t -> Llm_provider.Llm_transport.t)
-    : Llm_provider.Llm_transport.t =
-  let with_call_switch f =
-    Eio.Switch.run (fun sw -> f (factory ~sw))
-  in
-  {
-    complete_sync =
-      (fun req ->
-        with_call_switch (fun transport -> transport.complete_sync req));
-    complete_stream =
-      (fun ~on_event req ->
-        with_call_switch (fun transport ->
-            transport.complete_stream ~on_event req));
-  }
-
-let non_http_transport_of_provider
-    ~(sw : Eio.Switch.t)
-    ~(provider_cfg : Llm_provider.Provider_config.t)
-    ?cli_transport_overrides
-    ()
-  : (Llm_provider.Llm_transport.t option, Oas.Error.sdk_error) result =
-  let _ = sw in
-  let proc_mgr_result () =
-    match Process_eio.get_proc_mgr () with
-    | Ok mgr -> Ok mgr
-    | Error detail -> Error (invalid_runtime_config "proc_mgr" detail)
-  in
-  match provider_cfg.kind with
-  | Llm_provider.Provider_config.Claude_code ->
-      (match proc_mgr_result () with
-       | Error _ as e -> e
-       | Ok mgr ->
-           let overrides =
-             Option.value
-               ~default:
-                 {
-                   cwd = None;
-                   claude_mcp_config = None;
-                   claude_allowed_tools = None;
-                   claude_permission_mode = None;
-                   claude_max_turns = None;
-                   gemini_yolo = None;
-                 }
-               cli_transport_overrides
-           in
-           let config =
-             {
-               Llm_provider.Transport_claude_code.default_config with
-               model = cli_model_override provider_cfg.model_id;
-               cwd = overrides.cwd;
-               mcp_config = overrides.claude_mcp_config;
-               allowed_tools =
-                 Option.value ~default:[] overrides.claude_allowed_tools;
-               permission_mode = overrides.claude_permission_mode;
-               max_turns = overrides.claude_max_turns;
-             }
-           in
-           Ok
-             (Some
-                (make_per_call_switch_transport (fun ~sw ->
-                     Llm_provider.Transport_claude_code.create ~sw ~mgr
-                       ~config))))
-  | Llm_provider.Provider_config.Gemini_cli ->
-      (match proc_mgr_result () with
-       | Error _ as e -> e
-       | Ok mgr ->
-           let overrides =
-             Option.value
-               ~default:
-                 {
-                   cwd = None;
-                   claude_mcp_config = None;
-                   claude_allowed_tools = None;
-                   claude_permission_mode = None;
-                   claude_max_turns = None;
-                   gemini_yolo = None;
-                 }
-               cli_transport_overrides
-           in
-           let config =
-             {
-               Llm_provider.Transport_gemini_cli.default_config with
-               model = cli_model_override provider_cfg.model_id;
-               cwd = overrides.cwd;
-               yolo = Option.value ~default:true overrides.gemini_yolo;
-             }
-           in
-           Ok
-             (Some
-                (make_per_call_switch_transport (fun ~sw ->
-                     Llm_provider.Transport_gemini_cli.create ~sw ~mgr
-                       ~config))))
-  | Llm_provider.Provider_config.Kimi_cli ->
-      (match proc_mgr_result () with
-       | Error _ as e -> e
-       | Ok mgr ->
-           let config =
-             {
-               Llm_provider.Transport_kimi_cli.default_config with
-               model = cli_model_override provider_cfg.model_id;
-             }
-           in
-           Ok
-             (Some
-                (make_per_call_switch_transport (fun ~sw ->
-                     Llm_provider.Transport_kimi_cli.create ~sw ~mgr
-                       ~config))))
-  | Llm_provider.Provider_config.Codex_cli ->
-      (match proc_mgr_result () with
-       | Error _ as e -> e
-       | Ok mgr ->
-           let cwd =
-             Option.bind cli_transport_overrides (fun overrides -> overrides.cwd)
-           in
-           Ok
-             (Some
-                (make_per_call_switch_transport (fun ~sw ->
-                     Llm_provider.Transport_codex_cli.create ~sw ~mgr
-                       ~config:
-                         {
-                           Llm_provider.Transport_codex_cli.default_config with
-                           cwd;
-                         }))))
-  | Anthropic | OpenAI_compat | Ollama | Gemini | Glm | Kimi ->
-      Ok None
+let non_http_transport_of_provider =
+  Oas_worker_exec_transport.non_http_transport_of_provider
 
 (* ================================================================ *)
 (* Internal: event publishing                                        *)
 (* ================================================================ *)
 
-let publish_lifecycle _bus ~name ~event ~detail =
-  match Masc_event_bus.get () with
-  | None -> ()
-  | Some mb ->
-    Oas_bus_instrument.publish mb
-      (Oas.Event_bus.mk_event
-        (Custom
-          (Printf.sprintf "masc.oas_worker.%s" event,
-           `Assoc [
-             ("agent", `String name);
-             ("detail", `String detail);
-             ("timestamp", `Float (Time_compat.now ()));
-           ])))
+let publish_lifecycle =
+  Oas_worker_exec_checkpoint.publish_lifecycle
 
 (* ================================================================ *)
 (* Internal: checkpoint persistence                                  *)
 (* ================================================================ *)
 
-let persist_checkpoint ~dir ~session_id (ckpt : Oas.Checkpoint.t) =
-  let path = Filename.concat dir (session_id ^ ".json") in
-  Fs_compat.mkdir_p dir;
-  Fs_compat.save_file path (Oas.Checkpoint.to_string ckpt)
+let persist_checkpoint =
+  Oas_worker_exec_checkpoint.persist_checkpoint
 
-let build_checkpoint ~session_id ?checkpoint_sidecar (agent : Oas.Agent.t) =
-  match checkpoint_sidecar with
-  | None -> Oas.Agent.checkpoint ~session_id agent
-  | Some json ->
-      Oas.Agent_checkpoint.build_checkpoint
-        ~session_id ~working_context:json
-        ~state:(Oas.Agent.state agent)
-        ~tools:(Oas.Agent.tools agent)
-        ~context:(Oas.Agent.context agent)
-        ~mcp_clients:(Oas.Agent.options agent).mcp_clients
-        ()
+let build_checkpoint =
+  Oas_worker_exec_checkpoint.build_checkpoint
 
-let partial_response_of_stop
-    ~(session_id : string)
-    ~(model_id : string)
-    ~(text : string)
-  : Oas.Types.api_response =
-  {
-    id = session_id;
-    model = model_id;
-    stop_reason = Oas.Types.EndTurn;
-    content = [ Oas.Types.Text text ];
-    usage = None;
-    telemetry = None;
-  }
+let partial_response_of_stop =
+  Oas_worker_exec_checkpoint.partial_response_of_stop
 
 (* ================================================================ *)
 (* Build                                                             *)
@@ -522,145 +192,22 @@ let build
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
   : (Oas.Agent.t, Oas.Error.sdk_error) result =
-  let tool_names =
-    List.map (fun (t : Oas.Tool.t) -> t.schema.name) config.tools in
-  let guardrails = match config.guardrails with
-    | Some g -> g
-    | None ->
-      { Oas.Guardrails.default with
-        tool_filter =
-          if tool_names <> [] then Oas.Guardrails.AllowList tool_names
-          else Oas.Guardrails.AllowAll }
-  in
-  let builder =
-    Oas.Builder.create ~net ~model:config.model_id
-    |> Oas.Builder.with_name config.name
-    |> Oas.Builder.with_system_prompt config.system_prompt
-    |> Oas.Builder.with_max_tokens config.max_tokens
-    |> Oas.Builder.with_max_turns config.max_turns
-    |> Oas.Builder.with_max_idle_turns config.max_idle_turns
-    |> Oas.Builder.with_temperature config.temperature
-    |> Oas.Builder.with_provider config.provider
-    |> Oas.Builder.with_tools config.tools
-    |> Oas.Builder.with_guardrails guardrails
-  in
-  let builder =
-    if config.tools <> [] then
-      Oas.Builder.with_tool_choice Oas.Types.Auto builder
-    else builder
-  in
-  let builder = match config.hooks with
-    | Some h -> Oas.Builder.with_hooks h builder
-    | None -> builder
-  in
-  let builder = match config.context_reducer with
-    | Some r -> Oas.Builder.with_context_reducer r builder
-    | None -> builder
-  in
-  let builder = match config.description with
-    | Some d -> Oas.Builder.with_description d builder
-    | None -> builder
-  in
-  let builder = match config.memory with
-    | Some m -> Oas.Builder.with_memory m builder
-    | None -> builder
-  in
-  let builder = match config.raw_trace with
-    | Some raw_trace -> Oas.Builder.with_raw_trace raw_trace builder
-    | None -> builder
-  in
-  let builder = match config.tool_retry_policy with
-    | Some policy -> Oas.Builder.with_tool_retry_policy policy builder
-    | None -> builder
-  in
-  let builder = match config.enable_thinking with
-    | Some enabled -> Oas.Builder.with_enable_thinking enabled builder
-    | None -> builder
-  in
-  let builder =
-    match config.priority with
-    | Some priority -> Oas.Builder.with_priority priority builder
-    | None -> builder
-  in
-  let builder =
-    match config.max_cost_usd with
-    | Some usd -> Oas.Builder.with_max_cost_usd usd builder
-    | None -> builder
-  in
-  let builder =
-    match config.max_input_tokens with
-    | Some tokens -> Oas.Builder.with_max_input_tokens tokens builder
-    | None -> builder
-  in
-  let builder =
-    match config.runtime_mcp_policy with
-    | Some policy -> Oas.Builder.with_runtime_mcp_policy policy builder
-    | None -> builder
-  in
-  let builder =
-    if config.cache_system_prompt then
-      Oas.Builder.with_cache_system_prompt true builder
-    else builder
-  in
-  let builder =
-    if config.yield_on_tool then
-      Oas.Builder.with_yield_on_tool true builder
-    else builder
-  in
-  let builder =
-    if config.allowed_paths <> [] then
-      Oas.Builder.with_allowed_paths config.allowed_paths builder
-    else builder
-  in
-  let builder =
-    if config.initial_messages <> [] then
-      Oas.Builder.with_initial_messages config.initial_messages builder
-    else builder
-  in
-  let builder =
-    match config.compact_ratio with
-    | Some ratio ->
-      Oas.Builder.with_context_thresholds ~compact_ratio:ratio builder
-    | None -> builder
-  in
-  let builder = match config.context_injector with
-    | Some injector -> Oas.Builder.with_context_injector injector builder
-    | None -> builder
-  in
-  let builder = match config.context with
-    | Some ctx -> Oas.Builder.with_context ctx builder
-    | None -> builder
-  in
-  let builder = match config.slot_id with
-    | Some id -> Oas.Builder.with_slot_id id builder
-    | None -> builder
-  in
-  let builder = match config.approval with
-    | Some cb -> Oas.Builder.with_approval cb builder
-    | None -> builder
-  in
-  let builder = match config.exit_condition with
-    | Some cond -> Oas.Builder.with_exit_condition cond builder
-    | None -> builder
-  in
-  let builder = match config.summarizer with
-    | Some s -> Oas.Builder.with_summarizer s builder
-    | None -> builder
-  in
-  let builder =
-    match
-      non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg
-        ?cli_transport_overrides:config.cli_transport_overrides
-        ()
-    with
-    | Ok (Some transport) -> Ok (Oas.Builder.with_transport transport builder)
-    | Ok None -> Ok builder
-    | Error _ as e -> e
-  in
-  match builder with
+  match
+    non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg
+      ?cli_transport_overrides:config.cli_transport_overrides
+      ()
+  with
   | Error _ as e -> e
-  | Ok builder ->
-  Oas.Builder.build_safe builder
+  | Ok transport ->
+      let builder =
+        Oas_worker_exec_agent.builder_without_approval ~net ~config ?transport ()
+      in
+      let builder =
+        match config.approval with
+        | Some cb -> Oas.Builder.with_approval cb builder
+        | None -> builder
+      in
+      Oas.Builder.build_safe builder
 
 (* ================================================================ *)
 (* Idle-detail enrichment                                           *)
@@ -672,27 +219,8 @@ let build
 
     Exposed at module level so it can be unit-tested independently of
     the network-bound [run] function. *)
-let enrich_idle_detail (detail : string) (messages : Oas.Types.message list) : string =
-  if String.starts_with ~prefix:"Idle detected" detail then
-    let last_tool =
-      let rec find = function
-        | [] -> None
-        | (m : Oas.Types.message) :: rest ->
-          let later = find rest in
-          if Option.is_some later then later
-          else if m.role = Oas.Types.Assistant then
-            List.find_map (function
-              | Oas.Types.ToolUse { name; _ } -> Some name
-              | _ -> None
-            ) m.content
-          else None
-      in
-      find messages
-    in
-    (match last_tool with
-     | Some name -> Printf.sprintf "%s (tool: %s)" detail name
-     | None -> detail)
-  else detail
+let enrich_idle_detail =
+  Oas_worker_exec_checkpoint.enrich_idle_detail
 
 (* ================================================================ *)
 (* Resume from checkpoint                                            *)
@@ -724,81 +252,6 @@ let resume_from_checkpoint
     ~(config : config)
     ~(checkpoint : Oas.Checkpoint.t)
   : (Oas.Agent.t, Oas.Error.sdk_error) result =
-  (* Adjust budgets: max_turns and max_cost_usd are per-call, but
-     Agent.resume restores turn_count/usage from checkpoint. Without
-     adjustment the loop guard fires immediately on resumed agents. *)
-  let effective_max_turns = checkpoint.turn_count + config.max_turns in
-  let effective_max_cost_usd = match config.max_cost_usd with
-    | Some budget ->
-      Some (checkpoint.usage.estimated_cost_usd +. budget)
-    | None -> None
-  in
-  (* Patch checkpoint fields that MASC controls per-turn.
-     OAS build_resume copies checkpoint.model/system_prompt/temperature
-     over the base config, so we align the checkpoint with MASC intent. *)
-  let patched_checkpoint = { checkpoint with
-    Oas.Checkpoint.model = config.model_id;
-    system_prompt = Some config.system_prompt;
-    temperature = Some config.temperature;
-    enable_thinking = config.enable_thinking;
-    cache_system_prompt = config.cache_system_prompt;
-    max_input_tokens = config.max_input_tokens;
-    max_total_tokens = None;  (* MASC does not manage cumulative token budgets — OAS SSOT *)
-  } in
-  let agent_config : Oas.Types.agent_config = {
-    Oas.Types.default_config with
-    name = config.name;
-    model = config.model_id;
-    system_prompt = Some config.system_prompt;
-    max_tokens = Some config.max_tokens;
-    max_turns = effective_max_turns;
-    temperature = Some config.temperature;
-    enable_thinking = config.enable_thinking;
-    cache_system_prompt = config.cache_system_prompt;
-    max_input_tokens = config.max_input_tokens;
-    max_cost_usd = effective_max_cost_usd;
-    yield_on_tool = config.yield_on_tool;
-    context_compact_ratio = config.compact_ratio;
-    priority = config.priority;
-    exit_condition = config.exit_condition;
-  } in
-  let tool_names =
-    List.map (fun (t : Oas.Tool.t) -> t.schema.name) config.tools in
-  let guardrails = match config.guardrails with
-    | Some g -> g
-    | None ->
-      { Oas.Guardrails.default with
-        tool_filter =
-          if tool_names <> [] then Oas.Guardrails.AllowList tool_names
-          else Oas.Guardrails.AllowAll }
-  in
-  (* Parity with [build]: every Agent.options field that [build] threads
-     from [config] via the Builder must also be threaded here. Missing
-     fields cause silent behavioral drift on resume — e.g. dropping
-     [approval] makes OAS log "ApprovalRequired but no approval callback
-     — executing" on the first ApprovalRequired tool, dropping
-     [summarizer] leaks raw STATE blocks into compaction, dropping
-     [slot_id] desyncs admission queue accounting. *)
-  let options : Oas.Agent.options = {
-    Oas.Agent.default_options with
-    provider = Some config.provider;
-    hooks = Option.value ~default:Oas.Hooks.empty config.hooks;
-    max_idle_turns = config.max_idle_turns;
-    guardrails;
-    context_reducer = config.context_reducer;
-    context_injector = config.context_injector;
-    event_bus = config.event_bus;
-    memory = config.memory;
-    raw_trace = config.raw_trace;
-    tool_retry_policy = config.tool_retry_policy;
-    allowed_paths = config.allowed_paths;
-    description = config.description;
-    approval = config.approval;
-    slot_id = config.slot_id;
-    runtime_mcp_policy = config.runtime_mcp_policy;
-    summarizer = config.summarizer;
-    priority = config.priority;
-  } in
   match
     non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg
       ?cli_transport_overrides:config.cli_transport_overrides
@@ -806,11 +259,14 @@ let resume_from_checkpoint
   with
   | Error _ as e -> e
   | Ok transport ->
-      let options = { options with transport } in
+      let prepared_resume =
+        Oas_worker_exec_agent.prepare_resume ~config ~checkpoint
+      in
+      let options = { prepared_resume.options with transport } in
       Ok
-        (Oas.Agent.resume ~net ~checkpoint:patched_checkpoint
+        (Oas.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
            ~tools:config.tools ?context:config.context
-           ~options ~config:agent_config ())
+           ~options ~config:prepared_resume.agent_config ())
 
 (* ================================================================ *)
 (* Run                                                               *)

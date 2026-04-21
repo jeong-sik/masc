@@ -578,9 +578,14 @@ let cli_wrapped_hard_quota_indicators = [
 ]
 
 let message_looks_like_cli_wrapped_hard_quota (message : string) : bool =
-  List.exists
-    (String_util.contains_substring_ci message)
-    cli_wrapped_hard_quota_indicators
+  let contains needle =
+    String_util.contains_substring_ci message needle
+  in
+  List.exists contains cli_wrapped_hard_quota_indicators
+  ||
+  (contains "claude exited with code 1"
+   && contains "\"api_error_status\":429"
+   && contains "you've hit your limit")
 
 let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
   match err with

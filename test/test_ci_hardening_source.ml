@@ -220,10 +220,18 @@ let test_route_auth_contracts () =
        {|Http.Router.post "/api/v1/gate/connector/unbind"|})
 
 let test_http_write_auth_contracts () =
-  check bool "server auth no longer accepts query token fallback" true
-    (not
-       (file_contains_pattern "lib/server/server_auth.ml"
-          {|query_param request "token"|}));
+  check bool "server auth scopes query token fallback to observer SSE helper" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       "let observer_sse_query_token_from_request");
+  check bool "observer SSE helper still gates query token on sse_kind" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       {|match query_param request "sse_kind" with|});
+  check bool "observer SSE helper still reads token query param" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       {|trim_opt (query_param request "token")|});
+  check bool "observer SSE auth error documents scoped query token contract" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       {|or 'token' query param for the observer SSE stream.|});
   check bool "server auth defines token-bound permission helper" true
     (file_contains_pattern "lib/server/server_auth.ml"
        "let authorize_token_bound_permission_request");

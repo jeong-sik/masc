@@ -140,11 +140,80 @@ let runtime_keepalive_started_at (config : Coord_utils.config)
     (meta : keeper_meta) =
   Keeper_registry.started_at ~base_path:config.base_path meta.name
 
+(* ── Structured blocker classification ──────────────────────── *)
+(* Types blocker_class, cascade_exhaustion_reason, blocker_class_to_string,
+   cascade_exhaustion_summary, blocker_class_continue_gate
+   are defined in Keeper_types (keeper_types.ml). *)
+
+let blocker_class_of_sdk_error (err : Oas.Error.sdk_error) : blocker_class option =
+  match Oas_worker_named.classify_masc_internal_error err with
+  | Some (Oas_worker_named.Cascade_exhausted { detail; _ }) ->
+      let reason =
+        match detail with
+        | Some d when String_util.contains_substring_ci d "connection refused" ->
+            Connection_refused
+        | Some d when String_util.contains_substring_ci d "no providers available" ->
+            No_providers_available
+        | Some d when String_util.contains_substring_ci d "all providers failed" ->
+            All_providers_failed
+        | Some d when String_util.contains_substring_ci d "all candidates filtered" ->
+            Candidates_filtered_after_cycles
+        | Some d -> Other_detail d
+        | None -> Candidates_filtered_after_cycles
+      in
+      Some (Cascade_exhausted reason)
+  | Some (Oas_worker_named.No_tool_capable_provider _) ->
+      Some No_tool_capable_provider
+  | Some (Oas_worker_named.Accept_rejected _) ->
+      None
+  | None -> (
+      match err with
+      | Oas.Error.Internal msg ->
+          let trimmed = String.trim msg in
+          if String_util.contains_substring_ci trimmed
+               "turn outcome ambiguous after committed mutating tool call(s)"
+          then
+            Some
+              (if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
+               then Ambiguous_post_commit_timeout
+               else Ambiguous_post_commit_failure)
+          else if String_util.contains_substring_ci trimmed "cascade_exhausted" then
+            Some (Cascade_exhausted (Other_detail trimmed))
+          else if String_util.contains_substring_ci trimmed
+                    "autonomous turn slot wait timeout" then
+            Some Autonomous_slot_wait_timeout
+          else if String_util.contains_substring_ci trimmed
+                    "admission queue wait timeout" then
+            Some Admission_queue_wait_timeout
+          else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
+                  && String_util.contains_substring_ci trimmed "semaphore_wait_ms=" then
+            Some Turn_timeout_after_queue_wait
+          else if String_util.contains_substring_ci trimmed "turn wall-clock timeout" then
+            Some Turn_timeout
+          else if String_util.contains_substring_ci trimmed "completion contract"
+                  || String_util.contains_substring_ci trimmed "completion_contract" then
+            Some Completion_contract_violation
+          else
+            None
+      | _ -> None)
+
+(* ── Runtime blocker surface ───────────────────────────────── *)
+
 type runtime_blocker_surface = {
   blocker_class : string;
   summary : string;
   continue_gate : bool;
 }
+
+let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class) :
+    runtime_blocker_surface =
+  let str = blocker_class_to_string cls in
+  let continue_gate = blocker_class_continue_gate cls in
+  let summary = match cls with
+    | Cascade_exhausted reason -> cascade_exhaustion_summary reason
+    | _ -> if summary = "" then str else summary
+  in
+  { blocker_class = str; summary; continue_gate }
 
 let runtime_blocker_surface_of_failure_reason
     (reason : Keeper_registry.failure_reason) =
@@ -257,12 +326,18 @@ let proactive_runtime_reason_is_current (meta : keeper_meta) =
 let runtime_blocker_fields_json (config : Coord_utils.config)
     (meta : keeper_meta) =
   let derived =
-    match runtime_registry_entry config meta.name with
-    | Some entry -> (
-        match entry.last_failure_reason with
-        | Some reason -> runtime_blocker_surface_of_failure_reason reason
-        | None -> None)
-    | None -> None
+    match meta.runtime.last_blocker_class with
+    | Some cls ->
+        Some (runtime_blocker_surface_of_typed_class
+                ~summary:meta.runtime.last_blocker cls)
+    | None ->
+        (* Fallback: legacy string-based classification *)
+        match runtime_registry_entry config meta.name with
+        | Some entry -> (
+            match entry.last_failure_reason with
+            | Some reason -> runtime_blocker_surface_of_failure_reason reason
+            | None -> None)
+        | None -> None
   in
   let derived =
     match derived with

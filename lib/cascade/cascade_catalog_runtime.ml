@@ -2,6 +2,8 @@ type candidate_probe_status =
   | Probe_ok
   | Probe_error of string
 
+let probe_timeout_sec = 5.0
+
 type candidate_probe = {
   model_string : string;
   provider_kind : string;
@@ -141,18 +143,12 @@ let install_snapshot_for_tests ~source_path ~profile_names =
           rejected_update = None;
         })
 
-let has_suffix ~suffix s =
-  let suffix_len = String.length suffix in
-  let s_len = String.length s in
-  s_len > suffix_len
-  && String.sub s (s_len - suffix_len) suffix_len = suffix
-
 let discover_profiles = function
   | `Assoc fields ->
       fields
       |> List.filter_map (fun (key, value) ->
              match value with
-             | `List _ when has_suffix ~suffix:"_models" key ->
+             | `List _ when Base.String.is_suffix ~suffix:"_models" key ->
                  let suffix_len = String.length "_models" in
                  Some (String.sub key 0 (String.length key - suffix_len))
              | _ -> None)
@@ -393,13 +389,14 @@ let probe_provider ~sw ~net ~clock (candidate : candidate_runtime) =
   in
   let run () = Oas_worker_exec.run ~sw ~net ~config "ping" in
   try
-    match Eio.Time.with_timeout_exn clock 5.0 run with
+    match Eio.Time.with_timeout_exn clock probe_timeout_sec run with
     | Ok _ -> candidate_probe_ok candidate
     | Error sdk_err ->
         candidate_probe_error candidate (Oas.Error.to_string sdk_err)
   with
   | Eio.Time.Timeout ->
-      candidate_probe_error candidate "probe timeout after 5s"
+      candidate_probe_error candidate
+        (Printf.sprintf "probe timeout after %.0fs" probe_timeout_sec)
 
 let rejection_of_path ~config_path ~attempted_mtime ~checked_at
     ~(errors : string list) ~(profiles : profile_rejection list) =

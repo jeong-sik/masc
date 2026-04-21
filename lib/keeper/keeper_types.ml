@@ -82,6 +82,53 @@ type proactive_runtime =
 
 type scheduled_autonomous_runtime = proactive_runtime
 
+(* ── Structured blocker classification ──────────────────────── *)
+
+type cascade_exhaustion_reason =
+  | Connection_refused
+  | No_providers_available
+  | All_providers_failed
+  | Candidates_filtered_after_cycles
+  | Other_detail of string
+
+type blocker_class =
+  | Cascade_exhausted of cascade_exhaustion_reason
+  | Ambiguous_post_commit_timeout
+  | Ambiguous_post_commit_failure
+  | Autonomous_slot_wait_timeout
+  | Admission_queue_wait_timeout
+  | Turn_timeout_after_queue_wait
+  | Turn_timeout
+  | Completion_contract_violation
+  | No_tool_capable_provider
+
+let blocker_class_to_string = function
+  | Cascade_exhausted _ -> "cascade_exhausted"
+  | Ambiguous_post_commit_timeout -> "ambiguous_post_commit_timeout"
+  | Ambiguous_post_commit_failure -> "ambiguous_post_commit_failure"
+  | Autonomous_slot_wait_timeout -> "autonomous_slot_wait_timeout"
+  | Admission_queue_wait_timeout -> "admission_queue_wait_timeout"
+  | Turn_timeout_after_queue_wait -> "turn_timeout_after_queue_wait"
+  | Turn_timeout -> "turn_timeout"
+  | Completion_contract_violation -> "completion_contract_violation"
+  | No_tool_capable_provider -> "no_tool_capable_provider"
+
+let cascade_exhaustion_summary = function
+  | Connection_refused ->
+      "Cascade exhausted after provider failures; local runtime connection refused."
+  | No_providers_available ->
+      "Cascade exhausted; no providers were available."
+  | All_providers_failed ->
+      "Cascade exhausted after all configured providers failed."
+  | Candidates_filtered_after_cycles ->
+      "Cascade exhausted after provider failures."
+  | Other_detail _ ->
+      "Cascade exhausted after provider failures."
+
+let blocker_class_continue_gate = function
+  | Ambiguous_post_commit_timeout | Ambiguous_post_commit_failure -> true
+  | _ -> false
+
 type usage_metrics =
   { total_turns : int
   ; total_input_tokens : int
@@ -119,6 +166,7 @@ type agent_runtime_state =
   ; last_active_desire : string
   ; last_current_intention : string
   ; last_blocker : string
+  ; last_blocker_class : blocker_class option
   ; last_need : string
   }
 
@@ -799,6 +847,9 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "last_active_desire", `String rt.last_active_desire
     ; "last_current_intention", `String rt.last_current_intention
     ; "last_blocker", `String rt.last_blocker
+    ; "last_blocker_class", (match rt.last_blocker_class with
+        | Some bc -> `String (blocker_class_to_string bc)
+        | None -> `Null)
     ; "last_need", `String rt.last_need
     ; "paused", `Bool m.paused
     ; "autoboot_enabled", `Bool m.autoboot_enabled
@@ -1232,6 +1283,7 @@ let parse_keeper_state
   let last_blocker =
     cap_loaded (Safe_ops.json_string ~default:"" "last_blocker" json)
   in
+  let last_blocker_class = None in
   let last_need =
     cap_loaded (Safe_ops.json_string ~default:"" "last_need" json)
   in
@@ -1272,6 +1324,7 @@ let parse_keeper_state
       ; last_active_desire
       ; last_current_intention
       ; last_blocker
+      ; last_blocker_class
       ; last_need
       }
   }
@@ -1461,6 +1514,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_active_desire"
   ; "last_current_intention"
   ; "last_blocker"
+  ; "last_blocker_class"
   ; "last_need"
   ; "paused"
   ; "autoboot_enabled"

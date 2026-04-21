@@ -95,6 +95,29 @@ type usage_metrics = {
 
 (** {1 Agent runtime state} *)
 
+(** Structured blocker classification — replaces string-based error matching. *)
+type cascade_exhaustion_reason =
+  | Connection_refused
+  | No_providers_available
+  | All_providers_failed
+  | Candidates_filtered_after_cycles
+  | Other_detail of string
+
+type blocker_class =
+  | Cascade_exhausted of cascade_exhaustion_reason
+  | Ambiguous_post_commit_timeout
+  | Ambiguous_post_commit_failure
+  | Autonomous_slot_wait_timeout
+  | Admission_queue_wait_timeout
+  | Turn_timeout_after_queue_wait
+  | Turn_timeout
+  | Completion_contract_violation
+  | No_tool_capable_provider
+
+val blocker_class_to_string : blocker_class -> string
+val cascade_exhaustion_summary : cascade_exhaustion_reason -> string
+val blocker_class_continue_gate : blocker_class -> bool
+
 type agent_runtime_state = {
   usage: usage_metrics;
   compaction_rt: compaction_runtime;
@@ -118,6 +141,7 @@ type agent_runtime_state = {
   last_active_desire: string;
   last_current_intention: string;
   last_blocker: string;
+  last_blocker_class: blocker_class option;
   last_need: string;
 }
 

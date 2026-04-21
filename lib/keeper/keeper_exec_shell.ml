@@ -1331,7 +1331,7 @@ let resolve_gh_repo_context ~(config : Coord.config) ~(meta : keeper_meta) =
            ~detail:
              "keeper_shell op=gh needs an active current_task_id bound to a task worktree."
            ~hint:
-             "Claim/bind a task first so gh can derive repo context from the active task worktree."
+             "Call keeper_task_claim with {} first so gh can derive repo context from the active task worktree."
            ())
   | Some task_id ->
       let task_id = Keeper_id.Task_id.to_string task_id in

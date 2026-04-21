@@ -982,7 +982,9 @@ let test_prompt_includes_claim_first_guidance () =
   check bool "user prompt explains no task_id needed" true
     (contains_substring user "Do not wait for keeper_tasks_list");
   check bool "user prompt prefers claim before browsing" true
-    (contains_substring user "Prefer keeper_task_claim before keeper_board_list or keeper_shell")
+    (contains_substring user "Prefer keeper_task_claim before keeper_board_list or keeper_shell");
+  check bool "user prompt explains gh requires claim first" true
+    (contains_substring user "If you need keeper_shell op=gh, claim first")
 
 let test_prompt_omits_claim_first_guidance_when_task_claimed () =
   let current_task_id =
@@ -1047,7 +1049,16 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
   check bool "legacy worktree branch_name schema removed" false
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "branch_name:");
   check bool "tool-less runtime escape hatch removed from nudge" false
-    (source_file_contains "lib/keeper/keeper_agent_run.ml" "NO_TOOL_CHANNEL")
+    (source_file_contains "lib/keeper/keeper_agent_run.ml" "NO_TOOL_CHANNEL");
+  check bool "work discovery nudge warns gh needs claimed task" true
+    (source_file_contains "lib/keeper/keeper_agent_run.ml"
+       "keeper_shell op=gh` derives repo context from the active task worktree/current_task_id");
+  check bool "keeper_shell schema documents gh claim prerequisite" true
+    (source_file_contains "lib/tool_shard.ml"
+       "Requires an active claimed task/current_task_id");
+  check bool "keeper_shell gh error hints keeper_task_claim" true
+    (source_file_contains "lib/keeper/keeper_exec_shell.ml"
+       "Call keeper_task_claim with {} first")
 
 (* ---------- Config tests ---------- *)
 

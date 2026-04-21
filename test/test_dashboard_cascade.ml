@@ -18,6 +18,21 @@ let to_list_opt = function
   | `List xs -> Some xs
   | _ -> None
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then
+      true
+    else if idx + needle_len > haystack_len then
+      false
+    else if String.sub haystack idx needle_len = needle then
+      true
+    else
+      loop (idx + 1)
+  in
+  loop 0
+
 let write_file path contents =
   let oc = open_out path in
   Fun.protect
@@ -74,10 +89,42 @@ let test_config_shape () =
   (match member "config_path" j with
    | `String _ | `Null -> ()
    | _ -> fail "config_path should be string or null");
+  (match member "validation_status" j with
+   | `String ("validated" | "serving_last_known_good" | "invalid") -> ()
+   | _ -> fail "validation_status should be known string");
+  (match member "validation_errors" j with
+   | `List _ -> ()
+   | _ -> fail "validation_errors should be list");
+  (match member "invalid_profiles" j with
+   | `List _ -> ()
+   | _ -> fail "invalid_profiles should be list");
   (match member "profiles" j with
    | `List _ -> () | _ -> fail "profiles should be list");
   (match member "keeper_profiles" j with
    | `List _ -> () | _ -> fail "keeper_profiles should be list")
+
+let test_config_validated_status () =
+  with_temp_config_root
+    {|
+      {
+        "keeper_unified_models": ["ollama:qwen3.5:35b-a3b-nvfp4"]
+      }
+    |}
+    (fun cascade_path ->
+      Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
+      Masc_mcp.Cascade_catalog_runtime.install_snapshot_for_tests
+        ~source_path:cascade_path
+        ~profile_names:[ Masc_mcp.Keeper_config.default_cascade_name ];
+      Fun.protect
+        ~finally:Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests
+        (fun () ->
+           let j = Masc_mcp.Dashboard_cascade.config_json () in
+           check string "validated status" "validated"
+             Yojson.Safe.Util.(j |> member "validation_status" |> to_string);
+           check int "validation errors empty" 0
+             Yojson.Safe.Util.(j |> member "validation_errors" |> to_list |> List.length);
+           check int "invalid profiles empty" 0
+             Yojson.Safe.Util.(j |> member "invalid_profiles" |> to_list |> List.length)))
 
 let test_config_profile_shape () =
   with_dashboard_snapshot @@ fun () ->
@@ -142,6 +189,31 @@ let test_config_uses_live_catalog () =
       check (option string) "config_path reflects active root"
         (Some cascade_path)
         Yojson.Safe.Util.(j |> member "config_path" |> to_string_option))
+
+let test_config_invalid_catalog_surfaces_validation_metadata () =
+  with_temp_config_root
+    {|
+      {
+        "broken_profile_models": ["__nonexistent_provider_sentinel__:fake"]
+      }
+    |}
+    (fun _cascade_path ->
+      Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
+      Fun.protect
+        ~finally:Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests
+        (fun () ->
+           let j = Masc_mcp.Dashboard_cascade.config_json () in
+           check string "invalid status" "invalid"
+             Yojson.Safe.Util.(j |> member "validation_status" |> to_string);
+           check bool "invalid provider surfaced in metadata" true
+             (contains_substring (Yojson.Safe.to_string j)
+                "__nonexistent_provider_sentinel__");
+           check bool "broken profile listed" true
+             (Yojson.Safe.Util.(j |> member "invalid_profiles" |> to_list)
+              |> List.exists (fun profile ->
+                     match member "name" profile with
+                     | `String "broken_profile" -> true
+                     | _ -> false))))
 
 (* ── health_json ───────────────────────────────────── *)
 
@@ -341,9 +413,12 @@ let () =
   run "dashboard_cascade" [
     "config_json", [
       test_case "top-level shape" `Quick test_config_shape;
+      test_case "validated status when snapshot exists" `Quick test_config_validated_status;
       test_case "profile shape" `Quick test_config_profile_shape;
       test_case "candidate shape" `Quick test_config_candidate_shape;
       test_case "uses live config catalog" `Quick test_config_uses_live_catalog;
+      test_case "invalid catalog surfaces validation metadata" `Quick
+        test_config_invalid_catalog_surfaces_validation_metadata;
     ];
     "health_json", [
       test_case "top-level shape" `Quick test_health_shape;

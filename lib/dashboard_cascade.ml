@@ -27,6 +27,41 @@ let source_to_string = function
   | CC.Default_fallback -> "default_fallback"
   | CC.Hardcoded_defaults -> "hardcoded_defaults"
 
+let string_list_to_json values =
+  `List (List.map (fun value -> `String value) values)
+
+let invalid_profile_to_json (name, errors : string * string list) =
+  `Assoc
+    [
+      ("name", `String name);
+      ("errors", string_list_to_json errors);
+    ]
+
+let json_assoc_member key = function
+  | `Assoc fields -> Option.value (List.assoc_opt key fields) ~default:`Null
+  | _ -> `Null
+
+let json_string_list = function
+  | `List values ->
+      List.filter_map
+        (function
+          | `String value -> Some value
+          | _ -> None)
+        values
+  | _ -> []
+
+let invalid_profiles_of_rejection_json rejection_json =
+  match json_assoc_member "profiles" rejection_json with
+  | `List profiles ->
+      List.filter_map
+        (fun profile_json ->
+           match json_assoc_member "name" profile_json with
+           | `String name ->
+               Some (name, json_string_list (json_assoc_member "errors" profile_json))
+           | _ -> None)
+        profiles
+  | _ -> []
+
 (* ── Config projection ──────────────────────────────── *)
 
 (** Profiles to surface in the dashboard.
@@ -96,6 +131,40 @@ let invalid_name_set = function
            (fun acc (name, _reasons) -> StringSet.add name acc)
            StringSet.empty
 
+let invalid_profiles_of_config_path = function
+  | None -> []
+  | Some path -> Cascade_catalog_validator.error_messages_by_profile ~config_path:path
+
+let validation_summary_json ?config_path () =
+  let fallback_invalid_profiles = invalid_profiles_of_config_path config_path in
+  let of_rejection ~status rejection =
+    let rejection_json = Cascade_catalog_runtime.rejection_to_yojson rejection in
+    let invalid_profiles =
+      match invalid_profiles_of_rejection_json rejection_json with
+      | [] -> fallback_invalid_profiles
+      | profiles -> profiles
+    in
+    [
+      ("validation_status", `String status);
+      ("validation_errors",
+       string_list_to_json (json_string_list (json_assoc_member "errors" rejection_json)));
+      ("invalid_profiles", `List (List.map invalid_profile_to_json invalid_profiles));
+    ]
+  in
+  match Cascade_catalog_runtime.inspect_active () with
+  | Ok (Cascade_catalog_runtime.Validated _) ->
+      [
+        ("validation_status", `String "validated");
+        ("validation_errors", `List []);
+        ("invalid_profiles", `List []);
+      ]
+  | Ok
+      (Cascade_catalog_runtime.Serving_last_known_good
+         { rejected_update; _ }) ->
+      of_rejection ~status:"serving_last_known_good" rejected_update
+  | Error rejection ->
+      of_rejection ~status:"invalid" rejection
+
 let config_json () =
   let config_path = Cascade_runtime.cascade_config_path () in
   let keeper_entries =
@@ -138,15 +207,21 @@ let config_json () =
         in
         List.map (profile_json_raw ~config_path) names
   in
-  `Assoc [
-    ("updated_at", `String (now_iso ()));
-    ("config_path",
-     match config_path with
-     | Some p -> `String p
-     | None -> `Null);
-    ("profiles", `List profiles);
-    ("keeper_profiles", `List (List.map keeper_profile_json keeper_entries));
-  ]
+  let fields =
+    [
+      ("updated_at", `String (now_iso ()));
+      ("config_path",
+       match config_path with
+       | Some p -> `String p
+       | None -> `Null);
+    ]
+    @ validation_summary_json ?config_path ()
+    @ [
+        ("profiles", `List profiles);
+        ("keeper_profiles", `List (List.map keeper_profile_json keeper_entries));
+      ]
+  in
+  `Assoc fields
 
 (* ── Health projection ──────────────────────────────── *)
 

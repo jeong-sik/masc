@@ -1009,7 +1009,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-           Log.Dashboard.warn "shell cache pre-warm failed: %s"
+             Log.Dashboard.warn "shell cache pre-warm failed: %s"
              (Printexc.to_string exn)));
       start_lazy_startup state;
       (match catalog_validation_error with

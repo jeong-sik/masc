@@ -905,6 +905,25 @@ let test_startup_state_json () =
   Alcotest.(check string) "last error recorded" "keeper failed"
     (json_string_field "last_error" json)
 
+let test_startup_state_catalog_degraded_survives_lazy_activation () =
+  Server_startup_state.reset ~backend_mode:"filesystem" ();
+  Server_startup_state.mark_state_ready ~backend_mode:"filesystem";
+  Server_startup_state.activate_lazy ~backend_mode:"filesystem"
+    ~tasks:[ "restore_sessions" ];
+  Server_startup_state.mark_degraded
+    ~error:"startup catalog validation failed: synthetic";
+  Server_startup_state.finish_lazy_task ~task:"restore_sessions";
+  let current = Server_startup_state.(!state) in
+  Alcotest.(check string) "phase stays degraded after lazy task completes"
+    "degraded"
+    (Server_startup_state.phase_to_string current.phase);
+  Alcotest.(check bool) "ready flag stays true after degradation" true
+    current.state_ready;
+  Alcotest.(check (option string))
+    "catalog validation error is preserved"
+    (Some "startup catalog validation failed: synthetic")
+    current.last_error
+
 let test_startup_state_liveness () =
   Server_startup_state.reset ~backend_mode:"unknown" ();
   Alcotest.(check bool) "is_live returns true even during init" true
@@ -1506,6 +1525,10 @@ let () =
             test_blocking_bootstrap_ignores_whitespace_legacy_room_dirs;
           Alcotest.test_case "startup state json reports lazy failure" `Quick
             test_startup_state_json;
+          Alcotest.test_case
+            "startup catalog degradation survives lazy activation"
+            `Quick
+            test_startup_state_catalog_degraded_survives_lazy_activation;
           Alcotest.test_case "liveness probe is always true" `Quick
             test_startup_state_liveness;
           Alcotest.test_case "readiness false before init" `Quick

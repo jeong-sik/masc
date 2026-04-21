@@ -1799,9 +1799,19 @@ export interface CascadeKeeperProfile {
   canonical: string
 }
 
+export type CascadeValidationStatus = 'validated' | 'serving_last_known_good' | 'invalid'
+
+export interface CascadeInvalidProfile {
+  name: string
+  errors: string[]
+}
+
 export interface CascadeConfigResponse {
   updated_at: string
   config_path: string | null
+  validation_status: CascadeValidationStatus
+  validation_errors: string[]
+  invalid_profiles: CascadeInvalidProfile[]
   profiles: CascadeProfile[]
   keeper_profiles: CascadeKeeperProfile[]
 }

@@ -46,6 +46,18 @@ type ctx_composition_metrics =
   ; segments : (string * prompt_segment_metrics) list
   }
 
+type tool_surface_metrics =
+  { turn_lane : string
+  ; visible_tool_count : int
+  ; tool_gate_enabled : bool
+  ; tool_surface_fallback_used : bool
+  ; config_root : string
+  ; cascade_config_path : string option
+  ; gemini_mcp_disabled : bool
+  ; approval_mode_effective : string option
+  ; approval_mode_derived : bool
+  }
+
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
@@ -63,6 +75,7 @@ type run_result =
   ; run_validation : Agent_sdk.Raw_trace.run_validation option
   ; stop_reason : Oas_worker.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
+  ; tool_surface : tool_surface_metrics
   }
 
 (** Canonical model label for MASC status/metrics surfaces.
@@ -146,6 +159,7 @@ val run_turn :
         -> turn_prompt)
   -> user_message:string
   -> cascade_name:string
+  -> ?turn_affordances:string list
   -> ?provider_filter:string list
   -> generation:int
   -> ?max_turns:int

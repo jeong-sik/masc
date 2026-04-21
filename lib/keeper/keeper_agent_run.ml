@@ -288,6 +288,33 @@ let ctx_composition_to_json (metrics : ctx_composition_metrics) : Yojson.Safe.t 
              metrics.segments) );
     ]
 
+type tool_surface_metrics =
+  { turn_lane : string
+  ; visible_tool_count : int
+  ; tool_gate_enabled : bool
+  ; tool_surface_fallback_used : bool
+  ; config_root : string
+  ; cascade_config_path : string option
+  ; gemini_mcp_disabled : bool
+  ; approval_mode_effective : string option
+  ; approval_mode_derived : bool
+  }
+
+type computed_tool_surface =
+  { all_allowed : string list
+  ; core_count : int
+  ; deterministic_prefilter_count : int
+  ; discovered_count : int
+  ; llm_selected_count : int
+  ; selection_mode : string
+  ; is_last_turn : bool
+  ; is_warning_zone : bool
+  ; tool_gate_requested : bool
+  ; tool_surface_fallback_used : bool
+  ; lane : string
+  ; query_text : string
+  }
+
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
@@ -305,6 +332,7 @@ type run_result =
   ; run_validation : Agent_sdk.Raw_trace.run_validation option
   ; stop_reason : Oas_worker.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
+  ; tool_surface : tool_surface_metrics
   }
 
 let nonempty_trimmed raw =
@@ -332,6 +360,56 @@ let surface_model_used (result : run_result) : string =
   match Option.bind result.cascade_observation observation_surface_model with
   | Some model -> model
   | None -> Option.value ~default:"" (nonempty_trimmed result.model_used)
+
+type keeper_internal_error =
+  | Keeper_tool_surface_empty of
+      { keeper_name : string
+      ; turn_lane : string
+      ; affordances : string list
+      ; fallback_used : bool
+      }
+
+let keeper_internal_error_prefix = "[keeper_internal_error] "
+
+let keeper_internal_error_to_json = function
+  | Keeper_tool_surface_empty { keeper_name; turn_lane; affordances; fallback_used } ->
+    `Assoc
+      [ "kind", `String "keeper_tool_surface_empty"
+      ; "keeper_name", `String keeper_name
+      ; "turn_lane", `String turn_lane
+      ; "affordances", `List (List.map (fun value -> `String value) affordances)
+      ; "fallback_used", `Bool fallback_used
+      ]
+
+let sdk_error_of_keeper_internal_error err =
+  Oas.Error.Internal
+    (keeper_internal_error_prefix
+     ^ Yojson.Safe.to_string (keeper_internal_error_to_json err))
+
+let oas_env_truthy value =
+  match String.lowercase_ascii (String.trim value) with
+  | "1" | "true" | "yes" | "on" -> true
+  | _ -> false
+
+let gemini_mcp_disabled_from_env () =
+  match Sys.getenv_opt "OAS_GEMINI_NO_MCP" with
+  | Some value -> oas_env_truthy value
+  | None -> false
+
+let approval_mode_from_env () =
+  match Sys.getenv_opt "OAS_GEMINI_APPROVAL_MODE" with
+  | Some value ->
+    let trimmed = String.trim value in
+    if trimmed = "" then None else Some (trimmed, false)
+  | None ->
+    if gemini_mcp_disabled_from_env () then Some ("plan", true) else None
+
+let tool_required_affordances =
+  [ "board_post_or_comment"
+  ; "message_sweep"
+  ; "task_claim"
+  ; "task_audit"
+  ]
 
 (* Tool selection & disclosure — extracted to Keeper_tool_disclosure (#5732) *)
 
@@ -419,6 +497,7 @@ let run_turn
          base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
       ~(user_message : string)
       ~(cascade_name : string)
+      ?(turn_affordances = [])
       ?provider_filter
       ~(generation : int)
       ?(max_turns : int = Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call)
@@ -518,6 +597,21 @@ let run_turn
      before any OAS call in this turn.  OAS 0.159+ transports read
      these at build_args time; an empty [oas_env] list is a no-op. *)
   Keeper_types_profile.apply_oas_env ~keeper_name:meta.name profile_defaults;
+  let config_root =
+    let inputs = Config_dir_resolver.inputs_from_env () in
+    let resolution =
+      Config_dir_resolver.resolve_with
+        { inputs with env_base_path = Some config.base_path }
+    in
+    resolution.Config_dir_resolver.config_root.path
+  in
+  let cascade_config_path = Cascade_runtime.cascade_config_path () in
+  let gemini_mcp_disabled = gemini_mcp_disabled_from_env () in
+  let approval_mode_effective, approval_mode_derived =
+    match approval_mode_from_env () with
+    | Some (mode, derived) -> (Some mode, derived)
+    | None -> (None, false)
+  in
   let persona_extended =
     Keeper_types_profile.resolved_persona_name ~keeper_name:meta.name
       profile_defaults
@@ -1093,6 +1187,342 @@ let run_turn
     | Some r -> r
     | None -> ref Agent_sdk.Tool_op.Keep_all
   in
+  let portal_ctx : Tool_portal.context = { config; agent_name = meta.name } in
+  let visible_always_include_tools =
+    Tool_portal.filter_visible_tool_names portal_ctx always_include_tools
+  in
+  let tool_surface_ref =
+    ref
+      {
+        turn_lane = "text_only";
+        visible_tool_count = 0;
+        tool_gate_enabled = false;
+        tool_surface_fallback_used = false;
+        config_root;
+        cascade_config_path;
+        gemini_mcp_disabled;
+        approval_mode_effective;
+        approval_mode_derived;
+      }
+  in
+  let validate_allow_list ~turn raw =
+    let raw = Tool_portal.filter_visible_tool_names portal_ctx raw in
+    let validated, dropped_names =
+      List.partition
+        (fun n ->
+           Keeper_tool_policy.StringSet.mem n universe_set
+           && Keeper_tool_policy.StringSet.mem n allowed_exec_set)
+        raw
+    in
+    let dropped = List.length dropped_names in
+    if dropped > 0
+    then (
+      let max_logged = 10 in
+      let shown = List.filteri (fun i _ -> i < max_logged) dropped_names in
+      let omitted = dropped - List.length shown in
+      let shown_text = String.concat ", " shown in
+      let omitted_suffix =
+        if omitted > 0 then Printf.sprintf " (+%d more)" omitted else ""
+      in
+      Log.Keeper.warn
+        "keeper:%s turn:%d AllowList pruned %d tool(s) outside dispatch universe: %s%s"
+        meta.name
+        turn
+        dropped
+        shown_text
+        omitted_suffix);
+    validated
+  in
+  let fallback_tool_surface ~turn =
+    let floor =
+      [ "keeper_context_status"
+      ; "keeper_task_claim"
+      ; "keeper_tasks_list"
+      ; "keeper_board_list"
+      ; "keeper_board_get"
+      ]
+    in
+    let repo_probe =
+      [ "keeper_fs_read"; "keeper_shell"; "keeper_bash" ]
+      |> List.find_opt (fun name ->
+           Keeper_tool_policy.StringSet.mem name universe_set
+           && Keeper_tool_policy.StringSet.mem name allowed_exec_set)
+      |> Option.to_list
+    in
+    validate_allow_list ~turn (floor @ repo_probe)
+  in
+  let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn =
+    let caller_requires_tools =
+      match current_tool_choice with
+      | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> true
+      | _ -> false
+    in
+    max_turns > 1
+    && not is_last_turn
+    && (caller_requires_tools
+        || List.exists
+             (fun affordance -> List.mem affordance turn_affordances)
+             tool_required_affordances)
+  in
+  let compute_tool_surface ~turn ~messages ~current_tool_choice ~decay_discovered
+      : computed_tool_surface =
+    let last_user_text =
+      List.fold_left
+        (fun acc (m : Agent_sdk.Types.message) ->
+           match m.role with
+           | Agent_sdk.Types.User -> Agent_sdk.Types.text_of_content m.content
+           | _ -> acc)
+        ""
+        messages
+    in
+    let query_text =
+      (if String.trim last_user_text <> "" then last_user_text else user_message)
+      |> Keeper_tool_disclosure.tool_query_text_of_user_message
+    in
+    let max_tools = max_tools_per_turn in
+    let core =
+      Keeper_exec_tools.effective_core_tools ()
+      |> List.filter (fun name -> Keeper_tool_policy.StringSet.mem name allowed_exec_set)
+    in
+    let discovered =
+      Keeper_discovered_tools.active_names !discovered_ref ~turn
+    in
+    let () =
+      if decay_discovered then ignore (Keeper_discovered_tools.decay !discovered_ref ~turn)
+    in
+    let selection_limit = min max_tools keeper_selection_top_k in
+    let preset_tools, preset_search_index =
+      load_preset_selection_context ()
+    in
+    let deterministic_prefilter =
+      Keeper_tool_disclosure.deterministic_prefilter_names
+        ~search_index:preset_search_index
+        ~query_text
+        ~selection_limit
+        ~core
+    in
+    let llm_rerank_enabled = Keeper_config.keeper_llm_rerank_enabled () in
+    let llm_selected =
+      if llm_rerank_enabled then
+        (match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+         | Some sw, Some net ->
+           let rerank_cascade =
+             Keeper_config.keeper_llm_rerank_cascade ()
+           in
+           let defaults =
+             Cascade_runtime.default_model_strings ~cascade_name:rerank_cascade
+           in
+           let config_path = Cascade_runtime.cascade_config_path () in
+           let model_strings =
+             Cascade_config.resolve_model_strings
+               ?config_path ~name:rerank_cascade ~defaults ()
+             |> Cascade_config.expand_model_strings_for_execution
+           in
+           let providers =
+             Cascade_config.parse_model_strings model_strings
+           in
+           let healthy =
+             Cascade_config.filter_healthy ~sw ~net providers
+           in
+           (match healthy with
+            | [] ->
+              Log.Keeper.warn
+                "keeper:%s TopK_llm: no healthy provider for cascade '%s', falling back to core+prefilter+discovered"
+                meta.name
+                rerank_cascade;
+              []
+            | first_provider :: _ ->
+              let rerank_fn =
+                Agent_sdk.Tool_selector.default_rerank_fn
+                  ~sw
+                  ~net
+                  ~provider:first_provider
+                  ~k:selection_limit
+                  ()
+              in
+              let strategy =
+                Agent_sdk.Tool_selector.TopK_llm
+                  { k = selection_limit
+                  ; bm25_prefilter_n =
+                      min
+                        keeper_selection_bm25_prefilter_n
+                        (List.length preset_tools)
+                  ; always_include = core
+                  ; confidence_threshold = 0.3
+                  ; rerank_fn
+                  }
+              in
+              (try
+                 let selected =
+                   Agent_sdk.Tool_selector.select_names
+                     ~strategy
+                     ~context:query_text
+                     ~tools:preset_tools
+                 in
+                 if Keeper_types_profile.keeper_debug then
+                   Log.Keeper.info
+                     "keeper:%s TopK_llm selected %d tools (query_len=%d, candidates=%d)"
+                     meta.name
+                     (List.length selected)
+                     (String.length query_text)
+                     (List.length preset_tools);
+                 selected
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
+                 Log.Keeper.warn
+                   "keeper:%s TopK_llm failed (%s), falling back to core+prefilter+discovered"
+                   meta.name
+                   (Printexc.to_string exn);
+                 []))
+         | _ ->
+           Log.Keeper.warn
+             "keeper:%s TopK_llm: Eio context unavailable, falling back to core+prefilter+discovered"
+             meta.name;
+           [])
+      else []
+    in
+    let merged =
+      Keeper_tool_disclosure.merge_tool_selection_boundary
+        ~core
+        ~deterministic_prefilter
+        ~llm_selected
+        ~discovered
+      |> Tool_portal.filter_visible_tool_names portal_ctx
+    in
+    let selection_mode =
+      if llm_rerank_enabled
+      then "deterministic_plus_llm_hint"
+      else "core_plus_prefilter_plus_discovered"
+    in
+    let deterministic_floor_set =
+      Keeper_types.dedupe_keep_order
+        (core @ deterministic_prefilter @ List.sort String.compare discovered)
+    in
+    let llm_only_count =
+      List.length
+        (List.filter
+           (fun n -> not (List.mem n deterministic_floor_set))
+           llm_selected)
+    in
+    let all_allowed =
+      Agent_sdk.Tool_op.apply
+        (Agent_sdk.Tool_op.compose
+           [ Agent_sdk.Tool_op.Replace_with merged
+           ; !tool_overlay_ref
+           ])
+        all_tool_names
+      |> validate_allow_list ~turn
+    in
+    let core_count = List.length (Keeper_exec_tools.effective_core_tools ()) in
+    let discovered_count =
+      List.length (Keeper_discovered_tools.active_names !discovered_ref ~turn)
+    in
+    let per_call_turn = turn - start_turn_count in
+    let is_last_turn = per_call_turn >= max_turns - 1 in
+    let is_warning_zone = per_call_turn >= max_turns - 2 in
+    let tool_gate_requested =
+      tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
+    in
+    let all_allowed, tool_surface_fallback_used =
+      if tool_gate_requested && all_allowed = [] then
+        let fallback_allowed = fallback_tool_surface ~turn in
+        if fallback_allowed <> [] then fallback_allowed, true else all_allowed, false
+      else
+        all_allowed, false
+    in
+    let safe_last_turn_tools =
+      Keeper_tool_policy.last_turn_safe_tool_names ()
+    in
+    let all_allowed =
+      if is_last_turn then
+        Agent_sdk.Tool_op.apply
+          (Agent_sdk.Tool_op.Intersect_with safe_last_turn_tools)
+          all_allowed
+      else
+        all_allowed
+    in
+    let all_allowed =
+      if List.length all_allowed > max_tools then (
+        Log.Keeper.info
+          "context overflow guard: %d tools > max %d, truncating"
+          (List.length all_allowed)
+          max_tools;
+        let essential =
+          List.filter
+            (fun name -> List.mem name visible_always_include_tools)
+            all_allowed
+        in
+        let non_essential =
+          List.filter
+            (fun name -> not (List.mem name visible_always_include_tools))
+            all_allowed
+        in
+        let budget = max_tools - List.length essential in
+        essential @ List.filteri (fun i _ -> i < budget) non_essential)
+      else
+        all_allowed
+    in
+    let lane =
+      if is_retry then "retry"
+      else if tool_gate_requested then "tool_required"
+      else (
+        match current_tool_choice with
+        | Some Agent_sdk.Types.None_ -> "tool_disabled"
+        | _ -> "text_only")
+    in
+    {
+      all_allowed;
+      core_count;
+      deterministic_prefilter_count = List.length deterministic_prefilter;
+      discovered_count;
+      llm_selected_count = llm_only_count;
+      selection_mode;
+      is_last_turn;
+      is_warning_zone;
+      tool_gate_requested;
+      tool_surface_fallback_used;
+      lane;
+      query_text;
+    }
+  in
+  let initial_tool_surface =
+    compute_tool_surface
+      ~turn:(start_turn_count + 1)
+      ~messages:history_messages
+      ~current_tool_choice:None
+      ~decay_discovered:false
+  in
+  tool_surface_ref :=
+    {
+      turn_lane = initial_tool_surface.lane;
+      visible_tool_count = List.length initial_tool_surface.all_allowed;
+      tool_gate_enabled = initial_tool_surface.tool_gate_requested;
+      tool_surface_fallback_used = initial_tool_surface.tool_surface_fallback_used;
+      config_root;
+      cascade_config_path;
+      gemini_mcp_disabled;
+      approval_mode_effective;
+      approval_mode_derived;
+    };
+  let initial_tool_surface_result =
+    if initial_tool_surface.tool_gate_requested
+       && initial_tool_surface.all_allowed = []
+    then
+      Error
+        (sdk_error_of_keeper_internal_error
+           (Keeper_tool_surface_empty
+              { keeper_name = meta.name
+              ; turn_lane = initial_tool_surface.lane
+              ; affordances = turn_affordances
+              ; fallback_used = initial_tool_surface.tool_surface_fallback_used
+              }))
+    else
+      Ok initial_tool_surface
+  in
+  match initial_tool_surface_result with
+  | Error err -> Error err
+  | Ok _ ->
   (* Mutation boundary mechanism removed. Previously, the first successful
      mutating tool would open a "boundary" that blocked further tools and
      exited the OAS loop early. This caused keeper death spirals (#6801) and
@@ -1329,218 +1759,12 @@ let run_turn
                    | None -> Some temporal
                    | Some existing -> Some (existing ^ "\n\n" ^ temporal))
               in
-              (* 2. Progressive tool disclosure via OAS Tool_selector.
-           Extract context from last user message for relevance scoring. *)
-              let last_user_text =
-                List.fold_left
-                  (fun acc (m : Agent_sdk.Types.message) ->
-                     match m.role with
-                     | Agent_sdk.Types.User -> Agent_sdk.Types.text_of_content m.content
-                     | _ -> acc)
-                  ""
-                  messages
-              in
-              let query_text =
-                (if String.trim last_user_text <> "" then last_user_text else user_message)
-                |> Keeper_tool_disclosure.tool_query_text_of_user_message
-              in
-              let max_tools = max_tools_per_turn in
-              let portal_ctx : Tool_portal.context = { config; agent_name = meta.name } in
-              let visible_always_include_tools =
-                Tool_portal.filter_visible_tool_names portal_ctx always_include_tools
-              in
-              (* Progressive tool disclosure: core tools are always visible;
-           additional tools are selected by BM25 + optional LLM reranking
-           (TopK_llm, gated by MASC_KEEPER_LLM_RERANK env var).
-           When LLM rerank is disabled, only tools explicitly discovered
-           via keeper_tool_search appear alongside core. *)
-              let llm_rerank_enabled = Keeper_config.keeper_llm_rerank_enabled () in
-              let effective_selected, deterministic_prefilter_count, llm_selected_count,
-                  selection_mode =
-                let core =
-                  Keeper_exec_tools.effective_core_tools ()
-                  |> List.filter (fun name -> Keeper_tool_policy.StringSet.mem name allowed_exec_set)
-                in
-                let discovered =
-                  Keeper_discovered_tools.active_names !discovered_ref ~turn
-                in
-                let _ = Keeper_discovered_tools.decay !discovered_ref ~turn in
-                let selection_limit = min max_tools keeper_selection_top_k in
-                let preset_tools, preset_search_index =
-                  load_preset_selection_context ()
-                in
-                let deterministic_prefilter =
-                  (* Keep a deterministic BM25 floor even when TopK_llm is disabled:
-                     productive preset-local tools such as masc_code_search should
-                     stay visible without requiring keeper_tool_search first. *)
-                  Keeper_tool_disclosure.deterministic_prefilter_names
-                    ~search_index:preset_search_index
-                    ~query_text
-                    ~selection_limit
-                    ~core
-                in
-                let llm_selected =
-                  if llm_rerank_enabled then
-                    (match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
-                     | Some sw, Some net ->
-                       let rerank_cascade =
-                         Keeper_config.keeper_llm_rerank_cascade ()
-                       in
-                       let defaults =
-                         Cascade_runtime.default_model_strings ~cascade_name:rerank_cascade
-                       in
-                       let config_path = Cascade_runtime.cascade_config_path () in
-                       (* Resolve cascade → first healthy provider. OAS 0.144.0+
-                          no longer owns cascade orchestration — MASC picks one
-                          provider from the cascade and passes it to the
-                          single-provider rerank API. Graceful degradation via
-                          BM25 fallback lives inside [default_rerank_fn]. *)
-                       let model_strings =
-                         Cascade_config.resolve_model_strings
-                           ?config_path ~name:rerank_cascade ~defaults ()
-                         |> Cascade_config.expand_model_strings_for_execution
-                       in
-                       let providers =
-                         Cascade_config.parse_model_strings model_strings
-                       in
-                       let healthy =
-                         Cascade_config.filter_healthy ~sw ~net providers
-                       in
-                       (match healthy with
-                        | [] ->
-                          Log.Keeper.warn
-                            "keeper:%s TopK_llm: no healthy provider for cascade \
-                             '%s', falling back to core+prefilter+discovered"
-                            meta.name
-                            rerank_cascade;
-                          []
-                        | first_provider :: _ ->
-                          let rerank_fn =
-                            Agent_sdk.Tool_selector.default_rerank_fn
-                              ~sw
-                              ~net
-                              ~provider:first_provider
-                              ~k:selection_limit
-                              ()
-                          in
-                          let strategy =
-                            Agent_sdk.Tool_selector.TopK_llm
-                              { k = selection_limit
-                              ; bm25_prefilter_n =
-                                  min
-                                    keeper_selection_bm25_prefilter_n
-                                    (List.length preset_tools)
-                              ; always_include = core
-                              ; confidence_threshold = 0.3
-                              ; rerank_fn
-                              }
-                          in
-                          (try
-                             let selected =
-                               Agent_sdk.Tool_selector.select_names
-                                 ~strategy
-                                 ~context:query_text
-                                 ~tools:preset_tools
-                             in
-                             if Keeper_types_profile.keeper_debug
-                             then
-                               Log.Keeper.info
-                                 "keeper:%s TopK_llm selected %d tools \
-                                  (query_len=%d, candidates=%d)"
-                                 meta.name
-                                 (List.length selected)
-                                 (String.length query_text)
-                                 (List.length preset_tools);
-                             selected
-                           with
-                           | Eio.Cancel.Cancelled _ as e -> raise e
-	                           | exn ->
-	                             Log.Keeper.warn
-	                               "keeper:%s TopK_llm failed (%s), falling back to \
-	                                core+prefilter+discovered"
-	                               meta.name
-	                               (Printexc.to_string exn);
-	                             []))
-	                     | _ ->
-	                       Log.Keeper.warn
-	                         "keeper:%s TopK_llm: Eio context unavailable, falling back \
-                          to core+prefilter+discovered"
-                         meta.name;
-                       [])
-                  else []
-                in
-                let merged =
-                  Keeper_tool_disclosure.merge_tool_selection_boundary
-                    ~core
-                    ~deterministic_prefilter
-                    ~llm_selected
-                    ~discovered
-                  |> Tool_portal.filter_visible_tool_names portal_ctx
-                in
-                let selection_mode =
-                  if llm_rerank_enabled
-                  then "deterministic_plus_llm_hint"
-                  else "core_plus_prefilter_plus_discovered"
-                in
-                let deterministic_floor_set =
-                  Keeper_types.dedupe_keep_order
-                    (core @ deterministic_prefilter @ List.sort String.compare discovered)
-                in
-                let llm_only_count =
-                  List.length
-                    (List.filter
-                       (fun n -> not (List.mem n deterministic_floor_set))
-                       llm_selected)
-                in
-                merged, List.length deterministic_prefilter, llm_only_count,
-                selection_mode
-              in
-              (* Apply runtime tool overlay (masc_tool_grant/revoke) and
-           intersect with the full dispatch universe. *)
-              let all_allowed =
-                let raw =
-                  Agent_sdk.Tool_op.apply
-                    (Agent_sdk.Tool_op.compose
-                       [ Agent_sdk.Tool_op.Replace_with effective_selected
-                       ; !tool_overlay_ref
-                       ])
-                    all_tool_names
-                  |> Tool_portal.filter_visible_tool_names portal_ctx
-                in
-                (* Validate AllowList against dispatch universe: tools visible
-             to the LLM but absent from keeper_tools would cause execution
-             errors and waste a turn.  Filter them out defensively.
-             This can happen when core_discovery_tools includes tools
-             not covered by the keeper's preset (e.g. minimal). *)
-                let validated, dropped_names =
-                  List.partition
-                    (fun n ->
-                       Keeper_tool_policy.StringSet.mem n universe_set && Keeper_tool_policy.StringSet.mem n allowed_exec_set)
-                    raw
-                in
-                let dropped = List.length dropped_names in
-                if dropped > 0
-                then (
-                  let max_logged = 10 in
-                  let shown = List.filteri (fun i _ -> i < max_logged) dropped_names in
-                  let omitted = dropped - List.length shown in
-                  let shown_text = String.concat ", " shown in
-                  let omitted_suffix =
-                    if omitted > 0 then Printf.sprintf " (+%d more)" omitted else ""
-                  in
-                  Log.Keeper.warn
-                    "keeper:%s turn:%d AllowList pruned %d tool(s) outside dispatch \
-                     universe: %s%s"
-                    meta.name
-                    turn
-                    dropped
-                    shown_text
-                    omitted_suffix);
-                validated
-              in
-              let core_count = List.length (Keeper_exec_tools.effective_core_tools ()) in
-              let discovered_count =
-                List.length (Keeper_discovered_tools.active_names !discovered_ref ~turn)
+              let computed_surface =
+                compute_tool_surface
+                  ~turn
+                  ~messages
+                  ~current_tool_choice:current_params.tool_choice
+                  ~decay_discovered:true
               in
               if Keeper_types_profile.keeper_debug
               then
@@ -1549,24 +1773,19 @@ let run_turn
                    discovered=%d llm_selected=%d llm_rerank=%b allowed=%d query_len=%d \
                    mode=%s"
                   meta.name
-                  core_count
-                  deterministic_prefilter_count
-                  discovered_count
-                  llm_selected_count
-                  llm_rerank_enabled
-                  (List.length all_allowed)
-                  (String.length query_text)
-                  selection_mode;
+                  computed_surface.core_count
+                  computed_surface.deterministic_prefilter_count
+                  computed_surface.discovered_count
+                  computed_surface.llm_selected_count
+                  (Keeper_config.keeper_llm_rerank_enabled ())
+                  (List.length computed_surface.all_allowed)
+                  (String.length computed_surface.query_text)
+                  computed_surface.selection_mode;
               (* 3. Graceful last-turn: inject budget warnings and restrict
            tools when approaching the turn limit.
            - Warning zone (2 turns before limit): inject budget warning
            - Last turn (1 turn before limit): restrict to safe tools + force [STATE]
            The keeper can still call extend_turns to escape the limit. *)
-              (* With Agent.resume, turn is cumulative from checkpoint.
-           Use per-call turn count for budget calculations. *)
-              let per_call_turn = turn - start_turn_count in
-              let is_last_turn = per_call_turn >= max_turns - 1 in
-              let is_warning_zone = per_call_turn >= max_turns - 2 in
               let append_ctx ctx text =
                 Some
                   (match ctx with
@@ -1574,7 +1793,7 @@ let run_turn
                    | Some e -> e ^ "\n\n" ^ text)
               in
               let ctx =
-                if is_last_turn
+                if computed_surface.is_last_turn
                 then
                   append_ctx
                     ctx
@@ -1589,7 +1808,7 @@ let run_turn
                         another keeper or operator for judgment when the work needs a \
                         decision you cannot make alone; \
                         (3) if you claimed a task, call keeper_task_done NOW before \
-                        session ends."
+                       session ends."
                        turn
                        max_turns)
                 else if is_retry
@@ -1597,12 +1816,12 @@ let run_turn
                   append_ctx
                     ctx
                     (Printf.sprintf
-                       "[RETRY] The previous attempt overflowed the model context. Stay \
+                        "[RETRY] The previous attempt overflowed the model context. Stay \
                         concise, prefer already-loaded context, and only use the \
                         smallest essential tool set if a tool call is strictly \
                         necessary. Current tool budget: %d."
-                       max_tools)
-                else if is_warning_zone
+                       max_tools_per_turn)
+                else if computed_surface.is_warning_zone
                 then
                   append_ctx
                     ctx
@@ -1617,76 +1836,40 @@ let run_turn
                        max_turns)
                 else ctx
               in
-              let safe_last_turn_tools =
-                Keeper_tool_policy.last_turn_safe_tool_names ()
-              in
-              let all_allowed =
-                if is_last_turn
-                then
-                  Agent_sdk.Tool_op.apply
-                    (Agent_sdk.Tool_op.Intersect_with safe_last_turn_tools)
-                    all_allowed
-                else all_allowed
-              in
-              if is_warning_zone
+              if computed_surface.is_warning_zone
               then
                 Log.Keeper.info
                   "keeper:%s turn_budget turn=%d/%d last_turn=%b"
                   meta.name
                   turn
                   max_turns
-                  is_last_turn;
-              (* Context overflow guard: Tool_selector.select already respects
-           the k limit, but overlays can grow the visible set beyond
-           max_tools.  Cap the post-overlay set to stay inside small-model
-           context windows. Configurable via MASC_KEEPER_MAX_TOOLS_PER_TURN. *)
-              let all_allowed =
-                if List.length all_allowed > max_tools
-                then (
-                  Log.Keeper.info
-                    "context overflow guard: %d tools > max %d, truncating"
-                    (List.length all_allowed)
-                    max_tools;
-                  let essential =
-                    List.filter
-                      (fun name -> List.mem name visible_always_include_tools)
-                      all_allowed
-                  in
-                  let non_essential =
-                    List.filter
-                      (fun name -> not (List.mem name visible_always_include_tools))
-                      all_allowed
-                  in
-                  let budget = max_tools - List.length essential in
-                  essential @ List.filteri (fun i _ -> i < budget) non_essential)
-                else all_allowed
-              in
+                  computed_surface.is_last_turn;
+              let all_allowed = computed_surface.all_allowed in
               let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
-              (* Tool choice: Any on all non-last turns.
-           "Must call a tool" is deterministic (API enforces).
-           "Which tool" is non-deterministic (model chooses).
-           OAS handles provider differences:
-             - GLM: Any → Auto (api_openai.ml, GLM only supports auto)
-             - Ollama (supports_tool_choice=false): contract relaxed
-             - Claude/OpenAI: Any = required, enforced by API
-           Reconcile/mutation-boundary removed — #6801 root cause
-           was sticky_reconcile, not tool_choice=Any itself. *)
               let tool_choice =
-                if is_last_turn || List.length all_allowed = 0
-                then current_params.tool_choice (* last turn: preserve caller's choice *)
-                else Some Agent_sdk.Types.Any (* all other turns: force tool use *)
+                if computed_surface.is_last_turn
+                then current_params.tool_choice
+                else if computed_surface.tool_gate_requested && List.length all_allowed > 0
+                then Some Agent_sdk.Types.Any
+                else current_params.tool_choice
               in
               completion_contract_ref :=
-                Keeper_tool_disclosure.completion_contract_of_tool_choice tool_choice;
-              let lane =
-                if is_retry then "retry"
-                else (
-                  match tool_choice with
-                  | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
-                    "tool_required"
-                  | Some Agent_sdk.Types.None_ -> "tool_disabled"
-                  | _ -> "tool_optional")
-              in
+                if computed_surface.tool_gate_requested
+                then Keeper_tool_disclosure.Require_tool_use
+                else Keeper_tool_disclosure.completion_contract_of_tool_choice tool_choice;
+              let lane = computed_surface.lane in
+              tool_surface_ref :=
+                {
+                  turn_lane = lane;
+                  visible_tool_count = List.length all_allowed;
+                  tool_gate_enabled = computed_surface.tool_gate_requested;
+                  tool_surface_fallback_used = computed_surface.tool_surface_fallback_used;
+                  config_root;
+                  cascade_config_path;
+                  gemini_mcp_disabled;
+                  approval_mode_effective;
+                  approval_mode_derived;
+                };
               (* thinking_enabled reflects the actual per-turn decision: when
                  adaptive mode flipped it, log that value so dashboards and
                  decisions.jsonl show what was sent to the model rather than
@@ -1729,12 +1912,15 @@ let run_turn
                    ; "event", `String "tool_disclosure"
                    ; "keeper_name", `String meta.name
                    ; "turn", `Int turn
-                   ; "selection_mode", `String selection_mode
-                   ; "core_count", `Int core_count
-                   ; "deterministic_prefilter_count", `Int deterministic_prefilter_count
-                   ; "discovered_count", `Int discovered_count
-                   ; "llm_selected_count", `Int llm_selected_count
+                   ; "selection_mode", `String computed_surface.selection_mode
+                   ; "core_count", `Int computed_surface.core_count
+                   ; "deterministic_prefilter_count", `Int computed_surface.deterministic_prefilter_count
+                   ; "discovered_count", `Int computed_surface.discovered_count
+                   ; "llm_selected_count", `Int computed_surface.llm_selected_count
                    ; "final_visible", `Int (List.length all_allowed)
+                   ; "turn_lane", `String lane
+                   ; "tool_gate_enabled", `Bool computed_surface.tool_gate_requested
+                   ; "tool_surface_fallback_used", `Bool computed_surface.tool_surface_fallback_used
                    ; "hook_ms", `Float hook_elapsed_ms
                    ]
                in
@@ -1848,7 +2034,7 @@ let run_turn
   with
   | Error e -> Error (Oas.Error.Internal e)
   | Ok oas_allowed_paths ->
-    let require_tool_choice_support = tools <> [] && max_turns > 1 in
+    let require_tool_choice_support = initial_tool_surface.tool_gate_requested in
     let timeout_s =
       match oas_timeout_s with
       | Some value -> value
@@ -2399,6 +2585,7 @@ let run_turn
              ; run_validation = result.run_validation
              ; stop_reason = result.stop_reason
              ; inference_telemetry = result.response.telemetry
+             ; tool_surface = !tool_surface_ref
              }
          in
          match text_result with

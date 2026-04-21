@@ -419,6 +419,116 @@ let test_keeper_status_exposes_model_observability () =
         (observability |> member "runtime_contract"
          |> member "chat_completion_compatible" = `Null))
 
+let test_keeper_status_ignores_stale_cascade_observation () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "stale-observation-keeper" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Ignore stale keeper metrics");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      let meta =
+        match Keeper_types.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "keeper meta missing after up"
+        | Error err -> Alcotest.fail ("meta read failed: " ^ err)
+      in
+      let current_labels =
+        Keeper_model_labels.configured_model_labels_of_meta meta
+      in
+      let stale_selected_model = "stale:old-path" in
+      Dated_jsonl.append
+        (Keeper_types.keeper_metrics_store config keeper_name)
+        (`Assoc
+          [
+            ("ts", `String (Types.now_iso ()));
+            ("model_used", `String stale_selected_model);
+            ( "cascade",
+              `Assoc
+                [
+                  ("cascade_name", `String "stale-cascade");
+                  ( "configured_labels",
+                    `List [ `String "stale:old-path"; `String "stale:fallback" ] );
+                  ( "candidate_models",
+                    `List [ `String "stale:old-path"; `String "stale:fallback" ] );
+                  ("selected_model", `String stale_selected_model);
+                  ("selected_index", `Int 0);
+                  ("fallback_hops", `Int 0);
+                  ("fallback_applied", `Bool false);
+                  ( "attempts",
+                    `List
+                      [
+                        `Assoc
+                          [
+                            ("attempt_index", `Int 0);
+                            ("model_id", `String "old-path");
+                            ("model_label", `String stale_selected_model);
+                            ("latency_ms", `Int 52);
+                            ("error", `Null);
+                          ];
+                      ] );
+                ] );
+          ]);
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
+          ~args:(`Assoc [ ("name", `String keeper_name); ("fast", `Bool true) ])
+      in
+      Alcotest.(check bool) "status ok" true ok;
+      let status_json = parse_json_exn body in
+      let open Yojson.Safe.Util in
+      let observability = status_json |> member "model_observability" in
+      let status_dump = Yojson.Safe.pretty_to_string status_json in
+      Alcotest.(check (option string))
+        ("current cascade name wins over stale metrics\n" ^ status_dump)
+        (Some meta.cascade_name)
+        (observability |> member "cascade_name" |> to_string_option);
+      Alcotest.(check bool) "stale observation ignored" false
+        (observability |> member "recent_turn_observation" |> to_bool);
+      Alcotest.(check (list string)) "configured labels come from current meta"
+        current_labels
+        (observability |> member "configured_labels" |> to_list
+       |> List.map to_string);
+      Alcotest.(check (list string)) "resolved candidates fall back to current config"
+        current_labels
+        (observability |> member "resolved_candidates" |> to_list
+       |> List.map to_string);
+      Alcotest.(check bool) "stale selected model not surfaced" true
+        (observability |> member "selected_model" |> to_string_option
+       <> Some stale_selected_model);
+      Alcotest.(check string) "attempt summary resets to current config"
+        "No recent cascade observation for current keeper config. Showing configured labels only."
+        (observability |> member "attempt_summary" |> member "summary"
+       |> to_string))
+
 let test_keeper_down_accepts_agent_name_alias () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

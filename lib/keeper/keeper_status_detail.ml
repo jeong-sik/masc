@@ -156,6 +156,11 @@ let assoc_bool_opt key fields =
   | Some (`Bool value) -> Some value
   | _ -> None
 
+let json_string_opt_member json key =
+  match Yojson.Safe.Util.member key json with
+  | `String value -> nonempty_trimmed value
+  | _ -> None
+
 let latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes =
   let lines =
     let dated = Dated_jsonl.read_recent_lines metrics_store 8 in
@@ -319,7 +324,9 @@ let attempt_summary_json ~configured_labels ~resolved_candidates ~selected_model
   | None ->
       `Assoc
         [
-          ("summary", `String "No recent cascade observation. Showing configured labels only.");
+          ( "summary",
+            `String
+              "No recent cascade observation for current keeper config. Showing configured labels only." );
           ("attempts_observed", `Null);
           ("selected_index", `Null);
           ("fallback_hops", `Null);
@@ -381,8 +388,8 @@ let attempt_summary_json ~configured_labels ~resolved_candidates ~selected_model
           ("fallback_applied", `Bool fallback_applied);
         ]
 
-let model_observability_json ~configured_labels ~active_model
-    ~runtime_blocker_fields latest_metrics =
+let latest_cascade_for_current_config ~current_cascade_name ~configured_labels
+    latest_metrics =
   let latest_cascade =
     match latest_metrics with
     | Some metrics -> (
@@ -391,24 +398,35 @@ let model_observability_json ~configured_labels ~active_model
         | _ -> None)
     | None -> None
   in
+  match latest_cascade with
+  | None -> None
+  | Some cascade ->
+      let cascade_name_matches =
+        match json_string_opt_member cascade "cascade_name" with
+        | Some observed_name -> String.equal observed_name current_cascade_name
+        | None -> true
+      in
+      let configured_labels_match =
+        match json_string_list_member cascade "configured_labels" with
+        | [] -> true
+        | observed_labels -> observed_labels = configured_labels
+      in
+      if cascade_name_matches && configured_labels_match then Some cascade
+      else None
+
+let model_observability_json ~current_cascade_name ~configured_labels ~active_model
+    ~runtime_blocker_fields latest_metrics =
+  let latest_cascade =
+    latest_cascade_for_current_config ~current_cascade_name ~configured_labels
+      latest_metrics
+  in
   let runtime_blocker_class =
     assoc_string_opt "runtime_blocker_class" runtime_blocker_fields
   in
   let cascade_name =
-    match latest_cascade with
-    | Some cascade -> (
-        match Yojson.Safe.Util.member "cascade_name" cascade with
-        | `String value when String.trim value <> "" -> value
-        | _ -> "")
-    | None -> ""
+    Option.value ~default:"" (nonempty_trimmed current_cascade_name)
   in
-  let configured_labels_surface =
-    match latest_cascade with
-    | Some cascade ->
-        let labels = json_string_list_member cascade "configured_labels" in
-        if labels <> [] then labels else configured_labels
-    | None -> configured_labels
-  in
+  let configured_labels_surface = configured_labels in
   let resolved_candidates =
     match latest_cascade with
     | Some cascade ->
@@ -416,13 +434,18 @@ let model_observability_json ~configured_labels ~active_model
         if labels <> [] then labels else configured_labels_surface
     | None -> configured_labels_surface
   in
+  let fallback_selected_model =
+    match configured_labels_surface with
+    | model :: _ -> Some model
+    | [] -> nonempty_trimmed active_model
+  in
   let selected_model =
     match latest_cascade with
     | Some cascade -> (
-        match Yojson.Safe.Util.member "selected_model" cascade with
-        | `String value -> nonempty_trimmed value
-        | _ -> nonempty_trimmed active_model)
-    | None -> nonempty_trimmed active_model
+        match json_string_opt_member cascade "selected_model" with
+        | Some _ as model -> model
+        | None -> fallback_selected_model)
+    | None -> fallback_selected_model
   in
   `Assoc
     [
@@ -439,7 +462,7 @@ let model_observability_json ~configured_labels ~active_model
           ~resolved_candidates ~selected_model latest_cascade );
       ( "runtime_contract",
         lightweight_runtime_contract_json ~selected_model
-          ~runtime_blocker_class );
+         ~runtime_blocker_class );
     ]
 
 let handle_keeper_status ctx args : tool_result =
@@ -929,7 +952,8 @@ let handle_keeper_status ctx args : tool_result =
            latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes
          in
          let model_observability =
-           model_observability_json ~configured_labels:models
+           model_observability_json ~current_cascade_name:m.cascade_name
+             ~configured_labels:models
              ~active_model ~runtime_blocker_fields latest_metrics
          in
 

@@ -83,112 +83,135 @@ stylesheet
   }
 |}]
 
-let view_hero (keepers : Keepers_types.response) =
-  let live_n, warn_n, dead_n =
-    List.fold keepers.keepers ~init:(0, 0, 0)
-      ~f:(fun (l, w, d) (k : Keepers_types.keeper) ->
-        match k.status with
-        | Live -> l + 1, w, d
-        | Warn -> l, w + 1, d
-        | Dead -> l, w, d + 1)
-  in
+let view_hero (rows : Keepers_directory.row list) =
+  let counts = Keepers_directory.counts rows in
   let tail =
-    if live_n + warn_n + dead_n = 0
-    then "— offline"
-    else Printf.sprintf "· %d live · %d warn · %d dead" live_n warn_n dead_n
+    if counts.total = 0
+    then "· directory pending"
+    else
+      Printf.sprintf
+        "· %d active · %d attention · %d paused · %d offline"
+        counts.active
+        counts.attention
+        counts.paused
+        counts.offline
   in
   Hero.view
-    ~eyebrow:"runtime · keepers"
+    ~eyebrow:"runtime + mission · keepers"
     ~title:"fleet"
     ~tail:(tail, `Brass)
     ~sub:
-      "3s 폴링으로 본 fleet 전체. 아래 섹션은 roster(현재) · \
-       swim(60s 활동) · pressure(60m ctx)로 시간축이 짧아진다."
+      "keepers summary에 execution + mission snapshot을 덧입혀 directory를 먼저 보여준다. 아래 섹션은 roster(축약) · swim(60s 활동) · pressure(60m ctx) 순으로 이어진다."
     ()
 ;;
 
-let view_hud_strip (keepers : Keepers_types.response) =
-  let live_n, warn_n, dead_n =
-    List.fold keepers.keepers ~init:(0, 0, 0)
-      ~f:(fun (l, w, d) (k : Keepers_types.keeper) ->
-        match k.status with
-        | Live -> l + 1, w, d
-        | Warn -> l, w + 1, d
-        | Dead -> l, w, d + 1)
+let view_hud_strip
+      ~(rows : Keepers_directory.row list)
+      ~(execution : Directory_execution_types.response)
+      ~(mission : Directory_mission_types.response)
+  =
+  let execution_generated_at =
+    let open Directory_execution_types in
+    execution.generated_at
   in
-  let total = live_n + warn_n + dead_n in
-  let synced =
-    match keepers.generated_at with
-    | "" -> "—"
-    | ts ->
-      if String.length ts >= 19 && Char.equal ts.[10] 'T'
-      then Printf.sprintf "%s UTC" (String.sub ts ~pos:11 ~len:8)
-      else ts
+  let mission_generated_at =
+    let open Directory_mission_types in
+    mission.generated_at
   in
-  let dead_cls : Hud.v_class =
-    if dead_n > 0 then `Bad else `Neutral
-  in
-  let warn_cls : Hud.v_class =
-    if warn_n > 0 then `Warn else `Neutral
-  in
-  let live_cls : Hud.v_class =
-    if live_n > 0 then `Ok else `Neutral
-  in
+  let counts = Keepers_directory.counts rows in
+  let coverage = Keepers_directory.coverage rows in
   Hud.strip
-    [ Hud.cell ~k:"Fleet" ~v:(Printf.sprintf "%02d" total) ()
-    ; Hud.cell ~v_class:live_cls ~k:"Live"
-        ~v:(Printf.sprintf "%02d" live_n) ()
-    ; Hud.cell ~v_class:warn_cls ~k:"Warn"
-        ~v:(Printf.sprintf "%02d" warn_n) ()
-    ; Hud.cell ~v_class:dead_cls ~k:"Dead"
-        ~v:(Printf.sprintf "%02d" dead_n) ()
+    [ Hud.cell ~k:"Fleet" ~v:(Printf.sprintf "%02d" counts.total) ()
+    ; Hud.cell ~v_class:(if counts.active > 0 then `Ok else `Neutral)
+        ~k:"Active"
+        ~v:(Printf.sprintf "%02d" counts.active) ()
     ; Hud.cell
-        ~k:"Cycle"
-        ~v:(if keepers.cycle <= 0
-            then "—"
-            else Printf.sprintf "%d" keepers.cycle)
+        ~v_class:(if counts.attention > 0 then `Warn else `Neutral)
+        ~k:"Attention"
+        ~v:(Printf.sprintf "%02d" counts.attention) ()
+    ; Hud.cell
+        ~v_class:(if counts.paused > 0 then `Warn else `Neutral)
+        ~k:"Paused"
+        ~v:(Printf.sprintf "%02d" counts.paused) ()
+    ; Hud.cell
+        ~v_class:(if counts.offline > 0 then `Bad else `Neutral)
+        ~k:"Offline"
+        ~v:(Printf.sprintf "%02d" counts.offline) ()
+    ; Hud.cell
+        ~k:"Shared"
+        ~v:
+          (if coverage.shared = 0 && String.is_empty execution_generated_at
+              && String.is_empty mission_generated_at
+           then "—"
+           else Printf.sprintf "%02d" coverage.shared)
         ()
-    ; Hud.cell ~k:"Synced" ~v:synced ()
     ]
 ;;
 
-let render ~(shell : Overview_types.response) (keepers : Keepers_types.response) : Node.t =
+let render
+      ~(shell : Overview_types.response)
+      ~(keepers : Keepers_types.response)
+      ~(execution : Directory_execution_types.response)
+      ~(mission : Directory_mission_types.response)
+      ~(selected_name : string option)
+  : Node.t
+  =
+  let rows = Keepers_directory.build_rows ~keepers execution mission in
   let has_fleet = not (List.is_empty keepers.keepers) in
+  let page_sections =
+    [ Sec.view ~title:"directory" ~sub:"runtime + mission"
+        ~right:(Printf.sprintf "%d merged" (List.length rows))
+        ()
+    ; Node.div
+        ~attrs:[ Keepers_directory.Style.meta_strip ]
+        [ Keepers_directory.view_summary_strip ~rows ~execution ~mission ]
+    ; Keepers_directory.view ~rows ~selected_name
+    ]
+    @ if has_fleet
+      then
+        [ Sec.view ~title:"roster" ~sub:"condensed"
+            ~right:
+              (Printf.sprintf
+                 "fleet %d"
+                 (List.length keepers.keepers))
+            ()
+        ; Roster.view ~keepers ()
+        ; Sec.view ~title:"swim" ~sub:"60s"
+            ~right:"lane · activity" ()
+        ; Swim.view ~keepers ()
+        ; Sec.view ~title:"pressure" ~sub:"60m"
+            ~right:"ctx %" ()
+        ; Ctx_chart.view ~keepers ()
+        ]
+      else
+        [ Node.div
+            ~attrs:[ Style.quiet ]
+            [ Node.text
+                "keepers summary endpoint is quiet — directory snapshot만 먼저 올라와 있습니다."
+            ]
+        ]
+  in
   Shell_view.view
     ~shell
+    ~aside:(Keepers_directory.aside ~rows ~selected_name ~execution ~mission)
     ~active:Keepers
-    [ view_hero keepers
-    ; view_hud_strip keepers
-    ; (if has_fleet
-       then
-         Node.div
-           ~attrs:[]
-           [ Sec.view ~title:"roster" ~sub:"현재"
-               ~right:
-                 (Printf.sprintf
-                    "fleet %d"
-                    (List.length keepers.keepers))
-               ()
-           ; Roster.view ~keepers ()
-           ; Sec.view ~title:"swim" ~sub:"60s"
-               ~right:"lane · activity" ()
-           ; Swim.view ~keepers ()
-           ; Sec.view ~title:"pressure" ~sub:"60m"
-               ~right:"ctx %" ()
-           ; Ctx_chart.view ~keepers ()
-           ]
-       else
-         Node.div
-           ~attrs:[ Style.quiet ]
-           [ Node.text
-               "fleet endpoint is quiet — no keepers reported yet."
-           ])
+    [ view_hero rows
+    ; view_hud_strip ~rows ~execution ~mission
+    ; Node.div ~attrs:[] page_sections
     ]
 ;;
 
 let component (_graph @ local) =
-  Bonsai.map2
-    (Bonsai.Expert.Var.value Keepers_var.var)
-    (Bonsai.Expert.Var.value Overview_var.var)
-    ~f:(fun keepers shell -> render ~shell keepers)
+  Bonsai.map
+    (Bonsai.both
+       (Bonsai.both
+          (Bonsai.both
+             (Bonsai.Expert.Var.value Keepers_var.var)
+             (Bonsai.Expert.Var.value Overview_var.var))
+          (Bonsai.both
+             (Bonsai.Expert.Var.value Directory_execution_var.var)
+             (Bonsai.Expert.Var.value Directory_mission_var.var)))
+       (Bonsai.Expert.Var.value Keepers_directory.selected_name_var))
+    ~f:(fun (((keepers, shell), (execution, mission)), selected_name) ->
+      render ~shell ~keepers ~execution ~mission ~selected_name)
 ;;

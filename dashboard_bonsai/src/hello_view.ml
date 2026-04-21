@@ -73,7 +73,7 @@ let component (_graph @ local) =
   Bonsai.return
     (Node.div
        ~attrs:[ Style.root ]
-       [ Node.p ~attrs:[ Style.eyebrow ] [ Node.text "masc · observatory" ]
+       [ Node.p ~attrs:[ Style.eyebrow ] [ Node.text "masc · runtime" ]
        ; Node.h1 ~attrs:[ Style.title ] [ Node.text "dark manor · bonsai" ]
        ; Node.p
            ~attrs:[ Style.sub ]

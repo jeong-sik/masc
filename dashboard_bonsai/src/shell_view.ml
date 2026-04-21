@@ -688,7 +688,7 @@ let topbar ~(active : Route.t) =
         ]
     ; Node.div
         ~attrs:[ Style.crumbs ]
-        [ Node.span [ Node.text "Chronicle" ]
+        [ Node.span [ Node.text "Runtime" ]
         ; Node.span ~attrs:[ Style.sep ] [ Node.text "." ]
         ; Node.span [ Node.text "dashboard bonsai" ]
         ; Node.span ~attrs:[ Style.sep ] [ Node.text "." ]

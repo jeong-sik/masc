@@ -35,6 +35,7 @@ val container_path_of_host :
     Errors include image misconfiguration, docker exit non-zero, or
     the input not being inside the playground. *)
 val read_file_in_container :
+  ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   host_path:string ->
@@ -62,6 +63,7 @@ val read_file_in_container :
     the program name (e.g. [docker_rg_failed], [docker_cat_failed])
     for caller log forensics. *)
 val run_command_in_container_with_status :
+  ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t ->
   ?ok_exit_codes:int list ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
@@ -76,6 +78,7 @@ val run_command_in_container_with_status :
     [run_command_in_container_with_status] that drops the returned
     process status and keeps only the captured stdout bytes. *)
 val run_command_in_container :
+  ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t ->
   ?ok_exit_codes:int list ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

@@ -2836,6 +2836,17 @@ let test_merge_reported_and_observed_tool_names_preserves_synthetic_tools () =
     [ "keeper_voice_agent"; "keeper_voice_agent"; "keeper_board_post" ]
     merged
 
+let test_final_keeper_tool_names_falls_back_to_reported_tool_use () =
+  let final_tools =
+    KTD.final_keeper_tool_names
+      ~reported_tool_names:[ "keeper_task_claim"; "Bash"; "Skill" ]
+      ~observed_tool_names:[]
+      ~allowed_tool_names:[ "keeper_task_claim"; "keeper_bash" ]
+  in
+  check (list string) "reported keeper tool plus alias preserved"
+    [ "keeper_task_claim"; "keeper_bash" ]
+    final_tools
+
 (* prioritized_disclosed_tool_names tests removed: function replaced
    by OAS Tool_selector.select in #5429 boundary cleanup. *)
 
@@ -3659,6 +3670,9 @@ let () =
             test_tool_usage_delta_ignores_removed_tools;
           test_case "merge observed and synthetic tool names" `Quick
             test_merge_reported_and_observed_tool_names_preserves_synthetic_tools;
+          test_case "final keeper tool names fall back to reported tools"
+            `Quick
+            test_final_keeper_tool_names_falls_back_to_reported_tool_use;
           test_case "tool query strips continuity noise" `Quick
             test_tool_query_text_of_user_message_strips_continuity_noise;
           test_case "tool query keeps counted headers" `Quick

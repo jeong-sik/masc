@@ -176,11 +176,23 @@ let process_status_is_timeout = function
   | Unix.WEXITED 124 -> true  (* Process_eio returns 124 on Eio.Time.Timeout *)
   | _ -> false
 
+let run_argv_with_status_retry_eintr ?cwd ~timeout_sec argv =
+  let rec loop attempts_left =
+    let result = Process_eio.run_argv_with_status ?cwd ~timeout_sec argv in
+    match result with
+    | Unix.WEXITED 127, out
+      when attempts_left > 0
+           && String_util.contains_substring_ci out "interrupted system call" ->
+        loop (attempts_left - 1)
+    | _ -> result
+  in
+  loop 3
+
 let shell_command_available name =
   let probe =
     Printf.sprintf "command -v %s >/dev/null 2>&1" (Filename.quote name)
   in
-  match Process_eio.run_argv_with_status ~timeout_sec:2.0 [ "/bin/sh"; "-c"; probe ] with
+  match run_argv_with_status_retry_eintr ~timeout_sec:2.0 [ "/bin/sh"; "-c"; probe ] with
   | Unix.WEXITED 0, _ -> true
   | _ -> false
 (** Write playground repo state cache after successful clone/pull.
@@ -613,6 +625,7 @@ let run_docker_with_git_bash
          ])
 
 let run_docker_hardened_bash
+    ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
     ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(cwd : string)
@@ -630,7 +643,35 @@ let run_docker_hardened_bash
     sandbox_error_json
       "sandbox_profile=docker blocks nested container runtimes and host socket references"
   else
-    match ensure_keeper_sandbox_runtime ~timeout_sec with
+    match turn_sandbox_runtime, network_mode with
+    | Some runtime, Network_none ->
+      (match
+         Keeper_turn_sandbox_runtime.run_bash_with_status runtime
+           ~cwd ~cmd ~timeout_sec ()
+       with
+       | Error message -> sandbox_error_json message
+       | Ok (st, out) ->
+         if st <> Unix.WEXITED 0 then
+           Keeper_registry.record_error ~base_path:config.base_path meta.name
+             (Printf.sprintf "sandbox docker exec failed (%s): %s"
+                image
+                (Worker_dev_tools.truncate_for_log out))
+         else
+           Keeper_registry.clear_error ~base_path:config.base_path meta.name;
+         Yojson.Safe.to_string
+           (`Assoc
+              [
+                ("ok", `Bool (st = Unix.WEXITED 0));
+                ("cwd", `String cwd);
+                ("sandbox_profile", `String "docker");
+                ("git_creds_enabled", `Bool false);
+                ("network_mode", `String (network_mode_to_string network_mode));
+                ("effective_sandbox_image", `String image);
+                ("status", Keeper_alerting_path.process_status_to_json st);
+                ("output", `String out);
+              ]))
+    | _ ->
+      match ensure_keeper_sandbox_runtime ~timeout_sec with
     | Error err -> sandbox_error_json err
     | Ok seccomp_args ->
     let host_root =
@@ -705,6 +746,7 @@ let run_docker_hardened_bash
          ])
 
 let handle_keeper_bash
+      ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -844,6 +886,7 @@ let handle_keeper_bash
         "DOCKER_EXEC: keeper=%s cwd=%s cmd=%s network=%s"
         meta.name cwd cmd_for_log (network_mode_to_string sandbox_network_mode);
       run_docker_hardened_bash
+        ~turn_sandbox_runtime
         ~config ~meta ~cwd ~timeout_sec ~cmd
         ~network_mode:sandbox_network_mode)
     else
@@ -1394,6 +1437,7 @@ let resolve_gh_repo_context ~(config : Coord.config) ~(meta : keeper_meta) =
                           ()))
 
 let handle_keeper_shell
+      ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -1445,7 +1489,7 @@ let handle_keeper_shell
   in
   let render_process_result ?cwd ~cmd argv =
     let st, out =
-      Process_eio.run_argv_with_status ?cwd ~timeout_sec:io_timeout_sec argv
+      run_argv_with_status_retry_eintr ?cwd ~timeout_sec:io_timeout_sec argv
     in
     Yojson.Safe.to_string
       (Exec_core.process_result_json
@@ -1466,6 +1510,25 @@ let handle_keeper_shell
          ~output:out
          ())
   in
+  let render_completed_process_result ?cwd ~cmd ?(extra = []) st out =
+    Yojson.Safe.to_string
+      (Exec_core.process_result_json
+         ~artifact_policy:Exec_core.Inline_only
+         ~base_path:root
+         ~keeper_name:meta.name
+         ~cmd
+         ~extra:([
+             "op", `String op;
+             "cmd", `String cmd;
+             ( "cwd",
+               match cwd with
+               | Some dir -> `String dir
+               | None -> `Null );
+           ] @ extra)
+         ~status:st
+         ~output:out
+         ())
+  in
   let docker_read_error ~target msg =
     error_json ~fields:[ "op", `String op; "path", `String target ] msg
   in
@@ -1478,24 +1541,46 @@ let handle_keeper_shell
     | Ok cpath -> (
         match
           Keeper_docker_read.run_command_in_container_with_status
+            ?turn_sandbox_runtime
             ~ok_exit_codes ~config ~meta ~command_argv:(command_argv cpath)
             ~max_bytes ~timeout_sec ()
         with
         | Error msg -> Error (docker_read_error ~target msg)
         | Ok payload -> Ok payload)
   in
+  let run_in_turn_runtime ?(ok_exit_codes = [ 0 ]) ~cwd ~cmd ~command_argv
+      ~max_bytes ~timeout_sec ?(extra = []) () =
+    match turn_sandbox_runtime with
+    | Some runtime ->
+      (match
+         Keeper_turn_sandbox_runtime.run_command_with_status
+           ~ok_exit_codes runtime ~cwd ~command_argv ~max_bytes ~timeout_sec ()
+       with
+       | Error msg ->
+         error_json
+           ~fields:([ "op", `String op; "cwd", `String cwd ] @ extra) msg
+       | Ok (st, out) ->
+         render_completed_process_result ~cwd ~cmd ~extra st out)
+    | None ->
+      render_process_result ~cwd ~cmd command_argv
+  in
   match op with
   | "pwd" ->
     (match cwd_target () with
      | Error e -> path_error e
-     | Ok cwd -> render_process_result ~cwd ~cmd:"pwd" [ "/bin/pwd" ])
+     | Ok cwd ->
+       run_in_turn_runtime ~cwd ~cmd:"pwd" ~command_argv:[ "/bin/pwd" ]
+         ~max_bytes:4096 ~timeout_sec:io_timeout_sec ())
   | "git_status" ->
     (match cwd_target () with
      | Error e -> path_error e
      | Ok cwd ->
-       render_process_result ~cwd
-         ~cmd:"git -C <cwd> --no-optional-locks status --short --branch"
-         [ "git"; "-C"; cwd; "--no-optional-locks"; "status"; "--short"; "--branch" ])
+       run_in_turn_runtime ~cwd
+         ~cmd:"git --no-optional-locks status --short --branch"
+         ~command_argv:
+           [ "git"; "--no-optional-locks"; "status"; "--short"; "--branch" ]
+         ~max_bytes:1_000_000
+         ~timeout_sec:read_timeout_sec ())
   | "ls" ->
     (match read_target () with
      | Error e -> path_error e
@@ -1534,9 +1619,11 @@ let handle_keeper_shell
                      ; "via", `String "docker"
                      ; "entries", lines_to_json ~limit out
                      ])))
-       else
-         let st, out =
-           Process_eio.run_argv_with_status ~timeout_sec:io_timeout_sec [ "/bin/ls"; "-la"; target ]
+        else
+          let st, out =
+           run_argv_with_status_retry_eintr
+             ~timeout_sec:io_timeout_sec
+             [ "/bin/ls"; "-la"; target ]
          in
          Yojson.Safe.to_string
            (`Assoc
@@ -1580,7 +1667,9 @@ let handle_keeper_shell
                   ]))
        else
          let st, out =
-           Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec [ "/bin/cat"; target ]
+           run_argv_with_status_retry_eintr
+             ~timeout_sec:read_timeout_sec
+             [ "/bin/cat"; target ]
          in
          let body =
            if String.length out > max_bytes then String.sub out 0 max_bytes else out
@@ -1655,7 +1744,7 @@ let handle_keeper_shell
                    ]))
         else
           let st, out =
-            Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec argv
+            run_argv_with_status_retry_eintr ~timeout_sec:read_timeout_sec argv
           in
           (* rg exit codes: 0=matches found, 1=no matches (not an error), 2+=real error.
              Treat exit 1 as success with empty results — "no match" is a valid answer. *)
@@ -1682,18 +1771,62 @@ let handle_keeper_shell
            Printf.sprintf "-%d" count ]
        in
        let argv = if file_path <> "" then base_argv @ [ "--"; file_path ] else base_argv in
-       let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec argv
-       in
-       Yojson.Safe.to_string
-         (`Assoc
-             [ "ok", `Bool (st = Unix.WEXITED 0)
-             ; "op", `String op
-             ; "cwd", `String cwd
-             ; "count", `Int count
-             ; "status", Keeper_alerting_path.process_status_to_json st
-             ; "entries", lines_to_json ~limit:50 out
-             ]))
+       (match turn_sandbox_runtime with
+        | Some runtime ->
+          let argv =
+            let base_argv =
+              [ "git"; "--no-optional-locks"; "log";
+                Printf.sprintf "--format=%s" format;
+                Printf.sprintf "-%d" count ]
+            in
+            if file_path = "" then base_argv
+            else
+              let runtime_path =
+                if Filename.is_relative file_path then file_path
+                else
+                  match
+                    Keeper_turn_sandbox_runtime.container_path_of_host runtime
+                      ~host_path:file_path
+                  with
+                  | Ok mapped -> mapped
+                  | Error _ -> file_path
+              in
+              base_argv @ [ "--"; runtime_path ]
+          in
+          (match
+             Keeper_turn_sandbox_runtime.run_command_with_status runtime
+               ~cwd ~command_argv:argv
+               ~ok_exit_codes:[ 0 ]
+               ~max_bytes:1_000_000
+               ~timeout_sec:read_timeout_sec ()
+           with
+           | Error msg ->
+             error_json
+               ~fields:[ "op", `String op; "cwd", `String cwd ] msg
+           | Ok (st, out) ->
+             Yojson.Safe.to_string
+               (`Assoc
+                   [ "ok", `Bool true
+                   ; "op", `String op
+                   ; "cwd", `String cwd
+                   ; "count", `Int count
+                   ; "via", `String "docker"
+                   ; "status", Keeper_alerting_path.process_status_to_json st
+                   ; "entries", lines_to_json ~limit:50 out
+                   ]))
+        | None ->
+          let st, out =
+            Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec argv
+          in
+          Yojson.Safe.to_string
+            (`Assoc
+                [ "ok", `Bool (st = Unix.WEXITED 0)
+                ; "op", `String op
+                ; "cwd", `String cwd
+                ; "count", `Int count
+                ; "status", Keeper_alerting_path.process_status_to_json st
+                ; "entries", lines_to_json ~limit:50 out
+                ])))
   | "find" ->
     let name_pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
     if name_pattern = ""
@@ -1729,7 +1862,7 @@ let handle_keeper_shell
                    ]))
         else
           let st, out =
-            Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
+            run_argv_with_status_retry_eintr ~timeout_sec:read_timeout_sec
               [ "find"; target; "-maxdepth"; "5"; "-name"; name_pattern;
                 "-not"; "-path"; "*/.git/*";
                 "-not"; "-path"; "*/_build/*";
@@ -1772,7 +1905,7 @@ let handle_keeper_shell
                   ]))
        else
          let st, out =
-           Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
+           run_argv_with_status_retry_eintr ~timeout_sec:read_timeout_sec
              [ "/usr/bin/head"; "-n"; string_of_int n; target ]
          in
          Yojson.Safe.to_string
@@ -1812,7 +1945,7 @@ let handle_keeper_shell
                   ]))
        else
          let st, out =
-           Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
+           run_argv_with_status_retry_eintr ~timeout_sec:read_timeout_sec
              [ "/usr/bin/tail"; "-n"; string_of_int n; target ]
          in
          Yojson.Safe.to_string
@@ -1886,7 +2019,7 @@ let handle_keeper_shell
                    ]))
        else
          let st, out =
-           Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
+           run_argv_with_status_retry_eintr ~timeout_sec:read_timeout_sec
              [ "find"; target; "-maxdepth"; "3"; "-print";
                "-not"; "-path"; "*/.git/*";
                "-not"; "-path"; "*/_build/*" ]
@@ -1903,9 +2036,9 @@ let handle_keeper_shell
     (match cwd_target () with
      | Error e -> path_error e
      | Ok cwd ->
-       render_process_result ~cwd
-         ~cmd:"git diff --stat"
-         [ "git"; "-C"; cwd; "--no-optional-locks"; "diff"; "--stat" ])
+       run_in_turn_runtime ~cwd ~cmd:"git diff --stat"
+         ~command_argv:[ "git"; "--no-optional-locks"; "diff"; "--stat" ]
+         ~max_bytes:1_000_000 ~timeout_sec:read_timeout_sec ())
   | "git_worktree" ->
     let action =
       Safe_ops.json_string ~default:"list" "action" args
@@ -1916,8 +2049,9 @@ let handle_keeper_shell
       (match cwd_target () with
        | Error e -> path_error e
        | Ok cwd ->
-         render_process_result ~cwd ~cmd:"git worktree list"
-           [ "git"; "-C"; cwd; "worktree"; "list" ])
+         run_in_turn_runtime ~cwd ~cmd:"git worktree list"
+           ~command_argv:[ "git"; "worktree"; "list" ]
+           ~max_bytes:1_000_000 ~timeout_sec:read_timeout_sec ())
     | "add" ->
       let branch = Safe_ops.json_string ~default:"" "branch" args |> String.trim in
       let base = Safe_ops.json_string ~default:"origin/main" "base" args |> String.trim in
@@ -1928,10 +2062,25 @@ let handle_keeper_shell
         match cwd_target () with
         | Error e -> path_error e
         | Ok cwd ->
-          let _st, wt_out =
-            Process_eio.run_argv_with_status ~timeout_sec:5.0
-              [ "git"; "-C"; cwd; "worktree"; "list"; "--porcelain" ]
+          let wt_out_result =
+            match turn_sandbox_runtime with
+            | Some runtime ->
+              Keeper_turn_sandbox_runtime.run_command runtime
+                ~cwd
+                ~command_argv:[ "git"; "worktree"; "list"; "--porcelain" ]
+                ~max_bytes:1_000_000
+                ~timeout_sec:5.0 ()
+            | None ->
+              let _st, wt_out =
+                run_argv_with_status_retry_eintr ~timeout_sec:5.0
+                  [ "git"; "-C"; cwd; "worktree"; "list"; "--porcelain" ]
+              in
+              Ok wt_out
           in
+          match wt_out_result with
+          | Error msg ->
+            error_json ~fields:[ "op", `String op; "cwd", `String cwd ] msg
+          | Ok wt_out ->
           if String_util.contains_substring_ci wt_out branch then
             let existing_path =
               String.split_on_char '\n' wt_out
@@ -1954,9 +2103,11 @@ let handle_keeper_shell
             let wt_path = Printf.sprintf ".worktrees/%s"
               (String.map (fun c -> if c = '/' then '-' else c) branch)
             in
-            render_process_result ~cwd
+            run_in_turn_runtime ~cwd
               ~cmd:(Printf.sprintf "git worktree add %s -b %s %s" wt_path branch base)
-              [ "git"; "-C"; cwd; "worktree"; "add"; wt_path; "-b"; branch; base ]
+              ~command_argv:[ "git"; "worktree"; "add"; wt_path; "-b"; branch; base ]
+              ~max_bytes:1_000_000
+              ~timeout_sec:io_timeout_sec ()
       )
     | other ->
       error_json ~fields:[ "op", `String op ]
@@ -2015,8 +2166,17 @@ let handle_keeper_shell
             | Error e -> path_error e
             | Ok () ->
               let st, out =
-                Process_eio.run_argv_with_status ~cwd ~timeout_sec
-                  [ "bash"; "-lc"; cmd_str ^ " 2>&1" ]
+                match turn_sandbox_runtime with
+                | Some runtime ->
+                  (match
+                     Keeper_turn_sandbox_runtime.run_bash_with_status runtime
+                       ~cwd ~cmd:cmd_str ~timeout_sec ()
+                   with
+                   | Ok payload -> payload
+                   | Error msg -> (Unix.WEXITED 127, msg))
+                | None ->
+                  run_argv_with_status_retry_eintr ~cwd ~timeout_sec
+                    [ "bash"; "-lc"; cmd_str ^ " 2>&1" ]
               in
               if process_status_is_timeout st then
                 Yojson.Safe.to_string
@@ -2213,21 +2373,21 @@ let handle_keeper_shell
                  ; "reversibility", `String rev_tag
                  ] @ extras))
         in
-        let run_gh_command ~command ~cwd ~(ctx : gh_repo_context option) =
+        let run_gh_command ~display_command ~parsed_command ~cwd
+            ~(ctx : gh_repo_context option) =
           if reversibility = Worker_dev_tools.R1_Reversible then
             Log.Keeper.info
               "gh_audit: keeper=%s reversibility=R1 cwd=%s cmd=%s"
-              meta.name cwd command;
-          let full_cmd =
-            Keeper_gh_env.with_env config
-              (Printf.sprintf "%s 2>&1" command)
+              meta.name cwd display_command;
+          let env = Keeper_gh_env.process_env config in
+          let gh_argv =
+            "gh" :: Keeper_gh_shared.gh_simple_command_argv parsed_command
           in
           let st, out =
-            Process_eio.run_argv_with_status ~cwd ~timeout_sec
-              [ "bash"; "-lc"; full_cmd ]
+            Process_eio.run_argv_with_status ?env ~cwd ~timeout_sec gh_argv
           in
           if process_status_is_timeout st then
-            gh_base ~command ~ok:false ~cwd
+            gh_base ~command:display_command ~ok:false ~cwd
               [ "error", `String "gh_command_timed_out"
               ; "timeout_sec", `Float timeout_sec
               ; "status", Keeper_alerting_path.process_status_to_json st
@@ -2267,7 +2427,7 @@ let handle_keeper_shell
                      origin remote and recreate the task worktree if needed." ]
               else base_fields
             in
-            gh_base ~command ~ok ~cwd hinted_fields
+            gh_base ~command:display_command ~ok ~cwd hinted_fields
         in
         (match reversibility with
          | Worker_dev_tools.R2_Irreversible ->
@@ -2315,7 +2475,8 @@ let handle_keeper_shell
                       ~repo_slug:ctx.repo_slug parsed_cmd
                   in
                   run_gh_command
-                    ~command:(gh_cmd_display cmd_to_run)
+                    ~display_command:(gh_cmd_display cmd_to_run)
+                    ~parsed_command:cmd_to_run
                     ~cwd:ctx.worktree_cwd
                     ~ctx:(Some ctx))
            end))

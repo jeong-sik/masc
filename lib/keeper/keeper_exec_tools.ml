@@ -112,6 +112,7 @@ let execute_keeper_tool_call_with_outcome
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
+      ?turn_sandbox_runtime
       ?search_fn
       ~(name : string)
       ~(input : Yojson.Safe.t)
@@ -239,13 +240,13 @@ let execute_keeper_tool_call_with_outcome
         (Keeper_exec_board.handle_keeper_board_tool ~meta ~name ~args)
     | "keeper_fs_read" ->
       make_executed_tool_result
-        (Keeper_exec_fs.handle_keeper_fs_read ~config ~meta ~args)
+        (Keeper_exec_fs.handle_keeper_fs_read ~turn_sandbox_runtime ~config ~meta ~args)
     | "keeper_fs_edit" ->
       make_executed_tool_result
-        (Keeper_exec_fs.handle_keeper_fs_edit ~config ~meta ~args)
+        (Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_runtime ~config ~meta ~args)
     | "keeper_bash" ->
       make_executed_tool_result
-        (Keeper_exec_shell.handle_keeper_bash ~config ~meta ~args)
+        (Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_runtime ~config ~meta ~args)
     | "keeper_bash_output" ->
       make_executed_tool_result
         (Keeper_exec_shell.handle_keeper_bash_output ~config ~meta ~args)
@@ -254,7 +255,7 @@ let execute_keeper_tool_call_with_outcome
         (Keeper_exec_shell.handle_keeper_bash_kill ~config ~meta ~args)
     | "keeper_shell" ->
       make_executed_tool_result
-        (Keeper_exec_shell.handle_keeper_shell ~config ~meta ~args)
+        (Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime ~config ~meta ~args)
     | "keeper_voice_speak"
     | "keeper_voice_listen"
     | "keeper_voice_agent"
@@ -351,6 +352,7 @@ let execute_keeper_tool_call
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
+      ?turn_sandbox_runtime
       ?search_fn
       ~(name : string)
       ~(input : Yojson.Safe.t)
@@ -359,6 +361,6 @@ let execute_keeper_tool_call
   =
   let result =
     execute_keeper_tool_call_with_outcome
-      ~config ~meta ~ctx_work ?search_fn ~name ~input ()
+      ~config ~meta ~ctx_work ?turn_sandbox_runtime ?search_fn ~name ~input ()
   in
   result.raw_output

@@ -93,7 +93,7 @@ let test_patch_unique_match () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "let x = 1\nlet y = 2\n";
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~config ~meta
+    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_runtime:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -115,7 +115,7 @@ let test_patch_no_match_errors () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "let x = 1\n";
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~config ~meta
+    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_runtime:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -145,7 +145,7 @@ let test_patch_multiple_matches_without_replace_all_errors () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "x = 1\nx = 1\nx = 1\n";
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~config ~meta
+    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_runtime:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -165,7 +165,7 @@ let test_patch_replace_all () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "x = 1\nx = 1\nx = 1\n";
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~config ~meta
+    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_runtime:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -187,7 +187,7 @@ let test_patch_empty_old_string_errors () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "let x = 1\n";
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~config ~meta
+    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_runtime:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -205,7 +205,7 @@ let test_patch_missing_file_errors () =
   setup @@ fun ~config ~meta ~playground ->
   let path = Filename.concat playground "ghost.ml" in
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~config ~meta
+    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_runtime:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -222,7 +222,7 @@ let test_patch_delete_via_empty_new_string () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "keep me\nDELETE_ME\nkeep me too\n";
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~config ~meta
+    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_runtime:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -241,7 +241,7 @@ let test_overwrite_unchanged_by_patch_addition () =
   setup @@ fun ~config ~meta ~playground ->
   let path = Filename.concat playground "new.txt" in
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~config ~meta
+    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_runtime:None ~config ~meta
       ~args:
         (`Assoc
           [

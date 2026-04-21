@@ -23,3 +23,16 @@ let with_env (config : Coord.config) (gh_cmd : string) : string =
   | None -> gh_cmd
   | Some dir ->
     Printf.sprintf "GH_CONFIG_DIR=%s %s" (Filename.quote dir) gh_cmd
+
+let process_env (config : Coord.config) : string array option =
+  match config_dir config with
+  | None -> None
+  | Some dir ->
+    let gh_config = "GH_CONFIG_DIR=" ^ dir in
+    let base =
+      Unix.environment ()
+      |> Array.to_list
+      |> List.filter (fun entry ->
+        not (String.starts_with ~prefix:"GH_CONFIG_DIR=" entry))
+    in
+    Some (Array.of_list (gh_config :: base))

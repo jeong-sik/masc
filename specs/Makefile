@@ -5,6 +5,7 @@
 #   make check-all          Run all specs (clean + buggy)
 #   make check-bug-models   Bug models only
 #   make check-keeper       Keeper state machine only
+#   make check-supporting   Boundary + closure + small domain specs
 #   make check-ecosystem    MASC ecosystem only
 #   make check-boundary     Cross-domain boundary specs only
 #   make check-closure      Contract-closure specs (autoresearch<->verification<->FSM)
@@ -53,8 +54,9 @@ TLC = $(JAVA) $(JAVA_OPTS) \
 
 CLEAN_CFGS := $(shell find . -name '*.cfg' ! -name '*-buggy*.cfg' ! -name '*-ci.cfg' | sort)
 BUGGY_CFGS := $(shell find . -name '*-buggy*.cfg' | sort)
+SUPPORTING_SPEC_DIRS := boundary checkpoint-trim closure masc-ecosystem social-state-cap state-product task-lifecycle
 
-.PHONY: check-all check-clean check-buggy check-bug-models check-keeper check-ecosystem check-boundary check-closure list clean clean-artefacts
+.PHONY: check-all check-clean check-buggy check-bug-models check-keeper check-supporting check-ecosystem check-boundary check-closure list clean clean-artefacts
 
 clean: clean-artefacts
 
@@ -75,15 +77,15 @@ check-clean:
 	  tla="$$dir/$$base.tla"; \
 	  if [ ! -f "$$tla" ]; then echo "SKIP $$cfg (no .tla)"; continue; fi; \
 	  skip=0; for kf in $(KNOWN_FAILURES); do [ "$$base" = "$$kf" ] && skip=1; done; \
-	  if [ $$skip -eq 1 ]; then printf "SKIP  %-40s (KNOWN_FAILURES)\n" "$$base"; continue; fi; \
-	  printf "CHECK %-40s ...\n" "$$base"; \
-	  start_ts=$$(date +%s); \
+	  if [ $$skip -eq 1 ]; then printf "SKIP %-40s (KNOWN_FAILURES)\n" "$$base"; continue; fi; \
+	  start=$$(date +%s); \
+	  printf "CHECK %-40s START cfg=%s\n" "$$base" "$$cfg"; \
 	  $(TLC) -config "$$cfg" "$$tla" > /tmp/tlc-$$base.log 2>&1; \
 	  rc=$$?; \
-	  end_ts=$$(date +%s); \
-	  duration=$$((end_ts - start_ts)); \
-	  if [ $$rc -eq 0 ]; then printf "OK    %-40s (%3ds)\n" "$$base" "$$duration"; \
-	  else printf "FAIL  %-40s (exit $$rc, %3ds)\n" "$$base" "$$duration"; tail -15 /tmp/tlc-$$base.log; fail=1; fi; \
+	  end=$$(date +%s); \
+	  elapsed=$$((end - start)); \
+	  if [ $$rc -eq 0 ]; then printf "CHECK %-40s OK (%ss)\n" "$$base" "$$elapsed"; \
+	  else printf "CHECK %-40s FAIL (exit $$rc, %ss)\n" "$$base" "$$elapsed"; tail -5 /tmp/tlc-$$base.log; fail=1; fi; \
 	done; \
 	if [ $$fail -eq 1 ]; then exit 1; fi
 
@@ -100,16 +102,16 @@ check-buggy:
 	  tla="$$dir/$$bugbase.tla"; \
 	  if [ ! -f "$$tla" ]; then echo "SKIP $$cfg (no .tla)"; continue; fi; \
 	  skip=0; for kb in $(KNOWN_BUGGY_NO_VIOLATION); do [ "$$bugbase" = "$$kb" ] && skip=1; done; \
-	  if [ $$skip -eq 1 ]; then printf "SKIP  %-40s (KNOWN_BUGGY_NO_VIOLATION)\n" "$$bugbase (buggy)"; continue; fi; \
-	  printf "CHECK %-40s ...\n" "$$cfgtag (buggy)"; \
-	  start_ts=$$(date +%s); \
+	  if [ $$skip -eq 1 ]; then printf "SKIP %-40s (KNOWN_BUGGY_NO_VIOLATION)\n" "$$bugbase (buggy)"; continue; fi; \
+	  start=$$(date +%s); \
+	  printf "CHECK %-40s START cfg=%s\n" "$$cfgtag (buggy)" "$$cfg"; \
 	  $(TLC) -config "$$cfg" "$$tla" > /tmp/tlc-$$cfgtag.log 2>&1; \
 	  rc=$$?; \
-	  end_ts=$$(date +%s); \
-	  duration=$$((end_ts - start_ts)); \
-	  if [ $$rc -eq 12 ] || [ $$rc -eq 13 ]; then printf "OK    %-40s (violation exit $$rc, %3ds)\n" "$$cfgtag (buggy)" "$$duration"; \
-	  elif [ $$rc -eq 0 ]; then printf "FAIL  %-40s (no violation, %3ds)\n" "$$cfgtag (buggy)" "$$duration"; fail=1; \
-	  else printf "WARN  %-40s (exit $$rc, %3ds)\n" "$$cfgtag (buggy)" "$$duration"; fi; \
+	  end=$$(date +%s); \
+	  elapsed=$$((end - start)); \
+	  if [ $$rc -eq 12 ] || [ $$rc -eq 13 ]; then printf "CHECK %-40s OK (violation exit $$rc, %ss)\n" "$$cfgtag (buggy)" "$$elapsed"; \
+	  elif [ $$rc -eq 0 ]; then printf "CHECK %-40s FAIL (no violation, %ss)\n" "$$cfgtag (buggy)" "$$elapsed"; fail=1; \
+	  else printf "CHECK %-40s WARN (exit $$rc, %ss)\n" "$$cfgtag (buggy)" "$$elapsed"; fi; \
 	done; \
 	if [ $$fail -eq 1 ]; then exit 1; fi
 
@@ -122,6 +124,11 @@ check-keeper:
 	@$(MAKE) --no-print-directory \
 	  CLEAN_CFGS="$$(find keeper-state-machine/ -name '*.cfg' ! -name '*-buggy*.cfg' | sort)" \
 	  BUGGY_CFGS="$$(find keeper-state-machine/ -name '*-buggy*.cfg' | sort)" check-all
+
+check-supporting:
+	@$(MAKE) --no-print-directory \
+	  CLEAN_CFGS="$$(find $(SUPPORTING_SPEC_DIRS) -name '*.cfg' ! -name '*-buggy*.cfg' | sort)" \
+	  BUGGY_CFGS="$$(find $(SUPPORTING_SPEC_DIRS) -name '*-buggy*.cfg' | sort)" check-all
 
 check-ecosystem:
 	@$(MAKE) --no-print-directory \

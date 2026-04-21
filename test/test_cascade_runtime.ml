@@ -16,7 +16,9 @@ let provider_kind_models providers =
 
 let provider_supports_required_tool_use (cfg : Llm_provider.Provider_config.t) =
   let registry = Llm_provider.Provider_registry.default () in
-  let provider_name = Masc_mcp.Provider_adapter.string_of_provider_kind cfg.kind in
+  let provider_name =
+    Llm_provider.Provider_config.string_of_provider_kind cfg.kind
+  in
   let caps =
     match Llm_provider.Provider_registry.find registry provider_name with
     | Some entry -> entry.capabilities
@@ -28,6 +30,19 @@ let provider_supports_required_tool_use (cfg : Llm_provider.Provider_config.t) =
     | None -> caps
   in
   caps.supports_tools && caps.supports_tool_choice
+
+let provider_supports_callable_tool_use (cfg : Llm_provider.Provider_config.t) =
+  let registry = Llm_provider.Provider_registry.default () in
+  let provider_name =
+    Llm_provider.Provider_config.string_of_provider_kind cfg.kind
+  in
+  let caps =
+    match Llm_provider.Provider_registry.find registry provider_name with
+    | Some entry -> entry.capabilities
+    | None -> Llm_provider.Capabilities.default_capabilities
+  in
+  caps.supports_tools
+  || (caps.supports_runtime_mcp_tools && caps.supports_runtime_tool_events)
 
 let direct_model_strings =
   [ "ollama:local-model"
@@ -53,10 +68,18 @@ let test_provider_filter_falls_back_to_unfiltered_when_no_match () =
     [ "ollama"; "openai_compat" ] (provider_kinds providers)
 
 let tool_required_model_strings =
-  [ "codex_cli:auto"
+  [ "custom:remote-model@http://127.0.0.1:18080/v1"
+  ; "codex_cli:auto"
   ; "gemini_cli:auto"
   ; "ollama:local-model"
-  ; "llama:qwen3.5-3b-a3b-ud-q8-xl"
+  ]
+
+let callable_tool_required_model_strings =
+  [ "custom:remote-model@http://127.0.0.1:18080/v1"
+  ; "claude_code:auto"
+  ; "codex_cli:auto"
+  ; "gemini_cli:auto"
+  ; "ollama:local-model"
   ]
 
 let test_required_tool_choice_filter_keeps_only_supported_providers () =
@@ -65,10 +88,12 @@ let test_required_tool_choice_filter_keeps_only_supported_providers () =
       ~require_tool_choice_support:true
       tool_required_model_strings
   in
-  check bool "tool-required path keeps at least one callable provider" true
-    (providers <> []);
   check bool "every surviving provider satisfies required tool-use capabilities" true
-    (List.for_all provider_supports_required_tool_use providers)
+    (List.for_all provider_supports_required_tool_use providers);
+  check bool "drops codex_cli without inline tool choice" false
+    (List.mem "codex_cli" (provider_kinds providers));
+  check bool "drops gemini_cli without inline tool choice" false
+    (List.mem "gemini_cli" (provider_kinds providers))
 
 let test_required_tool_choice_filter_can_exhaust_candidates () =
   let providers =
@@ -78,6 +103,19 @@ let test_required_tool_choice_filter_can_exhaust_candidates () =
   in
   check (list string) "unsupported-only candidate set becomes empty" []
     (provider_kind_models providers)
+
+let test_required_tool_support_filter_keeps_inline_or_runtime_capable_providers () =
+  let providers =
+    Masc_mcp.Cascade_runtime.resolve_providers_from_model_strings
+      ~require_tool_support:true
+      callable_tool_required_model_strings
+  in
+  check bool "tool-support path keeps at least one callable provider" true
+    (providers <> []);
+  check bool "every surviving provider supports inline or runtime MCP tools" true
+    (List.for_all provider_supports_callable_tool_use providers);
+  check bool "drops gemini_cli without runtime MCP lane" false
+    (List.mem "gemini_cli" (provider_kinds providers))
 
 let () =
   run "Cascade_runtime"
@@ -92,5 +130,8 @@ let () =
             test_required_tool_choice_filter_keeps_only_supported_providers;
           test_case "required tool choice can exhaust candidates" `Quick
             test_required_tool_choice_filter_can_exhaust_candidates;
+          test_case "required tool support keeps inline or runtime-capable providers"
+            `Quick
+            test_required_tool_support_filter_keeps_inline_or_runtime_capable_providers;
         ] );
     ]

@@ -154,7 +154,7 @@ let reset_cascade_counters_for_test () =
     Uses OAS provider resolution so endpoint-distinct providers such as
     [glm] and [glm-coding] remain distinguishable. *)
 let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
-  Llm_provider.Provider_registry.provider_name_of_config cfg
+  Llm_provider.Provider_config.string_of_provider_kind cfg.kind
 
 let display_provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
   Provider_adapter.display_provider_name (provider_name_of_config cfg)

@@ -23,6 +23,8 @@ type config = {
   priority : Llm_provider.Request_priority.t option;
   system_prompt : string;
   tools : Oas.Tool.t list;
+  runtime_mcp_policy :
+    Llm_provider.Llm_transport.runtime_mcp_policy option;
   max_turns : int;
   max_idle_turns : int;
   max_tokens : int;
@@ -69,6 +71,7 @@ let default_config
   let provider = Oas.Provider.config_of_provider_config provider_cfg in
   { name; provider_cfg; provider; model_id = provider_cfg.model_id;
     priority = None; system_prompt; tools;
+    runtime_mcp_policy = None;
     max_turns = 20;
     max_idle_turns = 3;
     max_tokens = Oas_worker_cascade.default_max_tokens;
@@ -169,6 +172,115 @@ let cli_model_override model_id =
   match String.lowercase_ascii (String.trim model_id) with
   | "" | "auto" -> None
   | _ -> Some (String.trim model_id)
+
+let provider_caps_of_config (provider_cfg : Llm_provider.Provider_config.t) =
+  let base_caps =
+    match provider_cfg.kind with
+    | Llm_provider.Provider_config.Ollama ->
+        Llm_provider.Capabilities.ollama_capabilities
+    | Anthropic -> Llm_provider.Capabilities.anthropic_capabilities
+    | Glm -> Llm_provider.Capabilities.glm_capabilities
+    | Gemini -> Llm_provider.Capabilities.gemini_capabilities
+    | OpenAI_compat -> Llm_provider.Capabilities.openai_chat_capabilities
+    | Claude_code -> Llm_provider.Capabilities.claude_code_capabilities
+    | Gemini_cli -> Llm_provider.Capabilities.gemini_cli_capabilities
+    | Codex_cli -> Llm_provider.Capabilities.codex_cli_capabilities
+  in
+  let caps =
+    match provider_cfg.kind with
+    | Llm_provider.Provider_config.Claude_code
+    | Gemini_cli
+    | Codex_cli -> base_caps
+    | _ ->
+        (match Llm_provider.Capabilities.for_model_id provider_cfg.model_id with
+         | Some caps -> caps
+         | None -> base_caps)
+  in
+  match provider_cfg.supports_tool_choice_override with
+  | Some supports_tool_choice -> { caps with supports_tool_choice }
+  | None -> caps
+
+let provider_supports_inline_tools (provider_cfg : Llm_provider.Provider_config.t) =
+  (provider_caps_of_config provider_cfg).supports_tools
+
+let provider_supports_runtime_mcp_lane
+    (provider_cfg : Llm_provider.Provider_config.t) =
+  let caps = provider_caps_of_config provider_cfg in
+  caps.supports_runtime_mcp_tools && caps.supports_runtime_tool_events
+
+let dedupe_preserve_order (items : string list) =
+  let seen = Hashtbl.create (List.length items) in
+  List.filter
+    (fun item ->
+      if Hashtbl.mem seen item then
+        false
+      else (
+        Hashtbl.add seen item ();
+        true))
+    items
+
+let public_mcp_tool_names_of_oas_tools (tools : Oas.Tool.t list) =
+  List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools
+
+let tool_names_are_public_mcp (tool_names : string list) =
+  tool_names <> [] && List.for_all Tool_catalog.is_public_mcp tool_names
+
+let public_mcp_runtime_policy_of_tool_names (tool_names : string list) :
+    Llm_provider.Llm_transport.runtime_mcp_policy option =
+  let tool_names = dedupe_preserve_order tool_names in
+  if not (tool_names_are_public_mcp tool_names) then
+    None
+  else
+    Some
+      {
+        Llm_provider.Llm_transport.empty_runtime_mcp_policy with
+        servers =
+          [
+            Llm_provider.Llm_transport.Http_server
+              {
+                name = "masc";
+                url = Env_config_runtime.Local_runtime.mcp_url ();
+                headers = [];
+              };
+          ];
+        allowed_server_names = [ "masc" ];
+        allowed_tool_names = tool_names;
+        strict = true;
+        disable_builtin_tools = true;
+      }
+
+let provider_label (provider_cfg : Llm_provider.Provider_config.t) =
+  Printf.sprintf "%s:%s"
+    (Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind)
+    provider_cfg.model_id
+
+let resolve_tool_lane_for_oas_tools
+    ~(provider_cfg : Llm_provider.Provider_config.t)
+    ~(tools : Oas.Tool.t list)
+  : (Oas.Tool.t list
+     * Llm_provider.Llm_transport.runtime_mcp_policy option,
+     Oas.Error.sdk_error)
+    result =
+  let tool_names = public_mcp_tool_names_of_oas_tools tools in
+  match public_mcp_runtime_policy_of_tool_names tool_names with
+  | Some runtime_mcp_policy
+    when provider_supports_runtime_mcp_lane provider_cfg ->
+      Ok ([], Some runtime_mcp_policy)
+  | _ when tools = [] ->
+      Ok (tools, None)
+  | _ when provider_supports_inline_tools provider_cfg ->
+      Ok (tools, None)
+  | _ ->
+      let detail =
+        if tool_names_are_public_mcp tool_names then
+          Printf.sprintf
+            "%s does not support inline tools or request-scoped runtime MCP tools"
+            (provider_label provider_cfg)
+        else
+          Printf.sprintf "%s does not support inline tools"
+            (provider_label provider_cfg)
+      in
+      Error (invalid_runtime_config "tool_support" detail)
 
 (** Wrap CLI transports in a per-call sub-switch.
 
@@ -382,6 +494,11 @@ let build
     | None -> builder
   in
   let builder =
+    match config.runtime_mcp_policy with
+    | Some policy -> Oas.Builder.with_runtime_mcp_policy policy builder
+    | None -> builder
+  in
+  let builder =
     if config.cache_system_prompt then
       Oas.Builder.with_cache_system_prompt true builder
     else builder
@@ -575,6 +692,7 @@ let resume_from_checkpoint
     description = config.description;
     approval = config.approval;
     slot_id = config.slot_id;
+    runtime_mcp_policy = config.runtime_mcp_policy;
     summarizer = config.summarizer;
     priority = config.priority;
   } in
@@ -795,12 +913,32 @@ let run_with_masc_tools
     ?on_resume
     (goal : string)
   : (run_result, Oas.Error.sdk_error) result =
-  let oas_tools = List.map (fun (td : Types.tool_schema) ->
-    Tool_bridge.oas_tool_of_masc
-      ~name:td.name
-      ~description:td.description
-      ~input_schema:td.input_schema
-      (fun input -> dispatch ~name:td.name ~args:input)
-  ) masc_tools in
-  let config = { config with tools = oas_tools @ config.tools } in
-  run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?contract goal
+  match
+    public_mcp_runtime_policy_of_tool_names
+      (List.map (fun (td : Types.tool_schema) -> td.name) masc_tools)
+  with
+  | Some runtime_mcp_policy
+    when provider_supports_runtime_mcp_lane config.provider_cfg ->
+      let config = { config with runtime_mcp_policy = Some runtime_mcp_policy } in
+      run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?contract goal
+  | _ when masc_tools = [] ->
+      run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?contract goal
+  | _ when provider_supports_inline_tools config.provider_cfg ->
+      let oas_tools =
+        List.map
+          (fun (td : Types.tool_schema) ->
+            Tool_bridge.oas_tool_of_masc
+              ~name:td.name
+              ~description:td.description
+              ~input_schema:td.input_schema
+              (fun input -> dispatch ~name:td.name ~args:input))
+          masc_tools
+      in
+      let config = { config with tools = oas_tools @ config.tools } in
+      run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?contract goal
+  | _ ->
+      Error
+        (invalid_runtime_config "tool_support"
+           (Printf.sprintf
+              "%s does not support inline tools or request-scoped runtime MCP tools"
+              (provider_label config.provider_cfg)))

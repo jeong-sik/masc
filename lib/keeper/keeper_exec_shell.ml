@@ -75,21 +75,6 @@ let user_timeout_max_sec = env_float "MASC_KEEPER_USER_TIMEOUT_MAX_SEC" 180.0
    sub-network-latency timeout without masking genuine hangs. *)
 let gh_min_timeout_sec = 15.0
 
-let normalize_gh_command (cmd : string) : string =
-  let tokens =
-    cmd
-    |> String.trim
-    |> String.split_on_char ' '
-    |> List.map String.trim
-    |> List.filter (fun token -> token <> "")
-  in
-  let rec drop_leading_gh = function
-    | token :: rest when String.lowercase_ascii token = "gh" ->
-        drop_leading_gh rest
-    | remaining -> remaining
-  in
-  String.concat " " (drop_leading_gh tokens)
-
 let clamp_shell_timeout ?(min_sec = 1.0) ~default args =
   Safe_ops.json_float ~default "timeout_sec" args
   |> fun n -> max min_sec (min user_timeout_max_sec n)
@@ -1988,11 +1973,7 @@ let handle_keeper_shell
                  ; "output", `String out
                  ]))
   | "gh" ->
-    let cmd_str =
-      Safe_ops.json_string ~default:"" "cmd" args
-      |> normalize_gh_command
-    in
-    let cmd_has_repo_flag = Keeper_gh_shared.has_repo_flag cmd_str in
+    let raw_cmd_str = Safe_ops.json_string ~default:"" "cmd" args in
     (* gh runs against remote network. Prior floors (1s, then 5s) kept
        firing gh_command_timed_out on plain read calls — 41 such
        rejections on 2026-04-17/18 (#8688), every single one at
@@ -2005,135 +1986,166 @@ let handle_keeper_shell
     let timeout_sec =
       clamp_shell_timeout ~min_sec:gh_min_timeout_sec ~default:gh_default_timeout args
     in
-    if cmd_str = "" then
+    if String.trim raw_cmd_str = "" then
       error_json ~fields:[ "op", `String op ]
         "cmd is required for gh op. Good: cmd='pr list --state open'. Bad: cmd=''."
-    else
-      let allowed_orgs = Keeper_tool_policy.git_clone_allowed_orgs () in
-      (* Reversibility gate (Thariq / Anthropic auto-mode principle):
-         - R0 read / R1 reversible mutation: allowed; R1 is audit-logged.
-         - R2 irreversible: rejected with a structured-tool hint so the
-         LLM can self-recover toward an operator-approval path without
-           a second round-trip. *)
-      let reversibility = Worker_dev_tools.classify_gh_reversibility cmd_str in
-      let rev_tag = Worker_dev_tools.string_of_gh_reversibility reversibility in
-      let gh_base ~command ~ok ~cwd extras =
+    else (
+      match Keeper_gh_shared.parse_simple_gh_command raw_cmd_str with
+      | Error parse_error ->
+        let reason =
+          match parse_error with
+          | Keeper_gh_shared.Empty_command -> "empty_command"
+          | Keeper_gh_shared.Unsupported_shell_construct tag -> tag
+          | Keeper_gh_shared.Unsupported_command_shape tag -> tag
+        in
         Yojson.Safe.to_string
           (`Assoc
-              ([ "ok", `Bool ok
-               ; "op", `String op
-               ; "cwd", `String cwd
-               ; "command", `String command
-               ; "reversibility", `String rev_tag
-               ] @ extras))
-      in
-      let run_gh_command ~command ~cwd ~(ctx : gh_repo_context option) =
-        if reversibility = Worker_dev_tools.R1_Reversible then
-          Log.Keeper.info
-            "gh_audit: keeper=%s reversibility=R1 cwd=%s cmd=%s"
-            meta.name cwd command;
-        let full_cmd =
-          Keeper_gh_env.with_env config
-            (Printf.sprintf "%s 2>&1" command)
-        in
-        let st, out =
-          Process_eio.run_argv_with_status ~cwd ~timeout_sec
-            [ "bash"; "-lc"; full_cmd ]
-        in
-        if process_status_is_timeout st then
-          gh_base ~command ~ok:false ~cwd
-            [ "error", `String "gh_command_timed_out"
-            ; "timeout_sec", `Float timeout_sec
-            ; "status", Keeper_alerting_path.process_status_to_json st
-            ; "output", `String out
-            ; "hint", `String
-                "gh network call exceeded timeout_sec. Retry \
-                 with a larger value — gh round-trip plus auth \
-                 handshake is usually 3-10s, so prefer \
-                 timeout_sec=30 or timeout_sec=60 rather than \
-                 the 15s floor. You may also narrow the query \
-                 (--state, --limit, --json)."
-            ]
-        else
-          let ok = st = Unix.WEXITED 0 in
-          let base_fields =
-            (match ctx with
-             | Some ctx ->
-               [ "task_id", `String ctx.task_id
-               ; "repo", `String ctx.repo_slug
-               ; "git_root", `String ctx.git_root
-               ]
-             | None -> [])
-            @
-            [ "status", Keeper_alerting_path.process_status_to_json st
-            ; "output", `String out ]
-          in
-          let hinted_fields =
-            if (not ok)
-               && String_util.contains_substring_ci out
-                    "Could not resolve to a Repository"
-            then
-              base_fields @
-              [ "error", `String "gh_repo_resolve_failed"
+              [ "ok", `Bool false
+              ; "op", `String op
+              ; "error", `String "gh_command_shape_unsupported"
+              ; "reason", `String reason
               ; "hint", `String
-                  "gh is bound to the active task worktree repo. \
-                   Ensure the linked sandbox clone still has a valid \
-                   origin remote and recreate the task worktree if needed." ]
-            else base_fields
+                 "keeper_shell op=gh only accepts one simple gh command. \
+                   Avoid pipelines, redirects, env prefixes, and shell \
+                   control syntax."
+              ])
+      | Ok parsed_cmd ->
+        let allowed_orgs = Keeper_tool_policy.git_clone_allowed_orgs () in
+        let canonical_cmd_str =
+          Keeper_gh_shared.gh_simple_command_argv parsed_cmd
+          |> String.concat " "
+        in
+        (* Reversibility gate (Thariq / Anthropic auto-mode principle):
+           - R0 read / R1 reversible mutation: allowed; R1 is audit-logged.
+           - R2 irreversible: rejected with a structured-tool hint so the
+             LLM can self-recover toward an operator-approval path without
+             a second round-trip. *)
+        let reversibility =
+          Worker_dev_tools.classify_gh_reversibility canonical_cmd_str
+        in
+        let rev_tag =
+          Worker_dev_tools.string_of_gh_reversibility reversibility
+        in
+        let gh_cmd_display cmd =
+          Printf.sprintf "gh %s"
+            (Keeper_gh_shared.render_simple_gh_command cmd)
+        in
+        let gh_base ~ok ~cwd ~command extras =
+          Yojson.Safe.to_string
+            (`Assoc
+                ([ "ok", `Bool ok
+                 ; "op", `String op
+                 ; "cwd", `String cwd
+                 ; "command", `String command
+                 ; "reversibility", `String rev_tag
+                 ] @ extras))
+        in
+        let run_gh_command ~command ~cwd ~(ctx : gh_repo_context option) =
+          if reversibility = Worker_dev_tools.R1_Reversible then
+            Log.Keeper.info
+              "gh_audit: keeper=%s reversibility=R1 cwd=%s cmd=%s"
+              meta.name cwd command;
+          let full_cmd =
+            Keeper_gh_env.with_env config
+              (Printf.sprintf "%s 2>&1" command)
           in
-          gh_base ~command ~ok ~cwd hinted_fields
-      in
-      (match reversibility with
-       | Worker_dev_tools.R2_Irreversible ->
-         let hint =
-           Option.value
-             (Worker_dev_tools.structured_tool_hint_for_r2 cmd_str)
-             ~default:
-               "This gh command mutates state that gh itself cannot \
-                restore. Route through the appropriate structured \
-                keeper tool or post on the board for operator approval."
-         in
-         Log.Keeper.warn
-           "keeper_shell op=gh R2 blocked: %s (keeper=%s)"
-           cmd_str meta.name;
-         gh_base ~command:(Printf.sprintf "gh %s" cmd_str) ~ok:false ~cwd:""
-           [ "error", `String "gh_irreversible_blocked"
-           ; "hint", `String hint ]
-       | R0_Read | R1_Reversible ->
-         (match Worker_dev_tools.validate_gh_command ~allowed_orgs cmd_str with
-          | Error reason ->
-            Yojson.Safe.to_string
-              (`Assoc
-                  [ "ok", `Bool false
-                  ; "op", `String op
-                  ; "error", `String "gh_command_blocked"
-                  ; "reason", `String reason
-                   ; "hint", `String
-                       "Run `gh --help` shapes: pr/issue/repo/release/label/run/\
-                       workflow/api/project/ruleset/search/status/cache/gist. \
-                       auth/secret/ssh-key are blocked."
-                  ])
-          | Ok () ->
-            (match resolve_gh_repo_context ~config ~meta with
-             | Error err ->
-               gh_repo_context_error_json
-                 ~op
-                 ~cmd_display:(Printf.sprintf "gh %s" cmd_str) err
-             | Ok ctx ->
-               let cmd_to_run =
-                 if cmd_has_repo_flag
-                 then
-                   fst
-                     (Keeper_gh_shared.correct_repo_flag
-                        ~correct_slug:ctx.repo_slug cmd_str)
-                 else
-                   Keeper_gh_shared.inject_repo_flag_cmd
-                     ~repo_slug:ctx.repo_slug cmd_str
-               in
-               run_gh_command
-                 ~command:(Printf.sprintf "gh %s" cmd_to_run)
-                 ~cwd:ctx.worktree_cwd
-                 ~ctx:(Some ctx))))
+          let st, out =
+            Process_eio.run_argv_with_status ~cwd ~timeout_sec
+              [ "bash"; "-lc"; full_cmd ]
+          in
+          if process_status_is_timeout st then
+            gh_base ~command ~ok:false ~cwd
+              [ "error", `String "gh_command_timed_out"
+              ; "timeout_sec", `Float timeout_sec
+              ; "status", Keeper_alerting_path.process_status_to_json st
+              ; "output", `String out
+              ; "hint", `String
+                  "gh network call exceeded timeout_sec. Retry \
+                   with a larger value — gh round-trip plus auth \
+                   handshake is usually 3-10s, so prefer \
+                   timeout_sec=30 or timeout_sec=60 rather than \
+                   the 15s floor. You may also narrow the query \
+                   (--state, --limit, --json)."
+              ]
+          else
+            let ok = st = Unix.WEXITED 0 in
+            let base_fields =
+              (match ctx with
+               | Some ctx ->
+                 [ "task_id", `String ctx.task_id
+                 ; "repo", `String ctx.repo_slug
+                 ; "git_root", `String ctx.git_root
+                 ]
+               | None -> [])
+              @
+              [ "status", Keeper_alerting_path.process_status_to_json st
+              ; "output", `String out ]
+            in
+            let hinted_fields =
+              if (not ok)
+                 && String_util.contains_substring_ci out
+                      "Could not resolve to a Repository"
+              then
+                base_fields @
+                [ "error", `String "gh_repo_resolve_failed"
+                ; "hint", `String
+                    "gh is bound to the active task worktree repo. \
+                     Ensure the linked sandbox clone still has a valid \
+                     origin remote and recreate the task worktree if needed." ]
+              else base_fields
+            in
+            gh_base ~command ~ok ~cwd hinted_fields
+        in
+        (match reversibility with
+         | Worker_dev_tools.R2_Irreversible ->
+           let hint =
+             Option.value
+               (Worker_dev_tools.structured_tool_hint_for_r2 canonical_cmd_str)
+               ~default:
+                 "This gh command mutates state that gh itself cannot \
+                  restore. Route through the appropriate structured \
+                  keeper tool or post on the board for operator approval."
+           in
+           Log.Keeper.warn
+             "keeper_shell op=gh R2 blocked: %s (keeper=%s)"
+             canonical_cmd_str meta.name;
+           gh_base ~ok:false ~cwd:"" ~command:(gh_cmd_display parsed_cmd)
+             [ "error", `String "gh_irreversible_blocked"
+             ; "hint", `String hint ]
+         | R0_Read | R1_Reversible ->
+           begin
+             match
+               Worker_dev_tools.validate_gh_command
+                 ~allowed_orgs canonical_cmd_str
+             with
+             | Error reason ->
+               Yojson.Safe.to_string
+                 (`Assoc
+                     [ "ok", `Bool false
+                     ; "op", `String op
+                     ; "error", `String "gh_command_blocked"
+                     ; "reason", `String reason
+                     ; "hint", `String
+                         "Run `gh --help` shapes: pr/issue/repo/release/\
+                         label/run/workflow/api/project/ruleset/search/\
+                          status/cache/gist. auth/secret/ssh-key are blocked."
+                     ])
+             | Ok () ->
+               (match resolve_gh_repo_context ~config ~meta with
+                | Error err ->
+                  gh_repo_context_error_json
+                    ~op
+                    ~cmd_display:(gh_cmd_display parsed_cmd) err
+                | Ok ctx ->
+                  let cmd_to_run =
+                    Keeper_gh_shared.gh_simple_command_with_repo_flag
+                      ~repo_slug:ctx.repo_slug parsed_cmd
+                  in
+                  run_gh_command
+                    ~command:(gh_cmd_display cmd_to_run)
+                    ~cwd:ctx.worktree_cwd
+                    ~ctx:(Some ctx))
+           end))
   | _ ->
     Yojson.Safe.to_string
       (`Assoc

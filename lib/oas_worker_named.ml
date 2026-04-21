@@ -358,6 +358,7 @@ let codex_cli_prompt_preflight ~(config : Oas_worker_exec.config) ~(goal : strin
       Oas.Agent_turn.prepare_messages
         ~messages:(config.initial_messages @ [ Oas.Types.user_msg goal ])
         ~context_reducer:config.context_reducer
+        ~tiered_memory:None
         ~turn_params:Oas.Hooks.default_turn_params
     in
     let req_config =
@@ -562,10 +563,6 @@ let cli_wrapped_hard_quota_indicators = [
   "quota_exhausted";
   "exhausted your capacity on this model";
   "quota will reset after";
-  "\"api_error_status\":429";
-  "you've hit your limit";
-  "youve hit your limit";
-  "resets apr ";
 ]
 
 let message_looks_like_cli_wrapped_hard_quota (message : string) : bool =
@@ -1089,27 +1086,6 @@ let run_named
            continues without throttling. *)
         ()
   in
-  let cooldown_blocks_next_cycle ~cycle =
-    let backoff_ms = Cascade_strategy.backoff_ms strategy.cycle ~cycle:(cycle + 1) in
-    let deadline = Unix.gettimeofday () +. (float_of_int backoff_ms /. 1000.) in
-    let infos =
-      List.filter_map
-        (fun (cfg : Llm_provider.Provider_config.t) ->
-          Cascade_health_tracker.provider_info signal_ctx.health
-            ~provider_key:(adapter.health_key cfg))
-        candidate_cfgs
-    in
-    infos <> []
-    && List.length infos = List.length candidate_cfgs
-    && List.for_all
-         (fun (info : Cascade_health_tracker.provider_info) ->
-           info.in_cooldown
-           &&
-           match info.cooldown_expires_at with
-           | Some expires_at -> expires_at > deadline
-           | None -> false)
-         infos
-  in
   let cascade_exhausted_after_filter ~cycle =
     let observation =
       Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
@@ -1138,47 +1114,20 @@ let run_named
       Cascade_strategy.order_candidates strategy
         ~adapter ~ctx:signal_ctx ~cycle:n candidate_cfgs
     in
-    let all_candidates_in_cooldown =
-      strategy.kind = Cascade_strategy.Circuit_breaker_cycling
-      && candidate_cfgs <> []
-      && List.for_all
-           (fun candidate ->
-             Cascade_health_tracker.is_in_cooldown signal_ctx.health
-               ~provider_key:(adapter.health_key candidate))
-           candidate_cfgs
-    in
     let last_cycle = n + 1 >= strategy.cycle.max_cycles in
     match ordered with
     | [] when last_cycle ->
       record_trace ~cycle:n ~candidates_out:0 ~backoff_ms:0 ~kind:Exhausted;
       cascade_exhausted_after_filter ~cycle:n
-    | [] when cooldown_blocks_next_cycle ~cycle:n ->
-      record_trace ~cycle:n ~candidates_out:0 ~backoff_ms:0 ~kind:Exhausted;
-      Log.Misc.info
-        "cascade %s: cycle %d (%s) filtered all candidates and cooldown exceeds next backoff, exhausting early"
-        cascade_name n (Cascade_strategy.kind_to_string strategy.kind);
-      cascade_exhausted_after_filter ~cycle:n
     | [] ->
-      let backoff =
-        if all_candidates_in_cooldown
-        then 0
-        else Cascade_strategy.backoff_ms strategy.cycle ~cycle:(n + 1)
-      in
+      let backoff = Cascade_strategy.backoff_ms strategy.cycle ~cycle:(n + 1) in
       record_trace ~cycle:n ~candidates_out:0 ~backoff_ms:backoff
         ~kind:Filtered_empty;
-      if all_candidates_in_cooldown
-      then begin
-        Log.Misc.info
-          "cascade %s: cycle %d (%s) filtered all candidates because every provider is in cooldown; skipping empty-cycle retries"
-          cascade_name n (Cascade_strategy.kind_to_string strategy.kind);
-        cascade_exhausted_after_filter ~cycle:n
-      end else begin
-        Log.Misc.info
-          "cascade %s: cycle %d (%s) filtered all candidates, retrying"
-          cascade_name n (Cascade_strategy.kind_to_string strategy.kind);
-        do_backoff (n + 1);
-        cycle_loop (n + 1)
-      end
+      Log.Misc.info
+        "cascade %s: cycle %d (%s) filtered all candidates, retrying"
+        cascade_name n (Cascade_strategy.kind_to_string strategy.kind);
+      do_backoff (n + 1);
+      cycle_loop (n + 1)
     | _ ->
       record_trace ~cycle:n ~candidates_out:(List.length ordered)
         ~backoff_ms:0 ~kind:Ordered;

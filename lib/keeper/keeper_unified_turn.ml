@@ -180,14 +180,6 @@ let fail_open_local_only_when_unavailable
          if List.exists probe ollama_urls then normalized_effective
          else normalized_base)
 
-type turn_cascade_plan = {
-  cascade_name : string;
-  max_context_resolution : Keeper_exec_context.max_context_resolution;
-  max_context : int;
-  temperature : float;
-  max_tokens : int;
-}
-
 (** {1 Retry & Side-Effect Safety}
 
     @boundary-contract
@@ -288,7 +280,6 @@ let fail_open_cascade_after_auto_recoverable_error
 let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_server_rejected_parse_error err
-  || Oas_worker_named.sdk_error_is_hard_quota err
   || is_auto_recoverable_cascade_exhausted_error err
 
 let ambiguous_side_effect_error_prefix =
@@ -1111,7 +1102,7 @@ let append_decision_record
                  call log uses; captures the adaptive classifier's decision
                  (true=Cognitive, false=Mechanical) so the dashboard can surface
                  thinking fraction per model. *)
-              let (_, _, turn_thinking_enabled, _, _, _, _) =
+              let (_, _, turn_thinking_enabled, _, _, _, _, _) =
                 Keeper_tool_call_log.get_turn_context ~keeper_name:meta.name ()
               in
               let thinking_enabled_field =
@@ -1194,7 +1185,6 @@ let append_decision_record
                 | None -> []
               in
               `Assoc ([
-                ("provider", `String (Keeper_hooks_oas.provider_of_model surface_model_used));
                 ("model_used", `String surface_model_used);
                 ("turn_count", `Int r.turn_count);
                 ("stop_reason", `String stop_reason_str);
@@ -1240,13 +1230,7 @@ let append_decision_record
                   else "other"
                 | _ -> "unknown"
               in
-              let error_provider =
-                match cascade_models with
-                | model :: _ -> Keeper_hooks_oas.provider_of_model model
-                | [] -> Keeper_hooks_oas.provider_of_model meta.cascade_name
-              in
               `Assoc [
-                ("provider", `String error_provider);
                 ("cascade_name", `String meta.cascade_name);
                 ("candidate_models", `List (List.map (fun s -> `String s) cascade_models));
                 ("error_category", `String error_category);
@@ -1765,7 +1749,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       Ok meta
   | phase_opt ->
       (* State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade) *)
-      let routed_cascade_name =
+      let effective_cascade_name =
         let phase = match phase_opt with
           | Some p -> p
           | None ->
@@ -1794,52 +1778,22 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             meta.name (String.concat ", " routed_labels) resolved_cascade;
         resolved_cascade
       in
-      let prepare_turn_cascade_plan ~(cascade_name : string)
-          : (turn_cascade_plan, Oas.Error.sdk_error) result =
-        let meta_for_cascade = { meta with cascade_name } in
-        let model_labels =
-          Keeper_coordination.effective_model_labels_for_turn meta_for_cascade
-        in
-        match ensure_api_keys_for_labels model_labels with
-        | Error e -> Error (Oas.Error.Internal e)
-        | Ok () -> (
-            match ensure_local_discovery_ready model_labels with
-            | Error e -> Error (Oas.Error.Internal e)
-            | Ok () ->
-                let max_context_resolution =
-                  Keeper_exec_context.resolve_max_context_resolution
-                    ~requested_override:meta.max_context_override model_labels
-                in
-                let max_context =
-                  resolved_max_context_for_turn ~meta model_labels
-                in
-                let temperature =
-                  Cascade_inference.resolve_temperature
-                    ~cascade_name
-                    ~fallback:Keeper_config.keeper_unified_temperature
-                in
-                let raw_max_tokens =
-                  Cascade_inference.resolve_max_tokens
-                    ~cascade_name
-                    ~fallback:Keeper_config.keeper_unified_max_tokens
-                in
-                let max_tokens =
-                  (* Capability gate: clamp to provider ceiling (TLA+ S3) *)
-                  Cascade_inference.clamp_max_tokens_to_ceiling
-                    ~provider_ceiling:(Some max_context) raw_max_tokens
-                in
-                Ok
-                  {
-                    cascade_name;
-                    max_context_resolution;
-                    max_context;
-                    temperature;
-                    max_tokens;
-                  })
+      (* 1. Check API keys *)
+      let meta_for_cascade = { meta with cascade_name = effective_cascade_name } in
+      let model_labels = Keeper_coordination.effective_model_labels_for_turn meta_for_cascade in
+      match ensure_api_keys_for_labels model_labels with
+      | Error e -> Error (Oas.Error.Internal e)
+      | Ok () -> (
+      match ensure_local_discovery_ready model_labels with
+      | Error e -> Error (Oas.Error.Internal e)
+      | Ok () ->
+      let max_context_resolution =
+        Keeper_exec_context.resolve_max_context_resolution
+          ~requested_override:meta.max_context_override model_labels
       in
-      match prepare_turn_cascade_plan ~cascade_name:routed_cascade_name with
-      | Error err -> Error err
-      | Ok initial_cascade_plan ->
+      let max_context =
+        resolved_max_context_for_turn ~meta model_labels
+      in
       (* Yield before CPU-bound prompt construction so the Eio scheduler
          can service HTTP handlers between keeper turn setups. *)
       Eio.Fiber.yield ();
@@ -1861,7 +1815,22 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~generation:meta.runtime.generation
       in
-      (* 3. max_turns: defer to OAS default (Types.default_agent_config.max_turns).
+      (* 3. Derive parameters: cascade.json -> keeper env-var fallback *)
+      let temperature =
+        Cascade_inference.resolve_temperature
+          ~cascade_name:effective_cascade_name
+          ~fallback:Keeper_config.keeper_unified_temperature
+      in
+      let max_tokens =
+        let raw = Cascade_inference.resolve_max_tokens
+          ~cascade_name:effective_cascade_name
+          ~fallback:Keeper_config.keeper_unified_max_tokens
+        in
+        (* Capability gate: clamp to provider ceiling (TLA+ S3) *)
+        Cascade_inference.clamp_max_tokens_to_ceiling
+          ~provider_ceiling:(Some max_context) raw
+      in
+      (* max_turns: defer to OAS default (Types.default_agent_config.max_turns).
          MASC does not hardcode agent runtime budgets. *)
       let max_cost_usd = Keeper_config.keeper_tool_cost_max_usd () in
       (* 4. Build turn prompt callback: use our unified system prompt *)
@@ -2058,10 +2027,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let keeper_profile =
             Keeper_types_profile.load_keeper_profile_defaults meta.name
           in
-          let active_cascade_plan = ref initial_cascade_plan in
-          let do_run ~(plan : turn_cascade_plan) ~run_meta ~run_generation
-              ~is_retry ~oas_timeout_s =
-            let max_context = plan.max_context in
+          let do_run ~run_meta ~max_context ~run_generation ~is_retry
+              ~oas_timeout_s =
             let max_idle_turns, max_turns =
               match channel with
               | Keeper_world_observation.Reactive ->
@@ -2077,7 +2044,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             Otel_genai.with_keeper_turn_span
               ~keeper_name:run_meta.name
               ~agent_name:run_meta.agent_name
-              ~cascade_name:plan.cascade_name
+              ~cascade_name:effective_cascade_name
               ~trace_id:(Keeper_id.Trace_id.to_string run_meta.runtime.trace_id)
               ~generation:run_generation
               ~max_context
@@ -2091,7 +2058,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               (fun () ->
                 Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
                   ~max_context ~build_turn_prompt
-                  ~user_message ~cascade_name:plan.cascade_name
+                  ~user_message ~cascade_name:effective_cascade_name
                   ~turn_affordances:
                     (observed_affordances_of_observation ~meta:run_meta observation)
                   ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
@@ -2100,8 +2067,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   ~max_idle_turns
                   ~history_user_source:"world_state_prompt"
                   ~history_assistant_source:"internal_assistant"
-                  ~temperature:plan.temperature
-                  ~max_tokens:plan.max_tokens
+                  ~temperature ~max_tokens
                   ~oas_timeout_s
                   ?max_cost_usd
                   ~trajectory_acc
@@ -2110,10 +2076,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   ?event_bus:(Keeper_event_bus.get ())
                   ())
           in
-          let rec retry_loop ~(plan : turn_cascade_plan) ~run_meta
-              ~run_generation ~attempt ~is_retry ~overflow_retry_used
-              ~cascade_fail_open_used =
-            active_cascade_plan := plan;
+          let rec retry_loop ~run_meta ~max_context ~run_generation
+              ~attempt ~is_retry
+              ~overflow_retry_used =
             let mark_terminal_error err =
               if is_cascade_exhausted_error err then
                 Keeper_registry.set_turn_cascade_state
@@ -2138,7 +2103,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               match
                 bounded_oas_timeout_for_turn_budget_with_turn_budget
                   ~max_turns
-                  ~max_context:plan.max_context
+                  ~max_context
                   ~remaining_turn_budget_s:(remaining_turn_budget_s ())
               with
               | None ->
@@ -2155,7 +2120,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   Keeper_registry.set_turn_cascade_state
                     ~base_path:config.base_path meta.name
                     Keeper_registry.Cascade_trying;
-                  do_run ~plan ~run_meta ~run_generation ~is_retry
+                  do_run ~run_meta ~max_context ~run_generation ~is_retry
                     ~oas_timeout_s
             in
             match attempt_result with
@@ -2171,7 +2136,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 Keeper_registry.set_turn_cascade_state
                   ~base_path:config.base_path meta.name
                   Keeper_registry.Cascade_done;
-                Ok (plan, result)
+                Ok result
             | Error err ->
                 let _ = drain_turn_event_bus () in
                 let committed_tools = committed_mutating_tools_snapshot () in
@@ -2200,7 +2165,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     (String.concat ", " committed_tools)
                     err_preview;
                   mark_terminal_error err;
-                  Error (plan, err)
+                  Error err
                 end else if committed_tools <> [] then begin
                   let reclassified, failure_reason =
                     match
@@ -2236,153 +2201,105 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       (String.concat ", " committed_tools)
                       err_preview;
                   mark_terminal_error reclassified;
-                  Error (plan, reclassified)
+                  Error reclassified
                 end else if is_transient_network_error err
                               && attempt <= max_transient_retries then begin
                   let delay = transient_backoff_sec attempt in
                   Log.Keeper.warn
                     "%s: transient network error cascade=%s max_context=%d turn_budget=%d primary_budget=%d requested_override=%s retry=%d/%d backoff=%.0fs: %s"
-                    meta.name plan.cascade_name
-                    plan.max_context_resolution.effective_budget
-                    plan.max_context
-                    plan.max_context_resolution.primary_budget
-                    (match plan.max_context_resolution.requested_override with
+                    meta.name effective_cascade_name max_context_resolution.effective_budget
+                    max_context
+                    max_context_resolution.primary_budget
+                    (match max_context_resolution.requested_override with
                      | Some requested -> string_of_int requested
                      | None -> "none")
                     attempt max_transient_retries delay
                     (short_preview (Oas.Error.to_string err));
                   Eio.Time.sleep clock delay;
-                  retry_loop ~plan ~run_meta ~run_generation
-                    ~attempt:(attempt + 1) ~is_retry:true
-                    ~overflow_retry_used ~cascade_fail_open_used
-                end else if not cascade_fail_open_used then begin
-                  match
-                    fail_open_cascade_after_auto_recoverable_error
-                      ~base_cascade:meta.cascade_name
-                      ~effective_cascade:plan.cascade_name
-                      err
-                  with
-                  | Some fallback_cascade ->
-                      (match prepare_turn_cascade_plan
-                               ~cascade_name:fallback_cascade
-                       with
-                       | Ok fallback_plan ->
-                           Log.Keeper.warn
-                             "%s: cascade=%s fail-open to cascade=%s after auto-recoverable exhaustion: %s"
-                             meta.name plan.cascade_name
-                             fallback_plan.cascade_name
-                             (short_preview (Oas.Error.to_string err));
-                           Eio.Fiber.yield ();
-                           retry_loop ~plan:fallback_plan ~run_meta
-                             ~run_generation ~attempt:1 ~is_retry:true
-                             ~overflow_retry_used
-                             ~cascade_fail_open_used:true
-                       | Error fallback_err ->
-                           Log.Keeper.warn
-                             "%s: cascade fail-open unavailable %s -> %s: %s"
-                             meta.name plan.cascade_name fallback_cascade
-                             (short_preview
-                                (Oas.Error.to_string fallback_err));
-                           mark_terminal_error err;
-                           Error (plan, err))
-                  | None ->
-                      if is_context_overflow err then
-                        handle_context_overflow_error ~plan ~run_meta
-                          ~overflow_retry_used ~cascade_fail_open_used err
-                      else begin
-                        mark_terminal_error err;
-                        Error (plan, err)
-                      end
+                  retry_loop ~run_meta ~max_context ~run_generation
+                    ~attempt:(attempt + 1)
+                    ~is_retry:true ~overflow_retry_used
                 end else if is_context_overflow err then begin
-                  handle_context_overflow_error ~plan ~run_meta
-                    ~overflow_retry_used ~cascade_fail_open_used err
+                  let current_turn_event_bus = drain_turn_event_bus () in
+                  dispatch_keeper_phase_event
+                    ~config
+                    ~keeper_name:meta.name
+                    (context_overflow_event_of_error
+                       ~fallback_tokens:max_context
+                       ~turn_event_bus:current_turn_event_bus
+                       err);
+                  if not overflow_retry_used then
+                    match
+                      recover_context_overflow_retry
+                        ~meta:run_meta
+                        ~base_dir
+                        ~max_cascade_context:max_context
+                        ~error:err
+                    with
+                    | Some retry_plan ->
+                        Keeper_registry.set_turn_phase
+                          ~base_path:config.base_path meta.name
+                          Keeper_registry.Turn_compacting;
+                        current_turn_overflow_blocker :=
+                          Some (Oas.Error.to_string err);
+                        dispatch_keeper_phase_event
+                          ~config
+                          ~keeper_name:meta.name
+                          Keeper_state_machine.Compaction_started;
+                        dispatch_keeper_phase_event
+                          ~config
+                          ~keeper_name:meta.name
+                          (Keeper_state_machine.Compaction_completed
+                             {
+                               before_tokens =
+                                 retry_plan.compaction.before_tokens;
+                               after_tokens =
+                                 retry_plan.compaction.after_tokens;
+                             });
+                        Keeper_registry.prepare_turn_retry_after_compaction
+                          ~base_path:config.base_path meta.name;
+                        let retry_meta =
+                          if retry_plan.retry_generation = run_meta.runtime.generation
+                          then run_meta
+                          else
+                            map_runtime
+                              (fun rt ->
+                                {
+                                  rt with
+                                  generation = retry_plan.retry_generation;
+                                })
+                              run_meta
+                        in
+                        Eio.Fiber.yield ();
+                        retry_loop
+                          ~run_meta:retry_meta
+                          ~max_context:retry_plan.retry_max_context
+                          ~run_generation:retry_plan.retry_generation
+                          ~attempt:1
+                          ~is_retry:true
+                          ~overflow_retry_used:true
+                    | None ->
+                        mark_paused_after_overflow
+                          ~run_meta
+                          ~reason:"auto_compact_recovery_unavailable";
+                        Keeper_registry.set_turn_phase
+                          ~base_path:config.base_path meta.name
+                          Keeper_registry.Turn_finalizing;
+                        Error err
+                  else begin
+                    mark_paused_after_overflow
+                      ~run_meta
+                      ~reason:"overflow_persisted_after_auto_compact_retry";
+                    Keeper_registry.set_turn_phase
+                      ~base_path:config.base_path meta.name
+                      Keeper_registry.Turn_finalizing;
+                    Error err
+                  end
                 end
                 else begin
                   mark_terminal_error err;
-                  Error (plan, err)
+                  Error err
                 end
-          and handle_context_overflow_error ~(plan : turn_cascade_plan)
-              ~run_meta ~overflow_retry_used ~cascade_fail_open_used err =
-            let current_turn_event_bus = drain_turn_event_bus () in
-            dispatch_keeper_phase_event
-              ~config
-              ~keeper_name:meta.name
-              (context_overflow_event_of_error
-                 ~fallback_tokens:plan.max_context
-                 ~turn_event_bus:current_turn_event_bus
-                 err);
-            if not overflow_retry_used then
-              match
-                recover_context_overflow_retry
-                  ~meta:run_meta
-                  ~base_dir
-                  ~max_cascade_context:plan.max_context
-                  ~error:err
-              with
-              | Some retry_plan ->
-                  Keeper_registry.set_turn_phase
-                    ~base_path:config.base_path meta.name
-                    Keeper_registry.Turn_compacting;
-                  current_turn_overflow_blocker :=
-                    Some (Oas.Error.to_string err);
-                  dispatch_keeper_phase_event
-                    ~config
-                    ~keeper_name:meta.name
-                    Keeper_state_machine.Compaction_started;
-                  dispatch_keeper_phase_event
-                    ~config
-                    ~keeper_name:meta.name
-                    (Keeper_state_machine.Compaction_completed
-                       {
-                         before_tokens = retry_plan.compaction.before_tokens;
-                         after_tokens = retry_plan.compaction.after_tokens;
-                       });
-                  Keeper_registry.prepare_turn_retry_after_compaction
-                    ~base_path:config.base_path meta.name;
-                  let retry_meta =
-                    if retry_plan.retry_generation = run_meta.runtime.generation
-                    then run_meta
-                    else
-                      map_runtime
-                        (fun rt ->
-                          {
-                            rt with
-                            generation = retry_plan.retry_generation;
-                          })
-                        run_meta
-                  in
-                  let overflow_retry_plan =
-                    {
-                      plan with
-                      max_context = retry_plan.retry_max_context;
-                    }
-                  in
-                  Eio.Fiber.yield ();
-                  retry_loop
-                    ~plan:overflow_retry_plan
-                    ~run_meta:retry_meta
-                    ~run_generation:retry_plan.retry_generation
-                    ~attempt:1
-                    ~is_retry:true
-                    ~overflow_retry_used:true
-                    ~cascade_fail_open_used
-              | None ->
-                  mark_paused_after_overflow
-                    ~run_meta
-                    ~reason:"auto_compact_recovery_unavailable";
-                  Keeper_registry.set_turn_phase
-                    ~base_path:config.base_path meta.name
-                    Keeper_registry.Turn_finalizing;
-                  Error (plan, err)
-            else begin
-              mark_paused_after_overflow
-                ~run_meta
-                ~reason:"overflow_persisted_after_auto_compact_retry";
-              Keeper_registry.set_turn_phase
-                ~base_path:config.base_path meta.name
-                Keeper_registry.Turn_finalizing;
-              Error (plan, err)
-            end
           in
           (* Wall-clock timeout guards against indefinite TCP-level hangs
              from upstream LLM providers. Without this, a single stalled
@@ -2390,9 +2307,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           (try
             Eio.Time.with_timeout_exn clock timeout_sec
               (fun () ->
-                retry_loop ~plan:initial_cascade_plan ~run_meta:meta
-                  ~run_generation:generation ~attempt:1 ~is_retry:false
-                  ~overflow_retry_used:false ~cascade_fail_open_used:false)
+                retry_loop ~run_meta:meta ~max_context
+                  ~run_generation:generation ~attempt:1
+                  ~is_retry:false ~overflow_retry_used:false)
           with Eio.Time.Timeout ->
             let msg =
               Printf.sprintf
@@ -2421,8 +2338,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               Keeper_registry.set_turn_phase
                 ~base_path:config.base_path meta.name
                 Keeper_registry.Turn_finalizing;
-              Error
-                (!active_cascade_plan, Oas.Error.Api (Timeout { message = msg }))
+              Error (Oas.Error.Api (Timeout { message = msg }))
             end else if committed_tools <> [] then begin
               let timeout_err =
                 Oas.Error.Api (Timeout { message = msg })
@@ -2456,16 +2372,15 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               Keeper_registry.set_turn_phase
                 ~base_path:config.base_path meta.name
                 Keeper_registry.Turn_finalizing;
-              Error (!active_cascade_plan, reclassified)
+              Error reclassified
             end else begin
               Keeper_registry.set_turn_phase
                 ~base_path:config.base_path meta.name
                 Keeper_registry.Turn_finalizing;
               Error
-                ( !active_cascade_plan,
-                  Oas_worker_named.sdk_error_of_masc_internal_error
-                    (Oas_worker_named.Turn_timeout
-                       { elapsed_sec = timeout_sec }) )
+                (Oas_worker_named.sdk_error_of_masc_internal_error
+                   (Oas_worker_named.Turn_timeout
+                      { elapsed_sec = timeout_sec }))
             end)))
       in
       let turn_event_bus = drain_turn_event_bus () in
@@ -2476,7 +2391,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              correlation_id
        | None -> ());
       match run_result with
-      | Error (failed_plan, err) ->
+      | Error err ->
           finalize_trajectory_acc ~config ~keeper_name:meta.name trajectory_acc
             (Trajectory.Failed (Oas.Error.to_string err));
           let e_str = Oas.Error.to_string err in
@@ -2488,11 +2403,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~labels:[("keeper_name", meta.name); ("outcome", "failure")] ();
           Log.Keeper.error
             "%s: keeper cycle FAILED cascade=%s max_context=%d turn_budget=%d primary_budget=%d requested_override=%s latency=%dms%s error=%s"
-            meta.name failed_plan.cascade_name
-            failed_plan.max_context_resolution.effective_budget
-            failed_plan.max_context
-            failed_plan.max_context_resolution.primary_budget
-            (match failed_plan.max_context_resolution.requested_override with
+            meta.name effective_cascade_name max_context_resolution.effective_budget
+            max_context
+            max_context_resolution.primary_budget
+            (match max_context_resolution.requested_override with
              | Some requested -> string_of_int requested
              | None -> "none")
             latency_ms
@@ -2506,8 +2420,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             (short_preview e_str);
           let social_state, social_transition_reason =
             Social.derive_failure_state ~meta ~observation
-              ~previous_state:previous_social_state ~is_auto_recoverable
-              ~reason:e_str
+              ~previous_state:previous_social_state
+              ~is_auto_recoverable ~reason:e_str
           in
           let failure_meta_base =
             match !paused_meta_override with
@@ -2645,7 +2559,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             raise Keeper_registry.Keeper_fiber_crash
           end;
           Error err
-      | Ok (succeeded_plan, result) ->
+      | Ok result ->
           finalize_trajectory_acc ~config ~keeper_name:meta.name trajectory_acc
             Trajectory.Completed;
           let explicit_accountability_claim =
@@ -2680,7 +2594,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   Keeper_state_machine.Handoff_started)
               ~meta
               ~model:result.model_used
-              ~primary_model_max_tokens:succeeded_plan.max_context
+              ~primary_model_max_tokens:max_context
               ~current_turn_overflow_blocker:!current_turn_overflow_blocker
               ~checkpoint:result.checkpoint
           in
@@ -2888,6 +2802,6 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            | Oas_worker.Completed ->
              Keeper_registry.reset_turn_failures ~base_path:config.base_path
                updated_meta.name);
-          Ok updated_meta
+          Ok updated_meta)
 
 let run_unified_turn = run_keeper_cycle

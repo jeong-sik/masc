@@ -462,32 +462,22 @@ let make_hooks
             , tool_choice
             , thinking_enabled
             , thinking_budget
+            , prompt_fingerprint
             , trace_id
             , session_id
             , turn ) =
           Keeper_tool_call_log.get_turn_context
             ~keeper_name:(!meta_ref).name ()
         in
-        let model =
-          let m = (!meta_ref).runtime.usage.last_model_used in
-          if m = "" then (!meta_ref).cascade_name else m
-        in
-        let provider = provider_of_model model in
-        Prometheus.inc_counter
-          "masc_tool_call_total"
-          ~labels:
-            [ ("provider", provider)
-            ; ("tool", tool_name)
-            ; ("outcome", outcome)
-            ]
-          ();
         (try
            Keeper_tool_call_log.log_call
              ~keeper_name:(!meta_ref).name
              ~tool_name ~input ~output_text
              ~success:(outcome = "ok") ~duration_ms
-             ~model ~provider
+             ~model:(let m = (!meta_ref).runtime.usage.last_model_used in
+                     if m = "" then (!meta_ref).cascade_name else m)
              ?lane ?tool_choice ?thinking_enabled ?thinking_budget
+             ?prompt_fingerprint
              ?trace_id ?session_id ?turn
              ~result_bytes ?truncated_to ()
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());

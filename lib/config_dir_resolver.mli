@@ -33,6 +33,7 @@ type resolution = {
   status : status;
   warnings : string list;
   config_root : path_item;
+  cascade_authoring : path_item;
   cascade : path_item;
   prompts : path_item;
   keepers : path_item;

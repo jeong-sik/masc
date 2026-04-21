@@ -1,0 +1,259 @@
+{
+  "runs": [
+    {
+      "case_id": "read_search_prompt_fingerprint",
+      "provider": "openai",
+      "model": "gpt-5.4",
+      "keeper_profile": "bench-analyst",
+      "run_id": "run-openai-analyst-1",
+      "repeat_index": 1,
+      "prompt_fingerprint": "fp-analyst-a",
+      "task_success": true,
+      "latency_ms": 1800,
+      "input_tokens": 820,
+      "output_tokens": 160,
+      "cost_usd": 0.021,
+      "status": "ok",
+      "final_output": "completed",
+      "final_result": {
+        "status": "completed",
+        "evidence_found": 2
+      },
+      "tool_calls": [
+        {
+          "tool_name": "keeper_tool_search",
+          "success": true,
+          "duration_ms": 24.0,
+          "input": {
+            "query": "prompt_fingerprint keeper_tool_call_log"
+          }
+        },
+        {
+          "tool_name": "keeper_fs_read",
+          "success": true,
+          "duration_ms": 31.0,
+          "input": {
+            "path": "lib/keeper_tool_call_log.ml"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "read_search_prompt_fingerprint",
+      "provider": "openai",
+      "model": "gpt-5.4",
+      "keeper_profile": "bench-analyst",
+      "run_id": "run-openai-analyst-2",
+      "repeat_index": 2,
+      "prompt_fingerprint": "fp-analyst-a",
+      "task_success": true,
+      "latency_ms": 1760,
+      "input_tokens": 810,
+      "output_tokens": 158,
+      "cost_usd": 0.020,
+      "status": "ok",
+      "final_output": "completed",
+      "final_result": {
+        "status": "completed",
+        "evidence_found": 2
+      },
+      "tool_calls": [
+        {
+          "tool_name": "keeper_tool_search",
+          "success": true,
+          "duration_ms": 23.0,
+          "input": {
+            "query": "prompt_fingerprint keeper_tool_call_log"
+          }
+        },
+        {
+          "tool_name": "keeper_fs_read",
+          "success": true,
+          "duration_ms": 33.0,
+          "input": {
+            "path": "lib/keeper_tool_call_log.ml"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "read_search_prompt_fingerprint",
+      "provider": "openai",
+      "model": "gpt-5.4",
+      "keeper_profile": "bench-executor",
+      "run_id": "run-openai-executor-1",
+      "repeat_index": 1,
+      "prompt_fingerprint": "fp-executor-a",
+      "task_success": true,
+      "latency_ms": 2010,
+      "input_tokens": 900,
+      "output_tokens": 220,
+      "cost_usd": 0.025,
+      "status": "ok",
+      "final_output": "completed",
+      "final_result": {
+        "status": "completed",
+        "evidence_found": 2
+      },
+      "tool_calls": [
+        {
+          "tool_name": "keeper_tool_search",
+          "success": true,
+          "duration_ms": 19.0,
+          "input": {
+            "query": "prompt_fingerprint keeper_tool_call_log"
+          }
+        },
+        {
+          "tool_name": "keeper_bash",
+          "success": true,
+          "duration_ms": 48.0,
+          "input": {
+            "cmd": "rg prompt_fingerprint lib"
+          }
+        },
+        {
+          "tool_name": "keeper_fs_read",
+          "success": true,
+          "duration_ms": 30.0,
+          "input": {
+            "path": "lib/keeper_tool_call_log.ml"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "text_only_triage",
+      "provider": "openai",
+      "model": "gpt-5.4",
+      "keeper_profile": "bench-analyst",
+      "run_id": "run-openai-text-only-1",
+      "repeat_index": 1,
+      "prompt_fingerprint": "fp-analyst-text",
+      "task_success": true,
+      "latency_ms": 640,
+      "input_tokens": 250,
+      "output_tokens": 72,
+      "cost_usd": 0.004,
+      "status": "ok",
+      "final_output": "text only",
+      "final_result": {
+        "status": "completed",
+        "mode": "text_only"
+      },
+      "tool_calls": []
+    },
+    {
+      "case_id": "recovery_after_failed_read",
+      "provider": "openai",
+      "model": "gpt-5.4-mini",
+      "keeper_profile": "bench-verifier",
+      "run_id": "run-openai-verifier-1",
+      "repeat_index": 1,
+      "prompt_fingerprint": "fp-verifier-a",
+      "task_success": true,
+      "latency_ms": 1890,
+      "input_tokens": 710,
+      "output_tokens": 145,
+      "cost_usd": 0.011,
+      "status": "ok",
+      "final_output": "recovered",
+      "final_result": {
+        "status": "completed",
+        "recovered": true
+      },
+      "tool_calls": [
+        {
+          "tool_name": "keeper_fs_read",
+          "success": false,
+          "duration_ms": 15.0,
+          "input": {
+            "path": "lib/missing_file.ml"
+          }
+        },
+        {
+          "tool_name": "keeper_tool_search",
+          "success": true,
+          "duration_ms": 20.0,
+          "input": {
+            "query": "keeper_agent_run prompt_fingerprint"
+          }
+        },
+        {
+          "tool_name": "keeper_fs_read",
+          "success": true,
+          "duration_ms": 34.0,
+          "input": {
+            "path": "lib/keeper/keeper_agent_run.ml"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "recovery_after_failed_read",
+      "provider": "openai",
+      "model": "gpt-5.4-mini",
+      "keeper_profile": "bench-verifier",
+      "run_id": "run-openai-verifier-2",
+      "repeat_index": 2,
+      "prompt_fingerprint": "fp-verifier-b",
+      "task_success": true,
+      "latency_ms": 1950,
+      "input_tokens": 735,
+      "output_tokens": 150,
+      "cost_usd": 0.012,
+      "status": "ok",
+      "final_output": "recovered",
+      "final_result": {
+        "status": "completed",
+        "recovered": true
+      },
+      "tool_calls": [
+        {
+          "tool_name": "keeper_fs_read",
+          "success": false,
+          "duration_ms": 18.0,
+          "input": {
+            "path": "lib/missing_file.ml"
+          }
+        },
+        {
+          "tool_name": "keeper_tool_search",
+          "success": true,
+          "duration_ms": 24.0,
+          "input": {
+            "query": "keeper_agent_run prompt_fingerprint"
+          }
+        },
+        {
+          "tool_name": "keeper_fs_read",
+          "success": true,
+          "duration_ms": 39.0,
+          "input": {
+            "path": "lib/keeper/keeper_agent_run.ml"
+          }
+        },
+        {
+          "tool_name": "keeper_fs_read",
+          "success": true,
+          "duration_ms": 22.0,
+          "input": {
+            "path": "lib/keeper/keeper_agent_run.ml"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "multi_step_board_update",
+      "provider": "anthropic",
+      "model": "claude-sonnet-latest",
+      "keeper_profile": "bench-executor",
+      "run_id": "run-anthropic-executor-1",
+      "repeat_index": 1,
+      "prompt_fingerprint": "fp-executor-board",
+      "task_success": false,
+      "status": "unsupported",
+      "tool_calls": []
+    }
+  ]
+}

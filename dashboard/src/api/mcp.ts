@@ -33,7 +33,7 @@ let devTokenBootstrapPromise: Promise<void> | null = null
     only exposes `/api/v1/dashboard/dev-token` when bound to loopback with
     strict-auth overrides disabled; in every other case this quietly no-ops
     and existing flows (URL `?token=…`, manual paste) continue to work. */
-async function ensureDevToken(): Promise<void> {
+export async function ensureDevToken(): Promise<void> {
   if (getStoredToken()) return
   if (devTokenBootstrapPromise) return devTokenBootstrapPromise
   devTokenBootstrapPromise = (async () => {

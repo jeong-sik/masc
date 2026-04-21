@@ -233,6 +233,9 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
     verify_mcp_auth =
       (fun ~base_path request ->
         Result.map (fun _ -> ()) (verify_mcp_auth ~base_path request));
+    verify_mcp_observer_stream_auth =
+      (fun ~base_path request ->
+        Result.map (fun _ -> ()) (verify_mcp_observer_stream_auth ~base_path request));
     verify_operator_mcp_auth =
       (fun ~base_path request ->
         Result.map (fun _ -> ()) (verify_operator_mcp_auth ~base_path request));

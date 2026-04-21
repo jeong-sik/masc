@@ -18,6 +18,7 @@ import { refreshForRoute } from './tab-refresh'
 import { refreshMissionSnapshot } from './mission-store'
 import { replayOasRuntimeTelemetry } from './oas-runtime-store'
 import { refreshShell } from './store'
+import { ensureDevToken } from './api/mcp'
 import {
   BuildIdentityBadge,
   ConnectionStatus,
@@ -64,8 +65,15 @@ export function App() {
       })
       .finally(() => {
         if (cancelled) return
-        connectSSE()
-        resumeQueuedOasRuntimeIngress()
+        void ensureDevToken()
+          .catch(err => {
+            console.warn('[app] dashboard dev-token bootstrap failed', err instanceof Error ? err.message : err)
+          })
+          .finally(() => {
+            if (cancelled) return
+            connectSSE()
+            resumeQueuedOasRuntimeIngress()
+          })
       })
 
     // Register mission refresh for periodic recovery from transient failures.

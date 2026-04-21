@@ -1,35 +1,35 @@
 (** Violation_record — Typed violation records + constraint algebra.
 
-    Delegates JSON serialization to Agent_sdk.Mode_enforcer canonical types.
+    Delegates JSON serialization to Oas.Mode_enforcer canonical types.
     MASC consumers use this module for backward-compatible access.
 
     @since CDAL eval content-based redesign
-    @see Agent_sdk.Mode_enforcer for canonical serializers *)
+    @see Oas.Mode_enforcer for canonical serializers *)
 
 (** Re-export OAS canonical violation_kind. *)
-type violation_kind = Agent_sdk.Mode_enforcer.violation_kind =
+type violation_kind = Oas.Mode_enforcer.violation_kind =
   | Mutating_in_diagnose
   | External_in_draft
   | Scope_violation
 
 (** Re-export OAS canonical violation record. *)
-type t = Agent_sdk.Mode_enforcer.violation = {
+type t = Oas.Mode_enforcer.violation = {
   ts : float;
   tool_name : string;
   input_summary : string;
-  effective_mode : Agent_sdk.Execution_mode.t;
+  effective_mode : Oas.Execution_mode.t;
   violation_kind : violation_kind;
 }
 
 let violation_kind_of_string s =
   match String.lowercase_ascii s with
-  | "mutating_in_diagnose" -> Ok Agent_sdk.Mode_enforcer.Mutating_in_diagnose
-  | "external_in_draft" -> Ok Agent_sdk.Mode_enforcer.External_in_draft
-  | "scope_violation" -> Ok Agent_sdk.Mode_enforcer.Scope_violation
+  | "mutating_in_diagnose" -> Ok Oas.Mode_enforcer.Mutating_in_diagnose
+  | "external_in_draft" -> Ok Oas.Mode_enforcer.External_in_draft
+  | "scope_violation" -> Ok Oas.Mode_enforcer.Scope_violation
   | other -> Error (Printf.sprintf "unknown violation_kind: %s" other)
 
 let violation_kind_to_string v =
-  Agent_sdk.Mode_enforcer.violation_kind_to_string v
+  Oas.Mode_enforcer.violation_kind_to_string v
 
 let of_json (json : Yojson.Safe.t) : (t, string) result =
   let open Yojson.Safe.Util in
@@ -37,7 +37,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
     let ts = json |> member "ts" |> to_float in
     let tool_name = json |> member "tool_name" |> to_string in
     let input_summary = json |> member "input_summary" |> to_string in
-    match Agent_sdk.Execution_mode.of_yojson (json |> member "effective_mode") with
+    match Oas.Execution_mode.of_yojson (json |> member "effective_mode") with
     | Error e -> Error (Printf.sprintf "effective_mode parse: %s" e)
     | Ok effective_mode ->
         (match violation_kind_of_string (json |> member "violation_kind" |> to_string) with
@@ -59,8 +59,8 @@ let of_json_list (json : Yojson.Safe.t) : (t list, string) result =
     parse [] items
   | _ -> Error "expected JSON array of violation records"
 
-let minimum_required_mode (v : t) : Agent_sdk.Execution_mode.t =
+let minimum_required_mode (v : t) : Oas.Execution_mode.t =
   match v.violation_kind with
-  | Mutating_in_diagnose -> Agent_sdk.Execution_mode.Draft
-  | External_in_draft -> Agent_sdk.Execution_mode.Execute
-  | Scope_violation -> Agent_sdk.Execution_mode.Execute
+  | Mutating_in_diagnose -> Oas.Execution_mode.Draft
+  | External_in_draft -> Oas.Execution_mode.Execute
+  | Scope_violation -> Oas.Execution_mode.Execute

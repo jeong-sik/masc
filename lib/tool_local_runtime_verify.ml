@@ -1,7 +1,7 @@
 (** Tool_local_runtime_verify -- runtime contract verification. *)
 
 include Tool_local_runtime_http
-module Oas_types = Agent_sdk.Types
+module Oas_types = Oas.Types
 
 let runtime_snapshots_for_pool runtime_pool =
   let snapshots = Local_runtime_pool.snapshots () in

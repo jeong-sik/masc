@@ -4,6 +4,7 @@ module Harness = Masc_mcp.Dashboard_harness_health
 module Cal = Masc_mcp.Eval_calibration
 module AR = Masc_mcp.Anti_rationalization
 module Coord = Masc_mcp.Coord
+module Reg = Masc_mcp.Keeper_registry
 module Keeper_types = Masc_mcp.Keeper_types
 
 let test_counter = ref 0
@@ -334,6 +335,45 @@ let test_agent_scoped_verdicts_filter_before_limit () =
   check (option (float 0.000_001)) "last verdict timestamp preserved" (Some 101.0)
     Yojson.Safe.Util.(outcomes |> member "validation" |> member "last_verdict_at" |> to_float_option)
 
+let test_outcomes_rollup_counts_gate_rejected_from_completed_turns () =
+  with_test_stores @@ fun config ->
+  let keeper_name = "keeper-outcomes-gate" in
+  let meta = make_keeper_meta ~name:keeper_name () in
+  Reg.clear ();
+  ignore (Reg.register ~base_path:config.base_path keeper_name meta);
+  Reg.mark_turn_started ~base_path:config.base_path keeper_name;
+  Reg.set_turn_decision_stage
+    ~base_path:config.base_path keeper_name Reg.Decision_tool_policy_selected;
+  Reg.mark_turn_gate_rejected_by_name keeper_name;
+  Reg.mark_turn_finished ~base_path:config.base_path keeper_name;
+  Reg.mark_turn_started ~base_path:config.base_path keeper_name;
+  Reg.set_turn_decision_stage
+    ~base_path:config.base_path keeper_name Reg.Decision_tool_policy_selected;
+  Reg.set_turn_cascade_state
+    ~base_path:config.base_path keeper_name Reg.Cascade_done;
+  Reg.mark_turn_finished ~base_path:config.base_path keeper_name;
+  Reg.mark_turn_started ~base_path:config.base_path keeper_name;
+  Reg.set_turn_decision_stage
+    ~base_path:config.base_path keeper_name Reg.Decision_tool_policy_selected;
+  Reg.set_turn_cascade_state
+    ~base_path:config.base_path keeper_name Reg.Cascade_exhausted;
+  Reg.mark_turn_finished ~base_path:config.base_path keeper_name;
+  let outcomes =
+    Masc_mcp.Dashboard_http_keeper.compute_outcomes_rollup
+      ~keeper_name
+      ~agent_name:keeper_name
+      ~recent_crash_count:0
+      ~registry_entry:(Reg.get ~base_path:config.base_path keeper_name)
+  in
+  check int "observed turns comes from completed turn ring" 3
+    Yojson.Safe.Util.(outcomes |> member "observed_turns" |> to_int);
+  check int "gate_rejected bucket populated" 1
+    Yojson.Safe.Util.(outcomes |> member "failures" |> member "gate_rejected" |> to_int);
+  check int "substantive turns exclude gate_rejected" 1
+    Yojson.Safe.Util.(outcomes |> member "successes" |> member "substantive_turns" |> to_int);
+  check int "turn_failed bucket keeps non-gate failures" 1
+    Yojson.Safe.Util.(outcomes |> member "failures" |> member "turn_failed" |> to_int)
+
 let () =
   run "Dashboard_harness_health"
     [
@@ -353,5 +393,7 @@ let () =
             test_overview_warns_when_evaluator_falls_back;
           test_case "agent-scoped verdicts filter before limit" `Quick
             test_agent_scoped_verdicts_filter_before_limit;
+          test_case "outcomes rollup counts gate_rejected from completed turns"
+            `Quick test_outcomes_rollup_counts_gate_rejected_from_completed_turns;
         ] );
     ]

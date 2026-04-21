@@ -24,6 +24,32 @@ let to_json (r : transition_record) : Yojson.Safe.t =
     "wall_clock_at_decision", `Float r.wall_clock_at_decision;
   ]
 
+type completed_turn_outcome =
+  | Turn_substantive
+  | Turn_failed
+  | Turn_gate_rejected
+
+type completed_turn_record = {
+  turn_id : int;
+  started_at : float;
+  ended_at : float;
+  outcome : completed_turn_outcome;
+}
+
+let completed_turn_outcome_to_json = function
+  | Turn_substantive -> `String "substantive"
+  | Turn_failed -> `String "failed"
+  | Turn_gate_rejected -> `String "gate_rejected"
+
+let completed_turn_to_json (r : completed_turn_record) : Yojson.Safe.t =
+  `Assoc
+    [
+      "turn_id", `Int r.turn_id;
+      "started_at", `Float r.started_at;
+      "ended_at", `Float r.ended_at;
+      "outcome", completed_turn_outcome_to_json r.outcome;
+    ]
+
 (* ================================================================ *)
 (* In-memory ring buffer for recent transitions                     *)
 (* ================================================================ *)
@@ -41,12 +67,33 @@ let ring_capacity = 50
 
 let rings : (string, ring) Hashtbl.t = Hashtbl.create 16
 
+type completed_turn_ring = {
+  buf : completed_turn_record option array;
+  mutable pos : int;
+  mutable count : int;
+}
+
+let completed_turn_rings : (string, completed_turn_ring) Hashtbl.t =
+  Hashtbl.create 16
+
 let get_or_create_ring name =
   match Hashtbl.find_opt rings name with
   | Some r -> r
   | None ->
-    let r = { buf = Array.make ring_capacity None; pos = 0; count = 0 } in
+    let r : ring =
+      { buf = Array.make ring_capacity None; pos = 0; count = 0 }
+    in
     Hashtbl.replace rings name r;
+    r
+
+let get_or_create_completed_turn_ring name =
+  match Hashtbl.find_opt completed_turn_rings name with
+  | Some r -> r
+  | None ->
+    let r : completed_turn_ring =
+      { buf = Array.make ring_capacity None; pos = 0; count = 0 }
+    in
+    Hashtbl.replace completed_turn_rings name r;
     r
 
 (* ================================================================ *)
@@ -108,3 +155,42 @@ let recent_transitions ~keeper_name ~limit : transition_record list =
 
 let recent_transitions_json ~keeper_name ~limit : Yojson.Safe.t =
   `List (List.map to_json (recent_transitions ~keeper_name ~limit))
+
+let record_completed_turn ~keeper_name (rec_ : completed_turn_record) =
+  let ring = get_or_create_completed_turn_ring keeper_name in
+  ring.buf.(ring.pos) <- Some rec_;
+  ring.pos <- (ring.pos + 1) mod ring_capacity;
+  ring.count <- ring.count + 1;
+  match sink_path () with
+  | None -> ()
+  | Some path ->
+      Safe_ops.protect ~default:() (fun () ->
+          let line =
+            Yojson.Safe.to_string
+              (`Assoc
+                [
+                  "keeper", `String keeper_name;
+                  "completed_turn", completed_turn_to_json rec_;
+                ])
+          in
+          let oc =
+            open_out_gen [ Open_wronly; Open_append; Open_creat ] 0o644 path
+          in
+          Fun.protect
+            ~finally:(fun () ->
+              Safe_ops.protect ~default:() (fun () -> close_out oc))
+            (fun () -> output_string oc (line ^ "\n")))
+
+let recent_completed_turns ~keeper_name ~limit : completed_turn_record list =
+  match Hashtbl.find_opt completed_turn_rings keeper_name with
+  | None -> []
+  | Some ring ->
+      let n = min limit (min ring.count ring_capacity) in
+      let result = ref [] in
+      for i = 0 to n - 1 do
+        let idx = (ring.pos - 1 - i + ring_capacity) mod ring_capacity in
+        match ring.buf.(idx) with
+        | Some r -> result := r :: !result
+        | None -> ()
+      done;
+      !result

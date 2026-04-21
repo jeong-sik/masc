@@ -1609,6 +1609,12 @@ let render_response
     | Some name when String.length name > 0 -> name
     | _ -> "local"
   in
+  let runtime_badge_text = Printf.sprintf "runtime=%s" runtime_name in
+  let snapshot_badge_text =
+    match keepers.generated_at with
+    | "" -> "snapshot · local"
+    | ts -> Printf.sprintf "snapshot · %s UTC" (Hud.hhmmss_of_iso ts)
+  in
   let tape =
     match response.entries with
     | [] ->
@@ -1741,8 +1747,8 @@ let render_response
       ; Node.span ~attrs:[ Style.moon_sep ] [ Node.text "·" ]
       ; Node.span
           ~attrs:[ Style.moon_mono ]
-          [ Node.text "base=/tmp/masc-bonsai-dev" ]
-      ; Node.span ~attrs:[ Style.moon_tail ] [ Node.text "operator · vincent" ]
+          [ Node.text runtime_badge_text ]
+      ; Node.span ~attrs:[ Style.moon_tail ] [ Node.text snapshot_badge_text ]
       ]
   in
   let nav_section label =
@@ -2025,7 +2031,7 @@ let render_response
           ]
       ; Node.div
           ~attrs:[]
-          [ aside_h ~tail:evs_tail "chronicle · recent"
+          [ aside_h ~tail:evs_tail "runtime · recent"
           ; evs_stream
           ]
       ]
@@ -2137,7 +2143,7 @@ let render_response
         ; Node.div ~attrs:[ Style.sec_h ] [ Node.text "log ring" ]
         ; Node.span
             ~attrs:[ Style.sec_sub ]
-            [ Node.text "in-memory chronicle · newest on top" ]
+            [ Node.text "in-memory journal · newest on top" ]
         ; Node.span ~attrs:[ Style.sec_hr ] []
         ; Node.span
             ~attrs:[ Style.sec_r ]

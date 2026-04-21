@@ -358,6 +358,7 @@ let codex_cli_prompt_preflight ~(config : Oas_worker_exec.config) ~(goal : strin
       Oas.Agent_turn.prepare_messages
         ~messages:(config.initial_messages @ [ Oas.Types.user_msg goal ])
         ~context_reducer:config.context_reducer
+        ~tiered_memory:None
         ~turn_params:Oas.Hooks.default_turn_params
     in
     let req_config =

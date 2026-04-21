@@ -36,7 +36,7 @@ let start (type p) (status : p task_status_t) : active task_status_t =
   | PClaimed { assignee; _ } ->
     let started_at = Types_core.now_iso () in
     PInProgress { assignee; started_at }
-  | _ ->
+  | PTodo | PInProgress _ | PDone _ | PCancelled _ ->
     let started_at = Types_core.now_iso () in
     PInProgress { assignee = "unknown"; started_at }
 
@@ -44,7 +44,7 @@ let complete (type p) (status : p task_status_t) ~notes : terminal task_status_t
   let assignee = match status with
     | PClaimed { assignee; _ } -> assignee
     | PInProgress { assignee; _ } -> assignee
-    | _ -> "unknown"
+    | PTodo | PDone _ | PCancelled _ -> "unknown"
   in
   let completed_at = Types_core.now_iso () in
   PDone { assignee; completed_at; notes }

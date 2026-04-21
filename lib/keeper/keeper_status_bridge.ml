@@ -39,61 +39,94 @@ let effective_declarative_cascade_name
   | None, Some _ -> Keeper_config.default_cascade_name
   | None, None -> Keeper_cascade_profile.canonicalize meta.cascade_name
 
-let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_defaults) :
-    string list =
+type override_field_detail = {
+  field : string;
+  default_value : Yojson.Safe.t;
+  live_value : Yojson.Safe.t;
+}
+
+let override_field field ~default_value ~live_value =
+  { field; default_value; live_value }
+
+let maybe_string_override field ?(normalize = fun value -> value) default live
+    acc =
+  let default = Option.map normalize default in
+  match default with
+  | Some value when value <> live ->
+      override_field field ~default_value:(`String value) ~live_value:(`String live)
+      :: acc
+  | _ -> acc
+
+let maybe_bool_override field default live acc =
+  match default with
+  | Some value when value <> live ->
+      override_field field ~default_value:(`Bool value) ~live_value:(`Bool live)
+      :: acc
+  | _ -> acc
+
+let maybe_string_list_override field default live acc =
+  match default with
+  | Some authored when authored <> live ->
+      override_field field ~default_value:(string_list_to_json authored)
+        ~live_value:(string_list_to_json live)
+      :: acc
+  | _ -> acc
+
+let nonempty_string_list_override field default live acc =
+  if default <> [] && default <> live then
+    override_field field ~default_value:(string_list_to_json default)
+      ~live_value:(string_list_to_json live)
+    :: acc
+  else acc
+
+let maybe_string_option_override field default live acc =
+  match default, live with
+  | Some authored, Some active when authored <> active ->
+      override_field field ~default_value:(`String authored)
+        ~live_value:(`String active)
+      :: acc
+  | _ -> acc
+
+let live_override_details (meta : keeper_meta)
+    (defaults : keeper_profile_defaults) : override_field_detail list =
   let effective_cascade_name =
     effective_declarative_cascade_name defaults meta
   in
-  let add_if label cond acc = if cond then label :: acc else acc in
   []
-  |> add_if "prompt.goal"
-       (match defaults.goal with
-        | Some value -> normalize_goal_horizon_text value <> meta.goal
-        | None -> false)
-  |> add_if "prompt.short_goal"
-       (match defaults.short_goal with
-        | Some value -> value <> meta.short_goal
-        | None -> false)
-  |> add_if "prompt.mid_goal"
-       (match defaults.mid_goal with
-        | Some value -> value <> meta.mid_goal
-        | None -> false)
-  |> add_if "prompt.long_goal"
-       (match defaults.long_goal with
-        | Some value -> value <> meta.long_goal
-        | None -> false)
-  |> add_if "prompt.will"
-       (match defaults.will with Some value -> value <> meta.will | None -> false)
-  |> add_if "prompt.needs"
-       (match defaults.needs with Some value -> value <> meta.needs | None -> false)
-  |> add_if "prompt.desires"
-       (match defaults.desires with Some value -> value <> meta.desires | None -> false)
-  |> add_if "prompt.instructions"
-       (match defaults.instructions with
-        | Some value -> value <> meta.instructions
-        | None -> false)
-  |> add_if "coordination.mention_targets"
-       (defaults.mention_targets <> [] && defaults.mention_targets <> meta.mention_targets)
-  |> add_if "tools.tool_preset"
-       (match defaults.tool_preset, Keeper_types.tool_access_preset meta.tool_access with
-        | Some authored, Some active -> authored <> Keeper_types.tool_preset_to_string active
-        | _ -> false)
-  |> add_if "tools.tool_also_allow"
-       (match defaults.tool_also_allow with
-        | Some authored ->
-            authored <> Keeper_types.tool_access_also_allowlist meta.tool_access
-        | None -> false)
-  |> add_if "tools.tool_denylist"
-       (match defaults.tool_denylist with
-        | Some authored -> authored <> meta.tool_denylist
-        | None -> false)
-  |> add_if "model.cascade_name"
-       (effective_cascade_name <> meta.cascade_name)
-  |> add_if "proactive.enabled"
-       (match defaults.proactive_enabled with
-        | Some value -> value <> meta.proactive.enabled
-        | None -> false)
+  |> maybe_string_override "prompt.goal"
+       ~normalize:normalize_goal_horizon_text defaults.goal meta.goal
+  |> maybe_string_override "prompt.short_goal" defaults.short_goal meta.short_goal
+  |> maybe_string_override "prompt.mid_goal" defaults.mid_goal meta.mid_goal
+  |> maybe_string_override "prompt.long_goal" defaults.long_goal meta.long_goal
+  |> maybe_string_override "prompt.will" defaults.will meta.will
+  |> maybe_string_override "prompt.needs" defaults.needs meta.needs
+  |> maybe_string_override "prompt.desires" defaults.desires meta.desires
+  |> maybe_string_override "prompt.instructions" defaults.instructions
+       meta.instructions
+  |> nonempty_string_list_override "coordination.mention_targets"
+       defaults.mention_targets meta.mention_targets
+  |> maybe_string_option_override "tools.tool_preset" defaults.tool_preset
+       (Keeper_types.tool_access_preset meta.tool_access
+        |> Option.map Keeper_types.tool_preset_to_string)
+  |> maybe_string_list_override "tools.tool_also_allow"
+       defaults.tool_also_allow
+       (Keeper_types.tool_access_also_allowlist meta.tool_access)
+  |> maybe_string_list_override "tools.tool_denylist" defaults.tool_denylist
+       meta.tool_denylist
+  |> (fun acc ->
+       if effective_cascade_name <> meta.cascade_name then
+         override_field "model.cascade_name"
+           ~default_value:(`String effective_cascade_name)
+           ~live_value:(`String meta.cascade_name)
+         :: acc
+       else acc)
+  |> maybe_bool_override "proactive.enabled" defaults.proactive_enabled
+       meta.proactive.enabled
   |> List.rev
+
+let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_defaults) :
+    string list =
+  live_override_details meta defaults |> List.map (fun detail -> detail.field)
 
 let runtime_registry_entry (config : Coord_utils.config) name =
   Keeper_registry.get ~base_path:config.base_path name
@@ -309,18 +342,35 @@ let optional_existing_path_json ?source = function
   | Some path -> existing_path_json ?source path
   | None -> `Null
 
-let override_field_source_json ~default_source_kind ~default_manifest_path field =
+let override_field_source_json ~default_source_kind ~default_manifest_path detail =
+  let default_missing =
+    match detail.default_value with
+    | `Null -> true
+    | _ -> false
+  in
+  let default_manifest_exists =
+    match default_manifest_path with
+    | Some path -> Fs_compat.file_exists path
+    | None -> false
+  in
   `Assoc
     [
-      ("field", `String field);
+      ("field", `String detail.field);
       ("source", `String "live_meta");
+      ("live_source", `String "runtime_overlay");
+      ("default_source", Json_util.string_opt_to_json default_source_kind);
       ("default_source_kind", Json_util.string_opt_to_json default_source_kind);
       ("default_manifest_path", Json_util.string_opt_to_json default_manifest_path);
+      ("default_manifest_exists", `Bool default_manifest_exists);
+      ("default_missing", `Bool default_missing);
+      ("default_value", detail.default_value);
+      ("live_value", detail.live_value);
     ]
 
 let source_provenance_json config (meta : keeper_meta) =
   let snapshot = keeper_default_source_snapshot meta.name in
-  let override_fields = live_override_fields meta snapshot.defaults in
+  let override_details = live_override_details meta snapshot.defaults in
+  let override_fields = List.map (fun detail -> detail.field) override_details in
   let resolution = Config_dir_resolver.resolve () in
   let live_meta_path = keeper_meta_path config meta.name in
   let default_manifest_path = snapshot.defaults.manifest_path in
@@ -344,5 +394,5 @@ let source_provenance_json config (meta : keeper_meta) =
         `List
           (List.map
              (override_field_source_json ~default_source_kind ~default_manifest_path)
-             override_fields) );
+             override_details) );
     ]

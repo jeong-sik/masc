@@ -984,21 +984,38 @@ proactive_enabled = true
       in
       Alcotest.(check bool) "override field proactive" true
         (List.mem "proactive.enabled" override_fields);
-      let override_field_sources =
-        json |> member "sources" |> member "override_field_sources" |> to_list
-      in
-      Alcotest.(check bool) "override field source proactive" true
-        (List.exists
-           (fun item ->
-              String.equal
-                (item |> member "field" |> to_string)
-                "proactive.enabled"
-              && String.equal
-                   (item |> member "source" |> to_string)
-                   "live_meta")
-           override_field_sources);
-      Alcotest.(check bool) "initiative surface removed" true
-        (json |> member "initiative" = `Null);
+	      let override_field_sources =
+	        json |> member "sources" |> member "override_field_sources" |> to_list
+	      in
+	      let proactive_source =
+	        List.find_opt
+	          (fun item ->
+	             String.equal
+	               (item |> member "field" |> to_string)
+	               "proactive.enabled")
+	          override_field_sources
+	      in
+	      let proactive_source =
+	        match proactive_source with
+	        | Some item -> item
+	        | None -> Alcotest.fail "missing proactive override source"
+	      in
+	      Alcotest.(check string) "override field source proactive" "live_meta"
+	        (proactive_source |> member "source" |> to_string);
+	      Alcotest.(check string) "override field live source" "runtime_overlay"
+	        (proactive_source |> member "live_source" |> to_string);
+	      Alcotest.(check string) "override field default source" "toml"
+	        (proactive_source |> member "default_source" |> to_string);
+	      Alcotest.(check bool) "override field default manifest exists" true
+	        (proactive_source |> member "default_manifest_exists" |> to_bool);
+	      Alcotest.(check bool) "override field default present" false
+	        (proactive_source |> member "default_missing" |> to_bool);
+	      Alcotest.(check bool) "override field default value" true
+	        (proactive_source |> member "default_value" |> to_bool);
+	      Alcotest.(check bool) "override field live value" false
+	        (proactive_source |> member "live_value" |> to_bool);
+	      Alcotest.(check bool) "initiative surface removed" true
+	        (json |> member "initiative" = `Null);
       Alcotest.(check int) "total input tokens surfaced" 1200
         (json |> member "metrics" |> member "total_input_tokens" |> to_int);
       Alcotest.(check int) "last latency surfaced" 4000

@@ -187,14 +187,56 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
         | Some keeper -> keeper
         | None -> Alcotest.fail "expected keeper in snapshot"
       in
-      Alcotest.(check (float 0.000001)) "metrics ratio wins over usage fallback"
-        0.1274375 Yojson.Safe.Util.(keeper |> member "context_ratio" |> to_float);
-      Alcotest.(check int) "metrics tokens retained" 16312
-        Yojson.Safe.Util.(keeper |> member "context_tokens" |> to_int);
-      Alcotest.(check int) "metrics max retained" 128000
-        Yojson.Safe.Util.(keeper |> member "context_max" |> to_int);
+      let latest_metrics_snapshot =
+        Dated_jsonl.read_recent_lines metrics_store 8
+        (* read_recent_lines returns chronological order; inspect newest first. *)
+        |> List.rev
+        |> List.find_map (fun line ->
+               try
+                 let json = Yojson.Safe.from_string line in
+                 match Safe_ops.json_string_opt "snapshot_source" json with
+                 | Some "keeper_context_status" ->
+                     Option.bind (Safe_ops.json_float_opt "context_ratio" json)
+                       (fun ratio ->
+                         Option.bind (Safe_ops.json_int_opt "context_tokens" json)
+                           (fun tokens ->
+                             Option.map
+                               (fun max_ctx -> (ratio, tokens, max_ctx))
+                               (Safe_ops.json_int_opt "context_max" json)))
+                 | _ -> None
+               with Yojson.Json_error _ -> None)
+      in
+      let metrics_ratio, metrics_tokens, metrics_max =
+        match latest_metrics_snapshot with
+        | Some snapshot -> snapshot
+        | None -> Alcotest.fail "expected keeper_context_status metrics snapshot"
+      in
+      let usage_ratio =
+        match Operator_control_snapshot.compute_context_ratio updated_meta with
+        | Some value -> value
+        | None -> Alcotest.fail "expected usage fallback ratio"
+      in
+      let snapshot_ratio =
+        Yojson.Safe.Util.(keeper |> member "context_ratio" |> to_float)
+      in
+      let snapshot_tokens =
+        Yojson.Safe.Util.(keeper |> member "context_tokens" |> to_int)
+      in
+      let snapshot_max =
+        Yojson.Safe.Util.(keeper |> member "context_max" |> to_int)
+      in
+      Alcotest.(check (float 0.000001)) "latest metrics ratio retained"
+        metrics_ratio snapshot_ratio;
+      Alcotest.(check int) "latest metrics tokens retained"
+        metrics_tokens snapshot_tokens;
+      Alcotest.(check int) "latest metrics max retained"
+        metrics_max snapshot_max;
       Alcotest.(check string) "metrics source retained" "keeper_context_status"
         Yojson.Safe.Util.(keeper |> member "context_source" |> to_string);
+      Alcotest.(check bool) "metrics ratio differs from usage fallback" true
+        (Float.abs (snapshot_ratio -. usage_ratio) > 0.000001);
+      Alcotest.(check bool) "metrics tokens differ from usage fallback" true
+        (snapshot_tokens <> updated_meta.runtime.usage.last_input_tokens);
       Alcotest.(check bool) "nested context payload omitted" true
         (Yojson.Safe.Util.member "context" keeper = `Null))
 

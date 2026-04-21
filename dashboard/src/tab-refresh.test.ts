@@ -52,7 +52,7 @@ describe('refreshPlanForRoute', () => {
     vi.clearAllMocks()
   })
 
-  it('hydrates overview from namespace truth and mission snapshot', () => {
+  it('hydrates overview from project snapshot and mission snapshot', () => {
     expect(refreshPlanForRoute({
       tab: 'overview',
       params: {},

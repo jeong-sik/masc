@@ -42,7 +42,7 @@ describe('flow-control-state', () => {
     flowState.value = 'unknown'
   }, 120_000)
 
-  it('reuses namespace truth pause state before calling MCP', async () => {
+  it('reuses project snapshot pause state before calling MCP', async () => {
     namespaceTruth.value = {
       root: {
         status: {
@@ -58,7 +58,7 @@ describe('flow-control-state', () => {
     expect(callMcpTool).not.toHaveBeenCalled()
   })
 
-  it('treats namespace truth warm-up as initializing before calling MCP', async () => {
+  it('treats project snapshot warm-up as initializing before calling MCP', async () => {
     namespaceTruthInitializing.value = true
 
     const { fetchPauseStatus, flowState } = await import('./flow-control-state')
@@ -112,7 +112,7 @@ describe('flow-control-state', () => {
     expect(flowState.value).toBe('unknown')
   })
 
-  it('reacts to namespace-truth signal changes after mount', async () => {
+  it('reacts to project-snapshot signal changes after mount', async () => {
     const { flowState } = await import('./flow-control-state')
 
     namespaceTruthInitializing.value = true

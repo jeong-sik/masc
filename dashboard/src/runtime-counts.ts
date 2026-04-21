@@ -2,7 +2,7 @@ import type { DashboardNamespaceTruthResponse, DashboardShellResponse } from './
 
 type RuntimeCountSource =
   | 'execution'
-  | 'namespace-truth'
+  | 'project-snapshot'
   | 'shell'
   | 'partial'
   | 'unknown'
@@ -89,7 +89,7 @@ export function resolveRuntimeCounts({
       ...namespace!,
       totalRuntimes: namespaceTotalRuntimes,
       configuredKeepers,
-      source: 'namespace-truth',
+      source: 'project-snapshot',
     }
   }
 
@@ -123,8 +123,8 @@ export function runtimeCountSourceLabel(source: RuntimeCountSource): string {
   switch (source) {
     case 'execution':
       return 'execution 상세'
-    case 'namespace-truth':
-      return 'namespace-truth'
+    case 'project-snapshot':
+      return 'project snapshot'
     case 'shell':
       return 'shell'
     case 'partial':

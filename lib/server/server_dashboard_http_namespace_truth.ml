@@ -47,7 +47,7 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
         let started_at = Unix.gettimeofday () in
         let t0 = Time_compat.now () in
         (* Staged fetch: shell may still need a guarded refresh, while execution
-           stays on the proactive cache to keep namespace-truth off the cold path. *)
+           stays on the proactive cache to keep project-snapshot off the cold path. *)
         let shell_ref = ref (`Assoc []) in
         let execution_ref = ref (`Assoc []) in
         let command_ref = ref (`Assoc []) in
@@ -72,13 +72,13 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
             match Eio.Time.with_timeout clock timeout_s (fun () -> Ok (f ())) with
             | Ok v -> v
             | Error `Timeout ->
-                Log.Dashboard.warn "namespace-truth fiber %s timed out (%.0fs)" label
+                Log.Dashboard.warn "project-snapshot fiber %s timed out (%.0fs)" label
                   timeout_s;
                 fallback
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
-              Log.Dashboard.warn "namespace-truth fiber %s failed: %s" label
+              Log.Dashboard.warn "project-snapshot fiber %s failed: %s" label
                 (Printexc.to_string exn);
               fallback
         in
@@ -119,9 +119,9 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
         let command_summary_json = !command_ref in
         let parallel_ms = (Time_compat.now () -. t0) *. 1000.0 in
         if parallel_ms >= 100.0 then
-          Log.Dashboard.info "namespace-truth fetch: %.0fms" parallel_ms
+          Log.Dashboard.info "project-snapshot fetch: %.0fms" parallel_ms
         else
-          Log.Dashboard.debug "namespace-truth fetch: %.0fms" parallel_ms;
+          Log.Dashboard.debug "project-snapshot fetch: %.0fms" parallel_ms;
         let execution_cache_state =
           json_assoc_field "projection_diagnostics" execution_json
           |> json_string_field_opt "cache_state"
@@ -208,6 +208,14 @@ let broadcast_namespace_truth_snapshot (state : Mcp_server.server_state) : unit 
       let namespace_sse_json =
         `Assoc
           [
+            ("type", `String "project_snapshot");
+            ("payload", snapshot);
+            ("ts_unix", `Float (Time_compat.now ()));
+          ]
+      in
+      let namespace_alias_sse_json =
+        `Assoc
+          [
             ("type", `String "namespace_truth_snapshot");
             ("payload", snapshot);
             ("ts_unix", `Float (Time_compat.now ()));
@@ -222,22 +230,23 @@ let broadcast_namespace_truth_snapshot (state : Mcp_server.server_state) : unit 
           ]
       in
       Sse.broadcast_to Observers namespace_sse_json;
+      Sse.broadcast_to Observers namespace_alias_sse_json;
       Sse.broadcast_to Observers legacy_sse_json;
       (* Demote the "pushed via SSE" log to DEBUG when no SSE client is
          connected. With zero observers, the broadcast still runs (for
          the replay buffer and external subscribers) but the log line
          is pure housekeeping noise — once per minute for 96 minutes
          straight in a fresh masc-server.log when nothing is tailing
-         /namespace-truth. Operators only care about this signal when
+         /project-snapshot. Operators only care about this signal when
          there is an actual client on the wire. *)
       let log_fn =
         if Sse.client_count () > 0
         then Log.Dashboard.info
         else Log.Dashboard.debug
       in
-      log_fn "namespace-truth snapshot pushed via SSE"
+      log_fn "project-snapshot pushed via SSE"
   | Some _ ->
-      Log.Dashboard.debug "namespace-truth snapshot unchanged, skipping SSE broadcast"
+      Log.Dashboard.debug "project-snapshot unchanged, skipping SSE broadcast"
 
 let () =
   Execution_surfaces._broadcast_namespace_truth_ref :=

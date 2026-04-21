@@ -159,7 +159,7 @@ const AUTORESEARCH_EVENTS = new Set([
   'autoresearch_stopped',
 ])
 
-/** Hydrate namespace-truth signals directly from SSE payload — zero HTTP fetch. */
+/** Hydrate project-snapshot signals directly from SSE payload — zero HTTP fetch. */
 function handleNamespaceTruthSnapshot(payload: unknown): void {
   try {
     const normalized = normalizeNamespaceTruth(payload)
@@ -169,7 +169,7 @@ function handleNamespaceTruthSnapshot(payload: unknown): void {
       normalized.root.status ?? null,
     )
   } catch (err) {
-    console.debug('[SSE] namespace-truth snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
+    console.debug('[SSE] project-snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
   }
 }
 
@@ -289,7 +289,7 @@ async function hydrateAfterReconnect(): Promise<void> {
   void refreshActiveRoute().catch(err =>
     console.warn('[SSE] reconnect route refresh failed', err instanceof Error ? err.message : err),
   )
-  // Safety-net retry: if namespace-truth fetch failed (e.g. server warm-up),
+  // Safety-net retry: if project-snapshot fetch failed (e.g. server warm-up),
   // the scheduler's error signal will be set. Retry once after delay.
   setTimeout(() => {
     if (namespaceTruthError.value) {
@@ -352,8 +352,8 @@ export function setupSSEReaction(): () => void {
   const unsubscribe = lastEvent.subscribe((event) => {
     if (!event) return
 
-    // 0. Namespace-truth snapshot — server push, no HTTP fetch needed
-    if ((event.type === 'namespace_truth_snapshot' || event.type === 'room_truth_snapshot') && event.payload) {
+    // 0. Project snapshot — server push, no HTTP fetch needed
+    if ((event.type === 'project_snapshot' || event.type === 'namespace_truth_snapshot' || event.type === 'room_truth_snapshot') && event.payload) {
       handleNamespaceTruthSnapshot(event.payload)
       return
     }

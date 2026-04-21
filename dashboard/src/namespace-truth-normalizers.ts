@@ -1,6 +1,6 @@
 import { asBoolean, asNumber, asString, asStringArray, isRecord, extractArray } from './components/common/normalize'
 import {
-  normalizeBuildIdentity,
+  normalizeServerStatus,
   normalizeExecutionSummary,
   normalizeExecutionQueueItem,
   normalizeAttentionItem,
@@ -14,24 +14,7 @@ import type {
   DashboardNamespaceTruthRecommendationSummary,
   DashboardNamespaceTruthResponse,
   PendingConfirmSummary,
-  ServerStatus,
 } from './types'
-
-function normalizeServerStatus(raw: unknown): ServerStatus | null {
-  if (!isRecord(raw)) return null
-  return {
-    coordination_root: asString(raw.coordination_root),
-    workspace_path: asString(raw.workspace_path),
-    workspace_differs: asBoolean(raw.workspace_differs),
-    cluster: asString(raw.cluster),
-    project: asString(raw.project),
-    paused: asBoolean(raw.paused),
-    version: asString(raw.version),
-    generated_at: asString(raw.generated_at),
-    build: normalizeBuildIdentity(raw.build),
-    tempo_interval_s: asNumber(raw.tempo_interval_s),
-  }
-}
 
 function normalizePendingConfirmSummary(raw: unknown): PendingConfirmSummary | null {
   if (!isRecord(raw)) return null

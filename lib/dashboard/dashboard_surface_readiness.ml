@@ -75,7 +75,7 @@ let all_entries =
       hidden_from_nav = false;
       meets_main_gate = true;
       rationale =
-        "오버뷰는 shell/mission/namespace truth를 묶는 front-door 브리핑 surface라 메인에서 유지합니다.";
+        "오버뷰는 shell/mission/project snapshot을 묶는 front-door 브리핑 surface라 메인에서 유지합니다.";
       route_hash = Some "#overview";
       refs =
         {

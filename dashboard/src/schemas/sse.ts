@@ -53,6 +53,7 @@ const FixedSSEEventTypeSchema = z.enum([
   'governance_param_changed',
   'approval:pending',
   'approval:resolved',
+  'project_snapshot',
   'room_truth_snapshot',
   'namespace_truth_snapshot',
   'execution_snapshot',

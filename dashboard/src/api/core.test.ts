@@ -187,7 +187,7 @@ describe('get bootstrap warm-up mapping', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const controller = new AbortController()
-    const request = get('/api/v1/dashboard/namespace-truth', { signal: controller.signal })
+    const request = get('/api/v1/dashboard/project-snapshot', { signal: controller.signal })
     controller.abort()
 
     await expect(request).rejects.toMatchObject({
@@ -195,7 +195,7 @@ describe('get bootstrap warm-up mapping', () => {
     })
   })
 
-  it('maps dashboard namespace-truth not-initialized errors to initializing payloads', async () => {
+  it('maps dashboard project-snapshot not-initialized errors to initializing payloads', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('{"error":"not initialized"}', {
         status: 500,
@@ -204,7 +204,7 @@ describe('get bootstrap warm-up mapping', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const data = await get<{ status?: string; message?: string }>('/api/v1/dashboard/namespace-truth')
+    const data = await get<{ status?: string; message?: string }>('/api/v1/dashboard/project-snapshot')
 
     expect(data.status).toBe('initializing')
     expect(data.message).toContain('warming up')
@@ -272,10 +272,10 @@ describe('get bootstrap warm-up mapping', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(get('/api/v1/dashboard/namespace-truth')).rejects.toMatchObject({
+    await expect(get('/api/v1/dashboard/project-snapshot')).rejects.toMatchObject({
       name: 'ApiRequestError',
       status: 401,
-      path: '/api/v1/dashboard/namespace-truth',
+      path: '/api/v1/dashboard/project-snapshot',
     })
   })
 
@@ -288,23 +288,31 @@ describe('get bootstrap warm-up mapping', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const data = await get<{ status?: string; message?: string }>('/api/v1/dashboard/namespace-truth')
+    const data = await get<{ status?: string; message?: string }>('/api/v1/dashboard/project-snapshot')
 
     expect(data.status).toBe('initializing')
     expect(data.message).toContain('warming up')
   })
 
-  it('remaps room-truth alias the same as namespace-truth', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response('{"error":"not initialized"}', {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
+  it('remaps namespace/room-truth aliases the same as project-snapshot', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response('{"error":"not initialized"}', {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ))
     vi.stubGlobal('fetch', fetchMock)
 
-    const data = await get<{ status?: string; message?: string }>('/api/v1/dashboard/room-truth')
+    const canonical = await get<{ status?: string; message?: string }>('/api/v1/dashboard/project-snapshot')
+    expect(canonical.status).toBe('initializing')
+    expect(canonical.message).toContain('warming up')
 
+    const legacyNamespace = await get<{ status?: string; message?: string }>('/api/v1/dashboard/namespace-truth')
+    expect(legacyNamespace.status).toBe('initializing')
+    expect(legacyNamespace.message).toContain('warming up')
+
+    const data = await get<{ status?: string; message?: string }>('/api/v1/dashboard/room-truth')
     expect(data.status).toBe('initializing')
     expect(data.message).toContain('warming up')
   })

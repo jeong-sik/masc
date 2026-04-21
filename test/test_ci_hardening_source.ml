@@ -232,6 +232,18 @@ let test_http_write_auth_contracts () =
   check bool "observer SSE auth error documents scoped query token contract" true
     (file_contains_pattern "lib/server/server_auth.ml"
        {|or 'token' query param for the observer SSE stream.|});
+  check bool "server auth keeps general MCP auth header-only" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       {|match auth_token_from_request request with|});
+  check bool "observer SSE query token fallback stays scoped" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       {|let observer_sse_query_token_from_request request =|});
+  check bool "observer SSE fallback reads token query param explicitly" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       {|query_param request "token"|});
+  check bool "observer SSE auth has dedicated verifier" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       {|let verify_mcp_observer_stream_auth ~base_path request =|});
   check bool "server auth defines token-bound permission helper" true
     (file_contains_pattern "lib/server/server_auth.ml"
        "let authorize_token_bound_permission_request");
@@ -413,7 +425,10 @@ let test_input_validation_contracts () =
 let test_room_current_validation_contracts () =
   (* H2 gateway serves canonical namespace routes and keeps temporary room
      aliases so mixed dashboard/backend deployments do not break during rollout. *)
-  check bool "h2 gateway serves namespace-truth endpoint" true
+  check bool "h2 gateway serves project-snapshot endpoint" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|"/api/v1/dashboard/project-snapshot"|});
+  check bool "h2 gateway serves namespace-truth endpoint alias" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|"/api/v1/dashboard/namespace-truth"|});
   check bool "h2 gateway keeps room-truth alias endpoint during rollout" true

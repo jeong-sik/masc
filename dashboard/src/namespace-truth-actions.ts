@@ -29,7 +29,7 @@ async function doFetchNamespaceTruth(): Promise<void> {
       isRecord(raw)
       && asString((raw as Record<string, unknown>).status) === 'initializing'
     if (isInitializing) {
-      console.debug('[namespace-truth] server initializing, scheduling warm-up retry')
+      console.debug('[project-snapshot] server initializing, scheduling warm-up retry')
       namespaceTruthInitializing.value = true
       scheduleNamespaceWarmRetry()
       return
@@ -43,8 +43,8 @@ async function doFetchNamespaceTruth(): Promise<void> {
       normalized.root.status ?? null,
     )
   } catch (err) {
-    const detail = err instanceof Error ? err.message : 'Failed to load project truth'
-    console.warn('[namespace-truth] fetch failed:', detail)
+    const detail = err instanceof Error ? err.message : 'Failed to load project snapshot'
+    console.warn('[project-snapshot] fetch failed:', detail)
     namespaceTruthError.value = detail
   } finally {
     namespaceTruthLoading.value = false
@@ -53,7 +53,7 @@ async function doFetchNamespaceTruth(): Promise<void> {
 
 function scheduleNamespaceWarmRetry(): void {
   warmRetryAttempt++
-  console.debug(`[namespace-truth] warm-up retry ${warmRetryAttempt}/${WARM_MAX_RETRIES}`)
+  console.debug(`[project-snapshot] warm-up retry ${warmRetryAttempt}/${WARM_MAX_RETRIES}`)
   if (warmRetryAttempt > WARM_MAX_RETRIES) {
     namespaceTruthInitializing.value = false
     namespaceTruthError.value = 'Server warm-up timed out. Try refreshing.'
@@ -77,12 +77,12 @@ const namespaceTruthScheduler = new FetchScheduler(doFetchNamespaceTruth, {
 
 // --- Public API ---
 
-/** Request a namespace-truth refresh (debounced, cooldown-enforced). */
+/** Request a project-snapshot refresh (debounced, cooldown-enforced). */
 export function requestNamespaceTruth(): void {
   namespaceTruthScheduler.request()
 }
 
-/** Request an immediate namespace-truth refresh (deduped with inflight). */
+/** Request an immediate project-snapshot refresh (deduped with inflight). */
 export function requestNamespaceTruthNow(): void {
   namespaceTruthScheduler.requestNow()
 }

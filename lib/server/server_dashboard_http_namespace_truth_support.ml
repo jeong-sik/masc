@@ -182,7 +182,7 @@ let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
           | _ ->
               let label, reason, source, provenance =
                 if not initialized then
-                  ( "초기 namespace truth",
+                  ( "초기 project snapshot",
                     "조율 namespace가 아직 초기화되지 않았습니다. 기본 namespace 상태부터 확인하세요.",
                     "orchestra",
                     "derived" )
@@ -374,7 +374,7 @@ let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shel
         (Some summary_input, Some (Meta_cognition.interpret summary_input))
     | Error err ->
         Log.Dashboard.debug
-          "namespace-truth meta-cognition summary parse skipped: %s" err;
+          "project-snapshot meta-cognition summary parse skipped: %s" err;
         (None, None)
   in
   let meta_cognition_latest_digest =

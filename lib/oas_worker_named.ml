@@ -68,6 +68,10 @@ type masc_internal_error =
       cascade_name : string;
       detail : string option;
     }
+  | No_tool_capable_provider of {
+      cascade_name : string;
+      configured_labels : string list;
+    }
   | Accept_rejected of {
       scope : string;
       model : string option;
@@ -90,6 +94,14 @@ let masc_internal_error_to_json = function
         ("kind", `String "cascade_exhausted");
         ("cascade_name", `String cascade_name);
         ("detail", Json_util.string_opt_to_json detail);
+      ]
+  | No_tool_capable_provider { cascade_name; configured_labels } ->
+    `Assoc
+      [
+        ("kind", `String "no_tool_capable_provider");
+        ("cascade_name", `String cascade_name);
+        ( "configured_labels",
+          `List (List.map (fun value -> `String value) configured_labels) );
       ]
   | Accept_rejected { scope; model; reason } ->
     `Assoc
@@ -125,6 +137,28 @@ let classify_masc_internal_error (err : Oas.Error.sdk_error) :
                       {
                         cascade_name;
                         detail = string_opt_of_assoc "detail" json;
+                      })
+               | None -> None)
+           | Some (`String "no_tool_capable_provider") -> (
+               match string_opt_of_assoc "cascade_name" json with
+               | Some cascade_name ->
+                 let configured_labels =
+                   match json with
+                   | `Assoc fields -> (
+                       match List.assoc_opt "configured_labels" fields with
+                       | Some (`List values) ->
+                         values
+                         |> List.filter_map (function
+                              | `String value -> Some value
+                              | _ -> None)
+                       | _ -> [])
+                   | _ -> []
+                 in
+                 Some
+                   (No_tool_capable_provider
+                      {
+                        cascade_name;
+                        configured_labels;
                       })
                | None -> None)
            | Some (`String "accept_rejected") -> (
@@ -429,19 +463,21 @@ let run_named
   let name = Printf.sprintf "oas-%s" cascade_name in
   match candidate_cfgs with
   | [] ->
-    Log.Misc.error "cascade %s: no callable models available" cascade_name;
-    Error
+      Log.Misc.error "cascade %s: no callable models available" cascade_name;
+      Error
       (sdk_error_of_masc_internal_error
-         (Cascade_exhausted
-            {
-              cascade_name;
-              detail =
-                Some
-                  (if require_tool_choice_support then
-                     "no callable models support required tool use"
-                   else
-                     "no callable models available");
-            }))
+         (if require_tool_choice_support then
+            No_tool_capable_provider
+              {
+                cascade_name;
+                configured_labels;
+              }
+          else
+            Cascade_exhausted
+              {
+                cascade_name;
+                detail = Some "no callable models available";
+              }))
   | _ ->
   let transport_resolved = match transport with
     | Some t -> t

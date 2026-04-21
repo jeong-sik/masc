@@ -316,6 +316,7 @@ let is_context_overflow (err : Oas.Error.sdk_error) : bool =
 let is_cascade_exhausted_error (err : Oas.Error.sdk_error) : bool =
   match Oas_worker_named.classify_masc_internal_error err with
   | Some (Oas_worker_named.Cascade_exhausted _)
+  | Some (Oas_worker_named.No_tool_capable_provider _)
   | Some (Oas_worker_named.Accept_rejected _) -> true
   | None -> false
 
@@ -1019,6 +1020,26 @@ let append_decision_record
                     ]
                 | None -> []
               in
+              let tool_surface_fields =
+                [
+                  ("turn_lane", `String r.tool_surface.turn_lane);
+                  ("visible_tool_count", `Int r.tool_surface.visible_tool_count);
+                  ("tool_gate_enabled", `Bool r.tool_surface.tool_gate_enabled);
+                  ( "tool_surface_fallback_used",
+                    `Bool r.tool_surface.tool_surface_fallback_used );
+                  ("config_root", `String r.tool_surface.config_root);
+                  ( "cascade_config_path",
+                    match r.tool_surface.cascade_config_path with
+                    | Some path -> `String path
+                    | None -> `Null );
+                  ("gemini_mcp_disabled", `Bool r.tool_surface.gemini_mcp_disabled);
+                  ( "approval_mode_effective",
+                    match r.tool_surface.approval_mode_effective with
+                    | Some mode -> `String mode
+                    | None -> `Null );
+                  ("approval_mode_derived", `Bool r.tool_surface.approval_mode_derived);
+                ]
+              in
                 let stop_reason_str =
                   match r.stop_reason with
                   | Oas_worker.Completed -> "completed"
@@ -1073,7 +1094,7 @@ let append_decision_record
                   if latency_ms > 0 then
                     `Float (float_of_int r.usage.output_tokens /. (float_of_int latency_ms /. 1000.0))
                   else `Null);
-              ] @ thinking_enabled_field @ inference_fields @ cascade_fields)
+              ] @ thinking_enabled_field @ inference_fields @ cascade_fields @ tool_surface_fields)
           | None ->
               (* Partial telemetry for error turns: record what we know.
                  Without this, 90%+ of turns have no telemetry at all. *)
@@ -1912,6 +1933,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
                   ~max_context ~build_turn_prompt
                   ~user_message ~cascade_name:effective_cascade_name
+                  ~turn_affordances:
+                    (observed_affordances_of_observation ~meta:run_meta observation)
                   ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
                   ~generation:run_generation
                   ~max_turns

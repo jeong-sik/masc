@@ -236,7 +236,8 @@ let task_started_at_unix status =
       Types.parse_iso8601 ~default_time claimed_at
   | Types.InProgress { started_at; _ } ->
       Types.parse_iso8601 ~default_time started_at
-  | _ -> default_time
+  | Types.Todo | Types.AwaitingVerification _ | Types.Done _ | Types.Cancelled _ ->
+      default_time
 
 let task_transition_details ~from_status ~to_status ?notes ?reason ?duration_ms
     ?(forced = false) () =
@@ -951,7 +952,10 @@ let transition_task_r config ~agent_name ~task_id ~action
               | Types.Release ->
                   ( t.cycle_count + 1,
                     derive_release_do_not_reclaim_reason t handoff_context )
-              | _ -> t.cycle_count, t.do_not_reclaim_reason
+              | Types.Claim | Types.Start | Types.Done_action | Types.Cancel
+              | Types.Submit_for_verification | Types.Approve_verification
+              | Types.Reject_verification ->
+                  t.cycle_count, t.do_not_reclaim_reason
             in
             {
               t with

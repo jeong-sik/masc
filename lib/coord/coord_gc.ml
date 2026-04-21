@@ -214,7 +214,7 @@ let gc config ?(days=7) () =
   let stale_count = ref 0 in
   let archived_tasks = ref [] in
   let kept_tasks = List.filter (fun task ->
-    let is_done = match task.task_status with Done _ -> true | _ -> false in
+    let is_done = Types.task_status_is_done task.task_status in
     let is_old = task.created_at < cutoff_iso in
     if is_old && not is_done then begin
       incr stale_count;
@@ -244,9 +244,8 @@ let gc config ?(days=7) () =
   (* Get open task IDs (not Done or Cancelled) *)
   let open_task_ids =
     List.filter_map (fun task ->
-      match task.task_status with
-      | Done _ | Cancelled _ -> None
-      | _ -> Some task.id
+      if Types.task_status_is_terminal task.task_status then None
+      else Some task.id
     ) backlog.tasks
   in
 

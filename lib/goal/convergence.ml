@@ -53,9 +53,7 @@ let is_terminal (task : Types.task) =
   Types.task_status_is_terminal task.task_status
 
 let is_completed (task : Types.task) =
-  match task.task_status with
-  | Types.Done _ -> true
-  | _ -> false
+  Types.task_status_is_done task.task_status
 
 let check_convergence ~goal_id ~tasks ?(stagnation_threshold = 5)
     ~iterations_without_progress () =

@@ -13,9 +13,20 @@ open Types
 val generate_token : unit -> string
 (** Generate a cryptographically random hex token (64 chars). *)
 
+val sha256_hash : string -> string
+(** Hash a token/secret with SHA-256 and return lowercase hex. *)
+
 val save_private_text_file : string -> string -> unit
 (** [save_private_text_file path content] writes [content] to [path] with
     mode 0o600. Creates the file if missing, truncates otherwise. *)
+
+(** {1 Path Helpers} *)
+
+val auth_dir : string -> string
+val agents_dir : string -> string
+val room_secret_file : string -> string
+val auth_config_file : string -> string
+val credential_file : string -> string -> string
 
 (** {1 Auth Config} *)
 
@@ -43,6 +54,20 @@ val find_credential_by_token :
 
 val resolve_agent_from_token :
   string -> token:string -> (string, masc_error) result
+
+(** {1 Raw Token Credential} *)
+
+val save_raw_token_credential :
+  string -> agent_name:string -> role:agent_role -> raw_token:string ->
+  (agent_credential, masc_error) result
+(** [save_raw_token_credential config ~agent_name ~role ~raw_token] hashes the
+    raw token and persists the credential. *)
+
+val ensure_keeper_credential :
+  string -> agent_name:string ->
+  (string * agent_credential, masc_error) result
+(** [ensure_keeper_credential config ~agent_name] returns a valid credential,
+    reusing [MASC_MCP_TOKEN] env or creating a new one. *)
 
 (** {1 Token Lifecycle} *)
 
@@ -113,3 +138,7 @@ val is_auth_enabled : string -> bool
 
 val read_initial_admin : string -> string option
 (** [read_initial_admin config] returns the bootstrap admin agent name. *)
+
+(** {1 Nickname Helpers} *)
+
+val extract_agent_type_prefix : string -> string option

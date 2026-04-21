@@ -153,7 +153,16 @@ let blocker_class_of_sdk_error (err : Oas.Error.sdk_error) : blocker_class optio
       Some No_tool_capable_provider
   | Some (Oas_worker_named.Accept_rejected _) ->
       None
+  | Some (Oas_worker_named.Admission_queue_timeout _) ->
+      Some Admission_queue_wait_timeout
+  | Some (Oas_worker_named.Turn_timeout _) ->
+      Some Turn_timeout
+  | Some (Oas_worker_named.Ambiguous_post_commit { is_timeout; _ }) ->
+      Some
+        (if is_timeout then Ambiguous_post_commit_timeout
+         else Ambiguous_post_commit_failure)
   | None -> (
+      (* Legacy fallback for pre-Phase-C persisted errors *)
       match err with
       | Oas.Error.Internal msg ->
           let trimmed = String.trim msg in
@@ -164,22 +173,11 @@ let blocker_class_of_sdk_error (err : Oas.Error.sdk_error) : blocker_class optio
               (if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
                then Ambiguous_post_commit_timeout
                else Ambiguous_post_commit_failure)
-          else if String_util.contains_substring_ci trimmed "cascade_exhausted" then
-            Some (Cascade_exhausted (Other_detail trimmed))
-          else if String_util.contains_substring_ci trimmed
-                    "autonomous turn slot wait timeout" then
-            Some Autonomous_slot_wait_timeout
-          else if String_util.contains_substring_ci trimmed
-                    "admission queue wait timeout" then
+          else if String_util.contains_substring_ci trimmed "admission queue wait timeout"
+          then
             Some Admission_queue_wait_timeout
-          else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
-                  && String_util.contains_substring_ci trimmed "semaphore_wait_ms=" then
-            Some Turn_timeout_after_queue_wait
           else if String_util.contains_substring_ci trimmed "turn wall-clock timeout" then
             Some Turn_timeout
-          else if String_util.contains_substring_ci trimmed "completion contract"
-                  || String_util.contains_substring_ci trimmed "completion_contract" then
-            Some Completion_contract_violation
           else
             None
       | _ -> None)
@@ -260,14 +258,6 @@ let runtime_blocker_surface_of_reason (reason : string) =
              "Cascade exhausted after provider failures.");
         continue_gate = false;
       }
-  else if String_util.contains_substring_ci trimmed "autonomous turn slot wait timeout"
-  then
-    Some
-      {
-        blocker_class = "autonomous_slot_wait_timeout";
-        summary = trimmed;
-        continue_gate = false;
-      }
   else if String_util.contains_substring_ci trimmed "admission queue wait timeout"
   then
     Some
@@ -277,28 +267,10 @@ let runtime_blocker_surface_of_reason (reason : string) =
         continue_gate = false;
       }
   else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
-          && String_util.contains_substring_ci trimmed "semaphore_wait_ms="
-  then
-    Some
-      {
-        blocker_class = "turn_timeout_after_queue_wait";
-        summary = trimmed;
-        continue_gate = false;
-      }
-  else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
   then
     Some
       {
         blocker_class = "turn_timeout";
-        summary = trimmed;
-        continue_gate = false;
-      }
-  else if String_util.contains_substring_ci trimmed "completion contract"
-          || String_util.contains_substring_ci trimmed "completion_contract"
-  then
-    Some
-      {
-        blocker_class = "completion_contract_violation";
         summary = trimmed;
         continue_gate = false;
       }

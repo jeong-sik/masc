@@ -46,6 +46,56 @@ let test_kimi_direct_auth_accepts_primary_and_fallback_envs () =
             (Adapter.auth_env_keys_of_provider_kind
                Llm_provider.Provider_config.Kimi)))
 
+let test_provider_kind_string_uses_oas_ssot () =
+  check string "anthropic ssot" "anthropic"
+    (Adapter.string_of_provider_kind Llm_provider.Provider_config.Anthropic);
+  check string "openai_compat ssot" "openai_compat"
+    (Adapter.string_of_provider_kind Llm_provider.Provider_config.OpenAI_compat);
+  check string "claude_code ssot" "claude_code"
+    (Adapter.string_of_provider_kind Llm_provider.Provider_config.Claude_code)
+
+let test_cascade_prefix_of_provider_kind_keeps_adapter_mapping () =
+  check string "anthropic prefix" "claude"
+    (Adapter.cascade_prefix_of_provider_kind
+       Llm_provider.Provider_config.Anthropic);
+  check string "openai compat prefix" "openai"
+    (Adapter.cascade_prefix_of_provider_kind
+       Llm_provider.Provider_config.OpenAI_compat);
+  check string "codex cli prefix" "codex_cli"
+    (Adapter.cascade_prefix_of_provider_kind
+       Llm_provider.Provider_config.Codex_cli)
+
+let test_auth_env_keys_of_provider_kind_defaults () =
+  check (list string) "anthropic env keys" [ "ANTHROPIC_API_KEY" ]
+    (Adapter.auth_env_keys_of_provider_kind
+       Llm_provider.Provider_config.Anthropic);
+  check (list string) "openai compat env keys" [ "OPENAI_API_KEY" ]
+    (Adapter.auth_env_keys_of_provider_kind
+       Llm_provider.Provider_config.OpenAI_compat);
+  check (list string) "glm env keys" [ "ZAI_API_KEY" ]
+    (Adapter.auth_env_keys_of_provider_kind Llm_provider.Provider_config.Glm);
+  check (list string) "ollama env keys" []
+    (Adapter.auth_env_keys_of_provider_kind
+       Llm_provider.Provider_config.Ollama);
+  check (list string) "claude code env keys" []
+    (Adapter.auth_env_keys_of_provider_kind
+       Llm_provider.Provider_config.Claude_code)
+
+let test_gemini_auth_env_key_paths () =
+  check (list string) "gemini inventory env keys"
+    [ "GOOGLE_CLOUD_PROJECT"; "GOOGLE_CLOUD_LOCATION" ]
+    (Adapter.auth_env_keys_of_provider_kind
+       Llm_provider.Provider_config.Gemini);
+  let config =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Gemini
+      ~model_id:"gemini-2.5-pro"
+      ~base_url:"https://generativelanguage.googleapis.com"
+      ()
+  in
+  check (list string) "gemini docker env keys" [ "GEMINI_API_KEY" ]
+    (Adapter.docker_auth_env_keys_of_provider_config config)
+
 let test_gemini_direct_auth_vertex_adc () =
   with_env "GOOGLE_CLOUD_PROJECT" (Some "demo-project") (fun () ->
       with_env "GOOGLE_CLOUD_LOCATION" (Some "asia-northeast3") (fun () ->
@@ -239,6 +289,14 @@ let () =
           test_case "resolve cli canonicals" `Quick test_resolve_cli_canonical_names;
           test_case "kimi direct auth accepts fallback envs" `Quick
             test_kimi_direct_auth_accepts_primary_and_fallback_envs;
+          test_case "provider kind string uses oas ssot" `Quick
+            test_provider_kind_string_uses_oas_ssot;
+          test_case "cascade prefix keeps adapter mapping" `Quick
+            test_cascade_prefix_of_provider_kind_keeps_adapter_mapping;
+          test_case "provider kind auth env defaults" `Quick
+            test_auth_env_keys_of_provider_kind_defaults;
+          test_case "gemini auth env key paths" `Quick
+            test_gemini_auth_env_key_paths;
           test_case "gemini vertex adc" `Quick test_gemini_direct_auth_vertex_adc;
           test_case "gemini api key fallback" `Quick
             test_gemini_direct_auth_api_key_fallback;

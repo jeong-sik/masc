@@ -146,10 +146,19 @@ let local_cascade_prefix = cn_llama
 let make_local_label (model_id : string) : string =
   local_cascade_prefix ^ ":" ^ model_id
 
-(** Map OAS Provider_config.provider_kind to MASC adapter canonical_name.
-    Note: OpenAI_compat maps to codex-api (cloud); llama (local) uses the
-    same provider_kind but is identified by endpoint, not by this function. *)
+(** SSOT string form of OAS [provider_kind].
+    This must stay aligned with [Provider_config.string_of_provider_kind]. *)
 let string_of_provider_kind
+    : Llm_provider.Provider_config.provider_kind -> string
+  = Llm_provider.Provider_config.string_of_provider_kind
+
+(** Map OAS [provider_kind] to the MASC adapter canonical name when adapter
+    semantics are required.
+
+    Note: [OpenAI_compat] maps to the direct cloud adapter [codex-api]; local
+    llama remains an [OpenAI_compat] kind but is identified by endpoint rather
+    than by this helper. *)
+let adapter_canonical_name_of_provider_kind
     : Llm_provider.Provider_config.provider_kind -> string
   = function
   | Anthropic -> cn_claude_api
@@ -1036,7 +1045,7 @@ let endpoint_url_of_adapter (adapter : adapter) = adapter.endpoint_url
     to parse the prefix directly from the original provider:model label. This
     helper should be used only when a best-effort cascade prefix is sufficient. *)
 let cascade_prefix_of_provider_kind (kind : Llm_provider.Provider_config.provider_kind) : string =
-  let cn = string_of_provider_kind kind in
+  let cn = adapter_canonical_name_of_provider_kind kind in
   match resolve_direct_adapter cn with
   | Some a -> a.cascade_prefix
   | None -> cn
@@ -1090,16 +1099,17 @@ let auth_detail_of_provider provider =
 
 let auth_env_keys_of_provider_kind (kind : Llm_provider.Provider_config.provider_kind) : string list =
   match kind with
-  | Llm_provider.Provider_config.Anthropic -> [ "ANTHROPIC_API_KEY" ]
   | Llm_provider.Provider_config.Kimi -> kimi_api_key_envs
-  | Llm_provider.Provider_config.Glm -> [ "ZAI_API_KEY" ]
-  | Llm_provider.Provider_config.OpenAI_compat -> [ "OPENAI_API_KEY" ]
   | Llm_provider.Provider_config.Gemini -> [ google_cloud_project_env; google_cloud_location_env ]
-  | Llm_provider.Provider_config.Gemini_cli
-  | Llm_provider.Provider_config.Kimi_cli
-  | Llm_provider.Provider_config.Claude_code
-  | Llm_provider.Provider_config.Codex_cli
-  | Llm_provider.Provider_config.Ollama -> []
+  | _ ->
+      let adapter_name = adapter_canonical_name_of_provider_kind kind in
+      match resolve_direct_adapter adapter_name with
+      | Some adapter -> (
+          match adapter.auth_mode with
+          | Api_key env_name -> [ env_name ]
+          | No_auth | Cli_cached_login | Vertex_adc _ ->
+              Option.to_list (Llm_provider.Provider_config.default_api_key_env kind))
+      | None -> Option.to_list (Llm_provider.Provider_config.default_api_key_env kind)
 
 let docker_auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.t) : string list =
   match cfg.kind with

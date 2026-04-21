@@ -17,12 +17,7 @@ let task_is_linked_to_goal (task : Types.task) goal_id =
   with Not_found -> false
 
 let task_assignee (task : Types.task) : string option =
-  match task.task_status with
-  | Types.Claimed { assignee; _ } -> Some assignee
-  | Types.InProgress { assignee; _ } -> Some assignee
-  | Types.AwaitingVerification { assignee; _ } -> Some assignee
-  | Types.Done { assignee; _ } -> Some assignee
-  | Types.Todo | Types.Cancelled _ -> None
+  Types.task_assignee_of_status task.task_status
 
 let task_status_label (task : Types.task) : string =
   match task.task_status with
@@ -34,10 +29,7 @@ let task_status_label (task : Types.task) : string =
   | Types.Cancelled _ -> "cancelled"
 
 let task_is_terminal (task : Types.task) : bool =
-  match task.task_status with
-  | Types.Done _ | Types.Cancelled _ -> true
-  | Types.Todo | Types.Claimed _ | Types.InProgress _
-  | Types.AwaitingVerification _ -> false
+  Types.task_status_is_terminal task.task_status
 
 let task_is_done (task : Types.task) : bool =
   match task.task_status with

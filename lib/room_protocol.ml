@@ -41,12 +41,7 @@ let tasks ?status_filter ?(include_done = false) ?(include_cancelled = false)
              | `Active -> true))
 
 let task_assignee (task : Types.task) =
-  match task.task_status with
-  | Claimed { assignee; _ }
-  | InProgress { assignee; _ }
-  | Done { assignee; _ } ->
-      Some assignee
-  | _ -> None
+  Types.task_assignee_of_status task.task_status
 
 let agents ?status_filter config =
   let agents =

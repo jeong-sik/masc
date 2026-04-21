@@ -380,14 +380,10 @@ let social_edges_json ~limit sources =
 (* ================================================================ *)
 
 let active_task_count tasks =
-  tasks
-  |> List.fold_left
-       (fun acc (task : Types.task) ->
-         match task.task_status with
-         | Types.Done _ | Types.Cancelled _ -> acc
-         | Types.Todo | Types.Claimed _ | Types.InProgress _
-         | Types.AwaitingVerification _ -> acc + 1)
-       0
+  List.length (List.filter
+    (fun (task : Types.task) ->
+       not (Types.task_status_is_terminal task.task_status))
+    tasks)
 
 let stagnation_score ~active_agents ~active_tasks ~idle_signal_count
     ~heartbeat_count ~blocker_count =

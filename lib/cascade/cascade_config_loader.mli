@@ -10,6 +10,14 @@
     Cached with mtime-based hot-reload. *)
 val load_json : string -> (Yojson.Safe.t, string) result
 
+(** Drop the cached JSON entry for one [cascade.json] path.
+
+    Intended for in-process editors/tests that overwrite the file and need
+    the next read to bypass the previous mtime cache entry immediately.
+
+    @since 0.160.1 *)
+val invalidate_cache_entry : string -> unit
+
 (** A model entry with an optional weight for weighted cascade selection.
     Weight defaults to 1 when not specified.
     @since 0.137.0

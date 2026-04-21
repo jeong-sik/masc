@@ -1816,6 +1816,12 @@ export interface CascadeConfigResponse {
   keeper_profiles: CascadeKeeperProfile[]
 }
 
+export interface CascadeRawConfigResponse {
+  updated_at: string
+  config_path: string | null
+  raw_json: string
+}
+
 export interface CascadeHealthProvider {
   provider_key: string
   success_rate: number
@@ -1841,6 +1847,18 @@ export interface CascadeHealthResponse {
 
 export function fetchCascadeConfig(opts?: AbortableRequestOptions): Promise<CascadeConfigResponse> {
   return get<CascadeConfigResponse>('/api/v1/cascade/config', { signal: opts?.signal })
+}
+
+export function fetchCascadeConfigRaw(
+  opts?: AbortableRequestOptions,
+): Promise<CascadeRawConfigResponse> {
+  return get<CascadeRawConfigResponse>('/api/v1/cascade/config/raw', {
+    signal: opts?.signal,
+  })
+}
+
+export function updateCascadeConfigRaw(raw_json: string): Promise<CascadeConfigResponse> {
+  return post<CascadeConfigResponse>('/api/v1/cascade/config/raw', { raw_json })
 }
 
 export function fetchCascadeHealth(opts?: AbortableRequestOptions): Promise<CascadeHealthResponse> {

@@ -43,6 +43,38 @@
     @since 0.6.0 *)
 val config_json : unit -> Yojson.Safe.t
 
+(** Raw [cascade.json] payload from the active resolved config root.
+
+    Shape:
+    {[
+      {
+        "updated_at": "2026-04-21T08:15:00Z",
+        "config_path": "/path/to/cascade.json" | null,
+        "raw_json": "{ ... }\n"
+      }
+    ]}
+
+    [config_path] is the resolver's candidate [cascade.json] path under the
+    active config root, even when the file does not exist yet. In that missing
+    file case, [raw_json] defaults to ["{}\n"] so operators can bootstrap a
+    config from the dashboard editor.
+
+    @since 0.160.1 *)
+val raw_config_json : unit -> Yojson.Safe.t
+
+(** Validate and persist a raw [cascade.json] payload to the resolved config
+    root, then return the refreshed {!config_json} snapshot.
+
+    The input must be syntactically valid JSON. Semantic validation is not a
+    hard gate here: invalid cascades are still written and surfaced through the
+    returned validation metadata so the runtime can continue serving the last
+    known good snapshot. Missing parent directories are created on demand under
+    the active config root.
+
+    @since 0.160.1 *)
+val save_raw_config_json :
+  string -> (Yojson.Safe.t, string) result
+
 (** Build the per-keeper row of [keeper_profiles] without a full
     {!Keeper_registry.registry_entry}. Exposed so the raw-vs-canonical
     contract can be exercised in tests directly.

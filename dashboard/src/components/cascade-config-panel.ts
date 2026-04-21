@@ -16,7 +16,9 @@ import {
   fetchCascadeStrategyTrace,
   fetchCascadeSlo,
   fetchCascadeConfig,
+  fetchCascadeConfigRaw,
   fetchCascadeHealth,
+  updateCascadeConfigRaw,
   type CascadeCandidate,
   type CascadeCapacityEventKind,
   type CascadeClientCapacityEntry,
@@ -29,6 +31,7 @@ import {
   type CascadeInvalidProfile,
   type CascadeKeeperProfile,
   type CascadeProfile,
+  type CascadeRawConfigResponse,
   type CascadeStrategyTraceEvent,
   type CascadeStrategyTraceKind,
   type CascadeStrategyTraceResponse,
@@ -46,6 +49,7 @@ import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/as
 
 interface CascadeData {
   config: CascadeConfigResponse | null
+  rawConfig: CascadeRawConfigResponse | null
   health: CascadeHealthResponse | null
   capacity: CascadeClientCapacityResponse | null
   history: CascadeClientCapacityHistoryResponse | null
@@ -55,15 +59,16 @@ interface CascadeData {
 
 async function loadCascadeData(resource: ManagedAsyncResource<CascadeData>) {
   await resource.load(async (signal) => {
-    const [config, health, capacity, history, trace, slo] = await Promise.all([
+    const [config, rawConfig, health, capacity, history, trace, slo] = await Promise.all([
       fetchCascadeConfig({ signal }),
+      fetchCascadeConfigRaw({ signal }),
       fetchCascadeHealth({ signal }),
       fetchCascadeClientCapacity({ signal }),
       fetchCascadeClientCapacityHistory({ limit: 50, signal }),
       fetchCascadeStrategyTrace({ limit: 50, signal }),
       fetchCascadeSlo({ signal }),
     ])
-    return { config, health, capacity, history, trace, slo }
+    return { config, rawConfig, health, capacity, history, trace, slo }
   })
 }
 
@@ -718,6 +723,153 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
   `
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function validateJsonText(raw: string): string | null {
+  try {
+    JSON.parse(raw)
+    return null
+  } catch (error) {
+    return errorMessage(error)
+  }
+}
+
+function CascadeRawConfigEditor({
+  raw,
+  onRefresh,
+}: {
+  raw: CascadeRawConfigResponse | null
+  onRefresh: () => Promise<void>
+}) {
+  const editorText = useSignal(raw?.raw_json ?? '')
+  const editorDirty = useSignal(false)
+  const saving = useSignal(false)
+  const saveMessage = useSignal<string | null>(null)
+
+  useEffect(() => {
+    if (!raw || editorDirty.value) return
+    editorText.value = raw.raw_json
+  }, [raw?.config_path, raw?.updated_at, raw?.raw_json])
+
+  const syntaxError = validateJsonText(editorText.value)
+  const saveDisabled = saving.value
+    || !editorDirty.value
+    || raw?.config_path == null
+    || syntaxError != null
+
+  const handleReset = () => {
+    editorText.value = raw?.raw_json ?? ''
+    editorDirty.value = false
+    saveMessage.value = 'Latest disk snapshot restored in the editor.'
+  }
+
+  const handleSave = async (event: Event) => {
+    event.preventDefault()
+    const currentSyntaxError = validateJsonText(editorText.value)
+    if (currentSyntaxError) {
+      saveMessage.value = `Invalid JSON: ${currentSyntaxError}`
+      return
+    }
+    if (raw?.config_path == null) {
+      saveMessage.value = 'Resolved cascade config path is unavailable.'
+      return
+    }
+    saving.value = true
+    saveMessage.value = null
+    try {
+      await updateCascadeConfigRaw(editorText.value)
+      editorDirty.value = false
+      saveMessage.value = 'Saved. Refreshing cascade snapshot...'
+      try {
+        await onRefresh()
+        saveMessage.value = 'Saved successfully.'
+      } catch (error) {
+        saveMessage.value = `Saved, but refresh failed: ${errorMessage(error)}`
+      }
+    } catch (error) {
+      saveMessage.value = `Failed to save: ${errorMessage(error)}`
+    } finally {
+      saving.value = false
+    }
+  }
+
+  return html`
+    <${Card} title="Raw cascade.json Editor">
+      <div class="flex flex-col gap-3 p-4">
+        <p class="text-sm text-[var(--text-muted)]">
+          dashboard에서 바로 <code>cascade.json</code> 을 수정합니다.
+          저장 경로는
+          <code>${raw?.config_path ?? 'unresolved'}</code>
+          이고, 저장 후 current cascade snapshot 을 다시 읽습니다.
+        </p>
+        <p class="text-xs text-[var(--text-muted)]">
+          semantics invalid profile 도 저장은 허용됩니다. 저장 후 위의 validation banner 에서 invalid/last-known-good 상태를 바로 확인하면 됩니다.
+        </p>
+
+        <form class="flex flex-col gap-3" onSubmit=${handleSave}>
+          <textarea
+            class="h-96 w-full rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-2 font-mono text-xs text-[var(--text-strong)]"
+            spellcheck="false"
+            value=${editorText.value}
+            onInput=${(event: Event) => {
+              editorText.value = (event.target as HTMLTextAreaElement).value
+              editorDirty.value = true
+              saveMessage.value = null
+            }}
+          />
+
+          <div class="flex items-center gap-3 flex-wrap text-xs">
+            <span class=${editorDirty.value ? 'text-[var(--warn)]' : 'text-[var(--text-muted)]'}>
+              ${editorDirty.value ? 'unsaved changes' : 'in sync with disk'}
+            </span>
+            ${syntaxError
+              ? html`<span class="text-[var(--bad-light)]">syntax: ${syntaxError}</span>`
+              : html`<span class="text-[var(--ok)]">syntax: valid JSON</span>`}
+            ${saveMessage.value
+              ? html`
+                <span class=${saveMessage.value.startsWith('Failed') || saveMessage.value.startsWith('Invalid')
+                  ? 'text-[var(--bad-light)]'
+                  : 'text-[var(--text-muted)]'}
+                >
+                  ${saveMessage.value}
+                </span>
+              `
+              : null}
+          </div>
+
+          <div class="flex items-center gap-3 flex-wrap">
+            <button
+              type="submit"
+              class="rounded border border-[var(--accent-primary)] bg-[var(--accent-primary)] px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+              disabled=${saveDisabled}
+            >
+              ${saving.value ? 'Saving...' : 'Save cascade.json'}
+            </button>
+            <button
+              type="button"
+              class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50"
+              onClick=${handleReset}
+              disabled=${saving.value || !editorDirty.value}
+            >
+              Reset to disk
+            </button>
+            <button
+              type="button"
+              class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50"
+              onClick=${() => void onRefresh()}
+              disabled=${saving.value}
+            >
+              Reload snapshot
+            </button>
+          </div>
+        </form>
+      </div>
+    <//>
+  `
+}
+
 export function CascadeConfigPanel() {
   const traceSearch = useSignal('')
   const healthSearch = useSignal('')
@@ -735,6 +887,7 @@ export function CascadeConfigPanel() {
 
   const current = resource.state.value
   const config = current.data?.config ?? null
+  const rawConfig = current.data?.rawConfig ?? null
   const health = current.data?.health ?? null
   const capacity = current.data?.capacity ?? null
   const history = current.data?.history ?? null
@@ -758,7 +911,7 @@ export function CascadeConfigPanel() {
 
       ${current.error ? html`<${ErrorState} message=${current.error} />` : null}
 
-      ${current.loading && !config && !health
+      ${current.loading && !config && !rawConfig && !health
         ? html`<${LoadingState}>cascade snapshot 불러오는 중...<//>`
         : null}
 
@@ -804,6 +957,11 @@ export function CascadeConfigPanel() {
             })()
           : null}
       <//>
+
+      <${CascadeRawConfigEditor}
+        raw=${rawConfig}
+        onRefresh=${() => loadCascadeData(resource)}
+      />
 
       <${Card} title="Health Tracker">
         ${health

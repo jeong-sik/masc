@@ -6,6 +6,10 @@
 
 open Tool_inline_dispatch_types
 
+type tool_result = Tool_inline_dispatch_types.tool_result
+
+type context = Tool_inline_dispatch_types.context
+
 (** Argument extraction helpers bound to ctx.arguments. *)
 let arg_get_string ctx key default =
   Safe_ops.json_string ~default key ctx.arguments

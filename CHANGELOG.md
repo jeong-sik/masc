@@ -28,7 +28,7 @@
 
 ### Changed
 
-- **OAS pin bump → `main@3dabe7a8` (`v0.164.0`).** `scripts/oas-agent-sdk-pin.sh` now follows `jeong-sik/oas` `main` instead of the older `codex/glm-coding-plan-cascade` branch, and the dependency floor in `dune-project` / `masc_mcp.opam` is raised to `agent_sdk >= 0.164.0`. This matches the upstream version-boundary fix where current OAS `main` advertises `0.164.0` after post-`0.163.0` public API growth, so downstream pin metadata no longer conflates branch head with the older `0.163.0` line.
+- **OAS pin bump → `main@fde9cae9` (`v0.164.0`).** `scripts/oas-agent-sdk-pin.sh` now tracks the post-`oas#1125` / `oas#1126` `jeong-sik/oas` `main` head while keeping the dependency floor in `dune-project` / `masc_mcp.opam` at `agent_sdk >= 0.164.0`. This pulls in first-class Kimi Code provider support (`kimi` direct + `kimi_cli`) plus the new provider-kind SSOT helpers without a version-floor ratchet because upstream still declares `0.164.0`.
 
 ### Added
 

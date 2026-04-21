@@ -31,18 +31,18 @@ let resolve_api_key_env = Cascade_config_loader.resolve_api_key_env
 let default_registry = Llm_provider.Provider_registry.default ()
 
 (* Build headers list with Authorization when api_key is present.
-   Anthropic uses x-api-key; OpenAI-compat (including GLM) uses Bearer. *)
+   Anthropic/Kimi use x-api-key; OpenAI-compat (including GLM) uses Bearer. *)
 let headers_with_auth ~(kind : Llm_provider.Provider_config.provider_kind) ~api_key =
   let base = [("Content-Type", "application/json")] in
   if api_key = "" then base
   else match kind with
-    | Anthropic ->
+    | Anthropic | Kimi ->
         ("x-api-key", api_key)
         :: ("anthropic-version", "2023-06-01")
         :: base
     | OpenAI_compat | Ollama | Gemini | Glm | Claude_code ->
         ("Authorization", "Bearer " ^ api_key) :: base
-    | Gemini_cli | Codex_cli -> []
+    | Gemini_cli | Kimi_cli | Codex_cli -> []
 
 (* ── String splitting helper ──────────────────────────────── *)
 

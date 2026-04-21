@@ -91,12 +91,16 @@ let cn_ollama = "ollama"
 let cn_claude = "claude"
 let cn_codex = "codex"
 let cn_gemini = "gemini"
+let cn_kimi = "kimi"
 let cn_claude_api = "claude-api"
 let cn_codex_api = "codex-api"
 let cn_gemini_api = "gemini-api"
+let cn_kimi_api = "kimi-api"
 let cn_glm = "glm-api"
 let cn_glm_coding_plan = "glm-coding-plan"
 let cn_openrouter = "openrouter"
+
+let kimi_api_key_envs = [ "KIMI_API_KEY_SB"; "KIMI_API_KEY" ]
 
 let display_provider_name label =
   match normalize_label label with
@@ -129,6 +133,9 @@ let glm_api_url () =
 let glm_coding_api_url () =
   env_url_or ~env:"ZAI_CODING_BASE_URL" ~default:Llm_provider.Zai_catalog.coding_base_url
 
+let kimi_api_url () =
+  env_url_or ~env:"KIMI_BASE_URL" ~default:"https://api.kimi.com/coding"
+
 (** SSOT cascade prefix for local llama-server instances.
     All cascade label construction for local models must use this constant.
     Format: [local_cascade_prefix ^ ":" ^ model_id] → e.g. "llama:qwen3.5" *)
@@ -146,10 +153,12 @@ let string_of_provider_kind
     : Llm_provider.Provider_config.provider_kind -> string
   = function
   | Anthropic -> cn_claude_api
+  | Kimi -> cn_kimi_api
   | OpenAI_compat -> cn_codex_api
   | Ollama -> cn_ollama
   | Gemini -> cn_gemini_api
   | Gemini_cli -> cn_gemini
+  | Kimi_cli -> cn_kimi
   | Glm -> cn_glm
   | Claude_code -> cn_claude
   | Codex_cli -> cn_codex
@@ -219,6 +228,17 @@ let direct_adapters =
       default_model_id = Some "auto";
     };
     {
+      canonical_name = cn_kimi;
+      runtime_kind = Cli_agent;
+      auth_mode = Cli_cached_login;
+      aliases = [ cn_kimi; "kimi-cli"; "kimi_cli" ];
+      spawn_key = Some "kimi";
+      cascade_prefix = "kimi_cli";
+      default_voice = None;
+      endpoint_url = None;
+      default_model_id = Some "auto";
+    };
+    {
       canonical_name = cn_claude_api;
       runtime_kind = Direct_api;
       auth_mode = Api_key "ANTHROPIC_API_KEY";
@@ -254,6 +274,17 @@ let direct_adapters =
       cascade_prefix = "gemini";
       default_voice = Some "Roger";
       endpoint_url = None; (** Resolved dynamically for Gemini *)
+      default_model_id = Some "auto";
+    };
+    {
+      canonical_name = cn_kimi_api;
+      runtime_kind = Direct_api;
+      auth_mode = Api_key "KIMI_API_KEY_SB";
+      aliases = [ cn_kimi_api; "moonshot" ];
+      spawn_key = None;
+      cascade_prefix = "kimi";
+      default_voice = None;
+      endpoint_url = Some (kimi_api_url ());
       default_model_id = Some "auto";
     };
     {
@@ -738,7 +769,10 @@ let provider_auth_available label =
            (match adapter.spawn_key with
             | Some cmd -> Llm_provider.Provider_registry.command_in_path cmd
             | None -> false)
-       | Api_key env_name -> env_present env_name
+       | Api_key env_name ->
+           env_present env_name
+           || (adapter.canonical_name = cn_kimi_api
+               && List.exists env_present kimi_api_key_envs)
        | Vertex_adc { project_env; _ } -> env_present project_env)
   | None -> false
 
@@ -746,7 +780,11 @@ let provider_auth_available label =
     adapter config, instead of hardcoding vendor env var names. *)
 let auth_kind_for_canonical_name name =
   match resolve_direct_adapter name with
-  | Some adapter -> string_of_auth_mode adapter.auth_mode
+  | Some adapter ->
+      if adapter.canonical_name = cn_kimi_api then
+        "api_key:KIMI_API_KEY_SB|KIMI_API_KEY"
+      else
+        string_of_auth_mode adapter.auth_mode
   | None -> "unknown"
 
 let bare_ollama_migration_message () =
@@ -1012,7 +1050,12 @@ let auth_detail_of_provider provider =
       supports_run = false; endpoint_url = None;
       note = Some "Unsupported provider" }
   | Some adapter ->
-    let auth_kind_base = string_of_auth_mode adapter.auth_mode in
+    let auth_kind_base =
+      if adapter.canonical_name = cn_kimi_api then
+        "api_key:KIMI_API_KEY_SB|KIMI_API_KEY"
+      else
+        string_of_auth_mode adapter.auth_mode
+    in
     if adapter.canonical_name = cn_gemini_api then
       match resolve_gemini_direct_auth () with
       | Gemini_api_key ->
@@ -1048,10 +1091,12 @@ let auth_detail_of_provider provider =
 let auth_env_keys_of_provider_kind (kind : Llm_provider.Provider_config.provider_kind) : string list =
   match kind with
   | Llm_provider.Provider_config.Anthropic -> [ "ANTHROPIC_API_KEY" ]
+  | Llm_provider.Provider_config.Kimi -> kimi_api_key_envs
   | Llm_provider.Provider_config.Glm -> [ "ZAI_API_KEY" ]
   | Llm_provider.Provider_config.OpenAI_compat -> [ "OPENAI_API_KEY" ]
   | Llm_provider.Provider_config.Gemini -> [ google_cloud_project_env; google_cloud_location_env ]
   | Llm_provider.Provider_config.Gemini_cli
+  | Llm_provider.Provider_config.Kimi_cli
   | Llm_provider.Provider_config.Claude_code
   | Llm_provider.Provider_config.Codex_cli
   | Llm_provider.Provider_config.Ollama -> []
@@ -1067,12 +1112,13 @@ let docker_auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.
 
 let all_auth_env_keys () : string list =
   direct_adapters
-  |> List.filter_map (fun (adapter : adapter) ->
+  |> List.concat_map (fun (adapter : adapter) ->
     match adapter.auth_mode with
-    | No_auth -> None
-    | Cli_cached_login -> None
-    | Api_key env_name -> Some env_name
-    | Vertex_adc _ -> None)
+    | No_auth -> []
+    | Cli_cached_login -> []
+    | Api_key _ when adapter.canonical_name = cn_kimi_api -> kimi_api_key_envs
+    | Api_key env_name -> [ env_name ]
+    | Vertex_adc _ -> [])
   |> List.sort_uniq String.compare
 
 (* is_spawnable removed: use is_spawnable_agent directly. *)

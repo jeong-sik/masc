@@ -159,9 +159,9 @@ let validation_summary_json ?config_path () =
         ("invalid_profiles", `List []);
       ]
   | Ok
-      (Cascade_catalog_runtime.Serving_valid_subset
+      (Cascade_catalog_runtime.Validated_with_rejections
          { rejected_update; _ }) ->
-      of_rejection ~status:"serving_valid_subset" rejected_update
+      of_rejection ~status:"validated" rejected_update
   | Ok
       (Cascade_catalog_runtime.Serving_last_known_good
          { rejected_update; _ }) ->
@@ -260,30 +260,30 @@ let raw_config_json () =
 let save_raw_config_json raw_json =
   Config_dir_resolver.log_warnings ~context:"DashboardCascade" ();
   let config_path = Config_dir_resolver.cascade_path_candidate () in
-      let parse_result =
-        try
-          ignore (Yojson.Safe.from_string raw_json);
-          Ok ()
-        with
-        | Yojson.Json_error msg ->
-            Error (Printf.sprintf "invalid JSON: %s" msg)
-        | exn ->
-            Error (Printf.sprintf "failed to parse JSON: %s" (Printexc.to_string exn))
-      in
-      match parse_result with
-      | Error _ as err -> err
-      | Ok () -> (
-          try
-            Fs_compat.mkdir_p (Filename.dirname config_path);
-            match Fs_compat.save_file_atomic config_path raw_json with
-            | Error msg -> Error msg
-            | Ok () ->
-                Cascade_config_loader.invalidate_cache_entry config_path;
-                Cascade_catalog_runtime.invalidate_path config_path;
-                Ok (config_json ())
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | Sys_error msg -> Error msg)
+  let parse_result =
+    try
+      ignore (Yojson.Safe.from_string raw_json);
+      Ok ()
+    with
+    | Yojson.Json_error msg ->
+        Error (Printf.sprintf "invalid JSON: %s" msg)
+    | exn ->
+        Error (Printf.sprintf "failed to parse JSON: %s" (Printexc.to_string exn))
+  in
+  match parse_result with
+  | Error _ as err -> err
+  | Ok () -> (
+      try
+        Fs_compat.mkdir_p (Filename.dirname config_path);
+        match Fs_compat.save_file_atomic config_path raw_json with
+        | Error msg -> Error msg
+        | Ok () ->
+            Cascade_config_loader.invalidate_cache_entry config_path;
+            Cascade_catalog_runtime.invalidate_path config_path;
+            Ok (config_json ())
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | Sys_error msg -> Error msg)
 
 (* ── Health projection ──────────────────────────────── *)
 

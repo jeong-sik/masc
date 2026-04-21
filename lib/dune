@@ -503,6 +503,7 @@
    keeper_behavioral_regime_observer
    keeper_campaign_fsm
    keeper_unified_prompt
+   keeper_unified_metrics
    keeper_unified_turn
 
    keeper_prompt_names

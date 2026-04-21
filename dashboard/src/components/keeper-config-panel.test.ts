@@ -27,7 +27,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   return {
     name: 'keeper-sangsu',
     execution_scope: 'workspace',
-    sandbox_profile: 'legacy_local',
+    sandbox_profile: 'local',
     network_mode: 'inherit',
     shared_memory_scope: 'disabled',
     sandbox_last_error: null,
@@ -222,12 +222,12 @@ describe('filterHookSlots', () => {
 })
 
 describe('sandbox coerce helpers', () => {
-  it('coerceSandboxProfile maps docker_hardened, falls back to legacy_local otherwise', () => {
-    expect(coerceSandboxProfile('docker_hardened')).toBe('docker_hardened')
-    expect(coerceSandboxProfile('legacy_local')).toBe('legacy_local')
-    expect(coerceSandboxProfile('something_else')).toBe('legacy_local')
-    expect(coerceSandboxProfile(undefined)).toBe('legacy_local')
-    expect(coerceSandboxProfile('')).toBe('legacy_local')
+  it('coerceSandboxProfile maps docker, falls back to local otherwise', () => {
+    expect(coerceSandboxProfile('docker')).toBe('docker')
+    expect(coerceSandboxProfile('local')).toBe('local')
+    expect(coerceSandboxProfile('something_else')).toBe('local')
+    expect(coerceSandboxProfile(undefined)).toBe('local')
+    expect(coerceSandboxProfile('')).toBe('local')
   })
 
   it('coerceNetworkMode maps none, falls back to inherit otherwise', () => {
@@ -249,7 +249,7 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
   const base: KeeperConfig = {
     name: 'test-keeper',
     execution_scope: 'workspace',
-    sandbox_profile: 'legacy_local',
+    sandbox_profile: 'local',
     network_mode: 'inherit',
     shared_memory_scope: 'disabled',
     allowed_paths: [],
@@ -285,12 +285,12 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
 describe('initRuntimeDraftFromConfig — sandbox fields', () => {
   it('preserves sandbox fields from config', () => {
     const c = makeKeeperConfigForSandbox({
-      sandbox_profile: 'docker_hardened',
+      sandbox_profile: 'docker',
       network_mode: 'none',
       shared_memory_scope: 'room',
     })
     const draft = initRuntimeDraftFromConfig(c)
-    expect(draft.sandbox_profile).toBe('docker_hardened')
+    expect(draft.sandbox_profile).toBe('docker')
     expect(draft.network_mode).toBe('none')
     expect(draft.shared_memory_scope).toBe('room')
   })
@@ -302,7 +302,7 @@ describe('initRuntimeDraftFromConfig — sandbox fields', () => {
       shared_memory_scope: undefined,
     })
     const draft = initRuntimeDraftFromConfig(c)
-    expect(draft.sandbox_profile).toBe('legacy_local')
+    expect(draft.sandbox_profile).toBe('local')
     expect(draft.network_mode).toBe('inherit')
     expect(draft.shared_memory_scope).toBe('disabled')
   })
@@ -314,7 +314,7 @@ describe('initRuntimeDraftFromConfig — sandbox fields', () => {
       shared_memory_scope: 'shared',
     })
     const draft = initRuntimeDraftFromConfig(c)
-    expect(draft.sandbox_profile).toBe('legacy_local')
+    expect(draft.sandbox_profile).toBe('local')
     expect(draft.network_mode).toBe('inherit')
     expect(draft.shared_memory_scope).toBe('disabled')
   })
@@ -327,7 +327,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
 
   it('omits sandbox fields when unchanged', () => {
     const c = makeKeeperConfigForSandbox({
-      sandbox_profile: 'legacy_local',
+      sandbox_profile: 'local',
       network_mode: 'inherit',
       shared_memory_scope: 'disabled',
     })
@@ -338,9 +338,9 @@ describe('buildRuntimePayload — sandbox diffing', () => {
   })
 
   it('emits sandbox_profile when toggled on', () => {
-    const c = makeKeeperConfigForSandbox({ sandbox_profile: 'legacy_local' })
-    const payload = buildRuntimePayload(draftFrom(c, { sandbox_profile: 'docker_hardened' }), c)
-    expect(payload.sandbox_profile).toBe('docker_hardened')
+    const c = makeKeeperConfigForSandbox({ sandbox_profile: 'local' })
+    const payload = buildRuntimePayload(draftFrom(c, { sandbox_profile: 'docker' }), c)
+    expect(payload.sandbox_profile).toBe('docker')
   })
 
   it('emits network_mode when switched to none', () => {
@@ -357,24 +357,24 @@ describe('buildRuntimePayload — sandbox diffing', () => {
 
   it('emits all three when switching to hardened+none+room in one save', () => {
     const c = makeKeeperConfigForSandbox({
-      sandbox_profile: 'legacy_local',
+      sandbox_profile: 'local',
       network_mode: 'inherit',
       shared_memory_scope: 'disabled',
     })
     const payload = buildRuntimePayload(draftFrom(c, {
-      sandbox_profile: 'docker_hardened',
+      sandbox_profile: 'docker',
       network_mode: 'none',
       shared_memory_scope: 'room',
     }), c)
-    expect(payload.sandbox_profile).toBe('docker_hardened')
+    expect(payload.sandbox_profile).toBe('docker')
     expect(payload.network_mode).toBe('none')
     expect(payload.shared_memory_scope).toBe('room')
   })
 
-  it('treats unknown backend sandbox value as legacy_local for diffing', () => {
+  it('treats unknown backend sandbox value as local for diffing', () => {
     const c = makeKeeperConfigForSandbox({ sandbox_profile: 'some_future_profile' })
     const draft = draftFrom(c)
-    expect(draft.sandbox_profile).toBe('legacy_local')
+    expect(draft.sandbox_profile).toBe('local')
     const payload = buildRuntimePayload(draft, c)
     expect(payload.sandbox_profile).toBeUndefined()
   })
@@ -443,7 +443,7 @@ describe('KeeperConfigPanel', () => {
   it('patches sandbox runtime controls from the dashboard panel', async () => {
     mocks.patchKeeperConfig.mockResolvedValueOnce(
       makeKeeperConfig({
-        sandbox_profile: 'docker_hardened',
+        sandbox_profile: 'docker',
         network_mode: 'none',
         shared_memory_scope: 'room',
       }),
@@ -460,7 +460,7 @@ describe('KeeperConfigPanel', () => {
     expect(networkMode).not.toBeNull()
     expect(sharedMemory).not.toBeNull()
 
-    sandboxProfile!.value = 'docker_hardened'
+    sandboxProfile!.value = 'docker'
     sandboxProfile!.dispatchEvent(new Event('change', { bubbles: true }))
     await flush()
 
@@ -482,14 +482,14 @@ describe('KeeperConfigPanel', () => {
     expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
       'keeper-sangsu',
       expect.objectContaining({
-        sandbox_profile: 'docker_hardened',
+        sandbox_profile: 'docker',
         network_mode: 'none',
         shared_memory_scope: 'room',
       }),
     )
   })
 
-  it('shows the sandbox preflight guide when docker_hardened is selected', async () => {
+  it('shows the sandbox preflight guide when docker is selected', async () => {
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
     await flush()
@@ -499,7 +499,7 @@ describe('KeeperConfigPanel', () => {
     const sandboxProfile = container.querySelector('select[aria-label="sandbox_profile"]') as HTMLSelectElement | null
     expect(sandboxProfile).not.toBeNull()
 
-    sandboxProfile!.value = 'docker_hardened'
+    sandboxProfile!.value = 'docker'
     sandboxProfile!.dispatchEvent(new Event('change', { bubbles: true }))
     await flush()
 

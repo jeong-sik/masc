@@ -20,7 +20,7 @@ let tool_preset_enum_strings =
     Keeper_types_profile fails the test instead of silently dropping
     from the JSON Schema. *)
 let sandbox_profile_enum_strings =
-  [ "legacy_local"; "docker_hardened"; "docker_with_git" ]
+  [ "local"; "docker" ]
 let network_mode_enum_strings =
   [ "none"; "inherit" ]
 let shared_memory_scope_enum_strings =
@@ -281,12 +281,12 @@ let keeper_schemas : tool_schema list = [
         ("sandbox_profile", `Assoc [
           ("type", `String "string");
           ("enum", `List (List.map (fun s -> `String s) sandbox_profile_enum_strings));
-          ("description", `String "Filesystem/process sandbox profile. 'legacy_local' keeps the current local execution model. 'docker_hardened' runs keeper_bash in an ephemeral hardened Docker container rooted at the keeper playground.");
+          ("description", `String "Filesystem/process sandbox profile. 'local' runs on the host process with filesystem scoped to the keeper playground. 'docker' runs keeper_bash in an ephemeral hardened Docker container; the internal git/gh dispatcher upgrades network+credential mounts per-command.");
         ]);
         ("network_mode", `Assoc [
           ("type", `String "string");
           ("enum", `List (List.map (fun s -> `String s) network_mode_enum_strings));
-          ("description", `String "Network policy associated with the sandbox profile. 'none' is valid only with sandbox_profile='docker_hardened'.");
+          ("description", `String "Network policy associated with the sandbox profile. 'none' is valid only with sandbox_profile='docker'.");
         ]);
         ("shared_memory_scope", `Assoc [
           ("type", `String "string");

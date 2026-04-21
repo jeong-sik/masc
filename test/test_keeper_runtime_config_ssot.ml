@@ -184,7 +184,7 @@ let test_sandbox_policy_resync () =
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
 {|[keeper]
 goal = "test"
-sandbox_profile = "docker_hardened"
+sandbox_profile = "docker"
 network_mode = "none"
 shared_memory_scope = "room"
 |};
@@ -197,7 +197,7 @@ shared_memory_scope = "room"
             ("name", `String keeper_name);
             ("agent_name", `String keeper_name);
             ("trace_id", `String "trace-sandbox-policy-resync");
-            ("sandbox_profile", `String "legacy_local");
+            ("sandbox_profile", `String "local");
             ("network_mode", `String "inherit");
             ("shared_memory_scope", `String "disabled");
           ])
@@ -211,7 +211,7 @@ shared_memory_scope = "room"
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
-      check string "sandbox_profile" "docker_hardened"
+      check string "sandbox_profile" "docker"
         (Keeper_types.sandbox_profile_to_string updated.sandbox_profile);
       check string "network_mode" "none"
         (Keeper_types.network_mode_to_string updated.network_mode);

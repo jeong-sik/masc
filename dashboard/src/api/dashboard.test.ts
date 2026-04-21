@@ -173,7 +173,7 @@ describe('fetchKeeperConfig', () => {
     const rawResponse = {
       name: 'keeper-sangsu',
       execution_scope: 'workspace',
-      sandbox_profile: 'docker_hardened',
+      sandbox_profile: 'docker',
       network_mode: 'none',
       shared_memory_scope: 'room',
       sandbox_last_error: 'sandbox docker exec failed',
@@ -319,7 +319,7 @@ describe('fetchKeeperConfig', () => {
     const result = await fetchKeeperConfig('keeper-sangsu')
 
     expect(result.allowed_paths).toEqual(['/tmp/workspace'])
-    expect(result.sandbox_profile).toBe('docker_hardened')
+    expect(result.sandbox_profile).toBe('docker')
     expect(result.network_mode).toBe('none')
     expect(result.shared_memory_scope).toBe('room')
     expect(result.sandbox_last_error).toBe('sandbox docker exec failed')

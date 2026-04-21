@@ -103,13 +103,13 @@ let test_hardened_with_both_flags_routes () =
     true
     (Keeper_docker_read.should_route_read ~meta)
 
-let test_docker_with_git_also_routes () =
+let test_docker_git_creds_routes () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
   let meta =
     make_meta ~name:"poe" ~sandbox:Keeper_types.Docker
   in
-  Alcotest.(check bool) "docker_with_git also routes" true
+  Alcotest.(check bool) "docker git-creds also routes" true
     (Keeper_docker_read.should_route_read ~meta)
 
 (* ── container_path_of_host pure mapping ─────────────────────────── *)
@@ -400,8 +400,8 @@ let () =
             test_hardened_with_only_docker_read_does_not_route;
           Alcotest.test_case "hardened + both flags routes" `Quick
             test_hardened_with_both_flags_routes;
-          Alcotest.test_case "docker_with_git also routes" `Quick
-            test_docker_with_git_also_routes;
+          Alcotest.test_case "docker git-creds also routes" `Quick
+            test_docker_git_creds_routes;
         ] );
       ( "container_path_of_host",
         [

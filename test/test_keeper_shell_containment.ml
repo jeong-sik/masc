@@ -313,7 +313,7 @@ let test_hardened_flag_on_allows_inside_playground () =
   Alcotest.(check bool) "playground-internal cat not blocked" false
     (blocked_by_symmetric_sandbox raw)
 
-let test_docker_with_git_also_contained () =
+let test_docker_git_creds_contained () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   setup ~keeper_name:"poe" ~sandbox:Keeper_types.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
@@ -322,7 +322,7 @@ let test_docker_with_git_also_contained () =
     Keeper_exec_shell.handle_keeper_shell ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])
   in
-  Alcotest.(check bool) "docker_with_git also contained" true
+  Alcotest.(check bool) "docker git-creds also contained" true
     (blocked_by_symmetric_sandbox raw)
 
 let test_gh_binds_repo_from_active_task_worktree () =
@@ -428,8 +428,8 @@ let () =
             test_hardened_flag_on_blocks_find_outside;
           Alcotest.test_case "hardened flag on allows inside playground"
             `Quick test_hardened_flag_on_allows_inside_playground;
-          Alcotest.test_case "docker_with_git also contained" `Quick
-            test_docker_with_git_also_contained;
+          Alcotest.test_case "docker git-creds also contained" `Quick
+            test_docker_git_creds_contained;
           Alcotest.test_case "gh binds repo from active task worktree" `Quick
             test_gh_binds_repo_from_active_task_worktree;
           Alcotest.test_case "gh missing worktree returns typed error" `Quick

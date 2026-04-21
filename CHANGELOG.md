@@ -28,6 +28,18 @@
 
 ### Changed
 
+- **Keeper sandbox profile collapsed to `Local | Docker` 2-mode.** The three
+  external variants (`Legacy_local`, `Docker_hardened`, `Docker_with_git`) are
+  replaced by two: `local` runs on the host with filesystem scoped to the
+  keeper playground; `docker` runs in the hardened container. Git credential
+  mounting is no longer a separate profile — when `sandbox_profile=docker` and
+  `keeper_bash` cmd starts with `git`/`gh`, the dispatcher transparently
+  upgrades to network=inherit with gh/git credential mounts for that one
+  command. Response JSON carries `git_creds_enabled` so observers can tell
+  which path fired. Old profile strings still load via a compat layer that
+  warns and maps (`legacy_local→local`, `docker_hardened|docker_with_git→docker`);
+  the compat arm is removable once state JSON/TOML files are migrated. See
+  RFC-0006 §8 Addendum.
 - **OAS pin bump → `main@3dabe7a8` (`v0.164.0`).** `scripts/oas-agent-sdk-pin.sh` now follows `jeong-sik/oas` `main` instead of the older `codex/glm-coding-plan-cascade` branch, and the dependency floor in `dune-project` / `masc_mcp.opam` is raised to `agent_sdk >= 0.164.0`. This matches the upstream version-boundary fix where current OAS `main` advertises `0.164.0` after post-`0.163.0` public API growth, so downstream pin metadata no longer conflates branch head with the older `0.163.0` line.
 
 ### Added

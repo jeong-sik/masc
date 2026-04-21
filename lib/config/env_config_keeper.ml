@@ -532,7 +532,7 @@ module DockerPlayground = struct
 end
 
 module KeeperSandbox = struct
-  (** Ephemeral Docker image used by sandbox_profile=docker_hardened.
+  (** Ephemeral Docker image used by sandbox_profile=docker.
       Must contain bash and the CLI tools the keeper needs. *)
   let docker_image () =
     get_string
@@ -573,8 +573,9 @@ module KeeperSandbox = struct
   let with_git_dispatch_enabled () =
     get_bool ~default:true "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
 
-  (** Host path mounted read-only at /root/.config/gh inside docker_with_git.
-      Default $HOME/.config/gh. Empty string disables the mount (no gh auth). *)
+  (** Host path mounted read-only at /root/.config/gh inside the docker
+      git-creds execution path. Default $HOME/.config/gh. Empty string
+      disables the mount (no gh auth). *)
   let gh_creds_host_path () =
     let default =
       try Filename.concat (Sys.getenv "HOME") ".config/gh"
@@ -595,8 +596,9 @@ module KeeperSandbox = struct
   let ssh_dir_host_path () =
     get_string ~default:"" "MASC_KEEPER_SANDBOX_SSH_DIR"
 
-  (** Optional GitHub token forwarded as GH_TOKEN env into docker_with_git
-      containers. Defaults to the host GH_TOKEN; empty disables forwarding. *)
+  (** Optional GitHub token forwarded as GH_TOKEN env into the docker
+      git-creds execution path. Defaults to the host GH_TOKEN; empty
+      disables forwarding. *)
   let gh_token () =
     let default =
       try Sys.getenv "GH_TOKEN"

@@ -277,8 +277,8 @@ spawn 시 인자로 직접 설정하는 필드.
 | `auto_handoff` | bool | `true` | context 초과 시 자동 handoff | `masc_keeper_up`의 `auto_handoff` 인자 |
 | `handoff_threshold` | float | `0.85` | handoff 트리거 context_ratio | `masc_keeper_up`의 `handoff_threshold` 인자 |
 | `verify` | bool | `false` | 저비용 모델로 action 검증 | `masc_keeper_up`의 `verify` 인자 |
-| `sandbox_profile` | string | `legacy_local` | 실행 샌드박스 프로필 (`legacy_local`, `docker_hardened`, `docker_with_git`) | `masc_keeper_up`의 `sandbox_profile` 인자 |
-| `network_mode` | string | `inherit` 또는 `none` | 샌드박스 네트워크 정책. `docker_hardened`는 기본 `none`, `docker_with_git`는 기본 `inherit` | `masc_keeper_up`의 `network_mode` 인자 |
+| `sandbox_profile` | string | `local` | 실행 샌드박스 프로필 (`local`, `docker`). `docker` 프로필은 git/gh 명령에 대해서만 런타임에 network+credential 마운트를 올린다. | `masc_keeper_up`의 `sandbox_profile` 인자 |
+| `network_mode` | string | `inherit` 또는 `none` | 샌드박스 네트워크 정책. `docker`는 기본 `none` (git/gh 명령은 dispatch가 자동으로 `inherit`으로 승격) | `masc_keeper_up`의 `network_mode` 인자 |
 | `shared_memory_scope` | string | `disabled` | typed shared-memory lane. `room`이면 keeper-authorized `masc_team_memory_*`를 flattened `default` namespace에서 사용 가능 | `masc_keeper_up`의 `shared_memory_scope` 인자 |
 
 ### 3.1.1 Sandbox Core V1 사용법
@@ -290,7 +290,7 @@ spawn 시 인자로 직접 설정하는 필드.
   "name": "analyst",
   "goal": "Review incoming issues and prepare safe changes",
   "execution_scope": "workspace",
-  "sandbox_profile": "docker_hardened",
+  "sandbox_profile": "docker",
   "network_mode": "none",
   "shared_memory_scope": "room",
   "tool_access": { "kind": "preset", "preset": "coding", "also_allow": ["masc_team_memory_read", "masc_team_memory_write", "masc_team_memory_search"] }
@@ -300,9 +300,8 @@ spawn 시 인자로 직접 설정하는 필드.
 의미:
 
 - keeper shell write는 자기 sandbox 안에서만 허용된다. 현재 local/docker backend의 디스크 구현은 `.masc/playground/<keeper>/`이지만 keeper-facing 경로는 `.` / `mind` / `repos`이다.
-- `docker_hardened`는 keeper_bash를 ephemeral Docker sandbox로 실행한다. 기본은 read-only rootfs, tmpfs `/tmp`, `cap-drop=ALL`, `no-new-privileges`, `pids-limit`, memory limit, private sandbox mount, network=`none`이다.
-- `docker_with_git`은 `docker_hardened`의 보안 가드를 모두 유지하면서 `--network bridge` + `~/.config/gh` / `~/.gitconfig` read-only mount + `GH_TOKEN` env forward 를 추가한다. git/gh CLI 가 컨테이너 안에서 동작한다. `~/.ssh` mount 는 `MASC_KEEPER_SANDBOX_SSH_DIR` 환경 변수로 명시 opt-in 시에만 활성화된다.
-- 기본 dispatch: keeper의 `sandbox_profile` 이 `docker_hardened` 여도 `keeper_bash` 의 cmd 가 `git` 또는 `gh` 로 시작하면 자동으로 `docker_with_git` 으로 라우팅된다 (`MASC_KEEPER_SANDBOX_GIT_DISPATCH=false` 로 비활성화 가능). 즉 git/gh 외 모든 명령은 여전히 network=none 의 hardened 컨테이너에서 실행된다.
+- `sandbox_profile=docker`는 keeper_bash를 ephemeral Docker sandbox로 실행한다. 기본은 read-only rootfs, tmpfs `/tmp`, `cap-drop=ALL`, `no-new-privileges`, `pids-limit`, memory limit, private sandbox mount, network=`none`이다.
+- git/gh 명령 dispatch: `sandbox_profile=docker` 에서 `keeper_bash` 의 cmd 가 `git` 또는 `gh` 로 시작하면 자동으로 network=bridge + `~/.config/gh` / `~/.gitconfig` read-only mount + `GH_TOKEN` env forward 가 켜진다. 한 명령에만 적용되며, git/gh 외 모든 명령은 여전히 network=none 의 hardened 컨테이너에서 실행된다. 응답 JSON에는 `git_creds_enabled: true` 필드가 함께 들어온다. 비활성화하려면 `MASC_KEEPER_SANDBOX_GIT_DISPATCH=false`. `~/.ssh` mount 는 `MASC_KEEPER_SANDBOX_SSH_DIR` 환경 변수로 명시 opt-in 시에만 활성화된다.
 - `shared_memory_scope=room`은 공용 writable mount가 아니라 flattened `default` namespace typed lane만 연다.
 - team memory 도구는 keeper tool surface에도 노출되어야 하므로 preset에 없다면 `tool_also_allow` 또는 `tool_access.also_allow`로 명시해야 한다.
 
@@ -319,7 +318,7 @@ guardrail:
 - path traversal / symlink escape는 차단된다.
 - secret-like payload는 team memory write에서 차단된다.
 - team memory는 keeper context에서만 허용되고, `room`은 항상 `default`여야 한다.
-- `legacy_local`는 `network_mode=none`을 허용하지 않는다. `none`은 `docker_hardened`와 함께 써야 한다.
+- `sandbox_profile=local`은 `network_mode=none`을 허용하지 않는다. `none`은 `sandbox_profile=docker`와 함께 써야 한다.
 
 ### 3.1.2 Legendary Bash 도구 표면
 

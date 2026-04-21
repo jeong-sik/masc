@@ -72,12 +72,11 @@ let handle_keeper_fs_read
   | Error e -> error_json e
   | Ok target ->
     (* RFC-0006 Phase B-1: symmetric sandbox guard. For hardened keepers
-       (sandbox_profile=docker_hardened/docker_with_git) with
-       MASC_KEEPER_SYMMETRIC_SANDBOX=true, the resolver-level allowed_paths
-       check is augmented by a strict playground-bundle containment so the
-       host FS cannot leak through keeper_fs_read while keeper_bash is
-       container-isolated. No-op for legacy keepers and when the env flag
-       is off. *)
+       (sandbox_profile=docker) with MASC_KEEPER_SYMMETRIC_SANDBOX=true,
+       the resolver-level allowed_paths check is augmented by a strict
+       playground-bundle containment so the host FS cannot leak through
+       keeper_fs_read while keeper_bash is container-isolated. No-op
+       for local keepers and when the env flag is off. *)
     (match Keeper_sandbox_containment.check_read_target ~config ~meta ~target with
      | Error e -> error_json ~fields:[ "path", `String target ] e
      | Ok () ->

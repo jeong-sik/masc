@@ -126,7 +126,7 @@ let test_hardened_with_flag_on_allows_inside_playground () =
        (Keeper_sandbox_containment.check_read_target
           ~config ~meta ~target:inside))
 
-let test_docker_with_git_also_contained () =
+let test_docker_git_creds_contained () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_tmp_base @@ fun base ->
   let config = Coord.default_config base in
@@ -173,8 +173,8 @@ let () =
             test_hardened_with_flag_on_blocks_outside;
           Alcotest.test_case "hardened with flag on allows inside playground"
             `Quick test_hardened_with_flag_on_allows_inside_playground;
-          Alcotest.test_case "docker_with_git also contained" `Quick
-            test_docker_with_git_also_contained;
+          Alcotest.test_case "docker git-creds also contained" `Quick
+            test_docker_git_creds_contained;
           Alcotest.test_case "lookalike sibling path blocked" `Quick
             test_path_just_outside_playground_blocked;
         ] );

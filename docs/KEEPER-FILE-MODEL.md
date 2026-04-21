@@ -140,8 +140,8 @@ persona_name = "analyst"
 | `persona_name` | Required | Which persona blueprint this keeper uses | Primary field in the target model. |
 | `name` | Optional | Override keeper handle | Usually redundant because filename is already the keeper name. |
 | `execution_scope` | Optional | Deployment-specific execution scope | Only when different from the default. |
-| `sandbox_profile` | Optional | Process/filesystem sandbox profile | `docker_hardened` is the new hardened path; `docker_with_git` is the git/gh-enabled hardened variant; `legacy_local` preserves current behavior. |
-| `network_mode` | Optional | Sandbox network policy | `docker_hardened` defaults to `none`; `docker_with_git` and `legacy_local` default to `inherit`. |
+| `sandbox_profile` | Optional | Process/filesystem sandbox profile | `local` runs on the host with fs scoped to the keeper playground. `docker` runs in a hardened ephemeral container; the internal git/gh dispatcher upgrades network+credential mounts per-command. |
+| `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none` (promoted to `inherit` for git/gh commands by the dispatcher); `local` defaults to `inherit`. |
 | `shared_memory_scope` | Optional | Typed shared-memory lane | `room` enables keeper-authorized `masc_team_memory_*` exchange on the flattened `default` namespace. |
 | `cascade_name` | Optional | Deployment-specific cascade override | Only when not using the default cascade. |
 | `tool_preset` | Optional | Deployment-specific policy override | Only when intentionally overriding persona default. |
@@ -179,7 +179,7 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 | Field | Allowed values |
 | --- | --- |
 | `execution_scope` | `observe_only`, `workspace`, `local` |
-| `sandbox_profile` | `legacy_local`, `docker_hardened`, `docker_with_git` |
+| `sandbox_profile` | `local`, `docker` |
 | `network_mode` | `none`, `inherit` |
 | `shared_memory_scope` | `disabled`, `room` |
 | `tool_preset` | `minimal`, `social`, `messaging`, `coding`, `research`, `delivery`, `full` |
@@ -192,7 +192,7 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 [keeper]
 persona_name = "analyst"
 execution_scope = "workspace"
-sandbox_profile = "docker_hardened"
+sandbox_profile = "docker"
 network_mode = "none"
 shared_memory_scope = "room"
 tool_also_allow = ["masc_team_memory_read", "masc_team_memory_write", "masc_team_memory_search"]
@@ -203,7 +203,7 @@ Operational intent:
 - private writable lane: the keeper sandbox. The current local/docker storage path is `.masc/playground/<keeper>/...`, but keeper tools should use sandbox-relative paths such as `repos/<repo>` and `mind/<file>`.
 - shared lane: `masc_team_memory_read/write/search` only, on flattened `room="default"`
 - no arbitrary shared writable shell directory
-- `docker_hardened`는 `allowed_paths=["*"]`를 거부하고, private sandbox root 밖 경로도 허용하지 않는다
+- `sandbox_profile=docker`는 `allowed_paths=["*"]`를 거부하고, private sandbox root 밖 경로도 허용하지 않는다
 
 ### Removed / forbidden fields (hard-rejected)
 

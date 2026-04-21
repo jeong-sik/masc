@@ -277,7 +277,7 @@ let make_config () =
   ensure_dir (Filename.concat tmp ".masc");
   (tmp, Coord.default_config tmp)
 
-let make_docker_hardened_meta name =
+let make_docker_meta name =
   let json =
     `Assoc
       [
@@ -285,13 +285,13 @@ let make_docker_hardened_meta name =
         ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-" ^ name));
         ("goal", `String "sandbox test");
-        ("sandbox_profile", `String "docker_hardened");
+        ("sandbox_profile", `String "docker");
         ("network_mode", `String "none");
       ]
   in
   match Keeper_types.meta_of_json json with
   | Ok meta -> meta
-  | Error err -> Alcotest.fail ("make_docker_hardened_meta failed: " ^ err)
+  | Error err -> Alcotest.fail ("make_docker_meta failed: " ^ err)
 
 let with_eio_fs f =
   Eio_main.run @@ fun env ->
@@ -311,12 +311,12 @@ let parse_error_field raw =
   |> Json.member "error"
   |> Json.to_string_option
 
-let test_docker_hardened_blocks_nested_docker_command () =
+let test_docker_blocks_nested_docker_command () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_docker_hardened_meta "docker-nested" in
+  let meta = make_docker_meta "docker-nested" in
   let raw =
     Keeper_exec_shell.handle_keeper_bash
       ~config ~meta
@@ -330,12 +330,12 @@ let test_docker_hardened_blocks_nested_docker_command () =
   | None ->
       Alcotest.fail ("expected error json, got: " ^ raw)
 
-let test_docker_hardened_blocks_docker_socket_reference () =
+let test_docker_blocks_docker_socket_reference () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_docker_hardened_meta "docker-sock" in
+  let meta = make_docker_meta "docker-sock" in
   let raw =
     Keeper_exec_shell.handle_keeper_bash
       ~config ~meta
@@ -349,12 +349,12 @@ let test_docker_hardened_blocks_docker_socket_reference () =
   | None ->
       Alcotest.fail ("expected error json, got: " ^ raw)
 
-let test_docker_hardened_missing_seccomp_profile_fails_closed () =
+let test_docker_missing_seccomp_profile_fails_closed () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_docker_hardened_meta "missing-seccomp" in
+  let meta = make_docker_meta "missing-seccomp" in
   with_boot_override "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
     (Filename.concat base_path "missing-seccomp-profile.json")
     (fun () ->
@@ -541,12 +541,12 @@ let () =
     ]);
     ("edge", [
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;
-      Alcotest.test_case "docker_hardened blocks nested docker command" `Quick
-        test_docker_hardened_blocks_nested_docker_command;
-      Alcotest.test_case "docker_hardened blocks docker socket reference" `Quick
-        test_docker_hardened_blocks_docker_socket_reference;
-      Alcotest.test_case "docker_hardened missing seccomp fails closed" `Quick
-        test_docker_hardened_missing_seccomp_profile_fails_closed;
+      Alcotest.test_case "docker blocks nested docker command" `Quick
+        test_docker_blocks_nested_docker_command;
+      Alcotest.test_case "docker blocks docker socket reference" `Quick
+        test_docker_blocks_docker_socket_reference;
+      Alcotest.test_case "docker missing seccomp fails closed" `Quick
+        test_docker_missing_seccomp_profile_fails_closed;
     ]);
     ("readonly_hints", [
       Alcotest.test_case "doubled playground prefix auto-recovers" `Quick

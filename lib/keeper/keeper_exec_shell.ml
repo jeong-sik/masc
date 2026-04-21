@@ -484,12 +484,13 @@ let command_uses_nested_container_runtime cmd =
 let ensure_keeper_sandbox_runtime ~timeout_sec =
   Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec
 
-(* docker_with_git: leading-token check used by per-command dispatch.
-   Returns true when the trimmed command's first whitespace-separated word
-   is exactly "git" or "gh" (case-sensitive — both lowercase by convention).
-   Subcommand args do not change the dispatch decision; e.g. "git push --force"
-   still dispatches to docker_with_git, but the existing destructive-bash
-   guard (Worker_dev_tools.is_destructive_bash_operation) already rejects
+(* Docker git-creds dispatch: leading-token check used by per-command
+   dispatch.  Returns true when the trimmed command's first whitespace-
+   separated word is exactly "git" or "gh" (case-sensitive — both
+   lowercase by convention).  Subcommand args do not change the dispatch
+   decision; e.g. "git push --force" still takes the git-creds path, but
+   the existing destructive-bash guard
+   (Worker_dev_tools.is_destructive_bash_operation) already rejects
    force-push before this point. *)
 let cmd_targets_git_or_gh cmd =
   let trimmed = String.trim cmd in
@@ -525,7 +526,7 @@ let run_docker_with_git_bash
     sandbox_error_json "keeper sandbox docker image is not configured"
   else if command_uses_nested_container_runtime cmd then
     sandbox_error_json
-      "docker_with_git blocks nested container runtimes and host socket references"
+      "sandbox_profile=docker+git_creds blocks nested container runtimes and host socket references"
   else
     match ensure_keeper_sandbox_runtime ~timeout_sec with
     | Error err -> sandbox_error_json err
@@ -603,7 +604,8 @@ let run_docker_with_git_bash
          [
            ("ok", `Bool (st = Unix.WEXITED 0));
            ("cwd", `String cwd);
-           ("sandbox_profile", `String "docker_with_git");
+           ("sandbox_profile", `String "docker");
+           ("git_creds_enabled", `Bool true);
            ("network_mode", `String "bridge");
            ("effective_sandbox_image", `String image);
            ("status", Keeper_alerting_path.process_status_to_json st);
@@ -626,7 +628,7 @@ let run_docker_hardened_bash
     sandbox_error_json "keeper sandbox docker image is not configured"
   else if command_uses_nested_container_runtime cmd then
     sandbox_error_json
-      "docker_hardened blocks nested container runtimes and host socket references"
+      "sandbox_profile=docker blocks nested container runtimes and host socket references"
   else
     match ensure_keeper_sandbox_runtime ~timeout_sec with
     | Error err -> sandbox_error_json err
@@ -694,7 +696,8 @@ let run_docker_hardened_bash
          [
            ("ok", `Bool (st = Unix.WEXITED 0));
            ("cwd", `String cwd);
-           ("sandbox_profile", `String "docker_hardened");
+           ("sandbox_profile", `String "docker");
+           ("git_creds_enabled", `Bool false);
            ("network_mode", `String (network_mode_to_string network_mode));
            ("effective_sandbox_image", `String image);
            ("status", Keeper_alerting_path.process_status_to_json st);

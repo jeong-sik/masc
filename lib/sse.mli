@@ -26,8 +26,10 @@ type client = {
   last_seen_at : float Atomic.t;
 }
 
+module SMap : Map.S with type key = String.t
+
 type client_registry_state = {
-  entries : client Map.Make(String).t;
+  entries : client SMap.t;
   count : int;
 }
 
@@ -42,6 +44,8 @@ type session_snapshot = {
 (** {1 Constants} *)
 
 val max_clients : int
+val max_buffer_size : int
+val buffer_ttl_seconds : float
 
 (** {1 Session Management} *)
 
@@ -89,6 +93,7 @@ val remove_external_subscribers : string list -> string list * int
 (** {1 Event Buffer} *)
 
 val get_events_after : int -> string list
+val buffer_event : int -> string -> unit
 val cleanup_expired_events : unit -> int
 
 (** {1 Snapshots} *)
@@ -100,3 +105,5 @@ val session_kind_to_string : session_kind -> string
 
 val register_commit_test_hook : (unit -> unit) option Atomic.t
 val buffer_commit_test_hook : (unit -> unit) option Atomic.t
+val clients : client_registry_state Atomic.t
+val event_buffer : (int * string * float) list Atomic.t

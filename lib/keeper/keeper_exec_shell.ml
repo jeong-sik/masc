@@ -1462,18 +1462,20 @@ let handle_keeper_shell
   let docker_read_error ~target msg =
     error_json ~fields:[ "op", `String op; "path", `String target ] msg
   in
-  let run_readonly_in_docker ~target ~command_argv ~max_bytes ~timeout_sec =
+  let run_readonly_in_docker ?(ok_exit_codes = [ 0 ]) ~target ~command_argv
+      ~max_bytes ~timeout_sec () =
     match
       Keeper_docker_read.container_path_of_host ~config ~meta ~host_path:target
     with
     | Error e -> Error (docker_read_error ~target e)
     | Ok cpath -> (
         match
-          Keeper_docker_read.run_command_in_container ~config ~meta
-            ~command_argv:(command_argv cpath) ~max_bytes ~timeout_sec ()
+          Keeper_docker_read.run_command_in_container_with_status
+            ~ok_exit_codes ~config ~meta ~command_argv:(command_argv cpath)
+            ~max_bytes ~timeout_sec ()
         with
         | Error msg -> Error (docker_read_error ~target msg)
-        | Ok out -> Ok out)
+        | Ok payload -> Ok payload)
   in
   match op with
   | "pwd" ->
@@ -1627,11 +1629,13 @@ let handle_keeper_shell
              run_readonly_in_docker ~target
                ~command_argv:(fun cpath ->
                  base_argv @ type_argv @ glob_argv @ [ pattern; cpath ])
+               ~ok_exit_codes:[ 0; 1 ]
                ~max_bytes:1_000_000
                ~timeout_sec:read_timeout_sec
+               ()
            with
            | Error response -> response
-           | Ok out ->
+           | Ok (st, out) ->
              Yojson.Safe.to_string
                (`Assoc
                    [ "ok", `Bool true
@@ -1639,9 +1643,7 @@ let handle_keeper_shell
                    ; "path", `String target
                    ; "pattern", `String pattern
                    ; "via", `String "docker"
-                   ; "status",
-                     Keeper_alerting_path.process_status_to_json
-                       (Unix.WEXITED 0)
+                   ; "status", Keeper_alerting_path.process_status_to_json st
                    ; "matches", lines_to_json ~limit out
                    ]))
         else
@@ -1704,9 +1706,10 @@ let handle_keeper_shell
                    "-not"; "-path"; "*/.masc/*" ])
                ~max_bytes:1_000_000
                ~timeout_sec:read_timeout_sec
+               ()
            with
            | Error response -> response
-           | Ok out ->
+           | Ok (st, out) ->
              Yojson.Safe.to_string
                (`Assoc
                    [ "ok", `Bool true
@@ -1714,9 +1717,7 @@ let handle_keeper_shell
                    ; "path", `String target
                    ; "name", `String name_pattern
                    ; "via", `String "docker"
-                   ; "status",
-                     Keeper_alerting_path.process_status_to_json
-                       (Unix.WEXITED 0)
+                   ; "status", Keeper_alerting_path.process_status_to_json st
                    ; "files", lines_to_json ~limit out
                    ]))
         else
@@ -1745,12 +1746,13 @@ let handle_keeper_shell
          (match
             run_readonly_in_docker ~target
               ~command_argv:(fun cpath ->
-                [ "/usr/bin/head"; "-n"; string_of_int n; cpath ])
+                [ "head"; "-n"; string_of_int n; cpath ])
               ~max_bytes:1_000_000
               ~timeout_sec:read_timeout_sec
+              ()
           with
           | Error response -> response
-          | Ok out ->
+          | Ok (st, out) ->
             Yojson.Safe.to_string
               (`Assoc
                   [ "ok", `Bool true
@@ -1758,9 +1760,7 @@ let handle_keeper_shell
                   ; "path", `String target
                   ; "lines", `Int n
                   ; "via", `String "docker"
-                  ; "status",
-                    Keeper_alerting_path.process_status_to_json
-                      (Unix.WEXITED 0)
+                  ; "status", Keeper_alerting_path.process_status_to_json st
                   ; "content", `String out
                   ]))
        else
@@ -1786,12 +1786,13 @@ let handle_keeper_shell
          (match
             run_readonly_in_docker ~target
               ~command_argv:(fun cpath ->
-                [ "/usr/bin/tail"; "-n"; string_of_int n; cpath ])
+                [ "tail"; "-n"; string_of_int n; cpath ])
               ~max_bytes:1_000_000
               ~timeout_sec:read_timeout_sec
+              ()
           with
           | Error response -> response
-          | Ok out ->
+          | Ok (st, out) ->
             Yojson.Safe.to_string
               (`Assoc
                   [ "ok", `Bool true
@@ -1799,9 +1800,7 @@ let handle_keeper_shell
                   ; "path", `String target
                   ; "lines", `Int n
                   ; "via", `String "docker"
-                  ; "status",
-                    Keeper_alerting_path.process_status_to_json
-                      (Unix.WEXITED 0)
+                  ; "status", Keeper_alerting_path.process_status_to_json st
                   ; "content", `String out
                   ]))
        else
@@ -1825,12 +1824,13 @@ let handle_keeper_shell
        if Keeper_docker_read.should_route_read ~meta then
          (match
             run_readonly_in_docker ~target
-              ~command_argv:(fun cpath -> [ "/usr/bin/wc"; "-l"; cpath ])
+              ~command_argv:(fun cpath -> [ "wc"; "-l"; cpath ])
               ~max_bytes:4096
               ~timeout_sec:read_timeout_sec
+              ()
           with
           | Error response -> response
-          | Ok out ->
+          | Ok (st, out) ->
             Yojson.Safe.to_string
               (Exec_core.process_result_json
                  ~artifact_policy:Exec_core.Inline_only
@@ -1845,7 +1845,7 @@ let handle_keeper_shell
                      "path", `String target;
                      "via", `String "docker";
                    ]
-                 ~status:(Unix.WEXITED 0)
+                 ~status:st
                  ~output:out
                  ()))
        else
@@ -1864,20 +1864,19 @@ let handle_keeper_shell
                   "-not"; "-path"; "*/_build/*" ])
               ~max_bytes:1_000_000
               ~timeout_sec:read_timeout_sec
+              ()
           with
-          | Error response -> response
-          | Ok out ->
-            Yojson.Safe.to_string
-              (`Assoc
-                  [ "ok", `Bool true
-                  ; "op", `String op
-                  ; "path", `String target
-                  ; "via", `String "docker"
-                  ; "status",
-                    Keeper_alerting_path.process_status_to_json
-                      (Unix.WEXITED 0)
-                  ; "entries", lines_to_json ~limit out
-                  ]))
+           | Error response -> response
+           | Ok (st, out) ->
+             Yojson.Safe.to_string
+               (`Assoc
+                   [ "ok", `Bool true
+                   ; "op", `String op
+                   ; "path", `String target
+                   ; "via", `String "docker"
+                   ; "status", Keeper_alerting_path.process_status_to_json st
+                   ; "entries", lines_to_json ~limit out
+                   ]))
        else
          let st, out =
            Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec

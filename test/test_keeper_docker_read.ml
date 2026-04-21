@@ -41,6 +41,11 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out oc) @@ fun () ->
+  output_string oc content
+
 let make_meta ~name ~sandbox =
   let json =
     `Assoc
@@ -117,6 +122,19 @@ let setup_config name =
     make_meta ~name ~sandbox:Keeper_types.Docker_hardened
   in
   base, config, meta
+
+let with_fake_docker script f =
+  let dir = temp_dir () in
+  let docker_path = Filename.concat dir "docker" in
+  write_file docker_path script;
+  Unix.chmod docker_path 0o755;
+  let path =
+    match Sys.getenv_opt "PATH" with
+    | Some prior when String.trim prior <> "" -> dir ^ ":" ^ prior
+    | _ -> dir
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) @@ fun () ->
+  with_env "PATH" path f
 
 let test_container_path_root_maps () =
   let base, config, meta = setup_config "minjae" in
@@ -265,6 +283,110 @@ let test_run_command_empty_image_errors () =
          in
          loop 0)
 
+let fake_docker_exit_1_script =
+  "#!/bin/sh\n\
+if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"run\" ]; then\n\
+  printf 'no matches\\n'\n\
+  exit 1\n\
+fi\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
+let fake_docker_echo_command_script =
+  "#!/bin/sh\n\
+if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" != \"run\" ]; then\n\
+  printf 'unexpected docker invocation\\n' >&2\n\
+  exit 2\n\
+fi\n\
+shift\n\
+while [ \"$#\" -gt 0 ]; do\n\
+  if [ \"$1\" = \"alpine:test\" ]; then\n\
+    shift\n\
+    break\n\
+  fi\n\
+  shift\n\
+done\n\
+printf '%s\\n' \"$*\"\n\
+exit 0\n"
+
+let test_run_command_nonzero_exit_errors_by_default () =
+  with_fake_docker fake_docker_exit_1_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  match
+    Keeper_docker_read.run_command_in_container_with_status ~config ~meta
+      ~command_argv:[ "rg"; "needle"; "/home/keeper/playground/demo.txt" ]
+      ~max_bytes:4096 ~timeout_sec:5.0 ()
+  with
+  | Ok (_st, _out) ->
+      Alcotest.fail "expected exit=1 docker command to error by default"
+  | Error msg ->
+      Alcotest.(check bool) "error preserves exit code" true
+        (let needle = "exit=1" in
+         let nlen = String.length needle in
+         let mlen = String.length msg in
+         let rec loop i =
+           if i + nlen > mlen then false
+           else if String.sub msg i nlen = needle then true
+           else loop (i + 1)
+         in
+         loop 0)
+
+let test_run_command_allows_configured_nonzero_exit () =
+  with_fake_docker fake_docker_exit_1_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  match
+    Keeper_docker_read.run_command_in_container_with_status
+      ~ok_exit_codes:[ 0; 1 ] ~config ~meta
+      ~command_argv:[ "rg"; "needle"; "/home/keeper/playground/demo.txt" ]
+      ~max_bytes:4096 ~timeout_sec:5.0 ()
+  with
+  | Error msg ->
+      Alcotest.failf "expected exit=1 to be allowed for rg, got %s" msg
+  | Ok (st, out) ->
+      Alcotest.(check (pair string int)) "preserves rg no-match status"
+        ("exit", 1)
+        (match st with
+         | Unix.WEXITED code -> ("exit", code)
+         | Unix.WSIGNALED code -> ("signaled", code)
+         | Unix.WSTOPPED code -> ("stopped", code));
+      Alcotest.(check string) "preserves stdout on allowed exit"
+        "no matches\n" out
+
+let test_run_command_preserves_bare_command_argv () =
+  with_fake_docker fake_docker_echo_command_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  match
+    Keeper_docker_read.run_command_in_container_with_status ~config ~meta
+      ~command_argv:
+        [ "head"; "-n"; "1"; "/home/keeper/playground/minjae/mind/demo.txt" ]
+      ~max_bytes:4096 ~timeout_sec:5.0 ()
+  with
+  | Error msg ->
+      Alcotest.failf "expected bare command argv echo, got %s" msg
+  | Ok (st, out) ->
+      Alcotest.(check (pair string int)) "echo script exits cleanly"
+        ("exit", 0)
+        (match st with
+         | Unix.WEXITED code -> ("exit", code)
+         | Unix.WSIGNALED code -> ("signaled", code)
+         | Unix.WSTOPPED code -> ("stopped", code));
+      Alcotest.(check string) "preserves bare head argv"
+        "head -n 1 /home/keeper/playground/minjae/mind/demo.txt\n" out
+
 let () =
   Alcotest.run "Keeper_docker_read"
     [
@@ -303,5 +425,11 @@ let () =
             test_run_command_empty_argv_errors;
           Alcotest.test_case "empty image configuration errors" `Quick
             test_run_command_empty_image_errors;
+          Alcotest.test_case "nonzero exit errors by default" `Quick
+            test_run_command_nonzero_exit_errors_by_default;
+          Alcotest.test_case "configured nonzero exit is allowed" `Quick
+            test_run_command_allows_configured_nonzero_exit;
+          Alcotest.test_case "preserves bare command argv" `Quick
+            test_run_command_preserves_bare_command_argv;
         ] );
     ]

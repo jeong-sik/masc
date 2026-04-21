@@ -320,7 +320,11 @@ Tier는 mode/category와 독립적으로 적용되는 추가 필터 레이어다
 
 ### 7.1 config/cascade.json 구조
 
-JSON 파일로 CASCADE별 모델 순서를 정의한다. 키 패턴: `{cascade_name}_models`.
+JSON 파일로 cascade별 설정을 정의한다. 기본 키 패턴은
+`{cascade_name}_models`이며, catalog discovery는
+`Cascade_config_loader`가 알고 있는 recognized per-cascade 키 집합
+(`_models`, `_temperature`, `_max_tokens`, `_strategy`, ...)을 기준으로
+이뤄진다.
 
 ```json
 {
@@ -357,6 +361,16 @@ JSON 파일로 CASCADE별 모델 순서를 정의한다. 키 패턴: `{cascade_n
 ### 7.3 Per-cascade 추론 파라미터
 
 `{cascade_name}_temperature`, `{cascade_name}_max_tokens` 키로 cascade별 온도와 토큰 수를 오버라이드할 수 있다. 미설정 시 호출자 기본값 사용.
+
+### 7.3.1 Keeper assignability metadata
+
+`{cascade_name}_keeper_assignable`는 dashboard/cascade manager가 keeper에
+할당 가능한 profile인지 명시하는 bool metadata다. 기본값은 `true`.
+
+- `true` 또는 미설정: keeper assignment dropdown에 노출 가능
+- `false`: system-only profile. cascade manager에는 보이지만 keeper에는 할당 불가
+
+예: `tool_rerank_keeper_assignable = false`
 
 ### 7.4 Pluggable Strategy (Phase A~B, #7606/#7611)
 

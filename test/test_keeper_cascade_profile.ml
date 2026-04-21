@@ -22,6 +22,24 @@ let active_names =
     "tool_use_strict";
     "resilient_breaker" ]
 
+let write_file path contents =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc contents)
+
+let with_temp_config contents f =
+  let dir = Filename.temp_file "keeper-cascade-profile-" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let path = Filename.concat dir "cascade.json" in
+  write_file path contents;
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.remove path with _ -> ());
+      try Unix.rmdir dir with _ -> ())
+    (fun () -> f path)
+
 let test_round_trip () =
   List.iter
     (fun name ->
@@ -54,11 +72,60 @@ let test_unknown_falls_back_to_default () =
     "keeper_unified"
     (Profile.canonicalize "definitely_not_a_real_cascade_xyz")
 
+let test_catalog_names_follow_live_config () =
+  with_temp_config
+    {|
+      {
+        "default_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
+        "custom_live_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
+        "tool_rerank_temperature": 0.0,
+        "tool_rerank_max_tokens": 200,
+        "tool_rerank_keeper_assignable": false,
+        "governance_judge_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
+        "governance_judge_keeper_assignable": false
+      }
+    |}
+    (fun path ->
+      let catalog = Profile.catalog_names ~config_path:path () in
+      check (list string) "catalog_names follows cascade schema keys"
+        [ "custom_live"; "default"; "governance_judge"; "tool_rerank" ]
+        catalog;
+      check (list string) "keeper catalog excludes system-only cascades"
+        [ "custom_live"; "default" ]
+        (Profile.keeper_catalog_names ~config_path:path ());
+      check (list string) "system catalog follows explicit metadata"
+        [ "governance_judge"; "tool_rerank" ]
+        (Profile.system_catalog_names ~config_path:path ());
+      check string "dynamic live profile survives canonicalization"
+        "custom_live"
+        (Profile.canonicalize_with_catalog ~catalog "custom_live");
+      check string "dynamic live profile requires exact match"
+        "keeper_unified"
+        (Profile.canonicalize_with_catalog ~catalog "Custom_Live");
+      check string "unknown live profile still falls back"
+        "keeper_unified"
+        (Profile.canonicalize_with_catalog ~catalog "missing_profile"))
+
+let test_catalog_read_failures_do_not_fallback_to_hardcoded_names () =
+  let missing = Filename.concat (Filename.get_temp_dir_name ()) "missing-cascade.json" in
+  check (list string) "catalog_names stays empty on read failure"
+    []
+    (Profile.catalog_names ~config_path:missing ());
+  check (list string) "keeper catalog stays empty on read failure"
+    []
+    (Profile.keeper_catalog_names ~config_path:missing ());
+  check (list string) "system catalog stays empty on read failure"
+    []
+    (Profile.system_catalog_names ~config_path:missing ())
+
 let () =
   run "keeper_cascade_profile"
     [ ( "ssot",
         [ test_case "active names round-trip" `Quick test_round_trip;
           test_case "known_cascades covers active" `Quick test_known_cascades_covers_active;
           test_case "legacy aliases collapse" `Quick test_legacy_aliases_collapse_to_keeper_unified;
-          test_case "unknown falls back to default" `Quick test_unknown_falls_back_to_default ] )
+          test_case "unknown falls back to default" `Quick test_unknown_falls_back_to_default;
+          test_case "catalog_names follow live config" `Quick test_catalog_names_follow_live_config;
+          test_case "catalog read failures stay empty" `Quick
+            test_catalog_read_failures_do_not_fallback_to_hardcoded_names ] )
     ]

@@ -1459,6 +1459,24 @@ let handle_keeper_shell
          ~output:out
          ())
   in
+  let docker_read_error ~target msg =
+    error_json ~fields:[ "op", `String op; "path", `String target ] msg
+  in
+  let run_readonly_in_docker ?(ok_exit_codes = [ 0 ]) ~target ~command_argv
+      ~max_bytes ~timeout_sec () =
+    match
+      Keeper_docker_read.container_path_of_host ~config ~meta ~host_path:target
+    with
+    | Error e -> Error (docker_read_error ~target e)
+    | Ok cpath -> (
+        match
+          Keeper_docker_read.run_command_in_container_with_status
+            ~ok_exit_codes ~config ~meta ~command_argv:(command_argv cpath)
+            ~max_bytes ~timeout_sec ()
+        with
+        | Error msg -> Error (docker_read_error ~target msg)
+        | Ok payload -> Ok payload)
+  in
   match op with
   | "pwd" ->
     (match cwd_target () with
@@ -1494,7 +1512,8 @@ let handle_keeper_shell
                Keeper_docker_read.run_command_in_container ~config ~meta
                  ~command_argv:[ "ls"; "-la"; cpath ]
                  ~max_bytes:1_000_000
-                 ~timeout_sec:io_timeout_sec ()
+                 ~timeout_sec:io_timeout_sec
+                 ()
              with
              | Error msg ->
                error_json
@@ -1533,7 +1552,8 @@ let handle_keeper_shell
          (match
             Keeper_docker_read.read_file_in_container ~config ~meta
               ~host_path:target ~max_bytes
-              ~timeout_sec:read_timeout_sec ()
+              ~timeout_sec:read_timeout_sec
+              ()
           with
           | Error msg ->
             error_json
@@ -1601,21 +1621,47 @@ let handle_keeper_shell
         match argv with
         | Error e -> path_error e
         | Ok argv ->
-        let st, out =
-          Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec argv
-        in
-        (* rg exit codes: 0=matches found, 1=no matches (not an error), 2+=real error.
-           Treat exit 1 as success with empty results — "no match" is a valid answer. *)
-        let is_ok = st = Unix.WEXITED 0 || st = Unix.WEXITED 1 in
-        Yojson.Safe.to_string
-          (`Assoc
-              [ "ok", `Bool is_ok
-              ; "op", `String op
-              ; "path", `String target
-              ; "pattern", `String pattern
-              ; "status", Keeper_alerting_path.process_status_to_json st
-              ; "matches", lines_to_json ~limit out
-              ]))
+        if Keeper_docker_read.should_route_read ~meta then
+          let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
+          let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
+          let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
+          (match
+             run_readonly_in_docker ~target
+               ~command_argv:(fun cpath ->
+                 base_argv @ type_argv @ glob_argv @ [ pattern; cpath ])
+               ~ok_exit_codes:[ 0; 1 ]
+               ~max_bytes:1_000_000
+               ~timeout_sec:read_timeout_sec
+               ()
+           with
+           | Error response -> response
+           | Ok (st, out) ->
+             Yojson.Safe.to_string
+               (`Assoc
+                   [ "ok", `Bool true
+                   ; "op", `String op
+                   ; "path", `String target
+                   ; "pattern", `String pattern
+                   ; "via", `String "docker"
+                   ; "status", Keeper_alerting_path.process_status_to_json st
+                   ; "matches", lines_to_json ~limit out
+                   ]))
+        else
+          let st, out =
+            Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec argv
+          in
+          (* rg exit codes: 0=matches found, 1=no matches (not an error), 2+=real error.
+             Treat exit 1 as success with empty results — "no match" is a valid answer. *)
+          let is_ok = st = Unix.WEXITED 0 || st = Unix.WEXITED 1 in
+          Yojson.Safe.to_string
+            (`Assoc
+                [ "ok", `Bool is_ok
+                ; "op", `String op
+                ; "path", `String target
+                ; "pattern", `String pattern
+                ; "status", Keeper_alerting_path.process_status_to_json st
+                ; "matches", lines_to_json ~limit out
+                ]))
   | "git_log" ->
     (match cwd_target () with
      | Error e -> path_error e
@@ -1650,82 +1696,202 @@ let handle_keeper_shell
       | Error e -> path_error e
       | Ok target ->
         let limit = shell_readonly_limit args in
-        let st, out =
-          Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
-            [ "find"; target; "-maxdepth"; "5"; "-name"; name_pattern;
-              "-not"; "-path"; "*/.git/*";
-              "-not"; "-path"; "*/_build/*";
-              "-not"; "-path"; "*/.masc/*" ]
-        in
-        Yojson.Safe.to_string
-          (`Assoc
-              [ "ok", `Bool (st = Unix.WEXITED 0)
-              ; "op", `String op
-              ; "path", `String target
-              ; "name", `String name_pattern
-              ; "status", Keeper_alerting_path.process_status_to_json st
-              ; "files", lines_to_json ~limit out
-              ]))
+        if Keeper_docker_read.should_route_read ~meta then
+          (match
+             run_readonly_in_docker ~target
+               ~command_argv:(fun cpath ->
+                 [ "find"; cpath; "-maxdepth"; "5"; "-name"; name_pattern;
+                   "-not"; "-path"; "*/.git/*";
+                   "-not"; "-path"; "*/_build/*";
+                   "-not"; "-path"; "*/.masc/*" ])
+               ~max_bytes:1_000_000
+               ~timeout_sec:read_timeout_sec
+               ()
+           with
+           | Error response -> response
+           | Ok (st, out) ->
+             Yojson.Safe.to_string
+               (`Assoc
+                   [ "ok", `Bool true
+                   ; "op", `String op
+                   ; "path", `String target
+                   ; "name", `String name_pattern
+                   ; "via", `String "docker"
+                   ; "status", Keeper_alerting_path.process_status_to_json st
+                   ; "files", lines_to_json ~limit out
+                   ]))
+        else
+          let st, out =
+            Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
+              [ "find"; target; "-maxdepth"; "5"; "-name"; name_pattern;
+                "-not"; "-path"; "*/.git/*";
+                "-not"; "-path"; "*/_build/*";
+                "-not"; "-path"; "*/.masc/*" ]
+          in
+          Yojson.Safe.to_string
+            (`Assoc
+                [ "ok", `Bool (st = Unix.WEXITED 0)
+                ; "op", `String op
+                ; "path", `String target
+                ; "name", `String name_pattern
+                ; "status", Keeper_alerting_path.process_status_to_json st
+                ; "files", lines_to_json ~limit out
+                ]))
   | "head" ->
     (match read_target () with
      | Error e -> path_error e
      | Ok target ->
        let n = Safe_ops.json_int ~default:20 "lines" args |> fun v -> max 1 (min 200 v) in
-       let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
-           [ "/usr/bin/head"; "-n"; string_of_int n; target ]
-       in
-       Yojson.Safe.to_string
-         (`Assoc
-             [ "ok", `Bool (st = Unix.WEXITED 0)
-             ; "op", `String op
-             ; "path", `String target
-             ; "lines", `Int n
-             ; "status", Keeper_alerting_path.process_status_to_json st
-             ; "content", `String out
-             ]))
+       if Keeper_docker_read.should_route_read ~meta then
+         (match
+            run_readonly_in_docker ~target
+              ~command_argv:(fun cpath ->
+                [ "head"; "-n"; string_of_int n; cpath ])
+              ~max_bytes:1_000_000
+              ~timeout_sec:read_timeout_sec
+              ()
+          with
+          | Error response -> response
+          | Ok (st, out) ->
+            Yojson.Safe.to_string
+              (`Assoc
+                  [ "ok", `Bool true
+                  ; "op", `String op
+                  ; "path", `String target
+                  ; "lines", `Int n
+                  ; "via", `String "docker"
+                  ; "status", Keeper_alerting_path.process_status_to_json st
+                  ; "content", `String out
+                  ]))
+       else
+         let st, out =
+           Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
+             [ "/usr/bin/head"; "-n"; string_of_int n; target ]
+         in
+         Yojson.Safe.to_string
+           (`Assoc
+               [ "ok", `Bool (st = Unix.WEXITED 0)
+               ; "op", `String op
+               ; "path", `String target
+               ; "lines", `Int n
+               ; "status", Keeper_alerting_path.process_status_to_json st
+               ; "content", `String out
+               ]))
   | "tail" ->
     (match read_target () with
      | Error e -> path_error e
      | Ok target ->
        let n = Safe_ops.json_int ~default:20 "lines" args |> fun v -> max 1 (min 200 v) in
-       let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
-           [ "/usr/bin/tail"; "-n"; string_of_int n; target ]
-       in
-       Yojson.Safe.to_string
-         (`Assoc
-             [ "ok", `Bool (st = Unix.WEXITED 0)
-             ; "op", `String op
-             ; "path", `String target
-             ; "lines", `Int n
-             ; "status", Keeper_alerting_path.process_status_to_json st
-             ; "content", `String out
-             ]))
+       if Keeper_docker_read.should_route_read ~meta then
+         (match
+            run_readonly_in_docker ~target
+              ~command_argv:(fun cpath ->
+                [ "tail"; "-n"; string_of_int n; cpath ])
+              ~max_bytes:1_000_000
+              ~timeout_sec:read_timeout_sec
+              ()
+          with
+          | Error response -> response
+          | Ok (st, out) ->
+            Yojson.Safe.to_string
+              (`Assoc
+                  [ "ok", `Bool true
+                  ; "op", `String op
+                  ; "path", `String target
+                  ; "lines", `Int n
+                  ; "via", `String "docker"
+                  ; "status", Keeper_alerting_path.process_status_to_json st
+                  ; "content", `String out
+                  ]))
+       else
+         let st, out =
+           Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
+             [ "/usr/bin/tail"; "-n"; string_of_int n; target ]
+         in
+         Yojson.Safe.to_string
+           (`Assoc
+               [ "ok", `Bool (st = Unix.WEXITED 0)
+               ; "op", `String op
+               ; "path", `String target
+               ; "lines", `Int n
+               ; "status", Keeper_alerting_path.process_status_to_json st
+               ; "content", `String out
+               ]))
   | "wc" ->
     (match read_target () with
      | Error e -> path_error e
      | Ok target ->
-       render_process_result ~cmd:"wc" [ "/usr/bin/wc"; "-l"; target ])
+       if Keeper_docker_read.should_route_read ~meta then
+         (match
+            run_readonly_in_docker ~target
+              ~command_argv:(fun cpath -> [ "wc"; "-l"; cpath ])
+              ~max_bytes:4096
+              ~timeout_sec:read_timeout_sec
+              ()
+          with
+          | Error response -> response
+          | Ok (st, out) ->
+            Yojson.Safe.to_string
+              (Exec_core.process_result_json
+                 ~artifact_policy:Exec_core.Inline_only
+                 ~base_path:root
+                 ~keeper_name:meta.name
+                 ~cmd:"wc"
+                 ~extra:
+                   [
+                     "op", `String op;
+                     "cmd", `String "wc";
+                     "cwd", `Null;
+                     "path", `String target;
+                     "via", `String "docker";
+                   ]
+                 ~status:st
+                 ~output:out
+                 ()))
+       else
+         render_process_result ~cmd:"wc" [ "/usr/bin/wc"; "-l"; target ])
   | "tree" ->
     (match read_target () with
      | Error e -> path_error e
      | Ok target ->
-       let st, out =
-         Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
-           [ "find"; target; "-maxdepth"; "3"; "-print";
-             "-not"; "-path"; "*/.git/*";
-             "-not"; "-path"; "*/_build/*" ]
-       in
        let limit = shell_readonly_limit args in
-       Yojson.Safe.to_string
-         (`Assoc
-             [ "ok", `Bool (st = Unix.WEXITED 0)
-             ; "op", `String op
-             ; "path", `String target
-             ; "status", Keeper_alerting_path.process_status_to_json st
-             ; "entries", lines_to_json ~limit out
-             ]))
+       if Keeper_docker_read.should_route_read ~meta then
+         (match
+            run_readonly_in_docker ~target
+              ~command_argv:(fun cpath ->
+                [ "find"; cpath; "-maxdepth"; "3"; "-print";
+                  "-not"; "-path"; "*/.git/*";
+                  "-not"; "-path"; "*/_build/*" ])
+              ~max_bytes:1_000_000
+              ~timeout_sec:read_timeout_sec
+              ()
+          with
+           | Error response -> response
+           | Ok (st, out) ->
+             Yojson.Safe.to_string
+               (`Assoc
+                   [ "ok", `Bool true
+                   ; "op", `String op
+                   ; "path", `String target
+                   ; "via", `String "docker"
+                   ; "status", Keeper_alerting_path.process_status_to_json st
+                   ; "entries", lines_to_json ~limit out
+                   ]))
+       else
+         let st, out =
+           Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
+             [ "find"; target; "-maxdepth"; "3"; "-print";
+               "-not"; "-path"; "*/.git/*";
+               "-not"; "-path"; "*/_build/*" ]
+         in
+         Yojson.Safe.to_string
+           (`Assoc
+               [ "ok", `Bool (st = Unix.WEXITED 0)
+               ; "op", `String op
+               ; "path", `String target
+               ; "status", Keeper_alerting_path.process_status_to_json st
+               ; "entries", lines_to_json ~limit out
+               ]))
   | "git_diff" ->
     (match cwd_target () with
      | Error e -> path_error e

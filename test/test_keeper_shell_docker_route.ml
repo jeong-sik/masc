@@ -1,12 +1,13 @@
-(** Tests for keeper_shell docker routing (RFC-0006 Phase B-3b).
+(** Tests for keeper_shell docker routing (RFC-0006 Phase B-3b+).
 
-    Verifies that the [should_route_read] branch fires for [cat] and
-    [ls] when symmetric_sandbox + docker_read are both on for a
-    hardened keeper. The docker process itself is not invoked because
-    the test environment sets [MASC_KEEPER_SANDBOX_DOCKER_IMAGE=""],
-    so the response must surface the structured "docker image is not
-    configured" error from [Keeper_docker_read] — proof that control
-    reached the docker route. *)
+    Verifies that the [should_route_read] branch fires for path-based
+    readonly keeper_shell ops when symmetric_sandbox + docker_read are
+    both on for a hardened keeper. The docker process itself is not
+    invoked because the test environment sets
+    [MASC_KEEPER_SANDBOX_DOCKER_IMAGE=""], so the response must
+    surface the structured "docker image is not configured" error from
+    [Keeper_docker_read] — proof that control reached the docker
+    route. *)
 
 module Coord = Masc_mcp.Coord
 module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
@@ -46,6 +47,11 @@ let cleanup_dir dir =
     | exception Unix.Unix_error _ -> ()
   in
   try rm dir with _ -> ()
+
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out oc) @@ fun () ->
+  output_string oc content
 
 let rec ensure_dir path =
   if path = "" || path = "." || path = "/" then ()
@@ -92,6 +98,19 @@ let setup ~sandbox f =
   ensure_dir playground;
   f ~config ~meta ~playground
 
+let with_fake_docker script f =
+  let dir = temp_dir () in
+  let docker_path = Filename.concat dir "docker" in
+  write_file docker_path script;
+  Unix.chmod docker_path 0o755;
+  let path =
+    match Sys.getenv_opt "PATH" with
+    | Some prior when String.trim prior <> "" -> dir ^ ":" ^ prior
+    | _ -> dir
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) @@ fun () ->
+  with_env "PATH" path f
+
 let parse_field raw field =
   Yojson.Safe.from_string raw |> Json.member field
 
@@ -111,40 +130,74 @@ let response_mentions raw field needle =
       in
       loop 0
 
+let parse_bool_field raw field =
+  parse_field raw field |> Json.to_bool_option
+
+let parse_status_exit_code raw =
+  match parse_field raw "status" |> Json.member "code" |> Json.to_int_option with
+  | Some code -> code
+  | None -> Alcotest.failf "missing status.code in %s" raw
+
+let assert_docker_route_fires ~config ~meta ~playground =
+  let host_path = Filename.concat playground "mind/demo.txt" in
+  ensure_dir (Filename.dirname host_path);
+  ignore (Fs_compat.save_file_atomic host_path "alpha\nbeta\ngamma\n");
+  let cases =
+    [
+      ("cat", `Assoc [ ("op", `String "cat"); ("path", `String host_path) ]);
+      ("ls", `Assoc [ ("op", `String "ls"); ("path", `String playground) ]);
+      ( "rg",
+        `Assoc
+          [
+            ("op", `String "rg");
+            ("pattern", `String "alpha");
+            ("path", `String playground);
+          ] );
+      ( "find",
+        `Assoc
+          [
+            ("op", `String "find");
+            ("pattern", `String "*.txt");
+            ("path", `String playground);
+          ] );
+      ( "head",
+        `Assoc
+          [
+            ("op", `String "head");
+            ("lines", `Int 1);
+            ("path", `String host_path);
+          ] );
+      ( "tail",
+        `Assoc
+          [
+            ("op", `String "tail");
+            ("lines", `Int 1);
+            ("path", `String host_path);
+          ] );
+      ("wc", `Assoc [ ("op", `String "wc"); ("path", `String host_path) ]);
+      ("tree", `Assoc [ ("op", `String "tree"); ("path", `String playground) ]);
+    ]
+  in
+  List.iter
+    (fun (op, args) ->
+      let raw =
+        Keeper_exec_shell.handle_keeper_shell ~config ~meta ~args
+      in
+      Alcotest.(check bool)
+        (Printf.sprintf "%s surfaces docker image config error (docker route fired)" op)
+        true
+        (response_mentions raw "error" "docker image"))
+    cases
+
 (* ── Tests ───────────────────────────────────────────────────────── *)
 
-let test_cat_routes_through_docker () =
+let test_readonly_ops_route_through_docker () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
   with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types.Docker_hardened
   @@ fun ~config ~meta ~playground ->
-  let host_path = Filename.concat playground "mind/x" in
-  ensure_dir (Filename.dirname host_path);
-  ignore (Fs_compat.save_file_atomic host_path "matrix");
-  let raw =
-    Keeper_exec_shell.handle_keeper_shell ~config ~meta
-      ~args:(`Assoc [ ("op", `String "cat"); ("path", `String host_path) ])
-  in
-  Alcotest.(check bool)
-    "cat surfaces docker image config error (docker route fired)"
-    true
-    (response_mentions raw "error" "docker image")
-
-let test_ls_routes_through_docker () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker_hardened
-  @@ fun ~config ~meta ~playground ->
-  let raw =
-    Keeper_exec_shell.handle_keeper_shell ~config ~meta
-      ~args:(`Assoc [ ("op", `String "ls"); ("path", `String playground) ])
-  in
-  Alcotest.(check bool)
-    "ls surfaces docker image config error (docker route fired)"
-    true
-    (response_mentions raw "error" "docker image")
+  assert_docker_route_fires ~config ~meta ~playground
 
 let test_cat_legacy_keeper_skips_docker () =
   with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
@@ -182,15 +235,65 @@ let test_cat_flag_off_skips_docker () =
     false
     (response_mentions raw "error" "docker image")
 
+let fake_docker_rg_no_match_script =
+  "#!/bin/sh\n\
+if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" != \"run\" ]; then\n\
+  printf 'unexpected docker invocation\\n' >&2\n\
+  exit 2\n\
+fi\n\
+shift\n\
+while [ \"$#\" -gt 0 ]; do\n\
+  if [ \"$1\" = \"alpine:test\" ]; then\n\
+    shift\n\
+    break\n\
+  fi\n\
+  shift\n\
+done\n\
+if [ \"$1\" = \"rg\" ]; then\n\
+  exit 1\n\
+fi\n\
+printf '%s\\n' \"$*\"\n\
+exit 0\n"
+
+let test_rg_no_match_remains_successful_in_docker_route () =
+  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
+  with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_rg_no_match_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker_hardened
+  @@ fun ~config ~meta ~playground ->
+  let host_path = Filename.concat playground "mind/demo.txt" in
+  ensure_dir (Filename.dirname host_path);
+  ignore (Fs_compat.save_file_atomic host_path "alpha\nbeta\ngamma\n");
+  let raw =
+    Keeper_exec_shell.handle_keeper_shell ~config ~meta
+      ~args:
+        (`Assoc
+            [
+              ("op", `String "rg");
+              ("pattern", `String "missing");
+              ("path", `String playground);
+            ])
+  in
+  Alcotest.(check (option bool)) "rg no-match stays ok" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check int) "rg keeps exit=1 status" 1
+    (parse_status_exit_code raw);
+  Alcotest.(check int) "rg no-match returns empty matches" 0
+    (parse_field raw "matches" |> Json.to_list |> List.length)
+
 let () =
   Alcotest.run "Keeper_shell_docker_route"
     [
       ( "docker_route_fires",
         [
-          Alcotest.test_case "cat routes through docker for hardened+flags"
-            `Quick test_cat_routes_through_docker;
-          Alcotest.test_case "ls routes through docker for hardened+flags"
-            `Quick test_ls_routes_through_docker;
+          Alcotest.test_case
+            "path-based readonly ops route through docker for hardened+flags"
+            `Quick test_readonly_ops_route_through_docker;
         ] );
       ( "docker_route_skipped",
         [
@@ -198,5 +301,10 @@ let () =
             test_cat_legacy_keeper_skips_docker;
           Alcotest.test_case "DOCKER_READ flag off skips docker route"
             `Quick test_cat_flag_off_skips_docker;
+        ] );
+      ( "docker_route_contract",
+        [
+          Alcotest.test_case "rg no-match remains successful" `Quick
+            test_rg_no_match_remains_successful_in_docker_route;
         ] );
     ]

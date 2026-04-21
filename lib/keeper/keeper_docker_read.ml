@@ -95,14 +95,15 @@ let container_name_of meta =
     (Unix.getpid ())
     (int_of_float (Unix.gettimeofday () *. 1000.0))
 
-let run_command_in_container ~config ~(meta : keeper_meta)
+let run_command_in_container_with_status ?(ok_exit_codes = [ 0 ])
+    ~config ~(meta : keeper_meta)
     ~(command_argv : string list) ~(max_bytes : int)
-    ~(timeout_sec : float) () : (string, string) result =
+    ~(timeout_sec : float) () : (Unix.process_status * string, string) result =
   let image = Env_config_keeper.KeeperSandbox.docker_image () in
   if String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
   else if command_argv = [] then
-    Error "run_command_in_container: command_argv is empty"
+    Error "run_command_in_container_with_status: command_argv is empty"
   else
     match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec with
     | Error err -> Error err
@@ -124,12 +125,13 @@ let run_command_in_container ~config ~(meta : keeper_meta)
         match command_argv with prog :: _ -> prog | [] -> "?"
       in
       (match st with
-       | Unix.WEXITED 0 ->
+       | Unix.WEXITED code
+         when List.exists (fun ok_code -> ok_code = code) ok_exit_codes ->
          let body =
            if String.length out > max_bytes then String.sub out 0 max_bytes
            else out
          in
-         Ok body
+         Ok (st, body)
        | Unix.WEXITED code ->
          Error
            (Printf.sprintf
@@ -142,6 +144,15 @@ let run_command_in_container ~config ~(meta : keeper_meta)
        | Unix.WSTOPPED n ->
          Error
            (Printf.sprintf "docker_%s_stopped: signal=%d" head_program n))
+
+let run_command_in_container ?(ok_exit_codes = [ 0 ]) ~config ~meta
+    ~command_argv ~max_bytes ~timeout_sec () =
+  match
+    run_command_in_container_with_status ~ok_exit_codes ~config ~meta
+      ~command_argv ~max_bytes ~timeout_sec ()
+  with
+  | Error _ as err -> err
+  | Ok (_st, out) -> Ok out
 
 let read_file_in_container ~config ~(meta : keeper_meta) ~host_path
     ~(max_bytes : int) ~(timeout_sec : float) () : (string, string) result =

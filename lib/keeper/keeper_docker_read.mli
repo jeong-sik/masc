@@ -61,7 +61,22 @@ val read_file_in_container :
     preflight failure, and docker exit non-zero. The error tag uses
     the program name (e.g. [docker_rg_failed], [docker_cat_failed])
     for caller log forensics. *)
+val run_command_in_container_with_status :
+  ?ok_exit_codes:int list ->
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  command_argv:string list ->
+  max_bytes:int ->
+  timeout_sec:float ->
+  unit ->
+  (Unix.process_status * string, string) result
+
+(** [run_command_in_container ?ok_exit_codes ~config ~meta ~command_argv
+    ~max_bytes ~timeout_sec ()] is a convenience wrapper around
+    [run_command_in_container_with_status] that drops the returned
+    process status and keeps only the captured stdout bytes. *)
 val run_command_in_container :
+  ?ok_exit_codes:int list ->
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   command_argv:string list ->

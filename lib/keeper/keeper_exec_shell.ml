@@ -900,10 +900,13 @@ let handle_keeper_bash
                ~error:"branch_switch_blocked"
                ~reason:
                  "git checkout/switch/branch mutations require a write-enabled preset \
-                  (Coding/Delivery/Full) and a playground clone. \
-                  Clone into your playground first (keeper_shell op=git_clone), \
-                  then set cwd to the cloned repo path."
-               ~hint:(Printf.sprintf "Use cwd=%srepos/REPO" (Playground_paths.bundle_root meta.name))
+                  (Coding/Delivery/Full) and a keeper-owned sandbox repo or \
+                  worktree. Clone into your sandbox first \
+                  (keeper_shell op=git_clone), then create or enter a worktree \
+                  under repos/<repo>/.worktrees/<task>."
+               ~hint:(Printf.sprintf
+                        "Use cwd=%srepos/REPO/.worktrees/TASK"
+                        (Playground_paths.bundle_root meta.name))
                ~retryability:Exec_core.Operator_required
                ~extra:[ "cmd", `String cmd_for_log ]
                ()))
@@ -944,12 +947,16 @@ let handle_keeper_bash
                ~reason:
                  (Printf.sprintf
                     "Write operations (git push/commit, make deploy, etc.) \
-                     must run with cwd inside your playground \
-                     (%s). Open a worktree under \
-                     your playground clone first via masc_worktree_create, \
-                     then set cwd to the returned worktree path."
+                     must run with cwd inside your keeper-owned sandbox clone \
+                     or one of its worktrees under %srepos/<repo>/.worktrees/. \
+                     Open a sandbox clone first with keeper_shell op=git_clone \
+                     if needed, then use masc_worktree_create and set cwd to \
+                     the returned worktree path."
                     (Playground_paths.bundle_root meta.name))
-               ~hint:(Printf.sprintf "cwd must start with %s" (Playground_paths.bundle_root meta.name))
+               ~hint:(Printf.sprintf
+                        "cwd must start with %s and usually looks like %srepos/REPO/.worktrees/TASK"
+                        (Playground_paths.bundle_root meta.name)
+                        (Playground_paths.bundle_root meta.name))
                ~retryability:Exec_core.Operator_required
                ~extra:[ "cmd", `String cmd_for_log; "cwd", `String cwd ]
                ()))

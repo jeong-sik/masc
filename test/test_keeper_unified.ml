@@ -1040,7 +1040,12 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "`keeper_task_claim` {}");
   check bool "bash tool uses cmd field" true
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "`keeper_bash` { cmd:");
-  check bool "tool-less runtime path is explicit" true
+  check bool "worktree tool uses task_id schema" true
+    (source_file_contains "lib/keeper/keeper_agent_run.ml"
+       "`masc_worktree_create` { task_id:");
+  check bool "legacy worktree branch_name schema removed" false
+    (source_file_contains "lib/keeper/keeper_agent_run.ml" "branch_name:");
+  check bool "tool-less runtime escape hatch removed from nudge" false
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "NO_TOOL_CHANNEL")
 
 (* ---------- Config tests ---------- *)

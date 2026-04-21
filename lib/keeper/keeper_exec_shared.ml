@@ -107,6 +107,29 @@ let keeper_default_read_root ~(config : Coord.config) ~(meta : keeper_meta) =
   keeper_playground_root ~config ~meta
 ;;
 
+let safe_file_exists path =
+  try Fs_compat.file_exists path with
+  | Sys_error _ -> false
+;;
+
+let safe_is_dir path =
+  try Fs_compat.file_exists path && Sys.is_directory path with
+  | Sys_error _ -> false
+;;
+
+let keeper_sandbox_repo_names ~(config : Coord.config) ~(meta : keeper_meta) =
+  let repos_dir = Filename.concat (keeper_playground_root ~config ~meta) "repos" in
+  if not (safe_is_dir repos_dir) then []
+  else
+    Sys.readdir repos_dir
+    |> Array.to_list
+    |> List.sort String.compare
+    |> List.filter (fun entry ->
+      let candidate = Filename.concat repos_dir entry in
+      safe_is_dir candidate
+      && safe_file_exists (Filename.concat candidate ".git"))
+;;
+
 let relative_path_targets_allowed_root ~(meta : keeper_meta) (raw : string) =
   let boundary prefix =
     let prefix = Keeper_alerting_path.strip_trailing_slashes prefix in
@@ -124,6 +147,88 @@ let is_playground_lane_relative_path (raw : string) =
        || String.starts_with ~prefix:(prefix ^ "/") raw)
     [ "mind"; "repos" ]
 
+let strip_keeper_playground_prefix ~(meta : keeper_meta) (raw : string) =
+  let try_strip ~prefix text =
+    if Filename.is_relative text
+       && String.length text >= String.length prefix
+       && String.starts_with ~prefix text
+    then
+      let rest =
+        String.sub text (String.length prefix)
+          (String.length text - String.length prefix)
+      in
+      Some (if rest = "" then "." else rest)
+    else None
+  in
+  let bundle_root = Playground_paths.bundle_root meta.name in
+  let short_root =
+    "playground/" ^ Playground_paths.sanitize_keeper_name meta.name
+  in
+  let prefixes =
+    [
+      bundle_root;
+      Keeper_alerting_path.strip_trailing_slashes bundle_root;
+      short_root ^ "/";
+      short_root;
+    ]
+  in
+  List.find_map (fun prefix -> try_strip ~prefix raw) prefixes
+;;
+
+let repo_relative_path_candidate ~(meta : keeper_meta) (raw : string) =
+  let first_segment =
+    match String.split_on_char '/' raw with
+    | segment :: _ -> segment
+    | [] -> raw
+  in
+  Filename.is_relative raw
+  && raw <> ""
+  && String.contains raw '/'
+  && not (is_playground_lane_relative_path raw)
+  && not (relative_path_targets_allowed_root ~meta raw)
+  && not (List.mem first_segment [ ".masc"; "playground"; "workspace"; ".worktrees" ])
+;;
+
+let rewrite_single_repo_relative_path ~(config : Coord.config) ~(meta : keeper_meta)
+      (raw : string) =
+  if not (repo_relative_path_candidate ~meta raw) then Ok None
+  else
+    let first_segment =
+      match String.split_on_char '/' raw with
+      | segment :: _ -> segment
+      | [] -> raw
+    in
+    match keeper_sandbox_repo_names ~config ~meta with
+    | repo_names when List.mem first_segment repo_names ->
+      let sandbox_relative = Filename.concat "repos" raw in
+      let rewritten =
+        Filename.concat (keeper_playground_root ~config ~meta) sandbox_relative
+      in
+      Log.Keeper.debug "playground_relative: explicit repo rewrite %S → %S"
+        raw rewritten;
+      Ok (Some rewritten)
+    | [ repo_name ] ->
+      let sandbox_relative =
+        Filename.concat ("repos/" ^ repo_name) raw
+      in
+      let rewritten =
+        Filename.concat (keeper_playground_root ~config ~meta) sandbox_relative
+      in
+      Log.Keeper.debug "playground_relative: single-repo rewrite %S → %S"
+        raw rewritten;
+      Ok (Some rewritten)
+    | [] -> Ok None
+    | repo_names ->
+      Error
+        (Printf.sprintf
+           "ambiguous_repo_relative_path: %s (sandbox repos: [%s]). \
+            Use repos/<repo>/%s or <repo>/%s explicitly."
+           raw
+           (String.concat ", " repo_names)
+           raw
+           raw)
+;;
+
 (* Bare filenames and canonical sandbox lanes default to the keeper sandbox,
    but rooted-looking relative paths (for example
    "workspace/..." or "lib/...") keep project-root/boundary semantics.
@@ -135,23 +240,15 @@ let is_playground_lane_relative_path (raw : string) =
    doubled).  Stripping early
    prevents the downstream resolver from doubling the prefix again. *)
 let playground_relative_unless_allowed_root ~(config : Coord.config)
-    ~(meta : keeper_meta) (raw : string) : string =
+    ~(meta : keeper_meta) (raw : string) : (string, string) result =
   let trimmed = String.trim raw in
-  (* 1. Strip keeper's playground prefix from relative paths.
-     E.g. ".masc/playground/masc-improver/repos" → "repos" *)
-  let pg_bundle = Playground_paths.bundle_root meta.name in
   let trimmed =
-    if Filename.is_relative trimmed
-       && String.length trimmed >= String.length pg_bundle
-       && String.starts_with ~prefix:pg_bundle trimmed
-    then
-      let rest = String.sub trimmed (String.length pg_bundle)
-                   (String.length trimmed - String.length pg_bundle) in
-      let stripped = if rest = "" then "." else rest in
+    match strip_keeper_playground_prefix ~meta trimmed with
+    | Some stripped ->
       Log.Keeper.debug "playground_relative: stripped prefix %S → %S"
         trimmed stripped;
       stripped
-    else trimmed
+    | None -> trimmed
   in
   (* 2. Fix doubled playground prefix in absolute paths.
      E.g. "/base/.masc/playground/X/.masc/playground/X/repos" →
@@ -162,6 +259,7 @@ let playground_relative_unless_allowed_root ~(config : Coord.config)
         keeper_playground_root ~config ~meta
         |> Keeper_alerting_path.strip_trailing_slashes
       in
+      let pg_bundle = Playground_paths.bundle_root meta.name in
       let doubled_prefix = pg_root ^ "/" ^ pg_bundle in
       if String.starts_with ~prefix:doubled_prefix trimmed then
         let rest = String.sub trimmed
@@ -174,30 +272,40 @@ let playground_relative_unless_allowed_root ~(config : Coord.config)
       else trimmed
     else trimmed
   in
-  if trimmed = ""
-     || not (Filename.is_relative trimmed)
-     || (String.contains trimmed '/'
-         && not (is_playground_lane_relative_path trimmed))
-     || relative_path_targets_allowed_root ~meta trimmed
-  then trimmed
-  else
-    let pg = keeper_playground_root ~config ~meta in
-    Filename.concat pg trimmed
+  match rewrite_single_repo_relative_path ~config ~meta trimmed with
+  | Error _ as err -> err
+  | Ok (Some rewritten) -> Ok rewritten
+  | Ok None ->
+    if trimmed = ""
+       || not (Filename.is_relative trimmed)
+       || (String.contains trimmed '/'
+           && not (is_playground_lane_relative_path trimmed))
+       || relative_path_targets_allowed_root ~meta trimmed
+    then Ok trimmed
+    else
+      let pg = keeper_playground_root ~config ~meta in
+      Ok (Filename.concat pg trimmed)
 
 let resolve_keeper_path ~(config : Coord.config) ~(meta : keeper_meta) ~(raw_path : string)
   =
-  resolve_keeper_target_path
-    ~config
-    ~allowed_paths:(keeper_effective_write_allowed_paths ~meta)
-    ~raw_path:(playground_relative_unless_allowed_root ~config ~meta raw_path)
+  match playground_relative_unless_allowed_root ~config ~meta raw_path with
+  | Error _ as err -> err
+  | Ok normalized ->
+    resolve_keeper_target_path
+      ~config
+      ~allowed_paths:(keeper_effective_write_allowed_paths ~meta)
+      ~raw_path:normalized
 ;;
 
 let resolve_keeper_read_path ~(config : Coord.config) ~(meta : keeper_meta)
       ~(raw_path : string) =
-  Keeper_alerting_path.resolve_keeper_read_path
-    ~config
-    ~allowed_paths:(keeper_effective_allowed_paths ~meta)
-    ~raw_path:(playground_relative_unless_allowed_root ~config ~meta raw_path)
+  match playground_relative_unless_allowed_root ~config ~meta raw_path with
+  | Error _ as err -> err
+  | Ok normalized ->
+    Keeper_alerting_path.resolve_keeper_read_path
+      ~config
+      ~allowed_paths:(keeper_effective_allowed_paths ~meta)
+      ~raw_path:normalized
 ;;
 
 let keeper_agent_sender ~(meta : keeper_meta) =

@@ -47,6 +47,28 @@ let with_temp_dir prefix f =
     in
     rm path
   ) (fun () -> f path)
+
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else (
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    Unix.mkdir path 0o755)
+
+let playground_root_of_config config keeper_name =
+  Filename.concat
+    (KAP.project_root_of_config config)
+    (KAP.playground_path_of_keeper keeper_name)
+
+let create_sandbox_repo ~config ~(meta : KT.keeper_meta) repo_name =
+  let repo_root =
+    Filename.concat (playground_root_of_config config meta.name) ("repos/" ^ repo_name)
+  in
+  ensure_dir repo_root;
+  ensure_dir (Filename.concat repo_root ".git");
+  repo_root
+
 (* ── observe_only scope ── *)
 
 let test_observe_only_empty_paths () =
@@ -329,9 +351,7 @@ let test_playground_prefix_stripped_relative () =
   let meta = make_meta ~execution_scope:"workspace" ~name:"sangsu" () in
   with_temp_config (fun config ->
     ignore (KAP.ensure_playground_bundle ~config ~name:"sangsu");
-    let pg_root = Filename.concat
-      (KAP.project_root_of_config config)
-      (KAP.playground_path_of_keeper "sangsu") in
+    let pg_root = playground_root_of_config config "sangsu" in
     let target = Filename.concat pg_root "notes.md" in
     ignore (Fs_compat.save_file_atomic target "test");
     (* Pass with redundant playground prefix — should still resolve to the
@@ -341,19 +361,55 @@ let test_playground_prefix_stripped_relative () =
     | Error err -> fail ("expected stripped path, got error: " ^ err)
     | Ok path -> check string "prefix stripped" target path)
 
+let test_playground_short_prefix_stripped_relative () =
+  let meta = make_meta ~execution_scope:"workspace" ~name:"sangsu" () in
+  with_temp_config (fun config ->
+    ignore (KAP.ensure_playground_bundle ~config ~name:"sangsu");
+    let pg_root = playground_root_of_config config "sangsu" in
+    let target = Filename.concat pg_root "notes.md" in
+    ignore (Fs_compat.save_file_atomic target "test");
+    match KES.resolve_keeper_path ~config ~meta
+            ~raw_path:"playground/sangsu/notes.md" with
+    | Error err -> fail ("expected stripped short prefix, got error: " ^ err)
+    | Ok path -> check string "short prefix stripped" target path)
+
 let test_bare_filename_still_works () =
   let meta = make_meta ~execution_scope:"workspace" ~name:"sangsu" () in
   with_temp_config (fun config ->
     ignore (KAP.ensure_playground_bundle ~config ~name:"sangsu");
-    let pg_root = Filename.concat
-      (KAP.project_root_of_config config)
-      (KAP.playground_path_of_keeper "sangsu") in
+    let pg_root = playground_root_of_config config "sangsu" in
     let target = Filename.concat pg_root "hello.txt" in
     ignore (Fs_compat.save_file_atomic target "test");
     match KES.resolve_keeper_path ~config ~meta
             ~raw_path:"hello.txt" with
     | Error err -> fail ("bare filename should still work: " ^ err)
     | Ok path -> check string "bare filename" target path)
+
+let test_single_sandbox_repo_relative_read_path_rewrites () =
+  let meta = make_meta ~execution_scope:"workspace" ~name:"sangsu" () in
+  with_temp_config (fun config ->
+    let repo_root = create_sandbox_repo ~config ~meta "masc-mcp" in
+    let target = Filename.concat repo_root "lib/foo.ml" in
+    ensure_dir (Filename.dirname target);
+    ignore (Fs_compat.save_file_atomic target "let x = 1\n");
+    match KES.resolve_keeper_read_path ~config ~meta ~raw_path:"lib/foo.ml" with
+    | Error err -> fail ("expected single-repo relative rewrite, got error: " ^ err)
+    | Ok path -> check string "single repo relative read path" target path)
+
+let test_multi_sandbox_repo_relative_path_is_ambiguous () =
+  let meta = make_meta ~execution_scope:"workspace" ~name:"sangsu" () in
+  with_temp_config (fun config ->
+    ignore (create_sandbox_repo ~config ~meta "masc-mcp");
+    ignore (create_sandbox_repo ~config ~meta "other-repo");
+    match KES.resolve_keeper_path ~config ~meta ~raw_path:"lib/foo.ml" with
+    | Ok path -> fail ("expected ambiguous repo-relative path, got: " ^ path)
+    | Error err ->
+      check bool "uses structured ambiguous prefix" true
+        (String.starts_with ~prefix:"ambiguous_repo_relative_path:" err);
+      check bool "mentions first candidate" true
+        (contains_substring ~haystack:err ~needle:"masc-mcp");
+      check bool "mentions second candidate" true
+        (contains_substring ~haystack:err ~needle:"other-repo"))
 
 let test_docker_hardened_rejects_wildcard_allowed_paths () =
   with_temp_config (fun config ->
@@ -537,8 +593,14 @@ let () =
         [
           test_case "relative playground prefix stripped" `Quick
             test_playground_prefix_stripped_relative;
+          test_case "short playground prefix stripped" `Quick
+            test_playground_short_prefix_stripped_relative;
           test_case "bare filename still works after guard" `Quick
             test_bare_filename_still_works;
+          test_case "single sandbox repo relative read path rewrites" `Quick
+            test_single_sandbox_repo_relative_read_path_rewrites;
+          test_case "multi sandbox repo relative path is ambiguous" `Quick
+            test_multi_sandbox_repo_relative_path_is_ambiguous;
         ] );
       ( "sandbox_validation",
         [

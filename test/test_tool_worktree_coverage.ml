@@ -50,6 +50,36 @@ let make_ctx () : Tool_worktree.context =
   let config = Masc_mcp.Coord.default_config "/tmp/test-worktree" in
   ({ config; agent_name = "test-agent" } : Tool_worktree.context)
 
+let temp_dir () =
+  let dir = Filename.temp_file "tool_worktree_coverage_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path)
+      else
+        Unix.unlink path
+  in
+  try rm dir with _ -> ()
+
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else (
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    Unix.mkdir path 0o755)
+
+let run_ok ~cwd cmd =
+  let wrapped = Printf.sprintf "cd %s && %s > /dev/null 2>&1" (Filename.quote cwd) cmd in
+  let code = Sys.command wrapped in
+  if code <> 0 then fail (Printf.sprintf "command failed (%d): %s" code cmd)
+
 let test_dispatch_worktree_create () =
   let ctx = make_ctx () in
   let args = `Assoc [("task_id", `String "task-001"); ("base_branch", `String "main")] in
@@ -173,6 +203,30 @@ let test_dispatch_worktree_create_whitespace_agent_trimmed () =
     check bool "whitespace agent_name trimmed to fallback" false
       (contains "agent_name mismatch" msg)
 
+let test_dispatch_worktree_create_reports_missing_sandbox_clone () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  run_ok ~cwd:base_path "git init -q -b main";
+  let config = Masc_mcp.Coord.default_config base_path in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-agent"));
+  let ctx : Tool_worktree.context = { config; agent_name = "test-agent" } in
+  let args = `Assoc [
+    ("task_id", `String "task-missing-clone");
+    ("repo_name", `String "masc-mcp");
+    ("base_branch", `String "main");
+  ] in
+  match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
+  | None -> fail "dispatch returned None for masc_worktree_create"
+  | Some (true, msg) ->
+    fail ("expected missing_sandbox_clone error, got success: " ^ msg)
+  | Some (false, msg) ->
+    if not (contains "missing_sandbox_clone:" msg) then
+      fail (Printf.sprintf "expected missing_sandbox_clone in: %s" msg);
+    if not (contains "keeper_shell op=git_clone" msg) then
+      fail (Printf.sprintf "expected keeper_shell git_clone hint in: %s" msg)
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -203,5 +257,7 @@ let () =
         test_dispatch_worktree_create_empty_agent_falls_back;
       test_case "whitespace agent_name trimmed" `Quick
         test_dispatch_worktree_create_whitespace_agent_trimmed;
+      test_case "missing sandbox clone is explicit" `Quick
+        test_dispatch_worktree_create_reports_missing_sandbox_clone;
     ];
   ]

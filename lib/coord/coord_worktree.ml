@@ -91,6 +91,26 @@ let ensure_worktree_path root worktree_name =
   else
     Error (IoError "Invalid worktree path: must be created under .worktrees/")
 
+let missing_sandbox_clone_error ~agent_name ~repos_dir ~repo_name =
+  let rel_target, clone_hint =
+    match repo_name with
+    | Some name when String.trim name <> "" ->
+      let rel = Printf.sprintf "repos/%s" name in
+      ( rel,
+        Printf.sprintf
+          "keeper_shell op=git_clone url=\"https://github.com/<org>/%s.git\" path=\"%s\""
+          name rel )
+    | _ ->
+      ( "repos/<repo>",
+        "keeper_shell op=git_clone url=\"https://github.com/<org>/<repo>.git\" \
+         path=\"repos/<repo>\"" )
+  in
+  IoError
+    (Printf.sprintf
+       "missing_sandbox_clone: no sandbox git clone found for agent %s under %s \
+        (expected %s). Recovery: %s"
+       agent_name repos_dir rel_target clone_hint)
+
 (** Link worktree info to a task in backlog.
     Uses read_json/write_json to handle Backend ZSTD compression transparently. *)
 let link_worktree_to_task config ~task_id ~worktree_info =
@@ -204,22 +224,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
       with
       | Some clone -> Ok clone
       | None ->
-        let hint =
-          match repo_name with
-          | Some name when String.trim name <> "" ->
-            Printf.sprintf
-              "Clone the target repo into %s first or choose an existing repo_name."
-              (Filename.concat repos_dir name)
-          | _ ->
-            Printf.sprintf
-              "Clone a repo into %s first with keeper_shell op=git_clone or pass repo_name for an existing clone."
-              repos_dir
-        in
-        Error
-          (IoError
-             (Printf.sprintf
-                "No sandbox git clone found under %s for agent %s. %s"
-                repos_dir agent_name hint))
+        Error (missing_sandbox_clone_error ~agent_name ~repos_dir ~repo_name)
     in
     match resolve_keeper_repo_root () with
     | Error e -> Error e

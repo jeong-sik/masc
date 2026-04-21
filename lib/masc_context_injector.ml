@@ -40,7 +40,7 @@ let iso8601_of_float (t : float) : string =
 (* Injector factory                                                  *)
 (* ================================================================ *)
 
-let make ~(config : config) () : Agent_sdk.Hooks.context_injector =
+let make ~(config : config) () : Oas.Hooks.context_injector =
   let call_count = Atomic.make 0 in
   let success_count = Atomic.make 0 in
   let error_count = Atomic.make 0 in
@@ -52,7 +52,7 @@ let make ~(config : config) () : Agent_sdk.Hooks.context_injector =
     else ignore (Atomic.fetch_and_add error_count 1);
     let outcome_str = if is_ok then "ok" else "error" in
     let elapsed = now -. config.start_time in
-    Some Agent_sdk.Hooks.{
+    Some Oas.Hooks.{
       context_updates = [
         (key_wall_time, `String (iso8601_of_float now));
         (key_elapsed_seconds, `Float elapsed);
@@ -70,22 +70,22 @@ let make ~(config : config) () : Agent_sdk.Hooks.context_injector =
 (* ================================================================ *)
 
 let get_string ctx key =
-  match Agent_sdk.Context.get ctx key with
+  match Oas.Context.get ctx key with
   | Some (`String s) -> Some s
   | _ -> None
 
 let get_float ctx key =
-  match Agent_sdk.Context.get ctx key with
+  match Oas.Context.get ctx key with
   | Some (`Float f) -> Some f
   | Some (`Int i) -> Some (float_of_int i)
   | _ -> None
 
 let get_int ctx key =
-  match Agent_sdk.Context.get ctx key with
+  match Oas.Context.get ctx key with
   | Some (`Int i) -> Some i
   | _ -> None
 
-let render_temporal_summary (ctx : Agent_sdk.Context.t) : string option =
+let render_temporal_summary (ctx : Oas.Context.t) : string option =
   match get_string ctx key_wall_time with
   | None -> None
   | Some wall_time ->

@@ -12,7 +12,7 @@ let adaptive_thinking_budget
     (* 1) Structured tool errors in last tools -> High thinking *)
     let had_error =
       List.exists
-        (fun (r : Agent_sdk.Types.tool_result) ->
+        (fun (r : Oas.Types.tool_result) ->
            match r with
            | Error _ -> true
            | Ok _ -> false)
@@ -93,7 +93,7 @@ let prompt_segment_metrics_of_text (text : string) : prompt_segment_metrics =
   {
     bytes = String.length text;
     estimated_tokens =
-      (if text = "" then 0 else Agent_sdk.Context_reducer.estimate_char_tokens text);
+      (if text = "" then 0 else Oas.Context_reducer.estimate_char_tokens text);
     fingerprint =
       (if text = ""
        then None
@@ -169,17 +169,17 @@ let add_segment_metric
     }
 
 let metric_of_block
-    ~(role : Agent_sdk.Types.role)
-    (block : Agent_sdk.Types.content_block) : prompt_segment_metrics =
+    ~(role : Oas.Types.role)
+    (block : Oas.Types.content_block) : prompt_segment_metrics =
   let bytes =
     match block with
-    | Agent_sdk.Types.Text text ->
+    | Oas.Types.Text text ->
         String.length (Inference_utils.sanitize_text_utf8 text)
-    | Agent_sdk.Types.ToolUse { id; name; input } ->
+    | Oas.Types.ToolUse { id; name; input } ->
         String.length (Inference_utils.sanitize_text_utf8 id)
         + String.length (Inference_utils.sanitize_text_utf8 name)
         + String.length (Yojson.Safe.to_string input)
-    | Agent_sdk.Types.ToolResult { tool_use_id; content; json; _ } ->
+    | Oas.Types.ToolResult { tool_use_id; content; json; _ } ->
         String.length (Inference_utils.sanitize_text_utf8 tool_use_id)
         + String.length (Inference_utils.sanitize_text_utf8 content)
         + (match json with
@@ -189,7 +189,7 @@ let metric_of_block
   in
   let msg : Agent_sdk.Types.message =
     {
-      Agent_sdk.Types.role;
+      Oas.Types.role;
       content = [block];
       name = None;
       tool_call_id = None;
@@ -203,17 +203,17 @@ let metric_of_block
   }
 
 let history_bucket_of_block
-    ~(role : Agent_sdk.Types.role)
-    (block : Agent_sdk.Types.content_block) : string =
+    ~(role : Oas.Types.role)
+    (block : Oas.Types.content_block) : string =
   match block with
-  | Agent_sdk.Types.ToolUse _ -> "history_tool_use"
-  | Agent_sdk.Types.ToolResult _ -> "history_tool_result"
-  | Agent_sdk.Types.Text _ -> (
+  | Oas.Types.ToolUse _ -> "history_tool_use"
+  | Oas.Types.ToolResult _ -> "history_tool_result"
+  | Oas.Types.Text _ -> (
       match role with
-      | Agent_sdk.Types.User -> "history_user"
-      | Agent_sdk.Types.Assistant | Agent_sdk.Types.System ->
+      | Oas.Types.User -> "history_user"
+      | Oas.Types.Assistant | Oas.Types.System ->
           "history_assistant_text"
-      | Agent_sdk.Types.Tool -> "history_tool_result")
+      | Oas.Types.Tool -> "history_tool_result")
   | _ -> "history_other"
 
 let build_ctx_composition_metrics
@@ -222,7 +222,7 @@ let build_ctx_composition_metrics
     ~(memory_context : string)
     ~(temporal_context : string)
     ~(user_message : string)
-    ~(history_messages : Agent_sdk.Types.message list)
+    ~(history_messages : Oas.Types.message list)
     ~(actual_input_tokens : int) : ctx_composition_metrics =
   let totals : (string, prompt_segment_metrics) Hashtbl.t = Hashtbl.create 16 in
   let add_text_segment bucket text =
@@ -235,7 +235,7 @@ let build_ctx_composition_metrics
   add_text_segment "temporal_context" temporal_context;
   add_text_segment "user_message" user_message;
   List.iter
-    (fun (message : Agent_sdk.Types.message) ->
+    (fun (message : Oas.Types.message) ->
       List.iter
         (fun block ->
           let bucket = history_bucket_of_block ~role:message.role block in
@@ -332,15 +332,15 @@ type run_result =
   ; cascade_observation : Oas_worker.cascade_observation option
   ; turn_count : int
   ; tool_calls_made : int
-  ; usage : Agent_sdk.Types.api_usage
+  ; usage : Oas.Types.api_usage
   ; tools_used : string list
   ; tool_calls : tool_call_detail list
-  ; checkpoint : Agent_sdk.Checkpoint.t option
-  ; proof : Agent_sdk.Cdal_proof.t option
-  ; trace_ref : Agent_sdk.Raw_trace.run_ref option
-  ; run_validation : Agent_sdk.Raw_trace.run_validation option
+  ; checkpoint : Oas.Checkpoint.t option
+  ; proof : Oas.Cdal_proof.t option
+  ; trace_ref : Oas.Raw_trace.run_ref option
+  ; run_validation : Oas.Raw_trace.run_validation option
   ; stop_reason : Oas_worker.stop_reason
-  ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
+  ; inference_telemetry : Oas.Types.inference_telemetry option
   ; tool_surface : tool_surface_metrics
   }
 
@@ -415,7 +415,7 @@ let keeper_selection_bm25_prefilter_n = 30
 
 let tool_index_entry_of_tool
     ~(korean_kw_tbl : (string, string) Hashtbl.t)
-    (t : Agent_sdk.Tool.t) : Agent_sdk.Tool_index.entry =
+    (t : Oas.Tool.t) : Oas.Tool_index.entry =
   let name = t.schema.name in
   let group =
     if String.starts_with ~prefix:"keeper_board_" name then Some "board"
@@ -446,7 +446,7 @@ let tool_index_entry_of_tool
         |> List.filter (fun s -> s <> "")
     | None -> []
   in
-  Agent_sdk.Tool_index.{ name; description = t.schema.description; group; aliases }
+  Oas.Tool_index.{ name; description = t.schema.description; group; aliases }
 
 (* Post-turn telemetry logging — extracted to Keeper_turn_telemetry (#5732) *)
 
@@ -485,7 +485,7 @@ let run_turn
       ~(base_dir : string)
       ~(max_context : int)
       ~(build_turn_prompt :
-         base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
+         base_system_prompt:string -> messages:Oas.Types.message list -> turn_prompt)
       ~(user_message : string)
       ~(cascade_name : string)
       ?(turn_affordances = [])
@@ -503,7 +503,7 @@ let run_turn
       ?max_cost_usd
       ?on_event
       ?(trajectory_acc : Trajectory.accumulator option)
-      ?(tool_overlay : Agent_sdk.Tool_op.t ref option)
+      ?(tool_overlay : Oas.Tool_op.t ref option)
       ?priority
       ?(is_retry = false)
       ?shared_context
@@ -663,7 +663,7 @@ let run_turn
      first attempt.  Checkpoint reload does not include it (checkpoint is
      written only on success), so we still append to ctx — but skip persist
      to avoid duplicate entries in the session history file. *)
-  let user_msg = Agent_sdk.Types.user_msg user_message in
+  let user_msg = Oas.Types.user_msg user_message in
   (* Capture history BEFORE appending the current user_msg.
      OAS Agent.run appends user_msg from ~goal internally, so passing it
      in initial_messages would cause duplication. *)
@@ -686,7 +686,7 @@ let run_turn
   let ctx_snapshot = ctx_work in
   let agent_name = meta.agent_name in
   let meta_ref = ref meta in
-  let agent_ref : Agent_sdk.Agent.t option ref = ref None in
+  let agent_ref : Oas.Agent.t option ref = ref None in
   (* Session-local search function ref.  Uses the forward-ref pattern:
      1. Create a placeholder ref before make_tools (search index not yet built).
      2. Pass it to make_tools so each tool call captures this ref by value.
@@ -894,7 +894,7 @@ let run_turn
      top_k from Keeper_config for dashboard tuning; groups enable
      co-retrieval of related tools. *)
   let tool_index_config =
-    { Agent_sdk.Tool_index.default_config with
+    { Oas.Tool_index.default_config with
       top_k = Keeper_config.keeper_tool_search_top_k ()
     }
   in
@@ -908,7 +908,7 @@ let run_turn
      this index serves only the explicit keeper_tool_search tool.
      Search results are post-filtered to keeper_allowed_tool_names
      so the keeper only sees tools it is actually permitted to call. *)
-  let search_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
+  let search_index = Oas.Tool_index.build ~config:tool_index_config tool_entries in
   let load_preset_selection_context () =
     let preset_names =
       Keeper_tool_policy.keeper_preset_universe_tool_names meta
@@ -917,18 +917,18 @@ let run_turn
     List.iter (fun n -> Hashtbl.replace preset_set n true) preset_names;
     let preset_tools =
       List.filter
-        (fun (t : Agent_sdk.Tool.t) -> Hashtbl.mem preset_set t.schema.name)
+        (fun (t : Oas.Tool.t) -> Hashtbl.mem preset_set t.schema.name)
         keeper_tools
     in
     let progressive_tool_index_config =
-      { Agent_sdk.Tool_index.default_config with
+      { Oas.Tool_index.default_config with
         top_k = keeper_selection_bm25_prefilter_n }
     in
     let preset_tool_entries =
       List.map (tool_index_entry_of_tool ~korean_kw_tbl) preset_tools
     in
     (preset_tools,
-     Agent_sdk.Tool_index.build ~config:progressive_tool_index_config
+     Oas.Tool_index.build ~config:progressive_tool_index_config
        preset_tool_entries)
   in
   (* Map tool name → OAS schema for search result enrichment.
@@ -937,7 +937,7 @@ let run_turn
   let oas_description_map =
     let tbl = Hashtbl.create (List.length keeper_tools) in
     List.iter
-      (fun (t : Agent_sdk.Tool.t) ->
+      (fun (t : Oas.Tool.t) ->
          Hashtbl.replace tbl t.schema.name t.schema.description)
       keeper_tools;
     tbl
@@ -947,8 +947,8 @@ let run_turn
   let oas_input_schema_map =
     let tbl = Hashtbl.create (List.length keeper_tools) in
     List.iter
-      (fun (t : Agent_sdk.Tool.t) ->
-         let param_type_str (pt : Agent_sdk.Types.param_type) =
+      (fun (t : Oas.Tool.t) ->
+         let param_type_str (pt : Oas.Types.param_type) =
            match pt with
            | String -> "string"
            | Integer -> "integer"
@@ -959,7 +959,7 @@ let run_turn
          in
          let props =
            List.map
-             (fun (p : Agent_sdk.Types.tool_param) ->
+             (fun (p : Oas.Types.tool_param) ->
                 ( p.name
                 , `Assoc
                     [ "type", `String (param_type_str p.param_type)
@@ -969,8 +969,8 @@ let run_turn
          in
          let required =
            t.schema.parameters
-           |> List.filter (fun (p : Agent_sdk.Types.tool_param) -> p.required)
-           |> List.map (fun (p : Agent_sdk.Types.tool_param) -> `String p.name)
+           |> List.filter (fun (p : Oas.Types.tool_param) -> p.required)
+           |> List.map (fun (p : Oas.Types.tool_param) -> `String p.name)
          in
          let schema =
            `Assoc
@@ -989,7 +989,7 @@ let run_turn
   (local_search_fn_ref
    := fun ~query ~max_results ->
         let core = Keeper_exec_tools.effective_core_tools () in
-        let retrieved = Agent_sdk.Tool_index.retrieve search_index query in
+        let retrieved = Oas.Tool_index.retrieve search_index query in
         (* Pre-filter: exclude core tools, the search tool itself, and
        policy-denied tools.  Samchon principle: "if you can verify, you
        converge" — only return tools the keeper can actually call,
@@ -1136,7 +1136,7 @@ let run_turn
      this includes all candidate tools minus denied.  BM25 retrieval
      and Tool_op.Add operate within this scope. *)
   let all_tool_names =
-    "extend_turns" :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
+    "extend_turns" :: List.map (fun (t : Oas.Tool.t) -> t.schema.name) keeper_tools
   in
   (* Precompute membership table for AllowList validation below.
      all_tool_names is constant for the session; building universe_set
@@ -1174,7 +1174,7 @@ let run_turn
   let tool_overlay_ref =
     match tool_overlay with
     | Some r -> r
-    | None -> ref Agent_sdk.Tool_op.Keep_all
+    | None -> ref Oas.Tool_op.Keep_all
   in
   let portal_ctx : Tool_portal.context = { config; agent_name = meta.name } in
   let visible_always_include_tools =
@@ -1244,7 +1244,7 @@ let run_turn
   let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn =
     let caller_requires_tools =
       match current_tool_choice with
-      | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> true
+      | Some (Oas.Types.Any | Oas.Types.Tool _) -> true
       | _ -> false
     in
     max_turns > 1
@@ -1258,9 +1258,9 @@ let run_turn
       : computed_tool_surface =
     let last_user_text =
       List.fold_left
-        (fun acc (m : Agent_sdk.Types.message) ->
+        (fun acc (m : Oas.Types.message) ->
            match m.role with
-           | Agent_sdk.Types.User -> Agent_sdk.Types.text_of_content m.content
+           | Oas.Types.User -> Oas.Types.text_of_content m.content
            | _ -> acc)
         ""
         messages
@@ -1325,7 +1325,7 @@ let run_turn
                        []
                    | first_provider :: _ ->
                        let rerank_fn =
-                         Agent_sdk.Tool_selector.default_rerank_fn
+                         Oas.Tool_selector.default_rerank_fn
                            ~sw
                            ~net
                            ~provider:first_provider
@@ -1333,7 +1333,7 @@ let run_turn
                            ()
                        in
                        let strategy =
-                         Agent_sdk.Tool_selector.TopK_llm
+                         Oas.Tool_selector.TopK_llm
                            { k = selection_limit
                            ; bm25_prefilter_n =
                                min
@@ -1346,7 +1346,7 @@ let run_turn
                        in
                        (try
                           let selected =
-                            Agent_sdk.Tool_selector.select_names
+                            Oas.Tool_selector.select_names
                               ~strategy
                               ~context:query_text
                               ~tools:preset_tools
@@ -1398,9 +1398,9 @@ let run_turn
            llm_selected)
     in
     let all_allowed =
-      Agent_sdk.Tool_op.apply
-        (Agent_sdk.Tool_op.compose
-           [ Agent_sdk.Tool_op.Replace_with merged
+      Oas.Tool_op.apply
+        (Oas.Tool_op.compose
+           [ Oas.Tool_op.Replace_with merged
            ; !tool_overlay_ref
            ])
         all_tool_names
@@ -1428,8 +1428,8 @@ let run_turn
     in
     let all_allowed =
       if is_last_turn then
-        Agent_sdk.Tool_op.apply
-          (Agent_sdk.Tool_op.Intersect_with safe_last_turn_tools)
+        Oas.Tool_op.apply
+          (Oas.Tool_op.Intersect_with safe_last_turn_tools)
           all_allowed
       else
         all_allowed
@@ -1460,7 +1460,7 @@ let run_turn
       else if tool_gate_requested then "tool_required"
       else (
         match current_tool_choice with
-        | Some Agent_sdk.Types.None_ -> "tool_disabled"
+        | Some Oas.Types.None_ -> "tool_disabled"
         | _ -> "text_only")
     in
     {
@@ -1679,13 +1679,13 @@ let run_turn
      each turn selects the top-k tools most relevant to the current
      context, with confidence-gated fallback and optional LLM rerank.
      This replaces ~120 lines of manual Tool_index calls. *)
-  let before_turn_hook : Agent_sdk.Hooks.hooks =
-    { Agent_sdk.Hooks.empty with
+  let before_turn_hook : Oas.Hooks.hooks =
+    { Oas.Hooks.empty with
       before_turn_params =
         Some
           (fun event ->
             match event with
-            | Agent_sdk.Hooks.BeforeTurnParams
+            | Oas.Hooks.BeforeTurnParams
                 { turn; current_params; messages; last_tool_results; _ } ->
               let hook_t0 = Time_compat.now () in
               (* Update current_turn_ref so session-scoped callbacks
@@ -1714,11 +1714,11 @@ let run_turn
                     let rev = List.rev messages in
                     let rec scan = function
                       | [] -> []
-                      | (msg : Agent_sdk.Types.message) :: rest ->
+                      | (msg : Oas.Types.message) :: rest ->
                         let names =
                           List.filter_map
                             (function
-                              | Agent_sdk.Types.ToolUse { name; _ } -> Some name
+                              | Oas.Types.ToolUse { name; _ } -> Some name
                               | _ -> None)
                             msg.content
                         in
@@ -1850,12 +1850,12 @@ let run_turn
                   max_turns
                   computed_surface.is_last_turn;
               let all_allowed = computed_surface.all_allowed in
-              let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
+              let tool_filter = Oas.Guardrails.AllowList all_allowed in
               let tool_choice =
                 if computed_surface.is_last_turn
                 then current_params.tool_choice
                 else if computed_surface.tool_gate_requested && List.length all_allowed > 0
-                then Some Agent_sdk.Types.Any
+                then Some Oas.Types.Any
                 else current_params.tool_choice
               in
               let turn_completion_contract =
@@ -1895,7 +1895,7 @@ let run_turn
                 ?tool_choice:(Option.map
                   (fun choice ->
                     Yojson.Safe.to_string
-                      (Agent_sdk.Types.tool_choice_to_json choice))
+                      (Oas.Types.tool_choice_to_json choice))
                   tool_choice)
                 ~thinking_enabled:thinking_enabled_effective
                 ?thinking_budget:current_params.thinking_budget
@@ -1949,16 +1949,16 @@ let run_turn
            Without this, N concurrent keeper fibers starve the Eio scheduler
            during turn setup (tool list construction + prompt building). *)
               Eio.Fiber.yield ();
-              Agent_sdk.Hooks.AdjustParams
+              Oas.Hooks.AdjustParams
                 { current_params with
                   extra_system_context = ctx
                 ; tool_choice
                 ; tool_filter_override = Some tool_filter
                 }
-            | _ -> Agent_sdk.Hooks.Continue)
+            | _ -> Oas.Hooks.Continue)
     }
   in
-  let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
+  let hooks = Oas.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
   let base_dir = Coord.masc_root_dir config in
   (* RFC-MASC-004 Phase 2: Hook-first is now the only path.
      Create bare memory (no imperative seeding). Memory content is
@@ -1981,7 +1981,7 @@ let run_turn
         ~episode_limit:memory_episode_limit
         ~procedure_limit:memory_procedure_limit ()
     in
-    Agent_sdk.Hooks.compose ~outer:mem_hooks ~inner:hooks
+    Oas.Hooks.compose ~outer:mem_hooks ~inner:hooks
   in
   let reducer =
     (* Hydration of [Tool_blob_store] markers happens BEFORE
@@ -1994,21 +1994,21 @@ let run_turn
       | Some r -> [ r ]
       | None -> []
     in
-    Agent_sdk.Context_reducer.compose (
+    Oas.Context_reducer.compose (
       hydrator_steps @ [
-      Agent_sdk.Context_reducer.drop_thinking;
-      Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:3;
-      Agent_sdk.Context_reducer.prune_tool_outputs ~max_output_len:4000;
-      Agent_sdk.Context_reducer.cap_message_tokens
+      Oas.Context_reducer.drop_thinking;
+      Oas.Context_reducer.stub_tool_results ~keep_recent:3;
+      Oas.Context_reducer.prune_tool_outputs ~max_output_len:4000;
+      Oas.Context_reducer.cap_message_tokens
         ~max_tokens:Env_config_keeper.KeeperReducer.cap_message_tokens
         ~keep_recent:Env_config_keeper.KeeperReducer.cap_message_keep_recent;
-      Agent_sdk.Context_reducer.repair_dangling_tool_calls;
+      Oas.Context_reducer.repair_dangling_tool_calls;
       {
-        Agent_sdk.Context_reducer.strategy =
-          Agent_sdk.Context_reducer.Custom
+        Oas.Context_reducer.strategy =
+          Oas.Context_reducer.Custom
             Keeper_context_core.repair_broken_tool_call_pairs;
       };
-      Agent_sdk.Context_reducer.merge_contiguous;
+      Oas.Context_reducer.merge_contiguous;
     ])
   in
   (* 8. Run Agent *)
@@ -2185,7 +2185,7 @@ let run_turn
        (* RFC-MASC-004: AfterTurn hooks flush incrementally during
           Agent.run. Post-run episode creation requires an explicit
           flush_incremental call since AfterTurn already fired. *)
-       let text = Agent_sdk.Types.text_of_content result.response.content in
+       let text = Oas.Types.text_of_content result.response.content in
        let model = result.response.model in
        (* Extract and persist thinking blocks to trajectory JSONL.
            NOTE: turn = acc.turn stays at 0 in the keeper path because
@@ -2198,7 +2198,7 @@ let run_turn
           let now_iso = Types.now_iso () in
           List.iter
             (function
-              | Agent_sdk.Types.Thinking { content; _ } ->
+              | Oas.Types.Thinking { content; _ } ->
                 let entry : Trajectory.thinking_entry =
                   { ts = now
                   ; ts_iso = now_iso
@@ -2221,7 +2221,7 @@ let run_turn
                      "keeper:%s thinking persist failed: %s"
                      meta.name
                      (Printexc.to_string exn))
-              | Agent_sdk.Types.RedactedThinking _ ->
+              | Oas.Types.RedactedThinking _ ->
                 let entry : Trajectory.thinking_entry =
                   { ts = now
                   ; ts_iso = now_iso
@@ -2250,7 +2250,7 @@ let run_turn
        let reported_tool_names =
          List.filter_map
            (function
-             | Agent_sdk.Types.ToolUse { name; _ } -> Some name
+             | Oas.Types.ToolUse { name; _ } -> Some name
              | _ -> None)
            result.response.content
        in
@@ -2358,7 +2358,7 @@ let run_turn
                (Oas.Error.Agent
                   (Oas.Error.CompletionContractViolation
                      {
-                       contract = Agent_sdk.Completion_contract_id.Require_tool_use;
+                       contract = Oas.Completion_contract_id.Require_tool_use;
                        reason;
                      }))
          in
@@ -2394,7 +2394,7 @@ let run_turn
                    stop_reason_str;
                  response_text ^ "\n" ^ block
            in
-           let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
+           let assistant_msg = Oas.Types.assistant_msg response_text in
            Keeper_exec_context.persist_message
              ~source:history_assistant_source
              session
@@ -2431,7 +2431,7 @@ let run_turn
            (match result.proof with
             | Some p ->
               Keeper_turn_telemetry.log_keeper_proof ~keeper_name:meta.name p;
-              let store = Agent_sdk.Proof_store.default_config in
+              let store = Oas.Proof_store.default_config in
               let outcome = Cdal_eval_v1.evaluate ~store p in
               let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
               let task_subject =
@@ -2638,7 +2638,7 @@ let run_turn
                    @ (match result.response.telemetry with
                       | Some t ->
                         [ ( "inference_telemetry"
-                          , Agent_sdk.Types.inference_telemetry_to_yojson t )
+                          , Oas.Types.inference_telemetry_to_yojson t )
                         ]
                       | None -> [])
                    @

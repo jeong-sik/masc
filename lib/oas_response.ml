@@ -3,10 +3,10 @@
     Repo-local code should read SDK responses through this module rather than
     reaching into provider-specific helper namespaces. *)
 
-type api_response = Agent_sdk.Types.api_response
+type api_response = Oas.Types.api_response
 
 let text_of_response (response : api_response) =
-  Agent_sdk.Types.text_of_content response.content
+  Oas.Types.text_of_content response.content
 
 let model_used (response : api_response) =
   response.model
@@ -16,7 +16,7 @@ let usage_or_zero (response : api_response) =
   | Some usage -> usage
   | None ->
       {
-        Agent_sdk.Types.input_tokens = 0;
+        Oas.Types.input_tokens = 0;
         output_tokens = 0;
         cache_creation_input_tokens = 0;
         cache_read_input_tokens = 0;

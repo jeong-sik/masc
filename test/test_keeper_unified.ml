@@ -2336,6 +2336,7 @@ let test_sanitize_messages_utf8_cleans_history_path () =
         content = [ Text "hist\000ory\127entry" ];
         name = None;
         tool_call_id = None;
+      metadata = [];
       }
   in
   let tool_msg =
@@ -2354,6 +2355,7 @@ let test_sanitize_messages_utf8_cleans_history_path () =
           ];
         name = None;
         tool_call_id = None;
+      metadata = [];
       }
   in
   let sanitized =

@@ -400,13 +400,13 @@ let init () =
      approaching this cap indicate impending publish blocking."
     Gauge;
   add "masc_oas_bus_publish_block_seconds_total"
-    "Cumulative seconds spent inside Agent_sdk.Event_bus.publish when routed \
+    "Cumulative seconds spent inside Oas.Event_bus.publish when routed \
      through Oas_bus_instrument.publish. A sustained ramp indicates a \
      subscriber drain loop has fallen behind and publishers are blocking \
      on Eio.Stream.add."
     Counter;
   add "masc_oas_bus_publish_total"
-    "Total Agent_sdk.Event_bus.publish calls routed through \
+    "Total Oas.Event_bus.publish calls routed through \
      Oas_bus_instrument.publish."
     Counter
 

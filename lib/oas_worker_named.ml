@@ -282,7 +282,7 @@ let config_for_label
     ~(name : string)
     ~(model_label : string)
     ~(system_prompt : string)
-    ~(tools : Agent_sdk.Tool.t list)
+    ~(tools : Oas.Tool.t list)
     ~(max_turns : int)
     ~(max_tokens : int)
     ?(max_input_tokens : int option)

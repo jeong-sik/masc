@@ -27,23 +27,23 @@ let masc_publish event =
   | None -> ()
 
 (** Publish a broadcast event to the shared Event_bus. *)
-let publish_broadcast (_bus : Agent_sdk.Event_bus.t) ~agent_name ~content =
+let publish_broadcast (_bus : Oas.Event_bus.t) ~agent_name ~content =
   let payload = `Assoc [
     ("agent_name", `String agent_name);
     ("content", `String content);
     ("timestamp", `Float (Time_compat.now ()));
   ] in
-  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.broadcast", payload)))
+  masc_publish (Oas.Event_bus.mk_event (Custom ("masc.broadcast", payload)))
 
 (** Publish a heartbeat event to the shared Event_bus. *)
-let publish_heartbeat (_bus : Agent_sdk.Event_bus.t) ~agent_name ~turn ~context_pct =
+let publish_heartbeat (_bus : Oas.Event_bus.t) ~agent_name ~turn ~context_pct =
   let payload = `Assoc [
     ("agent_name", `String agent_name);
     ("turn", `Int turn);
     ("context_pct", `Float context_pct);
     ("timestamp", `Float (Time_compat.now ()));
   ] in
-  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.heartbeat", payload)))
+  masc_publish (Oas.Event_bus.mk_event (Custom ("masc.heartbeat", payload)))
 
 (** Publish a task state change event to the shared Event_bus.
     #8605 family: [transition] is the canonical [Types.task_action]
@@ -51,7 +51,7 @@ let publish_heartbeat (_bus : Agent_sdk.Event_bus.t) ~agent_name ~turn ~context_
     ("claim" / "start" / "done" / ...) is preserved via
     [Types.task_action_to_string]. Sibling refactor of #8846 (the
     Coord-side hook for the same transition vocabulary). *)
-let publish_task_transition (_bus : Agent_sdk.Event_bus.t) ~agent_name ~task_id
+let publish_task_transition (_bus : Oas.Event_bus.t) ~agent_name ~task_id
     ~(transition : Types.task_action) =
   let payload = `Assoc [
     ("agent_name", `String agent_name);
@@ -59,7 +59,7 @@ let publish_task_transition (_bus : Agent_sdk.Event_bus.t) ~agent_name ~task_id
     ("transition", `String (Types.task_action_to_string transition));
     ("timestamp", `Float (Time_compat.now ()));
   ] in
-  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.task_transition", payload)))
+  masc_publish (Oas.Event_bus.mk_event (Custom ("masc.task_transition", payload)))
 
 (** {1 Autonomy Agent Lifecycle Events}
 
@@ -77,7 +77,7 @@ let publish_task_transition (_bus : Agent_sdk.Event_bus.t) ~agent_name ~task_id
     @deprecated Unused since #1060 (no producer wired). Tracked as
     [mark scaffolding] tier of #8857; planned wiring in Thompson
     autonomy RFC (open). *)
-let publish_agent_selected (_bus : Agent_sdk.Event_bus.t) ~agent_name ~trigger
+let publish_agent_selected (_bus : Oas.Event_bus.t) ~agent_name ~trigger
     ~thompson_score ~final_score =
   let payload = `Assoc [
     ("agent_name", `String agent_name);
@@ -87,14 +87,14 @@ let publish_agent_selected (_bus : Agent_sdk.Event_bus.t) ~agent_name ~trigger
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("masc.autonomy.agent_selected", payload)))
+    (Oas.Event_bus.mk_event (Custom ("masc.autonomy.agent_selected", payload)))
 
 (** Publish an agent action decision event (MODEL decision result).
     Emitted after MODEL decides post/comment/upvote/skip.
     @deprecated Unused since #1060 (no producer wired). Tracked as
     [mark scaffolding] tier of #8857; planned wiring in Thompson
     autonomy RFC (open). *)
-let publish_agent_decision (_bus : Agent_sdk.Event_bus.t) ~agent_name ~action
+let publish_agent_decision (_bus : Oas.Event_bus.t) ~agent_name ~action
     ~trigger_reason =
   let payload = `Assoc [
     ("agent_name", `String agent_name);
@@ -103,14 +103,14 @@ let publish_agent_decision (_bus : Agent_sdk.Event_bus.t) ~agent_name ~action
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("masc.autonomy.agent_decision", payload)))
+    (Oas.Event_bus.mk_event (Custom ("masc.autonomy.agent_decision", payload)))
 
 (** Publish an action execution result event.
     Emitted after an agent's action (post/comment/upvote) completes.
     @deprecated Unused since #1060 (no producer wired). Tracked as
     [mark scaffolding] tier of #8857; planned wiring in Thompson
     autonomy RFC (open). *)
-let publish_agent_action_executed (_bus : Agent_sdk.Event_bus.t) ~agent_name
+let publish_agent_action_executed (_bus : Oas.Event_bus.t) ~agent_name
     ~action ~success =
   let payload = `Assoc [
     ("agent_name", `String agent_name);
@@ -119,13 +119,13 @@ let publish_agent_action_executed (_bus : Agent_sdk.Event_bus.t) ~agent_name
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("masc.autonomy.agent_action_executed", payload)))
+    (Oas.Event_bus.mk_event (Custom ("masc.autonomy.agent_action_executed", payload)))
 
 (** {1 Keeper Snapshot Events} *)
 
 (** Publish a keeper snapshot event to the OAS Event_bus.
     Emitted alongside SSE broadcast in keeper_keepalive. *)
-let publish_keeper_snapshot (_bus : Agent_sdk.Event_bus.t) ~keeper_name
+let publish_keeper_snapshot (_bus : Oas.Event_bus.t) ~keeper_name
     ~generation ~context_ratio ~message_count =
   let payload = `Assoc [
     ("keeper_name", `String keeper_name);
@@ -135,7 +135,7 @@ let publish_keeper_snapshot (_bus : Agent_sdk.Event_bus.t) ~keeper_name
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("masc.keeper.snapshot", payload)))
+    (Oas.Event_bus.mk_event (Custom ("masc.keeper.snapshot", payload)))
 
 (** {1 Keeper Lifecycle Events} *)
 
@@ -166,7 +166,7 @@ let publish_keeper_snapshot (_bus : Agent_sdk.Event_bus.t) ~keeper_name
      - Custom_event { verb; phase = Some p } -> event=verb, phase=p
      - Phase_event p                          -> event=p, phase=p
    The legacy ?phase optional argument is folded into the variant. *)
-let publish_keeper_lifecycle (_bus : Agent_sdk.Event_bus.t)
+let publish_keeper_lifecycle (_bus : Oas.Event_bus.t)
     ~(event : Keeper_lifecycle_events.lifecycle_event)
     ~keeper_name ~detail () =
   let phase_json =
@@ -184,7 +184,7 @@ let publish_keeper_lifecycle (_bus : Agent_sdk.Event_bus.t)
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("masc.keeper.lifecycle", payload)))
+    (Oas.Event_bus.mk_event (Custom ("masc.keeper.lifecycle", payload)))
 
 (** {1 Phase 4: Social Events}
 
@@ -200,20 +200,20 @@ let publish_keeper_lifecycle (_bus : Agent_sdk.Event_bus.t)
     @deprecated Unused since #1060 (no producer wired). Tracked as
     [mark scaffolding] tier of #8857; planned wiring with Phase 4
     social network feature (open). *)
-let publish_trust_updated (_bus : Agent_sdk.Event_bus.t) ~agent_a ~agent_b ~trust_score =
+let publish_trust_updated (_bus : Oas.Event_bus.t) ~agent_a ~agent_b ~trust_score =
   let payload = `Assoc [
     ("agent_a", `String agent_a);
     ("agent_b", `String agent_b);
     ("trust_score", `Float trust_score);
     ("timestamp", `Float (Time_compat.now ()));
   ] in
-  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.trust_updated", payload)))
+  masc_publish (Oas.Event_bus.mk_event (Custom ("masc.trust_updated", payload)))
 
 (** Publish a reputation change event.
     @deprecated Unused since #1060 (no producer wired). Tracked as
     [mark scaffolding] tier of #8857; planned wiring with Phase 4
     social network feature (open). *)
-let publish_reputation_changed (_bus : Agent_sdk.Event_bus.t) ~agent_name ~old_score ~new_score ~trend =
+let publish_reputation_changed (_bus : Oas.Event_bus.t) ~agent_name ~old_score ~new_score ~trend =
   let payload = `Assoc [
     ("agent_name", `String agent_name);
     ("old_score", `Float old_score);
@@ -221,4 +221,4 @@ let publish_reputation_changed (_bus : Agent_sdk.Event_bus.t) ~agent_name ~old_s
     ("trend", `String trend);
     ("timestamp", `Float (Time_compat.now ()));
   ] in
-  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.reputation_changed", payload)))
+  masc_publish (Oas.Event_bus.mk_event (Custom ("masc.reputation_changed", payload)))

@@ -13,7 +13,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
   (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
   Atomic.set Coord_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems. *)
-  let event_bus = Agent_sdk.Event_bus.create () in
+  let event_bus = Oas.Event_bus.create () in
   (* Eio fiber isolation: each subsystem runs in its own fiber.
      If one crashes, others keep running — Eio's structured concurrency.
      Subsystem_health tracks liveness at module level (no init timing dependency). *)
@@ -55,7 +55,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
      here per OAS event_bus.mli:103-107 boundary. Dashboard SSE consumers
      see both channels as one stream — the relay translates masc.* →
      masc:* on the wire for backward compatibility. *)
-  let masc_event_bus = Agent_sdk.Event_bus.create () in
+  let masc_event_bus = Oas.Event_bus.create () in
   Masc_event_bus.set masc_event_bus;
   (* Event_bus → SSE bridge: relay both OAS and MASC buses to dashboard *)
   Oas_sse_bridge.start ~sw ~clock ~config:state.room_config ~bus:event_bus;
@@ -73,9 +73,9 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
   let keeper_lifecycle_sub =
     Oas_bus_instrument.subscribe
       ~purpose:"lifecycle_listener"
-      ~filter:(fun (evt : Agent_sdk.Event_bus.event) ->
+      ~filter:(fun (evt : Oas.Event_bus.event) ->
         match evt.payload with
-        | Agent_sdk.Event_bus.Custom ("masc.keeper.lifecycle", _) -> true
+        | Oas.Event_bus.Custom ("masc.keeper.lifecycle", _) -> true
         | _ -> false)
       masc_event_bus
   in
@@ -101,9 +101,9 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       (try
         let events = Oas_bus_instrument.drain keeper_lifecycle_sub in
         List.iter
-          (fun (evt : Agent_sdk.Event_bus.event) ->
+          (fun (evt : Oas.Event_bus.event) ->
             match evt.payload with
-            | Agent_sdk.Event_bus.Custom ("masc.keeper.lifecycle", payload) ->
+            | Oas.Event_bus.Custom ("masc.keeper.lifecycle", payload) ->
                 (match
                    ( Safe_ops.json_string_opt "event" payload,
                      Safe_ops.json_string_opt "keeper_name" payload )

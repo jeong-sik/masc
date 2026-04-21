@@ -153,7 +153,7 @@ let max_oas_history_retained = 12
 let oas_history_path ~(session_dir : string) ~(snapshot_id : string) =
   Filename.concat session_dir snapshot_id
 
-let oas_history_snapshot_id_of_checkpoint (ckpt : Agent_sdk.Checkpoint.t) : string =
+let oas_history_snapshot_id_of_checkpoint (ckpt : Oas.Checkpoint.t) : string =
   let generation =
     match ckpt.working_context with
     | Some (`Assoc fields) -> (
@@ -167,11 +167,11 @@ let oas_history_snapshot_id_of_checkpoint (ckpt : Agent_sdk.Checkpoint.t) : stri
   Printf.sprintf "%s%013d-g%d%s"
     oas_history_prefix created_ms generation oas_history_suffix
 
-let save_oas_history ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t) : unit =
+let save_oas_history ~(session_dir : string) (ckpt : Oas.Checkpoint.t) : unit =
   let snapshot_id = oas_history_snapshot_id_of_checkpoint ckpt in
   Keeper_fs.save_atomic
     (oas_history_path ~session_dir ~snapshot_id)
-    (Agent_sdk.Checkpoint.to_string ckpt);
+    (Oas.Checkpoint.to_string ckpt);
   let files = list_oas_history_files ~session_dir in
   if List.length files > max_oas_history_retained then
     files
@@ -205,12 +205,12 @@ let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string lis
     snapshot_ids
   |> fun (deleted, missing) -> (List.rev deleted, List.rev missing)
 
-let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
+let save_oas ~(session_dir : string) (ckpt : Oas.Checkpoint.t)
   : (unit, string) result =
   let fallback () =
     Keeper_fs.save_atomic
       (oas_checkpoint_path ~session_dir ~session_id:ckpt.session_id)
-      (Agent_sdk.Checkpoint.to_string ckpt);
+      (Oas.Checkpoint.to_string ckpt);
     (try save_oas_history ~session_dir ckpt with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
@@ -223,9 +223,9 @@ let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
     match Fs_compat.get_fs_opt () with
     | Some fs when Eio_guard.is_ready () ->
         let dir = Eio.Path.(fs / session_dir) in
-        (match Agent_sdk.Checkpoint_store.create dir with
+        (match Oas.Checkpoint_store.create dir with
          | Ok store -> (
-             match Agent_sdk.Checkpoint_store.save store ckpt with
+             match Oas.Checkpoint_store.save store ckpt with
              | Ok () ->
                  (try save_oas_history ~session_dir ckpt with
                   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -233,15 +233,15 @@ let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
                       Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
                         ckpt.session_id (Printexc.to_string exn));
                  Ok ()
-             | Error err -> Error (Agent_sdk.Error.to_string err))
-         | Error err -> Error (Agent_sdk.Error.to_string err))
+             | Error err -> Error (Oas.Error.to_string err))
+         | Error err -> Error (Oas.Error.to_string err))
     | Some _ | None ->
         fallback ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Printf.sprintf "save_oas: %s" (Printexc.to_string exn))
 
-(* Delta Checkpoint Shadow-Apply removed: Agent_sdk.Checkpoint.delta
+(* Delta Checkpoint Shadow-Apply removed: Oas.Checkpoint.delta
    type was removed upstream. Functions had zero callers. *)
 
 type checkpoint_load_error =
@@ -299,7 +299,7 @@ let is_not_found_detail (detail : string) : bool =
   || String.starts_with ~prefix:"eio.io fs not_found" d  (* Eio.Io (Fs Not_found _) *)
   || has_substring d "no such file or directory"
 
-(* #8605 family: exhaustive on Agent_sdk.Error.sdk_error top-level
+(* #8605 family: exhaustive on Oas.Error.sdk_error top-level
    variants. The previous wildcard collapsed Api / Agent / Mcp / Config
    / Orchestration / A2a / Internal errors into Io_error, hiding
    non-IO failures from the dashboard. The wildcards on Io _ and
@@ -307,7 +307,7 @@ let is_not_found_detail (detail : string) : bool =
    variants land in the semantically correct category, but a future
    top-level sdk_error variant becomes a build error and forces a
    deliberate routing decision. *)
-let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
+let classify_sdk_error (e : Oas.Error.sdk_error) : checkpoint_load_error =
   match e with
   | Io (FileOpFailed r) ->
       if is_not_found_detail r.detail then Not_found
@@ -320,14 +320,14 @@ let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
       Parse_error (sprintf "unknown variant %s: %s" r.type_name r.value)
   | Api _ | Agent _ | Mcp _ | Config _
   | Orchestration _ | A2a _ | Internal _ ->
-      Sdk_other_error (Agent_sdk.Error.to_string e)
+      Sdk_other_error (Oas.Error.to_string e)
 
 let load_oas_history_file ~(session_dir : string) ~(snapshot_id : string) :
-    (Agent_sdk.Checkpoint.t, checkpoint_load_error) result =
+    (Oas.Checkpoint.t, checkpoint_load_error) result =
   let path = oas_history_path ~session_dir ~snapshot_id in
   if Fs_compat.file_exists path then
     try
-      match Agent_sdk.Checkpoint.of_string (Fs_compat.load_file path) with
+      match Oas.Checkpoint.of_string (Fs_compat.load_file path) with
       | Ok ckpt -> Ok ckpt
       | Error e -> Error (classify_sdk_error e)
     with
@@ -336,12 +336,12 @@ let load_oas_history_file ~(session_dir : string) ~(snapshot_id : string) :
   else Error Not_found
 
 let load_oas ~(session_dir : string) ~(session_id : string) :
-    (Agent_sdk.Checkpoint.t, checkpoint_load_error) result =
+    (Oas.Checkpoint.t, checkpoint_load_error) result =
   let fallback () =
     let path = oas_checkpoint_path ~session_dir ~session_id in
     if Fs_compat.file_exists path then
       try
-        match Agent_sdk.Checkpoint.of_string (Fs_compat.load_file path) with
+        match Oas.Checkpoint.of_string (Fs_compat.load_file path) with
         | Ok ckpt -> Ok ckpt
         | Error e -> Error (classify_sdk_error e)
       with
@@ -352,11 +352,11 @@ let load_oas ~(session_dir : string) ~(session_id : string) :
   match Fs_compat.get_fs_opt () with
   | Some fs when Eio_guard.is_ready () ->
       let dir = Eio.Path.(fs / session_dir) in
-      (match Agent_sdk.Checkpoint_store.create dir with
+      (match Oas.Checkpoint_store.create dir with
        | Ok store -> (
-           match Agent_sdk.Checkpoint_store.load store session_id with
+           match Oas.Checkpoint_store.load store session_id with
            | Ok ckpt -> Ok ckpt
            | Error e -> Error (classify_sdk_error e))
-       | Error e -> Error (Store_error (Agent_sdk.Error.to_string e)))
+       | Error e -> Error (Store_error (Oas.Error.to_string e)))
   | Some _ | None ->
       fallback ()

@@ -228,7 +228,7 @@ let is_server_rejected_parse_error (err : Oas.Error.sdk_error) : bool =
 let is_required_tool_contract_violation (err : Oas.Error.sdk_error) : bool =
   match err with
   | Oas.Error.Agent (Oas.Error.CompletionContractViolation { contract; _ }) ->
-      contract = Agent_sdk.Completion_contract_id.Require_tool_use
+      contract = Oas.Completion_contract_id.Require_tool_use
   | _ -> false
 
 let is_auto_recoverable_cascade_exhausted_error (err : Oas.Error.sdk_error) : bool =
@@ -516,16 +516,16 @@ let recover_context_overflow_retry
       None
 
 let summarize_turn_event_bus
-    (events : Agent_sdk.Event_bus.event list) : turn_event_bus_summary =
+    (events : Oas.Event_bus.event list) : turn_event_bus_summary =
   List.fold_left
-    (fun acc (evt : Agent_sdk.Event_bus.event) ->
+    (fun acc (evt : Oas.Event_bus.event) ->
       let correlation_id =
         match acc.correlation_id with
         | Some _ -> acc.correlation_id
         | None -> Some evt.meta.correlation_id
       in
       match evt.payload with
-      | Agent_sdk.Event_bus.ContextOverflowImminent
+      | Oas.Event_bus.ContextOverflowImminent
           { estimated_tokens; limit_tokens; _ } ->
           {
             correlation_id;
@@ -684,8 +684,8 @@ let enqueue_partial_commit_continue_gate
     ~on_resolution:(fun decision ->
       let latest_meta = current_keeper_meta ~config ~fallback_meta:meta in
       match decision with
-      | Agent_sdk.Hooks.Approve
-      | Agent_sdk.Hooks.Edit _ ->
+      | Oas.Hooks.Approve
+      | Oas.Hooks.Edit _ ->
         (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:false with
          | Ok resumed_meta ->
              Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name None;
@@ -697,7 +697,7 @@ let enqueue_partial_commit_continue_gate
              Log.Keeper.error
                "%s: partial-commit continue gate approved but keeper resume sync failed: %s"
                meta.name err)
-      | Agent_sdk.Hooks.Reject reason ->
+      | Oas.Hooks.Reject reason ->
         (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
          | Ok paused_meta ->
              Keeper_registry.set_failure_reason
@@ -794,7 +794,7 @@ let is_noop_cycle ~has_text ~(tools_used : string list) : bool =
        List.mem name observation_only_tool_strings) tools_used
 
 let visible_run_validation (result : Keeper_agent_run.run_result) :
-    Agent_sdk.Raw_trace.run_validation option =
+    Oas.Raw_trace.run_validation option =
   match result.run_validation with
   | Some v when v.ok && (v.evidence <> [] || v.has_file_write) -> Some v
   | _ -> None
@@ -804,7 +804,7 @@ let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =
   || Option.is_some (visible_run_validation result)
 
 let validated_evidence_preview
-    (v : Agent_sdk.Raw_trace.run_validation) : string =
+    (v : Oas.Raw_trace.run_validation) : string =
   if v.has_file_write then "(validated evidence: file_write)"
   else
     match v.tool_names with
@@ -817,7 +817,7 @@ let accountability_evidence_refs
     ~(trace_id : string)
     ~(turn_number : int)
     ~(result : Keeper_agent_run.run_result)
-    ~(validated_evidence : Agent_sdk.Raw_trace.run_validation option) =
+    ~(validated_evidence : Oas.Raw_trace.run_validation option) =
   let tool_refs =
     let stay_silent = Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent in
     result.tools_used
@@ -1092,21 +1092,21 @@ let append_decision_record
         ( "trace_ref",
           match result with
           | Some { trace_ref = Some trace_ref; _ } ->
-              Agent_sdk.Raw_trace.run_ref_to_yojson trace_ref
+              Oas.Raw_trace.run_ref_to_yojson trace_ref
           | _ -> `Null );
         ( "run_validation",
           match result with
           | Some { run_validation = Some validation; _ } ->
-              Agent_sdk.Raw_trace.run_validation_to_yojson validation
+              Oas.Raw_trace.run_validation_to_yojson validation
           | _ -> `Null );
         ( "cdal_proof",
           match result with
           | Some { proof = Some p; _ } ->
               `Assoc
                 [
-                  ("run_id", `String p.Agent_sdk.Cdal_proof.run_id);
+                  ("run_id", `String p.Oas.Cdal_proof.run_id);
                   ( "result_status",
-                    Agent_sdk.Cdal_proof.result_status_to_yojson p.result_status );
+                    Oas.Cdal_proof.result_status_to_yojson p.result_status );
                   ("tool_trace_count", `Int (List.length p.tool_trace_refs));
                 ]
           | _ -> `Null );
@@ -1572,22 +1572,22 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ( "trace_ref",
           match result.trace_ref with
           | Some trace_ref ->
-              Agent_sdk.Raw_trace.run_ref_to_yojson trace_ref
+              Oas.Raw_trace.run_ref_to_yojson trace_ref
           | None -> `Null );
         ( "run_validation",
           match result.run_validation with
           | Some validation ->
-              Agent_sdk.Raw_trace.run_validation_to_yojson validation
+              Oas.Raw_trace.run_validation_to_yojson validation
           | None -> `Null );
         ("cdal_proof",
          match result.proof with
          | Some p ->
            `Assoc [
-             ("run_id", `String p.Agent_sdk.Cdal_proof.run_id);
+             ("run_id", `String p.Oas.Cdal_proof.run_id);
              ("effective_mode",
-              Agent_sdk.Execution_mode.to_yojson p.effective_execution_mode);
+              Oas.Execution_mode.to_yojson p.effective_execution_mode);
              ("result_status",
-              Agent_sdk.Cdal_proof.result_status_to_yojson p.result_status);
+              Oas.Cdal_proof.result_status_to_yojson p.result_status);
              ("violation_count",
               `Int (List.length p.raw_evidence_refs));
              ("tool_trace_count",
@@ -1598,7 +1598,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ("inference_telemetry",
          match result.inference_telemetry with
          | Some t ->
-           Agent_sdk.Types.inference_telemetry_to_yojson t
+           Oas.Types.inference_telemetry_to_yojson t
          | None -> `Null);
       ]
   in
@@ -1892,7 +1892,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         | Some bus ->
           Some (Oas_bus_instrument.subscribe
                   ~purpose:"keeper_turn"
-                  ~filter:(Agent_sdk.Event_bus.filter_agent meta.name) bus)
+                  ~filter:(Oas.Event_bus.filter_agent meta.name) bus)
         | None -> None
       in
       let turn_event_bus = ref empty_turn_event_bus_summary in
@@ -1924,13 +1924,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         | _ -> None
       in
       let process_tool_events_for_side_effects
-          (events : Agent_sdk.Event_bus.event list) : unit =
+          (events : Oas.Event_bus.event list) : unit =
         List.iter
-          (fun (evt : Agent_sdk.Event_bus.event) ->
+          (fun (evt : Oas.Event_bus.event) ->
             match evt.payload with
-            | Agent_sdk.Event_bus.ToolCalled { tool_name; input; _ } ->
+            | Oas.Event_bus.ToolCalled { tool_name; input; _ } ->
                 push_pending_input tool_name input
-            | Agent_sdk.Event_bus.ToolCompleted
+            | Oas.Event_bus.ToolCompleted
                 { tool_name; output = Ok _; _ } ->
                 let input_opt = pop_pending_input tool_name in
                 let input =
@@ -1942,7 +1942,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 then
                   mutating_tools_committed :=
                     tool_name :: !mutating_tools_committed
-            | Agent_sdk.Event_bus.ToolCompleted
+            | Oas.Event_bus.ToolCompleted
                 { tool_name; output = Error _; _ } ->
                 (* Failed tool: drop the matching pending input. *)
                 let _ = pop_pending_input tool_name in

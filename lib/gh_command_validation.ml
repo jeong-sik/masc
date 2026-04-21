@@ -4,8 +4,13 @@
     Provides R0/R1/R2 reversibility classification, command allowlist
     enforcement, and destructive-operation detection for keeper gh ops.
 
-    @since godfile decomposition pass 2
-    @see Worker_dev_tools for the shell-metacharacter gate reused here *)
+    @since godfile decomposition pass 2 *)
+
+let forbidden_shell_chars =
+  [ ';'; '|'; '&'; '>'; '<'; '`'; '$'; '\n'; '\r' ]
+
+let contains_forbidden_shell_chars cmd =
+  String.exists (fun ch -> List.mem ch forbidden_shell_chars) cmd
 
 let contains_substring s needle =
   let s_len = String.length s in
@@ -210,7 +215,7 @@ let extract_gh_command_pair cmd =
 let validate_gh_command ?(allowed_orgs = []) cmd =
   let trimmed = String.trim cmd in
   if trimmed = "" then Error "gh command must not be empty"
-  else if Worker_dev_tools.contains_forbidden_shell_chars trimmed then
+  else if contains_forbidden_shell_chars trimmed then
     Error
       "Blocked: chaining/redirect in gh command. Use a single subcommand. \
        Good: cmd='pr list --state open'. Bad: cmd='pr list && echo done'."

@@ -115,9 +115,9 @@ let direct_turn_observation (meta : keeper_meta) :
 let handle_keeper_msg ?on_text_delta ctx args : tool_result =
   let on_event = match on_text_delta with
     | None -> None
-    | Some cb -> Some (fun (evt : Agent_sdk.Types.sse_event) ->
+    | Some cb -> Some (fun (evt : Oas.Types.sse_event) ->
         match evt with
-        | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
+        | Oas.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
         | _ -> ())
   in
   let name = get_string args "name" "" in

@@ -2275,7 +2275,6 @@ let run_turn
            | Error reason ->
              let contract_str =
                match effective_completion_contract with
-               match effective_completion_contract with
                | Keeper_tool_disclosure.Allow_text_or_tool -> "Allow_text_or_tool"
                | Keeper_tool_disclosure.Require_tool_use -> "Require_tool_use"
              in

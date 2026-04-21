@@ -110,7 +110,6 @@ let test_full_flow_externalize_hydrate_serve () =
             ];
           name = None;
           tool_call_id = Some "tool_call_42";
-        metadata = [];
         }
       in
       let reducer = H.hydrate_recent ~store ~keep_recent:3 in
@@ -167,7 +166,6 @@ let test_recency_budget_holds_across_modules () =
             ];
           name = None;
           tool_call_id = Some id;
-        metadata = [];
         }
       in
       let msgs =

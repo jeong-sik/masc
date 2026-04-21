@@ -328,7 +328,6 @@ let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
           content = blocks;
           name = None;
           tool_call_id = None;
-          metadata = [];
         }
       in
       Inference_utils.sanitize_text_utf8 (text_of_message msg)

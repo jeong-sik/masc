@@ -11,17 +11,17 @@ module Compact = Masc_mcp.Context_compact_oas
 module Scoring = Masc_mcp.Context_compact_oas
 
 let msg role text : Agent_sdk.Types.message =
-  { role; content = [Types.Text text]; name = None; tool_call_id = None; metadata = [] }
+  { role; content = [Types.Text text]; name = None; tool_call_id = None }
 
 let tool_msg ?(id = "tool-1") text : Agent_sdk.Types.message =
   { role = Types.Tool;
     content = [Types.ToolResult { tool_use_id = id; content = text; is_error = false; json = None }];
-    name = None; tool_call_id = None; metadata = [] }
+    name = None; tool_call_id = None }
 
 let tool_use_msg ?(id = "tool-1") ?(name = "grep_search") () : Agent_sdk.Types.message =
   { role = Types.Assistant;
     content = [Types.ToolUse { id; name; input = `Assoc [("query", `String "lib/")] }];
-    name = None; tool_call_id = None; metadata = [] }
+    name = None; tool_call_id = None }
 
 (* ================================================================ *)
 (* Merge Contiguous Tests                                           *)

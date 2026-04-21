@@ -40,15 +40,15 @@ let test_checkpoint_roundtrip () =
     Oas.Types.user_msg "turn 1 user";
     { Oas.Types.role = Oas.Types.Assistant;
       content = [Oas.Types.Text "turn 1 response"];
-      name = None; tool_call_id = None; metadata = [] };
+      name = None; tool_call_id = None };
     Oas.Types.user_msg "turn 2 user";
     { Oas.Types.role = Oas.Types.Assistant;
       content = [Oas.Types.Text "turn 2 response"];
-      name = None; tool_call_id = None; metadata = [] };
+      name = None; tool_call_id = None };
     Oas.Types.user_msg "turn 3 user";
     { Oas.Types.role = Oas.Types.Assistant;
       content = [Oas.Types.Text "turn 3 response"];
-      name = None; tool_call_id = None; metadata = [] };
+      name = None; tool_call_id = None };
   ] in
   Oas.Agent.set_state agent { (Oas.Agent.state agent) with
     messages = msgs;
@@ -91,10 +91,10 @@ let test_multi_cascade_accumulation () =
     messages = [
       Oas.Types.user_msg "t1";
       { Oas.Types.role = Oas.Types.Assistant;
-        content = [Oas.Types.Text "r1"]; name = None; tool_call_id = None; metadata = [] };
+        content = [Oas.Types.Text "r1"]; name = None; tool_call_id = None };
       Oas.Types.user_msg "t2";
       { Oas.Types.role = Oas.Types.Assistant;
-        content = [Oas.Types.Text "r2"]; name = None; tool_call_id = None; metadata = [] };
+        content = [Oas.Types.Text "r2"]; name = None; tool_call_id = None };
     ];
     turn_count = 2;
   };
@@ -106,7 +106,7 @@ let test_multi_cascade_accumulation () =
     messages = (Oas.Agent.state agent_b).messages @ [
       Oas.Types.user_msg "t3";
       { Oas.Types.role = Oas.Types.Assistant;
-        content = [Oas.Types.Text "r3"]; name = None; tool_call_id = None; metadata = [] };
+        content = [Oas.Types.Text "r3"]; name = None; tool_call_id = None };
     ];
     turn_count = 3;
   };

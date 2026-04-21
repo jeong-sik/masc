@@ -111,8 +111,8 @@ let test_envelope_empty_snapshot_returns_none () =
 
 let make_test_checkpoint ?(working_context = None) ~response_text () =
   let messages = [
-    Agent_sdk.Types.{ role = User; content = [Text "hello"]; name = None; tool_call_id = None; metadata = [] };
-    Agent_sdk.Types.{ role = Assistant; content = [Text response_text]; name = None; tool_call_id = None; metadata = [] };
+    Agent_sdk.Types.{ role = User; content = [Text "hello"]; name = None; tool_call_id = None };
+    Agent_sdk.Types.{ role = Assistant; content = [Text response_text]; name = None; tool_call_id = None };
   ] in
   Agent_sdk.Checkpoint.{
     version = 4;

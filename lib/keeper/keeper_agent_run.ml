@@ -193,7 +193,6 @@ let metric_of_block
       content = [block];
       name = None;
       tool_call_id = None;
-      metadata = [];
     }
   in
   {

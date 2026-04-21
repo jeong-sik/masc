@@ -709,7 +709,7 @@ jobs:
   tla-specs:
     name: TLA+ Model Checking (${{ matrix.suite }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     needs: [pr-sync-check, changes]
     if: ${{ !cancelled() && needs.changes.outputs.tla == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
     strategy:

@@ -374,6 +374,146 @@ let test_outcomes_rollup_counts_gate_rejected_from_completed_turns () =
   check int "turn_failed bucket keeps non-gate failures" 1
     Yojson.Safe.Util.(outcomes |> member "failures" |> member "turn_failed" |> to_int)
 
+(* ------------------------------------------------------------------ *)
+(* Wake-time payload telemetry (Phase 0 for Option C redesign).       *)
+(* ------------------------------------------------------------------ *)
+
+let with_wake_payload_store f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = tmpdir "harness_wake_payload" in
+  Harness.set_wake_payload_store_for_testing ~base_dir;
+  Fun.protect
+    ~finally:(fun () -> Harness.reset_runtime_stores_for_testing ())
+    (fun () -> f ())
+
+let sample_role_counts =
+  [ ("system", 1); ("user", 6); ("assistant", 18); ("tool", 17) ]
+
+let test_wake_payload_round_trip () =
+  with_wake_payload_store @@ fun () ->
+  let before =
+    Harness.record_wake_payload
+      ~keeper_name:"engineering-01"
+      ~trace_id:"trc_abc"
+      ~turn_index:3
+      ~model_id:"claude-opus-4-7"
+      ~context_window:200_000
+      ~approx_body_bytes:184_231
+      ~system_prompt_bytes:12_400
+      ~tool_defs_bytes:48_200
+      ~messages_bytes:123_631
+      ~message_count:42
+      ~role_counts:sample_role_counts
+      ~tool_count:23
+      ~has_compact_happened:false
+  in
+  let events = Harness.read_wake_payload_events () in
+  check int "exactly one event persisted" 1 (List.length events);
+  let after = List.hd events in
+  check string "keeper_name round-trip" before.keeper_name after.keeper_name;
+  check string "trace_id round-trip" before.trace_id after.trace_id;
+  check int "turn_index round-trip" before.turn_index after.turn_index;
+  check string "model_id round-trip" before.model_id after.model_id;
+  check int "context_window round-trip"
+    before.context_window after.context_window;
+  check int "approx_body_bytes round-trip"
+    before.approx_body_bytes after.approx_body_bytes;
+  check int "system_prompt_bytes round-trip"
+    before.system_prompt_bytes after.system_prompt_bytes;
+  check int "tool_defs_bytes round-trip"
+    before.tool_defs_bytes after.tool_defs_bytes;
+  check int "messages_bytes round-trip"
+    before.messages_bytes after.messages_bytes;
+  check int "message_count round-trip"
+    before.message_count after.message_count;
+  check int "tool_count round-trip" before.tool_count after.tool_count;
+  check bool "has_compact_happened round-trip"
+    before.has_compact_happened after.has_compact_happened;
+  let sorted =
+    List.sort (fun (a, _) (b, _) -> compare a b)
+  in
+  check
+    (list (pair string int))
+    "role_counts round-trip"
+    (sorted sample_role_counts)
+    (sorted after.role_counts)
+
+let test_wake_payload_role_count_invariant () =
+  with_wake_payload_store @@ fun () ->
+  let role_counts = [ ("user", 3); ("assistant", 5); ("tool", 2) ] in
+  let message_count =
+    List.fold_left (fun acc (_, n) -> acc + n) 0 role_counts
+  in
+  let event =
+    Harness.record_wake_payload
+      ~keeper_name:"k"
+      ~trace_id:"t"
+      ~turn_index:0
+      ~model_id:"m"
+      ~context_window:100_000
+      ~approx_body_bytes:1_024
+      ~system_prompt_bytes:256
+      ~tool_defs_bytes:128
+      ~messages_bytes:640
+      ~message_count
+      ~role_counts
+      ~tool_count:0
+      ~has_compact_happened:false
+  in
+  let total_from_counts =
+    List.fold_left (fun acc (_, n) -> acc + n) 0 event.role_counts
+  in
+  check int "role_counts sum equals message_count"
+    event.message_count total_from_counts
+
+let test_wake_payload_empty_history () =
+  with_wake_payload_store @@ fun () ->
+  let event =
+    Harness.record_wake_payload
+      ~keeper_name:"k"
+      ~trace_id:"t"
+      ~turn_index:0
+      ~model_id:"m"
+      ~context_window:100_000
+      ~approx_body_bytes:1_024
+      ~system_prompt_bytes:1_024
+      ~tool_defs_bytes:0
+      ~messages_bytes:0
+      ~message_count:0
+      ~role_counts:[]
+      ~tool_count:0
+      ~has_compact_happened:false
+  in
+  check int "empty history message_count is zero" 0 event.message_count;
+  check (list (pair string int)) "empty history role_counts is empty"
+    [] event.role_counts;
+  let events = Harness.read_wake_payload_events () in
+  check int "empty-history event still persists" 1 (List.length events)
+
+let test_wake_payload_filters_foreign_records () =
+  with_wake_payload_store @@ fun () ->
+  (* Directly append a pre_compact-style record into the wake_payload
+     store to prove [wake_payload_event_of_json] rejects it. *)
+  Dated_jsonl.append
+    (Harness.get_wake_payload_store ())
+    (`Assoc
+      [
+        ("record_type", `String "pre_compact");
+        ("timestamp", `Float 1745000000.0);
+        ("keeper_name", `String "intruder");
+      ]);
+  ignore
+    (Harness.record_wake_payload
+       ~keeper_name:"k" ~trace_id:"t" ~turn_index:0 ~model_id:"m"
+       ~context_window:100_000 ~approx_body_bytes:0 ~system_prompt_bytes:0
+       ~tool_defs_bytes:0 ~messages_bytes:0 ~message_count:0 ~role_counts:[]
+       ~tool_count:0 ~has_compact_happened:false);
+  let events = Harness.read_wake_payload_events () in
+  check int "foreign record_type filtered out" 1 (List.length events);
+  check string "only wake_payload survives" "k"
+    (List.hd events).keeper_name
+
 let () =
   run "Dashboard_harness_health"
     [
@@ -395,5 +535,16 @@ let () =
             test_agent_scoped_verdicts_filter_before_limit;
           test_case "outcomes rollup counts gate_rejected from completed turns"
             `Quick test_outcomes_rollup_counts_gate_rejected_from_completed_turns;
+        ] );
+      ( "wake payload telemetry",
+        [
+          test_case "round-trip preserves every field" `Quick
+            test_wake_payload_round_trip;
+          test_case "role_counts sum equals message_count" `Quick
+            test_wake_payload_role_count_invariant;
+          test_case "empty history persists with zero counts" `Quick
+            test_wake_payload_empty_history;
+          test_case "non-wake_payload records ignored" `Quick
+            test_wake_payload_filters_foreign_records;
         ] );
     ]

@@ -309,19 +309,19 @@ let view_meta_strip (r : Archive_runs_types.response) =
     List.count r.loops ~f:(fun (l : Archive_runs_types.loop) ->
       match l.status with
       | Running -> true
-      | _ -> false)
+      | Stopped | Paused | Failed | Completed | Unknown -> false)
   in
   let completed =
     List.count r.loops ~f:(fun (l : Archive_runs_types.loop) ->
       match l.status with
       | Completed -> true
-      | _ -> false)
+      | Running | Stopped | Paused | Failed | Unknown -> false)
   in
   let failed =
     List.count r.loops ~f:(fun (l : Archive_runs_types.loop) ->
       match l.status with
       | Failed -> true
-      | _ -> false)
+      | Running | Stopped | Paused | Completed | Unknown -> false)
   in
   Meta.strip
     [ Meta.cell ~k:"total" ~v:(Printf.sprintf "%d" r.total) ()

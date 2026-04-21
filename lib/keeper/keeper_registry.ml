@@ -375,6 +375,13 @@ let turn_phase_of_cascade_state = function
   | Cascade_trying -> Turn_executing
   | Cascade_done | Cascade_exhausted -> Turn_finalizing
 
+let completed_turn_outcome_of_observation
+    (obs : turn_observation) : Keeper_transition_audit.completed_turn_outcome =
+  match obs.decision_stage, obs.cascade_state with
+  | Decision_gate_rejected, _ -> Keeper_transition_audit.Turn_gate_rejected
+  | _, Cascade_done -> Keeper_transition_audit.Turn_substantive
+  | _ -> Keeper_transition_audit.Turn_failed
+
 let update_current_turn e f =
   let current_turn_observation =
     match e.current_turn_observation with
@@ -470,23 +477,37 @@ let mark_turn_gate_rejected_by_name name =
           }))
 
 let mark_turn_finished ~base_path name =
+  let completed_turn_to_record = ref None in
   update_entry ~base_path name (fun e ->
     let last_completed_turn =
       match e.current_turn_observation with
       | Some obs ->
-        Some {
-          ct_turn_id = obs.turn_id;
-          ct_started_at = obs.started_at;
-          ct_ended_at = Time_compat.now ();
-          ct_decision_stage = obs.decision_stage;
-          ct_cascade_state = obs.cascade_state;
-          ct_selected_model = obs.selected_model;
-        }
+          let ended_at = Time_compat.now () in
+          completed_turn_to_record :=
+            Some
+              {
+                Keeper_transition_audit.turn_id = obs.turn_id;
+                started_at = obs.started_at;
+                ended_at;
+                outcome = completed_turn_outcome_of_observation obs;
+              };
+          Some
+            {
+              ct_turn_id = obs.turn_id;
+              ct_started_at = obs.started_at;
+              ct_ended_at = ended_at;
+              ct_decision_stage = obs.decision_stage;
+              ct_cascade_state = obs.cascade_state;
+              ct_selected_model = obs.selected_model;
+            }
       | None -> e.last_completed_turn  (* no live turn → preserve previous *)
     in
     { e with
       current_turn_observation = None;
-      last_completed_turn })
+      last_completed_turn });
+  Option.iter
+    (Keeper_transition_audit.record_completed_turn ~keeper_name:name)
+    !completed_turn_to_record
 
 let increment_turn_failures ~base_path name =
   update_entry ~base_path name (fun e ->

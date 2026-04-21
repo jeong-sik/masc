@@ -49,8 +49,10 @@ let compute_health_score
 (** Outcomes rollup: aggregate successes / failures / validation for a keeper.
 
     Data sources (all already in-process, zero new schema):
-    - [Keeper_transition_audit.recent_transitions] (50-entry ring) → turn,
-      compaction, handoff outcomes classified by [selected_event].
+    - [Keeper_transition_audit.recent_completed_turns] (50-entry ring) →
+      turn outcomes classified after [mark_turn_finished].
+    - [Keeper_transition_audit.recent_transitions] (50-entry ring) →
+      compaction / handoff outcomes classified by [selected_event].
     - [registry_entry] crash_log / restart_count / turn_consecutive_failures
       → resilience counters.
     - [Dashboard_harness_health.read_recent_verdicts] → OAS verdict pass/fail
@@ -59,9 +61,8 @@ let compute_health_score
     Conservation law (spec {!KeeperOutcomesConservation.tla}):
       successes.substantive_turns + failures.turn_failed + failures.gate_rejected
         = observed_turns
-    holds by construction only for buckets backed by the transition ring pass.
-    Historical [gate_rejected] counts are not yet persisted in the same read
-    model, so the field remains 0 until a keeper-turn source is added. *)
+    holds by construction because all three turn buckets now come from the
+    same completed-turn ring. *)
 let compute_outcomes_rollup
     ~keeper_name
     ~agent_name
@@ -71,22 +72,31 @@ let compute_outcomes_rollup
   let succ_compactions = ref 0 in
   let succ_handoffs = ref 0 in
   let fail_turn = ref 0 in
+  let fail_gate_rejected = ref 0 in
   let fail_compaction = ref 0 in
   let fail_handoff = ref 0 in
+  let completed_turns =
+    Keeper_transition_audit.recent_completed_turns ~keeper_name ~limit:50
+  in
+  List.iter
+    (fun (turn : Keeper_transition_audit.completed_turn_record) ->
+      match turn.outcome with
+      | Keeper_transition_audit.Turn_substantive -> incr succ_turns
+      | Keeper_transition_audit.Turn_failed -> incr fail_turn
+      | Keeper_transition_audit.Turn_gate_rejected -> incr fail_gate_rejected)
+    completed_turns;
   let transitions =
     Keeper_transition_audit.recent_transitions ~keeper_name ~limit:50
   in
   List.iter (fun (tr : Keeper_transition_audit.transition_record) ->
     match tr.selected_event with
-    | Keeper_state_machine.Turn_succeeded -> incr succ_turns
-    | Turn_failed _ -> incr fail_turn
-    | Compaction_completed _ -> incr succ_compactions
+    | Keeper_state_machine.Compaction_completed _ -> incr succ_compactions
     | Compaction_failed _ -> incr fail_compaction
     | Handoff_completed _ -> incr succ_handoffs
     | Handoff_failed _ -> incr fail_handoff
     | _ -> ()
   ) transitions;
-  let observed_turns = !succ_turns + !fail_turn in
+  let observed_turns = List.length completed_turns in
   let restarts, consecutive_fail =
     match registry_entry with
     | Some (e : Keeper_registry.registry_entry) ->
@@ -164,8 +174,7 @@ let compute_outcomes_rollup
     ]);
     ("failures", `Assoc [
       ("turn_failed", `Int !fail_turn);
-      (* Historical gate_rejected counts are not persisted yet. *)
-      ("gate_rejected", `Int 0);
+      ("gate_rejected", `Int !fail_gate_rejected);
       ("compaction_failed", `Int !fail_compaction);
       ("handoff_failed", `Int !fail_handoff);
       ("crashes", `Int recent_crash_count);

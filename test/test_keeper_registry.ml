@@ -189,6 +189,30 @@ let test_dispatch_event_with_audit_preserves_snapshot () =
       check string "new phase" "failing" (KSM.phase_to_string audit.new_phase)
   | _ -> fail "expected exactly one transition audit entry"
 
+let test_mark_turn_finished_records_completed_turn_outcome_once () =
+  R.clear ();
+  let keeper_name = "k-completed-turn-audit" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  R.mark_turn_started ~base_path:bp keeper_name;
+  R.set_turn_decision_stage
+    ~base_path:bp keeper_name R.Decision_tool_policy_selected;
+  R.mark_turn_gate_rejected_by_name keeper_name;
+  R.mark_turn_finished ~base_path:bp keeper_name;
+  R.mark_turn_finished ~base_path:bp keeper_name;
+  match Audit.recent_completed_turns ~keeper_name ~limit:5 with
+  | [ turn ] ->
+      check int "turn_id recorded" 1 turn.turn_id;
+      check bool "started_at recorded" true (turn.started_at > 0.0);
+      check bool "ended_at recorded" true (turn.ended_at >= turn.started_at);
+      check bool "gate_rejected outcome recorded" true
+        (match turn.outcome with
+         | Audit.Turn_gate_rejected -> true
+         | _ -> false)
+  | turns ->
+      fail
+        (Printf.sprintf "expected exactly one completed turn, got %d"
+           (List.length turns))
+
 let test_unregister () =
   R.clear ();
   let _entry = R.register ~base_path:bp "k2" (make_meta "k2") in
@@ -737,6 +761,8 @@ let () =
           eio_test "register restarting and start" test_register_restarting_and_start;
           eio_test "dispatch event with audit preserves snapshot"
             test_dispatch_event_with_audit_preserves_snapshot;
+          eio_test "mark_turn_finished records completed turn outcome once"
+            test_mark_turn_finished_records_completed_turn_outcome_once;
           eio_test "unregister" test_unregister;
           eio_test "all" test_all;
           eio_test "update meta" test_update_meta;

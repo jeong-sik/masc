@@ -718,6 +718,15 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let state =
         create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
       in
+      let raise_catalog_validation_failure label rejection =
+        raise
+          (Invalid_argument
+             (Printf.sprintf
+                "%s: %s"
+                label
+                (Yojson.Safe.to_string
+                   (Cascade_catalog_runtime.rejection_to_yojson rejection))))
+      in
       (match Cascade_catalog_runtime.inspect_active ~sw ~net ~clock () with
        | Ok (Cascade_catalog_runtime.Validated snapshot) ->
            Log.Server.info
@@ -727,17 +736,13 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
        | Ok
            (Cascade_catalog_runtime.Serving_last_known_good
               { rejected_update; _ }) ->
-           failwith
-             (Printf.sprintf
-                "startup rejected active cascade catalog: %s"
-                (Yojson.Safe.to_string
-                   (Cascade_catalog_runtime.rejection_to_yojson rejected_update)))
+           raise_catalog_validation_failure
+             "startup rejected active cascade catalog"
+             rejected_update
        | Error rejection ->
-           failwith
-             (Printf.sprintf
-                "startup catalog validation failed: %s"
-                (Yojson.Safe.to_string
-                   (Cascade_catalog_runtime.rejection_to_yojson rejection))));
+           raise_catalog_validation_failure
+             "startup catalog validation failed"
+             rejection);
       let t1 = Eio.Time.now clock in
       Log.Server.info "State created (PG pool) in %.1fs" (t1 -. t0);
       bootstrap_server_state_blocking state;

@@ -29,7 +29,7 @@ let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Coord.confi
         match e.action with
         | Audit_log.ToolCall tool_name when e.timestamp >= since ->
           let is_fail =
-            match e.outcome with Audit_log.Failure _ -> true | _ -> false
+            match e.outcome with Audit_log.Failure _ -> true | Audit_log.Success -> false
           in
           let calls, fails =
             match SMap.find_opt tool_name m with

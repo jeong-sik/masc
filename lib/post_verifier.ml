@@ -219,7 +219,7 @@ let verify ~content =
     Heuristic_metrics.record {
       module_name = "post_verifier"; site = "verify";
       raw_value = verdict_score v; threshold = 0.5;
-      triggered = (match v with Fail _ -> true | _ -> false);
+      triggered = (match v with Fail _ -> true | Pass | Warn _ -> false);
       provenance = Post_verifier (match dim with Relevance -> "relevance" | Quality -> "quality" | Safety -> "safety");
       timestamp = Unix.gettimeofday ();
     }) [(Relevance, relevance); (Quality, quality); (Safety, safety)];

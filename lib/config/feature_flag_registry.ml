@@ -264,4 +264,4 @@ let overridden_flags () =
 
 (** Flags in deprecated lifecycle state. *)
 let deprecated_flags () =
-  List.filter (fun f -> match f.lifecycle with Deprecated _ -> true | _ -> false) all_flags
+  List.filter (fun f -> match f.lifecycle with Deprecated _ -> true | Active | Experimental -> false) all_flags

@@ -60,6 +60,9 @@ let worker_raw_trace_path ~base_path ~worker_name =
     (worker_container_dir ~base_path ~worker_name)
     "raw-trace.jsonl"
 
+let oas_tool_error ?(recoverable = false) message : Oas.Types.tool_result =
+  Error { Oas.Types.message; recoverable; error_class = None }
+
 let oas_trace_session_root ~base_path =
   Filename.concat (Filename.concat base_path ".masc") "oas-runtime"
 
@@ -349,17 +352,11 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt:_
                    ~args
                with
                | Ok result when result.is_error ->
-                 Error
-                   {
-                     Oas.Types.message = result.text;
-                     recoverable = false;
-                     error_class = None;
-                   }
+                 oas_tool_error result.text
                | Ok result ->
                  Ok { Oas.Types.content = result.text }
                | Error e ->
-                 Error
-                   { Oas.Types.message = e; recoverable = false; error_class = None }
+                 oas_tool_error e
              in
              Oas.Mcp.mcp_tool_to_sdk_tool ~call_fn
                {

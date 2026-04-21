@@ -1422,7 +1422,8 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
                  | `Exited 0 ->
                    Ok { Agent_sdk.Types.content = output }
                  | `Exited code ->
-                   tool_error (Printf.sprintf "Exit code %d:\n%s" code output)
+                   tool_error
+                     (Printf.sprintf "Exit code %d:\n%s" code output)
                  | `Signaled sig_num ->
                    tool_error
                      ~recoverable:(sig_num = Sys.sigterm)

@@ -657,13 +657,12 @@ let validate_path_result ~sw ~net ~clock ~config_path =
                           "required default profile %S failed validation"
                           Keeper_config.default_cascade_name;
                       ])
-                   @
-                   [
-                     Printf.sprintf
-                       "catalog validation rejected %d/%d profile(s)"
-                       (List.length rejected_profiles)
-                       (List.length profiles);
-                   ])
+                  @ [
+                      Printf.sprintf
+                        "catalog validation rejected %d/%d profile(s)"
+                        (List.length rejected_profiles)
+                        (List.length profiles);
+                    ])
                 ~profiles:rejected_profiles
             in
             if profile_snapshots = [] || not default_profile_validated then

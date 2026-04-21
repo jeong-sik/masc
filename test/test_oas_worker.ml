@@ -1034,14 +1034,15 @@ let test_classify_masc_internal_error_roundtrip () =
       (Oas_worker_named.Cascade_exhausted
          {
            cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
-           detail = Some "all providers failed";
+           reason = Keeper_types.All_providers_failed;
          })
   in
   (match Oas_worker_named.classify_masc_internal_error cascade_err with
-   | Some (Oas_worker_named.Cascade_exhausted { cascade_name; detail }) ->
+   | Some (Oas_worker_named.Cascade_exhausted { cascade_name; reason }) ->
        Alcotest.(check string) "cascade name" Masc_mcp.Keeper_config.default_cascade_name cascade_name;
-       Alcotest.(check (option string)) "cascade detail"
-         (Some "all providers failed") detail
+       Alcotest.(check string) "cascade reason"
+         (Keeper_types.cascade_exhaustion_summary Keeper_types.All_providers_failed)
+         (Keeper_types.cascade_exhaustion_summary reason)
    | _ -> Alcotest.fail "expected structured cascade exhaustion");
   let accept_err =
     Oas_worker_named.sdk_error_of_masc_internal_error

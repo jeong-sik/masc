@@ -117,6 +117,8 @@ type blocker_class =
 val blocker_class_to_string : blocker_class -> string
 val cascade_exhaustion_summary : cascade_exhaustion_reason -> string
 val blocker_class_continue_gate : blocker_class -> bool
+val cascade_exhaustion_reason_to_json : cascade_exhaustion_reason -> Yojson.Safe.t
+val cascade_exhaustion_reason_of_json : Yojson.Safe.t -> cascade_exhaustion_reason option
 
 type agent_runtime_state = {
   usage: usage_metrics;

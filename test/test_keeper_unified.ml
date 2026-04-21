@@ -16,6 +16,7 @@ module HK = Masc_mcp.Keeper_hooks_oas
 module KG = Masc_mcp.Keeper_guards
 module OMR = Masc_mcp.Oas_model_resolve
 module AQ = Masc_mcp.Keeper_approval_queue
+module Keeper_types = Masc_mcp.Keeper_types
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")

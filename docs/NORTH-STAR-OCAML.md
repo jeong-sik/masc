@@ -134,7 +134,112 @@ OCaml 5.4 추가. 현재 keeper 우선순위 관리를 `List.sort`로 구현한 
 
 ---
 
-## 3. 금지 패턴 (Anti-patterns)
+## 3. 구체적 코드 수정안 (Tier 1 상세)
+
+### 3A. String-typed enum → variant 타입 (keeper_unified_turn.ml)
+
+**현재** (line 750-761):
+```ocaml
+let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
+  (* ...returns "tool_use" | "noop" | "skip_text" | "text_response" *)
+
+let work_kind_of_selected_mode (selected_mode : string) : string =
+  match selected_mode with
+  | "tool_use" -> "tool_use"
+  | "noop" -> "noop"
+  | _ -> "text_turn"
+```
+
+**문제**: `selected_mode`와 `work_kind`가 string. 새 모드 추가 시 컴파일러가 완전성 검사 불가.
+`_ -> "text_turn"`은 unknown 입력을 text_turn으로 은밀히 분류.
+
+**수정안** — variant 타입 도입:
+```ocaml
+type turn_mode =
+  | Tool_use
+  | Noop
+  | Skip_text
+  | Text_response
+
+type work_kind =
+  | Wk_tool_use
+  | Wk_noop
+  | Wk_text_turn
+
+let work_kind_of_turn_mode = function
+  | Tool_use -> Wk_tool_use
+  | Noop -> Wk_noop
+  | Skip_text -> Wk_text_turn
+  | Text_response -> Wk_text_turn
+```
+
+**ROI**: 4개 call site 수정으로 컴파일러가 미래 variant 확장 시 반드시 모든 case 처리 보장.
+
+### 3B. post_commit_failure_kind_of_error — 재분류
+
+**현재** (line 220):
+```ocaml
+let post_commit_failure_kind_of_error (err : Oas.Error.sdk_error) =
+  match err with
+  | Oas.Error.Api (Timeout _) -> Keeper_registry.Post_commit_timeout
+  | _ -> Keeper_registry.Post_commit_failure
+```
+
+**분석**: `Oas.Error.sdk_error`의 변형은 Api/Agent/Internal/Config/MaxTurnsExceeded/TokenBudgetExceeded/ExitConditionMet/UnrecognizedStopReason.
+Timeout vs 나머지 구분이 실제로 유의미하므로, 이 wildcard는 **합리적**으로 판단.
+다만 명시적 분류로 변경하면 문서화 가치 증가:
+
+```ocaml
+let post_commit_failure_kind_of_error = function
+  | Oas.Error.Api (Timeout _) -> Post_commit_timeout
+  | Oas.Error.Api _ | Oas.Error.Agent _ | Oas.Error.Internal _
+  | Oas.Error.Config _ | Oas.Error.InvalidConfig _
+  | Oas.Error.MaxTurnsExceeded | Oas.Error.TokenBudgetExceeded
+  | Oas.Error.ExitConditionMet | Oas.Error.UnrecognizedStopReason ->
+      Post_commit_failure
+```
+
+**ROI**: 낮음. OAS가 변형을 추가할 때만 이점. 문서화 목적이면 OK, 아니면 현행 유지.
+
+### 3C. server_dashboard_http_runtime_info.ml — Mutex 전환
+
+**현재**: Eio fiber 안에서 `Stdlib.Mutex.lock/unlock` 7회 호출.
+
+**수정안**:
+```ocaml
+(* Before *)
+Stdlib.Mutex.lock cache_mu;
+let result = compute_expensiveThing () in
+Stdlib.Mutex.unlock cache_mu;
+result
+
+(* After *)
+Eio.Mutex.use_rw ~protect:true cache_mu (fun () ->
+  compute_expensive_thing ()
+)
+```
+
+**주의**: `use_rw` 내부에서 Eio fiber가 yield 가능. critical section이 non-yielding C call만 포함하면
+현행 유지 + 근거 주석 추가.
+
+**ROI**: 높음. 7군데 lock/unlock이 Eio fiber context에서 동작하므로 잠재적 dead-lock 위험 제거.
+
+### 3D. `match handoff_json with ... | _ -> ()` (line 1519)
+
+**현재**:
+```ocaml
+match handoff_json with
+| Some ((`Assoc _ as handoff)) ->
+    (* ... broadcast handoff SSE ... *)
+| _ -> ()
+```
+
+**분석**: `handoff_json : Yojson.Safe.t option`. `None` → broadcast 불필요, `Some (`List _)` 등 → 무시.
+JSON 구조가 `Assoc`이 아니면 무시하는 것이 올바른 동작. **합리적**. 수정 불필요.
+
+---
+
+## 4. 금지 패턴 (Anti-patterns)
 
 | 패턴 | 이유 | 대안 |
 |------|------|------|
@@ -147,7 +252,7 @@ OCaml 5.4 추가. 현재 keeper 우선순위 관리를 `List.sort`로 구현한 
 
 ---
 
-## 4. 측정 지표 (정량)
+## 5. 측정 지표 (정량)
 
 | 지표 | 현재 | 목표 (3개월) | 측정 방법 |
 |------|------|-------------|----------|
@@ -161,10 +266,36 @@ OCaml 5.4 추가. 현재 keeper 우선순위 관리를 `List.sort`로 구현한 
 
 ---
 
-## 5. 참고 자료
+## 6. 참고 자료
 
 - OCaml 5.4 Changelog: https://ocaml.org/releases/5.4.0
 - OCaml Manual 5.4: https://ocaml.org/manual/5.4/
 - Alexis King "Parse, Don't Validate": https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/
 - Eio Mutex 선택 가이드: ~/me/memory/feedback_ocaml5-mutex-selection.md
 - AI 코드 안티패턴: ~/me/instructions/software-development.md
+- Flambda 2 (ICFP 2023): 추상화 비용 감소 — functor/고차함수 신뢰, 작은 closure 유지, `[@inline]` 힌트 활용
+- Retrofitting Effect Handlers (arXiv 2411.19397): OCaml 5.x effect 설계 논문
+
+---
+
+## 7. 학문적 근거에 의한 코딩 가이드라인
+
+### Flambda 2 인사이트 (ICFP 2023 + OCaml Workshop 2023)
+
+**핵심**: Flambda 2는 추상화 비용을 획기적으로 감소시킴. "깔끔한 코드 vs 빠른 코드" 딜레마가 완화.
+
+| 원칙 | 실천 |
+|------|------|
+| 작은 함수에 `[@inline]` 힌트 | hot-path의 small function에 적용 |
+| Local exception으로 early exit | `raise_notrace` + local exn → direct jump |
+| Closure capture 최소화 | 많은 free variable보다 명시적 parameter |
+| Functor/고차함수 신뢰 | 과도한 수동 inline 대신 깔끔한 추상화 |
+| Variant→variant 직접 match | 중간 할당 최적화됨 (3B의 수정안과 일치) |
+
+### Effect Handlers 실천 가이드 (arXiv 2411.19397 기준)
+
+**안전한 도입 경로**:
+1. `Effect.Deep.try_with`로 감싸진 scope에서만 사용
+2. effect는 shallow handler로 정의 (성능상 유리)
+3. fiber cancellation과의 상호작용 주의 — `Eio.Cancel.Cancelled`는 effect handler 바깥에서 처리
+4. pilot: 로깅 effect → `Perform Log.message "..."` → handler에서 `Eio.traceln` 분기

@@ -136,6 +136,19 @@ let test_release_truth_contracts () =
   check bool "make release evidence target exists" true
     (file_contains_pattern "Makefile" "release-evidence:")
 
+let test_oas_pin_source_contracts () =
+  check bool "oas pin check parses local file pins from opam output" true
+    (file_contains_pattern "scripts/check-oas-pin.sh"
+       "extract_opam_pin_source()");
+  check bool "oas pin check accepts rsync-style file pins" true
+    (file_contains_pattern "scripts/check-oas-pin.sh" "git+*|file://*)");
+  check bool "oas pin check normalizes local pin path helper" true
+    (file_contains_pattern "scripts/check-oas-pin.sh"
+       "local_pin_path_from_source()");
+  check bool "oas pin check accepts both git file pins and plain file pins" true
+    (file_contains_pattern "scripts/check-oas-pin.sh"
+       "git+file://*|file://*)")
+
 let test_doc_truth_guard_contracts () =
   check bool "doc truth script protects spec index front door wording" true
     (file_contains_pattern "scripts/check-doc-truth.sh"
@@ -803,6 +816,7 @@ let () =
              test_contract_harness_and_execution_session_authz_contracts;
            test_case "health and ci diagnostics" `Quick test_health_and_ci_runner_diagnostics;
            test_case "release truth contracts" `Quick test_release_truth_contracts;
+           test_case "oas pin source contracts" `Quick test_oas_pin_source_contracts;
            test_case "doc truth guard contracts" `Quick test_doc_truth_guard_contracts;
            test_case "route auth contracts" `Quick test_route_auth_contracts;
            test_case "http write auth contracts" `Quick test_http_write_auth_contracts;

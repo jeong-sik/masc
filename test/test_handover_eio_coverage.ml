@@ -10,6 +10,13 @@
 open Alcotest
 
 module Handover_eio = Masc_mcp.Handover_eio
+module Prometheus = Masc_mcp.Prometheus
+
+let persistence_surface = "handover_eio"
+
+let persistence_counter reason =
+  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", persistence_surface); ("reason", reason)] ()
 
 (* ============================================================
    handover_record Type Tests
@@ -292,8 +299,14 @@ let test_load_nonexistent () =
 
 let test_list_handovers_empty () =
   with_eio_env @@ fun ~fs config ->
+  let before =
+    persistence_counter Safe_ops.persistence_read_drop_reason_list_dir_error
+  in
   let handovers = Handover_eio.list_handovers ~fs config in
-  check int "empty list" 0 (List.length handovers)
+  check int "empty list" 0 (List.length handovers);
+  check (float 0.1) "missing dir does not increment metric"
+    before
+    (persistence_counter Safe_ops.persistence_read_drop_reason_list_dir_error)
 
 let test_list_handovers_multiple () =
   with_eio_env @@ fun ~fs config ->
@@ -305,6 +318,26 @@ let test_list_handovers_multiple () =
   ignore (Handover_eio.save_handover ~fs config h2);
   let handovers = Handover_eio.list_handovers ~fs config in
   check int "two handovers" 2 (List.length handovers)
+
+let test_list_handovers_skips_bad_entries_with_metric () =
+  with_eio_env @@ fun ~fs config ->
+  let h = Handover_eio.create_handover
+    ~from_agent:"a1" ~task_id:"t1" ~session_id:"s1" ~reason:Handover_eio.Explicit in
+  ignore (Handover_eio.save_handover ~fs config h);
+  let dir = Filename.concat config.base_path ".masc/handovers" in
+  let broken = Filename.concat dir "broken.json" in
+  let oc = open_out broken in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc "{not-json");
+  let before =
+    persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+  in
+  let handovers = Handover_eio.list_handovers ~fs config in
+  check int "only valid handover returned" 1 (List.length handovers);
+  check (float 0.1) "broken file increments metric" 1.0
+    (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+     -. before)
 
 (* ============================================================
    Eio IO Tests: get_pending_handovers
@@ -397,6 +430,8 @@ let () =
     "eio_list", [
       test_case "empty" `Quick test_list_handovers_empty;
       test_case "multiple" `Quick test_list_handovers_multiple;
+      test_case "skips bad entries with metric" `Quick
+        test_list_handovers_skips_bad_entries_with_metric;
     ];
     "eio_pending", [
       test_case "get pending" `Quick test_get_pending_handovers;

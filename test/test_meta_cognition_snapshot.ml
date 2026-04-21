@@ -1,8 +1,10 @@
 module Tool_agent = Masc_mcp.Tool_agent
 module Coord = Masc_mcp.Coord
 module Meta_cognition = Masc_mcp.Meta_cognition
+module Prometheus = Masc_mcp.Prometheus
 
 let counter = ref 0
+let persistence_surface = "meta_cognition_snapshot"
 
 let temp_dir () =
   incr counter;
@@ -92,6 +94,10 @@ let json_list_ids key json =
          match item |> member "id" with
          | `String value -> Some value
          | _ -> None)
+
+let persistence_counter reason =
+  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+    ~labels:[("surface", persistence_surface); ("reason", reason)] ()
 
 let test_snapshot_detects_signals () =
   with_ctx @@ fun ctx ->
@@ -248,6 +254,43 @@ let test_parse_summary_preserves_refs_and_secondary_signals () =
         [ "comment:c-1"; "post:p-root" ]
         (interpretation.evidence_refs |> List.sort String.compare)
 
+let test_snapshot_governance_cases_skip_bad_entries_with_metric () =
+  with_ctx @@ fun ctx ->
+  let cases_dir = Filename.concat (Coord.masc_dir ctx.config) "governance_v2/cases" in
+  Fs_compat.mkdir_p cases_dir;
+  Fs_compat.save_file (Filename.concat cases_dir "good.json")
+    (Yojson.Safe.to_string
+       (`Assoc
+         [
+           ("id", `String "case-1");
+           ("title", `String "good governance case");
+           ("status", `String "pending_ruling");
+         ]));
+  Fs_compat.save_file (Filename.concat cases_dir "missing-id.json")
+    (Yojson.Safe.to_string
+       (`Assoc
+         [
+           ("title", `String "bad governance case");
+           ("status", `String "pending_ruling");
+         ]));
+  Fs_compat.save_file (Filename.concat cases_dir "broken.json") "{not-json";
+  let before_entry =
+    persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+  in
+  let before_invalid =
+    persistence_counter Safe_ops.persistence_read_drop_reason_invalid_payload
+  in
+  let json = Meta_cognition.snapshot_json ~limit:5 ctx.config in
+  let open Yojson.Safe.Util in
+  Alcotest.(check int) "valid governance case still counted" 1
+    (json |> member "room_state" |> member "governance_case_count" |> to_int);
+  Alcotest.(check (float 0.1)) "broken file increments entry_load_error" 1.0
+    (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+     -. before_entry);
+  Alcotest.(check (float 0.1)) "missing id increments invalid_payload" 1.0
+    (persistence_counter Safe_ops.persistence_read_drop_reason_invalid_payload
+     -. before_invalid)
+
 let () =
   Alcotest.run "Meta_cognition_snapshot"
     [
@@ -259,5 +302,7 @@ let () =
             test_snapshot_marks_contested_belief;
           Alcotest.test_case "parses summary refs and secondary signals" `Quick
             test_parse_summary_preserves_refs_and_secondary_signals;
+          Alcotest.test_case "governance cases skip bad entries with metric"
+            `Quick test_snapshot_governance_cases_skip_bad_entries_with_metric;
         ] );
     ]

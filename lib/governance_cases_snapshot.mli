@@ -15,8 +15,8 @@ val cases_dir : base_path:string -> string
 
 (** Load every case in [base_path/.masc/governance_v2/cases/*.json] whose
     name does not start with ["_"] (reserved for markers).  Unreadable
-    or malformed files are skipped silently; the caller gets an empty
-    list when the directory does not exist. *)
+    or malformed files are skipped with WARN+metric observability; the
+    caller still gets an empty list when the directory does not exist. *)
 val load_all : base_path:string -> case list
 
 (** Count of cases whose [status] equals the given string. *)

@@ -205,6 +205,8 @@ let metric_keeper_lifecycle_dispatch_rejections =
   "masc_keeper_lifecycle_dispatch_rejections_total"
 let metric_keeper_paused_state_persist_errors =
   "masc_keeper_paused_state_persist_errors_total"
+let metric_persistence_read_drops =
+  "masc_persistence_read_drops_total"
 
 (* OAS SSE relay (oas_sse_bridge.ml). *)
 let metric_oas_sse_relay_retries =
@@ -308,6 +310,10 @@ let init () =
   add metric_keeper_paused_state_persist_errors
     "Total keeper paused-state persistence failures, labeled by phase \
      (boot_resume_check|boot_resume_persist) and reason (read_meta_error|meta_missing)"
+    Counter;
+  add metric_persistence_read_drops
+    "Total persisted read-model entries dropped during filesystem scans, \
+     labeled by surface and reason"
     Counter;
   add metric_oas_sse_relay_retries
     "Total OAS SSE relay retry attempts, labeled by failed stage"

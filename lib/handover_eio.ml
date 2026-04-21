@@ -181,19 +181,42 @@ let load_handover ~fs config handover_id : (handover_record, string) result =
 
 (** List all handovers *)
 let list_handovers ~fs config : handover_record list =
+  let surface = "handover_eio" in
+  let observe_drop ~reason =
+    Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+      ~labels:[("surface", surface); ("reason", reason)] ()
+  in
+  let report_drop ~reason ~path ~detail =
+    Safe_ops.report_persistence_read_drop
+      ~on_drop:(fun () -> observe_drop ~reason)
+      ~surface
+      ~reason
+      ~path
+      ~detail
+  in
   let dir = handover_dir_path config in
-  let path = Eio.Path.(fs / dir) in
-  try
-    let files = Eio.Path.read_dir path in
-    let json_files = List.filter (fun f ->
-      Filename.check_suffix f ".json" && f <> "pending.json"
-    ) files in
-    let handovers = List.filter_map (fun f ->
-      let id = Filename.chop_suffix f ".json" in
-      match load_handover ~fs config id with Ok h -> Some h | Error _ -> None
-    ) json_files in
-    List.sort (fun a b -> compare b.created_at a.created_at) handovers
-  with Eio.Io _ | Yojson.Json_error _ -> []
+  if not (Sys.file_exists dir) then
+    []
+  else
+    match Safe_ops.list_dir_safe dir with
+    | Error detail ->
+      report_drop ~reason:Safe_ops.persistence_read_drop_reason_list_dir_error ~path:dir ~detail;
+      []
+    | Ok files ->
+      let json_files = List.filter (fun f ->
+        Filename.check_suffix f ".json" && f <> "pending.json"
+      ) files in
+      let handovers = List.filter_map (fun f ->
+        let id = Filename.chop_suffix f ".json" in
+        Safe_ops.result_to_option_logged
+          ~on_drop:(fun () ->
+            observe_drop ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error)
+          ~surface
+          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~path:(Filename.concat dir f)
+          (load_handover ~fs config id)
+      ) json_files in
+      List.sort (fun a b -> compare b.created_at a.created_at) handovers
 
 (** Get pending handovers *)
 let get_pending_handovers ~fs config : handover_record list =
@@ -277,5 +300,3 @@ let format_as_markdown (h : handover_record) : string =
   end;
 
   Buffer.contents buf
-
-

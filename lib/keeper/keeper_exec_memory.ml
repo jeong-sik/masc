@@ -356,10 +356,11 @@ let keeper_context_status_json
     | Some snapshot -> Keeper_memory_policy.keeper_state_snapshot_to_summary_text snapshot
   in
   let ctx_tokens = count_context_tokens ctx_work in
+  let ctx_max = Keeper_exec_context.max_tokens_of_context ctx_work in
   let ctx_ratio =
-    if ctx_work.max_tokens = 0
+    if ctx_max = 0
     then 0.0
-    else float_of_int ctx_tokens /. float_of_int ctx_work.max_tokens
+    else float_of_int ctx_tokens /. float_of_int ctx_max
   in
   let memory_tier_summary =
     Keeper_memory_recall.read_memory_horizon_counts config
@@ -383,7 +384,7 @@ let keeper_context_status_json
         ; "generation", `Int meta.runtime.generation
         ; "context_ratio", `Float ctx_ratio
         ; "context_tokens", `Int ctx_tokens
-        ; "context_max", `Int ctx_work.max_tokens
+        ; "context_max", `Int ctx_max
         ; "message_count", `Int (List.length (messages_of_context ctx_work))
         ; "last_model_used", `String meta.runtime.usage.last_model_used
         ]

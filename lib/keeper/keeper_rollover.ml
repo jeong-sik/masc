@@ -170,7 +170,7 @@ let maybe_rollover_oas_handoff
           failure_reason = None;
           context_ratio = ratio;
           context_tokens = token_count ctx;
-          context_max = ctx.max_tokens;
+          context_max = max_tokens_of_context ctx;
           message_count = message_count ctx;
         }
       in

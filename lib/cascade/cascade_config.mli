@@ -72,6 +72,23 @@ val parse_weighted_entry :
   Cascade_config_loader.weighted_entry ->
   Llm_provider.Provider_config.t option
 
+type weighted_entry_drop =
+  | Drop_unregistered_scheme of { model : string; scheme : string }
+  | Drop_unavailable_scheme of { model : string; scheme : string }
+  | Drop_invalid_syntax of string
+
+(** Like {!parse_weighted_entry}, but preserves the reason a candidate was
+    rejected so callers can surface actionable validation errors.
+
+    @since 0.150.0 *)
+val parse_weighted_entry_diag :
+  ?temperature:float ->
+  ?max_tokens:int ->
+  ?system_prompt:string ->
+  ?api_key_env_overrides:(string * string) list ->
+  Cascade_config_loader.weighted_entry ->
+  (Llm_provider.Provider_config.t, weighted_entry_drop) result
+
 (** Parse a list of weighted entries, dropping ones that cannot produce a
     provider config. Preserves input order.
 

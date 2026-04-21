@@ -399,6 +399,21 @@ let test_partial_catalog_keeps_validated_subset_available () =
   check (list string) "dashboard only advertises validated profiles"
     [ Keeper_config.default_cascade_name; "tool_rerank" ]
     (Masc_mcp.Server_routes_http_routes_dashboard.available_cascade_profiles ());
+  let invalid_profiles =
+    Masc_mcp.Server_routes_http_routes_dashboard.invalid_cascade_profiles ()
+  in
+  check (list string) "invalid profiles use runtime rejected subset"
+    [ "broken_profile" ]
+    (List.map fst invalid_profiles);
+  check bool "invalid profile reason is actionable" true
+    (match List.assoc_opt "broken_profile" invalid_profiles with
+     | Some reasons ->
+         List.exists
+           (fun reason ->
+              contains_substring reason
+                "uses unregistered provider scheme")
+           reasons
+     | None -> false);
   let config_json = Masc_mcp.Dashboard_cascade.config_json () in
   let profile_names =
     json_list_field "profiles" config_json

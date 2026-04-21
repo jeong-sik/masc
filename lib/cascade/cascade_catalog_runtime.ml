@@ -409,17 +409,32 @@ let validate_profile_static ~config_path name : (profile_build, profile_rejectio
           List.fold_left
             (fun (ok_acc, err_acc) (entry : Cascade_config_loader.weighted_entry) ->
               match
-                Cascade_config.parse_weighted_entry
+                Cascade_config.parse_weighted_entry_diag
                   ~api_key_env_overrides
                   entry
               with
-              | Some provider_cfg ->
+              | Ok provider_cfg ->
                   ({ model_string = entry.model; provider_cfg } :: ok_acc, err_acc)
-              | None ->
+              | Error
+                  (Cascade_config.Drop_unregistered_scheme { model; scheme }) ->
                   ( ok_acc,
                     Printf.sprintf
-                      "candidate %S is invalid or unavailable for the current runtime"
-                      entry.model
+                      "candidate %S uses unregistered provider scheme %S"
+                      model scheme
+                    :: err_acc )
+              | Error
+                  (Cascade_config.Drop_unavailable_scheme { model; scheme }) ->
+                  ( ok_acc,
+                    Printf.sprintf
+                      "candidate %S uses unavailable provider scheme %S \
+                       (missing credential or disabled runtime lane)"
+                      model scheme
+                    :: err_acc )
+              | Error (Cascade_config.Drop_invalid_syntax model) ->
+                  ( ok_acc,
+                    Printf.sprintf
+                      "candidate %S has invalid provider:model syntax"
+                      model
                     :: err_acc ))
             ([], [])
             expanded_entries
@@ -849,6 +864,31 @@ let known_profile_names ?sw ?net ?clock () =
   match require_snapshot ?sw ?net ?clock () with
   | Ok snapshot -> Ok (profile_names_of_snapshot snapshot)
   | Error _ as e -> e
+
+let dedupe_keep_order values =
+  let seen = Hashtbl.create (List.length values) in
+  List.filter
+    (fun value ->
+      if value = "" || Hashtbl.mem seen value then
+        false
+      else (
+        Hashtbl.replace seen value ();
+        true))
+    values
+
+let invalid_profile_errors ?sw ?net ?clock () =
+  let of_rejection rejection =
+    rejection.profiles
+    |> List.filter_map (fun (profile : profile_rejection) ->
+           let errors = dedupe_keep_order profile.errors in
+           if errors = [] then None else Some (profile.name, errors))
+  in
+  match inspect_active ?sw ?net ?clock () with
+  | Ok (Validated _) -> []
+  | Ok (Validated_with_rejections { rejected_update; _ })
+  | Ok (Serving_last_known_good { rejected_update; _ })
+  | Error rejected_update ->
+      of_rejection rejected_update
 
 let resolve_selection_trace ?sw ?net ?clock ~name () =
   match lookup_active_profile ?sw ?net ?clock name with

@@ -52,6 +52,7 @@ type inputs = {
 
     Documented in [docs/TOML-RELOAD-MATRIX.md]. *)
 val cascade_json_filename : string
+val cascade_toml_filename : string
 val tool_policy_toml_filename : string
 val keeper_runtime_toml_filename : string
 

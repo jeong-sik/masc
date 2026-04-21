@@ -253,6 +253,9 @@ let is_auto_recoverable_cascade_exhausted_error (err : Oas.Error.sdk_error) : bo
       false
   | Some (Oas_worker_named.No_tool_capable_provider _)
   | Some (Oas_worker_named.Accept_rejected _)
+  | Some (Oas_worker_named.Admission_queue_timeout _)
+  | Some (Oas_worker_named.Turn_timeout _)
+  | Some (Oas_worker_named.Ambiguous_post_commit _)
   | None ->
       false
 

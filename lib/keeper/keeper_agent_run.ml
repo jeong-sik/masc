@@ -1198,7 +1198,7 @@ let run_turn
               — inspect GitHub PRs/issues/checks\n\
              \  - `keeper_bash` { cmd: \"<single shell command>\" } \
               — run one shell command, including raw git in a worktree\n\
-             \  - `masc_worktree_create` { repo_name: \"masc-mcp\", branch_name: \"<branch>\" } \
+             \  - `masc_worktree_create` { task_id: \"<task-id>\", repo_name: \"masc-mcp\" } \
               — create a worktree before editing code\n\
              \  - `keeper_board_post` { content: \"<note>\" } \
               — coordinate via board\n\
@@ -1212,11 +1212,8 @@ let run_turn
               registered tools. Calling them is a hallucination — the \
               call fails silently and the turn is wasted. Use the \
               `keeper_*` names exactly as shown above.\n\n\
-              Do not print fenced pseudo-calls. If this runtime does not \
-              expose a structured tool channel, return exactly \
-              `NO_TOOL_CHANNEL: <brief reason>` instead of pretending a \
-              tool ran. Otherwise pick the smallest viable action and emit \
-              one or more structured tool calls now."
+              Do not print fenced pseudo-calls. Pick the smallest viable \
+              action and emit one or more structured tool calls now."
              interval (String.concat "\n\n" sections)))
     | _ -> None
   in

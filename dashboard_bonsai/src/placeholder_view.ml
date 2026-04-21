@@ -135,7 +135,7 @@ let blueprint_of_route : Route.t -> blueprint = function
         "A single sightline for runtime pressure, missing telemetry, and keeper \
          stall signatures.";
       measure = "Dropped spans, stale heartbeat windows, and blocked capability claims.";
-      next_step = "Bind span summaries to the pressure and chronicle lanes.";
+      next_step = "Bind span summaries to the pressure and journal lanes.";
       endpoint = "/api/v1/dashboard/*";
     }
   | Intervene ->

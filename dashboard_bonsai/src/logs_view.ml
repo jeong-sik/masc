@@ -891,7 +891,7 @@ stylesheet
   }
 
   /* ─── right aside (340px, fixed) ───
-     dashboard_v2 aside: focus card + chronicle evs stream.
+     dashboard_v2 aside: focus card + watch evs stream.
      현재는 static skeleton. 추후 Var 연결. */
   .aside {
     position: fixed;
@@ -1040,7 +1040,7 @@ stylesheet
     font-variant-numeric: tabular-nums;
   }
 
-  /* ─── chronicle evs stream ─── */
+  /* ─── watch evs stream ─── */
   .evs { display: flex; flex-direction: column; }
   .evrow {
     display: grid;
@@ -1793,7 +1793,7 @@ let render_response
               ; Node.text "c"
               ]
           ]
-      ; nav_section "chronicle"
+      ; nav_section "watch"
       ; nav_link Overview
       ; nav_link Logs
       ; nav_link Goals

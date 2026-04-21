@@ -431,7 +431,7 @@ let keepers_summary_mock () : Masc_dashboard_api_types.Keepers.response =
   K.{
     keepers = [ luna; brass_owl; moth; ash_hound ];
     cycle = 4;
-    room = Some "chronicle";
+    room = Some "local";
     generated_at = iso8601_utc_now ();
   }
 

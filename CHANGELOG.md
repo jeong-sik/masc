@@ -1,6 +1,14 @@
 # Changelog
 
 
+## [0.12.1] - 2026-04-21
+
+### Changed
+- TBD
+
+### Deprecated
+- TBD
+
 ## Unreleased
 
 ### Added

@@ -36,9 +36,21 @@ type pre_compact_event = {
 
     Captured once per keeper turn, just before [Oas_worker.run_named] fires.
     Phase 0 baseline for the tiered-hydration redesign (Option C).
+
     [approx_body_bytes] is a MASC-side estimate (sum of content text,
-    tool definition JSON, system prompt). It is NOT the exact HTTP body
-    wire size — provider layers apply further encoding. *)
+    tool definition JSON, system prompt, plus the pending user turn).
+    It is NOT the exact HTTP body wire size — provider layers add JSON
+    structural overhead (role keys, content block wrappers, array
+    brackets, escaping). Expect the real body to be ~1.3–1.5× this
+    estimate depending on tool-call density. Use [approx_body_bytes]
+    for trend detection, not for absolute thresholds.
+
+    [message_count] and [role_counts] include the synthesized user turn
+    that OAS will append from [~goal], matching the wire-level message
+    list the LLM will receive.
+
+    [has_compact_happened] is reserved for future wake-time pre-reduction
+    (Option C PR4). Currently always false — compaction runs post-turn. *)
 type wake_payload_event = {
   timestamp : float;
   keeper_name : string;

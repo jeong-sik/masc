@@ -477,6 +477,7 @@
    keeper_tool_alias
    keeper_tool_disclosure
    keeper_turn_telemetry
+   keeper_wake_telemetry
    keeper_approval_queue
    keeper_agent_run
    keeper_world_observation

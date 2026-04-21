@@ -265,7 +265,8 @@ let compute_directives
       |> List.filter_map (fun (task : Types.task) ->
            match task.task_status with
            | Types.Todo -> Some task.id
-           | _ -> None)
+           | Types.Claimed _ | Types.InProgress _ | Types.AwaitingVerification _
+           | Types.Done _ | Types.Cancelled _ -> None)
     in
     match unclaimed with
     | task_id :: _ -> directives := ("claim:" ^ task_id) :: !directives

@@ -129,6 +129,29 @@ let blocker_class_continue_gate = function
   | Ambiguous_post_commit_timeout | Ambiguous_post_commit_failure -> true
   | _ -> false
 
+let cascade_exhaustion_reason_to_json = function
+  | Connection_refused -> `String "connection_refused"
+  | No_providers_available -> `String "no_providers_available"
+  | All_providers_failed -> `String "all_providers_failed"
+  | Candidates_filtered_after_cycles -> `String "candidates_filtered_after_cycles"
+  | Other_detail msg ->
+      `Assoc [("tag", `String "other_detail"); ("message", `String msg)]
+
+let cascade_exhaustion_reason_of_json = function
+  | `String "connection_refused" -> Some Connection_refused
+  | `String "no_providers_available" -> Some No_providers_available
+  | `String "all_providers_failed" -> Some All_providers_failed
+  | `String "candidates_filtered_after_cycles" ->
+      Some Candidates_filtered_after_cycles
+  | `Assoc fields ->
+      (match List.assoc_opt "tag" fields with
+       | Some (`String "other_detail") ->
+           (match List.assoc_opt "message" fields with
+            | Some (`String msg) -> Some (Other_detail msg)
+            | _ -> None)
+       | _ -> None)
+  | _ -> None
+
 type usage_metrics =
   { total_turns : int
   ; total_input_tokens : int

@@ -147,20 +147,7 @@ let runtime_keepalive_started_at (config : Coord_utils.config)
 
 let blocker_class_of_sdk_error (err : Oas.Error.sdk_error) : blocker_class option =
   match Oas_worker_named.classify_masc_internal_error err with
-  | Some (Oas_worker_named.Cascade_exhausted { detail; _ }) ->
-      let reason =
-        match detail with
-        | Some d when String_util.contains_substring_ci d "connection refused" ->
-            Connection_refused
-        | Some d when String_util.contains_substring_ci d "no providers available" ->
-            No_providers_available
-        | Some d when String_util.contains_substring_ci d "all providers failed" ->
-            All_providers_failed
-        | Some d when String_util.contains_substring_ci d "all candidates filtered" ->
-            Candidates_filtered_after_cycles
-        | Some d -> Other_detail d
-        | None -> Candidates_filtered_after_cycles
-      in
+  | Some (Oas_worker_named.Cascade_exhausted { reason; _ }) ->
       Some (Cascade_exhausted reason)
   | Some (Oas_worker_named.No_tool_capable_provider _) ->
       Some No_tool_capable_provider
@@ -210,7 +197,8 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   let str = blocker_class_to_string cls in
   let continue_gate = blocker_class_continue_gate cls in
   let summary = match cls with
-    | Cascade_exhausted reason -> cascade_exhaustion_summary reason
+    | Cascade_exhausted reason ->
+        if summary = "" then cascade_exhaustion_summary reason else summary
     | _ -> if summary = "" then str else summary
   in
   { blocker_class = str; summary; continue_gate }

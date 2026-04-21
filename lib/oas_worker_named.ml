@@ -74,7 +74,7 @@ let resolve_providers_from_model_strings ?provider_filter
 type masc_internal_error =
   | Cascade_exhausted of {
       cascade_name : string;
-      detail : string option;
+      reason : Keeper_types.cascade_exhaustion_reason;
     }
   | No_tool_capable_provider of {
       cascade_name : string;
@@ -96,12 +96,12 @@ let string_opt_of_assoc key = function
   | _ -> None
 
 let masc_internal_error_to_json = function
-  | Cascade_exhausted { cascade_name; detail } ->
+  | Cascade_exhausted { cascade_name; reason } ->
     `Assoc
       [
         ("kind", `String "cascade_exhausted");
         ("cascade_name", `String cascade_name);
-        ("detail", Json_util.string_opt_to_json detail);
+        ("reason", Keeper_types.cascade_exhaustion_reason_to_json reason);
       ]
   | No_tool_capable_provider { cascade_name; configured_labels } ->
     `Assoc
@@ -140,11 +140,19 @@ let classify_masc_internal_error (err : Oas.Error.sdk_error) :
            | Some (`String "cascade_exhausted") -> (
                match string_opt_of_assoc "cascade_name" json with
                | Some cascade_name ->
+                 let reason =
+                   match List.assoc_opt "reason" (match json with `Assoc fields -> fields | _ -> []) with
+                   | Some json_val ->
+                       (match Keeper_types.cascade_exhaustion_reason_of_json json_val with
+                        | Some r -> r
+                        | None -> Other_detail "unknown_cascade_reason")
+                   | None -> Other_detail "missing_reason_field"
+                 in
                  Some
                    (Cascade_exhausted
                       {
                         cascade_name;
-                        detail = string_opt_of_assoc "detail" json;
+                        reason;
                       })
                | None -> None)
            | Some (`String "no_tool_capable_provider") -> (
@@ -524,12 +532,7 @@ let run_named
             Cascade_exhausted
               {
                 cascade_name;
-                detail =
-                  Some
-                    (if require_tool_support then
-                       "no callable models support inline or runtime MCP tool use"
-                     else
-                       "no callable models available");
+                reason = Keeper_types.No_providers_available;
               }))
   | _ ->
   let transport_resolved = match transport with
@@ -640,15 +643,22 @@ let run_named
       ?resume_checkpoint remaining last_err =
     match remaining with
     | [] ->
-      let err_msg = match last_err with
+      let reason : Keeper_types.cascade_exhaustion_reason = match last_err with
+        | Some (Llm_provider.Http_client.NetworkError { message })
+          when String_util.contains_substring_ci message "connection refused" ->
+            Keeper_types.Connection_refused
         | Some (Llm_provider.Http_client.HttpError { code; body }) ->
-          Printf.sprintf "HTTP %d: %s" code
-            (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." body |> String_util.to_string)
-        | Some (Llm_provider.Http_client.AcceptRejected { reason }) -> reason
+            Keeper_types.Other_detail
+              (Printf.sprintf "HTTP %d: %s" code
+                (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." body |> String_util.to_string))
+        | Some (Llm_provider.Http_client.AcceptRejected { reason = r }) ->
+            Keeper_types.Other_detail r
         | Some (Llm_provider.Http_client.CliTransportRequired { kind }) ->
-          Printf.sprintf "%s provider requires a CLI transport" kind
-        | Some (Llm_provider.Http_client.NetworkError { message }) -> message
-        | None -> "no providers available"
+            Keeper_types.Other_detail
+              (Printf.sprintf "%s provider requires a CLI transport" kind)
+        | Some (Llm_provider.Http_client.NetworkError { message }) ->
+            Keeper_types.Other_detail message
+        | None -> Keeper_types.No_providers_available
       in
       let observation =
         Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
@@ -660,7 +670,7 @@ let run_named
            (Cascade_exhausted
               {
                 cascade_name;
-                detail = Some err_msg;
+                reason;
               }))
     | (provider_cfg : Llm_provider.Provider_config.t) :: rest ->
       let is_last = rest = [] in
@@ -914,14 +924,9 @@ let run_named
     in
     Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure
       ~observation:(Some observation);
-    let detail =
-      Printf.sprintf
-        "all candidates filtered after %d cycle(s) (strategy=%s)"
-        (cycle + 1) (Cascade_strategy.kind_to_string strategy.kind)
-    in
     Error
       (sdk_error_of_masc_internal_error
-         (Cascade_exhausted { cascade_name; detail = Some detail }))
+         (Cascade_exhausted { cascade_name; reason = Keeper_types.Candidates_filtered_after_cycles }))
   in
   let record_trace ~cycle ~candidates_out ~backoff_ms ~kind =
     Cascade_strategy_trace.record {

@@ -466,14 +466,14 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     |> List.exists (fun tool_name ->
                            let trimmed = String.trim tool_name in
                            trimmed <> ""
-                           && not (String.equal trimmed "keeper_stay_silent"))
+                           && not (String.equal trimmed (Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent)))
                   in
                   let tool_refs =
                     result.tools_used
                     |> List.filter_map (fun tool_name ->
                            let trimmed = String.trim tool_name in
                            if trimmed = ""
-                              || String.equal trimmed "keeper_stay_silent"
+                              || String.equal trimmed (Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent)
                            then None
                            else Some ("tool:" ^ trimmed))
                   in

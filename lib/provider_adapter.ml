@@ -1108,7 +1108,13 @@ let docker_auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.
     if Masc_network_defaults.is_loopback_host_opt (Uri.host uri) then []
     else auth_env_keys_of_provider_kind cfg.kind
   | Llm_provider.Provider_config.Gemini -> [ gemini_api_key_env ]
-  | _ -> auth_env_keys_of_provider_kind cfg.kind
+  | Llm_provider.Provider_config.Anthropic
+  | Llm_provider.Provider_config.Ollama
+  | Llm_provider.Provider_config.Gemini_cli
+  | Llm_provider.Provider_config.Glm
+  | Llm_provider.Provider_config.Claude_code
+  | Llm_provider.Provider_config.Codex_cli ->
+      auth_env_keys_of_provider_kind cfg.kind
 
 let all_auth_env_keys () : string list =
   direct_adapters

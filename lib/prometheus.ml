@@ -273,6 +273,8 @@ let init () =
     "Total provider prefix cache creation tokens (Anthropic)" Counter;
   add "masc_provider_prefix_cache_read_tokens_total"
     "Total provider prefix cache read tokens (Anthropic)" Counter;
+  add "masc_tool_call_total"
+    "Total keeper tool calls labeled by provider, tool, and outcome" Counter;
   register_histogram ~name:"masc_tool_call_duration_seconds"
     ~help:"Tool call latency in seconds" ();
   (* Inference admission queue metrics *)

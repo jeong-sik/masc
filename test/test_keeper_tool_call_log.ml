@@ -115,12 +115,16 @@ let test_model_field_stored () =
       ~keeper_name:"k" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"ok"
       ~success:true ~duration_ms:2.0
-      ~model:"glm-4-9b" ();
+      ~model:"glm-4-9b" ~provider:"glm-coding" ();
     let entries = Keeper_tool_call_log.read_recent () in
     Alcotest.(check int) "one entry" 1 (List.length entries);
-    let entry_str = Yojson.Safe.to_string (List.hd entries) in
+    let entry = List.hd entries in
+    let entry_str = Yojson.Safe.to_string entry in
     Alcotest.(check bool) "model field present" true
-      (Observability_redact.contains_substring ~sub:"glm-4-9b" entry_str))
+      (Observability_redact.contains_substring ~sub:"glm-4-9b" entry_str);
+    Alcotest.(check (option string)) "provider field present"
+      (Some "glm-coding")
+      (Safe_ops.json_string_opt "provider" entry))
 
 let test_turn_context_fields_stored () =
   with_tmp_log (fun () ->

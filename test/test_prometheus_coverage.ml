@@ -220,7 +220,9 @@ let test_keeper_metrics_registered () =
   check bool "has operator compact counter" true
     (has "masc_keeper_operator_compact_total");
   check bool "has operator clear counter" true
-    (has "masc_keeper_operator_clear_total")
+    (has "masc_keeper_operator_clear_total");
+  check bool "has tool call counter" true
+    (has "masc_tool_call_total")
 
 let test_histogram_exported_as_summary () =
   let name = "test_hist_export_fmt" in

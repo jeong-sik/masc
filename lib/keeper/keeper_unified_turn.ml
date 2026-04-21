@@ -1194,6 +1194,7 @@ let append_decision_record
                 | None -> []
               in
               `Assoc ([
+                ("provider", `String (Keeper_hooks_oas.provider_of_model surface_model_used));
                 ("model_used", `String surface_model_used);
                 ("turn_count", `Int r.turn_count);
                 ("stop_reason", `String stop_reason_str);
@@ -1239,7 +1240,13 @@ let append_decision_record
                   else "other"
                 | _ -> "unknown"
               in
+              let error_provider =
+                match cascade_models with
+                | model :: _ -> Keeper_hooks_oas.provider_of_model model
+                | [] -> Keeper_hooks_oas.provider_of_model meta.cascade_name
+              in
               `Assoc [
+                ("provider", `String error_provider);
                 ("cascade_name", `String meta.cascade_name);
                 ("candidate_models", `List (List.map (fun s -> `String s) cascade_models));
                 ("error_category", `String error_category);

@@ -21,6 +21,14 @@ let parse_history_since request =
   | None -> None
   | Some s -> float_of_string_opt (String.trim s)
 
+let raw_json_of_body body_str =
+  match Yojson.Safe.from_string body_str with
+  | `Assoc fields -> (
+      match List.assoc_opt "raw_json" fields with
+      | Some (`String raw_json) -> Ok raw_json
+      | _ -> Error "expected JSON body with string field raw_json")
+  | _ -> Error "expected JSON object body"
+
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/cascade/config" (fun request reqd ->
@@ -29,6 +37,35 @@ let add_routes router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/cascade/config/raw" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json = Dashboard_cascade.raw_config_json () in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.post "/api/v1/cascade/config/raw" (fun request reqd ->
+       with_token_permission_auth ~permission:Types.CanAdmin
+         (fun _state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             let response status message =
+               Http.Response.json ~status ~request:req
+                 (Yojson.Safe.to_string
+                    (`Assoc [ ("ok", `Bool false); ("error", `String message) ]))
+                 reqd
+             in
+             match raw_json_of_body body_str with
+             | exception Yojson.Json_error msg ->
+                 response `Bad_request ("invalid JSON body: " ^ msg)
+             | Error msg ->
+                 response `Bad_request msg
+             | Ok raw_json -> (
+                 match Dashboard_cascade.save_raw_config_json raw_json with
+                 | Ok json ->
+                     Http.Response.json ~request:req
+                       (Yojson.Safe.to_string json) reqd
+                 | Error msg ->
+                     response `Bad_request msg))
+         ) request reqd)
   |> Http.Router.get "/api/v1/cascade/health" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let json = Dashboard_cascade.health_json () in

@@ -18,6 +18,9 @@ let with_cache_lock f =
   Mutex.lock config_cache_mu;
   Fun.protect ~finally:(fun () -> Mutex.unlock config_cache_mu) f
 
+let invalidate_cache_entry path =
+  with_cache_lock (fun () -> Hashtbl.remove config_cache path)
+
 let read_json_file path =
   let ic = open_in path in
   let content =

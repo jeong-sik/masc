@@ -341,6 +341,9 @@ let cascade_path_opt () =
   let resolution = resolve () in
   if resolution.cascade.exists then Some resolution.cascade.path else None
 
+let cascade_path_candidate () =
+  (resolve ()).cascade.path
+
 let prompts_dir () =
   (resolve ()).prompts.path
 

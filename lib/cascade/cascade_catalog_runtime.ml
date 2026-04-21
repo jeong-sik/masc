@@ -80,6 +80,23 @@ let with_cache_lock f =
 let reset_cache_for_tests () =
   with_cache_lock (fun () -> cache := { active_snapshot = None; rejected_update = None })
 
+let invalidate_path config_path =
+  let keep_snapshot = function
+    | Some (snapshot : snapshot) when String.equal snapshot.source_path config_path -> None
+    | other -> other
+  in
+  let keep_rejection = function
+    | Some (rejection : rejection) when String.equal rejection.source_path config_path -> None
+    | other -> other
+  in
+  with_cache_lock (fun () ->
+      let current = !cache in
+      cache :=
+        {
+          active_snapshot = keep_snapshot current.active_snapshot;
+          rejected_update = keep_rejection current.rejected_update;
+        })
+
 let install_snapshot_for_tests ~source_path ~profile_names =
   let mtime =
     try (Unix.stat source_path).Unix.st_mtime with

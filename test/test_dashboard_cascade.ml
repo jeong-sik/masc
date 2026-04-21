@@ -39,6 +39,14 @@ let write_file path contents =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc contents)
 
+let read_file path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+       let len = in_channel_length ic in
+       really_input_string ic len)
+
 let with_temp_config_root contents f =
   let dir = Filename.temp_file "dashboard-cascade-" "" in
   Sys.remove dir;
@@ -214,6 +222,77 @@ let test_config_invalid_catalog_surfaces_validation_metadata () =
                      match member "name" profile with
                      | `String "broken_profile" -> true
                      | _ -> false))))
+
+(* ── raw_config_json / save_raw_config_json ───────────────────── *)
+
+let test_raw_config_shape () =
+  with_temp_config_root
+    {|
+      {
+        "keeper_unified_models": ["ollama:qwen3.5:35b-a3b-nvfp4"]
+      }
+    |}
+    (fun cascade_path ->
+      let j = Masc_mcp.Dashboard_cascade.raw_config_json () in
+      let raw_json = Yojson.Safe.Util.(j |> member "raw_json" |> to_string) in
+      (match member "updated_at" j with
+       | `String _ -> ()
+       | _ -> fail "updated_at should be string");
+      check (option string) "config_path reflects active root"
+        (Some cascade_path)
+        Yojson.Safe.Util.(j |> member "config_path" |> to_string_option);
+      check bool "raw_json includes current file contents" true
+        (contains_substring raw_json "keeper_unified_models"))
+
+let test_raw_config_defaults_when_file_missing () =
+  with_temp_config_root "{}\n"
+    (fun cascade_path ->
+      Sys.remove cascade_path;
+      let j = Masc_mcp.Dashboard_cascade.raw_config_json () in
+      check (option string) "config_path still known"
+        (Some cascade_path)
+        Yojson.Safe.Util.(j |> member "config_path" |> to_string_option);
+      check string "missing file seeds default object"
+        "{}\n"
+        Yojson.Safe.Util.(j |> member "raw_json" |> to_string))
+
+let test_save_raw_config_json_rejects_invalid_json () =
+  with_temp_config_root "{}\n"
+    (fun _cascade_path ->
+      match Masc_mcp.Dashboard_cascade.save_raw_config_json "{ invalid" with
+      | Ok _ -> fail "invalid JSON should be rejected"
+      | Error msg ->
+          check bool "error mentions invalid JSON" true
+            (contains_substring msg "invalid JSON"))
+
+let test_save_raw_config_json_persists_and_refreshes_projection () =
+  with_temp_config_root
+    {|
+      {
+        "alpha_models": ["ollama:qwen3.5:35b-a3b-nvfp4"]
+      }
+    |}
+    (fun cascade_path ->
+      let before = Masc_mcp.Dashboard_cascade.config_json () in
+      check bool "old profile visible before save" true
+        (List.mem "alpha" (profile_names before));
+      let next_raw =
+        {|
+          {
+            "beta_editor_models": ["ollama:qwen3.5:35b-a3b-nvfp4"]
+          }
+        |}
+      in
+      match Masc_mcp.Dashboard_cascade.save_raw_config_json next_raw with
+      | Error msg -> fail ("save_raw_config_json failed: " ^ msg)
+      | Ok saved_config ->
+          check bool "new profile visible immediately after save" true
+            (List.mem "beta_editor" (profile_names saved_config));
+          check bool "old profile removed after save" false
+            (List.mem "alpha" (profile_names saved_config));
+          check string "file persisted verbatim"
+            next_raw
+            (read_file cascade_path))
 
 (* ── health_json ───────────────────────────────────── *)
 
@@ -419,6 +498,15 @@ let () =
       test_case "uses live config catalog" `Quick test_config_uses_live_catalog;
       test_case "invalid catalog surfaces validation metadata" `Quick
         test_config_invalid_catalog_surfaces_validation_metadata;
+    ];
+    "raw_config_json", [
+      test_case "top-level shape" `Quick test_raw_config_shape;
+      test_case "missing file seeds default object" `Quick
+        test_raw_config_defaults_when_file_missing;
+      test_case "invalid JSON is rejected" `Quick
+        test_save_raw_config_json_rejects_invalid_json;
+      test_case "save persists and refreshes config projection" `Quick
+        test_save_raw_config_json_persists_and_refreshes_projection;
     ];
     "health_json", [
       test_case "top-level shape" `Quick test_health_shape;

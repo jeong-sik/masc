@@ -2041,61 +2041,17 @@ let run_turn
     in
     (* Phase 0: wake-time payload telemetry (Option C baseline).
        Entire block is dead code when MASC_PAYLOAD_TELEMETRY is unset.
-       Exceptions from the telemetry path never abort the LLM call. *)
+       Compute logic lives in [Keeper_wake_telemetry] for unit tests;
+       exceptions from the telemetry path never abort the LLM call. *)
     let () =
       if Env_config_keeper.KeeperTelemetry.payload_telemetry_enabled () then
         try
-          let bytes_of_content_block : Agent_sdk.Types.content_block -> int = function
-            | Agent_sdk.Types.Text s -> String.length s
-            | Agent_sdk.Types.Thinking { content; _ } -> String.length content
-            | Agent_sdk.Types.RedactedThinking s -> String.length s
-            | Agent_sdk.Types.ToolUse { id; name; input } ->
-              String.length id + String.length name
-              + String.length (Yojson.Safe.to_string input)
-            | Agent_sdk.Types.ToolResult { tool_use_id; content; _ } ->
-              String.length tool_use_id + String.length content
-            | Agent_sdk.Types.Image { data; _ }
-            | Agent_sdk.Types.Document { data; _ }
-            | Agent_sdk.Types.Audio { data; _ } -> String.length data
-          in
-          let bytes_of_message (m : Agent_sdk.Types.message) =
-            List.fold_left
-              (fun acc b -> acc + bytes_of_content_block b)
-              0 m.content
-          in
-          let role_key : Agent_sdk.Types.role -> string = function
-            | Agent_sdk.Types.System -> "system"
-            | Agent_sdk.Types.User -> "user"
-            | Agent_sdk.Types.Assistant -> "assistant"
-            | Agent_sdk.Types.Tool -> "tool"
-          in
-          let tool_defs_bytes =
-            List.fold_left
-              (fun acc t ->
-                acc
-                + String.length
-                    (Yojson.Safe.to_string (Agent_sdk.Tool.schema_to_json t)))
-              0 tools
-          in
-          let messages_bytes =
-            List.fold_left
-              (fun acc m -> acc + bytes_of_message m)
-              0 history_messages
-            + String.length user_message
-          in
-          let system_prompt_bytes = String.length turn_system_prompt in
-          let approx_body_bytes =
-            system_prompt_bytes + tool_defs_bytes + messages_bytes
-          in
-          let role_counts =
-            let tbl = Hashtbl.create 5 in
-            List.iter
-              (fun (m : Agent_sdk.Types.message) ->
-                let key = role_key m.role in
-                let cur = try Hashtbl.find tbl key with Not_found -> 0 in
-                Hashtbl.replace tbl key (cur + 1))
-              history_messages;
-            Hashtbl.fold (fun k v acc -> (k, v) :: acc) tbl []
+          let sizes =
+            Keeper_wake_telemetry.compute_sizes
+              ~system_prompt:turn_system_prompt
+              ~tools
+              ~history_messages
+              ~user_message
           in
           let model_id =
             match meta.models with
@@ -2109,13 +2065,13 @@ let run_turn
               ~turn_index:start_turn_count
               ~model_id
               ~context_window:max_context
-              ~approx_body_bytes
-              ~system_prompt_bytes
-              ~tool_defs_bytes
-              ~messages_bytes
-              ~message_count:(List.length history_messages)
-              ~role_counts
-              ~tool_count:(List.length tools)
+              ~approx_body_bytes:sizes.approx_body_bytes
+              ~system_prompt_bytes:sizes.system_prompt_bytes
+              ~tool_defs_bytes:sizes.tool_defs_bytes
+              ~messages_bytes:sizes.messages_bytes
+              ~message_count:sizes.message_count
+              ~role_counts:sizes.role_counts
+              ~tool_count:sizes.tool_count
               ~has_compact_happened:false
           in
           ()

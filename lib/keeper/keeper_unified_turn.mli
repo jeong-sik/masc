@@ -218,6 +218,16 @@ val fail_open_local_only_when_unavailable :
   string list ->
   string
 
+(** Opportunistically fail open to a broader cascade after a hard-quota or
+    fully-filtered exhaustion event. Returns [Some cascade] for a one-shot
+    same-turn retry target, or [None] when the current cascade should remain
+    authoritative. *)
+val fail_open_cascade_after_auto_recoverable_error :
+  base_cascade:string ->
+  effective_cascade:string ->
+  Oas.Error.sdk_error ->
+  string option
+
 val run_keeper_cycle :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

@@ -640,7 +640,7 @@ let nav ~(active : Route.t) =
   let lnk = nav_link ~active in
   Node.div
     ~attrs:[ Style.nav ]
-    [ section "chronicle"
+    [ section "watch"
     ; lnk Overview
     ; lnk Logs
     ; lnk Goals
@@ -699,7 +699,7 @@ let topbar ~(active : Route.t) =
         [ Node.span
             ~attrs:[ Style.clock ]
             [ Node.text "Bonsai "
-            ; Node.b [ Node.text "v0.18" ]
+            ; Node.b [ Node.text "preview" ]
             ]
         ; pill ~tone:`Ok "sse live"
         ; pill "operator"
@@ -832,7 +832,7 @@ let flame () =
     ]
 ;;
 
-let chronicle () =
+let watch_feed () =
   let event ?(tone : tone = `Neutral) time body =
     let mark_attrs =
       match tone with
@@ -848,7 +848,7 @@ let chronicle () =
       ]
   in
   Node.div
-    [ aside_title ~right:"live" "Chronicle"
+    [ aside_title ~right:"live" "Watch"
     ; Node.div
         ~attrs:[ Style.events ]
         [ event ~tone:`Ok "now"
@@ -873,7 +873,7 @@ let default_aside ~(active : Route.t) =
     ~attrs:[ Style.aside ]
     [ focus_card ~active
     ; flame ()
-    ; chronicle ()
+    ; watch_feed ()
     ]
 ;;
 

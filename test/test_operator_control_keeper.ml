@@ -1096,6 +1096,36 @@ proactive_enabled = true
         (json |> member "proactive" |> member "enabled" |> to_bool);
       Alcotest.(check string) "default source kind" "toml"
         (json |> member "sources" |> member "default_source_kind" |> to_string);
+      Alcotest.(check string) "selected cascade name"
+        Masc_mcp.Keeper_config.default_cascade_name
+        (json |> member "execution" |> member "selected_cascade_name"
+       |> to_string);
+      Alcotest.(check string) "selected cascade canonical"
+        Masc_mcp.Keeper_config.default_cascade_name
+        (json |> member "execution" |> member "selected_cascade_canonical"
+       |> to_string);
+      let expected_default_models =
+        Masc_mcp.Cascade_runtime.models_of_cascade_name
+          Masc_mcp.Keeper_config.default_cascade_name
+      in
+      Alcotest.(check (list string)) "selected cascade models use default profile"
+        expected_default_models
+        (json |> member "execution" |> member "models" |> to_list
+       |> List.map to_string);
+      Alcotest.(check string) "cascade catalog source kind" "json"
+        (json |> member "sources" |> member "cascade_catalog_source_kind"
+       |> to_string);
+      Alcotest.(check string) "cascade catalog source path"
+        (Filename.concat config_dir "cascade.json")
+        (json |> member "sources" |> member "cascade_catalog_source_path"
+       |> to_string);
+      Alcotest.(check string) "cascade runtime json path"
+        (Filename.concat config_dir "cascade.json")
+        (json |> member "sources" |> member "cascade_runtime_json_path"
+       |> to_string);
+      Alcotest.(check bool) "cascade runtime json editable" true
+        (json |> member "sources" |> member "cascade_runtime_json_editable"
+       |> to_bool);
       Alcotest.(check string) "active config root" config_dir
         (json |> member "sources" |> member "active_config_root" |> to_string);
       Alcotest.(check string) "active config root source" "env"
@@ -1174,6 +1204,31 @@ proactive_enabled = true
         (contains_substring effective_system_prompt ("Goal: " ^ mutated.goal));
       Alcotest.(check bool) "effective system prompt includes world block" true
         (contains_substring effective_system_prompt "<world>");
+      let stale_meta =
+        { mutated with
+          cascade_name = "vendor_mix_balanced";
+          updated_at = Types.now_iso ();
+        }
+      in
+      (match Masc_mcp.Keeper_types.write_meta config stale_meta with
+      | Ok () -> ()
+      | Error err -> Alcotest.fail ("stale meta write failed: " ^ err));
+      let stale_status, stale_json =
+        Masc_mcp.Dashboard_http_keeper.keeper_config_json config keeper_name
+      in
+      Alcotest.(check bool) "stale config still found" true (stale_status = `OK);
+      Alcotest.(check string) "stale cascade raw name preserved"
+        "vendor_mix_balanced"
+        (stale_json |> member "execution" |> member "selected_cascade_name"
+       |> to_string);
+      Alcotest.(check string) "stale cascade falls back to live default"
+        Masc_mcp.Keeper_config.default_cascade_name
+        (stale_json |> member "execution" |> member "selected_cascade_canonical"
+       |> to_string);
+      Alcotest.(check (list string)) "stale cascade models use live default"
+        expected_default_models
+        (stale_json |> member "execution" |> member "models" |> to_list
+       |> List.map to_string);
       let ok, _ =
         dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_down"
           ~args:(`Assoc [ ("name", `String keeper_name) ])

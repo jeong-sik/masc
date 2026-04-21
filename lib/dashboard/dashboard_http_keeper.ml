@@ -21,6 +21,9 @@ let health_penalty_warn = Env_config_keeper.DashboardHealth.penalty_warn
 let runtime_warning_ctx_ratio =
   Env_config_keeper.DashboardHealth.runtime_warning_ctx_ratio
 
+let live_keeper_cascade_name (raw : string) =
+  Keeper_cascade_profile.resolve_live raw
+
 (** Compute keeper health score (0-100). Pure function.
     Inputs: restart_count, max_restarts, recent_crash_count,
             is_dead, context_ratio (0.0-1.0). *)
@@ -321,8 +324,9 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           let trace_history_count = List.length m.runtime.trace_history in
           let active_model = Keeper_exec_status.active_model_of_meta m in
           let next_model_hint = Keeper_exec_status.next_model_hint_of_meta m in
+          let effective_cascade_name = live_keeper_cascade_name m.cascade_name in
           let cascade_models =
-            Cascade_runtime.models_of_cascade_name m.cascade_name
+            Cascade_runtime.models_of_cascade_name effective_cascade_name
           in
           let primary_model =
             match cascade_models with
@@ -582,8 +586,9 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                   ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
                 ]
             | None ->
-                (let effective_models =
-                   Cascade_runtime.models_of_cascade_name m.cascade_name
+                (let effective_cascade_name = live_keeper_cascade_name m.cascade_name in
+                 let effective_models =
+                   Cascade_runtime.models_of_cascade_name effective_cascade_name
                  in
                  let cfgs = Cascade_config.parse_model_strings effective_models in
                  match cfgs with
@@ -1013,12 +1018,16 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("effective_system_prompt", `String effective_system_prompt);
         ]
       in
+      let effective_cascade_name = live_keeper_cascade_name m.cascade_name in
       let execution =
         `Assoc [
+          ("selected_cascade_name", `String m.cascade_name);
+          ( "selected_cascade_canonical",
+            `String effective_cascade_name );
           ( "models",
             `List
               (List.map (fun s -> `String s)
-                 (Cascade_runtime.models_of_cascade_name m.cascade_name)) );
+                 (Cascade_runtime.models_of_cascade_name effective_cascade_name)) );
           ("active_model", `String active_model);
           ("active_model_label", Json_util.string_opt_to_json active_model_label);
           ("last_model_used_label", Json_util.string_opt_to_json last_model_used_label);

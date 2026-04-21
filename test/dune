@@ -665,6 +665,17 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_cascade_toml_materialization)
+ (modules test_cascade_toml_materialization)
+ (deps %{workspace_root}/config/cascade.toml
+       %{workspace_root}/config/cascade.json)
+ (action
+  (setenv MASC_CASCADE_TOML_PATH %{workspace_root}/config/cascade.toml
+   (setenv MASC_CASCADE_JSON_PATH %{workspace_root}/config/cascade.json
+    (run %{test}))))
+ (libraries masc_test_deps))
+
+(test
  (name test_cascade_runtime)
  (modules test_cascade_runtime)
  (libraries masc_test_deps))

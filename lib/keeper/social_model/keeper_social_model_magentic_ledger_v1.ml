@@ -202,9 +202,11 @@ let apply_to_result ~(meta : keeper_meta)
 let derive_failure_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(previous_state : Types.social_state option)
+    ~(is_auto_recoverable : bool)
     ~(reason : string) =
   let base_state, transition_reason =
-    Bdi.derive_failure_state ~meta ~observation ~previous_state ~reason
+    Bdi.derive_failure_state ~meta ~observation ~previous_state
+      ~is_auto_recoverable ~reason
   in
   let previous_snapshot =
     Option.bind previous_state Fsm.snapshot_of_social_state

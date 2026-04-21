@@ -63,6 +63,20 @@ let make_config_root root =
   write_file (Filename.concat config "tool_policy.toml") "# test marker\n";
   config
 
+let make_toml_only_config_root root =
+  let config = Filename.concat root "config" in
+  mkdir_p (Filename.concat config "prompts");
+  mkdir_p (Filename.concat config "keepers");
+  mkdir_p (Filename.concat config "personas");
+  write_file
+    (Filename.concat config "cascade.toml")
+    {|
+[keeper_unified]
+models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+|};
+  write_file (Filename.concat config "tool_policy.toml") "# test marker\n";
+  config
+
 let make_inputs ?env_base_path ?env_config_dir ?env_personas_dir
     ?env_home ?(cwd = "/tmp/cwd") ?(executable_name = "/tmp/bin/masc-mcp") () =
   Lib.Config_dir_resolver.
@@ -115,8 +129,29 @@ let test_env_override_valid () =
     (Lib.Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "env"
     (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
+  check bool "cascade authoring missing" false resolution.cascade_authoring.exists;
   check bool "cascade exists" true resolution.cascade.exists;
   check bool "prompts exists" true resolution.prompts.exists
+
+let test_env_override_valid_with_toml_only_root () =
+  with_temp_dir "config-dir-env-toml" @@ fun root ->
+  let config = make_toml_only_config_root root in
+  let resolution =
+    Lib.Config_dir_resolver.resolve_with
+      (make_inputs ~env_config_dir:config ())
+  in
+  check string "status" "ready"
+    (Lib.Config_dir_resolver.status_to_string resolution.status);
+  check string "root source" "env"
+    (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
+  check bool "cascade authoring exists" true resolution.cascade_authoring.exists;
+  check string "cascade authoring path targets toml"
+    (Filename.concat config "cascade.toml")
+    resolution.cascade_authoring.path;
+  check bool "cascade exists via toml source" true resolution.cascade.exists;
+  check string "cascade runtime path still targets json"
+    (Filename.concat config "cascade.json")
+    resolution.cascade.path
 
 let test_env_override_invalid_no_fallback () =
   let invalid = "/tmp/definitely-missing-masc-config-dir" in
@@ -310,6 +345,8 @@ let () =
       ( "resolution",
         [
           test_case "env override valid" `Quick test_env_override_valid;
+          test_case "env override valid with toml-only root" `Quick
+            test_env_override_valid_with_toml_only_root;
           test_case "env override invalid does not fallback" `Quick
             test_env_override_invalid_no_fallback;
           test_case "cwd fallback disabled by default" `Quick

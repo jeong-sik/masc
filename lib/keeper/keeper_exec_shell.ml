@@ -176,7 +176,37 @@ let process_status_is_timeout = function
   | Unix.WEXITED 124 -> true  (* Process_eio returns 124 on Eio.Time.Timeout *)
   | _ -> false
 
+let replace_all_substrings ~needle ~replacement text =
+  let needle_len = String.length needle in
+  if needle_len = 0 || not (String_util.contains_substring text needle) then text
+  else
+    let text_len = String.length text in
+    let buf = Buffer.create text_len in
+    let rec loop i =
+      if i >= text_len then ()
+      else if i + needle_len <= text_len
+              && String.sub text i needle_len = needle then (
+        Buffer.add_string buf replacement;
+        loop (i + needle_len))
+      else (
+        Buffer.add_char buf text.[i];
+        loop (i + 1))
+    in
+    loop 0;
+    Buffer.contents buf
+
+let rewrite_turn_runtime_paths_to_host
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      text
+  =
+  replace_all_substrings
+    ~needle:(Keeper_sandbox.container_root meta.name)
+    ~replacement:(Keeper_sandbox.host_root_abs ~config meta.name)
+    text
+
 let run_argv_with_status_retry_eintr ?cwd ~timeout_sec argv =
+  let max_eintr_retries = 8 in
   let rec loop attempts_left =
     let result = Process_eio.run_argv_with_status ?cwd ~timeout_sec argv in
     match result with
@@ -186,7 +216,7 @@ let run_argv_with_status_retry_eintr ?cwd ~timeout_sec argv =
         loop (attempts_left - 1)
     | _ -> result
   in
-  loop 3
+  loop max_eintr_retries
 
 let shell_command_available name =
   let probe =
@@ -523,105 +553,151 @@ let optional_ro_mount ~host ~container =
   else if not (Sys.file_exists host) then []
   else [ "-v"; host ^ ":" ^ container ^ ":ro" ]
 
+type docker_shell_result =
+  {
+    status : Unix.process_status;
+    output : string;
+    image : string;
+    network_label : string;
+  }
+
+let run_docker_shell_command_with_status
+    ~(config : Coord.config)
+    ~(meta : keeper_meta)
+    ~(cwd : string)
+    ~(timeout_sec : float)
+    ~(cmd : string)
+    ~(git_creds_enabled : bool)
+    ~(network_mode : network_mode)
+  =
+  let image = Env_config_keeper.KeeperSandbox.docker_image () in
+  let sandbox_error message =
+    Keeper_registry.record_error ~base_path:config.base_path meta.name message;
+    Error message
+  in
+  if String.trim image = "" then
+    sandbox_error "keeper sandbox docker image is not configured"
+  else if command_uses_nested_container_runtime cmd then
+    sandbox_error
+      (if git_creds_enabled then
+         "sandbox_profile=docker+git_creds blocks nested container runtimes and host socket references"
+       else
+         "sandbox_profile=docker blocks nested container runtimes and host socket references")
+  else
+    match ensure_keeper_sandbox_runtime ~timeout_sec with
+    | Error err -> sandbox_error err
+    | Ok seccomp_args ->
+      let host_root =
+        keeper_playground_root ~config ~meta
+        |> Keeper_alerting_path.normalize_path_for_check
+        |> Keeper_alerting_path.strip_trailing_slashes
+      in
+      let container_name = keeper_sandbox_container_name meta in
+      let container_root = keeper_private_container_root meta in
+      let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
+      let uid = Unix.getuid () in
+      let gid = Unix.getgid () in
+      let network_args, network_label =
+        if git_creds_enabled then
+          ([ "--network"; "bridge" ], "bridge")
+        else
+          match network_mode with
+          | Network_none -> ([ "--network"; "none" ], "none")
+          | Network_inherit -> ([], network_mode_to_string network_mode)
+      in
+      let gh_creds =
+        match Keeper_gh_env.config_dir config with
+        | Some dir -> dir
+        | None -> Env_config_keeper.KeeperSandbox.gh_creds_host_path ()
+      in
+      let gitconfig = Env_config_keeper.KeeperSandbox.gitconfig_host_path () in
+      let ssh_dir = Env_config_keeper.KeeperSandbox.ssh_dir_host_path () in
+      let gh_token = Env_config_keeper.KeeperSandbox.gh_token () in
+      let cred_mounts =
+        if not git_creds_enabled then
+          []
+        else
+          optional_ro_mount ~host:gh_creds ~container:"/root/.config/gh"
+          @ optional_ro_mount ~host:gitconfig ~container:"/root/.gitconfig"
+          @ optional_ro_mount ~host:ssh_dir ~container:"/root/.ssh"
+      in
+      let token_env =
+        if (not git_creds_enabled) || gh_token = "" then
+          []
+        else
+          [ "-e"; "GH_TOKEN=" ^ gh_token ]
+      in
+      let argv =
+        [
+          "docker";
+          "run";
+          "--rm";
+          "--name";
+          container_name;
+          "-i";
+          "--user";
+          Printf.sprintf "%d:%d" uid gid;
+          "--read-only";
+          "--tmpfs";
+          (Printf.sprintf "/tmp:rw,nosuid,nodev,noexec,size=%s"
+             (Env_config_keeper.KeeperSandbox.tmpfs_size ()));
+          "--cap-drop=ALL";
+          "--security-opt";
+          "no-new-privileges";
+        ]
+        @ seccomp_args
+        @ [
+          "--pids-limit";
+          string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ());
+          "--memory";
+          Env_config_keeper.KeeperSandbox.memory ();
+          "-v";
+          host_root ^ ":" ^ container_root ^ ":rw";
+          "--workdir";
+          container_cwd;
+        ]
+        @ network_args
+        @ cred_mounts
+        @ token_env
+        @ [ image; "bash"; "-lc"; cmd ^ " 2>&1" ]
+      in
+      let status, output =
+        Process_eio.run_argv_with_status
+          ~cwd:(Sys.getcwd ()) ~timeout_sec argv
+      in
+      if status <> Unix.WEXITED 0 then
+        Keeper_registry.record_error ~base_path:config.base_path meta.name
+          (Printf.sprintf "sandbox docker exec failed (%s): %s"
+             image
+             (Worker_dev_tools.truncate_for_log output))
+      else
+        Keeper_registry.clear_error ~base_path:config.base_path meta.name;
+      Ok { status; output; image; network_label }
+
 let run_docker_with_git_bash
     ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(cwd : string)
     ~(timeout_sec : float)
     ~(cmd : string) =
-  let image = Env_config_keeper.KeeperSandbox.docker_image () in
-  let sandbox_error_json message =
-    Keeper_registry.record_error ~base_path:config.base_path meta.name message;
-    error_json message
-  in
-  if String.trim image = "" then
-    sandbox_error_json "keeper sandbox docker image is not configured"
-  else if command_uses_nested_container_runtime cmd then
-    sandbox_error_json
-      "sandbox_profile=docker+git_creds blocks nested container runtimes and host socket references"
-  else
-    match ensure_keeper_sandbox_runtime ~timeout_sec with
-    | Error err -> sandbox_error_json err
-    | Ok seccomp_args ->
-    let host_root =
-      keeper_playground_root ~config ~meta
-      |> Keeper_alerting_path.normalize_path_for_check
-      |> Keeper_alerting_path.strip_trailing_slashes
-    in
-    let container_name = keeper_sandbox_container_name meta in
-    let container_root = keeper_private_container_root meta in
-    let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
-    let uid = Unix.getuid () in
-    let gid = Unix.getgid () in
-    let gh_creds = Env_config_keeper.KeeperSandbox.gh_creds_host_path () in
-    let gitconfig = Env_config_keeper.KeeperSandbox.gitconfig_host_path () in
-    let ssh_dir = Env_config_keeper.KeeperSandbox.ssh_dir_host_path () in
-    let gh_token = Env_config_keeper.KeeperSandbox.gh_token () in
-    let cred_mounts =
-      optional_ro_mount ~host:gh_creds ~container:"/root/.config/gh"
-      @ optional_ro_mount ~host:gitconfig ~container:"/root/.gitconfig"
-      @ optional_ro_mount ~host:ssh_dir ~container:"/root/.ssh"
-    in
-    let token_env =
-      if gh_token = "" then [] else [ "-e"; "GH_TOKEN=" ^ gh_token ]
-    in
-    let argv =
-      [
-        "docker";
-        "run";
-        "--rm";
-        "--name";
-        container_name;
-        "-i";
-        "--user";
-        Printf.sprintf "%d:%d" uid gid;
-        "--read-only";
-        "--tmpfs";
-        (Printf.sprintf "/tmp:rw,nosuid,nodev,noexec,size=%s"
-           (Env_config_keeper.KeeperSandbox.tmpfs_size ()));
-        "--cap-drop=ALL";
-        "--security-opt";
-        "no-new-privileges";
-      ]
-      @ seccomp_args
-      @ [
-        "--pids-limit";
-        string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ());
-        "--memory";
-        Env_config_keeper.KeeperSandbox.memory ();
-        "-v";
-        host_root ^ ":" ^ container_root ^ ":rw";
-        "--workdir";
-        container_cwd;
-        "--network";
-        "bridge";
-      ]
-      @ cred_mounts
-      @ token_env
-      @ [ image; "bash"; "-lc"; cmd ^ " 2>&1" ]
-    in
-    let st, out =
-      Process_eio.run_argv_with_status
-        ~cwd:(Sys.getcwd ()) ~timeout_sec argv
-    in
-    if st <> Unix.WEXITED 0 then
-      Keeper_registry.record_error ~base_path:config.base_path meta.name
-        (Printf.sprintf "sandbox docker exec failed (%s): %s"
-           image
-           (Worker_dev_tools.truncate_for_log out))
-    else
-      Keeper_registry.clear_error ~base_path:config.base_path meta.name;
+  match
+    run_docker_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
+      ~cmd ~git_creds_enabled:true ~network_mode:Network_inherit
+  with
+  | Error message -> error_json message
+  | Ok result ->
     Yojson.Safe.to_string
       (`Assoc
          [
-           ("ok", `Bool (st = Unix.WEXITED 0));
+           ("ok", `Bool (result.status = Unix.WEXITED 0));
            ("cwd", `String cwd);
            ("sandbox_profile", `String "docker");
            ("git_creds_enabled", `Bool true);
-           ("network_mode", `String "bridge");
-           ("effective_sandbox_image", `String image);
-           ("status", Keeper_alerting_path.process_status_to_json st);
-           ("output", `String out);
+           ("network_mode", `String result.network_label);
+           ("effective_sandbox_image", `String result.image);
+           ( "status",
+             Keeper_alerting_path.process_status_to_json result.status );
+           ("output", `String result.output);
          ])
 
 let run_docker_hardened_bash
@@ -671,78 +747,24 @@ let run_docker_hardened_bash
                 ("output", `String out);
               ]))
     | _ ->
-      match ensure_keeper_sandbox_runtime ~timeout_sec with
-    | Error err -> sandbox_error_json err
-    | Ok seccomp_args ->
-    let host_root =
-      keeper_playground_root ~config ~meta
-      |> Keeper_alerting_path.normalize_path_for_check
-      |> Keeper_alerting_path.strip_trailing_slashes
-    in
-    let container_name = keeper_sandbox_container_name meta in
-    let container_root = keeper_private_container_root meta in
-    let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
-    let uid = Unix.getuid () in
-    let gid = Unix.getgid () in
-    let network_args =
-      match network_mode with
-      | Network_none -> [ "--network"; "none" ]
-      | Network_inherit -> []
-    in
-    let argv =
-      [
-        "docker";
-        "run";
-        "--rm";
-        "--name";
-        container_name;
-        "-i";
-        "--user";
-        Printf.sprintf "%d:%d" uid gid;
-        "--read-only";
-        "--tmpfs";
-        (Printf.sprintf "/tmp:rw,nosuid,nodev,noexec,size=%s"
-           (Env_config_keeper.KeeperSandbox.tmpfs_size ()));
-        "--cap-drop=ALL";
-        "--security-opt";
-        "no-new-privileges";
-      ]
-      @ seccomp_args
-      @ [
-        "--pids-limit";
-        string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ());
-        "--memory";
-        Env_config_keeper.KeeperSandbox.memory ();
-        "-v";
-        host_root ^ ":" ^ container_root ^ ":rw";
-        "--workdir";
-        container_cwd;
-      ]
-      @ network_args
-      @ [ image; "bash"; "-lc"; cmd ^ " 2>&1" ]
-    in
-    let st, out =
-      Process_eio.run_argv_with_status
-        ~cwd:(Sys.getcwd ()) ~timeout_sec argv
-    in
-    if st <> Unix.WEXITED 0 then
-      Keeper_registry.record_error ~base_path:config.base_path meta.name
-        (Printf.sprintf "sandbox docker exec failed (%s): %s"
-           image
-           (Worker_dev_tools.truncate_for_log out))
-    else
-      Keeper_registry.clear_error ~base_path:config.base_path meta.name;
+      match
+        run_docker_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
+          ~cmd ~git_creds_enabled:false ~network_mode
+      with
+      | Error message -> error_json message
+      | Ok result ->
     Yojson.Safe.to_string
       (`Assoc
          [
-           ("ok", `Bool (st = Unix.WEXITED 0));
+           ("ok", `Bool (result.status = Unix.WEXITED 0));
            ("cwd", `String cwd);
            ("sandbox_profile", `String "docker");
            ("git_creds_enabled", `Bool false);
-           ("network_mode", `String (network_mode_to_string network_mode));
-           ("effective_sandbox_image", `String image);
-           ("status", Keeper_alerting_path.process_status_to_json st);
-           ("output", `String out);
+           ("network_mode", `String result.network_label);
+           ("effective_sandbox_image", `String result.image);
+           ( "status",
+             Keeper_alerting_path.process_status_to_json result.status );
+           ("output", `String result.output);
          ])
 
 let handle_keeper_bash
@@ -1320,7 +1342,7 @@ type gh_repo_context =
     task_id : string;
     git_root : string;
     worktree_cwd : string;
-    repo_slug : string;
+    repo_slug : string option;
   }
 
 type gh_repo_context_error =
@@ -1365,17 +1387,25 @@ let gh_repo_context_error_json ~op ~cmd_display err =
          ; "hint", `String err.hint
          ] @ extra_fields))
 
-let resolve_gh_repo_context ~(config : Coord.config) ~(meta : keeper_meta) =
+let resolve_gh_repo_context ~(config : Coord.config) ~(meta : keeper_meta)
+    ~(cwd : string) =
+  let sandbox_git_root =
+    Filename.concat
+      (Keeper_alerting_path.project_root_of_config config)
+      (Keeper_alerting_path.playground_path_of_keeper meta.name)
+  in
+  let sandbox_worktree_cwd =
+    if safe_is_dir cwd then cwd else sandbox_git_root
+  in
   match meta.current_task_id with
   | None ->
-      Error
-        (gh_repo_context_error
-           ~code:"gh_repo_context_missing_current_task"
-           ~detail:
-             "keeper_shell op=gh needs an active current_task_id bound to a task worktree."
-           ~hint:
-             "Call keeper_task_claim with {} first so gh can derive repo context from the active task worktree."
-           ())
+      Ok
+        {
+          task_id = "(sandbox)";
+          git_root = sandbox_git_root;
+          worktree_cwd = sandbox_worktree_cwd;
+          repo_slug = None;
+        }
   | Some task_id ->
       let task_id = Keeper_id.Task_id.to_string task_id in
       match
@@ -1424,7 +1454,13 @@ let resolve_gh_repo_context ~(config : Coord.config) ~(meta : keeper_meta) =
                else
                  match Keeper_gh_shared.repo_slug_of_git_root ~git_root with
                  | Some repo_slug ->
-                     Ok { task_id; git_root; worktree_cwd; repo_slug }
+                     Ok
+                       {
+                         task_id;
+                         git_root;
+                         worktree_cwd;
+                         repo_slug = Some repo_slug;
+                       }
                  | None ->
                      Error
                        (gh_repo_context_error ~task_id ~git_root
@@ -1460,9 +1496,8 @@ let handle_keeper_shell
   in
   let root = Keeper_alerting_path.project_root_of_config config in
   let raw_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
-  (* RFC-0006 Phase B-1.5: pin host-FS read guard for hardened keeper
-     shell read ops. No-op for legacy keepers and when
-     MASC_KEEPER_SYMMETRIC_SANDBOX is off. *)
+  (* RFC-0006 Phase B-1.5: pin host-FS read guard for Docker keeper
+     shell read ops. Local keepers remain on the host path. *)
   let containment_check target =
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target
   in
@@ -1532,6 +1567,9 @@ let handle_keeper_shell
   let docker_read_error ~target msg =
     error_json ~fields:[ "op", `String op; "path", `String target ] msg
   in
+  let hostify_turn_runtime_output out =
+    rewrite_turn_runtime_paths_to_host ~config ~meta out
+  in
   let run_readonly_in_docker ?(ok_exit_codes = [ 0 ]) ~target ~command_argv
       ~max_bytes ~timeout_sec () =
     match
@@ -1549,7 +1587,7 @@ let handle_keeper_shell
         | Ok payload -> Ok payload)
   in
   let run_in_turn_runtime ?(ok_exit_codes = [ 0 ]) ~cwd ~cmd ~command_argv
-      ~max_bytes ~timeout_sec ?(extra = []) () =
+      ~max_bytes ~timeout_sec ?(map_output = fun out -> out) ?(extra = []) () =
     match turn_sandbox_runtime with
     | Some runtime ->
       (match
@@ -1560,36 +1598,76 @@ let handle_keeper_shell
          error_json
            ~fields:([ "op", `String op; "cwd", `String cwd ] @ extra) msg
        | Ok (st, out) ->
-         render_completed_process_result ~cwd ~cmd ~extra st out)
+         render_completed_process_result ~cwd ~cmd ~extra st (map_output out))
     | None ->
       render_process_result ~cwd ~cmd command_argv
+  in
+  let render_docker_process_result ~cwd ~cmd ~docker_cmd ~timeout_sec =
+    match
+      run_docker_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
+        ~cmd:docker_cmd ~git_creds_enabled:false ~network_mode:Network_none
+    with
+    | Error msg -> error_json ~fields:[ "op", `String op; "cwd", `String cwd ] msg
+    | Ok result ->
+      Yojson.Safe.to_string
+        (Exec_core.process_result_json
+           ~artifact_policy:Exec_core.Inline_only
+           ~base_path:root
+           ~keeper_name:meta.name
+           ~cmd
+           ~extra:
+             [
+               "op", `String op;
+               "cmd", `String cmd;
+               "cwd", `String cwd;
+               "via", `String "docker";
+             ]
+           ~status:result.status
+           ~output:result.output
+           ())
+  in
+  let docker_git_log_path host_path =
+    if String.trim host_path = "" then Ok ""
+    else if Filename.is_relative host_path then Ok host_path
+    else
+      Keeper_docker_read.container_path_of_host ~config ~meta ~host_path
   in
   match op with
   | "pwd" ->
     (match cwd_target () with
      | Error e -> path_error e
      | Ok cwd ->
-       run_in_turn_runtime ~cwd ~cmd:"pwd" ~command_argv:[ "/bin/pwd" ]
-         ~max_bytes:4096 ~timeout_sec:io_timeout_sec ())
+       if Keeper_docker_read.should_route_read ~meta then
+         render_docker_process_result ~cwd ~cmd:"pwd" ~docker_cmd:"pwd"
+           ~timeout_sec:io_timeout_sec
+       else
+         run_in_turn_runtime ~cwd ~cmd:"pwd" ~command_argv:[ "/bin/pwd" ]
+           ~map_output:hostify_turn_runtime_output
+           ~max_bytes:4096 ~timeout_sec:io_timeout_sec ())
   | "git_status" ->
     (match cwd_target () with
      | Error e -> path_error e
      | Ok cwd ->
-       run_in_turn_runtime ~cwd
-         ~cmd:"git --no-optional-locks status --short --branch"
-         ~command_argv:
-           [ "git"; "--no-optional-locks"; "status"; "--short"; "--branch" ]
-         ~max_bytes:1_000_000
-         ~timeout_sec:read_timeout_sec ())
+       if Keeper_docker_read.should_route_read ~meta then
+         render_docker_process_result ~cwd
+           ~cmd:"git -C <cwd> --no-optional-locks status --short --branch"
+           ~docker_cmd:"git --no-optional-locks status --short --branch"
+           ~timeout_sec:read_timeout_sec
+       else
+         run_in_turn_runtime ~cwd
+           ~cmd:"git --no-optional-locks status --short --branch"
+           ~command_argv:
+             [ "git"; "--no-optional-locks"; "status"; "--short"; "--branch" ]
+           ~max_bytes:1_000_000
+           ~timeout_sec:read_timeout_sec ())
   | "ls" ->
     (match read_target () with
      | Error e -> path_error e
      | Ok target ->
        let limit = shell_readonly_limit args in
-       (* RFC-0006 Phase B-3b: when symmetric_sandbox+docker_read are
-          on for a hardened keeper, route ls through the same docker
-          prelude as keeper_fs_read so the container's mount is the
-          load-bearing isolation. The host-side containment guard
+       (* RFC-0006 Phase B-3b: Docker keepers route ls through the same
+          docker prelude as keeper_fs_read so the container's mount is
+          the load-bearing isolation. The host-side containment guard
           above remains as defense in depth. *)
        if Keeper_docker_read.should_route_read ~meta then
          (match
@@ -1601,7 +1679,8 @@ let handle_keeper_shell
               ~fields:[ "op", `String op; "path", `String target ] e
           | Ok cpath ->
             (match
-               Keeper_docker_read.run_command_in_container ~config ~meta
+               Keeper_docker_read.run_command_in_container
+                 ?turn_sandbox_runtime ~config ~meta
                  ~command_argv:[ "ls"; "-la"; cpath ]
                  ~max_bytes:1_000_000
                  ~timeout_sec:io_timeout_sec
@@ -1644,7 +1723,8 @@ let handle_keeper_shell
           keeper_fs_read's [via: "docker"] response field. *)
        if Keeper_docker_read.should_route_read ~meta then
          (match
-            Keeper_docker_read.read_file_in_container ~config ~meta
+            Keeper_docker_read.read_file_in_container
+              ?turn_sandbox_runtime ~config ~meta
               ~host_path:target ~max_bytes
               ~timeout_sec:read_timeout_sec
               ()
@@ -1696,27 +1776,6 @@ let handle_keeper_shell
         let file_type = Safe_ops.json_string ~default:"" "type" args |> String.trim in
         (* Optional glob filter (e.g. "*.ml", "lib/**/*.ml") *)
         let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
-        let rg_available = shell_command_available "rg" in
-        let grep_available = shell_command_available "grep" in
-        let argv =
-          if rg_available then
-            let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
-            let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
-            let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
-            Ok (base_argv @ type_argv @ glob_argv @ [ pattern; target ])
-          else if not grep_available then
-            Error "rg executable not found, and grep fallback is unavailable"
-          else if file_type <> "" || glob <> "" then
-            Error
-              "rg executable not found; grep fallback only supports pattern and path"
-          else
-            (* Keep readonly rg usable in lean CI images that do not ship ripgrep. *)
-            Ok
-              [ "grep"; "-R"; "-n"; "-I"; "-m"; string_of_int limit; "--"; pattern; target ]
-        in
-        match argv with
-        | Error e -> path_error e
-        | Ok argv ->
         if Keeper_docker_read.should_route_read ~meta then
           let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
           let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
@@ -1743,21 +1802,42 @@ let handle_keeper_shell
                    ; "matches", lines_to_json ~limit out
                    ]))
         else
-          let st, out =
-            run_argv_with_status_retry_eintr ~timeout_sec:read_timeout_sec argv
+          let rg_available = shell_command_available "rg" in
+          let grep_available = shell_command_available "grep" in
+          let argv =
+            if rg_available then
+              let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
+              let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
+              let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
+              Ok (base_argv @ type_argv @ glob_argv @ [ pattern; target ])
+            else if not grep_available then
+              Error "rg executable not found, and grep fallback is unavailable"
+            else if file_type <> "" || glob <> "" then
+              Error
+                "rg executable not found; grep fallback only supports pattern and path"
+            else
+              (* Keep readonly rg usable in lean CI images that do not ship ripgrep. *)
+              Ok
+                [ "grep"; "-R"; "-n"; "-I"; "-m"; string_of_int limit; "--"; pattern; target ]
           in
-          (* rg exit codes: 0=matches found, 1=no matches (not an error), 2+=real error.
-             Treat exit 1 as success with empty results — "no match" is a valid answer. *)
-          let is_ok = st = Unix.WEXITED 0 || st = Unix.WEXITED 1 in
-          Yojson.Safe.to_string
-            (`Assoc
-                [ "ok", `Bool is_ok
-                ; "op", `String op
-                ; "path", `String target
-                ; "pattern", `String pattern
-                ; "status", Keeper_alerting_path.process_status_to_json st
-                ; "matches", lines_to_json ~limit out
-                ]))
+          match argv with
+          | Error e -> path_error e
+          | Ok argv ->
+            let st, out =
+              run_argv_with_status_retry_eintr ~timeout_sec:read_timeout_sec argv
+            in
+            (* rg exit codes: 0=matches found, 1=no matches (not an error), 2+=real error.
+               Treat exit 1 as success with empty results — "no match" is a valid answer. *)
+            let is_ok = st = Unix.WEXITED 0 || st = Unix.WEXITED 1 in
+            Yojson.Safe.to_string
+              (`Assoc
+                  [ "ok", `Bool is_ok
+                  ; "op", `String op
+                  ; "path", `String target
+                  ; "pattern", `String pattern
+                  ; "status", Keeper_alerting_path.process_status_to_json st
+                  ; "matches", lines_to_json ~limit out
+                  ]))
   | "git_log" ->
     (match cwd_target () with
      | Error e -> path_error e
@@ -1765,68 +1845,90 @@ let handle_keeper_shell
        let count = max 1 (min 50 (Safe_ops.json_int ~default:10 "count" args)) in
        let format = Safe_ops.json_string ~default:"%h %s" "format" args in
        let file_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
-       let base_argv =
-         [ "git"; "-C"; cwd; "--no-optional-locks"; "log";
-           Printf.sprintf "--format=%s" format;
-           Printf.sprintf "-%d" count ]
-       in
-       let argv = if file_path <> "" then base_argv @ [ "--"; file_path ] else base_argv in
-       (match turn_sandbox_runtime with
-        | Some runtime ->
-          let argv =
-            let base_argv =
-              [ "git"; "--no-optional-locks"; "log";
-                Printf.sprintf "--format=%s" format;
-                Printf.sprintf "-%d" count ]
-            in
-            if file_path = "" then base_argv
-            else
-              let runtime_path =
-                if Filename.is_relative file_path then file_path
-                else
-                  match
-                    Keeper_turn_sandbox_runtime.container_path_of_host runtime
-                      ~host_path:file_path
-                  with
-                  | Ok mapped -> mapped
-                  | Error _ -> file_path
+       if Keeper_docker_read.should_route_read ~meta then
+         (match docker_git_log_path file_path with
+          | Error err ->
+            error_json
+              ~fields:[ "op", `String op; "cwd", `String cwd; "path", `String file_path ]
+              err
+          | Ok docker_file_path ->
+            let docker_cmd =
+              let base =
+                Printf.sprintf "git --no-optional-locks log --format=%s -%d"
+                  (Filename.quote format) count
               in
-              base_argv @ [ "--"; runtime_path ]
-          in
-          (match
-             Keeper_turn_sandbox_runtime.run_command_with_status runtime
-               ~cwd ~command_argv:argv
-               ~ok_exit_codes:[ 0 ]
-               ~max_bytes:1_000_000
-               ~timeout_sec:read_timeout_sec ()
-           with
-           | Error msg ->
-             error_json
-               ~fields:[ "op", `String op; "cwd", `String cwd ] msg
-           | Ok (st, out) ->
-             Yojson.Safe.to_string
-               (`Assoc
-                   [ "ok", `Bool true
-                   ; "op", `String op
-                   ; "cwd", `String cwd
-                   ; "count", `Int count
-                   ; "via", `String "docker"
-                   ; "status", Keeper_alerting_path.process_status_to_json st
-                   ; "entries", lines_to_json ~limit:50 out
-                   ]))
-        | None ->
-          let st, out =
-            Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec argv
-          in
-          Yojson.Safe.to_string
-            (`Assoc
-                [ "ok", `Bool (st = Unix.WEXITED 0)
-                ; "op", `String op
-                ; "cwd", `String cwd
-                ; "count", `Int count
-                ; "status", Keeper_alerting_path.process_status_to_json st
-                ; "entries", lines_to_json ~limit:50 out
-                ])))
+              if docker_file_path = "" then
+                base
+              else
+                Printf.sprintf "%s -- %s" base (Filename.quote docker_file_path)
+            in
+            render_docker_process_result ~cwd
+              ~cmd:"git -C <cwd> --no-optional-locks log --format=<fmt> -<n>"
+              ~docker_cmd ~timeout_sec:read_timeout_sec)
+       else
+         let base_argv =
+           [ "git"; "-C"; cwd; "--no-optional-locks"; "log";
+             Printf.sprintf "--format=%s" format;
+             Printf.sprintf "-%d" count ]
+         in
+         let argv = if file_path <> "" then base_argv @ [ "--"; file_path ] else base_argv in
+         (match turn_sandbox_runtime with
+          | Some runtime ->
+            let argv =
+              let base_argv =
+                [ "git"; "--no-optional-locks"; "log";
+                  Printf.sprintf "--format=%s" format;
+                  Printf.sprintf "-%d" count ]
+              in
+              if file_path = "" then
+                base_argv
+              else
+                let runtime_path =
+                  if Filename.is_relative file_path then file_path
+                  else
+                    match
+                      Keeper_turn_sandbox_runtime.container_path_of_host runtime
+                        ~host_path:file_path
+                    with
+                    | Ok mapped -> mapped
+                    | Error _ -> file_path
+                in
+                base_argv @ [ "--"; runtime_path ]
+            in
+            (match
+               Keeper_turn_sandbox_runtime.run_command_with_status runtime
+                 ~cwd ~command_argv:argv
+                 ~ok_exit_codes:[ 0 ]
+                 ~max_bytes:1_000_000
+                 ~timeout_sec:read_timeout_sec ()
+             with
+             | Error msg ->
+               error_json
+                 ~fields:[ "op", `String op; "cwd", `String cwd ] msg
+             | Ok (st, out) ->
+               Yojson.Safe.to_string
+                 (`Assoc
+                     [ "ok", `Bool true
+                     ; "op", `String op
+                     ; "cwd", `String cwd
+                     ; "count", `Int count
+                     ; "via", `String "docker"
+                     ; "status", Keeper_alerting_path.process_status_to_json st
+                     ; "entries", lines_to_json ~limit:50 out
+                     ]))
+          | None ->
+            let st, out =
+              Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec argv
+            in
+            Yojson.Safe.to_string
+              (`Assoc
+                  [ "ok", `Bool (st = Unix.WEXITED 0)
+                  ; "op", `String op
+                  ; "cwd", `String cwd
+                  ; "count", `Int count
+                  ; "status", Keeper_alerting_path.process_status_to_json st
+                  ; "entries", lines_to_json ~limit:50 out
+                  ])))
   | "find" ->
     let name_pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
     if name_pattern = ""
@@ -2050,6 +2152,7 @@ let handle_keeper_shell
        | Error e -> path_error e
        | Ok cwd ->
          run_in_turn_runtime ~cwd ~cmd:"git worktree list"
+           ~map_output:hostify_turn_runtime_output
            ~command_argv:[ "git"; "worktree"; "list" ]
            ~max_bytes:1_000_000 ~timeout_sec:read_timeout_sec ())
     | "add" ->
@@ -2379,55 +2482,77 @@ let handle_keeper_shell
             Log.Keeper.info
               "gh_audit: keeper=%s reversibility=R1 cwd=%s cmd=%s"
               meta.name cwd display_command;
-          let env = Keeper_gh_env.process_env config in
-          let gh_argv =
-            "gh" :: Keeper_gh_shared.gh_simple_command_argv parsed_command
-          in
-          let st, out =
-            Process_eio.run_argv_with_status ?env ~cwd ~timeout_sec gh_argv
-          in
-          if process_status_is_timeout st then
-            gh_base ~command:display_command ~ok:false ~cwd
-              [ "error", `String "gh_command_timed_out"
-              ; "timeout_sec", `Float timeout_sec
-              ; "status", Keeper_alerting_path.process_status_to_json st
-              ; "output", `String out
-              ; "hint", `String
-                  "gh network call exceeded timeout_sec. Retry \
-                   with a larger value — gh round-trip plus auth \
-                   handshake is usually 3-10s, so prefer \
-                   timeout_sec=30 or timeout_sec=60 rather than \
-                   the 15s floor. You may also narrow the query \
-                   (--state, --limit, --json)."
+          let gh_context_fields =
+            match ctx with
+            | Some ctx ->
+              let repo_fields =
+                match ctx.repo_slug with
+                | Some repo_slug -> [ "repo", `String repo_slug ]
+                | None -> []
+              in
+              [ "task_id", `String ctx.task_id
+              ; "git_root", `String ctx.git_root
               ]
-          else
-            let ok = st = Unix.WEXITED 0 in
-            let base_fields =
-              (match ctx with
-               | Some ctx ->
-                 [ "task_id", `String ctx.task_id
-                 ; "repo", `String ctx.repo_slug
-                 ; "git_root", `String ctx.git_root
-                 ]
-               | None -> [])
-              @
-              [ "status", Keeper_alerting_path.process_status_to_json st
-              ; "output", `String out ]
-            in
-            let hinted_fields =
-              if (not ok)
-                 && String_util.contains_substring_ci out
-                      "Could not resolve to a Repository"
-              then
-                base_fields @
-                [ "error", `String "gh_repo_resolve_failed"
+              @ repo_fields
+            | None -> []
+          in
+          let gh_process =
+            if meta.sandbox_profile = Docker then
+              match
+                run_docker_shell_command_with_status ~config ~meta ~cwd
+                  ~timeout_sec ~cmd:display_command
+                  ~git_creds_enabled:true ~network_mode:Network_inherit
+              with
+              | Ok result -> Ok (result.status, result.output)
+              | Error msg -> Error msg
+            else
+              let env = Keeper_gh_env.process_env config in
+              let gh_argv =
+                "gh" :: Keeper_gh_shared.gh_simple_command_argv parsed_command
+              in
+              Ok (Process_eio.run_argv_with_status ?env ~cwd ~timeout_sec gh_argv)
+          in
+          match gh_process with
+          | Error msg ->
+            gh_base ~command:display_command ~ok:false ~cwd
+              (gh_context_fields @ [ "error", `String msg ])
+          | Ok (st, out) ->
+            if process_status_is_timeout st then
+              gh_base ~command:display_command ~ok:false ~cwd
+                (gh_context_fields @
+                [ "error", `String "gh_command_timed_out"
+                ; "timeout_sec", `Float timeout_sec
+                ; "status", Keeper_alerting_path.process_status_to_json st
+                ; "output", `String out
                 ; "hint", `String
-                    "gh is bound to the active task worktree repo. \
-                     Ensure the linked sandbox clone still has a valid \
-                     origin remote and recreate the task worktree if needed." ]
-              else base_fields
-            in
-            gh_base ~command:display_command ~ok ~cwd hinted_fields
+                    "gh network call exceeded timeout_sec. Retry \
+                     with a larger value — gh round-trip plus auth \
+                     handshake is usually 3-10s, so prefer \
+                     timeout_sec=30 or timeout_sec=60 rather than \
+                     the 15s floor. You may also narrow the query \
+                     (--state, --limit, --json)."
+                ])
+            else
+              let ok = st = Unix.WEXITED 0 in
+              let base_fields =
+                gh_context_fields @
+                [ "status", Keeper_alerting_path.process_status_to_json st
+                ; "output", `String out ]
+              in
+              let hinted_fields =
+                if (not ok)
+                   && String_util.contains_substring_ci out
+                        "Could not resolve to a Repository"
+                then
+                  base_fields @
+                  [ "error", `String "gh_repo_resolve_failed"
+                  ; "hint", `String
+                      "gh is bound to the active task worktree repo. \
+                       Ensure the linked sandbox clone still has a valid \
+                       origin remote and recreate the task worktree if needed." ]
+                else base_fields
+              in
+              gh_base ~command:display_command ~ok ~cwd hinted_fields
         in
         (match reversibility with
          | Worker_dev_tools.R2_Irreversible ->
@@ -2464,21 +2589,27 @@ let handle_keeper_shell
                           status/cache/gist. auth/secret/ssh-key are blocked."
                      ])
              | Ok () ->
-               (match resolve_gh_repo_context ~config ~meta with
-                | Error err ->
-                  gh_repo_context_error_json
-                    ~op
-                    ~cmd_display:(gh_cmd_display parsed_cmd) err
-                | Ok ctx ->
-                  let cmd_to_run =
-                    Keeper_gh_shared.gh_simple_command_with_repo_flag
-                      ~repo_slug:ctx.repo_slug parsed_cmd
-                  in
-                  run_gh_command
-                    ~display_command:(gh_cmd_display cmd_to_run)
-                    ~parsed_command:cmd_to_run
-                    ~cwd:ctx.worktree_cwd
-                    ~ctx:(Some ctx))
+               (match resolve_keeper_shell_write_cwd ~config ~meta ~args with
+                | Error e -> error_json e
+                  | Ok gh_cwd ->
+                  (match resolve_gh_repo_context ~config ~meta ~cwd:gh_cwd with
+                   | Error err ->
+                     gh_repo_context_error_json
+                       ~op
+                       ~cmd_display:(gh_cmd_display parsed_cmd) err
+                   | Ok ctx ->
+                     let cmd_to_run =
+                       match ctx.repo_slug with
+                       | Some repo_slug ->
+                           Keeper_gh_shared.gh_simple_command_with_repo_flag
+                             ~repo_slug parsed_cmd
+                       | None -> parsed_cmd
+                     in
+                     run_gh_command
+                       ~display_command:(gh_cmd_display cmd_to_run)
+                       ~parsed_command:cmd_to_run
+                       ~cwd:ctx.worktree_cwd
+                       ~ctx:(Some ctx)))
            end))
   | _ ->
     Yojson.Safe.to_string

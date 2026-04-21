@@ -1,10 +1,11 @@
 (** Runtime-authoritative validated cascade catalog.
 
-    The active runtime [cascade.json] is the only authoritative catalog.
-    This module validates the active file statically and keeps serving the
-    last-known-good snapshot when a hot reload is rejected. Provider liveness
-    is advisory runtime state and does not invalidate an otherwise-correct
-    catalog.
+    The runtime still executes from [cascade.json], but when a sibling
+    [cascade.toml] exists it becomes the authoring SSOT and [cascade.json] is
+    materialized from it on load. This module validates the active source
+    statically and keeps serving the last-known-good snapshot when a hot reload
+    is rejected. Provider liveness is advisory runtime state and does not
+    invalidate an otherwise-correct catalog.
 
     @stability Internal *)
 
@@ -74,6 +75,7 @@ val resolve_named_providers :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?provider_filter:string list ->
   ?require_tool_choice_support:bool ->
+  ?require_tool_support:bool ->
   cascade_name:string ->
   unit ->
   (Llm_provider.Provider_config.t list, string) result

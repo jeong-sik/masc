@@ -564,6 +564,7 @@ let cli_wrapped_hard_quota_indicators = [
   "quota will reset after";
   "\"api_error_status\":429";
   "you've hit your limit";
+  "youve hit your limit";
   "resets apr ";
 ]
 
@@ -1088,6 +1089,27 @@ let run_named
            continues without throttling. *)
         ()
   in
+  let cooldown_blocks_next_cycle ~cycle =
+    let backoff_ms = Cascade_strategy.backoff_ms strategy.cycle ~cycle:(cycle + 1) in
+    let deadline = Unix.gettimeofday () +. (float_of_int backoff_ms /. 1000.) in
+    let infos =
+      List.filter_map
+        (fun (cfg : Llm_provider.Provider_config.t) ->
+          Cascade_health_tracker.provider_info signal_ctx.health
+            ~provider_key:(adapter.health_key cfg))
+        candidate_cfgs
+    in
+    infos <> []
+    && List.length infos = List.length candidate_cfgs
+    && List.for_all
+         (fun (info : Cascade_health_tracker.provider_info) ->
+           info.in_cooldown
+           &&
+           match info.cooldown_expires_at with
+           | Some expires_at -> expires_at > deadline
+           | None -> false)
+         infos
+  in
   let cascade_exhausted_after_filter ~cycle =
     let observation =
       Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
@@ -1129,6 +1151,12 @@ let run_named
     match ordered with
     | [] when last_cycle ->
       record_trace ~cycle:n ~candidates_out:0 ~backoff_ms:0 ~kind:Exhausted;
+      cascade_exhausted_after_filter ~cycle:n
+    | [] when cooldown_blocks_next_cycle ~cycle:n ->
+      record_trace ~cycle:n ~candidates_out:0 ~backoff_ms:0 ~kind:Exhausted;
+      Log.Misc.info
+        "cascade %s: cycle %d (%s) filtered all candidates and cooldown exceeds next backoff, exhausting early"
+        cascade_name n (Cascade_strategy.kind_to_string strategy.kind);
       cascade_exhausted_after_filter ~cycle:n
     | [] ->
       let backoff =

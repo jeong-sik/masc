@@ -651,6 +651,18 @@ let test_sdk_error_is_hard_quota_detects_gemini_cli_network_wrapper () =
   Alcotest.(check bool) "Gemini CLI quota wrapper counts as hard quota" true
     (Oas_worker_named.sdk_error_is_hard_quota err)
 
+let test_sdk_error_is_hard_quota_detects_claude_cli_limit_wrapper () =
+  let err =
+    Oas.Error.Api
+      (Llm_provider.Retry.NetworkError
+         {
+           message =
+             "claude exited with code 1: {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've hit your limit · resets Apr 24 at 4am (Asia/Seoul)\"}";
+         })
+  in
+  Alcotest.(check bool) "Claude CLI limit wrapper counts as hard quota" true
+    (Oas_worker_named.sdk_error_is_hard_quota err)
+
 let test_sdk_error_is_hard_quota_keeps_transient_network_errors_false () =
   let err =
     Oas.Error.Api

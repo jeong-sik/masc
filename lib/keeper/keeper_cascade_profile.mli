@@ -91,6 +91,24 @@ val canonicalize_with_catalog : catalog:string list -> string -> string
     live catalog instead of the active config path. Intended for tests and
     server-side validation flows that already loaded the catalog. *)
 
+val resolve_live_with_catalog : catalog:string list -> string -> string
+(** Resolves a keeper-declared cascade against an explicit live catalog.
+
+    Semantics:
+    - blank/whitespace -> {!default_name}
+    - known legacy alias -> canonical known name, but only if present in [catalog]
+    - exact dynamic/live profile name -> preserved when present in [catalog]
+    - any name absent from [catalog] -> {!default_name}
+
+    Unlike {!canonicalize_with_catalog}, this treats compile-time built-in
+    names that are no longer active in the runtime catalog as drift and
+    falls back to {!default_name}. Use this at runtime read surfaces that
+    need to mirror the active catalog rather than the variant inventory. *)
+
+val resolve_live : ?config_path:string -> string -> string
+(** Like {!resolve_live_with_catalog}, but reads the active catalog from the
+    resolved cascade config path. *)
+
 val canonicalize : string -> string
 (** [canonicalize raw = to_string (canonical raw)]. Existing
     string-based call sites continue to work; legacy aliases collapse to

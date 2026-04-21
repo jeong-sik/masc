@@ -9,10 +9,9 @@
 
     This module enforces "whichever profile decides one tool, decides
     every tool" on the host side without spinning up a per-call
-    container. When the symmetric-sandbox env flag is set
-    ([MASC_KEEPER_SYMMETRIC_SANDBOX=true]) AND the keeper's profile is
-    [Docker], read targets must lie within the keeper's playground
-    bundle ([.masc/playground/<keeper>/]).
+    container. When the keeper's profile is [Docker], read targets
+    must lie within the keeper's playground bundle
+    ([.masc/playground/<keeper>/]).
 
     Phase B-2 will route the same tools through [docker exec] so the
     container's mount restrictions become the actual primary boundary;
@@ -24,11 +23,9 @@
 
     Returns [Error msg] only when ALL of the following hold:
     - [meta.sandbox_profile = Docker]
-    - [Env_config_keeper.KeeperSandbox.symmetric_read_containment ()] is true
     - [target] does NOT resolve under the keeper's playground bundle root
 
-    A no-op (always [Ok ()]) for legacy keepers and for hardened
-    keepers when the env flag is off. *)
+    A no-op (always [Ok ()]) for local keepers. *)
 val check_read_target :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

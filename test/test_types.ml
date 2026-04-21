@@ -1234,6 +1234,7 @@ let () =
             files = []; created_at = "2026-04-19T00:00:00Z";
             task_status = ts; priority = 5;
             worktree = None;
+            created_by = None;
             required_role = Types_core.Unassigned;
             required_preset = None;
             stage = None; contract = None; handoff_context = None;

@@ -691,6 +691,7 @@ type task = {
   priority: int; [@default 3]
   files: string list; [@default []]
   created_at: string;
+  created_by: string option; [@default None]
   worktree: worktree_info option; [@default None]  (* linked worktree info *)
   required_role: role; [@default Unassigned]  (** Role required to claim this task *)
   required_preset: string option; [@default None]  (** Tool preset required to claim this task *)
@@ -712,10 +713,14 @@ let task_to_yojson t =
     ("files", `List (List.map (fun s -> `String s) t.files));
     ("created_at", `String t.created_at);
   ] in
+  let with_created_by = match t.created_by with
+    | None -> base
+    | Some created_by -> base @ [("created_by", `String created_by)]
+  in
   (* Add worktree field if present *)
   let with_worktree = match t.worktree with
-    | None -> base
-    | Some wt -> base @ [("worktree", worktree_info_to_yojson wt)]
+    | None -> with_created_by
+    | Some wt -> with_created_by @ [("worktree", worktree_info_to_yojson wt)]
   in
   (* Add required_role if not Unassigned *)
   let with_role = match t.required_role with
@@ -769,6 +774,7 @@ let task_of_yojson json =
     let priority = json |> member "priority" |> to_int_option |> Option.value ~default:3 in
     let files = json |> member "files" |> to_list |> List.map to_string in
     let created_at = json |> member "created_at" |> to_string in
+    let created_by = json |> member "created_by" |> to_string_option in
     (* Parse optional worktree field *)
     let worktree = match json |> member "worktree" with
       | `Null -> None
@@ -819,6 +825,7 @@ let task_of_yojson json =
             priority;
             files;
             created_at;
+            created_by;
             worktree;
             required_role;
             required_preset;

@@ -10,6 +10,7 @@ module Coord = Masc_mcp.Coord
 module Config_boot_overrides = Config_boot_overrides
 module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
 module Keeper_registry = Masc_mcp.Keeper_registry
+module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_types = Masc_mcp.Keeper_types
 module Json = Yojson.Safe.Util
 
@@ -521,6 +522,34 @@ let test_git_write_classification () =
   Alcotest.(check bool) "push is not destructive"
     false (is_destructive "git push origin my-branch")
 
+let test_rewrite_turn_runtime_paths_to_host () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  let meta = make_docker_meta "minjae" in
+  let container_root = Keeper_sandbox.container_root meta.name in
+  let host_root = Keeper_sandbox.host_root_abs ~config meta.name in
+  let input =
+    Printf.sprintf "worktree %s/repos/masc-mcp\npwd=%s/repos/masc-mcp\n"
+      container_root container_root
+  in
+  let rewritten =
+    Keeper_exec_shell.rewrite_turn_runtime_paths_to_host ~config ~meta input
+  in
+  Alcotest.(check string) "container paths rewritten to host root"
+    (Printf.sprintf "worktree %s/repos/masc-mcp\npwd=%s/repos/masc-mcp\n"
+       host_root host_root)
+    rewritten
+
+let test_rewrite_turn_runtime_paths_to_host_is_noop_without_container_path () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  let meta = make_docker_meta "minjae" in
+  let input = "worktree /tmp/other\n" in
+  Alcotest.(check string) "unrelated paths untouched" input
+    (Keeper_exec_shell.rewrite_turn_runtime_paths_to_host ~config ~meta input)
+
 let () =
   Alcotest.run "Keeper bash safety" [
     ("allowlist", [
@@ -568,5 +597,11 @@ let () =
     ("git_worktree_op", [
       Alcotest.test_case "action normalization" `Quick test_git_worktree_action_normalization;
       Alcotest.test_case "branch required for add" `Quick test_git_worktree_branch_required;
+    ]);
+    ("turn_runtime_paths", [
+      Alcotest.test_case "container paths rewrite to host paths" `Quick
+        test_rewrite_turn_runtime_paths_to_host;
+      Alcotest.test_case "unrelated paths remain unchanged" `Quick
+        test_rewrite_turn_runtime_paths_to_host_is_noop_without_container_path;
     ]);
   ]

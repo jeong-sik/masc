@@ -1,9 +1,8 @@
 (** Tests for keeper_shell docker routing (RFC-0006 Phase B-3b+).
 
-    Verifies that the [should_route_read] branch fires for path-based
-    readonly keeper_shell ops when symmetric_sandbox + docker_read are
-    both on for a hardened keeper. The docker process itself is not
-    invoked because the test environment sets
+    Verifies that Docker keepers route structured shell ops through
+    docker. The docker process itself is not invoked because the test
+    environment sets
     [MASC_KEEPER_SANDBOX_DOCKER_IMAGE=""], so the response must
     surface the structured "docker image is not configured" error from
     [Keeper_docker_read] — proof that control reached the docker
@@ -176,6 +175,16 @@ let assert_docker_route_fires ~config ~meta ~playground =
           ] );
       ("wc", `Assoc [ ("op", `String "wc"); ("path", `String host_path) ]);
       ("tree", `Assoc [ ("op", `String "tree"); ("path", `String playground) ]);
+      ("pwd", `Assoc [ ("op", `String "pwd"); ("cwd", `String playground) ]);
+      ( "git_status",
+        `Assoc [ ("op", `String "git_status"); ("cwd", `String playground) ] );
+      ( "git_log",
+        `Assoc
+          [
+            ("op", `String "git_log");
+            ("cwd", `String playground);
+            ("count", `Int 1);
+          ] );
     ]
   in
   List.iter
@@ -192,16 +201,12 @@ let assert_docker_route_fires ~config ~meta ~playground =
 (* ── Tests ───────────────────────────────────────────────────────── *)
 
 let test_readonly_ops_route_through_docker () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   assert_docker_route_fires ~config ~meta ~playground
 
 let test_cat_legacy_keeper_skips_docker () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types.Local
   @@ fun ~config ~meta ~playground ->
@@ -214,24 +219,6 @@ let test_cat_legacy_keeper_skips_docker () =
   in
   Alcotest.(check bool)
     "legacy keeper does not surface docker image error"
-    false
-    (response_mentions raw "error" "docker image")
-
-let test_cat_flag_off_skips_docker () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  with_env "MASC_KEEPER_DOCKER_READ" "false" @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup ~sandbox:Keeper_types.Docker
-  @@ fun ~config ~meta ~playground ->
-  let host_path = Filename.concat playground "mind/x" in
-  ensure_dir (Filename.dirname host_path);
-  ignore (Fs_compat.save_file_atomic host_path "matrix");
-  let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
-      ~args:(`Assoc [ ("op", `String "cat"); ("path", `String host_path) ])
-  in
-  Alcotest.(check bool)
-    "DOCKER_READ off → no docker route, no image error"
     false
     (response_mentions raw "error" "docker image")
 
@@ -260,8 +247,6 @@ printf '%s\\n' \"$*\"\n\
 exit 0\n"
 
 let test_rg_no_match_remains_successful_in_docker_route () =
-  with_env "MASC_KEEPER_SYMMETRIC_SANDBOX" "true" @@ fun () ->
-  with_env "MASC_KEEPER_DOCKER_READ" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_rg_no_match_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -292,15 +277,13 @@ let () =
       ( "docker_route_fires",
         [
           Alcotest.test_case
-            "path-based readonly ops route through docker for hardened+flags"
+            "docker keeper shell ops route through docker"
             `Quick test_readonly_ops_route_through_docker;
         ] );
       ( "docker_route_skipped",
         [
           Alcotest.test_case "legacy keeper skips docker route" `Quick
             test_cat_legacy_keeper_skips_docker;
-          Alcotest.test_case "DOCKER_READ flag off skips docker route"
-            `Quick test_cat_flag_off_skips_docker;
         ] );
       ( "docker_route_contract",
         [

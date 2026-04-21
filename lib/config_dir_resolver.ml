@@ -4,6 +4,7 @@ module StringSet = Set.Make (String)
     Consumed by the resolver here and by config loaders elsewhere in the
     codebase. Issue #8414. *)
 let cascade_json_filename = "cascade.json"
+let cascade_toml_filename = "cascade.toml"
 let tool_policy_toml_filename = "tool_policy.toml"
 let keeper_runtime_toml_filename = "keeper_runtime.toml"
 
@@ -32,6 +33,7 @@ type resolution = {
   status : status;
   warnings : string list;
   config_root : path_item;
+  cascade_authoring : path_item;
   cascade : path_item;
   prompts : path_item;
   keepers : path_item;
@@ -137,6 +139,7 @@ let to_json (resolution : resolution) =
       ( "warnings",
         `List (List.map (fun warning -> `String warning) resolution.warnings) );
       ("config_root", item_to_json resolution.config_root);
+      ("cascade_authoring", item_to_json resolution.cascade_authoring);
       ("cascade", item_to_json resolution.cascade);
       ("prompts", item_to_json resolution.prompts);
       ("keepers", item_to_json resolution.keepers);
@@ -145,11 +148,13 @@ let to_json (resolution : resolution) =
 
 let config_signature_exists config_dir =
   let cascade = Filename.concat config_dir cascade_json_filename in
+  let cascade_toml = Filename.concat config_dir cascade_toml_filename in
   let prompts = Filename.concat config_dir "prompts" in
   let keepers = Filename.concat config_dir "keepers" in
   let personas = Filename.concat config_dir "personas" in
   existing_dir config_dir
-  && (existing_file cascade || existing_dir prompts || existing_dir keepers
+  && ((existing_file cascade || existing_file cascade_toml)
+     || existing_dir prompts || existing_dir keepers
      || existing_dir personas)
 
 let rec ancestor_dirs path =
@@ -273,8 +278,14 @@ let child_item (root : path_item) name =
   let path = Filename.concat root.path name in
   let exists =
     if String.equal name cascade_json_filename then existing_file path
+      || existing_file (Filename.concat root.path cascade_toml_filename)
     else existing_dir path
   in
+  { path; exists; source = root.source }
+
+let file_item (root : path_item) name =
+  let path = Filename.concat root.path name in
+  let exists = existing_file path in
   { path; exists; source = root.source }
 
 let personas_item (inputs : inputs) root =
@@ -302,12 +313,13 @@ let inputs_from_env () =
 
 let resolve_with inputs =
   let config_root, root_warnings = config_root_resolution inputs in
+  let cascade_authoring = file_item config_root cascade_toml_filename in
   let cascade = child_item config_root cascade_json_filename in
   let prompts = child_item config_root "prompts" in
   let keepers = child_item config_root "keepers" in
   let personas, persona_warnings = personas_item inputs config_root in
   let missing_child_warnings =
-    [ (cascade_json_filename, cascade.exists); ("prompts", prompts.exists); ("keepers", keepers.exists); ("personas", personas.exists) ]
+    [ ("cascade.json/cascade.toml", cascade.exists); ("prompts", prompts.exists); ("keepers", keepers.exists); ("personas", personas.exists) ]
     |> List.filter_map (fun (label, exists) ->
            if exists then None
            else
@@ -322,7 +334,16 @@ let resolve_with inputs =
     | Env | Local_masc | Home_masc | Exe_relative | Cwd ->
         if warnings = [] then Ready else Warn
   in
-  { status; warnings; config_root; cascade; prompts; keepers; personas }
+  {
+    status;
+    warnings;
+    config_root;
+    cascade_authoring;
+    cascade;
+    prompts;
+    keepers;
+    personas;
+  }
 
 let _cached_resolution : resolution option ref = ref None
 
@@ -343,6 +364,13 @@ let cascade_path_opt () =
 
 let cascade_path_candidate () =
   (resolve ()).cascade.path
+
+let cascade_toml_path_candidate () =
+  Filename.concat (resolve ()).config_root.path cascade_toml_filename
+
+let cascade_toml_path_opt () =
+  let path = cascade_toml_path_candidate () in
+  if existing_file path then Some path else None
 
 let prompts_dir () =
   (resolve ()).prompts.path

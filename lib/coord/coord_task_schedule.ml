@@ -13,6 +13,66 @@ let task_is_claim_pool_candidate (task : Types.task) =
   | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ ->
       false
 
+type verification_claim_state =
+  [ `Pending | `Assigned | `Passed | `Rejected ]
+
+let verification_claim_state_of_json json =
+  let open Yojson.Safe.Util in
+  match json |> member "status" |> member "status" with
+  | `String "pending" -> Some `Pending
+  | `String "assigned" -> Some `Assigned
+  | `String "completed" -> (
+      match json |> member "status" |> member "verdict" with
+      | `String "pass" -> Some `Passed
+      | `String "fail" | `String "partial" -> Some `Rejected
+      | _ -> None)
+  | _ -> None
+
+let latest_verification_status_by_task config =
+  let latest = Hashtbl.create 16 in
+  let dir = Filename.concat config.base_path "verifications" in
+  if Sys.file_exists dir then (
+    match Safe_ops.list_dir_safe dir with
+    | Error _ -> ()
+    | Ok files ->
+        List.iter
+          (fun file ->
+            if Filename.check_suffix file ".json" then
+              let path = Filename.concat dir file in
+              try
+                let json = Safe_ops.read_json_eio path in
+                let open Yojson.Safe.Util in
+                match
+                  json |> member "task_id",
+                  json |> member "created_at",
+                  verification_claim_state_of_json json
+                with
+                | `String task_id, (`Float _ | `Int _ as created_at_json), Some state ->
+                    let created_at =
+                      match created_at_json with
+                      | `Float value -> value
+                      | `Int value -> Float.of_int value
+                      | _ -> 0.0
+                    in
+                    (match Hashtbl.find_opt latest task_id with
+                     | Some (latest_created_at, _)
+                       when latest_created_at >= created_at -> ()
+                     | Some _ | None ->
+                         Hashtbl.replace latest task_id (created_at, state))
+                | _ -> ()
+              with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+          files
+  );
+  latest
+
+let verification_blocks_claim latest_status_by_task (task : Types.task) =
+  match Hashtbl.find_opt latest_status_by_task task.id with
+  | Some (_, `Pending)
+  | Some (_, `Assigned)
+  | Some (_, `Rejected) -> true
+  | Some (_, `Passed)
+  | None -> false
+
 let agent_current_task_matches_backlog backlog ~agent_name task_id =
   match
     List.find_opt
@@ -147,16 +207,29 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
       let blocked_todo = List.filter (fun (t : Types.task) ->
         Option.is_some t.do_not_reclaim_reason
       ) all_todo in
+      let latest_verification_status = latest_verification_status_by_task config in
+      let verification_blocked_todo =
+        List.filter (verification_blocks_claim latest_verification_status) all_todo
+      in
       if blocked_todo <> [] then
         log_event config
           (Printf.sprintf
              "{\"type\":\"task_claim_next_skip_blocked\",\"agent\":\"%s\",\"blocked\":%d,\"ts\":\"%s\"}"
              agent_name (List.length blocked_todo) (now_iso ()));
+      if verification_blocked_todo <> [] then
+        log_event config
+          (Printf.sprintf
+             "{\"type\":\"task_claim_next_skip_verification\",\"agent\":\"%s\",\"blocked\":%d,\"ts\":\"%s\"}"
+             agent_name (List.length verification_blocked_todo) (now_iso ()));
 
       let unclaimed = List.filter task_is_claim_pool_candidate sorted in
       (* Also exclude the just-released task: the agent is moving on,
          re-claiming the same task would be a no-op loop. *)
-      let blocked_ids = List.map (fun (t : Types.task) -> t.id) blocked_todo in
+      let blocked_ids =
+        List.map (fun (t : Types.task) -> t.id) blocked_todo
+        @ List.map (fun (t : Types.task) -> t.id) verification_blocked_todo
+        |> List.sort_uniq String.compare
+      in
       let all_excluded = match released_task_id with
         | Some rid -> rid :: (blocked_ids @ exclude_task_ids)
         | None -> blocked_ids @ exclude_task_ids

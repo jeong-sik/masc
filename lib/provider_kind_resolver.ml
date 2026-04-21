@@ -27,6 +27,18 @@ let split_provider_model (s : string) : (string * string) option =
       in
       if model_id = "" then None else Some (provider_name, model_id)
 
+let resolve_builtin_provider provider_name model_id =
+  match provider_name with
+  | "kimi" ->
+    Some
+      (Registered
+         {
+           provider_name;
+           model_id;
+           kind = Llm_provider.Provider_config.OpenAI_compat;
+         })
+  | _ -> None
+
 let resolve (spec : string) : resolution =
   let s = String.trim spec in
   match split_provider_model s with
@@ -43,24 +55,28 @@ let resolve (spec : string) : resolution =
     else
       Custom_url { model_id; base_url }
   | Some (provider_name, model_id) ->
-    (* Registry is the SSOT. We never override its [kind] from a
-       substring of [provider_name] or [model_id]. If the registry
-       says [Gemini], it is [Gemini] — even if the model id happens
-       to look OpenAI-compat, and vice versa. *)
-    let registry = Llm_provider.Provider_registry.default () in
-    match Llm_provider.Provider_registry.find registry provider_name with
-    | Some entry ->
-      Registered
-        {
-          provider_name;
-          model_id;
-          kind = entry.defaults.kind;
-        }
-    | None ->
-      Unknown
-        (Printf.sprintf
-           "unknown provider %S in spec %S; not found in Provider_registry"
-           provider_name spec)
+    (match resolve_builtin_provider provider_name model_id with
+     | Some resolution -> resolution
+     | None ->
+       (* Registry is the SSOT for pinned providers. We never override its
+          [kind] from a substring of [provider_name] or [model_id].
+          A small number of repo-local compatibility providers such as
+          [kimi] are handled above until the pinned OAS registry exposes
+          them first-class. *)
+       let registry = Llm_provider.Provider_registry.default () in
+       match Llm_provider.Provider_registry.find registry provider_name with
+       | Some entry ->
+         Registered
+           {
+             provider_name;
+             model_id;
+             kind = entry.defaults.kind;
+           }
+       | None ->
+         Unknown
+           (Printf.sprintf
+              "unknown provider %S in spec %S; not found in Provider_registry"
+              provider_name spec))
 
 let kind_of_spec (spec : string) :
     Llm_provider.Provider_config.provider_kind option =

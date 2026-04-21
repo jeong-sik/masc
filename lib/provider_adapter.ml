@@ -106,6 +106,7 @@ let display_provider_name label =
   match normalize_label label with
   | "glm" | "glm-api" -> cn_glm
   | "glm-coding" | "glm-coding-plan" -> cn_glm_coding_plan
+  | "kimi-api" -> cn_kimi
   | _ -> String.trim label
 
 (** Default API base URLs — overridable via env var for proxying/testing. *)
@@ -135,7 +136,6 @@ let glm_coding_api_url () =
 
 let kimi_api_url () =
   env_url_or ~env:"KIMI_BASE_URL" ~default:"https://api.kimi.com/coding"
-
 (** SSOT cascade prefix for local llama-server instances.
     All cascade label construction for local models must use this constant.
     Format: [local_cascade_prefix ^ ":" ^ model_id] → e.g. "llama:qwen3.5" *)
@@ -766,7 +766,7 @@ let provider_auth_available label =
       (match adapter.auth_mode with
        | No_auth -> true
        | Cli_cached_login ->
-           (match adapter.spawn_key with
+            (match adapter.spawn_key with
             | Some cmd -> Llm_provider.Provider_registry.command_in_path cmd
             | None -> false)
        | Api_key env_name ->

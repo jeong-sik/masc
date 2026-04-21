@@ -83,9 +83,11 @@ val cn_ollama : string
 val cn_claude : string
 val cn_codex : string
 val cn_gemini : string
+val cn_kimi : string
 val cn_claude_api : string
 val cn_codex_api : string
 val cn_gemini_api : string
+val cn_kimi_api : string
 val cn_glm : string
 val cn_glm_coding_plan : string
 val cn_openrouter : string

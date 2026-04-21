@@ -70,12 +70,17 @@ let gemini_cli_auto_models () =
 
 (* Mirrors the Codex CLI models observed locally on 2026-04-20, reordered
    light-to-heavy by generation (5.1 -> 5.4). Keep this operator-tunable
-   because hosted model menus drift. *)
+   because hosted model menus drift.
+
+   2026-04-21: probe the ChatGPT-backed Codex CLI (v0.122.0) before setting
+   defaults. gpt-5.1-codex-mini, gpt-5.1-codex-max, and gpt-5.2-codex all
+   returned runtime 400 unsupported-model errors, while gpt-5.2,
+   gpt-5.3-codex-spark, gpt-5.3-codex, gpt-5.4-mini, and gpt-5.4 executed
+   successfully. Keep the default rotation to the supported set; operators can
+   still opt into a different list explicitly through
+   MASC_CODEX_CLI_AUTO_MODELS when their environment supports it. *)
 let codex_cli_default_auto_models = [
-  "gpt-5.1-codex-mini";
-  "gpt-5.1-codex-max";
   "gpt-5.2";
-  "gpt-5.2-codex";
   "gpt-5.3-codex-spark";
   "gpt-5.3-codex";
   "gpt-5.4-mini";

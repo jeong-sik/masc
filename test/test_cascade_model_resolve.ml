@@ -101,12 +101,9 @@ let test_gemini_cli_auto_models_env_override () =
 
 let test_codex_and_claude_cli_auto_models_env_override () =
   with_clean_env (fun () ->
-    check (list string) "codex default follows 5.1-to-5.4 order"
+    check (list string) "codex default keeps ChatGPT-supported models only"
       [
-        "gpt-5.1-codex-mini";
-        "gpt-5.1-codex-max";
         "gpt-5.2";
-        "gpt-5.2-codex";
         "gpt-5.3-codex-spark";
         "gpt-5.3-codex";
         "gpt-5.4-mini";
@@ -140,10 +137,7 @@ let test_expand_auto_models_includes_cli_auto_specs () =
         "gemini_cli:gemini-2.5-flash-lite";
         "gemini_cli:gemini-3.1-pro-preview";
         "gemini_cli:gemini-2.5-pro";
-        "codex_cli:gpt-5.1-codex-mini";
-        "codex_cli:gpt-5.1-codex-max";
         "codex_cli:gpt-5.2";
-        "codex_cli:gpt-5.2-codex";
         "codex_cli:gpt-5.3-codex-spark";
         "codex_cli:gpt-5.3-codex";
         "codex_cli:gpt-5.4-mini";
@@ -219,13 +213,13 @@ let test_order_weighted_entries_rotation_scope_rotates_generically () =
              e.model)
     in
     check string "weighted first call keeps default head"
-      "codex_cli:gpt-5.1-codex-mini"
+      "codex_cli:gpt-5.2"
       (List.hd first);
     check string "weighted second call advances head"
-      "codex_cli:gpt-5.1-codex-max"
+      "codex_cli:gpt-5.3-codex-spark"
       (List.hd second);
     check string "weighted rotation is scoped"
-      "codex_cli:gpt-5.1-codex-mini"
+      "codex_cli:gpt-5.2"
       (List.hd other_scope))
 
 let () =

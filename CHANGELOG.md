@@ -47,8 +47,12 @@
 - **CLI auto-model rotation for cascade specs.** `gemini_cli:auto` now
   expands into a quota-aware concrete Gemini CLI candidate list
   (Flash/Lite first, Pro last), and `codex_cli:auto` expands through a
-  light-to-heavy Codex order from `gpt-5.1-codex-mini` up to `gpt-5.4`,
-  including `gpt-5.4-mini` and `gpt-5.3-codex-spark`.
+  light-to-heavy supported Codex order from `gpt-5.2` up to `gpt-5.4`,
+  including `gpt-5.4-mini` and `gpt-5.3-codex-spark`. The ChatGPT-backed
+  Codex rotation now excludes `gpt-5.1-codex-mini`, `gpt-5.1-codex-max`, and
+  `gpt-5.2-codex` after direct runtime probes returned 400
+  unsupported-model errors; operators can still re-add them explicitly
+  through `MASC_CODEX_CLI_AUTO_MODELS`.
   `claude_code:auto` remains single-entry by default but can be expanded via
   `MASC_CLAUDE_CODE_AUTO_MODELS`. This lets existing cascade
   failover/round-robin/cooldown machinery rotate CLI models without

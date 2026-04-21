@@ -199,6 +199,8 @@ let metric_keeper_heartbeat_successes =
   "masc_keeper_heartbeat_successes_total"
 let metric_keeper_heartbeat_failures =
   "masc_keeper_heartbeat_failures_total"
+let metric_keeper_tool_call_duration =
+  "masc_keeper_tool_call_duration_seconds"
 let metric_keeper_write_meta_failures =
   "masc_keeper_write_meta_failures_total"
 let metric_keeper_lifecycle_dispatch_rejections =
@@ -269,6 +271,8 @@ let init () =
     "Total keeper heartbeat successes" Counter;
   add metric_keeper_heartbeat_failures
     "Total keeper heartbeat failures" Counter;
+  register_histogram ~name:metric_keeper_tool_call_duration
+    ~help:"Keeper tool call latency in seconds, labeled by keeper, provider, tool, and outcome" ();
   add "masc_provider_prefix_cache_creation_tokens_total"
     "Total provider prefix cache creation tokens (Anthropic)" Counter;
   add "masc_provider_prefix_cache_read_tokens_total"

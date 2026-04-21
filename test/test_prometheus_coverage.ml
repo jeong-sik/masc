@@ -217,6 +217,8 @@ let test_keeper_metrics_registered () =
     (has "masc_keeper_heartbeat_successes_total");
   check bool "has keeper heartbeat failures counter" true
     (has "masc_keeper_heartbeat_failures_total");
+  check bool "has keeper tool duration histogram" true
+    (has "masc_keeper_tool_call_duration_seconds");
   check bool "has operator compact counter" true
     (has "masc_keeper_operator_compact_total");
   check bool "has operator clear counter" true

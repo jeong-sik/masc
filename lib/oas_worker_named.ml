@@ -449,13 +449,15 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
     : Cascade_fsm.provider_outcome option =
   match err with
   | Oas.Error.Api api_err ->
-    let http_err = match api_err with
+    let http_err = match[@warning "-8"] api_err with
       | Llm_provider.Retry.InvalidRequest { message } ->
         Llm_provider.Http_client.HttpError { code = 400; body = message }
       | Llm_provider.Retry.ContextOverflow { message; _ } ->
         Llm_provider.Http_client.HttpError { code = 400; body = message }
       | Llm_provider.Retry.RateLimited { message; _ } ->
         Llm_provider.Http_client.HttpError { code = 429; body = message }
+      | Llm_provider.Retry.NotFound { message } ->
+        Llm_provider.Http_client.HttpError { code = 404; body = message }
       | Llm_provider.Retry.ServerError { status; message } ->
         Llm_provider.Http_client.HttpError { code = status; body = message }
       | Llm_provider.Retry.AuthError { message } ->
@@ -575,12 +577,13 @@ let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
   | Oas.Error.Api api_err ->
     Llm_provider.Retry.is_hard_quota api_err
     ||
-    (match api_err with
+    (match[@warning "-8"] api_err with
      | Llm_provider.Retry.NetworkError { message }
      | Llm_provider.Retry.Overloaded { message }
      | Llm_provider.Retry.ServerError { message; _ } ->
        message_looks_like_cli_wrapped_hard_quota message
      | Llm_provider.Retry.RateLimited _
+     | Llm_provider.Retry.NotFound _
      | Llm_provider.Retry.AuthError _
      | Llm_provider.Retry.InvalidRequest _
      | Llm_provider.Retry.ContextOverflow _

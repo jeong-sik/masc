@@ -945,6 +945,16 @@ let decision_id ~(meta : keeper_meta) ~(ts : float) ~(suffix_seed : string) : st
     (Int64.of_float (ts *. 1000.0))
     (String.sub digest 0 8)
 
+let tool_call_detail_to_json
+    (detail : Keeper_agent_run.tool_call_detail)
+  : Yojson.Safe.t =
+  `Assoc
+    [ ("tool_name", `String detail.tool_name)
+    ; ("provider", `String detail.provider)
+    ; ("outcome", `String detail.outcome)
+    ; ("latency_ms", `Float detail.latency_ms)
+    ]
+
 let append_decision_record
     ~(config : Coord.config)
     ~(meta : keeper_meta)
@@ -976,6 +986,11 @@ let append_decision_record
     match result with
     | Some r -> r.tool_calls_made
     | None -> 0
+  in
+  let tool_calls =
+    match result with
+    | Some r -> r.tool_calls
+    | None -> []
   in
   let claim_executed = List.mem "keeper_task_claim" tools_used in
   let social_fields =
@@ -1042,6 +1057,7 @@ let append_decision_record
             ] );
         ("tool_call_count", `Int tool_call_count);
         ("tools_used", `List (List.map (fun s -> `String s) tools_used));
+        ("tool_calls", `List (List.map tool_call_detail_to_json tool_calls));
         ("claim_was_available", `Bool (observation.unclaimed_task_count > 0));
         ("claim_executed", `Bool claim_executed);
         ( "action_source",

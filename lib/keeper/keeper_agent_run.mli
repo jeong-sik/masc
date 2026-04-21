@@ -58,6 +58,13 @@ type tool_surface_metrics =
   ; approval_mode_derived : bool
   }
 
+type tool_call_detail =
+  { tool_name : string
+  ; provider : string
+  ; outcome : string
+  ; latency_ms : float
+  }
+
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
@@ -69,6 +76,7 @@ type run_result =
   ; tool_calls_made : int
   ; usage : Agent_sdk.Types.api_usage
   ; tools_used : string list
+  ; tool_calls : tool_call_detail list
   ; checkpoint : Agent_sdk.Checkpoint.t option
   ; proof : Agent_sdk.Cdal_proof.t option
   ; trace_ref : Agent_sdk.Raw_trace.run_ref option

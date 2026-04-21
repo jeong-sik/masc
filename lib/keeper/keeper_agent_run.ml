@@ -315,6 +315,13 @@ type computed_tool_surface =
   ; query_text : string
   }
 
+type tool_call_detail =
+  { tool_name : string
+  ; provider : string
+  ; outcome : string
+  ; latency_ms : float
+  }
+
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
@@ -326,6 +333,7 @@ type run_result =
   ; tool_calls_made : int
   ; usage : Agent_sdk.Types.api_usage
   ; tools_used : string list
+  ; tool_calls : tool_call_detail list
   ; checkpoint : Agent_sdk.Checkpoint.t option
   ; proof : Agent_sdk.Cdal_proof.t option
   ; trace_ref : Agent_sdk.Raw_trace.run_ref option
@@ -1185,6 +1193,7 @@ let run_turn
         approval_mode_derived;
       }
   in
+  let tool_calls_ref : tool_call_detail list ref = ref [] in
   let validate_allow_list ~turn raw =
     let raw = Tool_portal.filter_visible_tool_names portal_ctx raw in
     let validated, dropped_names =
@@ -1639,6 +1648,20 @@ let run_turn
       ~generation
       ?max_cost_usd
       ?trajectory_acc
+      ~on_tool_executed:(fun
+          ~tool_name
+          ~input:_
+          ~output_text:_
+          ~success
+          ~duration_ms
+          ~provider ->
+        tool_calls_ref :=
+          { tool_name
+          ; provider
+          ; outcome = if success then "ok" else "error"
+          ; latency_ms = duration_ms
+          }
+          :: !tool_calls_ref)
       ~discover_work_nudge
       ()
   in
@@ -2642,6 +2665,7 @@ let run_turn
              ; tool_calls_made = List.length actual_keeper_tool_names
              ; usage
              ; tools_used = actual_keeper_tool_names
+             ; tool_calls = List.rev !tool_calls_ref
              ; checkpoint = saved_checkpoint
              ; proof = result.proof
              ; trace_ref = result.trace_ref

@@ -59,9 +59,73 @@ let test_emit_cost_event_writes_inference_telemetry () =
   check (float 0.001) "peak_memory_gb" 52.66
     (json |> member "peak_memory_gb" |> to_float)
 
+let test_tool_execution_summary_derives_provider_and_outcome () =
+  let summary =
+    Hooks.tool_execution_summary
+      ~tool_name:"keeper_shell"
+      ~model:"codex_cli:gpt-5.4"
+      ~success:false
+      ~duration_ms:12.5
+  in
+  check string "tool name" "keeper_shell" summary.tool_name;
+  check string "provider" "codex_cli" summary.provider;
+  check string "outcome" "error" summary.outcome;
+  check (float 0.001) "duration" 12.5 summary.duration_ms
+
+let test_record_keeper_tool_duration_metric_tracks_labels () =
+  let summary =
+    Hooks.tool_execution_summary
+      ~tool_name:"keeper_board_post"
+      ~model:"glm-coding:glm-5.1"
+      ~success:true
+      ~duration_ms:250.0
+  in
+  let labels =
+    [ ("keeper", "telemetry-test")
+    ; ("provider", "glm-coding")
+    ; ("tool", "keeper_board_post")
+    ; ("outcome", "ok")
+    ]
+  in
+  let sum_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_tool_call_duration
+      ~labels
+      ()
+  in
+  let count_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      (Masc_mcp.Prometheus.metric_keeper_tool_call_duration ^ "_count")
+      ~labels
+      ()
+  in
+  Hooks.record_keeper_tool_duration_metric
+    ~keeper_name:"telemetry-test"
+    summary;
+  let sum_after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_tool_call_duration
+      ~labels
+      ()
+  in
+  let count_after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      (Masc_mcp.Prometheus.metric_keeper_tool_call_duration ^ "_count")
+      ~labels
+      ()
+  in
+  check (float 0.0001) "sum delta" 0.25 (sum_after -. sum_before);
+  check (float 0.0001) "count delta" 1.0 (count_after -. count_before)
+
 let () =
   run "keeper_hooks_oas/telemetry"
     [ ( "costs_jsonl",
         [ test_case "emit_cost_event keeps throughput and memory fields" `Quick
             test_emit_cost_event_writes_inference_telemetry ] )
+    ; ( "tool_telemetry",
+        [ test_case "tool execution summary derives provider and outcome" `Quick
+            test_tool_execution_summary_derives_provider_and_outcome
+        ; test_case "keeper tool duration metric tracks labels" `Quick
+            test_record_keeper_tool_duration_metric_tracks_labels
+        ] )
     ]

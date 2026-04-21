@@ -1,2 +1,8 @@
 (dirs (:standard \ .worktrees _build_codex_trpg archive dashboard_bonsai))
+
+(env
+ (dev
+  (flags (:standard -warn-error +8)))
+ (release
+  (flags (:standard -warn-error +8))))
  

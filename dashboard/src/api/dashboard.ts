@@ -35,11 +35,6 @@ import type {
   DashboardGoalsTreeResponse,
   DashboardNamespaceTruthResponse,
   DashboardShellResponse,
-  DashboardConfigResolution,
-  DashboardConfigResolutionItem,
-  DashboardRuntimeDiagnostic,
-  DashboardRuntimeResolution,
-  ServerBuildIdentity,
   BoardSortMode,
   GovernanceCaseBundle,
   GovernanceDecisionItem,
@@ -47,6 +42,8 @@ import type {
   KeeperApprovalQueueItem,
   GovernanceTimelineEvent,
   PendingConfirmation,
+  DashboardConfigResolution,
+  DashboardRuntimeResolution,
 } from '../types'
 
 // --- Dashboard projections ---
@@ -772,7 +769,12 @@ export type {
   DashboardRuntimeDiagnostic,
   DashboardRuntimeResolution,
   ServerBuildIdentity as DashboardBuildIdentity,
-}
+} from '../types'
+export type {
+  KeeperRuntimeResolved,
+  KeeperRuntimeField,
+  KeeperRuntimeSource,
+} from '../types'
 
 interface DashboardRuntimeProbeLoadedModel {
   name?: string | null

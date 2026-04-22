@@ -9,6 +9,9 @@ import type {
   DashboardConfigResolutionItem,
   DashboardRuntimeDiagnostic,
   DashboardRuntimeResolution,
+  KeeperRuntimeResolved,
+  KeeperRuntimeField,
+  KeeperRuntimeSource,
   DashboardShellMetaCognitionBelief,
   DashboardShellMetaCognitionDesire,
   DashboardShellMetaCognitionSummary,
@@ -447,6 +450,71 @@ export function normalizeDashboardRuntimeDiagnostic(
   }
 }
 
+const _MISSING = Symbol('missing')
+
+function normalizeKeeperRuntimeField<T>(
+  raw: unknown,
+  valueNormalize: (v: unknown) => T | typeof _MISSING,
+): KeeperRuntimeField<T> | null {
+  if (!isRecord(raw)) return null
+  const value = valueNormalize(raw.value)
+  if (value === _MISSING) return null
+  const source = asString(raw.source)
+  if (!source) return null
+  const validSources: KeeperRuntimeSource[] = ['env', 'toml', 'default', 'derived']
+  return {
+    value: value as T,
+    source: validSources.includes(source as KeeperRuntimeSource)
+      ? (source as KeeperRuntimeSource) : 'default',
+  }
+}
+
+function normalizeKeeperRuntimeResolved(raw: unknown): KeeperRuntimeResolved | null {
+  if (!isRecord(raw)) return null
+  const toNumber = (v: unknown): number | typeof _MISSING => {
+    const n = asNumber(v)
+    return n !== null && n !== undefined ? n : _MISSING
+  }
+  const intField = (key: string) => normalizeKeeperRuntimeField(
+    (raw as Record<string, unknown>)[key], v => {
+      const n = toNumber(v)
+      return n === _MISSING ? _MISSING : Math.round(n as number)
+    },
+  )
+  const floatField = (key: string) => normalizeKeeperRuntimeField(
+    (raw as Record<string, unknown>)[key], toNumber,
+  )
+  const optFloatField = (key: string) => normalizeKeeperRuntimeField<number | null>(
+    (raw as Record<string, unknown>)[key],
+    v => v === null || v === undefined ? null : toNumber(v) === _MISSING ? _MISSING : (toNumber(v) as number),
+  )
+  const bootstrap = intField('bootstrap_max_active_keepers')
+  const reactiveMaxTurns = intField('reactive_max_turns_per_call')
+  const autonomousMaxTurns = intField('autonomous_max_turns_per_call')
+  const reactiveMaxIdle = intField('reactive_max_idle_turns')
+  const autonomousMaxIdle = intField('autonomous_max_idle_turns')
+  const turnTimeout = floatField('turn_timeout_sec')
+  const admissionWait = floatField('admission_wait_timeout_sec')
+  const oasTimeoutOverride = optFloatField('oas_timeout_override_sec')
+  const oasTimeoutPer1k = floatField('oas_timeout_per_1k')
+  const oasTimeoutPerTurn = floatField('oas_timeout_per_turn')
+  if (!bootstrap || !reactiveMaxTurns || !autonomousMaxTurns || !reactiveMaxIdle
+    || !autonomousMaxIdle || !turnTimeout || !admissionWait || !oasTimeoutPer1k
+    || !oasTimeoutPerTurn) return null
+  return {
+    bootstrap_max_active_keepers: bootstrap,
+    reactive_max_turns_per_call: reactiveMaxTurns,
+    autonomous_max_turns_per_call: autonomousMaxTurns,
+    reactive_max_idle_turns: reactiveMaxIdle,
+    autonomous_max_idle_turns: autonomousMaxIdle,
+    turn_timeout_sec: turnTimeout,
+    admission_wait_timeout_sec: admissionWait,
+    oas_timeout_override_sec: oasTimeoutOverride as KeeperRuntimeField<number | null>,
+    oas_timeout_per_1k: oasTimeoutPer1k,
+    oas_timeout_per_turn: oasTimeoutPerTurn,
+  }
+}
+
 export function normalizeDashboardRuntimeResolution(
   raw: unknown,
 ): DashboardRuntimeResolution | null {
@@ -476,6 +544,7 @@ export function normalizeDashboardRuntimeResolution(
       .map(normalizeDashboardRuntimeDiagnostic)
       .filter((item): item is DashboardRuntimeDiagnostic => item !== null),
     build,
+    keeper_runtime: normalizeKeeperRuntimeResolved(raw.keeper_runtime),
   }
 }
 

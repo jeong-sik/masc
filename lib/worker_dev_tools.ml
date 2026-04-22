@@ -5,7 +5,12 @@
     file modifications).
 
     file_read/file_write use OCaml stdlib (no Eio filesystem capability needed).
-    shell_exec uses Eio.Process with fiber-based timeout. *)
+    shell_exec uses Eio.Process with fiber-based timeout.
+
+    Safety classification types (destructive_class, gate_diff, etc.) are
+    defined in [Gate_diff_types] and re-exported here for backward compat. *)
+
+include Gate_diff_types
 
 (* --- Safety validation --- *)
 
@@ -71,8 +76,8 @@ let validate_path ?workdir path =
         | Some home -> is_within_dir ~dir:(resolve_path (Filename.concat home "me")) resolved
         | None -> false)
 
-let tool_error ?(recoverable = false) message : Agent_sdk.Types.tool_result =
-  Error { Agent_sdk.Types.message; recoverable; error_class = None }
+let tool_error ?(recoverable = false) message : Oas.Types.tool_result =
+  Error { Oas.Types.message; recoverable; error_class = None }
 
 (** shell_exec intentionally supports only a narrow allowlist of dev/test
     commands and rejects shell control syntax to keep execution predictable. *)
@@ -710,478 +715,10 @@ let sanitize_command_for_log cmd =
 let truncate_for_log ?(max_len = 240) s =
   String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." s |> String_util.to_string
 
-(* --- gh CLI validation for keeper_shell op=gh / PR workflow helpers --- *)
+(* --- gh CLI validation (extracted to Gh_command_validation) --- *)
 
-(** Top-level gh CLI commands allowed. Commands not in this list are
-    rejected at the allowlist gate. *)
-let gh_allowed_commands =
-  [
-    "api"; "cache"; "gist"; "issue"; "label"; "pr"; "project";
-    "release"; "repo"; "ruleset"; "run"; "search"; "status";
-    "workflow";
-  ]
+include Gh_command_validation
 
-(** Reversibility classification for gh commands.
-    Based on Thariq (Anthropic) Agent SDK workshop principle:
-    "Tools for atomic/irreversible actions; bash for reversible work."
-    + Anthropic Claude Code auto mode pattern:
-    "Safe-tool allowlist = tools that cannot modify state; everything
-    else goes to classifier; irreversible requires approval."
-
-    - [R0_Read]: no state mutation. gh view/list, api GET, status,
-      search. Free to run; only org allowlist gate.
-    - [R1_Reversible]: mutates state but recoverable via inverse op.
-      pr create/close/reopen/merge/ready/comment/edit, issue
-      create/close/reopen, label create/delete, run cancel. Allowed
-      + caller is expected to emit an audit event.
-    - [R2_Irreversible]: cannot be undone via a gh inverse op.
-      repo delete/archive/transfer/rename, release delete, secret
-      delete, auth logout/token, ssh-key delete, workflow disable,
-      api --method DELETE, graphql mutation delete*/remove*/transfer*.
-      Must route through a structured keeper tool that carries
-      operator-approval semantics. *)
-type gh_reversibility =
-  | R0_Read
-  | R1_Reversible
-  | R2_Irreversible
-
-let string_of_gh_reversibility = function
-  | R0_Read -> "R0" | R1_Reversible -> "R1" | R2_Irreversible -> "R2"
-
-(** (command, subcommand) pairs classified as R2 irreversible.
-    Conservative: when an operation *could* leak/destroy state that
-    gh itself cannot restore, we mark it R2 even if a manual recovery
-    path exists. Examples: repo archive is technically reversible via
-    unarchive but disrupts downstream PRs; ssh-key delete is
-    re-registrable but signing/deploy keys mid-CI break. *)
-let gh_irreversible_ops =
-  [
-    ("repo",     ["delete"; "archive"; "transfer"; "rename"]);
-    ("release",  ["delete"]);
-    ("secret",   ["delete"; "remove"]);
-    ("ssh-key",  ["delete"]);
-    ("workflow", ["disable"]);
-    ("auth",     ["logout"; "token"]);
-    ("gist",     ["delete"]);
-    ("ruleset",  ["delete"]);
-  ]
-
-(** (command, subcommand) pairs classified as R1 reversible mutation.
-    The inverse operation is also a gh subcommand (pr close ↔ reopen,
-    label create ↔ delete, run cancel is always followed by rerun).
-    Allowed via op=gh but callers should audit. *)
-let gh_reversible_mutations =
-  [
-    ("pr",      ["create"; "close"; "reopen"; "merge"; "ready";
-                 "edit"; "comment"; "review"; "lock"; "unlock"]);
-    ("issue",   ["create"; "close"; "reopen"; "edit"; "comment";
-                 "lock"; "unlock"; "develop"; "pin"; "unpin"]);
-    ("label",   ["create"; "edit"; "delete"; "clone"]);
-    ("release", ["create"; "edit"; "upload"; "download"]);
-    ("run",     ["cancel"; "rerun"; "watch"]);
-    ("cache",   ["delete"]);
-    ("gist",    ["create"; "edit"; "clone"; "rename"]);
-    ("repo",    ["create"; "clone"; "fork"; "edit"; "sync"; "set-default"]);
-    ("project", ["create"; "edit"; "close"; "copy"; "link"; "unlink";
-                 "field-create"; "field-delete"; "item-add";
-                 "item-archive"; "item-delete"; "item-edit"]);
-    ("workflow", ["enable"; "run"]);
-    ("ruleset", ["create"; "edit"]);
-  ]
-
-(** SSOT: GraphQL mutation names classified as R2 irreversible.
-    Used by both [gh_api_graphql_is_destructive] (R0/R1/R2 classifier)
-    and [is_gh_dangerous_operation] (legacy workflow guard).
-    All names are lowercase for substring matching. *)
-let gh_graphql_r2_mutations =
-  [ "deletepullrequest"; "deleteissue"; "deletebranch"; "deleteref";
-    "deleteproject"; "deletebranchprotectionrule";
-    "removeouterfromorganization"; "transferrepository";
-    "archiverepository" ]
-
-let extract_gh_api_method cmd =
-  let tokens =
-    String.split_on_char ' ' (String.trim cmd)
-    |> List.filter (fun s -> s <> "")
-  in
-  let rec find = function
-    | [] -> "GET"
-    | "-X" :: m :: _ | "--method" :: m :: _ -> String.uppercase_ascii m
-    | tok :: _ when String.length tok > 9
-                    && String.sub tok 0 9 = "--method=" ->
-      String.uppercase_ascii (String.sub tok 9 (String.length tok - 9))
-    | tok :: _ when String.length tok > 3
-                    && String.sub tok 0 3 = "-X=" ->
-      String.uppercase_ascii (String.sub tok 3 (String.length tok - 3))
-    | _ :: rest -> find rest
-  in
-  find tokens
-
-(** Detect [gh api graphql] invocations that carry a destructive
-    mutation name. Uses substring match on the query body (passed via
-    -f query=... or --raw-field query=...). Conservative: unknown
-    mutation names default to R1 because GraphQL mutation semantics
-    are wide; only the destructive-verb-prefix set is R2. *)
-let gh_api_graphql_is_destructive cmd =
-  let lower = String.lowercase_ascii cmd in
-  let has s = contains_substring lower s in
-  has "graphql"
-  && List.exists has gh_graphql_r2_mutations
-
-(** Classify a gh command string by state reversibility.
-    The command is the portion after "gh " — a normalized form
-    without the leading "gh" literal.
-
-    Precedence (first match wins):
-      1. top command + subcommand in [gh_irreversible_ops] → R2
-      2. [api] with [--method DELETE] or a destructive graphql
-         mutation → R2
-      3. top command + subcommand in [gh_reversible_mutations] → R1
-      4. [api] with --method POST/PUT/PATCH (or -f field flags that
-         imply non-GET) → R1
-      5. anything else → R0 (read-only default) *)
-(* [classify_gh_reversibility] is defined after [has_mutating_http_method]
-   below so we can reuse its -f/-F/--field → implicit-POST detection.
-   The forward declaration pattern keeps this section free of an
-   [let rec] cluster that would pull unrelated functions into the same
-   recursive binding. *)
-
-(** Legacy alias: kept so pre-classifier call sites still compile.
-    Equivalent to [classify_gh_reversibility cmd = R2_Irreversible]
-    for the pairs we used to block. *)
-let gh_blocked_operations =
-  List.concat_map
-    (fun (c, subs) -> List.map (fun s -> (c, s)) subs)
-    gh_irreversible_ops
-
-(* [structured_tool_hint_for_r2] is defined after [extract_gh_command_pair]
-   below (see the classifier block near the bottom of this file). *)
-
-(** Extract owner from a [--repo OWNER/NAME], [--repo=OWNER/NAME], or
-    [-R OWNER/NAME] flag in a gh command string. Returns [None] if no
-    such flag is present — in that case gh defaults to the cwd's git
-    origin, which is already org-gated at clone time.
-
-    Only the owner segment is returned; repo/branch names are outside
-    the allowlist scope. *)
-let extract_gh_repo_owner cmd =
-  let tokens =
-    String.split_on_char ' ' (String.trim cmd)
-    |> List.filter (fun s -> s <> "")
-  in
-  let owner_of_slug s =
-    match String.split_on_char '/' s with
-    | owner :: _ :: _ when owner <> "" -> Some owner
-    | _ -> None
-  in
-  let rec find = function
-    | [] -> None
-    | "--repo" :: slug :: _ | "-R" :: slug :: _ -> owner_of_slug slug
-    | tok :: rest when String.length tok > 7 && String.sub tok 0 7 = "--repo=" ->
-      let slug = String.sub tok 7 (String.length tok - 7) in
-      (match owner_of_slug slug with
-       | Some _ as o -> o
-       | None -> find rest)
-    | _ :: rest -> find rest
-  in
-  find tokens
-
-(** Extract the top-level command and its first subcommand from a gh
-    command string (the portion after "gh ").
-    Flags (starting with '-') and their values are skipped when scanning
-    for the subcommand, preventing bypass via flag insertion.
-    Example: "pr view 123" -> (Some "pr", Some "view")
-    Example: "workflow --repo o/r disable" -> (Some "workflow", Some "disable") *)
-let extract_gh_command_pair cmd =
-  let parts =
-    String.split_on_char ' ' (String.trim cmd)
-    |> List.filter (fun s -> s <> "")
-  in
-  match parts with
-  | [] -> (None, None)
-  | [ x ] -> (Some x, None)
-  | x :: rest ->
-    let rec find_subcmd = function
-      | [] -> None
-      | tok :: tl ->
-        if String.length tok > 0 && tok.[0] = '-' then
-          if String.contains tok '=' then find_subcmd tl
-          else (match tl with _ :: rest' -> find_subcmd rest' | [] -> None)
-        else Some tok
-    in
-    (Some x, find_subcmd rest)
-
-(** Validate a gh CLI command string for safety.
-    Checks in order:
-      (1) shell metacharacters,
-      (2) top-level command allowlist,
-      (3) blocked (command, subcommand) operation pairs,
-      (4) [--repo OWNER/NAME] owner against [allowed_orgs] (if non-empty).
-
-    Check 4 is skipped when [allowed_orgs] is [] (policy not configured)
-    or when the command carries no [--repo] flag (gh falls back to
-    cwd's origin, which is already gated at clone time).
-
-    [cmd] is the portion after "gh ", e.g. "pr view 123". *)
-let validate_gh_command ?(allowed_orgs = []) cmd =
-  let trimmed = String.trim cmd in
-  if trimmed = "" then Error "gh command must not be empty"
-  else if contains_forbidden_shell_chars trimmed then
-    Error
-      "Blocked: chaining/redirect in gh command. Use a single subcommand. \
-       Good: cmd='pr list --state open'. Bad: cmd='pr list && echo done'."
-  else
-    match extract_gh_command_pair trimmed with
-    | (None, _) -> Error "gh command must not be empty"
-    | (Some command, subcmd) ->
-      let command = String.lowercase_ascii command in
-      if not (List.mem command gh_allowed_commands) then
-        Error
-          (Printf.sprintf
-             "gh command blocked: '%s' is not in the approved command list"
-             command)
-      else
-        let sub =
-          Option.value ~default:"" subcmd |> String.lowercase_ascii
-        in
-        if List.exists (fun (c, s) -> c = command && s = sub)
-             gh_blocked_operations
-        then
-          Error
-            (Printf.sprintf "gh %s %s is blocked for safety" command sub)
-        else
-          match allowed_orgs, extract_gh_repo_owner trimmed with
-          | [], _ | _, None -> Ok ()
-          | orgs, Some owner when List.mem owner orgs -> Ok ()
-          | orgs, Some owner ->
-            Error
-              (Printf.sprintf
-                 "gh --repo owner '%s' not in allowed_orgs [%s]. \
-                  Drop --repo to use the current repo, or use an allowed org."
-                 owner
-                 (String.concat ", " orgs))
-
-(** Known destructive API endpoint patterns.
-    Each pattern is checked as a substring of the full command.
-    Covers merge, state-closing, and branch-merge endpoints. *)
-let gh_api_destructive_patterns =
-  [ "/merge"; "/merges";
-    "state=closed"; "state=\"closed\""; "state='closed'" ]
-
-(** Legacy alias. Callers that need the R1 workflow-mutation names
-    (mergepullrequest, closepullrequest, closeissue) add them locally;
-    the R2 set is [gh_graphql_r2_mutations]. *)
-let gh_graphql_destructive_mutations =
-  gh_graphql_r2_mutations
-  @ [ "mergepullrequest"; "closepullrequest"; "closeissue" ]
-
-(** Check if a gh API command uses or implies a non-GET HTTP method.
-    Returns [true] for explicit mutating methods (-X POST, --method PATCH,
-    etc.) and for implicit POST via field flags (-f, -F, --field,
-    --raw-field), matching gh CLI behavior where field flags cause an
-    automatic POST. Handles both "--method POST" and "--method=POST". *)
-let has_implicit_post_flags parts =
-  let rec check = function
-    | [] -> false
-    | tok :: rest ->
-      let tok_lower = String.lowercase_ascii tok in
-      if tok = "-f" || tok = "-F" || tok = "--field" || tok = "--raw-field"
-         || String.length tok_lower > 3 && String.sub tok_lower 0 3 = "-f="
-         || String.length tok_lower > 8 && String.sub tok_lower 0 8 = "--field="
-         || String.length tok_lower > 12 && String.sub tok_lower 0 12 = "--raw-field="
-      then true
-      else check rest
-  in
-  check parts
-
-let has_mutating_http_method parts =
-  let cmd = String.concat " " parts in
-  let m = String.lowercase_ascii (extract_gh_api_method cmd) in
-  (m = "post" || m = "put" || m = "patch" || m = "delete")
-  || has_implicit_post_flags parts
-
-(** Classify a gh command string by state reversibility.
-    The command is the portion after "gh " — a normalized form
-    without the leading "gh" literal.
-
-    Precedence (first match wins):
-      1. top command + subcommand in [gh_irreversible_ops] → R2
-      2. [api] with [--method DELETE] or a destructive graphql
-         mutation → R2
-      3. [api] with --method POST/PUT/PATCH, or implicit POST via
-         [-f]/[-F]/[--field]/[--raw-field] (gh auto-converts field
-         flags to POST) → R1
-      4. top command + subcommand in [gh_reversible_mutations] → R1
-      5. anything else → R0 (read-only default) *)
-let classify_gh_reversibility cmd =
-  match extract_gh_command_pair cmd with
-  | (None, _) -> R0_Read
-  | (Some command, subcmd_opt) ->
-    let command = String.lowercase_ascii command in
-    let sub =
-      Option.value ~default:"" subcmd_opt |> String.lowercase_ascii
-    in
-    let in_table table =
-      List.exists
-        (fun (c, subs) -> c = command && List.mem sub subs)
-        table
-    in
-    if in_table gh_irreversible_ops then R2_Irreversible
-    else if command = "api" then begin
-      let method_ = extract_gh_api_method cmd in
-      let parts =
-        String.split_on_char ' ' (String.trim cmd)
-        |> List.filter (fun s -> s <> "")
-      in
-      if method_ = "DELETE" then R2_Irreversible
-      else if gh_api_graphql_is_destructive cmd then R2_Irreversible
-      else if List.mem method_ ["POST"; "PUT"; "PATCH"] then R1_Reversible
-      else if has_mutating_http_method parts then R1_Reversible
-      else R0_Read
-    end
-    else if in_table gh_reversible_mutations then R1_Reversible
-    else R0_Read
-
-(** Suggested next-action hint for a rejected R2 command.
-    Returned in the gate response so small LLMs can self-recover
-    without a second operator turn. Conservative: only returns a hint
-    when the mapping is obvious; otherwise None → caller falls back
-    to a generic message. *)
-let structured_tool_hint_for_r2 cmd =
-  match extract_gh_command_pair cmd with
-  | (Some "repo", Some ("delete" | "archive" | "transfer" | "rename")) ->
-    Some "Use an operator-approved path: open a board post describing \
-          the intent and wait for operator action. No keeper tool \
-          performs repo-level destructive ops."
-  | (Some "release", Some "delete") ->
-    Some "Open a board post with release tag + reason. Release deletion \
-          requires operator approval."
-  | (Some "secret", _) | (Some "ssh-key", _) | (Some "auth", _) ->
-    Some "Credential operations are operator-only. Do not attempt via \
-          any keeper tool."
-  | (Some "api", _) ->
-    Some "Destructive gh api calls (DELETE or graphql mutation \
-          delete*/remove*/transfer*) are blocked. Use pr/issue \
-          subcommands for R1 mutations, or open a board post."
-  | _ ->
-    None
-
-(** Filter out flag-like tokens, keeping only positional args.
-    Handles boolean flag bypass (e.g. "workflow -q delete"). *)
-let positional_tokens parts =
-  List.filter (fun s -> String.length s = 0 || s.[0] <> '-') parts
-
-(** Shared tokenizer for destructive-operation checks. *)
-let gh_op_parts cmd =
-  String.split_on_char ' ' (String.trim cmd)
-  |> List.filter (fun s -> s <> "")
-  |> List.map String.lowercase_ascii
-
-let has_positional_subcmd subcmds rest =
-  let positionals = positional_tokens rest in
-  List.exists (fun s -> List.mem s subcmds) positionals
-
-(** Check if a gh command is a normal workflow mutation (merge, close).
-    These are legitimate for coding-preset keepers but should still be
-    gated for lower-privilege presets. *)
-let is_gh_workflow_operation cmd =
-  let parts = gh_op_parts cmd in
-  match parts with
-  | "pr" :: rest -> has_positional_subcmd [ "merge"; "close" ] rest
-  | "issue" :: rest -> has_positional_subcmd [ "close" ] rest
-  | "project" :: rest -> has_positional_subcmd [ "close" ] rest
-  | "api" :: _ ->
-    let joined = String.concat " " parts in
-    has_mutating_http_method parts
-    && List.exists (fun pat -> contains_substring joined pat)
-         [ "/merge"; "/merges"; "state=closed"; "state=\"closed\""; "state='closed'" ]
-  | _ -> false
-
-(** Check if a gh command is specifically [gh pr merge]. *)
-let is_gh_pr_merge cmd =
-  let parts = gh_op_parts cmd in
-  match parts with
-  | "pr" :: rest -> has_positional_subcmd [ "merge" ] rest
-  | _ -> false
-
-let gh_raw_parts cmd =
-  String.split_on_char ' ' (String.trim cmd)
-  |> List.filter (fun s -> s <> "")
-
-let gh_option_takes_value tok =
-  let tok = String.lowercase_ascii tok in
-  not (contains_substring tok "=")
-  && List.mem tok
-       [ "-r"; "--repo";
-         "-b"; "--body";
-         "-f"; "--body-file";
-         "-t"; "--subject";
-         "--match-head-commit";
-         "--author-email" ]
-
-(** Return the explicit target passed to [gh pr merge], if any.
-    Supports numeric PR ids, branch names, and PR URLs. Returns [None]
-    when the merge command targets the current branch's PR. *)
-let gh_pr_merge_target cmd =
-  let raw_parts = gh_raw_parts cmd in
-  let lower_parts = List.map String.lowercase_ascii raw_parts in
-  let rec drop_until_merge raw lower =
-    match raw, lower with
-    | _raw_hd :: raw_tl, lower_hd :: lower_tl ->
-        if lower_hd = "merge" then Some (raw_tl, lower_tl)
-        else drop_until_merge raw_tl lower_tl
-    | _ -> None
-  in
-  let rec find_target raw lower =
-    match raw, lower with
-    | [], [] -> None
-    | raw_hd :: raw_tl, lower_hd :: lower_tl ->
-        if String.length lower_hd > 0 && lower_hd.[0] = '-' then
-          if gh_option_takes_value lower_hd then
-            (match raw_tl, lower_tl with
-             | _value :: raw_rest, _value_lower :: lower_rest ->
-                 find_target raw_rest lower_rest
-             | _ -> None)
-          else
-            find_target raw_tl lower_tl
-        else
-          Some raw_hd
-    | _ -> None
-  in
-  match lower_parts with
-  | "pr" :: _ -> (
-      match drop_until_merge raw_parts lower_parts with
-      | Some (raw_after_merge, lower_after_merge) ->
-          find_target raw_after_merge lower_after_merge
-      | None -> None)
-  | _ -> None
-
-(** Check if a gh command is a dangerous irreversible operation (delete,
-    archive, transfer). Always gated regardless of preset. *)
-let is_gh_dangerous_operation cmd =
-  let parts = gh_op_parts cmd in
-  match parts with
-  | "issue" :: rest -> has_positional_subcmd [ "delete"; "transfer" ] rest
-  | "release" :: rest -> has_positional_subcmd [ "delete" ] rest
-  | "repo" :: rest -> has_positional_subcmd [ "archive"; "rename" ] rest
-  | "label" :: rest -> has_positional_subcmd [ "delete" ] rest
-  | "cache" :: rest -> has_positional_subcmd [ "delete" ] rest
-  | "project" :: rest -> has_positional_subcmd [ "delete" ] rest
-  | "workflow" :: rest -> has_positional_subcmd [ "delete" ] rest
-  | "ruleset" :: _ -> false
-  | "api" :: _ ->
-    let joined = String.concat " " parts in
-    List.mem "delete" parts
-    || (List.mem "graphql" parts
-        && List.exists (fun m -> contains_substring joined m)
-             gh_graphql_destructive_mutations)
-  | _ -> false
-
-(** Combined check: returns [true] for any destructive mutation.
-    Use [is_gh_dangerous_operation] for always-gated ops, or
-    [is_gh_workflow_operation] for preset-dependent gating. *)
-let is_gh_destructive_operation cmd =
-  is_gh_workflow_operation cmd || is_gh_dangerous_operation cmd
 
 (* --- Recursive mkdir --- *)
 
@@ -1207,13 +744,13 @@ let file_read_description =
     file_read_max_label
 
 let make_file_read ?workdir ?on_exec () =
-  Agent_sdk.Tool.create
+  Oas.Tool.create
     ~name:"file_read"
     ~description:file_read_description
     ~parameters:[
       { name = "path";
         description = "Absolute file path to read";
-        param_type = Agent_sdk.Types.String; required = true };
+        param_type = Oas.Types.String; required = true };
     ]
     (fun input ->
        match Worker_tool_input.extract_string "path" input with
@@ -1243,10 +780,10 @@ let make_file_read ?workdir ?on_exec () =
                (fun f -> f ~tool_name:"file_read" ~success:true ~duration_ms)
                on_exec;
              if String.length content > file_read_max_bytes then
-               Ok { Agent_sdk.Types.content =
+               Ok { Oas.Types.content =
                  String.sub content 0 file_read_max_bytes
                  ^ Printf.sprintf "\n[TRUNCATED at %s]" file_read_max_label }
-             else Ok { Agent_sdk.Types.content = content }
+             else Ok { Oas.Types.content = content }
            with Sys_error msg ->
              let duration_ms =
                int_of_float ((Time_compat.now () -. started) *. 1000.0)
@@ -1257,7 +794,7 @@ let make_file_read ?workdir ?on_exec () =
              tool_error (Printf.sprintf "Cannot read: %s" msg))
 
 let make_file_write ?workdir ?on_exec () =
-  Agent_sdk.Tool.create
+  Oas.Tool.create
     ~name:"file_write"
     ~description:"Write content to a file by absolute path. Creates the file \
       if it doesn't exist, overwrites if it does. Creates parent directories. \
@@ -1265,10 +802,10 @@ let make_file_write ?workdir ?on_exec () =
     ~parameters:[
       { name = "path";
         description = "Absolute file path to write";
-        param_type = Agent_sdk.Types.String; required = true };
+        param_type = Oas.Types.String; required = true };
       { name = "content";
         description = "Content to write to the file";
-        param_type = Agent_sdk.Types.String; required = true };
+        param_type = Oas.Types.String; required = true };
     ]
     (fun input ->
        match Worker_tool_input.extract_string "path" input,
@@ -1300,7 +837,7 @@ let make_file_write ?workdir ?on_exec () =
              Option.iter
                (fun f -> f ~tool_name:"file_write" ~success:true ~duration_ms)
                on_exec;
-             Ok { Agent_sdk.Types.content =
+             Ok { Oas.Types.content =
                Printf.sprintf "Written %d bytes to %s"
                  (String.length content) resolved_path }
            with Sys_error msg ->
@@ -1360,16 +897,16 @@ let attribution_of_validation ~cmd
 
 let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_commands
     ~description () =
-  Agent_sdk.Tool.create
+  Oas.Tool.create
     ~name:"shell_exec"
     ~description
     ~parameters:[
       { name = "command";
         description = "Shell command to execute";
-        param_type = Agent_sdk.Types.String; required = true };
+        param_type = Oas.Types.String; required = true };
       { name = "timeout_s";
         description = "Timeout in seconds (default 30, max 120)";
-        param_type = Agent_sdk.Types.Number; required = false };
+        param_type = Oas.Types.Number; required = false };
     ]
     (fun input ->
        match Worker_tool_input.extract_string "command" input with
@@ -1420,7 +957,7 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
                  in
                  match status with
                  | `Exited 0 ->
-                   Ok { Agent_sdk.Types.content = output }
+                   Ok { Oas.Types.content = output }
                  | `Exited code ->
                    tool_error
                      (Printf.sprintf "Exit code %d:\n%s" code output)
@@ -1476,12 +1013,12 @@ let make_shell_exec_readonly ~workdir ~on_exec ~proc_mgr ~clock =
 
 (** Create dev tools that close over Eio capabilities.
     Returns [file_read; file_write; shell_exec]. *)
-let make_tools ~proc_mgr ~clock ?workdir ?on_exec () : Agent_sdk.Tool.t list =
+let make_tools ~proc_mgr ~clock ?workdir ?on_exec () : Oas.Tool.t list =
   [ make_file_read ?workdir ?on_exec ();
     make_file_write ?workdir ?on_exec ();
     make_shell_exec ~workdir ~on_exec ~proc_mgr ~clock ]
 
-let make_readonly_tools ~proc_mgr ~clock ?workdir ?on_exec () : Agent_sdk.Tool.t list =
+let make_readonly_tools ~proc_mgr ~clock ?workdir ?on_exec () : Oas.Tool.t list =
   [ make_file_read ?workdir ?on_exec ();
     make_shell_exec_readonly ~workdir ~on_exec ~proc_mgr ~clock ]
 
@@ -1541,140 +1078,9 @@ let shadow_parse_outcome (cmd : string) : string =
 let cross_check_command ~legacy cmd =
   (legacy, shadow_parse_outcome cmd)
 
-(* ================================================================ *)
-(* Tick 13 (P5 continued) — typed destructive classes.              *)
-(*                                                                  *)
-(* [Eval_gate.destructive_patterns] currently exposes a flat list   *)
-(* of (substring, description) tuples.  The verifier cascade and    *)
-(* the shadow AST gate both want a typed discriminant so routing    *)
-(* logic does not depend on the free-form description string.       *)
-(*                                                                  *)
-(* [destructive_class_of_cmd] is the pure mapping used by Tick 14's *)
-(* golden diff: for every one of Eval_gate's 19 patterns there must *)
-(* be exactly one [destructive_class] that matches — the test suite *)
-(* enforces the covenant.                                           *)
-(* ================================================================ *)
-
-type destructive_class =
-  | Recursive_delete        (* rm -rf / rm -r / rmdir *)
-  | Sql_destructive         (* drop table, drop database, truncate, delete from *)
-  | Forced_git_mutation     (* git push --force, git reset --hard, git clean -f *)
-  | Privilege_escalation    (* chmod 777 *)
-  | Filesystem_format       (* mkfs *)
-  | Device_write            (* > /dev/, dd if= *)
-  | Process_signal          (* kill -9, pkill *)
-  | System_control          (* shutdown, reboot *)
-
-let destructive_class_to_string = function
-  | Recursive_delete -> "recursive_delete"
-  | Sql_destructive -> "sql_destructive"
-  | Forced_git_mutation -> "forced_git_mutation"
-  | Privilege_escalation -> "privilege_escalation"
-  | Filesystem_format -> "filesystem_format"
-  | Device_write -> "device_write"
-  | Process_signal -> "process_signal"
-  | System_control -> "system_control"
-
-(* Substring → class mapping.  Each entry mirrors one row in
-   [Eval_gate.destructive_patterns].  Order matters: longer
-   substrings come first so "rm -rf" matches before "rm -r". *)
-let destructive_class_substrings : (string * destructive_class) list = [
-  "rm -rf",            Recursive_delete;
-  "rm -r",             Recursive_delete;
-  "rmdir",             Recursive_delete;
-  "drop table",        Sql_destructive;
-  "drop database",     Sql_destructive;
-  "truncate table",    Sql_destructive;
-  "delete from",       Sql_destructive;
-  "git push --force",  Forced_git_mutation;
-  "git push -f",       Forced_git_mutation;
-  "git reset --hard",  Forced_git_mutation;
-  "git clean -f",      Forced_git_mutation;
-  "chmod 777",         Privilege_escalation;
-  "mkfs",              Filesystem_format;
-  "> /dev/",           Device_write;
-  "dd if=",            Device_write;
-  "kill -9",           Process_signal;
-  "pkill",             Process_signal;
-  "shutdown",          System_control;
-  "reboot",            System_control;
-]
-
-(* Case-insensitive substring-hit test without a regex engine. *)
-let contains_sub_ci (s : string) (sub : string) : bool =
-  let ls = String.length s and lsub = String.length sub in
-  if lsub = 0 then true
-  else if lsub > ls then false
-  else
-    let s = String.lowercase_ascii s and sub = String.lowercase_ascii sub in
-    let rec loop i =
-      if i + lsub > ls then false
-      else if String.sub s i lsub = sub then true
-      else loop (i + 1)
-    in
-    loop 0
-
-(* Returns the matching class (first hit in declaration order) plus
-   the literal substring that triggered, so callers can log both
-   the typed tag and the provenance.  [None] means "no known
-   destructive pattern found" — the caller is still free to apply
-   structural checks (rm with -r -f split flags, git push to a
-   protected branch, etc.) on top. *)
-let classify_destructive cmd : (destructive_class * string) option =
-  List.find_map (fun (sub, cls) ->
-    if contains_sub_ci cmd sub then Some (cls, sub) else None)
-    destructive_class_substrings
-
-(* ================================================================ *)
-(* Tick 14 (P5 continued) — legacy ↔ shadow diff harness.           *)
-(*                                                                  *)
-(* Pure diff producer: given a command string, render both the      *)
-(* legacy regex verdict and the shadow AST/destructive verdict      *)
-(* into a single [gate_diff] record.  The flag flip (plan decision  *)
-(* point 2) is gated on this harness showing zero                   *)
-(* [Legacy_allow_shadow_deny] OR [Legacy_deny_shadow_allow] rows    *)
-(* across N=1000 prod calls.  Until then the record is consumed by  *)
-(* telemetry only.                                                  *)
-(* ================================================================ *)
-
-type legacy_verdict =
-  | Legacy_allow
-  | Legacy_reject_by_allowlist
-  | Legacy_reject_destructive of string
-      (** The matching substring from [Eval_gate.destructive_patterns],
-          NOT the description.  Callers that need the free-form
-          description can look it up in [destructive_patterns]. *)
-
-type shadow_verdict =
-  | Shadow_allow of { parse_tag : string }
-      (** Parser and destructive classifier both clean. [parse_tag] is
-          the tag from [shadow_parse_outcome] so callers can tell
-          [parsed_simple] apart from the too_complex family at triage
-          time. *)
-  | Shadow_parse_unsupported of { parse_tag : string }
-      (** Grammar did not accept the command (parse_error, or any of
-          the parse_aborted / too_complex subtags).  Not a deny — means the
-          AST gate cannot yet express an opinion.  Callers in
-          observation mode should still fall back to the regex
-          verdict; in flip mode they must conservatively reject. *)
-  | Shadow_deny_destructive of destructive_class * string
-      (** [classify_destructive] matched; the [string] is the
-          triggering substring. *)
-
-type gate_diff =
-  | Agree
-      (** Legacy and shadow reached the same allow/deny decision. *)
-  | Legacy_allow_shadow_deny
-      (** Legacy regex allowed but shadow identified destructive
-          content. Indicates legacy under-blocks — must be fixed
-          BEFORE flip (otherwise flip is a safety regression). *)
-  | Legacy_deny_shadow_allow
-      (** Legacy rejected but shadow saw nothing dangerous.
-          Indicates legacy over-blocks — needs analysis to
-          determine whether legacy is too conservative or shadow
-          is missing coverage. *)
-  | Shadow_cannot_parse
-      (** Grammar upgrade needed; legacy decision stands. *)
+(* Classification functions that depend on worker_dev_tools internals
+   (validate_command, shadow_parse_outcome). Types come from
+   Gate_diff_types via [include Gate_diff_types] at the top. *)
 
 let classify_legacy cmd : legacy_verdict =
   match validate_command cmd with
@@ -1696,59 +1102,7 @@ let classify_shadow cmd : shadow_verdict =
       if parse_tag = "parsed_simple" then Shadow_allow { parse_tag }
       else Shadow_parse_unsupported { parse_tag }
 
-let diff_of_verdicts ~legacy ~shadow : gate_diff =
-  match legacy, shadow with
-  (* Grammar gap is surfaced first — the flip is blocked on a
-     shadow opinion, so Shadow_parse_unsupported is always a signal
-     worth tracking regardless of the legacy decision. *)
-  | _, Shadow_parse_unsupported _ -> Shadow_cannot_parse
-  | Legacy_allow, Shadow_allow _ -> Agree
-  (* Allowlist rejects are policy (which bins are permitted),
-     orthogonal to the destructive/safety gate — treat as agreement
-     since shadow is not authoritative on binary selection. *)
-  | Legacy_reject_by_allowlist, _ -> Agree
-  | Legacy_reject_destructive _, Shadow_deny_destructive _ -> Agree
-  | Legacy_allow, Shadow_deny_destructive _ -> Legacy_allow_shadow_deny
-  | Legacy_reject_destructive _, Shadow_allow _ -> Legacy_deny_shadow_allow
-
 let diff_command cmd : gate_diff * legacy_verdict * shadow_verdict =
   let legacy = classify_legacy cmd in
   let shadow = classify_shadow cmd in
   (diff_of_verdicts ~legacy ~shadow, legacy, shadow)
-
-let gate_diff_to_string = function
-  | Agree -> "agree"
-  | Legacy_allow_shadow_deny -> "legacy_allow_shadow_deny"
-  | Legacy_deny_shadow_allow -> "legacy_deny_shadow_allow"
-  | Shadow_cannot_parse -> "shadow_cannot_parse"
-
-(* Tick 22: stable log tags for legacy and shadow verdicts.
-   Exposed for the dark-launch shadow logger in keeper_exec_shell
-   — a per-call [diff_command] invocation emits a structured line
-   using these strings so operators can grep for
-   [Legacy_deny_shadow_allow] (flip blockers) or
-   [Legacy_allow_shadow_deny] (safety regressions) in the keeper
-   log stream without needing a separate metrics pipeline. *)
-let legacy_verdict_to_tag = function
-  | Legacy_allow -> "legacy_allow"
-  | Legacy_reject_by_allowlist -> "legacy_reject_by_allowlist"
-  | Legacy_reject_destructive _ -> "legacy_reject_destructive"
-
-let shadow_verdict_to_tag = function
-  | Shadow_allow _ -> "shadow_allow"
-  | Shadow_parse_unsupported _ -> "shadow_parse_unsupported"
-  | Shadow_deny_destructive _ -> "shadow_deny_destructive"
-
-(* Deterministic 12-hex-char digest of the command.  MD5 is used
-   strictly for log-line de-duplication, never for security; it
-   stops arbitrary shell fragments from leaking into log streams
-   while still letting operators aggregate identical diff
-   occurrences across processes. *)
-let cmd_hash_for_log (cmd : string) : string =
-  let hex = Digest.to_hex (Digest.string cmd) in
-  if String.length hex >= 12 then String.sub hex 0 12 else hex
-
-let shadow_diff_log_enabled () =
-  match Sys.getenv_opt "MASC_BASH_AST_SHADOW_LOG" with
-  | Some ("1" | "true" | "TRUE" | "yes" | "on" | "log") -> true
-  | _ -> false

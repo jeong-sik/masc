@@ -344,7 +344,7 @@ let provider_inventory_json () =
     ]
 
 let response_text_of_api_response (response : Oas.Types.api_response) =
-  Agent_sdk.Types.text_of_content response.content |> String.trim
+  Oas.Types.text_of_content response.content |> String.trim
 
 let provider_label_for_model provider model =
   match Provider_adapter.resolve_direct_adapter provider with

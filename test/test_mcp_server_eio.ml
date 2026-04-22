@@ -9,6 +9,8 @@ module Mcp = Masc_mcp.Mcp_server
 module Config = Masc_mcp.Config
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Tool_result = Masc_mcp.Tool_result
+module Keeper_types = Masc_mcp.Keeper_types
+module Keeper_registry = Masc_mcp.Keeper_registry
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
@@ -55,6 +57,24 @@ let write_text_file path content =
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
+
+let make_keeper_meta ?agent_name name =
+  let agent_name =
+    Option.value agent_name
+      ~default:(Keeper_types.keeper_agent_name name)
+  in
+  let json =
+    `Assoc
+      [
+        ("name", `String name);
+        ("agent_name", `String agent_name);
+        ("trace_id", `String ("trace-test-" ^ name));
+        ("goal", `String "test goal");
+      ]
+  in
+  match Keeper_types.meta_of_json json with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("make_keeper_meta failed: " ^ err)
 
 let extract_json_from_text text =
   try
@@ -1853,6 +1873,58 @@ let test_handle_request_tools_call_board_post_structured_content () =
     Yojson.Safe.Util.(structured |> member "author" |> to_string);
   cleanup_dir base_path
 
+let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Keeper_registry.clear ();
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+      let keeper_name = "sangsu" in
+      let keeper_agent_name = Keeper_types.keeper_agent_name keeper_name in
+      ignore
+        (Keeper_registry.register ~base_path keeper_name
+           (make_keeper_meta ~agent_name:keeper_agent_name keeper_name));
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
+      let request =
+        Yojson.Safe.to_string
+          (`Assoc
+            [
+              ("jsonrpc", `String "2.0");
+              ("id", `Int 119);
+              ("method", `String "tools/call");
+              ( "params",
+                `Assoc
+                  [
+                    ("name", `String "masc_status");
+                    ( "arguments",
+                      `Assoc
+                        [ ("_agent_name", `String keeper_agent_name) ] );
+                  ] );
+            ])
+      in
+      let response = Mcp_eio.handle_request ~clock ~sw state request in
+      ignore (result_fields_exn response);
+      match List.assoc_opt "masc_status" (Keeper_registry.tool_usage_of ~base_path keeper_name) with
+      | Some entry ->
+          Alcotest.(check int) "tool count" 1 entry.count;
+          Alcotest.(check int) "tool successes" 1 entry.successes;
+          Alcotest.(check int) "tool failures" 0 entry.failures;
+          let persisted =
+            Yojson.Safe.from_file
+              (Filename.concat base_path ".masc/keepers/tool_usage/sangsu.json")
+          in
+          let open Yojson.Safe.Util in
+          Alcotest.(check string) "persisted tool name" "masc_status"
+            (persisted |> member "tools" |> index 0 |> member "tool" |> to_string)
+      | None -> Alcotest.fail "expected keeper tool usage for masc_status")
+
 let test_handle_request_tools_call_blocks_keeper_internal_tool () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2692,6 +2764,8 @@ let eio_tests = [
   (* cache get structured content test removed: cache tools retired (#3640) *)
   "handle tools/call board post structured content", `Quick,
     test_handle_request_tools_call_board_post_structured_content;
+  "handle tools/call records keeper usage for public MCP tool", `Quick,
+    test_handle_request_tools_call_records_keeper_usage_for_public_mcp;
   "handle tools/call blocks keeper internal tool", `Quick,
     test_handle_request_tools_call_blocks_keeper_internal_tool;
   "handle invalid json", `Quick, test_handle_request_invalid_json;

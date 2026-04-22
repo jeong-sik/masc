@@ -3,6 +3,8 @@ open Alcotest
 module WO = Masc_mcp.Keeper_world_observation
 module UP = Masc_mcp.Keeper_unified_prompt
 module UT = Masc_mcp.Keeper_unified_turn
+module EC = Masc_mcp.Keeper_error_classify
+module UM = Masc_mcp.Keeper_unified_metrics
 module KR = Masc_mcp.Keeper_registry
 module KAR = Masc_mcp.Keeper_agent_run
 module KTD = Masc_mcp.Keeper_tool_disclosure
@@ -1062,7 +1064,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     (source_file_contains "lib/tool_shard.ml"
        "Requires an active claimed task/current_task_id");
   check bool "keeper_shell gh runtime allows sandbox fallback" true
-    (source_file_contains "lib/keeper/keeper_exec_shell.ml"
+    (source_file_contains "lib/keeper/keeper_shell_gh_context.ml"
        "task_id = \"(sandbox)\"")
 
 (* ---------- Config tests ---------- *)
@@ -1194,7 +1196,7 @@ let test_metrics_text_response () =
       ~model:"test-model" ~input_tok:100 ~output_tok:50 ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:200
+    UM.update_metrics_from_result minimal_meta ~latency_ms:200
       ~observation:base_observation result
   in
   check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns;
@@ -1261,7 +1263,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
       ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:200
+    UM.update_metrics_from_result minimal_meta ~latency_ms:200
       ~observation:base_observation result
   in
   check string "helper canonicalizes surface model" selected_label
@@ -1275,7 +1277,7 @@ let test_metrics_tool_response () =
       ~model:"test-model" ~input_tok:200 ~output_tok:80 ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:500
+    UM.update_metrics_from_result minimal_meta ~latency_ms:500
       ~observation:base_observation result
   in
   check int "proactive_count +1" (minimal_meta.runtime.proactive_rt.count_total + 1)
@@ -1298,7 +1300,7 @@ let test_metrics_noop_response () =
       ~model:"test-model" ~input_tok:50 ~output_tok:10 ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:100
+    UM.update_metrics_from_result minimal_meta ~latency_ms:100
       ~observation:base_observation result
   in
   check int "proactive_count +1"
@@ -1334,7 +1336,7 @@ let test_metrics_validated_evidence_counts_as_visible () =
       ~run_validation:validation ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:100
+    UM.update_metrics_from_result minimal_meta ~latency_ms:100
       ~observation:base_observation result
   in
   check int "proactive visible_count +1"
@@ -1376,7 +1378,7 @@ let test_metrics_failed_validation_does_not_count_as_visible () =
       ~run_validation:validation ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:100
+    UM.update_metrics_from_result minimal_meta ~latency_ms:100
       ~observation:base_observation result
   in
   check int "proactive visible_count unchanged"
@@ -1401,7 +1403,7 @@ let test_metrics_file_write_evidence_counts_as_visible () =
       ~run_validation:validation ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:100
+    UM.update_metrics_from_result minimal_meta ~latency_ms:100
       ~observation:base_observation result
   in
   check int "proactive visible_count +1"
@@ -1429,7 +1431,7 @@ let test_metrics_heartbeat_only_tool_response_is_maintenance_only () =
       ~model:"test-model" ~input_tok:40 ~output_tok:0 ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:80
+    UM.update_metrics_from_result minimal_meta ~latency_ms:80
       ~observation:base_observation result
   in
   check int "proactive_count +1"
@@ -1462,7 +1464,7 @@ let test_metrics_reactive_turn_does_not_mutate_proactive_runtime () =
       ~model:"test-model" ~input_tok:90 ~output_tok:30 ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:120
+    UM.update_metrics_from_result minimal_meta ~latency_ms:120
       ~observation:reactive_observation result
   in
   check int "proactive_count unchanged on reactive turn"
@@ -1481,7 +1483,7 @@ let test_silent_proactive_cycle_advances_cooldown_anchor () =
       ~model:"test-model" ~input_tok:40 ~output_tok:10 ()
   in
   let updated =
-    UT.update_metrics_from_result
+    UM.update_metrics_from_result
       { minimal_meta with
         proactive = { minimal_meta.proactive with enabled = true; cooldown_sec = 300 }
       }
@@ -1503,7 +1505,7 @@ let test_metrics_reactive_failure_does_not_mutate_proactive_runtime () =
     }
   in
   let updated =
-    UT.update_metrics_from_failure minimal_meta ~latency_ms:90
+    UM.update_metrics_from_failure minimal_meta ~latency_ms:90
       ~observation:reactive_observation ~reason:"reactive failure" ()
   in
   check int "reactive failure leaves proactive_count unchanged"
@@ -1623,7 +1625,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         KD.baseline_execution_result
           (KD.empty_world_observation ~keeper_name:minimal_meta.name)
       in
-      UT.append_metrics_snapshot
+      UM.append_metrics_snapshot
         ~config
         ~meta:minimal_meta
         ~observation:base_observation
@@ -1751,7 +1753,7 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
           ~model:"openai:qwen3.5-35b" ~input_tok:40 ~output_tok:20
           ~run_validation:validation ()
       in
-      UT.append_metrics_snapshot
+      UM.append_metrics_snapshot
         ~config
         ~meta:minimal_meta
         ~observation:base_observation
@@ -1826,7 +1828,7 @@ let test_append_decision_record_persists_tool_calls () =
           ~output_tok:20
           ()
       in
-      UT.append_decision_record
+      UM.append_decision_record
         ~config
         ~meta:minimal_meta
         ~observation:base_observation
@@ -2019,7 +2021,7 @@ let wrapped_claude_limit_error () =
 
 let test_fail_open_cascade_after_auto_recoverable_error_falls_back_to_default () =
   let fallback =
-    UT.fail_open_cascade_after_auto_recoverable_error
+    EC.fail_open_cascade_after_auto_recoverable_error
       ~base_cascade:"tool_use_strict"
       ~effective_cascade:"tool_use_strict"
       (wrapped_claude_limit_error ())
@@ -2029,7 +2031,7 @@ let test_fail_open_cascade_after_auto_recoverable_error_falls_back_to_default ()
 
 let test_fail_open_cascade_after_auto_recoverable_error_returns_base_after_phase_override () =
   let fallback =
-    UT.fail_open_cascade_after_auto_recoverable_error
+    EC.fail_open_cascade_after_auto_recoverable_error
       ~base_cascade:"tool_use_strict"
       ~effective_cascade:KC.local_recovery_cascade_name
       (wrapped_claude_limit_error ())
@@ -2039,7 +2041,7 @@ let test_fail_open_cascade_after_auto_recoverable_error_returns_base_after_phase
 
 let test_fail_open_cascade_after_auto_recoverable_error_preserves_explicit_local_only () =
   let fallback =
-    UT.fail_open_cascade_after_auto_recoverable_error
+    EC.fail_open_cascade_after_auto_recoverable_error
       ~base_cascade:KC.local_only_cascade_name
       ~effective_cascade:KC.local_only_cascade_name
       (wrapped_claude_limit_error ())
@@ -2049,7 +2051,7 @@ let test_fail_open_cascade_after_auto_recoverable_error_preserves_explicit_local
 
 let test_fail_open_cascade_after_auto_recoverable_error_skips_default_cascade () =
   let fallback =
-    UT.fail_open_cascade_after_auto_recoverable_error
+    EC.fail_open_cascade_after_auto_recoverable_error
       ~base_cascade:KC.default_cascade_name
       ~effective_cascade:KC.default_cascade_name
       (wrapped_claude_limit_error ())
@@ -2072,22 +2074,22 @@ let test_context_overflow_limit_parses_common_oas_errors () =
 
 let test_is_context_overflow_only_for_overflow_errors () =
   check bool "ContextOverflow matches" true
-    (UT.is_context_overflow
+    (EC.is_context_overflow
        (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 })));
   check bool "ContextOverflow without limit" true
-    (UT.is_context_overflow
+    (EC.is_context_overflow
        (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = None })));
   check bool "NetworkError does not match" false
-    (UT.is_context_overflow
+    (EC.is_context_overflow
        (Agent_sdk.Error.Api (NetworkError { message = "Connection_reset" })));
   check bool "Internal does not match" false
-    (UT.is_context_overflow
+    (EC.is_context_overflow
        (Agent_sdk.Error.Internal "some error"));
   check bool "TokenBudgetExceeded Input matches" true
-    (UT.is_context_overflow
+    (EC.is_context_overflow
        (Agent_sdk.Error.Agent (TokenBudgetExceeded { kind = "Input"; used = 204917; limit = 200000 })));
   check bool "TokenBudgetExceeded Total does not match" false
-    (UT.is_context_overflow
+    (EC.is_context_overflow
        (Agent_sdk.Error.Agent (TokenBudgetExceeded { kind = "Total"; used = 300000; limit = 250000 })))
 
 let test_summarize_turn_event_bus_extracts_overflow_signal () =
@@ -2188,7 +2190,7 @@ let test_metrics_persist_social_state_fields () =
           ~observation:base_observation ~previous_state:None result
       in
       let updated =
-        UT.update_metrics_from_result minimal_meta ~latency_ms:100
+        UM.update_metrics_from_result minimal_meta ~latency_ms:100
           ~observation:base_observation ~social_state
           ~social_transition_reason:
             (KSM.transition_reason_to_string transition_reason)
@@ -2208,7 +2210,7 @@ let test_metrics_persist_social_state_fields () =
 let test_metrics_failure_response () =
   let reason = "Agent run failed: Max turns exceeded (turn 10, limit 10)" in
   let updated =
-    UT.update_metrics_from_failure minimal_meta ~latency_ms:250
+    UM.update_metrics_from_failure minimal_meta ~latency_ms:250
       ~observation:base_observation ~reason
       ~social_transition_reason:"failure:run_error" ()
   in
@@ -2386,7 +2388,7 @@ let test_sanitize_messages_utf8_reuses_clean_history_list () =
 
 let test_overflow_detection_and_limit_parsing () =
   check bool "ContextOverflow with limit" true
-    (UT.is_context_overflow
+    (EC.is_context_overflow
        (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 8192 })));
   check (option int) "parses limit via OAS SSOT" (Some 8192)
     (Agent_sdk.Retry.extract_context_limit
@@ -2394,7 +2396,7 @@ let test_overflow_detection_and_limit_parsing () =
   check (option int) "no limit in unrelated error" None
     (Agent_sdk.Retry.extract_context_limit "Network error: connection reset");
   check bool "NetworkError not overflow" false
-    (UT.is_context_overflow
+    (EC.is_context_overflow
        (Agent_sdk.Error.Api (NetworkError { message = "timeout" })))
 
 let test_side_effect_timeout_reclassified_as_persistent () =
@@ -2403,13 +2405,13 @@ let test_side_effect_timeout_reclassified_as_persistent () =
       (Timeout { message = "Execution cancelled after 300.0s" })
   in
   let reclassified =
-    UT.reclassify_error_after_side_effect
+    EC.reclassify_error_after_side_effect
       ~tool_names:["keeper_fs_edit"] original
   in
   check bool "marked ambiguous partial" true
-    (UT.is_ambiguous_side_effect_error reclassified);
+    (EC.is_ambiguous_side_effect_error reclassified);
   check bool "no longer transient" false
-    (UT.is_transient_network_error reclassified);
+    (EC.is_transient_network_error reclassified);
   check bool "mentions tool name" true
     (contains_substring
        (Agent_sdk.Error.to_string reclassified)
@@ -2421,13 +2423,13 @@ let test_side_effect_reclassification_requires_committed_tools () =
       (Timeout { message = "Execution cancelled after 300.0s" })
   in
   let reclassified =
-    UT.reclassify_error_after_side_effect
+    EC.reclassify_error_after_side_effect
       ~tool_names:[] original
   in
   check bool "no committed tool keeps transient" true
-    (UT.is_transient_network_error reclassified);
+    (EC.is_transient_network_error reclassified);
   check bool "not marked ambiguous partial" false
-    (UT.is_ambiguous_side_effect_error reclassified)
+    (EC.is_ambiguous_side_effect_error reclassified)
 
 let test_side_effect_reclassification_ignores_read_only_tools () =
   let original =
@@ -2435,13 +2437,13 @@ let test_side_effect_reclassification_ignores_read_only_tools () =
       (Timeout { message = "Execution cancelled after 300.0s" })
   in
   let reclassified =
-    UT.reclassify_error_after_side_effect
+    EC.reclassify_error_after_side_effect
       ~tool_names:["keeper_board_list"; "keeper_fs_read"] original
   in
   check bool "read-only timeout stays transient" true
-    (UT.is_transient_network_error reclassified);
+    (EC.is_transient_network_error reclassified);
   check bool "read-only timeout not ambiguous partial" false
-    (UT.is_ambiguous_side_effect_error reclassified)
+    (EC.is_ambiguous_side_effect_error reclassified)
 
 let test_side_effect_reclassification_marks_any_post_commit_error () =
   let original =
@@ -2449,13 +2451,13 @@ let test_side_effect_reclassification_marks_any_post_commit_error () =
       (AuthError { message = "Unauthorized" })
   in
   let reclassified =
-    UT.reclassify_error_after_side_effect
+    EC.reclassify_error_after_side_effect
       ~tool_names:["keeper_fs_edit"] original
   in
   check bool "auth error stays non-transient" false
-    (UT.is_transient_network_error reclassified);
+    (EC.is_transient_network_error reclassified);
   check bool "auth error becomes ambiguous partial" true
-    (UT.is_ambiguous_side_effect_error reclassified)
+    (EC.is_ambiguous_side_effect_error reclassified)
 
 let test_post_commit_failure_kind_marks_timeouts () =
   let timeout_error =
@@ -2464,7 +2466,7 @@ let test_post_commit_failure_kind_marks_timeouts () =
   in
   check string "timeout kind" "post_commit_timeout"
     (KR.ambiguous_partial_commit_kind_to_string
-       (UT.post_commit_failure_kind_of_error timeout_error))
+       (EC.post_commit_failure_kind_of_error timeout_error))
 
 let test_post_commit_failure_kind_marks_non_timeouts_as_failures () =
   let auth_error =
@@ -2473,7 +2475,7 @@ let test_post_commit_failure_kind_marks_non_timeouts_as_failures () =
   in
   check string "failure kind" "post_commit_failure"
     (KR.ambiguous_partial_commit_kind_to_string
-       (UT.post_commit_failure_kind_of_error auth_error))
+       (EC.post_commit_failure_kind_of_error auth_error))
 
 let test_server_rejected_parse_error_ollama_closing_brace () =
   let err =
@@ -2481,9 +2483,9 @@ let test_server_rejected_parse_error_ollama_closing_brace () =
       (InvalidRequest { message = {|Value looks like object, but can't find closing '}' symbol|} })
   in
   check bool "ollama closing brace is parse error" true
-    (UT.is_server_rejected_parse_error err);
+    (EC.is_server_rejected_parse_error err);
   check bool "ollama closing brace is NOT transient network" false
-    (UT.is_transient_network_error err)
+    (EC.is_transient_network_error err)
 
 let test_server_rejected_parse_error_unterminated () =
   let err =
@@ -2491,7 +2493,7 @@ let test_server_rejected_parse_error_unterminated () =
       (InvalidRequest { message = "Unterminated string in JSON" })
   in
   check bool "unterminated is parse error" true
-    (UT.is_server_rejected_parse_error err)
+    (EC.is_server_rejected_parse_error err)
 
 let test_server_rejected_parse_error_unexpected_char () =
   let err =
@@ -2499,7 +2501,7 @@ let test_server_rejected_parse_error_unexpected_char () =
       (InvalidRequest { message = "Unexpected character in JSON at position 42" })
   in
   check bool "unexpected character in json is parse error" true
-    (UT.is_server_rejected_parse_error err)
+    (EC.is_server_rejected_parse_error err)
 
 let test_server_rejected_parse_error_parse_error () =
   let err =
@@ -2507,7 +2509,7 @@ let test_server_rejected_parse_error_parse_error () =
       (InvalidRequest { message = "Parse error at position 1024" })
   in
   check bool "parse error is parse error" true
-    (UT.is_server_rejected_parse_error err)
+    (EC.is_server_rejected_parse_error err)
 
 let test_server_rejected_parse_error_case_insensitive () =
   let err =
@@ -2515,7 +2517,7 @@ let test_server_rejected_parse_error_case_insensitive () =
       (InvalidRequest { message = "PARSE ERROR in request body" })
   in
   check bool "uppercase PARSE ERROR detected" true
-    (UT.is_server_rejected_parse_error err)
+    (EC.is_server_rejected_parse_error err)
 
 let test_server_rejected_parse_error_generic_invalid_request () =
   let err =
@@ -2523,7 +2525,7 @@ let test_server_rejected_parse_error_generic_invalid_request () =
       (InvalidRequest { message = "bad tool schema" })
   in
   check bool "generic InvalidRequest is NOT parse error" false
-    (UT.is_server_rejected_parse_error err)
+    (EC.is_server_rejected_parse_error err)
 
 let test_server_rejected_parse_error_generic_closing () =
   let err =
@@ -2531,7 +2533,7 @@ let test_server_rejected_parse_error_generic_closing () =
       (InvalidRequest { message = "Service closing for maintenance" })
   in
   check bool "generic 'closing' is NOT parse error" false
-    (UT.is_server_rejected_parse_error err)
+    (EC.is_server_rejected_parse_error err)
 
 let test_server_rejected_parse_error_generic_cant_find () =
   let err =
@@ -2539,7 +2541,7 @@ let test_server_rejected_parse_error_generic_cant_find () =
       (InvalidRequest { message = "Can't find the specified tool 'my_tool'" })
   in
   check bool "generic 'can't find' is NOT parse error" false
-    (UT.is_server_rejected_parse_error err)
+    (EC.is_server_rejected_parse_error err)
 
 let test_server_rejected_parse_error_network_error () =
   let err =
@@ -2547,7 +2549,7 @@ let test_server_rejected_parse_error_network_error () =
       (NetworkError { message = "connection refused" })
   in
   check bool "network error is NOT parse error" false
-    (UT.is_server_rejected_parse_error err)
+    (EC.is_server_rejected_parse_error err)
 
 let test_auto_recoverable_turn_error_includes_transient_network () =
   let err =
@@ -2555,7 +2557,7 @@ let test_auto_recoverable_turn_error_includes_transient_network () =
       (Timeout { message = "Execution cancelled after 300.0s" })
   in
   check bool "timeout is auto-recoverable" true
-    (UT.is_auto_recoverable_turn_error err)
+    (EC.is_auto_recoverable_turn_error err)
 
 let test_auto_recoverable_turn_error_includes_server_parse_rejection () =
   let err =
@@ -2563,7 +2565,7 @@ let test_auto_recoverable_turn_error_includes_server_parse_rejection () =
       (InvalidRequest { message = "Parse error at position 42" })
   in
   check bool "server parse rejection is auto-recoverable" true
-    (UT.is_auto_recoverable_turn_error err)
+    (EC.is_auto_recoverable_turn_error err)
 
 let test_auto_recoverable_turn_error_includes_wrapped_hard_quota () =
   let err =
@@ -2575,7 +2577,7 @@ let test_auto_recoverable_turn_error_includes_wrapped_hard_quota () =
          })
   in
   check bool "wrapped hard quota is auto-recoverable" true
-    (UT.is_auto_recoverable_turn_error err)
+    (EC.is_auto_recoverable_turn_error err)
 
 let test_required_tool_contract_violation_detected () =
   let err =
@@ -2588,7 +2590,7 @@ let test_required_tool_contract_violation_detected () =
          })
   in
   check bool "tool-choice contract violation detected" true
-    (UT.is_required_tool_contract_violation err)
+    (EC.is_required_tool_contract_violation err)
 
 let test_required_tool_contract_violation_ignores_legacy_internal_error () =
   let err =
@@ -2596,7 +2598,7 @@ let test_required_tool_contract_violation_ignores_legacy_internal_error () =
       "Completion contract [require_tool_use] violated: required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block"
   in
   check bool "legacy internal contract violation ignored" false
-    (UT.is_required_tool_contract_violation err)
+    (EC.is_required_tool_contract_violation err)
 
 let test_cascade_exhausted_error_detected_from_structured_internal_error () =
   let err =
@@ -2608,7 +2610,7 @@ let test_cascade_exhausted_error_detected_from_structured_internal_error () =
          })
   in
   check bool "structured cascade exhausted error detected" true
-    (UT.is_cascade_exhausted_error err)
+    (EC.is_cascade_exhausted_error err)
 
 let test_cascade_exhausted_error_ignores_legacy_internal_error () =
   let err =
@@ -2616,7 +2618,7 @@ let test_cascade_exhausted_error_ignores_legacy_internal_error () =
       "cascade keeper_unified: all models failed: no providers available"
   in
   check bool "legacy internal cascade exhaustion ignored" false
-    (UT.is_cascade_exhausted_error err)
+    (EC.is_cascade_exhausted_error err)
 
 let test_auto_recoverable_turn_error_excludes_required_tool_contract_violation () =
   let err =
@@ -2629,7 +2631,7 @@ let test_auto_recoverable_turn_error_excludes_required_tool_contract_violation (
          })
   in
   check bool "tool-choice contract violation is not globally auto-recoverable" false
-    (UT.is_auto_recoverable_turn_error err)
+    (EC.is_auto_recoverable_turn_error err)
 
 let test_auto_recoverable_turn_error_excludes_persistent_errors () =
   let err =
@@ -2637,7 +2639,7 @@ let test_auto_recoverable_turn_error_excludes_persistent_errors () =
       (AuthError { message = "Unauthorized" })
   in
   check bool "auth error is persistent" false
-    (UT.is_auto_recoverable_turn_error err)
+    (EC.is_auto_recoverable_turn_error err)
 
 let test_auto_recoverable_turn_error_includes_wrapped_cascade_exhausted_hard_quota () =
   let err =
@@ -2651,7 +2653,7 @@ let test_auto_recoverable_turn_error_includes_wrapped_cascade_exhausted_hard_quo
          })
   in
   check bool "wrapped cascade hard quota is auto-recoverable" true
-    (UT.is_auto_recoverable_turn_error err)
+    (EC.is_auto_recoverable_turn_error err)
 
 let test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaustion () =
   let err =
@@ -2663,7 +2665,7 @@ let test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaus
          })
   in
   check bool "filtered candidates cascade exhaustion is auto-recoverable" true
-    (UT.is_auto_recoverable_turn_error err)
+    (EC.is_auto_recoverable_turn_error err)
 
 let test_bounded_oas_timeout_uses_adaptive_when_budget_is_large () =
   let expected =
@@ -2752,13 +2754,13 @@ let test_side_effect_reclassification_ignores_keeper_read_only_tools () =
       (Timeout { message = "Execution cancelled after 300.0s" })
   in
   let reclassified =
-    UT.reclassify_error_after_side_effect
+    EC.reclassify_error_after_side_effect
       ~tool_names:["keeper_tasks_list"; "keeper_memory_search"] original
   in
   check bool "read-only keeper tools stay transient" true
-    (UT.is_transient_network_error reclassified);
+    (EC.is_transient_network_error reclassified);
   check bool "read-only keeper tools are not ambiguous" false
-    (UT.is_ambiguous_side_effect_error reclassified)
+    (EC.is_ambiguous_side_effect_error reclassified)
 
 let test_side_effect_reclassification_drops_keeper_read_only_tools_from_mixed_set () =
   let original =
@@ -2766,13 +2768,13 @@ let test_side_effect_reclassification_drops_keeper_read_only_tools_from_mixed_se
       (Timeout { message = "Execution cancelled after 300.0s" })
   in
   let reclassified =
-    UT.reclassify_error_after_side_effect
+    EC.reclassify_error_after_side_effect
       ~tool_names:["keeper_tasks_list"; "keeper_fs_edit"; "keeper_memory_search"]
       original
   in
   let rendered = Agent_sdk.Error.to_string reclassified in
   check bool "mixed set is ambiguous" true
-    (UT.is_ambiguous_side_effect_error reclassified);
+    (EC.is_ambiguous_side_effect_error reclassified);
   check bool "keeps mutating tool" true
     (contains_substring rendered "keeper_fs_edit");
   check bool "drops tasks_list from ambiguous set" false
@@ -2786,7 +2788,7 @@ let test_metrics_mixed_response () =
       ~model:"test-model" ~input_tok:150 ~output_tok:60 ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:300
+    UM.update_metrics_from_result minimal_meta ~latency_ms:300
       ~observation:base_observation result
   in
   check int "proactive +1" (minimal_meta.runtime.proactive_rt.count_total + 1)
@@ -3960,39 +3962,39 @@ let () =
         [
           test_case "NetworkError detected" `Quick (fun () ->
             check bool "network error" true
-              (UT.is_transient_network_error
+              (EC.is_transient_network_error
                  (Agent_sdk.Error.Api (NetworkError { message = "Connection_reset" }))));
           test_case "Timeout detected" `Quick (fun () ->
             check bool "timeout" true
-              (UT.is_transient_network_error
+              (EC.is_transient_network_error
                  (Agent_sdk.Error.Api (Timeout { message = "connection timed out" }))));
           test_case "Overloaded detected" `Quick (fun () ->
             check bool "overloaded" true
-              (UT.is_transient_network_error
+              (EC.is_transient_network_error
                  (Agent_sdk.Error.Api (Overloaded { message = "server busy" }))));
           test_case "ServerError 503 detected" `Quick (fun () ->
             check bool "503" true
-              (UT.is_transient_network_error
+              (EC.is_transient_network_error
                  (Agent_sdk.Error.Api (ServerError { status = 503; message = "Service Unavailable" }))));
           test_case "ServerError 500 not transient" `Quick (fun () ->
             check bool "500" false
-              (UT.is_transient_network_error
+              (EC.is_transient_network_error
                  (Agent_sdk.Error.Api (ServerError { status = 500; message = "Internal" }))));
           test_case "AuthError not transient" `Quick (fun () ->
             check bool "auth" false
-              (UT.is_transient_network_error
+              (EC.is_transient_network_error
                  (Agent_sdk.Error.Api (AuthError { message = "Unauthorized" }))));
           test_case "RateLimited not transient" `Quick (fun () ->
             check bool "rate limit" false
-              (UT.is_transient_network_error
+              (EC.is_transient_network_error
                  (Agent_sdk.Error.Api (RateLimited { retry_after = None; message = "429" }))));
           test_case "ContextOverflow not transient" `Quick (fun () ->
             check bool "overflow" false
-              (UT.is_transient_network_error
+              (EC.is_transient_network_error
                  (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = None }))));
           test_case "Internal error not transient" `Quick (fun () ->
             check bool "internal" false
-              (UT.is_transient_network_error
+              (EC.is_transient_network_error
                  (Agent_sdk.Error.Internal "some error")));
           test_case "timeout after mutating tool becomes persistent" `Quick
             test_side_effect_timeout_reclassified_as_persistent;
@@ -4123,14 +4125,14 @@ let () =
                 { minimal_meta with mention_targets = [ "verifier" ] }
               in
               check bool "verifier token matches" true
-                (UT.is_verifier_role_keeper meta));
+                (UM.is_verifier_role_keeper meta));
           test_case "is_verifier_role_keeper detects korean token" `Quick
             (fun () ->
               let meta =
                 { minimal_meta with mention_targets = [ "검증자" ] }
               in
               check bool "korean token matches" true
-                (UT.is_verifier_role_keeper meta));
+                (UM.is_verifier_role_keeper meta));
           test_case "is_verifier_role_keeper rejects non-verifier persona"
             `Quick (fun () ->
               let meta =
@@ -4140,11 +4142,11 @@ let () =
                 }
               in
               check bool "non-verifier mention targets" false
-                (UT.is_verifier_role_keeper meta));
+                (UM.is_verifier_role_keeper meta));
           test_case "is_verifier_role_keeper empty mention targets" `Quick
             (fun () ->
               check bool "empty mention_targets" false
-                (UT.is_verifier_role_keeper
+                (UM.is_verifier_role_keeper
                    { minimal_meta with mention_targets = [] }));
           test_case "affordance: verifier sees task_verify when pending>0"
             `Quick (fun () ->
@@ -4155,7 +4157,7 @@ let () =
                 { base_observation with pending_verification_count = 3 }
               in
               let affordances =
-                UT.observed_affordances_of_observation ~meta obs
+                UM.observed_affordances_of_observation ~meta obs
               in
               check bool "task_verify present for verifier" true
                 (List.mem "task_verify" affordances));
@@ -4168,7 +4170,7 @@ let () =
                 { base_observation with pending_verification_count = 3 }
               in
               let affordances =
-                UT.observed_affordances_of_observation ~meta obs
+                UM.observed_affordances_of_observation ~meta obs
               in
               check bool "task_verify absent for non-verifier" false
                 (List.mem "task_verify" affordances));
@@ -4178,7 +4180,7 @@ let () =
                 { base_observation with pending_verification_count = 2 }
               in
               let affordances =
-                UT.observed_affordances_of_observation obs
+                UM.observed_affordances_of_observation obs
               in
               check bool "task_verify present without meta" true
                 (List.mem "task_verify" affordances));
@@ -4191,7 +4193,7 @@ let () =
                 { base_observation with pending_verification_count = 5 }
               in
               let triggers =
-                UT.observed_triggers_of_observation ~meta obs
+                UM.observed_triggers_of_observation ~meta obs
               in
               check bool "pending_verification absent for non-verifier" false
                 (List.mem "pending_verification" triggers));
@@ -4204,7 +4206,7 @@ let () =
                 { base_observation with pending_verification_count = 1 }
               in
               let triggers =
-                UT.observed_triggers_of_observation ~meta obs
+                UM.observed_triggers_of_observation ~meta obs
               in
               check bool "pending_verification present for verifier" true
                 (List.mem "pending_verification" triggers));

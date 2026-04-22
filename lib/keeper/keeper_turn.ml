@@ -115,9 +115,9 @@ let direct_turn_observation (meta : keeper_meta) :
 let handle_keeper_msg ?on_text_delta ctx args : tool_result =
   let on_event = match on_text_delta with
     | None -> None
-    | Some cb -> Some (fun (evt : Agent_sdk.Types.sse_event) ->
+    | Some cb -> Some (fun (evt : Oas.Types.sse_event) ->
         match evt with
-        | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
+        | Oas.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
         | _ -> ())
   in
   let name = get_string args "name" "" in
@@ -428,7 +428,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                | Error msg ->
                    Log.Keeper.error "write_meta failed after keeper_msg turn: %s" msg);
               (try
-                 Keeper_unified_turn.append_metrics_snapshot
+                 Keeper_unified_metrics.append_metrics_snapshot
                    ~config:ctx.config
                    ~meta:updated_meta
                    ~observation:(direct_turn_observation updated_meta)
@@ -451,7 +451,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                    Log.Keeper.error
                      "write metrics snapshot failed after keeper_msg turn: %s"
                      (Printexc.to_string exn));
-              Keeper_unified_turn.broadcast_lifecycle_events
+              Keeper_unified_metrics.broadcast_lifecycle_events
                 ~name:updated_meta.name
                 ~turn_generation:lifecycle.turn_generation
                 ~compaction:lifecycle.compaction

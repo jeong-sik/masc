@@ -294,13 +294,21 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
      a registered keeper (keeper-internal dispatch via cli_agent runtime),
      otherwise External_mcp (true external MCP client).  Sound partial:
      missing identity falls through to External_mcp.  Issue #8915. *)
-  let source : Tool_registry.call_source =
-    if String.length agent_name = 0 then External_mcp
-    else
-      match Keeper_registry.find_by_agent_name agent_name with
-      | Some _ -> Keeper_internal
-      | None -> External_mcp
+  let keeper_entry =
+    if String.length agent_name = 0 then None
+    else Keeper_registry.find_by_agent_name agent_name
   in
+  let source : Tool_registry.call_source =
+    match keeper_entry with
+    | Some _ -> Keeper_internal
+    | None -> External_mcp
+  in
+  (match keeper_entry with
+   | Some entry ->
+       Keeper_registry.record_tool_use
+         ~base_path:entry.base_path entry.name ~tool_name:name ~success;
+       Keeper_registry.flush_tool_usage ~base_path:entry.base_path entry.name
+   | None -> ());
 
   (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
   let telemetry_enabled = Env_config_core.telemetry_enabled () in

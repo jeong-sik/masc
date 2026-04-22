@@ -677,10 +677,10 @@ let write_heartbeat_snapshot
   in
   let c_messages = messages_for_continuity in
   let latest_user_message =
-    latest_message_content_by_role ~role:Agent_sdk.Types.User c_messages
+    latest_message_content_by_role ~role:Oas.Types.User c_messages
   in
   let latest_assistant_message =
-    latest_message_content_by_role ~role:Agent_sdk.Types.Assistant c_messages
+    latest_message_content_by_role ~role:Oas.Types.Assistant c_messages
     in
     let continuity_snapshot = latest_state_snapshot_from_messages c_messages in
     let continuity_summary =
@@ -1070,7 +1070,7 @@ let run_keepalive_unified_turn
       ~pending_board_events
       ~(stop : bool Atomic.t)
       ~(proactive_warmup_elapsed : bool)
-      ~(shared_context : Agent_sdk.Context.t)
+      ~(shared_context : Oas.Context.t)
   : keeper_meta
   =
   if not proactive_warmup_elapsed
@@ -1473,7 +1473,7 @@ let run_heartbeat_loop
      metadata across turns, but per-turn context_injector-local timing
      and tool-call counters are recreated inside run_turn and therefore
      do not accumulate for the full keeper lifecycle. *)
-  let shared_context = Agent_sdk.Context.create () in
+  let shared_context = Oas.Context.create () in
   (* Mtime-based change detection for keeper meta disk reads.
      Avoids re-parsing the JSON file on every heartbeat cycle when
      no operator has modified it.  Initialized to 0.0 so the first

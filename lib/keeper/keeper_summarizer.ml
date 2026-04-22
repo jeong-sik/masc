@@ -12,7 +12,7 @@
 
     This module wraps the default summarizer after scrubbing
     `[STATE]...[/STATE]` blocks from every Text block. Consumers register
-    it via [Agent_sdk.Builder.with_summarizer] on the agent they build.
+    it via [Oas.Builder.with_summarizer] on the agent they build.
 
     OAS/MASC boundary: OAS knows nothing about [STATE] markers (see
     feedback_oas-must-not-know-masc). This module lives on the MASC side
@@ -22,12 +22,12 @@
     delegate to it directly instead of re-implementing the extractive
     logic here. *)
 
-let scrub_text_blocks (msg : Agent_sdk.Types.message) : Agent_sdk.Types.message =
+let scrub_text_blocks (msg : Oas.Types.message) : Oas.Types.message =
   let content' =
     List.map
       (function
-        | Agent_sdk.Types.Text s ->
-          Agent_sdk.Types.Text (Keeper_text_processing.strip_state_blocks_text s)
+        | Oas.Types.Text s ->
+          Oas.Types.Text (Keeper_text_processing.strip_state_blocks_text s)
         | other -> other)
       msg.content
   in
@@ -35,7 +35,7 @@ let scrub_text_blocks (msg : Agent_sdk.Types.message) : Agent_sdk.Types.message 
 
 (** Scrub [STATE] blocks from each message's Text before summarization,
     then delegate to OAS's exported default summarizer. Callers pass
-    this to [Agent_sdk.Builder.with_summarizer]. *)
-let keeper_summarizer (messages : Agent_sdk.Types.message list) : string =
+    this to [Oas.Builder.with_summarizer]. *)
+let keeper_summarizer (messages : Oas.Types.message list) : string =
   let scrubbed = List.map scrub_text_blocks messages in
-  Agent_sdk.Budget_strategy.default_summarizer scrubbed
+  Oas.Budget_strategy.default_summarizer scrubbed

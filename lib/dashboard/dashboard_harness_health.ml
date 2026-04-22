@@ -119,6 +119,19 @@ let get_or_create_store store_ref base_dir_fn =
       store_ref := Some store;
       store
 
+let append_store_json_fail_open ~store_ref ~store_name get_store json =
+  try
+    Dated_jsonl.append (get_store ()) json
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+      (* Health/event persistence is observability only. If the backing JSONL
+         append fails, drop the poisoned store so the next call can recreate
+         it instead of leaking Eio_mutex.Poisoned into keeper control flow. *)
+      store_ref := None;
+      Log.Harness.warn "[%s] append failed: %s" store_name
+        (Printexc.to_string exn)
+
 let get_pre_compact_store () =
   get_or_create_store pre_compact_store_ref pre_compact_store_base_dir
 
@@ -569,7 +582,9 @@ let record_pre_compact_at ~timestamp ~keeper_name ~context_ratio ~message_count
       trigger;
     }
   in
-  Dated_jsonl.append (get_pre_compact_store ()) (pre_compact_record_json event);
+  append_store_json_fail_open ~store_ref:pre_compact_store_ref
+    ~store_name:"pre_compact" get_pre_compact_store
+    (pre_compact_record_json event);
   event
 
 let record_pre_compact ~keeper_name ~context_ratio ~message_count ~token_count
@@ -600,7 +615,8 @@ let record_wake_payload_at ~timestamp ~keeper_name ~trace_id ~turn_index
       has_compact_happened;
     }
   in
-  Dated_jsonl.append (get_wake_payload_store ())
+  append_store_json_fail_open ~store_ref:wake_payload_store_ref
+    ~store_name:"wake_payload" get_wake_payload_store
     (wake_payload_record_json event);
   event
 

@@ -1,7 +1,7 @@
 (** Tool_local_runtime_bench -- concurrency benchmark against runtime pool. *)
 
 include Tool_local_runtime_http
-module Oas_types = Agent_sdk.Types
+module Oas_types = Oas.Types
 
 let pctl percentile values =
   match values with
@@ -298,7 +298,7 @@ let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec (
           let runtime_id =
             Local_runtime_pool.runtime_id_of_base_url provider_config.base_url
           in
-          let messages =
+          let messages : Oas_types.message list =
             [
               {
                 Oas_types.role = Oas_types.User;

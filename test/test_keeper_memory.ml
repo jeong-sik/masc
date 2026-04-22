@@ -413,7 +413,7 @@ let test_memory_write_then_recall_with_state_block () =
     in
 
     let (notes_written, kinds) =
-      Keeper_memory_bank.append_memory_notes_from_reply config meta ~turn:1 ~reply
+      Keeper_memory_bank.append_memory_notes_from_reply config meta ~turn:1 ~reply ()
     in
 
     (* Verify write happened *)
@@ -441,7 +441,7 @@ let test_memory_write_then_recall_meta_fallback () =
     let reply = "네, 이해했습니다. 바로 작업을 시작하겠습니다." in
 
     let (notes_written, kinds) =
-      Keeper_memory_bank.append_memory_notes_from_reply config meta ~turn:1 ~reply
+      Keeper_memory_bank.append_memory_notes_from_reply config meta ~turn:1 ~reply ()
     in
 
     (* Meta fallback should write the goal from meta.goal *)
@@ -481,7 +481,7 @@ let test_memory_write_persists_horizon_and_source () =
        [/STATE]"
     in
     let (_notes_written, _kinds) =
-      Keeper_memory_bank.append_memory_notes_from_reply config meta ~turn:2 ~reply
+      Keeper_memory_bank.append_memory_notes_from_reply config meta ~turn:2 ~reply ()
     in
     let entries = read_memory_bank_entries config "meta-keeper" in
     check bool "entries persisted" true (entries <> []);

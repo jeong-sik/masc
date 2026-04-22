@@ -1,10 +1,3 @@
-type gate_diff_tag =
-  [ `Agree
-  | `Legacy_allow_shadow_deny
-  | `Legacy_deny_shadow_allow
-  | `Shadow_cannot_parse
-  ]
-
 let gate_diff_total = Atomic.make 0
 let gate_diff_agree = Atomic.make 0
 let gate_diff_legacy_allow_shadow_deny = Atomic.make 0
@@ -31,13 +24,13 @@ let too_complex_other = Atomic.make 0
 
 let incr a = ignore (Atomic.fetch_and_add a 1)
 
-let incr_gate_diff tag =
+let incr_gate_diff (diff : Gate_diff_types.gate_diff) =
   incr gate_diff_total;
-  match tag with
-  | `Agree -> incr gate_diff_agree
-  | `Legacy_allow_shadow_deny -> incr gate_diff_legacy_allow_shadow_deny
-  | `Legacy_deny_shadow_allow -> incr gate_diff_legacy_deny_shadow_allow
-  | `Shadow_cannot_parse -> incr gate_diff_shadow_cannot_parse
+  match diff with
+  | Agree -> incr gate_diff_agree
+  | Legacy_allow_shadow_deny -> incr gate_diff_legacy_allow_shadow_deny
+  | Legacy_deny_shadow_allow -> incr gate_diff_legacy_deny_shadow_allow
+  | Shadow_cannot_parse -> incr gate_diff_shadow_cannot_parse
 
 let incr_auto_bg_observed ~promoted_candidate =
   incr auto_bg_observed;

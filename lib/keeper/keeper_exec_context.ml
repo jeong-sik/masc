@@ -118,7 +118,7 @@ type compaction_event = Keeper_post_turn.compaction_event = {
 
 type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
   updated_meta : keeper_meta;
-  checkpoint : Agent_sdk.Checkpoint.t option;
+  checkpoint : Oas.Checkpoint.t option;
   handoff_json : Yojson.Safe.t option;
   handoff_attempted : bool;
   handoff_failure_reason : string option;
@@ -131,7 +131,7 @@ type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
 }
 
 type overflow_retry_recovery = Keeper_post_turn.overflow_retry_recovery = {
-  checkpoint : Agent_sdk.Checkpoint.t;
+  checkpoint : Oas.Checkpoint.t;
   compaction : compaction_event;
   turn_generation : int;
 }

@@ -64,34 +64,34 @@ let render_memory_context
 let make
     ~(agent_name : string)
     ~(config : Coord_utils.config)
-    ~(memory : Agent_sdk.Memory.t)
+    ~(memory : Oas.Memory.t)
     ?(episode_limit = 30)
     ?(procedure_limit = 10)
-    () : Agent_sdk.Hooks.hooks =
-  { Agent_sdk.Hooks.empty with
+    () : Oas.Hooks.hooks =
+  { Oas.Hooks.empty with
 
     before_turn_params = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.BeforeTurnParams { current_params; _ } ->
+      | Oas.Hooks.BeforeTurnParams { current_params; _ } ->
         let memory_ctx =
           render_memory_context ~agent_name ~config
             ~episode_limit ~procedure_limit ()
         in
         (match memory_ctx with
-         | None -> Agent_sdk.Hooks.Continue
+         | None -> Oas.Hooks.Continue
          | Some mem_text ->
            let extra =
              match current_params.extra_system_context with
              | None -> Some mem_text
              | Some existing -> Some (existing ^ "\n\n" ^ mem_text)
            in
-           Agent_sdk.Hooks.AdjustParams
+           Oas.Hooks.AdjustParams
              { current_params with extra_system_context = extra })
-      | _ -> Agent_sdk.Hooks.Continue);
+      | _ -> Oas.Hooks.Continue);
 
     after_turn = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.AfterTurn _ ->
+      | Oas.Hooks.AfterTurn _ ->
         let (ep, pr) =
           Memory_oas_bridge.flush_incremental ~memory ~agent_name
         in
@@ -99,6 +99,6 @@ let make
           Log.Keeper.debug
             "memory_hooks: flush_incremental agent=%s episodes=%d procedures=%d"
             agent_name ep pr;
-        Agent_sdk.Hooks.Continue
-      | _ -> Agent_sdk.Hooks.Continue);
+        Oas.Hooks.Continue
+      | _ -> Oas.Hooks.Continue);
   }

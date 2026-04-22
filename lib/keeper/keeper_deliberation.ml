@@ -711,35 +711,35 @@ let structured_result_of_json (json : Yojson.Safe.t)
       in
       Ok { action; reasoning; confidence }
 
-let structured_result_schema : structured_result Agent_sdk.Structured.schema =
+let structured_result_schema : structured_result Oas.Structured.schema =
   {
-    Agent_sdk.Structured.name = "keeper_deliberation_decision";
+    Oas.Structured.name = "keeper_deliberation_decision";
     description =
       "Choose exactly one typed keeper deliberation action and return only the tool input object.";
     params =
       [
         {
-          Agent_sdk.Types.name = "action";
+          Oas.Types.name = "action";
           description = "One of: noop, reply_in_room, task_claim, broadcast, board_post, board_comment, board_vote, propose_spawn, start_discussion, share_finding, multi_step.";
-          param_type = Agent_sdk.Types.String;
+          param_type = Oas.Types.String;
           required = true;
         };
         {
-          Agent_sdk.Types.name = "params";
+          Oas.Types.name = "params";
           description = "Action-specific parameters.";
-          param_type = Agent_sdk.Types.Object;
+          param_type = Oas.Types.Object;
           required = true;
         };
         {
-          Agent_sdk.Types.name = "reasoning";
+          Oas.Types.name = "reasoning";
           description = "Optional short explanation for the chosen action.";
-          param_type = Agent_sdk.Types.String;
+          param_type = Oas.Types.String;
           required = false;
         };
         {
-          Agent_sdk.Types.name = "confidence";
+          Oas.Types.name = "confidence";
           description = "Confidence score from 0.0 to 1.0.";
-          param_type = Agent_sdk.Types.Number;
+          param_type = Oas.Types.Number;
           required = false;
         };
       ];

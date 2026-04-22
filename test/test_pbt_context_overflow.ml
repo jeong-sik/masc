@@ -26,6 +26,7 @@
       repair_broken_tool_call_pairs reducer after repair_dangling_tool_calls. *)
 
 module UT = Masc_mcp.Keeper_unified_turn
+module EC = Masc_mcp.Keeper_error_classify
 
 (* ── Generators ──────────────────────────────────────────── *)
 
@@ -74,13 +75,13 @@ let prop_input_budget_always_detected =
   QCheck.Test.make ~count:200
     ~name:"TokenBudgetExceeded(Input) always detected as context overflow"
     (QCheck.make gen_input_budget_error)
-    (fun err -> UT.is_context_overflow err)
+    (fun err -> EC.is_context_overflow err)
 
 let prop_non_input_budget_never_detected =
   QCheck.Test.make ~count:200
     ~name:"TokenBudgetExceeded(non-Input) never detected as context overflow"
     (QCheck.make gen_non_input_budget_error)
-    (fun err -> not (UT.is_context_overflow err))
+    (fun err -> not (EC.is_context_overflow err))
 
 let prop_recovery_yields_positive_limit =
   QCheck.Test.make ~count:200
@@ -177,10 +178,10 @@ let test_cap_message_tokens_integration () =
         Bytes.to_string buf)
     in
     let cap_pos =
-      find_substring content "Agent_sdk.Context_reducer.cap_message_tokens"
+      find_substring content "Oas.Context_reducer.cap_message_tokens"
     in
     let repair_pos =
-      find_substring content "Agent_sdk.Context_reducer.repair_dangling_tool_calls"
+      find_substring content "Oas.Context_reducer.repair_dangling_tool_calls"
     in
     Alcotest.(check bool)
       "keeper_agent_run.ml must integrate cap_message_tokens before repair_dangling_tool_calls"
@@ -230,7 +231,7 @@ let test_pair_repair_integration () =
         Bytes.to_string buf)
     in
     let repair_pos =
-      find_substring content "Agent_sdk.Context_reducer.repair_dangling_tool_calls"
+      find_substring content "Oas.Context_reducer.repair_dangling_tool_calls"
     in
     let local_pos =
       match repair_pos with

@@ -15,10 +15,10 @@ let check_execution_mode (b : Cdal_loader.loaded_bundle) : Cdal_types.check_resu
   let proof_effective = proof.effective_execution_mode in
   (* Propagation: proof.requested must match contract.runtime_constraints.requested *)
   let propagation_ok =
-    Agent_sdk.Execution_mode.equal proof_requested contract_mode in
+    Oas.Execution_mode.equal proof_requested contract_mode in
   (* No-upward-escalation: effective <= requested *)
   let escalation_ok =
-    Agent_sdk.Execution_mode.can_serve
+    Oas.Execution_mode.can_serve
       ~requested:proof_requested ~effective:proof_effective in
   if propagation_ok && escalation_ok then
     { check_id; status = Satisfied; findings = []; completeness_gaps = [] }
@@ -28,18 +28,18 @@ let check_execution_mode (b : Cdal_loader.loaded_bundle) : Cdal_types.check_resu
       findings := ({ Cdal_types.
         check_id;
         event_id = None;
-        observed = `String (Agent_sdk.Execution_mode.to_string proof_requested);
-        expected = `String (Agent_sdk.Execution_mode.to_string contract_mode);
+        observed = `String (Oas.Execution_mode.to_string proof_requested);
+        expected = `String (Oas.Execution_mode.to_string contract_mode);
         trace_ref = None;
       } : Cdal_types.contract_finding) :: !findings;
     if not escalation_ok then
       findings := ({ Cdal_types.
         check_id;
         event_id = Some "escalation";
-        observed = `String (Agent_sdk.Execution_mode.to_string proof_effective);
+        observed = `String (Oas.Execution_mode.to_string proof_effective);
         expected = `String
           (Printf.sprintf "<= %s"
-             (Agent_sdk.Execution_mode.to_string proof_requested));
+             (Oas.Execution_mode.to_string proof_requested));
         trace_ref = None;
       } : Cdal_types.contract_finding) :: !findings;
     { check_id; status = Violated;
@@ -54,15 +54,15 @@ let check_risk_class (b : Cdal_loader.loaded_bundle) : Cdal_types.check_result =
   let check_id = "runtime.risk_class" in
   let contract_risk = b.contract.runtime_constraints.risk_class in
   let proof_risk = b.proof.risk_class in
-  if Agent_sdk.Risk_class.equal contract_risk proof_risk then
+  if Oas.Risk_class.equal contract_risk proof_risk then
     { check_id; status = Satisfied; findings = []; completeness_gaps = [] }
   else
     { check_id; status = Violated;
       findings = [{
         check_id;
         event_id = None;
-        observed = `String (Agent_sdk.Risk_class.to_string proof_risk);
-        expected = `String (Agent_sdk.Risk_class.to_string contract_risk);
+        observed = `String (Oas.Risk_class.to_string proof_risk);
+        expected = `String (Oas.Risk_class.to_string contract_risk);
         trace_ref = None;
       }];
       completeness_gaps = [] }
@@ -106,7 +106,7 @@ let check_required_artifact (_b : Cdal_loader.loaded_bundle) : Cdal_types.check_
 
 let review_warning_artifact = "evidence/review_warning.json"
 
-let has_review_warning_ref (proof : Agent_sdk.Cdal_proof.t) : bool =
+let has_review_warning_ref (proof : Oas.Cdal_proof.t) : bool =
   List.exists
     (fun ref_ -> String.ends_with ~suffix:review_warning_artifact ref_)
     proof.raw_evidence_refs

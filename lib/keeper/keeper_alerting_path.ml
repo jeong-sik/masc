@@ -390,9 +390,9 @@ let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
 
 let extract_user_messages (ctx_work : Keeper_types.working_context) : string list =
   Keeper_exec_context.messages_of_context ctx_work
-  |> List.filter_map (fun (m : Agent_sdk.Types.message) ->
-       if m.role = Agent_sdk.Types.User then
-         let c = String.trim (Agent_sdk.Types.text_of_message m) in
+  |> List.filter_map (fun (m : Oas.Types.message) ->
+       if m.role = Oas.Types.User then
+         let c = String.trim (Oas.Types.text_of_message m) in
          if c = "" then None else Some c
        else
          None)

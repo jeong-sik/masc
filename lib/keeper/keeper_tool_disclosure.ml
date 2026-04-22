@@ -101,19 +101,19 @@ let merge_completion_contract
   | _, Require_tool_use -> Require_tool_use
   | Allow_text_or_tool, Allow_text_or_tool -> Allow_text_or_tool
 
-(** Issue #8696: exhaustive match against [Agent_sdk.Types.tool_choice].
+(** Issue #8696: exhaustive match against [Oas.Types.tool_choice].
     Previous catch-all silently mapped any future SDK constructor to
     [Allow_text_or_tool]; on an OAS pin bump that adds a constructor
     (e.g. requiring tool use under new conditions) the keeper would
     silently degrade. Listing every variant turns SDK drift into a
     compile error here so it is reviewed at the boundary. *)
 let completion_contract_of_tool_choice
-      (tool_choice : Agent_sdk.Types.tool_choice option)
+      (tool_choice : Oas.Types.tool_choice option)
   : completion_contract
   =
   match tool_choice with
-  | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> Require_tool_use
-  | Some (Agent_sdk.Types.Auto | Agent_sdk.Types.None_) -> Allow_text_or_tool
+  | Some (Oas.Types.Any | Oas.Types.Tool _) -> Require_tool_use
+  | Some (Oas.Types.Auto | Oas.Types.None_) -> Allow_text_or_tool
   | None -> Allow_text_or_tool
 
 let run_completion_contract
@@ -284,13 +284,13 @@ let allow_deterministic_tool ~(query_text : string) (name : string) : bool =
 ;;
 
 let deterministic_prefilter_names
-    ~(search_index : Agent_sdk.Tool_index.t)
+    ~(search_index : Oas.Tool_index.t)
     ~(query_text : string)
     ~(selection_limit : int)
     ~(core : string list) : string list =
   if selection_limit <= 0 then []
   else
-    Agent_sdk.Tool_index.retrieve search_index query_text
+    Oas.Tool_index.retrieve search_index query_text
     |> List.filter_map (fun (name, _) ->
          if List.mem name core then None
          else if not (allow_deterministic_tool ~query_text name)

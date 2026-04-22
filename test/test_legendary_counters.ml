@@ -17,11 +17,11 @@ let test_initial_zero () =
 
 let test_gate_diff_buckets () =
   Legendary_counters.reset ();
-  Legendary_counters.incr_gate_diff `Agree;
-  Legendary_counters.incr_gate_diff `Agree;
-  Legendary_counters.incr_gate_diff `Legacy_allow_shadow_deny;
-  Legendary_counters.incr_gate_diff `Legacy_deny_shadow_allow;
-  Legendary_counters.incr_gate_diff `Shadow_cannot_parse;
+  Legendary_counters.incr_gate_diff Gate_diff_types.Agree;
+  Legendary_counters.incr_gate_diff Gate_diff_types.Agree;
+  Legendary_counters.incr_gate_diff Gate_diff_types.Legacy_allow_shadow_deny;
+  Legendary_counters.incr_gate_diff Gate_diff_types.Legacy_deny_shadow_allow;
+  Legendary_counters.incr_gate_diff Gate_diff_types.Shadow_cannot_parse;
   let s = Legendary_counters.snapshot () in
   Alcotest.(check int) "total = 5" 5 s.gate_diff_total;
   Alcotest.(check int) "agree = 2" 2 s.gate_diff_agree;
@@ -44,7 +44,7 @@ let test_auto_bg_observed () =
 
 let test_snapshot_json_shape () =
   Legendary_counters.reset ();
-  Legendary_counters.incr_gate_diff `Legacy_allow_shadow_deny;
+  Legendary_counters.incr_gate_diff Gate_diff_types.Legacy_allow_shadow_deny;
   Legendary_counters.incr_auto_bg_observed ~promoted_candidate:true;
   let json =
     Legendary_counters.snapshot_to_json (Legendary_counters.snapshot ())
@@ -64,7 +64,7 @@ let test_snapshot_json_shape () =
        ~affix:"\"auto_bg_would_have_promoted\":1" s)
 
 let test_reset () =
-  Legendary_counters.incr_gate_diff `Agree;
+  Legendary_counters.incr_gate_diff Gate_diff_types.Agree;
   Legendary_counters.incr_auto_bg_observed ~promoted_candidate:true;
   Legendary_counters.incr_too_complex_by_tag "too_complex:redirect";
   Legendary_counters.reset ();
@@ -169,12 +169,12 @@ let test_disagree_ratio_math () =
      disagree_ratio should count only the two *disagreement* buckets
      — shadow_cannot_parse is its own category per the runbook. *)
   Legendary_counters.reset ();
-  for _ = 1 to 6 do Legendary_counters.incr_gate_diff `Agree done;
+  for _ = 1 to 6 do Legendary_counters.incr_gate_diff Gate_diff_types.Agree done;
   for _ = 1 to 2 do
-    Legendary_counters.incr_gate_diff `Legacy_allow_shadow_deny
+    Legendary_counters.incr_gate_diff Gate_diff_types.Legacy_allow_shadow_deny
   done;
-  Legendary_counters.incr_gate_diff `Legacy_deny_shadow_allow;
-  Legendary_counters.incr_gate_diff `Shadow_cannot_parse;
+  Legendary_counters.incr_gate_diff Gate_diff_types.Legacy_deny_shadow_allow;
+  Legendary_counters.incr_gate_diff Gate_diff_types.Shadow_cannot_parse;
   let s = Legendary_counters.snapshot () in
   Alcotest.(check int) "total = 10" 10 s.gate_diff_total;
   check_ratio "disagree_ratio = 3/10"
@@ -184,9 +184,9 @@ let test_shadow_parse_coverage_math () =
   (* 100 total, 3 shadow_cannot_parse → coverage 0.97.  Exactly the
      runbook threshold for the MASC_BASH_AST_ONLY flip criterion. *)
   Legendary_counters.reset ();
-  for _ = 1 to 97 do Legendary_counters.incr_gate_diff `Agree done;
+  for _ = 1 to 97 do Legendary_counters.incr_gate_diff Gate_diff_types.Agree done;
   for _ = 1 to 3 do
-    Legendary_counters.incr_gate_diff `Shadow_cannot_parse
+    Legendary_counters.incr_gate_diff Gate_diff_types.Shadow_cannot_parse
   done;
   let s = Legendary_counters.snapshot () in
   check_ratio "coverage = 0.97"
@@ -196,7 +196,7 @@ let test_shadow_parse_coverage_full () =
   (* No parse failures → 1.0 (AST gate would parse everything
      observed so far). *)
   Legendary_counters.reset ();
-  for _ = 1 to 5 do Legendary_counters.incr_gate_diff `Agree done;
+  for _ = 1 to 5 do Legendary_counters.incr_gate_diff Gate_diff_types.Agree done;
   let s = Legendary_counters.snapshot () in
   check_ratio "coverage = 1.0"
     ~expected:1.0 (Legendary_counters.shadow_parse_coverage s)
@@ -236,12 +236,12 @@ let test_snapshot_to_json_with_ratios_shape () =
 let test_snapshot_to_json_with_ratios_populated () =
   Legendary_counters.reset ();
   (* 10 observations with 3 disagreements + 1 parse-bailout. *)
-  for _ = 1 to 6 do Legendary_counters.incr_gate_diff `Agree done;
+  for _ = 1 to 6 do Legendary_counters.incr_gate_diff Gate_diff_types.Agree done;
   for _ = 1 to 2 do
-    Legendary_counters.incr_gate_diff `Legacy_allow_shadow_deny
+    Legendary_counters.incr_gate_diff Gate_diff_types.Legacy_allow_shadow_deny
   done;
-  Legendary_counters.incr_gate_diff `Legacy_deny_shadow_allow;
-  Legendary_counters.incr_gate_diff `Shadow_cannot_parse;
+  Legendary_counters.incr_gate_diff Gate_diff_types.Legacy_deny_shadow_allow;
+  Legendary_counters.incr_gate_diff Gate_diff_types.Shadow_cannot_parse;
   let json =
     Legendary_counters.snapshot_to_json_with_ratios
       (Legendary_counters.snapshot ())

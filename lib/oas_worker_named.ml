@@ -282,7 +282,7 @@ let config_for_label
     ~(name : string)
     ~(model_label : string)
     ~(system_prompt : string)
-    ~(tools : Agent_sdk.Tool.t list)
+    ~(tools : Oas.Tool.t list)
     ~(max_turns : int)
     ~(max_tokens : int)
     ?(max_input_tokens : int option)
@@ -441,6 +441,11 @@ let with_codex_cli_preflight ~(scope : string) ~(config : Oas_worker_exec.config
     Error (codex_cli_preflight_error ~scope ~provider_cfg:config.provider_cfg preflight)
   | None -> run ()
 
+let retry_message_looks_like_not_found (message : string) : bool =
+  String_util.contains_substring_ci message "not found"
+  || String_util.contains_substring_ci message "status code: 404"
+  || String_util.contains_substring_ci message "404 page not found"
+
 (** Convert an OAS sdk_error into a Cascade_fsm provider_outcome.
     API-level errors and model-capability-dependent agent errors are
     cascadeable (a different provider may succeed).  Structural agent
@@ -451,7 +456,10 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
   | Oas.Error.Api api_err ->
     let http_err = match[@warning "-8"] api_err with
       | Llm_provider.Retry.InvalidRequest { message } ->
-        Llm_provider.Http_client.HttpError { code = 400; body = message }
+        let code =
+          if retry_message_looks_like_not_found message then 404 else 400
+        in
+        Llm_provider.Http_client.HttpError { code; body = message }
       | Llm_provider.Retry.ContextOverflow { message; _ } ->
         Llm_provider.Http_client.HttpError { code = 400; body = message }
       | Llm_provider.Retry.RateLimited { message; _ } ->
@@ -464,7 +472,8 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
         Llm_provider.Http_client.HttpError { code = 401; body = message }
       | Llm_provider.Retry.Overloaded { message } ->
         Llm_provider.Http_client.HttpError { code = 529; body = message }
-      | Llm_provider.Retry.NetworkError { message }
+      | Llm_provider.Retry.NetworkError { message } ->
+        Llm_provider.Http_client.NetworkError { message }
       | Llm_provider.Retry.Timeout { message } ->
         Llm_provider.Http_client.NetworkError { message }
     in
@@ -544,15 +553,16 @@ let enrich_sdk_error ~cascade_name
            message =
              append_hint message moonshot_auth_hint_marker detail;
          })
-  | Oas.Error.Api (Llm_provider.Retry.NotFound { message })
-    when provider_cfg.kind = Llm_provider.Provider_config.OpenAI_compat ->
+  | Oas.Error.Api (Llm_provider.Retry.InvalidRequest { message })
+    when provider_cfg.kind = Llm_provider.Provider_config.OpenAI_compat
+      && retry_message_looks_like_not_found message ->
     let detail =
       Printf.sprintf "base_url=%s request_path=%s endpoint=%s"
         provider_cfg.base_url provider_cfg.request_path
         (provider_cfg.base_url ^ provider_cfg.request_path)
     in
     Oas.Error.Api
-      (Llm_provider.Retry.NotFound
+      (Llm_provider.Retry.InvalidRequest
          {
            message =
              append_hint message openai_compat_not_found_hint_marker detail;
@@ -590,8 +600,8 @@ let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
      | Llm_provider.Retry.ServerError { message; _ } ->
        message_looks_like_cli_wrapped_hard_quota message
      | Llm_provider.Retry.RateLimited _
-     | Llm_provider.Retry.NotFound _
      | Llm_provider.Retry.AuthError _
+     | Llm_provider.Retry.NotFound _
      | Llm_provider.Retry.InvalidRequest _
      | Llm_provider.Retry.ContextOverflow _
      | Llm_provider.Retry.Timeout _ ->
@@ -729,6 +739,15 @@ let run_named
       Oas_worker_exec.resolve_tool_lane_for_oas_tools ~provider_cfg ~tools
       |> Result.map
            (fun (effective_tools, runtime_mcp_policy) ->
+             let runtime_mcp_policy =
+               match runtime_mcp_policy, String.trim keeper_name with
+               | Some policy, keeper_name when keeper_name <> "" ->
+                   Some
+                     (Oas_worker_exec.runtime_mcp_policy_with_masc_agent_name
+                        ~agent_name:(Keeper_types.keeper_agent_name keeper_name)
+                        policy)
+               | _ -> runtime_mcp_policy
+             in
              {
                (Oas_worker_exec.default_config ~name ~provider_cfg
                   ~system_prompt ~tools:effective_tools)
@@ -823,14 +842,11 @@ let run_named
     match remaining with
     | [] ->
       let reason : Keeper_types.cascade_exhaustion_reason = match last_err with
-        (* TODO(OAS): NetworkError should expose structured detail so we can
-           match on | NetworkError { detail = Connection_refused } instead of
-           string-matching the message.  Requires OAS PR to add
-           network_error_detail variant to http_client.http_error and
-           retry.api_error. *)
-        | Some (Llm_provider.Http_client.NetworkError { message })
-          when String_util.contains_substring_ci message "connection refused" ->
-            Keeper_types.Connection_refused
+        | Some (Llm_provider.Http_client.NetworkError { message }) ->
+            if String_util.contains_substring_ci message "connection refused" then
+              Keeper_types.Connection_refused
+            else
+              Keeper_types.Other_detail message
         | Some (Llm_provider.Http_client.HttpError { code; body }) ->
             Keeper_types.Other_detail
               (Printf.sprintf "HTTP %d: %s" code
@@ -840,8 +856,6 @@ let run_named
         | Some (Llm_provider.Http_client.CliTransportRequired { kind }) ->
             Keeper_types.Other_detail
               (Printf.sprintf "%s provider requires a CLI transport" kind)
-        | Some (Llm_provider.Http_client.NetworkError { message }) ->
-            Keeper_types.Other_detail message
         | None -> Keeper_types.No_providers_available
       in
       let observation =

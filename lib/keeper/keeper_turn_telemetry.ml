@@ -59,9 +59,9 @@ let friction_activity_payload
     ]
 ;;
 
-let log_keeper_proof ~(keeper_name : string) (proof : Agent_sdk.Cdal_proof.t) =
+let log_keeper_proof ~(keeper_name : string) (proof : Oas.Cdal_proof.t) =
   let status_string =
-    Agent_sdk.Cdal_proof.show_result_status proof.result_status
+    Oas.Cdal_proof.show_result_status proof.result_status
     |> fun raw ->
     match String.rindex_opt raw '.' with
     | Some idx when idx + 1 < String.length raw ->
@@ -69,14 +69,14 @@ let log_keeper_proof ~(keeper_name : string) (proof : Agent_sdk.Cdal_proof.t) =
     | _ -> raw |> String.lowercase_ascii
   in
   match proof.result_status with
-  | Agent_sdk.Cdal_proof.Completed ->
+  | Oas.Cdal_proof.Completed ->
     if Keeper_types_profile.keeper_debug
     then
       Log.Keeper.debug
         "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
         keeper_name
         proof.run_id
-        (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
+        (Oas.Execution_mode.to_string proof.effective_execution_mode)
         status_string
         (List.length proof.raw_evidence_refs)
   | _ ->
@@ -84,7 +84,7 @@ let log_keeper_proof ~(keeper_name : string) (proof : Agent_sdk.Cdal_proof.t) =
       "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
       keeper_name
       proof.run_id
-      (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
+      (Oas.Execution_mode.to_string proof.effective_execution_mode)
       status_string
       (List.length proof.raw_evidence_refs)
 ;;

@@ -2,6 +2,7 @@ open Alcotest
 
 module KEC = Masc_mcp.Keeper_exec_context
 module KCC = Masc_mcp.Keeper_context_core
+module KMP = Masc_mcp.Keeper_memory_policy
 module KT = Masc_mcp.Keeper_types
 module KR = Masc_mcp.Keeper_registry
 module KST = Masc_mcp.Keeper_state_machine
@@ -1475,9 +1476,11 @@ let test_patch_checkpoint_replaces_last_assistant () =
   in
   let last_msg = List.nth patched.messages 1 in
   let text = Agent_sdk.Types.text_of_message last_msg in
-  check bool "contains STATE block" true (contains_substring text "[STATE]");
+  check bool "scrubs STATE block" false (contains_substring text "[STATE]");
   check bool "contains patched text" true
     (contains_substring text "patched response");
+  check bool "replay metadata attached" true
+    (KMP.snapshot_of_message_metadata last_msg <> None);
   check string "session_id updated" "new-session" patched.session_id
 
 let test_patch_checkpoint_preserves_non_assistant () =
@@ -1500,7 +1503,9 @@ let test_patch_checkpoint_preserves_non_assistant () =
   check string "first assistant preserved" "answer 1" second_text;
   (* Last assistant patched *)
   let last_text = Agent_sdk.Types.text_of_message (List.nth patched.messages 3) in
-  check string "last assistant patched" "answer 2 with STATE" last_text
+  check string "last assistant patched" "answer 2 with STATE" last_text;
+  check bool "no metadata without state snapshot" true
+    (KMP.snapshot_of_message_metadata (List.nth patched.messages 3) = None)
 
 let test_patch_checkpoint_updates_session_id () =
   let cp = make_test_checkpoint ~session_id:"old" [] in

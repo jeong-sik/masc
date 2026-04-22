@@ -1,7 +1,7 @@
 (** Tool_local_runtime_verify -- runtime contract verification. *)
 
 include Tool_local_runtime_http
-module Oas_types = Agent_sdk.Types
+module Oas_types = Oas.Types
 
 let runtime_snapshots_for_pool runtime_pool =
   let snapshots = Local_runtime_pool.snapshots () in
@@ -155,7 +155,7 @@ let probe_chat_completion_compatible
           ~request_path:Masc_network_defaults.openai_chat_completions_path
           ~max_tokens:1 ~temperature:Oas_worker_cascade.deterministic_temperature ()
       in
-      let messages =
+      let messages : Oas_types.message list =
         [
           {
             Oas_types.role = Oas_types.User;

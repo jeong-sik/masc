@@ -329,11 +329,11 @@ module Pending = struct
 end
 
 (* Translate one OAS event into zero or one persist_* effect. *)
-let handle_event ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
+let handle_event ~base_path ~retention_days (evt : Oas.Event_bus.event)
   : unit =
-  let { Agent_sdk.Event_bus.correlation_id; run_id; ts; _ } = evt.meta in
+  let { Oas.Event_bus.correlation_id; run_id; ts; _ } = evt.meta in
   match evt.payload with
-  | Agent_sdk.Event_bus.ContextCompactStarted { agent_name; trigger } ->
+  | Oas.Event_bus.ContextCompactStarted { agent_name; trigger } ->
     let compaction_id = synth_compaction_id ~ts_unix:ts ~keeper_name:agent_name in
     Pending.stash ~keeper_name:agent_name ~compaction_id ~ts;
     let r = {
@@ -348,7 +348,7 @@ let handle_event ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
      | Ok () -> ()
      | Error (Io_failure m | Serialize_failure m) ->
        Printf.eprintf "keeper_compact_audit: persist_start failed: %s\n%!" m)
-  | Agent_sdk.Event_bus.ContextCompacted
+  | Oas.Event_bus.ContextCompacted
       { agent_name; before_tokens; after_tokens; phase } ->
     let compaction_id =
       match Pending.take ~keeper_name:agent_name with
@@ -378,16 +378,16 @@ let handle_event ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
 
 (* Filter: accept only the two compaction payload variants. Keeps
    subscriber's stream tight. *)
-let compaction_filter : Agent_sdk.Event_bus.filter = fun evt ->
+let compaction_filter : Oas.Event_bus.filter = fun evt ->
   match evt.payload with
-  | Agent_sdk.Event_bus.ContextCompactStarted _
-  | Agent_sdk.Event_bus.ContextCompacted _ -> true
+  | Oas.Event_bus.ContextCompactStarted _
+  | Oas.Event_bus.ContextCompacted _ -> true
   | _ -> false
 
 let spawn_subscriber
     ~sw ~clock ~base_path ~retention_days
     ?(drain_interval_s = 0.25)
-    (bus : Agent_sdk.Event_bus.t) : unit =
+    (bus : Oas.Event_bus.t) : unit =
   (* Env override of retention_days; default is the caller-supplied value. *)
   let effective_retention =
     resolve_retention_days ~default:retention_days

@@ -310,17 +310,17 @@ let truncate_text ~max_chars text =
     String_util.utf8_safe ~max_bytes:max_chars ~suffix:"…" text
     |> String_util.to_string
 
-let latest_preview_of_messages (messages : Agent_sdk.Types.message list) =
+let latest_preview_of_messages (messages : Oas.Types.message list) =
   messages
   |> List.rev
-  |> List.find_map (fun (message : Agent_sdk.Types.message) ->
-       if message.role = Agent_sdk.Types.System then None
+  |> List.find_map (fun (message : Oas.Types.message) ->
+       if message.role = Oas.Types.System then None
        else
-         Agent_sdk.Types.text_of_message message
+         Oas.Types.text_of_message message
          |> trim_to_opt
          |> Option.map (truncate_text ~max_chars:180))
 
-let continuity_summary_of_messages (messages : Agent_sdk.Types.message list) =
+let continuity_summary_of_messages (messages : Oas.Types.message list) =
   match Keeper_memory_policy.latest_state_snapshot_from_messages messages with
   | Some snapshot ->
       Keeper_memory_policy.keeper_state_snapshot_to_summary_text snapshot
@@ -344,7 +344,7 @@ let oas_checkpoint_summary_json
     ~(path : string)
     ~(is_current : bool)
     ~(fallback_generation : int)
-    (checkpoint : Agent_sdk.Checkpoint.t) =
+    (checkpoint : Oas.Checkpoint.t) =
   let generation =
     Keeper_context_core.checkpoint_generation checkpoint
       ~fallback:fallback_generation

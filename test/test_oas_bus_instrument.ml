@@ -123,6 +123,35 @@ let test_publish_updates_counters () =
     check bool "publish_block_seconds did not decrease"
       true (after_block >= before_block))
 
+let test_threshold_transitions_warn_once_until_recovery () =
+  I.For_testing.reset ();
+  run_eio (fun ~sw:_ ~env:_ ->
+    let bus = mk_bus () in
+    let h = I.subscribe ~purpose:"sampler_sub" bus in
+    for _ = 1 to 3 do
+      I.publish bus (mk_custom_event "x")
+    done;
+    (match I.For_testing.sample_threshold_transitions ~warn_threshold:2 with
+     | [ `Warn ("sampler_sub", 3) ] -> ()
+     | other ->
+       fail
+         (Printf.sprintf "expected single warn transition, got %d"
+            (List.length other)));
+    check int "no duplicate warn without recovery" 0
+      (List.length
+         (I.For_testing.sample_threshold_transitions ~warn_threshold:2));
+    ignore (I.drain h);
+    (match I.For_testing.sample_threshold_transitions ~warn_threshold:2 with
+     | [ `Recovered ("sampler_sub", 0) ] -> ()
+     | other ->
+       fail
+         (Printf.sprintf "expected single recovery transition, got %d"
+            (List.length other)));
+    check int "no duplicate recovery after state clears" 0
+      (List.length
+         (I.For_testing.sample_threshold_transitions ~warn_threshold:2));
+    I.unsubscribe bus h)
+
 let () =
   run "oas_bus_instrument" [
     ("backpressure", [
@@ -136,5 +165,7 @@ let () =
         test_multiple_subs_same_purpose_coexist;
       test_case "publish updates counters" `Quick
         test_publish_updates_counters;
+      test_case "threshold transitions warn once until recovery" `Quick
+        test_threshold_transitions_warn_once_until_recovery;
     ])
   ]

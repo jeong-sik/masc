@@ -22,7 +22,7 @@ let lesson_pattern (state : Autoresearch.loop_state) =
    each call to [Memory_oas_bridge.create_memory] returns a fresh
    in-memory Context and procedural data written by [persist_failure_feedback]
    is invisible to [build_goal_with_feedback].  #6831 *)
-let loop_memory_cache : (string, Agent_sdk.Memory.t) Hashtbl.t =
+let loop_memory_cache : (string, Oas.Memory.t) Hashtbl.t =
   Hashtbl.create 8
 
 let make_loop_memory (ctx : Tool_autoresearch_context.t)
@@ -245,8 +245,8 @@ let restore_original_content ~workdir ~target_file ~original_content ~sync_index
     Log.Autoresearch.warn "failed to restore %s: %s" target_file err
 
 let diff_guard_summary report =
-  report.Agent_sdk.Autonomy_diff_guard.issues
-  |> List.map Agent_sdk.Autonomy_diff_guard.show_issue
+  report.Oas.Autonomy_diff_guard.issues
+  |> List.map Oas.Autonomy_diff_guard.show_issue
   |> String.concat "; "
 
 (** Run one experiment cycle: the real Karpathy loop turn.
@@ -415,13 +415,13 @@ let handle_cycle (ctx : Tool_autoresearch_context.t) args =
                    ]
                | Ok patch ->
                  let report =
-                   Agent_sdk.Autonomy_diff_guard.validate_patch
+                   Oas.Autonomy_diff_guard.validate_patch
                      ~allowed_paths:[ target_file ]
                      patch
                  in
                  if List.exists
                       (function
-                        | Agent_sdk.Autonomy_diff_guard.Empty_patch -> true
+                        | Oas.Autonomy_diff_guard.Empty_patch -> true
                         | _ -> false)
                       report.issues
                  then (

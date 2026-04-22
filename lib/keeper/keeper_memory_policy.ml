@@ -151,6 +151,9 @@ let no_memory_bank_compaction = {
 }
 
 let keeper_memory_schema_version = 2
+let replay_metadata_key = "masc.replay"
+let replay_metadata_kind = "state_snapshot"
+let replay_metadata_version = 1
 
 let short_term_horizon = "short_term"
 let mid_term_horizon = "mid_term"
@@ -723,29 +726,75 @@ let structured_working_context_of_snapshot
     ("state_snapshot", keeper_state_snapshot_to_json snapshot);
   ]
 
+let replay_metadata_of_snapshot
+    (snapshot : keeper_state_snapshot) : Yojson.Safe.t =
+  `Assoc [
+    ("kind", `String replay_metadata_kind);
+    ("version", `Int replay_metadata_version);
+    ("payload", keeper_state_snapshot_to_json snapshot);
+  ]
+
+let snapshot_of_replay_metadata
+    (json : Yojson.Safe.t) : keeper_state_snapshot option =
+  try
+    let open Yojson.Safe.Util in
+    let kind = json |> member "kind" |> to_string_option in
+    let version = json |> member "version" |> to_int_option in
+    match kind, version with
+    | Some kind, Some 1 when String.equal kind replay_metadata_kind ->
+        keeper_state_snapshot_of_json (json |> member "payload")
+    | _ -> None
+  with
+  | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
+
+let with_snapshot_metadata
+    (msg : Agent_sdk.Types.message)
+    (snapshot : keeper_state_snapshot) : Agent_sdk.Types.message =
+  let metadata =
+    (replay_metadata_key, replay_metadata_of_snapshot snapshot)
+    :: List.remove_assoc replay_metadata_key msg.metadata
+  in
+  { msg with metadata }
+
+let snapshot_of_message_metadata
+    (msg : Agent_sdk.Types.message) : keeper_state_snapshot option =
+  match List.assoc_opt replay_metadata_key msg.metadata with
+  | Some json -> snapshot_of_replay_metadata json
+  | None -> None
+
+let snapshot_of_message
+    (msg : Agent_sdk.Types.message) : keeper_state_snapshot option =
+  match snapshot_of_message_metadata msg with
+  | Some _ as snapshot -> snapshot
+  | None ->
+      parse_state_snapshot_from_reply (Agent_sdk.Types.text_of_message msg)
+
 (** Extract a [keeper_state_snapshot] from the structured JSON stored in
     [Checkpoint.working_context].  Returns [None] if the JSON does not
     contain a valid version-1 state_snapshot. *)
 let snapshot_of_structured_working_context
     (json : Yojson.Safe.t) : keeper_state_snapshot option =
-  try
-    let open Yojson.Safe.Util in
-    let version = json |> member "version" |> to_int_option in
-    match version with
-    | Some 1 ->
-      let snapshot_json = json |> member "state_snapshot" in
-      keeper_state_snapshot_of_json snapshot_json
-    | _ -> None
-  with
-  | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
+  match snapshot_of_replay_metadata json with
+  | Some _ as snapshot -> snapshot
+  | None ->
+      (try
+         let open Yojson.Safe.Util in
+         let version = json |> member "version" |> to_int_option in
+         match version with
+         | Some 1 ->
+             let snapshot_json = json |> member "state_snapshot" in
+             keeper_state_snapshot_of_json snapshot_json
+         | _ -> None
+       with
+       | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None)
 
-let latest_state_snapshot_from_messages (messages : Agent_sdk.Types.message list) :
+let latest_state_snapshot_from_messages (messages : Oas.Types.message list) :
     keeper_state_snapshot option =
-  let rec loop (msgs : Agent_sdk.Types.message list) =
+  let rec loop (msgs : Oas.Types.message list) =
     match msgs with
     | [] -> None
     | msg :: rest ->
-      match parse_state_snapshot_from_reply (Agent_sdk.Types.text_of_message msg) with
+      match snapshot_of_message msg with
       | None -> loop rest
       | Some snapshot -> Some snapshot
   in

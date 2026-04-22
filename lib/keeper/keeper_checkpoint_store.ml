@@ -322,12 +322,158 @@ let classify_sdk_error (e : Oas.Error.sdk_error) : checkpoint_load_error =
   | Orchestration _ | A2a _ | Internal _ ->
       Sdk_other_error (Oas.Error.to_string e)
 
+let result_all items =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | Ok item :: rest -> loop (item :: acc) rest
+    | Error e :: _ -> Error e
+  in
+  loop [] items
+
+let content_block_of_json_strict json =
+  try
+    match Agent_sdk.Api.content_block_of_json json with
+    | Some block -> Ok block
+    | None ->
+        let open Yojson.Safe.Util in
+        let block_type =
+          json |> member "type" |> to_string_option |> Option.value ~default:"<missing>"
+        in
+        Error
+          (Agent_sdk.Error.Serialization
+             (JsonParseError
+                {
+                  detail =
+                    Printf.sprintf "Unknown content block type: %s" block_type;
+                }))
+  with
+  | Yojson.Safe.Util.Type_error (msg, _) ->
+      Error
+        (Agent_sdk.Error.Serialization
+           (JsonParseError
+              { detail = Printf.sprintf "Invalid content block: %s" msg }))
+  | Yojson.Json_error msg ->
+      Error
+        (Agent_sdk.Error.Serialization
+           (JsonParseError
+              { detail = Printf.sprintf "Invalid content block: %s" msg }))
+  | Failure msg ->
+      Error
+        (Agent_sdk.Error.Serialization
+           (JsonParseError
+              { detail = Printf.sprintf "Invalid content block: %s" msg }))
+
+let role_of_string_compat raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "system" -> Ok Agent_sdk.Types.System
+  | "user" -> Ok Agent_sdk.Types.User
+  | "assistant" -> Ok Agent_sdk.Types.Assistant
+  | "tool" -> Ok Agent_sdk.Types.Tool
+  | other ->
+      Error
+        (Agent_sdk.Error.Serialization
+           (UnknownVariant { type_name = "role"; value = other }))
+
+let message_of_json_compat json =
+  let open Yojson.Safe.Util in
+  try
+    let role = json |> member "role" |> to_string |> role_of_string_compat in
+    let content =
+      json |> member "content" |> to_list
+      |> List.map content_block_of_json_strict
+      |> result_all
+    in
+    match role, content with
+    | Ok role, Ok content ->
+        Ok
+          {
+            Agent_sdk.Types.role;
+            content;
+            name = json |> member "name" |> to_string_option;
+            tool_call_id = json |> member "tool_call_id" |> to_string_option;
+          }
+    | Error e, _ -> Error e
+    | _, Error e -> Error e
+  with
+  | Yojson.Safe.Util.Type_error (msg, _) ->
+      Error
+        (Agent_sdk.Error.Serialization
+           (JsonParseError
+              { detail = Printf.sprintf "Invalid checkpoint message: %s" msg }))
+  | Yojson.Json_error msg ->
+      Error
+        (Agent_sdk.Error.Serialization
+           (JsonParseError
+              { detail = Printf.sprintf "Invalid checkpoint message: %s" msg }))
+
+let normalize_checkpoint_json_for_sdk json =
+  let normalize_message = function
+    | `Assoc fields ->
+        `Assoc
+          (List.map
+             (function
+               | "role", `String ("assistant" | "user" as role) ->
+                   ("role", `String role)
+               | "role", `String _ ->
+                   ("role", `String "assistant")
+               | field -> field)
+             fields)
+    | other -> other
+  in
+  match json with
+  | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "messages", `List messages ->
+                 ("messages", `List (List.map normalize_message messages))
+             | field -> field)
+           fields)
+  | other -> other
+
+let checkpoint_of_json_compat json =
+  let open Yojson.Safe.Util in
+  try
+    let messages =
+      json |> member "messages" |> to_list
+      |> List.map message_of_json_compat
+      |> result_all
+    in
+    match messages with
+    | Error e -> Error e
+    | Ok messages -> (
+        match Agent_sdk.Checkpoint.of_json (normalize_checkpoint_json_for_sdk json) with
+        | Ok checkpoint -> Ok { checkpoint with messages }
+        | Error e -> Error e)
+  with
+  | Yojson.Safe.Util.Type_error (msg, _) ->
+      Error
+        (Agent_sdk.Error.Serialization
+           (JsonParseError
+              { detail = Printf.sprintf "Checkpoint.of_json compat: %s" msg }))
+  | Yojson.Json_error msg ->
+      Error
+        (Agent_sdk.Error.Serialization
+           (JsonParseError
+              { detail = Printf.sprintf "Checkpoint.of_json compat: %s" msg }))
+
+let checkpoint_of_string_compat raw =
+  match Agent_sdk.Checkpoint.of_string raw with
+  | Ok checkpoint -> Ok checkpoint
+  | Error _ ->
+      let json =
+        raw
+        |> Inference_utils.sanitize_text_utf8
+        |> Yojson.Safe.from_string
+      in
+      checkpoint_of_json_compat json
+
 let load_oas_history_file ~(session_dir : string) ~(snapshot_id : string) :
     (Oas.Checkpoint.t, checkpoint_load_error) result =
   let path = oas_history_path ~session_dir ~snapshot_id in
   if Fs_compat.file_exists path then
     try
-      match Oas.Checkpoint.of_string (Fs_compat.load_file path) with
+      match checkpoint_of_string_compat (Fs_compat.load_file path) with
       | Ok ckpt -> Ok ckpt
       | Error e -> Error (classify_sdk_error e)
     with
@@ -341,7 +487,7 @@ let load_oas ~(session_dir : string) ~(session_id : string) :
     let path = oas_checkpoint_path ~session_dir ~session_id in
     if Fs_compat.file_exists path then
       try
-        match Oas.Checkpoint.of_string (Fs_compat.load_file path) with
+        match checkpoint_of_string_compat (Fs_compat.load_file path) with
         | Ok ckpt -> Ok ckpt
         | Error e -> Error (classify_sdk_error e)
       with

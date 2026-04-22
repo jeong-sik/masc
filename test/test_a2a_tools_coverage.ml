@@ -11,6 +11,80 @@
 open Alcotest
 
 module A2a_tools = Masc_mcp.A2a_tools
+module Coord = Masc_mcp.Coord
+
+let string_contains ~substring ~string =
+  let sub_len = String.length substring in
+  let str_len = String.length string in
+  if sub_len = 0 then true
+  else if sub_len > str_len then false
+  else
+    let rec loop i =
+      if i + sub_len > str_len then false
+      else if String.sub string i sub_len = substring then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let with_temp_config agent_name f =
+  let tmp =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-a2a-%d-%d" (Unix.getpid ()) (Random.bits ()))
+  in
+  Unix.mkdir tmp 0o755;
+  let config = Coord.default_config tmp in
+  let cleanup () =
+    ignore (Coord.reset config);
+    (try Unix.rmdir tmp with Unix.Unix_error _ -> ())
+  in
+  Fun.protect ~finally:cleanup (fun () ->
+    ignore (Coord.init config ~agent_name:(Some agent_name));
+    f config)
+
+let read_fd_all fd =
+  let buf = Buffer.create 128 in
+  let chunk = Bytes.create 256 in
+  let rec loop () =
+    match Unix.read fd chunk 0 (Bytes.length chunk) with
+    | 0 -> Buffer.contents buf
+    | n ->
+      Buffer.add_subbytes buf chunk 0 n;
+      loop ()
+  in
+  loop ()
+
+let run_delegate_with_timeout ~agent_name ~target =
+  with_temp_config agent_name @@ fun config ->
+  let read_fd, write_fd = Unix.pipe () in
+  match Unix.fork () with
+  | 0 ->
+    Unix.close read_fd;
+    let payload =
+      match A2a_tools.delegate config ~agent_name ~target ~message:"hello" () with
+      | Ok json -> "ok:" ^ Yojson.Safe.to_string json
+      | Error msg -> "error:" ^ msg
+    in
+    ignore (Unix.write_substring write_fd payload 0 (String.length payload));
+    Unix.close write_fd;
+    exit 0
+  | pid ->
+    Unix.close write_fd;
+    let rec wait attempts =
+      match Unix.waitpid [Unix.WNOHANG] pid with
+      | 0, _ when attempts > 0 ->
+        Unix.sleepf 0.01;
+        wait (attempts - 1)
+      | 0, _ ->
+        Unix.kill pid Sys.sigkill;
+        ignore (Unix.waitpid [] pid);
+        Unix.close read_fd;
+        `Timed_out
+      | _, _status ->
+        let payload = read_fd_all read_fd in
+        Unix.close read_fd;
+        `Completed payload
+    in
+    wait 50
 
 (* ============================================================
    task_type Parsing Tests
@@ -107,6 +181,33 @@ let test_event_type_roundtrip_broadcast () =
   match A2a_tools.event_type_of_string s with
   | Ok result -> check bool "roundtrip" true (original = result)
   | Error _ -> fail "roundtrip failed"
+
+(* ============================================================
+   delegate Guard Tests
+   ============================================================ *)
+
+let test_delegate_rejects_casefolded_self_alias () =
+  match run_delegate_with_timeout ~agent_name:"claude" ~target:"CLAUDE" with
+  | `Timed_out ->
+    fail "delegate hung on case-folded self alias"
+  | `Completed payload ->
+    check bool "self alias rejected" true
+      (string_contains
+         ~substring:"Self-delegation not allowed"
+         ~string:payload)
+
+let test_delegate_rejects_safe_filename_alias () =
+  match
+    run_delegate_with_timeout
+      ~agent_name:"keeper:foo" ~target:"keeper_3afoo"
+  with
+  | `Timed_out ->
+    fail "delegate hung on safe_filename alias"
+  | `Completed payload ->
+    check bool "portal-key alias rejected" true
+      (string_contains
+         ~substring:"same portal identity"
+         ~string:payload)
 
 (* ============================================================
    subscription_to_json Tests
@@ -616,6 +717,12 @@ let () =
       test_case "stream" `Quick test_task_type_stream;
       test_case "invalid" `Quick test_task_type_invalid;
       test_case "empty" `Quick test_task_type_empty;
+    ];
+    "delegate", [
+      test_case "rejects casefolded self alias" `Quick
+        test_delegate_rejects_casefolded_self_alias;
+      test_case "rejects safe_filename alias" `Quick
+        test_delegate_rejects_safe_filename_alias;
     ];
     "event_type_of_string", [
       test_case "task_update" `Quick test_event_type_task_update;

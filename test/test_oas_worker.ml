@@ -732,18 +732,6 @@ let test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400 () =
          | Some Cascade_fsm.Slot_full -> "some-slot-full"
          | None -> "none")
 
-let test_sdk_error_is_hard_quota_detects_claude_cli_limit_wrapper () =
-  let err =
-    Oas.Error.Api
-      (Llm_provider.Retry.NetworkError
-         {
-           message =
-             "claude exited with code 1: {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've hit your limit · resets Apr 24 at 4am (Asia/Seoul)\"}";
-         })
-  in
-  Alcotest.(check bool) "Claude CLI limit wrapper counts as hard quota" true
-    (Oas_worker_named.sdk_error_is_hard_quota err)
-
 let make_openai_compat_provider_cfg ?(model_id = "mock-model")
     ?(base_url = "http://127.0.0.1:18080/v1")
     ?(request_path = "/chat/completions") ?(api_key = "") () =

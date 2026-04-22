@@ -464,6 +464,8 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
         Llm_provider.Http_client.HttpError { code = 400; body = message }
       | Llm_provider.Retry.RateLimited { message; _ } ->
         Llm_provider.Http_client.HttpError { code = 429; body = message }
+      | Llm_provider.Retry.NotFound { message } ->
+        Llm_provider.Http_client.HttpError { code = 404; body = message }
       | Llm_provider.Retry.ServerError { status; message } ->
         Llm_provider.Http_client.HttpError { code = status; body = message }
       | Llm_provider.Retry.AuthError { message } ->

@@ -7,6 +7,8 @@
 
 (** {1 Types} *)
 
+module SMap : Map.S with type key = string
+
 type session_kind =
   | Observer
   | Coordinator
@@ -92,6 +94,9 @@ val remove_external_subscribers : string list -> string list * int
 
 (** {1 Event Buffer} *)
 
+val clients : client_registry_state Atomic.t
+val event_buffer : (int * string * float) list Atomic.t
+val buffer_event : int -> string -> unit
 val get_events_after : int -> string list
 val buffer_event : int -> string -> unit
 val cleanup_expired_events : unit -> int

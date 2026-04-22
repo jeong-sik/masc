@@ -37,6 +37,7 @@ vi.mock('../router', () => ({
 }))
 
 import {
+  clearKeeperDetailSelection,
   closeKeeperDetail,
   filterCheckpointHistory,
   lineageTransitionLabel,
@@ -108,10 +109,35 @@ describe('openKeeperDetail', () => {
 
     expect(selectedKeeper.value).toBeNull()
     expect(mocks.resetKeeperConfig).toHaveBeenCalledTimes(1)
+    expect(mocks.selectKeeper).toHaveBeenLastCalledWith('')
     expect(mocks.navigate).toHaveBeenLastCalledWith('monitoring', {
       section: 'agents',
       view: 'keepers',
     })
+  })
+
+  it('only clears detail state for the matching keeper when cleanup is scoped', () => {
+    const keeper: Keeper = {
+      name: 'sangsu',
+      agent_name: 'sangsu-agent',
+      status: 'active',
+    }
+
+    openKeeperDetail(keeper)
+    mocks.resetKeeperConfig.mockClear()
+    mocks.selectKeeper.mockClear()
+
+    clearKeeperDetailSelection('other-keeper')
+
+    expect(selectedKeeper.value).toEqual(keeper)
+    expect(mocks.resetKeeperConfig).not.toHaveBeenCalled()
+    expect(mocks.selectKeeper).not.toHaveBeenCalled()
+
+    clearKeeperDetailSelection('sangsu-agent')
+
+    expect(selectedKeeper.value).toBeNull()
+    expect(mocks.resetKeeperConfig).toHaveBeenCalledTimes(1)
+    expect(mocks.selectKeeper).toHaveBeenCalledWith('')
   })
 })
 

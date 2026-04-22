@@ -19,7 +19,9 @@ import {
   keepersWithUnknownCanonical,
   profileSummaryText,
   profileKeeperAssignmentNote,
+  availableKeeperAssignments,
   rawConfigModeSummary,
+  validateSourceConfigText,
 } from './cascade-config-panel'
 import type {
   CascadeCandidate,
@@ -105,6 +107,8 @@ function makeRawConfig(
     config_path: '/tmp/config/cascade.json',
     source_kind: 'json',
     source_path: '/tmp/config/cascade.json',
+    source_editable: true,
+    source_text: '{}',
     raw_json_editable: true,
     raw_json: '{}',
     ...overrides,
@@ -188,7 +192,7 @@ describe('catalogSourceSummary', () => {
 })
 
 describe('rawConfigModeSummary', () => {
-  it('marks TOML-backed raw config as read-only generated view', () => {
+  it('marks TOML-backed config as editable source plus generated preview', () => {
     const summary = rawConfigModeSummary(
       makeRawConfig({
         source_kind: 'toml',
@@ -198,15 +202,18 @@ describe('rawConfigModeSummary', () => {
     )
     expect(summary.title).toContain('TOML SSOT')
     expect(summary.primary).toContain('/tmp/config/cascade.toml')
-    expect(summary.primary).toContain('generated cascade.json')
-    expect(summary.saveLabel).toBe('TOML-backed (read-only)')
+    expect(summary.primary).toContain('cascade.toml SSOT')
+    expect(summary.secondary).toContain('/tmp/config/cascade.json')
+    expect(summary.saveLabel).toBe('Save cascade.toml')
+    expect(summary.previewTitle).toBe('Generated cascade.json Preview')
   })
 
   it('keeps JSON mode editable', () => {
     const summary = rawConfigModeSummary(makeRawConfig())
-    expect(summary.title).toBe('Raw cascade.json Editor')
+    expect(summary.title).toBe('Active Cascade Source Editor')
     expect(summary.primary).toContain('/tmp/config/cascade.json')
     expect(summary.saveLabel).toBe('Save cascade.json')
+    expect(summary.previewTitle).toBeNull()
   })
 })
 
@@ -570,5 +577,41 @@ describe('profileKeeperAssignmentNote', () => {
     expect(profileKeeperAssignmentNote(profile, assignedKeepers)).toBe(
       'manual/system-only profile; current keepers still reference it',
     )
+  })
+})
+
+describe('availableKeeperAssignments', () => {
+  const assigned = groupKeepersByCanonicalCascade([
+    {
+      keeper: 'alice',
+      cascade_name: 'keeper_unified',
+      canonical: 'keeper_unified',
+    },
+  ]).get('keeper_unified') ?? []
+
+  it('returns sorted keepers not already assigned to the profile', () => {
+    expect(availableKeeperAssignments(['carol', 'alice', 'bob'], assigned)).toEqual([
+      'bob',
+      'carol',
+    ])
+  })
+
+  it('deduplicates repeated keeper names', () => {
+    expect(availableKeeperAssignments(['bob', 'bob', 'alice'], assigned)).toEqual(['bob'])
+  })
+})
+
+describe('validateSourceConfigText', () => {
+  it('validates JSON source client-side', () => {
+    expect(validateSourceConfigText(makeRawConfig(), '{ invalid')).not.toBeNull()
+  })
+
+  it('skips client-side syntax validation for TOML source', () => {
+    expect(
+      validateSourceConfigText(
+        makeRawConfig({ source_kind: 'toml', source_path: '/tmp/config/cascade.toml' }),
+        '[broken',
+      ),
+    ).toBeNull()
   })
 })

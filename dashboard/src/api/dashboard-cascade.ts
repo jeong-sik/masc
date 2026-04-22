@@ -72,6 +72,8 @@ export interface CascadeRawConfigResponse {
   config_path: string | null
   source_kind: 'json' | 'toml'
   source_path: string
+  source_editable: boolean
+  source_text: string
   raw_json_editable: boolean
   raw_json: string
 }
@@ -113,8 +115,8 @@ export function fetchCascadeConfigRaw(
   })
 }
 
-export function updateCascadeConfigRaw(raw_json: string): Promise<CascadeConfigResponse> {
-  return post<CascadeConfigResponse>('/api/v1/cascade/config/raw', { raw_json })
+export function updateCascadeConfigRaw(source_text: string): Promise<CascadeConfigResponse> {
+  return post<CascadeConfigResponse>('/api/v1/cascade/config/raw', { source_text })
 }
 
 export function fetchCascadeHealth(

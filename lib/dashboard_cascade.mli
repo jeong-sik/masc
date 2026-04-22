@@ -58,30 +58,39 @@ val config_json : unit -> Yojson.Safe.t
         "config_path": "/path/to/cascade.json" | null,
         "source_kind": "json" | "toml",
         "source_path": "/path/to/cascade.json" | "/path/to/cascade.toml",
+        "source_editable": true,
+        "source_text": "{ ... }\n" | "comment = ...\n[profile]\n...",
         "raw_json_editable": true | false,
         "raw_json": "{ ... }\n"
       }
     ]}
 
+    [source_text] is the editable active source file content. In JSON mode it
+    matches [raw_json]; in TOML mode it is the live [cascade.toml] source while
+    [raw_json] remains the generated runtime [cascade.json] preview.
+
     [config_path] is the resolver's candidate [cascade.json] path under the
     active config root, even when the file does not exist yet. In that missing
-    file case, [raw_json] defaults to ["{}\n"] so operators can bootstrap a
-    config from the dashboard editor. When [source_kind] is ["toml"], the raw
-    JSON remains readable as the generated runtime artifact but
-    [raw_json_editable] is [false] and writes are blocked.
+    JSON-file case, both [source_text] and [raw_json] default to ["{}\n"] so
+    operators can bootstrap a config from the dashboard editor. When
+    [source_kind] is ["toml"], [raw_json_editable] stays [false] because the
+    preview is generated, but [source_editable] remains [true].
 
     @since 0.160.1 *)
 val raw_config_json : unit -> Yojson.Safe.t
 
-(** Validate and persist a raw [cascade.json] payload to the resolved config
-    root, then return the refreshed {!config_json} snapshot.
+(** Validate and persist the active cascade authoring source, then return the
+    refreshed {!config_json} snapshot.
 
-    The input must be syntactically valid JSON. Semantic validation is not a
-    hard gate here: invalid cascades are still written and surfaced through the
-    returned validation metadata so the runtime can continue serving the last
-    known good snapshot. Missing parent directories are created on demand under
-    the active config root. Returns [Error _] when [cascade.toml] is the active
-    source because the dashboard must not overwrite generated [cascade.json].
+    In JSON mode, the input must be syntactically valid JSON and is written to
+    the active [cascade.json]. In TOML mode, the input must be syntactically
+    valid TOML and is written to the active [cascade.toml], after which the
+    generated runtime [cascade.json] is materialized from that source.
+
+    Semantic validation is not a hard gate here: invalid cascades are still
+    written and surfaced through the returned validation metadata so the
+    runtime can continue serving the last known good snapshot. Missing parent
+    directories are created on demand under the active config root.
 
     @since 0.160.1 *)
 val save_raw_config_json :

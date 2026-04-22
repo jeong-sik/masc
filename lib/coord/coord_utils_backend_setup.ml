@@ -279,7 +279,7 @@ let backend_config_for base_path =
           other;
         Backend_types.FileSystem
   in
-  let masc_root = Filename.concat base_path ".masc" in
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
   let cluster_segment =
     match cluster_name with
     | "" | "default" -> None

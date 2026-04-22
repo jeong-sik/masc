@@ -91,7 +91,7 @@ let health_path_diagnostics () =
         ()
   | None ->
       let effective_base_path = default_base_path () in
-      let effective_masc_root = Filename.concat effective_base_path ".masc" in
+      let effective_masc_root = Common.masc_dir_from_base_path ~base_path:effective_base_path in
       Server_base_path_diagnostics.detect
         ?input_base_path:(Env_config_core.base_path_raw_opt ())
         ?env_masc_base_path:(Env_config_core.base_path_raw_opt ())

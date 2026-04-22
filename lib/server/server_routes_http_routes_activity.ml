@@ -185,7 +185,7 @@ let add_routes ~sw ~clock router =
          in
          let karma_map = Board_dispatch.get_all_karma () in
          let get_karma author =
-           try List.assoc author karma_map with Not_found -> 0
+           List.assoc_opt author karma_map |> Option.value ~default:0
          in
          let paged = posts |> drop offset |> take limit in
          let posts_json =

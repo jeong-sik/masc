@@ -611,6 +611,63 @@ let test_bootstrap_base_path_config_root_collapses_masc_input () =
       Alcotest.(check bool) "nested .masc/.masc config not created" false
         (Sys.file_exists
            (Filename.concat base_path ".masc/.masc/config/cascade.json")))
+let test_config_bootstrap_mode_parses_env () =
+  let check expected value =
+    with_env "MASC_CONFIG_BOOTSTRAP" value @@ fun () ->
+    Alcotest.(check string) (Printf.sprintf "mode for %s" (Option.value ~default:"<unset>" value))
+      expected
+      (match Server_runtime_bootstrap.config_bootstrap_mode () with
+       | `Auto -> "auto" | `Empty -> "empty" | `Skip -> "skip")
+  in
+  check "auto" None;
+  check "auto" (Some "");
+  check "auto" (Some "auto");
+  check "empty" (Some "empty");
+  check "empty" (Some "EMPTY");
+  check "skip" (Some "skip");
+  check "skip" (Some "SKIP")
+
+let test_bootstrap_empty_mode_creates_scaffold_without_files () =
+  with_temp_dir "startup-empty-mode" (fun dir ->
+      let repo = Filename.concat dir "repo" in
+      mkdir_p repo;
+      ignore (make_config_root repo);
+      let base_path = Filename.concat dir "base" in
+      mkdir_p base_path;
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_CONFIG_BOOTSTRAP" (Some "empty") @@ fun () ->
+      with_cwd repo @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
+      let config_root = Filename.concat base_path ".masc/config" in
+      Alcotest.(check bool) "config root created" true (Sys.is_directory config_root);
+      Alcotest.(check bool) "keepers dir scaffolded" true
+        (Sys.is_directory (Filename.concat config_root "keepers"));
+      Alcotest.(check bool) "personas dir scaffolded" true
+        (Sys.is_directory (Filename.concat config_root "personas"));
+      Alcotest.(check bool) "prompts dir scaffolded" true
+        (Sys.is_directory (Filename.concat config_root "prompts"));
+      Alcotest.(check bool) "cascade not copied" false
+        (Sys.file_exists (Filename.concat config_root "cascade.json"));
+      Alcotest.(check bool) "tool policy not copied" false
+        (Sys.file_exists (Filename.concat config_root "tool_policy.toml"));
+      Alcotest.(check bool) "keeper not copied" false
+        (Sys.file_exists (Filename.concat config_root "keepers/example.toml")))
+
+let test_bootstrap_skip_mode_creates_nothing () =
+  with_temp_dir "startup-skip-mode" (fun dir ->
+      let repo = Filename.concat dir "repo" in
+      mkdir_p repo;
+      ignore (make_config_root repo);
+      let base_path = Filename.concat dir "base" in
+      mkdir_p base_path;
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_CONFIG_BOOTSTRAP" (Some "skip") @@ fun () ->
+      with_cwd repo @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
+      let config_root = Filename.concat base_path ".masc/config" in
+      Alcotest.(check bool) "config root not created" false
+        (Sys.file_exists config_root))
+
 let test_constructor_is_pure () =
   with_temp_dir "startup-pure" (fun dir ->
       let agents_dir = Coord.agents_dir (Coord.default_config dir) in
@@ -1783,6 +1840,13 @@ let () =
           Alcotest.test_case
             "bootstrap base-path config collapses .masc input path"
             `Quick test_bootstrap_base_path_config_root_collapses_masc_input;
+          Alcotest.test_case "config_bootstrap_mode parses env var" `Quick
+            test_config_bootstrap_mode_parses_env;
+          Alcotest.test_case
+            "bootstrap empty mode creates scaffold without files"
+            `Quick test_bootstrap_empty_mode_creates_scaffold_without_files;
+          Alcotest.test_case "bootstrap skip mode creates nothing" `Quick
+            test_bootstrap_skip_mode_creates_nothing;
           Alcotest.test_case "constructors stay pure" `Quick
             test_constructor_is_pure;
           Alcotest.test_case "restore_persisted_sessions uses flat agents dir"

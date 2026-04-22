@@ -30,7 +30,7 @@ code_refs:
 - `docs/tla-audit/decision-fsm-gap-2026-04-13.md`
 - `docs/design/oas-masc-state-boundary.md` — MASC/OAS SSOT
 - `specs/keeper-state-machine/KeeperStateMachine.tla` — 11-state spec
-- `specs/keeper-state-machine/KeeperCoreTriad.tla` — State × Decision × Cascade (5-phase 투사)
+- `specs/keeper-state-machine/KeeperCoreTriad.tla` — State × Decision × Cascade (7-phase 투사)
 - `specs/state-product/StateProduct.tla` — Keeper × Turn × Validation 직교 합성
 - `specs/keeper-state-machine/KeeperContextLifecycle.tla` — Context + Compaction + Checkpoint
 - `specs/keeper-state-machine/KeeperCascadeLifecycle.tla`

@@ -20,10 +20,14 @@ type routing_decision = {
     (typically ["keeper_unified"]).
 
     Routing rules (TLA+ mirrored):
-    - Running      -> [base_cascade]    (healthy, full capability)
-    - Failing      -> ["local_recovery"] (cheap local model for recovery)
-    - Compacting   -> ["local_only"]     (local model sufficient)
-    - Other phases -> [base_cascade]     (default, turn may be blocked upstream) *)
+    - [Running], [Draining], [Paused] -> [base_cascade]
+    - [Failing] -> ["local_recovery"]
+    - [Compacting], [HandingOff] -> ["local_only"]
+    - [Overflowed], terminal/non-executable phases -> [base_cascade]
+
+    This helper is total: even phases that are blocked upstream still return
+    a routing decision so dashboards/tests can inspect the same contract.
+    The keeper cycle gate remains the owner of "can this phase execute a turn?" *)
 val select_cascade :
   base_cascade:string ->
   phase:Keeper_state_machine.phase ->

@@ -1,9 +1,10 @@
 (** test_keeper_cascade_routing — State-aware cascade profile selection.
 
     Verifies TLA+ KeeperCoreTriad safety invariants in OCaml:
-    - S1: Terminal phases never select a cascade (blocked upstream)
+    - S1: Blocked/non-executable phases still map to base_cascade in the helper;
+          actual turn blocking happens upstream in keeper_unified_turn
     - S2: Failing phase selects local_recovery
-    - S3: Compacting/HandingOff selects local_only
+    - S3: Compacting/HandingOff select local_only
     - Running selects base_cascade unchanged *)
 
 open Alcotest
@@ -40,6 +41,10 @@ let test_handing_off_uses_local_only () =
   let r = select SM.HandingOff in
   check string "HandingOff -> local_only"
     Masc_mcp.Keeper_config.local_only_cascade_name r.effective_cascade
+
+let test_overflowed_uses_base () =
+  let r = select SM.Overflowed in
+  check string "Overflowed -> base" base r.effective_cascade
 
 let test_draining_uses_base () =
   let r = select SM.Draining in
@@ -100,6 +105,7 @@ let () =
       test_case "Failing uses local_recovery" `Quick test_failing_uses_local_recovery;
       test_case "Compacting uses local_only"  `Quick test_compacting_uses_local_only;
       test_case "HandingOff uses local_only"  `Quick test_handing_off_uses_local_only;
+      test_case "Overflowed uses base"    `Quick test_overflowed_uses_base;
       test_case "Draining uses base"      `Quick test_draining_uses_base;
       test_case "Paused uses base"        `Quick test_paused_uses_base;
       test_case "Offline uses base"       `Quick test_offline_uses_base;

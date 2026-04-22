@@ -755,7 +755,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
     ?(semaphore_wait_ms = 0)
     ?shared_context
     () : (keeper_meta, Oas.Error.sdk_error) result =
-  (* 0. Phase gate + state-aware cascade routing *)
+  (* 0. Phase gate + state-aware cascade routing.
+     The gate owns turn executability; select_cascade remains a total helper
+     so dashboards/tests can inspect the same routing contract for blocked
+     phases like Overflowed. *)
   let registry_base_path = config.base_path in
   let previous_social_state = Social.previous_state_of_meta meta in
   match Keeper_registry.get_phase ~base_path:registry_base_path meta.name with
@@ -765,7 +768,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         meta.name (Keeper_state_machine.phase_to_string phase);
       Ok meta
   | phase_opt ->
-      (* State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade) *)
+      (* State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade).
+         At this point [phase] is executable; blocked phases returned above. *)
       let effective_cascade_name =
         let phase = match phase_opt with
           | Some p -> p

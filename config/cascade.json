@@ -1,22 +1,36 @@
 {
-  "_comment": "Checked-in seed for cascade authoring. Keep repo defaults boring: one keeper-assignable bootstrap profile (big_three), system-only fallback/phase-routing profiles (default, local_only, local_recovery, tool_rerank), and move personal/live experiments to $MASC_BASE_PATH/.masc/config/cascade.toml.",
-  "_comment_default": "System-only fallback profile for unknown/missing cascade names. Mirrors big_three so fallback stays boring.",
+  "_comment": "Checked-in seed for cascade authoring. Keep repo defaults boring: one keeper-assignable bootstrap profile (big_three), system-only fallback/judge/phase-routing profiles (default, governance_judge, operator_judge, local_only, local_recovery, tool_rerank), and move personal/live experiments to $MASC_BASE_PATH/.masc/config/cascade.toml.",
+  "_comment_default": "System-only fallback profile for unknown/missing cascade names. Mirrors big_three without Claude CLI so automatic recovery does not pull Claude by default.",
   "default_models": [
-    { "model": "claude_code:auto", "weight": 1 },
     { "model": "codex_cli:auto", "weight": 1 },
     { "model": "gemini_cli:auto", "weight": 1 }
   ],
   "default_temperature": 0.2,
   "default_max_tokens": 16384,
   "default_keeper_assignable": false,
-  "_comment_big_three": "Canonical keeper bootstrap profile exposed by the checked-in seed.",
+  "_comment_big_three": "Canonical keeper bootstrap profile exposed by the checked-in seed. Automatic keepers stay off Claude CLI unless an operator opts in via live config.",
   "big_three_models": [
-    { "model": "claude_code:auto", "weight": 1 },
     { "model": "codex_cli:auto", "weight": 1 },
     { "model": "gemini_cli:auto", "weight": 1 }
   ],
   "big_three_temperature": 0.2,
   "big_three_max_tokens": 16384,
+  "_comment_governance_judge": "System-only dashboard governance judge profile. Explicitly defined so background judge loops do not inherit fallback providers such as Claude CLI.",
+  "governance_judge_models": [
+    { "model": "codex_cli:auto", "weight": 1 },
+    { "model": "gemini_cli:auto", "weight": 1 }
+  ],
+  "governance_judge_temperature": 0.2,
+  "governance_judge_max_tokens": 16384,
+  "governance_judge_keeper_assignable": false,
+  "_comment_operator_judge": "System-only dashboard operator judge profile. Mirrors governance_judge so background control loops stay off Claude CLI by default.",
+  "operator_judge_models": [
+    { "model": "codex_cli:auto", "weight": 1 },
+    { "model": "gemini_cli:auto", "weight": 1 }
+  ],
+  "operator_judge_temperature": 0.2,
+  "operator_judge_max_tokens": 16384,
+  "operator_judge_keeper_assignable": false,
   "_comment_local_only": "System-only local phase-routing profile for compacting/handoff paths.",
   "local_only_models": [ "ollama:auto" ],
   "local_only_temperature": 0.2,

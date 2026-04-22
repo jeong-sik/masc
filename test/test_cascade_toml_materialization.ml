@@ -1,4 +1,5 @@
 open Alcotest
+open Yojson.Safe.Util
 
 let contains_substring haystack needle =
   let haystack_len = String.length haystack in
@@ -95,6 +96,30 @@ let render_or_fail toml_path =
   | Ok rendered -> rendered
   | Error msg -> failf "unexpected TOML render failure: %s" msg
 
+let model_names_for_profile json profile_name =
+  json
+  |> member (profile_name ^ "_models")
+  |> to_list
+  |> List.map (function
+       | `String model -> model
+       | value -> value |> member "model" |> to_string)
+
+let test_repo_seed_excludes_claude_from_automatic_profiles () =
+  let rendered = render_or_fail (repo_toml_path ()) |> Yojson.Safe.from_string in
+  let expect_profile_models profile_name expected =
+    check (list string) (profile_name ^ " models")
+      expected
+      (model_names_for_profile rendered profile_name)
+  in
+  expect_profile_models "default" [ "codex_cli:auto"; "gemini_cli:auto" ];
+  expect_profile_models "big_three" [ "codex_cli:auto"; "gemini_cli:auto" ];
+  expect_profile_models "governance_judge" [ "codex_cli:auto"; "gemini_cli:auto" ];
+  expect_profile_models "operator_judge" [ "codex_cli:auto"; "gemini_cli:auto" ];
+  check bool "governance_judge is system-only" false
+    (rendered |> member "governance_judge_keeper_assignable" |> to_bool);
+  check bool "operator_judge is system-only" false
+    (rendered |> member "operator_judge_keeper_assignable" |> to_bool)
+
 let test_repo_toml_renders_to_committed_json () =
   let rendered = render_or_fail (repo_toml_path ()) in
   check string "repo cascade json stays in sync with toml"
@@ -180,6 +205,8 @@ let () =
         [
           test_case "repo toml renders to committed json" `Quick
             test_repo_toml_renders_to_committed_json;
+          test_case "repo seed excludes claude from automatic profiles" `Quick
+            test_repo_seed_excludes_claude_from_automatic_profiles;
         ] );
       ( "validation",
         [

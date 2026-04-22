@@ -391,6 +391,7 @@ let message_of_json_compat json =
             content;
             name = json |> member "name" |> to_string_option;
             tool_call_id = json |> member "tool_call_id" |> to_string_option;
+            metadata = [];
           }
     | Error e, _ -> Error e
     | _, Error e -> Error e

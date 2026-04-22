@@ -120,7 +120,7 @@ let raw_completion ~model_id ~prompt ~max_tokens ~timeout_sec () =
     ~max_tokens ~timeout_sec ()
 
 let error_message_of_http_error = function
-  | Llm_provider.Http_client.NetworkError { message; _ } -> message
+  | Llm_provider.Http_client.NetworkError { message } -> message
   | Llm_provider.Http_client.AcceptRejected { reason } -> reason
   | Llm_provider.Http_client.CliTransportRequired { kind } ->
       Printf.sprintf "%s provider requires a CLI transport" kind

@@ -119,7 +119,7 @@ let first_endpoint_url endpoints =
   | [] -> None
 
 let error_message_of_http_error = function
-  | Llm_provider.Http_client.NetworkError { message; _ } -> message
+  | Llm_provider.Http_client.NetworkError { message } -> message
   | Llm_provider.Http_client.AcceptRejected { reason } -> reason
   | Llm_provider.Http_client.CliTransportRequired { kind } ->
       Printf.sprintf "%s provider requires a CLI transport" kind

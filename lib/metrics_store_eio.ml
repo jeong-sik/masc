@@ -124,9 +124,10 @@ let flush_pending () =
 (** Start the background flush fiber. Call once inside Eio_main.run.
     Drains the write queue every 500ms or when the stream has entries. *)
 let start_flush_fiber ~clock =
+  let flush_interval_s = 0.5 in
   Atomic.set queue_active true;
   let rec loop () =
-    Eio.Time.sleep clock 0.5;
+    Eio.Time.sleep clock flush_interval_s;
     flush_pending ();
     loop ()
   in

@@ -589,6 +589,8 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_goal_list" -> Some (Coord_goals.handle_goal_list ctx args)
   | "masc_goal_upsert" -> Some (Coord_goals.handle_goal_upsert ctx args)
   | "masc_goal_review" -> Some (Coord_goals.handle_goal_review ctx args)
+  | "masc_goal_transition" -> Some (Coord_goals.handle_goal_transition ctx args)
+  | "masc_goal_verify" -> Some (Coord_goals.handle_goal_verify ctx args)
   | "masc_reset" -> Some (handle_reset ctx args)
   | "masc_workflow_guide" -> Some (handle_workflow_guide ctx args)
   | "masc_check" ->
@@ -620,7 +622,8 @@ let tool_required_permission = function
   | "masc_status" | "masc_workflow_guide" | "masc_check"
   | "masc_goal_list" ->
       Some Types.CanReadState
-  | "masc_goal_upsert" | "masc_goal_review" ->
+  | "masc_goal_upsert" | "masc_goal_review"
+  | "masc_goal_transition" | "masc_goal_verify" ->
       Some Types.CanBroadcast
   | "masc_heartbeat" ->
       Some Types.CanBroadcast

@@ -75,6 +75,17 @@ tools = ["keeper_board_post", "keeper_board_comment", "keeper_context_status", "
 
 # Optional tools that require explicit opt-in via also_allow.
 # Excluded from all presets by default; a keeper must list them in also_allow.
+[groups.voice]
+# Voice session management + TTS/mic via ElevenLabs or local backend.
+tools = [
+  "keeper_voice_speak",
+  "keeper_voice_listen",
+  "keeper_voice_agent",
+  "keeper_voice_sessions",
+  "keeper_voice_session_start",
+  "keeper_voice_session_end",
+]
+
 [groups.optional]
 tools = ["keeper_board_delete", "keeper_board_cleanup"]
 
@@ -158,13 +169,13 @@ masc_tools = ["masc_status", "masc_tool_help"]
 # Social: persona keepers that live on the board + web search.
 # ~15 tools. Optimal for 9B tool selection accuracy.
 [presets.social]
-groups = ["base", "board_core", "coordination_core", "filesystem"]
+groups = ["base", "board_core", "coordination_core", "filesystem", "voice"]
 masc_groups = ["essential"]
 
 # Messaging: social + shell, library, github for broader interaction.
 # ~25 tools.
 [presets.messaging]
-groups = ["base", "board_core", "coordination_core", "shell", "filesystem", "library"]
+groups = ["base", "board_core", "coordination_core", "shell", "filesystem", "library", "voice"]
 masc_groups = ["essential"]
 
 [presets.coding]
@@ -178,7 +189,7 @@ masc_groups = ["essential"]
 # Delivery preset: research + coding for keepers that need to produce code changes.
 # Use for keepers whose goal involves PRs, issues, or code fixes.
 [presets.delivery]
-groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board_core", "autoresearch", "coding_shard", "coding", "github", "github_review"]
+groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board_core", "autoresearch", "coding_shard", "coding", "github", "github_review", "voice"]
 masc_groups = ["essential", "coordination", "coding"]
 
 [presets.full]

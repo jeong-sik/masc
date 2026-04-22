@@ -478,6 +478,12 @@ do
     restore_env_override "$env_name"
 done
 
+# ~/.zshenv and repo-local env files may reintroduce retired PostgreSQL selectors
+# after the initial top-of-script scrub. Re-assert filesystem-only startup here
+# so the launched server process never sees the deprecated vars.
+export MASC_STORAGE_TYPE="filesystem"
+unset MASC_POSTGRES_URL DATABASE_URL SUPABASE_DB_URL SB_PG_URL
+
 # Did caller provide --base-path explicitly on CLI?
 BASE_PATH_EXPLICIT=0
 

@@ -1,37 +1,46 @@
 # Dockerfile for masc-worker-runtime image.
-# Builds the masc-worker-run helper binary and packages it into a minimal
-# Alpine image. The binary reads a Worker_execution_spec from stdin (via
-# --spec-stdin) and writes the run_result to stdout.
+# Builds the masc-worker-run helper binary and packages it into a
+# Debian-based runtime image. The binary reads a Worker_execution_spec
+# from stdin (via --spec-stdin) and writes the run_result to stdout.
 #
 # Build:  docker build -f Dockerfile.worker -t masc-worker-runtime:dev .
 # Usage:  echo '<spec-json>' | docker run -i masc-worker-runtime:dev
 
-# ── stage 1: build ──────────────────────────────────────────────────
-FROM ocaml/opam:alpine-5.4-flambda AS build
+FROM ocaml/opam:debian-12-ocaml-5.4 AS build
 
-USER opam
-WORKDIR /home/opam/src
+WORKDIR /src
 
-# Install system deps first (cache layer)
-RUN sudo apk add --no-cache \
-  gmp-dev libffi-dev openssl-dev linux-headers pkgconf m4 git
+COPY . .
 
-# Copy opam files for dependency caching
-COPY --chown=opam:opam masc_mcp.opam dune-project ./
-RUN opam install . --deps-only --yes
+RUN sudo apt-get update \
+ && sudo apt-get install -y --no-install-recommends \
+      pkg-config \
+      libssl-dev \
+      libsqlite3-dev \
+      zlib1g-dev \
+      curl \
+      git \
+      libgmp-dev \
+      libprotobuf-dev \
+      protobuf-compiler \
+      libffi-dev \
+ && sudo rm -rf /var/lib/apt/lists/*
 
-# Copy full source
-COPY --chown=opam:opam . .
+RUN opam exec -- bash -lc "scripts/opam-pin-external-deps.sh && opam install . --deps-only -y && dune build bin/masc_worker_run.exe"
 
-# Build only the worker binary
-RUN opam exec -- dune build bin/masc_worker_run.exe
+FROM debian:12-slim AS runtime
 
-# ── stage 2: runtime ────────────────────────────────────────────────
-FROM alpine:3.21 AS runtime
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      libffi8 \
+      libgmp10 \
+      libsqlite3-0 \
+      libssl3 \
+      zlib1g \
+ && rm -rf /var/lib/apt/lists/*
 
-RUN apk add --no-cache gmp libffi openssl
-
-COPY --from=build /home/opam/src/_build/default/bin/masc_worker_run.exe \
+COPY --from=build /src/_build/default/bin/masc_worker_run.exe \
      /usr/local/bin/masc-worker-run
 
 ENTRYPOINT ["/usr/local/bin/masc-worker-run", "--spec-stdin"]

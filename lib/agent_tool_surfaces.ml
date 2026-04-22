@@ -423,4 +423,8 @@ let local_worker_resolvable_tool_names () : string list =
   match local_worker_tool_schemas () with
   | Ok schemas ->
       List.map (fun (s : Types.tool_schema) -> s.name) schemas
-  | Error _ -> []
+  | Error msg ->
+      Eio.traceln
+        "[AgentToolSurfaces] local_worker_tool_schemas failed: %s"
+        msg;
+      []

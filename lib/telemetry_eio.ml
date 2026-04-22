@@ -103,7 +103,9 @@ let parse_event_records (jsons : Yojson.Safe.t list) : event_record list =
   List.filter_map (fun json ->
     match event_record_of_yojson json with
     | Ok record -> Some record
-    | Error _ -> None
+    | Error msg ->
+        Eio.traceln "[TelemetryEio] parse_event_records drop: %s" msg;
+        None
   ) jsons
 
 let read_all_events_from_path (file : string) : event_record list =
@@ -117,7 +119,9 @@ let read_all_events_from_path (file : string) : event_record list =
         try
           match event_record_of_yojson (Yojson.Safe.from_string line) with
           | Ok record -> Some record
-          | Error _ -> None
+          | Error msg ->
+              Eio.traceln "[TelemetryEio] read_all_events_from_path drop: %s" msg;
+              None
         with Yojson.Json_error _ -> None)
 
 let event_to_json event =

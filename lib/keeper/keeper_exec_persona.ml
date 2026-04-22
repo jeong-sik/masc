@@ -37,6 +37,7 @@ let resolved_keeper_args_to_json
     ~name ~persona_name ~goal ~short_goal ~mid_goal ~long_goal
     ~instructions ~will ~needs ~desires ~policy_voice_enabled
     ~mention_targets
+    ~autoboot_enabled_opt
     ~tool_preset ~tool_also_allow ~tool_denylist
     ~proactive_enabled ~shards
     ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec =
@@ -63,12 +64,17 @@ let resolved_keeper_args_to_json
       ("handoff_cooldown_sec", `Int handoff_cooldown_sec);
     ]
   in
+  let autoboot_field =
+    match autoboot_enabled_opt with
+    | Some value -> [ ("autoboot_enabled", `Bool value) ]
+    | None -> []
+  in
   let shards_field =
     match shards with
     | Some xs -> [("shards", string_list_to_json xs)]
     | None -> []
   in
-  `Assoc (base @ shards_field)
+  `Assoc (base @ autoboot_field @ shards_field)
 
 let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   let errors = ref [] in
@@ -174,6 +180,7 @@ let resolved_keeper_args_from_persona args :
               |> first_some defaults.proactive_enabled
               |> Option.value ~default:false
             in
+            let autoboot_enabled = get_bool_opt args "autoboot_enabled" in
             (match get_string_opt args "tool_preset" with
              | Some raw -> (
                  match tool_preset_of_string raw with
@@ -215,6 +222,7 @@ let resolved_keeper_args_from_persona args :
                          ~instructions  ~will ~needs ~desires
                          ~policy_voice_enabled
                          ~mention_targets
+                         ~autoboot_enabled_opt:autoboot_enabled
                          ~tool_preset ~tool_also_allow ~tool_denylist
                          ~proactive_enabled ~shards
                          ~auto_handoff ~handoff_threshold
@@ -265,6 +273,7 @@ let resolved_keeper_args_from_persona args :
                      ~instructions  ~will ~needs ~desires
                      ~policy_voice_enabled
                      ~mention_targets
+                     ~autoboot_enabled_opt:autoboot_enabled
                      ~tool_preset ~tool_also_allow ~tool_denylist
                      ~proactive_enabled ~shards
                      ~auto_handoff ~handoff_threshold

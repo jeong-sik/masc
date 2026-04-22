@@ -51,19 +51,28 @@ let write_json path json =
   Out_channel.with_open_bin path (fun oc ->
       output_string oc (Yojson.Safe.pretty_to_string json))
 
-let write_keeper_toml_exn config ~name =
+let write_file path content =
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+
+let write_keeper_toml_exn ?autoboot_enabled config ~name =
   let keepers_dir =
     Filename.concat (Coord.masc_root_dir config) "config/keepers"
+  in
+  let autoboot_line =
+    match autoboot_enabled with
+    | Some value -> Printf.sprintf "autoboot_enabled = %b\n" value
+    | None -> ""
   in
   Fs_compat.mkdir_p keepers_dir;
   Fs_compat.save_file
     (Filename.concat keepers_dir (name ^ ".toml"))
-    {|
-[keeper]
-goal = "test keeper"
-room_scope = "current"
-proactive_enabled = false
-|}
+    (Printf.sprintf
+       "[keeper]\n\
+        goal = \"test keeper\"\n\
+        %s\
+        room_scope = \"current\"\n\
+        proactive_enabled = false\n"
+       autoboot_line)
 
 let write_keeper_meta_exn ?(autoboot_enabled = true)
     ?(social_model = "bdi_speech_v1")
@@ -186,6 +195,107 @@ let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
       let names = Keeper_runtime.bootable_keeper_names config in
       check bool "autoboot disabled sangsu excluded from bootable list" false
         (List.mem "sangsu" names))
+
+let test_declarative_autoboot_disabled_skips_boot_without_meta () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_keeper_toml_exn ~autoboot_enabled:false config ~name:"sangsu";
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
+      Config_dir_resolver.reset ();
+      let bootable_names = Keeper_runtime.bootable_keeper_names config in
+      check bool "bootable list excludes declarative autoboot-disabled keeper" false
+        (List.mem "sangsu" bootable_names);
+      let keepalive_names = Keeper_types.keepalive_keeper_names config in
+      check bool "keepalive list excludes declarative autoboot-disabled keeper" false
+        (List.mem "sangsu" keepalive_names))
+
+let test_autoboot_policy_resync_from_declarative_toml () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Cascade_catalog_runtime.reset_cache_for_tests ();
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_keeper_toml_exn ~autoboot_enabled:false config ~name:"sangsu";
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      let cascade_path = Filename.concat config_root "cascade.json" in
+      write_file
+        cascade_path
+        {|{
+  "big_three_models": ["test-only:model"]
+}|};
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
+      Config_dir_resolver.reset ();
+      Cascade_catalog_runtime.install_snapshot_for_tests
+        ~source_path:cascade_path
+        ~profile_names:[ Keeper_config.default_cascade_name ];
+      write_keeper_meta_exn
+        ~autoboot_enabled:true config ~name:"sangsu" ~trace_id:"trace-sangsu";
+      match Keeper_runtime.ensure_keeper_meta config "sangsu" with
+      | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
+      | Ok updated ->
+          check bool "autoboot_enabled resynced from TOML" false
+            updated.Keeper_types.autoboot_enabled)
+
+let test_keeper_up_uses_toml_autoboot_default () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "toml-autoboot-default" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_keeper_toml_exn ~autoboot_enabled:false config ~name:keeper_name;
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
+      Config_dir_resolver.reset ();
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, body =
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_up"
+            ~args:(`Assoc [ ("name", `String keeper_name) ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_up dispatch"
+      in
+      check bool "keeper_up ok" true ok;
+      match Keeper_types.read_meta config keeper_name with
+      | Ok (Some meta) ->
+          check bool "autoboot_enabled defaulted from TOML" false
+            meta.autoboot_enabled
+      | Ok None -> fail "keeper meta missing after keeper_up"
+      | Error e -> fail ("read_meta failed: " ^ e))
 
 let test_keeper_list_normalizes_unknown_social_model () =
   Eio_main.run @@ fun env ->
@@ -311,6 +421,12 @@ let () =
             test_keeper_listing_ignores_sidecar_json_files;
           test_case "bootable list skips autoboot-disabled meta" `Quick
             test_bootable_keeper_names_skip_autoboot_disabled_meta;
+          test_case "declarative autoboot-disabled keeper skips boot without meta"
+            `Quick test_declarative_autoboot_disabled_skips_boot_without_meta;
+          test_case "autoboot policy resyncs from declarative TOML" `Quick
+            test_autoboot_policy_resync_from_declarative_toml;
+          test_case "keeper_up uses TOML autoboot default" `Quick
+            test_keeper_up_uses_toml_autoboot_default;
           test_case "tool keeper list normalizes unknown social model" `Quick
             test_keeper_list_normalizes_unknown_social_model;
           test_case "tool keeper list preserves known social model" `Quick

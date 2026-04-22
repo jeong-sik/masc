@@ -31,7 +31,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         p.profile_defaults.goal |> Option.value ~default:""
         |> normalize_goal_horizon_text
   in
-  let autoboot_enabled = Option.value ~default:true p.autoboot_enabled_opt in
+  let autoboot_enabled =
+    first_some p.autoboot_enabled_opt p.profile_defaults.autoboot_enabled
+    |> Option.value ~default:true
+  in
   let policy_voice_enabled =
     first_some
       p.policy_voice_enabled_opt

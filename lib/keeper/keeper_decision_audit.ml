@@ -322,7 +322,7 @@ let cascade_fsm_to_mermaid
     match provider_health with
     | None -> `Unknown
     | Some pairs ->
-      (try List.assoc label pairs with Not_found -> `Unknown)
+      List.assoc_opt label pairs |> Option.value ~default:`Unknown
   in
   p "stateDiagram-v2\n";
   p "    [*] --> SelectProvider: AdmitKeeper\n";

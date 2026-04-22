@@ -1372,7 +1372,7 @@ let handle_keeper_get_subroutes state req request reqd =
           | _ -> []
         in
         let lookup_used k =
-          try List.assoc k used_by_kind with Not_found -> 0
+          List.assoc_opt k used_by_kind |> Option.value ~default:0
         in
         `List (List.map (fun (kind, cap) ->
           `Assoc [

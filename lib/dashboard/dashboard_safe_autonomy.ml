@@ -714,7 +714,7 @@ let build_keeper_snapshot
     ~(activity_by_keeper : (string, activity_stats) Hashtbl.t)
     (meta : keeper_meta) =
   let sandbox = Keeper_sandbox.of_meta ~config ~meta in
-  let repo_readiness = Keeper_repo_readiness.inspect ~config ~keeper_name:meta.name () in
+  let repo_readiness = Keeper_repo_readiness.inspect ~config ~meta () in
   let recommendation =
     recommendation_for_keeper bench_manifest ~keeper_name:meta.name
   in

@@ -75,6 +75,22 @@ let rec ensure_dir path =
     if parent <> path then ensure_dir parent;
     Unix.mkdir path 0o755)
 
+let write_file path content =
+  ensure_dir (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out oc) @@ fun () ->
+  output_string oc content
+
+let write_keeper_toml ~base_path ~name ~sandbox_profile =
+  let path =
+    Filename.concat base_path
+      (Printf.sprintf ".masc/config/keepers/%s.toml" name)
+  in
+  write_file path
+    (Printf.sprintf
+       "[keeper]\npersona_name = %S\nsandbox_profile = %S\n"
+       name sandbox_profile)
+
 let run_ok ~cwd cmd =
   let wrapped = Printf.sprintf "cd %s && %s > /dev/null 2>&1" (Filename.quote cwd) cmd in
   let code = Sys.command wrapped in
@@ -160,6 +176,21 @@ let test_dispatch_unknown_tool () =
   match Tool_worktree.dispatch ctx ~name:"masc_unknown" ~args:(`Assoc []) with
   | None -> ()
   | Some _ -> fail "expected None for unknown tool"
+
+let test_remove_schema_requires_only_task_id () =
+  let schema =
+    Tool_worktree.schemas
+    |> List.find (fun (s : Types.tool_schema) ->
+         String.equal s.name "masc_worktree_remove")
+  in
+  let open Yojson.Safe.Util in
+  let required =
+    schema.input_schema
+    |> member "required"
+    |> to_list
+    |> List.map to_string
+  in
+  check (list string) "remove required fields" [ "task_id" ] required
 
 (* ============================================================
    Iter-7 (#6527) — agent_name spoof rejection
@@ -404,6 +435,67 @@ let test_dispatch_worktree_create_auto_provisions_before_wide_workspace_storm ()
       check bool "message mentions auto-provision" true
         (contains "auto-provisioned" msg)
 
+let test_dispatch_worktree_create_and_remove_use_docker_keeper_lane () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_process_eio env;
+  run_ok ~cwd:base_path "git init -q -b main";
+  ignore
+    (setup_nested_repo_with_remote ~base_path
+       ~repo_rel:"workspace/yousleepwhen/masc-mcp");
+  write_keeper_toml ~base_path ~name:"sangsu" ~sandbox_profile:"docker";
+  let config = Masc_mcp.Coord.default_config base_path in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "sangsu"));
+  let ctx : Tool_worktree.context = { config; agent_name = "sangsu" } in
+  let task_id = "task-auto-clone-docker" in
+  let create_args = `Assoc [
+    ("task_id", `String task_id);
+    ("repo_name", `String "masc-mcp");
+    ("base_branch", `String "main");
+  ] in
+  let docker_clone =
+    Filename.concat base_path ".masc/playground/docker/sangsu/repos/masc-mcp"
+  in
+  let docker_worktree =
+    Filename.concat docker_clone
+      (Filename.concat ".worktrees"
+         (Playground_paths.worktree_dir_name "sangsu" task_id))
+  in
+  let legacy_worktree =
+    Filename.concat base_path
+      (Filename.concat ".masc/playground/sangsu/repos/masc-mcp/.worktrees"
+         (Playground_paths.worktree_dir_name "sangsu" task_id))
+  in
+  match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args:create_args with
+  | None -> fail "dispatch returned None for masc_worktree_create"
+  | Some (false, msg) ->
+      fail
+        (Printf.sprintf
+           "expected docker keeper auto-provision success, got error: %s"
+           msg)
+  | Some (true, msg) ->
+      check bool "message mentions auto-provision" true
+        (contains "auto-provisioned" msg);
+      check bool "docker sandbox clone created" true
+        (Sys.file_exists docker_clone);
+      check bool "docker worktree created" true
+        (Sys.file_exists docker_worktree);
+      check bool "legacy worktree untouched" false
+        (Sys.file_exists legacy_worktree);
+      let remove_args = `Assoc [ ("task_id", `String task_id) ] in
+      match Tool_worktree.dispatch ctx ~name:"masc_worktree_remove" ~args:remove_args with
+      | None -> fail "dispatch returned None for masc_worktree_remove"
+      | Some (false, remove_msg) ->
+          fail
+            (Printf.sprintf
+               "expected docker keeper remove success, got error: %s"
+               remove_msg)
+      | Some (true, _remove_msg) ->
+          check bool "docker worktree removed" false
+            (Sys.file_exists docker_worktree)
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -424,6 +516,8 @@ let () =
       test_case "worktree_remove" `Quick test_dispatch_worktree_remove;
       test_case "worktree_list" `Quick test_dispatch_worktree_list;
       test_case "unknown" `Quick test_dispatch_unknown_tool;
+      test_case "remove schema requires only task_id" `Quick
+        test_remove_schema_requires_only_task_id;
     ];
     "agent_name_spoof", [
       test_case "spoofed agent_name blocked" `Quick
@@ -444,5 +538,7 @@ let () =
         test_dispatch_worktree_create_auto_provisions_before_hidden_dir_storm;
       test_case "workspace repo wins before wide workspace storm" `Quick
         test_dispatch_worktree_create_auto_provisions_before_wide_workspace_storm;
+      test_case "docker keeper uses docker lane for create/remove" `Quick
+        test_dispatch_worktree_create_and_remove_use_docker_keeper_lane;
     ];
   ]

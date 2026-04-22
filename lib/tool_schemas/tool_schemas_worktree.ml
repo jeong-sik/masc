@@ -55,14 +55,14 @@ After completing work in a worktree created by masc_worktree_create.";
       ("properties", `Assoc [
         ("agent_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Your agent name");
+          ("description", `String "Optional. Leave empty to use your registered agent name.");
         ]);
         ("task_id", `Assoc [
           ("type", `String "string");
           ("description", `String "Task ID used when creating the worktree");
         ]);
       ]);
-      ("required", `List [`String "agent_name"; `String "task_id"]);
+      ("required", `List [`String "task_id"]);
     ];
   };
   {

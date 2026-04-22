@@ -156,6 +156,8 @@ run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCompactionLifecycle
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperCompositeLifecycle.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCompositeLifecycle.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperCircuitBreaker.tla"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperCoreTriad.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCoreTriad.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCircuitBreaker.tla"
 run_tlc "$REPO_ROOT/specs/boundary" "KeeperContinueGate.tla"
 run_tlc_buggy "$REPO_ROOT/specs/boundary" "KeeperContinueGate.tla"

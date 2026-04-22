@@ -187,7 +187,7 @@ let metric_of_block
            | None -> 0)
     | _ -> 0
   in
-  let msg : Agent_sdk.Types.message =
+  let msg : Oas.Types.message =
     {
       Oas.Types.role;
       content = [block];
@@ -2483,15 +2483,15 @@ let run_turn
            in
            receipt_response_text_present_ref := true;
            let assistant_msg =
-             Agent_sdk.Types.make_message
-               ~role:Agent_sdk.Types.Assistant
+             Oas.Types.make_message
+               ~role:Oas.Types.Assistant
                ~metadata:
                  [
                    ( Keeper_memory_policy.replay_metadata_key,
                      Keeper_memory_policy.replay_metadata_of_snapshot
                        state_snapshot );
                  ]
-               [ Agent_sdk.Types.Text response_text ]
+               [ Oas.Types.Text response_text ]
            in
            Keeper_exec_context.persist_message
              ~source:history_assistant_source

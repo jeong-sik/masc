@@ -1,7 +1,7 @@
 (** Compaction audit: Event_bus subscriber + paired JSONL persistence +
     rolling retention.
 
-    Subscribes to OAS {!Agent_sdk.Event_bus} for [ContextCompactStarted]
+    Subscribes to OAS {!Oas.Event_bus} for [ContextCompactStarted]
     and [ContextCompacted] payloads, synthesizes a stable [compaction_id]
     correlating start/complete pairs per keeper, and appends each event
     to [{base_path}/data/harness-compact/YYYY-MM/DD.jsonl].
@@ -133,5 +133,5 @@ val spawn_subscriber
   -> base_path:string
   -> retention_days:int
   -> ?drain_interval_s:float
-  -> Agent_sdk.Event_bus.t
+  -> Oas.Event_bus.t
   -> unit

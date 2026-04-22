@@ -27,9 +27,9 @@ type keeper_skill_route = {
 
 (** Merge two API usage records by summing all fields. *)
 val merge_usage :
-  Agent_sdk.Types.api_usage ->
-  Agent_sdk.Types.api_usage ->
-  Agent_sdk.Types.api_usage
+  Oas.Types.api_usage ->
+  Oas.Types.api_usage ->
+  Oas.Types.api_usage
 
 (** {1 Alert Retry Logic} *)
 

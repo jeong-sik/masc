@@ -37,14 +37,17 @@ val resolve_named_providers_result :
   ?provider_filter:string list ->
   ?require_tool_choice_support:bool ->
   ?require_tool_support:bool ->
+  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
   cascade_name:string -> unit -> (Llm_provider.Provider_config.t list, string) result
 val resolve_named_providers :
   ?provider_filter:string list ->
   ?require_tool_choice_support:bool ->
   ?require_tool_support:bool ->
+  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
   cascade_name:string -> unit -> Llm_provider.Provider_config.t list
 val resolve_providers_from_model_strings :
   ?provider_filter:string list ->
   ?require_tool_choice_support:bool ->
   ?require_tool_support:bool ->
+  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
   string list -> Llm_provider.Provider_config.t list

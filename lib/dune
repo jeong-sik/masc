@@ -554,6 +554,7 @@
    verifier_core
    verifier_oas
    procedural_memory
+   provider_tool_support
    oas_events
    oas_worker
    oas_worker_cascade
@@ -659,6 +660,7 @@
    keeper_exec_tools
   keeper_exec_status_metrics
   keeper_exec_status
+  provider_tool_support
   keeper_status_detail
   keeper_exec_persona
   keeper_model_labels

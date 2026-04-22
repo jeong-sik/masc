@@ -42,8 +42,10 @@ let cascade_catalog_error_to_sdk_error detail =
 let resolve_cascade_providers ?provider_filter
     ?(require_tool_choice_support = false)
     ?(require_tool_support = false)
+    ?runtime_mcp_policy
     ~cascade_name () =
   Cascade_runtime.resolve_named_providers_result ?provider_filter
+    ?runtime_mcp_policy
     ~require_tool_choice_support ~require_tool_support ~cascade_name ()
 
 (** Resolve from an explicit model string list (user-declared in keeper TOML).
@@ -52,9 +54,34 @@ let resolve_cascade_providers ?provider_filter
 let resolve_providers_from_model_strings ?provider_filter
     ?(require_tool_choice_support = false)
     ?(require_tool_support = false)
+    ?runtime_mcp_policy
     model_strings =
   Cascade_runtime.resolve_providers_from_model_strings ?provider_filter
+    ?runtime_mcp_policy
     ~require_tool_choice_support ~require_tool_support model_strings
+
+let keeper_agent_name_opt (keeper_name : string) =
+  let keeper_name = String.trim keeper_name in
+  if keeper_name = "" then None
+  else Some (Keeper_types.keeper_agent_name keeper_name)
+
+let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Oas.Tool.t list)
+    =
+  let public_tool_names =
+    tools
+    |> Oas_worker_exec.public_mcp_tools_of_oas_tools
+    |> Oas_worker_exec.public_mcp_tool_names_of_oas_tools
+  in
+  match
+    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names public_tool_names,
+    keeper_agent_name_opt keeper_name
+  with
+  | Some policy, Some agent_name ->
+      Some
+        (Oas_worker_exec.runtime_mcp_policy_with_masc_agent_name
+           ~agent_name policy)
+  | Some policy, None -> Some policy
+  | None, _ -> None
 
 type masc_internal_error =
   | Cascade_exhausted of {
@@ -679,6 +706,7 @@ let run_named
   let cascade_name =
     Keeper_cascade_profile.normalize_declared_name cascade_name
   in
+  let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
   let configured_labels_result, candidate_cfgs_result =
     match model_strings with
     | Some ms when ms <> [] ->
@@ -687,10 +715,12 @@ let run_named
       ( Ok ms,
         Ok
           (resolve_providers_from_model_strings ?provider_filter
+             ?runtime_mcp_policy
              ~require_tool_choice_support ~require_tool_support ms) )
     | _ ->
       ( Cascade_runtime.models_of_cascade_name_result cascade_name,
         resolve_cascade_providers ?provider_filter
+          ?runtime_mcp_policy
           ~require_tool_choice_support ~require_tool_support ~cascade_name ()
       )
   in
@@ -736,7 +766,9 @@ let run_named
      threads this checkpoint to the next provider without mutable state. *)
   let try_provider ?resume_checkpoint (provider_cfg : Llm_provider.Provider_config.t) =
     let config_result =
-      Oas_worker_exec.resolve_tool_lane_for_oas_tools ~provider_cfg ~tools
+      Oas_worker_exec.resolve_tool_lane_for_oas_tools
+        ?agent_name:(keeper_agent_name_opt keeper_name)
+        ~provider_cfg ~tools ()
       |> Result.map
            (fun (effective_tools, runtime_mcp_policy) ->
              let runtime_mcp_policy =

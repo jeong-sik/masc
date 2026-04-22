@@ -1353,7 +1353,7 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy ()
   match
     Oas_worker_exec.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_codex_cli_provider_cfg ())
-      ~tools
+      ~tools ()
   with
   | Ok (effective_tools, Some policy) ->
       Alcotest.(check int) "runtime lane strips inline tools" 0
@@ -1371,6 +1371,26 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy ()
       Alcotest.fail "expected codex_cli public MCP tools to use runtime MCP lane"
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
+let test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_rejects_runtime_headers () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  let tools =
+    [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ]
+  in
+  match
+    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      ~agent_name:"keeper-sangsu-agent"
+      ~provider_cfg:(make_codex_cli_provider_cfg ())
+      ~tools ()
+  with
+  | Ok _ ->
+      Alcotest.fail
+        "expected codex_cli to reject public MCP runtime lane when keeper headers are required"
+  | Error (Oas.Error.Config (Oas.Error.InvalidConfig { field; detail })) ->
+      Alcotest.(check string) "field" "tool_support" field;
+      Alcotest.(check bool) "detail mentions runtime MCP HTTP headers" true
+        (contains_substring ~needle:"runtime MCP HTTP headers" detail)
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
 let test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   let tools =
@@ -1379,7 +1399,7 @@ let test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy () 
   match
     Oas_worker_exec.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_kimi_cli_provider_cfg ())
-      ~tools
+      ~tools ()
   with
   | Ok (effective_tools, Some policy) ->
       Alcotest.(check int) "runtime lane strips inline tools" 0
@@ -1397,6 +1417,36 @@ let test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy () 
       Alcotest.fail "expected kimi_cli public MCP tools to use runtime MCP lane"
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
+let test_resolve_tool_lane_for_kimi_cli_public_tools_with_agent_name_keeps_runtime_headers () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  let tools =
+    [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ]
+  in
+  match
+    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      ~agent_name:"keeper-sangsu-agent"
+      ~provider_cfg:(make_kimi_cli_provider_cfg ())
+      ~tools ()
+  with
+  | Ok (effective_tools, Some policy) ->
+      let masc_headers =
+        List.find_map
+          (function
+            | Llm_provider.Llm_transport.Http_server server
+              when String.equal server.name "masc" -> Some server.headers
+            | _ -> None)
+          policy.servers
+      in
+      Alcotest.(check int) "runtime lane strips inline tools" 0
+        (List.length effective_tools);
+      Alcotest.(check (option string)) "keeper header preserved on runtime MCP policy"
+        (Some "keeper-sangsu-agent")
+        (Option.bind masc_headers (List.assoc_opt "x-masc-agent-name"))
+  | Ok (_, None) ->
+      Alcotest.fail
+        "expected kimi_cli public MCP tools with agent_name to use runtime MCP lane"
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
 let test_resolve_tool_lane_for_kimi_cli_mixed_tools_keeps_public_runtime_subset () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   let tools =
@@ -1409,7 +1459,7 @@ let test_resolve_tool_lane_for_kimi_cli_mixed_tools_keeps_public_runtime_subset 
   match
     Oas_worker_exec.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_kimi_cli_provider_cfg ())
-      ~tools
+      ~tools ()
   with
   | Ok (effective_tools, Some policy) ->
       Alcotest.(check int) "runtime lane strips inline tools" 0
@@ -1429,7 +1479,7 @@ let test_resolve_tool_lane_for_openai_public_tools_keeps_inline_tools () =
   match
     Oas_worker_exec.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_openai_compat_provider_cfg ())
-      ~tools
+      ~tools ()
   with
   | Ok (effective_tools, None) ->
       Alcotest.(check int) "inline lane keeps requested tools"
@@ -1443,7 +1493,7 @@ let test_resolve_tool_lane_for_codex_cli_internal_tools_rejects () =
   match
     Oas_worker_exec.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_codex_cli_provider_cfg ())
-      ~tools:[ make_named_noop_tool "keeper_board_get" ]
+      ~tools:[ make_named_noop_tool "keeper_board_get" ] ()
   with
   | Ok _ ->
       Alcotest.fail
@@ -1457,7 +1507,7 @@ let test_resolve_tool_lane_for_kimi_cli_internal_tools_rejects () =
   match
     Oas_worker_exec.resolve_tool_lane_for_oas_tools
       ~provider_cfg:(make_kimi_cli_provider_cfg ())
-      ~tools:[ make_named_noop_tool "keeper_board_get" ]
+      ~tools:[ make_named_noop_tool "keeper_board_get" ] ()
   with
   | Ok _ ->
       Alcotest.fail
@@ -2943,8 +2993,16 @@ let () =
         test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow;
       Alcotest.test_case "public MCP tools on codex_cli use runtime MCP lane" `Quick
         test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy;
+      Alcotest.test_case
+        "public MCP tools on codex_cli reject unsupported runtime MCP headers"
+        `Quick
+        test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_rejects_runtime_headers;
       Alcotest.test_case "public MCP tools on kimi_cli use runtime MCP lane" `Quick
         test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy;
+      Alcotest.test_case
+        "public MCP tools on kimi_cli keep runtime MCP headers"
+        `Quick
+        test_resolve_tool_lane_for_kimi_cli_public_tools_with_agent_name_keeps_runtime_headers;
       Alcotest.test_case "mixed tool surface on kimi_cli keeps public runtime subset" `Quick
         test_resolve_tool_lane_for_kimi_cli_mixed_tools_keeps_public_runtime_subset;
       Alcotest.test_case "public MCP tools on openai_compat stay inline" `Quick

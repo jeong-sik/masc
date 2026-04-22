@@ -771,7 +771,8 @@ let models_of_cascade_name ?sw ?net ?clock raw_name =
 
 let resolve_named_providers ?sw ?net ?clock ?provider_filter
     ?(require_tool_choice_support = false)
-    ?(require_tool_support = false) ~cascade_name () =
+    ?(require_tool_support = false)
+    ?runtime_mcp_policy ~cascade_name () =
   match lookup_active_profile ?sw ?net ?clock cascade_name with
   | Error _ as e -> e
   | Ok (_snapshot, normalized, profile) ->
@@ -787,50 +788,10 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
              ~label:normalized
       in
       let providers =
-        if not require_tool_choice_support && not require_tool_support then
-          providers
-        else
-          let provider_capabilities_of_config
-              (cfg : Llm_provider.Provider_config.t) =
-            let registry = Llm_provider.Provider_registry.default () in
-            (* Use the OAS registry's own naming convention, not masc's
-               adapter vocabulary (cn_claude_api / cn_kimi_api /
-               cn_codex_api, …). The registry is keyed on "claude",
-               "kimi", "claude_code", "gemini_cli", …, so calling
-               [Provider_adapter.string_of_provider_kind] — which returns
-               the masc canonical_name — missed every direct-API entry
-               and fell through to [default_capabilities]. Worse, for
-               CLI kinds the masc vocabulary collides with direct-API
-               names: masc maps [Claude_code] to "claude", but "claude"
-               is the registry's Anthropic entry, so the lookup silently
-               returned direct-API capabilities for CLI runs. *)
-            let provider_name =
-              Llm_provider.Provider_registry.provider_name_of_config cfg
-            in
-            let caps =
-              match Llm_provider.Provider_registry.find registry provider_name with
-              | Some entry -> entry.capabilities
-              | None -> Llm_provider.Capabilities.default_capabilities
-            in
-            match cfg.supports_tool_choice_override with
-            | Some supports_tool_choice -> { caps with supports_tool_choice }
-            | None -> caps
-          in
-          let supports_required_tool_use cfg =
-            let caps = provider_capabilities_of_config cfg in
-            let inline_tools = caps.supports_tools in
-            let inline_tool_choice = inline_tools && caps.supports_tool_choice in
-            let runtime_mcp =
-              caps.supports_runtime_mcp_tools
-              && caps.supports_runtime_tool_events
-            in
-            match require_tool_choice_support, require_tool_support with
-            | true, true -> inline_tool_choice || runtime_mcp
-            | true, false -> inline_tool_choice
-            | false, true -> inline_tools || runtime_mcp
-            | false, false -> true
-          in
-          List.filter supports_required_tool_use providers
+        Provider_tool_support.apply_required_tool_use_filter
+          ?runtime_mcp_policy
+          ~require_tool_choice_support ~require_tool_support
+          ~label:normalized providers
       in
       if providers = [] then
         Error

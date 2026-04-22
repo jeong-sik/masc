@@ -170,34 +170,31 @@ let provider_kinds providers =
     providers
 
 let provider_supports_required_tool_use (cfg : Llm_provider.Provider_config.t) =
-  let registry = Llm_provider.Provider_registry.default () in
-  let provider_name =
-    Llm_provider.Provider_registry.provider_name_of_config cfg
-  in
-  let caps =
-    match Llm_provider.Provider_registry.find registry provider_name with
-    | Some entry -> entry.capabilities
-    | None -> Llm_provider.Capabilities.default_capabilities
-  in
-  let caps =
-    match cfg.supports_tool_choice_override with
-    | Some supports_tool_choice -> { caps with supports_tool_choice }
-    | None -> caps
-  in
+  let caps = Oas_worker_exec.provider_caps_of_config cfg in
   caps.supports_tools && caps.supports_tool_choice
 
 let provider_supports_callable_tool_use (cfg : Llm_provider.Provider_config.t) =
-  let registry = Llm_provider.Provider_registry.default () in
-  let provider_name =
-    Llm_provider.Provider_registry.provider_name_of_config cfg
-  in
-  let caps =
-    match Llm_provider.Provider_registry.find registry provider_name with
-    | Some entry -> entry.capabilities
-    | None -> Llm_provider.Capabilities.default_capabilities
-  in
+  let caps = Oas_worker_exec.provider_caps_of_config cfg in
   caps.supports_tools
   || (caps.supports_runtime_mcp_tools && caps.supports_runtime_tool_events)
+
+let runtime_mcp_policy_with_headers =
+  {
+    Llm_provider.Llm_transport.empty_runtime_mcp_policy with
+    servers =
+      [
+        Llm_provider.Llm_transport.Http_server
+          {
+            name = "masc";
+            url = "http://127.0.0.1:8935/mcp";
+            headers = [ ("x-masc-agent-name", "keeper-sangsu-agent") ];
+          };
+      ];
+    allowed_server_names = [ "masc" ];
+    allowed_tool_names = [ "masc_status" ];
+    strict = true;
+    disable_builtin_tools = true;
+  }
 
 let test_valid_catalog_skips_live_probes_at_bootstrap () =
   with_temp_dir "cascade-catalog-runtime" @@ fun dir ->
@@ -532,6 +529,38 @@ let test_resolve_named_providers_tool_support_keeps_runtime_mcp_providers () =
   check bool "drops gemini_cli without runtime MCP lane" false
     (List.mem "gemini_cli" (provider_kinds providers))
 
+let test_resolve_named_providers_runtime_mcp_headers_drop_unsupported_providers () =
+  with_temp_dir "cascade-catalog-runtime-mcp-headers" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  ignore
+    (write_cascade_json config_dir
+       {|{
+  "keeper_unified_models": [
+    "custom:remote-model@http://127.0.0.1:18080/v1",
+    "claude_code:auto",
+    "codex_cli:auto",
+    "kimi_cli:auto",
+    "gemini_cli:auto",
+    "ollama:local-model"
+  ]
+}|});
+  let providers =
+    require_ok
+      (Cascade_catalog_runtime.resolve_named_providers
+         ~require_tool_support:true
+         ~runtime_mcp_policy:runtime_mcp_policy_with_headers
+         ~cascade_name:Keeper_config.default_cascade_name
+         ())
+  in
+  check bool "drops codex_cli when runtime MCP headers are required" false
+    (List.mem "codex_cli" (provider_kinds providers));
+  check bool "keeps kimi_cli with runtime MCP header support" true
+    (List.mem "kimi_cli" (provider_kinds providers));
+  check bool "keeps claude_code with runtime MCP header support" true
+    (List.mem "claude_code" (provider_kinds providers))
+
 let test_config_doctor_live_reports_catalog_validation () =
   with_temp_dir "cascade-doctor-live" @@ fun dir ->
   let base_path = Filename.concat dir "base" in
@@ -649,6 +678,10 @@ let () =
             "resolve_named_providers tool support keeps runtime MCP providers"
             `Quick
             test_resolve_named_providers_tool_support_keeps_runtime_mcp_providers;
+          test_case
+            "resolve_named_providers runtime MCP headers drop unsupported providers"
+            `Quick
+            test_resolve_named_providers_runtime_mcp_headers_drop_unsupported_providers;
           test_case
             "config doctor live reports catalog validation"
             `Quick

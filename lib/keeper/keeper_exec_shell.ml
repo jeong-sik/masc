@@ -589,7 +589,7 @@ let handle_keeper_bash
              ; "Ask a human operator to perform this destructive action."
              ]
            ~retryability:Exec_core.Operator_required
-           ~extra:[ "cmd", `String cmd_for_log ]
+           ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
            ~env_snapshot:env_snap
            ()))
     else if sandbox_profile = Docker && git_creds_enabled then (
@@ -662,6 +662,7 @@ let handle_keeper_bash
              ~reason:reason_str
              ~hint
              ~alternatives
+             ~extra:[ "execution_time_ms", `Int 0 ]
              ~env_snapshot:env_snap
              ())
       | Ok () ->
@@ -692,7 +693,7 @@ let handle_keeper_bash
                  ; "Use keeper_shell op=git op_cmd='branch -a' to list available branches."
                  ]
                ~retryability:Exec_core.Operator_required
-               ~extra:[ "cmd", `String cmd_for_log ]
+               ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
                ()))
         (* Write gate — preset layer *)
         else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
@@ -711,7 +712,7 @@ let handle_keeper_bash
                  ; "If you need write access, ask the operator to assign a Coding/Delivery/Full preset."
                  ]
                ~retryability:Exec_core.Operator_required
-               ~extra:[ "cmd", `String cmd_for_log ]
+               ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
                ~env_snapshot:env_snap
                ()))
         (* Write gate — playground containment layer (#6527 iter 3).
@@ -754,7 +755,7 @@ let handle_keeper_bash
                  ; "Use keeper_bash with a cwd pointing to your sandbox worktree."
                  ]
                ~retryability:Exec_core.Operator_required
-               ~extra:[ "cmd", `String cmd_for_log; "cwd", `String cwd ]
+               ~extra:[ "cmd", `String cmd_for_log; "cwd", `String cwd; "execution_time_ms", `Int 0 ]
                ()))
         else (
             (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
@@ -846,23 +847,19 @@ let handle_keeper_bash
                    else None
                  with
                  | None ->
-                   let t0 =
-                     if auto_bg_observe_enabled && not auto_bg_enabled
-                     then Unix.gettimeofday ()
-                     else 0.0
-                   in
+                   let t0 = Unix.gettimeofday () in
                    let st, out =
                      Process_eio.run_argv_with_status
                        ~cwd ~timeout_sec argv_merged
                    in
-                   (if auto_bg_observe_enabled && not auto_bg_enabled then begin
-                      let duration_ms =
-                        int_of_float ((Unix.gettimeofday () -. t0) *. 1000.)
-                      in
+                   let elapsed_ms =
+                     int_of_float ((Unix.gettimeofday () -. t0) *. 1000.)
+                   in
+                   (if auto_bg_observe_enabled then begin
                       let budget_ms =
                         Masc_exec.Exec_run.default_budget_ms ()
                       in
-                      let promoted_candidate = duration_ms >= budget_ms in
+                      let promoted_candidate = elapsed_ms >= budget_ms in
                       Legendary_counters.incr_auto_bg_observed
                         ~promoted_candidate;
                       if promoted_candidate then
@@ -871,7 +868,7 @@ let handle_keeper_bash
                            cmd_hash=%s duration_ms=%d budget_ms=%d"
                           meta.name
                           (Worker_dev_tools.cmd_hash_for_log cmd)
-                          duration_ms
+                          elapsed_ms
                           budget_ms
                     end);
                    Yojson.Safe.to_string
@@ -879,13 +876,17 @@ let handle_keeper_bash
                         ~base_path:root
                         ~keeper_name:meta.name
                         ~cmd
-                        ~extra:[ "cwd", `String cwd ]
+                        ~extra:[
+                          "cwd", `String cwd;
+                          "execution_time_ms", `Int elapsed_ms;
+                        ]
                         ~status:st
                         ~output:out
                         ~env_snapshot:env_snap
                         ())
                  | Some clock ->
                    let budget_ms = Masc_exec.Exec_run.default_budget_ms () in
+                   let t0_bg = Unix.gettimeofday () in
                    let outcome =
                      Masc_exec.Exec_run.run_with_auto_bg
                        ~clock
@@ -900,17 +901,26 @@ let handle_keeper_bash
                    in
                    (match outcome with
                     | Masc_exec.Exec_run.Completed r ->
+                      let elapsed_ms =
+                        int_of_float ((Unix.gettimeofday () -. t0_bg) *. 1000.)
+                      in
                       Yojson.Safe.to_string
                         (Exec_core.process_result_json
                            ~base_path:root
                            ~keeper_name:meta.name
                            ~cmd
-                           ~extra:[ "cwd", `String cwd ]
+                           ~extra:[
+                             "cwd", `String cwd;
+                             "execution_time_ms", `Int elapsed_ms;
+                           ]
                            ~status:r.status
                            ~output:r.stdout
                            ~env_snapshot:env_snap
                            ())
                     | Masc_exec.Exec_run.Promoted p ->
+                      let elapsed_ms =
+                        int_of_float ((Unix.gettimeofday () -. t0_bg) *. 1000.)
+                      in
                       Log.Keeper.info
                         "BG_PROMOTE: keeper=%s task_id=%s budget_ms=%d cmd=%s"
                         meta.name
@@ -931,6 +941,7 @@ let handle_keeper_bash
                             ( "bytes_dropped",
                               `Int p.bytes_dropped_stdout );
                             ("budget_ms", `Int budget_ms);
+                            ("execution_time_ms", `Int elapsed_ms);
                             ( "hint",
                               `String
                                 (Printf.sprintf

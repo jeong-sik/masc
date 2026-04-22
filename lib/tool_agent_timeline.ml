@@ -320,24 +320,24 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
          with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> "unknown"
        in
        let input_tokens =
-         try e.payload |> member "input_tokens" |> to_int
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0
+         try Some (e.payload |> member "input_tokens" |> to_int)
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None
        in
        let output_tokens =
-         try e.payload |> member "output_tokens" |> to_int
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0
+         try Some (e.payload |> member "output_tokens" |> to_int)
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None
        in
        let cache_creation_tokens =
-         try e.payload |> member "cache_creation_tokens" |> to_int
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0
+         try Some (e.payload |> member "cache_creation_tokens" |> to_int)
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None
        in
        let cache_read_tokens =
-         try e.payload |> member "cache_read_tokens" |> to_int
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0
+         try Some (e.payload |> member "cache_read_tokens" |> to_int)
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None
        in
        let cost_usd =
-         try e.payload |> member "cost_usd" |> to_float
-         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0.0
+         try Some (e.payload |> member "cost_usd" |> to_float)
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None
        in
        let latency_ms =
          try e.payload |> member "latency_ms" |> to_int
@@ -386,11 +386,11 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
              `Assoc
                ([
                  ("keeper_name", `String keeper_name);
-                 ("input_tokens", `Int input_tokens);
-                 ("output_tokens", `Int output_tokens);
-                 ("cache_creation_tokens", `Int cache_creation_tokens);
-                 ("cache_read_tokens", `Int cache_read_tokens);
-                 ("cost_usd", `Float cost_usd);
+                 ("input_tokens", Json_util.int_opt_to_json input_tokens);
+                 ("output_tokens", Json_util.int_opt_to_json output_tokens);
+                 ("cache_creation_tokens", Json_util.int_opt_to_json cache_creation_tokens);
+                 ("cache_read_tokens", Json_util.int_opt_to_json cache_read_tokens);
+                 ("cost_usd", Json_util.float_opt_to_json cost_usd);
                  ("latency_ms", `Int latency_ms);
                  ("model_used", `String model_used);
                  ("work_kind", `String work_kind);

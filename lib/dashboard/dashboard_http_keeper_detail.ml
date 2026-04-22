@@ -141,11 +141,11 @@ let compute_metrics_window
           | None -> Safe_ops.json_int_opt "to_generation" handoff_obj
         in
         let usage_obj = j |> member "usage" in
-        let input_tokens = Safe_ops.json_int ~default:0 "input_tokens" usage_obj in
-        let output_tokens = Safe_ops.json_int ~default:0 "output_tokens" usage_obj in
-        let total_tokens = Safe_ops.json_int ~default:0 "total_tokens" usage_obj in
+        let input_tokens = Safe_ops.json_int_opt "input_tokens" usage_obj in
+        let output_tokens = Safe_ops.json_int_opt "output_tokens" usage_obj in
+        let total_tokens = Safe_ops.json_int_opt "total_tokens" usage_obj in
         let latency_ms = Safe_ops.json_int ~default:0 "latency_ms" j in
-        let cost_usd = Safe_ops.json_float ~default:0.0 "cost_usd" j in
+        let cost_usd = Safe_ops.json_float_opt "cost_usd" j in
         let model_used = Safe_ops.json_string ~default:"" "model_used" j in
         let message_count = Safe_ops.json_int ~default:0 "message_count" j in
         let model_used_norm = normalize_model_name model_used in
@@ -353,9 +353,9 @@ let compute_metrics_window
                   gs
             in
             gen_stats.turns <- gen_stats.turns + 1;
-            gen_stats.input_tokens <- gen_stats.input_tokens + input_tokens;
-            gen_stats.output_tokens <- gen_stats.output_tokens + output_tokens;
-            gen_stats.total_tokens <- gen_stats.total_tokens + total_tokens;
+            gen_stats.input_tokens <- gen_stats.input_tokens + Option.value ~default:0 input_tokens;
+            gen_stats.output_tokens <- gen_stats.output_tokens + Option.value ~default:0 output_tokens;
+            gen_stats.total_tokens <- gen_stats.total_tokens + Option.value ~default:0 total_tokens;
             if handoff_performed then gen_stats.handoffs <- gen_stats.handoffs + 1;
             if compacted then gen_stats.compactions <- gen_stats.compactions + 1;
             if memory_compaction_performed_now then begin
@@ -406,11 +406,11 @@ let compute_metrics_window
               ("handoff_new_trace_id", Json_util.string_opt_to_json (match handoff_new_trace_id with Some s when s <> "" -> Some s | _ -> None));
               ("handoff_new_generation", Json_util.int_opt_to_json handoff_new_generation);
               ("generation", `Int gen);
-              ("input_tokens", `Int input_tokens);
-              ("output_tokens", `Int output_tokens);
-              ("total_tokens", `Int total_tokens);
+              ("input_tokens", Json_util.int_opt_to_json input_tokens);
+              ("output_tokens", Json_util.int_opt_to_json output_tokens);
+              ("total_tokens", Json_util.int_opt_to_json total_tokens);
               ("latency_ms", `Int latency_ms);
-              ("cost_usd", `Float cost_usd);
+              ("cost_usd", Json_util.float_opt_to_json cost_usd);
               ("model_used", `String model_used);
               ("prompt_fingerprint", j |> member "prompt_fingerprint");
               ("prompt", j |> member "prompt");

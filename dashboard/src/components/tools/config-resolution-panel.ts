@@ -288,7 +288,7 @@ const KEEPER_RUNTIME_ROWS: Array<{
   label: string
   fmt: 'int' | 'float' | 'duration'
 }> = [
-  { key: 'bootstrap_max_active_keepers', label: 'max active keepers', fmt: 'int' },
+  { key: 'bootstrap_max_active_keepers', label: 'bootstrap max active keepers', fmt: 'int' },
   { key: 'reactive_max_turns_per_call', label: 'reactive max turns/call', fmt: 'int' },
   { key: 'autonomous_max_turns_per_call', label: 'autonomous max turns/call', fmt: 'int' },
   { key: 'reactive_max_idle_turns', label: 'reactive max idle turns', fmt: 'int' },
@@ -326,13 +326,16 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
   return html`
     <div class="mt-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-4 py-4">
       <div class="mb-3 flex flex-wrap items-center gap-2">
-        <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">keeper runtime</div>
+        <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">keeper runtime limits</div>
         ${tomlCount > 0 ? html`
           <${StatusChip} tone=${sourceTone('toml')}>${tomlCount} TOML<//>
         ` : null}
         ${envCount > 0 ? html`
           <${StatusChip} tone=${sourceTone('env')}>${envCount} env<//>
         ` : null}
+      </div>
+      <div class="mb-3 text-xs text-[var(--text-muted)]">
+        Per-keeper runtime caps and timeouts. These values are not the live keeper count.
       </div>
       <div class="grid gap-2 md:grid-cols-2">
         ${KEEPER_RUNTIME_ROWS.map(row => {

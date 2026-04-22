@@ -112,6 +112,18 @@ describe('ConfigResolutionPanel', () => {
             started_at: '2026-03-27T00:00:00Z',
             uptime_seconds: 42,
           },
+          keeper_runtime: {
+            bootstrap_max_active_keepers: { value: 9, source: 'toml' },
+            reactive_max_turns_per_call: { value: 15, source: 'toml' },
+            autonomous_max_turns_per_call: { value: 6, source: 'derived' },
+            reactive_max_idle_turns: { value: 15, source: 'toml' },
+            autonomous_max_idle_turns: { value: 3, source: 'derived' },
+            turn_timeout_sec: { value: 90, source: 'toml' },
+            admission_wait_timeout_sec: { value: 45, source: 'derived' },
+            oas_timeout_override_sec: { value: 120, source: 'env' },
+            oas_timeout_per_1k: { value: 7.5, source: 'derived' },
+            oas_timeout_per_turn: { value: 30, source: 'derived' },
+          },
         }}
       />`,
       container,
@@ -139,6 +151,9 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('ollama warm / kv probe')
     expect(container.textContent).toContain('kv likely reused')
     expect(container.textContent).toContain('qwen3.5:35b-a3b-coding-nvfp4')
+    expect(container.textContent).toContain('keeper runtime limits')
+    expect(container.textContent).toContain('Per-keeper runtime caps and timeouts. These values are not the live keeper count.')
+    expect(container.textContent).toContain('bootstrap max active keepers')
   })
   it('keeps the full path on hover title and hides duplicate source badges', () => {
     render(

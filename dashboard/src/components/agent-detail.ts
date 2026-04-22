@@ -45,6 +45,10 @@ import { KeeperPhaseBadge } from './keeper-phase-indicator'
 import { trimText } from '../lib/truncate'
 import type { Task } from '../types'
 import { DialogOverlay } from './common/dialog'
+import { requestConfirm } from './common/confirm-dialog'
+import { showToast } from './common/toast'
+import { invalidateDashboardCache, refreshDashboard } from '../store'
+import { purgeAgent } from '../api/actions'
 
 // Re-export public API for external consumers
 export { selectedAgentName, openAgentDetail, closeAgentDetail } from './agent-detail-state'
@@ -173,6 +177,7 @@ export function AgentDetailOverlay() {
   const ownedTasks = assignedTasks(agentName)
   const lines = namespaceActivity.value
   const taskQuery = useSignal('')
+  const purgePending = useSignal(false)
   const historyRows = taskHistories.value
   const visibleOwnedTasks = useMemo(
     () => filterOwnedTasks(ownedTasks, taskQuery.value),
@@ -204,6 +209,36 @@ export function AgentDetailOverlay() {
   // Skip secondaryLabel when keeperIdentity already shows the agent runtime name
   const showSecondaryLabel = secondaryLabel && !keeperIdentity
   const titleId = `agent-detail-title-${agentName}`
+
+  const handlePurge = () => {
+    void (async () => {
+      const targetLabel = keeper ? `${displayName} 키퍼` : displayName
+      const confirmed = await requestConfirm({
+        title: '에이전트 완전 삭제',
+        message: `${targetLabel}를 완전 삭제합니다.\n런타임 상태, 인증, metrics가 제거되고 keeper면 config/keepers TOML도 함께 삭제됩니다.`,
+        tone: 'danger',
+        confirmText: '완전 삭제',
+      })
+      if (!confirmed) return
+      purgePending.value = true
+      try {
+        const result = await purgeAgent(agentName)
+        closeAgentDetail()
+        invalidateDashboardCache()
+        await refreshDashboard({ force: true })
+        showToast(
+          result.target_kind === 'keeper'
+            ? `${displayName} 완전 삭제됨`
+            : `${agentName} 삭제됨`,
+          'success',
+        )
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : '에이전트 삭제 실패', 'error')
+      } finally {
+        purgePending.value = false
+      }
+    })()
+  }
 
   return html`
     <${DialogOverlay}
@@ -271,6 +306,15 @@ export function AgentDetailOverlay() {
               disabled=${loading.value}
             >
               ${loading.value ? '새로고침 중...' : '새로고침'}
+            <//>
+            <${ActionButton}
+              variant="danger"
+              size="lg"
+              class="px-4 py-2 text-sm rounded shadow-sm"
+              onClick=${handlePurge}
+              disabled=${purgePending.value}
+            >
+              ${purgePending.value ? '삭제 중...' : '완전 삭제'}
             <//>
             <button
               ref=${closeButtonRef}

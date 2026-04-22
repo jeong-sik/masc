@@ -20,11 +20,11 @@ type t = {
 
 let backend_phase_of_string s =
   match String.lowercase_ascii s with
-  | "postgresql" | "pg" -> Server_state_product.Backend.PostgreSQL
-  | "filesystem" | "fs" -> Server_state_product.Backend.Filesystem
-  | "degraded" -> Server_state_product.Backend.Degraded
-  | "uninitialized" | "unknown" -> Server_state_product.Backend.Uninitialized
-  | _ -> Server_state_product.Backend.Uninitialized
+  | "postgresql" | "pg" -> Some Server_state_product.Backend.PostgreSQL
+  | "filesystem" | "fs" -> Some Server_state_product.Backend.Filesystem
+  | "degraded" -> Some Server_state_product.Backend.Degraded
+  | "uninitialized" | "unknown" -> Some Server_state_product.Backend.Uninitialized
+  | _ -> None
 
 let backend_phase_to_string = function
   | Server_state_product.Backend.PostgreSQL -> "postgresql"
@@ -41,7 +41,11 @@ let to_product (current : t) : Server_state_product.product =
     | Blocking -> Lifecycle.Booting
     | Ready | Lazy | Degraded -> Lifecycle.Serving
   in
-  let backend = backend_phase_of_string current.backend_mode in
+  let backend =
+    match backend_phase_of_string current.backend_mode with
+    | Some b -> b
+    | None -> Server_state_product.Backend.Uninitialized
+  in
   let lazy_tasks =
     match current.pending_lazy_tasks with
     | [] -> Lazy_task_queue.Complete

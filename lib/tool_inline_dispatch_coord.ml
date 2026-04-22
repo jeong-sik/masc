@@ -94,7 +94,10 @@ let handle_start (ctx : context) : tool_result option =
               incr idx
             done;
             let start = !idx + String.length prefix in
-            let end_idx = try String.index_from add_result start ':' with Not_found -> String.length add_result in
+            let end_idx = match String.index_from_opt add_result start ':' with
+              | Some idx -> idx
+              | None -> String.length add_result
+            in
             String.sub add_result start (end_idx - start)
           with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
         in
@@ -141,9 +144,12 @@ let handle_join (ctx : context) : tool_result option =
         done;
         !idx + String.length prefix
       in
-      let end_idx = String.index_from result start_idx '\n' in
+      let end_idx = match String.index_from_opt result start_idx '\n' with
+        | Some idx -> idx
+        | None -> String.length result
+      in
       String.sub result start_idx (end_idx - start_idx)
-    with Not_found | Invalid_argument _ -> agent_name
+    with Invalid_argument _ -> agent_name
   in
   let _ = Session.register registry ~agent_name:nickname in
   ctx.write_mcp_session_agent nickname;

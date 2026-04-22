@@ -310,9 +310,12 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         done;
         !idx + String.length prefix
       in
-      let end_idx = String.index_from result start_idx '\n' in
+      let end_idx = match String.index_from_opt result start_idx '\n' with
+        | Some idx -> idx
+        | None -> String.length result
+      in
       String.sub result start_idx (end_idx - start_idx)
-    with Not_found | Invalid_argument _ -> fallback
+    with Invalid_argument _ -> fallback
   in
 
   let write_term_session_agent nickname =

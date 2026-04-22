@@ -394,6 +394,39 @@ let sdk_error_of_keeper_internal_error err =
     (keeper_internal_error_prefix
      ^ Yojson.Safe.to_string (keeper_internal_error_to_json err))
 
+let sdk_error_kind = function
+  | Oas.Error.Api _ -> "api"
+  | Oas.Error.Agent _ -> "agent"
+  | Oas.Error.Mcp _ -> "mcp"
+  | Oas.Error.Config _ -> "config"
+  | Oas.Error.Serialization _ -> "serialization"
+  | Oas.Error.Io _ -> "io"
+  | Oas.Error.Orchestration _ -> "orchestration"
+  | Oas.Error.A2a _ -> "a2a"
+  | Oas.Error.Internal _ -> "internal"
+
+let terminal_reason_code_of_sdk_error = function
+  | Oas.Error.Agent
+      (Oas.Error.CompletionContractViolation { contract; _ }) ->
+    Printf.sprintf
+      "completion_contract_violation:%s"
+      (Oas.Completion_contract_id.to_string contract)
+  | Oas.Error.Api _ -> "api_error"
+  | Oas.Error.Agent _ -> "agent_error"
+  | Oas.Error.Mcp _ -> "mcp_error"
+  | Oas.Error.Config _ -> "config_error"
+  | Oas.Error.Serialization _ -> "serialization_error"
+  | Oas.Error.Io _ -> "io_error"
+  | Oas.Error.Orchestration _ -> "orchestration_error"
+  | Oas.Error.A2a _ -> "a2a_error"
+  | Oas.Error.Internal _ -> "internal_error"
+
+let cascade_outcome_of_observation = function
+  | Some (obs : Oas_worker.cascade_observation) when obs.fallback_applied ->
+    "passed_to_next_model"
+  | Some _ -> "completed"
+  | None -> "not_observed"
+
 let tool_required_affordances =
   [ "board_post_or_comment"
   ; "message_sweep"
@@ -513,6 +546,7 @@ let run_turn
   Masc_runtime_events.emit_turn_start ();
   Fun.protect ~finally:Masc_runtime_events.emit_turn_end
   @@ fun () ->
+  let receipt_started_at = Types.now_iso () in
   (* 0. Resolve inference parameters via Cascade_inference *)
   let temperature =
     match temperature with
@@ -1193,6 +1227,20 @@ let run_turn
         approval_mode_derived;
       }
   in
+  let requested_tool_names_ref : string list ref = ref [] in
+  let reported_tool_names_ref : string list ref = ref [] in
+  let observed_tool_names_ref : string list ref = ref [] in
+  let canonical_tool_names_ref : string list ref = ref [] in
+  let unexpected_tool_names_ref : string list ref = ref [] in
+  let actual_keeper_tool_names_ref : string list ref = ref [] in
+  let receipt_turn_count_ref : int option ref = ref None in
+  let receipt_model_used_ref : string option ref = ref None in
+  let receipt_stop_reason_ref : string option ref = ref None in
+  let receipt_cascade_observation_ref : Oas_worker.cascade_observation option ref =
+    ref None
+  in
+  let receipt_response_text_present_ref = ref false in
+  let receipt_tool_contract_result_ref = ref "unknown" in
   let tool_calls_ref : tool_call_detail list ref = ref [] in
   let validate_allow_list ~turn raw =
     let raw = Tool_portal.filter_visible_tool_names portal_ctx raw in
@@ -1866,6 +1914,7 @@ let run_turn
               if turn_completion_contract = Keeper_tool_disclosure.Require_tool_use
               then required_tool_use_seen_ref := true;
               let lane = computed_surface.lane in
+              requested_tool_names_ref := all_allowed;
               tool_surface_ref :=
                 {
                   turn_lane = lane;
@@ -2111,7 +2160,8 @@ let run_turn
             "[wake_payload] telemetry failed keeper=%s: %s"
             meta.name (Printexc.to_string exn)
     in
-    (match
+    let turn_result =
+      match
        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
          Oas_worker.run_named
            ~cascade_name
@@ -2186,6 +2236,11 @@ let run_turn
           flush_incremental call since AfterTurn already fired. *)
        let text = Oas.Types.text_of_content result.response.content in
        let model = result.response.model in
+       receipt_turn_count_ref := Some result.turns;
+       receipt_model_used_ref := Some model;
+       receipt_stop_reason_ref :=
+         Some (Keeper_execution_receipt.stop_reason_to_string result.stop_reason);
+       receipt_cascade_observation_ref := result.cascade_observation;
        (* Extract and persist thinking blocks to trajectory JSONL.
            NOTE: turn = acc.turn stays at 0 in the keeper path because
            Trajectory.increment_turn is never called here — the keeper
@@ -2253,12 +2308,14 @@ let run_turn
              | _ -> None)
            result.response.content
        in
+       reported_tool_names_ref := reported_tool_names;
        let tool_usage_after =
          Keeper_tool_disclosure.keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
        in
        let observed_tool_names =
          Keeper_tool_disclosure.tool_usage_delta ~before:tool_usage_before ~after:tool_usage_after
        in
+       observed_tool_names_ref := observed_tool_names;
        let tool_names =
          Keeper_tool_disclosure.merge_reported_and_observed_tool_names ~reported_tool_names ~observed_tool_names
        in
@@ -2275,11 +2332,13 @@ let run_turn
        let canonical_tool_names =
          Keeper_tool_alias.canonicalize_observed tool_names
        in
+       canonical_tool_names_ref := canonical_tool_names;
        let unexpected_tool_names =
          Keeper_tool_disclosure.unexpected_tool_names
            ~allowed_tool_names:all_tool_names
            ~tool_names:canonical_tool_names
        in
+       unexpected_tool_names_ref := unexpected_tool_names;
        (* Partial tolerance (#8471): when a turn mixes valid tool calls
           with unexpected ones (LLM hallucinating Claude Code built-ins
           like Bash/Read/Skill outside the keeper surface), do not nuke
@@ -2301,6 +2360,7 @@ let run_turn
              "keeper turn reported unexpected tool names outside keeper surface: %s"
              (String.concat ", " unexpected_tool_names)
          in
+         receipt_tool_contract_result_ref := "violated";
          Log.Keeper.error "keeper:%s %s" meta.name reason;
          Error (Oas.Error.Internal reason)
        else (
@@ -2314,6 +2374,7 @@ let run_turn
            |> Keeper_tool_alias.canonicalize_observed
            |> List.filter (fun tool_name -> List.mem tool_name all_tool_names)
          in
+         actual_keeper_tool_names_ref := actual_keeper_tool_names;
          let usage = Keeper_exec_context.usage_of_response result.response in
          let ctx_composition =
            build_ctx_composition_metrics
@@ -2339,8 +2400,11 @@ let run_turn
                ~contract:effective_completion_contract
                ~tool_present:!keeper_surface_tool_used_ref
            with
-           | Ok () -> Ok text
+           | Ok () ->
+             receipt_tool_contract_result_ref := "satisfied";
+             Ok text
            | Error reason ->
+             receipt_tool_contract_result_ref := "violated";
              let contract_str =
                match effective_completion_contract with
                | Keeper_tool_disclosure.Allow_text_or_tool -> "Allow_text_or_tool"
@@ -2401,6 +2465,7 @@ let run_turn
              | None ->
                  Keeper_text_processing.user_visible_reply_text raw_response_text
            in
+           receipt_response_text_present_ref := true;
            let assistant_msg =
              Agent_sdk.Types.make_message
                ~role:Agent_sdk.Types.Assistant
@@ -2702,5 +2767,100 @@ let run_turn
              with
              | Error e -> Error (Oas.Error.Internal e)
              | Ok response_text -> finalize_response_text response_text))
-    )
+    in
+    let receipt_ended_at = Types.now_iso () in
+    let error_kind, error_message =
+      match turn_result with
+      | Ok _ -> None, None
+      | Error err -> Some (sdk_error_kind err), Some (Oas.Error.to_string err)
+    in
+    let tool_contract_result =
+      match turn_result with
+      | Error (Oas.Error.Agent (Oas.Error.CompletionContractViolation _)) ->
+        "violated"
+      | _ ->
+        !receipt_tool_contract_result_ref
+    in
+    let terminal_reason_code =
+      match turn_result with
+      | Ok _ ->
+        Option.value
+          ~default:"completed"
+          !receipt_stop_reason_ref
+      | Error err ->
+        terminal_reason_code_of_sdk_error err
+    in
+    let cascade_observation = !receipt_cascade_observation_ref in
+    let receipt =
+      {
+        Keeper_execution_receipt.keeper_name = meta.name;
+        agent_name = meta.agent_name;
+        trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id;
+        generation;
+        turn_count = !receipt_turn_count_ref;
+        current_task_id =
+          Option.map Keeper_id.Task_id.to_string meta.current_task_id;
+        goal_ids = meta.active_goal_ids;
+        outcome =
+          (match turn_result with
+           | Ok _ -> "ok"
+           | Error _ -> "error");
+        terminal_reason_code;
+        response_text_present = !receipt_response_text_present_ref;
+        model_used = !receipt_model_used_ref;
+        requested_tools = !requested_tool_names_ref;
+        reported_tools = !reported_tool_names_ref;
+        observed_tools = !observed_tool_names_ref;
+        canonical_tools = !canonical_tool_names_ref;
+        unexpected_tools = !unexpected_tool_names_ref;
+        tools_used = !actual_keeper_tool_names_ref;
+        tool_contract_result;
+        tool_surface =
+          {
+            turn_lane = (!tool_surface_ref).turn_lane;
+            visible_tool_count = (!tool_surface_ref).visible_tool_count;
+            tool_gate_enabled = (!tool_surface_ref).tool_gate_enabled;
+            tool_surface_fallback_used =
+              (!tool_surface_ref).tool_surface_fallback_used;
+          };
+        sandbox_configured_kind =
+          Keeper_types.sandbox_profile_to_string meta.sandbox_profile;
+        sandbox_effective_kind =
+          Keeper_execution_receipt.effective_sandbox_kind_of_meta meta;
+        execution_scope =
+          Keeper_execution_scope.to_string meta.execution_scope;
+        sandbox_root = Some config.base_path;
+        network_mode = Keeper_types.network_mode_to_string meta.network_mode;
+        approval_profile = (!tool_surface_ref).approval_mode_effective;
+        approval_profile_derived = (!tool_surface_ref).approval_mode_derived;
+        cascade_name;
+        cascade_selected_model =
+          Option.bind cascade_observation (fun obs -> obs.selected_model);
+        cascade_attempt_count =
+          (match cascade_observation with
+           | Some obs -> List.length obs.attempts
+           | None -> 0);
+        cascade_fallback_applied =
+          (match cascade_observation with
+           | Some obs -> obs.fallback_applied
+           | None -> false);
+        cascade_outcome =
+          cascade_outcome_of_observation cascade_observation;
+        stop_reason = !receipt_stop_reason_ref;
+        error_kind;
+        error_message;
+        started_at = receipt_started_at;
+        ended_at = receipt_ended_at;
+      }
+    in
+    (try
+       Keeper_execution_receipt.append config receipt
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Log.Keeper.warn
+         "keeper:%s execution_receipt append failed: %s"
+         meta.name
+         (Printexc.to_string exn));
+    turn_result
 ;;

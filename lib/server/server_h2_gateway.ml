@@ -561,6 +561,14 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           let json = dashboard_execution_http_json ~state ~sw ~clock httpun_request in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, "/api/v1/dashboard/execution-trust" ->
+          let state = get_server_state () in
+          let json =
+            dashboard_execution_trust_http_json ~state ~sw ~clock
+              httpun_request
+          in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
       | `GET, "/api/v1/dashboard/board" ->
           let json = dashboard_memory_http_json httpun_request in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors

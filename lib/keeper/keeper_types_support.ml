@@ -48,6 +48,25 @@ let keeper_metrics_store config name : Dated_jsonl.t =
   in
   Eio_guard.with_mutex metrics_store_mu lookup
 
+let execution_receipt_store_cache : (string, Dated_jsonl.t) Hashtbl.t =
+  Hashtbl.create 8
+
+let execution_receipt_store_mu = Eio.Mutex.create ()
+
+let keeper_execution_receipt_store config name : Dated_jsonl.t =
+  let dir =
+    Filename.concat (keeper_dir_ config) (name ^ "/execution-receipts")
+  in
+  let lookup () =
+    match Hashtbl.find_opt execution_receipt_store_cache dir with
+    | Some store -> store
+    | None ->
+      let store = Dated_jsonl.create ~base_dir:dir () in
+      Hashtbl.replace execution_receipt_store_cache dir store;
+      store
+  in
+  Eio_guard.with_mutex execution_receipt_store_mu lookup
+
 let keeper_memory_bank_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".memory.jsonl")
 

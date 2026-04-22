@@ -538,6 +538,80 @@ let seed_auth_and_keeper ~base_path ~keeper_name =
   config, admin_token
 ;;
 
+let append_execution_receipt config ~keeper_name =
+  let meta =
+    match Masc_mcp.Keeper_types.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None -> fail ("keeper meta missing for receipt: " ^ keeper_name)
+    | Error err -> fail ("read_meta failed for receipt: " ^ err)
+  in
+  let started_at = Types.now_iso () in
+  let ended_at = Types.now_iso () in
+  let receipt : Masc_mcp.Keeper_execution_receipt.t =
+    {
+      keeper_name;
+      agent_name = meta.agent_name;
+      trace_id = Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id;
+      generation = meta.runtime.generation;
+      turn_count = Some 2;
+      current_task_id = None;
+      goal_ids = meta.active_goal_ids;
+      outcome = "ok";
+      terminal_reason_code = "completed";
+      response_text_present = true;
+      model_used = Some "custom:mock";
+      requested_tools = [ "keeper_task_claim"; "keeper_fs_read" ];
+      reported_tools = [ "Read" ];
+      observed_tools = [ "keeper_fs_read" ];
+      canonical_tools = [ "keeper_fs_read" ];
+      unexpected_tools = [ "WebSearch" ];
+      tools_used = [ "keeper_fs_read" ];
+      tool_contract_result = "satisfied";
+      tool_surface =
+        {
+          turn_lane = "tool";
+          visible_tool_count = 2;
+          tool_gate_enabled = true;
+          tool_surface_fallback_used = false;
+        };
+      sandbox_configured_kind =
+        Masc_mcp.Keeper_types.sandbox_profile_to_string meta.sandbox_profile;
+      sandbox_effective_kind =
+        Masc_mcp.Keeper_execution_receipt.effective_sandbox_kind_of_meta meta;
+      execution_scope =
+        Masc_mcp.Keeper_execution_scope.to_string meta.execution_scope;
+      sandbox_root = Some config.base_path;
+      network_mode =
+        Masc_mcp.Keeper_types.network_mode_to_string meta.network_mode;
+      approval_profile = Some "trusted_local";
+      approval_profile_derived = false;
+      cascade_name = meta.cascade_name;
+      cascade_selected_model = Some "custom:mock";
+      cascade_attempt_count = 2;
+      cascade_fallback_applied = true;
+      cascade_outcome = "passed_to_next_model";
+      stop_reason = Some "completed";
+      error_kind = None;
+      error_message = None;
+      started_at;
+      ended_at;
+    }
+  in
+  let tm = Unix.gmtime (Unix.gettimeofday ()) in
+  let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
+  let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
+  let base_dir =
+    Filename.concat
+      (Masc_mcp.Keeper_types.keeper_dir config)
+      (keeper_name ^ "/execution-receipts")
+  in
+  let month_dir = Filename.concat base_dir month in
+  Fs_compat.mkdir_p month_dir;
+  Fs_compat.append_jsonl
+    (Filename.concat month_dir day)
+    (Masc_mcp.Keeper_execution_receipt.to_json receipt)
+;;
+
 let with_seeded_server ?(env_overrides = []) f =
   let run_with_env_overrides env_overrides =
     let exe = find_main_eio_exe () in
@@ -862,6 +936,29 @@ let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
     (contains_substr "invalid in active cascade.json" assign_invalid_result.body)
 ;;
 
+let test_execution_trust_route_surfaces_latest_receipt () =
+  with_seeded_server
+  @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
+  append_execution_receipt config ~keeper_name;
+  let result =
+    run_curl_get ~port ~path:"/api/v1/dashboard/execution-trust" ()
+  in
+  require_status "execution trust GET returns 200" 200 result;
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string result.body in
+  let row =
+    json |> member "keepers" |> to_list
+    |> List.find (fun keeper -> keeper |> member "name" |> to_string = keeper_name)
+  in
+  check string "route surfaces trust outcome" "ok"
+    (row |> member "trust" |> member "last_outcome" |> to_string);
+  check string "route surfaces trust sandbox kind" "worktree"
+    (row |> member "trust" |> member "sandbox" |> member "effective_kind"
+     |> to_string);
+  check string "route surfaces trust contract result" "satisfied"
+    (row |> member "trust" |> member "tool_contract_result" |> to_string)
+;;
+
 let test_merge_keeper_trace_lines_includes_internal_history () =
   let base_path = Filename.temp_file "dashboard-keeper-trajectory-" "" in
   (try Sys.remove base_path with
@@ -956,6 +1053,10 @@ let () =
             "keeper cascade routes filter invalid catalog entries"
             `Slow
             test_keeper_cascade_routes_filter_invalid_catalog_entries
+        ; test_case
+            "execution trust route surfaces latest receipt"
+            `Slow
+            test_execution_trust_route_surfaces_latest_receipt
         ; test_case
             "merge keeper trace lines includes internal history"
             `Quick

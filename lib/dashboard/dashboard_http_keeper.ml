@@ -232,6 +232,111 @@ let tokens_per_sec_json ~tokens ~latency_ms =
   if tokens <= 0 || latency_ms <= 0 then `Null
   else `Float ((float_of_int tokens *. 1000.0) /. float_of_int latency_ms)
 
+let json_string_list_member key json =
+  match Yojson.Safe.Util.member key json with
+  | `List items ->
+    items
+    |> List.filter_map (function
+         | `String value ->
+           let trimmed = String.trim value in
+           if trimmed = "" then None else Some trimmed
+         | _ -> None)
+  | _ -> []
+
+let keeper_trust_json ?(include_receipt = false)
+    (config : Coord.config) (meta : Keeper_types.keeper_meta) =
+  let latest_receipt = Keeper_execution_receipt.latest_json config meta.name in
+  let sandbox_json =
+    match latest_receipt with
+    | Some receipt -> Yojson.Safe.Util.member "sandbox" receipt
+    | None ->
+      `Assoc
+        [
+          ( "configured_kind",
+            `String
+              (Keeper_types.sandbox_profile_to_string meta.sandbox_profile) );
+          ( "effective_kind",
+            `String
+              (Keeper_execution_receipt.effective_sandbox_kind_of_meta meta)
+          );
+          ( "execution_scope",
+            `String
+              (Keeper_execution_scope.to_string meta.execution_scope) );
+          ("sandbox_root", `String config.base_path);
+          ("network_mode", `String (Keeper_types.network_mode_to_string meta.network_mode));
+        ]
+  in
+  let approval_json =
+    match latest_receipt with
+    | Some receipt -> Yojson.Safe.Util.member "approval" receipt
+    | None -> `Assoc [ ("profile", `Null); ("derived", `Bool false) ]
+  in
+  let cascade_json =
+    match latest_receipt with
+    | Some receipt -> Yojson.Safe.Util.member "cascade" receipt
+    | None ->
+      `Assoc
+        [
+          ("name", `String meta.cascade_name);
+          ("selected_model", `Null);
+          ("attempt_count", `Int 0);
+          ("fallback_applied", `Bool false);
+          ("outcome", `String "not_observed");
+        ]
+  in
+  let requested_tools =
+    match latest_receipt with
+    | Some receipt -> json_string_list_member "requested_tools" receipt
+    | None -> []
+  in
+  let tools_used =
+    match latest_receipt with
+    | Some receipt -> json_string_list_member "tools_used" receipt
+    | None -> []
+  in
+  let unexpected_tools =
+    match latest_receipt with
+    | Some receipt -> json_string_list_member "unexpected_tools" receipt
+    | None -> []
+  in
+  `Assoc
+    [
+      ( "last_outcome",
+        match latest_receipt with
+        | Some receipt -> Yojson.Safe.Util.member "outcome" receipt
+        | None -> `String "not_run" );
+      ( "terminal_reason_code",
+        match latest_receipt with
+        | Some receipt -> Yojson.Safe.Util.member "terminal_reason_code" receipt
+        | None -> `String "no_receipt" );
+      ( "tool_contract_result",
+        match latest_receipt with
+        | Some receipt -> Yojson.Safe.Util.member "tool_contract_result" receipt
+        | None -> `String "unknown" );
+      ("requested_tool_count", `Int (List.length requested_tools));
+      ("tools_used", `List (List.map (fun value -> `String value) tools_used));
+      ( "unexpected_tools",
+        `List (List.map (fun value -> `String value) unexpected_tools) );
+      ("sandbox", sandbox_json);
+      ("approval", approval_json);
+      ("cascade", cascade_json);
+      ( "last_receipt_at",
+        match latest_receipt with
+        | Some receipt -> Yojson.Safe.Util.member "ended_at" receipt
+        | None -> `Null );
+      ( "last_error",
+        match latest_receipt with
+        | Some receipt -> Yojson.Safe.Util.member "error" receipt
+        | None -> `Null );
+      ( "last_receipt",
+        if include_receipt then
+          match latest_receipt with
+          | Some receipt -> receipt
+          | None -> `Null
+        else
+          `Null );
+    ]
+
 let keeper_names (config : Coord.config) =
   Keeper_types.keeper_names config
 
@@ -642,6 +747,9 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
 	            let compact_ratio_gate = m.compaction.ratio_gate in
 	            let compact_message_gate = m.compaction.message_gate in
 	            let compact_token_gate = m.compaction.token_gate in
+              let trust_json =
+                keeper_trust_json ~include_receipt:(not compact) config m
+              in
               let recent_tool_names =
                 match metrics_window_summary with
                 | `Assoc fields -> (
@@ -759,6 +867,10 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ("koreanName", `String (let (_, k) = get_agent_identity m.name in k));
               ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
               ("generation", `Int m.runtime.generation);
+              ( "current_task_id",
+                Json_util.string_opt_to_json
+                  (Option.map Keeper_id.Task_id.to_string m.current_task_id) );
+              ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids));
               ("created_at", `String m.created_at);
               ("updated_at", `String m.updated_at);
               ("trace_history_count", `Int trace_history_count);
@@ -930,6 +1042,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ("k2k_mentions", k2k_mentions);
               ("last_handoff_event", match last_handoff_event with Some j -> j | None -> `Null);
               ("last_compaction_event", match last_compaction_event with Some j -> j | None -> `Null);
+              ("trust", trust_json);
               ("context", context);
               ("context_source", context_source);
               ("runtime_warning_ctx_ratio", `Float runtime_warning_ctx_ratio);
@@ -984,6 +1097,38 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
     ("recent_alerts", `List recent_alerts);
     ("alert_count", `Int (List.length recent_alerts));
   ]
+
+let execution_trust_dashboard_json (config : Coord.config) : Yojson.Safe.t =
+  let keepers =
+    match keepers_dashboard_json ~compact:true config with
+    | `Assoc fields -> (
+        match List.assoc_opt "keepers" fields with
+        | Some (`List rows) ->
+          rows
+          |> List.map (fun row ->
+                 `Assoc
+                   [
+                     ("name", Yojson.Safe.Util.member "name" row);
+                     ("agent_name", Yojson.Safe.Util.member "agent_name" row);
+                     ("phase", Yojson.Safe.Util.member "phase" row);
+                     ( "pipeline_stage",
+                       Yojson.Safe.Util.member "pipeline_stage" row );
+                     ("status", Yojson.Safe.Util.member "status" row);
+                     ("trace_id", Yojson.Safe.Util.member "trace_id" row);
+                     ("generation", Yojson.Safe.Util.member "generation" row);
+                     ("current_task_id", Yojson.Safe.Util.member "current_task_id" row);
+                     ("active_goal_ids", Yojson.Safe.Util.member "active_goal_ids" row);
+                     ("trust", Yojson.Safe.Util.member "trust" row);
+                   ])
+        | _ -> [])
+    | _ -> []
+  in
+  `Assoc
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ("keepers", `List keepers);
+      ("total", `Int (List.length keepers));
+    ]
 
 (** Build a structured config JSON for a single keeper, grouped by category.
     Returns (http_status, json). *)

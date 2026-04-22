@@ -514,6 +514,7 @@
    keeper_prompt
    keeper_coordination
    keeper_execution
+   keeper_execution_receipt
    keeper_event_bus
    masc_event_bus
    keeper_keepalive

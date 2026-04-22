@@ -417,6 +417,78 @@ let create_keeper env sw config name =
   | Some (false, err) -> fail err
   | None -> fail "missing masc_keeper_up dispatch"
 
+let append_execution_receipt config ~keeper_name =
+  let meta =
+    match Lib.Keeper_types.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None -> fail ("keeper meta missing for receipt: " ^ keeper_name)
+    | Error err -> fail ("read_meta failed for receipt: " ^ err)
+  in
+  let started_at = Types.now_iso () in
+  let ended_at = Types.now_iso () in
+  let receipt : Lib.Keeper_execution_receipt.t =
+    {
+      keeper_name;
+      agent_name = meta.agent_name;
+      trace_id = Lib.Keeper_id.Trace_id.to_string meta.runtime.trace_id;
+      generation = meta.runtime.generation;
+      turn_count = Some 3;
+      current_task_id = None;
+      goal_ids = meta.active_goal_ids;
+      outcome = "ok";
+      terminal_reason_code = "completed";
+      response_text_present = true;
+      model_used = Some "custom:mock";
+      requested_tools = [ "keeper_task_claim"; "keeper_fs_read" ];
+      reported_tools = [ "Read" ];
+      observed_tools = [ "keeper_fs_read" ];
+      canonical_tools = [ "keeper_fs_read" ];
+      unexpected_tools = [ "WebSearch" ];
+      tools_used = [ "keeper_fs_read" ];
+      tool_contract_result = "satisfied";
+      tool_surface =
+        {
+          turn_lane = "tool";
+          visible_tool_count = 2;
+          tool_gate_enabled = true;
+          tool_surface_fallback_used = false;
+        };
+      sandbox_configured_kind =
+        Lib.Keeper_types.sandbox_profile_to_string meta.sandbox_profile;
+      sandbox_effective_kind =
+        Lib.Keeper_execution_receipt.effective_sandbox_kind_of_meta meta;
+      execution_scope =
+        Lib.Keeper_execution_scope.to_string meta.execution_scope;
+      sandbox_root = Some config.base_path;
+      network_mode = Lib.Keeper_types.network_mode_to_string meta.network_mode;
+      approval_profile = Some "trusted_local";
+      approval_profile_derived = false;
+      cascade_name = meta.cascade_name;
+      cascade_selected_model = Some "custom:mock";
+      cascade_attempt_count = 2;
+      cascade_fallback_applied = true;
+      cascade_outcome = "passed_to_next_model";
+      stop_reason = Some "completed";
+      error_kind = None;
+      error_message = None;
+      started_at;
+      ended_at;
+    }
+  in
+  let tm = Unix.gmtime (Unix.gettimeofday ()) in
+  let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
+  let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
+  let base_dir =
+    Filename.concat
+      (Lib.Keeper_types.keeper_dir config)
+      (keeper_name ^ "/execution-receipts")
+  in
+  let month_dir = Filename.concat base_dir month in
+  Fs_compat.mkdir_p month_dir;
+  Fs_compat.append_jsonl
+    (Filename.concat month_dir day)
+    (Lib.Keeper_execution_receipt.to_json receipt)
+
 let test_dashboard_shell_splits_active_and_configured_keepers () =
   let dir = test_dir () in
   Fun.protect
@@ -541,6 +613,60 @@ let test_dashboard_execution_surfaces_keeper_diagnostic () =
               (row |> member "diagnostic" |> member "health_state" <> `Null);
             check bool "diagnostic next action surfaced" true
               (row |> member "diagnostic" |> member "next_action_path" <> `Null))))
+
+let test_execution_trust_surfaces_latest_receipt () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:None);
+      Eio.Switch.run (fun sw ->
+        Fun.protect
+          ~finally:(fun () ->
+            Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu")
+          (fun () ->
+            create_keeper env sw config "sangsu";
+            append_execution_receipt config ~keeper_name:"sangsu";
+            let compact_json =
+              Lib.Dashboard_http_keeper.keepers_dashboard_json
+                ~compact:true config
+            in
+            let trust_json =
+              Lib.Dashboard_http_keeper.execution_trust_dashboard_json config
+            in
+            let open Yojson.Safe.Util in
+            let compact_row =
+              compact_json |> member "keepers" |> to_list
+              |> List.find (fun keeper ->
+                     keeper |> member "name" |> to_string = "sangsu")
+            in
+            let trust_row =
+              trust_json |> member "keepers" |> to_list
+              |> List.find (fun keeper ->
+                     keeper |> member "name" |> to_string = "sangsu")
+            in
+            check string "compact keeper row exposes trust outcome" "ok"
+              (compact_row |> member "trust" |> member "last_outcome"
+             |> to_string);
+            check string "compact keeper row exposes trust contract result"
+              "satisfied"
+              (compact_row |> member "trust" |> member "tool_contract_result"
+             |> to_string);
+            check string "execution trust row preserves sandbox kind"
+              "worktree"
+              (trust_row |> member "trust" |> member "sandbox"
+             |> member "effective_kind" |> to_string);
+            check string "execution trust row preserves cascade outcome"
+              "passed_to_next_model"
+              (trust_row |> member "trust" |> member "cascade"
+             |> member "outcome" |> to_string);
+            check (list string) "execution trust row preserves unexpected tools"
+              [ "WebSearch" ]
+              (trust_row |> member "trust" |> member "unexpected_tools"
+             |> to_list |> List.map to_string))))
 
 let test_patch_keeper_dependent_caches_tolerates_null_agent () =
   let execution_json =
@@ -667,6 +793,8 @@ let () =
             test_dashboard_execution_fresh_join_not_marked_stale;
           Alcotest.test_case "execution surfaces keeper diagnostic" `Quick
             test_dashboard_execution_surfaces_keeper_diagnostic;
+          Alcotest.test_case "execution trust surfaces latest receipt" `Quick
+            test_execution_trust_surfaces_latest_receipt;
           Alcotest.test_case "lifecycle patch tolerates null agent" `Quick
             test_patch_keeper_dependent_caches_tolerates_null_agent;
           Alcotest.test_case "running keeper patch tolerates null agent" `Quick

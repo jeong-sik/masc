@@ -432,6 +432,31 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
         ~clock ~timeout_sec:120.0 (compute ?actor ?fixture ~light)
 
+let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
+  let compute () =
+    let started_at = Unix.gettimeofday () in
+    run_dashboard_compute ~mode:Offloaded_readonly ?net:state.Mcp_server.net
+      ?mono_clock:state.Mcp_server.mono_clock ~sw ~clock
+      ~config:state.Mcp_server.room_config
+      (fun ~config ~sw:_ ->
+        Dashboard_http_keeper.execution_trust_dashboard_json config
+        |> with_projection_diagnostics ~surface:"execution_trust" ~started_at
+             ~extra:[])
+  in
+  match state.Mcp_server.clock with
+  | Some clock ->
+    Dashboard_cache.get_or_compute_with_timeout
+      "execution-trust:default"
+      ~ttl:15.0
+      ~clock
+      ~timeout_sec:30.0
+      compute
+  | None ->
+    Dashboard_cache.get_or_compute
+      "execution-trust:default"
+      ~ttl:15.0
+      compute
+
 let transport_health_cache_diagnostics () =
   match cached_surface_json _transport_health_cache with
   | `Assoc fields -> (

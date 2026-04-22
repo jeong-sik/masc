@@ -32,8 +32,27 @@ val codex_cli_auto_models : unit -> string list
     control unless an operator opts into model rotation. *)
 val claude_code_auto_models : unit -> string list
 
+type model_resolution_provenance =
+  | Explicit_input
+  | Alias of string
+  | Env_default of string
+  | Hardcoded_default
+  | Discovery
+  | Unresolved_auto
+
+type model_resolution = {
+  requested_model_id : string;
+  resolved_model_id : string;
+  provenance : model_resolution_provenance;
+}
+
+val resolve_glm_model :
+  ?getenv:(string -> string option) -> string -> model_resolution
+val resolve_glm_coding_model :
+  ?getenv:(string -> string option) -> string -> model_resolution
+
 (** Resolve a GLM model alias to the concrete API model ID.
-    - ["auto"] -> env var [ZAI_DEFAULT_MODEL] or ["glm-5"]
+    - ["auto"] -> env var [ZAI_DEFAULT_MODEL] or ["glm-5.1"]
     - ["flash"] -> ["glm-4.7-flashx"]
     - ["turbo"] -> ["glm-5-turbo"]
     - ["vision"] -> ["glm-4.6v"]
@@ -44,6 +63,12 @@ val resolve_glm_coding_model_id : string -> string
 (** Resolve "auto" and aliases to concrete model IDs for any provider.
     Cloud providers resolve aliases; local providers (llama, ollama) resolve
     "auto" via {!Llm_provider.Discovery.first_discovered_model_id}. *)
+val resolve_auto_model :
+  ?getenv:(string -> string option) ->
+  ?discover:(unit -> string option) ->
+  string ->
+  string ->
+  model_resolution
 val resolve_auto_model_id : string -> string -> string
 
 (** Parse a "model@url" custom model spec.

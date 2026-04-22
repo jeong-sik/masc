@@ -57,7 +57,7 @@ let save_private_text_file path content =
         open_out_gen [ Open_wronly; Open_creat; Open_trunc; Open_text ] 0o600
           path
       in
-      Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
           output_string oc content));
   chmod path 0o600
 

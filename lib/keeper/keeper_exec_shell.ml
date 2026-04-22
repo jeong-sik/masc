@@ -1040,19 +1040,28 @@ let handle_keeper_shell
   in
   let run_readonly_in_docker ?(ok_exit_codes = [ 0 ]) ~target ~command_argv
       ~max_bytes ~timeout_sec () =
-    match
-      Keeper_docker_read.container_path_of_host ~config ~meta ~host_path:target
-    with
-    | Error e -> Error (docker_read_error ~target e)
-    | Ok cpath -> (
-        match
-          Keeper_docker_read.run_command_in_container_with_status
-            ?turn_sandbox_runtime
-            ~ok_exit_codes ~config ~meta ~command_argv:(command_argv cpath)
-            ~max_bytes ~timeout_sec ()
-        with
-        | Error msg -> Error (docker_read_error ~target msg)
-        | Ok payload -> Ok payload)
+    let max_eintr_retries = 8 in
+    let rec loop attempts_left =
+      match
+        Keeper_docker_read.container_path_of_host ~config ~meta ~host_path:target
+      with
+      | Error e -> Error (docker_read_error ~target e)
+      | Ok cpath -> (
+          match
+            Keeper_docker_read.run_command_in_container_with_status
+              ?turn_sandbox_runtime
+              ~ok_exit_codes ~config ~meta ~command_argv:(command_argv cpath)
+              ~max_bytes ~timeout_sec ()
+          with
+          | Error msg
+            when attempts_left > 0
+                 && String_util.contains_substring_ci msg
+                      "interrupted system call" ->
+              loop (attempts_left - 1)
+          | Error msg -> Error (docker_read_error ~target msg)
+          | Ok payload -> Ok payload)
+    in
+    loop max_eintr_retries
   in
   let run_in_turn_runtime ?(ok_exit_codes = [ 0 ]) ~cwd ~cmd ~command_argv
       ~max_bytes ~timeout_sec ?(map_output = fun out -> out) ?(extra = []) () =

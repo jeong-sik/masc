@@ -13,7 +13,7 @@ module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_runtime = Masc_mcp.Keeper_sandbox_runtime
-module Env_config_keeper = Masc_mcp.Env_config_keeper
+module Env_config_keeper = Env_config_keeper
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 

@@ -398,6 +398,21 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           typeof row.runtime_blocker_continue_gate === 'boolean'
             ? row.runtime_blocker_continue_gate
             : null,
+        active_goal_ids: asStringArray(row.active_goal_ids) ?? [],
+        goal: asString(row.goal) ?? null,
+        short_goal: asString(row.short_goal) ?? null,
+        mid_goal: asString(row.mid_goal) ?? null,
+        long_goal: asString(row.long_goal) ?? null,
+        goal_horizons: isRecord(row.goal_horizons)
+          ? {
+              short: asString(row.goal_horizons.short) ?? null,
+              mid: asString(row.goal_horizons.mid) ?? null,
+              long: asString(row.goal_horizons.long) ?? null,
+            }
+          : null,
+        sandbox_profile: asString(row.sandbox_profile) ?? null,
+        sandbox_last_error: asString(row.sandbox_last_error) ?? null,
+        effective_sandbox_image: asString(row.effective_sandbox_image) ?? null,
         created_at: toIsoTimestamp(row.created_at) ?? asString(row.created_at),
         updated_at: toIsoTimestamp(row.updated_at) ?? asString(row.updated_at),
         last_heartbeat: asString(row.last_heartbeat) ?? asString(agentRaw?.last_seen),

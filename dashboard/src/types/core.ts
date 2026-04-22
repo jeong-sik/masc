@@ -543,6 +543,18 @@ export interface Keeper {
   runtime_blocker_summary?: string | null
   runtime_blocker_continue_gate?: boolean | null
   active_goal_ids?: string[]
+  goal?: string | null
+  short_goal?: string | null
+  mid_goal?: string | null
+  long_goal?: string | null
+  goal_horizons?: {
+    short?: string | null
+    mid?: string | null
+    long?: string | null
+  } | null
+  sandbox_profile?: 'local' | 'docker' | string | null
+  sandbox_last_error?: string | null
+  effective_sandbox_image?: string | null
   last_autonomous_action_at?: string | null
   autonomous_action_count?: number
   autonomous_turn_count?: number

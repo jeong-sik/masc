@@ -8,9 +8,12 @@ import {
   normalizeShellMetaCognitionSummary,
 } from './store-normalizers'
 import type {
+  DashboardAttentionEvent,
   DashboardNamespaceTruthAttentionSummary,
   DashboardNamespaceTruthFocus,
   DashboardNamespaceTruthMetaCognitionDigest,
+  DashboardReadinessPillar,
+  DashboardReadinessSummary,
   DashboardNamespaceTruthRecommendationSummary,
   DashboardNamespaceTruthResponse,
   PendingConfirmSummary,
@@ -107,6 +110,69 @@ function normalizeFocus(raw: unknown): DashboardNamespaceTruthFocus | null {
   }
 }
 
+function normalizeReadinessPillar(raw: unknown): DashboardReadinessPillar | null {
+  if (!isRecord(raw)) return null
+  const key = asString(raw.key)
+  const label = asString(raw.label)
+  const status = asString(raw.status)
+  const summary = asString(raw.summary)
+  const score = asNumber(raw.score)
+  if (!key || !label || !status || !summary || score == null) return null
+  return {
+    key,
+    label,
+    status,
+    score,
+    summary,
+    blocking_reasons: asStringArray(raw.blocking_reasons),
+    metrics: isRecord(raw.metrics)
+      ? Object.fromEntries(
+          Object.entries(raw.metrics)
+            .map(([metricKey, value]) => {
+              const numeric = asNumber(value)
+              return numeric == null ? null : [metricKey, numeric]
+            })
+            .filter((entry): entry is [string, number] => entry !== null),
+        )
+      : {},
+  }
+}
+
+function normalizeReadiness(raw: unknown): DashboardReadinessSummary | null {
+  if (!isRecord(raw)) return null
+  const status = asString(raw.status)
+  const score = asNumber(raw.score)
+  if (!status || score == null) return null
+  return {
+    status,
+    score,
+    decision_required_count: asNumber(raw.decision_required_count) ?? 0,
+    blocking_count: asNumber(raw.blocking_count) ?? 0,
+    pillars: extractArray(raw.pillars)
+      .map(normalizeReadinessPillar)
+      .filter((pillar): pillar is DashboardReadinessPillar => pillar !== null),
+  }
+}
+
+function normalizeAttentionEvent(raw: unknown): DashboardAttentionEvent | null {
+  if (!isRecord(raw)) return null
+  const severity = asString(raw.severity)
+  const kind = asString(raw.kind)
+  const summary = asString(raw.summary)
+  if (!severity || !kind || !summary) return null
+  return {
+    severity,
+    kind,
+    summary,
+    requires_decision: asBoolean(raw.requires_decision) ?? false,
+    keeper_name: asString(raw.keeper_name) ?? null,
+    target_type: asString(raw.target_type) ?? null,
+    target_id: asString(raw.target_id) ?? null,
+    recommended_action: asString(raw.recommended_action) ?? null,
+    provenance: asString(raw.provenance) ?? null,
+  }
+}
+
 export function normalizeNamespaceTruth(raw: unknown): DashboardNamespaceTruthResponse {
   const root = isRecord(raw) ? raw : {}
   const namespaceBlock = isRecord(root.root) ? root.root : {}
@@ -154,6 +220,10 @@ export function normalizeNamespaceTruth(raw: unknown): DashboardNamespaceTruthRe
       pending_confirm_summary: normalizePendingConfirmSummary(operatorBlock.pending_confirm_summary),
       provenance: asString(operatorBlock.provenance) ?? null,
     },
+    readiness: normalizeReadiness(root.readiness),
+    attention_events: extractArray(root.attention_events)
+      .map(normalizeAttentionEvent)
+      .filter((event): event is DashboardAttentionEvent => event !== null),
     focus: normalizeFocus(root.focus),
   }
 }

@@ -5,6 +5,7 @@ import { RotateCcw } from 'lucide-preact'
 import { LoadingState } from './common/feedback-state'
 import {
   fetchDashboardExecution,
+  fetchDashboardNamespaceTruth,
   fetchTelemetrySummary,
   fetchToolQuality,
   type TelemetrySourceSummary,
@@ -15,11 +16,13 @@ import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { useSavedSignal } from '../lib/saved-signal'
 import { normalizeKeepers } from '../keeper-store-normalize'
+import { normalizeNamespaceTruth } from '../namespace-truth-normalizers'
 import { formatTimeAgo } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
 import { requestConfirm } from './common/confirm-dialog'
 import { Sparkline } from './common/sparkline'
 import { pushSnapshot, getTrend, type MetricKey, type TrendDirection } from './fleet-trend-store'
+import type { DashboardAttentionEvent, DashboardReadinessPillar } from '../types'
 import {
   EMPTY_TOOL_QUALITY,
   PRESSURE_WARN_RATIO,
@@ -145,6 +148,140 @@ function WarningBanner({ warnings }: { warnings: string[] }) {
   `
 }
 
+function readinessTone(status: string | null | undefined): 'neutral' | 'ok' | 'warn' {
+  if (status === 'ok') return 'ok'
+  if (status === 'warn' || status === 'bad') return 'warn'
+  return 'neutral'
+}
+
+function readinessStatusClass(status: string | null | undefined): string {
+  if (status === 'ok') return 'text-[var(--ok)]'
+  if (status === 'warn') return 'text-[var(--warn)]'
+  if (status === 'bad') return 'text-[var(--bad-light)]'
+  return 'text-[var(--text-dim)]'
+}
+
+function attentionSeverityClass(severity: string | null | undefined): string {
+  if (severity === 'bad') return 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]'
+  if (severity === 'warn') return 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn)]'
+  return 'border-[var(--card-border)] bg-[var(--white-1)] text-[var(--text-dim)]'
+}
+
+function ReadinessPillarCard({ pillar }: { pillar: DashboardReadinessPillar }) {
+  return html`
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3">
+      <div class="flex items-center justify-between gap-3">
+        <div class="text-2xs font-medium text-[var(--text)]">${pillar.label}</div>
+        <div class="font-mono text-2xs ${readinessStatusClass(pillar.status)}">
+          ${pillar.score.toFixed(2)}
+        </div>
+      </div>
+      <div class="mt-1 text-3xs ${readinessStatusClass(pillar.status)}">${pillar.summary}</div>
+      ${pillar.blocking_reasons.length > 0
+        ? html`
+          <div class="mt-2 flex flex-col gap-1 text-3xs text-[var(--text-dim)]">
+            ${pillar.blocking_reasons.slice(0, 2).map(reason => html`<div>${reason}</div>`)}
+          </div>
+        `
+        : null}
+    </div>
+  `
+}
+
+function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
+  if (events.length === 0) {
+    return html`
+      <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 text-2xs text-[var(--text-dim)]">
+        No decision-needed or blocker events are active.
+      </div>
+    `
+  }
+
+  return html`
+    <div class="flex flex-col gap-2">
+      ${events.slice(0, 6).map(event => html`
+        <div class="rounded border px-3 py-2 ${attentionSeverityClass(event.severity)}">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-2xs font-medium">
+                ${event.keeper_name ? `${event.keeper_name} · ${event.kind}` : event.kind}
+              </div>
+              <div class="mt-0.5 text-3xs leading-relaxed">${event.summary}</div>
+            </div>
+            ${event.requires_decision
+              ? html`<span class="rounded bg-[var(--white-8)] px-1.5 py-0.5 text-3xs font-semibold">DECISION</span>`
+              : null}
+          </div>
+          ${event.recommended_action
+            ? html`<div class="mt-1 text-3xs text-[var(--text-dim)]">Next: ${event.recommended_action}</div>`
+            : null}
+        </div>
+      `)}
+    </div>
+  `
+}
+
+function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
+  const truth = state.namespace_truth
+  const readiness = truth?.readiness ?? null
+  const attentionEvents = truth?.attention_events ?? []
+  const pendingApprovals = truth?.operator?.pending_confirm_summary?.visible_count
+    ?? truth?.operator?.pending_confirm_summary?.total_count
+    ?? 0
+
+  if (!truth || !readiness) {
+    return html`
+      <div class="rounded border border-[var(--card-border)] bg-[var(--white-1)] p-3 text-2xs text-[var(--text-dim)]">
+        Control room readiness is unavailable for this refresh.
+      </div>
+    `
+  }
+
+  return html`
+    <div class="flex flex-col gap-3">
+      <div class="grid grid-cols-1 gap-3 xl:grid-cols-4">
+        <${SummaryCard}
+          title="Readiness"
+          value=${readiness.score.toFixed(2)}
+          detail=${`${readiness.blocking_count} blockers · ${readiness.decision_required_count} decisions required.`}
+          tone=${readinessTone(readiness.status)}
+        />
+        <${SummaryCard}
+          title="Approvals"
+          value=${pendingApprovals.toString()}
+          detail=${pendingApprovals > 0 ? 'Operator approval queue is non-empty.' : 'No pending approvals are visible.'}
+          tone=${pendingApprovals > 0 ? 'warn' : 'ok'}
+        />
+        <${SummaryCard}
+          title="Attention"
+          value=${attentionEvents.length.toString()}
+          detail=${attentionEvents.length > 0 ? 'Critical blockers and pause-worthy states are surfaced here.' : 'No active attention events are reported.'}
+          tone=${attentionEvents.length > 0 ? 'warn' : 'ok'}
+        />
+        <${SummaryCard}
+          title="Goal Scope"
+          value=${state.rows.length > 0 ? `${state.rows.filter(row => row.goal_linked).length}/${state.rows.length}` : '0/0'}
+          detail=${state.rows.some(row => !row.goal_linked) ? 'Some keepers are active without a visible goal link.' : 'All surfaced keepers have a goal anchor.'}
+          tone=${state.rows.length === 0 || state.rows.every(row => row.goal_linked) ? 'ok' : 'warn'}
+        />
+      </div>
+
+      <div class="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)]">
+        <div>
+          <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Readiness Pillars</div>
+          <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
+            ${readiness.pillars.map(pillar => html`<${ReadinessPillarCard} pillar=${pillar} />`)}
+          </div>
+        </div>
+        <div>
+          <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Attention Queue</div>
+          <${AttentionEventList} events=${attentionEvents} />
+        </div>
+      </div>
+    </div>
+  `
+}
+
 function PressureWatchlist({ rows }: { rows: FleetRow[] }) {
   const watchlist = rows
     .filter(row =>
@@ -264,6 +401,39 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                 <div class="max-w-60 truncate text-3xs text-[var(--text-dim)]" title=${toolInfo.title}>
                   ${toolInfo.label}
                 </div>
+                <div class="mt-1 flex max-w-60 flex-wrap gap-1">
+                  <span
+                    class=${row.goal_linked
+                      ? 'rounded bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--ok)]'
+                      : 'rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--warn)]'}
+                    title=${row.goal_label ?? 'No active goal is linked to this keeper.'}
+                  >
+                    ${row.goal_label
+                      ? (row.active_goal_count > 1 ? `goal ${row.active_goal_count}` : 'goal linked')
+                      : 'goal missing'}
+                  </span>
+                  <span
+                    class=${row.sandbox_profile
+                      ? 'rounded bg-[var(--white-8)] px-1.5 py-0.5 text-3xs text-[var(--text-dim)]'
+                      : 'rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--warn)]'}
+                    title=${row.effective_sandbox_image ?? row.sandbox_profile ?? 'Sandbox profile unavailable.'}
+                  >
+                    ${row.sandbox_profile ? `sandbox ${row.sandbox_profile}` : 'sandbox unknown'}
+                  </span>
+                  ${row.decision_required
+                    ? html`<span class="rounded bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs text-[var(--bad-light)]">decision</span>`
+                    : null}
+                </div>
+                ${row.goal_label
+                  ? html`<div class="max-w-60 truncate text-3xs text-[var(--text-dim)]" title=${row.goal_label}>${row.goal_label}</div>`
+                  : null}
+                ${row.sandbox_last_error
+                  ? html`
+                    <div class="max-w-60 truncate text-3xs text-[var(--bad-light)]" title=${row.sandbox_last_error}>
+                      ${row.sandbox_last_error}
+                    </div>
+                  `
+                  : null}
               </td>
               <td class="py-1.5 text-right font-mono ${statusClass(row)}">${row.status}</td>
               <td class="py-1.5 text-right text-[var(--text-dim)]">${formatActivity(row.last_activity_ago_s)}</td>
@@ -384,10 +554,11 @@ export function FleetTelemetryPanel() {
     }
 
     try {
-      const [executionResult, toolQualityResult, telemetrySummaryResult] = await Promise.allSettled([
+      const [executionResult, toolQualityResult, telemetrySummaryResult, namespaceTruthResult] = await Promise.allSettled([
         fetchDashboardExecution({ signal: controller.signal }),
         fetchToolQuality({ n: 5000, windowHours: 24, signal: controller.signal }),
         fetchTelemetrySummary({ signal: controller.signal }),
+        fetchDashboardNamespaceTruth({ signal: controller.signal }),
       ])
 
       if (controller.signal.aborted || requestId !== latestRequestId.current) return
@@ -419,6 +590,14 @@ export function FleetTelemetryPanel() {
       }
       warnings.push(...buildTelemetryWarnings(telemetrySummary.sources))
 
+      const namespaceTruth =
+        namespaceTruthResult.status === 'fulfilled'
+          ? normalizeNamespaceTruth(namespaceTruthResult.value)
+          : null
+      if (namespaceTruthResult.status === 'rejected' && !isAbortError(namespaceTruthResult.reason)) {
+        warnings.push(`Control room unavailable: ${errorMessage(namespaceTruthResult.reason)}`)
+      }
+
       const rows = buildFleetRows(keepers, toolQuality)
       warnings.push(...buildRuntimeWarnings(rows))
       const updatedAt =
@@ -441,6 +620,7 @@ export function FleetTelemetryPanel() {
         tool_quality: toolQuality,
         telemetry_sources: telemetrySummary.sources,
         total_telemetry_entries: telemetrySummary.total_entries,
+        namespace_truth: namespaceTruth,
         updated_at: updatedAt,
       }
     } finally {
@@ -559,6 +739,11 @@ export function FleetTelemetryPanel() {
           detail=${`${sourcesWithData}/${value.telemetry_sources.length || 0} stores currently have data.`}
           tone=${sourcesWithData > 0 ? 'ok' : 'warn'}
         />
+      </div>
+
+      <div>
+        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Fleet Control Room</div>
+        <${ControlRoomPanel} state=${value} />
       </div>
 
       <div>

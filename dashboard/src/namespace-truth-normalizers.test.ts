@@ -346,6 +346,58 @@ describe('normalizeNamespaceTruth', () => {
     expect(pcs!.hidden_actors).toEqual([])
   })
 
+  it('extracts readiness summary and attention events', () => {
+    const result = normalizeNamespaceTruth({
+      readiness: {
+        status: 'warn',
+        score: 0.61,
+        decision_required_count: 2,
+        blocking_count: 3,
+        pillars: [
+          {
+            key: 'execution_safety',
+            label: 'Execution Safety',
+            status: 'ok',
+            score: 1,
+            summary: 'Sandbox posture is visible.',
+            blocking_reasons: [],
+            metrics: { keeper_count: 4 },
+          },
+          {
+            key: 'goal_coherence',
+            label: 'Goal Coherence',
+            status: 'warn',
+            score: 0.25,
+            summary: 'One keeper is unscoped.',
+            blocking_reasons: ['1 keeper has no active goal link.'],
+            metrics: { unscoped_keepers: 1 },
+          },
+        ],
+      },
+      attention_events: [
+        {
+          severity: 'warn',
+          kind: 'continue_gate',
+          summary: 'keeper-alpha needs a decision.',
+          requires_decision: true,
+          keeper_name: 'keeper-alpha',
+          recommended_action: 'Review the pending continue gate.',
+          provenance: 'runtime',
+        },
+      ],
+    })
+
+    expect(result.readiness).not.toBeNull()
+    expect(result.readiness!.status).toBe('warn')
+    expect(result.readiness!.score).toBe(0.61)
+    expect(result.readiness!.decision_required_count).toBe(2)
+    expect(result.readiness!.pillars).toHaveLength(2)
+    expect(result.readiness!.pillars[1]!.blocking_reasons).toEqual(['1 keeper has no active goal link.'])
+    expect(result.attention_events).toHaveLength(1)
+    expect(result.attention_events![0]!.kind).toBe('continue_gate')
+    expect(result.attention_events![0]!.requires_decision).toBe(true)
+  })
+
   // ── focus ──
 
   it('returns null focus when required fields missing', () => {

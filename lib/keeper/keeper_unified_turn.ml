@@ -1569,11 +1569,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 ~payload:(`Assoc
                   ([
                     ("keeper_name", `String updated_meta.name);
-                    ("input_tokens", `Int result.usage.input_tokens);
-                    ("output_tokens", `Int result.usage.output_tokens);
-                    ("cache_creation_tokens", `Int result.usage.cache_creation_input_tokens);
-                    ("cache_read_tokens", `Int result.usage.cache_read_input_tokens);
-                    ("cost_usd", `Float turn_cost);
+                    ("input_tokens", (if result.usage_reported then `Int result.usage.input_tokens else `Null));
+                    ("output_tokens", (if result.usage_reported then `Int result.usage.output_tokens else `Null));
+                    ("cache_creation_tokens", (if result.usage_reported then `Int result.usage.cache_creation_input_tokens else `Null));
+                    ("cache_read_tokens", (if result.usage_reported then `Int result.usage.cache_read_input_tokens else `Null));
+                    ("cost_usd", (if result.usage_reported then `Float turn_cost else `Null));
                     ("latency_ms", `Int latency_ms);
                     ("model_used", `String (Keeper_agent_run.surface_model_used result));
                     ("work_kind", `String (Keeper_unified_metrics.work_kind_of_selected_mode (Keeper_unified_metrics.selected_mode_of_result result)));

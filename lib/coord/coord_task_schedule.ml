@@ -16,53 +16,25 @@ let task_is_claim_pool_candidate (task : Types.task) =
 type verification_claim_state =
   [ `Pending | `Assigned | `Passed | `Rejected ]
 
-let verification_claim_state_of_json json =
-  let open Yojson.Safe.Util in
-  match json |> member "status" |> member "status" with
-  | `String "pending" -> Some `Pending
-  | `String "assigned" -> Some `Assigned
-  | `String "completed" -> (
-      match json |> member "status" |> member "verdict" with
-      | `String "pass" -> Some `Passed
-      | `String "fail" | `String "partial" -> Some `Rejected
-      | _ -> None)
-  | _ -> None
+let verification_claim_state_of_status
+    (status : Coord_verification_store.request_status) =
+  match status with
+  | `Pending -> `Pending
+  | `Assigned _ -> `Assigned
+  | `Completed `Pass -> `Passed
+  | `Completed (`Fail _ | `Partial _) ->
+      `Rejected
 
 let latest_verification_status_by_task config =
   let latest = Hashtbl.create 16 in
-  let dir = Filename.concat config.base_path "verifications" in
-  if Sys.file_exists dir then (
-    match Safe_ops.list_dir_safe dir with
-    | Error _ -> ()
-    | Ok files ->
-        List.iter
-          (fun file ->
-            if Filename.check_suffix file ".json" then
-              let path = Filename.concat dir file in
-              try
-                let json = Safe_ops.read_json_eio path in
-                let open Yojson.Safe.Util in
-                match
-                  json |> member "task_id",
-                  json |> member "created_at",
-                  verification_claim_state_of_json json
-                with
-                | `String task_id, (`Float _ | `Int _ as created_at_json), Some state ->
-                    let created_at =
-                      match created_at_json with
-                      | `Float value -> value
-                      | `Int value -> Float.of_int value
-                      | _ -> 0.0
-                    in
-                    (match Hashtbl.find_opt latest task_id with
-                     | Some (latest_created_at, _)
-                       when latest_created_at >= created_at -> ()
-                     | Some _ | None ->
-                         Hashtbl.replace latest task_id (created_at, state))
-                | _ -> ()
-              with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
-          files
-  );
+  Coord_verification_store.list_request_headers config.base_path
+  |> List.iter (fun (req : Coord_verification_store.request_header) ->
+         let state = verification_claim_state_of_status req.status in
+         match Hashtbl.find_opt latest req.task_id with
+         | Some (latest_created_at, _) when latest_created_at >= req.created_at ->
+             ()
+         | Some _ | None ->
+             Hashtbl.replace latest req.task_id (req.created_at, state));
   latest
 
 let verification_blocks_claim latest_status_by_task (task : Types.task) =

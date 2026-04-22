@@ -30,7 +30,7 @@ let decide ~accept_on_exhaustion ~is_last outcome =
             (Llm_provider.Http_client.NetworkError
                {
                  message = "slot full, cascading to next provider";
-                 kind = Unknown;
+                 kind = Llm_provider.Http_client.Local_resource_exhaustion;
                });
       }
   | Accept_rejected { response; reason } ->

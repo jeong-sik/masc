@@ -623,7 +623,7 @@ let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
     Llm_provider.Retry.is_hard_quota api_err
     ||
     (match[@warning "-8"] api_err with
-     | Llm_provider.Retry.NetworkError { message }
+     | Llm_provider.Retry.NetworkError { message; _ }
      | Llm_provider.Retry.Overloaded { message }
      | Llm_provider.Retry.ServerError { message; _ } ->
        message_looks_like_cli_wrapped_hard_quota message

@@ -265,14 +265,13 @@ let validate_cross_agent ~worker ~verifier =
 
 (** File-based storage *)
 
-let verifications_dir base_path =
-  Filename.concat base_path "verifications"
+let verifications_dir = Coord_verification_store.verifications_dir
 
 let ensure_dir path =
   Fs_compat.mkdir_p path
 
 let request_path base_path req_id =
-  Filename.concat (verifications_dir base_path) (req_id ^ ".json")
+  Coord_verification_store.request_path base_path req_id
 
 let save_request base_path req =
   let dir = verifications_dir base_path in

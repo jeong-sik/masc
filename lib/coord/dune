@@ -26,6 +26,7 @@
   coord_task
   coord_task_lifecycle
   coord_task_schedule
+  coord_verification_store
   event_kind
   coord_git
   coord_worktree

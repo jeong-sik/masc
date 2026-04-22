@@ -60,10 +60,18 @@ let format_exhausted_error last_err =
     | Some (Llm_provider.Http_client.NetworkError { message }) -> message
     | None -> "No providers available"
   in
+  let network_error_kind =
+    match last_err with
+    | Some (Llm_provider.Http_client.NetworkError { kind; _ }) -> kind
+    | _ -> Unknown
+  in
   match last_err with
   | Some (Llm_provider.Http_client.AcceptRejected _ as err) -> err
   | _ ->
     Llm_provider.Http_client.NetworkError
-      { message = Printf.sprintf "All models failed: %s" msg }
+      {
+        message = Printf.sprintf "All models failed: %s" msg;
+        kind = network_error_kind;
+      }
 
 (* ── Inline tests ───────────────────────────────── *)

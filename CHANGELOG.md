@@ -56,13 +56,13 @@
 
 ### Changed
 
-- **OAS pin bump → `fix/pipeline-message-constructor@5a20cae0` (`v0.170.2`).**
+- **OAS pin bump → `fix/pipeline-message-constructor@7ae2d9c8` (`v0.170.3`).**
   `scripts/oas-agent-sdk-pin.sh` now tracks the reachable follow-up OAS branch
   that carries structured replay metadata plus the pipeline constructor fix
   required by `#9386`, including the split-stage follow-up needed after OAS
   `main` moved the turn pipeline constructor sites into `stage_input`,
   `stage_collect`, and `stage_execute`. The dependency floor in
-  `dune-project` / `masc_mcp.opam` stays at `agent_sdk >= 0.170.2`, and the
+  `dune-project` / `masc_mcp.opam` is raised to `agent_sdk >= 0.170.3`, and the
   generated keeper OAS pin docs now report the same branch SHA, base version,
   and dependency floor from the shared pin script.
 - **Keeper sandbox profile collapsed to `Local | Docker` 2-mode.** The three

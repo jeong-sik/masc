@@ -39,7 +39,7 @@ let overflow_blockers_are_recognized () =
 let non_overflow_blockers_are_not_matched () =
   let cases = [
     "";
-    "Internal error: cascade keeper_unified: all models failed";
+    "Internal error: cascade big_three: all models failed";
     "turn outcome ambiguous after committed message";
     "network timeout";
     "rate limited";

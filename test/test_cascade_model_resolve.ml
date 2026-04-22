@@ -158,12 +158,12 @@ let test_expand_model_strings_for_execution_rotation_scope_rotates () =
     State.clear_all ();
     let first =
       C.expand_model_strings_for_execution
-        ~rotation_scope:"keeper_unified"
+        ~rotation_scope:"big_three"
         [ "gemini_cli:auto" ]
     in
     let second =
       C.expand_model_strings_for_execution
-        ~rotation_scope:"keeper_unified"
+        ~rotation_scope:"big_three"
         [ "gemini_cli:auto" ]
     in
     let other_scope =
@@ -193,14 +193,14 @@ let test_order_weighted_entries_rotation_scope_rotates_generically () =
     in
     let first =
       C.order_weighted_entries
-        ~rotation_scope:"keeper_unified"
+        ~rotation_scope:"big_three"
         [ entry "codex_cli:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) ->
              e.model)
     in
     let second =
       C.order_weighted_entries
-        ~rotation_scope:"keeper_unified"
+        ~rotation_scope:"big_three"
         [ entry "codex_cli:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) ->
              e.model)

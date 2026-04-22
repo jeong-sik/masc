@@ -144,7 +144,7 @@ let test_config_validated_status () =
   with_temp_config_root
     {|
       {
-        "keeper_unified_models": ["ollama:qwen3.5:35b-a3b-nvfp4"]
+        "big_three_models": ["ollama:qwen3.5:35b-a3b-nvfp4"]
       }
     |}
     (fun cascade_path ->
@@ -272,7 +272,7 @@ let test_raw_config_shape () =
   with_temp_config_root
     {|
       {
-        "keeper_unified_models": ["ollama:qwen3.5:35b-a3b-nvfp4"]
+        "big_three_models": ["ollama:qwen3.5:35b-a3b-nvfp4"]
       }
     |}
     (fun cascade_path ->
@@ -291,7 +291,7 @@ let test_raw_config_shape () =
       check bool "json raw is editable" true
         Yojson.Safe.Util.(j |> member "raw_json_editable" |> to_bool);
       check bool "raw_json includes current file contents" true
-        (contains_substring raw_json "keeper_unified_models"))
+        (contains_substring raw_json "big_three_models"))
 
 let test_raw_config_defaults_when_file_missing () =
   with_temp_config_root "{}\n"
@@ -334,7 +334,7 @@ models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
       check bool "generated runtime json visible" true
         (contains_substring
            Yojson.Safe.Util.(j |> member "raw_json" |> to_string)
-           "keeper_unified_models");
+           "big_three_models");
       check bool "runtime json materialized on read" true
         (Sys.file_exists json_path))
 
@@ -560,7 +560,7 @@ let test_keeper_profile_preserves_raw_unknown_cascade () =
   check string "cascade_name preserves raw TOML value"
     "playground_experiment_xyz" (lookup fs "cascade_name");
   check string "canonical collapses unknown → keeper_unified"
-    "keeper_unified" (lookup fs "canonical");
+    "big_three" (lookup fs "canonical");
   check bool "raw and canonical differ → UI shows drift"
     true (lookup fs "cascade_name" <> lookup fs "canonical")
 
@@ -572,19 +572,19 @@ let test_keeper_profile_preserves_raw_legacy_alias () =
   check string "legacy alias preserved as raw"
     "oas-keeper_unified" (lookup fs "cascade_name");
   check string "legacy alias canonicalizes to keeper_unified"
-    "keeper_unified" (lookup fs "canonical");
+    "big_three" (lookup fs "canonical");
   check bool "raw and canonical differ → UI shows drift"
     true (lookup fs "cascade_name" <> lookup fs "canonical")
 
 let test_keeper_profile_canonical_matches_when_raw_is_canonical () =
   let fs =
     Masc_mcp.Dashboard_cascade.keeper_profile_fields
-      ~keeper:"verdict" ~cascade_name:"keeper_unified"
+      ~keeper:"verdict" ~cascade_name:"big_three"
   in
   check string "cascade_name stays canonical"
-    "keeper_unified" (lookup fs "cascade_name");
+    "big_three" (lookup fs "cascade_name");
   check string "canonical matches"
-    "keeper_unified" (lookup fs "canonical");
+    "big_three" (lookup fs "canonical");
   check bool "raw == canonical → UI renders —"
     true (lookup fs "cascade_name" = lookup fs "canonical")
 
@@ -593,7 +593,7 @@ let test_keeper_profile_stale_builtin_falls_back_to_live_default () =
     {|
       {
         "default_models": ["ollama:qwen3.5:35b-a3b-nvfp4"],
-        "keeper_unified_models": ["ollama:qwen3.5:35b-a3b-nvfp4"]
+        "big_three_models": ["ollama:qwen3.5:35b-a3b-nvfp4"]
       }
     |}
     (fun _cascade_path ->
@@ -604,7 +604,7 @@ let test_keeper_profile_stale_builtin_falls_back_to_live_default () =
       check string "stale built-in raw value preserved"
         "vendor_mix_balanced" (lookup fs "cascade_name");
       check string "stale built-in falls back to live default"
-        "keeper_unified" (lookup fs "canonical");
+        "big_three" (lookup fs "canonical");
       check bool "raw and canonical differ for inactive built-in"
         true (lookup fs "cascade_name" <> lookup fs "canonical"))
 

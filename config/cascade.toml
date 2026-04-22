@@ -2,59 +2,53 @@ comment = "Known keeper-facing cascade profiles remain typed in lib/keeper/keepe
 
 [default]
 models = [
-  { model = "glm-coding:glm-5.1", weight = 50 },
-  { model = "ollama:qwen3.5:35b-a3b-nvfp4", weight = 30 },
-  { model = "ollama:gemma4:26b", weight = 20 },
+  { model = "claude_code:auto", weight = 40 },
+  { model = "codex_cli:auto", weight = 30 },
+  { model = "gemini_cli:auto", weight = 30 },
 ]
 temperature = 0.3
 max_tokens = 4096
 
-[default.api_key_env]
-"glm-coding" = "ZAI_API_KEY_SB"
-glm = "ZAI_API_KEY_SB"
-
-[keeper_unified]
+[big_three]
 models = [
-  { model = "glm-coding:glm-5.1", weight = 50 },
-  { model = "ollama:qwen3.5:35b-a3b-nvfp4", weight = 30 },
-  { model = "ollama:gemma4:26b", weight = 20 },
+  { model = "claude_code:auto", weight = 40 },
+  { model = "codex_cli:auto", weight = 30 },
+  { model = "gemini_cli:auto", weight = 30 },
 ]
 temperature = 0.2
 max_tokens = 16384
 
-[local_only]
+[underdog]
 models = [
-  "ollama:qwen3.5:35b-a3b-nvfp4",
+  { model = "kimi:auto", weight = 50 },
+  { model = "glm-coding:auto", weight = 50 },
+]
+temperature = 0.2
+max_tokens = 16384
+
+[local]
+models = [
+  "ollama:auto",
 ]
 temperature = 0.2
 max_tokens = 32768
 
-[local_mlx_vlm_qwen36]
-comment = "Local OpenAI-compatible mlx-vlm endpoint for Huihui Qwen3.6 35B. Keep repo profile limited to the canonical localhost endpoint and let OAS parser surface mlx-vlm telemetry fields."
+[local_only]
 models = [
-  "custom:mlx-community/Huihui-Qwen3.6-35B-A3B-abliterated-4.4bit-msq@http://127.0.0.1:18080/v1",
+  "ollama:auto",
 ]
 temperature = 0.2
-max_tokens = 16384
+max_tokens = 32768
 
 [local_recovery]
 models = [
-  "ollama:qwen3.5:35b-a3b-nvfp4",
+  "ollama:auto",
 ]
 temperature = 0.1
 max_tokens = 8192
 
 [tool_rerank]
-comment = "inference-only override: tool_rerank has no _models of its own; callers reuse the default cascade's models and apply the short max_tokens here. Short responses for rerank scoring."
+comment = "inference-only override: tool_rerank has no _models of its own; callers reuse the default cascade's models and apply the short max_tokens here."
 temperature = 0.0
 max_tokens = 200
 keeper_assignable = false
-
-[sangsu]
-comment = "sangsu is a persona keeper (홍상수-style 40대 남자) whose conversational turns rarely need tool calls. Bias heavily toward local ollama to keep cost near zero, but include glm-coding as the second link in the cascade so [require_tool_use] turns auto-failover to a tool-capable cloud model instead of leaving the keeper idle. Lower temperature (0.1) tightens ollama tool-call obedience per memory/reference_ollama-config-2026-04. Cascade weight ordering acts as a fallback chain: 90% of orderings put ollama first (then glm), 10% put glm first (then ollama)."
-models = [
-  { model = "ollama:qwen3.5:35b-a3b-nvfp4", weight = 90, supports_tool_choice = true },
-  { model = "glm-coding:glm-5.1", weight = 10 },
-]
-temperature = 0.1
-max_tokens = 16384

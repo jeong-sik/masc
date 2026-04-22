@@ -1,7 +1,8 @@
 [keeper]
 persona_name = "analyst"
 execution_scope = "workspace"
-cascade_name = "keeper_unified"
+cascade_name = "big_three"
+autoboot_enabled = true
 tool_preset = "coding"
 proactive_enabled = false
 room_signal_prompt_enabled = false

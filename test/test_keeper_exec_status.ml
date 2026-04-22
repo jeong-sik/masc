@@ -303,7 +303,7 @@ let test_runtime_surface_derives_cascade_exhausted_from_meta () =
   KR.clear ();
   let base = make_meta ~name:"runtime-cascade-exhausted-test" () in
   let reason =
-    "Internal error: [masc_oas_error] {\"kind\":\"cascade_exhausted\",\"cascade_name\":\"keeper_unified\",\"detail\":\"all providers failed: Connection refused\"}"
+    "Internal error: [masc_oas_error] {\"kind\":\"cascade_exhausted\",\"cascade_name\":\"big_three\",\"detail\":\"all providers failed: Connection refused\"}"
   in
   let meta =
     {

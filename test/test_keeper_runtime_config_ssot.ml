@@ -58,7 +58,7 @@ let with_config_dir f =
       write_file
         cascade_path
         {|{
-  "keeper_unified_models": ["test-only:model"]
+  "big_three_models": ["test-only:model"]
 }|};
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
       Config_dir_resolver.reset ();

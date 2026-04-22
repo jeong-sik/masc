@@ -158,6 +158,7 @@ let make_keeper_tool_handler
     ~(meta : Keeper_types.keeper_meta)
     ~(ctx_snapshot : Keeper_types.working_context)
     ?turn_sandbox_runtime
+    ?turn_sandbox_runtime_git
     ?search_fn
     ?on_tool_called
     ?(translate_input = fun j -> j)
@@ -190,6 +191,7 @@ let make_keeper_tool_handler
             Keeper_exec_tools.execute_keeper_tool_call_with_outcome
               ~config ~meta ~ctx_work:ctx_snapshot
               ?turn_sandbox_runtime
+              ?turn_sandbox_runtime_git
               ?search_fn
               ~name ~input ())
         in
@@ -385,7 +387,13 @@ let make_tool_bundle
   let turn_sandbox_runtime =
     match meta.sandbox_profile with
     | Keeper_types.Docker ->
-      Some (Keeper_turn_sandbox_runtime.create ~config ~meta)
+      Some (Keeper_turn_sandbox_runtime.create ~config ~meta ~network_mode:meta.network_mode ())
+    | Keeper_types.Local -> None
+  in
+  let turn_sandbox_runtime_git =
+    match meta.sandbox_profile with
+    | Keeper_types.Docker ->
+      Some (Keeper_turn_sandbox_runtime.create ~config ~meta ~network_mode:Network_inherit ())
     | Keeper_types.Local -> None
   in
   (* Build Tool.t for the full universe so BM25 and Tool_op can
@@ -408,6 +416,7 @@ let make_tool_bundle
           ~input_schema:td.input_schema
           (make_keeper_tool_handler ~name:td.name ~config ~meta ~ctx_snapshot
              ?turn_sandbox_runtime
+             ?turn_sandbox_runtime_git
              ?search_fn ?on_tool_called ~failure_counts ()))
       else None
     ) tool_defs
@@ -438,6 +447,7 @@ let make_tool_bundle
             ~input_schema
             (make_keeper_tool_handler ~name:internal ~config ~meta ~ctx_snapshot
                ?turn_sandbox_runtime
+               ?turn_sandbox_runtime_git
                ?search_fn ?on_tool_called
                ~translate_input:(fun j ->
                  Keeper_tool_alias.translate_input ~public j)
@@ -448,9 +458,12 @@ let make_tool_bundle
     tools = internal_tools @ alias_tools;
     cleanup =
       (fun () ->
-        match turn_sandbox_runtime with
+        (match turn_sandbox_runtime with
         | Some runtime -> Keeper_turn_sandbox_runtime.cleanup runtime
         | None -> ());
+        (match turn_sandbox_runtime_git with
+        | Some runtime -> Keeper_turn_sandbox_runtime.cleanup runtime
+        | None -> ()));
   }
 
 let make_tools

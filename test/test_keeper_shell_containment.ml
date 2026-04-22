@@ -10,6 +10,7 @@ module Coord = Masc_mcp.Coord
 module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
 module Keeper_id = Masc_mcp.Keeper_id
 module Keeper_registry = Masc_mcp.Keeper_registry
+module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
 module Fs_compat = Fs_compat
@@ -88,10 +89,7 @@ let setup ~keeper_name ~sandbox f =
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.clear ();
   let meta = make_meta ~name:keeper_name ~sandbox in
-  let playground =
-    Filename.concat base
-      (Keeper_alerting_path.playground_path_of_keeper meta.name)
-  in
+  let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   f ~base ~config ~meta ~playground
 

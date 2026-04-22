@@ -33,8 +33,28 @@ val backend_to_string : backend -> string
 (** {1 Path resolution} *)
 
 (** [host_root_abs ~config name] returns the absolute host-side
-    sandbox root for [name] rooted at [config.base_path]. *)
+    legacy unscoped sandbox root for [name] rooted at [config.base_path]. *)
 val host_root_abs : config:Coord.config -> string -> string
+
+(** [host_root_rel_of_profile sandbox_profile name] returns the
+    backend-scoped relative sandbox root for the given profile/name. *)
+val host_root_rel_of_profile :
+  Keeper_types.sandbox_profile ->
+  string ->
+  string
+
+(** [host_root_rel_of_meta ~meta] returns the backend-scoped relative
+    sandbox root for [meta]. *)
+val host_root_rel_of_meta :
+  meta:Keeper_types.keeper_meta ->
+  string
+
+(** [host_root_abs_of_meta ~config meta] returns the absolute
+    backend-scoped sandbox root for [meta]. *)
+val host_root_abs_of_meta :
+  config:Coord.config ->
+  Keeper_types.keeper_meta ->
+  string
 
 (** [container_root name] returns the in-container path used by the
     hardened Docker backend. *)
@@ -52,11 +72,22 @@ val of_meta :
 (** {1 Access control hints} *)
 
 (** Relative roots that tools may touch inside the keeper's
-    sandbox. Currently a single-element list. *)
+    legacy unscoped sandbox. Currently a single-element list. *)
 val allowed_path_roots : name:string -> string list
 
-(** Single relative root for [name] (convenience). *)
+(** Relative roots that tools may touch inside [meta]'s backend-scoped
+    sandbox. Currently a single-element list. *)
+val allowed_path_roots_of_meta :
+  meta:Keeper_types.keeper_meta ->
+  string list
+
+(** Single legacy unscoped relative root for [name] (convenience). *)
 val allowed_root_rel : name:string -> string
+
+(** Single backend-scoped relative root for [meta]. *)
+val allowed_root_rel_of_meta :
+  meta:Keeper_types.keeper_meta ->
+  string
 
 (** {1 Dashboard / status output} *)
 

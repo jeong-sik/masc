@@ -1,8 +1,10 @@
 (** Keeper repository readiness.
 
     This is a read-only probe for the single keeper sandbox repo clone under
-    [.masc/playground/<keeper>/repos/<repo>/]. It gives preflight callers a
+    the keeper's backend-scoped sandbox repo lane. It gives preflight callers a
     concrete answer about whether code work can safely start from that clone. *)
+
+open Keeper_types
 
 type command_result =
   { ok : bool
@@ -45,9 +47,10 @@ let repo_name_of_repo_arg ~project_root repo =
       String.sub base 0 (String.length base - 4)
     else base
 
-let clone_path ~(config : Coord.config) ~keeper_name ~repo_name =
-  Filename.concat config.base_path
-    (Filename.concat (Playground_paths.repos_path keeper_name) repo_name)
+let clone_path ~(config : Coord.config) ~(meta : keeper_meta) ~repo_name =
+  Filename.concat
+    (Keeper_sandbox.host_root_abs_of_meta ~config meta)
+    (Filename.concat "repos" repo_name)
 
 let first_line_opt s =
   match
@@ -76,7 +79,7 @@ let int_opt_field name = function
 
 let inspect
     ~(config : Coord.config)
-    ~keeper_name
+    ~(meta : keeper_meta)
     ?repo_name
     ?(repo = "")
     ?(default_branch = "main")
@@ -88,17 +91,21 @@ let inspect
     | Some name when String.trim name <> "" -> String.trim name
     | _ -> repo_name_of_repo_arg ~project_root repo
   in
-  let clone_path = clone_path ~config ~keeper_name ~repo_name:derived_repo_name in
+  let clone_path = clone_path ~config ~meta ~repo_name:derived_repo_name in
   let common_fields state ok next_action extra =
     `Assoc
       ([
          "ok", `Bool ok;
          "state", `String state;
-         "keeper", `String keeper_name;
+         "keeper", `String meta.name;
          "repo", `String repo;
          "repo_name", `String derived_repo_name;
          "clone_path", `String clone_path;
-         "sandbox_repos", `String (Playground_paths.repos_path keeper_name);
+         "sandbox_repos",
+         `String
+           (Keeper_alerting_path.strip_trailing_slashes
+              (Keeper_sandbox.allowed_root_rel_of_meta ~meta)
+            ^ "/repos/");
          "default_branch", `String default_branch;
          "next_action", `String next_action;
        ]

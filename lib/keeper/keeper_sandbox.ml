@@ -1,7 +1,7 @@
 (** Keeper sandbox contract.
 
     Keeper-facing tools expose exactly one logical sandbox.  The current
-    local storage implementation is still [.masc/playground/<keeper>], but
+    local storage implementation is still under [.masc/playground/], but
     that path is an implementation detail of the local/docker backends. *)
 
 type backend =
@@ -41,8 +41,31 @@ let backend_to_string = function
 let sandbox_id_of_name name =
   "keeper:" ^ Playground_paths.sanitize_keeper_name name
 
+let host_root_rel_of_backend ~(backend : backend) name =
+  match backend with
+  | Local -> Playground_paths.bundle_root name
+  | Docker ->
+      Printf.sprintf "%s/docker/%s/"
+        Playground_paths.all_playgrounds_prefix
+        (Playground_paths.sanitize_keeper_name name)
+
+let host_root_rel_of_profile sandbox_profile name =
+  host_root_rel_of_backend
+    ~backend:(backend_of_profile sandbox_profile)
+    name
+
+let host_root_rel_of_meta ~(meta : Keeper_types.keeper_meta) =
+  host_root_rel_of_profile meta.sandbox_profile meta.name
+
 let host_root_rel name =
   Playground_paths.bundle_root name
+
+let host_root_abs_of_backend ~(config : Coord.config) ~(backend : backend) name =
+  Filename.concat config.base_path (host_root_rel_of_backend ~backend name)
+
+let host_root_abs_of_meta ~(config : Coord.config)
+    (meta : Keeper_types.keeper_meta) =
+  Filename.concat config.base_path (host_root_rel_of_meta ~meta)
 
 let host_root_abs ~(config : Coord.config) name =
   Filename.concat config.base_path (host_root_rel name)
@@ -59,8 +82,8 @@ let of_meta ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) : t =
   ; backend
   ; sandbox_profile = Keeper_types.sandbox_profile_to_string meta.sandbox_profile
   ; network_mode = Keeper_types.network_mode_to_string meta.network_mode
-  ; host_root_rel = host_root_rel meta.name
-  ; host_root_abs = host_root_abs ~config meta.name
+  ; host_root_rel = host_root_rel_of_meta ~meta
+  ; host_root_abs = host_root_abs_of_meta ~config meta
   ; container_root =
       (match backend with
        | Local -> None
@@ -74,10 +97,16 @@ let of_meta ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) : t =
 let allowed_root_rel ~(name : string) : string =
   Playground_paths.bundle_root name
 
+let allowed_root_rel_of_meta ~(meta : Keeper_types.keeper_meta) : string =
+  host_root_rel_of_meta ~meta
+
 let allowed_path_roots ~(name : string) : string list =
   [ allowed_root_rel ~name ]
 
-let storage_lifetime = "persistent_base_task_overlay"
+let allowed_path_roots_of_meta ~(meta : Keeper_types.keeper_meta) : string list =
+  [ allowed_root_rel_of_meta ~meta ]
+
+let storage_lifetime = "persistent_backend_task_overlay"
 
 let context_status_fields (t : t) : (string * Yojson.Safe.t) list =
   [ "sandbox_id", `String t.sandbox_id

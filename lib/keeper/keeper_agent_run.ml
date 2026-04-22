@@ -2117,7 +2117,7 @@ let run_turn
     then Some (Keeper_runtime_resolved.admission_wait_timeout_sec ())
     else None
   in
-  ignore (Keeper_alerting_path.ensure_playground_bundle ~config ~name:meta.name);
+  ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
   let effective_allowed_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
   match
     Keeper_alerting_path.absolute_allowed_paths_result

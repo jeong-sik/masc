@@ -9,6 +9,7 @@ logs
 .env
 .env.*
 *.exe
+masc-mcp-linux-x64
 .github/
 docs/
 specs/

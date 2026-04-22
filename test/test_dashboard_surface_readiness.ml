@@ -177,12 +177,9 @@ let test_safe_autonomy_surface_matches_monitoring_contract () =
   match find_surface surfaces "monitoring.safe-autonomy" with
   | None -> fail "monitoring.safe-autonomy missing"
   | Some surface ->
-      check string "exposure_status" "main"
-        Yojson.Safe.Util.(surface |> member "exposure_status" |> to_string);
-      check bool "hidden_from_nav" false
-        Yojson.Safe.Util.(surface |> member "hidden_from_nav" |> to_bool);
-      check bool "meets_main_gate" true
-        Yojson.Safe.Util.(surface |> member "meets_main_gate" |> to_bool)
+      check string "exposure_status" "main" surface.exposure_status;
+      check bool "hidden_from_nav" false surface.hidden_from_nav;
+      check bool "meets_main_gate" true surface.meets_main_gate
 
 let () =
   run "Dashboard_surface_readiness"

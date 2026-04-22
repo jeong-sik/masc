@@ -646,6 +646,7 @@ let test_sdk_error_is_hard_quota_detects_gemini_cli_network_wrapper () =
              "gemini exited with code 1: TerminalQuotaError: You have exhausted \
               your capacity on this model. Your quota will reset after 4h41m7s. \
               reason=QUOTA_EXHAUSTED";
+           kind = Unknown;
          })
   in
   Alcotest.(check bool) "Gemini CLI quota wrapper counts as hard quota" true
@@ -658,6 +659,7 @@ let test_sdk_error_is_hard_quota_detects_claude_cli_limit_wrapper () =
          {
            message =
              "claude exited with code 1: {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've hit your limit · resets Apr 24 at 4am (Asia/Seoul)\"}";
+           kind = Unknown;
          })
   in
   Alcotest.(check bool) "Claude CLI limit wrapper counts as hard quota" true
@@ -669,6 +671,7 @@ let test_sdk_error_is_hard_quota_keeps_transient_network_errors_false () =
       (Llm_provider.Retry.NetworkError
          {
            message = "gemini exited with code 1: connection reset by peer";
+           kind = Unknown;
          })
   in
   Alcotest.(check bool) "transient network error stays transient" false

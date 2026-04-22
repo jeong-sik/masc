@@ -52,7 +52,7 @@ type turn_event_bus_summary = {
 (** Fold the drained OAS event-bus events for a single keeper turn into
     the signals MASC currently consumes. *)
 val summarize_turn_event_bus :
-  Agent_sdk.Event_bus.event list -> turn_event_bus_summary
+  Oas.Event_bus.event list -> turn_event_bus_summary
 
 (** Build the keeper overflow event from either a drained event-bus
     signal or the structured OAS error fallback. Exposed for tests. *)
@@ -117,7 +117,7 @@ val run_keeper_cycle :
   generation:int ->
   ?channel:Keeper_world_observation.keeper_cycle_channel ->
   ?semaphore_wait_ms:int ->
-  ?shared_context:Agent_sdk.Context.t ->
+  ?shared_context:Oas.Context.t ->
   unit ->
   (Keeper_types.keeper_meta, Oas.Error.sdk_error) result
 
@@ -128,6 +128,6 @@ val run_unified_turn :
   generation:int ->
   ?channel:Keeper_world_observation.keeper_cycle_channel ->
   ?semaphore_wait_ms:int ->
-  ?shared_context:Agent_sdk.Context.t ->
+  ?shared_context:Oas.Context.t ->
   unit ->
   (Keeper_types.keeper_meta, Oas.Error.sdk_error) result

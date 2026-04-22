@@ -255,7 +255,7 @@ let metadata_of_json (json : Yojson.Safe.t) : (string * Yojson.Safe.t) list =
   | `Assoc fields -> fields
   | _ -> []
 
-let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
+let message_to_json (m : Oas.Types.message) : Yojson.Safe.t =
   let m = Inference_utils.sanitize_message_utf8 m in
   let tool_call_id =
     match m.tool_call_id with
@@ -309,7 +309,7 @@ let message_of_json (json : Yojson.Safe.t) : Oas.Types.message =
   in
   Inference_utils.sanitize_message_utf8
     {
-      Agent_sdk.Types.role;
+      Oas.Types.role;
       content;
       name =
         (json |> member "name" |> to_string_option
@@ -1340,8 +1340,8 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
     [working_context]/[STATE] paths for older checkpoints. *)
 let patch_checkpoint_last_assistant
     ?snapshot
-    (cp : Agent_sdk.Checkpoint.t) ~session_id ~response_text
-  : Agent_sdk.Checkpoint.t =
+    (cp : Oas.Checkpoint.t) ~session_id ~response_text
+  : Oas.Checkpoint.t =
   let snapshot =
     match snapshot with
     | Some snapshot -> Some snapshot
@@ -1374,15 +1374,15 @@ let patch_checkpoint_last_assistant
                   ]
               | None -> []
             in
-            Agent_sdk.Types.make_message
-              ~role:Agent_sdk.Types.Assistant
+            Oas.Types.make_message
+              ~role:Oas.Types.Assistant
               ~metadata
-              [ Agent_sdk.Types.Text visible_response_text ]
+              [ Oas.Types.Text visible_response_text ]
           else msg)
         cp.messages
   in
   let sanitized_messages, _ = sanitize_checkpoint_messages messages in
-  { cp with Agent_sdk.Checkpoint.session_id;
+  { cp with Oas.Checkpoint.session_id;
             messages = sanitized_messages;
             working_context = None }
 

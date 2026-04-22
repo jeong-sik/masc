@@ -1233,7 +1233,6 @@ let () =
           { id = "t-1"; title = "x"; description = ""; goal_id = None;
             files = []; created_at = "2026-04-19T00:00:00Z";
             task_status = ts; priority = 5;
-            goal_id = None;
             worktree = None;
             created_by = None;
             required_role = Types_core.Unassigned;

@@ -123,7 +123,6 @@ let make_task ~id ~status : Types.task = {
   priority = 3;
   files = [];
   created_at = "2024-01-01T00:00:00Z";
-  goal_id = None;
   worktree = None;
   created_by = None;
   required_role = Types_core.Unassigned; required_preset = None; stage = None;
@@ -163,7 +162,6 @@ let make_task_with_priority ~id ~priority : Types.task = {
   priority;
   files = [];
   created_at = "2024-01-01T00:00:00Z";
-  goal_id = None;
   worktree = None;
   created_by = None;
   required_role = Types_core.Unassigned; required_preset = None; stage = None;

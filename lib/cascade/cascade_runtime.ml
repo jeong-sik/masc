@@ -248,69 +248,11 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
            (String.concat ", " labels)
            (String.concat ", " missing))
 
-let provider_capabilities_of_config (cfg : Llm_provider.Provider_config.t) =
-  let registry = Llm_provider.Provider_registry.default () in
-  (* Use the exact OAS provider kind name here. Provider_adapter collapses
-     CLI kinds onto shared canonical families ("gemini", "codex"), which
-     makes Gemini_cli incorrectly inherit direct-API capabilities. *)
-  let provider_name = Llm_provider.Provider_config.string_of_provider_kind cfg.kind in
-  let caps =
-    match Llm_provider.Provider_registry.find registry provider_name with
-    | Some entry -> entry.capabilities
-    | None -> Llm_provider.Capabilities.default_capabilities
-  in
-  let caps =
-    match cfg.kind with
-    | Llm_provider.Provider_config.Kimi_cli ->
-        (* Keep cascade prefiltering aligned with the OAS worker resolver:
-           Kimi CLI does not consume OAS req.tools inline, but it does expose
-           runtime MCP tools and tool events via [kimi mcp] / [--mcp-config*].
-           Ref checked 2026-04-21:
-           https://moonshotai.github.io/kimi-cli/en/customization/mcp.html *)
-        {
-          caps with
-          supports_tools = false;
-          supports_runtime_mcp_tools = true;
-          supports_runtime_tool_events = true;
-        }
-    | _ -> caps
-  in
-  match cfg.supports_tool_choice_override with
-  | Some supports_tool_choice -> { caps with supports_tool_choice }
-  | None -> caps
-
-let apply_required_tool_choice_filter ~require_tool_choice_support
-    ~require_tool_support ~label
+let apply_required_tool_choice_filter ?runtime_mcp_policy
+    ~require_tool_choice_support ~require_tool_support ~label
     (providers : Llm_provider.Provider_config.t list) =
-  if not require_tool_choice_support && not require_tool_support then
-    providers
-  else
-    let supports_required_tool_use cfg =
-      let caps = provider_capabilities_of_config cfg in
-      let inline_tools = caps.supports_tools in
-      let inline_tool_choice = inline_tools && caps.supports_tool_choice in
-      let runtime_mcp =
-        caps.supports_runtime_mcp_tools && caps.supports_runtime_tool_events
-      in
-      match require_tool_choice_support, require_tool_support with
-      | true, true -> inline_tool_choice || runtime_mcp
-      | true, false -> inline_tool_choice
-      | false, true -> inline_tools || runtime_mcp
-      | false, false -> true
-    in
-    let filtered = List.filter supports_required_tool_use providers in
-    if filtered = [] && providers <> [] then
-      Log.Misc.warn
-        "cascade %s: required tool-use gate removed all providers (providers=[%s])"
-        label
-        (String.concat ", "
-           (List.map
-              (fun (cfg : Llm_provider.Provider_config.t) ->
-                Printf.sprintf "%s:%s"
-                  (Llm_provider.Provider_config.string_of_provider_kind cfg.kind)
-                  cfg.model_id)
-              providers));
-    filtered
+  Provider_tool_support.apply_required_tool_use_filter ?runtime_mcp_policy
+    ~require_tool_choice_support ~require_tool_support ~label providers
 
 let cascade_config_path () : string option =
   Config_dir_resolver.log_warnings ~context:"CascadeRuntime" ();
@@ -335,6 +277,7 @@ let models_of_cascade_name (cascade_name : string) : string list =
 let resolve_providers_from_model_strings ?provider_filter
     ?(require_tool_choice_support = false)
     ?(require_tool_support = false)
+    ?runtime_mcp_policy
     (model_strings : string list)
     : Llm_provider.Provider_config.t list =
   let specs = Cascade_config.parse_model_strings model_strings in
@@ -343,7 +286,8 @@ let resolve_providers_from_model_strings ?provider_filter
       ~provider_filter
       ~label:"direct_model_strings"
       specs
-    |> apply_required_tool_choice_filter ~require_tool_choice_support
+    |> apply_required_tool_choice_filter ?runtime_mcp_policy
+         ~require_tool_choice_support
          ~require_tool_support
          ~label:"direct_model_strings"
   in
@@ -356,26 +300,29 @@ let resolve_providers_from_model_strings ?provider_filter
 let resolve_named_providers_result ?provider_filter
     ?(require_tool_choice_support = false)
     ?(require_tool_support = false)
+    ?runtime_mcp_policy
     ~cascade_name ()
     : (Llm_provider.Provider_config.t list, string) result =
   let label = Keeper_cascade_profile.normalize_declared_name cascade_name in
   match
     Cascade_catalog_runtime.resolve_named_providers ?provider_filter
-      ~require_tool_choice_support:false ~cascade_name ()
+      ?runtime_mcp_policy ~require_tool_choice_support:false ~cascade_name ()
   with
   | Error _ as e -> e
   | Ok providers ->
       Ok
-        (apply_required_tool_choice_filter ~require_tool_choice_support
+        (apply_required_tool_choice_filter ?runtime_mcp_policy
+           ~require_tool_choice_support
            ~require_tool_support ~label providers)
 
 let resolve_named_providers ?provider_filter
     ?(require_tool_choice_support = false)
     ?(require_tool_support = false)
+    ?runtime_mcp_policy
     ~cascade_name ()
     : Llm_provider.Provider_config.t list =
   match
-    resolve_named_providers_result ?provider_filter
+    resolve_named_providers_result ?provider_filter ?runtime_mcp_policy
       ~require_tool_choice_support ~require_tool_support ~cascade_name ()
   with
   | Ok providers -> providers

@@ -15,32 +15,11 @@ let provider_kind_models providers =
     providers
 
 let provider_supports_required_tool_use (cfg : Llm_provider.Provider_config.t) =
-  let registry = Llm_provider.Provider_registry.default () in
-  let provider_name =
-    Llm_provider.Provider_config.string_of_provider_kind cfg.kind
-  in
-  let caps =
-    match Llm_provider.Provider_registry.find registry provider_name with
-    | Some entry -> entry.capabilities
-    | None -> Llm_provider.Capabilities.default_capabilities
-  in
-  let caps =
-    match cfg.supports_tool_choice_override with
-    | Some supports_tool_choice -> { caps with supports_tool_choice }
-    | None -> caps
-  in
+  let caps = Masc_mcp.Oas_worker_exec.provider_caps_of_config cfg in
   caps.supports_tools && caps.supports_tool_choice
 
 let provider_supports_callable_tool_use (cfg : Llm_provider.Provider_config.t) =
-  let registry = Llm_provider.Provider_registry.default () in
-  let provider_name =
-    Llm_provider.Provider_config.string_of_provider_kind cfg.kind
-  in
-  let caps =
-    match Llm_provider.Provider_registry.find registry provider_name with
-    | Some entry -> entry.capabilities
-    | None -> Llm_provider.Capabilities.default_capabilities
-  in
+  let caps = Masc_mcp.Oas_worker_exec.provider_caps_of_config cfg in
   caps.supports_tools
   || (caps.supports_runtime_mcp_tools && caps.supports_runtime_tool_events)
 
@@ -82,6 +61,24 @@ let callable_tool_required_model_strings =
   ; "gemini_cli:auto"
   ; "ollama:local-model"
   ]
+
+let runtime_mcp_policy_with_headers =
+  {
+    Llm_provider.Llm_transport.empty_runtime_mcp_policy with
+    servers =
+      [
+        Llm_provider.Llm_transport.Http_server
+          {
+            name = "masc";
+            url = "http://127.0.0.1:8935/mcp";
+            headers = [ ("x-masc-agent-name", "keeper-sangsu-agent") ];
+          };
+      ];
+    allowed_server_names = [ "masc" ];
+    allowed_tool_names = [ "masc_status" ];
+    strict = true;
+    disable_builtin_tools = true;
+  }
 
 let test_required_tool_choice_filter_keeps_only_supported_providers () =
   let providers =
@@ -132,6 +129,20 @@ let test_required_tool_gate_filter_keeps_runtime_mcp_capable_cli_providers () =
   check bool "drops gemini_cli without runtime MCP lane" false
     (List.mem "gemini_cli" (provider_kinds providers))
 
+let test_required_tool_support_filter_drops_runtime_mcp_providers_without_header_support () =
+  let providers =
+    Masc_mcp.Cascade_runtime.resolve_providers_from_model_strings
+      ~require_tool_support:true
+      ~runtime_mcp_policy:runtime_mcp_policy_with_headers
+      callable_tool_required_model_strings
+  in
+  check bool "drops codex_cli when runtime MCP headers are required" false
+    (List.mem "codex_cli" (provider_kinds providers));
+  check bool "keeps kimi_cli with runtime MCP header support" true
+    (List.mem "kimi_cli" (provider_kinds providers));
+  check bool "keeps claude_code with runtime MCP header support" true
+    (List.mem "claude_code" (provider_kinds providers))
+
 let () =
   run "Cascade_runtime"
     [
@@ -150,5 +161,8 @@ let () =
             test_required_tool_support_filter_keeps_inline_or_runtime_capable_providers;
           test_case "tool gate keeps runtime MCP-capable CLI providers" `Quick
             test_required_tool_gate_filter_keeps_runtime_mcp_capable_cli_providers;
+          test_case "runtime MCP header requirement drops unsupported providers"
+            `Quick
+            test_required_tool_support_filter_drops_runtime_mcp_providers_without_header_support;
         ] );
     ]

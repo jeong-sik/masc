@@ -503,7 +503,8 @@ let run_with_masc_tools
       (List.map (fun (td : Types.tool_schema) -> td.name) masc_tools)
   with
   | Some runtime_mcp_policy
-    when provider_supports_runtime_mcp_lane config.provider_cfg ->
+    when Provider_tool_support.provider_supports_runtime_mcp_policy
+           config.provider_cfg runtime_mcp_policy ->
       let config = { config with runtime_mcp_policy = Some runtime_mcp_policy } in
       run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?contract goal
   | _ when masc_tools = [] ->

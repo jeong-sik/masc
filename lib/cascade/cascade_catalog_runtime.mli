@@ -76,6 +76,7 @@ val resolve_named_providers :
   ?provider_filter:string list ->
   ?require_tool_choice_support:bool ->
   ?require_tool_support:bool ->
+  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
   cascade_name:string ->
   unit ->
   (Llm_provider.Provider_config.t list, string) result

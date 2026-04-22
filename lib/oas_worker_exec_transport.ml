@@ -106,57 +106,10 @@ let kimi_cli_model_for_provider (provider_cfg : Llm_provider.Provider_config.t) 
   | Some explicit -> Some explicit
   | None -> Llm_provider.Transport_kimi_cli.default_config.model
 
-let normalize_cli_provider_caps
-    ~(provider_cfg : Llm_provider.Provider_config.t)
-    (caps : Llm_provider.Capabilities.capabilities) =
-  match provider_cfg.kind with
-  | Llm_provider.Provider_config.Kimi_cli ->
-      {
-        caps with
-        supports_tools = false;
-        supports_runtime_mcp_tools = true;
-        supports_runtime_tool_events = true;
-      }
-  | _ -> caps
-
-let provider_caps_of_config (provider_cfg : Llm_provider.Provider_config.t) =
-  let base_caps =
-    match provider_cfg.kind with
-    | Llm_provider.Provider_config.Ollama ->
-        Llm_provider.Capabilities.ollama_capabilities
-    | Anthropic -> Llm_provider.Capabilities.anthropic_capabilities
-    | Kimi -> Llm_provider.Capabilities.kimi_capabilities
-    | Glm -> Llm_provider.Capabilities.glm_capabilities
-    | Gemini -> Llm_provider.Capabilities.gemini_capabilities
-    | OpenAI_compat -> Llm_provider.Capabilities.openai_chat_capabilities
-    | Claude_code -> Llm_provider.Capabilities.claude_code_capabilities
-    | Gemini_cli -> Llm_provider.Capabilities.gemini_cli_capabilities
-    | Kimi_cli -> Llm_provider.Capabilities.kimi_cli_capabilities
-    | Codex_cli -> Llm_provider.Capabilities.codex_cli_capabilities
-  in
-  let caps =
-    match provider_cfg.kind with
-    | Llm_provider.Provider_config.Claude_code
-    | Gemini_cli
-    | Codex_cli
-    | Kimi_cli -> base_caps
-    | _ -> (
-        match Llm_provider.Capabilities.for_model_id provider_cfg.model_id with
-        | Some caps -> caps
-        | None -> base_caps)
-  in
-  let caps = normalize_cli_provider_caps ~provider_cfg caps in
-  match provider_cfg.supports_tool_choice_override with
-  | Some supports_tool_choice -> { caps with supports_tool_choice }
-  | None -> caps
-
-let provider_supports_inline_tools (provider_cfg : Llm_provider.Provider_config.t) =
-  (provider_caps_of_config provider_cfg).supports_tools
-
-let provider_supports_runtime_mcp_lane
-    (provider_cfg : Llm_provider.Provider_config.t) =
-  let caps = provider_caps_of_config provider_cfg in
-  caps.supports_runtime_mcp_tools && caps.supports_runtime_tool_events
+let provider_caps_of_config = Provider_tool_support.oas_capabilities_of_config
+let provider_supports_inline_tools = Provider_tool_support.provider_supports_inline_tools
+let provider_supports_runtime_mcp_lane =
+  Provider_tool_support.provider_supports_runtime_mcp_lane
 
 let dedupe_preserve_order (items : string list) =
   let seen = Hashtbl.create (List.length items) in
@@ -332,17 +285,32 @@ let kimi_cli_extra_env (provider_cfg : Llm_provider.Provider_config.t) =
   | None -> []
 
 let resolve_tool_lane_for_oas_tools
+    ?agent_name
     ~(provider_cfg : Llm_provider.Provider_config.t)
     ~(tools : Oas.Tool.t list)
+    ()
   : (Oas.Tool.t list
      * Llm_provider.Llm_transport.runtime_mcp_policy option,
      Oas.Error.sdk_error)
     result =
   let public_tools = public_mcp_tools_of_oas_tools tools in
   let public_tool_names = public_mcp_tool_names_of_oas_tools public_tools in
-  match public_mcp_runtime_policy_of_tool_names public_tool_names with
+  let runtime_mcp_policy =
+    match public_mcp_runtime_policy_of_tool_names public_tool_names with
+    | Some policy ->
+        let agent_name =
+          match agent_name with
+          | Some agent_name -> String.trim agent_name
+          | None -> ""
+        in
+        if agent_name = "" then Some policy
+        else Some (runtime_mcp_policy_with_masc_agent_name ~agent_name policy)
+    | None -> None
+  in
+  match runtime_mcp_policy with
   | Some runtime_mcp_policy
-    when provider_supports_runtime_mcp_lane provider_cfg ->
+    when Provider_tool_support.provider_supports_runtime_mcp_policy
+           provider_cfg runtime_mcp_policy ->
       Ok ([], Some runtime_mcp_policy)
   | _ when tools = [] ->
       Ok (tools, None)
@@ -350,7 +318,21 @@ let resolve_tool_lane_for_oas_tools
       Ok (tools, None)
   | _ ->
       let detail =
-        if public_tool_names <> [] then
+        let runtime_mcp_requires_http_headers =
+          match runtime_mcp_policy with
+          | Some policy ->
+              Provider_tool_support.runtime_mcp_policy_requires_http_headers
+                policy
+          | None -> false
+        in
+        if public_tool_names <> []
+           && runtime_mcp_requires_http_headers
+           && provider_supports_runtime_mcp_lane provider_cfg
+        then
+          Printf.sprintf
+            "%s does not support request-scoped runtime MCP HTTP headers required by public MCP tools"
+            (provider_label provider_cfg)
+        else if public_tool_names <> [] then
           Printf.sprintf
             "%s does not support inline tools or request-scoped runtime MCP tools"
             (provider_label provider_cfg)

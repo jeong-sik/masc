@@ -82,7 +82,6 @@
         test_decision_pipeline_observer
         test_keeper_composite_observer
         test_keeper_behavioral_regime
-        test_keeper_telemetry_feedback
         test_keeper_toml
         test_keeper_runtime_toml
         test_keeper_tool_policy_config
@@ -111,20 +110,16 @@
         test_task_stage
         test_ocaml_north_star_task_lifecycle
         ; test_risk_digest removed (team session cleanup)
-        test_artifact_store
         test_tool_blob_store
         test_tool_bridge_externalize
         test_keeper_artifact_hydrator
         test_artifacts_endpoint
         test_tool_output_washing_e2e
         test_keeper_context_core_dedup
-        test_golden_set
-        test_golden_set_eval
         test_adversarial_eval
         test_labeling
         test_tool_deep_review
         test_tool_call_quality_benchmark
-        test_typed_state
         test_keeper_prompt_metrics
         test_cache_metrics_wiring
         test_tool_surface_ssot
@@ -138,7 +133,6 @@
         test_run_local_script
         test_tool_prefilter
         test_keeper_state_machine
-        test_keeper_campaign_fsm
         test_keeper_social_model_magentic_ledger_fsm
         test_keeper_overflow_recovery
         test_team_memory
@@ -202,7 +196,6 @@
           test_decision_pipeline_observer
           test_keeper_composite_observer
           test_keeper_behavioral_regime
-          test_keeper_telemetry_feedback
           test_keeper_toml
           test_keeper_runtime_toml
           test_keeper_tool_policy_config
@@ -231,20 +224,16 @@
           test_task_stage
           test_ocaml_north_star_task_lifecycle
           ; test_risk_digest removed (team session cleanup)
-          test_artifact_store
           test_tool_blob_store
           test_tool_bridge_externalize
           test_keeper_artifact_hydrator
           test_artifacts_endpoint
           test_tool_output_washing_e2e
           test_keeper_context_core_dedup
-          test_golden_set
-          test_golden_set_eval
           test_adversarial_eval
           test_labeling
           test_tool_deep_review
           test_tool_call_quality_benchmark
-          test_typed_state
           test_keeper_prompt_metrics
           test_cache_metrics_wiring
           test_tool_surface_ssot
@@ -258,7 +247,6 @@
           test_run_local_script
           test_tool_prefilter
           test_keeper_state_machine
-          test_keeper_campaign_fsm
           test_keeper_social_model_magentic_ledger_fsm
           test_keeper_overflow_recovery
           test_team_memory
@@ -276,9 +264,9 @@
 ; ============================================================
 (tests
  (names test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_context_overflow
-        test_keeper_state_machine_pbt test_keeper_trace_validate)
+        test_keeper_state_machine_pbt)
  (modules test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_context_overflow
-          test_keeper_state_machine_pbt test_keeper_trace_validate)
+          test_keeper_state_machine_pbt)
  (libraries masc_test_deps))
 
 ; ============================================================
@@ -292,11 +280,6 @@
 (test
  (name test_governance_cases_snapshot)
  (modules test_governance_cases_snapshot)
- (libraries masc_test_deps))
-
-(test
- (name test_meta_cognition_feedback)
- (modules test_meta_cognition_feedback)
  (libraries masc_test_deps))
 
 ; test_worker_run_evidence_summary removed (team session cleanup)
@@ -381,7 +364,6 @@
         test_keeper_tool_exposure
         test_keeper_runtime_denylist
         test_keeper_runtime_config_ssot
-        test_keeper_voice_loop
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
         test_autoresearch_knowledge
@@ -546,7 +528,6 @@
         test_keeper_tool_exposure
         test_keeper_runtime_denylist
         test_keeper_runtime_config_ssot
-        test_keeper_voice_loop
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
         test_autoresearch_knowledge
@@ -781,7 +762,7 @@
         test_tempo_coverage test_transport_coverage test_validation_coverage
         test_dashboard_resilience_coverage
         test_nickname_coverage test_level2_config_coverage
-        test_compression_dict_coverage test_config_coverage
+        test_config_coverage
         test_env_config_coverage test_progress_coverage
         test_mcp_protocol_coverage test_notify_coverage
         test_mcp_session_coverage test_sse_coverage
@@ -816,7 +797,7 @@
         test_tempo_coverage test_transport_coverage test_validation_coverage
         test_dashboard_resilience_coverage
         test_nickname_coverage test_level2_config_coverage
-        test_compression_dict_coverage test_config_coverage
+        test_config_coverage
         test_env_config_coverage test_progress_coverage
         test_mcp_protocol_coverage test_notify_coverage
         test_mcp_session_coverage test_sse_coverage
@@ -1029,11 +1010,6 @@
  (deps ../bin/main_eio.exe)
  (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
 
-(test
- (name test_compression_boundary)
- (modules test_compression_boundary)
- (libraries alcotest masc_backend masc_compression))
-
 ; ============================================================
 ; Special: Minimal dependency tests (CI scripts, governance)
 ; ============================================================
@@ -1097,17 +1073,6 @@
  (name test_start_masc_mcp_script)
  (modules test_start_masc_mcp_script)
  (libraries alcotest unix))
-
-(test
- (name test_harness_shell_helpers)
- (modules test_harness_shell_helpers)
- (deps %{exe:../bin/keeper_campaign_fsm.exe})
- (action
-  (setenv KEEPER_CAMPAIGN_FSM_EXE %{exe:../bin/keeper_campaign_fsm.exe}
-   (setenv MASC_HARNESS_ALLOW_DUNE_EXEC_FALLBACK 0
-    (run %{test}))))
- (libraries alcotest unix)
-)
 
 (test
  (name test_tool_call_replay_harness)

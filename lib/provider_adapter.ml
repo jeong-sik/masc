@@ -109,24 +109,38 @@ let display_provider_name label =
   | "kimi-api" -> cn_kimi
   | _ -> String.trim label
 
-(** Default API base URLs — overridable via env var for proxying/testing. *)
+(** Default API base URLs — overridable via env var for proxying/testing.
+    Where OAS Provider_registry already defines a default, query it rather
+    than duplicating the literal here. *)
 
 let env_url_or ~env ~default =
   match Sys.getenv_opt env with
   | Some url when String.trim url <> "" -> String.trim url
   | _ -> default
 
+(** Query OAS Provider_registry for a provider's default base_url.
+    Returns empty string if the provider is not known to OAS.
+    This removes duplicated defaults between MASC and OAS. *)
+let registry_default_base_url name =
+  let registry = Llm_provider.Provider_registry.default () in
+  match Llm_provider.Provider_registry.find registry name with
+  | Some entry -> entry.defaults.base_url
+  | None -> ""
+
 let anthropic_api_url () =
-  env_url_or ~env:"ANTHROPIC_API_URL" ~default:"https://api.anthropic.com"
+  env_url_or ~env:"ANTHROPIC_API_URL"
+    ~default:(registry_default_base_url "claude")
 
 let openai_api_url () =
   env_url_or ~env:"OPENAI_API_URL" ~default:"https://api.openai.com"
 
 let openrouter_api_url () =
-  env_url_or ~env:"OPENROUTER_API_URL" ~default:"https://openrouter.ai/api/v1"
+  env_url_or ~env:"OPENROUTER_API_URL"
+    ~default:(registry_default_base_url "openrouter")
 
 let gemini_generative_api_url () =
-  env_url_or ~env:"GEMINI_API_URL" ~default:"https://generativelanguage.googleapis.com"
+  env_url_or ~env:"GEMINI_API_URL"
+    ~default:(registry_default_base_url "gemini")
 
 let glm_api_url () =
   env_url_or ~env:"ZAI_BASE_URL" ~default:Llm_provider.Zai_catalog.general_base_url
@@ -135,7 +149,8 @@ let glm_coding_api_url () =
   env_url_or ~env:"ZAI_CODING_BASE_URL" ~default:Llm_provider.Zai_catalog.coding_base_url
 
 let kimi_api_url () =
-  env_url_or ~env:"KIMI_BASE_URL" ~default:"https://api.kimi.com/coding"
+  env_url_or ~env:"KIMI_BASE_URL"
+    ~default:(registry_default_base_url "kimi")
 (** SSOT cascade prefix for local llama-server instances.
     All cascade label construction for local models must use this constant.
     Format: [local_cascade_prefix ^ ":" ^ model_id] → e.g. "llama:qwen3.5" *)

@@ -134,6 +134,10 @@ let error_message_of_http_error = function
         | _ -> Printf.sprintf "HTTP %d" code
       with Yojson.Json_error _ -> Printf.sprintf "HTTP %d" code)
 
+(** Probe whether an endpoint supports the OpenAI chat-completions protocol.
+    This is a protocol-level probe; it explicitly depends on OAS
+    [Llm_provider.Complete.complete] because the goal is to verify the
+    endpoint's wire protocol, not to run a full agent turn. *)
 let probe_chat_completion_compatible
     ?(timeout_sec = 5)
     (endpoint : Discovery_cache.endpoint_info) =

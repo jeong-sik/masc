@@ -16,109 +16,6 @@ let pctl percentile values =
       in
       List.nth_opt sorted index
 
-let raw_completion_at ~server_url ~model_id ~prompt ~max_tokens ~timeout_sec () =
-  let url =
-    String.trim server_url
-    ^ Masc_network_defaults.openai_chat_completions_path
-  in
-  let request_body =
-    `Assoc
-      [
-        ("model", `String model_id);
-        ( "messages",
-          `List
-            [
-              `Assoc
-                [
-                  ("role", `String "user");
-                  ("content", `String prompt);
-                ];
-            ] );
-        ("temperature", `Float 0.0);
-        ("max_tokens", `Int max_tokens);
-      ]
-    |> Yojson.Safe.to_string
-  in
-  let started = Time_compat.now () in
-  try
-    let argv =
-      [
-        "curl";
-        "-sS";
-        "--http1.1";
-        "--max-time";
-        string_of_int (max 1 timeout_sec);
-        "-X";
-        "POST";
-        url;
-        "-H";
-        "content-type: application/json";
-        "--data-binary";
-        "@-";
-      ]
-    in
-    let status, body =
-      Masc_exec.Exec_gate.run_argv_with_stdin_and_status
-        ~actor:"tool/local_runtime_bench"
-        ~raw_source:(String.concat " " (List.map Filename.quote argv))
-        ~summary:"tool local runtime raw completion"
-        ~timeout_sec:(float_of_int (max 1 (timeout_sec + 2)))
-        ~stdin_content:request_body
-        argv
-    in
-    let latency_ms =
-      int_of_float ((Time_compat.now () -. started) *. 1000.0)
-    in
-    match status with
-    | Unix.WEXITED 0 -> (
-        try
-          let json = Yojson.Safe.from_string body in
-          let open Yojson.Safe.Util in
-          match member "error" json with
-          | `Assoc fields -> (
-              match List.assoc_opt "message" fields with
-              | Some (`String msg) ->
-                  { success = false; latency_ms; error = Some msg }
-              | _ ->
-                  { success = false; latency_ms; error = Some "llama returned error" })
-          | _ ->
-              ignore
-                (match json |> member "choices" |> to_list with
-                 | choice :: _ -> choice |> member "message" |> member "content" |> to_string_option
-                 | [] -> None);
-              { success = true; latency_ms; error = None }
-        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Failure _ ->
-          { success = false; latency_ms; error = Some "invalid llama response json" })
-    | Unix.WEXITED code ->
-        {
-          success = false;
-          latency_ms;
-          error = Some (Printf.sprintf "curl exit code %d" code);
-        }
-    | Unix.WSIGNALED sig_num ->
-        {
-          success = false;
-          latency_ms;
-          error = Some (Printf.sprintf "curl signal %d" sig_num);
-        }
-    | Unix.WSTOPPED sig_num ->
-        {
-          success = false;
-          latency_ms;
-          error = Some (Printf.sprintf "curl stopped %d" sig_num);
-        }
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    {
-      success = false;
-      latency_ms =
-        int_of_float ((Time_compat.now () -. started) *. 1000.0);
-      error = Some (Printexc.to_string exn);
-    }
-
-let raw_completion ~model_id ~prompt ~max_tokens ~timeout_sec () =
-  raw_completion_at ~server_url:Env_config.Llama.server_url ~model_id ~prompt
-    ~max_tokens ~timeout_sec ()
-
 let error_message_of_http_error = function
   | Llm_provider.Http_client.NetworkError { message; _ } -> message
   | Llm_provider.Http_client.AcceptRejected { reason } -> reason
@@ -281,10 +178,11 @@ let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec (
     =
   match Masc_eio_env.get_opt () with
   | None ->
-      let base_url = runtime_base_url_for_pool runtime_pool in
-      ( raw_completion_at ~server_url:base_url ~model_id ~prompt ~max_tokens
-          ~timeout_sec (),
-        Local_runtime_pool.runtime_id_of_base_url base_url )
+      (* MASC-OAS boundary: raw curl fallback removed.
+         Bench must run inside an Eio-managed context. *)
+      ( { success = false; latency_ms = 0;
+          error = Some "Eio environment not available; bench requires OAS runtime context" },
+        "unknown" )
   | Some env -> (
       let started = Time_compat.now () in
       let model_label = model_label_for_pool ~model_id runtime_pool in

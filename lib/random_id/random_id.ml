@@ -8,9 +8,7 @@
 
 let hex ~bytes =
   let rnd = Mirage_crypto_rng.generate bytes in
-  String.concat ""
-    (List.init (String.length rnd) (fun i ->
-       Printf.sprintf "%02x" (Char.code (String.get rnd i))))
+  List.fold_left (fun acc s -> acc ^ s) "" (List.init (String.length rnd) (fun i -> Printf.sprintf "%02x" (Char.code (String.get rnd i))))
 
 let prefixed ~prefix ~bytes =
   prefix ^ hex ~bytes

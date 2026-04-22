@@ -619,7 +619,7 @@ let text_of_response (resp : Llm_provider.Types.api_response) : string =
   |> List.filter_map (function
     | Llm_provider.Types.Text t -> Some t
     | _ -> None)
-  |> String.concat ""
+  |> fun lst -> List.fold_left (fun acc s -> acc ^ s) "" lst
 
 (* ── Model resolution: named -> "default" -> hardcoded ─── *)
 

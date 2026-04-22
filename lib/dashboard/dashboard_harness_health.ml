@@ -260,7 +260,7 @@ let role_counts_of_json json : (string * int) list =
   |> List.filter_map (fun (role, value) ->
          match value with
          | `Int n -> Some (role, n)
-         | `Intlit s -> (try Some (role, int_of_string s) with _ -> None)
+         | `Intlit s -> Option.map (fun n -> (role, n)) (int_of_string_opt s)
          | _ -> None)
 
 let wake_payload_record_json (event : wake_payload_event) =

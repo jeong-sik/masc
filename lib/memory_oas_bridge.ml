@@ -319,7 +319,7 @@ let metadata_float key metadata =
   match List.assoc_opt key metadata with
   | Some (`Float value) -> Some value
   | Some (`Int value) -> Some (float_of_int value)
-  | Some (`Intlit value) -> Some (float_of_string value)
+  | Some (`Intlit value) -> float_of_string_opt value
   | _ -> None
 
 let institution_outcome_to_string = function

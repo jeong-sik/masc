@@ -26,8 +26,7 @@ let json_int_opt = function
 let json_float_opt = function
   | `Float value -> Some value
   | `Int value -> Some (float_of_int value)
-  | `Intlit raw -> (
-      try Some (float_of_string raw) with Failure _ -> None)
+  | `Intlit raw -> float_of_string_opt raw
   | _ -> None
 
 let json_bool_opt = function

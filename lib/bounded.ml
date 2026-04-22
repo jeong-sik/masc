@@ -194,7 +194,7 @@ let resolve_path json path =
 let json_to_float = function
   | `Int i -> Some (float_of_int i)
   | `Float f -> Some f
-  | `String s -> (try Some (float_of_string s) with Failure _ -> None)
+  | `String s -> float_of_string_opt s
   | _ -> None
 
 (** Check goal condition against result *)

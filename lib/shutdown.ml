@@ -30,7 +30,7 @@ let default_config = {
 let config_from_env () =
   let get_float name default =
     match Sys.getenv_opt name with
-    | Some s -> (try Float.of_string s with Failure _ -> default)
+    | Some s -> Option.value ~default (float_of_string_opt s)
     | None -> default
   in
   {

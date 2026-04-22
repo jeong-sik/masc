@@ -67,10 +67,10 @@ let role_counts_with_pending_user
   List.iter
     (fun (m : Oas.Types.message) ->
       let key = role_key m.role in
-      let cur = try Hashtbl.find tbl key with Not_found -> 0 in
+      let cur = Hashtbl.find_opt tbl key |> Option.value ~default:0 in
       Hashtbl.replace tbl key (cur + 1))
     history_messages;
-  let cur = try Hashtbl.find tbl "user" with Not_found -> 0 in
+  let cur = Hashtbl.find_opt tbl "user" |> Option.value ~default:0 in
   Hashtbl.replace tbl "user" (cur + 1);
   Hashtbl.fold (fun k v acc -> (k, v) :: acc) tbl []
   |> List.sort (fun (a, _) (b, _) -> String.compare a b)

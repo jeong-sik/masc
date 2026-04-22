@@ -31,7 +31,7 @@ let float_of_env_default name ~default ~min_v ~max_v =
     match Sys.getenv_opt name with
     | None -> default
     | Some s ->
-        (try float_of_string (String.trim s) with Failure _ -> default)
+        Option.value ~default (float_of_string_opt (String.trim s))
   in
   max min_v (min max_v v)
 
@@ -88,8 +88,10 @@ let parse_tool_call_detail (detail_opt : string option)
           | Some ("timeout", v) ->
               timeout := bool_of_tag_value v
           | Some ("duration_ms", v) ->
-              (try duration_ms := Some (max 0 (int_of_string v)) with Failure _ ->
-                Log.Dashboard.warn "invalid duration_ms value: %s" v)
+              (match int_of_string_opt v with
+               | Some n -> duration_ms := Some (max 0 n)
+               | None ->
+                 Log.Dashboard.warn "invalid duration_ms value: %s" v)
           | _ -> ())
         tags;
       (tool_name, !timeout, !duration_ms)

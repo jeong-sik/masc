@@ -132,13 +132,13 @@ let snapshot_env ~cwd =
       else
         try
           let ic = open_in head_file in
-          let line = input_line ic in
-          close_in ic;
-          let prefix = "ref: refs/heads/" in
-          if String.starts_with ~prefix line then
-            Some (String.sub line (String.length prefix)
-                    (String.length line - String.length prefix))
-          else Some (String.sub line 0 8)
+          Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+            let line = input_line ic in
+            let prefix = "ref: refs/heads/" in
+            if String.starts_with ~prefix line then
+              Some (String.sub line (String.length prefix)
+                      (String.length line - String.length prefix))
+            else Some (String.sub line 0 8))
         with _ -> None
   in
   let project_kind = detect_project_kind cwd in
@@ -715,7 +715,7 @@ let default_tail_cap = 512 * 1024
 let env_int key =
   match Sys.getenv_opt key with
   | None | Some "" -> None
-  | Some s -> (try Some (int_of_string (String.trim s)) with _ -> None)
+  | Some s -> int_of_string_opt (String.trim s)
 
 let output_cap_enabled () =
   match Sys.getenv_opt "MASC_BASH_OUTPUT_CAP" with

@@ -93,7 +93,7 @@ let try_write_pid_file path ~pid ~pgid ~started_at =
     ensure_dir (Filename.dirname path);
     let oc = open_out_gen [ Open_wronly; Open_creat; Open_trunc ] 0o644 path in
     Printf.fprintf oc "%d\n%d\n%f\n" pid pgid started_at;
-    close_out oc)
+    close_out_noerr oc)
 
 let try_delete_pid_file = function
   | None -> ()

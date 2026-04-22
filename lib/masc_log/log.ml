@@ -212,7 +212,7 @@ module Ring = struct
   let rotate_if_needed () =
     let today = date_string () in
     if today <> !file_current_date && !file_base_dir <> "" then begin
-      (match !file_channel with Some oc -> protect ~default:() (fun () -> close_out oc) | None -> ());
+      (match !file_channel with Some oc -> close_out_noerr oc | None -> ());
       open_sink !file_base_dir
     end
 

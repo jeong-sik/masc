@@ -579,7 +579,7 @@ let progress_generation_of_text (text : string) : int option =
   |> List.find_map (fun line ->
          match strip_prefix_ci ~prefix:"Generation:" line with
          | None -> None
-         | Some raw -> (try Some (int_of_string (String.trim raw)) with _ -> None))
+         | Some raw -> int_of_string_opt (String.trim raw))
 
 let progress_snapshot_cache_of_text (text : string) : progress_snapshot_cache option =
   match state_snapshot_of_summary_text text with

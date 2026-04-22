@@ -747,8 +747,9 @@ let run_turn
   let decay_turns =
     match Sys.getenv_opt "MASC_KEEPER_TOOL_DECAY_TURNS" with
     | Some s ->
-      (try max 1 (int_of_string s) with
-       | Failure _ ->
+      (match int_of_string_opt s with
+       | Some n -> max 1 n
+       | None ->
          Log.Keeper.warn
            "keeper: MASC_KEEPER_TOOL_DECAY_TURNS=%S is not a valid integer, using default 5"
            s;

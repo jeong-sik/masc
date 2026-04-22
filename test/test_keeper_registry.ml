@@ -9,6 +9,32 @@ module Json = Yojson.Safe.Util
 
 let bp = "/tmp/test"
 
+let with_env name value f =
+  let old = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match old with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then (
+      Array.iter (fun name -> rm_rf (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path)
+    else
+      Unix.unlink path
+
+let temp_base_path label =
+  let base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-test-%s-%06x" label (Random.bits ()))
+  in
+  Unix.mkdir base 0o755;
+  base
+
 let make_meta name =
   let json = `Assoc [
     ("name", `String name);
@@ -696,6 +722,48 @@ let test_directive_claim () =
      | None -> fail "expected current_task_id set")
   | None -> fail "expected dc1"
 
+let test_directive_pause_persists_meta () =
+  R.clear ();
+  let base_dir = temp_base_path "directive-pause-persist" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = make_test_config base_dir in
+      let meta = make_meta "dpersist" in
+      (match Keeper_types.write_meta ~force:true config meta with
+       | Ok () -> ()
+       | Error err -> fail ("write_meta failed: " ^ err));
+      ignore (R.register ~base_path:base_dir "dpersist" meta);
+      KK.process_directive ~agent_name:"agent-dpersist" "pause";
+      match Keeper_types.read_meta config "dpersist" with
+      | Ok (Some persisted) ->
+          check bool "paused persisted" true persisted.paused
+      | Ok None -> fail "expected persisted meta"
+      | Error err -> fail ("read_meta failed: " ^ err))
+
+let test_directive_claim_persists_meta () =
+  R.clear ();
+  let base_dir = temp_base_path "directive-claim-persist" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = make_test_config base_dir in
+      let meta = make_meta "dclaimpersist" in
+      (match Keeper_types.write_meta ~force:true config meta with
+       | Ok () -> ()
+       | Error err -> fail ("write_meta failed: " ^ err));
+      ignore (R.register ~base_path:base_dir "dclaimpersist" meta);
+      KK.process_directive ~agent_name:"agent-dclaimpersist" "claim:T-77";
+      match Keeper_types.read_meta config "dclaimpersist" with
+      | Ok (Some persisted) ->
+          (match persisted.current_task_id with
+           | Some task_id ->
+               check string "claimed task persisted" "T-77"
+                 (Masc_mcp.Keeper_id.Task_id.to_string task_id)
+           | None -> fail "expected persisted current_task_id")
+      | Ok None -> fail "expected persisted meta"
+      | Error err -> fail ("read_meta failed: " ^ err))
+
 let test_directive_unknown_no_crash () =
   R.clear ();
   let _entry = R.register ~base_path:bp "du1" (make_meta "du1") in
@@ -750,6 +818,221 @@ let test_wakeup_all_scoped_to_base_path () =
   check bool "base path A all wakeup set" true (Atomic.get entry_a.fiber_wakeup);
   check bool "base path B all wakeup stays unset" false
     (Atomic.get entry_b.fiber_wakeup)
+
+let test_board_signal_wakeup_ignores_unmatched_posts_without_opt_in () =
+  R.clear ();
+  let base_dir = temp_base_path "board-wakeup-ignore" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Board.reset_global_for_test ();
+      Masc_mcp.Board_dispatch.reset_for_test ();
+      rm_rf base_dir)
+    (fun () ->
+      with_env "MASC_BASE_PATH" base_dir (fun () ->
+        Masc_mcp.Board.reset_global_for_test ();
+        Masc_mcp.Board_dispatch.reset_for_test ();
+        Masc_mcp.Board_dispatch.init_jsonl ();
+        let config = make_test_config base_dir in
+        let alpha = make_meta "alpha" in
+        let beta = make_meta "beta" in
+        ignore (Keeper_types.write_meta ~force:true config alpha);
+        ignore (Keeper_types.write_meta ~force:true config beta);
+        let entry_a = R.register ~base_path:base_dir "alpha" alpha in
+        let entry_b = R.register ~base_path:base_dir "beta" beta in
+        let post =
+          match
+            Masc_mcp.Board_dispatch.create_post ~author:"alice"
+              ~title:"General update"
+              ~content:"No direct mention here"
+              ~post_kind:Masc_mcp.Board.Human_post ()
+          with
+          | Ok post -> post
+          | Error err -> fail (Masc_mcp.Board.show_board_error err)
+        in
+        let signal : Masc_mcp.Board_dispatch.keeper_board_signal =
+          {
+            kind = Masc_mcp.Board_dispatch.Board_post_created;
+            post_id = Masc_mcp.Board.Post_id.to_string post.id;
+            author = "alice";
+            title = post.title;
+            content = post.content;
+            hearth = post.hearth;
+          }
+        in
+        KK.wakeup_relevant_keeper_for_board_signal ~config signal;
+        check bool "alpha not woken" false (Atomic.get entry_a.fiber_wakeup);
+        check bool "beta not woken" false (Atomic.get entry_b.fiber_wakeup)))
+
+let test_board_signal_wakeup_only_wakes_opted_in_scope_keeper () =
+  R.clear ();
+  let base_dir = temp_base_path "board-wakeup-optin" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Board.reset_global_for_test ();
+      Masc_mcp.Board_dispatch.reset_for_test ();
+      rm_rf base_dir)
+    (fun () ->
+      with_env "MASC_BASE_PATH" base_dir (fun () ->
+        Masc_mcp.Board.reset_global_for_test ();
+        Masc_mcp.Board_dispatch.reset_for_test ();
+        Masc_mcp.Board_dispatch.init_jsonl ();
+        let config = make_test_config base_dir in
+        let opted_in_base = make_meta "opted-in" in
+        let opted_in = { opted_in_base with room_signal_prompt_enabled = true } in
+        let defaulted = make_meta "defaulted" in
+        ignore (Keeper_types.write_meta ~force:true config opted_in);
+        ignore (Keeper_types.write_meta ~force:true config defaulted);
+        let entry_a = R.register ~base_path:base_dir "opted-in" opted_in in
+        let entry_b = R.register ~base_path:base_dir "defaulted" defaulted in
+        let post =
+          match
+            Masc_mcp.Board_dispatch.create_post ~author:"alice"
+              ~title:"General update"
+              ~content:"No direct mention here"
+              ~post_kind:Masc_mcp.Board.Human_post ()
+          with
+          | Ok post -> post
+          | Error err -> fail (Masc_mcp.Board.show_board_error err)
+        in
+        let signal : Masc_mcp.Board_dispatch.keeper_board_signal =
+          {
+            kind = Masc_mcp.Board_dispatch.Board_post_created;
+            post_id = Masc_mcp.Board.Post_id.to_string post.id;
+            author = "alice";
+            title = post.title;
+            content = post.content;
+            hearth = post.hearth;
+          }
+        in
+        KK.wakeup_relevant_keeper_for_board_signal ~config signal;
+        check bool "opted-in keeper woken" true (Atomic.get entry_a.fiber_wakeup);
+        check bool "defaulted keeper stays asleep" false
+          (Atomic.get entry_b.fiber_wakeup)))
+
+let test_board_signal_wakeup_keeps_thread_reply_after_self_comment () =
+  R.clear ();
+  let base_dir = temp_base_path "board-wakeup-followup" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Board.reset_global_for_test ();
+      Masc_mcp.Board_dispatch.reset_for_test ();
+      rm_rf base_dir)
+    (fun () ->
+      with_env "MASC_BASE_PATH" base_dir (fun () ->
+        Masc_mcp.Board.reset_global_for_test ();
+        Masc_mcp.Board_dispatch.reset_for_test ();
+        Masc_mcp.Board_dispatch.init_jsonl ();
+        let config = make_test_config base_dir in
+        let participant = make_meta "participant" in
+        let bystander = make_meta "bystander" in
+        ignore (Keeper_types.write_meta ~force:true config participant);
+        ignore (Keeper_types.write_meta ~force:true config bystander);
+        let entry_a = R.register ~base_path:base_dir "participant" participant in
+        let entry_b = R.register ~base_path:base_dir "bystander" bystander in
+        let post =
+          match
+            Masc_mcp.Board_dispatch.create_post ~author:"alice"
+              ~title:"General update"
+              ~content:"No direct mention here"
+              ~post_kind:Masc_mcp.Board.Human_post ()
+          with
+          | Ok post -> post
+          | Error err -> fail (Masc_mcp.Board.show_board_error err)
+        in
+        let post_id = Masc_mcp.Board.Post_id.to_string post.id in
+        (match
+           Masc_mcp.Board_dispatch.add_comment ~post_id ~author:"participant"
+             ~content:"I am following this thread."
+             ()
+         with
+        | Ok _ -> ()
+        | Error err -> fail (Masc_mcp.Board.show_board_error err));
+        Unix.sleepf 0.02;
+        (match
+           Masc_mcp.Board_dispatch.add_comment ~post_id ~author:"bob"
+             ~content:"There is a new question for you."
+             ()
+         with
+        | Ok _ -> ()
+        | Error err -> fail (Masc_mcp.Board.show_board_error err));
+        let signal : Masc_mcp.Board_dispatch.keeper_board_signal =
+          {
+            kind = Masc_mcp.Board_dispatch.Board_comment_added;
+            post_id;
+            author = "bob";
+            title = post.title;
+            content = "There is a new question for you.";
+            hearth = post.hearth;
+          }
+        in
+        KK.wakeup_relevant_keeper_for_board_signal ~config signal;
+        check bool "participant keeper woken" true
+          (Atomic.get entry_a.fiber_wakeup);
+        check bool "bystander keeper stays asleep" false
+          (Atomic.get entry_b.fiber_wakeup)))
+
+let test_effective_keepalive_meta_prefers_registry_when_disk_unchanged () =
+  R.clear ();
+  let stale = make_meta "loop-meta" in
+  let fresh =
+    {
+      stale with
+      continuity_summary = "fresh continuity";
+      runtime =
+        {
+          stale.runtime with
+          usage = { stale.runtime.usage with total_turns = 9 };
+        };
+    }
+  in
+  ignore (R.register ~base_path:bp "loop-meta" fresh);
+  let chosen =
+    KK.effective_keepalive_meta
+      ~base_path:bp
+      ~fallback:stale
+      ~disk_meta_opt:None
+  in
+  check string "continuity comes from registry" "fresh continuity"
+    chosen.continuity_summary;
+  check int "turn count comes from registry" 9
+    chosen.runtime.usage.total_turns
+
+let test_effective_keepalive_meta_prefers_disk_when_present () =
+  R.clear ();
+  let stale = make_meta "loop-meta-disk" in
+  let registry_meta =
+    {
+      stale with
+      continuity_summary = "registry continuity";
+      runtime =
+        {
+          stale.runtime with
+          usage = { stale.runtime.usage with total_turns = 3 };
+        };
+    }
+  in
+  let disk_meta =
+    {
+      stale with
+      continuity_summary = "disk continuity";
+      runtime =
+        {
+          stale.runtime with
+          usage = { stale.runtime.usage with total_turns = 11 };
+        };
+    }
+  in
+  ignore (R.register ~base_path:bp "loop-meta-disk" registry_meta);
+  let chosen =
+    KK.effective_keepalive_meta
+      ~base_path:bp
+      ~fallback:stale
+      ~disk_meta_opt:(Some disk_meta)
+  in
+  check string "continuity comes from disk" "disk continuity"
+    chosen.continuity_summary;
+  check int "turn count comes from disk" 11
+    chosen.runtime.usage.total_turns
 
 let () =
   run "Keeper_registry"
@@ -825,6 +1108,8 @@ let () =
           eio_test "resume directive" test_directive_resume;
           eio_test "keeper-name directive alias" test_directive_keeper_name_alias;
           eio_test "claim directive" test_directive_claim;
+          eio_test "pause directive persists meta" test_directive_pause_persists_meta;
+          eio_test "claim directive persists meta" test_directive_claim_persists_meta;
           eio_test "unknown directive no crash" test_directive_unknown_no_crash;
           eio_test "nonexistent agent no crash" test_directive_nonexistent_agent;
           eio_test "stop keepalive scoped to base_path"
@@ -833,5 +1118,15 @@ let () =
             test_wakeup_keeper_scoped_to_base_path;
           eio_test "wakeup all scoped to base_path"
             test_wakeup_all_scoped_to_base_path;
+          eio_test "board wakeup ignores unmatched posts without opt-in"
+            test_board_signal_wakeup_ignores_unmatched_posts_without_opt_in;
+          eio_test "board wakeup only wakes opted-in scope keeper"
+            test_board_signal_wakeup_only_wakes_opted_in_scope_keeper;
+          eio_test "board wakeup keeps thread reply after self comment"
+            test_board_signal_wakeup_keeps_thread_reply_after_self_comment;
+          eio_test "effective keepalive meta prefers registry when disk unchanged"
+            test_effective_keepalive_meta_prefers_registry_when_disk_unchanged;
+          eio_test "effective keepalive meta prefers disk when present"
+            test_effective_keepalive_meta_prefers_disk_when_present;
         ] );
     ]

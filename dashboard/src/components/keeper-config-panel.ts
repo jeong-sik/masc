@@ -4,7 +4,13 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { fetchKeeperConfig, patchKeeperConfig } from '../api/dashboard'
+import {
+  fetchCascadeProfiles,
+  fetchKeeperConfig,
+  patchKeeperConfig,
+  updateKeeperCascade,
+  type CascadeInvalidProfile,
+} from '../api/dashboard'
 import type { KeeperConfigUpdatePayload } from '../api/dashboard'
 import type { KeeperConfig, KeeperHookSlot } from '../types'
 import type { KeeperConfigLoadStatus } from './keeper-detail-source'
@@ -20,9 +26,17 @@ import { SetupGuideCard } from './setup-guide-card'
 const configResource = createAsyncResource<KeeperConfig>()
 const configState = configResource.state
 const configKeeperName = signal<string>('')
+type CascadeProfileCatalog = {
+  profiles: string[]
+  invalid_profiles: CascadeInvalidProfile[]
+}
+const cascadeProfilesResource = createAsyncResource<CascadeProfileCatalog>()
+const cascadeProfilesState = cascadeProfilesResource.state
 const editMode = signal(false)
 const saving = signal(false)
 const saveError = signal<string | null>(null)
+const cascadeSaving = signal(false)
+const cascadeSaveError = signal<string | null>(null)
 
 // Draft values for editable fields (only used in edit mode)
 type EditDraft = {
@@ -207,10 +221,13 @@ export async function loadKeeperConfig(
 
 export function resetKeeperConfig(): void {
   configResource.reset()
+  cascadeProfilesResource.reset()
   configKeeperName.value = ''
   editMode.value = false
   editDraft.value = null
   saveError.value = null
+  cascadeSaveError.value = null
+  cascadeSaving.value = false
   runtimeDraft.value = null
   runtimeSaving.value = false
   hookFilterQuery.value = ''
@@ -228,6 +245,13 @@ export function peekKeeperConfigLoadStatus(
   const state = configState.value
   if (configKeeperName.value !== name) return 'other'
   return state.status
+}
+
+async function loadCascadeProfiles(options?: { force?: boolean }): Promise<void> {
+  const force = options?.force === true
+  if (!force && cascadeProfilesState.value.status === 'loaded') return
+  if (force) cascadeProfilesResource.reset()
+  await cascadeProfilesResource.load(() => fetchCascadeProfiles())
 }
 
 // ── Helpers ──────────────────────────────────────────────
@@ -474,10 +498,14 @@ function cascadeSelectionSummary(c: KeeperConfig): string {
 
 export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   const state = configState.value
+  const cascadeState = cascadeProfilesState.value
 
   // Trigger load on first render or name change
   if (configKeeperName.value !== keeperName || state.status === 'idle') {
     void loadKeeperConfig(keeperName)
+  }
+  if (cascadeState.status === 'idle') {
+    void loadCascadeProfiles()
   }
 
   if (state.status === 'loading') {
@@ -534,6 +562,25 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     editMode.value = false
     editDraft.value = null
     saveError.value = null
+  }
+
+  async function saveCascadeSelection(nextCascadeName: string) {
+    const currentCascade = c.execution.selected_cascade_name || ''
+    if (!nextCascadeName || nextCascadeName === currentCascade) return
+    cascadeSaving.value = true
+    cascadeSaveError.value = null
+    try {
+      await updateKeeperCascade(keeperName, nextCascadeName)
+      await loadKeeperConfig(keeperName, { force: true })
+      await loadCascadeProfiles({ force: true })
+      showToast(`cascade 변경 완료: ${nextCascadeName}`, 'success')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'cascade 변경 실패'
+      cascadeSaveError.value = message
+      showToast(message, 'error')
+    } finally {
+      cascadeSaving.value = false
+    }
   }
 
   async function saveConfig() {
@@ -626,6 +673,20 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     </details>
   `
 
+  const cascadeProfiles = cascadeState.status === 'loaded' ? cascadeState.data.profiles : []
+  const invalidCascadeProfiles =
+    cascadeState.status === 'loaded' ? cascadeState.data.invalid_profiles : []
+  const cascadeOptions = [
+    ...cascadeProfiles,
+    ...invalidCascadeProfiles.map((profile) => profile.name),
+  ]
+  const currentCascade = c.execution.selected_cascade_name || ''
+  const hasCascadeSelector =
+    currentCascade !== '' || cascadeOptions.length > 0 || cascadeState.status === 'loading'
+  const invalidCascadeSummary = invalidCascadeProfiles
+    .map((profile) => `${profile.name}: ${profile.errors.join('; ')}`)
+    .join(' | ')
+
   return html`
     <div class="flex flex-col gap-1.5">
       ${toolbar}
@@ -647,8 +708,46 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${SectionHeader} title="소스" />
       <${Callout}
         title="Cascade 선택"
-        body=${cascadeSelectionSummary(c)}
+        body=${hasCascadeSelector
+          ? '이 selector는 keeper TOML의 cascade_name 을 바꿉니다. catalog authoring source와 generated runtime JSON 경로는 아래 읽기 전용 메타데이터를 보세요.'
+          : cascadeSelectionSummary(c)}
       />
+      ${hasCascadeSelector
+        ? html`
+            <label class="flex flex-col gap-1.5 py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm mb-1.5">
+              <span class="text-xs font-medium text-text-muted">활성 cascade profile</span>
+              <select
+                class="rounded border border-card-border/60 bg-[var(--white-4)] px-3 py-2 text-xs font-semibold text-text-strong disabled:opacity-60"
+                value=${currentCascade}
+                disabled=${cascadeSaving.value || cascadeState.status === 'loading' || cascadeOptions.length === 0}
+                onChange=${(event: Event) => {
+                  const next = (event.currentTarget as HTMLSelectElement).value
+                  void saveCascadeSelection(next)
+                }}
+              >
+                ${currentCascade !== '' && !cascadeOptions.includes(currentCascade)
+                  ? html`<option value=${currentCascade}>${currentCascade}</option>`
+                  : null}
+                ${cascadeOptions.map((profileName) => html`
+                  <option value=${profileName}>${profileName}</option>
+                `)}
+              </select>
+              <span class="text-2xs text-[var(--text-dim)]">
+                ${cascadeSaving.value
+                  ? 'cascade_name 저장 중...'
+                  : cascadeState.status === 'loading'
+                    ? '사용 가능한 cascade profile 로딩 중...'
+                    : '변경 시 keeper manifest의 cascade_name 이 즉시 갱신됩니다.'}
+              </span>
+              ${cascadeSaveError.value
+                ? html`<span class="text-2xs text-[var(--bad)]">${cascadeSaveError.value}</span>`
+                : null}
+              ${invalidCascadeProfiles.length > 0
+                ? html`<span class="text-2xs text-[var(--warn)]">invalid profile ${invalidCascadeProfiles.length}개: ${invalidCascadeSummary}</span>`
+                : null}
+            </label>
+          `
+        : null}
       <${ConfigRow} label="기본 소스" value=${c.sources.default_source_kind || '--'} />
       <${ConfigRow} label="선택 cascade" value=${c.execution.selected_cascade_name || '--'} />
       ${c.execution.selected_cascade_canonical

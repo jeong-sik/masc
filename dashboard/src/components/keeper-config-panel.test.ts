@@ -388,12 +388,24 @@ describe('buildRuntimePayload — sandbox diffing', () => {
 
 const mocks = vi.hoisted(() => ({
   fetchKeeperConfig: vi.fn(async () => makeKeeperConfig()),
+  fetchCascadeProfiles: vi.fn(async () => ({
+    profiles: ['keeper_unified', 'resilient_breaker'],
+    invalid_profiles: [
+      {
+        name: 'broken_profile',
+        errors: ['missing models'],
+      },
+    ],
+  })),
   patchKeeperConfig: vi.fn(),
+  updateKeeperCascade: vi.fn(async () => ({ ok: true })),
 }))
 
 vi.mock('../api/dashboard', () => ({
+  fetchCascadeProfiles: mocks.fetchCascadeProfiles,
   fetchKeeperConfig: mocks.fetchKeeperConfig,
   patchKeeperConfig: mocks.patchKeeperConfig,
+  updateKeeperCascade: mocks.updateKeeperCascade,
 }))
 
 import { KeeperConfigPanel, loadKeeperConfig, resetKeeperConfig } from './keeper-config-panel'
@@ -410,7 +422,9 @@ describe('KeeperConfigPanel', () => {
     document.body.appendChild(container)
     resetKeeperConfig()
     mocks.fetchKeeperConfig.mockClear()
+    mocks.fetchCascadeProfiles.mockClear()
     mocks.patchKeeperConfig.mockClear()
+    mocks.updateKeeperCascade.mockClear()
   })
 
   afterEach(() => {
@@ -425,10 +439,12 @@ describe('KeeperConfigPanel', () => {
     await flush()
 
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(1)
+    expect(mocks.fetchCascadeProfiles).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('편집 가능 범위')
-    expect(container.textContent).toContain('resolved config root의 cascade.json')
+    expect(container.textContent).toContain('keeper TOML의 cascade_name')
     expect(container.textContent).toContain('Cascade 선택')
     expect(container.textContent).toContain('keeper_unified')
+    expect(container.textContent).toContain('broken_profile')
     expect(container.textContent).toContain('/tmp/config/keepers/default.toml')
     expect(container.textContent).toContain('/tmp/config/cascade.toml')
     expect(container.textContent).toContain('/tmp/config/cascade.json')
@@ -449,6 +465,41 @@ describe('KeeperConfigPanel', () => {
     const textareas = Array.from(container.querySelectorAll('textarea'))
     expect(textareas.length).toBeGreaterThan(0)
     expect(textareas[0]?.value).toContain('Ship stable keeper ops')
+  })
+
+  it('exposes cascade selection controls directly in the config panel', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    const cascadeSelect = Array.from(container.querySelectorAll('select')).find(
+      (select) => !select.getAttribute('aria-label'),
+    ) as HTMLSelectElement | undefined
+    expect(cascadeSelect).toBeDefined()
+    expect(cascadeSelect?.value).toBe('keeper_unified')
+
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(
+      makeKeeperConfig({
+        execution: {
+          models: ['llama:test-balanced'],
+          active_model: 'llama:test-balanced',
+          verify: true,
+          selected_cascade_name: 'resilient_breaker',
+          selected_cascade_canonical: 'resilient_breaker',
+        },
+      }),
+    )
+
+    cascadeSelect!.value = 'resilient_breaker'
+    cascadeSelect!.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+    await flush()
+
+    expect(mocks.updateKeeperCascade).toHaveBeenCalledWith(
+      'keeper-sangsu',
+      'resilient_breaker',
+    )
+    expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
   })
 
   it('patches sandbox runtime controls from the dashboard panel', async () => {

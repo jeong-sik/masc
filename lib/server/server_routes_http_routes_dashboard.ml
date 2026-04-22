@@ -555,6 +555,13 @@ let rec add_routes ~sw ~clock router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/safe-autonomy" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let config = state.Mcp_server.room_config in
+         let json = Dashboard_safe_autonomy.json ~config () in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/transport-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_transport_health_http_json ~state in

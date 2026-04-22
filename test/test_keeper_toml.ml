@@ -449,6 +449,7 @@ mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
 room_signal_prompt_enabled = true
 policy_voice_enabled = false
+autoboot_enabled = false
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -465,7 +466,8 @@ policy_voice_enabled = false
       check (option bool) "proactive" (Some true) d.proactive_enabled;
       check (option bool) "room signal prompt" (Some true)
         d.room_signal_prompt_enabled;
-      check (option bool) "policy_voice" (Some false) d.policy_voice_enabled
+      check (option bool) "policy_voice" (Some false) d.policy_voice_enabled;
+      check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled
 
 let test_profile_rejects_invalid_social_model () =
   let input = {|
@@ -845,6 +847,35 @@ let test_persona_resolver_rejects_non_public_social_model_arg () =
          || contains_substring e "non-public keeper args");
       check bool "mentions social_model" true (contains_substring e "social_model")
 
+let test_persona_resolver_preserves_autoboot_enabled_arg () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Probe",
+  "keeper": {
+    "goal": "test persona keeper"
+  }
+}
+|};
+  match
+    Masc_mcp.Keeper_exec_persona.resolved_keeper_args_from_persona
+      (`Assoc
+        [
+          ("persona_name", `String "probe");
+          ("autoboot_enabled", `Bool false);
+        ])
+  with
+  | Error e -> fail ("resolver failed: " ^ e)
+  | Ok (_, resolved) ->
+      check (option bool) "autoboot_enabled preserved" (Some false)
+        (match Yojson.Safe.Util.member "autoboot_enabled" resolved with
+         | `Bool value -> Some value
+         | _ -> None)
+
 (* ================================================================ *)
 (* Unknown-key detection                                             *)
 (* ================================================================ *)
@@ -856,6 +887,7 @@ goal = "canonical"
 mention_targets = ["a", "b"]
 tool_preset = "coding"
 tool_also_allow = ["x"]
+autoboot_enabled = false
 cascade_name = "big_three"
 |} in
   match TL.parse_toml input with
@@ -1136,5 +1168,7 @@ let () =
             test_persona_resolver_defaults_to_research_tool_preset;
           test_case "persona resolver rejects non-public social_model arg" `Quick
             test_persona_resolver_rejects_non_public_social_model_arg;
+          test_case "persona resolver preserves autoboot_enabled arg" `Quick
+            test_persona_resolver_preserves_autoboot_enabled_arg;
         ] );
     ]

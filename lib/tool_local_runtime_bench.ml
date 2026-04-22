@@ -1,7 +1,7 @@
 (** Tool_local_runtime_bench -- concurrency benchmark against runtime pool. *)
 
 include Tool_local_runtime_http
-module Oas_types = Agent_sdk.Types
+module Oas_types = Oas.Types
 
 let pctl percentile values =
   match values with
@@ -305,7 +305,6 @@ let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec (
                 content = [ Oas_types.Text prompt ];
                 name = None;
                 tool_call_id = None;
-                metadata = [];
               };
             ]
           in

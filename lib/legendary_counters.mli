@@ -11,17 +11,7 @@
     log aggregators) and in-memory totals (for dashboards / HTTP
     snapshot endpoints). *)
 
-type gate_diff_tag =
-  [ `Agree
-  | `Legacy_allow_shadow_deny
-  | `Legacy_deny_shadow_allow
-  | `Shadow_cannot_parse
-  ]
-(** Categorical buckets mirroring [Worker_dev_tools.gate_diff] 1:1.
-    [`Agree] is recorded even though it is not logged, so the
-    denominator for "disagree rate" is observable. *)
-
-val incr_gate_diff : gate_diff_tag -> unit
+val incr_gate_diff : Gate_diff_types.gate_diff -> unit
 (** Record one P5 shadow-gate call under the given bucket.  Always
     increments [gate_diff_total] in the snapshot. *)
 

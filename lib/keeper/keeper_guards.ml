@@ -3,7 +3,7 @@
     Decomposes the previously monolithic [pre_tool_use] guard chain
     (streak / deny / cost / destructive / governance) into standalone
     OAS [Hooks.hooks] records that stack via
-    [Agent_sdk.Hooks.compose]. Each guard fills only the
+    [Oas.Hooks.compose]. Each guard fills only the
     [pre_tool_use] slot; composition short-circuits on the first
     non-[Continue] decision.
 
@@ -136,8 +136,8 @@ let emit_gate_event
     ] in
     (try
       Oas_bus_instrument.publish bus
-        (Agent_sdk.Event_bus.mk_event
-           (Agent_sdk.Event_bus.Custom ("masc.keeper_gate", payload)))
+        (Oas.Event_bus.mk_event
+           (Oas.Event_bus.Custom ("masc.keeper_gate", payload)))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
@@ -150,17 +150,17 @@ let emit_gate_event
 (* -------------------------------------------------------------- *)
 
 (** Build a [Hooks.hooks] record with only [pre_tool_use] filled. *)
-let hooks_of_pre_tool_use (fn : Agent_sdk.Hooks.hook)
-  : Agent_sdk.Hooks.hooks =
-  { Agent_sdk.Hooks.empty with pre_tool_use = Some fn }
+let hooks_of_pre_tool_use (fn : Oas.Hooks.hook)
+  : Oas.Hooks.hooks =
+  { Oas.Hooks.empty with pre_tool_use = Some fn }
 
 (** Compose a list of hooks via [Hooks.compose], left-to-right.
     Each slot short-circuits on the first non-[Continue] decision. *)
-let compose_all (hs : Agent_sdk.Hooks.hooks list)
-  : Agent_sdk.Hooks.hooks =
+let compose_all (hs : Oas.Hooks.hooks list)
+  : Oas.Hooks.hooks =
   List.fold_left
-    (fun acc h -> Agent_sdk.Hooks.compose ~outer:acc ~inner:h)
-    Agent_sdk.Hooks.empty
+    (fun acc h -> Oas.Hooks.compose ~outer:acc ~inner:h)
+    Oas.Hooks.empty
     hs
 
 (* -------------------------------------------------------------- *)
@@ -181,13 +181,13 @@ let make_streak_state () : streak_state = { entry = ("", 0) }
     FIRST in the chain so the timestamp is set even when a later
     guard returns [Override]. *)
 let timing_guard ~(tool_start_time : float ref)
-  : Agent_sdk.Hooks.hooks =
+  : Oas.Hooks.hooks =
   hooks_of_pre_tool_use (fun event ->
     match event with
-    | Agent_sdk.Hooks.PreToolUse _ ->
+    | Oas.Hooks.PreToolUse _ ->
       tool_start_time := Time_compat.now ();
-      Agent_sdk.Hooks.Continue
-    | _ -> Agent_sdk.Hooks.Continue)
+      Oas.Hooks.Continue
+    | _ -> Oas.Hooks.Continue)
 
 (* -------------------------------------------------------------- *)
 (* Individual guards                                               *)
@@ -198,10 +198,10 @@ let timing_guard ~(tool_start_time : float ref)
 let custom_guard
     ~(meta_ref : Keeper_types.keeper_meta ref)
     ~(guard : tool_name:string -> input:Yojson.Safe.t -> string option)
-  : Agent_sdk.Hooks.hooks =
+  : Oas.Hooks.hooks =
   hooks_of_pre_tool_use (fun event ->
     match event with
-    | Agent_sdk.Hooks.PreToolUse
+    | Oas.Hooks.PreToolUse
         { tool_name; input; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
       let keeper_name = (!meta_ref).Keeper_types.name in
@@ -220,12 +220,12 @@ let custom_guard
            ~accumulated_cost_usd
            ~stage_latency_ms:latency_ms
            ~reason_text:reason;
-         Agent_sdk.Hooks.Override
+         Oas.Hooks.Override
            (render_inline_skip_reason
               ~tool_name ~reason_code:"pre_tool_use_guard"
               ~reason_text:reason)
-       | None -> Agent_sdk.Hooks.Continue)
-    | _ -> Agent_sdk.Hooks.Continue)
+       | None -> Oas.Hooks.Continue)
+    | _ -> Oas.Hooks.Continue)
 
 (** Same-name streak gate: block when the same tool name is called
     [threshold+] times consecutively, regardless of args. OAS idle
@@ -236,10 +236,10 @@ let streak_guard
     ~(meta_ref : Keeper_types.keeper_meta ref)
     ~(state : streak_state)
     ~(threshold : int)
-  : Agent_sdk.Hooks.hooks =
+  : Oas.Hooks.hooks =
   hooks_of_pre_tool_use (fun event ->
     match event with
-    | Agent_sdk.Hooks.PreToolUse
+    | Oas.Hooks.PreToolUse
         { tool_name; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
       let keeper_name = (!meta_ref).Keeper_types.name in
@@ -267,22 +267,22 @@ let streak_guard
           ~accumulated_cost_usd
           ~stage_latency_ms:latency_ms
           ~reason_text;
-        Agent_sdk.Hooks.Override
+        Oas.Hooks.Override
           (render_inline_skip_reason
              ~tool_name ~reason_code:"streak_gate" ~reason_text)
       end
-      else Agent_sdk.Hooks.Continue
-    | _ -> Agent_sdk.Hooks.Continue)
+      else Oas.Hooks.Continue
+    | _ -> Oas.Hooks.Continue)
 
 (** Keeper deny list. Block administrative / destructive tools that
     should only be invoked by operators or controlled workflows. *)
 let deny_guard
     ~(meta_ref : Keeper_types.keeper_meta ref)
     ~(denied : string list)
-  : Agent_sdk.Hooks.hooks =
+  : Oas.Hooks.hooks =
   hooks_of_pre_tool_use (fun event ->
     match event with
-    | Agent_sdk.Hooks.PreToolUse
+    | Oas.Hooks.PreToolUse
         { tool_name; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
       let keeper_name = (!meta_ref).Keeper_types.name in
@@ -300,22 +300,22 @@ let deny_guard
           ~accumulated_cost_usd
           ~stage_latency_ms:latency_ms
           ~reason_text;
-        Agent_sdk.Hooks.Override
+        Oas.Hooks.Override
           (render_inline_skip_reason
              ~tool_name ~reason_code:"keeper_deny" ~reason_text)
       end
-      else Agent_sdk.Hooks.Continue
-    | _ -> Agent_sdk.Hooks.Continue)
+      else Oas.Hooks.Continue
+    | _ -> Oas.Hooks.Continue)
 
 (** Cost budget gate: reject when the running cost meets or exceeds
     [limit]. No-op when [max_cost_usd] is [None]. *)
 let cost_guard
     ~(meta_ref : Keeper_types.keeper_meta ref)
     ~(max_cost_usd : float option)
-  : Agent_sdk.Hooks.hooks =
+  : Oas.Hooks.hooks =
   hooks_of_pre_tool_use (fun event ->
     match event with
-    | Agent_sdk.Hooks.PreToolUse
+    | Oas.Hooks.PreToolUse
         { tool_name; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
       let keeper_name = (!meta_ref).Keeper_types.name in
@@ -339,11 +339,11 @@ let cost_guard
            ~accumulated_cost_usd
            ~stage_latency_ms:latency_ms
            ~reason_text;
-         Agent_sdk.Hooks.Override
+         Oas.Hooks.Override
            (render_inline_skip_reason
               ~tool_name ~reason_code:"cost_gate" ~reason_text)
-       | _ -> Agent_sdk.Hooks.Continue)
-    | _ -> Agent_sdk.Hooks.Continue)
+       | _ -> Oas.Hooks.Continue)
+    | _ -> Oas.Hooks.Continue)
 
 (** Destructive pattern detection for bash/edit style tools.
     Only applies when [enabled] is [true] and the tool is flagged by
@@ -351,20 +351,20 @@ let cost_guard
 let destructive_guard
     ~(meta_ref : Keeper_types.keeper_meta ref)
     ~(enabled : bool)
-  : Agent_sdk.Hooks.hooks =
+  : Oas.Hooks.hooks =
   hooks_of_pre_tool_use (fun event ->
     match event with
-    | Agent_sdk.Hooks.PreToolUse
+    | Oas.Hooks.PreToolUse
         { tool_name; input; accumulated_cost_usd; turn; _ } ->
-      if not enabled then Agent_sdk.Hooks.Continue
+      if not enabled then Oas.Hooks.Continue
       else if not (Tool_dispatch.is_destructive tool_name) then
-        Agent_sdk.Hooks.Continue
+        Oas.Hooks.Continue
       else
         let t0 = Time_compat.now () in
         let keeper_name = (!meta_ref).Keeper_types.name in
         let cmd = extract_command_from_input input in
         (match Eval_gate.detect_destructive cmd with
-         | None -> Agent_sdk.Hooks.Continue
+         | None -> Oas.Hooks.Continue
          | Some (pattern, desc) ->
            let reason_text =
              Printf.sprintf "pattern='%s' (%s)" pattern desc
@@ -382,11 +382,11 @@ let destructive_guard
              ~accumulated_cost_usd
              ~stage_latency_ms:latency_ms
              ~reason_text;
-           Agent_sdk.Hooks.Override
+           Oas.Hooks.Override
              (render_inline_skip_reason
                 ~tool_name ~reason_code:"destructive_guard"
                 ~reason_text))
-    | _ -> Agent_sdk.Hooks.Continue)
+    | _ -> Oas.Hooks.Continue)
 
 (** Governance approval gate. Escalates via [ApprovalRequired] when
     the assessed risk level meets or exceeds the configured keeper
@@ -394,10 +394,10 @@ let destructive_guard
     agent Builder to resolve the decision. *)
 let governance_approval_guard
     ~(meta_ref : Keeper_types.keeper_meta ref)
-  : Agent_sdk.Hooks.hooks =
+  : Oas.Hooks.hooks =
   hooks_of_pre_tool_use (fun event ->
     match event with
-    | Agent_sdk.Hooks.PreToolUse
+    | Oas.Hooks.PreToolUse
         { tool_name; input; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
       let keeper_name = (!meta_ref).Keeper_types.name in
@@ -419,10 +419,10 @@ let governance_approval_guard
           ~accumulated_cost_usd
           ~stage_latency_ms:latency_ms
           ~reason_text:"risk threshold reached; operator approval required";
-        Agent_sdk.Hooks.ApprovalRequired
+        Oas.Hooks.ApprovalRequired
       end
-      else Agent_sdk.Hooks.Continue
-    | _ -> Agent_sdk.Hooks.Continue)
+      else Oas.Hooks.Continue
+    | _ -> Oas.Hooks.Continue)
 
 (* -------------------------------------------------------------- *)
 (* Chain assembly                                                  *)
@@ -445,7 +445,7 @@ let build_chain
     ~(destructive_check : bool)
     ~(pre_tool_use_guard :
         tool_name:string -> input:Yojson.Safe.t -> string option)
-  : Agent_sdk.Hooks.hooks =
+  : Oas.Hooks.hooks =
   compose_all [
     timing_guard ~tool_start_time;
     custom_guard ~meta_ref ~guard:pre_tool_use_guard;

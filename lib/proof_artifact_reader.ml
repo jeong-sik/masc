@@ -5,7 +5,7 @@
 let prefix = "proof-store://"
 let prefix_len = String.length prefix
 
-let proofs_root (config : Agent_sdk.Proof_store.config) =
+let proofs_root (config : Oas.Proof_store.config) =
   Filename.concat config.root "proofs"
 
 let validate_relative_path ~raw ~label =
@@ -19,7 +19,7 @@ let validate_relative_path ~raw ~label =
   else
     Ok raw
 
-let run_artifact_path (config : Agent_sdk.Proof_store.config)
+let run_artifact_path (config : Oas.Proof_store.config)
     ~(run_id : string) ~(relative_path : string) : (string, string) result =
   Result.bind
     (validate_relative_path ~raw:run_id ~label:"run_id")
@@ -32,8 +32,8 @@ let run_artifact_path (config : Agent_sdk.Proof_store.config)
                (Filename.concat (proofs_root config) clean_run_id)
                clean_relative_path)))
 
-let resolve_path (config : Agent_sdk.Proof_store.config)
-    (ref_ : Agent_sdk.Cdal_proof.artifact_ref) : (string, string) result =
+let resolve_path (config : Oas.Proof_store.config)
+    (ref_ : Oas.Cdal_proof.artifact_ref) : (string, string) result =
   if String.length ref_ > prefix_len
      && String.sub ref_ 0 prefix_len = prefix then
     let rel = String.sub ref_ prefix_len (String.length ref_ - prefix_len) in
@@ -42,8 +42,8 @@ let resolve_path (config : Agent_sdk.Proof_store.config)
   else
     Error (Printf.sprintf "invalid artifact ref: %s" ref_)
 
-let read_json (config : Agent_sdk.Proof_store.config)
-    (ref_ : Agent_sdk.Cdal_proof.artifact_ref)
+let read_json (config : Oas.Proof_store.config)
+    (ref_ : Oas.Cdal_proof.artifact_ref)
     : (Yojson.Safe.t, string) result =
   match resolve_path config ref_ with
   | Error e -> Error e

@@ -452,6 +452,9 @@
    keeper_failure_circuit_breaker
    keeper_exec_board
    keeper_exec_fs
+   keeper_shell_docker
+   keeper_shell_gh_context
+   keeper_shell_bg_task
    keeper_exec_shell
    keeper_gh_env
    keeper_gh_shared
@@ -500,6 +503,7 @@
    keeper_behavioral_regime_observer
    keeper_campaign_fsm
    keeper_unified_prompt
+   keeper_unified_metrics
    keeper_unified_turn
 
    keeper_prompt_names
@@ -587,6 +591,9 @@
    tool_misc_transport
    tool_misc_admin
    tool_misc_web_search
+  ;; godsplit-safety: variant unification & godfile decomposition
+  gate_diff_types
+  gh_command_validation
 )
 (private_modules
  dashboard_http_keeper_metrics
@@ -636,6 +643,9 @@
   keeper_exec_shared
    keeper_exec_board
    keeper_exec_fs
+   keeper_shell_docker
+   keeper_shell_gh_context
+   keeper_shell_bg_task
    keeper_exec_shell
    keeper_gh_env
    keeper_gh_shared

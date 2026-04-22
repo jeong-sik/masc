@@ -670,7 +670,8 @@ let test_sdk_error_is_hard_quota_keeps_transient_network_errors_false () =
     Oas.Error.Api
       (Llm_provider.Retry.NetworkError
          { message = "gemini exited with code 1: connection reset by peer";
-           kind = Llm_provider.Http_client.Unknown })
+           kind = Llm_provider.Http_client.Unknown;
+         })
   in
   Alcotest.(check bool) "transient network error stays transient" false
     (Oas_worker_named.sdk_error_is_hard_quota err)
@@ -2019,7 +2020,6 @@ let tool_result_msg ?(id = "tool-1") text : Agent_sdk.Types.message =
       ];
     name = None;
     tool_call_id = None;
-    metadata = [];
   }
 
 let tool_use_msg ?(id = "tool-1") ?(name = "keeper_fs_read") input
@@ -2030,7 +2030,6 @@ let tool_use_msg ?(id = "tool-1") ?(name = "keeper_fs_read") input
       [ Agent_sdk.Types.ToolUse { id; name; input } ];
     name = None;
     tool_call_id = None;
-    metadata = [];
   }
 
 let test_keeper_checkpoint_store_oas_roundtrip () =
@@ -2744,7 +2743,6 @@ let make_assistant_tool_use_msg name : Agent_sdk.Types.message =
       ];
     name = None;
     tool_call_id = None;
-    metadata = [];
   }
 
 (** Idle error with a preceding tool-use: should append "(tool: <name>)". *)
@@ -2763,7 +2761,7 @@ let test_enrich_idle_detail_no_tool () =
   let messages : Agent_sdk.Types.message list =
     [ { Agent_sdk.Types.role = Agent_sdk.Types.User;
         content = [ Agent_sdk.Types.Text "hello" ];
-        name = None; tool_call_id = None; metadata = [] } ]
+        name = None; tool_call_id = None } ]
   in
   let result = Oas_worker_exec.enrich_idle_detail detail messages in
   Alcotest.(check string) "unchanged when no tool" detail result

@@ -108,7 +108,7 @@ let emit_cost_event
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
-    ?(telemetry : Agent_sdk.Types.inference_telemetry option)
+    ?(telemetry : Oas.Types.inference_telemetry option)
     () : unit =
   let path = Filename.concat masc_root "costs.jsonl" in
   let int_field name = function
@@ -213,7 +213,7 @@ let suggest_alternatives ~(allowed_tools : string list)
     burning more tokens on a stuck LLM is worse than retrying later. *)
 let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     ~allowed_tools ~tool_names
-  : Agent_sdk.Hooks.hook_decision =
+  : Oas.Hooks.hook_decision =
   let tools_str = match tool_names with
     | [] -> "<none>"
     | names -> String.concat ", " names
@@ -227,15 +227,15 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     | alts -> String.concat ", " alts
   in
   if consecutive_idle_turns >= skip_at then
-    Agent_sdk.Hooks.Skip
+    Oas.Hooks.Skip
   else if consecutive_idle_turns = skip_at - 1 then
-    Agent_sdk.Hooks.Nudge
+    Oas.Hooks.Nudge
       (Printf.sprintf
          "FINAL WARNING: you repeated %s %d times. Next idle = turn ends. \
           Use one of these instead: %s — or call keeper_stay_silent to do nothing."
          tools_str consecutive_idle_turns alt_str)
   else
-    Agent_sdk.Hooks.Nudge
+    Oas.Hooks.Nudge
       (Printf.sprintf
          "You are repeating %s without progress. \
           Available alternatives: %s."
@@ -246,7 +246,7 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     Reads the keeper's allowed tool names from [meta_ref] for concrete
     alternative suggestions. *)
 let on_idle_decision ~consecutive_idle_turns ~allowed_tools ~tool_names
-  : Agent_sdk.Hooks.hook_decision =
+  : Oas.Hooks.hook_decision =
   let skip_at = Env_config_keeper.KeeperKeepalive.idle_skip_threshold in
   on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     ~allowed_tools ~tool_names
@@ -282,7 +282,7 @@ let make_hooks
     ?(discover_work_nudge : unit -> string option =
         fun () -> None)
     ()
-  : Agent_sdk.Hooks.hooks =
+  : Oas.Hooks.hooks =
   let sse_turn_complete = "keeper_turn_complete" in
   let board_write_tools =
     [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
@@ -311,7 +311,7 @@ let make_hooks
       ~pre_tool_use_guard
   in
   let non_gate_hooks =
-    { Agent_sdk.Hooks.empty with
+    { Oas.Hooks.empty with
 
     (* Work discovery injection (#8773 fix). The callback owns the policy
        (interval, sources, query) and returns Some text only when there
@@ -321,11 +321,11 @@ let make_hooks
        None — silent no-op, no token cost. *)
     before_turn = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.BeforeTurn _ ->
+      | Oas.Hooks.BeforeTurn _ ->
         (match discover_work_nudge () with
-         | None -> Agent_sdk.Hooks.Continue
+         | None -> Oas.Hooks.Continue
          | Some text when String.trim text = "" ->
-           Agent_sdk.Hooks.Continue
+           Oas.Hooks.Continue
          | Some text when not (String.is_valid_utf_8 text) ->
            (* Defensive: nudge path producers (e.g. keeper_agent_run's
               discover_work_nudge) source strings from external input
@@ -339,16 +339,16 @@ let make_hooks
               drift. See #9036 for the first observed producer fix. *)
            Log.Keeper.warn "keeper:%s before_turn: dropped invalid UTF-8 nudge (%d bytes)"
              (!meta_ref).name (String.length text);
-           Agent_sdk.Hooks.Continue
+           Oas.Hooks.Continue
          | Some text ->
            Log.Keeper.info "keeper:%s before_turn: injecting work_discovery nudge (%d chars)"
              (!meta_ref).name (String.length text);
-           Agent_sdk.Hooks.Nudge text)
-      | _ -> Agent_sdk.Hooks.Continue);
+           Oas.Hooks.Nudge text)
+      | _ -> Oas.Hooks.Continue);
 
     after_turn = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.AfterTurn { turn; response } ->
+      | Oas.Hooks.AfterTurn { turn; response } ->
         let meta = !meta_ref in
         let model = response.model in
         let input_tok, output_tok, turn_cost_usd = match response.usage with
@@ -419,7 +419,7 @@ let make_hooks
              ~model ~input_tokens:input_tok ~output_tokens:output_tok
              ~cost_usd:turn_cost_usd ?telemetry:response.telemetry ()
          | None -> ());
-        let text = Agent_sdk.Types.text_of_content response.content in
+        let text = Oas.Types.text_of_content response.content in
         let has_state_block =
           Option.is_some (Keeper_memory_policy.find_state_block text)
         in
@@ -450,24 +450,24 @@ let make_hooks
            should not hit threshold 5). *)
         streak_state.Keeper_guards.entry <- ("", 0);
         tool_call_count_ref := 0;
-        Agent_sdk.Hooks.Continue
-      | _ -> Agent_sdk.Hooks.Continue);
+        Oas.Hooks.Continue
+      | _ -> Oas.Hooks.Continue);
 
     post_tool_use = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.PostToolUse { tool_name; input; output; duration_ms = hook_duration_ms; _ } ->
+      | Oas.Hooks.PostToolUse { tool_name; input; output; duration_ms = hook_duration_ms; _ } ->
         incr tool_call_count_ref;
         let output_text = match output with
-          | Ok { Agent_sdk.Types.content; _ } -> content
-          | Error { Agent_sdk.Types.message; _ } -> message
+          | Ok { Oas.Types.content; _ } -> content
+          | Error { Oas.Types.message; _ } -> message
         in
         let input_keys = match input with
           | `Assoc pairs -> String.concat "," (List.map fst pairs)
           | _ -> "-"
         in
         let outcome, out_len = match output with
-          | Ok { Agent_sdk.Types.content; _ } -> "ok", String.length content
-          | Error { Agent_sdk.Types.message; _ } -> "error", String.length message
+          | Ok { Oas.Types.content; _ } -> "ok", String.length content
+          | Error { Oas.Types.message; _ } -> "error", String.length message
         in
         Log.Keeper.info "keeper:%s tool_call tool=%s params=[%s] outcome=%s out_len=%d"
           (!meta_ref).name tool_name input_keys outcome out_len;
@@ -539,8 +539,8 @@ let make_hooks
         if List.mem tool_name board_write_tools then
           Log.Keeper.debug "keeper:%s social_event tool=%s"
             (!meta_ref).name tool_name;
-        Agent_sdk.Hooks.Continue
-      | _ -> Agent_sdk.Hooks.Continue);
+        Oas.Hooks.Continue
+      | _ -> Oas.Hooks.Continue);
 
     (* pre_tool_use is provided by [guard_chain] below via Hooks.compose.
        The guard chain (timing + custom + streak + deny + cost +
@@ -549,7 +549,7 @@ let make_hooks
 
     on_idle = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.OnIdle { consecutive_idle_turns; tool_names; _ } ->
+      | Oas.Hooks.OnIdle { consecutive_idle_turns; tool_names; _ } ->
         let allowed_tools =
           Keeper_tool_policy.keeper_allowed_tool_names !meta_ref in
         let decision =
@@ -558,32 +558,32 @@ let make_hooks
         let tools_str = match tool_names with
           | [] -> "<none>" | names -> String.concat ", " names in
         (match decision with
-         | Agent_sdk.Hooks.Skip ->
+         | Oas.Hooks.Skip ->
            Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s] — requesting stop"
              (!meta_ref).name consecutive_idle_turns tools_str
-         | Agent_sdk.Hooks.Nudge _ ->
+         | Oas.Hooks.Nudge _ ->
            Log.Keeper.info "keeper:%s idle_turns=%d tools=[%s] — nudging LLM via Nudge"
              (!meta_ref).name consecutive_idle_turns tools_str
          | _ -> ());
         decision
-      | _ -> Agent_sdk.Hooks.Continue);
+      | _ -> Oas.Hooks.Continue);
 
     on_error = Some (function
-      | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
+      | Oas.Hooks.OnError { detail; context = err_ctx } ->
         Log.Keeper.error "keeper:%s on_error: %s (context: %s)"
           (!meta_ref).name detail err_ctx;
-        Agent_sdk.Hooks.Continue
-      | _ -> Agent_sdk.Hooks.Continue);
+        Oas.Hooks.Continue
+      | _ -> Oas.Hooks.Continue);
 
     on_tool_error = Some (function
-      | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
+      | Oas.Hooks.OnToolError { tool_name; error } ->
         Log.Keeper.error "keeper:%s tool_error: %s — %s"
           (!meta_ref).name tool_name error;
-        Agent_sdk.Hooks.Continue
-      | _ -> Agent_sdk.Hooks.Continue);
+        Oas.Hooks.Continue
+      | _ -> Oas.Hooks.Continue);
 
     post_tool_use_failure = Some (function
-      | Agent_sdk.Hooks.PostToolUseFailure { tool_name; error; _ } ->
+      | Oas.Hooks.PostToolUseFailure { tool_name; error; _ } ->
         let meta = !meta_ref in
         (* The richer counterpart
              "tool <name> returned error result (n/max): <detail>"
@@ -602,15 +602,15 @@ let make_hooks
           provenance = Pipeline_stage "post_tool_use_failure";
           timestamp = Unix.gettimeofday ();
         };
-        Agent_sdk.Hooks.Continue
-      | _ -> Agent_sdk.Hooks.Continue);
+        Oas.Hooks.Continue
+      | _ -> Oas.Hooks.Continue);
   }
   in
   (* Guards fire first (outer). If all return Continue, non_gate_hooks
      fire for the remaining slots (inner). pre_tool_use lives in
      guard_chain only; non_gate_hooks has it None, so Hooks.compose
      keeps guard_chain's pre_tool_use verbatim. *)
-  Agent_sdk.Hooks.compose ~outer:guard_chain ~inner:non_gate_hooks
+  Oas.Hooks.compose ~outer:guard_chain ~inner:non_gate_hooks
 
 (** Static introspection of hook slot configuration.
     Returns a JSON summary of which hook slots are active, their gates/effects,

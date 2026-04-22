@@ -25,35 +25,35 @@ type sizes = {
   tool_count : int;
 }
 
-let role_key : Agent_sdk.Types.role -> string = function
-  | Agent_sdk.Types.System -> "system"
-  | Agent_sdk.Types.User -> "user"
-  | Agent_sdk.Types.Assistant -> "assistant"
-  | Agent_sdk.Types.Tool -> "tool"
+let role_key : Oas.Types.role -> string = function
+  | Oas.Types.System -> "system"
+  | Oas.Types.User -> "user"
+  | Oas.Types.Assistant -> "assistant"
+  | Oas.Types.Tool -> "tool"
 
-let bytes_of_content_block : Agent_sdk.Types.content_block -> int = function
-  | Agent_sdk.Types.Text s -> String.length s
-  | Agent_sdk.Types.Thinking { content; _ } -> String.length content
-  | Agent_sdk.Types.RedactedThinking s -> String.length s
-  | Agent_sdk.Types.ToolUse { id; name; input } ->
+let bytes_of_content_block : Oas.Types.content_block -> int = function
+  | Oas.Types.Text s -> String.length s
+  | Oas.Types.Thinking { content; _ } -> String.length content
+  | Oas.Types.RedactedThinking s -> String.length s
+  | Oas.Types.ToolUse { id; name; input } ->
     String.length id + String.length name
     + String.length (Yojson.Safe.to_string input)
-  | Agent_sdk.Types.ToolResult { tool_use_id; content; _ } ->
+  | Oas.Types.ToolResult { tool_use_id; content; _ } ->
     String.length tool_use_id + String.length content
-  | Agent_sdk.Types.Image { data; _ }
-  | Agent_sdk.Types.Document { data; _ }
-  | Agent_sdk.Types.Audio { data; _ } -> String.length data
+  | Oas.Types.Image { data; _ }
+  | Oas.Types.Document { data; _ }
+  | Oas.Types.Audio { data; _ } -> String.length data
 
-let bytes_of_message (m : Agent_sdk.Types.message) : int =
+let bytes_of_message (m : Oas.Types.message) : int =
   List.fold_left
     (fun acc b -> acc + bytes_of_content_block b)
     0 m.content
 
-let estimate_tool_defs_bytes (tools : Agent_sdk.Tool.t list) : int =
+let estimate_tool_defs_bytes (tools : Oas.Tool.t list) : int =
   List.fold_left
     (fun acc t ->
       acc
-      + String.length (Yojson.Safe.to_string (Agent_sdk.Tool.schema_to_json t)))
+      + String.length (Yojson.Safe.to_string (Oas.Tool.schema_to_json t)))
     0 tools
 
 (** Count role occurrences across [history_messages], then add [+1] to
@@ -61,11 +61,11 @@ let estimate_tool_defs_bytes (tools : Agent_sdk.Tool.t list) : int =
     [~goal]. Returned as a stable-sorted assoc list for deterministic
     JSON output. *)
 let role_counts_with_pending_user
-    (history_messages : Agent_sdk.Types.message list) :
+    (history_messages : Oas.Types.message list) :
     (string * int) list =
   let tbl = Hashtbl.create 5 in
   List.iter
-    (fun (m : Agent_sdk.Types.message) ->
+    (fun (m : Oas.Types.message) ->
       let key = role_key m.role in
       let cur = try Hashtbl.find tbl key with Not_found -> 0 in
       Hashtbl.replace tbl key (cur + 1))
@@ -77,8 +77,8 @@ let role_counts_with_pending_user
 
 let compute_sizes
     ~(system_prompt : string)
-    ~(tools : Agent_sdk.Tool.t list)
-    ~(history_messages : Agent_sdk.Types.message list)
+    ~(tools : Oas.Tool.t list)
+    ~(history_messages : Oas.Types.message list)
     ~(user_message : string) : sizes =
   let system_prompt_bytes = String.length system_prompt in
   let tool_defs_bytes = estimate_tool_defs_bytes tools in

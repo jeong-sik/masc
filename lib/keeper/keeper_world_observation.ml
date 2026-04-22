@@ -693,10 +693,16 @@ let observe ~(pending_board_events : pending_board_event list option)
         in
         events
   in
-  (* Work Discovery: check if scan interval has elapsed *)
+  (* Work Discovery: check if scan interval has elapsed.
+     None means "not explicitly configured" — default to enabled so
+     keepers that lack explicit work_discovery_enabled in their profile
+     still discover work autonomously.  Only Some false explicitly
+     disables the mechanism.  Ref: P0 keeper activity investigation,
+     15/16 keepers had None → idle forever. *)
   let work_discovery_due =
     match meta.work_discovery_enabled with
-    | Some true ->
+    | Some false -> false
+    | _ ->
       let interval =
         Option.value ~default:600 meta.work_discovery_interval_sec
       in
@@ -704,7 +710,6 @@ let observe ~(pending_board_events : pending_board_event list option)
         Time_compat.now () -. meta.runtime.proactive_rt.last_work_discovery_ts
       in
       since_last >= float_of_int interval
-    | _ -> false
   in
   {
     pending_mentions;

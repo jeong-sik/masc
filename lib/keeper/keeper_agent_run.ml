@@ -1597,7 +1597,8 @@ let run_turn
   let discover_work_nudge () : string option =
     let meta = !meta_ref in
     match meta.work_discovery_enabled with
-    | Some true ->
+    | Some false -> None
+    | _ ->
       let interval =
         Option.value ~default:600 meta.work_discovery_interval_sec in
       let since_last =
@@ -1699,7 +1700,6 @@ let run_turn
               Do not print fenced pseudo-calls. Pick the smallest viable \
               action and emit one or more structured tool calls now."
              interval (String.concat "\n\n" sections)))
-    | _ -> None
   in
   let base_hooks =
     (* Issue #8597 #3-5: dropped ~config / ~session / ~ctx_snapshot —

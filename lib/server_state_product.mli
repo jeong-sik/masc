@@ -43,7 +43,6 @@ end
 module Backend : sig
   type phase =
     | Uninitialized (** Backend not yet resolved *)
-    | PostgreSQL    (** Connected to PostgreSQL *)
     | Filesystem    (** Fallback to filesystem backend *)
     | Degraded      (** Backend connection failed *)
 
@@ -51,7 +50,6 @@ module Backend : sig
   val all_phases : phase list
 
   type event =
-    | Resolve_pg
     | Resolve_fs
     | Degrade of string
     | Recover

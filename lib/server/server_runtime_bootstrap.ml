@@ -5,8 +5,24 @@ open Server_routes_http
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 
+let retired_pg_env_keys =
+  [ "MASC_POSTGRES_URL"; "DATABASE_URL"; "SUPABASE_DB_URL"; "SB_PG_URL" ]
+
+let clear_retired_pg_envs () =
+  List.iter
+    (fun key ->
+      match Sys.getenv_opt key |> Env_config_core.trim_opt with
+      | Some _ ->
+          Log.Server.warn
+            "Ignoring retired PG runtime env %s; filesystem-only bootstrap is enforced."
+            key;
+          Unix.putenv key ""
+      | None -> Unix.putenv key "")
+    retired_pg_env_keys
+
 let force_jsonl_fallback_env () =
-  Unix.putenv Env_config_core.storage_type_env_key "filesystem"
+  Unix.putenv Env_config_core.storage_type_env_key "filesystem";
+  clear_retired_pg_envs ()
 
 let requested_backend_mode () =
   Env_config_core.storage_type ()
@@ -193,6 +209,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Eio_context.set_net net;
   Eio_context.set_clock clock;
   Eio_context.set_mono_clock mono_clock;
+  force_jsonl_fallback_env ();
   ensure_default_oas_cascade_timeout_env ();
   Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
   Exec_tap.install_from_env ();
@@ -698,8 +715,8 @@ let startup_migrate_keeper_histories (state : Mcp_server.server_state) =
 
 (* bootstrap_keepers removed: the keeper_autoboot subsystem in
    start_keeper_loops now handles keeper startup in a dedicated
-   fiber with a 5-second delay, avoiding PG pool contention with
-   the 7+ dashboard refresh loops that share the same pool. *)
+   fiber with a 5-second delay, avoiding runtime bootstrap contention with
+   the 7+ dashboard refresh loops that start alongside it. *)
 
 let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     ~make_h2_request_handler ~make_h2_error_handler =
@@ -745,6 +762,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     | Env_config.Transport.Unknown_h2_mode _ -> `Auto
   in
   let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
+  force_jsonl_fallback_env ();
   let initial_backend_mode = requested_backend_mode () in
   server_state := None;
   Server_startup_state.reset ~backend_mode:initial_backend_mode ();
@@ -818,7 +836,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
              detail
        | None -> ());
       let t1 = Eio.Time.now clock in
-      Log.Server.info "State created (PG pool) in %.1fs" (t1 -. t0);
+      Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
       bootstrap_server_state_blocking state;
       sync_admin_token_env state;
       let path_diagnostics =
@@ -891,7 +909,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             fun () -> startup_prune_keeper_checkpoints state );
           (* keeper_bootstrap removed: keeper_autoboot subsystem in
              start_keeper_loops handles this in a dedicated fiber,
-             avoiding PG pool contention with dashboard refresh loops. *)
+             avoiding bootstrap contention with dashboard refresh loops. *)
         ]
       in
       let task_names = List.map fst tasks in

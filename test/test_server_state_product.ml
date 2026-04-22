@@ -52,12 +52,12 @@ let test_lifecycle_all_transitions () =
 (* ── Dimension 2: Backend ───────────────────────────────── *)
 
 let test_backend_resolve () =
-  let r = S.Backend.apply_event ~current:Uninitialized Resolve_pg in
-  check (of_pp S.Backend.pp_phase) "postgresql" PostgreSQL
+  let r = S.Backend.apply_event ~current:Uninitialized Resolve_fs in
+  check (of_pp S.Backend.pp_phase) "filesystem" Filesystem
     (match r with Applied p -> p | Ignored _ -> fail "ignored")
 
 let test_backend_degrade () =
-  let r = S.Backend.apply_event ~current:PostgreSQL (Degrade "conn_reset") in
+  let r = S.Backend.apply_event ~current:Filesystem (Degrade "conn_reset") in
   check (of_pp S.Backend.pp_phase) "degraded" Degraded
     (match r with Applied p -> p | Ignored _ -> fail "ignored")
 
@@ -128,7 +128,7 @@ let test_invariant_i5_booting_uninitialized () =
   let state =
     { S.initial with
       lifecycle = Booting;
-      backend = PostgreSQL
+      backend = Filesystem
     }
   in
   check_err "I5 violated" (S.check_invariants state)
@@ -137,7 +137,7 @@ let test_invariant_all_valid () =
   let state =
     { S.initial with
       lifecycle = Serving;
-      backend = PostgreSQL;
+      backend = Filesystem;
       readiness = Ready;
       lazy_tasks = Complete
     }
@@ -155,9 +155,9 @@ let test_apply_lifecycle_event () =
   check (of_pp S.Lifecycle.pp_phase) "serving" Serving state.lifecycle;
   let state =
     check_ok "resolve backend"
-      (S.apply_backend_event state Resolve_pg)
+      (S.apply_backend_event state Resolve_fs)
   in
-  check (of_pp S.Backend.pp_phase) "postgresql" PostgreSQL state.backend;
+  check (of_pp S.Backend.pp_phase) "filesystem" Filesystem state.backend;
   let state =
     check_ok "set ready"
       (S.apply_readiness_event state Set_ready)
@@ -168,7 +168,7 @@ let test_apply_backend_event_degrade () =
   let state =
     { S.initial with
       lifecycle = Serving;
-      backend = PostgreSQL;
+      backend = Filesystem;
       readiness = Ready
     }
   in
@@ -180,7 +180,7 @@ let test_apply_backend_event_degrade_after_not_ready () =
   let state =
     { S.initial with
       lifecycle = Serving;
-      backend = PostgreSQL;
+      backend = Filesystem;
       readiness = NotReady
     }
   in
@@ -261,8 +261,8 @@ let test_lifecycle_chain () =
   in
   check (of_pp S.Lifecycle.pp_phase) "serving" Serving state.lifecycle;
   let state =
-    check_ok "resolve pg"
-      (S.apply_backend_event state Resolve_pg)
+    check_ok "resolve fs"
+      (S.apply_backend_event state Resolve_fs)
   in
   let state =
     check_ok "set ready"
@@ -305,7 +305,7 @@ let test_backend_degrade_recover_cycle () =
   let state =
     { S.initial with
       lifecycle = Serving;
-      backend = PostgreSQL;
+      backend = Filesystem;
       readiness = NotReady
     }
   in
@@ -332,7 +332,7 @@ let () =
          test_case "all transitions" `Quick test_lifecycle_all_transitions;
        ]);
       ("backend",
-       [ test_case "resolve_pg" `Quick test_backend_resolve;
+       [ test_case "resolve_fs" `Quick test_backend_resolve;
          test_case "degrade" `Quick test_backend_degrade;
          test_case "recover" `Quick test_backend_recover;
        ]);

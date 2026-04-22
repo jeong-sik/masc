@@ -180,202 +180,9 @@ let fail_open_local_only_when_unavailable
          if List.exists probe ollama_urls then normalized_effective
          else normalized_base)
 
-(** {1 Retry & Side-Effect Safety}
+(* Extracted to Keeper_error_classify — see keeper_error_classify.ml *)
 
-    @boundary-contract
-    - MASC owns: side-effect detection (blocking retry after mutating tools),
-      cross-provider retry (2 attempts after all OAS per-provider retries
-      exhaust), error reclassification for ambiguous outcomes.
-    - OAS owns: per-provider retry (3 attempts), HTTP backoff, timeout
-      handling, provider failover within a single cascade call.
-    - Neither may: retry silently after a mutating tool succeeded (integrity
-      over availability); duplicate OAS per-provider retry counts. *)
-
-(** Detect transient network errors that warrant retry with short backoff.
-    Uses structured [Oas.Error.sdk_error] pattern matching instead of
-    substring matching on stringified error messages. *)
-let is_transient_network_error (err : Oas.Error.sdk_error) : bool =
-  match err with
-  | Oas.Error.Api (NetworkError _) -> true
-  | Oas.Error.Api (Timeout _) -> true
-  | Oas.Error.Api (Overloaded _) -> true
-  | Oas.Error.Api (ServerError { status = 503; _ }) -> true
-  | _ -> false
-
-(** Detect server-side request body parse errors (e.g. Ollama yyjson
-    rejecting a request with "Value looks like object, but can't find
-    closing '}' symbol").  The LLM API never processed the request, so
-    committed tool results are not at risk of duplication.
-
-    These errors may recur with the same payload, so they are NOT
-    eligible for same-turn retry.  They ARE eligible for auto-recovery
-    when all committed tools are reconcile-safe (idempotent/board-like):
-    the keeper's next heartbeat cycle will build a fresh prompt. *)
-let is_server_rejected_parse_error (err : Oas.Error.sdk_error) : bool =
-  match err with
-  | Oas.Error.Api (InvalidRequest { message }) ->
-      let lower = String.lowercase_ascii message in
-      (* Compound patterns to avoid false positives on generic messages
-         like "Service closing" or "Can't find the specified tool".
-         Each pattern targets a specific JSON parser error family. *)
-      (string_contains_substring ~needle:"can't find closing" lower
-       || string_contains_substring ~needle:"find end of" lower)
-      || string_contains_substring ~needle:"unexpected character in json" lower
-      || string_contains_substring ~needle:"unterminated" lower
-      || string_contains_substring ~needle:"parse error" lower
-  | _ -> false
-
-let is_required_tool_contract_violation (err : Oas.Error.sdk_error) : bool =
-  match err with
-  | Oas.Error.Agent (Oas.Error.CompletionContractViolation { contract; _ }) ->
-      contract = Oas.Completion_contract_id.Require_tool_use
-  | _ -> false
-
-let is_auto_recoverable_cascade_exhausted_error (err : Oas.Error.sdk_error) : bool =
-  match Oas_worker_named.classify_masc_internal_error err with
-  | Some
-      (Oas_worker_named.Cascade_exhausted
-         { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
-      true
-  | Some
-      (Oas_worker_named.Cascade_exhausted
-         { reason = Keeper_types.Other_detail detail; _ }) ->
-      Oas_worker_named.message_looks_like_cli_wrapped_hard_quota detail
-  | Some (Oas_worker_named.Cascade_exhausted _) ->
-      false
-  | Some (Oas_worker_named.No_tool_capable_provider _)
-  | Some (Oas_worker_named.Accept_rejected _)
-  | Some (Oas_worker_named.Admission_queue_timeout _)
-  | Some (Oas_worker_named.Turn_timeout _)
-  | Some (Oas_worker_named.Ambiguous_post_commit _)
-  | None ->
-      false
-
-let is_auto_recoverable_cascade_fail_open_error
-    (err : Oas.Error.sdk_error) : bool =
-  Oas_worker_named.sdk_error_is_hard_quota err
-  || is_auto_recoverable_cascade_exhausted_error err
-
-let fail_open_cascade_after_auto_recoverable_error
-    ~(base_cascade : string)
-    ~(effective_cascade : string)
-    (err : Oas.Error.sdk_error) : string option =
-  if not (is_auto_recoverable_cascade_fail_open_error err)
-  then None
-  else
-    let normalized_base =
-      Keeper_cascade_profile.normalize_declared_name base_cascade
-    in
-    let normalized_effective =
-      Keeper_cascade_profile.normalize_declared_name effective_cascade
-    in
-    if not (String.equal normalized_effective normalized_base)
-    then Some normalized_base
-    else if
-      String.equal normalized_effective Keeper_config.local_only_cascade_name
-      || String.equal normalized_effective Keeper_config.default_cascade_name
-    then None
-    else Some Keeper_config.default_cascade_name
-
-let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =
-  is_transient_network_error err
-  || is_server_rejected_parse_error err
-  || is_auto_recoverable_cascade_exhausted_error err
-
-let ambiguous_side_effect_error_prefix =
-  "turn outcome ambiguous after committed mutating tool call(s)"
-
-let committed_mutating_tools tool_names =
-  tool_names
-  |> dedupe_keep_order
-  |> List.filter Keeper_exec_tools.has_mutating_side_effect
-
-let is_ambiguous_side_effect_error (err : Oas.Error.sdk_error) : bool =
-  match Oas_worker_named.classify_masc_internal_error err with
-  | Some (Oas_worker_named.Ambiguous_post_commit _) -> true
-  | None -> (
-      match err with
-      | Oas.Error.Internal msg ->
-          string_contains_substring
-            ~needle:ambiguous_side_effect_error_prefix msg
-      | _ -> false)
-  | _ -> false
-
-let reclassify_error_after_side_effect
-    ~(tool_names : string list)
-    (err : Oas.Error.sdk_error) : Oas.Error.sdk_error =
-  let committed_tools = committed_mutating_tools tool_names in
-  if committed_tools = [] || is_ambiguous_side_effect_error err then err
-  else
-    let tools = committed_tools in
-    let original = short_preview (Oas.Error.to_string err) in
-    let is_timeout = match err with Oas.Error.Api (Timeout _) -> true | _ -> false in
-    Oas_worker_named.sdk_error_of_masc_internal_error
-      (Oas_worker_named.Ambiguous_post_commit
-         { is_timeout; tools; original_error = original })
-
-let post_commit_failure_kind_of_error (err : Oas.Error.sdk_error) =
-  match err with
-  | Oas.Error.Api (Timeout _) -> Keeper_registry.Post_commit_timeout
-  | _ -> Keeper_registry.Post_commit_failure
-
-let summarize_post_commit_failure
-    ~(tool_names : string list)
-    ~(kind : Keeper_registry.ambiguous_partial_commit_kind)
-    (err : Oas.Error.sdk_error) =
-  let committed_tools = committed_mutating_tools tool_names in
-  let tools = String.concat ", " committed_tools in
-  let err_preview = short_preview (Oas.Error.to_string err) in
-  (* Manual reconcile blocker removed — no "required/not required" branching.
-     Evidence is recorded via Keeper_registry; the next turn's observation
-     signals the failure for autonomous or operator-driven recovery. *)
-  match kind with
-  | Keeper_registry.Post_commit_timeout ->
-      Printf.sprintf
-        "Mutating tools [%s] committed before the turn timed out; evidence \
-         recorded (error: %s)"
-        tools err_preview
-  | Keeper_registry.Post_commit_failure ->
-      Printf.sprintf
-        "Mutating tools [%s] committed before the turn failed; evidence \
-         recorded (error: %s)"
-        tools err_preview
-
-let classify_post_commit_failure
-    ~(tool_names : string list)
-    ?kind
-    (err : Oas.Error.sdk_error) =
-  let committed_tools = committed_mutating_tools tool_names in
-  if committed_tools = []
-  then None
-  else
-    let resolved_kind =
-      Option.value ~default:(post_commit_failure_kind_of_error err) kind
-    in
-    let reclassified =
-      reclassify_error_after_side_effect ~tool_names:committed_tools err
-    in
-    let detail =
-      summarize_post_commit_failure
-        ~tool_names:committed_tools
-        ~kind:resolved_kind
-        err
-    in
-    Some
-      ( reclassified,
-        Keeper_registry.Ambiguous_partial_commit
-          { kind = resolved_kind; detail } )
-
-(** Max transient retries (excluding the initial attempt).  Total attempts
-    = 1 initial + max_transient_retries.  OAS internal retry is 3 per
-    provider; this outer retry covers cases where all providers fail
-    transiently (e.g. TCP keepalive expiry across all backends). *)
-let max_transient_retries = 2
-
-(** Exponential backoff delay for transient retry [attempt] (1-indexed).
-    Delays: 1s, 2s — total wait 3s before giving up. *)
-let transient_backoff_sec (attempt : int) : float =
-  Float.min 4.0 (1.0 *. Float.of_int (1 lsl (attempt - 1)))
+module EC = Keeper_error_classify
 
 let oas_timeout_guard_sec = 1.0
 
@@ -400,28 +207,6 @@ let bounded_oas_timeout_for_turn_budget ~(max_context : int)
   bounded_oas_timeout_for_turn_budget_with_turn_budget ~max_context
     ~max_turns:(Keeper_runtime_resolved.reactive_max_turns_per_call ())
     ~remaining_turn_budget_s
-
-(** Detect context overflow errors via structured OAS error types.
-    Matches [ContextOverflow] (API-level) and [TokenBudgetExceeded]
-    for input token budget exceeded.  Both are recoverable
-    via checkpoint compaction + retry.
-
-    @since 2.256.0 also matches TokenBudgetExceeded(Input) *)
-let is_context_overflow (err : Oas.Error.sdk_error) : bool =
-  match err with
-  | Oas.Error.Api (ContextOverflow _) -> true
-  | Oas.Error.Agent (TokenBudgetExceeded { kind = "Input"; _ }) -> true
-  | _ -> false
-
-let is_cascade_exhausted_error (err : Oas.Error.sdk_error) : bool =
-  match Oas_worker_named.classify_masc_internal_error err with
-  | Some (Oas_worker_named.Cascade_exhausted _)
-  | Some (Oas_worker_named.No_tool_capable_provider _)
-  | Some (Oas_worker_named.Accept_rejected _) -> true
-  | Some (Oas_worker_named.Admission_queue_timeout _)
-  | Some (Oas_worker_named.Turn_timeout _)
-  | Some (Oas_worker_named.Ambiguous_post_commit _) -> false
-  | None -> false
 
 type overflow_retry_plan = {
   retry_max_context : int;
@@ -966,7 +751,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       in
       let committed_mutating_tools_snapshot () =
         with_turn_event_bus_lock (fun () ->
-          committed_mutating_tools !mutating_tools_committed)
+          EC.committed_mutating_tools !mutating_tools_committed)
       in
       let start_background_turn_event_bus_drain ~clock =
         match event_bus_sub, Eio_context.get_switch_opt () with
@@ -1097,7 +882,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~attempt ~is_retry
               ~overflow_retry_used =
             let mark_terminal_error err =
-              if is_cascade_exhausted_error err then
+              if EC.is_cascade_exhausted_error err then
                 Keeper_registry.set_turn_cascade_state
                   ~base_path:config.base_path meta.name
                   Keeper_registry.Cascade_exhausted
@@ -1160,8 +945,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 if committed_tools <> []
                    && Keeper_tool_registry.all_tools_reconcile_safe
                         committed_tools
-                   && (is_auto_recoverable_turn_error err
-                       || is_required_tool_contract_violation err)
+                   && (EC.is_auto_recoverable_turn_error err
+                       || EC.is_required_tool_contract_violation err)
                 then begin
                   (* All committed tools are board-like (duplicate-tolerant)
                      AND the failure is transient or the server rejected the
@@ -1171,8 +956,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                      build a fresh prompt that may avoid the parse issue. *)
                   let err_preview = short_preview (Oas.Error.to_string err) in
                   let reason =
-                    if is_server_rejected_parse_error err then "server parse rejection"
-                    else if is_required_tool_contract_violation err then
+                    if EC.is_server_rejected_parse_error err then "server parse rejection"
+                    else if EC.is_required_tool_contract_violation err then
                       "required tool contract violation"
                     else "transient error"
                   in
@@ -1186,18 +971,18 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 end else if committed_tools <> [] then begin
                   let reclassified, failure_reason =
                     match
-                      classify_post_commit_failure
+                      EC.classify_post_commit_failure
                         ~tool_names:committed_tools
                         err
                     with
                     | Some classified -> classified
                     | None ->
-                        ( reclassify_error_after_side_effect
+                        ( EC.reclassify_error_after_side_effect
                             ~tool_names:committed_tools err,
                           Keeper_registry.Ambiguous_partial_commit {
                             kind = Keeper_registry.Post_commit_failure;
                             detail =
-                              summarize_post_commit_failure
+                              EC.summarize_post_commit_failure
                                 ~tool_names:committed_tools
                                 ~kind:Keeper_registry.Post_commit_failure
                                 err;
@@ -1205,7 +990,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   in
                   post_commit_failure_reason := Some failure_reason;
                   let err_preview = short_preview (Oas.Error.to_string err) in
-                  if is_transient_network_error err then
+                  if EC.is_transient_network_error err then
                     Log.Keeper.error
                       "%s: transient provider error after committed mutating tool call(s) [%s] — treating as integrity failure, skipping retry to prevent duplicate (error: %s)"
                       meta.name
@@ -1219,9 +1004,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       err_preview;
                   mark_terminal_error reclassified;
                   Error reclassified
-                end else if is_transient_network_error err
-                              && attempt <= max_transient_retries then begin
-                  let delay = transient_backoff_sec attempt in
+                end else if EC.is_transient_network_error err
+                              && attempt <= EC.max_transient_retries then begin
+                  let delay = EC.transient_backoff_sec attempt in
                   Log.Keeper.warn
                     "%s: transient network error cascade=%s max_context=%d turn_budget=%d primary_budget=%d requested_override=%s retry=%d/%d backoff=%.0fs: %s"
                     meta.name effective_cascade_name max_context_resolution.effective_budget
@@ -1230,13 +1015,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     (match max_context_resolution.requested_override with
                      | Some requested -> string_of_int requested
                      | None -> "none")
-                    attempt max_transient_retries delay
+                    attempt EC.max_transient_retries delay
                     (short_preview (Oas.Error.to_string err));
                   Eio.Time.sleep clock delay;
                   retry_loop ~run_meta ~max_context ~run_generation
                     ~attempt:(attempt + 1)
                     ~is_retry:true ~overflow_retry_used
-                end else if is_context_overflow err then begin
+                end else if EC.is_context_overflow err then begin
                   let current_turn_event_bus = drain_turn_event_bus () in
                   dispatch_keeper_phase_event
                     ~config
@@ -1362,20 +1147,20 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               in
               let reclassified, failure_reason =
                 match
-                  classify_post_commit_failure
+                  EC.classify_post_commit_failure
                     ~tool_names:committed_tools
                     ~kind:Keeper_registry.Post_commit_timeout
                     timeout_err
                 with
                 | Some classified -> classified
                 | None ->
-                    ( reclassify_error_after_side_effect
+                    ( EC.reclassify_error_after_side_effect
                         ~tool_names:committed_tools
                         timeout_err,
                       Keeper_registry.Ambiguous_partial_commit {
                         kind = Keeper_registry.Post_commit_timeout;
                         detail =
-                          summarize_post_commit_failure
+                          EC.summarize_post_commit_failure
                             ~tool_names:committed_tools
                             ~kind:Keeper_registry.Post_commit_timeout
                             timeout_err;
@@ -1412,10 +1197,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           finalize_trajectory_acc ~config ~keeper_name:meta.name trajectory_acc
             (Trajectory.Failed (Oas.Error.to_string err));
           let e_str = Oas.Error.to_string err in
-          let is_transient = is_transient_network_error err in
-          let is_server_parse_rejection = is_server_rejected_parse_error err in
-          let is_auto_recoverable = is_auto_recoverable_turn_error err in
-          let is_ambiguous_partial = is_ambiguous_side_effect_error err in
+          let is_transient = EC.is_transient_network_error err in
+          let is_server_parse_rejection = EC.is_server_rejected_parse_error err in
+          let is_auto_recoverable = EC.is_auto_recoverable_turn_error err in
+          let is_ambiguous_partial = EC.is_ambiguous_side_effect_error err in
           Prometheus.inc_counter Prometheus.metric_keeper_turns
             ~labels:[("keeper_name", meta.name); ("outcome", "failure")] ();
           Log.Keeper.error

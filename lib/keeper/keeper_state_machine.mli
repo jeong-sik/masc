@@ -178,7 +178,7 @@ type event =
     }
     (** Provider rejected prompt for exceeding max context.
         [`Prompt_rejected] is sourced from a failed unified turn
-        (see [Keeper_unified_turn.is_context_overflow]);
+        (see [Keeper_error_classify.is_context_overflow]);
         [`Oas_signal] is sourced either from structured OAS overflow
         diagnostics or from the drained OAS [Event_bus]
         [ContextOverflowImminent] signal for the same turn. *)

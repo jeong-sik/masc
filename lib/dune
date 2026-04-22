@@ -504,6 +504,7 @@
    keeper_campaign_fsm
    keeper_unified_prompt
    keeper_unified_metrics
+   keeper_error_classify
    keeper_unified_turn
 
    keeper_prompt_names

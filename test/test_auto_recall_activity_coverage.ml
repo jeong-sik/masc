@@ -250,6 +250,44 @@ let with_temp_dir prefix f =
 let write_file path content =
   Fs_compat.save_file path content
 
+let capture_stderr f =
+  let pipe_read, pipe_write = Unix.pipe () in
+  let saved_stderr = Unix.dup Unix.stderr in
+  Unix.dup2 pipe_write Unix.stderr;
+  Unix.close pipe_write;
+  (try f () with _ -> ());
+  flush stderr;
+  Unix.dup2 saved_stderr Unix.stderr;
+  Unix.close saved_stderr;
+  Unix.set_nonblock pipe_read;
+  let buf = Buffer.create 256 in
+  let tmp = Bytes.create 256 in
+  let rec read_all () =
+    match Unix.read pipe_read tmp 0 256 with
+    | 0 -> ()
+    | n -> Buffer.add_subbytes buf tmp 0 n; read_all ()
+    | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> ()
+    | exception _ -> ()
+  in
+  read_all ();
+  Unix.close pipe_read;
+  Buffer.contents buf
+
+let str_contains haystack needle =
+  let hl = String.length haystack in
+  let nl = String.length needle in
+  if nl = 0 then true
+  else if nl > hl then false
+  else begin
+    let found = ref false in
+    let i = ref 0 in
+    while !i <= hl - nl && not !found do
+      if String.sub haystack !i nl = needle then found := true;
+      incr i
+    done;
+    !found
+  end
+
 let test_recent_activity_skips_malformed_jsonl_lines () =
   with_temp_dir "activity-feed-jsonl" @@ fun base_path ->
   let config = Coord.default_config base_path in
@@ -327,6 +365,29 @@ let test_recent_activity_falls_back_from_bad_task_timestamp () =
         item.created_at
   | _ -> fail "expected one task activity item"
 
+let test_recent_activity_ignores_backlog_json_without_timestamp_warning () =
+  with_temp_dir "activity-feed-backlog" @@ fun base_path ->
+  let config = Coord.default_config base_path in
+  let masc_dir = Coord.masc_dir config in
+  let tasks_dir = Filename.concat masc_dir "tasks" in
+  Fs_compat.mkdir_p tasks_dir;
+  write_file (Filename.concat tasks_dir "backlog.json")
+    (Yojson.Safe.to_string
+       (`Assoc
+         [
+           ("tasks", `List []);
+           ("last_updated", `String "2026-04-22T13:01:48Z");
+           ("version", `Int 7);
+         ]));
+  let output =
+    capture_stderr (fun () ->
+        ignore (Activity_feed.recent_activity config ~limit:10 ()))
+  in
+  check bool "backlog timestamp fallback warning suppressed" false
+    (str_contains output "task activity timestamp parse fallback");
+  let items = Activity_feed.recent_activity config ~limit:10 () in
+  check int "backlog does not become an activity item" 0 (List.length items)
+
 (* ============================================================
    Runner
    ============================================================ *)
@@ -384,5 +445,7 @@ let () =
         test_recent_activity_skips_bad_task_file;
       test_case "falls back from bad task timestamp" `Quick
         test_recent_activity_falls_back_from_bad_task_timestamp;
+      test_case "ignores backlog json without timestamp warning" `Quick
+        test_recent_activity_ignores_backlog_json_without_timestamp_warning;
     ];
   ]

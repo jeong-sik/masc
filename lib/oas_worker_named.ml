@@ -742,11 +742,11 @@ let run_named
              let runtime_mcp_policy =
                match runtime_mcp_policy, String.trim keeper_name with
                | Some policy, keeper_name when keeper_name <> "" ->
-                   Some
-                     (Oas_worker_exec.runtime_mcp_policy_with_masc_agent_name
-                        ~agent_name:(Keeper_types.keeper_agent_name keeper_name)
-                        policy)
-               | _ -> runtime_mcp_policy
+                   Oas_worker_exec.runtime_mcp_policy_for_provider
+                     ~provider_cfg
+                     ~agent_name:(Keeper_types.keeper_agent_name keeper_name)
+                     (Some policy)
+                | _ -> runtime_mcp_policy
              in
              {
                (Oas_worker_exec.default_config ~name ~provider_cfg

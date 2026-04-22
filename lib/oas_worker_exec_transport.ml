@@ -203,6 +203,20 @@ let runtime_mcp_policy_with_masc_agent_name
     in
     { policy with servers }
 
+let runtime_mcp_policy_for_provider
+    ~(provider_cfg : Llm_provider.Provider_config.t)
+    ~(agent_name : string)
+    (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option) =
+  match policy_opt, provider_cfg.kind with
+  | Some policy, Llm_provider.Provider_config.Codex_cli ->
+      (* Codex CLI runtime MCP currently rejects inline HTTP headers, so
+         keep the runtime policy untouched until that transport supports
+         carrying per-request headers. *)
+      Some policy
+  | Some policy, _ ->
+      Some (runtime_mcp_policy_with_masc_agent_name ~agent_name policy)
+  | None, _ -> None
+
 let kimi_cli_runtime_mcp_jsons
     ~(base : string list)
     (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option) =

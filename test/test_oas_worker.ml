@@ -1557,6 +1557,55 @@ let test_runtime_mcp_policy_with_masc_agent_name_upserts_header () =
         (List.assoc_opt "x-masc-agent-name" other_headers)
   | _ -> Alcotest.fail "expected both masc and other HTTP servers"
 
+let test_runtime_mcp_policy_for_provider_skips_codex_cli_header_injection () =
+  let policy =
+    {
+      Llm_provider.Llm_transport.empty_runtime_mcp_policy with
+      servers =
+        [
+          Llm_provider.Llm_transport.Http_server
+            { name = "masc"; url = "http://127.0.0.1:8947/mcp"; headers = [] };
+        ];
+      allowed_server_names = [ "masc" ];
+      allowed_tool_names = [ "masc_status" ];
+      strict = true;
+      disable_builtin_tools = true;
+    }
+  in
+  let find_masc_headers policy_opt =
+    match policy_opt with
+    | None -> Alcotest.fail "expected runtime MCP policy"
+    | Some (policy : Llm_provider.Llm_transport.runtime_mcp_policy) ->
+        List.find_map
+          (function
+            | Llm_provider.Llm_transport.Http_server server
+              when String.equal server.name "masc" -> Some server.headers
+            | _ -> None)
+          policy.servers
+  in
+  let codex_headers =
+    find_masc_headers
+      (Oas_worker_exec.runtime_mcp_policy_for_provider
+         ~provider_cfg:(make_codex_cli_provider_cfg ())
+         ~agent_name:"keeper-sangsu-agent"
+         (Some policy))
+  in
+  let openai_headers =
+    find_masc_headers
+      (Oas_worker_exec.runtime_mcp_policy_for_provider
+         ~provider_cfg:(make_openai_compat_provider_cfg ())
+         ~agent_name:"keeper-sangsu-agent"
+         (Some policy))
+  in
+  match codex_headers, openai_headers with
+  | Some codex_headers, Some openai_headers ->
+      Alcotest.(check (option string)) "codex_cli skips agent header" None
+        (List.assoc_opt "x-masc-agent-name" codex_headers);
+      Alcotest.(check (option string)) "openai_compat still injects agent header"
+        (Some "keeper-sangsu-agent")
+        (List.assoc_opt "x-masc-agent-name" openai_headers)
+  | _ -> Alcotest.fail "expected masc runtime server headers"
+
 let test_kimi_cli_runtime_mcp_jsons_include_request_policy () =
   let policy =
     {
@@ -2905,6 +2954,8 @@ let () =
         test_kimi_mcp_config_json_of_policy_filters_to_allowed_servers;
       Alcotest.test_case "runtime MCP policy injects keeper agent header for masc server" `Quick
         test_runtime_mcp_policy_with_masc_agent_name_upserts_header;
+      Alcotest.test_case "provider-aware runtime MCP policy skips codex_cli agent header injection" `Quick
+        test_runtime_mcp_policy_for_provider_skips_codex_cli_header_injection;
       Alcotest.test_case "kimi request runtime MCP config is merged" `Quick
         test_kimi_cli_runtime_mcp_jsons_include_request_policy;
       Alcotest.test_case "kimi argv includes request runtime MCP config" `Quick

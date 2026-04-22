@@ -4,7 +4,7 @@ module WT = Masc_mcp.Keeper_wake_telemetry
 module Types = Agent_sdk.Types
 
 let text_msg role s : Types.message =
-  { role; content = [ Types.Text s ]; name = None; tool_call_id = None }
+  { role; content = [ Types.Text s ]; name = None; tool_call_id = None; metadata = [] }
 
 let tool_use_msg id name input : Types.message =
   {
@@ -12,6 +12,7 @@ let tool_use_msg id name input : Types.message =
     content = [ Types.ToolUse { id; name; input } ];
     name = None;
     tool_call_id = None;
+      metadata = [];
   }
 
 let tool_result_msg ~tool_use_id ~content : Types.message =
@@ -21,6 +22,7 @@ let tool_result_msg ~tool_use_id ~content : Types.message =
       [ Types.ToolResult { tool_use_id; content; is_error = false; json = None } ];
     name = None;
     tool_call_id = Some tool_use_id;
+      metadata = [];
   }
 
 let sum_counts counts =
@@ -56,6 +58,7 @@ let test_thinking_and_redacted () =
         ];
       name = None;
       tool_call_id = None;
+      metadata = [];
     }
   in
   check int "thinking uses content; redacted uses literal length"

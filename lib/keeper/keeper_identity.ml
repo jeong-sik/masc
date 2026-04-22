@@ -95,3 +95,30 @@ let canonical_keeper_name raw_name =
         if Keeper_config.validate_name candidate then Some candidate else None
     | None ->
         if Keeper_config.validate_name trimmed then Some trimmed else None
+
+type parsed_identity = {
+  keeper_name : string;
+  agent_name : string;
+  trace_id : string option;
+}
+
+let parse_json_identity json =
+  let agent_name = Safe_ops.json_string ~default:"" "agent_name" json in
+  let trace_id = Safe_ops.json_string_opt "trace_id" json in
+  let raw_keeper_name =
+    match Safe_ops.json_string_opt "keeper_name" json with
+    | Some v when String.trim v <> "" -> Some v
+    | _ -> Safe_ops.json_string_opt "name" json
+  in
+  let keeper_name =
+    match raw_keeper_name with
+    | Some value when String.trim value <> "" ->
+        (match canonical_keeper_name value with
+         | Some name -> name
+         | None -> String.trim value)
+    | _ ->
+        (match canonical_keeper_name_from_agent_name agent_name with
+         | Some name -> name
+         | None -> String.trim agent_name)
+  in
+  { keeper_name; agent_name; trace_id }

@@ -190,12 +190,9 @@ let claim_event_of_json json =
       match claim_kind_of_string (Safe_ops.json_string ~default:"" "kind" json) with
       | Some kind ->
           let claim_id = Safe_ops.json_string ~default:"" "claim_id" json in
-          let agent_name = Safe_ops.json_string ~default:"" "agent_name" json in
-          let keeper_name =
-            match json_string_opt "keeper_name" json with
-            | Some value when String.trim value <> "" -> normalize_keeper_name value
-            | _ -> keeper_name_of_agent agent_name
-          in
+          let ident = Keeper_identity.parse_json_identity json in
+          let agent_name = ident.agent_name in
+          let keeper_name = ident.keeper_name in
           let subject = Safe_ops.json_string ~default:"" "subject" json in
           let surface = Safe_ops.json_string ~default:"task" "surface" json in
           let created_at = Safe_ops.json_string ~default:"" "created_at" json in
@@ -207,7 +204,7 @@ let claim_event_of_json json =
                 claim_id;
                 agent_name;
                 keeper_name;
-                trace_id = json_string_opt "trace_id" json;
+                trace_id = ident.trace_id;
                 turn_number = json_int_opt "turn_number" json;
                 task_id = json_string_opt "task_id" json;
                 kind;

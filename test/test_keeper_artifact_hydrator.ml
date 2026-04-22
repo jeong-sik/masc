@@ -51,6 +51,7 @@ let make_tool_message ~tool_use_id ~content : T.message =
     content = [ tool_result_block ~tool_use_id ~content ];
     name = None;
     tool_call_id = Some tool_use_id;
+      metadata = [];
   }
 
 let extract_tool_content (msg : T.message) : string =
@@ -138,6 +139,7 @@ let test_non_tool_result_unchanged () =
           content = [ T.Text "hi" ];
           name = None;
           tool_call_id = None;
+      metadata = [];
         }
       in
       let r = H.hydrate_recent ~store ~keep_recent:3 in

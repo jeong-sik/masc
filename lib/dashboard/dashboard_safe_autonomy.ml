@@ -452,6 +452,12 @@ let classify_sandbox_truth ~(config : Coord.config) ~(meta : keeper_meta)
                  sandbox.sandbox_profile)
             ~evidence_refs,
           [] )
+    | "auto_provisionable" ->
+        ( make_domain ~id:sandbox_domain_id ~status:Warn ~score:80.0
+            ~summary:
+              "sandbox exists and the repo clone can be auto-provisioned on worktree creation"
+            ~evidence_refs,
+          [] )
     | "missing_clone" ->
         ( make_domain ~id:sandbox_domain_id ~status:Warn ~score:60.0
             ~summary:

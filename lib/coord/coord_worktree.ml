@@ -23,19 +23,27 @@ let run_argv_lines argv =
   |> String.split_on_char '\n'
   |> List.filter (fun s -> s <> "")
 
+(** Run argv and get process status + combined output. *)
+let run_argv_with_status argv =
+  Masc_exec.Exec_gate.run_argv_with_status
+    ~actor:"coord/worktree"
+    ~raw_source:(exec_gate_raw_source argv)
+    ~summary:"coord_worktree argv"
+    ~timeout_sec:30.0
+    argv
+
 (** Run argv and get exit code (Eio-native, no shell) *)
 let run_argv_exit argv =
-  match
-    Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:"coord/worktree"
-      ~raw_source:(exec_gate_raw_source argv)
-      ~summary:"coord_worktree argv"
-      ~timeout_sec:30.0
-      argv
-  with
+  match run_argv_with_status argv with
   | Unix.WEXITED n, _ -> n
   | Unix.WSIGNALED _, _ -> 128
   | Unix.WSTOPPED _, _ -> 128
+
+let first_nonempty_line output =
+  output
+  |> String.split_on_char '\n'
+  |> List.map String.trim
+  |> List.find_opt (fun s -> s <> "")
 
 (** Check if directory is a git repository - delegates to Coord_git *)
 let is_git_repo config =
@@ -91,6 +99,45 @@ let ensure_worktree_path root worktree_name =
   else
     Error (IoError "Invalid worktree path: must be created under .worktrees/")
 
+let safe_file_exists path =
+  try Sys.file_exists path with
+  | Sys_error _ -> false
+
+let safe_is_dir path =
+  try Sys.file_exists path && Sys.is_directory path with
+  | Sys_error _ -> false
+
+let safe_repo_name name =
+  name <> "" && name <> "." && name <> ".."
+  && not (String.contains name '/')
+  && not (String.contains name '\\')
+  && not (String.contains name '\x00')
+  && String.for_all
+       (fun c ->
+         (c >= 'A' && c <= 'Z')
+         || (c >= 'a' && c <= 'z')
+         || (c >= '0' && c <= '9')
+         || c = '-'
+         || c = '_'
+         || c = '.')
+       name
+
+let is_git_clone candidate =
+  safe_is_dir candidate
+  &&
+  match git_marker_kind (Filename.concat candidate ".git") with
+  | `Directory | `File -> true
+  | `Missing -> false
+
+let rec rm_rf path =
+  if safe_file_exists path then
+    if safe_is_dir path then begin
+      (try Sys.readdir path with Sys_error _ -> [||])
+      |> Array.iter (fun entry -> rm_rf (Filename.concat path entry));
+      (try Unix.rmdir path with Unix.Unix_error _ -> ())
+    end else
+      try Unix.unlink path with Unix.Unix_error _ -> ()
+
 let missing_sandbox_clone_error ~agent_name ~repos_dir ~repo_name =
   let rel_target, clone_hint =
     match repo_name with
@@ -110,6 +157,159 @@ let missing_sandbox_clone_error ~agent_name ~repos_dir ~repo_name =
        "missing_sandbox_clone: no sandbox git clone found for agent %s under %s \
         (expected %s). Recovery: %s"
        agent_name repos_dir rel_target clone_hint)
+
+let workspace_repo_not_found_error ~agent_name ~repos_dir ~repo_name
+    ~search_root =
+  IoError
+    (Printf.sprintf
+       "missing_sandbox_clone: no sandbox git clone found for agent %s under %s \
+        and no workspace git repo named %s was found under %s. Recovery: \
+        keeper_shell op=git_clone url=\"https://github.com/<org>/%s.git\" \
+        path=\"repos/%s\""
+       agent_name repos_dir repo_name search_root repo_name repo_name)
+
+let workspace_repo_ambiguous_error ~repo_name ~search_root ~matches =
+  IoError
+    (Printf.sprintf
+       "ambiguous_workspace_repo: found multiple git repos named %s under %s: \
+        [%s]. Auto-provision is blocked until the repo is disambiguated; use \
+        keeper_shell op=git_clone explicitly."
+       repo_name search_root (String.concat ", " matches))
+
+let partial_clone_error ~clone_path ~msg =
+  rm_rf clone_path;
+  IoError msg
+
+let workspace_repo_matches ~search_root ~repo_name =
+  let max_dirs = 4000 in
+  let max_matches = 8 in
+  let preferred_dir_name = function
+    | "workspace" | "workspaces" | "repos" | "projects" | "src" -> true
+    | _ -> false
+  in
+  let entry_priority entry =
+    if entry = repo_name then 0
+    else if preferred_dir_name entry then 1
+    else if String.length entry > 0 && entry.[0] = '.' then 3
+    else 2
+  in
+  let skip_dir_name = function
+    | ".git" | ".hg" | ".svn" | ".masc" | ".worktrees" | "_build"
+    | "node_modules" ->
+        true
+    | _ -> false
+  in
+  let matches =
+    if Filename.basename search_root = repo_name && is_git_clone search_root
+    then ref [ search_root ]
+    else ref []
+  in
+  let queue = Queue.create () in
+  Queue.add search_root queue;
+  let dirs_seen = ref 0 in
+  while
+    !dirs_seen < max_dirs
+    && Queue.length queue > 0
+    && List.length !matches < max_matches
+  do
+    let dir = Queue.take queue in
+    incr dirs_seen;
+    let entries =
+      try Sys.readdir dir with Sys_error _ -> [||]
+    in
+    Array.sort
+      (fun a b ->
+         match compare (entry_priority a) (entry_priority b) with
+         | 0 -> compare a b
+         | n -> n)
+      entries;
+    Array.iter
+      (fun entry ->
+         if List.length !matches < max_matches then
+           let path = Filename.concat dir entry in
+           if entry = repo_name && is_git_clone path then
+             matches := path :: !matches;
+           if safe_is_dir path && not (skip_dir_name entry) then
+             Queue.add path queue)
+      entries
+  done;
+  List.sort_uniq String.compare !matches
+
+let git_origin_url root =
+  match run_argv_with_status [ "git"; "-C"; root; "remote"; "get-url"; "origin" ] with
+  | Unix.WEXITED 0, output -> first_nonempty_line output
+  | _ -> None
+
+let auto_provision_sandbox_clone ~config ~agent_name ~repos_dir ~repo_name =
+  let search_root = project_root config in
+  match workspace_repo_matches ~search_root ~repo_name with
+  | [] ->
+      Error
+        (workspace_repo_not_found_error ~agent_name ~repos_dir ~repo_name
+           ~search_root)
+  | [ source_root ] ->
+      Fs_compat.mkdir_p repos_dir;
+      let clone_path = Filename.concat repos_dir repo_name in
+      if safe_file_exists clone_path then
+        if is_git_clone clone_path then Ok (clone_path, None)
+        else
+          Error
+            (IoError
+               (Printf.sprintf
+                  "sandbox_clone_conflict: %s already exists under %s but is not \
+                   a git clone. Remove or repair it, or use keeper_shell \
+                   op=git_clone explicitly."
+                  repo_name repos_dir))
+      else
+        let status, output =
+          run_argv_with_status [ "git"; "clone"; source_root; clone_path ]
+        in
+        if status <> Unix.WEXITED 0 then
+          Error
+            (partial_clone_error ~clone_path
+               ~msg:
+                 (Printf.sprintf
+                    "auto_provision_clone_failed: git clone from workspace repo %s \
+                     into %s failed: %s"
+                    source_root clone_path
+                    (let detail = String.trim output in
+                     if detail = "" then "(no output)" else detail)))
+        else (
+          match git_origin_url source_root with
+          | Some origin_url ->
+              let set_status, set_output =
+                run_argv_with_status
+                  [ "git"; "-C"; clone_path; "remote"; "set-url"; "origin";
+                    origin_url ]
+              in
+              if set_status <> Unix.WEXITED 0 then
+                Error
+                  (partial_clone_error ~clone_path
+                     ~msg:
+                       (Printf.sprintf
+                          "auto_provision_clone_failed: cloned %s into %s but \
+                           could not restore origin %s: %s"
+                          source_root clone_path origin_url
+                          (let detail = String.trim set_output in
+                           if detail = "" then "(no output)" else detail)))
+              else
+                Ok
+                  ( clone_path,
+                    Some
+                      (Printf.sprintf
+                         "Sandbox clone auto-provisioned from workspace repo %s."
+                         source_root) )
+          | None ->
+              Ok
+                ( clone_path,
+                  Some
+                    (Printf.sprintf
+                       "Sandbox clone auto-provisioned from workspace repo %s \
+                        (origin remote unavailable on source clone)."
+                       source_root) ))
+  | matches ->
+      Error
+        (workspace_repo_ambiguous_error ~repo_name ~search_root ~matches)
 
 (** Link worktree info to a task in backlog.
     Uses read_json/write_json to handle Backend ZSTD compression transparently. *)
@@ -164,34 +364,6 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
         Filename.concat config.base_path
           (Playground_paths.repos_path agent_name)
       in
-      (* [Sys.is_directory] raises [Sys_error] on permission errors or
-         if the path disappears between [file_exists] and [is_directory]
-         (TOCTOU). Swallow those errors and treat the candidate as
-         "not a clone" so a broken entry under [repos/] never crashes
-         the worktree resolver. *)
-      let safe_is_dir path =
-        try Sys.file_exists path && Sys.is_directory path
-        with Sys_error _ -> false
-      in
-      let is_git_clone candidate =
-        safe_is_dir candidate
-        && (try Sys.file_exists (Filename.concat candidate ".git")
-            with Sys_error _ -> false)
-      in
-      (* Reject repo_name values that aren't a single safe path
-         component. This prevents "../kirin" or "foo/bar" from escaping
-         the repos/ directory via [Filename.concat]. Keeper names are
-         already sanitized by [Playground_paths], but [repo_name] comes
-         straight from MCP tool args and needs its own gate. *)
-      let safe_repo_name name =
-        name <> "" && name <> "." && name <> ".."
-        && not (String.contains name '/')
-        && not (String.contains name '\\')
-        && not (String.contains name '\x00')
-        && String.for_all (fun c ->
-          (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
-          || (c >= '0' && c <= '9') || c = '-' || c = '_' || c = '.') name
-      in
       let explicit_repo =
         match repo_name with
         | None | Some "" -> None
@@ -217,18 +389,23 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
           in
           find 0
       in
-      match
-        match explicit_repo with
-        | Some _ as r -> r
-        | None -> scan_first_git_repo repos_dir
-      with
-      | Some clone -> Ok clone
-      | None ->
-        Error (missing_sandbox_clone_error ~agent_name ~repos_dir ~repo_name)
+      match repo_name with
+      | Some name when String.trim name <> "" && safe_repo_name name -> (
+          match explicit_repo with
+          | Some clone -> Ok (clone, None)
+          | None ->
+              auto_provision_sandbox_clone ~config ~agent_name ~repos_dir
+                ~repo_name:name)
+      | _ -> (
+          match scan_first_git_repo repos_dir with
+          | Some clone -> Ok (clone, None)
+          | None ->
+              Error
+                (missing_sandbox_clone_error ~agent_name ~repos_dir ~repo_name))
     in
     match resolve_keeper_repo_root () with
     | Error e -> Error e
-    | Ok root -> begin
+    | Ok (root, provision_note) -> begin
         let worktree_name = Playground_paths.worktree_dir_name agent_name task_id in
         match ensure_worktree_path root worktree_name with
         | Error e -> Error e
@@ -288,6 +465,11 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                   | Some missing ->
                       Printf.sprintf "\n  Note: origin/%s not found; used origin/%s" missing resolved_base
                 in
+                let provision_note =
+                  match provision_note with
+                  | None -> ""
+                  | Some detail -> "\n  Note: " ^ detail
+                in
                 (* Create worktree with force-branch (-B) from base.
                    -B resets the branch if it already exists (stale from a
                    previous session), avoiding the TOCTOU race of
@@ -329,7 +511,8 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                   log_event config event;
 
                   Ok (Printf.sprintf "✅ Worktree created:\n  Path: %s\n  Branch: %s\n  Repo: %s%s%s\n\nNext: cd %s && work && gh pr create --draft"
-                      worktree_path branch_name repo_name note link_note worktree_path)
+                      worktree_path branch_name repo_name note
+                      (provision_note ^ link_note) worktree_path)
                 end
                 else
                   let detail = String.trim git_output in

@@ -70,6 +70,158 @@ let test_invalid_repo_name () =
   check bool "not ok" false (json_bool "ok" json);
   check string "state" "invalid_repo_name" (json_string "state" json)
 
+let run_ok ~cwd cmd =
+  let wrapped =
+    Printf.sprintf "cd %s && %s > /dev/null 2>&1" (Filename.quote cwd) cmd
+  in
+  let code = Sys.command wrapped in
+  if code <> 0 then fail (Printf.sprintf "command failed (%d): %s" code cmd)
+
+let create_file_storm ~base_path ~count =
+  for i = 0 to count - 1 do
+    let path = Filename.concat base_path (Printf.sprintf "aa-%04d.tmp" i) in
+    let oc = open_out path in
+    output_string oc "x\n";
+    close_out oc
+  done
+
+let create_hidden_dir_storm ~base_path ~count =
+  let root = Filename.concat base_path ".venvs/storm" in
+  mkdir_p root;
+  for i = 0 to count - 1 do
+    Unix.mkdir (Filename.concat root (Printf.sprintf "aa-%04d" i)) 0o755
+  done
+
+let create_wide_workspace_storm ~base_path ~count =
+  let root = Filename.concat base_path "workspace/aaa-big" in
+  mkdir_p root;
+  for i = 0 to count - 1 do
+    Unix.mkdir (Filename.concat root (Printf.sprintf "aa-%04d" i)) 0o755
+  done
+
+let test_auto_provisionable_workspace_repo () =
+  let base_path = temp_dir "masc-repo-readiness" in
+  let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
+  let remote = Filename.concat base_path ".remote-masc-mcp.git" in
+  mkdir_p (Filename.dirname repo);
+  run_ok ~cwd:base_path
+    (Printf.sprintf "git init --bare -q --initial-branch=main %s"
+       (Filename.quote remote));
+  run_ok ~cwd:base_path
+    (Printf.sprintf "git clone -q %s %s"
+       (Filename.quote remote) (Filename.quote repo));
+  run_ok ~cwd:repo "git config user.email test@example.com";
+  run_ok ~cwd:repo "git config user.name Test";
+  let readme = Filename.concat repo "README.md" in
+  let oc = open_out readme in
+  output_string oc "# readiness\n";
+  close_out oc;
+  run_ok ~cwd:repo "git add README.md";
+  run_ok ~cwd:repo "git commit -q -m init";
+  run_ok ~cwd:repo "git push -q origin main";
+  let config = Masc_mcp.Coord.default_config base_path in
+  let json =
+    Masc_mcp.Keeper_repo_readiness.inspect ~config
+      ~keeper_name:"keeper-one" ~repo_name:"masc-mcp" ()
+  in
+  check bool "ok" true (json_bool "ok" json);
+  check string "state" "auto_provisionable" (json_string "state" json);
+  check string "workspace repo match" repo
+    Yojson.Safe.Util.(json |> member "workspace_repo_match" |> to_string)
+
+let test_auto_provisionable_workspace_repo_after_file_storm () =
+  let base_path = temp_dir "masc-repo-readiness" in
+  let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
+  let remote = Filename.concat base_path ".remote-masc-mcp.git" in
+  create_file_storm ~base_path ~count:4005;
+  mkdir_p (Filename.dirname repo);
+  run_ok ~cwd:base_path
+    (Printf.sprintf "git init --bare -q --initial-branch=main %s"
+       (Filename.quote remote));
+  run_ok ~cwd:base_path
+    (Printf.sprintf "git clone -q %s %s"
+       (Filename.quote remote) (Filename.quote repo));
+  run_ok ~cwd:repo "git config user.email test@example.com";
+  run_ok ~cwd:repo "git config user.name Test";
+  let readme = Filename.concat repo "README.md" in
+  let oc = open_out readme in
+  output_string oc "# readiness\n";
+  close_out oc;
+  run_ok ~cwd:repo "git add README.md";
+  run_ok ~cwd:repo "git commit -q -m init";
+  run_ok ~cwd:repo "git push -q origin main";
+  let config = Masc_mcp.Coord.default_config base_path in
+  let json =
+    Masc_mcp.Keeper_repo_readiness.inspect ~config
+      ~keeper_name:"keeper-one" ~repo_name:"masc-mcp" ()
+  in
+  check bool "ok" true (json_bool "ok" json);
+  check string "state" "auto_provisionable" (json_string "state" json);
+  check string "workspace repo match" repo
+    Yojson.Safe.Util.(json |> member "workspace_repo_match" |> to_string)
+
+let test_auto_provisionable_workspace_repo_before_hidden_dir_storm () =
+  let base_path = temp_dir "masc-repo-readiness" in
+  let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
+  let remote = Filename.concat base_path ".remote-masc-mcp.git" in
+  create_hidden_dir_storm ~base_path ~count:4005;
+  mkdir_p (Filename.dirname repo);
+  run_ok ~cwd:base_path
+    (Printf.sprintf "git init --bare -q --initial-branch=main %s"
+       (Filename.quote remote));
+  run_ok ~cwd:base_path
+    (Printf.sprintf "git clone -q %s %s"
+       (Filename.quote remote) (Filename.quote repo));
+  run_ok ~cwd:repo "git config user.email test@example.com";
+  run_ok ~cwd:repo "git config user.name Test";
+  let readme = Filename.concat repo "README.md" in
+  let oc = open_out readme in
+  output_string oc "# readiness\n";
+  close_out oc;
+  run_ok ~cwd:repo "git add README.md";
+  run_ok ~cwd:repo "git commit -q -m init";
+  run_ok ~cwd:repo "git push -q origin main";
+  let config = Masc_mcp.Coord.default_config base_path in
+  let json =
+    Masc_mcp.Keeper_repo_readiness.inspect ~config
+      ~keeper_name:"keeper-one" ~repo_name:"masc-mcp" ()
+  in
+  check bool "ok" true (json_bool "ok" json);
+  check string "state" "auto_provisionable" (json_string "state" json);
+  check string "workspace repo match" repo
+    Yojson.Safe.Util.(json |> member "workspace_repo_match" |> to_string)
+
+let test_auto_provisionable_workspace_repo_before_wide_workspace_storm () =
+  let base_path = temp_dir "masc-repo-readiness" in
+  let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
+  let remote = Filename.concat base_path ".remote-masc-mcp.git" in
+  create_wide_workspace_storm ~base_path ~count:4005;
+  mkdir_p (Filename.dirname repo);
+  run_ok ~cwd:base_path
+    (Printf.sprintf "git init --bare -q --initial-branch=main %s"
+       (Filename.quote remote));
+  run_ok ~cwd:base_path
+    (Printf.sprintf "git clone -q %s %s"
+       (Filename.quote remote) (Filename.quote repo));
+  run_ok ~cwd:repo "git config user.email test@example.com";
+  run_ok ~cwd:repo "git config user.name Test";
+  let readme = Filename.concat repo "README.md" in
+  let oc = open_out readme in
+  output_string oc "# readiness\n";
+  close_out oc;
+  run_ok ~cwd:repo "git add README.md";
+  run_ok ~cwd:repo "git commit -q -m init";
+  run_ok ~cwd:repo "git push -q origin main";
+  let config = Masc_mcp.Coord.default_config base_path in
+  let json =
+    Masc_mcp.Keeper_repo_readiness.inspect ~config
+      ~keeper_name:"keeper-one" ~repo_name:"masc-mcp" ()
+  in
+  check bool "ok" true (json_bool "ok" json);
+  check string "state" "auto_provisionable" (json_string "state" json);
+  check string "workspace repo match" repo
+    Yojson.Safe.Util.(json |> member "workspace_repo_match" |> to_string)
+
 let () =
   Random.self_init ();
   run "Keeper_repo_readiness"
@@ -79,5 +231,13 @@ let () =
         test_case "missing clone" `Quick test_missing_clone;
         test_case "non-git clone" `Quick test_non_git_clone;
         test_case "invalid repo_name" `Quick test_invalid_repo_name;
+        test_case "auto provisionable workspace repo" `Quick
+          test_auto_provisionable_workspace_repo;
+        test_case "auto provisionable workspace repo after file storm" `Quick
+          test_auto_provisionable_workspace_repo_after_file_storm;
+        test_case "auto provisionable workspace repo before hidden dir storm"
+          `Quick test_auto_provisionable_workspace_repo_before_hidden_dir_storm;
+        test_case "auto provisionable workspace repo before wide workspace storm"
+          `Quick test_auto_provisionable_workspace_repo_before_wide_workspace_storm;
       ];
     ]

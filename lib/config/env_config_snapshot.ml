@@ -254,8 +254,6 @@ let keeper_entries =
   [
     entry ~default:"true" "MASC_KEEPER_BOOTSTRAP_ENABLED"
       "Enable keeper auto-bootstrap";
-    entry ~default:"10000" "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
-      "Max concurrent active keepers";
     entry ~default:"300" "MASC_KEEPER_SNAPSHOT_SEC"
       "Keeper keepalive snapshot interval";
     entry ~default:"false" "MASC_KEEPER_DEBUG" "Enable keeper debug logging";
@@ -538,6 +536,8 @@ let keeper_sandbox_entries =
       "Memory limit for hardened keeper containers";
     entry ~default:"256m" "MASC_KEEPER_SANDBOX_TMPFS_SIZE"
       "Writable /tmp tmpfs size for hardened keeper containers";
+    entry ~default:"false" "MASC_KEEPER_SANDBOX_RELAX_FS"
+      "Relax Docker sandbox filesystem hardening (writable rootfs + exec /tmp)";
     entry ~default:"(none)" "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
       "Optional seccomp profile path for hardened keeper containers";
     entry ~default:"false" "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS"

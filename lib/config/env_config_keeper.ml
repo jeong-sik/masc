@@ -558,6 +558,30 @@ module KeeperSandbox = struct
   let tmpfs_size () =
     get_string ~default:"256m" "MASC_KEEPER_SANDBOX_TMPFS_SIZE"
 
+  (** Relax filesystem hardening inside the Docker sandbox while still
+      keeping host isolation and the same sandbox mount topology.
+
+      When true:
+      - omit [--read-only] so the image rootfs is writable
+      - drop [/tmp]'s [noexec] bit so installers/runtime bootstraps can
+        execute temporary files inside the container
+
+      This is intentionally narrower than a full "unsafe" mode: caps,
+      no-new-privileges, memory/pids limits, and mount scoping remain. *)
+  let relax_fs () =
+    get_bool ~default:false "MASC_KEEPER_SANDBOX_RELAX_FS"
+
+  let read_only_rootfs_args () =
+    if relax_fs () then [] else [ "--read-only" ]
+
+  let tmpfs_mount () =
+    let exec_suffix =
+      if relax_fs () then "" else ",noexec"
+    in
+    Printf.sprintf "/tmp:rw,nosuid,nodev%s,size=%s"
+      exec_suffix
+      (tmpfs_size ())
+
   (** Optional seccomp profile path passed to [docker run --security-opt]. *)
   let seccomp_profile () =
     get_string ~default:"" "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"

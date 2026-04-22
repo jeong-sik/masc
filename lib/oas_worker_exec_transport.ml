@@ -620,6 +620,15 @@ module Kimi_cli_transport_local = struct
                      ^ "than a transient transport failure. "
                      ^ message;
                  })
+        | Some 75 ->
+            Error
+              (Llm_provider.Http_client.AcceptRejected
+                 {
+                   reason =
+                     "kimi_cli session limit exceeded (exit 75). "
+                     ^ "The session is resumable with -r flag. "
+                     ^ message;
+                 })
         | _ -> err)
     | other -> other
 

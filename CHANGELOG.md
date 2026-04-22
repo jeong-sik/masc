@@ -56,15 +56,13 @@
 
 ### Changed
 
-- **OAS pin bump → `fix/pipeline-message-constructor@7ae2d9c8` (`v0.170.3`).**
-  `scripts/oas-agent-sdk-pin.sh` now tracks the reachable follow-up OAS branch
-  that carries structured replay metadata plus the pipeline constructor fix
-  required by `#9386`, including the split-stage follow-up needed after OAS
-  `main` moved the turn pipeline constructor sites into `stage_input`,
-  `stage_collect`, and `stage_execute`. The dependency floor in
-  `dune-project` / `masc_mcp.opam` is raised to `agent_sdk >= 0.170.3`, and the
-  generated keeper OAS pin docs now report the same branch SHA, base version,
-  and dependency floor from the shared pin script.
+- **OAS pin refresh → `main@09a19698` (`v0.170.3`).**
+  `scripts/oas-agent-sdk-pin.sh` no longer tracks the deleted
+  `fix/pipeline-message-constructor` branch. It now pins upstream OAS `main`
+  at the current reachable head while keeping the dependency floor at
+  `agent_sdk >= 0.170.3`, because upstream `main` still advertises version
+  `0.170.3`. The generated keeper OAS pin docs are re-synced from the shared
+  pin script so the declared track ref, SHA, and floor stay aligned.
 - **Keeper sandbox profile collapsed to `Local | Docker` 2-mode.** The three
   external variants (`Legacy_local`, `Docker_hardened`, `Docker_with_git`) are
   replaced by two: `local` runs on the host with filesystem scoped to the

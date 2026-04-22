@@ -414,26 +414,12 @@ let expand_provider_auto ?rotation_scope ~spec provider models =
 let expand_auto_model_string ?rotation_scope (s : string) : string list =
   let trimmed = String.trim s in
   match split_provider_model trimmed with
-  | Some ("glm", model_id)
-    when String.lowercase_ascii model_id = "auto" ->
-    expand_provider_auto ?rotation_scope ~spec:trimmed "glm"
-      (Cascade_model_resolve.glm_auto_models ())
-  | Some ("glm-coding", model_id)
-    when String.lowercase_ascii model_id = "auto" ->
-    expand_provider_auto ?rotation_scope ~spec:trimmed "glm-coding"
-      (Cascade_model_resolve.glm_coding_auto_models ())
-  | Some ("gemini_cli", model_id)
-    when String.lowercase_ascii model_id = "auto" ->
-    expand_provider_auto ?rotation_scope ~spec:trimmed "gemini_cli"
-      (Cascade_model_resolve.gemini_cli_auto_models ())
-  | Some ("codex_cli", model_id)
-    when String.lowercase_ascii model_id = "auto" ->
-    expand_provider_auto ?rotation_scope ~spec:trimmed "codex_cli"
-      (Cascade_model_resolve.codex_cli_auto_models ())
-  | Some ("claude_code", model_id)
-    when String.lowercase_ascii model_id = "auto" ->
-    expand_provider_auto ?rotation_scope ~spec:trimmed "claude_code"
-      (Cascade_model_resolve.claude_code_auto_models ())
+  | Some (provider_name, model_id)
+    when String.lowercase_ascii model_id = "auto" -> (
+      match Provider_adapter.auto_models_for_cascade_prefix provider_name with
+      | Some models when models <> [] ->
+          expand_provider_auto ?rotation_scope ~spec:trimmed provider_name models
+      | _ -> [ trimmed ])
   | _ -> [ trimmed ]
 
 let expand_auto_models (strs : string list) : string list =

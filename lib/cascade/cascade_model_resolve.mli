@@ -32,6 +32,11 @@ val codex_cli_auto_models : unit -> string list
     control unless an operator opts into model rotation. *)
 val claude_code_auto_models : unit -> string list
 
+(** Ordered Kimi CLI candidates for [kimi_cli:auto].
+    Configurable via [MASC_KIMI_CLI_AUTO_MODELS] (comma-separated).
+    Defaults to [["kimi-for-coding"]]. *)
+val kimi_cli_auto_models : unit -> string list
+
 type model_resolution_provenance =
   | Explicit_input
   | Alias of string

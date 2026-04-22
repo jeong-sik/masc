@@ -500,11 +500,11 @@ export interface BucketMetric {
   entry_count: number
   success_count: number
   error_count: number
-  p50_latency_ms: number
-  p95_latency_ms: number
+  p50_latency_ms: number | null
+  p95_latency_ms: number | null
   error_rate: number
-  total_cost_usd: number
-  cache_hit_ratio: number
+  total_cost_usd: number | null
+  cache_hit_ratio: number | null
 }
 
 export interface DashboardRuntimeModelMetric {
@@ -542,6 +542,8 @@ export interface DashboardRuntimeModelMetric {
   total_output_tokens?: number | null
   total_cache_read_tokens?: number | null
   total_reasoning_tokens?: number | null
+  usage_sample_count?: number | null
+  telemetry_sample_count?: number | null
   fallback_count?: number | null
   success_count?: number | null
   error_count?: number | null
@@ -551,12 +553,12 @@ export interface DashboardRuntimeModelMetric {
   top_tools?: Array<{ tool: string; count: number }> | null
   recent_entries?: Array<{
     ts_unix: number
-    input_tokens: number
-    output_tokens: number
-    latency_ms: number
+    input_tokens: number | null
+    output_tokens: number | null
+    latency_ms: number | null
     prompt_tok_per_sec?: number | null
     peak_memory_gb?: number | null
-    cost_usd: number
+    cost_usd: number | null
     tools_count: number
   }> | null
   buckets?: BucketMetric[] | null
@@ -648,6 +650,8 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
     total_output_tokens: asNumber(raw.total_output_tokens) ?? null,
     total_cache_read_tokens: asNumber(raw.total_cache_read_tokens) ?? null,
     total_reasoning_tokens: asNumber(raw.total_reasoning_tokens) ?? null,
+    usage_sample_count: asNumber(raw.usage_sample_count) ?? null,
+    telemetry_sample_count: asNumber(raw.telemetry_sample_count) ?? null,
     fallback_count: asNumber(raw.fallback_count) ?? null,
     success_count: asNumber(raw.success_count) ?? null,
     error_count: asNumber(raw.error_count) ?? null,
@@ -665,12 +669,12 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
           .filter(isRecord)
           .map(r => ({
             ts_unix: asNumber(r.ts_unix) ?? 0,
-            input_tokens: asNumber(r.input_tokens) ?? 0,
-            output_tokens: asNumber(r.output_tokens) ?? 0,
-            latency_ms: asNumber(r.latency_ms) ?? 0,
+            input_tokens: asNumber(r.input_tokens) ?? null,
+            output_tokens: asNumber(r.output_tokens) ?? null,
+            latency_ms: asNumber(r.latency_ms) ?? null,
             prompt_tok_per_sec: asNumber(r.prompt_tok_per_sec) ?? null,
             peak_memory_gb: asNumber(r.peak_memory_gb) ?? null,
-            cost_usd: asNumber(r.cost_usd) ?? 0,
+            cost_usd: asNumber(r.cost_usd) ?? null,
             tools_count: asNumber(r.tools_count) ?? 0,
           }))
       : null,
@@ -682,11 +686,11 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
             entry_count: asNumber(b.entry_count) ?? 0,
             success_count: asNumber(b.success_count) ?? 0,
             error_count: asNumber(b.error_count) ?? 0,
-            p50_latency_ms: asNumber(b.p50_latency_ms) ?? 0,
-            p95_latency_ms: asNumber(b.p95_latency_ms) ?? 0,
+            p50_latency_ms: asNumber(b.p50_latency_ms) ?? null,
+            p95_latency_ms: asNumber(b.p95_latency_ms) ?? null,
             error_rate: asNumber(b.error_rate) ?? 0,
-            total_cost_usd: asNumber(b.total_cost_usd) ?? 0,
-            cache_hit_ratio: asNumber(b.cache_hit_ratio) ?? 0,
+            total_cost_usd: asNumber(b.total_cost_usd) ?? null,
+            cache_hit_ratio: asNumber(b.cache_hit_ratio) ?? null,
           }))
       : null,
   }

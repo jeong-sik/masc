@@ -4,7 +4,6 @@ import { useSignal } from '@preact/signals'
 import {
   fetchRuntimeModelMetrics,
   fetchRuntimeProviders,
-  type BucketMetric,
   type DashboardRuntimeModelMetric,
   type DashboardRuntimeModelMetricsResponse,
   type DashboardRuntimeProviderSnapshot,
@@ -137,8 +136,8 @@ function fmtTime(tsUnix: number): string {
   return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
-function fmtPct(value: number): string {
-  if (Number.isNaN(value)) return '--'
+function fmtPct(value?: number | null): string {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '--'
   return `${(value * 100).toFixed(1)}%`
 }
 
@@ -153,6 +152,27 @@ function sparklineSvg(values: number[], color: string, w = 80, h = 20): string {
     return `${x.toFixed(1)},${y.toFixed(1)}`
   }).join(' ')
   return `<svg width="${w}" height="${h}" class="inline-block align-middle" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg"><polyline fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" points="${points}"/></svg>`
+}
+
+function sumNullable(values: Array<number | null | undefined>): number | null {
+  let sawNumber = false
+  let total = 0
+  for (const value of values) {
+    if (typeof value === 'number' && !Number.isNaN(value)) {
+      sawNumber = true
+      total += value
+    }
+  }
+  return sawNumber ? total : null
+}
+
+export function metricCoverageText(metric: DashboardRuntimeModelMetric): string | null {
+  const successCount = metric.success_count ?? 0
+  if (successCount <= 0) return null
+  const usageCount = metric.usage_sample_count ?? 0
+  const telemetryCount = metric.telemetry_sample_count ?? 0
+  if (usageCount >= successCount && telemetryCount >= successCount) return null
+  return `usage ${fmtNumber(usageCount)}/${fmtNumber(successCount)} · telemetry ${fmtNumber(telemetryCount)}/${fmtNumber(successCount)}`
 }
 
 export function RuntimeMonitor() {
@@ -270,7 +290,7 @@ export function RuntimeMonitor() {
           />
           <${StatCell}
             label="Total Cost"
-            value=${fmtCost(metrics?.models.reduce((sum, m) => sum + (m.total_cost_usd ?? 0), 0))}
+            value=${fmtCost(sumNullable((metrics?.models ?? []).map(m => m.total_cost_usd)))}
             detail=${`${fmtNumber(metrics?.models.reduce((sum, m) => sum + (m.total_tool_calls ?? 0), 0))} tool calls`}
           />
         </div>
@@ -308,6 +328,9 @@ export function RuntimeMonitor() {
                     <div class="grid gap-1">
                       <strong class="text-sm text-text-strong">${metric.model_id}</strong>
                       <span class="text-xs text-text-muted">entries ${fmtNumber(metric.entry_count)} · fallback ${fmtNumber(metric.fallback_count)}</span>
+                      ${metricCoverageText(metric)
+                        ? html`<span class="text-2xs text-[var(--text-muted)]">${metricCoverageText(metric)}</span>`
+                        : null}
                     </div>
                     <div class="flex gap-2 items-center">
                       <${StatusChip}
@@ -343,18 +366,35 @@ export function RuntimeMonitor() {
                       ? html`<div class="col-span-3 text-text-muted">hw tok/s p50/p95 · ${fmtNumber(metric.hw_decode_p50_tok_per_sec, 1)} / ${fmtNumber(metric.hw_decode_p95_tok_per_sec, 1)} (decode-only; excludes queue/prefill/thinking)</div>`
                       : null}
                   </div>
-                  ${(metric.buckets ?? []).length >= 2
-                    ? html`<div class="flex items-center gap-4 mt-1 text-2xs text-[var(--text-muted)]">
-                        <span>p95 latency</span>
-                        <span dangerouslySetInnerHTML=${{ __html: sparklineSvg((metric.buckets as BucketMetric[]).map(b => b.p95_latency_ms), 'var(--status-warn)', 80, 18) }}></span>
-                        <span>error rate</span>
-                        <span dangerouslySetInnerHTML=${{ __html: sparklineSvg((metric.buckets as BucketMetric[]).map(b => b.error_rate), 'var(--status-bad)', 80, 18) }}></span>
-                      </div>`
-                    : null}
                   ${(() => {
-                    const cacheRead = metric.total_cache_read_tokens ?? 0
-                    const totalIn = cacheRead + (metric.total_input_tokens ?? 0)
-                    const cacheRatio = totalIn > 0 ? cacheRead / totalIn : 0
+                    const latencySeries = (metric.buckets ?? [])
+                      .map(b => b.p95_latency_ms)
+                      .filter((value): value is number => typeof value === 'number' && !Number.isNaN(value))
+                    const errorSeries = (metric.buckets ?? [])
+                      .map(b => b.error_rate)
+                      .filter((value): value is number => typeof value === 'number' && !Number.isNaN(value))
+                    if (latencySeries.length < 2 || errorSeries.length < 2) return null
+                    return html`<div class="flex items-center gap-4 mt-1 text-2xs text-[var(--text-muted)]">
+                        <span>p95 latency</span>
+                        <span dangerouslySetInnerHTML=${{ __html: sparklineSvg(latencySeries, 'var(--status-warn)', 80, 18) }}></span>
+                        <span>error rate</span>
+                        <span dangerouslySetInnerHTML=${{ __html: sparklineSvg(errorSeries, 'var(--status-bad)', 80, 18) }}></span>
+                      </div>`
+                  })()}
+                  ${(() => {
+                    const cacheRead = metric.total_cache_read_tokens
+                    const inputTokens = metric.total_input_tokens
+                    const hasCacheNumbers =
+                      typeof cacheRead === 'number' && typeof inputTokens === 'number'
+                    let cacheRatio: number | null = null
+                    if (hasCacheNumbers) {
+                      const totalTokens = cacheRead + inputTokens
+                      cacheRatio = totalTokens > 0 ? cacheRead / totalTokens : 0
+                    }
+                    const totalIn =
+                      hasCacheNumbers
+                        ? cacheRead + inputTokens
+                        : null
                     return html`<div class="text-2xs text-[var(--text-muted)] mt-1">
                       cost ${fmtCost(metric.total_cost_usd)} · cache savings ${fmtPct(cacheRatio)} (${fmtNumber(cacheRead)} / ${fmtNumber(totalIn)} tokens)
                     </div>`
@@ -386,10 +426,10 @@ export function RuntimeMonitor() {
                             </div>
                             ${metric.recent_entries?.map(re => html`
                               <div class="grid grid-cols-6 gap-1 text-2xs text-[var(--text-body)]">
-                                <div>${fmtTime(re.ts_unix)}</div>
-                                <div>${fmtNumber(re.input_tokens)}</div>
-                                <div>${fmtNumber(re.output_tokens)}</div>
-                                <div>${fmtNumber(re.latency_ms, 0)}ms</div>
+                              <div>${fmtTime(re.ts_unix)}</div>
+                              <div>${fmtNumber(re.input_tokens)}</div>
+                              <div>${fmtNumber(re.output_tokens)}</div>
+                                <div>${re.latency_ms == null ? '--' : `${fmtNumber(re.latency_ms, 0)}ms`}</div>
                                 <div>${fmtCost(re.cost_usd)}</div>
                                 <div>${re.tools_count}</div>
                               </div>

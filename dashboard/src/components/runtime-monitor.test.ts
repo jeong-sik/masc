@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { runtimeProviderTone, modelMetricTone, fmtCost, fmtSuccessRate, fmtNumber, filterModelMetrics, sortModelMetricsByUrgency } from './runtime-monitor'
+import { runtimeProviderTone, modelMetricTone, fmtCost, fmtSuccessRate, fmtNumber, filterModelMetrics, sortModelMetricsByUrgency, metricCoverageText } from './runtime-monitor'
 import type { DashboardRuntimeProviderSnapshot, DashboardRuntimeModelMetric } from '../api/dashboard'
 
 function makeProvider(overrides: Partial<DashboardRuntimeProviderSnapshot> = {}): DashboardRuntimeProviderSnapshot {
@@ -188,6 +188,32 @@ describe('fmtNumber', () => {
   it('formats with custom digits', () => {
     const result = fmtNumber(1234.567, 2)
     expect(result).toContain('1,234.57')
+  })
+})
+
+describe('metricCoverageText', () => {
+  it('returns null when all successful entries reported usage and telemetry', () => {
+    expect(
+      metricCoverageText(
+        makeMetric({
+          success_count: 3,
+          usage_sample_count: 3,
+          telemetry_sample_count: 3,
+        }),
+      ),
+    ).toBeNull()
+  })
+
+  it('renders partial coverage when usage or telemetry samples are missing', () => {
+    expect(
+      metricCoverageText(
+        makeMetric({
+          success_count: 5,
+          usage_sample_count: 0,
+          telemetry_sample_count: 2,
+        }),
+      ),
+    ).toBe('usage 0/5 · telemetry 2/5')
   })
 })
 

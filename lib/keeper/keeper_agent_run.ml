@@ -337,6 +337,7 @@ type run_result =
   ; turn_count : int
   ; tool_calls_made : int
   ; usage : Oas.Types.api_usage
+  ; usage_reported : bool
   ; tools_used : string list
   ; tool_calls : tool_call_detail list
   ; checkpoint : Oas.Checkpoint.t option
@@ -2780,6 +2781,7 @@ let run_turn
              ; turn_count = result.turns
              ; tool_calls_made = List.length actual_keeper_tool_names
              ; usage
+             ; usage_reported = Option.is_some result.response.usage
              ; tools_used = actual_keeper_tool_names
              ; tool_calls = List.rev !tool_calls_ref
              ; checkpoint = saved_checkpoint

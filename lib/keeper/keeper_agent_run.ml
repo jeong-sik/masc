@@ -2247,7 +2247,6 @@ let run_turn
                         ~config
                         ~governance_level:(Env_config_core.governance_level ())
                         ~keeper_name:meta.name
-                        ~config
                         ~meta
                         ())
            ~enable_thinking:(Keeper_config.keeper_enable_thinking ())

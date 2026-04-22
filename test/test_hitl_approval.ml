@@ -536,16 +536,17 @@ let test_resolve_with_policy_remembers_medium_allow () =
       in
       match
         AQ.resolve_with_policy ~base_path ~id
-          ~decision:Agent_sdk.Hooks.Approve ~remember:true ()
+          ~decision:Agent_sdk.Hooks.Approve ~remember_rule:true ()
       with
-      | Ok true ->
+      | Ok { remembered_rule = Some _ } ->
           let open Yojson.Safe.Util in
           let summary =
             AQ.policy_summary_json ~base_path ~keeper_name:"remember-keeper"
           in
           Alcotest.(check int) "allow rules persisted" 1
             (summary |> member "allow_rules" |> to_int)
-      | Ok false -> Alcotest.fail "expected remembered=true for medium allow"
+      | Ok { remembered_rule = None } ->
+          Alcotest.fail "expected remembered_rule for medium allow"
       | Error err ->
           Alcotest.fail ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err))
 
@@ -565,16 +566,17 @@ let test_resolve_with_policy_does_not_remember_high_allow () =
       in
       match
         AQ.resolve_with_policy ~base_path ~id
-          ~decision:Agent_sdk.Hooks.Approve ~remember:true ()
+          ~decision:Agent_sdk.Hooks.Approve ~remember_rule:true ()
       with
-      | Ok false ->
+      | Ok { remembered_rule = None } ->
           let open Yojson.Safe.Util in
           let summary =
             AQ.policy_summary_json ~base_path ~keeper_name:"remember-keeper"
           in
           Alcotest.(check int) "no persisted rules for high allow" 0
             (summary |> member "persisted_rules" |> to_int)
-      | Ok true -> Alcotest.fail "high-risk allow should not be remembered"
+      | Ok { remembered_rule = Some _ } ->
+          Alcotest.fail "high-risk allow should not be remembered"
       | Error err ->
           Alcotest.fail ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err))
 
@@ -700,10 +702,11 @@ let test_callback_paranoid_medium_risk_uses_remembered_policy () =
       in
       (match
          AQ.resolve_with_policy ~base_path ~id
-           ~decision:Agent_sdk.Hooks.Approve ~remember:true ()
+           ~decision:Agent_sdk.Hooks.Approve ~remember_rule:true ()
        with
-       | Ok true -> ()
-       | Ok false -> Alcotest.fail "expected medium allow to be remembered"
+       | Ok { remembered_rule = Some _ } -> ()
+       | Ok { remembered_rule = None } ->
+           Alcotest.fail "expected medium allow to be remembered"
        | Error err ->
            Alcotest.fail
              ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err));

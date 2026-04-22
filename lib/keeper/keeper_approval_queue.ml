@@ -23,6 +23,9 @@ type pending_approval = {
   id : string;
   keeper_name : string;
   tool_name : string;
+  action_key : string;
+  input_hash : string;
+  sandbox_target : string;
   input : Yojson.Safe.t;
   risk_level : risk_level;
   requested_at : float;
@@ -204,8 +207,11 @@ let with_rules_lock f =
   Mutex.lock rules_mu;
   Fun.protect f ~finally:(fun () -> Mutex.unlock rules_mu)
 
-let rules_path () =
-  Filename.concat (Filename.concat (Env_config_core.base_path ()) ".masc")
+let rules_path ?base_path () =
+  let base_path =
+    Option.value ~default:(Env_config_core.base_path ()) base_path
+  in
+  Filename.concat (Coord_utils.masc_dir_from_base_path ~base_path)
     "approval-rules.json"
 
 let stable_request_key_blocklist =
@@ -236,29 +242,44 @@ let sandbox_profile_of_runtime_contract runtime_contract =
 let backend_of_runtime_contract runtime_contract =
   Option.bind runtime_contract (string_opt_member "backend")
 
-let load_rules_unlocked () =
-  match Safe_ops.read_json_file_safe (rules_path ()) with
+let load_rules_unlocked ?base_path () =
+  match Safe_ops.read_json_file_safe (rules_path ?base_path ()) with
   | Ok (`List entries) ->
       entries |> List.filter_map approval_rule_of_yojson
   | _ -> []
 
-let save_rules_unlocked rules =
-  let path = rules_path () in
+let save_rules_unlocked ?base_path rules =
+  let path = rules_path ?base_path () in
   Fs_compat.mkdir_p (Filename.dirname path);
   let json = `List (List.map approval_rule_to_yojson rules) in
   match Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) with
   | Ok () -> ()
   | Error msg -> raise (Sys_error msg)
 
-let list_rules () =
-  with_rules_lock (fun () -> load_rules_unlocked ())
+let list_rules ?base_path () =
+  with_rules_lock (fun () -> load_rules_unlocked ?base_path ())
 
-let list_rules_dashboard_json () =
+let list_rules_dashboard_json ?base_path () =
   let rules =
-    list_rules ()
+    list_rules ?base_path ()
     |> List.sort (fun left right -> Float.compare right.created_at left.created_at)
   in
   `List (List.map approval_rule_to_yojson rules)
+
+let policy_summary_json ~base_path ~keeper_name : Yojson.Safe.t =
+  let persisted_rules =
+    list_rules ~base_path ()
+    |> List.fold_left
+         (fun count (rule : approval_rule) ->
+           if String.equal rule.keeper_name keeper_name then count + 1 else count)
+         0
+  in
+  `Assoc
+    [
+      ("allow_rules", `Int persisted_rules);
+      ("deny_rules", `Int 0);
+      ("persisted_rules", `Int persisted_rules);
+    ]
 
 let rule_identity_matches left right =
   String.equal left.keeper_name right.keeper_name
@@ -268,10 +289,10 @@ let rule_identity_matches left right =
   && String.equal left.request_fingerprint right.request_fingerprint
   && left.max_risk = right.max_risk
 
-let upsert_rule ~keeper_name ~tool_name ~input ~risk_level ?runtime_contract
-    ?created_by ?source_approval_id () =
+let upsert_rule ?base_path ~keeper_name ~tool_name ~input ~risk_level
+    ?runtime_contract ?created_by ?source_approval_id () =
   with_rules_lock (fun () ->
-    let rules = load_rules_unlocked () in
+    let rules = load_rules_unlocked ?base_path () in
     let request_fingerprint = request_fingerprint input in
     let candidate =
       {
@@ -294,7 +315,7 @@ let upsert_rule ~keeper_name ~tool_name ~input ~risk_level ?runtime_contract
     match List.find_opt (fun rule -> rule_identity_matches rule candidate) rules with
     | Some existing -> (existing, false)
     | None ->
-        save_rules_unlocked (candidate :: rules);
+        save_rules_unlocked ?base_path (candidate :: rules);
         (candidate, true))
 
 let delete_rule ~id =
@@ -312,9 +333,10 @@ let delete_rule ~id =
       save_rules_unlocked remaining;
       Ok deleted))
 
-let find_matching_rule ~keeper_name ~tool_name ~input ~risk_level ?runtime_contract () =
+let find_matching_rule ?base_path ~keeper_name ~tool_name ~input ~risk_level
+    ?runtime_contract () =
   with_rules_lock (fun () ->
-    let rules = load_rules_unlocked () in
+    let rules = load_rules_unlocked ?base_path () in
     let request_fingerprint = request_fingerprint input in
     let sandbox_profile = sandbox_profile_of_runtime_contract runtime_contract in
     let backend = backend_of_runtime_contract runtime_contract in
@@ -344,7 +366,7 @@ let find_matching_rule ~keeper_name ~tool_name ~input ~risk_level ?runtime_contr
               else current)
             rules
         in
-        save_rules_unlocked updated_rules;
+        save_rules_unlocked ?base_path updated_rules;
         Some { rule_id = rule.id; matched_by = "always_rule" })
 
 (* ── Persistent audit log ────────────────────────────────── *)
@@ -423,6 +445,47 @@ let audit_rule_event ~event_type (rule : approval_rule) =
 let generate_id () =
   make_generated_id "appr"
 
+let normalized_input_hash (input : Yojson.Safe.t) =
+  Digestif.SHA256.(digest_string (Yojson.Safe.to_string input) |> to_hex)
+
+let first_cmd_token (cmd : string) =
+  cmd
+  |> String.trim
+  |> String.split_on_char ' '
+  |> List.find_map (fun token ->
+         let trimmed = String.trim token in
+         if trimmed = "" then None else Some trimmed)
+
+let action_key_of_input ~tool_name ~(input : Yojson.Safe.t) =
+  match Safe_ops.json_string_opt "op" input with
+  | Some op when String.trim op <> "" ->
+      "op:" ^ String.trim op
+  | _ -> (
+      match Safe_ops.json_string_opt "action" input with
+      | Some action when String.trim action <> "" ->
+          "action:" ^ String.trim action
+      | _ -> (
+          match Safe_ops.json_string_opt "kind" input with
+          | Some kind when String.trim kind <> "" ->
+              "kind:" ^ String.trim kind
+          | _ -> (
+              match
+                Safe_ops.json_string_opt "cmd" input
+                |> fun value -> Option.bind value first_cmd_token
+              with
+              | Some token -> "cmd:" ^ token
+              | None -> "tool:" ^ tool_name)))
+
+let sandbox_target_of_runtime_contract = function
+  | Some runtime_contract -> (
+      match Safe_ops.json_string_opt "sandbox_target" runtime_contract with
+      | Some target when String.trim target <> "" -> String.trim target
+      | _ -> (
+          match Safe_ops.json_string_opt "backend" runtime_contract with
+          | Some backend when String.trim backend <> "" -> String.trim backend
+          | _ -> "unknown"))
+  | None -> "unknown"
+
 let input_preview_of_json (json : Yojson.Safe.t) =
   (* Per-leaf sentinel-aware truncation: a naive [String.sub] on the
      serialized form would chop a [masc:blob ...] marker mid-field and
@@ -436,10 +499,16 @@ let create_entry ~id ~keeper_name ~tool_name ~input ~risk_level
     ?turn_id ?task_id ?goal_id ?(goal_ids = []) ?runtime_contract
     ?selected_model ?disposition ?disposition_reason
     ~resolver ~on_resolution () =
+  let action_key = action_key_of_input ~tool_name ~input in
+  let input_hash = normalized_input_hash input in
+  let sandbox_target = sandbox_target_of_runtime_contract runtime_contract in
   {
     id;
     keeper_name;
     tool_name;
+    action_key;
+    input_hash;
+    sandbox_target;
     input;
     risk_level;
     requested_at = Unix.gettimeofday ();
@@ -462,6 +531,8 @@ let pending_entry_json_fields ?(include_requested_at_iso = false)
     ("id", `String entry.id);
     ("keeper_name", `String entry.keeper_name);
     ("tool_name", `String entry.tool_name);
+    ("action_key", `String entry.action_key);
+    ("sandbox_target", `String entry.sandbox_target);
     ("risk_level", `String (risk_level_to_string entry.risk_level));
     ("requested_at", `Float entry.requested_at);
     ("waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at));
@@ -473,26 +544,29 @@ let pending_entry_json_fields ?(include_requested_at_iso = false)
     ("disposition", Json_util.string_opt_to_json entry.disposition);
     ("disposition_reason", Json_util.string_opt_to_json entry.disposition_reason);
   ]
-  @
-  if include_requested_at_iso then
-    [ ("requested_at_iso", `String (Types.iso8601_of_unix_seconds entry.requested_at)) ]
-  else []
-  @
-  if include_runtime_contract then
-    [
-      ( "runtime_contract",
-        match entry.runtime_contract with
-        | Some json -> json
-        | None -> `Null );
-    ]
-  else []
-  @
-  if include_input then
-    [
-      ("input", entry.input);
-      ("input_preview", `String (input_preview_of_json entry.input));
-    ]
-  else []
+  @ (if include_requested_at_iso then
+       [ ("requested_at_iso", `String (Types.iso8601_of_unix_seconds entry.requested_at)) ]
+     else [])
+  @ (if include_runtime_contract then
+       [
+         ( "runtime_contract",
+           match entry.runtime_contract with
+           | Some json -> json
+           | None when String.equal entry.sandbox_target "unknown" -> `Null
+           | None ->
+               `Assoc
+                 [
+                   ("backend", `String entry.sandbox_target);
+                   ("sandbox_target", `String entry.sandbox_target);
+                 ] );
+       ]
+     else [])
+  @ (if include_input then
+       [
+         ("input", entry.input);
+         ("input_preview", `String (input_preview_of_json entry.input));
+       ]
+     else [])
 
 let broadcast_pending entry =
   try
@@ -569,26 +643,26 @@ let resolve_entry (entry : pending_approval) (decision : decision) =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> ()
 
-let find_pending_id ~keeper_name ~tool_name =
-  SMap.fold
-    (fun id (entry : pending_approval) acc ->
-      match acc with
-      | Some _ -> acc
-      | None ->
-        if String.equal entry.keeper_name keeper_name
-           && String.equal entry.tool_name tool_name
-        then Some id
-        else None)
-    (Atomic.get pending) None
+let pending_entry_matches (entry : pending_approval)
+    ~keeper_name ~tool_name ~action_key ~input_hash
+    ~task_id ~goal_id ~sandbox_target =
+  String.equal entry.keeper_name keeper_name
+  && String.equal entry.tool_name tool_name
+  && String.equal entry.action_key action_key
+  && String.equal entry.input_hash input_hash
+  && String.equal entry.sandbox_target sandbox_target
+  && entry.task_id = task_id
+  && entry.goal_id = goal_id
 
-let find_pending_id_in_map (map : pending_approval SMap.t) ~keeper_name ~tool_name =
+let find_pending_id_in_map (map : pending_approval SMap.t) ~keeper_name ~tool_name
+    ~action_key ~input_hash ~task_id ~goal_id ~sandbox_target =
   SMap.fold
     (fun id (entry : pending_approval) acc ->
       match acc with
       | Some _ -> acc
       | None ->
-        if String.equal entry.keeper_name keeper_name
-           && String.equal entry.tool_name tool_name
+        if pending_entry_matches entry ~keeper_name ~tool_name ~action_key
+             ~input_hash ~task_id ~goal_id ~sandbox_target
         then Some id
         else None)
     map None
@@ -634,9 +708,15 @@ let submit_pending ~keeper_name ~tool_name ~input ~risk_level
     ~on_resolution
     ()
   : string =
+  let action_key = action_key_of_input ~tool_name ~input in
+  let input_hash = normalized_input_hash input in
+  let sandbox_target = sandbox_target_of_runtime_contract runtime_contract in
   let rec submit () =
     let map = Atomic.get pending in
-    match find_pending_id_in_map map ~keeper_name ~tool_name with
+    match
+      find_pending_id_in_map map ~keeper_name ~tool_name ~action_key
+        ~input_hash ~task_id ~goal_id ~sandbox_target
+    with
     | Some id -> id
     | None ->
       let id = generate_id () in
@@ -665,10 +745,18 @@ let resolve_error_to_string = function
   | Not_found id -> Printf.sprintf "approval %s not found" id
   | Already_resolved id -> Printf.sprintf "approval %s already resolved" id
 
-let remember_rule_for_entry ?created_by (entry : pending_approval) =
+let remember_rule_for_entry ?base_path ?created_by (entry : pending_approval) =
+  let rememberable =
+    match entry.risk_level with
+    | Low | Medium -> true
+    | High | Critical -> false
+  in
+  if not rememberable then None
+  else
   try
     let rule, created =
-      upsert_rule ~keeper_name:entry.keeper_name ~tool_name:entry.tool_name
+      upsert_rule ?base_path ~keeper_name:entry.keeper_name
+        ~tool_name:entry.tool_name
         ~input:entry.input ~risk_level:entry.risk_level
         ?runtime_contract:entry.runtime_contract ?created_by
         ~source_approval_id:entry.id ()
@@ -683,7 +771,7 @@ let remember_rule_for_entry ?created_by (entry : pending_approval) =
         entry.id (Printexc.to_string exn);
       None
 
-let resolve_with_policy ~id ~(decision : Oas.Hooks.approval_decision)
+let resolve_with_policy ?base_path ~id ~(decision : Oas.Hooks.approval_decision)
     ?(remember_rule = false) ?created_by ()
     : (resolution_result, resolve_error) result =
   let result = ref (Error (Not_found id)) in
@@ -699,7 +787,7 @@ let resolve_with_policy ~id ~(decision : Oas.Hooks.approval_decision)
       let remembered_rule =
         match decision with
         | Oas.Hooks.Approve when remember_rule ->
-            remember_rule_for_entry ?created_by entry
+            remember_rule_for_entry ?base_path ?created_by entry
         | _ -> None
       in
       resolve_entry entry decision;

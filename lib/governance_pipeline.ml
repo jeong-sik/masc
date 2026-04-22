@@ -320,7 +320,8 @@ let to_oas_approval_callback
           None
         else
           Keeper_approval_queue.find_matching_rule
-            ~keeper_name ~tool_name ~input ~risk_level ?runtime_contract ()
+            ~base_path:config.base_path ~keeper_name ~tool_name ~input
+            ~risk_level ?runtime_contract ()
       in
       (match rule_match with
       | Some matched ->

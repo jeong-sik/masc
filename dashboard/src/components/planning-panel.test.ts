@@ -32,28 +32,28 @@ describe('PlanningPanel', () => {
   beforeEach(() => setRoute())
   afterEach(() => cleanup())
 
-  it('renders Planning (kanban) by default', () => {
-    render(html`<${PlanningPanel} />`)
-    expect(screen.getByTestId('planning')).toBeTruthy()
-    expect(screen.queryByTestId('goal-tree')).toBeNull()
-  })
-
-  it('renders GoalTree when view=goal-tree', () => {
-    setRoute('goal-tree')
+  it('renders GoalTree by default', () => {
     render(html`<${PlanningPanel} />`)
     expect(screen.getByTestId('goal-tree')).toBeTruthy()
     expect(screen.queryByTestId('planning')).toBeNull()
   })
 
-  it('renders FilterChips with 2 options', () => {
-    render(html`<${PlanningPanel} />`)
-    expect(screen.getByText('칸반')).toBeTruthy()
-    expect(screen.getByText('목표 트리')).toBeTruthy()
-  })
-
-  it('falls back to default for unknown view', () => {
-    setRoute('nonexistent')
+  it('renders Planning when view=default', () => {
+    setRoute('default')
     render(html`<${PlanningPanel} />`)
     expect(screen.getByTestId('planning')).toBeTruthy()
+    expect(screen.queryByTestId('goal-tree')).toBeNull()
+  })
+
+  it('renders FilterChips with 2 options', () => {
+    render(html`<${PlanningPanel} />`)
+    expect(screen.getByText('Goal Manager')).toBeTruthy()
+    expect(screen.getByText('Backlog')).toBeTruthy()
+  })
+
+  it('falls back to goal-tree for unknown view', () => {
+    setRoute('nonexistent')
+    render(html`<${PlanningPanel} />`)
+    expect(screen.getByTestId('goal-tree')).toBeTruthy()
   })
 })

@@ -40,7 +40,14 @@ export function normalizeAgentStatus(value: unknown): Agent['status'] {
 
 export function normalizeTaskStatus(value: unknown): Task['status'] {
   const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  if (raw === 'todo' || raw === 'in_progress' || raw === 'claimed' || raw === 'done' || raw === 'cancelled') {
+  if (
+    raw === 'todo'
+    || raw === 'in_progress'
+    || raw === 'claimed'
+    || raw === 'awaiting_verification'
+    || raw === 'done'
+    || raw === 'cancelled'
+  ) {
     return raw
   }
   if (raw === 'inprogress') return 'in_progress'
@@ -111,6 +118,7 @@ export function normalizeTask(raw: unknown): Task | null {
   return {
     id,
     title,
+    goal_id: asString(raw.goal_id) ?? null,
     status: normalizeTaskStatus(raw.status),
     priority: asNumber(raw.priority),
     assignee: asString(raw.assignee),

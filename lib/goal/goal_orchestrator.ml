@@ -177,13 +177,15 @@ let task_exists_in_backlog config ~title_prefix =
 
 (** Idempotent version of add_task.
     Skips creation if a task with matching title prefix already exists. *)
-let add_task_safe config ~title ~description =
+let add_task_safe config ~title ~description ~goal_id =
   let prefix = if String.length title > 40 then String.sub title 0 40 else title in
   if task_exists_in_backlog config ~title_prefix:prefix then
     Ok (Printf.sprintf "(skipped, already exists) %s" (String.sub title 0 (min 60 (String.length title))))
   else
     try
-      let response = Coord.add_task config ~title ~priority:3 ~description in
+      let response =
+        Coord.add_task config ~title ~priority:3 ~description ~goal_id
+      in
       Ok response
     with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 
@@ -203,7 +205,9 @@ let execute_plan config ~agent_name:_ plan =
         Printf.sprintf "Goal dispatch child node %s (depth=%d)" node.node_id
           node.depth
       in
-      push_result (add_task_safe config ~title:child_title ~description:child_desc);
+      push_result
+        (add_task_safe config ~title:child_title ~description:child_desc
+           ~goal_id:node.goal_id);
       List.iter
         (fun gc ->
           let gc_title =
@@ -214,7 +218,9 @@ let execute_plan config ~agent_name:_ plan =
               "Goal dispatch grandchild node %s (parent=%s)"
               gc.node_id node.node_id
           in
-          push_result (add_task_safe config ~title:gc_title ~description:gc_desc))
+          push_result
+            (add_task_safe config ~title:gc_title ~description:gc_desc
+               ~goal_id:gc.goal_id))
         node.children)
     plan.nodes;
   {

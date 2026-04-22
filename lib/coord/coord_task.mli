@@ -68,12 +68,14 @@ val observe_task_transition :
 
 val add_task :
   ?contract:Types.task_contract ->
+  ?goal_id:string ->
   ?required_preset:string ->
   ?created_by:string ->
   config -> title:string -> priority:int -> description:string -> string
 
 val add_task_with_role :
   ?contract:Types.task_contract ->
+  ?goal_id:string ->
   ?created_by:string ->
   config -> title:string -> priority:int -> description:string ->
   required_role:Types_core.role -> string

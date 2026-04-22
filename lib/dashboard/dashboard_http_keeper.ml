@@ -904,7 +904,9 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                   let linked = List.filter (fun (g : Goal_store.goal) ->
                     List.mem g.id m.active_goal_ids) all_goals in
                   let tasks = Coord.get_tasks_safe config in
-                  let forest = Dashboard_goals.build_forest ~goals:linked ~tasks in
+                  let forest =
+                    Dashboard_goals.build_forest ~config ~goals:linked ~tasks
+                  in
                   `Assoc [
                     ("count", `Int (List.length linked));
                     ("nodes", `List (List.map Dashboard_goals.tree_node_to_json forest));

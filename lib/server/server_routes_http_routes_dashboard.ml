@@ -504,6 +504,24 @@ let rec add_routes ~sw ~clock router =
          let json = dashboard_goals_tree_http_json ~config:state.Mcp_server.room_config in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/goals/detail" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let goal_id =
+           Server_utils.query_param req "goal_id"
+           |> Option.map String.trim
+           |> Option.value ~default:""
+         in
+         if goal_id = "" then
+           respond_json_with_cors ~status:`Bad_request req reqd
+             {|{"ok":false,"error":"goal_id query param is required"}|}
+         else
+           let json =
+             dashboard_goal_detail_http_json
+               ~config:state.Mcp_server.room_config ~goal_id
+           in
+           Http.Response.json ~compress:true ~request:req
+             (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tasks/history" (fun request reqd ->
        with_public_read (fun state req reqd ->
          handle_dashboard_task_history state req reqd

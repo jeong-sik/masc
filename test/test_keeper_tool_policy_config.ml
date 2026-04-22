@@ -153,6 +153,7 @@ let test_unknown_preset_returns_false () =
 let test_task_required_preset_roundtrip () =
   let task : Types.task = {
     id = "test-001"; title = "Test"; description = "";
+    goal_id = None;
     task_status = Todo; priority = 3; files = [];
     created_at = "2026-01-01T00:00:00Z";
     worktree = None;
@@ -170,7 +171,7 @@ let test_task_required_preset_roundtrip () =
 let test_task_required_preset_none_compat () =
   let task : Types.task = {
     id = "test-002"; title = "Test"; description = "";
-    task_status = Todo; priority = 3; files = [];
+    task_status = Todo; goal_id = None; priority = 3; files = [];
     created_at = "2026-01-01T00:00:00Z";
     worktree = None;
     created_by = None;

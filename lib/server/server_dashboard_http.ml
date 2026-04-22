@@ -362,6 +362,18 @@ let dashboard_planning_http_json ~(config : Coord.config) : Yojson.Safe.t =
 let dashboard_goals_tree_http_json ~(config : Coord.config) : Yojson.Safe.t =
   Dashboard_goals.dashboard_goals_tree_json ~config
 
+let dashboard_goal_detail_http_json ~(config : Coord.config) ~goal_id :
+    Yojson.Safe.t =
+  match Dashboard_goals.goal_detail_json ~config ~goal_id with
+  | Ok json -> json
+  | Error message ->
+      `Assoc
+        [
+          ("ok", `Bool false);
+          ("error", `String message);
+          ("goal_id", `String goal_id);
+        ]
+
 let operator_action_http_json ~state ~sw ~clock request ~args =
   let ctx : _ Operator_control.context =
     {

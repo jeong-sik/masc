@@ -427,29 +427,23 @@ let get_goal config ~goal_id =
   read_state config |> fun state -> find_goal state.goals goal_id
 
 let update_goal config ~goal_id f =
-  let found = ref false in
-  let now = Types.now_iso () in
-  let state =
-    update_state config (fun state ->
-        let goals =
-          List.map
-            (fun goal ->
-              if not (String.equal goal.id goal_id) then
-                goal
-              else begin
-                found := true;
-                normalize_goal (f { goal with updated_at = now })
-              end)
-            state.goals
-        in
-        { version = state.version + 1; updated_at = now; goals })
-  in
-  if not !found then
-    Error "goal not found"
-  else
-    match find_goal state.goals goal_id with
-    | Some goal -> Ok goal
-    | None -> Error "goal not found"
+  let lock_path = goals_path config in
+  Coord.with_file_lock config lock_path (fun () ->
+      let state = read_state config in
+      match find_goal state.goals goal_id with
+      | None -> Error "goal not found"
+      | Some goal ->
+          let now = Types.now_iso () in
+          let updated_goal = normalize_goal (f { goal with updated_at = now }) in
+          let next_state =
+            {
+              version = state.version + 1;
+              updated_at = now;
+              goals = replace_goal state.goals updated_goal;
+            }
+          in
+          write_state config next_state;
+          Ok updated_goal)
 
 let delete_goal config ~goal_id =
   let before = read_state config in

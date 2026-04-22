@@ -615,111 +615,84 @@ let evaluate_quorum request =
     Pending
 
 let cancel_request config ~(request_id : string) =
-  let resolved_at = Types.now_iso () in
-  let found = ref false in
-  let state =
-    update_state config (fun state ->
-        let requests =
-          List.map
-            (fun request ->
-              if String.equal request.id request_id then begin
-                found := true;
-                {
-                  request with
-                  status =
-                    (match request.status with
-                    | Open -> Cancelled
-                    | status -> status);
-                  resolved_at =
-                    (match request.status with
-                    | Open -> Some resolved_at
-                    | _ -> request.resolved_at);
-                }
-              end else
-                request)
-            state.requests
-        in
-        { version = state.version + 1; updated_at = resolved_at; requests })
-  in
-  if not !found then
-    Error "goal verification request not found"
-  else
-    match List.find_opt (fun request -> String.equal request.id request_id) state.requests with
-    | Some request -> Ok request
-    | None -> Error "goal verification request not found"
+  let lock_path = requests_path config in
+  Coord.with_file_lock config lock_path (fun () ->
+      let state = read_state config in
+      match List.find_opt (fun request -> String.equal request.id request_id) state.requests with
+      | None -> Error "goal verification request not found"
+      | Some request when request.status <> Open -> Ok request
+      | Some request ->
+          let resolved_at = Types.now_iso () in
+          let updated_request =
+            {
+              request with
+              status = Cancelled;
+              resolved_at = Some resolved_at;
+            }
+          in
+          let requests =
+            List.map
+              (fun row ->
+                if String.equal row.id request_id then updated_request else row)
+              state.requests
+          in
+          write_state config
+            { version = state.version + 1; updated_at = resolved_at; requests };
+          Ok updated_request)
 
 let submit_vote config ~(request_id : string) ~(principal : goal_principal)
     ~(decision : vote_decision) ?note ?(evidence_refs = []) () =
-  let submitted_at = Types.now_iso () in
-  let found = ref false in
-  let outcome = ref Pending in
-  let error = ref None in
-  let state =
-    update_state config (fun state ->
-        let requests =
-          List.map
-            (fun request ->
-              if not (String.equal request.id request_id) then
-                request
-              else begin
-                found := true;
-                if request.status <> Open then begin
-                  error := Some "goal verification request is not open";
-                  request
-                end else if principal_equal principal request.requested_by then begin
-                  error := Some "requester cannot vote on their own goal verification request";
-                  request
-                end else if
-                  not
-                    (List.exists
-                       (fun eligible -> principal_equal eligible principal)
-                       request.policy_snapshot.eligible_principals)
-                then begin
-                  error := Some "principal is not eligible for this goal verification request";
-                  request
-                end else if
-                  List.exists
-                    (fun vote -> principal_equal vote.principal principal)
-                    request.votes
-                then begin
-                  error := Some "principal has already voted on this request";
-                  request
-                end else
-                  let votes =
-                    request.votes
-                    @ [ { principal; decision; note; evidence_refs; submitted_at } ]
-                  in
-                  let next_request = { request with votes } in
-                  let next_request =
-                    match evaluate_quorum next_request with
-                    | Pending ->
-                        outcome := Pending;
-                        next_request
-                    | Passed ->
-                        outcome := Passed;
-                        {
-                          next_request with
-                          status = Approved;
-                          resolved_at = Some submitted_at;
-                        }
-                    | Failed ->
-                        outcome := Failed;
-                        {
-                          next_request with
-                          status = Rejected;
-                          resolved_at = Some submitted_at;
-                        }
-                  in
-                  next_request
-              end)
-            state.requests
-        in
-        { version = state.version + 1; updated_at = submitted_at; requests })
-  in
-  match !error with
-  | Some msg -> Error msg
-  | None when not !found -> Error "goal verification request not found"
-  | None -> (
+  let lock_path = requests_path config in
+  Coord.with_file_lock config lock_path (fun () ->
+      let state = read_state config in
       match List.find_opt (fun request -> String.equal request.id request_id) state.requests with
-      | Some request -> Ok (request, !outcome)
-      | None -> Error "goal verification request not found")
+      | None -> Error "goal verification request not found"
+      | Some request when request.status <> Open ->
+          Error "goal verification request is not open"
+      | Some request when principal_equal principal request.requested_by ->
+          Error "requester cannot vote on their own goal verification request"
+      | Some request
+        when not
+               (List.exists
+                  (fun eligible -> principal_equal eligible principal)
+                  request.policy_snapshot.eligible_principals) ->
+          Error "principal is not eligible for this goal verification request"
+      | Some request
+        when List.exists
+               (fun vote -> principal_equal vote.principal principal)
+               request.votes ->
+          Error "principal has already voted on this request"
+      | Some request ->
+          let submitted_at = Types.now_iso () in
+          let votes =
+            request.votes
+            @ [ { principal; decision; note; evidence_refs; submitted_at } ]
+          in
+          let next_request = { request with votes } in
+          let next_request, outcome =
+            match evaluate_quorum next_request with
+            | Pending -> (next_request, Pending)
+            | Passed ->
+                ( {
+                    next_request with
+                    status = Approved;
+                    resolved_at = Some submitted_at;
+                  },
+                  Passed )
+            | Failed ->
+                ( {
+                    next_request with
+                    status = Rejected;
+                    resolved_at = Some submitted_at;
+                  },
+                  Failed )
+          in
+          let requests =
+            List.map
+              (fun row ->
+                if String.equal row.id request_id then next_request else row)
+              state.requests
+          in
+          write_state config
+            { version = state.version + 1; updated_at = submitted_at; requests };
+          Ok (next_request, outcome))

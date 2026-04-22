@@ -42,7 +42,9 @@ let make_goal ?(status = Goal_store.Active) ?(days_ago = 0) id title =
   {
     Goal_store.id; horizon = Short; title;
     metric = None; target_value = None; due_date = None;
-    priority = 3; status; parent_goal_id = None;
+    priority = 3; status; phase = Goal_store.phase_of_goal_status status;
+    verifier_policy = None; require_completion_approval = false;
+    active_verification_request_id = None; parent_goal_id = None;
     last_review_note = None; last_review_at = None;
     created_at = ts; updated_at = ts;
   }

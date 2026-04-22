@@ -1706,7 +1706,9 @@ let persist_directive_meta_update
             let b_mtime = Option.value ~default:0.0 (Fs_compat.file_mtime b) in
             Float.compare b_mtime a_mtime
           in
-          List.sort by_mtime_desc paths |> List.hd
+          (match List.sort by_mtime_desc paths with
+           | latest_path :: _ -> latest_path
+           | [] -> default_path)
   in
   try
     Keeper_fs.save_json_atomic persisted_path (meta_to_json updated_meta);

@@ -184,10 +184,11 @@ let run_docker_shell_command_with_status
           "-i";
           "--user";
           Printf.sprintf "%d:%d" uid gid;
-          "--read-only";
+        ]
+        @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
+        @ [
           "--tmpfs";
-          (Printf.sprintf "/tmp:rw,nosuid,nodev,noexec,size=%s"
-             (Env_config_keeper.KeeperSandbox.tmpfs_size ()));
+          Env_config_keeper.KeeperSandbox.tmpfs_mount ();
           "--cap-drop=ALL";
           "--security-opt";
           "no-new-privileges";

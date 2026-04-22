@@ -1389,6 +1389,8 @@ let keeper_config_json (config : Coord.config) (name : string)
             string_or_null (Env_config_keeper.KeeperSandbox.memory ()));
           ("tmpfs_size",
             string_or_null (Env_config_keeper.KeeperSandbox.tmpfs_size ()));
+          ("relax_fs",
+            `Bool (Env_config_keeper.KeeperSandbox.relax_fs ()));
           ("seccomp_profile",
             string_or_null
               (Env_config_keeper.KeeperSandbox.seccomp_profile ()));

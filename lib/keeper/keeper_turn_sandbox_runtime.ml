@@ -130,10 +130,11 @@ let start_container (t : t) ~(timeout_sec : float) =
             container_name;
             "--user";
             Printf.sprintf "%d:%d" t.uid t.gid;
-            "--read-only";
+          ]
+          @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
+          @ [
             "--tmpfs";
-            Printf.sprintf "/tmp:rw,nosuid,nodev,noexec,size=%s"
-              (Env_config_keeper.KeeperSandbox.tmpfs_size ());
+            Env_config_keeper.KeeperSandbox.tmpfs_mount ();
             "--cap-drop=ALL";
             "--security-opt";
             "no-new-privileges";

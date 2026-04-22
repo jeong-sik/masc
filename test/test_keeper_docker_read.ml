@@ -13,6 +13,7 @@ module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_runtime = Masc_mcp.Keeper_sandbox_runtime
+module Env_config_keeper = Masc_mcp.Env_config_keeper
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 
@@ -544,6 +545,73 @@ let test_turn_runtime_reuses_single_container () =
   Alcotest.(check int) "docker exec happens twice" 2 (count "exec ");
   Alcotest.(check int) "docker rm happens once" 1 (count "rm -f ")
 
+let test_default_fs_hardening_helpers () =
+  with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "false" @@ fun () ->
+  Alcotest.(check (list string)) "default helper keeps read-only rootfs"
+    [ "--read-only" ]
+    (Env_config_keeper.KeeperSandbox.read_only_rootfs_args ());
+  Alcotest.(check bool) "default helper keeps tmpfs noexec" true
+    (contains_substring
+       (Env_config_keeper.KeeperSandbox.tmpfs_mount ())
+       "/tmp:rw,nosuid,nodev,noexec,size=")
+
+let test_relaxed_fs_helpers () =
+  with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "true" @@ fun () ->
+  Alcotest.(check (list string)) "relaxed helper drops read-only rootfs"
+    [] (Env_config_keeper.KeeperSandbox.read_only_rootfs_args ());
+  Alcotest.(check bool) "relaxed helper drops tmpfs noexec" false
+    (contains_substring
+       (Env_config_keeper.KeeperSandbox.tmpfs_mount ())
+       "/tmp:rw,nosuid,nodev,noexec,size=");
+  Alcotest.(check bool) "relaxed helper keeps writable tmpfs mount" true
+    (contains_substring
+       (Env_config_keeper.KeeperSandbox.tmpfs_mount ())
+       "/tmp:rw,nosuid,nodev,size=")
+
+let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
+  with_fake_docker fake_docker_turn_runtime_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "true" @@ fun () ->
+  let base, config, meta = setup_config "minjae" in
+  let log_path = Filename.concat base "docker.log" in
+  let host_root =
+    Filename.concat (Keeper_alerting_path.project_root_of_config config)
+      (Keeper_alerting_path.playground_path_of_keeper meta.name)
+  in
+  ensure_dir host_root;
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta in
+  Fun.protect ~finally:(fun () ->
+    Keeper_turn_sandbox_runtime.cleanup runtime;
+    cleanup_dir base) @@ fun () ->
+  (match
+     Keeper_docker_read.run_command_in_container_with_status
+       ~turn_sandbox_runtime:runtime
+       ~config ~meta
+       ~command_argv:[ "cat"; "/home/keeper/playground/minjae/mind/demo.txt" ]
+       ~max_bytes:4096 ~timeout_sec:5.0 ()
+   with
+   | Error msg -> Alcotest.failf "expected turn runtime command success, got %s" msg
+   | Ok _ -> ());
+  Keeper_turn_sandbox_runtime.cleanup runtime;
+  let run_line =
+    read_file log_path
+    |> String.split_on_char '\n'
+    |> List.find_opt (fun line -> String.starts_with ~prefix:"run -d " line)
+  in
+  match run_line with
+  | None -> Alcotest.fail "expected docker run log line"
+  | Some line ->
+      Alcotest.(check bool) "relaxed runtime drops read-only rootfs" false
+        (contains_substring line "--read-only");
+      Alcotest.(check bool) "relaxed runtime drops tmpfs noexec" false
+        (contains_substring line "/tmp:rw,nosuid,nodev,noexec,size=");
+      Alcotest.(check bool) "relaxed runtime keeps tmpfs mount" true
+        (contains_substring line "/tmp:rw,nosuid,nodev,size=")
+
 let () =
   Alcotest.run "Keeper_docker_read"
     [
@@ -584,8 +652,15 @@ let () =
             test_run_command_allows_configured_nonzero_exit;
           Alcotest.test_case "preserves bare command argv" `Quick
             test_run_command_preserves_bare_command_argv;
+          Alcotest.test_case "default fs hardening helpers" `Quick
+            test_default_fs_hardening_helpers;
+          Alcotest.test_case "relaxed fs helpers" `Quick
+            test_relaxed_fs_helpers;
           Alcotest.test_case "turn runtime reuses single container" `Quick
             test_turn_runtime_reuses_single_container;
+          Alcotest.test_case
+            "turn runtime relaxed fs omits readonly and noexec"
+            `Quick test_turn_runtime_relaxed_fs_omits_readonly_and_noexec;
         ] );
       ( "docker_preflight",
         [

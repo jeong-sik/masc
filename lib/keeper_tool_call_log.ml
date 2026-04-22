@@ -31,6 +31,14 @@ type turn_context = {
   trace_id: string option;
   session_id: string option;
   turn: int option;
+  keeper_turn_id: int option;
+  task_id: string option;
+  goal_ids: string list option;
+  execution_scope: string option;
+  sandbox_profile: string option;
+  network_mode: string option;
+  shared_memory_scope: string option;
+  approval_mode: string option;
 }
 
 let empty_turn_context = {
@@ -42,6 +50,14 @@ let empty_turn_context = {
   trace_id = None;
   session_id = None;
   turn = None;
+  keeper_turn_id = None;
+  task_id = None;
+  goal_ids = None;
+  execution_scope = None;
+  sandbox_profile = None;
+  network_mode = None;
+  shared_memory_scope = None;
+  approval_mode = None;
 }
 
 let pending_turn_context : (string, turn_context) Hashtbl.t = Hashtbl.create 8
@@ -55,7 +71,9 @@ let consume_truncation_info ~keeper_name () =
   | None -> (0, None)
 
 let set_turn_context ~keeper_name ?lane ?tool_choice ?thinking_enabled
-    ?thinking_budget ?prompt_fingerprint ?trace_id ?session_id ?turn () =
+    ?thinking_budget ?prompt_fingerprint ?trace_id ?session_id ?turn
+    ?keeper_turn_id ?task_id ?goal_ids ?execution_scope ?sandbox_profile
+    ?network_mode ?shared_memory_scope ?approval_mode () =
   Hashtbl.replace pending_turn_context keeper_name
     {
       lane;
@@ -66,6 +84,14 @@ let set_turn_context ~keeper_name ?lane ?tool_choice ?thinking_enabled
       trace_id;
       session_id;
       turn;
+      keeper_turn_id;
+      task_id;
+      goal_ids;
+      execution_scope;
+      sandbox_profile;
+      network_mode;
+      shared_memory_scope;
+      approval_mode;
     }
 
 let get_turn_context ~keeper_name () =
@@ -81,7 +107,15 @@ let get_turn_context ~keeper_name () =
   , ctx.prompt_fingerprint
   , ctx.trace_id
   , ctx.session_id
-  , ctx.turn )
+  , ctx.turn
+  , ctx.keeper_turn_id
+  , ctx.task_id
+  , ctx.goal_ids
+  , ctx.execution_scope
+  , ctx.sandbox_profile
+  , ctx.network_mode
+  , ctx.shared_memory_scope
+  , ctx.approval_mode )
 
 let store_ref : Dated_jsonl.t option ref = ref None
 
@@ -150,7 +184,10 @@ let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
 let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
     ~(output_text : string) ~(success : bool) ~(duration_ms : float)
     ?(model : string = "") ?lane ?tool_choice ?thinking_enabled
-    ?thinking_budget ?prompt_fingerprint ?trace_id ?session_id ?turn ?result_bytes ?truncated_to () =
+    ?thinking_budget ?prompt_fingerprint ?trace_id ?session_id ?turn
+    ?keeper_turn_id ?task_id ?goal_ids ?execution_scope ?sandbox_profile
+    ?network_mode ?shared_memory_scope ?approval_mode ?result_bytes
+    ?truncated_to () =
   if Observability_redact.is_denied_tool ~tool_name then ()
   else
     match !store_ref with
@@ -163,7 +200,15 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
           , ctx_prompt_fingerprint
           , ctx_trace_id
           , ctx_session_id
-          , ctx_turn ) =
+          , ctx_turn
+          , ctx_keeper_turn_id
+          , ctx_task_id
+          , ctx_goal_ids
+          , ctx_execution_scope
+          , ctx_sandbox_profile
+          , ctx_network_mode
+          , ctx_shared_memory_scope
+          , ctx_approval_mode ) =
         get_turn_context ~keeper_name ()
       in
       let lane = match lane with Some _ -> lane | None -> ctx_lane in
@@ -190,6 +235,40 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
         match session_id with Some _ -> session_id | None -> ctx_session_id
       in
       let turn = match turn with Some _ -> turn | None -> ctx_turn in
+      let keeper_turn_id =
+        match keeper_turn_id with
+        | Some _ -> keeper_turn_id
+        | None -> ctx_keeper_turn_id
+      in
+      let task_id = match task_id with Some _ -> task_id | None -> ctx_task_id in
+      let goal_ids =
+        match goal_ids with Some _ -> goal_ids | None -> ctx_goal_ids
+      in
+      let execution_scope =
+        match execution_scope with
+        | Some _ -> execution_scope
+        | None -> ctx_execution_scope
+      in
+      let sandbox_profile =
+        match sandbox_profile with
+        | Some _ -> sandbox_profile
+        | None -> ctx_sandbox_profile
+      in
+      let network_mode =
+        match network_mode with
+        | Some _ -> network_mode
+        | None -> ctx_network_mode
+      in
+      let shared_memory_scope =
+        match shared_memory_scope with
+        | Some _ -> shared_memory_scope
+        | None -> ctx_shared_memory_scope
+      in
+      let approval_mode =
+        match approval_mode with
+        | Some _ -> approval_mode
+        | None -> ctx_approval_mode
+      in
       let model_field =
         if model = "" then [] else [("model", `String model)]
       in
@@ -233,6 +312,39 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
         | Some value -> [("turn", `Int value)]
         | None -> []
       in
+      let keeper_turn_id_field = match keeper_turn_id with
+        | Some value -> [("keeper_turn_id", `Int value)]
+        | None -> []
+      in
+      let task_id_field = match task_id with
+        | Some value -> [("task_id", `String value)]
+        | None -> []
+      in
+      let goal_ids_field = match goal_ids with
+        | Some values ->
+            [("goal_ids", `List (List.map (fun value -> `String value) values))]
+        | None -> []
+      in
+      let execution_scope_field = match execution_scope with
+        | Some value -> [("execution_scope", `String value)]
+        | None -> []
+      in
+      let sandbox_profile_field = match sandbox_profile with
+        | Some value -> [("sandbox_profile", `String value)]
+        | None -> []
+      in
+      let network_mode_field = match network_mode with
+        | Some value -> [("network_mode", `String value)]
+        | None -> []
+      in
+      let shared_memory_scope_field = match shared_memory_scope with
+        | Some value -> [("shared_memory_scope", `String value)]
+        | None -> []
+      in
+      let approval_mode_field = match approval_mode with
+        | Some value -> [("approval_mode", `String value)]
+        | None -> []
+      in
       let safe_input = input_to_json (Observability_redact.redact_json_value input) in
       let safe_output = Observability_redact.redact_preview ~max_len:max_output_len output_text in
       let output_json = blob_aware_output_json safe_output in
@@ -250,6 +362,9 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
            @ thinking_enabled_field @ thinking_budget_field
            @ prompt_fingerprint_field
            @ trace_id_field @ session_id_field @ turn_field
+           @ keeper_turn_id_field @ task_id_field @ goal_ids_field
+           @ execution_scope_field @ sandbox_profile_field @ network_mode_field
+           @ shared_memory_scope_field @ approval_mode_field
            @ result_bytes_field @ truncated_to_field)
       in
       (* Sanitize UTF-8 before persisting.  Tool output may contain invalid

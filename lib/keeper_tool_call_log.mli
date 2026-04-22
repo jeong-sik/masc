@@ -36,6 +36,14 @@ val set_turn_context :
   ?trace_id:string ->
   ?session_id:string ->
   ?turn:int ->
+  ?keeper_turn_id:int ->
+  ?task_id:string ->
+  ?goal_ids:string list ->
+  ?execution_scope:string ->
+  ?sandbox_profile:string ->
+  ?network_mode:string ->
+  ?shared_memory_scope:string ->
+  ?approval_mode:string ->
   unit ->
   unit
 (** [set_turn_context ...] stores the current effective turn policy for
@@ -46,9 +54,13 @@ val get_turn_context :
   unit ->
   string option * string option * bool option * int option
   * string option * string option * string option * int option
+  * int option * string option * string list option * string option
+  * string option * string option * string option * string option
 (** Returns [(lane, tool_choice, thinking_enabled, thinking_budget, trace_id,
-    prompt_fingerprint, session_id, turn)] for the keeper, or [None] values when no turn context
-    has been recorded. *)
+    prompt_fingerprint, session_id, turn, keeper_turn_id, task_id, goal_ids,
+    execution_scope, sandbox_profile, network_mode, shared_memory_scope,
+    approval_mode)] for the keeper, or [None] values when no turn context has
+    been recorded. *)
 
 val init : ?cluster_name:string -> base_path:string -> unit -> unit
 (** [init ?cluster_name ~base_path ()] creates the cluster-aware Dated_jsonl
@@ -70,6 +82,14 @@ val log_call :
   ?trace_id:string ->
   ?session_id:string ->
   ?turn:int ->
+  ?keeper_turn_id:int ->
+  ?task_id:string ->
+  ?goal_ids:string list ->
+  ?execution_scope:string ->
+  ?sandbox_profile:string ->
+  ?network_mode:string ->
+  ?shared_memory_scope:string ->
+  ?approval_mode:string ->
   ?result_bytes:int ->
   ?truncated_to:int ->
   unit ->

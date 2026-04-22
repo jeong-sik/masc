@@ -493,6 +493,8 @@
    keeper_turn_telemetry
    keeper_wake_telemetry
    keeper_approval_queue
+   keeper_runtime_contract
+   keeper_runtime_trust_snapshot
    keeper_agent_run
    keeper_world_observation
    keeper_decision_audit

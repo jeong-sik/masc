@@ -722,6 +722,10 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                     ("stress_recent", stress);
                   ]
               in
+              let runtime_trust =
+                Keeper_runtime_trust_snapshot.snapshot_json
+                  ~config ~meta:m
+              in
               let detail_fields =
                 if compact then []
                 else [
@@ -804,6 +808,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 Json_util.string_opt_to_json sandbox_last_error);
               ("effective_sandbox_image",
                 Json_util.string_opt_to_json effective_sandbox_image);
+              ("runtime_trust", runtime_trust);
               ("paused", `Bool m.paused);
               ("keepalive_running", `Bool keepalive_running);
               ("autoboot_enabled", `Bool m.autoboot_enabled);

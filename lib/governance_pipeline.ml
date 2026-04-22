@@ -173,7 +173,7 @@ let install ~config ~governance_level =
 (* ── OAS Approval Pipeline bridge (#5902) ─────────────────── *)
 
 let to_oas_approval_callback
-    ~governance_level ~keeper_name : Oas.Hooks.approval_callback =
+    ~governance_level ~keeper_name ?meta () : Oas.Hooks.approval_callback =
   let queue_risk_level = function
     | Low -> Keeper_approval_queue.Low
     | Medium -> Keeper_approval_queue.Medium
@@ -213,10 +213,39 @@ let to_oas_approval_callback
         (risk_level_to_string base_risk)
         (risk_level_to_string risk);
     if needs_approval then
+      let turn_id =
+        Option.map
+          (fun (meta : Keeper_types.keeper_meta) ->
+            meta.runtime.usage.total_turns + 1)
+          meta
+      in
+      let task_id =
+        Option.bind meta (fun keeper_meta ->
+          Keeper_runtime_contract.current_task_id_opt keeper_meta)
+      in
+      let goal_id =
+        Option.bind meta (fun keeper_meta ->
+          Keeper_runtime_contract.primary_goal_id_opt keeper_meta)
+      in
+      let goal_ids =
+        Option.map
+          (fun (keeper_meta : Keeper_types.keeper_meta) ->
+            keeper_meta.active_goal_ids)
+          meta
+      in
+      let runtime_contract =
+        Option.map Keeper_runtime_contract.runtime_contract_json meta
+      in
       Keeper_approval_queue.submit_and_await
         ~keeper_name
         ~tool_name
         ~input
+        ?turn_id
+        ?task_id
+        ?goal_id
+        ?goal_ids
+        ?runtime_contract
         ~risk_level:(queue_risk_level risk)
+        ()
     else
       Oas.Hooks.Approve

@@ -291,6 +291,46 @@ let append_decision_record
     | Some r -> r.tool_calls
     | None -> []
   in
+  let ( _turn_lane
+      , _turn_tool_choice
+      , turn_thinking_enabled
+      , _turn_thinking_budget
+      , _turn_prompt_fingerprint
+      , _turn_trace_id
+      , _turn_session_id
+      , _turn_number
+      , turn_id_opt
+      , task_id_opt
+      , turn_goal_ids_opt
+      , _execution_scope
+      , _sandbox_profile
+      , _network_mode
+      , _shared_memory_scope
+      , approval_mode ) =
+    Keeper_tool_call_log.get_turn_context ~keeper_name:meta.name ()
+  in
+  let turn_id =
+    Option.value ~default:meta.runtime.usage.total_turns turn_id_opt
+  in
+  let task_id =
+    match task_id_opt with
+    | Some _ as value -> value
+    | None -> Keeper_runtime_contract.current_task_id_opt meta
+  in
+  let goal_ids =
+    match turn_goal_ids_opt with
+    | Some values -> values
+    | None -> meta.active_goal_ids
+  in
+  let goal_id =
+    match goal_ids with
+    | value :: _ -> Some value
+    | [] -> None
+  in
+  let runtime_contract = Keeper_runtime_contract.runtime_contract_json meta in
+  let pending_approval_count =
+    Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
+  in
   let claim_executed = List.mem "keeper_task_claim" tools_used in
   let social_fields =
     match social_state with
@@ -328,8 +368,15 @@ let append_decision_record
         ("audience", `String "internal_human_only");
         ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
         ("generation", `Int meta.runtime.generation);
+        ("turn_id", `Int turn_id);
         ("keeper_name", `String meta.name);
         ("agent_name", `String meta.agent_name);
+        ("task_id", Json_util.string_opt_to_json task_id);
+        ("goal_id", Json_util.string_opt_to_json goal_id);
+        ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) goal_ids));
+        ("runtime_contract", runtime_contract);
+        ("pending_approval_count", `Int pending_approval_count);
+        ("approval_mode", Json_util.string_opt_to_json approval_mode);
         ("channel", `String (decision_channel_of_observation observation));
         ("outcome", `String outcome);
         ("selected_mode", `String selected_mode);
@@ -413,13 +460,6 @@ let append_decision_record
           match result with
           | Some r ->
               let surface_model_used = Keeper_agent_run.surface_model_used r in
-              (* Per-turn thinking_enabled read from the same ref that the tool
-                 call log uses; captures the adaptive classifier's decision
-                 (true=Cognitive, false=Mechanical) so the dashboard can surface
-                 thinking fraction per model. *)
-              let (_, _, turn_thinking_enabled, _, _, _, _, _) =
-                Keeper_tool_call_log.get_turn_context ~keeper_name:meta.name ()
-              in
               let thinking_enabled_field =
                 match turn_thinking_enabled with
                 | Some b -> [("thinking_enabled", `Bool b)]

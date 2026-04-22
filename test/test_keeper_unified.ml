@@ -7,6 +7,7 @@ module EC = Masc_mcp.Keeper_error_classify
 module UM = Masc_mcp.Keeper_unified_metrics
 module KR = Masc_mcp.Keeper_registry
 module KAR = Masc_mcp.Keeper_agent_run
+module KTCL = Masc_mcp.Keeper_tool_call_log
 module KTD = Masc_mcp.Keeper_tool_disclosure
 module KEC = Masc_mcp.Keeper_exec_context
 module KSM = Masc_mcp.Keeper_social_model
@@ -631,6 +632,7 @@ let test_pending_approval_blocks_turns_until_resolved () =
       ~input:(`Assoc [ ("kind", `String "continue_gate_required") ])
       ~risk_level:AQ.Critical
       ~on_resolution:(fun _ -> ())
+      ()
   in
   let decision = WO.unified_turn_decision ~meta:minimal_meta reactive_obs in
   check bool "approval pending blocks turn" false decision.should_run;
@@ -1803,8 +1805,20 @@ let test_append_decision_record_persists_tool_calls () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
+      let current_task_id =
+        match Masc_mcp.Keeper_id.Task_id.of_string "task-runtime-trust" with
+        | Ok task_id -> task_id
+        | Error err -> fail ("task id parse failed: " ^ err)
+      in
       let config = Masc_mcp.Coord.default_config base_dir in
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      let meta =
+        {
+          minimal_meta with
+          active_goal_ids = [ "goal-runtime-trust" ];
+          current_task_id = Some current_task_id;
+        }
+      in
       let tool_calls : KAR.tool_call_detail list =
         [ { tool_name = "keeper_shell"
           ; provider = "codex_cli"
@@ -1828,20 +1842,49 @@ let test_append_decision_record_persists_tool_calls () =
           ~output_tok:20
           ()
       in
-      UM.append_decision_record
-        ~config
-        ~meta:minimal_meta
-        ~observation:base_observation
-        ~latency_ms:42
-        ~outcome:"tool_use"
-        ~selected_mode:"tool_use"
-        ~result:(Some result)
-        ();
+      Fun.protect
+        ~finally:KTCL.reset_for_testing
+        (fun () ->
+          KTCL.set_turn_context
+            ~keeper_name:meta.name
+            ~thinking_enabled:false
+            ~keeper_turn_id:8
+            ~approval_mode:"manual"
+            ();
+          UM.append_decision_record
+            ~config
+            ~meta
+            ~observation:base_observation
+            ~latency_ms:42
+            ~outcome:"tool_use"
+            ~selected_mode:"tool_use"
+            ~result:(Some result)
+            ());
       let json =
-        read_jsonl_line (Keeper_types.keeper_decision_log_path config minimal_meta.name)
+        read_jsonl_line (Keeper_types.keeper_decision_log_path config meta.name)
       in
       check int "tool call count persisted" 2
         Yojson.Safe.Util.(json |> member "tool_call_count" |> to_int);
+      check int "turn id persisted" 8
+        Yojson.Safe.Util.(json |> member "turn_id" |> to_int);
+      check (option string) "task id persisted"
+        (Some "task-runtime-trust")
+        Yojson.Safe.Util.(json |> member "task_id" |> to_string_option);
+      check (option string) "goal id persisted"
+        (Some "goal-runtime-trust")
+        Yojson.Safe.Util.(json |> member "goal_id" |> to_string_option);
+      check (list string) "goal ids persisted"
+        [ "goal-runtime-trust" ]
+        Yojson.Safe.Util.(json |> member "goal_ids" |> to_list |> List.map to_string);
+      check (option string) "approval mode persisted"
+        (Some "manual")
+        Yojson.Safe.Util.(json |> member "approval_mode" |> to_string_option);
+      check (option string) "runtime contract backend persisted"
+        (Some "local")
+        Yojson.Safe.Util.(
+          json |> member "runtime_contract" |> member "backend" |> to_string_option);
+      check int "pending approval count persisted" 0
+        Yojson.Safe.Util.(json |> member "pending_approval_count" |> to_int);
       check (list string) "tools used persisted"
         ["keeper_shell"; "keeper_board_post"]
         Yojson.Safe.Util.(json |> member "tools_used" |> to_list |> List.map to_string);

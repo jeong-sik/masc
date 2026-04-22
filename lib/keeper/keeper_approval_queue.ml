@@ -26,6 +26,11 @@ type pending_approval = {
   input : Yojson.Safe.t;
   risk_level : risk_level;
   requested_at : float;
+  turn_id : int option;
+  task_id : string option;
+  goal_id : string option;
+  goal_ids : string list;
+  runtime_contract : Yojson.Safe.t option;
   resolver : Oas.Hooks.approval_decision Eio.Promise.u option;
   on_resolution : (Oas.Hooks.approval_decision -> unit) option;
 }
@@ -74,19 +79,31 @@ let get_audit_store () =
        None)
 
 let audit_approval_event ~event_type ~id ~keeper_name ~tool_name
-    ~risk_level ?(decision="") () =
+    ~risk_level ?turn_id ?task_id ?goal_id ?(goal_ids = [])
+    ?runtime_contract ?(decision="") () =
   match get_audit_store () with
   | None -> ()
   | Some store ->
-    let json = `Assoc [
-      ("ts", `Float (Unix.gettimeofday ()));
-      ("event", `String event_type);
-      ("id", `String id);
-      ("keeper", `String keeper_name);
-      ("tool", `String tool_name);
-      ("risk", `String (risk_level_to_string risk_level));
-      ("decision", `String decision);
-    ] in
+    let json =
+      `Assoc
+        ([
+           ("ts", `Float (Unix.gettimeofday ()));
+           ("event", `String event_type);
+           ("id", `String id);
+           ("keeper", `String keeper_name);
+           ("tool", `String tool_name);
+           ("risk", `String (risk_level_to_string risk_level));
+           ("decision", `String decision);
+           ("turn_id", Json_util.int_opt_to_json turn_id);
+           ("task_id", Json_util.string_opt_to_json task_id);
+           ("goal_id", Json_util.string_opt_to_json goal_id);
+           ("goal_ids", `List (List.map (fun goal -> `String goal) goal_ids));
+         ]
+         @
+         match runtime_contract with
+         | Some json -> [("runtime_contract", json)]
+         | None -> [])
+    in
     Safe_ops.protect ~default:() (fun () ->
       Dated_jsonl.append store json)
 
@@ -108,7 +125,8 @@ let input_preview_of_json (json : Yojson.Safe.t) =
   Observability_redact.redact_preview ~max_len:200 raw
 
 let create_entry ~id ~keeper_name ~tool_name ~input ~risk_level
-    ~resolver ~on_resolution =
+    ?turn_id ?task_id ?goal_id ?(goal_ids = []) ?runtime_contract
+    ~resolver ~on_resolution () =
   {
     id;
     keeper_name;
@@ -116,6 +134,11 @@ let create_entry ~id ~keeper_name ~tool_name ~input ~risk_level
     input;
     risk_level;
     requested_at = Unix.gettimeofday ();
+    turn_id;
+    task_id;
+    goal_id;
+    goal_ids;
+    runtime_contract;
     resolver;
     on_resolution;
   }
@@ -132,6 +155,14 @@ let broadcast_pending entry =
             ("risk_level", `String (risk_level_to_string entry.risk_level));
             ("requested_at", `Float entry.requested_at);
             ("input_preview", `String (input_preview_of_json entry.input));
+            ("turn_id", Json_util.int_opt_to_json entry.turn_id);
+            ("task_id", Json_util.string_opt_to_json entry.task_id);
+            ("goal_id", Json_util.string_opt_to_json entry.goal_id);
+            ("goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids));
+            ( "runtime_contract",
+              match entry.runtime_contract with
+              | Some json -> json
+              | None -> `Null );
           ]);
        ])
   with
@@ -145,7 +176,9 @@ let record_pending entry =
     (risk_level_to_string entry.risk_level);
   audit_approval_event ~event_type:"pending" ~id:entry.id
     ~keeper_name:entry.keeper_name ~tool_name:entry.tool_name
-    ~risk_level:entry.risk_level ();
+    ~risk_level:entry.risk_level ?turn_id:entry.turn_id ?task_id:entry.task_id
+    ?goal_id:entry.goal_id ~goal_ids:entry.goal_ids
+    ?runtime_contract:entry.runtime_contract ();
   broadcast_pending entry
 
 let resolve_entry (entry : pending_approval) (decision : decision) =
@@ -159,7 +192,9 @@ let resolve_entry (entry : pending_approval) (decision : decision) =
     entry.id entry.keeper_name entry.tool_name decision_str;
   audit_approval_event ~event_type:"resolved" ~id:entry.id
     ~keeper_name:entry.keeper_name ~tool_name:entry.tool_name
-    ~risk_level:entry.risk_level ~decision:decision_str ();
+    ~risk_level:entry.risk_level ?turn_id:entry.turn_id ?task_id:entry.task_id
+    ?goal_id:entry.goal_id ~goal_ids:entry.goal_ids
+    ?runtime_contract:entry.runtime_contract ~decision:decision_str ();
   (match entry.resolver with
    | Some resolver -> Eio.Promise.resolve resolver decision
    | None -> ());
@@ -227,12 +262,15 @@ let sort_entries_by_requested_at entries =
     Returns the operator's decision when the promise is resolved.
     Called from the OAS approval_callback (inside agent fiber). *)
 let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
+    ?turn_id ?task_id ?goal_id ?(goal_ids = []) ?runtime_contract
+    ()
   : Oas.Hooks.approval_decision =
   let id = generate_id () in
   let promise, resolver = Eio.Promise.create () in
   let entry =
     create_entry ~id ~keeper_name ~tool_name ~input ~risk_level
-      ~resolver:(Some resolver) ~on_resolution:None
+      ?turn_id ?task_id ?goal_id ~goal_ids ?runtime_contract
+      ~resolver:(Some resolver) ~on_resolution:None ()
   in
   atomic_update pending (fun map -> SMap.add id entry map);
   record_pending entry;
@@ -242,7 +280,10 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
       Safe_ops.protect ~default:() (fun () ->
         atomic_update pending (fun map -> SMap.remove id map)))
 
-let submit_pending ~keeper_name ~tool_name ~input ~risk_level ~on_resolution
+let submit_pending ~keeper_name ~tool_name ~input ~risk_level
+    ?turn_id ?task_id ?goal_id ?(goal_ids = []) ?runtime_contract
+    ~on_resolution
+    ()
   : string =
   let rec submit () =
     let map = Atomic.get pending in
@@ -252,7 +293,8 @@ let submit_pending ~keeper_name ~tool_name ~input ~risk_level ~on_resolution
       let id = generate_id () in
       let entry =
         create_entry ~id ~keeper_name ~tool_name ~input ~risk_level
-          ~resolver:None ~on_resolution:(Some on_resolution)
+          ?turn_id ?task_id ?goal_id ~goal_ids ?runtime_contract
+          ~resolver:None ~on_resolution:(Some on_resolution) ()
       in
       let updated = SMap.add id entry map in
       if Atomic.compare_and_set pending map updated then (
@@ -306,6 +348,10 @@ let list_pending_json () : Yojson.Safe.t =
       ("risk_level", `String (risk_level_to_string entry.risk_level));
       ("requested_at", `Float entry.requested_at);
       ("waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at));
+      ("turn_id", Json_util.int_opt_to_json entry.turn_id);
+      ("task_id", Json_util.string_opt_to_json entry.task_id);
+      ("goal_id", Json_util.string_opt_to_json entry.goal_id);
+      ("goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids));
     ] :: acc
   ) (Atomic.get pending) [] in
   `List (sort_entries_by_requested_at entries)
@@ -320,6 +366,14 @@ let list_pending_dashboard_json () : Yojson.Safe.t =
       ("requested_at", `Float entry.requested_at);
       ("requested_at_iso", `String (Types.iso8601_of_unix_seconds entry.requested_at));
       ("waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at));
+      ("turn_id", Json_util.int_opt_to_json entry.turn_id);
+      ("task_id", Json_util.string_opt_to_json entry.task_id);
+      ("goal_id", Json_util.string_opt_to_json entry.goal_id);
+      ("goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids));
+      ( "runtime_contract",
+        match entry.runtime_contract with
+        | Some json -> json
+        | None -> `Null );
       ("input", entry.input);
       ("input_preview", `String (input_preview_of_json entry.input));
     ] :: acc
@@ -335,6 +389,14 @@ let pending_entry_detail_json (entry : pending_approval) : Yojson.Safe.t =
     ("requested_at", `Float entry.requested_at);
     ("requested_at_iso", `String (Types.iso8601_of_unix_seconds entry.requested_at));
     ("waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at));
+    ("turn_id", Json_util.int_opt_to_json entry.turn_id);
+    ("task_id", Json_util.string_opt_to_json entry.task_id);
+    ("goal_id", Json_util.string_opt_to_json entry.goal_id);
+    ("goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids));
+    ( "runtime_contract",
+      match entry.runtime_contract with
+      | Some json -> json
+      | None -> `Null );
     ("input", entry.input);
     ("input_preview", `String (input_preview_of_json entry.input));
   ]
@@ -346,6 +408,12 @@ let get_pending_json ~id : Yojson.Safe.t option =
 
 let pending_count () : int =
   SMap.cardinal (Atomic.get pending)
+
+let pending_count_for_keeper ~keeper_name : int =
+  SMap.fold
+    (fun _ entry count ->
+      if String.equal entry.keeper_name keeper_name then count + 1 else count)
+    (Atomic.get pending) 0
 
 let has_pending_for_keeper ~keeper_name : bool =
   SMap.fold (fun _ entry acc -> acc || String.equal entry.keeper_name keeper_name) (Atomic.get pending) false
@@ -374,7 +442,10 @@ let expire_stale ~max_wait_s =
       id entry.keeper_name entry.tool_name;
     audit_approval_event ~event_type:"expired" ~id
       ~keeper_name:entry.keeper_name ~tool_name:entry.tool_name
-      ~risk_level:entry.risk_level ~decision:("reject:" ^ reason) ();
+      ~risk_level:entry.risk_level ?turn_id:entry.turn_id
+      ?task_id:entry.task_id ?goal_id:entry.goal_id
+      ~goal_ids:entry.goal_ids ?runtime_contract:entry.runtime_contract
+      ~decision:("reject:" ^ reason) ();
     (match entry.resolver with
      | Some resolver ->
        Eio.Promise.resolve resolver (Oas.Hooks.Reject reason)

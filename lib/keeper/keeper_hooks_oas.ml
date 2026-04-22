@@ -508,7 +508,15 @@ let make_hooks
             , prompt_fingerprint
             , trace_id
             , session_id
-            , turn ) =
+            , turn
+            , keeper_turn_id
+            , task_id
+            , goal_ids
+            , execution_scope
+            , sandbox_profile
+            , network_mode
+            , shared_memory_scope
+            , approval_mode ) =
           Keeper_tool_call_log.get_turn_context
             ~keeper_name:(!meta_ref).name ()
         in
@@ -521,7 +529,9 @@ let make_hooks
                      if m = "" then (!meta_ref).cascade_name else m)
              ?lane ?tool_choice ?thinking_enabled ?thinking_budget
              ?prompt_fingerprint
-             ?trace_id ?session_id ?turn
+             ?trace_id ?session_id ?turn ?keeper_turn_id ?task_id ?goal_ids
+             ?execution_scope ?sandbox_profile ?network_mode
+             ?shared_memory_scope ?approval_mode
              ~result_bytes ?truncated_to ()
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
         (try

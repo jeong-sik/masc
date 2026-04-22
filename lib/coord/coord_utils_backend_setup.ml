@@ -140,12 +140,11 @@ let logged_lines_mutex = Mutex.create ()
 
 let log_once_info fmt =
   Format.kasprintf (fun msg ->
-    Mutex.lock logged_lines_mutex;
     let fresh =
-      if Hashtbl.mem logged_lines msg then false
-      else begin Hashtbl.add logged_lines msg (); true end
+      Stdlib.Mutex.protect logged_lines_mutex (fun () ->
+        if Hashtbl.mem logged_lines msg then false
+        else begin Hashtbl.add logged_lines msg (); true end)
     in
-    Mutex.unlock logged_lines_mutex;
     if fresh then Log.Coord.info "%s" msg) fmt
 
 let resolve_requested_base_path path =

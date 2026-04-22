@@ -190,11 +190,11 @@ let install_from_env () =
            let mu = Mutex.create () in
            let writer line =
              Mutex.lock mu;
-             (try
-                let len = String.length line in
-                ignore (Unix.write_substring fd line 0 len : int)
-              with _exn -> ());
-             Mutex.unlock mu
+             Fun.protect
+               ~finally:(fun () -> Mutex.unlock mu)
+               (fun () ->
+                  let len = String.length line in
+                  ignore (Unix.write_substring fd line 0 len : int))
            in
            enable ~writer;
            Printf.eprintf "[exec_tap] enabled \xe2\x86\x92 %s\n%!" out_path

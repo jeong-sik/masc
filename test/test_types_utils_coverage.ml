@@ -457,6 +457,7 @@ let test_task_with_worktree () =
     title = "Worktree Task";
     description = "Task with worktree";
     task_status = InProgress { assignee = "claude"; started_at = "2024-01-01T01:00:00Z" };
+    goal_id = None;
     priority = 1;
     files = [];
     created_at = "2024-01-01T00:00:00Z";
@@ -482,14 +483,14 @@ let test_backlog_roundtrip () =
   let backlog = Types.{
     tasks = [
       { id = "t1"; title = "Task 1"; description = "Desc 1";
-        task_status = Todo; priority = 1; files = [];
+        task_status = Todo; goal_id = None; priority = 1; files = [];
         created_at = "2024-01-01T00:00:00Z"; worktree = None;
         created_by = None;
         required_role = Types_core.Unassigned; required_preset = None; stage = None;
         contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None };
       { id = "t2"; title = "Task 2"; description = "Desc 2";
         task_status = Done { assignee = "a"; completed_at = "2024-01-02T00:00:00Z"; notes = None };
-        priority = 2; files = []; created_at = "2024-01-01T01:00:00Z"; worktree = None;
+        goal_id = None; priority = 2; files = []; created_at = "2024-01-01T01:00:00Z"; worktree = None;
         created_by = None;
         required_role = Types_core.Unassigned; required_preset = None; stage = None;
         contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None };

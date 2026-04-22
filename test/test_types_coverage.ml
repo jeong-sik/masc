@@ -1256,6 +1256,7 @@ let test_task_to_yojson () =
     title = "Test Task";
     description = "A test task";
     task_status = Types.Todo;
+    goal_id = None;
     priority = 2;
     files = ["file1.ml"; "file2.ml"];
     created_at = "2024-01-15T12:00:00Z";
@@ -1284,6 +1285,7 @@ let test_task_to_yojson_with_worktree () =
     title = "Task with Worktree";
     description = "";
     task_status = Types.InProgress { assignee = "claude"; started_at = "2024-01-15T12:00:00Z" };
+    goal_id = None;
     priority = 1;
     files = [];
     created_at = "2024-01-15T12:00:00Z";

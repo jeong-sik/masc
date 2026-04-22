@@ -91,10 +91,10 @@ function flattenGoalTree(nodes: readonly GoalTreeNode[]): GoalTreeNode[] {
 
 function badgeLabel(badge: string): string {
   switch (badge) {
-    case 'awaiting_approval': return 'Approval'
+    case 'awaiting_approval': return '승인 대기'
     case 'sandbox': return 'Sandbox'
     case 'cascade': return 'Cascade'
-    case 'fsm': return 'FSM'
+    case 'task_verification_pending': return 'Task 검증 대기'
     case 'stalled': return 'Stalled'
     case 'linkage_warning': return 'Linkage'
     default: return badge
@@ -105,7 +105,7 @@ function badgeClass(badge: string): string {
   switch (badge) {
     case 'awaiting_approval':
     case 'cascade':
-    case 'fsm':
+    case 'task_verification_pending':
     case 'stalled':
       return 'border-warn/30 bg-warn/10 text-warn'
     case 'sandbox':

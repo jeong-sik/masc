@@ -226,19 +226,28 @@ let keeper_name_of_assignee metas assignee =
       if keeper_name_matches_meta metas assignee then Some assignee
       else None
 
-let goal_status_to_health = function
-  | Goal_store.Done -> Some "done"
-  | Goal_store.Paused -> Some "paused"
-  | Goal_store.Dropped -> Some "blocked"
-  | Goal_store.Active -> None
+let goal_phase_to_health = function
+  | Goal_phase.Completed -> Some "done"
+  | Goal_phase.Paused -> Some "paused"
+  | Goal_phase.Blocked | Goal_phase.Dropped -> Some "blocked"
+  | Goal_phase.Executing
+  | Goal_phase.Awaiting_verification
+  | Goal_phase.Awaiting_approval ->
+      None
 
-let goal_health_reason ~goal_status ~blocked_by_receipt ~child_blocked
+let goal_health_reason ~goal_phase ~blocked_by_receipt ~child_blocked
     ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalled
     ~linkage_warning_count ~stagnation_seconds ~child_at_risk =
-  match goal_status_to_health goal_status with
-  | Some "done" -> "Goal status is done."
-  | Some "paused" -> "Goal status is paused."
-  | Some "blocked" -> "Goal status is dropped."
+  match goal_phase_to_health goal_phase with
+  | Some "done" -> "Goal phase is completed."
+  | Some "paused" -> "Goal phase is paused."
+  | Some "blocked" -> (
+      match goal_phase with
+      | Goal_phase.Blocked -> "Goal phase is blocked."
+      | Goal_phase.Dropped -> "Goal phase is dropped."
+      | Goal_phase.Completed | Goal_phase.Paused | Goal_phase.Executing
+      | Goal_phase.Awaiting_verification | Goal_phase.Awaiting_approval ->
+          "Goal is blocked.")
   | Some _ | None ->
       if blocked_by_receipt then "Recent keeper execution ended with an error."
       else if child_blocked then "A linked sub-goal is blocked."
@@ -261,8 +270,8 @@ let goal_health_reason ~goal_status ~blocked_by_receipt ~child_blocked
       else
         "Linked tasks and keepers are progressing."
 
-let tree_health ~goal_status ~blocked_by_receipt ~child_blocked ~at_risk =
-  match goal_status_to_health goal_status with
+let tree_health ~goal_phase ~blocked_by_receipt ~child_blocked ~at_risk =
+  match goal_phase_to_health goal_phase with
   | Some health -> health
   | None ->
       if blocked_by_receipt || child_blocked then "blocked"
@@ -275,7 +284,7 @@ let tree_badges ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalle
   if pending_approvals > 0 then badges := "awaiting_approval" :: !badges;
   if sandbox_risk then badges := "sandbox" :: !badges;
   if cascade_risk then badges := "cascade" :: !badges;
-  if fsm_risk then badges := "fsm" :: !badges;
+  if fsm_risk then badges := "task_verification_pending" :: !badges;
   if stalled then badges := "stalled" :: !badges;
   if linkage_warning_count > 0 then badges := "linkage_warning" :: !badges;
   List.rev !badges
@@ -444,11 +453,11 @@ let rec build_tree context goals goal =
     || child_at_risk
   in
   let health =
-    tree_health ~goal_status:goal.Goal_store.status ~blocked_by_receipt
+    tree_health ~goal_phase:goal.Goal_store.phase ~blocked_by_receipt
       ~child_blocked ~at_risk
   in
   let status_reason =
-    goal_health_reason ~goal_status:goal.Goal_store.status ~blocked_by_receipt
+    goal_health_reason ~goal_phase:goal.Goal_store.phase ~blocked_by_receipt
       ~child_blocked ~pending_approvals:pending_approval_count
       ~sandbox_risk:direct_sandbox_risk ~cascade_risk:direct_cascade_risk
       ~fsm_risk:direct_fsm_risk ~stalled ~linkage_warning_count

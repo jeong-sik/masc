@@ -1336,6 +1336,7 @@ let sample_tool_surface_metrics () : Masc_mcp.Keeper_agent_run.tool_surface_metr
     approval_mode_derived = false;
   }
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
+    ?(usage_reported = true)
     ?(tool_calls = [])
     ?trace_ref
     ?run_validation
@@ -1350,6 +1351,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     turn_count = 1;
     tool_calls_made = List.length tools;
     usage = { input_tokens = input_tok; output_tokens = output_tok; cache_creation_input_tokens = 0; cache_read_input_tokens = 0; cost_usd = None };
+    usage_reported;
     tools_used = tools;
     tool_calls;
     checkpoint = None;
@@ -2095,6 +2097,50 @@ let test_append_decision_record_persists_tool_calls () =
         Yojson.Safe.Util.(List.nth recorded_tool_calls 1 |> member "outcome" |> to_string);
       check (float 0.001) "second latency" 3.0
         Yojson.Safe.Util.(List.nth recorded_tool_calls 1 |> member "latency_ms" |> to_float))
+
+let test_append_decision_record_nulls_unreported_usage () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      let result =
+        make_run_result
+          ~text:"Kimi replied without usage."
+          ~tools:[]
+          ~model:"kimi_cli:kimi-for-coding"
+          ~input_tok:0
+          ~output_tok:0
+          ~usage_reported:false
+          ()
+      in
+      UM.append_decision_record
+        ~config
+        ~meta:minimal_meta
+        ~observation:base_observation
+        ~latency_ms:420
+        ~outcome:"normal"
+        ~selected_mode:"normal"
+        ~result:(Some result)
+        ();
+      let json =
+        read_jsonl_line (Keeper_types.keeper_decision_log_path config minimal_meta.name)
+      in
+      let open Yojson.Safe.Util in
+      let telemetry = json |> member "telemetry" in
+      check bool "input_tokens null when usage unreported" true
+        (match telemetry |> member "input_tokens" with `Null -> true | _ -> false);
+      check bool "output_tokens null when usage unreported" true
+        (match telemetry |> member "output_tokens" with `Null -> true | _ -> false);
+      check bool "cache_read_tokens null when usage unreported" true
+        (match telemetry |> member "cache_read_tokens" with `Null -> true | _ -> false);
+      check bool "cost_usd null when usage unreported" true
+        (match telemetry |> member "cost_usd" with `Null -> true | _ -> false);
+      check bool "tokens_per_second null when usage unreported" true
+        (match telemetry |> member "tokens_per_second" with `Null -> true | _ -> false))
 
 let test_run_keeper_cycle_skips_non_executable_phase () =
   Eio_main.run @@ fun env ->
@@ -4192,6 +4238,8 @@ let () =
             test_append_metrics_snapshot_treats_validated_evidence_as_tool_use;
           test_case "decision record persists tool call details" `Quick
             test_append_decision_record_persists_tool_calls;
+          test_case "decision record nulls unreported usage" `Quick
+            test_append_decision_record_nulls_unreported_usage;
           test_case "social fields" `Quick
             test_metrics_persist_social_state_fields;
           test_case "failure response" `Quick test_metrics_failure_response;

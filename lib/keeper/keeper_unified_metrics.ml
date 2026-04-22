@@ -541,20 +541,36 @@ let append_decision_record
                     ] @ timings_fields
                 | None -> []
               in
+              let usage_fields =
+                if r.usage_reported then
+                  [
+                    ("input_tokens", `Int r.usage.input_tokens);
+                    ("output_tokens", `Int r.usage.output_tokens);
+                    ("cache_creation_tokens", `Int r.usage.cache_creation_input_tokens);
+                    ("cache_read_tokens", `Int r.usage.cache_read_input_tokens);
+                    ("cost_usd", match r.usage.cost_usd with Some c -> `Float c | None -> `Null);
+                    ( "tokens_per_second",
+                      if latency_ms > 0 then
+                        `Float
+                          (float_of_int r.usage.output_tokens
+                           /. (float_of_int latency_ms /. 1000.0))
+                      else `Null );
+                  ]
+                else
+                  [
+                    ("input_tokens", `Null);
+                    ("output_tokens", `Null);
+                    ("cache_creation_tokens", `Null);
+                    ("cache_read_tokens", `Null);
+                    ("cost_usd", `Null);
+                    ("tokens_per_second", `Null);
+                  ]
+              in
               `Assoc ([
                 ("model_used", `String surface_model_used);
                 ("turn_count", `Int r.turn_count);
                 ("stop_reason", `String stop_reason_str);
-                ("input_tokens", `Int r.usage.input_tokens);
-                ("output_tokens", `Int r.usage.output_tokens);
-                ("cache_creation_tokens", `Int r.usage.cache_creation_input_tokens);
-                ("cache_read_tokens", `Int r.usage.cache_read_input_tokens);
-                ("cost_usd", match r.usage.cost_usd with Some c -> `Float c | None -> `Null);
-                ("tokens_per_second",
-                  if latency_ms > 0 then
-                    `Float (float_of_int r.usage.output_tokens /. (float_of_int latency_ms /. 1000.0))
-                  else `Null);
-              ] @ thinking_enabled_field @ inference_fields @ cascade_fields @ tool_surface_fields)
+              ] @ usage_fields @ thinking_enabled_field @ inference_fields @ cascade_fields @ tool_surface_fields)
           | None ->
               (* Partial telemetry for error turns: record what we know.
                  Without this, 90%+ of turns have no telemetry at all. *)

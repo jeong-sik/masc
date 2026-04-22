@@ -139,10 +139,7 @@ let with_fake_docker script f =
 let test_container_path_root_maps () =
   let base, config, meta = setup_config "minjae" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  let host_root =
-    Filename.concat (Keeper_alerting_path.project_root_of_config config)
-      (Keeper_alerting_path.playground_path_of_keeper meta.name)
-  in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let croot = Keeper_sandbox.container_root meta.name in
   match
     Keeper_docker_read.container_path_of_host ~config ~meta
@@ -156,10 +153,7 @@ let test_container_path_root_maps () =
 let test_container_path_nested_maps_with_suffix () =
   let base, config, meta = setup_config "minjae" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  let host_root =
-    Filename.concat (Keeper_alerting_path.project_root_of_config config)
-      (Keeper_alerting_path.playground_path_of_keeper meta.name)
-  in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_path = Filename.concat host_root "mind/scratch.md" in
   let croot = Keeper_sandbox.container_root meta.name in
   match
@@ -212,10 +206,7 @@ let test_read_empty_image_config_errors () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   let base, config, meta = setup_config "minjae" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  let host_root =
-    Filename.concat (Keeper_alerting_path.project_root_of_config config)
-      (Keeper_alerting_path.playground_path_of_keeper meta.name)
-  in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_path = Filename.concat host_root "mind/x" in
   match
     Keeper_docker_read.read_file_in_container ~config ~meta ~host_path
@@ -499,10 +490,7 @@ let test_turn_runtime_reuses_single_container () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   let base, config, meta = setup_config "minjae" in
   let log_path = Filename.concat base "docker.log" in
-  let host_root =
-    Filename.concat (Keeper_alerting_path.project_root_of_config config)
-      (Keeper_alerting_path.playground_path_of_keeper meta.name)
-  in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir host_root;
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta in
@@ -577,10 +565,7 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
   with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "true" @@ fun () ->
   let base, config, meta = setup_config "minjae" in
   let log_path = Filename.concat base "docker.log" in
-  let host_root =
-    Filename.concat (Keeper_alerting_path.project_root_of_config config)
-      (Keeper_alerting_path.playground_path_of_keeper meta.name)
-  in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir host_root;
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta in

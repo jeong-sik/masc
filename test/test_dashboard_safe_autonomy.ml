@@ -90,11 +90,10 @@ let persist_keeper config =
   in
   match KT.write_meta ~force:true config meta with
   | Ok () ->
-      let sandbox_root = Keeper_sandbox.host_root_abs ~config meta.name in
+      let sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
       Fs_compat.mkdir_p sandbox_root;
       let repo_path =
-        Keeper_repo_readiness.clone_path ~config ~keeper_name:meta.name
-          ~repo_name:"masc-mcp"
+        Keeper_repo_readiness.clone_path ~config ~meta ~repo_name:"masc-mcp"
       in
       Fs_compat.mkdir_p repo_path;
       meta

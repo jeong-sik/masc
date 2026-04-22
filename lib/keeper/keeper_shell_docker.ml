@@ -26,9 +26,7 @@ let docker_private_workspace_cwd ~(config : Coord.config) ~(meta : keeper_meta)
     |> Keeper_alerting_path.strip_trailing_slashes
   in
   let host_root =
-    Filename.concat
-      (Keeper_alerting_path.project_root_of_config config)
-      (Keeper_alerting_path.playground_path_of_keeper meta.name)
+    Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> normalize_path_for_containment
   in
   let container_root = keeper_private_container_root meta in

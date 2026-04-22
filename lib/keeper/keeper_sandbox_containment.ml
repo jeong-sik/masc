@@ -11,9 +11,7 @@ let starts_with ~prefix s =
 (** Build the absolute, normalized playground bundle root for [meta]
     under [config.base_path]. *)
 let playground_root_abs ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) =
-  let project_root = Keeper_alerting_path.project_root_of_config config in
-  let bundle_rel = Keeper_alerting_path.playground_path_of_keeper meta.name in
-  Filename.concat project_root bundle_rel |> normalize
+  Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize
 
 let target_is_inside_playground ~playground ~target =
   let playground = playground in

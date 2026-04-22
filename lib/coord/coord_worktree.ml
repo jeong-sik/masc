@@ -129,6 +129,76 @@ let is_git_clone candidate =
   | `Directory | `File -> true
   | `Missing -> false
 
+let keeper_toml_path ~config ~agent_name =
+  let keeper_name = Playground_paths.sanitize_keeper_name agent_name in
+  Filename.concat
+    (Filename.concat
+       (Filename.concat
+          (masc_dir_from_base_path ~base_path:config.base_path)
+          "config")
+       "keepers")
+    (keeper_name ^ ".toml")
+
+let strip_inline_comment line =
+  match String.index_opt line '#' with
+  | Some idx -> String.sub line 0 idx
+  | None -> line
+
+let unquote value =
+  let len = String.length value in
+  if len >= 2 && value.[0] = '"' && value.[len - 1] = '"'
+  then String.sub value 1 (len - 2)
+  else value
+
+let keeper_uses_docker_sandbox ~config ~agent_name =
+  let path = keeper_toml_path ~config ~agent_name in
+  if not (safe_file_exists path) then false
+  else
+    try
+      let lines =
+        In_channel.with_open_text path In_channel.input_all
+        |> String.split_on_char '\n'
+      in
+      let rec loop in_keeper = function
+        | [] -> false
+        | raw_line :: rest ->
+            let line =
+              raw_line |> strip_inline_comment |> String.trim
+            in
+            if line = "" then loop in_keeper rest
+            else if String.length line > 0 && line.[0] = '[' then
+              loop (String.equal line "[keeper]") rest
+            else if
+              in_keeper
+              && String.starts_with ~prefix:"sandbox_profile" line
+            then
+              let value =
+                match String.index_opt line '=' with
+                | None -> ""
+                | Some idx ->
+                    String.sub line (idx + 1) (String.length line - idx - 1)
+                    |> String.trim
+                    |> unquote
+                    |> String.lowercase_ascii
+              in
+              String.equal value "docker"
+            else
+              loop in_keeper rest
+      in
+      loop false lines
+    with Sys_error _ -> false
+
+let repos_dir_of_keeper config agent_name =
+  let safe_name = Playground_paths.sanitize_keeper_name agent_name in
+  let repos_rel =
+    if keeper_uses_docker_sandbox ~config ~agent_name then
+      Printf.sprintf "%s/docker/%s/repos/"
+        Playground_paths.all_playgrounds_prefix safe_name
+    else
+      Playground_paths.repos_path agent_name
+  in
+  Filename.concat config.base_path repos_rel
+
 let rec rm_rf path =
   if safe_file_exists path then
     if safe_is_dir path then begin
@@ -353,17 +423,13 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
   | _, Error e -> Error e
   | Ok _, Ok _ ->
     (* Prefer a keeper's sandbox repo clone under
-       [.masc/playground/<agent>/repos/]. The layout is the SSOT in
-       [Playground_paths] (masc_config). If [repo_name] is supplied,
-       target that clone directly; otherwise scan the directory and
-       pick the first git clone (alphabetical). Keepers may work on
-       any repo their [tool_policy.toml] allows, but the worktree root
-       must come from a sandbox repo clone. *)
+       the keeper's backend-specific sandbox repo lane. If [repo_name]
+       is supplied, target that clone directly; otherwise scan the
+       directory and pick the first git clone (alphabetical). Keepers
+       may work on any repo their [tool_policy.toml] allows, but the
+       worktree root must come from a sandbox repo clone. *)
     let resolve_keeper_repo_root () =
-      let repos_dir =
-        Filename.concat config.base_path
-          (Playground_paths.repos_path agent_name)
-      in
+      let repos_dir = repos_dir_of_keeper config agent_name in
       let explicit_repo =
         match repo_name with
         | None | Some "" -> None
@@ -530,10 +596,7 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
   | _, Error e -> Error e
   | Ok _, Ok _ ->
     let resolve_existing_worktree_root () =
-      let repos_dir =
-        Filename.concat config.base_path
-          (Playground_paths.repos_path agent_name)
-      in
+      let repos_dir = repos_dir_of_keeper config agent_name in
       let worktree_name = Playground_paths.worktree_dir_name agent_name task_id in
       let safe_is_dir path =
         try Sys.file_exists path && Sys.is_directory path

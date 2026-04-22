@@ -374,9 +374,12 @@ let keeper_context_status_json
   (* Give the keeper sandbox-relative paths from the SSOT so it never needs
      to interpolate host storage paths such as ".masc/playground/<name>/". *)
   let sandbox = Keeper_sandbox.of_meta ~config ~meta in
-  let playground_bundle = Playground_paths.bundle_root meta.name in
-  let playground_mind = Playground_paths.mind_path meta.name in
-  let playground_repos = Playground_paths.repos_path meta.name in
+  let playground_bundle = sandbox.host_root_rel in
+  let sandbox_root =
+    Keeper_alerting_path.strip_trailing_slashes sandbox.host_root_rel
+  in
+  let playground_mind = sandbox_root ^ "/mind/" in
+  let playground_repos = sandbox_root ^ "/repos/" in
   Yojson.Safe.to_string
     (`Assoc
         ([ "name", `String meta.name

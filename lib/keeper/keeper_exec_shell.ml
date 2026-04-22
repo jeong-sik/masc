@@ -197,7 +197,7 @@ let rewrite_turn_runtime_paths_to_host
   =
   replace_all_substrings
     ~needle:(Keeper_sandbox.container_root meta.name)
-    ~replacement:(Keeper_sandbox.host_root_abs ~config meta.name)
+    ~replacement:(Keeper_sandbox.host_root_abs_of_meta ~config meta)
     text
 
 let run_argv_with_status_retry_eintr ?cwd ~timeout_sec argv =
@@ -366,7 +366,7 @@ let _docker_playground_cwd ~(config : Coord.config) ~(meta : keeper_meta) host_c
 let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
   (* bundle_root yields ".masc/playground/<safe>/" — strip the trailing
      slash so we can append "/repos/..." cleanly. *)
-  let playground_bundle = Playground_paths.bundle_root meta.name in
+  let playground_bundle = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
   let playground =
     if String.length playground_bundle > 0
        && playground_bundle.[String.length playground_bundle - 1] = '/'
@@ -545,7 +545,7 @@ let handle_keeper_bash
       normalize_path_for_containment cwd
     in
     let playground_rel =
-      Keeper_alerting_path.playground_path_of_keeper meta.name
+      Keeper_sandbox.allowed_root_rel_of_meta ~meta
     in
     let playground_abs =
       normalize_path_for_containment (Filename.concat root playground_rel)
@@ -667,6 +667,7 @@ let handle_keeper_bash
              ())
       | Ok () ->
         (* Branch-switch guard *)
+        let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
         if Worker_dev_tools.is_git_branch_switch cmd
                 && not (write_enabled && in_playground)
         then (
@@ -685,11 +686,11 @@ let handle_keeper_bash
                   under repos/<repo>/.worktrees/<task>."
                ~hint:(Printf.sprintf
                         "Use cwd=%srepos/REPO/.worktrees/TASK"
-                        (Playground_paths.bundle_root meta.name))
+                        sandbox_root)
                ~alternatives:
                  [ Printf.sprintf
                      "Clone the repo first: keeper_shell op=git_clone, then use cwd=%srepos/REPO/.worktrees/TASK."
-                     (Playground_paths.bundle_root meta.name)
+                     sandbox_root
                  ; "Use keeper_shell op=git op_cmd='branch -a' to list available branches."
                  ]
                ~retryability:Exec_core.Operator_required
@@ -742,15 +743,15 @@ let handle_keeper_bash
                      Open a sandbox clone first with keeper_shell op=git_clone \
                      if needed, then use masc_worktree_create and set cwd to \
                      the returned worktree path."
-                    (Playground_paths.bundle_root meta.name))
+                    sandbox_root)
                ~hint:(Printf.sprintf
                         "cwd must start with %s and usually looks like %srepos/REPO/.worktrees/TASK"
-                        (Playground_paths.bundle_root meta.name)
-                        (Playground_paths.bundle_root meta.name))
+                        sandbox_root
+                        sandbox_root)
                ~alternatives:
                  [ Printf.sprintf
                      "Clone into your sandbox: keeper_shell op=git_clone, then cd to %srepos/REPO/."
-                     (Playground_paths.bundle_root meta.name)
+                     sandbox_root
                  ; "Create a worktree inside your sandbox with masc_worktree_create."
                  ; "Use keeper_bash with a cwd pointing to your sandbox worktree."
                  ]
@@ -1055,7 +1056,7 @@ let handle_keeper_shell
   (* Actionable error: Samchon/Claude Code validateInput pattern.
      Returns structured JSON with tried path, playground root, and concrete next action. *)
   let path_error e =
-    actionable_path_error ~op ~keeper_name:meta.name ~raw_path ~error:e
+    actionable_path_error ~op ~meta ~raw_path ~error:e
   in
   let render_process_result ?cwd ~cmd argv =
     let st, out =
@@ -1880,11 +1881,9 @@ let handle_keeper_shell
                ; "url", `String url
                ])
        | Ok () ->
-         ignore (Keeper_alerting_path.ensure_playground_bundle ~config ~name:meta.name);
-         let playground = Filename.concat root
-           (Keeper_alerting_path.playground_path_of_keeper meta.name) in
-         let repos_dir = Filename.concat root
-           (Keeper_alerting_path.playground_repos_path meta.name) in
+         ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
+         let playground = keeper_playground_root ~config ~meta in
+         let repos_dir = Filename.concat playground "repos" in
          Fs_compat.mkdir_p repos_dir;
          (* Derive repo name from URL: strip trailing slash, .git, then basename.
             Guard against empty/traversal names (e.g. url ending with "/" or ".."). *)

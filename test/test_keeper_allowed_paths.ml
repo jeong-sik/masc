@@ -234,7 +234,7 @@ let test_sandbox_contract_reports_single_tool_root () =
     check string "sandbox id" "keeper:keeper" sb.sandbox_id;
     check string "sandbox root arg" "." sb.root_arg;
     check string "sandbox repos arg" "repos" sb.repos_arg;
-    check string "host root rel uses existing disk layout"
+    check string "local host root rel stays on local lane"
       ".masc/playground/keeper/" sb.host_root_rel;
     check (option string) "local has no container root" None sb.container_root)
 
@@ -257,6 +257,8 @@ let test_sandbox_contract_reports_docker_container_root () =
     let sb = KS.of_meta ~config ~meta in
     check string "docker backend" "docker"
       (KS.backend_to_string sb.backend);
+    check string "docker host root rel uses docker lane"
+      ".masc/playground/docker/keeper/" sb.host_root_rel;
     check (option string) "docker has private container root"
       (Some "/home/keeper/playground/keeper") sb.container_root)
 
@@ -439,7 +441,7 @@ let test_docker_rejects_paths_outside_private_root () =
     | Ok () -> fail "expected docker path rejection"
     | Error err ->
         check bool "mentions private playground" true
-          (String_util.contains_substring err ".masc/playground/sangsu"))
+          (String_util.contains_substring err ".masc/playground/docker/sangsu"))
 
 let test_docker_rejects_root_allowed_path () =
   with_temp_config (fun config ->
@@ -454,7 +456,7 @@ let test_docker_rejects_root_allowed_path () =
     | Ok () -> fail "expected docker root-path rejection"
     | Error err ->
         check bool "mentions private playground" true
-          (String_util.contains_substring err ".masc/playground/sangsu"))
+          (String_util.contains_substring err ".masc/playground/docker/sangsu"))
 
 let test_docker_rejects_glob_like_allowed_path () =
   with_temp_config (fun config ->
@@ -473,7 +475,9 @@ let test_docker_rejects_glob_like_allowed_path () =
 
 let test_docker_rejects_traversal_allowed_path () =
   with_temp_config (fun config ->
-    let private_root = KTU.private_workspace_root_rel "sangsu" in
+    let private_root =
+      KTU.private_workspace_root_rel ~sandbox_profile:KT.Docker "sangsu"
+    in
     match
       KTU.validate_sandbox_settings
         ~config
@@ -486,12 +490,16 @@ let test_docker_rejects_traversal_allowed_path () =
     | Ok () -> fail "expected docker traversal rejection"
     | Error err ->
         check bool "mentions private playground" true
-          (String_util.contains_substring err ".masc/playground/sangsu"))
+          (String_util.contains_substring err ".masc/playground/docker/sangsu"))
 
 let test_docker_accepts_private_root_paths () =
   with_temp_config (fun config ->
-    let private_root = KTU.private_workspace_root_rel "sangsu" in
-    ignore (KAP.ensure_playground_bundle ~config ~name:"sangsu");
+    let private_root =
+      KTU.private_workspace_root_rel ~sandbox_profile:KT.Docker "sangsu"
+    in
+    ignore
+      (KAP.ensure_sandbox_bundle_for_profile ~config ~name:"sangsu"
+         ~sandbox_profile:KT.Docker);
     let target_dir =
       Filename.concat (KAP.project_root_of_config config)
         (private_root ^ "/repos/demo")

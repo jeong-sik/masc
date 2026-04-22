@@ -24,9 +24,7 @@ let strip_trailing_slashes path =
   if len = String.length path then path else String.sub path 0 len
 
 let host_playground_root ~config ~(meta : keeper_meta) =
-  Filename.concat
-    (Keeper_alerting_path.project_root_of_config config)
-    (Keeper_alerting_path.playground_path_of_keeper meta.name)
+  Keeper_sandbox.host_root_abs_of_meta ~config meta
   |> Keeper_alerting_path.normalize_path_for_check
   |> strip_trailing_slashes
 

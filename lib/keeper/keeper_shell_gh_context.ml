@@ -71,9 +71,7 @@ let gh_repo_context_error_json ~op ~cmd_display err =
 let resolve_gh_repo_context ~(config : Coord.config) ~(meta : keeper_meta)
     ~(cwd : string) =
   let sandbox_git_root =
-    Filename.concat
-      (Keeper_alerting_path.project_root_of_config config)
-      (Keeper_alerting_path.playground_path_of_keeper meta.name)
+    Keeper_sandbox.host_root_abs_of_meta ~config meta
   in
   let sandbox_worktree_cwd =
     if safe_is_dir cwd then cwd else sandbox_git_root

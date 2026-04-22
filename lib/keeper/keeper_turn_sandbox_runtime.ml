@@ -30,7 +30,7 @@ let create ~(config : Coord.config) ~(meta : keeper_meta) =
   {
     config;
     meta;
-    host_root = Keeper_sandbox.host_root_abs ~config meta.name |> normalize_path;
+    host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path;
     container_root = Keeper_sandbox.container_root meta.name |> strip_trailing_slashes;
     uid = Unix.getuid ();
     gid = Unix.getgid ();

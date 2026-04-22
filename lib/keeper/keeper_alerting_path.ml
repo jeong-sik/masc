@@ -270,10 +270,34 @@ let playground_mind_path = Playground_paths.mind_path
 let playground_repos_path = Playground_paths.repos_path
 let playground_bundle_paths = Playground_paths.bundle_paths
 let sandbox_path_of_keeper name = Keeper_sandbox.allowed_root_rel ~name
+let sandbox_path_of_meta ~(meta : Keeper_types.keeper_meta) =
+  Keeper_sandbox.allowed_root_rel_of_meta ~meta
+
+let sandbox_bundle_paths_of_meta ~(meta : Keeper_types.keeper_meta) =
+  let root = sandbox_path_of_meta ~meta |> strip_trailing_slashes in
+  [ root ^ "/"; root ^ "/mind/"; root ^ "/repos/" ]
 
 let ensure_playground_bundle ~(config : Coord.config) ~(name : string) : string list =
   let root = project_root_of_config config in
   playground_bundle_paths name
+  |> List.map (Filename.concat root)
+  |> List.map Keeper_fs.ensure_dir
+
+let ensure_sandbox_bundle ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta)
+    : string list =
+  let root = project_root_of_config config in
+  sandbox_bundle_paths_of_meta ~meta
+  |> List.map (Filename.concat root)
+  |> List.map Keeper_fs.ensure_dir
+
+let ensure_sandbox_bundle_for_profile ~(config : Coord.config)
+    ~(name : string) ~(sandbox_profile : Keeper_types.sandbox_profile) : string list =
+  let root = project_root_of_config config in
+  let sandbox_root =
+    Keeper_sandbox.host_root_rel_of_profile sandbox_profile name
+    |> strip_trailing_slashes
+  in
+  [ sandbox_root ^ "/"; sandbox_root ^ "/mind/"; sandbox_root ^ "/repos/" ]
   |> List.map (Filename.concat root)
   |> List.map Keeper_fs.ensure_dir
 
@@ -284,7 +308,7 @@ let ensure_playground_bundle ~(config : Coord.config) ~(name : string) : string 
     Workspace/local scope no longer grants extra hardcoded paths; every
     additional path must be listed explicitly in [allowed_paths]. *)
 let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
-  let sandbox_paths = Keeper_sandbox.allowed_path_roots ~name:meta.name in
+  let sandbox_paths = Keeper_sandbox.allowed_path_roots_of_meta ~meta in
   match meta.allowed_paths with
   | ["*"] -> []
   | explicit -> sandbox_paths @ explicit
@@ -296,7 +320,7 @@ let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
     scope no longer grants extra hardcoded paths; every additional path
     must be listed explicitly in [allowed_paths]. *)
 let effective_write_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
-  let sandbox_paths = Keeper_sandbox.allowed_path_roots ~name:meta.name in
+  let sandbox_paths = Keeper_sandbox.allowed_path_roots_of_meta ~meta in
   match meta.allowed_paths with
   | ["*"] -> []
   | explicit -> sandbox_paths @ explicit

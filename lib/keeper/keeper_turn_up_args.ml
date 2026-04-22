@@ -372,14 +372,14 @@ let resolve_shared_memory_scope ~preferred ~fallback =
   first_some preferred fallback
   |> Option.value ~default:default_shared_memory_scope
 
-let private_workspace_root_rel keeper_name =
-  Keeper_alerting_path.playground_path_of_keeper keeper_name
+let private_workspace_root_rel ~sandbox_profile keeper_name =
+  Keeper_sandbox.host_root_rel_of_profile sandbox_profile keeper_name
   |> Keeper_alerting_path.strip_trailing_slashes
 
-let private_workspace_root_abs ~(config : Coord.config) keeper_name =
+let private_workspace_root_abs ~(config : Coord.config) ~sandbox_profile keeper_name =
   Filename.concat
     (Keeper_alerting_path.project_root_of_config config)
-    (private_workspace_root_rel keeper_name)
+    (private_workspace_root_rel ~sandbox_profile keeper_name)
   |> Keeper_alerting_path.normalize_path_for_check
   |> Keeper_alerting_path.strip_trailing_slashes
 
@@ -400,13 +400,16 @@ let sandbox_allowed_path_has_forbidden_segments path =
 let sandbox_allowed_path_within_private_root
     ~(config : Coord.config)
     ~keeper_name
+    ~sandbox_profile
     path =
   let trimmed = String.trim path in
   if trimmed = "" then false
   else if sandbox_allowed_path_has_forbidden_segments trimmed then
     false
   else
-    let private_root = private_workspace_root_abs ~config keeper_name in
+    let private_root =
+      private_workspace_root_abs ~config ~sandbox_profile keeper_name
+    in
     let candidate =
       (if Filename.is_relative trimmed then
          Filename.concat
@@ -445,7 +448,8 @@ let validate_sandbox_settings
           List.filter
             (fun path ->
               not
-                (sandbox_allowed_path_within_private_root ~config ~keeper_name path))
+                (sandbox_allowed_path_within_private_root
+                   ~config ~keeper_name ~sandbox_profile path))
             allowed_paths
         in
         match escaping with
@@ -455,5 +459,5 @@ let validate_sandbox_settings
               (Printf.sprintf
                  "%s allowed_paths must stay under %s (rejected: %s)"
                  profile_label
-                 (private_workspace_root_rel keeper_name)
+                 (private_workspace_root_rel ~sandbox_profile keeper_name)
                  (String.concat ", " escaping))

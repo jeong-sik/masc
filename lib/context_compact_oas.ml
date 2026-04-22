@@ -102,9 +102,9 @@ let summarize_chunk (msgs : Oas.Types.message list) : Oas.Types.message option =
   | [] -> None
   | _ ->
     Some {
-      Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
+      Oas.Types.role = Oas.Types.Assistant;
       content = [
-        Agent_sdk.Types.Text
+        Oas.Types.Text
           (Printf.sprintf "[Compacted %d messages into summary]\n%s"
              (List.length msgs) (String.concat "\n" lines))
       ];

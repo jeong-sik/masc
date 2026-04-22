@@ -1,12 +1,12 @@
-(** Replay metadata tests for keeper state snapshots.
+(** RFC-MASC-001 Phase 1: Tests for structured working_context in Checkpoint.
 
     Verifies:
     1. snapshot_to_json -> snapshot_of_json round-trip
-    2. replay metadata envelope (version 1)
+    2. structured_working_context envelope (version 1)
     3. Empty snapshot produces None
     4. Malformed JSON produces None
-    5. patch_checkpoint_last_assistant stores replay metadata
-    6. Legacy working_context envelopes remain readable *)
+    5. patch_checkpoint_last_assistant stores structured JSON when flag is on
+    6. Structured JSON takes priority over text fallback in dual-source read *)
 
 module KMP = Masc_mcp.Keeper_memory_policy
 module KCC = Masc_mcp.Keeper_context_core
@@ -72,36 +72,34 @@ let test_null_json_returns_none () =
   let restored = KMP.keeper_state_snapshot_of_json `Null in
   Alcotest.(check bool) "null -> None" true (restored = None)
 
-(* ── Replay metadata envelope tests ──────────────────────────────── *)
+(* ── Structured working_context envelope tests ───────────────────── *)
 
-let test_replay_metadata_round_trip () =
+let test_structured_envelope_round_trip () =
   let original = make_snapshot () in
-  let envelope = KMP.replay_metadata_of_snapshot original in
-  let restored = KMP.snapshot_of_replay_metadata envelope in
+  let envelope = KMP.structured_working_context_of_snapshot original in
+  let restored = KMP.snapshot_of_structured_working_context envelope in
   match restored with
   | None -> Alcotest.fail "envelope round-trip returned None"
   | Some snap ->
     Alcotest.(check (option string)) "goal" original.goal snap.goal;
     Alcotest.(check (list string)) "decisions" original.decisions snap.decisions
 
-let test_replay_metadata_wrong_version_returns_none () =
+let test_envelope_wrong_version_returns_none () =
   let json = `Assoc [
-    ("kind", `String KMP.replay_metadata_kind);
     ("version", `Int 99);
-    ("payload", KMP.keeper_state_snapshot_to_json (make_snapshot ()));
+    ("state_snapshot", KMP.keeper_state_snapshot_to_json (make_snapshot ()));
   ] in
-  let restored = KMP.snapshot_of_replay_metadata json in
+  let restored = KMP.snapshot_of_structured_working_context json in
   Alcotest.(check bool) "wrong version -> None" true (restored = None)
 
-let test_replay_metadata_missing_version_returns_none () =
+let test_envelope_missing_version_returns_none () =
   let json = `Assoc [
-    ("kind", `String KMP.replay_metadata_kind);
-    ("payload", KMP.keeper_state_snapshot_to_json (make_snapshot ()));
+    ("state_snapshot", KMP.keeper_state_snapshot_to_json (make_snapshot ()));
   ] in
-  let restored = KMP.snapshot_of_replay_metadata json in
+  let restored = KMP.snapshot_of_structured_working_context json in
   Alcotest.(check bool) "missing version -> None" true (restored = None)
 
-let test_legacy_working_context_empty_snapshot_returns_none () =
+let test_envelope_empty_snapshot_returns_none () =
   let json = `Assoc [
     ("version", `Int 1);
     ("state_snapshot", KMP.keeper_state_snapshot_to_json KMP.empty_keeper_state_snapshot);
@@ -215,12 +213,12 @@ let () =
           Alcotest.test_case "malformed -> None" `Quick test_malformed_json_returns_none;
           Alcotest.test_case "null -> None" `Quick test_null_json_returns_none;
         ] );
-      ( "replay_metadata",
+      ( "structured_envelope",
         [
-          Alcotest.test_case "replay metadata round-trip" `Quick test_replay_metadata_round_trip;
-          Alcotest.test_case "wrong version -> None" `Quick test_replay_metadata_wrong_version_returns_none;
-          Alcotest.test_case "missing version -> None" `Quick test_replay_metadata_missing_version_returns_none;
-          Alcotest.test_case "legacy empty working_context -> None" `Quick test_legacy_working_context_empty_snapshot_returns_none;
+          Alcotest.test_case "envelope round-trip" `Quick test_structured_envelope_round_trip;
+          Alcotest.test_case "wrong version -> None" `Quick test_envelope_wrong_version_returns_none;
+          Alcotest.test_case "missing version -> None" `Quick test_envelope_missing_version_returns_none;
+          Alcotest.test_case "empty in envelope -> None" `Quick test_envelope_empty_snapshot_returns_none;
         ] );
       ( "patch_checkpoint",
         [

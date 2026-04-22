@@ -27,7 +27,7 @@ COPY ${BINARY_PATH} /app/masc-mcp
 RUN chmod +x /app/masc-mcp
 
 # Create non-root user for runtime
-RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+RUN groupadd --system appgroup && useradd --system --gid appgroup appuser
 
 # Create data directory for JSONL fallback
 RUN mkdir -p /app/.masc && chown -R appuser:appgroup /app/.masc

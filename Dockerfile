@@ -41,6 +41,9 @@ ENV MASC_CONFIG_DIR=/app/config
 
 EXPOSE 8080
 
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -fsS http://localhost:${PORT}/health || exit 1
+
 USER appuser
 
 # --base-path is already set via MASC_BASE_PATH; avoid duplication.

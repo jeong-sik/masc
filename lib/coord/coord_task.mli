@@ -82,11 +82,13 @@ val add_task_with_role :
 
 val batch_add_tasks :
   ?created_by:string ->
-  config -> (string * int * string) list -> string
+  config -> (string * int * string * string option) list -> string
 
 val batch_add_tasks_with_contracts :
   ?created_by:string ->
-  config -> (string * int * string * Types.task_contract option) list -> string
+  config ->
+  (string * int * string * Types.task_contract option * string option) list ->
+  string
 
 (** {1 Task claiming} *)
 

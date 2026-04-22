@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
 import { AlertTriangle } from 'lucide-preact'
 import { useEffect, useMemo } from 'preact/hooks'
-import type { KeeperApprovalQueueItem } from '../types'
+import type { KeeperApprovalQueueItem, KeeperApprovalRule } from '../types'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { Card } from './common/card'
@@ -17,6 +17,7 @@ import {
   governanceError,
   governanceLoading,
   governanceApprovalActing,
+  deleteKeeperApprovalRule,
   refreshGovernance,
   respondToKeeperApproval,
 } from './governance-store'
@@ -243,6 +244,14 @@ export function approvalRiskToneClass(riskLevel: string): string {
   return 'border-white/10 bg-[var(--white-3)] text-text-muted'
 }
 
+function approvalDispositionToneClass(disposition?: string | null): string {
+  const normalized = disposition?.trim().toLowerCase()
+  if (normalized === 'alert') return 'border-bad/30 bg-bad/10 text-bad'
+  if (normalized === 'pause') return 'border-warn/30 bg-warn/10 text-warn'
+  if (normalized === 'pass') return 'border-ok/30 bg-ok/10 text-ok'
+  return 'border-white/10 bg-[var(--white-3)] text-text-muted'
+}
+
 const RISK_RANK: Record<string, number> = {
   critical: 4,
   high: 3,
@@ -455,6 +464,23 @@ function KeeperApprovalQueueSection() {
                     ${item.input_preview
                       ? html`<div class="mt-2 text-xs leading-relaxed text-text-muted break-words">${item.input_preview}</div>`
                       : null}
+                    <div class="mt-2 flex flex-wrap gap-1.5 text-2xs">
+                      ${item.task_id ? html`<span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-text-muted">task ${item.task_id}</span>` : null}
+                      ${item.goal_id ? html`<span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-text-muted">goal ${item.goal_id}</span>` : null}
+                      ${item.runtime_contract?.sandbox_profile
+                        ? html`<span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-text-muted">
+                          sandbox ${item.runtime_contract.sandbox_profile}${item.runtime_contract.backend ? ` / ${item.runtime_contract.backend}` : ''}
+                        </span>`
+                        : null}
+                      ${item.selected_model
+                        ? html`<span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-text-muted font-mono">${item.selected_model}</span>`
+                        : null}
+                      ${item.disposition
+                        ? html`<span class="rounded border px-1.5 py-0.5 font-bold ${approvalDispositionToneClass(item.disposition)}">
+                          ${item.disposition}${item.disposition_reason ? ` · ${item.disposition_reason}` : ''}
+                        </span>`
+                        : null}
+                    </div>
                     <div class="mt-3 grid gap-3 min-[1100px]:grid-cols-[minmax(0,1fr)_auto]">
                       <${JsonViewerCard} data=${item.input ?? {}} title="Approval Input" />
                       <div class="flex min-[1100px]:flex-col gap-2 min-[1100px]:justify-start">
@@ -466,6 +492,15 @@ function KeeperApprovalQueueSection() {
                           disabled=${Boolean(actingId)}
                         >
                           ${disabled ? '처리 중...' : '승인'}
+                        <//>
+                        <${ActionButton}
+                          variant="ghost"
+                          size="md"
+                          class="min-w-[110px]"
+                          onClick=${() => void respondToKeeperApproval(item.id, 'approve', true)}
+                          disabled=${Boolean(actingId)}
+                        >
+                          ${disabled ? '처리 중...' : '승인 + Always'}
                         <//>
                         <${ActionButton}
                           variant="danger"
@@ -488,6 +523,60 @@ function KeeperApprovalQueueSection() {
   `
 }
 
+function ApprovalRulesSection() {
+  const rules = governanceData.value?.approval_rules ?? []
+  const actingId = governanceApprovalActing.value
+  return html`
+    <${Card} title="Always 규칙" class="section mb-5" variant="compact">
+      <div class="mb-3 text-xs text-text-muted">
+        승인된 요청에서 파생된 자동 승인 규칙입니다. Critical, destructive shell/git, 수동 결정 대기 상태는 규칙이 있어도 자동 승인되지 않습니다.
+      </div>
+      ${rules.length === 0
+        ? html`<${EmptyState} message="저장된 Always 규칙이 없습니다." compact />`
+        : html`
+            <div class="flex flex-col gap-3" data-testid="governance-approval-rules">
+              ${rules.map((rule: KeeperApprovalRule) => {
+                const deleting = actingId === `rule:${rule.id}`
+                return html`
+                  <div class="rounded border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-rule">
+                    <div class="flex flex-wrap items-start gap-2.5">
+                      <span class="inline-flex items-center rounded border border-white/10 bg-[var(--white-3)] px-2 py-0.5 text-3xs font-bold text-text-muted">
+                        keeper ${rule.keeper_name}
+                      </span>
+                      <span class="inline-flex items-center rounded border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-bold text-accent">
+                        ${rule.tool_name}
+                      </span>
+                      ${rule.max_risk ? html`<span class="inline-flex items-center rounded border px-2 py-0.5 text-3xs font-bold ${approvalRiskToneClass(rule.max_risk)}">${rule.max_risk}</span>` : null}
+                      <span class="ml-auto text-2xs text-text-dim">
+                        ${rule.created_at ? html`생성 <${TimeAgo} timestamp=${rule.created_at} />` : null}
+                        ${rule.last_matched_at ? html` · 최근 매치 <${TimeAgo} timestamp=${rule.last_matched_at} />` : null}
+                      </span>
+                    </div>
+                    <div class="mt-2 flex flex-wrap gap-1.5 text-2xs">
+                      ${rule.sandbox_profile ? html`<span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-text-muted">sandbox ${rule.sandbox_profile}${rule.backend ? ` / ${rule.backend}` : ''}</span>` : null}
+                      ${rule.request_fingerprint_preview ? html`<span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-text-muted font-mono">fp ${rule.request_fingerprint_preview}</span>` : null}
+                      ${typeof rule.match_count === 'number' ? html`<span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-text-muted">match ${rule.match_count}</span>` : null}
+                      ${rule.source_approval_id ? html`<span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-text-muted">from ${rule.source_approval_id}</span>` : null}
+                    </div>
+                    <div class="mt-3 flex justify-end">
+                      <${ActionButton}
+                        variant="danger"
+                        size="sm"
+                        onClick=${() => void deleteKeeperApprovalRule(rule.id)}
+                        disabled=${Boolean(actingId)}
+                      >
+                        ${deleting ? '삭제 중...' : '삭제'}
+                      <//>
+                    </div>
+                  </div>
+                `
+              })}
+            </div>
+          `}
+    <//>
+  `
+}
+
 export function Governance() {
   useEffect(() => {
     void refreshGovernance()
@@ -502,6 +591,7 @@ export function Governance() {
       <${KeeperApprovalAlertBanner} />
       <${GovernanceSummaryStrip} />
       <${KeeperApprovalQueueSection} />
+      <${ApprovalRulesSection} />
       <${JudgmentsSection} />
     </div>
   `

@@ -40,6 +40,7 @@ import type {
   GovernanceCaseBundle,
   GovernanceDecisionItem,
   GovernanceJudgment,
+  KeeperApprovalRule,
   KeeperApprovalQueueItem,
   GovernanceTimelineEvent,
   PendingConfirmation,
@@ -345,6 +346,31 @@ export function fetchDashboardMemory(
   return get(`/api/v1/dashboard/board${params.toString() ? `?${params}` : ''}`)
 }
 
+function normalizeKeeperApprovalRule(raw: unknown): KeeperApprovalRule | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const keeperName = asString(raw.keeper_name, '').trim()
+  const toolName = asString(raw.tool_name, '').trim()
+  if (!id || !keeperName || !toolName) return null
+  return {
+    id,
+    keeper_name: keeperName,
+    tool_name: toolName,
+    sandbox_profile: asNullableString(raw.sandbox_profile),
+    backend: asNullableString(raw.backend),
+    request_fingerprint: asNullableString(raw.request_fingerprint) ?? undefined,
+    request_fingerprint_preview:
+      asNullableString(raw.request_fingerprint_preview) ?? undefined,
+    max_risk: asNullableString(raw.max_risk) ?? undefined,
+    created_at: asNullableIsoTimestamp(raw.created_at_iso ?? raw.created_at),
+    created_by: asNullableString(raw.created_by),
+    last_matched_at:
+      asNullableIsoTimestamp(raw.last_matched_at_iso ?? raw.last_matched_at),
+    match_count: asInt(raw.match_count) ?? undefined,
+    source_approval_id: asNullableString(raw.source_approval_id),
+  }
+}
+
 export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse> {
   return withRetries('fetchDashboardGovernance', async () => {
     const raw = await get<Record<string, unknown>>('/api/v1/dashboard/governance')
@@ -362,6 +388,11 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
       ? raw.approval_queue
           .map(item => normalizeKeeperApprovalQueueItem(item))
           .filter((item): item is KeeperApprovalQueueItem => item !== null)
+      : []
+    const approvalRules = Array.isArray(raw.approval_rules)
+      ? raw.approval_rules
+          .map(item => normalizeKeeperApprovalRule(item))
+          .filter((item): item is KeeperApprovalRule => item !== null)
       : []
     return {
       generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
@@ -404,6 +435,7 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
         : [],
       pending_actions: pendingActions,
       approval_queue: approvalQueue,
+      approval_rules: approvalRules,
     }
   })
 }
@@ -411,13 +443,21 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
 export function resolveGovernanceApproval(
   id: string,
   decision: 'approve' | 'reject',
+  rememberRule?: boolean,
   reason?: string,
-): Promise<{ ok: boolean; id: string; decision: 'approve' | 'reject' }> {
+): Promise<{ ok: boolean; id: string; decision: 'approve' | 'reject'; rule_id?: string | null }> {
   return post('/api/v1/dashboard/governance/approvals/resolve', {
     id,
     decision,
+    remember_rule: rememberRule,
     reason,
   })
+}
+
+export function deleteGovernanceApprovalRule(
+  id: string,
+): Promise<{ ok: boolean; id: string }> {
+  return post('/api/v1/dashboard/governance/approvals/rules/delete', { id })
 }
 
 export function fetchGovernanceCaseStatus(caseId: string): Promise<GovernanceCaseBundle> {

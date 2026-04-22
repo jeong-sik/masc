@@ -1,6 +1,6 @@
 import type { Agent, BoardPost } from './core'
 import type { OperatorAttentionItem, OperatorRecommendedAction } from './dashboard-mission'
-import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, GovernanceJudgment, KeeperApprovalQueueItem, PendingConfirmation, PendingConfirmSummary } from './governance'
+import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, GovernanceJudgment, KeeperApprovalQueueItem, KeeperApprovalRule, PendingConfirmation, PendingConfirmSummary } from './governance'
 
 // --- Dashboard projection responses ---
 
@@ -431,6 +431,7 @@ export interface DashboardGovernanceResponse {
   judgments?: GovernanceJudgment[]
   pending_actions?: PendingConfirmation[]
   approval_queue?: KeeperApprovalQueueItem[]
+  approval_rules?: KeeperApprovalRule[]
 }
 
 export interface DashboardPlanningResponse {

@@ -714,7 +714,8 @@ let task_to_yojson t =
     ("files", `List (List.map (fun s -> `String s) t.files));
     ("created_at", `String t.created_at);
   ] in
-  let with_goal_id = match t.goal_id with
+  let with_goal_id =
+    match t.goal_id with
     | None -> base
     | Some goal_id -> base @ [("goal_id", `String goal_id)]
   in

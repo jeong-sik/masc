@@ -1,0 +1,4 @@
+[keeper]
+persona_name = "sojin"
+sandbox_profile = "docker"
+network_mode = "none"

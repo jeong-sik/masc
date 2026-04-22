@@ -53,7 +53,6 @@ let update_gauge_for purpose value =
     ~labels:[("subscriber_purpose", purpose)]
     (float_of_int value)
 
-<<<<<<< HEAD
 let subscribe ~purpose ?(filter = Oas.Event_bus.accept_all) bus =
   let sub = Oas.Event_bus.subscribe ~filter bus in
   let t =

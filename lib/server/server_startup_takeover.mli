@@ -4,6 +4,8 @@ type acquire_result =
 
 val pid_lock_path : int -> string
 
+val base_path_lock_path : string -> string
+
 val status_line_is_healthy : string -> bool
 
 val looks_like_server_command : string -> bool
@@ -20,4 +22,9 @@ val acquire_pid_lock :
   ?kill_wait_sec:float ->
   ?poll_interval_sec:float ->
   int ->
+  acquire_result
+
+val acquire_base_path_lock :
+  ?lock_path:string ->
+  string ->
   acquire_result

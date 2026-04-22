@@ -191,6 +191,16 @@ let public_mcp_tools_of_oas_tools (tools : Oas.Tool.t list) =
 let tool_names_are_public_mcp (tool_names : string list) =
   tool_names <> [] && List.for_all Tool_catalog.is_public_mcp tool_names
 
+let trim_nonempty value =
+  match value with
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if String.equal trimmed "" then None else Some trimmed
+  | None -> None
+
+let first_nonempty_env names =
+  List.find_map (fun name -> Sys.getenv_opt name |> trim_nonempty) names
+
 let public_mcp_runtime_policy_of_tool_names (tool_names : string list) :
     Llm_provider.Llm_transport.runtime_mcp_policy option =
   let tool_names = dedupe_preserve_order tool_names in
@@ -224,16 +234,6 @@ let provider_label (provider_cfg : Llm_provider.Provider_config.t) =
   Printf.sprintf "%s:%s"
     (Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind)
     provider_cfg.model_id
-
-let trim_nonempty value =
-  match value with
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if String.equal trimmed "" then None else Some trimmed
-  | None -> None
-
-let first_nonempty_env names =
-  List.find_map (fun name -> Sys.getenv_opt name |> trim_nonempty) names
 
 let kimi_cli_auth_value (provider_cfg : Llm_provider.Provider_config.t) =
   match trim_nonempty (Some provider_cfg.api_key) with

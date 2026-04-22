@@ -1202,7 +1202,9 @@ let auto_label_for_adapter (adapter : adapter) =
   else
     match default_model_label_for_adapter adapter with
     | Ok label -> Some label
-    | Error _ -> None
+    | Error msg ->
+        Eio.traceln "[ProviderAdapter] default_model_label_for_adapter failed: %s" msg;
+        None
 
 (** Cloud adapters that participate in auto-detection (excludes llama
     which requires explicit model config, and openrouter which requires

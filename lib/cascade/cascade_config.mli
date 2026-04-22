@@ -135,7 +135,7 @@ val order_weighted_entries :
     need to report the reason back to the user.
 
     @since 0.81.0 *)
-val parse_model_string_exn :
+val parse_model_string_result :
   ?temperature:float ->
   ?max_tokens:int ->
   ?system_prompt:string ->

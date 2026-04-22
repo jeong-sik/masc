@@ -1,6 +1,6 @@
 module SS = Set.Make (String)
 
-type t = { root : string }
+type t = { root : string } [@@unboxed]
 
 let preview_max = 200
 
@@ -53,7 +53,7 @@ let put t ~bytes ~mime =
 let fetch t ~sha256 =
   let path = shard_path t sha256 in
   if Fs_compat.file_exists path then
-    try Some (Fs_compat.load_file path) with _ -> None
+    Safe_ops.protect ~default:None (fun () -> Some (Fs_compat.load_file path))
   else None
 
 let fetch_exn t ~sha256 =

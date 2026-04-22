@@ -10,11 +10,11 @@ let operator_severity_to_string = function
   | Sev_bad -> "bad"
   | Sev_warn -> "warn"
 
-let operator_severity_of_string = function
-  | "critical" -> Sev_critical
-  | "bad" -> Sev_bad
-  | "warn" -> Sev_warn
-  | other -> failwith ("unknown operator severity: " ^ other)
+let operator_severity_of_string_opt = function
+  | "critical" -> Some Sev_critical
+  | "bad" -> Some Sev_bad
+  | "warn" -> Some Sev_warn
+  | _ -> None
 
 let operator_severity_of_failure_envelope
     (sev : Failure_envelope.severity) : operator_severity =

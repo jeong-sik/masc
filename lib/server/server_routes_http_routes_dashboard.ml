@@ -581,7 +581,7 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun _state req reqd ->
          let n =
            let raw = match Server_utils.query_param req "n" with
-             | Some s -> (try int_of_string s with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 5000)
+             | Some s -> int_of_string_opt s |> Option.value ~default:5000
              | None -> 5000
            in
            max 1 (min 50000 raw)
@@ -589,12 +589,9 @@ let rec add_routes ~sw ~clock router =
          let window_hours =
            match Server_utils.query_param req "window_hours" with
            | Some s ->
-             (try
-                let value = float_of_string s in
-                Some (max 0.1 (min 168.0 value))
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | _ -> None)
+             (match float_of_string_opt s with
+              | Some value -> Some (max 0.1 (min 168.0 value))
+              | None -> None)
            | None -> None
          in
          let json = Dashboard_http_tool_quality.aggregate ~n ?window_hours () in

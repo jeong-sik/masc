@@ -27,7 +27,9 @@ let percentile95_int_option values =
         int_of_float (Float.ceil (0.95 *. float_of_int n)) - 1
         |> max 0 |> min (n - 1)
       in
-      float_of_int (List.nth values idx)
+      match List.nth_opt values idx with
+      | Some v -> float_of_int v
+      | None -> 0.0
 
 let dedupe_keep_order items =
   let seen = Hashtbl.create (List.length items) in

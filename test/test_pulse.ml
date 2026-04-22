@@ -472,14 +472,14 @@ let () = test "circuit_breaker wrap records success/failure" (fun () ->
   (match r2 with Error _ -> () | Ok _ -> failwith "expected Error while open")
 )
 
-(* ── Test: circuit_breaker wrap_exn ────────────────────────── *)
+(* ── Test: circuit_breaker wrap_result ────────────────────────── *)
 
-let () = test "circuit_breaker wrap_exn catches exceptions" (fun () ->
+let () = test "circuit_breaker wrap_result catches exceptions" (fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let cb = Circuit_breaker.create
     ~failure_threshold:3 ~failure_window:60.0 ~cooldown:1.0 () in
-  let r = Circuit_breaker.wrap_exn cb ~agent_id:"exc-test" (fun () ->
+  let r = Circuit_breaker.wrap_result cb ~agent_id:"exc-test" (fun () ->
     failwith "boom"
   ) in
   (match r with Error _ -> () | Ok _ -> failwith "expected Error from exception");

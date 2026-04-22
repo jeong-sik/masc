@@ -598,9 +598,11 @@ let repo_slug_of_remote_url url =
       let n = List.length parts in
       if n >= 2
       then
-        let owner = List.nth parts (n - 2) in
-        let repo = strip_git (List.nth parts (n - 1)) in
-        validate_repo_slug (owner ^ "/" ^ repo) |> Result.to_option
+        match List.nth_opt parts (n - 2), List.nth_opt parts (n - 1) with
+        | Some owner, Some last_part ->
+            let repo = strip_git last_part in
+            validate_repo_slug (owner ^ "/" ^ repo) |> Result.to_option
+        | _ -> None
       else
         None
 

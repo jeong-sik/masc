@@ -107,6 +107,10 @@ type masc_internal_error =
       cascade_name : string;
       wait_sec : float;
     }
+  | Admission_queue_rejected of {
+      keeper_name : string;
+      reason : string;
+    }
   | Turn_timeout of {
       elapsed_sec : float;
     }
@@ -164,6 +168,13 @@ let masc_internal_error_to_json = function
         ("keeper_name", `String keeper_name);
         ("cascade_name", `String cascade_name);
         ("wait_sec", `Float wait_sec);
+      ]
+  | Admission_queue_rejected { keeper_name; reason } ->
+    `Assoc
+      [
+        ("kind", `String "admission_queue_rejected");
+        ("keeper_name", `String keeper_name);
+        ("reason", `String reason);
       ]
   | Turn_timeout { elapsed_sec } ->
     `Assoc
@@ -298,6 +309,13 @@ let classify_masc_internal_error (err : Oas.Error.sdk_error) :
                    | _ -> 0.0
                  in
                  Some (Admission_queue_timeout { keeper_name; cascade_name; wait_sec })
+               | _ -> None)
+           | Some (`String "admission_queue_rejected") -> (
+               match string_opt_of_assoc "keeper_name" json,
+                     string_opt_of_assoc "reason" json
+               with
+               | Some keeper_name, Some reason ->
+                 Some (Admission_queue_rejected { keeper_name; reason })
                | _ -> None)
            | Some (`String "turn_timeout") -> (
                match json with
@@ -1282,14 +1300,14 @@ let run_named
          do_backoff (n + 1);
          cycle_loop (n + 1))
   in
-  try
-    Admission_queue.with_permit ?wait_timeout_sec
-      ~priority:queue_priority ~keeper_name:name ~cascade_name
-      (fun () -> cycle_loop 0)
-  with
-  | Admission_queue.Wait_timeout wait_ms ->
-      admission_wait_timeout_error ~keeper_name:name ~cascade_name
-        ~priority:queue_priority wait_ms)
+  match Admission_queue.with_permit ?wait_timeout_sec
+    ~priority:queue_priority ~keeper_name:name ~cascade_name
+    (fun () -> cycle_loop 0) with
+  | Ok result -> result
+  | Error (`Host_resource_saturated reason) ->
+      Error
+        (sdk_error_of_masc_internal_error
+           (Admission_queue_rejected { keeper_name = name; reason })))
 
 (** Run a single Agent.run() using a model label string (e.g. "llama:qwen3.5").
     Validates the label parses before attempting execution. *)
@@ -1338,7 +1356,7 @@ let run_model_by_label
         | None -> Masc_grpc_transport.from_env ()
       in
       let config = { config with transport = transport_resolved } in
-      try
+      match
         Admission_queue.with_permit ?wait_timeout_sec
           ~priority:Llm_provider.Request_priority.Proactive
           ~keeper_name:"oas-label-model"
@@ -1364,10 +1382,11 @@ let run_model_by_label
                             }))
                 | Error e -> Error e))
       with
-      | Admission_queue.Wait_timeout wait_ms ->
-          admission_wait_timeout_error ~keeper_name:"oas-label-model"
-            ~cascade_name:model_label
-            ~priority:Llm_provider.Request_priority.Proactive wait_ms
+      | Ok result -> result
+      | Error (`Host_resource_saturated reason) ->
+          Error
+            (sdk_error_of_masc_internal_error
+               (Admission_queue_rejected { keeper_name = "oas-label-model"; reason }))
 
 let run_named_with_masc_tools
     ~cascade_name
@@ -1459,7 +1478,7 @@ let run_model_with_masc_tools
         | None -> Masc_grpc_transport.from_env ()
       in
       let config = { config with raw_trace; transport = transport_resolved } in
-      try
+      match
         Admission_queue.with_permit ?wait_timeout_sec
           ~priority:Llm_provider.Request_priority.Proactive
           ~keeper_name:"oas-explicit-model"
@@ -1472,7 +1491,8 @@ let run_model_with_masc_tools
                 Oas_worker_exec.run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?contract ?on_event
                   goal))
       with
-      | Admission_queue.Wait_timeout wait_ms ->
-          admission_wait_timeout_error ~keeper_name:"oas-explicit-model"
-            ~cascade_name:model_label
-            ~priority:Llm_provider.Request_priority.Proactive wait_ms
+      | Ok result -> result
+      | Error (`Host_resource_saturated reason) ->
+          Error
+            (sdk_error_of_masc_internal_error
+               (Admission_queue_rejected { keeper_name = "oas-explicit-model"; reason }))

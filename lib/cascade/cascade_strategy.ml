@@ -173,7 +173,9 @@ let tier_for_cycle tiers ~cycle =
   | _ ->
     let n = List.length tiers in
     let idx = if cycle >= n then n - 1 else max 0 cycle in
-    List.nth tiers idx
+    match List.nth_opt tiers idx with
+    | Some tier -> tier
+    | None -> []
 
 let priority_tier_order adapter ctx ~tiers ~cycle cands =
   let allowed = tier_for_cycle tiers ~cycle in

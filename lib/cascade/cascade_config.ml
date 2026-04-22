@@ -493,7 +493,7 @@ let parse_weighted_entries
        label (List.length entries));
   List.rev parsed
 
-let parse_model_string_exn
+let parse_model_string_result
     ?(temperature = Llm_provider.Constants.Inference.default_temperature)
     ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
     ?system_prompt (s : string) : (Llm_provider.Provider_config.t, string) result =

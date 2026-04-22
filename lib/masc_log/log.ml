@@ -51,6 +51,11 @@ let level_of_string s =
   | Some lvl -> lvl
   | None -> Info
 
+let protect ~default f =
+  try f () with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> default
+
 let source_to_string = function
   | Structured -> "structured"
   | Legacy_stderr -> "legacy_stderr"
@@ -179,7 +184,7 @@ module Ring = struct
 
   let ensure_dir dir =
     if not (Sys.file_exists dir) then
-      (try Sys.mkdir dir 0o755 with Sys_error _ -> ())
+      protect ~default:() (fun () -> Sys.mkdir dir 0o755)
 
   let open_sink dir =
     ensure_dir dir;
@@ -207,7 +212,7 @@ module Ring = struct
   let rotate_if_needed () =
     let today = date_string () in
     if today <> !file_current_date && !file_base_dir <> "" then begin
-      (match !file_channel with Some oc -> (try close_out oc with Sys_error _ -> ()) | None -> ());
+      (match !file_channel with Some oc -> protect ~default:() (fun () -> close_out oc) | None -> ());
       open_sink !file_base_dir
     end
 
@@ -218,7 +223,7 @@ module Ring = struct
         output_string oc (Yojson.Safe.to_string entry_json);
         output_char oc '\n';
         (* flush on warn/error for timely persistence *)
-        (try flush oc with Sys_error _ -> ())
+        protect ~default:() (fun () -> flush oc)
     | None -> ()
 
   let entry_of_json json =
@@ -295,7 +300,7 @@ module Ring = struct
 
   let cleanup_old_files ?(keep_days = 7) dir =
     if Sys.file_exists dir then begin
-      let files = try Sys.readdir dir with Sys_error _ -> [||] in
+      let files = protect ~default:[||] (fun () -> Sys.readdir dir) in
       let cutoff =
         let t = Time_compat.now () -. (float_of_int keep_days *. 86400.0) in
         let tm = Unix.localtime t in
@@ -308,7 +313,7 @@ module Ring = struct
           (* Extract date from system_log_YYYY-MM-DD.jsonl *)
           let date_part = String.sub fname 11 10 in
           if date_part < cutoff then
-            (try Sys.remove (Filename.concat dir fname) with Sys_error _ -> ())
+            protect ~default:() (fun () -> Sys.remove (Filename.concat dir fname))
         end
       ) files
     end

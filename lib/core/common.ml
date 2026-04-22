@@ -18,6 +18,7 @@ let protect ~module_name ~finally_label ~finally f =
   match f () with
   | v ->
       (try finally () with
+       | Eio.Cancel.Cancelled _ as e -> raise e
        | ex ->
            let bt = Printexc.get_raw_backtrace () in
            handle_finalizer_error ~module_name ~label:finally_label
@@ -26,6 +27,7 @@ let protect ~module_name ~finally_label ~finally f =
   | exception ex ->
       let bt = Printexc.get_raw_backtrace () in
       (try finally () with
+       | Eio.Cancel.Cancelled _ as e -> raise e
        | ex2 ->
            let bt2 = Printexc.get_raw_backtrace () in
            handle_finalizer_error ~module_name ~label:finally_label

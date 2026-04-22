@@ -23,7 +23,6 @@ type snapshot = {
   waiters : waiter_info list;
 }
 
-exception Wait_timeout of int
 
 type waiter = {
   rank : int;
@@ -54,7 +53,7 @@ let insert_sorted entry ws =
   in
   go [] ws
 
-exception Host_resource_saturated of string
+
 
 (* ── Core Queue ────────────────────────────────────────── *)
 
@@ -83,89 +82,6 @@ let () = Admission_queue_metrics.set_max_concurrent global.max_slots
 let now_ts () = Unix.gettimeofday ()
 let wait_ms_since enqueue_ts = int_of_float ((now_ts () -. enqueue_ts) *. 1000.0)
 
-let rec _acquire ?wait_timeout_sec ~priority ~keeper_name ~cascade_name t =
-  (* Normalize at the gate: any cascade name stored in the admission info
-     record or forwarded to metrics passes through the SSOT canonicalizer,
-     so downstream consumers never see drift/ghost values. *)
-  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
-  let resolved = Llm_provider.Request_priority.resolve priority in
-  let rank = Llm_provider.Request_priority.to_int resolved in
-  let action =
-    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
-      if t.active < t.max_slots then (
-        t.active <- t.active + 1;
-        `Got_slot
-      ) else (
-        let p, r = Eio.Promise.create () in
-        let info = {
-          keeper_name;
-          cascade_name;
-          enqueue_ts = now_ts ();
-          priority;
-        } in
-        let entry = { rank; info; resolver = r; cancelled = Atomic.make false } in
-        t.waiters <- insert_sorted entry t.waiters;
-        Admission_queue_metrics.on_enqueue ~keeper_name ~cascade_name;
-        `Wait (p, entry)
-      ))
-  in
-  match action with
-  | `Got_slot ->
-    Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms:0;
-    ()
-  | `Wait (p, entry) ->
-    let enqueue_ts = entry.info.enqueue_ts in
-    let cancel_wait exn =
-      Atomic.set entry.cancelled true;
-      Admission_queue_metrics.on_dequeue ~keeper_name ~cascade_name;
-      Admission_queue_metrics.on_cancelled ~keeper_name ~cascade_name;
-      (* If release already resolved our promise, the slot was handed
-         to us but we are being cancelled. Release it back. *)
-      if Eio.Promise.is_resolved p then
-        _release_slot t;
-      raise exn
-    in
-    (try
-       (match wait_timeout_sec with
-        | Some timeout_sec ->
-            (match Eio_context.get_clock_opt () with
-             | Some clock ->
-                 Eio.Time.with_timeout_exn clock timeout_sec
-                   (fun () -> Eio.Promise.await p)
-             | None ->
-                 Eio.Promise.await p)
-        | None -> Eio.Promise.await p);
-       let wait_ms = wait_ms_since enqueue_ts in
-       Admission_queue_metrics.on_dequeue ~keeper_name ~cascade_name;
-       Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms
-     with
-     | Eio.Time.Timeout ->
-         cancel_wait (Wait_timeout (wait_ms_since enqueue_ts))
-     | exn ->
-         cancel_wait exn)
-
-and _release_slot t =
-  let to_wake =
-    Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
-      let rec find_valid acc = function
-        | [] ->
-          t.waiters <- List.rev acc;
-          t.active <- t.active - 1;
-          None
-        | entry :: rest ->
-          if Atomic.get entry.cancelled then
-            find_valid acc rest
-          else (
-            t.waiters <- List.rev_append acc rest;
-            Some entry
-          )
-      in
-      find_valid [] t.waiters)
-  in
-  match to_wake with
-  | Some entry -> Eio.Promise.resolve entry.resolver ()
-  | None -> ()
-
 (* ── Public API ────────────────────────────────────────── *)
 
 let check_host_resources ~keeper_name =
@@ -176,39 +92,44 @@ let check_host_resources ~keeper_name =
       Printf.sprintf "fd count %d >= 90%% of threshold %d" fd_count threshold
     in
     Log.Misc.warn "admission rejected for %s: %s" keeper_name msg;
-    raise (Host_resource_saturated msg)
-  end
+    Error (`Host_resource_saturated msg)
+  end else
+    Ok ()
 
 let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~cascade_name f =
   (* SSOT: every admission_queue entry point canonicalizes cascade_name
      so metrics/structs never see drift values. *)
   let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
-  check_host_resources ~keeper_name;
-  (* Passthrough: provider-level throttling belongs in OAS (cascade),
-     not in MASC.  The cascade distributes requests across providers
-     and handles 429/timeout by falling to the next provider.
-     Gating here starves cloud-routed keepers behind a serial local
-     decode and cannot express per-provider capacity.
-     Metric observation tracks real inflight even though gating is off. *)
-  Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms:0;
-  match f () with
-  | result ->
-    Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
-    result
-  | exception exn ->
-    Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
-    raise exn
+  match check_host_resources ~keeper_name with
+  | Error _ as e -> e
+  | Ok () ->
+      (* Passthrough: provider-level throttling belongs in OAS (cascade),
+         not in MASC.  The cascade distributes requests across providers
+         and handles 429/timeout by falling to the next provider.
+         Gating here starves cloud-routed keepers behind a serial local
+         decode and cannot express per-provider capacity.
+         Metric observation tracks real inflight even though gating is off. *)
+      Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms:0;
+      match f () with
+      | result ->
+        Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
+        Ok result
+      | exception exn ->
+        Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
+        raise exn
 
 let try_with_permit ~priority:_ ~keeper_name ~cascade_name f =
-  check_host_resources ~keeper_name;
-  Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms:0;
-  match f () with
-  | result ->
-    Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
-    Some result
-  | exception exn ->
-    Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
-    raise exn
+  match check_host_resources ~keeper_name with
+  | Error _ -> None
+  | Ok () ->
+      Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms:0;
+      match f () with
+      | result ->
+        Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
+        Some result
+      | exception exn ->
+        Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
+        raise exn
 
 let snapshot () =
   Eio.Mutex.use_ro global.mutex (fun () ->

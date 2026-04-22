@@ -9,8 +9,8 @@ type operator_severity = Sev_critical | Sev_bad | Sev_warn
 
 val operator_severity_to_string : operator_severity -> string
 
-(** Strict reverse: raises [Failure _] on unknown input. *)
-val operator_severity_of_string : string -> operator_severity
+(** Safe reverse: [None] on unknown input. *)
+val operator_severity_of_string_opt : string -> operator_severity option
 
 val operator_severity_of_failure_envelope :
   Failure_envelope.severity -> operator_severity

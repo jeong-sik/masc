@@ -950,7 +950,7 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
                         Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink buf);
                         Eio.Flow.close stdout_r
                       with Eio.Cancel.Cancelled _ as e ->
-                        (try Eio.Flow.close stdout_r with _ -> ());
+                        (try Eio.Flow.close stdout_r with Eio.Cancel.Cancelled _ as ce -> raise ce | _ -> ());
                         raise e);
                      let status = Eio.Process.await proc in
                      (status, Buffer.contents buf))

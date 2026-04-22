@@ -78,6 +78,13 @@ import { navigate, route } from '../router'
 
 export const selectedKeeper = signal<Keeper | null>(null)
 
+function selectedKeeperMatches(keeperName: string): boolean {
+  const selected = selectedKeeper.value
+  if (!selected) return false
+  const trimmed = keeperName.trim()
+  return selected.name === trimmed || selected.agent_name === trimmed
+}
+
 function baseAgentDirectoryRouteParams(): Record<string, string> {
   if (route.value.tab === 'monitoring' && route.value.params.section === 'agents') {
     const next: Record<string, string> = { ...route.value.params, section: 'agents' }
@@ -95,9 +102,15 @@ export function openKeeperDetail(k: Keeper) {
   navigate('monitoring', { ...baseAgentDirectoryRouteParams(), keeper: k.name })
 }
 
-export function closeKeeperDetail() {
+export function clearKeeperDetailSelection(keeperName?: string) {
+  if (keeperName && !selectedKeeperMatches(keeperName)) return
   selectedKeeper.value = null
+  selectKeeper('')
   resetKeeperConfig()
+}
+
+export function closeKeeperDetail() {
+  clearKeeperDetailSelection()
   navigate('monitoring', baseAgentDirectoryRouteParams())
 }
 
@@ -1318,7 +1331,7 @@ export function KeeperDetailPage() {
     selectKeeper(keeper.name)
     void loadKeeperConfig(keeper.name)
     return () => {
-      resetKeeperConfig()
+      clearKeeperDetailSelection(keeper.name)
     }
   }, [keeper.name])
   useEffect(() => {

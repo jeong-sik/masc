@@ -12,8 +12,23 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 module V = Masc_mcp.Verification
 module D = Masc_mcp.Dashboard_verification
+module CU = Coord_utils
 
 (* ── Fixture helpers ────────────────────────────────── *)
+
+let active_verifications_dir base_path =
+  Filename.concat (CU.masc_dir_from_base_path ~base_path) "verifications"
+
+let legacy_verifications_dir base_path =
+  Filename.concat base_path "verifications"
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
 
 (** Create an isolated MASC base_path for the duration of [f].
     Restores [MASC_BASE_PATH] afterwards so subsequent tests in the same
@@ -28,14 +43,7 @@ let with_temp_base_path f =
     (match prior with
      | Some v -> Unix.putenv "MASC_BASE_PATH" v
      | None -> Unix.putenv "MASC_BASE_PATH" "");
-    let vdir = Filename.concat dir "verifications" in
-    (try
-       Array.iter (fun file ->
-         try Sys.remove (Filename.concat vdir file) with _ -> ()
-       ) (Sys.readdir vdir);
-       Sys.rmdir vdir
-     with _ -> ());
-    (try Sys.rmdir dir with _ -> ())
+    rm_rf dir
   in
   Fun.protect ~finally:cleanup (fun () -> f dir)
 
@@ -185,6 +193,30 @@ let test_task_id_filter () =
      | `List _ -> Alcotest.fail "expected empty list"
      | _ -> Alcotest.fail "requests not list"))
 
+let test_requests_json_ignores_legacy_root_entries () =
+  with_temp_base_path (fun base_path ->
+    let _ =
+      create_pending_request ~base_path ~task_id:"task-live" ~worker:"alpha"
+        ~criteria:[V.Custom "live criterion"] ~evidence:["ref-live"]
+    in
+    let legacy_dir = legacy_verifications_dir base_path in
+    Fs_compat.mkdir_p legacy_dir;
+    Fs_compat.save_file (Filename.concat legacy_dir "vrf-foreign.json")
+      {|{"id":"vrf-foreign","task_id":"task-legacy","evaluator":"oracle","overall_verdict":"approve"}|};
+    Alcotest.(check bool) "active store exists" true
+      (Sys.file_exists (active_verifications_dir base_path));
+    let j = D.requests_json () in
+    (match member "total" j with
+     | `Int 1 -> ()
+     | `Int n -> Alcotest.fail (Printf.sprintf "expected 1 live row, got %d" n)
+     | _ -> Alcotest.fail "total not int");
+    match member "requests" j with
+    | `List [row] -> (
+        match member "task_id" row with
+        | `String "task-live" -> ()
+        | _ -> Alcotest.fail "legacy root row leaked into dashboard")
+    | _ -> Alcotest.fail "expected one dashboard row")
+
 let test_requests_json_surfaces_conflict_triage_fields () =
   with_temp_base_path (fun base_path ->
     let output =
@@ -310,6 +342,8 @@ let () =
     "requests_json", [
       Alcotest.test_case "shape" `Quick test_requests_json_shape;
       Alcotest.test_case "task_id filter" `Quick test_task_id_filter;
+      Alcotest.test_case "ignores legacy root entries" `Quick
+        test_requests_json_ignores_legacy_root_entries;
       Alcotest.test_case "conflict triage fields" `Quick
         test_requests_json_surfaces_conflict_triage_fields;
     ];

@@ -42,6 +42,11 @@ let with_temp_config ~fsm_enabled f =
 
 (* Add a task with strict contract requiring verification *)
 let add_strict_task config =
+  let existing_ids =
+    Coord.read_backlog config
+    |> fun backlog -> List.map (fun (t : Types.task) -> t.id) backlog.tasks
+  in
+  let title = Printf.sprintf "strict task %d" (List.length existing_ids + 1) in
   let contract : Types.task_contract = {
     strict = true;
     completion_contract = ["tests pass"];
@@ -50,12 +55,16 @@ let add_strict_task config =
     verify_gate_evidence = ["output.json"];
     links = { operation_id = None; session_id = None; autoresearch_loop_id = None };
   } in
-  let _msg = Coord.add_task ~contract config ~title:"strict task"
+  let _msg = Coord.add_task ~contract config ~title
     ~priority:3 ~description:"needs verification" in
   let backlog = Coord.read_backlog config in
-  match List.nth_opt backlog.tasks 0 with
-  | None -> Alcotest.fail "no task added"
+  match
+    List.find_opt
+      (fun (t : Types.task) -> not (List.mem t.id existing_ids))
+      backlog.tasks
+  with
   | Some t -> t.id
+  | None -> Alcotest.fail "new task not found after add_task"
 
 let claim_and_start config agent_name task_id =
   let _ = Coord.transition_task_r config ~agent_name ~task_id
@@ -63,6 +72,12 @@ let claim_and_start config agent_name task_id =
   let _ = Coord.transition_task_r config ~agent_name ~task_id
     ~action:Types.Start () in
   ()
+
+let create_pending_request config ~task_id ~worker ~request_id =
+  match Verification.create_request ~base_path:config.Coord.base_path
+          ~task_id ~output:`Null ~criteria:[] ~worker ~request_id () with
+  | Ok req -> req
+  | Error e -> Alcotest.fail ("create_request failed: " ^ e)
 
 let get_task config task_id =
   let backlog = Coord.read_backlog config in
@@ -251,6 +266,9 @@ let test_claim_next_skips_pending_verification_tasks () =
              ~task_id:task_1 ~action:Types.Submit_for_verification () with
      | Ok _ -> ()
      | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e));
+    ignore
+      (create_pending_request config ~task_id:task_1 ~worker:"worker"
+         ~request_id:"vrf-pending-claim-next");
     Coord.claim_next_r config ~agent_name:"worker" ()
     |> expect_claim_next_claimed ~task_id:task_2 ~released_task_id:(Some task_1);
     Coord.claim_next_r config ~agent_name:"other" ()
@@ -265,13 +283,44 @@ let test_claim_next_skips_rejected_verification_tasks () =
              ~task_id:task_1 ~action:Types.Submit_for_verification () with
      | Ok _ -> ()
      | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e));
+    let req =
+      create_pending_request config ~task_id:task_1 ~worker:"worker"
+        ~request_id:"vrf-rejected-claim-next"
+    in
     (match Coord.transition_task_r config ~agent_name:"verifier"
              ~task_id:task_1 ~action:Types.Reject_verification
              ~reason:"CI checks failed at plan commit and PR head" () with
      | Ok _ -> ()
      | Error e -> Alcotest.fail ("reject failed: " ^ Types.show_masc_error e));
+    (match Verification.submit_verdict ~base_path:config.Coord.base_path
+             ~req_id:req.id ~verifier:"verifier"
+             ~verdict:(Verification.Fail "CI checks failed at plan commit and PR head") with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("submit_verdict failed: " ^ e));
     Coord.claim_next_r config ~agent_name:"worker" ()
     |> expect_claim_next_claimed ~task_id:task_2 ~released_task_id:(Some task_1);
+    Coord.claim_next_r config ~agent_name:"other" ()
+    |> expect_claim_next_no_eligible)
+
+let test_claim_next_blocks_pending_requests_stored_only_under_masc_root () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_strict_task config in
+    let req =
+      match Verification.create_request ~base_path:config.Coord.base_path
+              ~task_id ~output:`Null ~criteria:[] ~worker:"worker"
+              ~request_id:"vrf-masc-root-only" () with
+      | Ok req -> req
+      | Error e -> Alcotest.fail ("create_request failed: " ^ e)
+    in
+    let active_path =
+      Filename.concat (Filename.concat (Coord_utils.masc_dir config) "verifications")
+        (req.id ^ ".json")
+    in
+    Alcotest.(check bool) "request stored under .masc" true
+      (Sys.file_exists active_path);
+    Alcotest.(check bool) "legacy root verifications absent" false
+      (Sys.file_exists
+         (Filename.concat config.Coord.base_path "verifications"));
     Coord.claim_next_r config ~agent_name:"other" ()
     |> expect_claim_next_no_eligible)
 
@@ -393,6 +442,8 @@ let () =
         test_claim_next_skips_pending_verification_tasks;
       Alcotest.test_case "claim_next skips rejected verification tasks" `Quick
         test_claim_next_skips_rejected_verification_tasks;
+      Alcotest.test_case ".masc pending verification blocks claim_next" `Quick
+        test_claim_next_blocks_pending_requests_stored_only_under_masc_root;
       Alcotest.test_case "self-approval blocked" `Quick
         test_self_approval_blocked;
       Alcotest.test_case "self-rejection blocked" `Quick

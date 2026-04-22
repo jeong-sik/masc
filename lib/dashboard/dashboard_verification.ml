@@ -1,6 +1,6 @@
 (** Dashboard projection for verification requests.
 
-    Reads [<base_path>/verifications/*.json] via {!Verification.list_requests}
+    Reads [<base_path>/.masc/verifications/*.json] via {!Verification.list_requests}
     and emits the Mission detail table row structure. No mutation, no
     network. *)
 

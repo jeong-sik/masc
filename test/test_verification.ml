@@ -5,6 +5,7 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 module V = Masc_mcp.Verification
 module P = Masc_mcp.Prometheus
+module CU = Coord_utils
 
 let persistence_surface = "verification"
 
@@ -15,20 +16,24 @@ let persistence_counter reason =
 (* Initialize mirage-crypto-rng once (needed by Verification.generate_id). *)
 let () = Mirage_crypto_rng_unix.use_default ()
 
+let active_verifications_dir base_path =
+  Filename.concat (CU.masc_dir_from_base_path ~base_path) "verifications"
+
+let legacy_verifications_dir base_path =
+  Filename.concat base_path "verifications"
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
 (** Use a temporary directory for each test *)
 let with_temp_dir f =
   let dir = Filename.temp_dir "masc_verify_test" "" in
-  Fun.protect ~finally:(fun () ->
-    (* Clean up *)
-    let vdir = Filename.concat dir "verifications" in
-    (try
-       Array.iter (fun file ->
-         Sys.remove (Filename.concat vdir file)
-       ) (Sys.readdir vdir);
-       Sys.rmdir vdir
-     with _ -> ());
-    (try Sys.rmdir dir with _ -> ())
-  ) (fun () -> f dir)
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
 (* --- Criterion tests --- *)
 
@@ -144,6 +149,10 @@ let test_create_and_load () =
         ~worker:"claude" () with
     | Error e -> Alcotest.fail e
     | Ok req ->
+        Alcotest.(check bool) "persisted under .masc/verifications" true
+          (Sys.file_exists
+             (Filename.concat (active_verifications_dir base_path)
+                (req.id ^ ".json")));
         match V.load_request base_path req.id with
         | Error e -> Alcotest.fail e
         | Ok loaded ->
@@ -175,7 +184,7 @@ let test_list_requests_skips_bad_entries_with_metric () =
   with_temp_dir (fun base_path ->
     let _ = V.create_request ~base_path ~task_id:"t1"
         ~output:`Null ~criteria:[] ~worker:"a" () in
-    let dir = Filename.concat base_path "verifications" in
+    let dir = active_verifications_dir base_path in
     Fs_compat.save_file (Filename.concat dir "broken.json") "{not-json";
     let before =
       persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
@@ -185,6 +194,24 @@ let test_list_requests_skips_bad_entries_with_metric () =
     Alcotest.(check (float 0.1)) "broken file increments metric" 1.0
       (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
        -. before))
+
+let test_list_requests_ignores_legacy_root_entries () =
+  with_temp_dir (fun base_path ->
+    let _ = V.create_request ~base_path ~task_id:"t1"
+        ~output:`Null ~criteria:[] ~worker:"a" () in
+    let legacy_dir = legacy_verifications_dir base_path in
+    Fs_compat.mkdir_p legacy_dir;
+    Fs_compat.save_file (Filename.concat legacy_dir "broken.json") "{not-json";
+    Fs_compat.save_file (Filename.concat legacy_dir "vrf-foreign.json")
+      {|{"id":"vrf-foreign","task_id":"t-foreign","evaluator":"oracle","overall_verdict":"approve"}|};
+    let before =
+      persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+    in
+    let reqs = V.list_requests base_path in
+    Alcotest.(check int) "legacy root ignored" 1 (List.length reqs);
+    Alcotest.(check (float 0.1)) "legacy root does not increment metric"
+      before
+      (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error))
 
 let test_assign_verifier () =
   with_temp_dir (fun base_path ->
@@ -398,6 +425,8 @@ let () =
         test_list_requests_missing_dir_stays_quiet;
       Alcotest.test_case "list requests skips bad entries with metric" `Quick
         test_list_requests_skips_bad_entries_with_metric;
+      Alcotest.test_case "list requests ignores legacy root entries" `Quick
+        test_list_requests_ignores_legacy_root_entries;
       Alcotest.test_case "assign verifier" `Quick test_assign_verifier;
       Alcotest.test_case "cross-agent assign fail" `Quick test_assign_verifier_cross_agent_fail;
       Alcotest.test_case "submit verdict" `Quick test_submit_verdict;

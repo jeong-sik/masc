@@ -3,7 +3,7 @@
     {!Verification_protocol} request.
 
     Consumes {!Verification.list_requests}, which reads
-    [<base_path>/verifications/*.json]. Pure read-only: no mutation, no
+    [<base_path>/.masc/verifications/*.json]. Pure read-only: no mutation, no
     network.
 
     Status mapping:

@@ -10,6 +10,7 @@ import { agents, keepers, executionLoaded, shellCounts } from '../store'
 import { missionKeeperBriefs } from '../mission-signals'
 import { AgentRoster, countRuntimeKinds } from './agent-roster'
 import { AgentProfile } from './agent-profile'
+import { KeeperDetailPage } from './keeper-detail'
 import { RouteLink } from './common/route-link'
 import { namespaceTruth } from '../namespace-truth-store'
 import { resolveRuntimeCounts } from '../runtime-counts'
@@ -38,6 +39,11 @@ const CHIPS: { id: AgentsView; label: string; description: string }[] = [
 ]
 
 export function AgentsUnified() {
+  const keeperParam = route.value.params.keeper as string | undefined
+  if (keeperParam) {
+    return html`<${KeeperDetailPage} />`
+  }
+
   // If an agent name is in the route params, show the profile page
   const agentParam = route.value.params.agent as string | undefined
   if (agentParam) {

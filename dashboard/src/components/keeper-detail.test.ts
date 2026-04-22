@@ -1,11 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Keeper } from '../types'
+import type { RouteState } from '../types'
 
 const mocks = vi.hoisted(() => ({
   loadKeeperConfig: vi.fn(async () => {}),
   resetKeeperConfig: vi.fn(),
   selectKeeper: vi.fn(),
+  navigate: vi.fn(),
+  route: {
+    value: {
+      tab: 'monitoring',
+      params: { section: 'agents', view: 'keepers' },
+      postId: null,
+    } as RouteState,
+  },
 }))
 
 vi.mock('./keeper-config-panel', async () => {
@@ -20,6 +29,11 @@ vi.mock('./keeper-config-panel', async () => {
 
 vi.mock('../keeper-runtime', () => ({
   selectKeeper: mocks.selectKeeper,
+}))
+
+vi.mock('../router', () => ({
+  navigate: mocks.navigate,
+  route: mocks.route,
 }))
 
 import {
@@ -38,9 +52,15 @@ describe('openKeeperDetail', () => {
     mocks.loadKeeperConfig.mockClear()
     mocks.resetKeeperConfig.mockClear()
     mocks.selectKeeper.mockClear()
+    mocks.navigate.mockClear()
+    mocks.route.value = {
+      tab: 'monitoring',
+      params: { section: 'agents', view: 'keepers' },
+      postId: null,
+    }
   })
 
-  it('selects the keeper and preloads config on modal open', () => {
+  it('selects the keeper, preloads config, and routes into keeper detail', () => {
     const keeper: Keeper = {
       name: 'sangsu',
       status: 'active',
@@ -51,9 +71,33 @@ describe('openKeeperDetail', () => {
     expect(selectedKeeper.value).toEqual(keeper)
     expect(mocks.selectKeeper).toHaveBeenCalledWith('sangsu')
     expect(mocks.loadKeeperConfig).toHaveBeenCalledWith('sangsu')
+    expect(mocks.navigate).toHaveBeenCalledWith('monitoring', {
+      section: 'agents',
+      view: 'keepers',
+      keeper: 'sangsu',
+    })
   })
 
-  it('resets modal-local state on close', () => {
+  it('routes to monitoring agents when opened outside the agents directory', () => {
+    mocks.route.value = {
+      tab: 'workspace',
+      params: { section: 'board' },
+      postId: null,
+    }
+    const keeper: Keeper = {
+      name: 'cheolsu',
+      status: 'active',
+    }
+
+    openKeeperDetail(keeper)
+
+    expect(mocks.navigate).toHaveBeenCalledWith('monitoring', {
+      section: 'agents',
+      keeper: 'cheolsu',
+    })
+  })
+
+  it('resets detail-local state on close and returns to the agent directory view', () => {
     const keeper: Keeper = {
       name: 'sangsu',
       status: 'active',
@@ -64,6 +108,10 @@ describe('openKeeperDetail', () => {
 
     expect(selectedKeeper.value).toBeNull()
     expect(mocks.resetKeeperConfig).toHaveBeenCalledTimes(1)
+    expect(mocks.navigate).toHaveBeenLastCalledWith('monitoring', {
+      section: 'agents',
+      view: 'keepers',
+    })
   })
 })
 

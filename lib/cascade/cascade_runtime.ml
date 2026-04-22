@@ -259,6 +259,22 @@ let provider_capabilities_of_config (cfg : Llm_provider.Provider_config.t) =
     | Some entry -> entry.capabilities
     | None -> Llm_provider.Capabilities.default_capabilities
   in
+  let caps =
+    match cfg.kind with
+    | Llm_provider.Provider_config.Kimi_cli ->
+        (* Keep cascade prefiltering aligned with the OAS worker resolver:
+           Kimi CLI does not consume OAS req.tools inline, but it does expose
+           runtime MCP tools and tool events via [kimi mcp] / [--mcp-config*].
+           Ref checked 2026-04-21:
+           https://moonshotai.github.io/kimi-cli/en/customization/mcp.html *)
+        {
+          caps with
+          supports_tools = false;
+          supports_runtime_mcp_tools = true;
+          supports_runtime_tool_events = true;
+        }
+    | _ -> caps
+  in
   match cfg.supports_tool_choice_override with
   | Some supports_tool_choice -> { caps with supports_tool_choice }
   | None -> caps

@@ -201,6 +201,20 @@ let test_masc_http_base_url_uses_explicit_host_and_port () =
           (Env_config.masc_http_base_url_result ());
         check string "base url from host+port" "http://masc.example.test:7777" (Env_config.masc_http_base_url ()))))
 
+let test_server_bootstrap_http_sets_runtime_mcp_url () =
+  with_env Env_config_core.http_base_url_env_key "https://public.example" (fun () ->
+    with_env Env_config_runtime.Local_runtime.mcp_url_env_key
+      "http://127.0.0.1:8935/mcp"
+      (fun () ->
+        ignore
+          (Masc_mcp.Server_bootstrap_http.make_http_config
+             ~host:"0.0.0.0" ~port:7777);
+        check string "base url preserved when explicitly provided"
+          "https://public.example" (Env_config.masc_http_base_url ());
+        check string "runtime MCP URL updated to active bind"
+          "http://127.0.0.1:7777/mcp"
+          (Env_config_runtime.Local_runtime.mcp_url ())))
+
 let test_sb_path_result_missing_is_error () =
   with_env "MASC_BASE_PATH" "" (fun () ->
     check bool "sb path result is error" true
@@ -585,6 +599,8 @@ let () =
         test_base_path_raw_prefers_preserved_input_env;
       test_case "base url prefers env and trims" `Quick test_masc_http_base_url_prefers_env_and_trims;
       test_case "base url uses explicit host+port" `Quick test_masc_http_base_url_uses_explicit_host_and_port;
+      test_case "server bootstrap sets runtime MCP URL" `Quick
+        test_server_bootstrap_http_sets_runtime_mcp_url;
       test_case "sb_path_result missing is error" `Quick test_sb_path_result_missing_is_error;
       test_case "masc_host reads primary env" `Quick test_masc_host_prefers_primary_over_deprecated;
       test_case "assets dir reads primary env" `Quick test_assets_dir_prefers_primary_over_deprecated;

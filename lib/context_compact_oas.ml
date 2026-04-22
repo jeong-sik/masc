@@ -102,14 +102,14 @@ let summarize_chunk (msgs : Oas.Types.message list) : Oas.Types.message option =
   | [] -> None
   | _ ->
     Some {
-      Oas.Types.role = Oas.Types.Assistant;
+      Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
       content = [
-        Oas.Types.Text
+        Agent_sdk.Types.Text
           (Printf.sprintf "[Compacted %d messages into summary]\n%s"
              (List.length msgs) (String.concat "\n" lines))
       ];
       name = None;
-      tool_call_id = None;
+      tool_call_id = None; metadata = [];
     }
 
 let mask_tool_result_content ~(tool_name : string option) ~(tool_use_id : string)

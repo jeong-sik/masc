@@ -250,7 +250,12 @@ let string_field_opt key value =
   | Some text -> [ (key, `String text) ]
   | None -> []
 
-let message_to_json (m : Oas.Types.message) : Yojson.Safe.t =
+let metadata_of_json (json : Yojson.Safe.t) : (string * Yojson.Safe.t) list =
+  match Yojson.Safe.Util.member "metadata" json with
+  | `Assoc fields -> fields
+  | _ -> []
+
+let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
   let m = Inference_utils.sanitize_message_utf8 m in
   let tool_call_id =
     match m.tool_call_id with
@@ -278,7 +283,8 @@ let message_to_json (m : Oas.Types.message) : Yojson.Safe.t =
   `Assoc
     (base
      @ string_field_opt "name" m.name
-     @ string_field_opt "tool_call_id" tool_call_id)
+     @ string_field_opt "tool_call_id" tool_call_id
+     @ if m.metadata = [] then [] else [ ("metadata", `Assoc m.metadata) ])
 
 let message_of_json (json : Yojson.Safe.t) : Oas.Types.message =
   let open Yojson.Safe.Util in
@@ -303,7 +309,7 @@ let message_of_json (json : Yojson.Safe.t) : Oas.Types.message =
   in
   Inference_utils.sanitize_message_utf8
     {
-      Oas.Types.role;
+      Agent_sdk.Types.role;
       content;
       name =
         (json |> member "name" |> to_string_option
@@ -311,6 +317,7 @@ let message_of_json (json : Yojson.Safe.t) : Oas.Types.message =
       tool_call_id =
         (json |> member "tool_call_id" |> to_string_option
          |> Option.map Inference_utils.sanitize_text_utf8);
+      metadata = metadata_of_json json;
     }
 
 (** Extract human-readable text from a single history.jsonl line that was
@@ -327,7 +334,7 @@ let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
           Oas.Types.role = Oas.Types.User;
           content = blocks;
           name = None;
-          tool_call_id = None;
+          tool_call_id = None; metadata = [];
         }
       in
       Inference_utils.sanitize_text_utf8 (text_of_message msg)
@@ -1325,28 +1332,25 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
          Non-trivial OAS errors were already logged above at error level. *)
       (session, None)
 
-(** Feature flag: when true, store structured JSON in
-    [Checkpoint.working_context] alongside the text [STATE] block.
-    Default TRUE as of RFC-MASC-001 Phase 1 rollout; set
-    [MASC_STRUCTURED_STATE=false] to restore legacy text-only behavior.
-    Accepted false values: [false], [0], [no]. Any other value (or
-    unset) enables the structured path. *)
-let structured_state_enabled () =
-  match Sys.getenv_opt "MASC_STRUCTURED_STATE" with
-  | Some ("false" | "0" | "no") -> false
-  | _ -> true
-
 (** Patch an OAS checkpoint: unify session_id and replace the last
-    assistant message's text content with [response_text] (which includes
-    MASC's [STATE] synthesis).  This ensures read_continuity_summary can
-    find the [STATE] block in checkpoint messages on the next turn.  #5431
-
-    When [MASC_STRUCTURED_STATE=true], also stores the parsed state
-    snapshot as structured JSON in [Checkpoint.working_context].
-    RFC-MASC-001 Phase 1: dual-write (text + structured). *)
+    assistant message's text content with [response_text] and attach the
+    structured replay snapshot in message metadata. New writes keep the
+    checkpoint [working_context] empty; readers fall back to legacy
+    [working_context]/[STATE] paths for older checkpoints. *)
 let patch_checkpoint_last_assistant
-    (cp : Oas.Checkpoint.t) ~session_id ~response_text
-  : Oas.Checkpoint.t =
+    ?snapshot
+    (cp : Agent_sdk.Checkpoint.t) ~session_id ~response_text
+  : Agent_sdk.Checkpoint.t =
+  let snapshot =
+    match snapshot with
+    | Some snapshot -> Some snapshot
+    | None -> Keeper_memory_policy.parse_state_snapshot_from_reply response_text
+  in
+  let visible_response_text =
+    match snapshot with
+    | Some _ -> Keeper_text_processing.strip_state_blocks_text response_text
+    | None -> response_text
+  in
   (* Find index of last assistant message. *)
   let last_asst_idx = ref (-1) in
   List.iteri
@@ -1359,26 +1363,27 @@ let patch_checkpoint_last_assistant
       List.mapi
         (fun i msg ->
           if i = !last_asst_idx then
-            Oas.Types.assistant_msg response_text
+            let metadata =
+              match snapshot with
+              | Some snapshot ->
+                  [
+                    ( Keeper_memory_policy.replay_metadata_key,
+                      Keeper_memory_policy.replay_metadata_of_snapshot
+                        snapshot );
+                  ]
+              | None -> []
+            in
+            Agent_sdk.Types.make_message
+              ~role:Agent_sdk.Types.Assistant
+              ~metadata
+              [ Agent_sdk.Types.Text visible_response_text ]
           else msg)
         cp.messages
   in
   let sanitized_messages, _ = sanitize_checkpoint_messages messages in
-  (* RFC-MASC-001 Phase 1: when structured state is enabled, parse the
-     [STATE] block from response_text and store as structured JSON in
-     Checkpoint.working_context.  This runs alongside the existing text
-     path — dual-write for safe migration. *)
-  let working_context =
-    if structured_state_enabled () then
-      match Keeper_memory_policy.parse_state_snapshot_from_reply response_text with
-      | Some snapshot ->
-        Some (Keeper_memory_policy.structured_working_context_of_snapshot snapshot)
-      | None -> cp.working_context
-    else cp.working_context
-  in
-  { cp with Oas.Checkpoint.session_id;
+  { cp with Agent_sdk.Checkpoint.session_id;
             messages = sanitized_messages;
-            working_context }
+            working_context = None }
 
 let save_checkpoint session (ctx : working_context) ~generation =
   let ckpt = create_checkpoint ctx ~generation in

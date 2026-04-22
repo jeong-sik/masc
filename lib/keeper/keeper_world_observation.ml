@@ -383,13 +383,6 @@ let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta)
     in
       match ctx_opt with
       | Some c ->
-          (* RFC-MASC-001 Phase 1 read-side symmetry: the save path
-             (Keeper_context_core.patch_checkpoint_last_assistant, gated by
-             MASC_STRUCTURED_STATE) writes a typed snapshot to
-             Checkpoint.working_context alongside the text [STATE] block.
-             Prefer that typed snapshot here so the injected continuity
-             reflects the same structured view the save path produced,
-             instead of re-parsing a [STATE] block from message bodies. *)
           let structured_snapshot =
             match
               Keeper_checkpoint_store.load_oas
@@ -404,9 +397,9 @@ let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta)
             | Error _ -> None
           in
           let snapshot =
-            match structured_snapshot with
-            | Some _ as s -> s
-            | None -> latest_state_snapshot_from_messages (messages_of_context c)
+            match latest_state_snapshot_from_messages (messages_of_context c) with
+            | Some _ as snapshot -> snapshot
+            | None -> structured_snapshot
           in
           (match snapshot with
            | Some s -> keeper_state_snapshot_to_summary_text s

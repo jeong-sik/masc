@@ -510,10 +510,7 @@ module Kimi_cli_transport_local = struct
     if content = [] then
       Error
         (Llm_provider.Http_client.NetworkError
-           {
-             message = "no messages parsed from kimi output";
-             kind = Llm_provider.Http_client.Unknown;
-           })
+           { message = "no messages parsed from kimi output" })
     else
       Ok
         {

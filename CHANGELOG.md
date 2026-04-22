@@ -56,11 +56,12 @@
 
 ### Changed
 
-- **OAS pin bump → `main@7f79cfa9` (`v0.170.0`).** `scripts/oas-agent-sdk-pin.sh`
-  now tracks the current `jeong-sik/oas` `main` after the `0.170.0` release,
-  and the dependency floor in `dune-project` / `masc_mcp.opam` is raised to
-  `agent_sdk >= 0.170.0`. Generated keeper OAS pin docs now report the same
-  runtime SHA, base version, and dependency floor from the shared pin script.
+- **OAS pin bump → `feature/structured-replay-metadata@7b4bc465` (`v0.170.2`).**
+  `scripts/oas-agent-sdk-pin.sh` now tracks the structured replay metadata OAS
+  branch that `#9386` depends on, and the dependency floor in `dune-project` /
+  `masc_mcp.opam` is raised to `agent_sdk >= 0.170.2`. Generated keeper OAS pin
+  docs now report the same branch SHA, base version, and dependency floor from
+  the shared pin script.
 - **Keeper sandbox profile collapsed to `Local | Docker` 2-mode.** The three
   external variants (`Legacy_local`, `Docker_hardened`, `Docker_with_git`) are
   replaced by two: `local` runs on the host with filesystem scoped to the

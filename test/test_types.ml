@@ -1237,7 +1237,6 @@ let () =
             created_by = None;
             required_role = Types_core.Unassigned;
             required_preset = None;
-            goal_id = None;
             stage = None; contract = None; handoff_context = None;
             cycle_count = 0;
             do_not_reclaim_reason = None; }

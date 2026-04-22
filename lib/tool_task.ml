@@ -393,7 +393,6 @@ let handle_add_task ctx args =
     | Ok contract ->
         ( true,
           Coord.add_task ?contract ?goal_id ?required_preset
-          Coord.add_task ?contract ?goal_id ?required_preset
             ~created_by:ctx.agent_name ctx.config ~title:trimmed_title
             ~priority ~description )
 

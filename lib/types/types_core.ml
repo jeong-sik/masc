@@ -687,7 +687,6 @@ type task = {
   id: string;
   title: string;
   description: string;
-  goal_id: string option; [@default None]
   task_status: task_status; [@key "status"]
   priority: int; [@default 3]
   files: string list; [@default []]
@@ -715,14 +714,9 @@ let task_to_yojson t =
     ("files", `List (List.map (fun s -> `String s) t.files));
     ("created_at", `String t.created_at);
   ] in
-  let with_goal_id =
-    match t.goal_id with
-    | None -> base
-    | Some goal_id -> base @ [("goal_id", `String goal_id)]
-  in
   let with_created_by = match t.created_by with
-    | None -> with_goal_id
-    | Some created_by -> with_goal_id @ [("created_by", `String created_by)]
+    | None -> base
+    | Some created_by -> base @ [("created_by", `String created_by)]
   in
   (* Add worktree field if present *)
   let with_worktree = match t.worktree with
@@ -782,7 +776,6 @@ let task_of_yojson json =
     let id = json |> member "id" |> to_string in
     let title = json |> member "title" |> to_string in
     let description = json |> member "description" |> to_string_option |> Option.value ~default:"" in
-    let goal_id = json |> member "goal_id" |> to_string_option in
     let priority = json |> member "priority" |> to_int_option |> Option.value ~default:3 in
     let files = json |> member "files" |> to_list |> List.map to_string in
     let created_at = json |> member "created_at" |> to_string in
@@ -834,7 +827,6 @@ let task_of_yojson json =
             id;
             title;
             description;
-            goal_id;
             task_status;
             priority;
             files;

@@ -563,7 +563,6 @@ let test_backlog_to_yojson_with_tasks () =
     worktree = None;
     created_by = None;
     required_role = Types_core.Unassigned; required_preset = None; stage = None;
-    goal_id = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
   let b : Types.backlog = { tasks = [task]; last_updated = "2024-01-15T12:00:00Z"; version = 2 } in
@@ -1264,7 +1263,6 @@ let test_task_to_yojson () =
     worktree = None;
     created_by = None;
     required_role = Types_core.Unassigned; required_preset = None; stage = None;
-    goal_id = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
   let json = Types.task_to_yojson t in
@@ -1294,7 +1292,6 @@ let test_task_to_yojson_with_worktree () =
     worktree = Some wt;
     created_by = None;
     required_role = Types_core.Unassigned; required_preset = None; stage = None;
-    goal_id = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
   let json = Types.task_to_yojson t in

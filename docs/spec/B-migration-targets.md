@@ -87,17 +87,7 @@ Source: `ROADMAP.md` Short-term + `ARCHITECTURE-COMPLEXITY-ANALYSIS.md` Phase 2-
 | dune optional library separation | dune, lib/ | -- | Not started | Medium |
 | TRPG dm-keeper -> on-demand | keeper_autonomy | -- | Not started | Medium |
 | Test noise cleanup: 32 duplicate files | test/ | ~12K lines | Audit done | Medium |
-| 5 hollow test files 삭제 | test/ | -- | TODO에 기록 | Low |
-
-### Blocking Issues (from .masc/TODO.md)
-
-| Issue | Symptom | Status |
-|-------|---------|--------|
-| #1981 keeper_prompt compile fail | CI Build/Test/Harness fail | Open |
-| #1980 test_verifier_oas_bridge missing module | Health check fail | Open |
-| #2186 test_transport_grpc_next stale reference | Build/Test + Health fail | Open |
-
-이 3건은 CI green을 막는 blocker다. Feature 작업 전 해소가 필요하다.
+| 5 hollow test files 삭제 | test/ | -- | Pending | Low |
 
 ---
 
@@ -216,9 +206,8 @@ lib/room/        lib/time_compat/ lib/types/
 
 | Issue | Count | Source |
 |-------|-------|--------|
-| Duplicate/trivial coverage files | 32 | ROADMAP, .masc/TODO.md |
+| Duplicate/trivial coverage files | 32 | ROADMAP |
 | Hollow test files (빈 테스트) | 5 | void, hebbian_eio, voice_stream, backend_eio, room_portal |
-| Stale test references (CI blocker) | 3 | #1980, #1981, #2186 |
 | Total test files | 319 | test/ 하위 |
 
 ### 32 Duplicate Coverage Files
@@ -235,16 +224,6 @@ test/ 디렉토리에 `*_coverage.ml` 파일이 32개 존재하며, 상당수가
 3. `test_voice_stream.ml`
 4. `test_backend_eio.ml`
 5. `test_room_portal.ml`
-
-### CI Blocker (3건)
-
-`.masc/TODO.md`에 기록된 3건의 CI 실패:
-
-- `#1981`: keeper_prompt.ml Printf format/argument mismatch
-- `#1980`: test_verifier_oas_bridge가 삭제된 Keeper_exec_autonomy 참조
-- `#2186`: test_transport_grpc_next_coverage가 삭제된 Transport_grpc_next 참조
-
-이 3건을 해소하지 않으면 어떤 feature PR도 CI green을 달성할 수 없다.
 
 ---
 
@@ -289,7 +268,8 @@ SPEC-INDEX.md               -- Spec 목차
 
 | # | Target | Impact | Effort |
 |---|--------|--------|--------|
-| 1 | CI blocker 3건 해소 (#1980, #1981, #2186) | Feature 작업 재개 | Low (각 1-2 시간) |
-| 2 | masc-games + masc-experiments 패키지 분리 | Tier 4 코드 32% 격리 | Medium-High |
-| 3 | Mode/profile system 구현 | 에이전트 tool 노출 93% 감소 | Medium |
-| 4 | 32 duplicate test files 정리 | 빌드/CI 시간 절감, noise 제거 | Low |
+| 1 | masc-games + masc-experiments 패키지 분리 | Tier 4 코드 32% 격리 | Medium-High |
+| 2 | Mode/profile system 구현 | 에이전트 tool 노출 93% 감소 | Medium |
+| 3 | 32 duplicate test files 정리 | 빌드/CI 시간 절감, noise 제거 | Low |
+| 4 | 5 hollow test files 삭제 | 테스트 noise 감소, 유지보수 단순화 | Low |
+| 5 | Environment variables -> config file | 설정 발견성 및 운영성 개선 | Medium |

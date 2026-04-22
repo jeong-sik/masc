@@ -189,10 +189,10 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
              Keeper_exec_context.resolve_max_context_resolution
                ~requested_override:meta.max_context_override effective_models
            in
-           (match resolution.requested_override with
+            (match resolution.requested_override with
             | Some requested ->
               Log.Keeper.debug
-                "%s: using max_context_override=%d turn_budget=%d primary_budget=%d effective_budget=%d (manual turn)"
+                "%s: using max_context_override=%d context_budget=%d primary_budget=%d effective_budget=%d (manual turn)"
                 meta.name requested resolution.turn_budget resolution.primary_budget
                 resolution.effective_budget
             | None -> ());
@@ -320,8 +320,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               in
               let soft_parts = List.filter
                 (fun s -> String.trim s <> "")
-                [ skill_route_text;
-                  continuity_text;
+                [ continuity_text;
+                  skill_route_text;
                   worktree_text;
                   turn_instructions_text ]
               in

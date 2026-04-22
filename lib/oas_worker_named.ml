@@ -88,6 +88,11 @@ type masc_internal_error =
       cascade_name : string;
       reason : Keeper_types.cascade_exhaustion_reason;
     }
+  | Resumable_cli_session of {
+      cascade_name : string;
+      detail : string;
+      exit_code : int option;
+    }
   | No_tool_capable_provider of {
       cascade_name : string;
       configured_labels : string list;
@@ -127,6 +132,14 @@ let masc_internal_error_to_json = function
         ("kind", `String "cascade_exhausted");
         ("cascade_name", `String cascade_name);
         ("reason", Keeper_types.cascade_exhaustion_reason_to_json reason);
+      ]
+  | Resumable_cli_session { cascade_name; detail; exit_code } ->
+    `Assoc
+      [
+        ("kind", `String "resumable_cli_session");
+        ("cascade_name", `String cascade_name);
+        ("detail", `String detail);
+        ("exit_code", Json_util.int_opt_to_json exit_code);
       ]
   | No_tool_capable_provider { cascade_name; configured_labels } ->
     `Assoc
@@ -190,6 +203,14 @@ let admission_wait_timeout_error
 
 let classify_masc_internal_error (err : Oas.Error.sdk_error) :
     masc_internal_error option =
+  let int_opt_of_assoc key = function
+    | `Assoc fields -> (
+        match List.assoc_opt key fields with
+        | Some (`Int value) -> Some value
+        | Some (`Intlit value) -> int_of_string_opt value
+        | _ -> None)
+    | _ -> None
+  in
   match err with
   | Oas.Error.Internal msg when String.starts_with ~prefix:masc_internal_error_prefix msg ->
     let payload =
@@ -219,6 +240,17 @@ let classify_masc_internal_error (err : Oas.Error.sdk_error) :
                         reason;
                       })
                | None -> None)
+           | Some (`String "resumable_cli_session") -> (
+               match string_opt_of_assoc "cascade_name" json, string_opt_of_assoc "detail" json with
+               | Some cascade_name, Some detail ->
+                 Some
+                   (Resumable_cli_session
+                      {
+                        cascade_name;
+                        detail;
+                        exit_code = int_opt_of_assoc "exit_code" json;
+                      })
+               | _ -> None)
            | Some (`String "no_tool_capable_provider") -> (
                match string_opt_of_assoc "cascade_name" json with
                | Some cascade_name ->
@@ -617,6 +649,35 @@ let message_looks_like_cli_wrapped_hard_quota (message : string) : bool =
    && contains "\"api_error_status\":429"
    && contains "you've hit your limit")
 
+let exit_code_of_message (message : string) : int option =
+  let prefix = "exited with code " in
+  match String.index_opt message ' ' with
+  | None -> None
+  | Some first_space ->
+      let search_from = first_space + 1 in
+      if search_from >= String.length message then None
+      else
+        let suffix =
+          String.sub message search_from (String.length message - search_from)
+        in
+        if not (String.starts_with ~prefix suffix) then None
+        else
+          match String.index_from_opt suffix (String.length prefix) ':' with
+          | None -> None
+          | Some colon ->
+              let raw =
+                String.sub suffix (String.length prefix)
+                  (colon - String.length prefix)
+                |> String.trim
+              in
+              int_of_string_opt raw
+
+let message_looks_like_resumable_cli_session (message : string) : bool =
+  match exit_code_of_message message with
+  | Some 75 ->
+      String_util.contains_substring_ci message "to resume this session:"
+  | _ -> false
+
 let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
   match err with
   | Oas.Error.Api api_err ->
@@ -897,13 +958,27 @@ let run_named
           ~candidate_cfgs ~selected_model_raw:None ~capture
       in
       Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
+      let terminal_error =
+        match last_err with
+        | Some (Llm_provider.Http_client.NetworkError { message; _ })
+          when message_looks_like_resumable_cli_session message ->
+            sdk_error_of_masc_internal_error
+              (Resumable_cli_session
+                 {
+                   cascade_name;
+                   detail = message;
+                   exit_code = exit_code_of_message message;
+                 })
+        | _ ->
+            sdk_error_of_masc_internal_error
+              (Cascade_exhausted
+                 {
+                   cascade_name;
+                   reason;
+                 })
+      in
       Error
-        (sdk_error_of_masc_internal_error
-           (Cascade_exhausted
-              {
-                cascade_name;
-                reason;
-              }))
+        terminal_error
     | (provider_cfg : Llm_provider.Provider_config.t) :: rest ->
       let is_last = rest = [] in
       Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name provider_cfg.model_id is_last;

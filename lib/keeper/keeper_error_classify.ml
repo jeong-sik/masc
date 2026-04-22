@@ -103,6 +103,19 @@ let is_auto_recoverable_cascade_exhausted_error (err : Oas.Error.sdk_error) : bo
       false
   | Some (Oas_worker_named.No_tool_capable_provider _)
   | Some (Oas_worker_named.Accept_rejected _)
+  | Some (Oas_worker_named.Resumable_cli_session _)
+  | Some (Oas_worker_named.Admission_queue_timeout _)
+  | Some (Oas_worker_named.Turn_timeout _)
+  | Some (Oas_worker_named.Ambiguous_post_commit _)
+  | None ->
+      false
+
+let is_resumable_cli_session_error (err : Oas.Error.sdk_error) : bool =
+  match Oas_worker_named.classify_masc_internal_error err with
+  | Some (Oas_worker_named.Resumable_cli_session _) -> true
+  | Some (Oas_worker_named.Cascade_exhausted _)
+  | Some (Oas_worker_named.No_tool_capable_provider _)
+  | Some (Oas_worker_named.Accept_rejected _)
   | Some (Oas_worker_named.Admission_queue_timeout _)
   | Some (Oas_worker_named.Turn_timeout _)
   | Some (Oas_worker_named.Ambiguous_post_commit _)
@@ -112,6 +125,7 @@ let is_auto_recoverable_cascade_exhausted_error (err : Oas.Error.sdk_error) : bo
 let is_auto_recoverable_cascade_fail_open_error
     (err : Oas.Error.sdk_error) : bool =
   Oas_worker_named.sdk_error_is_hard_quota err
+  || is_resumable_cli_session_error err
   || is_auto_recoverable_cascade_exhausted_error err
 
 let fallback_cascade_for_unavailable_profile
@@ -144,6 +158,7 @@ let fail_open_cascade_after_auto_recoverable_error
 let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_server_rejected_parse_error err
+  || is_resumable_cli_session_error err
   || is_auto_recoverable_cascade_exhausted_error err
 
 let ambiguous_side_effect_error_prefix =
@@ -253,6 +268,7 @@ let is_context_overflow (err : Oas.Error.sdk_error) : bool =
 let is_cascade_exhausted_error (err : Oas.Error.sdk_error) : bool =
   match Oas_worker_named.classify_masc_internal_error err with
   | Some (Oas_worker_named.Cascade_exhausted _)
+  | Some (Oas_worker_named.Resumable_cli_session _)
   | Some (Oas_worker_named.No_tool_capable_provider _)
   | Some (Oas_worker_named.Accept_rejected _) -> true
   | Some (Oas_worker_named.Admission_queue_timeout _)

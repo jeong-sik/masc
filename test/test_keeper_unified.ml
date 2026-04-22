@@ -1064,7 +1064,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     (source_file_contains "lib/tool_shard.ml"
        "Requires an active claimed task/current_task_id");
   check bool "keeper_shell gh runtime allows sandbox fallback" true
-    (source_file_contains "lib/keeper/keeper_exec_shell.ml"
+    (source_file_contains "lib/keeper/keeper_shell_gh_context.ml"
        "task_id = \"(sandbox)\"")
 
 (* ---------- Config tests ---------- *)

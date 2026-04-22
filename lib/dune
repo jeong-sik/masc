@@ -266,6 +266,8 @@
    provider_kind_resolver
    progress
    relay
+   goal_phase
+   goal_verification
    goal_store
    goal_guard
    goal_janitor

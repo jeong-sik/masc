@@ -275,7 +275,38 @@ let test_collect_board_events_keeps_non_mentions_as_followup_signal () =
           ~continuity_summary:"goal test-keeper"
           ~meta:minimal_meta
       in
-      check int "keeps non-mention events" 1 (List.length events);
+      check int "default keepers ignore unmatched non-mention events" 0
+        (List.length events);
+      check int "new count includes non-mention" 1 new_count;
+      check int "mention count stays zero" 0 mention_count)
+
+let test_collect_board_events_keeps_non_mentions_for_room_signal_keepers () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      Masc_mcp.Board.reset_global_for_test ();
+      Masc_mcp.Board_dispatch.reset_for_test ();
+      Masc_mcp.Board_dispatch.init_jsonl ();
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      (match
+         Masc_mcp.Board_dispatch.create_post ~author:"alice"
+           ~title:"General update" ~content:"No direct mention here"
+           ~post_kind:Masc_mcp.Board.Human_post ()
+       with
+      | Ok _ -> ()
+      | Error e -> fail ("create_post failed: " ^ Masc_mcp.Board.show_board_error e));
+      let events, new_count, mention_count =
+        WO.collect_board_events ~base_path:base_dir
+          ~continuity_summary:"goal test-keeper"
+          ~meta:room_signal_meta
+      in
+      check int "room-signal keepers keep non-mention events" 1
+        (List.length events);
       check int "new count includes non-mention" 1 new_count;
       check int "mention count stays zero" 0 mention_count;
       check bool "event is not explicit mention" false
@@ -333,6 +364,46 @@ let test_collect_board_events_keeps_external_replies_after_self_comment () =
           check string "latest external author" "bob"
             (Option.value ~default:"" event.latest_external_author)
       | _ -> fail "expected one follow-up board event")
+
+let test_observe_ignores_scope_messages_without_room_signal_opt_in () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      ignore (Masc_mcp.Coord.broadcast config ~from_agent:"alice" ~content:"general room update");
+      let meta = { minimal_meta with joined_room_ids = [ "default" ] } in
+      let obs =
+        WO.observe ~pending_board_events:(Some [])
+          ~config ~meta
+      in
+      check int "mentions stay empty" 0 (List.length obs.pending_mentions);
+      check int "scope messages stay empty" 0
+        (List.length obs.pending_scope_messages))
+
+let test_observe_collects_scope_messages_for_room_signal_keepers () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      ignore (Masc_mcp.Coord.broadcast config ~from_agent:"alice" ~content:"general room update");
+      let meta = { room_signal_meta with joined_room_ids = [ "default" ] } in
+      let obs =
+        WO.observe ~pending_board_events:(Some [])
+          ~config ~meta
+      in
+      check int "mentions stay empty" 0 (List.length obs.pending_mentions);
+      check bool "scope messages collected" true
+        (List.length obs.pending_scope_messages >= 1))
 
 let test_scheduled_turn_uses_cooldown_only () =
   let meta =
@@ -3955,10 +4026,16 @@ let () =
           test_case "with mentions" `Quick test_observation_with_mentions;
           test_case "uses precollected board events" `Quick
             test_observe_uses_precollected_board_events;
-          test_case "keeps non-mention board events as follow-up signal" `Quick
+          test_case "default keepers ignore unmatched non-mention board events" `Quick
             test_collect_board_events_keeps_non_mentions_as_followup_signal;
+          test_case "room-signal keepers keep unmatched non-mention board events" `Quick
+            test_collect_board_events_keeps_non_mentions_for_room_signal_keepers;
           test_case "keeps external replies after self comment" `Quick
             test_collect_board_events_keeps_external_replies_after_self_comment;
+          test_case "default keepers ignore scope messages" `Quick
+            test_observe_ignores_scope_messages_without_room_signal_opt_in;
+          test_case "room-signal keepers collect scope messages" `Quick
+            test_observe_collects_scope_messages_for_room_signal_keepers;
           test_case "scheduled turn uses cooldown only when work exists" `Quick
             test_scheduled_turn_uses_cooldown_only;
           test_case "scheduled turn skips without structured work signal" `Quick

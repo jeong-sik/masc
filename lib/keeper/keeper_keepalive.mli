@@ -74,6 +74,15 @@ val with_keeper_turn_slot_for_test :
   (semaphore_wait_ms:int -> 'a) ->
   'a
 
+(** Keepalive loop meta selection. Disk wins when it changed; otherwise
+    fall back to the latest registry snapshot instead of the original boot
+    meta so continuity/runtime fields do not regress across turns. *)
+val effective_keepalive_meta :
+  base_path:string ->
+  fallback:keeper_meta ->
+  disk_meta_opt:keeper_meta option ->
+  keeper_meta
+
 val wakeup_relevant_keeper_for_board_signal :
   config:Coord.config -> Board_dispatch.keeper_board_signal -> unit
 

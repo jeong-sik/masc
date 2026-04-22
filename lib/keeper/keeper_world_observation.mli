@@ -178,6 +178,12 @@ val board_signal_match :
   signal:Board_dispatch.keeper_board_signal ->
   board_signal_match
 
+val board_signal_wake_reason :
+  continuity_summary:string ->
+  meta:Keeper_types.keeper_meta ->
+  signal:Board_dispatch.keeper_board_signal ->
+  string option
+
 (** Read the best available continuity summary for a keeper.
     Recovery order is progress log -> checkpoint snapshot -> meta summary. *)
 val read_continuity_summary :

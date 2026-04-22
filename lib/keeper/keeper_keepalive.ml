@@ -31,6 +31,17 @@ let max_history_read_lines = 200
 let set_bus bus = Keeper_event_bus.set bus
 let get_bus () = Keeper_event_bus.get ()
 
+let effective_keepalive_meta
+    ~base_path
+    ~(fallback : keeper_meta)
+    ~(disk_meta_opt : keeper_meta option) : keeper_meta =
+  match disk_meta_opt with
+  | Some latest -> latest
+  | None -> (
+      match Keeper_registry.get ~base_path fallback.name with
+      | Some entry -> entry.meta
+      | None -> fallback)
+
 (* Global turn slot cap. Safety ceiling for ALL keeper turns (autonomous
    + reactive). Default 12 = headroom for up to 12 keepers. *)
 let keeper_turn_throttle_limit =
@@ -466,20 +477,19 @@ let wakeup_relevant_keeper_for_board_signal
     |> List.filter_map (fun name ->
       match read_meta config name with
       | Ok (Some meta) ->
-        let matched =
-          Keeper_world_observation.board_signal_match
+        let wake_reason =
+          Keeper_world_observation.board_signal_wake_reason
             ~continuity_summary:meta.continuity_summary
             ~meta
             ~signal
         in
-        Some (meta, matched)
+        Some (meta, wake_reason)
       | _ -> None)
   in
   let explicit =
     candidates
     |> List.filter
-         (fun (_meta, (matched : Keeper_world_observation.board_signal_match)) ->
-            matched.explicit_mention)
+         (fun (_meta, wake_reason) -> wake_reason = Some "explicit_mention")
   in
   let wake_meta (meta : keeper_meta) reason =
     if
@@ -497,10 +507,13 @@ let wakeup_relevant_keeper_for_board_signal
   in
   match explicit with
   | _ :: _ ->
-    explicit |> List.iter (fun (meta, _matched) -> wake_meta meta "explicit_mention")
+    explicit |> List.iter (fun (meta, _wake_reason) -> wake_meta meta "explicit_mention")
   | [] ->
     candidates
-    |> List.iter (fun (meta, _matched) -> wake_meta meta "board_activity")
+    |> List.iter (fun (meta, wake_reason) ->
+         match wake_reason with
+         | Some reason -> wake_meta meta reason
+         | None -> ())
 ;;
 
 let max_consecutive_heartbeat_failures () =
@@ -1489,17 +1502,30 @@ let run_heartbeat_loop
       Eio.Fiber.yield ();
       (* Phase 0: timing markers *)
       let t_presence_start = Time_compat.now () in
-      let meta_current =
+      let disk_meta_opt, new_meta_mtime =
         match read_meta_if_changed ctx.config m.name ~last_mtime:!last_meta_mtime with
         | Some (latest, new_mtime) ->
-          last_meta_mtime := new_mtime;
-          latest
-        | None -> m
+          Some latest, Some new_mtime
+        | None -> None, None
+      in
+      Option.iter (fun new_mtime -> last_meta_mtime := new_mtime) new_meta_mtime;
+      let meta_current =
+        effective_keepalive_meta
+          ~base_path:ctx.config.base_path
+          ~fallback:m
+          ~disk_meta_opt
       in
       (* Sync disk meta to registry so dashboard reads live values.  #5364.
-         Physical inequality: read_meta returns a fresh record when the JSON
-         file changed; same pointer means no disk change occurred. *)
-      if meta_current != m then
+         When disk meta is unchanged we still prefer the registry copy because
+         runtime writes update it via the write_meta hook. This keeps
+         continuity/runtime fields fresh even if disk mtime does not advance
+         between rapid writes inside a single loop window. *)
+      let registry_meta =
+        match Keeper_registry.get ~base_path:ctx.config.base_path meta_current.name with
+        | Some entry -> entry.meta
+        | None -> m
+      in
+      if meta_current != registry_meta then
         Keeper_registry.update_meta
           ~base_path:ctx.config.base_path meta_current.name meta_current;
       if
@@ -1649,6 +1675,58 @@ let with_keeper_entry_by_identity ~identity ~on_missing f =
      | None -> on_missing ())
 ;;
 
+let persist_directive_meta_update
+    (entry : Keeper_registry.registry_entry)
+    ~(updated_meta : keeper_meta) : unit =
+  let keeper_filename = entry.name ^ ".json" in
+  let masc_root = Coord_utils.masc_dir_from_base_path ~base_path:entry.base_path in
+  let default_path = Filename.concat (Filename.concat masc_root "keepers") keeper_filename in
+  let persisted_path =
+    if Fs_compat.file_exists default_path then
+      default_path
+    else
+      let clusters_dir = Filename.concat masc_root "clusters" in
+      let cluster_paths =
+        match Safe_ops.list_dir_safe clusters_dir with
+        | Ok names ->
+            names
+            |> List.map (fun cluster_name ->
+                   Filename.concat
+                     (Filename.concat (Filename.concat clusters_dir cluster_name) "keepers")
+                     keeper_filename)
+            |> List.filter Fs_compat.file_exists
+        | Error _ -> []
+      in
+      match cluster_paths with
+      | [] -> default_path
+      | [ path ] -> path
+      | paths ->
+          let by_mtime_desc a b =
+            let a_mtime = Option.value ~default:0.0 (Fs_compat.file_mtime a) in
+            let b_mtime = Option.value ~default:0.0 (Fs_compat.file_mtime b) in
+            Float.compare b_mtime a_mtime
+          in
+          List.sort by_mtime_desc paths |> List.hd
+  in
+  try
+    Keeper_fs.save_json_atomic persisted_path (meta_to_json updated_meta);
+    Keeper_registry.update_meta
+      ~base_path:entry.base_path
+      entry.name
+      updated_meta
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      let err = Printexc.to_string exn in
+      Log.Keeper.warn
+        "directive meta persist failed for %s: %s"
+        entry.name
+        err;
+      Keeper_registry.update_meta
+        ~base_path:entry.base_path
+        entry.name
+        updated_meta
+
 let set_keeper_paused_state ~agent_name paused =
   with_keeper_entry_by_identity
     ~identity:agent_name
@@ -1656,10 +1734,14 @@ let set_keeper_paused_state ~agent_name paused =
       let action = if paused then "pause" else "resume" in
       Log.Keeper.warn "directive %s: agent %s not in registry" action agent_name)
     (fun entry ->
-       Keeper_registry.update_meta
-         ~base_path:entry.base_path
-         entry.name
-         { entry.meta with paused };
+       let updated_meta =
+         {
+           entry.meta with
+           paused;
+           updated_at = now_iso ();
+         }
+       in
+       persist_directive_meta_update entry ~updated_meta;
        ignore
          (Keeper_registry.dispatch_event
             ~base_path:entry.base_path entry.name
@@ -1683,10 +1765,14 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
     ~on_missing:(fun () ->
       Log.Keeper.warn "directive claim: agent %s not in registry" agent_name)
     (fun entry ->
-       Keeper_registry.update_meta
-         ~base_path:entry.base_path
-         entry.name
-         { entry.meta with current_task_id = Some task_id };
+       let updated_meta =
+         {
+           entry.meta with
+           current_task_id = Some task_id;
+           updated_at = now_iso ();
+         }
+       in
+       persist_directive_meta_update entry ~updated_meta;
        wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 

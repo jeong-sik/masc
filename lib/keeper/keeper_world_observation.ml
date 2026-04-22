@@ -129,8 +129,7 @@ type board_signal_match = {
 }
 
 let scope_message_feed_enabled (meta : keeper_meta) : bool =
-  let _ = meta in
-  true
+  meta.room_signal_prompt_enabled
 
 let message_feed_targets (meta : keeper_meta) =
   if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
@@ -469,6 +468,27 @@ let check_self_comment_status ~self_tokens ~(post_id : string)
             ( List.length external_after,
               Board.Agent_id.to_string latest.author,
               short_preview ~max_len:60 latest.content )
+
+let board_signal_wake_reason
+    ~continuity_summary
+    ~(meta : keeper_meta)
+    ~(signal : Board_dispatch.keeper_board_signal) : string option =
+  let matched = board_signal_match ~continuity_summary ~meta ~signal in
+  if matched.explicit_mention then
+    Some "explicit_mention"
+  else if scope_message_feed_enabled meta then
+    Some "board_activity"
+  else
+    let self_tokens =
+      [ meta.name; meta.agent_name ]
+      |> List.map (fun value -> String.lowercase_ascii (String.trim value))
+    in
+    match signal.kind with
+    | Board_dispatch.Board_comment_added ->
+        (match check_self_comment_status ~self_tokens ~post_id:signal.post_id with
+         | `New_external _ -> Some "thread_reply_after_self_comment"
+         | `Never | `No_new_external -> None)
+    | Board_dispatch.Board_post_created -> None
 
 (** Collect recent board activity using cursor-based tracking.
     Cursor state lives in Keeper_registry as [(updated_at, post_id)].

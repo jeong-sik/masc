@@ -15,8 +15,10 @@ if command -v opam >/dev/null 2>&1; then
     eval "$(opam env 2>/dev/null)" >/dev/null 2>/dev/null || true
 fi
 
-# Storage backend: filesystem by default.
-export MASC_STORAGE_TYPE="${MASC_STORAGE_TYPE:-filesystem}"
+# Storage backend: filesystem only. Clear retired PG selectors so inherited
+# shells cannot steer runtime startup onto a PostgreSQL lane.
+export MASC_STORAGE_TYPE="filesystem"
+unset MASC_POSTGRES_URL DATABASE_URL SUPABASE_DB_URL SB_PG_URL
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"

@@ -53,26 +53,22 @@ end
 module Backend = struct
   type phase =
     | Uninitialized
-    | PostgreSQL
     | Filesystem
     | Degraded
 
   let phase_to_string = function
     | Uninitialized -> "uninitialized"
-    | PostgreSQL -> "postgresql"
     | Filesystem -> "filesystem"
     | Degraded -> "degraded"
 
-  let all_phases = [Uninitialized; PostgreSQL; Filesystem; Degraded]
+  let all_phases = [Uninitialized; Filesystem; Degraded]
 
   type event =
-    | Resolve_pg
     | Resolve_fs
     | Degrade of string
     | Recover
 
   let event_to_string = function
-    | Resolve_pg -> "resolve_pg"
     | Resolve_fs -> "resolve_fs"
     | Degrade s -> "degrade:" ^ s
     | Recover -> "recover"
@@ -81,9 +77,7 @@ module Backend = struct
 
   let apply_event ~current event =
     match current, event with
-    | Uninitialized, Resolve_pg -> Applied PostgreSQL
     | Uninitialized, Resolve_fs -> Applied Filesystem
-    | PostgreSQL, Degrade _ -> Applied Degraded
     | Filesystem, Degrade _ -> Applied Degraded
     | Degraded, Recover -> Applied Filesystem
     | phase, event -> Ignored { phase; event }

@@ -1228,6 +1228,11 @@
  (modules test_otel_genai)
  (libraries masc_test_deps))
 
+(test
+ (name test_server_state_product)
+ (modules test_server_state_product)
+ (libraries masc_test_deps))
+
 (executable
  (name keeper_tool_matrix_case_runner)
  (modules keeper_tool_matrix_case_runner test_keeper_tool_matrix_cases

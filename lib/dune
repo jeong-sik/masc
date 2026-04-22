@@ -141,6 +141,7 @@
    server_bootstrap_loops
    server_base_path_diagnostics
    server_runtime_bootstrap
+   server_state_product
    server_startup_state
    server_startup_takeover
    server_activity_http

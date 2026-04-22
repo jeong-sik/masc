@@ -92,19 +92,18 @@ let split_chunks input =
 let parse_labeled_chunk chunk =
   let trimmed = String.trim chunk in
   if String.length trimmed >= 4 && trimmed.[0] = '[' then
-    try
-      let close_idx = String.index trimmed ']' in
-      if close_idx + 2 < String.length trimmed && trimmed.[close_idx + 1] = ':' then
-        let label = String.sub trimmed 1 (close_idx - 1) in
-        let payload =
-          String.sub trimmed (close_idx + 2)
-            (String.length trimmed - close_idx - 2)
-          |> String.trim
-        in
-        (trim_to_option label, payload)
-      else
-        (None, trimmed)
-    with Not_found -> (None, trimmed)
+    match String.index_opt trimmed ']' with
+    | Some close_idx
+      when close_idx + 2 < String.length trimmed
+           && trimmed.[close_idx + 1] = ':' ->
+      let label = String.sub trimmed 1 (close_idx - 1) in
+      let payload =
+        String.sub trimmed (close_idx + 2)
+          (String.length trimmed - close_idx - 2)
+        |> String.trim
+      in
+      (trim_to_option label, payload)
+    | _ -> (None, trimmed)
   else
     (None, trimmed)
 

@@ -224,9 +224,9 @@ let command_blocked_hint name =
   let looks_like_source_code s =
     (* Contains '.' at a non-boundary position (A.B), or starts with a
        reserved OCaml keyword that no shell command uses. *)
-    (String.contains s '.'
-     && (String.index s '.' > 0)
-     && (String.index s '.' < String.length s - 1))
+    (match String.index_opt s '.' with
+     | Some i -> i > 0 && i < String.length s - 1
+     | None -> false)
     || List.mem s
          [ "let"; "match"; "if"; "then"; "else"; "fun"; "rec"; "in";
            "module"; "open"; "type"; "def"; "class"; "import"; "from" ]

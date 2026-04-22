@@ -481,7 +481,7 @@ let sort_goals goals =
           String.compare right.updated_at left.updated_at)
     goals
 
-let list_goals config ?horizon ?status () =
+let list_goals config ?horizon ?status ?phase () =
   read_state config
   |> fun state -> state.goals
   |> List.filter (fun goal ->
@@ -492,6 +492,10 @@ let list_goals config ?horizon ?status () =
          match status with
          | None -> true
          | Some status -> goal.status = status)
+  |> List.filter (fun goal ->
+         match phase with
+         | None -> true
+         | Some phase -> goal.phase = phase)
   |> sort_goals
 
 let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date

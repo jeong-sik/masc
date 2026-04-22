@@ -101,6 +101,41 @@ let test_goal_upsert_and_list () =
   in
   check int "one listed goal" 1 count
 
+let test_goal_list_filters_by_phase () =
+  with_room @@ fun config ->
+  let create ~title ~phase =
+    let created =
+      Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_upsert"
+        ~args:
+          (`Assoc
+            [
+              ("title", `String title);
+              ("phase", `String phase);
+            ])
+    in
+    match created with
+    | Some result -> ignore (parse_json_result result)
+    | None -> fail "masc_goal_upsert not handled"
+  in
+  create ~title:"Executing goal" ~phase:"executing";
+  create ~title:"Blocked goal" ~phase:"blocked";
+  let listed =
+    Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_list"
+      ~args:(`Assoc [ ("phase", `String "blocked") ])
+  in
+  let listed_json =
+    match listed with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_list not handled"
+  in
+  let goals = Yojson.Safe.Util.member "goals" listed_json |> Yojson.Safe.Util.to_list in
+  check int "one listed goal by phase" 1 (List.length goals);
+  match goals with
+  | [ goal_json ] ->
+      check string "phase filter honored" "blocked"
+        (get_string_field goal_json "phase")
+  | _ -> fail "expected one filtered goal"
+
 let test_goal_review_updates_status () =
   with_room @@ fun config ->
   let goal, _kind =
@@ -383,6 +418,7 @@ let () =
       ( "tool_coord",
         [
           test_case "upsert and list" `Quick test_goal_upsert_and_list;
+          test_case "list filters by phase" `Quick test_goal_list_filters_by_phase;
           test_case "review updates status" `Quick test_goal_review_updates_status;
           test_case "transition verify complete" `Quick
             test_goal_transition_verification_to_completion;

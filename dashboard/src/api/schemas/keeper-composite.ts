@@ -124,6 +124,7 @@ export const KeeperCompositeSnapshotSchema = object({
   run_id: string(),
   ts: number(),
   phase: KeeperCompositePhaseSchema,
+  collapsed_from: optional(nullable(string())),
   turn_phase: KeeperCompositeTurnPhaseSchema,
   decision: object({ stage: KeeperCompositeDecisionStageSchema }),
   cascade: object({ state: KeeperCompositeCascadeStateSchema }),

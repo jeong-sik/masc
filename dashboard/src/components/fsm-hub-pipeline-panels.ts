@@ -248,6 +248,18 @@ const STATE_DESCRIPTIONS: Record<string, string> = {
   Failing: 'Experiencing errors, will retry or recover',
   Draining: 'Finishing current work before shutdown',
   Stable: 'Outside the active turn cycle; idle terminal or quiescent parent phases collapse here',
+  running: 'Raw keeper phase indicates the runtime is actively executing turns',
+  failing: 'Raw keeper phase indicates recovery / retry handling is active',
+  overflowed: 'Raw keeper phase indicates provider context overflow needs compaction or clearance',
+  compacting: 'Raw keeper phase indicates compaction currently owns lifecycle progress',
+  handing_off: 'Raw keeper phase indicates state handoff is underway',
+  draining: 'Raw keeper phase indicates shutdown is in progress',
+  offline: 'Raw keeper phase indicates the keeper has not started yet',
+  paused: 'Raw keeper phase indicates operator pause or retry exhaustion',
+  stopped: 'Raw keeper phase indicates a clean terminal stop',
+  crashed: 'Raw keeper phase indicates a crash that may need restart or investigation',
+  restarting: 'Raw keeper phase indicates supervisor restart flow is active',
+  dead: 'Raw keeper phase indicates restart budget is exhausted',
 }
 
 export function HeroPhase({
@@ -284,11 +296,23 @@ export function HeroPhase({
   }
   const color = phaseColor[snapshot.phase] ?? 'text-[var(--accent)]'
   const heldFor = phaseSince != null ? fmtDuration(Math.max(0, now - phaseSince)) : null
+  const collapsedSource = snapshot.phase === 'Stable' ? snapshot.collapsed_from : null
+  const collapsedSourceLabel = collapsedSource
+    ? `${displayState(collapsedSource)} (${collapsedSource})`
+    : null
+  const title = collapsedSource
+    ? `${STATE_DESCRIPTIONS[snapshot.phase] ?? snapshot.phase}\nCollapsed from raw keeper phase: ${collapsedSource}\n${STATE_DESCRIPTIONS[collapsedSource] ?? collapsedSource}`
+    : (STATE_DESCRIPTIONS[snapshot.phase] ?? snapshot.phase)
+  const ariaLabel = [
+    `Keeper 상태: ${displayState(snapshot.phase)}`,
+    collapsedSourceLabel ? `collapsed from ${collapsedSourceLabel}` : null,
+    heldFor,
+  ].filter(Boolean).join(', ')
 
   return html`
     <div class=${`rounded border p-5 transition-all duration-700 ${flash ? 'border-[var(--accent)] bg-[rgba(71,184,255,0.06)] shadow-[0_0_16px_var(--accent-20)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}
-      role="status" aria-live="polite" aria-label=${`Keeper 상태: ${displayState(snapshot.phase)}${heldFor ? `, ${heldFor}` : ''}`}
-      title=${STATE_DESCRIPTIONS[snapshot.phase] ?? snapshot.phase}
+      role="status" aria-live="polite" aria-label=${ariaLabel}
+      title=${title}
     >
       <div class="flex items-baseline justify-between">
         <div>
@@ -297,6 +321,11 @@ export function HeroPhase({
             ${displayState(snapshot.phase)}
           </div>
           <div class="mt-0.5 text-3xs font-mono text-[var(--text-dim)]">${snapshot.phase}</div>
+          ${collapsedSourceLabel ? html`
+            <div class="mt-1 text-3xs font-mono text-[var(--text-dim)]">
+              collapsed from <span class="text-[var(--text-body)]">${collapsedSourceLabel}</span>
+            </div>
+          ` : null}
           ${heldFor ? html`
             <div class="mt-1 text-3xs font-mono text-[var(--text-dim)]" aria-hidden="true">
               유지 <span class="text-[var(--text-body)]">${heldFor}</span>

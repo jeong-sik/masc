@@ -312,12 +312,17 @@ let emit_goal_event ctx ~goal_id ~event_type ~payload =
   Goal_verification.emit_event ctx.config ~goal_id ~event_type ~payload
 
 let handle_goal_list (ctx : context) args =
-  match parse_optional_horizon args "horizon", parse_optional_goal_status args "status" with
-  | Error err, _
-  | _, Error err ->
+  match
+    parse_optional_horizon args "horizon",
+    parse_optional_goal_status args "status",
+    parse_optional_goal_phase args "phase"
+  with
+  | Error err, _, _
+  | _, Error err, _
+  | _, _, Error err ->
       validation_error_result [ err ]
-  | Ok horizon, Ok status ->
-      let goals = Goal_store.list_goals ctx.config ?horizon ?status () in
+  | Ok horizon, Ok status, Ok phase ->
+      let goals = Goal_store.list_goals ctx.config ?horizon ?status ?phase () in
       let rollup = Goal_store.compute_rollup goals in
       ok_result
         [

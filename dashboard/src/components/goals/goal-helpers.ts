@@ -9,10 +9,18 @@ import type { Goal, Task } from '../../types'
 // -- Filter state ------------------------------------------------
 
 type HorizonFilter = 'all' | 'short' | 'mid' | 'long'
-export type StatusFilter = 'all' | 'active' | 'completed' | 'paused'
+export type GoalPhaseFilter =
+  | 'all'
+  | 'executing'
+  | 'awaiting_verification'
+  | 'awaiting_approval'
+  | 'blocked'
+  | 'paused'
+  | 'completed'
+  | 'dropped'
 
 const horizonFilter = signal<HorizonFilter>('all')
-export const statusFilter = signal<StatusFilter>('all')
+export const phaseFilter = signal<GoalPhaseFilter>('all')
 
 // -- Task-level search (case-insensitive, title + description + assignee) --
 
@@ -56,8 +64,8 @@ const filteredGoals = computed(() => {
   if (horizonFilter.value !== 'all') {
     list = list.filter(g => g.horizon === horizonFilter.value)
   }
-  if (statusFilter.value !== 'all') {
-    list = list.filter(g => g.status === statusFilter.value)
+  if (phaseFilter.value !== 'all') {
+    list = list.filter(g => g.phase === phaseFilter.value)
   }
   return list
 })
@@ -137,11 +145,22 @@ export function priorityLabel(p: number): string {
   }
 }
 
-export function statusFilterLabel(value: StatusFilter): string {
+export function matchesGoalPhaseFilter(
+  phase: string,
+  filter: GoalPhaseFilter,
+): boolean {
+  return filter === 'all' || phase === filter
+}
+
+export function phaseFilterLabel(value: GoalPhaseFilter): string {
   switch (value) {
-    case 'active': return '진행 중'
-    case 'completed': return '완료'
+    case 'executing': return '실행 중'
+    case 'awaiting_verification': return 'Goal 검증 대기'
+    case 'awaiting_approval': return '승인 대기'
+    case 'blocked': return '차단됨'
     case 'paused': return '일시정지'
+    case 'completed': return '완료'
+    case 'dropped': return '중단'
     default: return '전체'
   }
 }

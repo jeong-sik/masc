@@ -159,6 +159,18 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   // KMC
   accumulating: '수집 중',
   // KSM
+  running: '가동 중',
+  failing: '오류 발생',
+  overflowed: '컨텍스트 초과',
+  compacting: '압축 중',
+  handing_off: '인수인계',
+  draining: '종료 준비',
+  offline: '오프라인',
+  paused: '일시 중지',
+  stopped: '정지',
+  crashed: '비정상 종료',
+  restarting: '재시작 중',
+  dead: '종료됨',
   Running: '가동 중',
   Overflowed: '컨텍스트 초과',
   Compacting: '압축 중',

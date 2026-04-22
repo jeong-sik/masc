@@ -150,6 +150,26 @@ let test_blocked_phase_projects_legacy_status () =
   check string "blocked phase projects to paused status" "paused"
     (match goal.status with Paused -> "paused" | _ -> "other")
 
+let test_list_goals_filters_by_phase () =
+  with_room @@ fun config ->
+  let make title phase =
+    match Goal_store.upsert_goal config ~title ~phase () with
+    | Ok _ -> ()
+    | Error msg -> fail msg
+  in
+  make "Executing goal" Goal_phase.Executing;
+  make "Approval goal" Goal_phase.Awaiting_approval;
+  make "Blocked goal" Goal_phase.Blocked;
+  let goals =
+    Goal_store.list_goals config ~phase:Goal_phase.Awaiting_approval ()
+  in
+  check int "one goal in awaiting approval" 1 (List.length goals);
+  match goals with
+  | [ goal ] ->
+      check string "filtered phase preserved" "awaiting_approval"
+        (Goal_phase.to_string goal.phase)
+  | _ -> fail "expected one filtered goal"
+
 let test_update_missing_goal_does_not_bump () =
   with_room @@ fun config ->
   let goal = make_goal "exists" "one goal" in
@@ -177,5 +197,7 @@ let () =
             test_legacy_status_defaults_phase;
           test_case "blocked phase projects legacy status" `Quick
             test_blocked_phase_projects_legacy_status;
+          test_case "list_goals filters by phase" `Quick
+            test_list_goals_filters_by_phase;
           test_case "missing update: no bump" `Quick
             test_update_missing_goal_does_not_bump ] ) ]

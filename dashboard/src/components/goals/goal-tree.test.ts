@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GoalTreeNode, GoalTreeTask } from '../../types'
-import { filterGoalTree } from './goal-tree'
+import { filterGoalTree, filterGoalTreeByPhase } from './goal-tree'
 
 function makeTask(overrides: Partial<GoalTreeTask> = {}): GoalTreeTask {
   return {
@@ -190,5 +190,58 @@ describe('filterGoalTree', () => {
     })
     const result = filterGoalTree([root], 'anything')
     expect(result).toHaveLength(0)
+  })
+})
+
+describe('filterGoalTreeByPhase', () => {
+  it('returns the input reference when phase filter is all', () => {
+    const nodes: readonly GoalTreeNode[] = [makeNode({ id: 'a', phase: 'executing' })]
+    expect(filterGoalTreeByPhase(nodes, 'all')).toBe(nodes)
+  })
+
+  it('keeps only nodes whose phase matches exactly', () => {
+    const nodes: readonly GoalTreeNode[] = [
+      makeNode({ id: 'a', phase: 'executing' }),
+      makeNode({ id: 'b', phase: 'awaiting_approval' }),
+      makeNode({ id: 'c', phase: 'blocked' }),
+    ]
+    const result = filterGoalTreeByPhase(nodes, 'awaiting_approval')
+    expect(result.map(node => node.id)).toEqual(['b'])
+  })
+
+  it('preserves ancestors when a descendant matches the phase filter', () => {
+    const leaf = makeNode({ id: 'leaf', phase: 'blocked', title: 'Blocked leaf' })
+    const mid = makeNode({
+      id: 'mid',
+      phase: 'executing',
+      title: 'Executing ancestor',
+      tasks: [makeTask({ id: 't-mid', title: 'ancestor task' })],
+      children: [leaf],
+    })
+    const root = makeNode({ id: 'root', phase: 'executing', children: [mid] })
+
+    const result = filterGoalTreeByPhase([root], 'blocked')
+    expect(result).toHaveLength(1)
+    expect(result[0]!.id).toBe('root')
+    expect(result[0]!.tasks).toEqual([])
+    expect(result[0]!.children).toHaveLength(1)
+    expect(result[0]!.children[0]!.id).toBe('mid')
+    expect(result[0]!.children[0]!.tasks).toEqual([])
+    expect(result[0]!.children[0]!.children[0]!.id).toBe('leaf')
+  })
+
+  it('prunes non-matching descendants even when the parent matches', () => {
+    const root = makeNode({
+      id: 'root',
+      phase: 'executing',
+      children: [
+        makeNode({ id: 'keep', phase: 'executing' }),
+        makeNode({ id: 'drop', phase: 'completed' }),
+      ],
+    })
+
+    const result = filterGoalTreeByPhase([root], 'executing')
+    expect(result).toHaveLength(1)
+    expect(result[0]!.children.map(child => child.id)).toEqual(['keep'])
   })
 })

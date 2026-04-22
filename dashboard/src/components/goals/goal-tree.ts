@@ -6,6 +6,7 @@ import { useEffect, useMemo } from 'preact/hooks'
 import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from '../../api/dashboard'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
+import { FilterChips } from '../common/filter-chips'
 import { StatusBadge } from '../common/status-badge'
 import { TimeAgo } from '../common/time-ago'
 import { TaskCreateForm } from '../task-manage/task-create-form'
@@ -25,8 +26,11 @@ import {
   countAwaitingVerificationTasks,
   countAwaitingVerificationInTree,
   countGoalVerificationInTree,
+  type GoalPhaseFilter,
   goalPhaseLabel,
   goalPhaseStatus,
+  matchesGoalPhaseFilter,
+  phaseFilterLabel,
 } from './goal-helpers'
 
 type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
@@ -73,6 +77,41 @@ function pruneNode(node: GoalTreeNode, needle: string): GoalTreeNode | null {
   return {
     ...node,
     tasks: matchingTasks,
+    children: prunedChildren,
+  }
+}
+
+export function filterGoalTreeByPhase(
+  nodes: readonly GoalTreeNode[],
+  filter: GoalPhaseFilter,
+): readonly GoalTreeNode[] {
+  if (filter === 'all') return nodes
+
+  const result: GoalTreeNode[] = []
+  for (const node of nodes) {
+    const pruned = pruneNodeByPhase(node, filter)
+    if (pruned !== null) result.push(pruned)
+  }
+  return result
+}
+
+function pruneNodeByPhase(
+  node: GoalTreeNode,
+  filter: GoalPhaseFilter,
+): GoalTreeNode | null {
+  const nodeMatches = matchesGoalPhaseFilter(node.phase, filter)
+  const prunedChildren: GoalTreeNode[] = []
+  for (const child of node.children) {
+    const prunedChild = pruneNodeByPhase(child, filter)
+    if (prunedChild !== null) prunedChildren.push(prunedChild)
+  }
+
+  if (!nodeMatches && prunedChildren.length === 0) return null
+  if (nodeMatches && prunedChildren.length === node.children.length) return node
+
+  return {
+    ...node,
+    tasks: nodeMatches ? node.tasks : [],
     children: prunedChildren,
   }
 }
@@ -152,6 +191,7 @@ const treeLoading = signal(false)
 const treeError = signal<string | null>(null)
 const expandedNodes = signal<Set<string>>(new Set())
 const filterQuery = signal('')
+const treePhaseFilter = signal<GoalPhaseFilter>('all')
 const selectedGoalId = signal<string | null>(null)
 const detailData = signal<DashboardGoalDetailResponse | null>(null)
 const detailLoading = signal(false)
@@ -737,11 +777,15 @@ export function GoalTree() {
   const loading = treeLoading.value
   const error = treeError.value
   const query = filterQuery.value
+  const activePhaseFilter = treePhaseFilter.value
   const selectedId = selectedGoalId.value
 
   const visibleTree = useMemo(
-    () => (data ? filterGoalTree(data.tree, query) : []),
-    [data, query],
+    () => {
+      if (!data) return []
+      return filterGoalTree(filterGoalTreeByPhase(data.tree, activePhaseFilter), query)
+    },
+    [activePhaseFilter, data, query],
   )
 
   const allNodes = useMemo(
@@ -749,18 +793,30 @@ export function GoalTree() {
     [data],
   )
 
+  const visibleNodes = useMemo(
+    () => flattenGoalTree(visibleTree),
+    [visibleTree],
+  )
+
   const selectedNode = useMemo(
-    () => allNodes.find(node => node.id === selectedId) ?? null,
-    [allNodes, selectedId],
+    () => visibleNodes.find(node => node.id === selectedId) ?? null,
+    [selectedId, visibleNodes],
   )
 
   useEffect(() => {
-    if (!data || allNodes.length === 0) return
-    if (!selectedGoalId.value || !allNodes.some(node => node.id === selectedGoalId.value)) {
-      selectedGoalId.value = allNodes[0]!.id
-      expandedNodes.value = new Set([allNodes[0]!.id])
+    if (!data || allNodes.length === 0) {
+      selectedGoalId.value = null
+      return
     }
-  }, [data, allNodes])
+    if (visibleNodes.length === 0) {
+      selectedGoalId.value = null
+      return
+    }
+    if (!selectedGoalId.value || !visibleNodes.some(node => node.id === selectedGoalId.value)) {
+      selectedGoalId.value = visibleNodes[0]!.id
+      expandedNodes.value = new Set([visibleNodes[0]!.id])
+    }
+  }, [allNodes, data, visibleNodes])
 
   useEffect(() => {
     if (!selectedId) {
@@ -771,7 +827,26 @@ export function GoalTree() {
     void refreshGoalDetail(selectedId)
   }, [selectedId])
 
-  const isFiltering = query.trim() !== ''
+  const phaseCounts = useMemo(() => {
+    const counts: Record<GoalPhaseFilter, number> = {
+      all: allNodes.length,
+      executing: 0,
+      awaiting_verification: 0,
+      awaiting_approval: 0,
+      blocked: 0,
+      paused: 0,
+      completed: 0,
+      dropped: 0,
+    }
+    for (const node of allNodes) {
+      if (node.phase in counts) {
+        counts[node.phase as Exclude<GoalPhaseFilter, 'all'>] += 1
+      }
+    }
+    return counts
+  }, [allNodes])
+
+  const isFiltering = query.trim() !== '' || activePhaseFilter !== 'all'
 
   return html`
     <div class="flex flex-col gap-5">
@@ -812,6 +887,31 @@ export function GoalTree() {
             <//>
           </div>
         </div>
+
+        ${data && data.tree.length > 0 ? html`
+          <div class="mb-4 flex flex-wrap items-center gap-2">
+            <span class="text-3xs font-semibold uppercase tracking-[0.18em] text-text-muted">Goal Phase</span>
+            <${FilterChips}
+              chips=${([
+                'all',
+                'executing',
+                'awaiting_verification',
+                'awaiting_approval',
+                'blocked',
+                'paused',
+                'completed',
+                'dropped',
+              ] as GoalPhaseFilter[]).map(filter => ({
+                key: filter,
+                label: phaseFilterLabel(filter),
+                count: phaseCounts[filter],
+              }))}
+              active=${treePhaseFilter}
+              tone="accent"
+              size="sm"
+            />
+          </div>
+        ` : null}
 
         ${error ? html`<${ErrorState} message=${error} />` : null}
 

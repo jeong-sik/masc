@@ -118,6 +118,7 @@ let make_task ~id ~status : Types.task = {
   id;
   title = "Test Task";
   description = "";
+  goal_id = None;
   task_status = status;
   priority = 3;
   files = [];

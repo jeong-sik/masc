@@ -27,6 +27,7 @@ export interface Agent {
 export interface Task {
   id: string
   title: string
+  goal_id?: string | null
   status?: 'todo' | 'in_progress' | 'claimed' | 'awaiting_verification' | 'done' | 'cancelled'
   priority?: number
   assignee?: string

@@ -437,6 +437,7 @@ let test_task_roundtrip () =
     id = "task-123";
     title = "Test Task";
     description = "A test task for coverage";
+    goal_id = None;
     task_status = Todo;
     priority = 2;
     files = ["file1.ml"; "file2.ml"];

@@ -20,16 +20,16 @@ function isPlanningView(v: string | undefined): v is PlanningView {
 
 const activeView = computed<PlanningView>(() => {
   const v = route.value.params.view
-  return isPlanningView(v) ? v : 'default'
+  return isPlanningView(v) ? v : 'goal-tree'
 })
 
 const VIEW_CHIPS: Array<{ key: PlanningView; label: string }> = [
-  { key: 'default',   label: '칸반' },
-  { key: 'goal-tree', label: '목표 트리' },
+  { key: 'goal-tree', label: 'Goal Manager' },
+  { key: 'default',   label: 'Backlog' },
 ]
 
 function updateViewParam(view: PlanningView): void {
-  const hash = view === 'default'
+  const hash = view === 'goal-tree'
     ? '#workspace?section=planning'
     : `#workspace?section=planning&view=${view}`
   history.replaceState(null, '', hash)

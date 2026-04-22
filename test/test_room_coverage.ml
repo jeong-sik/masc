@@ -1151,6 +1151,7 @@ let test_append_archive_tasks () =
       id = "task-test";
       title = "Archive Test";
       description = "Test description";
+      goal_id = None;
       task_status = Types.Done {
         assignee = "claude";
         completed_at = "2026-01-01T00:00:00Z";

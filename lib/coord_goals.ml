@@ -144,6 +144,11 @@ let handle_goal_upsert (ctx : context) args =
               ("action", `String action_name);
               ("goal_id", `String goal.id);
               ("goal", Goal_store.goal_to_yojson goal);
+              ( "task_goal_id_example",
+                `String
+                  (Printf.sprintf
+                     {|masc_add_task({title: "Implement %s", goal_id: "%s"})|}
+                     goal.title goal.id) );
               ("task_title_marker", `String task_marker);
               ( "linked_task_title_example",
                 `String

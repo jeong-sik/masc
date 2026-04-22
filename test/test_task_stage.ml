@@ -64,6 +64,7 @@ let test_yojson_roundtrip () =
 let test_task_with_stage () =
   let task : Types_core.task = {
     id = "T-001"; title = "test"; description = "";
+    goal_id = None;
     task_status = Todo; priority = 3; files = [];
     created_at = "2026-01-01T00:00:00Z";
     worktree = None; required_role = Unassigned; required_preset = None;
@@ -81,6 +82,7 @@ let test_task_with_stage () =
 let test_task_without_stage () =
   let task : Types_core.task = {
     id = "T-002"; title = "no stage"; description = "";
+    goal_id = None;
     task_status = Todo; priority = 3; files = [];
     created_at = "2026-01-01T00:00:00Z";
     worktree = None; required_role = Unassigned; required_preset = None;

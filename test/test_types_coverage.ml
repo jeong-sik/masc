@@ -555,6 +555,7 @@ let test_backlog_to_yojson_with_tasks () =
     id = "t1";
     title = "Test task";
     description = "Test description";
+    goal_id = None;
     task_status = Types.Todo;
     priority = 1;
     files = [];

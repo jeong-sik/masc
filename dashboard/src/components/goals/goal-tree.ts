@@ -1,15 +1,19 @@
-// Goal Tree — hierarchical goal decomposition with convergence indicators
+// Goal Manager — goal-first planning surface with health, detail, and evidence.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
-import { fetchDashboardGoalsTree } from '../../api/dashboard'
+import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from '../../api/dashboard'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { StatusBadge } from '../common/status-badge'
 import { TimeAgo } from '../common/time-ago'
+import { TaskCreateForm } from '../task-manage/task-create-form'
 import type {
+  DashboardGoalDetailResponse,
   DashboardGoalsTreeResponse,
+  GoalDetailKeeper,
+  GoalDetailTimelineEvent,
   GoalTreeNode,
   GoalTreeTask,
   GoalTreeSummary,
@@ -18,9 +22,10 @@ import {
   horizonLabel,
   horizonColor,
   priorityStars,
-  countAwaitingVerificationTasks,
   countAwaitingVerificationInTree,
 } from './goal-helpers'
+
+type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
 
 /**
  * Pure hierarchy filter for goal tree nodes.
@@ -29,17 +34,6 @@ import {
  * any task attached to the node. Ancestors of matching nodes are preserved
  * so the operator retains context (parent goal, horizon) — the tree shape
  * is never broken by the filter.
- *
- * Pruning rules:
- * - If a node's own title matches, the node and ALL its descendants / tasks
- *   are kept verbatim (treat the match as "show me this subtree").
- * - Otherwise, the node is kept only if any descendant matches, and only
- *   those matching descendants (recursively pruned) are retained. Tasks
- *   attached directly to this node are filtered down to matching tasks.
- *
- * Empty / whitespace query returns the input reference unchanged so
- * memoisation preserves referential equality for the non-filtering path.
- * Input is never mutated.
  */
 export function filterGoalTree(
   nodes: readonly GoalTreeNode[],
@@ -59,10 +53,7 @@ export function filterGoalTree(
 function pruneNode(node: GoalTreeNode, needle: string): GoalTreeNode | null {
   const title = node.title ?? ''
   const nodeMatches = title.toLowerCase().includes(needle)
-  if (nodeMatches) {
-    // Self match: keep the whole subtree as-is.
-    return node
-  }
+  if (nodeMatches) return node
 
   const matchingTasks = node.tasks.filter(t =>
     (t.title ?? '').toLowerCase().includes(needle),
@@ -73,12 +64,8 @@ function pruneNode(node: GoalTreeNode, needle: string): GoalTreeNode | null {
     if (prunedChild !== null) prunedChildren.push(prunedChild)
   }
 
-  if (matchingTasks.length === 0 && prunedChildren.length === 0) {
-    return null
-  }
+  if (matchingTasks.length === 0 && prunedChildren.length === 0) return null
 
-  // Ancestor retained for context: return a shallow copy with the pruned
-  // children / tasks so we never mutate the input node.
   return {
     ...node,
     tasks: matchingTasks,
@@ -86,13 +73,87 @@ function pruneNode(node: GoalTreeNode, needle: string): GoalTreeNode | null {
   }
 }
 
-// --- State ---
+function flattenGoalTree(nodes: readonly GoalTreeNode[]): GoalTreeNode[] {
+  const acc: GoalTreeNode[] = []
+  const walk = (items: readonly GoalTreeNode[]) => {
+    for (const item of items) {
+      acc.push(item)
+      if (item.children.length > 0) walk(item.children)
+    }
+  }
+  walk(nodes)
+  return acc
+}
+
+function badgeLabel(badge: string): string {
+  switch (badge) {
+    case 'awaiting_approval': return 'Approval'
+    case 'sandbox': return 'Sandbox'
+    case 'cascade': return 'Cascade'
+    case 'fsm': return 'FSM'
+    case 'stalled': return 'Stalled'
+    case 'linkage_warning': return 'Linkage'
+    default: return badge
+  }
+}
+
+function badgeClass(badge: string): string {
+  switch (badge) {
+    case 'awaiting_approval':
+    case 'cascade':
+    case 'fsm':
+    case 'stalled':
+      return 'border-warn/30 bg-warn/10 text-warn'
+    case 'sandbox':
+      return 'border-accent/30 bg-[var(--accent-10)] text-accent'
+    case 'linkage_warning':
+      return 'border-bad/30 bg-bad/10 text-bad'
+    default:
+      return 'border-card-border/60 bg-white/4 text-text-body'
+  }
+}
+
+function healthLabel(health: GoalTreeNode['health']): string {
+  switch (health) {
+    case 'done': return 'Done'
+    case 'paused': return 'Paused'
+    case 'blocked': return 'Blocked'
+    case 'at_risk': return 'At Risk'
+    case 'on_track': return 'On Track'
+    default: return health
+  }
+}
+
+function healthClass(health: GoalTreeNode['health']): string {
+  switch (health) {
+    case 'done': return 'border-sky-400/30 bg-sky-500/10 text-sky-300'
+    case 'paused': return 'border-warn/30 bg-warn/10 text-warn'
+    case 'blocked': return 'border-bad/35 bg-bad/10 text-bad'
+    case 'at_risk': return 'border-warn/30 bg-warn/10 text-warn'
+    case 'on_track': return 'border-ok/30 bg-ok/10 text-ok'
+    default: return 'border-card-border/60 bg-white/4 text-text-body'
+  }
+}
+
+function timelineSeverityClass(severity: GoalDetailTimelineEvent['severity']): string {
+  switch (severity) {
+    case 'bad': return 'border-bad/25 bg-bad/10 text-bad'
+    case 'warn': return 'border-warn/25 bg-warn/10 text-warn'
+    default: return 'border-card-border/50 bg-white/3 text-text-body'
+  }
+}
 
 const treeData = signal<DashboardGoalsTreeResponse | null>(null)
 const treeLoading = signal(false)
 const treeError = signal<string | null>(null)
 const expandedNodes = signal<Set<string>>(new Set())
 const filterQuery = signal('')
+const selectedGoalId = signal<string | null>(null)
+const detailData = signal<DashboardGoalDetailResponse | null>(null)
+const detailLoading = signal(false)
+const detailError = signal<string | null>(null)
+const detailTab = signal<GoalDetailTab>('summary')
+let detailRequestSeq = 0
 
 function toggleNode(id: string) {
   const next = new Set(expandedNodes.value)
@@ -101,12 +162,16 @@ function toggleNode(id: string) {
   expandedNodes.value = next
 }
 
+function selectGoal(id: string) {
+  selectedGoalId.value = id
+}
+
 function expandAll(nodes: GoalTreeNode[]) {
   const ids = new Set(expandedNodes.value)
-  function walk(ns: GoalTreeNode[]) {
-    for (const n of ns) {
-      ids.add(n.id)
-      walk(n.children)
+  function walk(items: GoalTreeNode[]) {
+    for (const item of items) {
+      ids.add(item.id)
+      walk(item.children)
     }
   }
   walk(nodes)
@@ -129,7 +194,24 @@ async function refreshTree() {
   }
 }
 
-// --- Convergence bar ---
+async function refreshGoalDetail(goalId: string) {
+  const reqId = ++detailRequestSeq
+  detailLoading.value = true
+  detailError.value = null
+  try {
+    const next = await fetchDashboardGoalDetail(goalId)
+    if (!next || typeof next !== 'object' || !('goal' in next)) {
+      throw new Error('invalid goal detail payload')
+    }
+    if (detailRequestSeq !== reqId) return
+    detailData.value = next
+  } catch (err) {
+    if (detailRequestSeq !== reqId) return
+    detailError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    if (detailRequestSeq === reqId) detailLoading.value = false
+  }
+}
 
 function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' }) {
   const clamped = Math.max(0, Math.min(100, pct))
@@ -150,8 +232,6 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
   `
 }
 
-// --- Summary stats ---
-
 function TreeSummary({
   summary,
   awaitingVerificationCount,
@@ -160,139 +240,163 @@ function TreeSummary({
   awaitingVerificationCount: number
 }) {
   return html`
-    <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3">
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(128px,1fr))] gap-3">
       <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
         <div class="text-2xl font-bold text-text-strong tabular-nums">${summary.total_goals}</div>
-        <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted mt-1">전체 목표</div>
+        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-text-muted">전체 목표</div>
       </div>
-      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
+      <div class="rounded border border-ok/25 bg-ok/10 p-3 text-center">
         <div class="text-2xl font-bold text-ok tabular-nums">${summary.active_goals}</div>
-        <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted mt-1">진행 중</div>
+        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-ok/80">On Track</div>
+      </div>
+      <div class="rounded border border-warn/25 bg-warn/10 p-3 text-center">
+        <div class="text-2xl font-bold text-warn tabular-nums">${summary.at_risk_goals}</div>
+        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-warn/80">At Risk</div>
+      </div>
+      <div class="rounded border border-bad/25 bg-bad/10 p-3 text-center">
+        <div class="text-2xl font-bold text-bad tabular-nums">${summary.blocked_goals}</div>
+        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-bad/80">Blocked</div>
       </div>
       <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
-        <div class="text-2xl font-bold text-text-strong tabular-nums">${summary.total_tasks}</div>
-        <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted mt-1">연결 태스크</div>
-      </div>
-      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
-        <div class="text-2xl font-bold text-ok tabular-nums">${summary.done_tasks}</div>
-        <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted mt-1">완료</div>
+        <div class="text-2xl font-bold text-text-strong tabular-nums">${summary.pending_approvals}</div>
+        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-text-muted">Approval</div>
       </div>
       ${awaitingVerificationCount > 0 ? html`
         <div class="rounded border border-accent/30 bg-[var(--accent-10)] p-3 text-center">
           <div class="text-2xl font-bold text-accent tabular-nums">${awaitingVerificationCount}</div>
-          <div class="text-3xs font-semibold uppercase tracking-widest text-accent/80 mt-1">검증 대기</div>
+          <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-accent/80">검증 대기</div>
         </div>
       ` : null}
       <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
-        <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted mb-2">전체 수렴도</div>
+        <div class="mb-2 text-3xs font-semibold uppercase tracking-widest text-text-muted">전체 수렴도</div>
         <${ConvergenceBar} pct=${summary.overall_convergence_pct} />
       </div>
     </div>
   `
 }
 
-// --- Task row inside a goal ---
+function HealthBadge({ health }: { health: GoalTreeNode['health'] }) {
+  return html`
+    <span class="inline-flex items-center rounded border px-2 py-0.5 text-3xs font-semibold uppercase tracking-wider ${healthClass(health)}">
+      ${healthLabel(health)}
+    </span>
+  `
+}
+
+function GoalBadges({ badges }: { badges: string[] }) {
+  if (badges.length === 0) return null
+  return html`
+    <div class="flex flex-wrap gap-1.5">
+      ${badges.map(badge => html`
+        <span
+          key=${badge}
+          class="inline-flex items-center rounded border px-2 py-0.5 text-3xs font-semibold uppercase tracking-wider ${badgeClass(badge)}"
+        >
+          ${badgeLabel(badge)}
+        </span>
+      `)}
+    </div>
+  `
+}
 
 function TreeTask({ task }: { task: GoalTreeTask }) {
   return html`
-    <div class="flex items-center gap-2 py-1.5 px-2 rounded bg-white/3 text-xs">
+    <div class="flex flex-wrap items-center gap-2 rounded bg-white/3 px-2 py-1.5 text-xs">
       <span class="size-2 rounded-sm shrink-0" style="background:${task.status_color}"></span>
-      <span class="flex-1 min-w-0 truncate text-text-body">${task.title}</span>
+      <span class="min-w-0 flex-1 truncate text-text-body">${task.title}</span>
+      <span class="rounded border border-card-border/60 bg-white/4 px-1.5 py-0.5 text-3xs font-medium text-text-muted">
+        ${task.linkage_source === 'explicit' ? 'goal_id' : 'title tag'}
+      </span>
       ${task.assignee ? html`
-        <span class="shrink-0 rounded border border-accent/20 bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-medium text-accent">${task.assignee}</span>
+        <span class="rounded border border-accent/20 bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-medium text-accent">${task.assignee}</span>
       ` : null}
       <${StatusBadge} status=${task.status} />
     </div>
   `
 }
 
-// --- Goal tree node (recursive) ---
-
 function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
   const isExpanded = expandedNodes.value.has(node.id)
   const hasContent = node.children.length > 0 || node.tasks.length > 0
+  const isSelected = selectedGoalId.value === node.id
   const indent = depth * 20
-  const headerBase = 'group flex items-start gap-3 rounded border border-card-border/60 bg-[rgba(8,13,22,0.86)] p-3 transition-colors hover:border-card-border/90 w-full text-left'
-
-  const headerContent = html`
-    ${hasContent ? html`
-      <span class="shrink-0 mt-0.5 text-xs text-text-dim transition-transform ${isExpanded ? 'rotate-90' : ''}">\u25B6</span>
-    ` : html`
-      <span class="shrink-0 mt-0.5 text-xs text-text-dim/30">\u25CB</span>
-    `}
-
-    <div class="flex-1 min-w-0">
-      <div class="flex flex-wrap items-center gap-2 mb-1">
-        <span class="shrink-0 rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-3xs font-bold uppercase tracking-widest" style="color:${horizonColor(node.horizon)}">
-          ${horizonLabel(node.horizon)}
-        </span>
-        <span class="text-base font-semibold text-text-strong break-words line-clamp-2">${node.title}</span>
-        <span class="text-2xs text-text-dim">${priorityStars(node.priority)}</span>
-      </div>
-
-      <div class="flex flex-wrap items-center gap-3 text-2xs text-text-muted">
-        ${node.metric ? html`
-          <span class="rounded-md border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-accent">
-            ${node.metric}${node.target_value ? ` \u2192 ${node.target_value}` : ''}
-          </span>
-        ` : null}
-        ${node.due_date ? html`
-          <span class="rounded-md border border-bad/20 bg-bad/10 px-2 py-0.5 text-bad">
-            마감 <${TimeAgo} timestamp=${node.due_date} />
-          </span>
-        ` : null}
-        ${node.task_count > 0 ? html`
-          <span class="font-medium">${node.task_done_count}/${node.task_count} 태스크</span>
-        ` : null}
-        ${(() => {
-          const awaiting = countAwaitingVerificationTasks(node.tasks)
-          return awaiting > 0 ? html`
-            <span class="rounded border border-accent/30 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-medium text-accent" title="verifier keeper의 독립 실측을 기다리는 task">
-              검증 대기 ${awaiting}
-            </span>
-          ` : null
-        })()}
-        ${node.child_count > 0 ? html`
-          <span class="font-medium">${node.child_count} 하위 목표</span>
-        ` : null}
-      </div>
-
-      <div class="mt-2 max-w-100">
-        <${ConvergenceBar} pct=${node.convergence_pct} size="sm" />
-      </div>
-    </div>
-
-    <div class="flex flex-col items-end gap-1 shrink-0">
-      <${StatusBadge} status=${node.status} />
-      <span class="text-3xs text-text-dim">
-        <${TimeAgo} timestamp=${node.updated_at} />
-      </span>
-    </div>
-  `
+  const headerBase = isSelected
+    ? 'group flex items-start gap-3 rounded border border-accent/35 bg-[rgba(11,18,32,0.94)] p-3 transition-colors w-full text-left shadow-[0_0_0_1px_rgba(110,231,255,0.08)]'
+    : 'group flex items-start gap-3 rounded border border-card-border/60 bg-[rgba(8,13,22,0.86)] p-3 transition-colors hover:border-card-border/90 w-full text-left'
 
   return html`
     <div class="flex flex-col" style="margin-left:${indent}px">
-      ${hasContent ? html`
-        <button
-          type="button"
-          class="${headerBase} cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-          onClick=${() => toggleNode(node.id)}
-          aria-expanded=${isExpanded}
-        >
-          ${headerContent}
-        </button>
-      ` : html`
-        <div class=${headerBase}>
-          ${headerContent}
+      <button
+        type="button"
+        class="${headerBase} ${hasContent ? 'cursor-pointer' : ''} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        onClick=${() => {
+          selectGoal(node.id)
+          if (hasContent) toggleNode(node.id)
+        }}
+        aria-expanded=${hasContent ? isExpanded : undefined}
+      >
+        ${hasContent ? html`
+          <span class="mt-0.5 shrink-0 text-xs text-text-dim transition-transform ${isExpanded ? 'rotate-90' : ''}">\u25B6</span>
+        ` : html`
+          <span class="mt-0.5 shrink-0 text-xs text-text-dim/30">\u25CB</span>
+        `}
+
+        <div class="min-w-0 flex-1">
+          <div class="mb-1 flex flex-wrap items-center gap-2">
+            <span
+              class="shrink-0 rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-3xs font-bold uppercase tracking-widest"
+              style="color:${horizonColor(node.horizon)}"
+            >
+              ${horizonLabel(node.horizon)}
+            </span>
+            <span class="break-words text-base font-semibold text-text-strong line-clamp-2">${node.title}</span>
+            <span class="text-2xs text-text-dim">${priorityStars(node.priority)}</span>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2.5 text-2xs text-text-muted">
+            <${HealthBadge} health=${node.health} />
+            <${StatusBadge} status=${node.status} />
+            ${node.task_count > 0 ? html`<span>${node.task_done_count}/${node.task_count} 태스크</span>` : null}
+            ${node.child_count > 0 ? html`<span>${node.child_count} 하위 목표</span>` : null}
+            ${node.pending_approval_count > 0 ? html`
+              <span class="rounded border border-warn/30 bg-warn/10 px-2 py-0.5 text-3xs font-medium text-warn">
+                approval ${node.pending_approval_count}
+              </span>
+            ` : null}
+            ${node.infra_risk_count > 0 ? html`
+              <span class="rounded border border-bad/25 bg-bad/10 px-2 py-0.5 text-3xs font-medium text-bad">
+                infra ${node.infra_risk_count}
+              </span>
+            ` : null}
+          </div>
+
+          <div class="mt-2 max-w-110">
+            <${ConvergenceBar} pct=${node.convergence_pct} size="sm" />
+          </div>
+
+          ${node.badges.length > 0 ? html`
+            <div class="mt-2">
+              <${GoalBadges} badges=${node.badges} />
+            </div>
+          ` : null}
         </div>
-      `}
+
+        <div class="flex shrink-0 flex-col items-end gap-1">
+          <span class="text-3xs text-text-dim">
+            <${TimeAgo} timestamp=${node.last_activity_at} />
+          </span>
+          ${isSelected ? html`
+            <span class="rounded border border-accent/30 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-semibold text-accent">selected</span>
+          ` : null}
+        </div>
+      </button>
 
       ${isExpanded ? html`
         <div class="mt-1.5 flex flex-col gap-1.5">
           ${node.tasks.length > 0 ? html`
             <div class="ml-6 flex flex-col gap-1 rounded border border-card-border/40 bg-[rgba(5,9,16,0.6)] p-2">
-              <div class="text-3xs font-semibold uppercase tracking-widest text-text-dim mb-1">연결된 태스크</div>
-              ${node.tasks.map(t => html`<${TreeTask} key=${t.id} task=${t} />`)}
+              <div class="mb-1 text-3xs font-semibold uppercase tracking-widest text-text-dim">연결된 태스크</div>
+              ${node.tasks.map(task => html`<${TreeTask} key=${task.id} task=${task} />`)}
             </div>
           ` : null}
           ${node.children.map(child => html`
@@ -304,7 +408,252 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
   `
 }
 
-// --- Main GoalTree component ---
+function DetailMetric({
+  label,
+  value,
+  tone = 'default',
+}: {
+  label: string
+  value: string | number
+  tone?: 'default' | 'ok' | 'warn' | 'bad'
+}) {
+  const toneClass =
+    tone === 'ok'
+      ? 'text-ok'
+      : tone === 'warn'
+        ? 'text-warn'
+        : tone === 'bad'
+          ? 'text-bad'
+          : 'text-text-strong'
+  return html`
+    <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
+      <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">${label}</div>
+      <div class="mt-2 text-lg font-semibold tabular-nums ${toneClass}">${value}</div>
+    </div>
+  `
+}
+
+function DetailTabs({ active }: { active: GoalDetailTab }) {
+  const tabs: GoalDetailTab[] = ['summary', 'tasks', 'evidence']
+  return html`
+    <div class="flex flex-wrap gap-2">
+      ${tabs.map(tab => html`
+        <button
+          key=${tab}
+          type="button"
+          class="rounded border px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors ${active === tab
+            ? 'border-accent/35 bg-[var(--accent-10)] text-accent'
+            : 'border-card-border/60 bg-white/3 text-text-body hover:border-card-border/90'}"
+          onClick=${() => { detailTab.value = tab }}
+        >
+          ${tab}
+        </button>
+      `)}
+    </div>
+  `
+}
+
+function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
+  return html`
+    <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <div class="text-sm font-semibold text-text-strong">${keeper.name}</div>
+          <div class="mt-1 text-2xs text-text-muted">${keeper.agent_name}</div>
+        </div>
+        ${keeper.latest_execution_outcome ? html`
+          <span class="rounded border border-card-border/60 bg-white/4 px-2 py-0.5 text-3xs font-semibold text-text-body">
+            ${keeper.latest_execution_outcome}
+          </span>
+        ` : null}
+      </div>
+      <div class="mt-3 grid grid-cols-2 gap-2 text-2xs text-text-muted">
+        <div>Sandbox</div>
+        <div class="text-right text-text-body">${keeper.sandbox_profile}</div>
+        <div>Effective</div>
+        <div class="text-right text-text-body">${keeper.sandbox_effective_kind ?? '-'}</div>
+        <div>Scope</div>
+        <div class="text-right text-text-body">${keeper.execution_scope}</div>
+        <div>Approval</div>
+        <div class="text-right text-text-body">${keeper.approval_profile ?? '-'}</div>
+        <div>Cascade</div>
+        <div class="text-right text-text-body">${keeper.cascade_name}</div>
+        <div>Outcome</div>
+        <div class="text-right text-text-body">${keeper.cascade_outcome ?? '-'}</div>
+      </div>
+      ${keeper.latest_execution_at ? html`
+        <div class="mt-3 text-3xs text-text-dim">
+          최근 실행 <${TimeAgo} timestamp=${keeper.latest_execution_at} />
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
+function GoalTimeline({ events }: { events: GoalDetailTimelineEvent[] }) {
+  if (events.length === 0) {
+    return html`<${EmptyState} message="최근 evidence가 없습니다" compact />`
+  }
+  return html`
+    <div class="flex flex-col gap-2">
+      ${events.map(event => html`
+        <div key=${`${event.kind}:${event.lane}:${event.ts}`} class="rounded border p-3 ${timelineSeverityClass(event.severity)}">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="text-sm font-semibold">${event.title}</div>
+            <div class="text-3xs text-text-dim">
+              <${TimeAgo} timestamp=${event.ts} />
+            </div>
+          </div>
+          <div class="mt-1 text-2xs text-text-muted">${event.lane}</div>
+          <div class="mt-2 text-xs leading-relaxed text-text-body">${event.summary}</div>
+        </div>
+      `)}
+    </div>
+  `
+}
+
+function GoalDetailPanel({
+  selectedNode,
+}: {
+  selectedNode: GoalTreeNode | null
+}) {
+  const data = detailData.value
+  const loading = detailLoading.value
+  const error = detailError.value
+  const activeTab = detailTab.value
+
+  if (!selectedNode) {
+    return html`
+      <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
+        <${EmptyState} message="왼쪽에서 목표를 선택하면 Summary / Tasks / Evidence가 표시됩니다." />
+      </section>
+    `
+  }
+
+  const detail = data?.goal.id === selectedNode.id ? data : null
+
+  return html`
+    <section class="flex flex-col gap-4 rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="max-w-150">
+          <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Goal Detail</div>
+          <h3 class="mt-1 text-xl font-semibold tracking-[-0.02em] text-text-strong">${selectedNode.title}</h3>
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <${HealthBadge} health=${selectedNode.health} />
+            <${StatusBadge} status=${selectedNode.status} />
+            <span class="rounded border border-white/10 bg-white/5 px-2 py-0.5 text-3xs font-semibold uppercase tracking-widest" style="color:${horizonColor(selectedNode.horizon)}">
+              ${horizonLabel(selectedNode.horizon)}
+            </span>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <${ActionButton}
+            variant="ghost"
+            size="sm"
+            disabled=${loading}
+            onClick=${() => { void refreshGoalDetail(selectedNode.id) }}
+          >
+            ${loading ? 'detail 갱신 중...' : 'detail 새로고침'}
+          <//>
+        </div>
+      </div>
+
+      <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2 text-sm text-text-body">
+        ${selectedNode.status_reason}
+      </div>
+
+      <${DetailTabs} active=${activeTab} />
+
+      ${error ? html`<${ErrorState} message=${error} />` : null}
+      ${loading && !detail ? html`<${LoadingState}>goal detail 로드 중...<//>` : null}
+
+      ${activeTab === 'summary' ? html`
+        <div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
+          <${DetailMetric} label="Task" value=${`${selectedNode.task_done_count}/${selectedNode.task_count}`} tone=${selectedNode.task_done_count === selectedNode.task_count && selectedNode.task_count > 0 ? 'ok' : 'default'} />
+          <${DetailMetric} label="Linked Keepers" value=${selectedNode.linked_keeper_names.length} />
+          <${DetailMetric} label="Approval" value=${selectedNode.pending_approval_count} tone=${selectedNode.pending_approval_count > 0 ? 'warn' : 'default'} />
+          <${DetailMetric} label="Infra Risk" value=${selectedNode.infra_risk_count} tone=${selectedNode.infra_risk_count > 0 ? 'bad' : 'default'} />
+          <${DetailMetric} label="Linkage" value=${selectedNode.linkage_source} tone=${selectedNode.linkage_warning_count > 0 ? 'warn' : 'default'} />
+          <${DetailMetric} label="Last Activity" value=${selectedNode.stagnation_seconds > 0 ? `${Math.floor(selectedNode.stagnation_seconds / 3600)}h idle` : 'now'} tone=${selectedNode.badges.includes('stalled') ? 'warn' : 'default'} />
+        </div>
+
+        ${selectedNode.badges.length > 0 ? html`
+          <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+            <div class="mb-2 text-2xs font-semibold uppercase tracking-widest text-text-muted">Badges</div>
+            <${GoalBadges} badges=${selectedNode.badges} />
+          </div>
+        ` : null}
+
+        <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted">Goal-Scoped Task</div>
+              <div class="mt-1 text-sm text-text-body">이 goal에 직접 연결되는 새 태스크를 backlog에 넣습니다.</div>
+            </div>
+          </div>
+          <${TaskCreateForm} goalId=${selectedNode.id} goalTitle=${selectedNode.title} />
+        </div>
+      ` : null}
+
+      ${activeTab === 'tasks' ? html`
+        ${detail ? (
+          detail.linked_tasks.length > 0
+            ? html`
+              <div class="flex flex-col gap-2">
+                ${detail.linked_tasks.map(task => html`<${TreeTask} key=${task.id} task=${task} />`)}
+              </div>
+            `
+            : html`<${EmptyState} message="이 goal에 직접 연결된 태스크가 없습니다" compact />`
+        ) : null}
+      ` : null}
+
+      ${activeTab === 'evidence' ? html`
+        <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div class="flex flex-col gap-4">
+            <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+              <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">Keeper Readiness</div>
+              ${detail ? (
+                detail.linked_keepers.length > 0
+                  ? html`
+                    <div class="flex flex-col gap-2">
+                      ${detail.linked_keepers.map(keeper => html`<${KeeperCard} key=${keeper.name} keeper=${keeper} />`)}
+                    </div>
+                  `
+                  : html`<${EmptyState} message="연결된 keeper가 없습니다" compact />`
+              ) : null}
+            </div>
+
+            <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+              <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">Pending Approvals</div>
+              ${detail ? (
+                detail.approvals.length > 0
+                  ? html`
+                    <div class="flex flex-col gap-2">
+                      ${detail.approvals.map((approval, index) => html`
+                        <div key=${String(approval.id ?? index)} class="rounded border border-warn/20 bg-warn/6 p-3 text-xs">
+                          <div class="flex flex-wrap items-center justify-between gap-2">
+                            <strong class="text-text-strong">${String(approval.tool_name ?? 'tool')}</strong>
+                            <span class="text-text-dim">${String(approval.risk_level ?? 'risk')}</span>
+                          </div>
+                          <div class="mt-2 text-text-muted">${String(approval.input_preview ?? 'pending operator decision')}</div>
+                        </div>
+                      `)}
+                    </div>
+                  `
+                  : html`<${EmptyState} message="approval 대기 없음" compact />`
+              ) : null}
+            </div>
+          </div>
+
+          <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+            <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">Unified Timeline</div>
+            ${detail ? html`<${GoalTimeline} events=${detail.timeline} />` : null}
+          </div>
+        </div>
+      ` : null}
+    </section>
+  `
+}
 
 export function GoalTree() {
   useEffect(() => {
@@ -315,25 +664,55 @@ export function GoalTree() {
   const loading = treeLoading.value
   const error = treeError.value
   const query = filterQuery.value
+  const selectedId = selectedGoalId.value
 
   const visibleTree = useMemo(
     () => (data ? filterGoalTree(data.tree, query) : []),
     [data, query],
   )
+
+  const allNodes = useMemo(
+    () => (data ? flattenGoalTree(data.tree) : []),
+    [data],
+  )
+
+  const selectedNode = useMemo(
+    () => allNodes.find(node => node.id === selectedId) ?? null,
+    [allNodes, selectedId],
+  )
+
+  useEffect(() => {
+    if (!data || allNodes.length === 0) return
+    if (!selectedGoalId.value || !allNodes.some(node => node.id === selectedGoalId.value)) {
+      selectedGoalId.value = allNodes[0]!.id
+      expandedNodes.value = new Set([allNodes[0]!.id])
+    }
+  }, [data, allNodes])
+
+  useEffect(() => {
+    if (!selectedId) {
+      detailData.value = null
+      detailError.value = null
+      return
+    }
+    void refreshGoalDetail(selectedId)
+  }, [selectedId])
+
   const isFiltering = query.trim() !== ''
 
   return html`
     <div class="flex flex-col gap-5">
       <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
-        <div class="flex flex-wrap items-start justify-between gap-4 mb-4">
+        <div class="mb-4 flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-190">
-            <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Goal Tree</div>
-            <h3 class="mt-1 text-2xl font-semibold tracking-[-0.02em] text-text-strong">목표 계층 구조</h3>
+            <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Goal Manager</div>
+            <h3 class="mt-1 text-2xl font-semibold tracking-[-0.02em] text-text-strong">목표 중심 계획 뷰</h3>
             <p class="mt-1.5 text-sm leading-relaxed text-text-muted">
-              목표의 부모-자식 관계와 연결된 태스크를 트리 형태로 보여줍니다. 수렴도는 하위 태스크 완료율 기반입니다.
+              goal-task 연결, keeper evidence, approval 대기, sandbox/cascade 신호를 한 표면에서 봅니다.
+              신규 태스크는 <code class="rounded bg-white/5 px-1 py-0.5 text-2xs text-text-strong">goal_id</code>로 직접 연결됩니다.
             </p>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
             ${data && data.tree.length > 0 ? html`
               <input
                 type="search"
@@ -363,24 +742,29 @@ export function GoalTree() {
 
         ${error ? html`<${ErrorState} message=${error} />` : null}
 
-        ${data ? html`<${TreeSummary}
-          summary=${data.summary}
-          awaitingVerificationCount=${countAwaitingVerificationInTree(data.tree)}
-        />` : null}
+        ${data ? html`
+          <${TreeSummary}
+            summary=${data.summary}
+            awaitingVerificationCount=${countAwaitingVerificationInTree(data.tree)}
+          />
+        ` : null}
       </section>
 
       ${loading && !data ? html`
-        <${LoadingState}>목표 트리 불러오는 중...<//>
+        <${LoadingState}>goal manager 로드 중...<//>
       ` : data && data.tree.length === 0 ? html`
-        <${EmptyState} message="등록된 목표가 없습니다. masc_goal_upsert로 목표를 등록하세요. 연결 태스크는 제목에 [goal:<id>]를 포함하면 Goal Tree에 반영됩니다." />
+        <${EmptyState} message="등록된 목표가 없습니다. masc_goal_upsert로 목표를 등록하세요. 태스크는 goal_id로 직접 연결되고, 제목의 [goal:<id>]는 레거시 fallback으로만 읽습니다." />
       ` : data && isFiltering && visibleTree.length === 0 ? html`
         <section class="py-4 text-center text-xs text-text-dim">
           필터 결과 없음 (${data.tree.length} 목표)
         </section>
       ` : data ? html`
-        <section class="flex flex-col gap-2">
-          ${visibleTree.map(node => html`<${TreeNode} key=${node.id} node=${node} depth=${0} />`)}
-        </section>
+        <div class="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
+          <section class="flex flex-col gap-2">
+            ${visibleTree.map(node => html`<${TreeNode} key=${node.id} node=${node} depth=${0} />`)}
+          </section>
+          <${GoalDetailPanel} selectedNode=${selectedNode} />
+        </div>
       ` : null}
     </div>
   `

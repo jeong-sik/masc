@@ -13,7 +13,7 @@ let schemas : tool_schema list =
       description =
         "List shared planning goals from the Goal Store, optionally filtered by horizon or status. \
 Use when a PM/planner agent needs current long/mid/short goals before creating tasks or reviews. \
-The dashboard Goal Tree reads the same store. Linked tasks appear when task titles include [goal:<id>].";
+The dashboard Goal Tree reads the same store. Linked tasks prefer explicit goal_id linkage; title tags like [goal:<id>] remain a legacy fallback.";
       input_schema =
         `Assoc
           [
@@ -43,7 +43,7 @@ The dashboard Goal Tree reads the same store. Linked tasks appear when task titl
       description =
         "Create or update a shared Goal Store entry used by Planning > Goal Tree. \
 For new goals, provide at least title; omitted horizon defaults to short. \
-After creation, link tasks into the tree by including [goal:<id>] in the task title.";
+After creation, link tasks into the tree with goal_id=<goal_id>; include [goal:<id>] in the title only for legacy compatibility.";
       input_schema =
         `Assoc
           [

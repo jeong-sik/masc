@@ -18,7 +18,9 @@ val convergence_signal_to_yojson : convergence_signal -> Yojson.Safe.t
     [None] when work is still in progress.
 
     @param goal_id  The goal whose tasks to evaluate.
-    @param tasks    All tasks in the room (filtered internally by goal_id prefix in title).
+    @param tasks    All tasks in the room (filtered internally by explicit
+                    [task.goal_id], with legacy title-tag fallback when
+                    [goal_id] is absent).
     @param stagnation_threshold  Number of iterations without progress before
                                  emitting [StagnationDetected]. Defaults to [5].
     @param iterations_without_progress  Current count of iterations with no task

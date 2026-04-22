@@ -8,6 +8,7 @@ type SurfaceSectionId =
   | 'agents'
   | 'runtime'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
+  | 'safe-autonomy'
   | 'memory-subsystems'
   | 'attribution'     // Layer 4 gate-chain observation (per-gate outcome + recent events)
   // command
@@ -159,6 +160,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '플릿 텔레메트리',
       description: '이벤트 로그, Keeper 비교, 도구 품질, 거버넌스 신호를 한 화면에서 봅니다.',
       params: { section: 'fleet-health' },
+    },
+    {
+      id: 'safe-autonomy',
+      label: '세이프 오토노미',
+      description: '도구, 샌드박스, 승인, 캐스케이드/FSM, 감사 추적을 keeper별 scorecard로 봅니다.',
+      params: { section: 'safe-autonomy' },
     },
     {
       id: 'memory-subsystems',

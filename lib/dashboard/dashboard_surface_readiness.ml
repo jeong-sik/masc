@@ -144,6 +144,25 @@ let all_entries =
         };
     };
     {
+      id = "monitoring.safe_autonomy";
+      label = "세이프 오토노미";
+      exposure_status = "lab";
+      hidden_from_nav = false;
+      meets_main_gate = false;
+      rationale =
+        "Tool correctness, sandbox truth, approval gates, cascade gracefulness, audit trail completeness를 하나의 운영 scorecard로 묶은 advisory surface입니다.";
+      route_hash = Some "#monitoring?section=safe-autonomy";
+      refs =
+        {
+          fixture_harness = Some "dune exec ./test/test_dashboard_safe_autonomy.exe";
+          live_spotcheck = Some "/api/v1/dashboard/safe-autonomy";
+          logs_ref = Some "/api/v1/dashboard/logs";
+          metrics_ref = Some "/metrics";
+          proof_ref = Some "/api/v1/dashboard/proof";
+          tool_name = Some "masc_surface_audit";
+        };
+    };
+    {
       id = "monitoring.activity";
       label = "활동 그래프";
       exposure_status = "legacy";

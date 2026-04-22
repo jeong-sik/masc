@@ -11,9 +11,11 @@ import { FleetHealthPanel } from './fleet-health-panel'
 import { Observatory } from './observatory/observatory'
 import { AttributionPanel } from './attribution-panel'
 import { JourneyPanel } from './journey-panel'
+import { SafeAutonomyPanel } from './safe-autonomy'
 
 type StatusSection =
   | 'observatory' | 'journey' | 'agents' | 'runtime' | 'fleet-health'
+  | 'safe-autonomy'
   | 'memory-subsystems' | 'attribution'
 
 function currentSection(): StatusSection {
@@ -23,6 +25,7 @@ function currentSection(): StatusSection {
     || section === 'journey'
     || section === 'runtime'
     || section === 'fleet-health'
+    || section === 'safe-autonomy'
     || section === 'memory-subsystems'
     || section === 'attribution'
   ) return section
@@ -43,6 +46,8 @@ export function Status() {
             ? html`<${RuntimePanel} />`
           : section === 'fleet-health'
             ? html`<${FleetHealthPanel} />`
+          : section === 'safe-autonomy'
+            ? html`<${SafeAutonomyPanel} />`
           : section === 'memory-subsystems'
             ? html`<${MemorySubsystems} />`
           : section === 'attribution'

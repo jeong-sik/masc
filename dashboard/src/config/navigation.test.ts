@@ -78,6 +78,7 @@ describe('monitoring navigation labels', () => {
     expect(labelFor('observatory')).toBe('관찰소 (beta)')
     expect(labelFor('journey')).toBe('여정 맵')
     expect(labelFor('fleet-health')).toBe('플릿 텔레메트리')
+    expect(labelFor('safe-autonomy')).toBe('세이프 오토노미')
     // "캐스케이드" and "에이전트 디렉터리" replaced the duplicated
     // "런타임" labels (one section renamed to cascade, the other to
     // agent directory) so monitoring no longer has two sidebar items
@@ -99,6 +100,7 @@ describe('monitoring navigation labels', () => {
 
     expect(ids).toContain('journey')
     expect(ids).toContain('fleet-health')
+    expect(ids).toContain('safe-autonomy')
     expect(ids).toContain('runtime')
     expect(ids).toContain('observatory')
     // Legacy sections removed in Phase 1

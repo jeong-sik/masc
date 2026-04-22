@@ -105,6 +105,7 @@ let test_visible_surfaces_are_listed () =
       "monitoring.sessions";
       "monitoring.observatory";
       "monitoring.agents";
+      "monitoring.safe_autonomy";
       "monitoring.activity";
       "command.intervene";
       "workspace.board";
@@ -133,6 +134,19 @@ let test_config_surface_stays_lab () =
       check bool "meets_main_gate" false
         Yojson.Safe.Util.(surface |> member "meets_main_gate" |> to_bool)
 
+let test_safe_autonomy_surface_stays_lab_but_visible () =
+  let json = Dashboard_surface_readiness.json ~surface_id:"monitoring.safe_autonomy" () in
+  let surfaces = Yojson.Safe.Util.(json |> member "surfaces" |> to_list) in
+  match find_surface surfaces "monitoring.safe_autonomy" with
+  | None -> fail "monitoring.safe_autonomy missing"
+  | Some surface ->
+      check string "exposure_status" "lab"
+        Yojson.Safe.Util.(surface |> member "exposure_status" |> to_string);
+      check bool "hidden_from_nav" false
+        Yojson.Safe.Util.(surface |> member "hidden_from_nav" |> to_bool);
+      check bool "meets_main_gate" false
+        Yojson.Safe.Util.(surface |> member "meets_main_gate" |> to_bool)
+
 let () =
   run "Dashboard_surface_readiness"
     [
@@ -152,5 +166,7 @@ let () =
           test_case "visible surfaces are listed" `Quick
             test_visible_surfaces_are_listed;
           test_case "config stays lab" `Quick test_config_surface_stays_lab;
+          test_case "safe autonomy stays lab but visible" `Quick
+            test_safe_autonomy_surface_stays_lab_but_visible;
         ] );
     ]

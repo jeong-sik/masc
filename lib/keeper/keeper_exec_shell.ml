@@ -533,6 +533,10 @@ let handle_keeper_bash
     match resolve_keeper_shell_write_cwd ~config ~meta ~args with
     | Error e -> error_json e
     | Ok cwd ->
+    let env_snap =
+      try Some (Exec_core.snapshot_env ~cwd)
+      with _ -> None
+    in
     let normalize_path_for_containment path =
       Keeper_alerting_path.normalize_path_for_check path
       |> Keeper_alerting_path.strip_trailing_slashes
@@ -586,6 +590,7 @@ let handle_keeper_bash
              ]
            ~retryability:Exec_core.Operator_required
            ~extra:[ "cmd", `String cmd_for_log ]
+           ~env_snapshot:env_snap
            ()))
     else if sandbox_profile = Docker && git_creds_enabled then (
       Log.Keeper.info
@@ -657,6 +662,7 @@ let handle_keeper_bash
              ~reason:reason_str
              ~hint
              ~alternatives
+             ~env_snapshot:env_snap
              ())
       | Ok () ->
         (* Branch-switch guard *)
@@ -706,6 +712,7 @@ let handle_keeper_bash
                  ]
                ~retryability:Exec_core.Operator_required
                ~extra:[ "cmd", `String cmd_for_log ]
+               ~env_snapshot:env_snap
                ()))
         (* Write gate — playground containment layer (#6527 iter 3).
            A write-enabled keeper still must not mutate anything outside
@@ -875,6 +882,7 @@ let handle_keeper_bash
                         ~extra:[ "cwd", `String cwd ]
                         ~status:st
                         ~output:out
+                        ~env_snapshot:env_snap
                         ())
                  | Some clock ->
                    let budget_ms = Masc_exec.Exec_run.default_budget_ms () in
@@ -900,6 +908,7 @@ let handle_keeper_bash
                            ~extra:[ "cwd", `String cwd ]
                            ~status:r.status
                            ~output:r.stdout
+                           ~env_snapshot:env_snap
                            ())
                     | Masc_exec.Exec_run.Promoted p ->
                       Log.Keeper.info

@@ -81,6 +81,27 @@ type outcome =
   | Executed of executed_result
   | Blocked_result of blocked_result
 
+type project_kind =
+  | OCaml_dune
+  | Node_js
+  | Python
+  | Rust_cargo
+  | Go_module
+  | Unknown_project
+
+type exec_env_snapshot = {
+  cwd : string;
+  git_repo : bool;
+  git_branch : string option;
+  project_kind : project_kind;
+  project_name : string option;
+}
+
+val string_of_project_kind : project_kind -> string
+val detect_project_kind : string -> project_kind
+val snapshot_env : cwd:string -> exec_env_snapshot
+val env_snapshot_to_json : exec_env_snapshot -> Yojson.Safe.t
+
 val classify_command : cmd:string -> classification
 val classification_to_json : classification -> Yojson.Safe.t
 
@@ -114,6 +135,7 @@ val build_blocked_outcome :
 
 val outcome_to_json :
   ?extra:(string * Yojson.Safe.t) list ->
+  ?env_snapshot:exec_env_snapshot option ->
   outcome ->
   Yojson.Safe.t
 
@@ -123,6 +145,7 @@ val process_result_json :
   keeper_name:string ->
   cmd:string ->
   ?extra:(string * Yojson.Safe.t) list ->
+  ?env_snapshot:exec_env_snapshot option ->
   status:Unix.process_status ->
   output:string ->
   unit ->
@@ -136,5 +159,6 @@ val blocked_result_json :
   ?alternatives:string list ->
   ?retryability:retryability ->
   ?extra:(string * Yojson.Safe.t) list ->
+  ?env_snapshot:exec_env_snapshot option ->
   unit ->
   Yojson.Safe.t

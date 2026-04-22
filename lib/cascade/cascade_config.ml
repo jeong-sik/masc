@@ -10,6 +10,7 @@
 (* ── Re-exports from extracted modules ─────────────── *)
 
 (* Model resolution *)
+let resolve_auto_model = Cascade_model_resolve.resolve_auto_model
 let resolve_glm_model_id = Cascade_model_resolve.resolve_glm_model_id
 let resolve_auto_model_id = Cascade_model_resolve.resolve_auto_model_id
 let parse_custom_model = Cascade_model_resolve.parse_custom_model
@@ -120,32 +121,32 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
     else Sys.getenv_opt effective_api_key_env |> Option.value ~default:""
   in
   let headers = headers_with_auth ~kind:defaults.kind ~api_key in
-  (* For local providers, resolve "auto" before endpoint selection so that
-     routing uses the concrete model name discovered from the server.
-     Filter by provider's own endpoint to prevent cross-provider
-     contamination (e.g. ollama:auto must not pick up llama-server models). *)
-  let is_local_auto =
-    (provider_name = "llama" || provider_name = "ollama")
-    && model_id = "auto"
+  (* Keep runtime model selection on the same resolution path as the
+     provenance helpers in [Cascade_model_resolve]. Local providers still
+     inject provider-specific discovery so routing stays isolated by
+     endpoint (e.g. ollama:auto must not pick up llama-server models). *)
+  let discover =
+    match provider_name with
+    | "ollama" ->
+        Some
+          (fun () ->
+            Llm_provider.Discovery.first_discovered_model_id_for_url
+              defaults.base_url)
+    | "llama" -> Some Llm_provider.Discovery.first_discovered_model_id
+    | _ -> None
   in
-  let effective_model_id =
-    if is_local_auto then
-      (if provider_name = "ollama" then
-         Llm_provider.Discovery.first_discovered_model_id_for_url defaults.base_url
-       else
-         Llm_provider.Discovery.first_discovered_model_id ())
-      |> Option.value ~default:model_id
-    else model_id
+  let model_resolution =
+    resolve_auto_model ?discover provider_name model_id
   in
+  let resolved_model_id = model_resolution.resolved_model_id in
   let base_url =
     if provider_name = "llama" then
       (* Route to the endpoint that has this model; round-robin fallback *)
-      match Llm_provider.Discovery.endpoint_for_model effective_model_id with
+      match Llm_provider.Discovery.endpoint_for_model resolved_model_id with
       | Some url -> url
       | None -> Llm_provider.Provider_registry.next_llama_endpoint ()
     else defaults.base_url
   in
-  let resolved_model_id = resolve_auto_model_id provider_name effective_model_id in
   (* Resolve max_context: per-model capabilities override registry default *)
   let max_context =
     let caps =

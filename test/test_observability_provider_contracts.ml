@@ -10,6 +10,21 @@ open Alcotest
 (* ── Section 1: Provider_adapter contracts ── *)
 
 module Adapter = Masc_mcp.Provider_adapter
+module Model_resolve = Masc_mcp.Cascade_model_resolve
+
+let string_of_resolution_provenance = function
+  | Model_resolve.Explicit_input -> "explicit_input"
+  | Model_resolve.Alias alias -> "alias:" ^ alias
+  | Model_resolve.Env_default var -> "env_default:" ^ var
+  | Model_resolve.Hardcoded_default -> "hardcoded_default"
+  | Model_resolve.Discovery -> "discovery"
+  | Model_resolve.Unresolved_auto -> "unresolved_auto"
+
+let resolution_provenance =
+  testable
+    (fun fmt provenance ->
+      Format.pp_print_string fmt (string_of_resolution_provenance provenance))
+    ( = )
 
 let test_alias_roundtrip () =
   let cases =
@@ -155,6 +170,56 @@ let test_labels_require_local_discovery () =
     (Masc_mcp.Oas_model_resolve.labels_require_local_discovery
        [ "default"; "glm:auto" ])
 
+let test_cascade_model_resolve_alias_provenance () =
+  let resolved =
+    Model_resolve.resolve_glm_model ~getenv:(fun _ -> None) "flash"
+  in
+  check string "glm flash alias" "glm-4.7-flashx" resolved.resolved_model_id;
+  check resolution_provenance "alias provenance"
+    (Model_resolve.Alias "flash") resolved.provenance
+
+let test_cascade_model_resolve_hardcoded_default_provenance () =
+  let resolved =
+    Model_resolve.resolve_auto_model ~getenv:(fun _ -> None) "openai" "auto"
+  in
+  check string "openai hardcoded default" "gpt-4.1" resolved.resolved_model_id;
+  check resolution_provenance "hardcoded provenance"
+    Model_resolve.Hardcoded_default resolved.provenance
+
+let test_cascade_model_resolve_env_default_provenance () =
+  let getenv = function
+    | "GEMINI_DEFAULT_MODEL" -> Some "gemini-2.5-flash"
+    | _ -> None
+  in
+  let resolved =
+    Model_resolve.resolve_auto_model ~getenv "gemini" "auto"
+  in
+  check string "gemini env default" "gemini-2.5-flash"
+    resolved.resolved_model_id;
+  check resolution_provenance "env provenance"
+    (Model_resolve.Env_default "GEMINI_DEFAULT_MODEL")
+    resolved.provenance
+
+let test_cascade_model_resolve_discovery_provenance () =
+  let resolved =
+    Model_resolve.resolve_auto_model
+      ~getenv:(fun _ -> None)
+      ~discover:(fun () -> Some "qwen3:8b")
+      "ollama" "auto"
+  in
+  check string "ollama discovery" "qwen3:8b" resolved.resolved_model_id;
+  check resolution_provenance "discovery provenance"
+    Model_resolve.Discovery resolved.provenance
+
+let test_cascade_model_resolve_unresolved_auto_provenance () =
+  let resolved =
+    Model_resolve.resolve_auto_model ~getenv:(fun _ -> None) "openrouter" "auto"
+  in
+  check string "openrouter unresolved auto stays auto" "auto"
+    resolved.resolved_model_id;
+  check resolution_provenance "unresolved provenance"
+    Model_resolve.Unresolved_auto resolved.provenance
+
 (* ── Section 3: Dashboard schema contracts ── *)
 
 let test_heartbeat_snapshot_has_required_fields () =
@@ -253,6 +318,16 @@ let () =
             test_effective_discovered_ctx;
           test_case "local discovery label detection" `Quick
             test_labels_require_local_discovery;
+          test_case "cascade alias provenance" `Quick
+            test_cascade_model_resolve_alias_provenance;
+          test_case "cascade hardcoded default provenance" `Quick
+            test_cascade_model_resolve_hardcoded_default_provenance;
+          test_case "cascade env default provenance" `Quick
+            test_cascade_model_resolve_env_default_provenance;
+          test_case "cascade discovery provenance" `Quick
+            test_cascade_model_resolve_discovery_provenance;
+          test_case "cascade unresolved auto provenance" `Quick
+            test_cascade_model_resolve_unresolved_auto_provenance;
           test_case "resolve max cascade context" `Quick
             test_resolve_max_cascade_context;
         ] );

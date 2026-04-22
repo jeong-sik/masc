@@ -192,7 +192,8 @@ let metric_of_block
       Oas.Types.role;
       content = [block];
       name = None;
-      tool_call_id = None; metadata = [];
+      tool_call_id = None;
+      metadata = [];
     }
   in
   {

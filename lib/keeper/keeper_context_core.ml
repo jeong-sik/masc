@@ -317,7 +317,7 @@ let message_of_json (json : Yojson.Safe.t) : Oas.Types.message =
       tool_call_id =
         (json |> member "tool_call_id" |> to_string_option
          |> Option.map Inference_utils.sanitize_text_utf8);
-      metadata = metadata_of_json json;
+      metadata = [];
     }
 
 (** Extract human-readable text from a single history.jsonl line that was
@@ -334,7 +334,8 @@ let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
           Oas.Types.role = Oas.Types.User;
           content = blocks;
           name = None;
-          tool_call_id = None; metadata = [];
+          tool_call_id = None;
+          metadata = [];
         }
       in
       Inference_utils.sanitize_text_utf8 (text_of_message msg)

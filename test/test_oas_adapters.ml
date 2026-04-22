@@ -21,7 +21,7 @@ let make_test_messages () : Agent_sdk.Types.message list =
     Agent_sdk.Types.assistant_msg "The answer is 4.";
     { Agent_sdk.Types.role = Agent_sdk.Types.Tool;
       content = [ Agent_sdk.Types.ToolResult { tool_use_id = "call-1"; content = "result: 4"; is_error = false; json = None } ];
-      name = None; tool_call_id = None ; metadata = []};
+      name = None; tool_call_id = None; metadata = [] };
     Agent_sdk.Types.user_msg "Thanks, now solve x^2 = 9.";
     Agent_sdk.Types.assistant_msg "x = 3 or x = -3.";
   ]
@@ -62,7 +62,7 @@ let test_roundtrip_tool_msg () =
   let msg : Agent_sdk.Types.message =
     { role = Agent_sdk.Types.Tool;
       content = [ Agent_sdk.Types.ToolResult { tool_use_id = "tc-1"; content = "tool output here"; is_error = false; json = None } ];
-      name = None; tool_call_id = None ; metadata = []} in
+      name = None; tool_call_id = None; metadata = [] } in
   match (fun (m : Agent_sdk.Types.message) -> match m.role with Agent_sdk.Types.System -> None | _ -> Some m) msg with
   | None -> Alcotest.fail "tool message should not be dropped"
   | Some oas ->
@@ -156,9 +156,9 @@ let test_compact_small_list_unchanged () =
 let test_restore_messages_all_roles () =
   let oas_msgs : Agent_sdk.Types.message list = [
     { Agent_sdk.Types.role = Agent_sdk.Types.User;
-      content = [Agent_sdk.Types.Text "user question"]; name = None; tool_call_id = None ; metadata = []};
+      content = [Agent_sdk.Types.Text "user question"]; name = None; tool_call_id = None; metadata = [] };
     { Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
-      content = [Agent_sdk.Types.Text "assistant answer"]; name = None; tool_call_id = None ; metadata = []};
+      content = [Agent_sdk.Types.Text "assistant answer"]; name = None; tool_call_id = None; metadata = [] };
   ] in
   let masc_msgs = List.map Fun.id oas_msgs in
   Alcotest.(check int) "2 messages restored" 2 (List.length masc_msgs);

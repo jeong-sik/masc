@@ -161,7 +161,8 @@ let probe_chat_completion_compatible
             Oas_types.role = Oas_types.User;
             content = [ Oas_types.Text "hi" ];
             name = None;
-            tool_call_id = None; metadata = [];
+            tool_call_id = None;
+            metadata = [];
           };
         ]
       in

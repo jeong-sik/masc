@@ -2004,7 +2004,8 @@ let tool_result_msg ?(id = "tool-1") text : Agent_sdk.Types.message =
           { tool_use_id = id; content = text; is_error = false; json = None };
       ];
     name = None;
-    tool_call_id = None; metadata = [];
+    tool_call_id = None;
+      metadata = [];
   }
 
 let tool_use_msg ?(id = "tool-1") ?(name = "keeper_fs_read") input
@@ -2014,7 +2015,8 @@ let tool_use_msg ?(id = "tool-1") ?(name = "keeper_fs_read") input
     content =
       [ Agent_sdk.Types.ToolUse { id; name; input } ];
     name = None;
-    tool_call_id = None; metadata = [];
+    tool_call_id = None;
+      metadata = [];
   }
 
 let test_keeper_checkpoint_store_oas_roundtrip () =
@@ -2727,7 +2729,8 @@ let make_assistant_tool_use_msg name : Agent_sdk.Types.message =
           { id = "call-1"; name; input = `Assoc [] };
       ];
     name = None;
-    tool_call_id = None; metadata = [];
+    tool_call_id = None;
+      metadata = [];
   }
 
 (** Idle error with a preceding tool-use: should append "(tool: <name>)". *)

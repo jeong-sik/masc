@@ -109,7 +109,8 @@ let summarize_chunk (msgs : Oas.Types.message list) : Oas.Types.message option =
              (List.length msgs) (String.concat "\n" lines))
       ];
       name = None;
-      tool_call_id = None; metadata = [];
+      tool_call_id = None;
+      metadata = [];
     }
 
 let mask_tool_result_content ~(tool_name : string option) ~(tool_use_id : string)

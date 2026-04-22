@@ -304,7 +304,8 @@ let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec (
                 Oas_types.role = Oas_types.User;
                 content = [ Oas_types.Text prompt ];
                 name = None;
-                tool_call_id = None; metadata = [];
+                tool_call_id = None;
+                metadata = [];
               };
             ]
           in

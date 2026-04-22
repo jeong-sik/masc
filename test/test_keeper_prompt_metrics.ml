@@ -239,7 +239,8 @@ let test_ctx_composition_splits_history_and_residual () =
         Agent_sdk.Types.role = Agent_sdk.Types.User;
         content = [Agent_sdk.Types.Text "Earlier user request"];
         name = None;
-        tool_call_id = None; metadata = [];
+        tool_call_id = None;
+      metadata = [];
       };
       {
         Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
@@ -254,7 +255,8 @@ let test_ctx_composition_splits_history_and_residual () =
               };
           ];
         name = None;
-        tool_call_id = None; metadata = [];
+        tool_call_id = None;
+      metadata = [];
       };
       {
         Agent_sdk.Types.role = Agent_sdk.Types.Tool;
@@ -269,7 +271,8 @@ let test_ctx_composition_splits_history_and_residual () =
               };
           ];
         name = None;
-        tool_call_id = None; metadata = [];
+        tool_call_id = None;
+      metadata = [];
       };
     ]
   in

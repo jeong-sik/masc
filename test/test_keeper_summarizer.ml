@@ -8,7 +8,7 @@
 module KS = Masc_mcp.Keeper_summarizer
 
 let msg ~role ~text : Agent_sdk.Types.message =
-  { role; content = [ Agent_sdk.Types.Text text ]; name = None; tool_call_id = None ; metadata = []}
+  { role; content = [ Agent_sdk.Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
 
 let test_scrub_text_blocks_removes_state () =
   let input =
@@ -53,7 +53,7 @@ let test_non_text_blocks_untouched () =
   let m : Agent_sdk.Types.message =
     { role = Agent_sdk.Types.Assistant;
       content = [ Agent_sdk.Types.Text "[STATE]\nDONE\n[/STATE]"; tool_use ];
-      name = None; tool_call_id = None ; metadata = []}
+      name = None; tool_call_id = None; metadata = [] }
   in
   let scrubbed = KS.scrub_text_blocks m in
   let has_tool_use =

@@ -946,9 +946,10 @@ type parsed_keeper_state =
 
 let parse_keeper_identity (json : Yojson.Safe.t)
     : (parsed_keeper_identity, string) result =
-  let pk_name = Safe_ops.json_string ~default:"" "name" json in
-  let pk_agent_name = Safe_ops.json_string ~default:"" "agent_name" json in
-  let pk_trace_id_raw = Safe_ops.json_string ~default:"" "trace_id" json in
+  let ident = Keeper_identity.parse_json_identity json in
+  let pk_name = ident.keeper_name in
+  let pk_agent_name = ident.agent_name in
+  let pk_trace_id_raw = Option.value ~default:"" ident.trace_id in
   match
     if String.trim pk_trace_id_raw = "" then
       Error "missing trace_id in persisted keeper identity"

@@ -68,8 +68,8 @@ let generate_session_id () =
 let resolve_base_dir ?(base_dir : string option) ?(config : Coord_utils.config option) () =
   match base_dir, config with
   | Some dir, _ -> dir
-  | None, Some cfg -> Filename.concat cfg.base_path ".masc"
-  | None, None -> Filename.concat (Env_config.base_path ()) ".masc"
+  | None, Some cfg -> Common.masc_dir_from_base_path ~base_path:cfg.base_path
+  | None, None -> Common.masc_dir_from_base_path ~base_path:(Env_config.base_path ())
 
 type file_stamp = float * int
 

@@ -25,7 +25,7 @@ let shell_profile_of_string = function
   | _ -> None
 
 let worker_container_root ~base_path =
-  Filename.concat (Filename.concat base_path ".masc") "local-workers"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "local-workers"
 
 let safe_worker_token worker_name =
   worker_name
@@ -64,7 +64,7 @@ let oas_tool_error ?(recoverable = false) message : Oas.Types.tool_result =
   Error { Oas.Types.message; recoverable; error_class = None }
 
 let oas_trace_session_root ~base_path =
-  Filename.concat (Filename.concat base_path ".masc") "oas-runtime"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "oas-runtime"
 
 let ensure_worker_container_dirs ~base_path ~worker_name =
   let dir = worker_container_dir ~base_path ~worker_name in

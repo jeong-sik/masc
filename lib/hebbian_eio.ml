@@ -84,7 +84,7 @@ let synapses_lock_file (config : config) =
 
 (** Ensure synapses directory exists *)
 let ensure_synapses_dir config =
-  let synapses_dir = Filename.concat (Filename.concat config.Coord_utils.base_path ".masc") "synapses" in
+  let synapses_dir = Filename.concat (Common.masc_dir_from_base_path ~base_path:config.Coord_utils.base_path) "synapses" in
   Fs_compat.mkdir_p synapses_dir
 
 (** Lock contention metrics *)

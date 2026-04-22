@@ -749,7 +749,7 @@ let resolve_config (config : Coord_utils_backend_setup.config) keeper_name
 (* -- Tool usage persistence ---------------------------------------- *)
 
 let tool_usage_path ~base_path name =
-  let dir = Filename.concat (Filename.concat base_path ".masc") "keepers/tool_usage" in
+  let dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers/tool_usage" in
   Filename.concat dir (name ^ ".json")
 
 let flush_tool_usage ~base_path name =

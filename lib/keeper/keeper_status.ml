@@ -276,7 +276,7 @@ let handle_keeper_trajectory ctx args : tool_result =
     | Ok None -> (false, Printf.sprintf "keeper not found: %s" requested_name)
     | Ok (Some (_resolved_name, m)) ->
       let limit = get_int args "limit" 20 in
-      let masc_root = Filename.concat ctx.config.base_path ".masc" in
+      let masc_root = Common.masc_dir_from_base_path ~base_path:ctx.config.base_path in
       let entries =
         Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
       in
@@ -312,7 +312,7 @@ let handle_keeper_eval ctx args : tool_result =
     | Ok None -> (false, Printf.sprintf "keeper not found: %s" requested_name)
     | Ok (Some (_resolved_name, m)) ->
       let scenario_file = get_string_opt args "scenario_file" in
-      let masc_root = Filename.concat ctx.config.base_path ".masc" in
+      let masc_root = Common.masc_dir_from_base_path ~base_path:ctx.config.base_path in
       let entries =
         Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
       in

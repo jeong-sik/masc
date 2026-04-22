@@ -35,7 +35,7 @@ let normalize_string_list items =
 
 let default_manifest_path () =
   Filename.concat
-    (Filename.concat (Filename.concat (Env_config.base_path ()) ".masc") "bench")
+    (Filename.concat (Common.masc_dir_from_base_path ~base_path:(Env_config.base_path ())) "bench")
     "keeper_model_recommendations.json"
 
 let enabled () =

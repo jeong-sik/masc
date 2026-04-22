@@ -153,7 +153,7 @@ let bootstrap_base_path_config_root ~base_path =
   else begin
     let mode = config_bootstrap_mode () in
     let config_root =
-      Filename.concat (Filename.concat base_path ".masc") "config"
+      Filename.concat (Common.masc_dir_from_base_path ~base_path) "config"
     in
     if mode = `Skip then
       Log.Server.info "config bootstrap skipped via MASC_CONFIG_BOOTSTRAP=skip"

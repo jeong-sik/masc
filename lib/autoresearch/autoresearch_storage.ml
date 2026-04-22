@@ -7,9 +7,8 @@
 
 (** Results directory for a loop: .masc/autoresearch/{loop_id}/ *)
 let results_dir ~base_path loop_id =
-  Filename.concat base_path
-    (Filename.concat ".masc"
-       (Filename.concat "autoresearch" loop_id))
+  Filename.concat (Common.masc_dir_from_base_path ~base_path)
+     (Filename.concat "autoresearch" loop_id)
 
 let results_file ~base_path loop_id =
   Filename.concat (results_dir ~base_path loop_id) "results.jsonl"
@@ -27,10 +26,9 @@ let managed_worktree_dir ~base_path loop_id =
   Filename.concat (results_dir ~base_path loop_id) "worktree"
 
 let session_link_file ~base_path session_id =
-  Filename.concat base_path
-    (Filename.concat ".masc"
-       (Filename.concat "team-sessions"
-          (Filename.concat session_id "autoresearch.json")))
+  Filename.concat (Common.masc_dir_from_base_path ~base_path)
+     (Filename.concat "team-sessions"
+        (Filename.concat session_id "autoresearch.json"))
 
 let ensure_dir path =
   let rec mkdir_p dir =
@@ -231,7 +229,7 @@ let load_cycle_history ~base_path loop_id =
 (** Scan .masc/autoresearch/ for all persisted loop IDs.
     Returns loop IDs (directory names) that contain a state.json file. *)
 let scan_persisted_loop_ids ~base_path =
-  let dir = Filename.concat base_path (Filename.concat ".masc" "autoresearch") in
+  let dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "autoresearch" in
   if not (Fs_compat.file_exists dir) then []
   else
     try

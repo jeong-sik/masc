@@ -301,7 +301,7 @@ let gc config ?(days=7) () =
   (* 5. Cleanup orphan keeper sidecar files (.metrics.jsonl/.memory.jsonl without .json)
         and orphan date-split metrics directories (<name>/metrics/ without <name>.json) *)
   let keeper_orphan_count = ref 0 in
-  let pk_dir = Filename.concat (Filename.concat config.base_path ".masc") "keepers" in
+  let pk_dir = Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "keepers" in
   if Sys.file_exists pk_dir then begin
     let entries = Sys.readdir pk_dir |> Array.to_list in
     (* Active keepers = those with a .json config file *)
@@ -366,10 +366,10 @@ let gc config ?(days=7) () =
 
   (* 6. Archive completed/interrupted team sessions older than N days *)
   let session_archive_count = ref 0 in
-  let ts_root = Filename.concat (Filename.concat config.base_path ".masc") "team-sessions" in
+  let ts_root = Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "team-sessions" in
   if Sys.file_exists ts_root && Sys.is_directory ts_root then begin
     let archive_ts_dir = Filename.concat
-      (Filename.concat (Filename.concat config.base_path ".masc") "archive") "team-sessions" in
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "archive") "team-sessions" in
     Sys.readdir ts_root |> Array.iter (fun session_id ->
         Coord_query.safe_yield ();
       let sdir = Filename.concat ts_root session_id in

@@ -71,7 +71,7 @@ let handle_join (room_config : Coord_utils_backend_setup.config) (bytes : string
       (* Read current agents for the response *)
       let agents_dir =
         Filename.concat
-          (Filename.concat room_config.base_path ".masc")
+          (Common.masc_dir_from_base_path ~base_path:room_config.base_path)
           "agents"
       in
       let active_agents =
@@ -160,7 +160,7 @@ let handle_broadcast (room_config : Coord_utils_backend_setup.config) (bytes : s
 
 (** GetStatus handler: return current room state. *)
 let handle_get_status (room_config : Coord_utils_backend_setup.config) (_bytes : string) : string =
-  let masc_dir = Filename.concat room_config.base_path ".masc" in
+  let masc_dir = Common.masc_dir_from_base_path ~base_path:room_config.base_path in
   let agents_dir = Filename.concat masc_dir "agents" in
   let agents =
     if Sys.file_exists agents_dir && Sys.is_directory agents_dir then
@@ -238,7 +238,7 @@ let active_subscribe_streams = Atomic.make 0
 let compute_directives
     ~(room_config : Coord_utils_backend_setup.config)
     ~(agent_name : string) : string list =
-  let masc_dir = Filename.concat room_config.base_path ".masc" in
+  let masc_dir = Common.masc_dir_from_base_path ~base_path:room_config.base_path in
   let directives = ref [] in
   (* 1. Pause directive: check if agent is marked paused *)
   let agent_file =
@@ -308,7 +308,7 @@ let handle_heartbeat
             let agent_file =
               Filename.concat
                 (Filename.concat
-                  (Filename.concat room_config.base_path ".masc")
+                  (Common.masc_dir_from_base_path ~base_path:room_config.base_path)
                   "agents")
                 (safe_filename ping.agent_name ^ ".json")
             in
@@ -336,7 +336,7 @@ let handle_heartbeat
             end
           with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Transport.error "gRPC heartbeat update failed: %s" (Printexc.to_string exn));
           (* Count active agents and pending tasks *)
-          let masc_dir = Filename.concat room_config.base_path ".masc" in
+          let masc_dir = Common.masc_dir_from_base_path ~base_path:room_config.base_path in
           let agents_dir = Filename.concat masc_dir "agents" in
           let agent_count =
             if Sys.file_exists agents_dir then
@@ -433,7 +433,7 @@ let handle_subscribe
   (* Read recent messages and push as events *)
   let backlog_file =
     Filename.concat
-      (Filename.concat room_config.base_path ".masc")
+      (Common.masc_dir_from_base_path ~base_path:room_config.base_path)
       "backlog.jsonl"
   in
   if Sys.file_exists backlog_file then begin

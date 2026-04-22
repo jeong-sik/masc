@@ -192,7 +192,7 @@ let metric_of_block
       Agent_sdk.Types.role;
       content = [block];
       name = None;
-      tool_call_id = None;
+      tool_call_id = None; metadata = [];
     }
   in
   {
@@ -2356,39 +2356,57 @@ let run_turn
                        reason;
                      }))
          in
-         let finalize_response_text response_text =
-           (* Ensure every generation has a [STATE] block for continuity.
-              If the model omitted it, synthesize one deterministically
-              from tool usage and stop reason. *)
-           let response_text =
-             match Keeper_memory_policy.find_state_block response_text with
-             | Some _ -> response_text
+         let finalize_response_text raw_response_text =
+           let stop_reason_str =
+             match result.stop_reason with
+             | Oas_worker.Completed -> "completed"
+             | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
+             | Oas_worker.MutationBoundaryReached { tool_name; _ } ->
+                 (match tool_name with
+                  | Some tool -> Printf.sprintf "mutation_boundary(%s)" tool
+                  | None -> "mutation_boundary")
+           in
+           let state_snapshot =
+             match Keeper_memory_policy.parse_state_snapshot_from_reply raw_response_text with
+             | Some snapshot -> snapshot
              | None ->
-                 let stop_reason_str =
-                   match result.stop_reason with
-                   | Oas_worker.Completed -> "completed"
-                   | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
-                   | Oas_worker.MutationBoundaryReached { tool_name; _ } ->
-                       (match tool_name with
-                        | Some tool -> Printf.sprintf "mutation_boundary(%s)" tool
-                        | None -> "mutation_boundary")
-                 in
                  let synth =
                    Keeper_memory_policy.synthesize_state_from_run_result
                      ~goal:meta.goal
                      ~tools_used:actual_keeper_tool_names
                      ~stop_reason:stop_reason_str
-                     ~response_text
+                     ~response_text:raw_response_text
                  in
-                 let block = Keeper_memory_policy.render_state_block synth in
                  Log.Keeper.info
                    "keeper:%s [STATE] missing, synthesized from %d tools (stop=%s)"
                    meta.name
                    (List.length actual_keeper_tool_names)
                    stop_reason_str;
-                 response_text ^ "\n" ^ block
+                 synth
            in
-           let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
+           let response_text =
+             match
+               Keeper_text_processing.state_snapshot_reply_fallback
+                 (Some state_snapshot)
+             with
+             | Some fallback ->
+                 Keeper_text_processing.user_visible_reply_text
+                   ~fallback
+                   raw_response_text
+             | None ->
+                 Keeper_text_processing.user_visible_reply_text raw_response_text
+           in
+           let assistant_msg =
+             Agent_sdk.Types.make_message
+               ~role:Agent_sdk.Types.Assistant
+               ~metadata:
+                 [
+                   ( Keeper_memory_policy.replay_metadata_key,
+                     Keeper_memory_policy.replay_metadata_of_snapshot
+                       state_snapshot );
+                 ]
+               [ Agent_sdk.Types.Text response_text ]
+           in
            Keeper_exec_context.persist_message
              ~source:history_assistant_source
              session
@@ -2397,11 +2415,9 @@ let run_turn
                  via checkpoint (OAS) and persist_message (history file).
                  No in-memory mutation needed; next turn reconstructs
                  context from checkpoint. *)
-           (* Save checkpoint AFTER [STATE] synthesis.  Patch the last
-                 assistant message in the OAS checkpoint so that the persisted
-                 checkpoint contains the [STATE] block.  Without this patch,
-                 read_continuity_summary would find no [STATE] in checkpoint
-                 messages and return empty, causing context loss.  #5431 *)
+           (* Save checkpoint after extracting the replay snapshot so the
+                 persisted checkpoint carries scrubbed assistant text plus
+                 structured replay metadata on the last assistant message. *)
            let saved_checkpoint =
              match result.checkpoint with
              | Some checkpoint ->
@@ -2410,6 +2426,7 @@ let run_turn
                    checkpoint
                    ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                    ~response_text
+                   ~snapshot:state_snapshot
                in
                (match
                   Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir patched
@@ -2496,8 +2513,10 @@ let run_turn
                 Keeper_memory_bank.append_memory_notes_from_reply
                   config
                   meta
+                  ~snapshot:state_snapshot
                   ~turn:result.turns
                   ~reply:response_text
+                  ()
               in
               if notes_written > 0
               then
@@ -2519,41 +2538,35 @@ let run_turn
               Collaboration learning (Hebbian strengthen/weaken) is not
               recorded here; it is owned by the task lifecycle path. *)
            (try
-              (match
-                 Keeper_memory_policy.parse_state_snapshot_from_reply
-                   response_text
-               with
-              | Some snap ->
-                Memory_oas_bridge.store_episode_from_snapshot ~memory
-                  ~keeper_name:meta.name ~turn:result.turns
-                  ~trace_id:
-                    (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                  snap;
-                let ep, pr =
-                  Memory_oas_bridge.flush_incremental ~memory
-                    ~agent_name:meta.name
-                in
-                if ep > 0 || pr > 0 then begin
-                  Log.Keeper.debug
-                    "keeper:%s post-run flush episodes=%d procedures=%d"
-                    meta.name ep pr;
-                  (* Emit activity event so episode flushes appear in
-                     the activity graph / telemetry surface. *)
-                  (try
-                     (Atomic.get Coord_hooks.activity_emit_fn) config
-                       ~actor:Coord_hooks.{ kind = "keeper"; id = meta.name }
-                       ~kind:"episode.flush"
-                       ~payload:(`Assoc [
-                         ("keeper", `String meta.name);
-                         ("episodes", `Int ep);
-                         ("procedures", `Int pr);
-                         ("turn", `Int result.turns);
-                       ])
-                       ~tags:[ "memory"; "episode"; "flush" ]
-                       ()
-                   with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
-                end
-              | None -> ())
+              Memory_oas_bridge.store_episode_from_snapshot ~memory
+                ~keeper_name:meta.name ~turn:result.turns
+                ~trace_id:
+                  (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                state_snapshot;
+              let ep, pr =
+                Memory_oas_bridge.flush_incremental ~memory
+                  ~agent_name:meta.name
+              in
+              if ep > 0 || pr > 0 then begin
+                Log.Keeper.debug
+                  "keeper:%s post-run flush episodes=%d procedures=%d"
+                  meta.name ep pr;
+                (* Emit activity event so episode flushes appear in
+                   the activity graph / telemetry surface. *)
+                (try
+                   (Atomic.get Coord_hooks.activity_emit_fn) config
+                     ~actor:Coord_hooks.{ kind = "keeper"; id = meta.name }
+                     ~kind:"episode.flush"
+                     ~payload:(`Assoc [
+                       ("keeper", `String meta.name);
+                       ("episodes", `Int ep);
+                       ("procedures", `Int pr);
+                       ("turn", `Int result.turns);
+                     ])
+                     ~tags:[ "memory"; "episode"; "flush" ]
+                     ()
+                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+              end
             with
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->

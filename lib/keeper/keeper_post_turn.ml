@@ -68,21 +68,19 @@ let apply_post_turn_lifecycle
         (Filename.concat (Filename.concat (Filename.dirname base_dir) "keepers") meta.name)
         "progress.md"
     in
-    (* RFC-MASC-001 Phase 1: try structured working_context first,
-       then fall back to text-based [STATE] parsing from messages. *)
     let structured_snapshot =
       match oas_checkpoint with
       | Some cp -> (
-        match cp.Agent_sdk.Checkpoint.working_context with
-        | Some json ->
-          Keeper_memory_policy.snapshot_of_structured_working_context json
-        | None -> None)
+          match cp.Agent_sdk.Checkpoint.working_context with
+          | Some json ->
+              Keeper_memory_policy.snapshot_of_structured_working_context json
+          | None -> None)
       | None -> None
     in
-      let snapshot =
-        match structured_snapshot with
-        | Some _ as s -> s
-      | None -> latest_state_snapshot_from_messages (messages_of_context ctx)
+    let snapshot =
+      match latest_state_snapshot_from_messages (messages_of_context ctx) with
+      | Some _ as snapshot -> snapshot
+      | None -> structured_snapshot
     in
     match snapshot with
     | None -> meta

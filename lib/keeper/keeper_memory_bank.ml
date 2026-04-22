@@ -513,10 +513,15 @@ let compact_memory_bank_if_needed
 let append_memory_notes_from_reply
     (config : Coord.config)
     (meta : keeper_meta)
+    ?snapshot
     ~(turn : int)
-    ~(reply : string) : (int * string list) =
+    ~(reply : string)
+    () : (int * string list) =
   let (snapshot, source) =
-    match parse_state_snapshot_from_reply reply with
+    match snapshot with
+    | Some s -> (s, "message_metadata")
+    | None ->
+      (match parse_state_snapshot_from_reply reply with
     | Some s -> (s, "reply_state_block")
     | None ->
         (* Deterministic fallback: use keeper meta fields as memory source.
@@ -533,7 +538,7 @@ let append_memory_notes_from_reply
             open_questions = [];
             constraints = [];
           },
-          "meta_goal_fallback" )
+          "meta_goal_fallback" ))
   in
   let notes =
     memory_candidates_from_snapshot snapshot

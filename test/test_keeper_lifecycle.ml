@@ -2,6 +2,7 @@ open Alcotest
 
 module KEC = Masc_mcp.Keeper_exec_context
 module KCC = Masc_mcp.Keeper_context_core
+module KMP = Masc_mcp.Keeper_memory_policy
 module KT = Masc_mcp.Keeper_types
 module KR = Masc_mcp.Keeper_registry
 module KST = Masc_mcp.Keeper_state_machine
@@ -71,7 +72,7 @@ let tool_use_message ?(name = "list_files") ~tool_use_id () =
           { id = tool_use_id; name; input = `Assoc [] };
       ];
     name = None;
-    tool_call_id = None;
+    tool_call_id = None; metadata = [];
   }
 
 let tool_result_message ?(is_error = false) ~tool_use_id content =
@@ -83,7 +84,7 @@ let tool_result_message ?(is_error = false) ~tool_use_id content =
           { tool_use_id; content; is_error; json = None };
       ];
     name = None;
-    tool_call_id = None;
+    tool_call_id = None; metadata = [];
   }
 
 let tool_result_content_for_id ~tool_use_id msgs =
@@ -705,7 +706,7 @@ let test_recover_latest_checkpoint_for_overflow_retry_repairs_orphan_tool_result
                     };
                 ];
               name = None;
-              tool_call_id = None;
+              tool_call_id = None; metadata = [];
             }
             :: checkpoint.messages;
         }
@@ -768,7 +769,7 @@ let test_rollover_repairs_orphan_tool_result () =
                       };
                   ];
                 name = None;
-                tool_call_id = None;
+                tool_call_id = None; metadata = [];
               };
               Agent_sdk.Types.assistant_msg
                 "done\n\n[STATE]\nGoal: rollover orphan repair\nProgress: ready\n[/STATE]";
@@ -869,7 +870,7 @@ let contaminated_user_message ?(prompt = "짧게 ping만 해봐") () :
         Agent_sdk.Types.Text ("[system context] " ^ contaminated_world_state_text);
       ];
     name = None;
-    tool_call_id = None;
+    tool_call_id = None; metadata = [];
   }
 
 let oversized_checkpoint_text =
@@ -885,7 +886,7 @@ let oversized_user_message ?(prompt = "긴 텍스트도 저장되면 안 돼") (
         Agent_sdk.Types.Text oversized_checkpoint_text;
       ];
     name = None;
-    tool_call_id = None;
+    tool_call_id = None; metadata = [];
   }
 
 let summarized_contaminated_text =
@@ -901,7 +902,7 @@ let summarized_contaminated_message () : Agent_sdk.Types.message =
     Agent_sdk.Types.role = Agent_sdk.Types.User;
     content = [Agent_sdk.Types.Text summarized_contaminated_text];
     name = None;
-    tool_call_id = None;
+    tool_call_id = None; metadata = [];
   }
 
 let test_persist_message_drops_world_state_and_separates_internal_history () =
@@ -1119,7 +1120,7 @@ let test_sanitize_checkpoint_message_caps_tool_result_aggregate_budget () =
             };
         ];
       name = None;
-      tool_call_id = None;
+      tool_call_id = None; metadata = [];
     }
   in
   match KCC.sanitize_checkpoint_message msg with
@@ -1313,7 +1314,7 @@ let test_deserialize_context_repairs_orphan_tool_result () =
               };
           ];
         name = None;
-        tool_call_id = None;
+        tool_call_id = None; metadata = [];
       }
   in
   let ctx =
@@ -1466,9 +1467,11 @@ let test_patch_checkpoint_replaces_last_assistant () =
   in
   let last_msg = List.nth patched.messages 1 in
   let text = Agent_sdk.Types.text_of_message last_msg in
-  check bool "contains STATE block" true (contains_substring text "[STATE]");
+  check bool "scrubs STATE block" false (contains_substring text "[STATE]");
   check bool "contains patched text" true
     (contains_substring text "patched response");
+  check bool "replay metadata attached" true
+    (KMP.snapshot_of_message_metadata last_msg <> None);
   check string "session_id updated" "new-session" patched.session_id
 
 let test_patch_checkpoint_preserves_non_assistant () =
@@ -1491,7 +1494,9 @@ let test_patch_checkpoint_preserves_non_assistant () =
   check string "first assistant preserved" "answer 1" second_text;
   (* Last assistant patched *)
   let last_text = Agent_sdk.Types.text_of_message (List.nth patched.messages 3) in
-  check string "last assistant patched" "answer 2 with STATE" last_text
+  check string "last assistant patched" "answer 2 with STATE" last_text;
+  check bool "no metadata without state snapshot" true
+    (KMP.snapshot_of_message_metadata (List.nth patched.messages 3) = None)
 
 let test_patch_checkpoint_updates_session_id () =
   let cp = make_test_checkpoint ~session_id:"old" [] in

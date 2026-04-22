@@ -109,7 +109,7 @@ let summarize_chunk (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.mess
              (List.length msgs) (String.concat "\n" lines))
       ];
       name = None;
-      tool_call_id = None;
+      tool_call_id = None; metadata = [];
     }
 
 let mask_tool_result_content ~(tool_name : string option) ~(tool_use_id : string)

@@ -21,7 +21,7 @@ let test_message_to_json_omits_flat_content () =
       T.role = T.User;
       content = [ T.Text "hello" ];
       name = None;
-      tool_call_id = None;
+      tool_call_id = None; metadata = [];
     }
   in
   let json = C.message_to_json msg in
@@ -56,7 +56,7 @@ let test_message_of_json_new_content_blocks_only () =
       T.role = T.Assistant;
       content = [ T.Text "world" ];
       name = None;
-      tool_call_id = None;
+      tool_call_id = None; metadata = [];
     }
   in
   let json = C.message_to_json new_msg in
@@ -74,7 +74,7 @@ let test_history_jsonl_text_uses_blocks_first () =
         T.role = T.User;
         content = [ T.Text "structured payload" ];
         name = None;
-        tool_call_id = None;
+        tool_call_id = None; metadata = [];
       }
   in
   let text = C.text_of_history_jsonl_json new_format in
@@ -153,7 +153,7 @@ let test_roundtrip_text_preserved () =
       T.role = T.Assistant;
       content = [ T.Text "alpha"; T.Text "beta" ];
       name = None;
-      tool_call_id = None;
+      tool_call_id = None; metadata = [];
     }
   in
   let json = C.message_to_json original in

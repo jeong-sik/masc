@@ -67,6 +67,7 @@ let dashboard_json ~base_path ~limit ~offset:_ ~status_filter:_ =
   let runtime = Dashboard_governance_judge.runtime_status base_path in
   let judgments = Dashboard_governance_judge.fresh_judgments_json ~base_path ~limit in
   let approval_queue = Keeper_approval_queue.list_pending_dashboard_json () in
+  let approval_rules = Keeper_approval_queue.list_rules_dashboard_json () in
   `Assoc
     [
       ("generated_at", `String (Types.now_iso ()));
@@ -77,6 +78,7 @@ let dashboard_json ~base_path ~limit ~offset:_ ~status_filter:_ =
       ("judgments", `List judgments);
       ("pending_actions", `List []);
       ("approval_queue", approval_queue);
+      ("approval_rules", approval_rules);
       ("cases", `List []);
     ]
 

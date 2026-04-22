@@ -226,6 +226,10 @@ let dashboard_governance_approval_resolve_http_json ~(args : Yojson.Safe.t) :
   | None ->
       Error (Bad_request "id is required")
   | Some id ->
+      let remember_rule =
+        Safe_ops.json_bool_opt "remember_rule" args
+        |> Option.value ~default:false
+      in
       let decision_name =
         Safe_ops.json_string_opt "decision" args
         |> Option.value ~default:"approve"
@@ -247,17 +251,41 @@ let dashboard_governance_approval_resolve_http_json ~(args : Yojson.Safe.t) :
       match decision with
       | Error _ as err -> err
       | Ok decision ->
-          (match Keeper_approval_queue.resolve ~id ~decision with
-           | Ok () ->
+          (match
+             Keeper_approval_queue.resolve_with_policy ~id ~decision
+               ~remember_rule ~created_by:"dashboard" ()
+           with
+           | Ok result ->
                Ok
                  (`Assoc
                    [
                      ("ok", `Bool true);
                      ("id", `String id);
                      ("decision", `String decision_name);
+                     ( "rule_id",
+                       match result.remembered_rule with
+                       | Some rule -> `String rule.id
+                       | None -> `Null );
                    ])
            | Error err ->
                Error (Gone err))
+
+let dashboard_governance_approval_rule_delete_http_json ~(args : Yojson.Safe.t) :
+    (Yojson.Safe.t, string) result =
+  match Safe_ops.json_string_opt "id" args with
+  | None -> Error "id is required"
+  | Some id -> (
+      match Keeper_approval_queue.delete_rule ~id with
+      | Ok deleted ->
+          Keeper_approval_queue.audit_rule_event ~event_type:"rule_deleted"
+            deleted;
+          Ok
+            (`Assoc
+              [
+                ("ok", `Bool true);
+                ("id", `String deleted.id);
+              ])
+      | Error message -> Error message)
 
 (* Dashboard-initiated verification verdict. Mirrors the 2-step path that
    tool_task uses for Approve_verification / Reject_verification: first

@@ -87,6 +87,10 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
                 ("type", `String "string");
                 ("description", `String "Task description");
               ]);
+              ("goal_id", `Assoc [
+                ("type", `String "string");
+                ("description", `String "Optional goal ID to link this task to a goal as typed metadata.");
+              ]);
               ("contract", `Assoc [
                 ("type", `String "object");
                 ("properties", `Assoc [

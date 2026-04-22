@@ -124,9 +124,9 @@ let ring_has_entry entries ~details =
 let test_batch_add_tasks () =
   with_test_env (fun config ->
     let tasks = [
-      ("Task A", 1, "Description A");
-      ("Task B", 2, "Description B");
-      ("Task C", 3, "Description C");
+      ("Task A", 1, "Description A", None);
+      ("Task B", 2, "Description B", None);
+      ("Task C", 3, "Description C", None);
     ] in
     let result = Coord.batch_add_tasks config tasks in
     Alcotest.(check bool) "batch add success" true (contains_check result);
@@ -142,15 +142,15 @@ let test_batch_add_empty_list () =
 
 let test_batch_add_single_task () =
   with_test_env (fun config ->
-    let result = Coord.batch_add_tasks config [("Single", 1, "Only one")] in
+    let result = Coord.batch_add_tasks config [("Single", 1, "Only one", None)] in
     Alcotest.(check bool) "single task batch" true (contains_check result)
   )
 
 let test_batch_add_preserves_priorities () =
   with_test_env (fun config ->
     let tasks = [
-      ("High Priority", 1, "");
-      ("Low Priority", 5, "");
+      ("High Priority", 1, "", None);
+      ("Low Priority", 5, "", None);
     ] in
     let _ = Coord.batch_add_tasks config tasks in
     let task_list = Coord.list_tasks config in
@@ -1160,6 +1160,7 @@ let test_append_archive_tasks () =
       priority = 1;
       files = [];
       created_at = "2026-01-01T00:00:00Z";
+      goal_id = None;
       worktree = None;
       created_by = None;
       required_role = Types_core.Unassigned; required_preset = None; stage = None;

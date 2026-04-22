@@ -200,8 +200,45 @@ export interface KeeperApprovalQueueItem {
   risk_level: string
   requested_at?: string | null
   waiting_s?: number
+  turn_id?: number | null
+  task_id?: string | null
+  goal_id?: string | null
+  goal_ids?: string[]
+  runtime_contract?: {
+    execution_scope?: string | null
+    sandbox_profile?: string | null
+    network_mode?: string | null
+    shared_memory_scope?: string | null
+    backend?: string | null
+    task_id?: string | null
+    goal_id?: string | null
+    goal_ids?: string[]
+  } | null
+  selected_model?: string | null
+  disposition?: string | null
+  disposition_reason?: string | null
+  rule_match?: {
+    rule_id?: string | null
+    matched_by?: string | null
+  } | null
   input?: unknown
   input_preview?: string | null
+}
+
+export interface KeeperApprovalRule {
+  id: string
+  keeper_name: string
+  tool_name: string
+  sandbox_profile?: string | null
+  backend?: string | null
+  request_fingerprint?: string
+  request_fingerprint_preview?: string
+  max_risk?: string
+  created_at?: string | null
+  created_by?: string | null
+  last_matched_at?: string | null
+  match_count?: number
+  source_approval_id?: string | null
 }
 
 export interface OperatorActionDescriptor {

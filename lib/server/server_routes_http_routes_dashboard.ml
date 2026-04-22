@@ -437,6 +437,26 @@ let rec add_routes ~sw ~clock router =
                   (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
          )
        ) request reqd)
+  |> Http.Router.post "/api/v1/dashboard/governance/approvals/rules/delete" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_operator_confirm" (fun _state _req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match
+               dashboard_governance_approval_rule_delete_http_json ~args
+             with
+             | Ok json ->
+                 respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string
+                      (operator_error_json message))
+           with Yojson.Json_error msg ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
+         )
+       ) request reqd)
 
   (* Operator surface restored after cp-purge (#7349): handlers existed in
      server_dashboard_http_core/.ml but their Router.get/post registrations

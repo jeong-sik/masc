@@ -395,6 +395,7 @@ let add_task ?contract ?goal_id ?required_preset ?created_by config ~title
             [
               ("task_id", `String task_id);
               ("title", `String title);
+              ("goal_id", Json_util.string_opt_to_json goal_id);
               ("priority", `Int priority);
               ("created_by", created_by_json);
               ("goal_id", goal_id_json);
@@ -504,30 +505,33 @@ let batch_add_tasks_internal ?created_by config tasks =
     try
       let backlog = read_backlog_or_raise config in
       let next_num = ref (next_task_number config backlog) in
-      let added_tasks = List.map (fun (title, priority, description, contract) ->
-        let task_id = Printf.sprintf "task-%03d" !next_num in
-        incr next_num;
-        let contract = Option.map normalize_task_contract contract in
-        {
-          id = task_id;
-          title;
-          description;
-          goal_id = None;
-          task_status = Todo;
-          priority;
-          files = [];
-          created_at = now_iso ();
-          created_by;
-          worktree = None;
-          required_role = Types_core.Unassigned;
-          required_preset = None;
-          stage = None;
-          contract;
-          handoff_context = None;
-          cycle_count = 0;
-          do_not_reclaim_reason = None;
-        }
-      ) tasks in
+      let added_tasks =
+        List.map
+          (fun (title, priority, description, contract, goal_id) ->
+            let task_id = Printf.sprintf "task-%03d" !next_num in
+            incr next_num;
+            let contract = Option.map normalize_task_contract contract in
+            {
+              id = task_id;
+              title;
+              description;
+              goal_id;
+              task_status = Todo;
+              priority;
+              files = [];
+              created_at = now_iso ();
+              created_by;
+              worktree = None;
+              required_role = Types_core.Unassigned;
+              required_preset = None;
+              stage = None;
+              contract;
+              handoff_context = None;
+              cycle_count = 0;
+              do_not_reclaim_reason = None;
+            })
+          tasks
+      in
       let new_backlog = {
         tasks = backlog.tasks @ added_tasks;
         last_updated = now_iso ();
@@ -548,6 +552,7 @@ let batch_add_tasks_internal ?created_by config tasks =
                 [
                   ("task_id", `String task.id);
                   ("title", `String task.title);
+                  ("goal_id", Json_util.string_opt_to_json task.goal_id);
                   ("priority", `Int task.priority);
                   ("created_by", created_by_json);
                   ( "strict_contract",
@@ -570,8 +575,8 @@ let batch_add_tasks_internal ?created_by config tasks =
 
 let batch_add_tasks ?created_by config tasks =
   batch_add_tasks_internal ?created_by config
-    (List.map (fun (title, priority, description) ->
-         (title, priority, description, None))
+    (List.map (fun (title, priority, description, goal_id) ->
+         (title, priority, description, None, goal_id))
        tasks)
 
 let batch_add_tasks_with_contracts ?created_by config tasks =

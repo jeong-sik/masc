@@ -36,6 +36,11 @@ let title_contains_goal_tag ~goal_id title =
     true
   with Not_found -> false
 
+let task_is_linked_to_goal (task : Types.task) goal_id =
+  match task.goal_id with
+  | Some typed_goal_id -> String.equal typed_goal_id goal_id
+  | None -> title_contains_goal_tag ~goal_id task.title
+
 let task_linkage_source_opt (task : Types.task) goal_id =
   match task.goal_id with
   | Some task_goal_id when String.equal task_goal_id goal_id -> Some "explicit"
@@ -533,6 +538,7 @@ let task_to_tree_json ((task, linkage_source) : Types.task * string) =
     [
       ("id", `String task.id);
       ("title", `String task.title);
+      ("goal_id", Json_util.string_opt_to_json task.goal_id);
       ("status", `String status);
       ("status_color", `String (task_status_color status));
       ("priority", `Int task.priority);

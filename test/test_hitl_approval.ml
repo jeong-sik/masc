@@ -54,6 +54,18 @@ let execute_approval_get args =
       Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:"approval-get-test"
         state ~name:"masc_approval_get" ~arguments:args)
 
+let with_test_config f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      f state.room_config)
+
 (* ── 1. Risk classification ──────────────────────────────── *)
 
 let test_risk_classification_critical () =
@@ -501,8 +513,9 @@ let test_approval_get_rejects_reader_role () =
 
 let test_callback_approves_low_risk () =
   (* development level: no confirmation needed *)
+  with_test_config @@ fun config ->
   let cb = GP.to_oas_approval_callback
-    ~governance_level:"development" ~keeper_name:"test" () in
+    ~config ~governance_level:"development" ~keeper_name:"test" () in
   let decision = cb ~tool_name:"masc_status" ~input:(`Assoc []) in
   match decision with
   | Agent_sdk.Hooks.Approve -> ()
@@ -511,14 +524,23 @@ let test_callback_approves_low_risk () =
   | _ -> Alcotest.fail "unexpected decision"
 
 let test_callback_production_keeper_write_requires_approval () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let initial_pending = AQ.pending_count () in
   let result = ref None in
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let config = state.room_config in
   Eio.Fiber.fork ~sw (fun () ->
     let cb =
       GP.to_oas_approval_callback
-        ~governance_level:"production" ~keeper_name:"test" () in
+        ~config ~governance_level:"production" ~keeper_name:"test" () in
     let decision =
       cb
         ~tool_name:"keeper_fs_edit"
@@ -548,12 +570,13 @@ let test_callback_production_keeper_write_requires_approval () =
   match !result with
   | Some Agent_sdk.Hooks.Approve -> ()
   | Some _ -> Alcotest.fail "expected Approve after operator resolution"
-  | None -> Alcotest.fail "keeper write callback did not suspend for approval"
+  | None -> Alcotest.fail "keeper write callback did not suspend for approval")
 
 let test_callback_production_keeper_shell_gh_read_only_auto_approved () =
+  with_test_config @@ fun config ->
   let cb =
     GP.to_oas_approval_callback
-      ~governance_level:"production" ~keeper_name:"test" () in
+      ~config ~governance_level:"production" ~keeper_name:"test" () in
   let decision =
     cb ~tool_name:"keeper_shell"
       ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])

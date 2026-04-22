@@ -560,6 +560,7 @@ let test_backlog_to_yojson_with_tasks () =
     priority = 1;
     files = [];
     created_at = "2024-01-15T12:00:00Z";
+    goal_id = None;
     worktree = None;
     created_by = None;
     required_role = Types_core.Unassigned; required_preset = None; stage = None;
@@ -1260,6 +1261,7 @@ let test_task_to_yojson () =
     priority = 2;
     files = ["file1.ml"; "file2.ml"];
     created_at = "2024-01-15T12:00:00Z";
+    goal_id = None;
     worktree = None;
     created_by = None;
     required_role = Types_core.Unassigned; required_preset = None; stage = None;
@@ -1289,6 +1291,7 @@ let test_task_to_yojson_with_worktree () =
     priority = 1;
     files = [];
     created_at = "2024-01-15T12:00:00Z";
+    goal_id = None;
     worktree = Some wt;
     created_by = None;
     required_role = Types_core.Unassigned; required_preset = None; stage = None;

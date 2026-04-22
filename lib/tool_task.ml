@@ -408,6 +408,11 @@ let handle_batch_add_tasks ctx args =
     let title = String.trim (t |> member "title" |> to_string) in
     let priority = t |> member "priority" |> to_int_option |> Option.value ~default:3 in
     let description = t |> member "description" |> to_string_option |> Option.value ~default:"" in
+    let goal_id =
+      match t |> member "goal_id" |> to_string_option with
+      | Some s when String.trim s <> "" -> Some (String.trim s)
+      | _ -> None
+    in
     let contract =
       match t |> member "contract" with
       | `Null -> Ok None
@@ -426,7 +431,7 @@ let handle_batch_add_tasks ctx args =
       Error (Printf.sprintf "item[%d]: priority must be 1-5, got %d" idx priority)
     else
       match contract with
-      | Ok contract -> Ok (title, priority, description, contract)
+      | Ok contract -> Ok (title, priority, description, contract, goal_id)
       | Error error -> Error error
   ) tasks_json in
   let errors = List.filter_map (function Error e -> Some e | Ok _ -> None) validated in

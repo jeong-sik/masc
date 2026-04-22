@@ -1,5 +1,6 @@
 import { showToast } from './common/toast'
 import {
+  deleteGovernanceApprovalRule,
   decideGovernanceExecutionOrder,
   fetchDashboardGovernance,
   fetchGovernanceCaseStatus,
@@ -122,12 +123,20 @@ export async function respondToExecutionOrder(decision: 'confirm' | 'deny') {
   }
 }
 
-export async function respondToKeeperApproval(id: string, decision: 'approve' | 'reject') {
+export async function respondToKeeperApproval(
+  id: string,
+  decision: 'approve' | 'reject',
+  rememberRule = false,
+) {
   if (!id) return
   governanceApprovalActing.value = id
   try {
-    await resolveGovernanceApproval(id, decision)
-    showToast(decision === 'approve' ? 'keeper 승인 요청을 승인했습니다' : 'keeper 승인 요청을 거부했습니다', 'success')
+    await resolveGovernanceApproval(id, decision, rememberRule)
+    const message =
+      decision === 'approve'
+        ? (rememberRule ? 'keeper 승인 요청을 승인하고 Always 규칙을 저장했습니다' : 'keeper 승인 요청을 승인했습니다')
+        : 'keeper 승인 요청을 거부했습니다'
+    showToast(message, 'success')
     await refreshGovernance()
   } catch (err) {
     const message = err instanceof Error ? err.message : 'keeper 승인 요청을 처리하지 못했습니다'
@@ -138,3 +147,18 @@ export async function respondToKeeperApproval(id: string, decision: 'approve' | 
   }
 }
 
+export async function deleteKeeperApprovalRule(id: string) {
+  if (!id) return
+  governanceApprovalActing.value = `rule:${id}`
+  try {
+    await deleteGovernanceApprovalRule(id)
+    showToast('Always 규칙을 삭제했습니다', 'success')
+    await refreshGovernance()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Always 규칙을 삭제하지 못했습니다'
+    governanceError.value = message
+    showToast(message, 'error')
+  } finally {
+    governanceApprovalActing.value = null
+  }
+}

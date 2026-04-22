@@ -172,8 +172,82 @@ let install ~config ~governance_level =
 
 (* ── OAS Approval Pipeline bridge (#5902) ─────────────────── *)
 
+let nonempty_trimmed value =
+  let trimmed = String.trim value in
+  if trimmed = "" then None else Some trimmed
+
+let selected_model_of_meta = function
+  | None -> None
+  | Some (meta : Keeper_types.keeper_meta) ->
+      match nonempty_trimmed meta.runtime.usage.last_model_used with
+      | Some _ as selected_model -> selected_model
+      | None -> (
+          match meta.models with
+          | model :: _ -> nonempty_trimmed model
+          | [] -> None)
+
+let input_op_opt input =
+  Option.bind (Safe_ops.json_string_opt "op" input) nonempty_trimmed
+
+let destructive_tool_or_op ~tool_name ~input =
+  let normalized_tool = String.lowercase_ascii tool_name in
+  let normalized_op =
+    input_op_opt input
+    |> Option.map String.lowercase_ascii
+    |> Option.value ~default:""
+  in
+  let destructive_ops =
+    [
+      "bash";
+      "git";
+      "git_commit";
+      "git_push";
+      "git_push_force";
+      "git_reset";
+      "git_reset_hard";
+      "git_rebase";
+      "git_clean";
+      "git_apply";
+    ]
+  in
+  String_util.contains_substring_ci normalized_tool "shell"
+  || String_util.contains_substring_ci normalized_tool "git"
+  || List.mem normalized_op destructive_ops
+
+let runtime_auto_approval_blocked = function
+  | None -> false
+  | Some (meta : Keeper_types.keeper_meta) ->
+      let continue_gate =
+        match meta.runtime.last_blocker_class with
+        | Some blocker_class ->
+            Keeper_types.blocker_class_continue_gate blocker_class
+        | None -> false
+      in
+      let blocker_class =
+        Option.map Keeper_types.blocker_class_to_string
+          meta.runtime.last_blocker_class
+      in
+      let blocker_summary = nonempty_trimmed meta.runtime.last_blocker in
+      continue_gate
+      ||
+      match blocker_class with
+      | Some "completion_contract_violation"
+      | Some "cascade_exhausted" ->
+          true
+      | _ ->
+          (match blocker_summary with
+          | Some summary ->
+              String_util.contains_substring_ci summary "manual block"
+              || String_util.contains_substring_ci summary "sandbox"
+          | None -> false)
+
+let auto_approval_forbidden ~tool_name ~input ~risk meta =
+  risk = Critical
+  || destructive_tool_or_op ~tool_name ~input
+  || runtime_auto_approval_blocked meta
+
 let to_oas_approval_callback
-    ~governance_level ~keeper_name ?meta () : Oas.Hooks.approval_callback =
+    ~config:_ ~governance_level ~keeper_name ?meta () : Oas.Hooks.approval_callback =
   let queue_risk_level = function
     | Low -> Keeper_approval_queue.Low
     | Medium -> Keeper_approval_queue.Medium
@@ -236,16 +310,40 @@ let to_oas_approval_callback
       let runtime_contract =
         Option.map Keeper_runtime_contract.runtime_contract_json meta
       in
-      Keeper_approval_queue.submit_and_await
-        ~keeper_name
-        ~tool_name
-        ~input
-        ?turn_id
-        ?task_id
-        ?goal_id
-        ?goal_ids
-        ?runtime_contract
-        ~risk_level:(queue_risk_level risk)
-        ()
+      let selected_model = selected_model_of_meta meta in
+      let risk_level = queue_risk_level risk in
+      let rule_match =
+        if auto_approval_forbidden ~tool_name ~input ~risk meta then
+          None
+        else
+          Keeper_approval_queue.find_matching_rule
+            ~keeper_name ~tool_name ~input ~risk_level ?runtime_contract ()
+      in
+      (match rule_match with
+      | Some matched ->
+          Keeper_approval_queue.audit_approval_event
+            ~event_type:"auto_approved_rule_match"
+            ~id:(Printf.sprintf "auto_%s_%s" keeper_name matched.rule_id)
+            ~keeper_name ~tool_name ~risk_level ?turn_id ?task_id ?goal_id
+            ~goal_ids:(Option.value ~default:[] goal_ids) ?runtime_contract
+            ?selected_model ~disposition:"Pass"
+            ~disposition_reason:"healthy" ~rule_match:matched
+            ~auto_approved:true ();
+          Oas.Hooks.Approve
+      | None ->
+          Keeper_approval_queue.submit_and_await
+            ~keeper_name
+            ~tool_name
+            ~input
+            ?turn_id
+            ?task_id
+            ?goal_id
+            ?goal_ids
+            ?runtime_contract
+            ?selected_model
+            ~disposition:"Pause"
+            ~disposition_reason:"waiting_approval"
+            ~risk_level
+            ())
     else
       Oas.Hooks.Approve

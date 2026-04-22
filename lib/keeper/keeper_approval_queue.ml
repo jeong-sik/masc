@@ -321,17 +321,14 @@ let upsert_rule ?base_path ~keeper_name ~tool_name ~input ~risk_level
 let delete_rule ~id =
   with_rules_lock (fun () ->
     let rules = load_rules_unlocked () in
-    if not (List.exists (fun rule -> String.equal rule.id id) rules) then
-      Error (Printf.sprintf "approval rule %s not found" id)
-    else (
-      let deleted =
-        List.find (fun rule -> String.equal rule.id id) rules
-      in
-      let remaining =
-        List.filter (fun rule -> not (String.equal rule.id id)) rules
-      in
-      save_rules_unlocked remaining;
-      Ok deleted))
+    match List.find_opt (fun rule -> String.equal rule.id id) rules with
+    | None -> Error (Printf.sprintf "approval rule %s not found" id)
+    | Some deleted ->
+        let remaining =
+          List.filter (fun rule -> not (String.equal rule.id id)) rules
+        in
+        save_rules_unlocked remaining;
+        Ok deleted)
 
 let find_matching_rule ?base_path ~keeper_name ~tool_name ~input ~risk_level
     ?runtime_contract () =

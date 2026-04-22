@@ -3,7 +3,7 @@
 \*
 \* Purpose
 \*   The repository already has three partial composition specs:
-\*     - KeeperCoreTriad.tla          State x Decision x Cascade (5-phase projection)
+\*     - KeeperCoreTriad.tla          State x Decision x Cascade (7-phase projection)
 \*     - StateProduct.tla             Keeper x Turn x Validation
 \*     - KeeperContextLifecycle.tla   Context + Compaction + Checkpoint + Recovery
 \*   None of them check joint invariants that span all four domain FSMs

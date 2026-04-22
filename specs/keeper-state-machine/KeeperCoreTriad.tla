@@ -24,15 +24,15 @@
 \*
 \* OCaml mapping:
 \*   phase              <-> Keeper_state_machine.phase (12-phase OCaml type
-\*                          projected to a 6-symbol triad alphabet; see the
+\*                          projected to a 7-symbol triad alphabet; see the
 \*                          canonical mapping in the TypeOK preamble below)
 \*   effective_cascade  <-> Keeper_cascade_routing.select_cascade result
 \*   provider_ceiling   <-> Oas_model_resolve.resolve_max_cascade_context
 \*   requested_max_tokens <-> Cascade_inference.resolve_max_tokens
 \*
-\* (The canonical 12->6 phase mapping lives next to TypeOK on line ~89.
+\* (The canonical 12->7 phase mapping lives next to TypeOK on line ~89.
 \*  An earlier version of this preamble carried a separate "Phase
-\*  simplification (12 -> 6)" mapping that classified HandingOff / Paused /
+\*  simplification (12 -> 7)" mapping that classified HandingOff / Paused /
 \*  Restarting differently from the canonical one.  Removed in #8970 to
 \*  avoid the self-contradiction that TLC could not surface.)
 
@@ -42,11 +42,13 @@ CONSTANTS
     MaxRetries,          \* Max cross-provider retries (e.g. 2)
     Provider1Ceiling,    \* max_tokens ceiling for provider 1
     Provider2Ceiling,    \* max_tokens ceiling for provider 2
-    KeeperUnifiedTokens, \* max_tokens for keeper_unified profile
+    BaseCascade,         \* keeper-configured base cascade name
+    BaseCascadeTokens,   \* max_tokens for the base cascade profile
     LocalRecoveryTokens, \* max_tokens for local_recovery profile
     LocalOnlyTokens      \* max_tokens for local_only profile
 
-ASSUME MaxRetries >= 0
+ASSUME /\ MaxRetries >= 0
+       /\ BaseCascade \notin {"local_recovery", "local_only", "none"}
 
 NumProviders == 2
 Providers == 1..NumProviders
@@ -57,10 +59,11 @@ ProviderCeiling(p) ==
 
 \* ── Cascade profile definitions ─────────────────────────
 \* Maps cascade name to its requested max_tokens.
-\* Mirrors config/cascade.json profile -> max_tokens.
+\* Mirrors config/cascade.json profile -> max_tokens, with BaseCascade
+\* standing in for the keeper's configured profile (typically keeper_unified).
 
 MaxTokensFor(cascade) ==
-    CASE cascade = "keeper_unified" -> KeeperUnifiedTokens
+    CASE cascade = BaseCascade      -> BaseCascadeTokens
       [] cascade = "local_recovery" -> LocalRecoveryTokens
       [] cascade = "local_only"     -> LocalOnlyTokens
       [] OTHER                      -> 0
@@ -68,9 +71,9 @@ MaxTokensFor(cascade) ==
 \* ── Variables ────────────────────────────────────────────
 
 VARIABLES
-    phase,               \* "Running" | "Failing" | "Overflowed" | "Compacting" | "Draining" | "Terminal"
+    phase,               \* "Running" | "Failing" | "Overflowed" | "Compacting" | "HandingOff" | "Draining" | "Terminal"
     turn_status,         \* "idle" | "selecting" | "executing" | "retrying" | "done"
-    effective_cascade,   \* "keeper_unified" | "local_recovery" | "local_only" | "none"
+    effective_cascade,   \* BaseCascade | "local_recovery" | "local_only" | "none"
     provider_idx,        \* 0..NumProviders (0 = exhausted or not started)
     requested_max_tokens,\* Nat (what the selected cascade demands)
     provider_result,     \* "pending" | "ok" | "error" | "capability_exceeded"
@@ -86,7 +89,7 @@ vars == <<phase, turn_status, effective_cascade, provider_idx,
 
 \* Issue #8642/#8701 family: explicit OCaml ↔ TLA+ mapping. SSOT for
 \* OCaml side is lib/keeper/keeper_state_machine.ml (12 phases). This
-\* spec collapses the 12 phases into a 6-symbol "core triad" alphabet
+\* spec collapses the 12 phases into a 7-symbol "core triad" alphabet
 \* because the triad invariants only depend on running/failure/
 \* compaction signals, not on the full keeper lifecycle. Mapping:
 \*
@@ -94,15 +97,15 @@ vars == <<phase, turn_status, effective_cascade, provider_idx,
 \*   "Failing"     ↔ Failing
 \*   "Overflowed"  ↔ Overflowed
 \*   "Compacting"  ↔ Compacting
+\*   "HandingOff"  ↔ HandingOff
 \*   "Draining"    ↔ Draining
-\*   "Terminal"    ↔ Stopped | Dead | Crashed | Offline   (collapsed)
+\*   "Terminal"    ↔ Offline | Paused | Stopped | Crashed | Restarting | Dead
 \*
 \* Unmodeled here (covered in companion specs):
-\*   HandingOff, Paused, Restarting   (see KeeperReconcileLiveness.tla
-\*   and KeeperGenerationLineage.tla).
-Phases == {"Running", "Failing", "Overflowed", "Compacting", "Draining", "Terminal"}
+\*   none
+Phases == {"Running", "Failing", "Overflowed", "Compacting", "HandingOff", "Draining", "Terminal"}
 TurnStatuses == {"idle", "selecting", "executing", "retrying", "done"}
-Cascades == {"keeper_unified", "local_recovery", "local_only", "none"}
+Cascades == {BaseCascade, "local_recovery", "local_only", "none"}
 ProviderResults == {"pending", "ok", "error", "capability_exceeded"}
 TurnOutcomes == {"none", "success", "error", "partial_commit"}
 
@@ -159,8 +162,16 @@ BecomeCompacting ==
                    requested_max_tokens, provider_result, has_side_effect,
                    retry_count, turn_outcome>>
 
+BecomeHandingOff ==
+    /\ phase = "Running"
+    /\ turn_status \in {"idle", "done"}
+    /\ phase' = "HandingOff"
+    /\ UNCHANGED <<turn_status, effective_cascade, provider_idx,
+                   requested_max_tokens, provider_result, has_side_effect,
+                   retry_count, turn_outcome>>
+
 BecomeDraining ==
-    /\ phase \in {"Running", "Failing", "Compacting"}
+    /\ phase \in {"Running", "Failing", "Compacting", "HandingOff"}
     /\ turn_status \in {"idle", "done"}
     /\ phase' = "Draining"
     /\ UNCHANGED <<turn_status, effective_cascade, provider_idx,
@@ -209,8 +220,8 @@ SelectCascade ==
     /\ turn_status' = "selecting"
     /\ effective_cascade' =
         IF phase = "Failing"    THEN "local_recovery"
-        ELSE IF phase = "Compacting" THEN "local_only"
-        ELSE "keeper_unified"
+        ELSE IF phase \in {"Compacting", "HandingOff"} THEN "local_only"
+        ELSE BaseCascade
     /\ requested_max_tokens' = MaxTokensFor(effective_cascade')
     /\ provider_idx' = 1
     /\ provider_result' = "pending"
@@ -328,6 +339,7 @@ Next ==
     \* Phase transitions (external events; BecomeRunning via TurnComplete)
     \/ BecomeFailing
     \/ BecomeCompacting
+    \/ BecomeHandingOff
     \/ BecomeOverflowed
     \/ OverflowedBecomeCompacting
     \/ BecomeDraining
@@ -359,6 +371,11 @@ FailingUsesRecovery ==
      /\ effective_cascade /= "none") =>
         effective_cascade = "local_recovery"
 
+BufferOpsUseLocalOnly ==
+    (phase \in {"Compacting", "HandingOff"} /\ turn_status = "selecting"
+     /\ effective_cascade /= "none") =>
+        effective_cascade = "local_only"
+
 \* S3: Active provider attempt respects ceiling
 \* After clamping, requested_max_tokens <= provider ceiling
 CapabilityGateHolds ==
@@ -380,6 +397,7 @@ SafetyInvariant ==
     /\ TypeOK
     /\ NoTerminalCascade
     /\ FailingUsesRecovery
+    /\ BufferOpsUseLocalOnly
     /\ CapabilityGateHolds
     /\ SideEffectContainment
     /\ PhaseDecisionConsistency
@@ -410,11 +428,11 @@ CapabilityNeverDeadlocks ==
 
 BugSelectCascade ==
     /\ turn_status = "idle"
-    /\ phase /= "Terminal"
+    /\ phase \notin {"Terminal", "Overflowed"}
     /\ turn_status' = "selecting"
-    \* BUG: always use keeper_unified regardless of phase
-    /\ effective_cascade' = "keeper_unified"
-    /\ requested_max_tokens' = KeeperUnifiedTokens
+    \* BUG: always use the configured base cascade regardless of phase
+    /\ effective_cascade' = BaseCascade
+    /\ requested_max_tokens' = BaseCascadeTokens
     /\ provider_idx' = 1
     /\ provider_result' = "pending"
     /\ has_side_effect' = FALSE

@@ -510,8 +510,8 @@ let test_bootstrap_base_path_config_root_copies_versioned_config () =
       Alcotest.(check bool) "keeper TOML copied" true
         (Sys.file_exists (Filename.concat config_root "keepers/example.toml")))
 
-let test_bootstrap_base_path_config_root_repairs_partial_root () =
-  with_temp_dir "startup-config-repair" (fun dir ->
+let test_bootstrap_base_path_config_root_preserves_existing_root_without_refill () =
+  with_temp_dir "startup-config-preserve" (fun dir ->
       let repo = Filename.concat dir "repo" in
       mkdir_p repo;
       ignore (make_config_root repo);
@@ -525,11 +525,16 @@ let test_bootstrap_base_path_config_root_repairs_partial_root () =
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
       Alcotest.(check string) "existing cascade preserved" "{\"seed\":\"local\"}"
         (read_file (Filename.concat config_root "cascade.json"));
-      Alcotest.(check bool) "keepers repaired" true
+      Alcotest.(check bool) "keepers dir scaffolded" true
         (Sys.is_directory (Filename.concat config_root "keepers"));
-      Alcotest.(check bool) "prompts repaired" true
+      Alcotest.(check bool) "prompts dir scaffolded" true
         (Sys.is_directory (Filename.concat config_root "prompts"));
-      Alcotest.(check bool) "tool policy repaired" true
+      Alcotest.(check bool) "versioned keeper not resurrected" false
+        (Sys.file_exists (Filename.concat config_root "keepers/example.toml"));
+      Alcotest.(check bool) "versioned prompt not resurrected" false
+        (Sys.file_exists
+           (Filename.concat config_root "prompts/keeper.unified.system.md"));
+      Alcotest.(check bool) "tool policy not backfilled" false
         (Sys.file_exists (Filename.concat config_root "tool_policy.toml")))
 
 let test_bootstrap_base_path_config_root_skips_explicit_config_override () =
@@ -1741,8 +1746,9 @@ let () =
             "bootstrap base-path config copies versioned config"
             `Quick test_bootstrap_base_path_config_root_copies_versioned_config;
           Alcotest.test_case
-            "bootstrap base-path config repairs partial root"
-            `Quick test_bootstrap_base_path_config_root_repairs_partial_root;
+            "bootstrap base-path config preserves existing root without refill"
+            `Quick
+            test_bootstrap_base_path_config_root_preserves_existing_root_without_refill;
           Alcotest.test_case
             "bootstrap base-path config skips explicit override"
             `Quick

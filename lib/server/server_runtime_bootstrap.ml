@@ -106,6 +106,11 @@ let rec copy_missing_tree ~src ~dst =
   else
     copy_file_if_missing ~src ~dst
 
+let ensure_config_root_scaffold config_root =
+  Fs_compat.mkdir_p config_root;
+  [ "prompts"; "keepers"; "personas" ]
+  |> List.iter (fun name -> Fs_compat.mkdir_p (Filename.concat config_root name))
+
 let bootstrap_base_path_config_root ~base_path =
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
   if Option.is_some (Config_dir_resolver.current_env_config_dir_opt ()) then
@@ -117,24 +122,36 @@ let bootstrap_base_path_config_root ~base_path =
     let source_root =
       versioned_config_root_candidates () |> List.find_opt Sys.file_exists
     in
-    (match source_root with
-     | Some source ->
-         copy_missing_tree ~src:source ~dst:config_root;
-         Log.Server.info
-           "bootstrapped base-path config root: %s <- %s"
-           config_root source
-     | None ->
-         Fs_compat.mkdir_p (Filename.concat config_root "prompts");
-         Fs_compat.mkdir_p (Filename.concat config_root "keepers");
-         Fs_compat.mkdir_p (Filename.concat config_root "personas");
-         let cascade_path =
-           Filename.concat config_root Config_dir_resolver.cascade_json_filename
-         in
-         if not (Sys.file_exists cascade_path) then
-           Fs_compat.save_file cascade_path "{}";
-         Log.Server.warn
-           "bootstrapped minimal base-path config root without versioned source: %s"
-           config_root);
+    if Sys.file_exists config_root then
+      if Sys.is_directory config_root then begin
+        (* Preserve an existing local config root as the source of truth.
+           Re-filling missing files from repo config resurrects keepers/personas
+           that operators intentionally deleted under <base_path>/.masc/config. *)
+        ensure_config_root_scaffold config_root;
+        Log.Server.info
+          "preserved existing base-path config root without refilling missing entries: %s"
+          config_root
+      end else
+        Log.Server.warn
+          "base-path config root exists but is not a directory; skipping bootstrap: %s"
+          config_root
+    else
+      (match source_root with
+       | Some source ->
+           copy_missing_tree ~src:source ~dst:config_root;
+           Log.Server.info
+             "bootstrapped base-path config root: %s <- %s"
+             config_root source
+       | None ->
+           ensure_config_root_scaffold config_root;
+           let cascade_path =
+             Filename.concat config_root Config_dir_resolver.cascade_json_filename
+           in
+           if not (Sys.file_exists cascade_path) then
+             Fs_compat.save_file cascade_path "{}";
+           Log.Server.warn
+             "bootstrapped minimal base-path config root without versioned source: %s"
+             config_root);
     Config_dir_resolver.reset ()
 
 let startup_config_resolution ~base_path =

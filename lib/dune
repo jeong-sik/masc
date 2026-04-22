@@ -267,7 +267,6 @@
    progress
    relay
    goal_store
-   goal_guard
    goal_janitor
    goal_orchestrator
    goal_scheduler

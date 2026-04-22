@@ -197,6 +197,11 @@ let public_mcp_runtime_policy_of_tool_names (tool_names : string list) :
   if not (tool_names_are_public_mcp tool_names) then
     None
   else
+    let masc_headers =
+      match first_nonempty_env [ "MASC_MCP_TOKEN" ] with
+      | Some token -> [ ("Authorization", "Bearer " ^ token) ]
+      | None -> []
+    in
     Some
       {
         Llm_provider.Llm_transport.empty_runtime_mcp_policy with
@@ -206,7 +211,7 @@ let public_mcp_runtime_policy_of_tool_names (tool_names : string list) :
               {
                 name = "masc";
                 url = Env_config_runtime.Local_runtime.mcp_url ();
-                headers = [];
+                headers = masc_headers;
               };
           ];
         allowed_server_names = [ "masc" ];

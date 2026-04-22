@@ -629,6 +629,11 @@
  (modules test_keeper_mutex_coverage)
  (libraries masc_test_deps))
 
+(test
+ (name test_dashboard_goals)
+ (modules test_dashboard_goals)
+ (libraries masc_test_deps))
+
 ; Tool diversity: Shannon entropy + QCheck PBT
 (test
  (name test_tool_diversity)

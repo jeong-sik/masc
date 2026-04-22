@@ -241,14 +241,18 @@ let read_backlog_counts ~(config : Coord.config) : int * int * int =
     (unclaimed, failed, pending_verification)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> (0, 0, 0)
+  | ex ->
+      Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
+      (0, 0, 0)
 
 (** Count active agents in room. *)
 let count_active_agents ~(config : Coord.config) : int =
   try List.length (Coord.get_agents_raw config)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> 0
+  | ex ->
+      Log.Keeper.warn "count_active_agents failed: %s" (Printexc.to_string ex);
+      0
 
 (** Compute idle seconds from keeper timestamps. *)
 let compute_idle_seconds ~(meta : keeper_meta) : int =

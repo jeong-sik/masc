@@ -579,6 +579,11 @@ let handle_keeper_bash
            ~reason:
              "This command is destructive (force push, push to main, rm -rf, \
               etc.) and is blocked for all presets."
+           ~alternatives:
+             [ "Use `git push` without --force for normal pushes."
+             ; "For cleanup, target specific files instead of rm -rf."
+             ; "Ask a human operator to perform this destructive action."
+             ]
            ~retryability:Exec_core.Operator_required
            ~extra:[ "cmd", `String cmd_for_log ]
            ()))
@@ -621,12 +626,37 @@ let handle_keeper_bash
           | Empty_command ->
             "Provide a non-empty command string."
         in
+        let alternatives =
+          match reason with
+          | Worker_dev_tools.Command_not_allowed name
+            when String.lowercase_ascii name = "gh" ->
+            [ "Use keeper_shell with op=\"gh\" for GitHub CLI operations."
+            ; "Example: keeper_shell op=gh cmd=\"pr list --state open\"."
+            ]
+          | Chain_or_redirect | Pipes_not_allowed | Unsafe_redirect ->
+            [ "Break the pipeline into separate keeper_bash calls."
+            ; "Save intermediate output to a file, then process it in the next call."
+            ]
+          | Injection | Process_substitution ->
+            [ "Use keeper_shell with a specific op (rg, find, ls) for structured queries."
+            ; "Avoid $(...) and backtick substitution in commands."
+            ]
+          | Command_not_allowed _ ->
+            [ "Use keeper_shell for structured ops (rg, ls, find)."
+            ; "Check if the command is available under a different name or op."
+            ]
+          | Empty_command ->
+            [ "Provide a non-empty command string."
+            ; "Example: keeper_bash cmd='ls -la lib/'."
+            ]
+        in
         Yojson.Safe.to_string
           (Exec_core.blocked_result_json
              ~cmd
              ~error:"command_blocked"
              ~reason:reason_str
              ~hint
+             ~alternatives
              ())
       | Ok () ->
         (* Branch-switch guard *)
@@ -649,6 +679,12 @@ let handle_keeper_bash
                ~hint:(Printf.sprintf
                         "Use cwd=%srepos/REPO/.worktrees/TASK"
                         (Playground_paths.bundle_root meta.name))
+               ~alternatives:
+                 [ Printf.sprintf
+                     "Clone the repo first: keeper_shell op=git_clone, then use cwd=%srepos/REPO/.worktrees/TASK."
+                     (Playground_paths.bundle_root meta.name)
+                 ; "Use keeper_shell op=git op_cmd='branch -a' to list available branches."
+                 ]
                ~retryability:Exec_core.Operator_required
                ~extra:[ "cmd", `String cmd_for_log ]
                ()))
@@ -664,6 +700,10 @@ let handle_keeper_bash
                ~reason:
                  "This command modifies state (git push/commit, make deploy, etc.). \
                   A write-enabled preset (Coding/Delivery/Full) is required."
+               ~alternatives:
+                 [ "Read-only alternatives: use keeper_bash for git log, git diff, git status."
+                 ; "If you need write access, ask the operator to assign a Coding/Delivery/Full preset."
+                 ]
                ~retryability:Exec_core.Operator_required
                ~extra:[ "cmd", `String cmd_for_log ]
                ()))
@@ -699,6 +739,13 @@ let handle_keeper_bash
                         "cwd must start with %s and usually looks like %srepos/REPO/.worktrees/TASK"
                         (Playground_paths.bundle_root meta.name)
                         (Playground_paths.bundle_root meta.name))
+               ~alternatives:
+                 [ Printf.sprintf
+                     "Clone into your sandbox: keeper_shell op=git_clone, then cd to %srepos/REPO/."
+                     (Playground_paths.bundle_root meta.name)
+                 ; "Create a worktree inside your sandbox with masc_worktree_create."
+                 ; "Use keeper_bash with a cwd pointing to your sandbox worktree."
+                 ]
                ~retryability:Exec_core.Operator_required
                ~extra:[ "cmd", `String cmd_for_log; "cwd", `String cwd ]
                ()))

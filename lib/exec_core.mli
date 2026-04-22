@@ -71,6 +71,7 @@ type blocked_result = {
   error : string;
   reason : string;
   hint : string;
+  alternatives : string list;
   classification : classification;
   retryability : retryability;
   summary : string;
@@ -106,6 +107,7 @@ val build_blocked_outcome :
   error:string ->
   reason:string ->
   ?hint:string ->
+  ?alternatives:string list ->
   ?retryability:retryability ->
   unit ->
   outcome
@@ -131,6 +133,7 @@ val blocked_result_json :
   error:string ->
   reason:string ->
   ?hint:string ->
+  ?alternatives:string list ->
   ?retryability:retryability ->
   ?extra:(string * Yojson.Safe.t) list ->
   unit ->

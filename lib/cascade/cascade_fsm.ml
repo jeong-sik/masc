@@ -28,7 +28,10 @@ let decide ~accept_on_exhaustion ~is_last outcome =
         last_err =
           Some
             (Llm_provider.Http_client.NetworkError
-               { message = "slot full, cascading to next provider"; kind = Unknown });
+               {
+                 message = "slot full, cascading to next provider";
+                 kind = Unknown;
+               });
       }
   | Accept_rejected { response; reason } ->
     if is_last && accept_on_exhaustion then

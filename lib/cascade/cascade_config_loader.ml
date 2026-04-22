@@ -236,7 +236,11 @@ let load_catalog ~config_path =
 let load_profile_weighted ~config_path ~name =
   let key = name ^ "_models" in
   match load_json config_path with
-  | Error _ -> []
+  | Error msg ->
+      Eio.traceln
+        "[CascadeConfig] load_profile_weighted: %s (profile=%s, path=%s)"
+        msg name config_path;
+      []
   | Ok json ->
     let open Yojson.Safe.Util in
     match json |> member key with
@@ -311,7 +315,11 @@ let read_api_key_env_field json key =
 
 let resolve_api_key_env ~config_path ~name =
   match load_json config_path with
-  | Error _ -> []
+  | Error msg ->
+      Eio.traceln
+        "[CascadeConfig] resolve_api_key_env: %s (name=%s, path=%s)"
+        msg name config_path;
+      []
   | Ok json ->
     match read_api_key_env_field json (name ^ "_api_key_env") with
     | [] -> read_api_key_env_field json "default_api_key_env"

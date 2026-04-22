@@ -106,7 +106,9 @@ let recent n =
     if not (Sys.file_exists path) then []
     else
       match Safe_ops.read_file_safe path with
-      | Error _ -> []
+      | Error msg ->
+          Eio.traceln "[AgentStress] recent read_file_safe failed: %s" msg;
+          []
       | Ok content ->
         let lines =
           String.split_on_char '\n' content

@@ -225,6 +225,21 @@ describe('deriveOperationalInsight', () => {
     expect(insight.tone).toBe('warn')
   })
 
+  it('reports raw stable source in detail and evidence when collapsed_from is present', () => {
+    const insight = deriveOperationalInsight(
+      makeSnapshot({
+        phase: 'Stable',
+        collapsed_from: 'paused',
+      }),
+      noObservations,
+      now,
+    )
+    expect(insight.tone).toBe('warn')
+    expect(insight.detail).toContain('raw keeper phase is paused')
+    expect(insight.evidence).toContain('raw paused')
+    expect(insight.nextStep).toContain('paused')
+  })
+
   it('reports ok when not live with last_outcome', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({

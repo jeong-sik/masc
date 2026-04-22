@@ -28,6 +28,7 @@ describe('parseKeeperCompositeSnapshot', () => {
   it('parses a valid snapshot', () => {
     const result = parseKeeperCompositeSnapshot(VALID_SNAPSHOT)
     expect(result.phase).toBe('Stable')
+    expect(result.collapsed_from).toBeUndefined()
     expect(result.turn_phase).toBe('idle')
     expect(result.is_live).toBe(true)
     expect(result.last_outcome).toBeNull()
@@ -95,6 +96,15 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.measurement.auto_rules).toBeDefined()
     expect(result.measurement.auto_rules!.reflect).toBe(true)
     expect(result.measurement.auto_rules!.goal_drift).toBe(0.1)
+  })
+
+  it('parses collapsed_from when Stable hides a raw keeper phase', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      collapsed_from: 'paused',
+    })
+    expect(result.phase).toBe('Stable')
+    expect(result.collapsed_from).toBe('paused')
   })
 
   it('throws CompositeSchemaDriftError for missing required field', () => {

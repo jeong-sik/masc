@@ -78,7 +78,7 @@ let schemas : tool_schema list =
     {
       name = "masc_goal_list";
       description =
-        "List shared planning goals from the Goal Store, optionally filtered by horizon or legacy status. \
+        "List shared planning goals from the Goal Store, optionally filtered by horizon, explicit phase, or legacy status. \
 Use when a PM/planner agent needs current long/mid/short goals before creating tasks or reviews. \
 The dashboard Goal Tree reads the same store. Linked tasks prefer structured task.goal_id; title tags like [goal:<id>] remain a legacy fallback. \
 The response includes each goal's explicit lifecycle phase and verification policy.";
@@ -90,6 +90,7 @@ The response includes each goal's explicit lifecycle phase and verification poli
               `Assoc
                 [
                   ("horizon", enum_schema ~description:"Optional horizon filter" goal_horizon_enum);
+                  ("phase", enum_schema ~description:"Optional explicit Goal FSM phase filter" goal_phase_enum);
                   ("status", enum_schema ~description:"Optional legacy status filter" goal_status_enum);
                 ] );
           ];

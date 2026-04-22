@@ -118,8 +118,19 @@ describe('FSM Hub integration — API response shape', () => {
     it('accepts the current backend payload shape end-to-end', () => {
       const parsed = parseKeeperCompositeSnapshot(REAL_COMPOSITE_PAYLOAD)
       expect(parsed.phase).toBe('Running')
+      expect(parsed.collapsed_from).toBeUndefined()
       expect(parsed.invariants.phase_turn_alignment).toBe(true)
       expect(parsed.last_outcome).toBeNull()
+    })
+
+    it('preserves collapsed_from when Stable hides a raw keeper phase', () => {
+      const parsed = parseKeeperCompositeSnapshot({
+        ...REAL_COMPOSITE_PAYLOAD,
+        phase: 'Stable',
+        collapsed_from: 'paused',
+      })
+      expect(parsed.phase).toBe('Stable')
+      expect(parsed.collapsed_from).toBe('paused')
     })
 
     it('rejects payloads missing a required field with a pathful error', () => {

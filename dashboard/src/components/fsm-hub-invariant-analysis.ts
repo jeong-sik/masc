@@ -46,6 +46,7 @@ function invariantDetail(
 }
 
 function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
+  const collapsedFrom = snapshot.phase === 'Stable' ? snapshot.collapsed_from : null
   if (!snapshot.is_live) {
     return snapshot.last_outcome
       ? 'The next live turn should repopulate KTC/KDP/KCL from idle placeholders.'
@@ -67,7 +68,9 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
     return 'Draining should complete before the lifecycle settles into Stopped.'
   }
   if (snapshot.phase === 'Stable') {
-    return 'The lifecycle is outside the active turn cycle; the next meaningful edge should come from a new live turn or operator action.'
+    return collapsedFrom
+      ? `The lifecycle is collapsed into Stable from raw phase ${collapsedFrom}; the next meaningful edge should clear that underlying condition before turn activity resumes.`
+      : 'The lifecycle is outside the active turn cycle; the next meaningful edge should come from a new live turn or operator action.'
   }
   if (snapshot.decision.stage === 'gate_rejected') {
     return 'The blocked turn should finalize back to idle without entering cascade/tool execution.'
@@ -163,13 +166,17 @@ export function deriveOperationalInsight(
     }
   }
   if (snapshot.phase === 'Overflowed' || snapshot.phase === 'HandingOff' || snapshot.phase === 'Draining' || snapshot.phase === 'Stable') {
+    const collapsedDetail = snapshot.phase === 'Stable' && snapshot.collapsed_from
+      ? ` The raw keeper phase is ${snapshot.collapsed_from}, so this is not just generic idleness.`
+      : ''
     return {
       tone: 'warn',
       headline: `${snapshot.phase} is the active lifecycle edge`,
-      detail: 'The keeper is transitioning between stable lifecycle states, so the parent FSM matters more than sub-turn activity right now.',
+      detail: `The keeper is transitioning between stable lifecycle states, so the parent FSM matters more than sub-turn activity right now.${collapsedDetail}`,
       nextStep: nextExpectedStep(snapshot),
       evidence: [
         `KSM ${snapshot.phase}`,
+        ...(snapshot.collapsed_from ? [`raw ${snapshot.collapsed_from}`] : []),
         `live ${String(snapshot.is_live)}`,
       ],
     }

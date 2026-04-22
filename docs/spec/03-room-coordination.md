@@ -1,12 +1,15 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-04-22
 code_refs:
   - lib/coord/
+  - lib/coord_goals.ml
+  - lib/goal/
   - lib/tool_task.ml
   - lib/tool_agent.ml
   - lib/tool_worktree.ml
   - lib/tool_control.ml
+  - lib/tool_schemas/tool_schemas_coord_extra.ml
 ---
 
 # Room Coordination
@@ -256,6 +259,54 @@ type tempo_config = {
 3. **Starvation prevention**: 24시간 대기 시 priority boost (-1/24h, min 1)
 4. **정렬**: effective priority 오름차순, 동일 priority 내 FIFO (older first)
 5. **제외 목록**: `exclude_task_ids` + 직전 auto-release된 태스크
+
+---
+
+### 4.5 Goal Planning FSM
+
+Planning의 Goal Store는 task lifecycle과 별개의 Goal-native FSM을 가진다. source of truth는 legacy `status`가 아니라 explicit `phase`다.
+
+```ocaml
+type goal_phase =
+  | Executing
+  | Awaiting_verification
+  | Awaiting_approval
+  | Blocked
+  | Paused
+  | Completed
+  | Dropped
+```
+
+핵심 필드:
+- `goal.phase`: 실제 Goal FSM 상태
+- `goal.status`: coarse compatibility projection (`active | paused | done | dropped`)
+- `goal.verifier_policy`: parent inheritance + local override가 가능한 verifier roster / quorum 설정
+- `goal.require_completion_approval`: verification 통과 후 operator approval gate 필요 여부
+
+도구 surface:
+- `masc_goal_list`: `phase` 기준 조회를 우선 지원하고, `status`는 compatibility alias로만 유지
+- `masc_goal_upsert`: goal metadata + verifier policy 설정
+- `masc_goal_transition`: explicit Goal FSM action (`request_complete`, `pause`, `resume`, `operator_block`, `approve_completion`, ...)
+- `masc_goal_verify`: open verification request에 대한 1 principal 1 vote
+- `masc_goal_review`: legacy wrapper. 새 lifecycle / quorum flow의 정식 surface는 아님
+
+전이 요약:
+
+| 현재 | action | 다음 | 메모 |
+|------|--------|------|------|
+| `executing` | `request_complete` | `completed` | verifier policy도 approval gate도 없을 때 |
+| `executing` | `request_complete` | `awaiting_verification` | quorum verification request snapshot 생성 |
+| `awaiting_verification` | quorum pass | `awaiting_approval` or `completed` | approval 요구 여부에 따라 분기 |
+| `awaiting_verification` | quorum fail | `executing` | goal은 다시 실행 상태로 복귀 |
+| `awaiting_approval` | `approve_completion` | `completed` | verification 이후 최종 operator gate |
+| `awaiting_approval` | `reject_completion` | `blocked` | approval rejection은 blocked로 이동 |
+| `blocked` | `operator_unblock` | `executing` | 재실행 가능 |
+
+Goal verification은 기존 task verification과 저장/판정 모델이 다르다:
+- task verification: criteria 기반 request evaluation
+- goal verification: operator / keeper mixed principals의 N-of-M quorum voting
+
+따라서 Goal verification은 task verification storage를 재사용하지 않고 `lib/goal/goal_verification.ml`의 sibling subsystem으로 유지한다.
 
 ---
 

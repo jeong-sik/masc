@@ -107,6 +107,7 @@ type snapshot = {
   run_id : string;
   ts : float;
   ksm_phase : ksm_phase;
+  collapsed_from : Keeper_state_machine.phase option;
   ktc_turn_phase : turn_phase;
   kdp_decision : decision_stage;
   kcl_cascade_state : cascade_state;
@@ -258,6 +259,19 @@ let derive_ksm_phase (phase : Keeper_state_machine.phase) : ksm_phase =
   | Keeper_state_machine.Restarting
   | Keeper_state_machine.Dead -> Ksm_stable
 
+let collapsed_from_phase
+    (phase : Keeper_state_machine.phase)
+    (derived : ksm_phase)
+    : Keeper_state_machine.phase option =
+  match derived with
+  | Ksm_stable -> Some phase
+  | Ksm_running
+  | Ksm_failing
+  | Ksm_overflowed
+  | Ksm_compacting
+  | Ksm_handing_off
+  | Ksm_draining -> None
+
 (* Exhaustive on [ksm_phase]: the prior wildcard hid the design
    decision for new ksm_phase variants and made the dashboard report
    Turn_idle for keepers in Ksm_failing / Ksm_overflowed when there is
@@ -396,6 +410,7 @@ let observe
   in
   let is_live = entry.current_turn_observation <> None in
   let ksm_phase = derive_ksm_phase entry.phase in
+  let collapsed_from = collapsed_from_phase entry.phase ksm_phase in
   let turn_phase = live_turn_phase entry in
   let compaction_stage = entry.compaction_stage in
   let decision_stage = live_decision_stage entry in
@@ -421,6 +436,7 @@ let observe
     run_id;
     ts;
     ksm_phase;
+    collapsed_from;
     ktc_turn_phase = turn_phase;
     kdp_decision = decision_stage;
     kcl_cascade_state = cascade_state;
@@ -479,6 +495,10 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     "run_id", `String s.run_id;
     "ts", `Float s.ts;
     "phase", `String (ksm_phase_to_string s.ksm_phase);
+    ( "collapsed_from",
+      match s.collapsed_from with
+      | Some phase -> `String (Keeper_state_machine.phase_to_string phase)
+      | None -> `Null );
     "turn_phase", `String (turn_phase_to_string s.ktc_turn_phase);
     "decision", `Assoc [
       "stage", `String (decision_stage_to_string s.kdp_decision);

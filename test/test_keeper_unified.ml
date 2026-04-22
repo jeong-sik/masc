@@ -3,6 +3,7 @@ open Alcotest
 module WO = Masc_mcp.Keeper_world_observation
 module UP = Masc_mcp.Keeper_unified_prompt
 module UT = Masc_mcp.Keeper_unified_turn
+module UM = Masc_mcp.Keeper_unified_metrics
 module KR = Masc_mcp.Keeper_registry
 module KAR = Masc_mcp.Keeper_agent_run
 module KTD = Masc_mcp.Keeper_tool_disclosure
@@ -1194,7 +1195,7 @@ let test_metrics_text_response () =
       ~model:"test-model" ~input_tok:100 ~output_tok:50 ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:200
+    UM.update_metrics_from_result minimal_meta ~latency_ms:200
       ~observation:base_observation result
   in
   check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns;
@@ -1261,7 +1262,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
       ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:200
+    UM.update_metrics_from_result minimal_meta ~latency_ms:200
       ~observation:base_observation result
   in
   check string "helper canonicalizes surface model" selected_label
@@ -1275,7 +1276,7 @@ let test_metrics_tool_response () =
       ~model:"test-model" ~input_tok:200 ~output_tok:80 ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:500
+    UM.update_metrics_from_result minimal_meta ~latency_ms:500
       ~observation:base_observation result
   in
   check int "proactive_count +1" (minimal_meta.runtime.proactive_rt.count_total + 1)
@@ -1298,7 +1299,7 @@ let test_metrics_noop_response () =
       ~model:"test-model" ~input_tok:50 ~output_tok:10 ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:100
+    UM.update_metrics_from_result minimal_meta ~latency_ms:100
       ~observation:base_observation result
   in
   check int "proactive_count +1"
@@ -1334,7 +1335,7 @@ let test_metrics_validated_evidence_counts_as_visible () =
       ~run_validation:validation ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:100
+    UM.update_metrics_from_result minimal_meta ~latency_ms:100
       ~observation:base_observation result
   in
   check int "proactive visible_count +1"
@@ -1376,7 +1377,7 @@ let test_metrics_failed_validation_does_not_count_as_visible () =
       ~run_validation:validation ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:100
+    UM.update_metrics_from_result minimal_meta ~latency_ms:100
       ~observation:base_observation result
   in
   check int "proactive visible_count unchanged"
@@ -1401,7 +1402,7 @@ let test_metrics_file_write_evidence_counts_as_visible () =
       ~run_validation:validation ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:100
+    UM.update_metrics_from_result minimal_meta ~latency_ms:100
       ~observation:base_observation result
   in
   check int "proactive visible_count +1"
@@ -1429,7 +1430,7 @@ let test_metrics_heartbeat_only_tool_response_is_maintenance_only () =
       ~model:"test-model" ~input_tok:40 ~output_tok:0 ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:80
+    UM.update_metrics_from_result minimal_meta ~latency_ms:80
       ~observation:base_observation result
   in
   check int "proactive_count +1"
@@ -1462,7 +1463,7 @@ let test_metrics_reactive_turn_does_not_mutate_proactive_runtime () =
       ~model:"test-model" ~input_tok:90 ~output_tok:30 ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:120
+    UM.update_metrics_from_result minimal_meta ~latency_ms:120
       ~observation:reactive_observation result
   in
   check int "proactive_count unchanged on reactive turn"
@@ -1481,7 +1482,7 @@ let test_silent_proactive_cycle_advances_cooldown_anchor () =
       ~model:"test-model" ~input_tok:40 ~output_tok:10 ()
   in
   let updated =
-    UT.update_metrics_from_result
+    UM.update_metrics_from_result
       { minimal_meta with
         proactive = { minimal_meta.proactive with enabled = true; cooldown_sec = 300 }
       }
@@ -1503,7 +1504,7 @@ let test_metrics_reactive_failure_does_not_mutate_proactive_runtime () =
     }
   in
   let updated =
-    UT.update_metrics_from_failure minimal_meta ~latency_ms:90
+    UM.update_metrics_from_failure minimal_meta ~latency_ms:90
       ~observation:reactive_observation ~reason:"reactive failure" ()
   in
   check int "reactive failure leaves proactive_count unchanged"
@@ -1623,7 +1624,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         KD.baseline_execution_result
           (KD.empty_world_observation ~keeper_name:minimal_meta.name)
       in
-      UT.append_metrics_snapshot
+      UM.append_metrics_snapshot
         ~config
         ~meta:minimal_meta
         ~observation:base_observation
@@ -1751,7 +1752,7 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
           ~model:"openai:qwen3.5-35b" ~input_tok:40 ~output_tok:20
           ~run_validation:validation ()
       in
-      UT.append_metrics_snapshot
+      UM.append_metrics_snapshot
         ~config
         ~meta:minimal_meta
         ~observation:base_observation
@@ -1826,7 +1827,7 @@ let test_append_decision_record_persists_tool_calls () =
           ~output_tok:20
           ()
       in
-      UT.append_decision_record
+      UM.append_decision_record
         ~config
         ~meta:minimal_meta
         ~observation:base_observation
@@ -2189,7 +2190,7 @@ let test_metrics_persist_social_state_fields () =
           ~observation:base_observation ~previous_state:None result
       in
       let updated =
-        UT.update_metrics_from_result minimal_meta ~latency_ms:100
+        UM.update_metrics_from_result minimal_meta ~latency_ms:100
           ~observation:base_observation ~social_state
           ~social_transition_reason:
             (KSM.transition_reason_to_string transition_reason)
@@ -2209,7 +2210,7 @@ let test_metrics_persist_social_state_fields () =
 let test_metrics_failure_response () =
   let reason = "Agent run failed: Max turns exceeded (turn 10, limit 10)" in
   let updated =
-    UT.update_metrics_from_failure minimal_meta ~latency_ms:250
+    UM.update_metrics_from_failure minimal_meta ~latency_ms:250
       ~observation:base_observation ~reason
       ~social_transition_reason:"failure:run_error" ()
   in
@@ -2786,7 +2787,7 @@ let test_metrics_mixed_response () =
       ~model:"test-model" ~input_tok:150 ~output_tok:60 ()
   in
   let updated =
-    UT.update_metrics_from_result minimal_meta ~latency_ms:300
+    UM.update_metrics_from_result minimal_meta ~latency_ms:300
       ~observation:base_observation result
   in
   check int "proactive +1" (minimal_meta.runtime.proactive_rt.count_total + 1)
@@ -4123,14 +4124,14 @@ let () =
                 { minimal_meta with mention_targets = [ "verifier" ] }
               in
               check bool "verifier token matches" true
-                (UT.is_verifier_role_keeper meta));
+                (UM.is_verifier_role_keeper meta));
           test_case "is_verifier_role_keeper detects korean token" `Quick
             (fun () ->
               let meta =
                 { minimal_meta with mention_targets = [ "검증자" ] }
               in
               check bool "korean token matches" true
-                (UT.is_verifier_role_keeper meta));
+                (UM.is_verifier_role_keeper meta));
           test_case "is_verifier_role_keeper rejects non-verifier persona"
             `Quick (fun () ->
               let meta =
@@ -4140,11 +4141,11 @@ let () =
                 }
               in
               check bool "non-verifier mention targets" false
-                (UT.is_verifier_role_keeper meta));
+                (UM.is_verifier_role_keeper meta));
           test_case "is_verifier_role_keeper empty mention targets" `Quick
             (fun () ->
               check bool "empty mention_targets" false
-                (UT.is_verifier_role_keeper
+                (UM.is_verifier_role_keeper
                    { minimal_meta with mention_targets = [] }));
           test_case "affordance: verifier sees task_verify when pending>0"
             `Quick (fun () ->
@@ -4155,7 +4156,7 @@ let () =
                 { base_observation with pending_verification_count = 3 }
               in
               let affordances =
-                UT.observed_affordances_of_observation ~meta obs
+                UM.observed_affordances_of_observation ~meta obs
               in
               check bool "task_verify present for verifier" true
                 (List.mem "task_verify" affordances));
@@ -4168,7 +4169,7 @@ let () =
                 { base_observation with pending_verification_count = 3 }
               in
               let affordances =
-                UT.observed_affordances_of_observation ~meta obs
+                UM.observed_affordances_of_observation ~meta obs
               in
               check bool "task_verify absent for non-verifier" false
                 (List.mem "task_verify" affordances));
@@ -4178,7 +4179,7 @@ let () =
                 { base_observation with pending_verification_count = 2 }
               in
               let affordances =
-                UT.observed_affordances_of_observation obs
+                UM.observed_affordances_of_observation obs
               in
               check bool "task_verify present without meta" true
                 (List.mem "task_verify" affordances));
@@ -4191,7 +4192,7 @@ let () =
                 { base_observation with pending_verification_count = 5 }
               in
               let triggers =
-                UT.observed_triggers_of_observation ~meta obs
+                UM.observed_triggers_of_observation ~meta obs
               in
               check bool "pending_verification absent for non-verifier" false
                 (List.mem "pending_verification" triggers));
@@ -4204,7 +4205,7 @@ let () =
                 { base_observation with pending_verification_count = 1 }
               in
               let triggers =
-                UT.observed_triggers_of_observation ~meta obs
+                UM.observed_triggers_of_observation ~meta obs
               in
               check bool "pending_verification present for verifier" true
                 (List.mem "pending_verification" triggers));

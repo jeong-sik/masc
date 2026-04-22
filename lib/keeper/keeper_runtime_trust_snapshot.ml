@@ -126,7 +126,9 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
         | Some _ as value -> value
         | None -> json_string_opt_member "model_used" telemetry)
   in
-  let runtime_contract = Keeper_runtime_contract.runtime_contract_json meta in
+  let runtime_contract =
+    Keeper_runtime_contract.runtime_contract_json ~config meta
+  in
   let disposition, disposition_reason =
     disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields
   in

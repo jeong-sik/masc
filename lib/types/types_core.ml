@@ -696,6 +696,7 @@ type task = {
   worktree: worktree_info option; [@default None]  (* linked worktree info *)
   required_role: role; [@default Unassigned]  (** Role required to claim this task *)
   required_preset: string option; [@default None]  (** Tool preset required to claim this task *)
+  goal_id: string option; [@default None]  (** Structured goal linkage SSOT *)
   stage: Task_stage.t option; [@default None]  (** Coding task stage gate *)
   contract: task_contract option; [@default None]
   handoff_context: task_handoff_context option; [@default None]
@@ -738,10 +739,14 @@ let task_to_yojson t =
     | None -> with_role
     | Some p -> with_role @ [("required_preset", `String p)]
   in
+  let with_goal_id = match t.goal_id with
+    | None -> with_preset
+    | Some goal_id -> with_preset @ [("goal_id", `String goal_id)]
+  in
   (* Add stage if present *)
   let with_stage = match t.stage with
-    | None -> with_preset
-    | Some s -> with_preset @ [("stage", Task_stage.to_yojson s)]
+    | None -> with_goal_id
+    | Some s -> with_goal_id @ [("stage", Task_stage.to_yojson s)]
   in
   let with_contract = match t.contract with
     | None -> with_stage
@@ -796,6 +801,7 @@ let task_of_yojson json =
       | None -> Unassigned
     in
     let required_preset = json |> member "required_preset" |> to_string_option in
+    let goal_id = json |> member "goal_id" |> to_string_option in
     (* Parse optional stage field *)
     let stage = match json |> member "stage" |> to_string_option with
       | Some s -> (match Task_stage.of_string s with Ok st -> Some st | Error _ -> None)
@@ -837,6 +843,7 @@ let task_of_yojson json =
             worktree;
             required_role;
             required_preset;
+            goal_id;
             stage;
             contract;
             handoff_context;

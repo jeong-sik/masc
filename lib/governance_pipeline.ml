@@ -247,7 +247,7 @@ let auto_approval_forbidden ~tool_name ~input ~risk meta =
   || runtime_auto_approval_blocked meta
 
 let to_oas_approval_callback
-    ?config:_ ~governance_level ~keeper_name ?meta () : Oas.Hooks.approval_callback =
+    ~config ~governance_level ~keeper_name ?meta () : Oas.Hooks.approval_callback =
   let queue_risk_level = function
     | Low -> Keeper_approval_queue.Low
     | Medium -> Keeper_approval_queue.Medium
@@ -308,7 +308,10 @@ let to_oas_approval_callback
           meta
       in
       let runtime_contract =
-        Option.map Keeper_runtime_contract.runtime_contract_json meta
+        Option.map
+          (fun keeper_meta ->
+            Keeper_runtime_contract.runtime_contract_json ~config keeper_meta)
+          meta
       in
       let selected_model = selected_model_of_meta meta in
       let risk_level = queue_risk_level risk in

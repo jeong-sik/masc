@@ -12,6 +12,13 @@ type convergence_signal =
 (** Serialize a convergence signal to JSON. *)
 val convergence_signal_to_yojson : convergence_signal -> Yojson.Safe.t
 
+(** Legacy title marker retained for backward compatibility. *)
+val goal_title_marker : string -> string
+
+(** True when the task is structurally linked to the goal or carries the
+    legacy [[goal:<id>]] title marker. *)
+val task_matches_goal : goal_id:string -> Types.task -> bool
+
 (** Check whether a goal's tasks have converged.
 
     Returns [Some signal] when convergence or stagnation is detected,

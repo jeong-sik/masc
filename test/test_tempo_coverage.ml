@@ -126,6 +126,7 @@ let make_task ~id ~status : Types.task = {
   worktree = None;
   created_by = None;
   required_role = Types_core.Unassigned; required_preset = None; stage = None;
+  goal_id = None;
   contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
 }
 
@@ -165,6 +166,7 @@ let make_task_with_priority ~id ~priority : Types.task = {
   worktree = None;
   created_by = None;
   required_role = Types_core.Unassigned; required_preset = None; stage = None;
+  goal_id = None;
   contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
 }
 

@@ -70,6 +70,7 @@ val add_task :
   ?contract:Types.task_contract ->
   ?goal_id:string ->
   ?required_preset:string ->
+  ?goal_id:string ->
   ?created_by:string ->
   config -> title:string -> priority:int -> description:string -> string
 

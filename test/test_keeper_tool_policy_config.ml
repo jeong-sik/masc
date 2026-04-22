@@ -160,6 +160,7 @@ let test_task_required_preset_roundtrip () =
     created_by = None;
     required_role = Types_core.Unassigned;
     required_preset = Some "delivery";
+    goal_id = None;
     stage = None; contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
   let json = Types.task_to_yojson task in
@@ -177,6 +178,7 @@ let test_task_required_preset_none_compat () =
     created_by = None;
     required_role = Types_core.Unassigned;
     required_preset = None;
+    goal_id = None;
     stage = None; contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
   let json = Types.task_to_yojson task in

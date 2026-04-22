@@ -149,6 +149,7 @@ async function refreshAfterRuntimeAction(): Promise<void> {
 }
 
 function keeperNeedsDiagnosticAttention(keeper: Keeper): boolean {
+  if (typeof keeper.needs_attention === 'boolean') return keeper.needs_attention
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   const blocker = keeper.last_blocker?.trim()
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
@@ -166,6 +167,12 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   const continueGate = keeper.runtime_blocker_continue_gate === true
   const socialFallbackActive = keeper.social_model_recognized === false
+  const attentionReason = keeper.attention_reason?.trim() || null
+  const nextHumanAction = keeper.next_human_action?.trim() || null
+  const sandboxTarget = keeper.sandbox_target?.trim() || keeper.sandbox_profile?.trim() || null
+  const persistedPolicyCount = keeper.approval_policy_effective?.persisted_rules
+  const goalLinkedTasks = keeper.goal_progress?.linked_task_count
+  const goalConvergence = keeper.goal_progress?.convergence
   const blocker = keeper.last_blocker?.trim()
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
@@ -259,6 +266,24 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : null}
         ${keeper.last_need
           ? html`<span><strong class="text-[var(--text-strong)]">최근 필요</strong> · ${keeper.last_need}</span>`
+          : null}
+        ${attentionReason
+          ? html`<span><strong class="text-[var(--text-strong)]">주의 사유</strong> · ${attentionReason}</span>`
+          : null}
+        ${nextHumanAction
+          ? html`<span><strong class="text-[var(--text-strong)]">다음 액션</strong> · ${nextHumanAction}</span>`
+          : null}
+        ${sandboxTarget
+          ? html`<span><strong class="text-[var(--text-strong)]">Sandbox</strong> · ${sandboxTarget}</span>`
+          : null}
+        ${typeof persistedPolicyCount === 'number'
+          ? html`<span><strong class="text-[var(--text-strong)]">Always</strong> · ${persistedPolicyCount} rules</span>`
+          : null}
+        ${typeof goalLinkedTasks === 'number'
+          ? html`<span><strong class="text-[var(--text-strong)]">Goal Tasks</strong> · ${goalLinkedTasks}</span>`
+          : null}
+        ${typeof goalConvergence === 'number'
+          ? html`<span><strong class="text-[var(--text-strong)]">Goal Progress</strong> · ${Math.round(goalConvergence * 100)}%</span>`
           : null}
         ${keeper.last_autonomous_action_at
           ? html`<span><strong class="text-[var(--text-strong)]">마지막 행동</strong> · <${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></span>`

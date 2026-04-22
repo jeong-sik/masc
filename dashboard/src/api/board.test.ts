@@ -209,6 +209,8 @@ describe('normalizeKeeperApprovalQueueItem', () => {
       id: 'q-1',
       keeper_name: 'janitor',
       tool_name: 'shell_exec',
+      action_key: 'op:gh',
+      sandbox_target: 'docker',
       risk_level: 'high',
       requested_at_iso: '2026-04-17T12:00:00Z',
       waiting_s: 30,
@@ -218,6 +220,8 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     expect(result!.id).toBe('q-1')
     expect(result!.keeper_name).toBe('janitor')
     expect(result!.tool_name).toBe('shell_exec')
+    expect(result!.action_key).toBe('op:gh')
+    expect(result!.sandbox_target).toBe('docker')
     expect(result!.risk_level).toBe('high')
     expect(result!.waiting_s).toBe(30)
     expect(result!.input_preview).toBe('ls -la')

@@ -101,10 +101,49 @@ export function sourceTone(source: CascadeProfile['source']): string {
   }
 }
 
-function catalogSourceSummary(config: CascadeConfigResponse): string {
-  const kind = config.source_kind === 'toml' ? 'authoring TOML' : 'runtime JSON'
+export function catalogSourceSummary(config: CascadeConfigResponse): string {
+  if (config.source_kind === 'toml') {
+    const sourcePath = config.source_path ?? 'cascade.toml'
+    const jsonPath = config.config_path ?? 'cascade.json'
+    return `SSOT: ${sourcePath} → generated ${jsonPath}`
+  }
   const path = config.source_path ?? config.config_path ?? 'config 없음'
-  return `${kind} · ${path}`
+  return `SSOT: ${path} (direct runtime edit)`
+}
+
+interface RawConfigModeSummary {
+  title: string
+  primary: string
+  secondary: string
+  saveLabel: string
+}
+
+export function rawConfigModeSummary(
+  raw: Pick<CascadeRawConfigResponse, 'raw_json_editable' | 'source_path' | 'config_path'> | null,
+): RawConfigModeSummary {
+  const rawEditable = raw?.raw_json_editable !== false
+  const sourcePath = raw?.source_path ?? raw?.config_path ?? 'unresolved'
+  const jsonPath = raw?.config_path ?? 'unresolved'
+  if (rawEditable) {
+    return {
+      title: 'Raw cascade.json Editor',
+      primary:
+        `dashboard에서 직접 cascade.json을 수정합니다. 저장 경로는 ${jsonPath} 이고, ` +
+        '저장 후 current cascade snapshot 을 다시 읽습니다.',
+      secondary:
+        'semantics invalid profile 도 저장은 허용됩니다. 저장 후 위의 validation banner 에서 invalid/last-known-good 상태를 바로 확인하면 됩니다.',
+      saveLabel: 'Save cascade.json',
+    }
+  }
+  return {
+    title: 'Generated cascade.json View (TOML SSOT)',
+    primary:
+      `현재 active source는 ${sourcePath} 의 cascade.toml SSOT 라서 이 editor는 read-only 입니다. ` +
+      '아래 내용은 generated cascade.json runtime artifact 입니다.',
+    secondary:
+      '수정은 cascade.toml source에서 하고, 여기서는 materialized runtime JSON만 확인합니다.',
+    saveLabel: 'TOML-backed (read-only)',
+  }
 }
 
 export function profileSummaryText(
@@ -789,8 +828,8 @@ function CascadeRawConfigEditor({
   const editorDirty = useSignal(false)
   const saving = useSignal(false)
   const saveMessage = useSignal<string | null>(null)
+  const mode = rawConfigModeSummary(raw)
   const rawEditable = raw?.raw_json_editable !== false
-  const sourcePath = raw?.source_path ?? raw?.config_path ?? 'unresolved'
 
   useEffect(() => {
     if (!raw || editorDirty.value) return
@@ -822,7 +861,7 @@ function CascadeRawConfigEditor({
       return
     }
     if (!rawEditable) {
-      saveMessage.value = `Active source is TOML: edit ${sourcePath}`
+      saveMessage.value = `Active source is TOML: edit ${raw?.source_path ?? raw?.config_path ?? 'unresolved'}`
       return
     }
     saving.value = true
@@ -845,26 +884,11 @@ function CascadeRawConfigEditor({
   }
 
   return html`
-    <${Card} title=${rawEditable ? 'Raw cascade.json Editor' : 'Raw cascade.json Runtime View'}>
+    <${Card} title=${mode.title}>
       <div class="flex flex-col gap-3 p-4">
-        <p class="text-sm text-[var(--text-muted)]">
-          ${rawEditable
-            ? html`
-                dashboard에서 바로 <code>cascade.json</code> 을 수정합니다.
-                저장 경로는
-                <code>${raw?.config_path ?? 'unresolved'}</code>
-                이고, 저장 후 current cascade snapshot 을 다시 읽습니다.
-              `
-            : html`
-                현재 active source는 <code>${sourcePath}</code> 이라서
-                이 editor는 read-only 입니다. 아래 내용은 generated
-                <code>cascade.json</code> runtime artifact 입니다.
-              `}
-        </p>
+        <p class="text-sm text-[var(--text-muted)]">${mode.primary}</p>
         <p class="text-xs text-[var(--text-muted)]">
-          ${rawEditable
-            ? 'semantics invalid profile 도 저장은 허용됩니다. 저장 후 위의 validation banner 에서 invalid/last-known-good 상태를 바로 확인하면 됩니다.'
-            : '수정은 cascade.toml source에서 하고, 여기서는 materialized runtime JSON만 확인합니다.'}
+          ${mode.secondary}
         </p>
 
         <form class="flex flex-col gap-3" onSubmit=${handleSave}>
@@ -905,7 +929,7 @@ function CascadeRawConfigEditor({
               class="rounded border border-[var(--accent-primary)] bg-[var(--accent-primary)] px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
               disabled=${saveDisabled}
             >
-              ${saving.value ? 'Saving...' : rawEditable ? 'Save cascade.json' : 'TOML-backed (read-only)'}
+              ${saving.value ? 'Saving...' : mode.saveLabel}
             </button>
             <button
               type="button"

@@ -5,6 +5,7 @@ import {
   filterHealthProviders,
   fmtPct,
   candidateTone,
+  catalogSourceSummary,
   sourceLabel,
   sourceTone,
   providerTone,
@@ -18,13 +19,16 @@ import {
   keepersWithUnknownCanonical,
   profileSummaryText,
   profileKeeperAssignmentNote,
+  rawConfigModeSummary,
 } from './cascade-config-panel'
 import type {
   CascadeCandidate,
   CascadeClientCapacityEntry,
+  CascadeConfigResponse,
   CascadeHealthProvider,
   CascadeKeeperProfile,
   CascadeProfile,
+  CascadeRawConfigResponse,
   CascadeStrategyTraceEvent,
 } from '../api/dashboard'
 
@@ -74,6 +78,35 @@ function makeCapacityEntry(overrides: Partial<CascadeClientCapacityEntry> = {}):
     active: 1,
     available: 2,
     total: 3,
+    ...overrides,
+  }
+}
+
+function makeCascadeConfig(overrides: Partial<CascadeConfigResponse> = {}): CascadeConfigResponse {
+  return {
+    updated_at: '2026-04-22T08:00:00Z',
+    config_path: '/tmp/config/cascade.json',
+    source_kind: 'json',
+    source_path: '/tmp/config/cascade.json',
+    validation_status: 'validated',
+    validation_errors: [],
+    invalid_profiles: [],
+    profiles: [],
+    keeper_profiles: [],
+    ...overrides,
+  }
+}
+
+function makeRawConfig(
+  overrides: Partial<CascadeRawConfigResponse> = {},
+): CascadeRawConfigResponse {
+  return {
+    updated_at: '2026-04-22T08:00:00Z',
+    config_path: '/tmp/config/cascade.json',
+    source_kind: 'json',
+    source_path: '/tmp/config/cascade.json',
+    raw_json_editable: true,
+    raw_json: '{}',
     ...overrides,
   }
 }
@@ -129,6 +162,51 @@ describe('sourceTone', () => {
   it('returns warn for fallbacks', () => {
     expect(sourceTone('default_fallback')).toBe('warn')
     expect(sourceTone('hardcoded_defaults')).toBe('warn')
+  })
+})
+
+describe('catalogSourceSummary', () => {
+  it('explains TOML as SSOT and JSON as generated artifact', () => {
+    const summary = catalogSourceSummary(
+      makeCascadeConfig({
+        source_kind: 'toml',
+        source_path: '/tmp/config/cascade.toml',
+        config_path: '/tmp/config/cascade.json',
+      }),
+    )
+    expect(summary).toContain('SSOT:')
+    expect(summary).toContain('/tmp/config/cascade.toml')
+    expect(summary).toContain('/tmp/config/cascade.json')
+    expect(summary).toContain('generated')
+  })
+
+  it('explains JSON mode as direct runtime edit', () => {
+    const summary = catalogSourceSummary(makeCascadeConfig())
+    expect(summary).toContain('direct runtime edit')
+    expect(summary).toContain('/tmp/config/cascade.json')
+  })
+})
+
+describe('rawConfigModeSummary', () => {
+  it('marks TOML-backed raw config as read-only generated view', () => {
+    const summary = rawConfigModeSummary(
+      makeRawConfig({
+        source_kind: 'toml',
+        source_path: '/tmp/config/cascade.toml',
+        raw_json_editable: false,
+      }),
+    )
+    expect(summary.title).toContain('TOML SSOT')
+    expect(summary.primary).toContain('/tmp/config/cascade.toml')
+    expect(summary.primary).toContain('generated cascade.json')
+    expect(summary.saveLabel).toBe('TOML-backed (read-only)')
+  })
+
+  it('keeps JSON mode editable', () => {
+    const summary = rawConfigModeSummary(makeRawConfig())
+    expect(summary.title).toBe('Raw cascade.json Editor')
+    expect(summary.primary).toContain('/tmp/config/cascade.json')
+    expect(summary.saveLabel).toBe('Save cascade.json')
   })
 })
 

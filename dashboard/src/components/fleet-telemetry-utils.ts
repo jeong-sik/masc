@@ -1,4 +1,5 @@
 import type { TelemetrySourceSummary, ToolQualityResponse } from '../api/dashboard'
+import type { DashboardNamespaceTruthResponse } from '../types'
 import { telemetrySourceLabel } from '../config/telemetry-sources'
 import type { Keeper } from '../types'
 import { formatElapsedCompact } from '../lib/format-time'
@@ -28,6 +29,13 @@ export interface FleetRow {
   runtime_blocker_class: Keeper['runtime_blocker_class'] | null
   runtime_blocker_summary: string | null
   tool_audit_at: string | null
+  goal_label: string | null
+  goal_linked: boolean
+  active_goal_count: number
+  sandbox_profile: string | null
+  sandbox_last_error: string | null
+  effective_sandbox_image: string | null
+  decision_required: boolean
   budget_source: 'override' | 'override_invalid' | 'env' | null
 }
 
@@ -39,6 +47,7 @@ export interface FleetTelemetryState {
   tool_quality: ToolQualityResponse
   telemetry_sources: TelemetrySourceSummary[]
   total_telemetry_entries: number
+  namespace_truth: DashboardNamespaceTruthResponse | null
   updated_at: string | null
 }
 
@@ -62,6 +71,7 @@ export function emptyState(): FleetTelemetryState {
     tool_quality: EMPTY_TOOL_QUALITY,
     telemetry_sources: [],
     total_telemetry_entries: 0,
+    namespace_truth: null,
     updated_at: null,
   }
 }
@@ -165,6 +175,18 @@ function keeperRecentTools(keeper: Keeper): string[] {
     ...(keeper.latest_tool_names ?? []),
     ...keeperMetricsWindowTools(keeper),
   ]).slice(0, 3)
+}
+
+function keeperGoalLabel(keeper: Keeper): string | null {
+  return firstNonEmptyString(
+    keeper.short_goal,
+    keeper.goal_horizons?.short,
+    keeper.goal,
+    keeper.mid_goal,
+    keeper.goal_horizons?.mid,
+    keeper.long_goal,
+    keeper.goal_horizons?.long,
+  )
 }
 
 function keeperToolCallCount(keeper: Keeper, toolQualityCalls?: number): number {
@@ -331,6 +353,13 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             runtime_blocker_summary:
               firstNonEmptyString(keeper.runtime_blocker_summary, keeper.last_blocker) ?? null,
             tool_audit_at: keeper.tool_audit_at ?? null,
+            goal_label: keeperGoalLabel(keeper),
+            goal_linked: (keeper.active_goal_ids?.length ?? 0) > 0 || keeperGoalLabel(keeper) != null,
+            active_goal_count: keeper.active_goal_ids?.length ?? 0,
+            sandbox_profile: keeper.sandbox_profile ?? null,
+            sandbox_last_error: keeper.sandbox_last_error ?? null,
+            effective_sandbox_image: keeper.effective_sandbox_image ?? null,
+            decision_required: keeper.runtime_blocker_continue_gate === true,
             budget_source:
               keeper.turn_budget?.reactive.source === 'override' ||
               keeper.turn_budget?.reactive.source === 'override_invalid' ||
@@ -361,6 +390,13 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
           runtime_blocker_class: null,
           runtime_blocker_summary: null,
           tool_audit_at: null,
+          goal_label: null,
+          goal_linked: false,
+          active_goal_count: 0,
+          sandbox_profile: null,
+          sandbox_last_error: null,
+          effective_sandbox_image: null,
+          decision_required: false,
           budget_source: null,
         }))
 

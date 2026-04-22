@@ -168,6 +168,13 @@ let test_dashboard_namespace_truth_empty_room () =
         check int "namespace counts expose total runtimes"
           0
           (json |> member "root" |> member "counts" |> member "total_runtimes" |> to_int);
+        check bool "readiness status exposed"
+          true
+          (String.length (json |> member "readiness" |> member "status" |> to_string) > 0);
+        check int "readiness exposes four pillars"
+          4
+          (json |> member "readiness" |> member "pillars" |> to_list |> List.length);
+        ignore (json |> member "attention_events" |> to_list);
         check string "focus source"
           "namespace"
           (json |> member "focus" |> member "source" |> to_string);

@@ -150,6 +150,36 @@ export interface DashboardNamespaceTruthFocus {
   suggested_params?: Record<string, string>
 }
 
+export interface DashboardReadinessPillar {
+  key: string
+  label: string
+  status: 'ok' | 'warn' | 'bad' | string
+  score: number
+  summary: string
+  blocking_reasons: string[]
+  metrics?: Record<string, number>
+}
+
+export interface DashboardReadinessSummary {
+  status: 'ok' | 'warn' | 'bad' | string
+  score: number
+  decision_required_count: number
+  blocking_count: number
+  pillars: DashboardReadinessPillar[]
+}
+
+export interface DashboardAttentionEvent {
+  severity: 'info' | 'warn' | 'bad' | string
+  kind: string
+  summary: string
+  requires_decision: boolean
+  keeper_name?: string | null
+  target_type?: string | null
+  target_id?: string | null
+  recommended_action?: string | null
+  provenance?: string | null
+}
+
 export interface DashboardNamespaceTruthResponse {
   generated_at?: string
   root: {
@@ -179,6 +209,8 @@ export interface DashboardNamespaceTruthResponse {
     pending_confirm_summary?: PendingConfirmSummary | null
     provenance?: string | null
   }
+  readiness?: DashboardReadinessSummary | null
+  attention_events?: DashboardAttentionEvent[]
   focus?: DashboardNamespaceTruthFocus | null
 }
 

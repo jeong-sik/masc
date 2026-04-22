@@ -248,7 +248,7 @@ let running_keeper_count (config : Coord.config) : int =
        0
 
 let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.Safe.t =
-  let include_goals = false in
+  let include_goals = true in
   let history_fragment_filter_enabled =
     bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
   in
@@ -500,6 +500,18 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 Keeper_state_machine.conditions_to_json entry.conditions
             | None -> `Null
           in
+          let sandbox_last_error =
+            match registry_entry with
+            | Some entry -> entry.last_error
+            | None -> None
+          in
+          let effective_sandbox_image =
+            if m.sandbox_profile = Keeper_types.Docker
+               || (m.sandbox_profile = Keeper_types.Local
+                   && Env_config_keeper.DockerPlayground.enabled)
+            then Some (Env_config_keeper.KeeperSandbox.docker_image ())
+            else None
+          in
           (* reconcile_status removed with manual_reconcile blocker system. *)
           let runtime_blocker_fields =
             runtime_blocker_fields_json config m
@@ -746,6 +758,8 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ("created_at", `String m.created_at);
               ("updated_at", `String m.updated_at);
               ("trace_history_count", `Int trace_history_count);
+              ("active_goal_ids",
+                `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids));
               ("goal", if include_goals then `String m.goal else `Null);
               ("short_goal", if include_goals then `String m.short_goal else `Null);
               ("mid_goal", if include_goals then `String m.mid_goal else `Null);
@@ -760,7 +774,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 else
                   `Null );
               ( "active_goals_tree",
-                if include_goals && m.active_goal_ids <> [] then
+                if (not compact) && include_goals && m.active_goal_ids <> [] then
                   let all_goals = Goal_store.list_goals config () in
                   let linked = List.filter (fun (g : Goal_store.goal) ->
                     List.mem g.id m.active_goal_ids) all_goals in
@@ -784,6 +798,12 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ("primary_model", `String primary_model);
               ("active_model", `String active_model);
               ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
+              ("sandbox_profile",
+                `String (Keeper_types.sandbox_profile_to_string m.sandbox_profile));
+              ("sandbox_last_error",
+                Json_util.string_opt_to_json sandbox_last_error);
+              ("effective_sandbox_image",
+                Json_util.string_opt_to_json effective_sandbox_image);
               ("paused", `Bool m.paused);
               ("keepalive_running", `Bool keepalive_running);
               ("autoboot_enabled", `Bool m.autoboot_enabled);

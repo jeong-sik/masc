@@ -4,7 +4,7 @@ import { act } from 'preact/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TelemetrySummaryResponse, ToolQualityResponse } from '../api/dashboard'
 import { normalizeKeepers } from '../keeper-store-normalize'
-import type { DashboardExecutionResponse } from '../types'
+import type { DashboardExecutionResponse, DashboardNamespaceTruthResponse } from '../types'
 import { filterFleetRows } from './fleet-telemetry-panel'
 import type { FleetRow } from './fleet-telemetry-utils'
 
@@ -27,6 +27,13 @@ function makeRow(overrides: Partial<FleetRow> = {}): FleetRow {
     runtime_blocker_class: null,
     runtime_blocker_summary: null,
     tool_audit_at: null,
+    goal_label: null,
+    goal_linked: false,
+    active_goal_count: 0,
+    sandbox_profile: null,
+    sandbox_last_error: null,
+    effective_sandbox_image: null,
+    decision_required: false,
     budget_source: null,
     ...overrides,
   }
@@ -152,6 +159,81 @@ const telemetrySummaryResponse: TelemetrySummaryResponse = {
   ],
 }
 
+const namespaceTruthResponse: DashboardNamespaceTruthResponse = {
+  generated_at: '2026-04-09T08:11:30Z',
+  root: {},
+  execution: {
+    summary: {
+      active_sessions: 2,
+      active_operations: 4,
+      continuity_alerts: 1,
+    },
+    top_queue: null,
+    provenance: 'test',
+  },
+  operator: {
+    health: 'ok',
+    pending_confirm_summary: {
+      actor_filter: null,
+      filter_active: false,
+      visible_count: 1,
+      total_count: 1,
+      hidden_count: 0,
+      hidden_actors: [],
+      confirm_required_actions: [],
+    },
+    attention_summary: {
+      count: 1,
+      bad_count: 0,
+      warn_count: 1,
+      provenance: 'test',
+      top_item: null,
+    },
+    recommendation_summary: null,
+    provenance: 'test',
+  },
+  readiness: {
+    status: 'warn',
+    score: 0.67,
+    decision_required_count: 1,
+    blocking_count: 2,
+    pillars: [
+      {
+        key: 'execution_safety',
+        label: 'Execution Safety',
+        status: 'ok',
+        score: 1,
+        summary: 'Sandbox and approval posture are visible.',
+        blocking_reasons: [],
+        metrics: { keeper_count: 2 },
+      },
+      {
+        key: 'autonomy_reliability',
+        label: 'Autonomy Reliability',
+        status: 'warn',
+        score: 0.5,
+        summary: 'One keeper is asking for intervention.',
+        blocking_reasons: ['1 keeper requires a continue gate decision.'],
+        metrics: { decision_required: 1 },
+      },
+    ],
+  },
+  attention_events: [
+    {
+      severity: 'warn',
+      kind: 'continue_gate',
+      summary: 'keeper-alpha is blocked on a continue decision.',
+      requires_decision: true,
+      keeper_name: 'keeper-alpha',
+      target_type: 'keeper',
+      target_id: 'keeper-alpha',
+      recommended_action: 'Open interventions and approve or pause the run.',
+      provenance: 'test',
+    },
+  ],
+  focus: null,
+}
+
 const metricSeriesPoint = {
   ts_unix: 1_744_186_600,
   context_ratio: 0.4,
@@ -182,12 +264,16 @@ async function loadPanel(mocks: {
   fetchDashboardExecution: (opts?: { signal?: AbortSignal }) => Promise<DashboardExecutionResponse>
   fetchToolQuality: (opts?: { n?: number; windowHours?: number; signal?: AbortSignal }) => Promise<ToolQualityResponse>
   fetchTelemetrySummary: (opts?: { signal?: AbortSignal }) => Promise<TelemetrySummaryResponse>
+  fetchDashboardNamespaceTruth?: (opts?: { signal?: AbortSignal }) => Promise<DashboardNamespaceTruthResponse>
 }) {
   vi.resetModules()
   vi.doMock('../api/dashboard', () => ({
     fetchDashboardExecution: mocks.fetchDashboardExecution,
     fetchToolQuality: mocks.fetchToolQuality,
     fetchTelemetrySummary: mocks.fetchTelemetrySummary,
+    fetchDashboardNamespaceTruth:
+      mocks.fetchDashboardNamespaceTruth
+      ?? vi.fn().mockResolvedValue(namespaceTruthResponse),
   }))
   return import('./fleet-telemetry-panel')
 }
@@ -222,6 +308,50 @@ describe('FleetTelemetryPanel', () => {
     const fetchDashboardExecution = vi.fn().mockResolvedValue(executionResponse)
     const fetchToolQuality = vi.fn().mockResolvedValue(toolQualityResponse)
     const fetchTelemetrySummary = vi.fn().mockResolvedValue(telemetrySummaryResponse)
+    const fetchDashboardNamespaceTruth = vi.fn().mockResolvedValue(namespaceTruthResponse)
+    const { FleetTelemetryPanel } = await loadPanel({
+      fetchDashboardExecution,
+      fetchToolQuality,
+      fetchTelemetrySummary,
+      fetchDashboardNamespaceTruth,
+    })
+
+    await act(async () => {
+      render(html`<${FleetTelemetryPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(fetchDashboardExecution).toHaveBeenCalledTimes(1)
+    expect(fetchToolQuality).toHaveBeenCalledTimes(1)
+    expect(fetchTelemetrySummary).toHaveBeenCalledTimes(1)
+    expect(fetchDashboardNamespaceTruth).toHaveBeenCalledTimes(1)
+    expect(container.textContent).toContain('Keeper 가동률')
+    expect(container.textContent).toContain('1/2 keepers surfaced recent tool activity.')
+    expect(container.textContent).toContain('keeper-alpha')
+    expect(container.textContent).toContain('keeper-beta')
+    expect(container.textContent).toContain('Keeper 턴 로그')
+    expect(container.textContent).toContain('Failure Categories')
+    expect(container.textContent).toContain('Fleet Control Room')
+  }, 60_000)
+
+  it('renders readiness cards, attention events, and keeper goal or sandbox badges', async () => {
+    const fetchDashboardExecution = vi.fn().mockResolvedValue({
+      ...executionResponse,
+      keepers: [
+        {
+          ...executionResponse.keepers[0],
+          active_goal_ids: ['goal-1'],
+          short_goal: 'Ship safer keeper ops',
+          sandbox_profile: 'docker',
+          effective_sandbox_image: 'ghcr.io/acme/keeper:latest',
+          sandbox_last_error: 'bind EPERM at /var/folders/tmp',
+          runtime_blocker_continue_gate: true,
+        },
+      ],
+    } satisfies DashboardExecutionResponse)
+    const fetchToolQuality = vi.fn().mockResolvedValue(toolQualityResponse)
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue(telemetrySummaryResponse)
     const { FleetTelemetryPanel } = await loadPanel({
       fetchDashboardExecution,
       fetchToolQuality,
@@ -234,15 +364,15 @@ describe('FleetTelemetryPanel', () => {
     })
     await flushUi()
 
-    expect(fetchDashboardExecution).toHaveBeenCalledTimes(1)
-    expect(fetchToolQuality).toHaveBeenCalledTimes(1)
-    expect(fetchTelemetrySummary).toHaveBeenCalledTimes(1)
-    expect(container.textContent).toContain('Keeper 가동률')
-    expect(container.textContent).toContain('1/2 keepers surfaced recent tool activity.')
-    expect(container.textContent).toContain('keeper-alpha')
-    expect(container.textContent).toContain('keeper-beta')
-    expect(container.textContent).toContain('Keeper 턴 로그')
-    expect(container.textContent).toContain('Failure Categories')
+    expect(container.textContent).toContain('Readiness')
+    expect(container.textContent).toContain('Approvals')
+    expect(container.textContent).toContain('Attention Queue')
+    expect(container.textContent).toContain('keeper-alpha is blocked on a continue decision.')
+    expect(container.textContent).toContain('goal linked')
+    expect(container.textContent).toContain('sandbox docker')
+    expect(container.textContent).toContain('decision')
+    expect(container.textContent).toContain('Ship safer keeper ops')
+    expect(container.textContent).toContain('bind EPERM at /var/folders/tmp')
   }, 60_000)
 
   it('warns when keepers are stuck before reaching tool execution', async () => {
@@ -722,10 +852,12 @@ describe('FleetTelemetryPanel', () => {
     const fetchDashboardExecution = vi.fn().mockResolvedValue(executionResponse)
     const fetchToolQuality = vi.fn().mockResolvedValue(toolQualityResponse)
     const fetchTelemetrySummary = vi.fn().mockResolvedValue(telemetrySummaryResponse)
+    const fetchDashboardNamespaceTruth = vi.fn().mockResolvedValue(namespaceTruthResponse)
     const { FleetTelemetryPanel } = await loadPanel({
       fetchDashboardExecution,
       fetchToolQuality,
       fetchTelemetrySummary,
+      fetchDashboardNamespaceTruth,
     })
 
     await act(async () => {
@@ -737,6 +869,7 @@ describe('FleetTelemetryPanel', () => {
     expect(fetchDashboardExecution).toHaveBeenCalledTimes(1)
     expect(fetchToolQuality).toHaveBeenCalledTimes(1)
     expect(fetchTelemetrySummary).toHaveBeenCalledTimes(1)
+    expect(fetchDashboardNamespaceTruth).toHaveBeenCalledTimes(1)
 
     await vi.advanceTimersByTimeAsync(30_000)
     await flushUi()
@@ -744,6 +877,7 @@ describe('FleetTelemetryPanel', () => {
     expect(fetchDashboardExecution).toHaveBeenCalledTimes(2)
     expect(fetchToolQuality).toHaveBeenCalledTimes(2)
     expect(fetchTelemetrySummary).toHaveBeenCalledTimes(2)
+    expect(fetchDashboardNamespaceTruth).toHaveBeenCalledTimes(2)
     expect(container.textContent).toContain('30초 자동 갱신')
   }, 60_000)
 
@@ -757,6 +891,8 @@ describe('FleetTelemetryPanel', () => {
     let resolveToolQualityThird: ((value: ToolQualityResponse) => void) | null = null
     let resolveSummarySecond: ((value: TelemetrySummaryResponse) => void) | null = null
     let resolveSummaryThird: ((value: TelemetrySummaryResponse) => void) | null = null
+    let resolveNamespaceSecond: ((value: DashboardNamespaceTruthResponse) => void) | null = null
+    let resolveNamespaceThird: ((value: DashboardNamespaceTruthResponse) => void) | null = null
 
     const fetchDashboardExecution = vi.fn().mockImplementation(() => {
       executionCall += 1
@@ -782,10 +918,20 @@ describe('FleetTelemetryPanel', () => {
         else resolveSummaryThird = resolve
       })
     })
+    let namespaceCall = 0
+    const fetchDashboardNamespaceTruth = vi.fn().mockImplementation(() => {
+      namespaceCall += 1
+      if (namespaceCall === 1) return Promise.resolve(namespaceTruthResponse)
+      return new Promise<DashboardNamespaceTruthResponse>(resolve => {
+        if (namespaceCall === 2) resolveNamespaceSecond = resolve
+        else resolveNamespaceThird = resolve
+      })
+    })
     const { FleetTelemetryPanel } = await loadPanel({
       fetchDashboardExecution,
       fetchToolQuality,
       fetchTelemetrySummary,
+      fetchDashboardNamespaceTruth,
     })
 
     await act(async () => {
@@ -807,6 +953,7 @@ describe('FleetTelemetryPanel', () => {
     const applyExecutionThird = requireResolver(resolveExecutionThird, 'missing newest execution resolver')
     const applyToolQualityThird = requireResolver(resolveToolQualityThird, 'missing newest tool quality resolver')
     const applySummaryThird = requireResolver(resolveSummaryThird, 'missing newest summary resolver')
+    const applyNamespaceThird = requireResolver(resolveNamespaceThird, 'missing newest namespace resolver')
     applyExecutionThird({
       ...executionResponse,
       keepers: [
@@ -830,6 +977,15 @@ describe('FleetTelemetryPanel', () => {
       ...telemetrySummaryResponse,
       total_entries: 999,
     })
+    applyNamespaceThird({
+      ...namespaceTruthResponse,
+      attention_events: [],
+      readiness: {
+        ...namespaceTruthResponse.readiness!,
+        score: 0.9,
+        status: 'ok',
+      },
+    })
     await flushUi()
 
     expect(container.textContent).toContain('keeper-gamma')
@@ -838,6 +994,7 @@ describe('FleetTelemetryPanel', () => {
     const applyExecutionSecond = requireResolver(resolveExecutionSecond, 'missing stale execution resolver')
     const applyToolQualitySecond = requireResolver(resolveToolQualitySecond, 'missing stale tool quality resolver')
     const applySummarySecond = requireResolver(resolveSummarySecond, 'missing stale summary resolver')
+    const applyNamespaceSecond = requireResolver(resolveNamespaceSecond, 'missing stale namespace resolver')
     applyExecutionSecond({
       ...executionResponse,
       keepers: [
@@ -861,6 +1018,7 @@ describe('FleetTelemetryPanel', () => {
       ...telemetrySummaryResponse,
       total_entries: 123,
     })
+    applyNamespaceSecond(namespaceTruthResponse)
     await flushUi()
 
     expect(container.textContent).toContain('keeper-gamma')
@@ -890,10 +1048,12 @@ describe('FleetTelemetryPanel', () => {
       abortableToolQuality(opts)
     ))
     const fetchTelemetrySummary = createAbortableResponse(telemetrySummaryResponse)
+    const fetchDashboardNamespaceTruth = createAbortableResponse(namespaceTruthResponse)
     const { FleetTelemetryPanel } = await loadPanel({
       fetchDashboardExecution,
       fetchToolQuality,
       fetchTelemetrySummary,
+      fetchDashboardNamespaceTruth,
     })
 
     await act(async () => {
@@ -908,6 +1068,7 @@ describe('FleetTelemetryPanel', () => {
     expect(fetchDashboardExecution).toHaveBeenCalledTimes(2)
     expect(fetchToolQuality).toHaveBeenCalledTimes(2)
     expect(fetchTelemetrySummary).toHaveBeenCalledTimes(2)
+    expect(fetchDashboardNamespaceTruth).toHaveBeenCalledTimes(2)
     expect(abortedSignals.length).toBeGreaterThan(0)
     expect(abortedSignals.every(signal => signal.aborted)).toBe(true)
     expect(container.textContent).toContain('keeper-alpha')

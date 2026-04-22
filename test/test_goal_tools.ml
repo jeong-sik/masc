@@ -45,6 +45,11 @@ let get_string_field json field =
   | `String value -> value
   | _ -> fail (field ^ " missing")
 
+let expect_error = function
+  | Some (false, body) -> Yojson.Safe.from_string body
+  | Some (true, _) -> fail "expected tool error"
+  | None -> fail "tool not handled"
+
 let test_goal_upsert_and_list () =
   with_room @@ fun config ->
   let created =
@@ -305,6 +310,67 @@ let test_goal_review_done_uses_transition_flow () =
     (reviewed_json |> Yojson.Safe.Util.member "goal" |> fun json ->
      get_string_field json "phase")
 
+let test_operator_actions_require_operator_principal () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Only operators can block" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let blocked =
+    Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+          [
+            ("goal_id", `String goal.id);
+            ("action", `String "operator_block");
+            ("actor", principal_json ~kind:"keeper" ~id:"keeper-alpha");
+          ])
+  in
+  let error_json = expect_error blocked in
+  check string "keeper blocked by validation"
+    "validation_error"
+    (get_string_field error_json "error_code");
+  let saved_goal =
+    match Goal_store.get_goal config ~goal_id:goal.id with
+    | Some goal -> goal
+    | None -> fail "goal missing after rejected operator_block"
+  in
+  check string "phase unchanged" "executing"
+    (Goal_phase.to_string saved_goal.phase)
+
+let test_completion_approval_requires_operator_principal () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal config ~title:"Only operators can approve"
+        ~phase:Goal_phase.Awaiting_approval ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let approved =
+    Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+          [
+            ("goal_id", `String goal.id);
+            ("action", `String "approve_completion");
+            ("actor", principal_json ~kind:"keeper" ~id:"keeper-alpha");
+          ])
+  in
+  let error_json = expect_error approved in
+  check string "keeper approval blocked by validation"
+    "validation_error"
+    (get_string_field error_json "error_code");
+  let saved_goal =
+    match Goal_store.get_goal config ~goal_id:goal.id with
+    | Some goal -> goal
+    | None -> fail "goal missing after rejected approve_completion"
+  in
+  check string "phase unchanged" "awaiting_approval"
+    (Goal_phase.to_string saved_goal.phase)
+
 let () =
   run "goal_tools"
     [
@@ -318,5 +384,9 @@ let () =
             test_goal_transition_approval_gate;
           test_case "review done compatibility" `Quick
             test_goal_review_done_uses_transition_flow;
+          test_case "operator-only actions enforce operator principal" `Quick
+            test_operator_actions_require_operator_principal;
+          test_case "approval requires operator principal" `Quick
+            test_completion_approval_requires_operator_principal;
         ] );
     ]

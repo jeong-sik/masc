@@ -213,6 +213,20 @@ let parse_optional_transition_action args field =
            ~expected:"string"
            ~received:(Yojson.Safe.to_string json))
 
+let actor_must_be_operator action =
+  match action with
+  | Goal_phase.Operator_block
+  | Goal_phase.Operator_unblock
+  | Goal_phase.Approve_completion
+  | Goal_phase.Reject_completion ->
+      true
+  | Goal_phase.Request_complete
+  | Goal_phase.Pause
+  | Goal_phase.Resume
+  | Goal_phase.Drop
+  | Goal_phase.Reopen ->
+      false
+
 let parse_optional_string_list args field =
   match Yojson.Safe.Util.member field args with
   | `Null -> Ok None
@@ -383,194 +397,200 @@ let handle_goal_transition (ctx : context) args =
       validation_error_result [ err ]
   | Ok goal_id, Ok (Some action), Ok (Some actor) -> (
       let note = get_string_opt args "note" in
-      match Goal_store.get_goal ctx.config ~goal_id with
-      | None -> error_result_typed ~code:Not_found "goal not found"
-      | Some goal ->
-          let goals = Goal_store.list_goals ctx.config () in
-          let effective_policy =
-            Goal_verification.effective_policy_for_nodes
-              ~goals:(goal_policy_nodes goals) ~goal_id
-          in
-          begin
-            match effective_policy with
-            | Error msg -> error_result_typed ~code:Validation_error msg
-            | Ok effective_policy ->
-                let has_effective_verifier_policy =
-                  Option.is_some effective_policy
-                in
-                match
-                  Goal_phase.decide_transition ~phase:goal.phase ~action
-                    ~has_effective_verifier_policy
-                    ~require_completion_approval:goal.require_completion_approval
-                with
-                | Error msg -> error_result_typed ~code:Conflict msg
-                | Ok Goal_phase.Open_verification -> (
-                    match effective_policy with
-                    | None ->
-                        error_result_typed ~code:Internal_error
-                          "effective verifier policy missing"
-                    | Some effective_policy -> (
-                        match
-                          Goal_verification.exclude_requester
-                            ~policy_snapshot:effective_policy ~requested_by:actor
-                        with
-                        | Error msg ->
-                            error_result_typed ~code:Validation_error msg
-                        | Ok policy_snapshot -> (
-                            match
-                              Goal_verification.create_request ctx.config ~goal_id
-                                ~requested_by:actor ~policy_snapshot
-                            with
-                            | Error msg ->
-                                error_result_typed ~code:Internal_error msg
-                            | Ok request -> (
-                                match
-                                  update_goal_phase ctx goal
-                                    ~phase:Goal_phase.Awaiting_verification ?note
-                                    ~active_verification_request_id:request.id ()
-                                with
-                                | Error msg ->
-                                    error_result_typed ~code:Internal_error msg
-                                | Ok updated_goal ->
-                                    emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
-                                      ~payload:
-                                        (`Assoc
-                                          [
-                                            ("phase", Goal_phase.to_yojson updated_goal.phase);
-                                            ("actor", Goal_verification.goal_principal_to_yojson actor);
-                                          ]);
-                                    emit_goal_event ctx ~goal_id
-                                      ~event_type:"goal_verification_opened"
-                                      ~payload:
-                                        (`Assoc
-                                          [
-                                            ( "request",
-                                              Goal_verification.goal_verification_request_to_yojson
-                                                request );
-                                          ]);
-                                    ok_result
-                                      [
-                                        ("goal_id", `String goal_id);
-                                        ( "action",
-                                          `String
-                                            (Goal_phase.action_to_string action) );
-                                        ("goal", Goal_store.goal_to_yojson updated_goal);
-                                        ( "verification_request",
-                                          Goal_verification.goal_verification_request_to_yojson
-                                            request );
-                                        ( "verification_summary",
-                                          verification_summary_json updated_goal
-                                            (Some policy_snapshot) (Some request) );
-                                      ]))))
-                | Ok Goal_phase.Open_approval -> (
-                    match
-                      update_goal_phase ctx goal ~phase:Goal_phase.Awaiting_approval
-                        ?note ~clear_active_verification_request:true ()
-                    with
-                    | Error msg -> error_result_typed ~code:Internal_error msg
-                    | Ok updated_goal ->
-                        emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
-                          ~payload:
-                            (`Assoc
-                              [
-                                ("phase", Goal_phase.to_yojson updated_goal.phase);
-                                ("actor", Goal_verification.goal_principal_to_yojson actor);
-                              ]);
-                        emit_goal_event ctx ~goal_id
-                          ~event_type:"goal_approval_opened"
-                          ~payload:
-                            (`Assoc
-                              [
-                                ("actor", Goal_verification.goal_principal_to_yojson actor);
-                              ]);
-                        ok_result
-                          [
-                            ("goal_id", `String goal_id);
-                            ("action", `String (Goal_phase.action_to_string action));
-                            ("goal", Goal_store.goal_to_yojson updated_goal);
-                            ( "verification_summary",
-                              verification_summary_json updated_goal
-                                effective_policy None );
-                          ])
-                | Ok Goal_phase.Complete -> (
-                    match
-                      update_goal_phase ctx goal ~phase:Goal_phase.Completed ?note
-                        ~clear_active_verification_request:true ()
-                    with
-                    | Error msg -> error_result_typed ~code:Internal_error msg
-                    | Ok updated_goal ->
-                        emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
-                          ~payload:
-                            (`Assoc
-                              [
-                                ("phase", Goal_phase.to_yojson updated_goal.phase);
-                                ("actor", Goal_verification.goal_principal_to_yojson actor);
-                              ]);
-                        ok_result
-                          [
-                            ("goal_id", `String goal_id);
-                            ("action", `String (Goal_phase.action_to_string action));
-                            ("goal", Goal_store.goal_to_yojson updated_goal);
-                            ( "verification_summary",
-                              verification_summary_json updated_goal
-                                effective_policy None );
-                          ])
-                | Ok (Goal_phase.Move_to next_phase) ->
-                    let _ =
-                      match goal.active_verification_request_id, next_phase with
-                      | Some request_id, Goal_phase.Dropped
-                      | Some request_id, Goal_phase.Executing
-                        when goal.phase = Goal_phase.Awaiting_verification ->
-                          ignore (Goal_verification.cancel_request ctx.config ~request_id);
-                          emit_goal_event ctx ~goal_id
-                            ~event_type:"goal_verification_resolved"
+      if actor_must_be_operator action
+         && actor.Goal_verification.kind <> Goal_verification.Operator
+      then
+        error_result_typed ~code:Validation_error
+          "actor.kind must be operator for this transition"
+      else
+        match Goal_store.get_goal ctx.config ~goal_id with
+        | None -> error_result_typed ~code:Not_found "goal not found"
+        | Some goal ->
+            let goals = Goal_store.list_goals ctx.config () in
+            let effective_policy =
+              Goal_verification.effective_policy_for_nodes
+                ~goals:(goal_policy_nodes goals) ~goal_id
+            in
+            begin
+              match effective_policy with
+              | Error msg -> error_result_typed ~code:Validation_error msg
+              | Ok effective_policy ->
+                  let has_effective_verifier_policy =
+                    Option.is_some effective_policy
+                  in
+                  match
+                    Goal_phase.decide_transition ~phase:goal.phase ~action
+                      ~has_effective_verifier_policy
+                      ~require_completion_approval:goal.require_completion_approval
+                  with
+                  | Error msg -> error_result_typed ~code:Conflict msg
+                  | Ok Goal_phase.Open_verification -> (
+                      match effective_policy with
+                      | None ->
+                          error_result_typed ~code:Internal_error
+                            "effective verifier policy missing"
+                      | Some effective_policy -> (
+                          match
+                            Goal_verification.exclude_requester
+                              ~policy_snapshot:effective_policy ~requested_by:actor
+                          with
+                          | Error msg ->
+                              error_result_typed ~code:Validation_error msg
+                          | Ok policy_snapshot -> (
+                              match
+                                Goal_verification.create_request ctx.config ~goal_id
+                                  ~requested_by:actor ~policy_snapshot
+                              with
+                              | Error msg ->
+                                  error_result_typed ~code:Internal_error msg
+                              | Ok request -> (
+                                  match
+                                    update_goal_phase ctx goal
+                                      ~phase:Goal_phase.Awaiting_verification ?note
+                                      ~active_verification_request_id:request.id ()
+                                  with
+                                  | Error msg ->
+                                      error_result_typed ~code:Internal_error msg
+                                  | Ok updated_goal ->
+                                      emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
+                                        ~payload:
+                                          (`Assoc
+                                            [
+                                              ("phase", Goal_phase.to_yojson updated_goal.phase);
+                                              ("actor", Goal_verification.goal_principal_to_yojson actor);
+                                            ]);
+                                      emit_goal_event ctx ~goal_id
+                                        ~event_type:"goal_verification_opened"
+                                        ~payload:
+                                          (`Assoc
+                                            [
+                                              ( "request",
+                                                Goal_verification.goal_verification_request_to_yojson
+                                                  request );
+                                            ]);
+                                      ok_result
+                                        [
+                                          ("goal_id", `String goal_id);
+                                          ( "action",
+                                            `String
+                                              (Goal_phase.action_to_string action) );
+                                          ("goal", Goal_store.goal_to_yojson updated_goal);
+                                          ( "verification_request",
+                                            Goal_verification.goal_verification_request_to_yojson
+                                              request );
+                                          ( "verification_summary",
+                                            verification_summary_json updated_goal
+                                              (Some policy_snapshot) (Some request) );
+                                        ]))))
+                  | Ok Goal_phase.Open_approval -> (
+                      match
+                        update_goal_phase ctx goal ~phase:Goal_phase.Awaiting_approval
+                          ?note ~clear_active_verification_request:true ()
+                      with
+                      | Error msg -> error_result_typed ~code:Internal_error msg
+                      | Ok updated_goal ->
+                          emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
                             ~payload:
                               (`Assoc
                                 [
-                                  ("request_id", `String request_id);
-                                  ("status", `String "cancelled");
-                                ])
-                      | _ -> ()
-                    in
-                    match
-                      update_goal_phase ctx goal ~phase:next_phase ?note
-                        ~clear_active_verification_request:
-                          (next_phase <> Goal_phase.Awaiting_verification)
-                        ()
-                    with
-                    | Error msg -> error_result_typed ~code:Internal_error msg
-                    | Ok updated_goal ->
-                        emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
-                          ~payload:
-                            (`Assoc
-                              [
-                                ("phase", Goal_phase.to_yojson updated_goal.phase);
-                                ("actor", Goal_verification.goal_principal_to_yojson actor);
-                              ]);
-                        if action = Goal_phase.Approve_completion
-                           || action = Goal_phase.Reject_completion then
-                          emit_goal_event ctx ~goal_id
-                            ~event_type:"goal_approval_resolved"
-                            ~payload:
-                              (`Assoc
-                                [
-                                  ( "decision",
-                                    `String
-                                      (if action = Goal_phase.Approve_completion then
-                                         "approve"
-                                       else
-                                         "reject") );
+                                  ("phase", Goal_phase.to_yojson updated_goal.phase);
+                                  ("actor", Goal_verification.goal_principal_to_yojson actor);
                                 ]);
-                        ok_result
-                          [
-                            ("goal_id", `String goal_id);
-                            ("action", `String (Goal_phase.action_to_string action));
-                            ("goal", Goal_store.goal_to_yojson updated_goal);
-                            ( "verification_summary",
-                              verification_summary_json updated_goal
-                                effective_policy None );
-                          ]
-          end)
+                          emit_goal_event ctx ~goal_id
+                            ~event_type:"goal_approval_opened"
+                            ~payload:
+                              (`Assoc
+                                [
+                                  ("actor", Goal_verification.goal_principal_to_yojson actor);
+                                ]);
+                          ok_result
+                            [
+                              ("goal_id", `String goal_id);
+                              ("action", `String (Goal_phase.action_to_string action));
+                              ("goal", Goal_store.goal_to_yojson updated_goal);
+                              ( "verification_summary",
+                                verification_summary_json updated_goal
+                                  effective_policy None );
+                            ])
+                  | Ok Goal_phase.Complete -> (
+                      match
+                        update_goal_phase ctx goal ~phase:Goal_phase.Completed ?note
+                          ~clear_active_verification_request:true ()
+                      with
+                      | Error msg -> error_result_typed ~code:Internal_error msg
+                      | Ok updated_goal ->
+                          emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
+                            ~payload:
+                              (`Assoc
+                                [
+                                  ("phase", Goal_phase.to_yojson updated_goal.phase);
+                                  ("actor", Goal_verification.goal_principal_to_yojson actor);
+                                ]);
+                          ok_result
+                            [
+                              ("goal_id", `String goal_id);
+                              ("action", `String (Goal_phase.action_to_string action));
+                              ("goal", Goal_store.goal_to_yojson updated_goal);
+                              ( "verification_summary",
+                                verification_summary_json updated_goal
+                                  effective_policy None );
+                            ])
+                  | Ok (Goal_phase.Move_to next_phase) ->
+                      let _ =
+                        match goal.active_verification_request_id, next_phase with
+                        | Some request_id, Goal_phase.Dropped
+                        | Some request_id, Goal_phase.Executing
+                          when goal.phase = Goal_phase.Awaiting_verification ->
+                            ignore (Goal_verification.cancel_request ctx.config ~request_id);
+                            emit_goal_event ctx ~goal_id
+                              ~event_type:"goal_verification_resolved"
+                              ~payload:
+                                (`Assoc
+                                  [
+                                    ("request_id", `String request_id);
+                                    ("status", `String "cancelled");
+                                  ])
+                        | _ -> ()
+                      in
+                      match
+                        update_goal_phase ctx goal ~phase:next_phase ?note
+                          ~clear_active_verification_request:
+                            (next_phase <> Goal_phase.Awaiting_verification)
+                          ()
+                      with
+                      | Error msg -> error_result_typed ~code:Internal_error msg
+                      | Ok updated_goal ->
+                          emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
+                            ~payload:
+                              (`Assoc
+                                [
+                                  ("phase", Goal_phase.to_yojson updated_goal.phase);
+                                  ("actor", Goal_verification.goal_principal_to_yojson actor);
+                                ]);
+                          if action = Goal_phase.Approve_completion
+                             || action = Goal_phase.Reject_completion then
+                            emit_goal_event ctx ~goal_id
+                              ~event_type:"goal_approval_resolved"
+                              ~payload:
+                                (`Assoc
+                                  [
+                                    ( "decision",
+                                      `String
+                                        (if action = Goal_phase.Approve_completion then
+                                           "approve"
+                                         else
+                                           "reject") );
+                                  ]);
+                          ok_result
+                            [
+                              ("goal_id", `String goal_id);
+                              ("action", `String (Goal_phase.action_to_string action));
+                              ("goal", Goal_store.goal_to_yojson updated_goal);
+                              ( "verification_summary",
+                                verification_summary_json updated_goal
+                                  effective_policy None );
+                            ]
+            end)
   | Ok _, Ok None, _ ->
       validation_error_result
         [

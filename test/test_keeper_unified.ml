@@ -2782,7 +2782,7 @@ let test_cascade_exhausted_error_detected_from_structured_internal_error () =
       (Masc_mcp.Oas_worker_named.Cascade_exhausted
          {
            cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
-           reason = Keeper_types.All_providers_failed;
+           reason = Masc_mcp.Keeper_types.All_providers_failed;
          })
   in
   check bool "structured cascade exhausted error detected" true

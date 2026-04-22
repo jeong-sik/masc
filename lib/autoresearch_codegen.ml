@@ -145,7 +145,9 @@ let generate_code_change ~goal ~baseline ~lower_is_better ~history ~insights
           ~cascade_name:"autoresearch" ~fallback:(fun () -> 0.7))
         ~max_tokens:(Cascade_inference.resolve_max_tokens
           ~cascade_name:"autoresearch" ~fallback:(fun () -> 4096))
-        ~approval:Approval_callbacks.auto_approve
+        ~approval:(Governance_pipeline.to_oas_approval_callback
+                     ~governance_level:(Env_config_core.governance_level ())
+                     ~keeper_name:"autoresearch-system" ())
         ()
     )
   with

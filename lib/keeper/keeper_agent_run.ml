@@ -612,7 +612,9 @@ let run_turn
         ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
     with
     | Ok cp -> Some cp
-    | Error _ -> None
+    | Error _ ->
+        Eio.traceln "[KeeperAgentRun] load_oas checkpoint failed";
+        None
   in
   (* Starting turn count for per-call budget calculation in hooks.
      With Agent.resume, turn count is cumulative from checkpoint. *)

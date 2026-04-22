@@ -89,6 +89,36 @@ let to_hint = function
   | `Permission_denied path ->
       Some (Printf.sprintf "EACCES: cannot execute %s" path)
 
+(** Structured self-correction alternatives for each semantic exit kind.
+    Empty list = no auto-correction possible (operator required).
+    Each alternative string is a complete, actionable suggestion that an
+    LLM agent can execute directly without further clarification. *)
+let to_alternatives = function
+  | `Ok -> []
+  | `Fail _ -> []
+  | `Timeout _ ->
+      [ "Split the command into smaller steps that each complete faster."
+      ; "Pipe intermediate results to a file instead of holding in memory."
+      ]
+  | `Signaled _ -> []
+  | `Git_not_a_repo ->
+      [ "Run `pwd` to check current directory."
+      ; "Clone the repository first: `git clone <url> <dir>` then cd into it."
+      ]
+  | `Oom_killed ->
+      [ "Reduce input size: process fewer files or rows at once."
+      ; "Stream output line-by-line instead of buffering everything."
+      ]
+  | `Policy_denied _ -> []
+  | `Tool_missing tool ->
+      [ Printf.sprintf "Install the missing tool: `opam install %s` or `brew install %s`." tool tool
+      ; Printf.sprintf "Check if %s is installed but not on PATH: `which %s` or `command -v %s`." tool tool tool
+      ]
+  | `Permission_denied _ ->
+      [ "Check file permissions: `ls -la <path>`."
+      ; "The binary may need execute permission: `chmod +x <path>` (if you own it)."
+      ]
+
 type payload_value =
   [ `String of string
   | `Int of int

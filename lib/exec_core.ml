@@ -71,6 +71,7 @@ type blocked_result = {
   error : string;
   reason : string;
   hint : string;
+  alternatives : string list;
   classification : classification;
   retryability : retryability;
   summary : string;
@@ -494,7 +495,8 @@ let build_process_outcome ~artifact_policy ~base_path ~keeper_name ~cmd ~status
       recovery_hint;
     }
 
-let build_blocked_outcome ~cmd ~error ~reason ?hint ?(retryability = Self_correct) () =
+let build_blocked_outcome ~cmd ~error ~reason ?hint
+    ?(alternatives = []) ?(retryability = Self_correct) () =
   let classification = classify_command ~cmd in
   let summary = summary_of_status classification Blocked in
   let recovery_hint =
@@ -511,6 +513,7 @@ let build_blocked_outcome ~cmd ~error ~reason ?hint ?(retryability = Self_correc
       error;
       reason;
       hint = recovery_hint;
+      alternatives;
       classification;
       retryability;
       summary;
@@ -585,8 +588,17 @@ let semantic_fields_of_executed (result : executed_result) :
       | None -> []
       | Some h -> [ "hint", `String h ]
     in
+    let alternatives_field =
+      match Masc_exec.Exec_semantic.to_alternatives sem with
+      | [] -> []
+      | alts ->
+          [ ( "alternatives",
+              `List (List.map (fun a -> `String a) alts) ) ]
+    in
     let semantic_obj : Yojson.Safe.t =
-      `Assoc (("kind", `String kind) :: payload_fields @ hint_field)
+      `Assoc
+        (("kind", `String kind) :: payload_fields @ hint_field
+       @ alternatives_field)
     in
     let rci_field =
       match Masc_exec.Exec_semantic.to_hint sem with
@@ -694,6 +706,11 @@ let outcome_to_json ?(extra = []) = function
          @ hint_fields
          @ semantic_fields_of_executed result)
   | Blocked_result result ->
+      let alternatives_field =
+        match result.alternatives with
+        | [] -> []
+        | alts -> [ ("alternatives", `List (List.map (fun a -> `String a) alts)) ]
+      in
       `Assoc
         ([
            ("ok", `Bool false);
@@ -708,7 +725,8 @@ let outcome_to_json ?(extra = []) = function
              ("summary", `String result.summary);
              ("hint", `String result.hint);
              ("recovery_hint", `String result.hint);
-           ])
+           ]
+         @ alternatives_field)
 
 let process_result_json ?(artifact_policy = Persist_if_large) ~base_path
     ~keeper_name ~cmd ?(extra = []) ~status ~output () =
@@ -716,7 +734,7 @@ let process_result_json ?(artifact_policy = Persist_if_large) ~base_path
     ~output
   |> outcome_to_json ~extra
 
-let blocked_result_json ~cmd ~error ~reason ?hint ?(retryability = Self_correct)
-    ?(extra = []) () =
-  build_blocked_outcome ~cmd ~error ~reason ?hint ~retryability ()
+let blocked_result_json ~cmd ~error ~reason ?hint ?(alternatives = [])
+    ?(retryability = Self_correct) ?(extra = []) () =
+  build_blocked_outcome ~cmd ~error ~reason ?hint ~alternatives ~retryability ()
   |> outcome_to_json ~extra

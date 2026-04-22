@@ -114,6 +114,23 @@ let is_auto_recoverable_cascade_fail_open_error
   Oas_worker_named.sdk_error_is_hard_quota err
   || is_auto_recoverable_cascade_exhausted_error err
 
+let fallback_cascade_for_unavailable_profile
+    ~(base_cascade : string)
+    ~(effective_cascade : string) : string option =
+  let normalized_base =
+    Keeper_cascade_profile.normalize_declared_name base_cascade
+  in
+  let normalized_effective =
+    Keeper_cascade_profile.normalize_declared_name effective_cascade
+  in
+  if not (String.equal normalized_effective normalized_base)
+  then Some normalized_base
+  else if
+    String.equal normalized_effective Keeper_config.local_only_cascade_name
+    || String.equal normalized_effective Keeper_config.default_cascade_name
+  then None
+  else Some Keeper_config.default_cascade_name
+
 let fail_open_cascade_after_auto_recoverable_error
     ~(base_cascade : string)
     ~(effective_cascade : string)
@@ -121,19 +138,8 @@ let fail_open_cascade_after_auto_recoverable_error
   if not (is_auto_recoverable_cascade_fail_open_error err)
   then None
   else
-    let normalized_base =
-      Keeper_cascade_profile.normalize_declared_name base_cascade
-    in
-    let normalized_effective =
-      Keeper_cascade_profile.normalize_declared_name effective_cascade
-    in
-    if not (String.equal normalized_effective normalized_base)
-    then Some normalized_base
-    else if
-      String.equal normalized_effective Keeper_config.local_only_cascade_name
-      || String.equal normalized_effective Keeper_config.default_cascade_name
-    then None
-    else Some Keeper_config.default_cascade_name
+    fallback_cascade_for_unavailable_profile
+      ~base_cascade ~effective_cascade
 
 let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =
   is_transient_network_error err

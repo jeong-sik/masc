@@ -68,6 +68,7 @@ type skip_reason =
   | Keeper_paused
   | Approval_pending
   | Scheduled_autonomous_disabled
+  | Provider_cooldown_pending of { remaining_sec : int }
   | Idle_gate_pending of { remaining_sec : int }
   | Cooldown_pending of { remaining_sec : int }
   | No_signal
@@ -91,6 +92,7 @@ let skip_reason_to_string = function
   | Keeper_paused -> "keeper_paused"
   | Approval_pending -> "approval_pending"
   | Scheduled_autonomous_disabled -> "scheduled_autonomous_disabled"
+  | Provider_cooldown_pending _ -> "provider_cooldown_pending"
   | Idle_gate_pending _ -> "idle_gate_pending"
   | Cooldown_pending _ -> "cooldown_pending"
   | No_signal -> "no_signal"
@@ -748,8 +750,66 @@ let effective_scheduled_autonomous_cooldown
 let effective_proactive_cooldown =
   effective_scheduled_autonomous_cooldown
 
+let fallback_cascade_for_provider_cooldown
+    ~(base_cascade : string)
+    ~(effective_cascade : string) : string option =
+  let normalized_base =
+    Keeper_cascade_profile.normalize_declared_name base_cascade
+  in
+  let normalized_effective =
+    Keeper_cascade_profile.normalize_declared_name effective_cascade
+  in
+  if not (String.equal normalized_effective normalized_base)
+  then Some normalized_base
+  else if
+    String.equal normalized_effective Keeper_config.local_only_cascade_name
+    || String.equal normalized_effective Keeper_config.default_cascade_name
+  then None
+  else Some Keeper_config.default_cascade_name
 
-let keeper_cycle_decision ~(meta : keeper_meta) (observation : world_observation) =
+let provider_cooldown_remaining_sec_for_cascade
+    ~(cascade_name : string) : int option =
+  let model_ids =
+    Cascade_runtime.models_of_cascade_name cascade_name
+    |> Cascade_config.parse_model_strings
+    |> List.map (fun (cfg : Llm_provider.Provider_config.t) ->
+           String.trim cfg.model_id)
+    |> List.filter (fun model_id -> model_id <> "")
+    |> List.sort_uniq String.compare
+  in
+  match model_ids with
+  | [] -> None
+  | _ ->
+      let provider_infos =
+        List.map
+          (fun provider_key ->
+             Cascade_health_tracker.provider_info
+               Cascade_health_tracker.global ~provider_key)
+          model_ids
+      in
+      if not (List.for_all Option.is_some provider_infos) then None
+      else
+        let provider_infos = List.filter_map Fun.id provider_infos in
+        if not (List.for_all (fun info -> info.Cascade_health_tracker.in_cooldown) provider_infos)
+        then None
+        else
+          let now = Time_compat.now () in
+          provider_infos
+          |> List.filter_map
+               (fun info -> info.Cascade_health_tracker.cooldown_expires_at)
+          |> List.map (fun expires_at ->
+                 int_of_float
+                   (Float.max 0.0 (Float.ceil (expires_at -. now))))
+          |> function
+          | [] -> Some 0
+          | first :: rest -> Some (List.fold_left min first rest)
+
+
+let keeper_cycle_decision
+    ?(provider_cooldown_remaining_sec =
+        provider_cooldown_remaining_sec_for_cascade)
+    ~(meta : keeper_meta)
+    (observation : world_observation) =
   let reactive_triggers =
     [
       (if observation.pending_mentions <> [] then Some Mention_pending else None);
@@ -857,8 +917,33 @@ let keeper_cycle_decision ~(meta : keeper_meta) (observation : world_observation
           && (backlog_elapsed
               || (idle_gate_elapsed && cooldown_elapsed))
         in
+        let provider_cooldown_remaining_sec =
+          if should_run
+          then provider_cooldown_remaining_sec ~cascade_name:meta.cascade_name
+          else None
+        in
+        let provider_cooldown_fail_open =
+          match provider_cooldown_remaining_sec with
+          | Some _ ->
+              fallback_cascade_for_provider_cooldown
+                ~base_cascade:meta.cascade_name
+                ~effective_cascade:meta.cascade_name
+          | None -> None
+        in
         let verdict =
-          if should_run then
+          if
+            Option.is_some provider_cooldown_remaining_sec
+            && Option.is_none provider_cooldown_fail_open
+          then
+            Skip {
+              reasons = (
+                Provider_cooldown_pending {
+                  remaining_sec =
+                    Option.value ~default:0 provider_cooldown_remaining_sec;
+                },
+                [] );
+            }
+          else if should_run then
             let run_reasons =
               [
                 Some Scheduled_autonomous_turn;

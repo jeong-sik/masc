@@ -414,6 +414,77 @@ let test_scheduled_turn_requires_idle_gate () =
            (first :: rest)
      | WO.Run _ -> false)
 
+let test_provider_cooldown_blocks_scheduled_turn_when_work_is_ready () =
+  let meta =
+    { minimal_meta with
+      current_task_id =
+        (match Masc_mcp.Keeper_id.Task_id.of_string "task-456" with
+         | Ok value -> Some value
+         | Error err -> fail ("task id parse failed: " ^ err));
+      proactive =
+        { enabled = true; idle_sec = 0; cooldown_sec = 60 };
+      runtime =
+        { minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = Time_compat.now () -. 120.0;
+            };
+        };
+    }
+  in
+  let decision =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> Some 3599)
+      ~meta
+      base_observation
+  in
+  check bool "provider cooldown blocks scheduled turn" false decision.should_run;
+  check string "channel stays scheduled_autonomous" "scheduled_autonomous"
+    (WO.channel_to_string decision.channel);
+  check bool "decision records provider cooldown wait reason" true
+    (match decision.verdict with
+     | WO.Skip { reasons = (first, rest) } ->
+         List.exists
+           (function WO.Provider_cooldown_pending { remaining_sec = 3599 } -> true | _ -> false)
+           (first :: rest)
+     | WO.Run _ -> false)
+
+let test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists () =
+  let meta =
+    { minimal_meta with
+      cascade_name = "tool_use_strict";
+      current_task_id =
+        (match Masc_mcp.Keeper_id.Task_id.of_string "task-789" with
+         | Ok value -> Some value
+         | Error err -> fail ("task id parse failed: " ^ err));
+      proactive =
+        { enabled = true; idle_sec = 0; cooldown_sec = 60 };
+      runtime =
+        { minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = Time_compat.now () -. 120.0;
+            };
+        };
+    }
+  in
+  let decision =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> Some 3599)
+      ~meta
+      base_observation
+  in
+  check bool "provider cooldown keeps scheduled turn open when fallback exists"
+    true decision.should_run;
+  check bool "decision does not surface cooldown skip when fail-open exists"
+    false
+    (match decision.verdict with
+     | WO.Skip { reasons = (first, rest) } ->
+         List.exists
+           (function WO.Provider_cooldown_pending _ -> true | _ -> false)
+           (first :: rest)
+     | WO.Run _ -> false)
+
 let test_effective_cooldown_no_decay_within_base () =
   (* Within the base cooldown period, no decay should apply. *)
   let result =
@@ -597,12 +668,22 @@ let test_verdict_reasons_to_strings_uses_structured_skip_tags () =
           ( WO.Cooldown_pending { remaining_sec = 60 }, [] );
       }
   in
+  let provider_cooldown_verdict =
+    WO.Skip
+      {
+        reasons =
+          ( WO.Provider_cooldown_pending { remaining_sec = 3599 }, [] );
+      }
+  in
   check (list string) "structured idle-gate skip tags"
     [ "idle_gate_pending" ]
     (WO.verdict_reasons_to_strings idle_gate_verdict);
   check (list string) "structured cooldown skip tags"
     [ "cooldown_pending" ]
-    (WO.verdict_reasons_to_strings cooldown_verdict)
+    (WO.verdict_reasons_to_strings cooldown_verdict);
+  check (list string) "structured provider cooldown skip tags"
+    [ "provider_cooldown_pending" ]
+    (WO.verdict_reasons_to_strings provider_cooldown_verdict)
 
 let test_paused_keeper_blocks_turns_even_with_reactive_signal () =
   let meta = { minimal_meta with paused = true } in
@@ -2102,6 +2183,24 @@ let test_fail_open_cascade_after_auto_recoverable_error_skips_default_cascade ()
   in
   check (option string) "default cascade has no broader fallback" None
     fallback
+
+let test_fallback_cascade_for_unavailable_profile_prefers_default () =
+  let fallback =
+    EC.fallback_cascade_for_unavailable_profile
+      ~base_cascade:"tool_use_strict"
+      ~effective_cascade:"tool_use_strict"
+  in
+  check (option string) "strict cascade fallback target is default"
+    (Some KC.default_cascade_name) fallback
+
+let test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_override () =
+  let fallback =
+    EC.fallback_cascade_for_unavailable_profile
+      ~base_cascade:"tool_use_strict"
+      ~effective_cascade:KC.local_recovery_cascade_name
+  in
+  check (option string) "phase override fallback target is base cascade"
+    (Some "tool_use_strict") fallback
 
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
@@ -3779,6 +3878,10 @@ let () =
             test_scheduled_turn_respects_cooldown;
           test_case "scheduled turn requires idle gate" `Quick
             test_scheduled_turn_requires_idle_gate;
+          test_case "provider cooldown blocks scheduled turn" `Quick
+            test_provider_cooldown_blocks_scheduled_turn_when_work_is_ready;
+          test_case "provider cooldown keeps scheduled turn open when fail-open exists" `Quick
+            test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists;
           test_case "idle decay: no decay within base" `Quick
             test_effective_cooldown_no_decay_within_base;
           test_case "idle decay: at boundary" `Quick
@@ -4175,6 +4278,10 @@ let () =
             test_fail_open_cascade_after_auto_recoverable_error_preserves_explicit_local_only;
           test_case "default cascade has no broader fail-open target" `Quick
             test_fail_open_cascade_after_auto_recoverable_error_skips_default_cascade;
+          test_case "unavailable profile fallback prefers default" `Quick
+            test_fallback_cascade_for_unavailable_profile_prefers_default;
+          test_case "unavailable phase override fallback prefers base" `Quick
+            test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_override;
         ] );
       ( "tool_classification",
         [

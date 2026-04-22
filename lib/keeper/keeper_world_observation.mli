@@ -109,6 +109,7 @@ type skip_reason =
   | Keeper_paused
   | Approval_pending
   | Scheduled_autonomous_disabled
+  | Provider_cooldown_pending of { remaining_sec : int }
   | Idle_gate_pending of { remaining_sec : int }
   | Cooldown_pending of { remaining_sec : int }
   | No_signal
@@ -220,10 +221,15 @@ val effective_proactive_cooldown :
   base_cooldown:int -> since_last:int ->
   ?consecutive_noop_count:int -> unit -> int
 
+val provider_cooldown_remaining_sec_for_cascade :
+  cascade_name:string -> int option
+
 val keeper_cycle_decision :
+  ?provider_cooldown_remaining_sec:(cascade_name:string -> int option) ->
   meta:Keeper_types.keeper_meta -> world_observation -> keeper_cycle_decision
 
 val unified_turn_decision :
+  ?provider_cooldown_remaining_sec:(cascade_name:string -> int option) ->
   meta:Keeper_types.keeper_meta -> world_observation -> keeper_cycle_decision
 
 val should_run_keeper_cycle :

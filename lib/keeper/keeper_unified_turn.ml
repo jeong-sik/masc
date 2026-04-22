@@ -585,6 +585,26 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             meta.name (String.concat ", " routed_labels) resolved_cascade;
         resolved_cascade
       in
+      let effective_cascade_name =
+        match
+          Keeper_world_observation.provider_cooldown_remaining_sec_for_cascade
+            ~cascade_name:effective_cascade_name
+        with
+        | Some remaining_sec ->
+            (match
+               EC.fallback_cascade_for_unavailable_profile
+                 ~base_cascade:meta.cascade_name
+                 ~effective_cascade:effective_cascade_name
+             with
+             | Some fallback_cascade
+               when not (String.equal fallback_cascade effective_cascade_name) ->
+                 Log.Keeper.warn
+                   "%s: cascade %s provider cooldown pending (%ds); fail-opening to %s"
+                   meta.name effective_cascade_name remaining_sec fallback_cascade;
+                 fallback_cascade
+             | _ -> effective_cascade_name)
+        | None -> effective_cascade_name
+      in
       (* 1. Check API keys *)
       let meta_for_cascade = { meta with cascade_name = effective_cascade_name } in
       let model_labels = Keeper_coordination.effective_model_labels_for_turn meta_for_cascade in

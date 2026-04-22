@@ -49,6 +49,11 @@ val is_cascade_exhausted_error : Oas.Error.sdk_error -> bool
     fully-filtered exhaustion event. Returns [Some cascade] for a one-shot
     same-turn retry target, or [None] when the current cascade should remain
     authoritative. *)
+val fallback_cascade_for_unavailable_profile :
+  base_cascade:string ->
+  effective_cascade:string ->
+  string option
+
 val fail_open_cascade_after_auto_recoverable_error :
   base_cascade:string ->
   effective_cascade:string ->

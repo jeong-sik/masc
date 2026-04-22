@@ -663,8 +663,11 @@ let handle_goal_verify (ctx : context) args =
                       (`Assoc
                         [
                           ( "vote",
-                            Goal_verification.goal_verification_vote_to_yojson
-                              (List.hd (List.rev request.votes)) );
+                            match List.rev request.votes with
+                            | last_vote :: _ ->
+                                Goal_verification.goal_verification_vote_to_yojson
+                                  last_vote
+                            | [] -> `Null );
                         ]);
                   let finalize ~phase ~event_status =
                     match

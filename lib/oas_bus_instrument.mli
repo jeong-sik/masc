@@ -16,7 +16,8 @@
       routed through [publish] below update every registered
       subscription's counter whose filter accepts the event.
     - A periodic sampler fiber that emits a WARN when depth crosses
-      80% of the default OAS buffer (>200 / 256).
+      80% of the default OAS buffer (>200 / 256), then stays quiet
+      until the subscriber recovers below the threshold.
 
     Subscriptions created directly via [Agent_sdk.Event_bus.subscribe]
     are invisible to this module. Use [subscribe] below for any MASC
@@ -54,9 +55,10 @@ val publish : Agent_sdk.Event_bus.t -> Agent_sdk.Event_bus.event -> unit
 
 (** Spawn the periodic depth sampler fiber. Reads the per-purpose
     depth counters every [~interval_s] seconds and emits a WARN log
-    when any exceeds [~warn_threshold] (default 200, i.e. ~80% of the
-    OAS default buffer size of 256). Safe to call once per server
-    bootstrap; multiple calls spawn independent fibers (don't). *)
+    when any crosses above [~warn_threshold] (default 200, i.e. ~80%
+    of the OAS default buffer size of 256), then an INFO when that
+    subscriber recovers below the threshold. Safe to call once per
+    server bootstrap; multiple calls spawn independent fibers (don't). *)
 val start_sampler
   :  sw:Eio.Switch.t
   -> clock:[> float Eio.Time.clock_ty ] Eio.Std.r
@@ -67,6 +69,14 @@ val start_sampler
 
 (** Test helpers. *)
 module For_testing : sig
+  type transition =
+    [ `Warn of string * int
+    | `Recovered of string * int
+    ]
+
   val current_depth : purpose:string -> int
+  val sample_threshold_transitions
+    :  warn_threshold:int
+    -> transition list
   val reset : unit -> unit
 end

@@ -452,7 +452,7 @@ let test_provider_cooldown_blocks_scheduled_turn_when_work_is_ready () =
 let test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists () =
   let meta =
     { minimal_meta with
-      cascade_name = "tool_use_strict";
+      cascade_name = "underdog";
       current_task_id =
         (match Masc_mcp.Keeper_id.Task_id.of_string "task-789" with
          | Ok value -> Some value
@@ -2109,11 +2109,11 @@ let test_fail_open_local_only_when_probe_fails () =
   let cascade =
     UT.fail_open_local_only_when_unavailable
       ~probe_ollama_base_url:(fun _ -> false)
-      ~base_cascade:"keeper_unified"
+      ~base_cascade:"underdog"
       ~effective_cascade:"local_only"
       [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
   in
-  check string "falls back to base cascade" "keeper_unified" cascade
+  check string "falls back to base cascade" "underdog" cascade
 
 let test_fail_open_local_only_preserves_explicit_local_only_base () =
   let cascade =
@@ -2187,27 +2187,27 @@ let test_fail_open_cascade_after_auto_recoverable_error_skips_default_cascade ()
 let test_fallback_cascade_for_unavailable_profile_prefers_default () =
   let fallback =
     EC.fallback_cascade_for_unavailable_profile
-      ~base_cascade:"tool_use_strict"
-      ~effective_cascade:"tool_use_strict"
+      ~base_cascade:"underdog"
+      ~effective_cascade:"underdog"
   in
-  check (option string) "strict cascade fallback target is default"
+  check (option string) "non-default cascade fallback target is default"
     (Some KC.default_cascade_name) fallback
 
 let test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_override () =
   let fallback =
     EC.fallback_cascade_for_unavailable_profile
-      ~base_cascade:"tool_use_strict"
+      ~base_cascade:"underdog"
       ~effective_cascade:KC.local_recovery_cascade_name
   in
   check (option string) "phase override fallback target is base cascade"
-    (Some "tool_use_strict") fallback
+    (Some "underdog") fallback
 
 let test_next_fail_open_cascade_for_turn_returns_untried_fallback () =
   let fallback =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"tool_use_strict"
-      ~effective_cascade:"tool_use_strict"
-      ~attempted_cascades:[ "tool_use_strict" ]
+      ~base_cascade:"underdog"
+      ~effective_cascade:"underdog"
+      ~attempted_cascades:[ "underdog" ]
       (wrapped_claude_limit_error ())
   in
   check (option string) "untried fallback returned"
@@ -2216,9 +2216,9 @@ let test_next_fail_open_cascade_for_turn_returns_untried_fallback () =
 let test_next_fail_open_cascade_for_turn_suppresses_attempted_fallback () =
   let fallback =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"tool_use_strict"
-      ~effective_cascade:"tool_use_strict"
-      ~attempted_cascades:[ "tool_use_strict"; KC.default_cascade_name ]
+      ~base_cascade:"underdog"
+      ~effective_cascade:"underdog"
+      ~attempted_cascades:[ "underdog"; KC.default_cascade_name ]
       (wrapped_claude_limit_error ())
   in
   check (option string) "attempted fallback suppressed" None fallback

@@ -502,7 +502,8 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
       | Llm_provider.Retry.NetworkError { message; kind } ->
         Llm_provider.Http_client.NetworkError { message; kind }
       | Llm_provider.Retry.Timeout { message } ->
-        Llm_provider.Http_client.NetworkError { message; kind = Unknown }
+        Llm_provider.Http_client.NetworkError
+          { message; kind = Llm_provider.Http_client.Timeout }
     in
     Some (Cascade_fsm.Call_err http_err)
   (* Model-capability errors: the next provider may handle these.
@@ -874,8 +875,9 @@ let run_named
     match remaining with
     | [] ->
       let reason : Keeper_types.cascade_exhaustion_reason = match last_err with
-        | Some (Llm_provider.Http_client.NetworkError { message }) ->
-            if String_util.contains_substring_ci message "connection refused" then
+        | Some (Llm_provider.Http_client.NetworkError { message; kind }) ->
+            if kind = Llm_provider.Http_client.Connection_refused
+               || String_util.contains_substring_ci message "connection refused" then
               Keeper_types.Connection_refused
             else
               Keeper_types.Other_detail message

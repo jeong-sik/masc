@@ -1,51 +1,43 @@
-comment = "Known keeper-facing cascade profiles remain typed in lib/keeper/keeper_cascade_profile.ml. Live catalog discovery is schema-driven via lib/cascade/cascade_config_loader.ml: any recognized {name}_* cascade key participates in the catalog, and optional {name}_keeper_assignable=false marks system-only profiles that stay visible/editable but must not be assignable to keepers. Personal/playground-only cascades belong in $MASC_BASE_PATH/.masc/playground/<persona>/.../cascade.json, not in this repo config."
+comment = "Checked-in seed for cascade authoring. Keep repo defaults boring: one keeper-assignable bootstrap profile (big_three), system-only fallback/phase-routing profiles (default, local_only, local_recovery, tool_rerank), and move personal/live experiments to $MASC_BASE_PATH/.masc/config/cascade.toml."
 
 [default]
+comment = "System-only fallback profile for unknown/missing cascade names. Mirrors big_three so fallback stays boring."
 models = [
-  { model = "claude_code:auto", weight = 40 },
-  { model = "codex_cli:auto", weight = 30 },
-  { model = "gemini_cli:auto", weight = 30 },
+  { model = "claude_code:auto", weight = 1 },
+  { model = "codex_cli:auto", weight = 1 },
+  { model = "gemini_cli:auto", weight = 1 },
 ]
-temperature = 0.3
-max_tokens = 4096
+temperature = 0.2
+max_tokens = 16384
+keeper_assignable = false
 
 [big_three]
+comment = "Canonical keeper bootstrap profile exposed by the checked-in seed."
 models = [
-  { model = "claude_code:auto", weight = 40 },
-  { model = "codex_cli:auto", weight = 30 },
-  { model = "gemini_cli:auto", weight = 30 },
+  { model = "claude_code:auto", weight = 1 },
+  { model = "codex_cli:auto", weight = 1 },
+  { model = "gemini_cli:auto", weight = 1 },
 ]
 temperature = 0.2
 max_tokens = 16384
-
-[underdog]
-models = [
-  { model = "kimi:auto", weight = 50 },
-  { model = "glm-coding:auto", weight = 50 },
-]
-temperature = 0.2
-max_tokens = 16384
-
-[local]
-models = [
-  "ollama:auto",
-]
-temperature = 0.2
-max_tokens = 32768
 
 [local_only]
+comment = "System-only local phase-routing profile for compacting/handoff paths."
 models = [
   "ollama:auto",
 ]
 temperature = 0.2
 max_tokens = 32768
+keeper_assignable = false
 
 [local_recovery]
+comment = "System-only local recovery profile used after cloud/provider failures."
 models = [
   "ollama:auto",
 ]
 temperature = 0.1
 max_tokens = 8192
+keeper_assignable = false
 
 [tool_rerank]
 comment = "inference-only override: tool_rerank has no _models of its own; callers reuse the default cascade's models and apply the short max_tokens here."

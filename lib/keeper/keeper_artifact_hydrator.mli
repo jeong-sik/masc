@@ -20,7 +20,7 @@ val keep_recent_from_env : unit -> int
 val hydrate_recent :
   store:Tool_blob_store.t ->
   keep_recent:int ->
-  Agent_sdk.Context_reducer.t
+  Oas.Context_reducer.t
 (** Build a [Custom] reducer that walks the message list right-to-left
     and hydrates the last [keep_recent] [Stored] markers it encounters.
 
@@ -31,7 +31,7 @@ val hydrate_recent :
     Storage exceptions are caught — a corrupted store cannot break the
     reducer pipeline. *)
 
-val reducer_from_env : unit -> Agent_sdk.Context_reducer.t option
+val reducer_from_env : unit -> Oas.Context_reducer.t option
 (** Returns a configured reducer if a blob store can be resolved from
     [MASC_BASE_PATH], else [None]. The [None] case lets callers compose
     the pipeline conditionally without a separate enable flag. *)

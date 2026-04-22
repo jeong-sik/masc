@@ -331,7 +331,7 @@ type tool_call_entry = {
 (** {1 Working Context Types (moved from Keeper_working_context)} *)
 
 type working_context = {
-  checkpoint : Agent_sdk.Checkpoint.t;
+  checkpoint : Oas.Checkpoint.t;
   max_tokens : int;
 }
 

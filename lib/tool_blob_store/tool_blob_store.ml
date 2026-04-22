@@ -56,11 +56,6 @@ let fetch t ~sha256 =
     Safe_ops.protect ~default:None (fun () -> Some (Fs_compat.load_file path))
   else None
 
-let fetch_exn t ~sha256 =
-  match fetch t ~sha256 with
-  | Some s -> s
-  | None -> raise Not_found
-
 let list_all t =
   if not (Sys.file_exists t.root) then []
   else

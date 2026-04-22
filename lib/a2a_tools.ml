@@ -384,9 +384,19 @@ let delegate config ~agent_name ~target ~message
     ?(artifacts : artifact list = [])
     ?(timeout = 300)
     () : (Yojson.Safe.t, string) result =
-  (* BUG: Prevent self-delegation — creates blocking self-portal *)
-  if String.equal agent_name target then
-    Error (Printf.sprintf "Self-delegation not allowed: agent '%s' cannot delegate to itself" agent_name)
+  let portal_identity_key name =
+    name |> String.trim |> Coord.safe_filename
+  in
+  (* Prevent self-delegation and portal-path aliases such as
+     "claude" -> "CLAUDE" or "keeper:foo" -> "keeper_3afoo".
+     Coord.portal_open_r keys portal files by [safe_filename], so two
+     different raw strings can still resolve to the same portal path and
+     deadlock on the same lock file. *)
+  if String.equal (portal_identity_key agent_name) (portal_identity_key target) then
+    Error
+      (Printf.sprintf
+         "Self-delegation not allowed: target '%s' resolves to the same portal identity as agent '%s'"
+         target agent_name)
   else
   (* Timeout is stored and returned in response for client-side enforcement *)
   let timeout_ms = timeout * 1000 in

@@ -72,7 +72,8 @@ let tool_use_message ?(name = "list_files") ~tool_use_id () =
           { id = tool_use_id; name; input = `Assoc [] };
       ];
     name = None;
-    tool_call_id = None; metadata = [];
+    tool_call_id = None;
+    metadata = [];
   }
 
 let tool_result_message ?(is_error = false) ~tool_use_id content =
@@ -84,7 +85,8 @@ let tool_result_message ?(is_error = false) ~tool_use_id content =
           { tool_use_id; content; is_error; json = None };
       ];
     name = None;
-    tool_call_id = None; metadata = [];
+    tool_call_id = None;
+    metadata = [];
   }
 
 let tool_result_content_for_id ~tool_use_id msgs =
@@ -706,7 +708,8 @@ let test_recover_latest_checkpoint_for_overflow_retry_repairs_orphan_tool_result
                     };
                 ];
               name = None;
-              tool_call_id = None; metadata = [];
+              tool_call_id = None;
+              metadata = [];
             }
             :: checkpoint.messages;
         }
@@ -769,7 +772,8 @@ let test_rollover_repairs_orphan_tool_result () =
                       };
                   ];
                 name = None;
-                tool_call_id = None; metadata = [];
+                tool_call_id = None;
+                metadata = [];
               };
               Agent_sdk.Types.assistant_msg
                 "done\n\n[STATE]\nGoal: rollover orphan repair\nProgress: ready\n[/STATE]";
@@ -870,7 +874,8 @@ let contaminated_user_message ?(prompt = "짧게 ping만 해봐") () :
         Agent_sdk.Types.Text ("[system context] " ^ contaminated_world_state_text);
       ];
     name = None;
-    tool_call_id = None; metadata = [];
+    tool_call_id = None;
+    metadata = [];
   }
 
 let oversized_checkpoint_text =
@@ -886,7 +891,8 @@ let oversized_user_message ?(prompt = "긴 텍스트도 저장되면 안 돼") (
         Agent_sdk.Types.Text oversized_checkpoint_text;
       ];
     name = None;
-    tool_call_id = None; metadata = [];
+    tool_call_id = None;
+    metadata = [];
   }
 
 let summarized_contaminated_text =
@@ -902,7 +908,8 @@ let summarized_contaminated_message () : Agent_sdk.Types.message =
     Agent_sdk.Types.role = Agent_sdk.Types.User;
     content = [Agent_sdk.Types.Text summarized_contaminated_text];
     name = None;
-    tool_call_id = None; metadata = [];
+    tool_call_id = None;
+    metadata = [];
   }
 
 let test_persist_message_drops_world_state_and_separates_internal_history () =
@@ -1120,7 +1127,8 @@ let test_sanitize_checkpoint_message_caps_tool_result_aggregate_budget () =
             };
         ];
       name = None;
-      tool_call_id = None; metadata = [];
+      tool_call_id = None;
+      metadata = [];
     }
   in
   match KCC.sanitize_checkpoint_message msg with
@@ -1314,7 +1322,8 @@ let test_deserialize_context_repairs_orphan_tool_result () =
               };
           ];
         name = None;
-        tool_call_id = None; metadata = [];
+        tool_call_id = None;
+        metadata = [];
       }
   in
   let ctx =

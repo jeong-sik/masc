@@ -667,7 +667,9 @@ let test_sdk_error_is_hard_quota_keeps_transient_network_errors_false () =
   let err =
     Oas.Error.Api
       (Llm_provider.Retry.NetworkError
-         { message = "gemini exited with code 1: connection reset by peer" })
+         {
+           message = "gemini exited with code 1: connection reset by peer";
+         })
   in
   Alcotest.(check bool) "transient network error stays transient" false
     (Oas_worker_named.sdk_error_is_hard_quota err)

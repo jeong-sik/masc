@@ -67,7 +67,6 @@ let test_task_with_stage () =
     goal_id = None;
     task_status = Todo; priority = 3; files = [];
     created_at = "2026-01-01T00:00:00Z";
-    goal_id = None;
     worktree = None; required_role = Unassigned; required_preset = None;
     created_by = None;
     stage = Some Task_stage.Implement;
@@ -86,7 +85,6 @@ let test_task_without_stage () =
     goal_id = None;
     task_status = Todo; priority = 3; files = [];
     created_at = "2026-01-01T00:00:00Z";
-    goal_id = None;
     worktree = None; required_role = Unassigned; required_preset = None;
     created_by = None;
     stage = None;

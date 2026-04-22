@@ -1160,7 +1160,6 @@ let test_append_archive_tasks () =
       priority = 1;
       files = [];
       created_at = "2026-01-01T00:00:00Z";
-      goal_id = None;
       worktree = None;
       created_by = None;
       required_role = Types_core.Unassigned; required_preset = None; stage = None;

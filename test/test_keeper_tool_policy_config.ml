@@ -156,7 +156,6 @@ let test_task_required_preset_roundtrip () =
     goal_id = None;
     task_status = Todo; priority = 3; files = [];
     created_at = "2026-01-01T00:00:00Z";
-    goal_id = None;
     worktree = None;
     created_by = None;
     required_role = Types_core.Unassigned;
@@ -174,7 +173,6 @@ let test_task_required_preset_none_compat () =
     id = "test-002"; title = "Test"; description = "";
     task_status = Todo; goal_id = None; priority = 3; files = [];
     created_at = "2026-01-01T00:00:00Z";
-    goal_id = None;
     worktree = None;
     created_by = None;
     required_role = Types_core.Unassigned;

@@ -395,10 +395,9 @@ let add_task ?contract ?goal_id ?required_preset ?created_by config ~title
             [
               ("task_id", `String task_id);
               ("title", `String title);
-              ("goal_id", Json_util.string_opt_to_json goal_id);
+              ("goal_id", goal_id_json);
               ("priority", `Int priority);
               ("created_by", created_by_json);
-              ("goal_id", goal_id_json);
               ( "strict_contract",
                 `Bool
                   (match contract with

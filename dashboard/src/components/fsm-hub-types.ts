@@ -162,7 +162,6 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   running: '가동 중',
   failing: '오류 발생',
   overflowed: '컨텍스트 초과',
-  compacting: '압축 중',
   handing_off: '인수인계',
   draining: '종료 준비',
   offline: '오프라인',

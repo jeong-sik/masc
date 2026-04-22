@@ -251,7 +251,6 @@ const STATE_DESCRIPTIONS: Record<string, string> = {
   running: 'Raw keeper phase indicates the runtime is actively executing turns',
   failing: 'Raw keeper phase indicates recovery / retry handling is active',
   overflowed: 'Raw keeper phase indicates provider context overflow needs compaction or clearance',
-  compacting: 'Raw keeper phase indicates compaction currently owns lifecycle progress',
   handing_off: 'Raw keeper phase indicates state handoff is underway',
   draining: 'Raw keeper phase indicates shutdown is in progress',
   offline: 'Raw keeper phase indicates the keeper has not started yet',

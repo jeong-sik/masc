@@ -28,9 +28,6 @@ val put : t -> bytes:string -> mime:string -> Tool_output.t
 val fetch : t -> sha256:string -> string option
 (** Retrieve bytes by sha256. Returns [None] if not in store. *)
 
-val fetch_exn : t -> sha256:string -> string
-(** Like [fetch] but raises [Not_found] on miss. *)
-
 val list_all : t -> string list
 (** List all sha256 hashes currently in the store. O(n) in store size.
     Mainly used by [gc] and tests. *)

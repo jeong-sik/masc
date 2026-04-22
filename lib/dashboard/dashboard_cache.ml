@@ -334,7 +334,8 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
             | Some v -> v
             | None -> `Assoc [("error", `String "Compute timeout")]))
     | Some (`Retry) -> try_get ~waited ~watching_token
-    | None -> assert false
+    | None ->
+        failwith "dashboard_cache: action unset after atomic_update (invariant broken)"
   in
   try_get ~waited:0.0 ~watching_token:None
 
@@ -373,7 +374,8 @@ let get_or_compute_simple key ~ttl compute =
          | _ -> map
        );
        raise exn)
-  | None -> assert false
+  | None ->
+      failwith "dashboard_cache: action unset after atomic_update (invariant broken)"
 
 let get_or_compute key ~ttl compute =
   if Eio_guard.is_ready () then get_or_compute_eio key ~ttl compute

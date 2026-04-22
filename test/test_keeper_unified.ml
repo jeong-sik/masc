@@ -1995,6 +1995,71 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
         Yojson.Safe.Util.(
           json |> member "scheduled_autonomous_outcome" |> to_string))
 
+let test_append_metrics_snapshot_nulls_unreported_usage () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let result =
+        make_run_result
+          ~text:"Kimi replied without usage."
+          ~tools:[]
+          ~model:"kimi_cli:kimi-for-coding"
+          ~input_tok:0
+          ~output_tok:0
+          ~usage_reported:false
+          ()
+      in
+      UM.append_metrics_snapshot
+        ~config
+        ~meta:minimal_meta
+        ~observation:base_observation
+        ~result
+        ~latency_ms:321
+        ~turn_cost:0.42
+        ~turn_generation:1
+        ~channel:"turn"
+        ~snapshot_source:"test"
+        ~context_ratio:0.1
+        ~context_tokens:10
+        ~context_max:100
+        ~message_count:2
+        ~compaction:
+          {
+            Masc_mcp.Keeper_exec_context.applied = false;
+            attempted = false;
+            failure_reason = None;
+            trigger = None;
+            decision = "no_compaction";
+            before_tokens = 0;
+            after_tokens = 0;
+            saved_tokens = 0;
+          }
+        ~handoff_json:None
+        ();
+      let metrics_store =
+        Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
+      in
+      let line =
+        match Dated_jsonl.read_recent_lines metrics_store 1 with
+        | [ line ] -> line
+        | _ -> fail "expected one metrics line"
+      in
+      let json = Yojson.Safe.from_string line in
+      let open Yojson.Safe.Util in
+      let usage = json |> member "usage" in
+      check bool "snapshot input_tokens null when usage unreported" true
+        (match usage |> member "input_tokens" with `Null -> true | _ -> false);
+      check bool "snapshot output_tokens null when usage unreported" true
+        (match usage |> member "output_tokens" with `Null -> true | _ -> false);
+      check bool "snapshot total_tokens null when usage unreported" true
+        (match usage |> member "total_tokens" with `Null -> true | _ -> false);
+      check bool "snapshot cost_usd null when usage unreported" true
+        (match json |> member "cost_usd" with `Null -> true | _ -> false))
+
 let test_append_decision_record_persists_tool_calls () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4236,6 +4301,8 @@ let () =
             test_append_metrics_snapshot_includes_cascade_observation;
           test_case "snapshot treats validated evidence as tool use" `Quick
             test_append_metrics_snapshot_treats_validated_evidence_as_tool_use;
+          test_case "snapshot nulls unreported usage" `Quick
+            test_append_metrics_snapshot_nulls_unreported_usage;
           test_case "decision record persists tool call details" `Quick
             test_append_decision_record_persists_tool_calls;
           test_case "decision record nulls unreported usage" `Quick

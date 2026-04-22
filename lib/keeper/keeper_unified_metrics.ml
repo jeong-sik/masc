@@ -848,6 +848,26 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     else None
   in
   let metrics_store = keeper_metrics_store config meta.name in
+  let usage_json =
+    if result.usage_reported then
+      `Assoc
+        [
+          ("input_tokens", `Int result.usage.input_tokens);
+          ("output_tokens", `Int result.usage.output_tokens);
+          ("total_tokens",
+           `Int (Keeper_exec_context.total_tokens result.usage));
+        ]
+    else
+      `Assoc
+        [
+          ("input_tokens", `Null);
+          ("output_tokens", `Null);
+          ("total_tokens", `Null);
+        ]
+  in
+  let cost_json =
+    if result.usage_reported then `Float turn_cost else `Null
+  in
   let snapshot =
     `Assoc
       [
@@ -862,16 +882,9 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
         ("ctx_composition", Keeper_agent_run.ctx_composition_to_json result.ctx_composition);
-        ( "usage",
-          `Assoc
-            [
-              ("input_tokens", `Int result.usage.input_tokens);
-              ("output_tokens", `Int result.usage.output_tokens);
-              ("total_tokens",
-               `Int (Keeper_exec_context.total_tokens result.usage));
-            ] );
+        ("usage", usage_json);
         ("latency_ms", `Int latency_ms);
-        ("cost_usd", `Float turn_cost);
+        ("cost_usd", cost_json);
         ("context_ratio", `Float context_ratio);
         ("context_tokens", `Int context_tokens);
         ("context_max", `Int context_max);

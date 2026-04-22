@@ -64,7 +64,7 @@ let git_commit ~workdir ~message
     Result.error "not inside a git repository"
   else
   let add_status, add_output =
-    run_git_with_status ~timeout_sec:30.0 ~workdir [ "add"; "-A" ]
+    run_git_with_status ~timeout_sec:30.0 ~workdir [ "add"; "--update" ]
   in
   match add_status with
   | Unix.WEXITED 0 -> (
@@ -110,7 +110,7 @@ let git_restore_head ~workdir =
   (try
     let (status, _output) =
       run_git_with_status ~timeout_sec:30.0 ~workdir
-        [ "reset"; "--hard"; "HEAD" ]
+        [ "restore"; "--source=HEAD"; "--worktree"; "--"; "." ]
     in
     match status with
     | Unix.WEXITED 0 -> ()
@@ -124,7 +124,7 @@ let git_reset_last ~workdir =
   (try
     let (status, _output) =
       run_git_with_status ~timeout_sec:30.0 ~workdir
-        [ "reset"; "--hard"; "HEAD~1" ]
+        [ "reset"; "--soft"; "HEAD~1" ]
     in
     match status with
     | Unix.WEXITED 0 -> ()

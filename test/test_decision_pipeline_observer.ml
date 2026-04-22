@@ -1,9 +1,7 @@
 open Alcotest
 
 module Reg = Masc_mcp.Keeper_registry
-module KDP = Masc_mcp.Keeper_decision_pipeline_contract
 module Obs = Masc_mcp.Keeper_composite_observer
-module KTC = Masc_mcp.Keeper_turn_cycle_contract
 module KTypes = Masc_mcp.Keeper_types
 module KSM = Masc_mcp.Keeper_state_machine
 
@@ -413,45 +411,7 @@ let test_composite_observer_named_sets_match_tla_sets () =
     (extract_tla_set ~marker:"InvariantSet" tla)
     (List.map Obs.invariant_key_to_string Obs.all_invariant_keys)
 
-let test_keeper_turn_cycle_named_sets_match_tla_sets () =
-  let tla = read_file (keeper_turn_cycle_tla ()) in
-  let check_set label expected actual = check (list string) label expected actual in
-  check_set
-    "TurnPhaseSet matches KTC turn_phase variants"
-    (extract_tla_set ~marker:"TurnPhaseSet" tla)
-    (List.map Obs.turn_phase_to_string Obs.all_turn_phases);
-  check_set
-    "DecisionSet matches KTC decision variants"
-    (extract_tla_set ~marker:"DecisionSet" tla)
-    (List.map Obs.decision_stage_to_string Obs.all_decision_stages);
-  check_set
-    "CascadeSet matches KTC cascade variants"
-    (extract_tla_set ~marker:"CascadeSet" tla)
-    (List.map Obs.cascade_state_to_string Obs.all_cascade_states);
-  check_set
-    "ActionSet matches KTC action variants"
-    (extract_tla_set ~marker:"ActionSet" tla)
-    (List.map KTC.tla_action_to_string KTC.all_tla_actions);
-  check_set
-    "InvariantSet matches KTC invariant variants"
-    (extract_tla_set ~marker:"InvariantSet" tla)
-    (List.map KTC.invariant_key_to_string KTC.all_invariant_keys)
 
-let test_keeper_decision_pipeline_named_sets_match_tla_sets () =
-  let tla = read_file (keeper_decision_pipeline_tla ()) in
-  let check_set label expected actual = check (list string) label expected actual in
-  check_set
-    "DecisionSet matches KDP decision variants"
-    (extract_tla_set ~marker:"DecisionSet" tla)
-    (List.map Obs.decision_stage_to_string Obs.all_decision_stages);
-  check_set
-    "ActionSet matches KDP action variants"
-    (extract_tla_set ~marker:"ActionSet" tla)
-    (List.map KDP.tla_action_to_string KDP.all_tla_actions);
-  check_set
-    "InvariantSet matches KDP invariant variants"
-    (extract_tla_set ~marker:"InvariantSet" tla)
-    (List.map KDP.invariant_key_to_string KDP.all_invariant_keys)
 
 let () =
   run "decision_pipeline_observer"
@@ -488,9 +448,5 @@ let () =
             test_composite_observer_variants_match_tla_sets;
           test_case "named sets match KeeperCompositeLifecycle.tla" `Quick
             test_composite_observer_named_sets_match_tla_sets;
-          test_case "named sets match KeeperTurnCycle.tla" `Quick
-            test_keeper_turn_cycle_named_sets_match_tla_sets;
-          test_case "named sets match KeeperDecisionPipeline.tla" `Quick
-            test_keeper_decision_pipeline_named_sets_match_tla_sets;
         ] );
     ]

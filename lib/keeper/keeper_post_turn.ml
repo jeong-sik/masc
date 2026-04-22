@@ -71,7 +71,7 @@ let apply_post_turn_lifecycle
     let structured_snapshot =
       match oas_checkpoint with
       | Some cp -> (
-          match cp.Agent_sdk.Checkpoint.working_context with
+          match cp.Oas.Checkpoint.working_context with
           | Some json ->
               Keeper_memory_policy.snapshot_of_structured_working_context json
           | None -> None)

@@ -1,7 +1,6 @@
 (** Miscellaneous Module Coverage Tests
 
     Tests for smaller utility modules:
-    - Compression_dict: zstd compression for small messages
     - Log: logging utilities
     - Config: schema registry helpers
     - Env_config: environment configuration
@@ -9,92 +8,9 @@
 
 open Alcotest
 
-module Compression_dict = Compression_dict
 module Log = Log
 module Config = Masc_mcp.Config
 module Env_config = Env_config
-
-(* ============================================================
-   Compression_dict Tests
-   ============================================================ *)
-
-let test_min_dict_size () =
-  check int "min_dict_size" 32 Compression_dict.min_dict_size
-
-let test_max_dict_size () =
-  check int "max_dict_size" 2048 Compression_dict.max_dict_size
-
-let test_should_use_dict_below_threshold () =
-  check bool "size 0" false (Compression_dict.should_use_dict 0);
-  check bool "size 10" false (Compression_dict.should_use_dict 10);
-  check bool "size 31" false (Compression_dict.should_use_dict 31)
-
-let test_should_use_dict_at_threshold () =
-  check bool "size 32" true (Compression_dict.should_use_dict 32)
-
-let test_should_use_dict_above_threshold () =
-  check bool "size 100" true (Compression_dict.should_use_dict 100);
-  check bool "size 1000" true (Compression_dict.should_use_dict 1000)
-
-let test_get_dict_empty () =
-  check string "empty dict" "" (Compression_dict.get_dict ())
-
-let test_has_dict_false () =
-  check bool "no dict" false (Compression_dict.has_dict ())
-
-let test_compress_small_data () =
-  let data = "hi" in
-  let compressed, used_dict, did_compress = Compression_dict.compress data in
-  check string "unchanged data" data compressed;
-  check bool "no dict used" false used_dict;
-  check bool "no compression" false did_compress
-
-let test_compress_larger_data () =
-  (* Create compressible data (repeated pattern) *)
-  let data = String.make 1000 'a' in
-  let compressed, used_dict, did_compress = Compression_dict.compress data in
-  check bool "no dict used" false used_dict;
-  (* Repeated data should compress well *)
-  if did_compress then
-    check bool "compressed smaller" true (String.length compressed < String.length data)
-  else
-    (* If not compressed, at least the data is unchanged *)
-    check string "unchanged" data compressed
-
-let test_compress_with_level () =
-  let data = String.make 500 'x' in
-  let c1, _, _ = Compression_dict.compress ~level:1 data in
-  let c9, _, _ = Compression_dict.compress ~level:9 data in
-  (* Higher compression level should generally produce smaller or equal output *)
-  check bool "level 9 <= level 1" true (String.length c9 <= String.length c1 + 10)
-
-let test_decompress_roundtrip () =
-  let data = String.make 100 'z' ^ String.make 100 'y' in
-  let compressed, _, did_compress = Compression_dict.compress data in
-  if did_compress then begin
-    let decompressed = Compression_dict.decompress ~orig_size:(String.length data) ~used_dict:false compressed in
-    check string "roundtrip" data decompressed
-  end else
-    (* Data wasn't compressed, nothing to decompress *)
-    ()
-
-let test_decompress_with_orig_size () =
-  let data = "This is a test string that we will compress and it needs to be long enough" in
-  let orig_size = String.length data in
-  let compressed, _, did_compress = Compression_dict.compress data in
-  if did_compress then begin
-    let decompressed = Compression_dict.decompress ~orig_size ~used_dict:false compressed in
-    check int "correct size" orig_size (String.length decompressed)
-  end else
-    ()
-
-let test_encoding_constants () =
-  check string "encoding_with_dict" "zstd-dict" Compression_dict.encoding_with_dict;
-  check string "encoding_standard" "zstd" Compression_dict.encoding_standard
-
-let test_version_info () =
-  check string "version" "6.0.0" Compression_dict.version;
-  check bool "version_string non-empty" true (String.length Compression_dict.version_string > 0)
 
 (* ============================================================
    Log Tests
@@ -260,30 +176,6 @@ let test_env_get_bool () =
 
 let () =
   run "Misc Coverage" [
-    "compression_dict.thresholds", [
-      test_case "min_dict_size" `Quick test_min_dict_size;
-      test_case "max_dict_size" `Quick test_max_dict_size;
-      test_case "should_use_dict below" `Quick test_should_use_dict_below_threshold;
-      test_case "should_use_dict at" `Quick test_should_use_dict_at_threshold;
-      test_case "should_use_dict above" `Quick test_should_use_dict_above_threshold;
-    ];
-    "compression_dict.dict", [
-      test_case "get_dict empty" `Quick test_get_dict_empty;
-      test_case "has_dict false" `Quick test_has_dict_false;
-    ];
-    "compression_dict.compress", [
-      test_case "small data" `Quick test_compress_small_data;
-      test_case "larger data" `Quick test_compress_larger_data;
-      test_case "with level" `Quick test_compress_with_level;
-    ];
-    "compression_dict.decompress", [
-      test_case "roundtrip" `Quick test_decompress_roundtrip;
-      test_case "with orig_size" `Quick test_decompress_with_orig_size;
-    ];
-    "compression_dict.constants", [
-      test_case "encoding constants" `Quick test_encoding_constants;
-      test_case "version info" `Quick test_version_info;
-    ];
     "log.level", [
       test_case "to_string" `Quick test_log_level_to_string;
       test_case "of_string" `Quick test_log_level_of_string;

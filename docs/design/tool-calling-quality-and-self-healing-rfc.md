@@ -2,7 +2,6 @@
 status: reference
 last_verified: 2026-04-17
 code_refs:
-  - lib/keeper/keeper_decision_pipeline_contract.ml
   - lib/keeper/keeper_composite_observer.ml
   - lib/keeper/keeper_measurement.ml
 ---

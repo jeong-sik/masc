@@ -25,7 +25,8 @@
 val resolve_glm_model_id : string -> string
 
 (** Resolve "auto" and aliases to concrete model IDs for any provider.
-    Cloud providers resolve aliases; local providers pass through.
+    Cloud providers resolve aliases; local providers resolve ["auto"]
+    via discovery first and otherwise pass through explicit model IDs.
     @since 0.89.1 *)
 val resolve_auto_model_id : string -> string -> string
 

@@ -31,7 +31,7 @@ let report_drop ~reason ~path ~detail =
     ~detail
 
 let cases_dir ~base_path =
-  Filename.concat base_path (Filename.concat ".masc" "governance_v2/cases")
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "governance_v2/cases"
 
 let parse_case ~path (json : Yojson.Safe.t) : case option =
   let id = Safe_ops.json_string ~default:"" "id" json in

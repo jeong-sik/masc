@@ -72,8 +72,8 @@ let extract_branch_name msg =
 (** Symlink [.masc/] from the repo root into the worktree for read-only
     access to room state. Idempotent: does nothing if link already exists. *)
 let symlink_masc ~repo_root ~worktree_path =
-  let masc_source = Filename.concat repo_root ".masc" in
-  let masc_target = Filename.concat worktree_path ".masc" in
+  let masc_source = Common.masc_dir_from_base_path ~base_path:repo_root in
+  let masc_target = Common.masc_dir_from_base_path ~base_path:worktree_path in
   if Sys.file_exists masc_source && not (Sys.file_exists masc_target) then
     try Unix.symlink masc_source masc_target; Ok ()
     with Unix.Unix_error (e, _, _) ->

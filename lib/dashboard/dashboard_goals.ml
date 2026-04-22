@@ -16,7 +16,6 @@ type tree_node = {
   pending_approval_count : int;
   infra_risk_count : int;
   linkage_source : string;
-  linkage_warning_count : int;
   status_reason : string;
 }
 
@@ -25,36 +24,15 @@ type goal_detail_keeper = {
   latest_receipt : Yojson.Safe.t option;
 }
 
-let title_contains_goal_tag ~goal_id title =
-  let pattern = Printf.sprintf "[goal:%s]" goal_id in
-  try
-    let _ =
-      Re.Str.search_forward
-        (Re.Str.regexp_string (String.lowercase_ascii pattern))
-        (String.lowercase_ascii title) 0
-    in
-    true
-  with Not_found -> false
-
 let task_is_linked_to_goal (task : Types.task) goal_id =
   match task.goal_id with
   | Some typed_goal_id -> String.equal typed_goal_id goal_id
-  | None -> title_contains_goal_tag ~goal_id task.title
+  | None -> false
 
 let task_linkage_source_opt (task : Types.task) goal_id =
   match task.goal_id with
   | Some task_goal_id when String.equal task_goal_id goal_id -> Some "explicit"
-  | Some _ -> None
-  | None ->
-      if title_contains_goal_tag ~goal_id task.title then Some "title_tag"
-      else None
-
-let task_conflicts_with_goal_tag (task : Types.task) goal_id =
-  match task.goal_id with
-  | Some task_goal_id ->
-      (not (String.equal task_goal_id goal_id))
-      && title_contains_goal_tag ~goal_id task.title
-  | None -> false
+  | Some _ | None -> None
 
 let task_assignee (task : Types.task) : string option =
   Types.task_assignee_of_status task.task_status
@@ -242,7 +220,7 @@ let goal_phase_to_health = function
 
 let goal_health_reason ~goal_phase ~blocked_by_receipt ~child_blocked
     ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalled
-    ~linkage_warning_count ~stagnation_seconds ~child_at_risk =
+    ~stagnation_seconds ~child_at_risk =
   match goal_phase_to_health goal_phase with
   | Some "done" -> "Goal phase is completed."
   | Some "paused" -> "Goal phase is paused."
@@ -268,8 +246,6 @@ let goal_health_reason ~goal_phase ~blocked_by_receipt ~child_blocked
       else if stalled then
         Printf.sprintf "No linked activity for %s."
           (human_duration stagnation_seconds)
-      else if linkage_warning_count > 0 then
-        "Legacy title tags conflict with explicit goal linkage."
       else if child_at_risk then
         "A linked sub-goal is at risk."
       else
@@ -283,15 +259,13 @@ let tree_health ~goal_phase ~blocked_by_receipt ~child_blocked ~at_risk =
       else if at_risk then "at_risk"
       else "on_track"
 
-let tree_badges ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalled
-    ~linkage_warning_count =
+let tree_badges ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalled =
   let badges = ref [] in
   if pending_approvals > 0 then badges := "awaiting_approval" :: !badges;
   if sandbox_risk then badges := "sandbox" :: !badges;
   if cascade_risk then badges := "cascade" :: !badges;
   if fsm_risk then badges := "task_verification_pending" :: !badges;
   if stalled then badges := "stalled" :: !badges;
-  if linkage_warning_count > 0 then badges := "linkage_warning" :: !badges;
   List.rev !badges
 
 type build_context = {
@@ -318,12 +292,6 @@ let rec build_tree context goals goal =
   in
   let direct_linkage_source =
     linked_tasks |> List.map snd |> link_source_of_values
-  in
-  let linkage_warning_count =
-    List.length
-      (List.filter
-         (fun task -> task_conflicts_with_goal_tag task goal.Goal_store.id)
-         context.all_tasks)
   in
   let direct_pending_approvals =
     context.pending_approvals
@@ -410,7 +378,7 @@ let rec build_tree context goals goal =
   let direct_badges =
     tree_badges ~pending_approvals:(List.length direct_pending_approvals)
       ~sandbox_risk:direct_sandbox_risk ~cascade_risk:direct_cascade_risk
-      ~fsm_risk:direct_fsm_risk ~stalled ~linkage_warning_count
+      ~fsm_risk:direct_fsm_risk ~stalled
   in
   let badges =
     dedupe_sort
@@ -454,7 +422,6 @@ let rec build_tree context goals goal =
     || infra_risk_count > 0
     || direct_fsm_risk
     || stalled
-    || linkage_warning_count > 0
     || child_at_risk
   in
   let health =
@@ -465,7 +432,7 @@ let rec build_tree context goals goal =
     goal_health_reason ~goal_phase:goal.Goal_store.phase ~blocked_by_receipt
       ~child_blocked ~pending_approvals:pending_approval_count
       ~sandbox_risk:direct_sandbox_risk ~cascade_risk:direct_cascade_risk
-      ~fsm_risk:direct_fsm_risk ~stalled ~linkage_warning_count
+      ~fsm_risk:direct_fsm_risk ~stalled
       ~stagnation_seconds ~child_at_risk
   in
   let convergence = compute_convergence goal linked_tasks children in
@@ -482,7 +449,6 @@ let rec build_tree context goals goal =
     pending_approval_count;
     infra_risk_count;
     linkage_source;
-    linkage_warning_count;
     status_reason;
   }
 
@@ -727,7 +693,6 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
       ("pending_approval_count", `Int node.pending_approval_count);
       ("infra_risk_count", `Int node.infra_risk_count);
       ("linkage_source", `String node.linkage_source);
-      ("linkage_warning_count", `Int node.linkage_warning_count);
       ("created_at", `String goal.created_at);
       ("updated_at", `String goal.updated_at);
     ]

@@ -106,7 +106,7 @@ val combinatorial_risk_escalation :
     Otherwise return base_risk unchanged. *)
 
 val to_oas_approval_callback :
-  config:Coord.config ->
+  ?config:Coord.config ->
   governance_level:string ->
   keeper_name:string ->
   ?meta:Keeper_types.keeper_meta ->

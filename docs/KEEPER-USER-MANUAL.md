@@ -300,8 +300,9 @@ spawn 시 인자로 직접 설정하는 필드.
 의미:
 
 - keeper shell write는 자기 sandbox 안에서만 허용된다. 현재 local/docker backend의 디스크 구현은 `.masc/playground/<keeper>/`이지만 keeper-facing 경로는 `.` / `mind` / `repos`이다.
-- `sandbox_profile=docker`는 keeper_bash를 ephemeral Docker sandbox로 실행한다. 기본은 read-only rootfs, tmpfs `/tmp`, `cap-drop=ALL`, `no-new-privileges`, `pids-limit`, memory limit, private sandbox mount, network=`none`이다.
-- git/gh 명령 dispatch: `sandbox_profile=docker` 에서 `keeper_bash` 의 cmd 가 `git` 또는 `gh` 로 시작하면 자동으로 network=bridge + `~/.config/gh` / `~/.gitconfig` read-only mount + `GH_TOKEN` env forward 가 켜진다. 한 명령에만 적용되며, git/gh 외 모든 명령은 여전히 network=none 의 hardened 컨테이너에서 실행된다. 응답 JSON에는 `git_creds_enabled: true` 필드가 함께 들어온다. 비활성화하려면 `MASC_KEEPER_SANDBOX_GIT_DISPATCH=false`. `~/.ssh` mount 는 `MASC_KEEPER_SANDBOX_SSH_DIR` 환경 변수로 명시 opt-in 시에만 활성화된다.
+- `sandbox_profile=docker`는 keeper identity 전체에 적용된다. `keeper_bash`뿐 아니라 `keeper_fs_read`, `keeper_fs_edit`, `keeper_shell`의 read/write/git/gh 흐름도 Docker로 라우팅된다. 기본은 read-only rootfs, tmpfs `/tmp`, `cap-drop=ALL`, `no-new-privileges`, `pids-limit`, memory limit, private sandbox mount, network=`none`이다.
+- git/gh 명령 dispatch: `sandbox_profile=docker` 에서 network가 필요한 `git`/`gh` 계열 명령(`keeper_bash`, `keeper_shell op=gh`, `keeper_shell op=git_clone`)은 한 명령 단위로 network=bridge + `~/.config/gh` / `~/.gitconfig` read-only mount + `GH_TOKEN` env forward 경로를 사용한다. 그 외 명령은 계속 network=none 의 hardened container 또는 turn-scoped `docker exec` runtime 으로 실행된다. Docker 라우트 응답에는 `via: "docker"`가 들어오고, git credential dispatch가 켜진 경우 `git_creds_enabled: true`도 함께 들어온다. 비활성화하려면 `MASC_KEEPER_SANDBOX_GIT_DISPATCH=false`. `~/.ssh` mount 는 `MASC_KEEPER_SANDBOX_SSH_DIR` 환경 변수로 명시 opt-in 시에만 활성화된다.
+- 기본 sandbox 이미지는 `masc-keeper-sandbox:local`이다. Docker keeper를 올리기 전에 `scripts/build-keeper-sandbox-image.sh`를 실행해 이미지를 만들고, smoke 검증은 `scripts/keeper-sandbox-smoke.sh`를 사용한다.
 - `shared_memory_scope=room`은 공용 writable mount가 아니라 flattened `default` namespace typed lane만 연다.
 - team memory 도구는 keeper tool surface에도 노출되어야 하므로 preset에 없다면 `tool_also_allow` 또는 `tool_access.also_allow`로 명시해야 한다.
 

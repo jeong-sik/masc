@@ -704,7 +704,14 @@ let label_for_rc = function
 
 let doctor_all_json_exit base_path =
   let config_report =
-    Config_doctor.analyze
+    Eio_main.run @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    Config_doctor.analyze_live
+      ~sw
+      ~net:(Eio.Stdenv.net env)
+      ~clock:(Eio.Stdenv.clock env)
+      ~fs:(Eio.Stdenv.fs env)
+      ~proc_mgr:(Eio.Stdenv.process_mgr env)
       ~base_path_input:base_path
       ~default_base_path:(default_base_path ())
       ()

@@ -952,6 +952,15 @@ let handle_keeper_status ctx args : tool_result =
            then Some (Env_config_keeper.KeeperSandbox.docker_image ())
            else None
          in
+         let sandbox_preflight =
+           match
+             effective_sandbox_image,
+             Keeper_sandbox_runtime.docker_preflight ~timeout_sec:10.0 ()
+             |> Option.map Keeper_sandbox_runtime.docker_preflight_to_yojson
+           with
+           | Some _, Some preflight -> Some preflight
+           | _ -> None
+         in
          let runtime_blocker_fields =
           runtime_blocker_fields_json ctx.config m
          in
@@ -1012,6 +1021,8 @@ let handle_keeper_status ctx args : tool_result =
              `String (shared_memory_scope_to_string m.shared_memory_scope));
            ("sandbox_last_error",
              Json_util.string_opt_to_json sandbox_last_error);
+           ("sandbox_preflight",
+             Json_util.option_to_yojson Fun.id sandbox_preflight);
            ("effective_sandbox_image",
              Json_util.string_opt_to_json effective_sandbox_image);
            ("tool_policy_mode",
@@ -1217,6 +1228,8 @@ let handle_keeper_status ctx args : tool_result =
                `String (shared_memory_scope_to_string m.shared_memory_scope));
              ("sandbox_last_error",
                Json_util.string_opt_to_json sandbox_last_error);
+             ("sandbox_preflight",
+               Json_util.option_to_yojson Fun.id sandbox_preflight);
              ("effective_sandbox_image",
                Json_util.string_opt_to_json effective_sandbox_image);
              ("allowed_paths", string_list_to_json m.allowed_paths);

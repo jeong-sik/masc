@@ -38,6 +38,7 @@ type t = {
   warnings : string list;
   next_actions : string list;
   catalog_validation : Yojson.Safe.t option;
+  sandbox_preflight : Yojson.Safe.t option;
 }
 
 type catalog_issue_severity = Cascade_catalog_validator.severity =
@@ -458,6 +459,7 @@ let analyze_with (inputs : inputs) =
     warnings;
     next_actions;
     catalog_validation = None;
+    sandbox_preflight = None;
   }
 
 let analyze ~base_path_input ~default_base_path () =
@@ -505,6 +507,22 @@ let analyze_live ~sw ~net ~clock ~fs ~proc_mgr ~base_path_input
   let report = analyze ~base_path_input ~default_base_path () in
   Process_eio.init ~cwd_default:Eio.Path.(fs / report.base_path) ~proc_mgr
     ~clock;
+  let sandbox_preflight_report =
+    Keeper_sandbox_runtime.docker_preflight ~timeout_sec:10.0 ()
+  in
+  let sandbox_preflight =
+    sandbox_preflight_report
+    |> Option.map Keeper_sandbox_runtime.docker_preflight_to_yojson
+  in
+  let sandbox_warning, sandbox_actions, sandbox_preflight_ok =
+    match sandbox_preflight_report with
+    | Some preflight when not preflight.ok ->
+        ( Some (Keeper_sandbox_runtime.docker_preflight_failure_message preflight),
+          preflight.next_actions,
+          false )
+    | Some _ -> (None, [], true)
+    | None -> (None, [], true)
+  in
   let live_outcome, live_warning, catalog_validation =
     match
       Cascade_catalog_runtime.inspect_active ~sw ~net ~clock ()
@@ -513,33 +531,41 @@ let analyze_live ~sw ~net ~clock ~fs ~proc_mgr ~base_path_input
     | outcome, warning, validation -> (outcome, warning, validation)
   in
   let warnings =
-    match live_warning with
-    | None -> report.warnings
-    | Some warning -> report.warnings @ [ warning ]
+    [ report.warnings;
+      (match live_warning with
+       | None -> []
+       | Some warning -> [ warning ]);
+      (match sandbox_warning with
+       | None -> []
+       | Some warning -> [ warning ]) ]
+    |> List.concat
   in
   let next_actions =
-    if
-      match live_outcome with
-      | Live_catalog_serving_last_known_good | Live_catalog_invalid -> true
-      | Live_catalog_valid | Live_catalog_partial -> false
-    then
-      report.next_actions
-      @
-      [
-        "Fix the active cascade catalog candidates/strategy and rerun `masc-mcp doctor config`.";
-      ]
-    else
-      report.next_actions
+    let catalog_actions =
+      if
+        match live_outcome with
+        | Live_catalog_serving_last_known_good | Live_catalog_invalid -> true
+        | Live_catalog_valid | Live_catalog_partial -> false
+      then
+        [
+          "Fix the active cascade catalog candidates/strategy and rerun `masc-mcp doctor config`.";
+        ]
+      else
+        []
+    in
+    report.next_actions @ catalog_actions @ sandbox_actions
+    |> dedupe_keep_order
   in
   let status =
-    match report.init_state, report.status, live_outcome with
-    | (Invalid_env | Missing_init), _, _ -> Error
-    | _, _, (Live_catalog_serving_last_known_good | Live_catalog_invalid) ->
+    match report.init_state, report.status, live_outcome, sandbox_preflight_ok with
+    | (Invalid_env | Missing_init), _, _, _ -> Error
+    | _, _, (Live_catalog_serving_last_known_good | Live_catalog_invalid), _ ->
         Error
-    | _, _, Live_catalog_partial -> Warn
-    | _, Warn, Live_catalog_valid -> Warn
-    | _, Ok, Live_catalog_valid -> Ok
-    | _, Error, Live_catalog_valid -> Error
+    | _, _, Live_catalog_partial, _ -> Warn
+    | _, Error, Live_catalog_valid, _ -> Error
+    | _, Warn, Live_catalog_valid, _ -> Warn
+    | _, Ok, Live_catalog_valid, false -> Warn
+    | _, Ok, Live_catalog_valid, true -> Ok
   in
   {
     report with
@@ -547,6 +573,7 @@ let analyze_live ~sw ~net ~clock ~fs ~proc_mgr ~base_path_input
     warnings;
     next_actions;
     catalog_validation = Some catalog_validation;
+    sandbox_preflight;
   }
 
 let to_yojson (report : t) =
@@ -570,6 +597,10 @@ let to_yojson (report : t) =
       ("next_actions", `List (List.map (fun value -> `String value) report.next_actions));
       ( "catalog_validation",
         match report.catalog_validation with
+        | Some value -> value
+        | None -> `Null );
+      ( "sandbox_preflight",
+        match report.sandbox_preflight with
         | Some value -> value
         | None -> `Null );
     ]
@@ -617,6 +648,12 @@ let render_text (report : t) =
        add_line "";
        add_line "catalog_validation:";
        add_line (Yojson.Safe.pretty_to_string validation)
+   | None -> ());
+  (match report.sandbox_preflight with
+   | Some preflight ->
+       add_line "";
+       add_line "sandbox_preflight:";
+       add_line (Yojson.Safe.pretty_to_string preflight)
    | None -> ());
   if report.warnings <> [] then begin
     add_line "";

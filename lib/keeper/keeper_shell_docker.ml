@@ -235,8 +235,9 @@ let run_docker_with_git_bash
   | Ok result ->
     Yojson.Safe.to_string
       (`Assoc
-         [
+        [
            ("ok", `Bool (result.status = Unix.WEXITED 0));
+           ("via", `String "docker");
            ("cwd", `String cwd);
            ("sandbox_profile", `String "docker");
            ("git_creds_enabled", `Bool true);
@@ -285,6 +286,7 @@ let run_docker_hardened_bash
            (`Assoc
               [
                 ("ok", `Bool (st = Unix.WEXITED 0));
+                ("via", `String "docker");
                 ("cwd", `String cwd);
                 ("sandbox_profile", `String "docker");
                 ("git_creds_enabled", `Bool false);
@@ -304,6 +306,7 @@ let run_docker_hardened_bash
       (`Assoc
          [
            ("ok", `Bool (result.status = Unix.WEXITED 0));
+           ("via", `String "docker");
            ("cwd", `String cwd);
            ("sandbox_profile", `String "docker");
            ("git_creds_enabled", `Bool false);

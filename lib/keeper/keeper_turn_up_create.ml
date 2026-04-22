@@ -107,146 +107,184 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           p.name err;
         (false, err)
     | Ok () ->
-    let max_active_keepers = Keeper_runtime_resolved.bootstrap_max_active_keepers () in
-    let active_keepers = Keeper_registry.count_running () in
-    if max_active_keepers > 0 && active_keepers >= max_active_keepers then begin
-      Log.Keeper.warn "create_keeper failed: max active keepers reached (%d/%d) for name=%s"
-        active_keepers max_active_keepers p.name;
-      (false,
-        Printf.sprintf
-          "keeper max active reached (%d/%d). Stop/remove a keeper or set MASC_KEEPER_MAX_ACTIVE_KEEPERS."
-          active_keepers max_active_keepers)
-    end
-    else
-    let proactive_enabled =
-      Option.value
-        ~default:
-          (Option.value ~default:default_proactive_enabled p.profile_defaults.proactive_enabled)
-        p.proactive_enabled_opt
-    in
-    let proactive_idle_sec =
-      Option.value
-        ~default:
-          (Option.value ~default:default_proactive_idle_sec p.profile_defaults.proactive_idle_sec)
-        p.proactive_idle_sec_opt
-      |> normalize_proactive_idle_sec
-    in
-    let proactive_cooldown_sec =
-      Option.value
-        ~default:
-          (Option.value ~default:default_proactive_cooldown_sec p.profile_defaults.proactive_cooldown_sec)
-        p.proactive_cooldown_sec_opt
-      |> normalize_proactive_cooldown_sec
-    in
-    let auto_handoff = Option.value ~default:true p.auto_handoff_opt in
-    let handoff_threshold =
-      match p.handoff_threshold_opt with
-      | Some threshold -> threshold
-      | None -> Runtime_params.get Governance_registry.keeper_handoff_threshold
-    in
-    let handoff_cooldown_sec =
-      match p.handoff_cooldown_sec_opt with
-      | Some cooldown_sec -> cooldown_sec
-      | None -> Runtime_params.get Governance_registry.keeper_handoff_cooldown_sec
-    in
-    let tool_access =
-      match p.tool_access_opt with
-      | Some access -> access
-      | None ->
-          let tool_preset =
-            Option.value ~default:Research
-              (first_some p.tool_preset_opt (preset_of_defaults p.profile_defaults))
-          in
-          let tool_also_allow =
-            resolve_tool_name_list
-              ~preferred:p.tool_also_allow_opt
-              ~fallback:p.profile_defaults.tool_also_allow
-          in
-          Preset { preset = tool_preset; also_allow = tool_also_allow }
-    in
-    let tool_denylist =
-      resolve_tool_name_list
-        ~preferred:p.tool_denylist_opt
-        ~fallback:p.profile_defaults.tool_denylist
-    in
-    let social_model =
-      p.profile_defaults.social_model
-      |> Option.value ~default:default_social_model
-      |> Keeper_social_model.normalize_social_model
-    in
-    
-    let will =
-      Option.value
-        ~default:(Option.value ~default:default_keeper_will p.profile_defaults.will)
-        p.will_opt
-    in
-    let needs =
-      Option.value
-        ~default:(Option.value ~default:default_keeper_needs p.profile_defaults.needs)
-        p.needs_opt
-    in
-    let desires =
-      Option.value
-        ~default:(Option.value ~default:default_keeper_desires p.profile_defaults.desires)
-        p.desires_opt
-    in
-    let (short_goal, mid_goal, long_goal) =
-      resolve_goal_horizons
-        ~goal
-        ~short_goal_opt:(first_some p.short_goal_opt p.profile_defaults.short_goal)
-        ~mid_goal_opt:(first_some p.mid_goal_opt p.profile_defaults.mid_goal)
-        ~long_goal_opt:(first_some p.long_goal_opt p.profile_defaults.long_goal)
-    in
-    let instructions = Option.value ~default:"" p.instructions_opt in
-    let (env_ratio_gate, env_message_gate, env_token_gate) =
-      keeper_compaction_policy_from_env ()
-    in
-    let continuity_compaction_cooldown_sec =
-      Option.value
-        ~default:(keeper_continuity_compaction_cooldown_sec ())
-        p.continuity_compaction_cooldown_sec_opt
-      |> normalize_continuity_compaction_cooldown_sec
-    in
-    let (compaction_profile, compaction_ratio_gate, compaction_message_gate, compaction_token_gate) =
-      resolve_compaction_policy
-        ~profile_opt:p.compaction_profile_opt
-        ~ratio_opt:p.compaction_ratio_gate_opt
-        ~message_opt:p.compaction_message_gate_opt
-        ~token_opt:p.compaction_token_gate_opt
-        ~fallback_profile:default_compaction_profile
-        ~fallback_ratio:env_ratio_gate
-        ~fallback_message:env_message_gate
-        ~fallback_token:env_token_gate
-    in
-    let cascade_models =
-      Cascade_runtime.models_of_cascade_name Keeper_config.default_cascade_name
-    in
-    ignore (Cascade_runtime.refresh_local_discovery_if_possible cascade_models);
-    let primary_max_context =
-      match p.max_context_override_opt with
-      | Some v -> v
-      | None ->
-          let resolved =
-            Cascade_runtime.resolve_max_cascade_context cascade_models
-          in
-          Cascade_runtime.clamp_context_for_pure_local_labels
-            ~labels:cascade_models ~max_context:resolved
-    in
-    Progress.Tracker.step tracker ~message:"Initializing session directory" ();
-    let trace_id = generate_trace_id () in
-    match Keeper_id.Trace_id.of_string trace_id with
-    | Error err ->
-      Log.Keeper.error
-        "create_keeper failed: generated invalid trace_id for name=%s: %s"
-        p.name err;
-      Progress.stop_tracking task_id;
-      (false, "internal keeper trace_id generation failed")
-    | Ok trace_id_t ->
-      let base_dir = session_base_dir ctx.config in
-      (* Ensure full session dir tree, not just base_dir (issue #3019) *)
-      ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
-      ignore (Keeper_alerting_path.ensure_playground_bundle ~config:ctx.config ~name:p.name);
-      let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
+        match
+          Keeper_sandbox_runtime.ensure_keeper_startup_preflight
+            ~timeout_sec:15.0 ~sandbox_profile
+        with
+        | Error err ->
+            Log.Keeper.warn "create_keeper failed sandbox preflight for %s: %s"
+              p.name err;
+            (false, err)
+        | Ok () ->
+            let max_active_keepers =
+              Keeper_runtime_resolved.bootstrap_max_active_keepers ()
+            in
+            let active_keepers = Keeper_registry.count_running () in
+            if max_active_keepers > 0 && active_keepers >= max_active_keepers then begin
+              Log.Keeper.warn
+                "create_keeper failed: max active keepers reached (%d/%d) for name=%s"
+                active_keepers max_active_keepers p.name;
+              (false,
+                Printf.sprintf
+                  "keeper max active reached (%d/%d). Stop/remove a keeper or set MASC_KEEPER_MAX_ACTIVE_KEEPERS."
+                  active_keepers max_active_keepers)
+            end
+            else
+              let proactive_enabled =
+                Option.value
+                  ~default:
+                    (Option.value ~default:default_proactive_enabled
+                       p.profile_defaults.proactive_enabled)
+                  p.proactive_enabled_opt
+              in
+              let proactive_idle_sec =
+                Option.value
+                  ~default:
+                    (Option.value ~default:default_proactive_idle_sec
+                       p.profile_defaults.proactive_idle_sec)
+                  p.proactive_idle_sec_opt
+                |> normalize_proactive_idle_sec
+              in
+              let proactive_cooldown_sec =
+                Option.value
+                  ~default:
+                    (Option.value ~default:default_proactive_cooldown_sec
+                       p.profile_defaults.proactive_cooldown_sec)
+                  p.proactive_cooldown_sec_opt
+                |> normalize_proactive_cooldown_sec
+              in
+              let auto_handoff = Option.value ~default:true p.auto_handoff_opt in
+              let handoff_threshold =
+                match p.handoff_threshold_opt with
+                | Some threshold -> threshold
+                | None ->
+                    Runtime_params.get Governance_registry.keeper_handoff_threshold
+              in
+              let handoff_cooldown_sec =
+                match p.handoff_cooldown_sec_opt with
+                | Some cooldown_sec -> cooldown_sec
+                | None ->
+                    Runtime_params.get Governance_registry.keeper_handoff_cooldown_sec
+              in
+              let tool_access =
+                match p.tool_access_opt with
+                | Some access -> access
+                | None ->
+                    let tool_preset =
+                      Option.value ~default:Research
+                        (first_some p.tool_preset_opt
+                           (preset_of_defaults p.profile_defaults))
+                    in
+                    let tool_also_allow =
+                      resolve_tool_name_list
+                        ~preferred:p.tool_also_allow_opt
+                        ~fallback:p.profile_defaults.tool_also_allow
+                    in
+                    Preset { preset = tool_preset; also_allow = tool_also_allow }
+              in
+              let tool_denylist =
+                resolve_tool_name_list
+                  ~preferred:p.tool_denylist_opt
+                  ~fallback:p.profile_defaults.tool_denylist
+              in
+              let social_model =
+                p.profile_defaults.social_model
+                |> Option.value ~default:default_social_model
+                |> Keeper_social_model.normalize_social_model
+              in
+              let will =
+                Option.value
+                  ~default:
+                    (Option.value ~default:default_keeper_will
+                       p.profile_defaults.will)
+                  p.will_opt
+              in
+              let needs =
+                Option.value
+                  ~default:
+                    (Option.value ~default:default_keeper_needs
+                       p.profile_defaults.needs)
+                  p.needs_opt
+              in
+              let desires =
+                Option.value
+                  ~default:
+                    (Option.value ~default:default_keeper_desires
+                       p.profile_defaults.desires)
+                  p.desires_opt
+              in
+              let (short_goal, mid_goal, long_goal) =
+                resolve_goal_horizons
+                  ~goal
+                  ~short_goal_opt:
+                    (first_some p.short_goal_opt p.profile_defaults.short_goal)
+                  ~mid_goal_opt:(first_some p.mid_goal_opt p.profile_defaults.mid_goal)
+                  ~long_goal_opt:
+                    (first_some p.long_goal_opt p.profile_defaults.long_goal)
+              in
+              let instructions = Option.value ~default:"" p.instructions_opt in
+              let (env_ratio_gate, env_message_gate, env_token_gate) =
+                keeper_compaction_policy_from_env ()
+              in
+              let continuity_compaction_cooldown_sec =
+                Option.value
+                  ~default:(keeper_continuity_compaction_cooldown_sec ())
+                  p.continuity_compaction_cooldown_sec_opt
+                |> normalize_continuity_compaction_cooldown_sec
+              in
+              let
+                ( compaction_profile,
+                  compaction_ratio_gate,
+                  compaction_message_gate,
+                  compaction_token_gate )
+                =
+                resolve_compaction_policy
+                  ~profile_opt:p.compaction_profile_opt
+                  ~ratio_opt:p.compaction_ratio_gate_opt
+                  ~message_opt:p.compaction_message_gate_opt
+                  ~token_opt:p.compaction_token_gate_opt
+                  ~fallback_profile:default_compaction_profile
+                  ~fallback_ratio:env_ratio_gate
+                  ~fallback_message:env_message_gate
+                  ~fallback_token:env_token_gate
+              in
+              let cascade_models =
+                Cascade_runtime.models_of_cascade_name
+                  Keeper_config.default_cascade_name
+              in
+              ignore
+                (Cascade_runtime.refresh_local_discovery_if_possible
+                   cascade_models);
+              let primary_max_context =
+                match p.max_context_override_opt with
+                | Some v -> v
+                | None ->
+                    let resolved =
+                      Cascade_runtime.resolve_max_cascade_context cascade_models
+                    in
+                    Cascade_runtime.clamp_context_for_pure_local_labels
+                      ~labels:cascade_models ~max_context:resolved
+              in
+              Progress.Tracker.step tracker ~message:"Initializing session directory" ();
+              let trace_id = generate_trace_id () in
+              match Keeper_id.Trace_id.of_string trace_id with
+              | Error err ->
+                  Log.Keeper.error
+                    "create_keeper failed: generated invalid trace_id for name=%s: %s"
+                    p.name err;
+                  Progress.stop_tracking task_id;
+                  (false, "internal keeper trace_id generation failed")
+              | Ok trace_id_t ->
+                  let base_dir = session_base_dir ctx.config in
+                  (* Ensure full session dir tree, not just base_dir (issue #3019) *)
+                  ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
+                  ignore
+                    (Keeper_alerting_path.ensure_playground_bundle ~config:ctx.config
+                       ~name:p.name);
+                  let session =
+                    Keeper_exec_context.create_session ~session_id:trace_id
+                      ~base_dir
+                  in
         let persona_extended =
           Keeper_types_profile.resolved_persona_name ~keeper_name:p.name
             p.profile_defaults

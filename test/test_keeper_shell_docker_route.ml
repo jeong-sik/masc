@@ -13,6 +13,7 @@ module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
+module Tool_code_write = Masc_mcp.Tool_code_write
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
 
@@ -109,6 +110,14 @@ let with_fake_docker script f =
   in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) @@ fun () ->
   with_env "PATH" path f
+
+let with_tool_policy_config f =
+  let config_dir =
+    Filename.concat (Masc_test_deps.find_project_root ()) "config"
+  in
+  Tool_code_write.reset_policy_config_cache ();
+  with_env "MASC_CONFIG_DIR" config_dir @@ fun () ->
+  Fun.protect ~finally:Tool_code_write.reset_policy_config_cache f
 
 let parse_field raw field =
   Yojson.Safe.from_string raw |> Json.member field
@@ -271,6 +280,30 @@ let test_rg_no_match_remains_successful_in_docker_route () =
   Alcotest.(check int) "rg no-match returns empty matches" 0
     (parse_field raw "matches" |> Json.to_list |> List.length)
 
+let test_git_clone_routes_through_docker () =
+  with_tool_policy_config @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("op", `String "git_clone");
+            ("url", `String "https://github.com/jeong-sik/masc-mcp.git");
+          ])
+  in
+  Alcotest.(check (option bool)) "git_clone fails through docker route" (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "via=docker" (Some "docker")
+    (parse_string_field raw "via");
+  Alcotest.(check bool) "output includes docker image error" true
+    (response_mentions raw "output" "docker image");
+  Alcotest.(check bool) "clone stays inside keeper repos" true
+    (response_mentions raw "path"
+       (Filename.concat playground "repos/masc-mcp"))
+
 let () =
   Alcotest.run "Keeper_shell_docker_route"
     [
@@ -289,5 +322,7 @@ let () =
         [
           Alcotest.test_case "rg no-match remains successful" `Quick
             test_rg_no_match_remains_successful_in_docker_route;
+          Alcotest.test_case "git_clone routes through docker" `Quick
+            test_git_clone_routes_through_docker;
         ] );
     ]

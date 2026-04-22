@@ -1,6 +1,16 @@
 open Alcotest
 open Masc_mcp
 
+let with_env key value f =
+  let prior = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prior with
+      | Some v -> Unix.putenv key v
+      | None -> Unix.putenv key "")
+    f
+
 let rec rm_rf path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -29,6 +39,34 @@ let rec mkdir_p path =
 let write_file path content =
   mkdir_p (Filename.dirname path);
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
+
+let with_fake_docker script f =
+  with_temp_dir "config-doctor-docker" @@ fun dir ->
+  let docker_path = Filename.concat dir "docker" in
+  Out_channel.with_open_bin docker_path (fun oc -> output_string oc script);
+  Unix.chmod docker_path 0o755;
+  let path =
+    match Sys.getenv_opt "PATH" with
+    | Some prior when String.trim prior <> "" -> dir ^ ":" ^ prior
+    | _ -> dir
+  in
+  with_env "PATH" path f
+
+let with_eio f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.clear_fs ();
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Process_eio.init
+    ~cwd_default:(Eio.Stdenv.cwd env)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
+  Eio.Switch.run @@ fun sw ->
+  f
+    ~sw
+    ~net:(Eio.Stdenv.net env)
+    ~clock:(Eio.Stdenv.clock env)
+    ~fs:(Eio.Stdenv.fs env)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
 
 let canonical_path path =
   try Unix.realpath path with
@@ -193,10 +231,14 @@ let test_non_runtime_required_cascade_catalog_warns () =
   "default_models": [
     "claude_code:claude-haiku-4-5-20251001"
   ],
-  "manual_trial_models": [
-    "__nonexistent_provider_sentinel__:fake-model"
+  "default_strategy": "priority_tier",
+  "default_tiers": [
+    ["claude_code:claude-haiku-4-5-20251001"],
+    ["gemini_cli:not-configured-here"]
   ],
-  "manual_trial_keeper_assignable": false
+  "manual_trial_models": [
+    "claude_code:claude-haiku-4-5-20251001"
+  ]
 }|}
     config_root;
   let report =
@@ -208,10 +250,70 @@ let test_non_runtime_required_cascade_catalog_warns () =
     (list_contains_substring
        ~needle:"Cascade catalog check scanned 2 preset(s): 0 error, 1 warn."
        report.warnings);
-  check bool "non-runtime-required detail surfaced" true
+  check bool "priority_tier degradation detail surfaced" true
     (list_contains_substring
-       ~needle:"non-runtime-required profile; runtime can serve a validated subset"
+       ~needle:"uses priority_tier, but 1/2 tier(s) collapse after model-id normalization"
        report.warnings)
+
+let fake_docker_missing_image_script =
+  "#!/bin/sh\n\
+case \"$1\" in\n\
+  info)\n\
+    printf '[]\\n'\n\
+    exit 0\n\
+    ;;\n\
+  image)\n\
+    printf 'Error: No such image: %s\\n' \"$3\" >&2\n\
+    exit 1\n\
+    ;;\n\
+  run)\n\
+    printf 'run should not execute when image inspect fails\\n' >&2\n\
+    exit 2\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
+let test_analyze_live_surfaces_sandbox_preflight_failure () =
+  with_temp_dir "config-doctor-sandbox-preflight" @@ fun dir ->
+  let base_path = Filename.concat dir "base" in
+  let config_root = Filename.concat base_path ".masc/config" in
+  initialize_config_root config_root;
+  with_fake_docker fake_docker_missing_image_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_eio @@ fun ~sw ~net ~clock ~fs ~proc_mgr ->
+  let report =
+    Config_doctor.analyze_live
+      ~sw ~net ~clock ~fs ~proc_mgr
+      ~base_path_input:base_path
+      ~default_base_path:base_path
+      ()
+  in
+  check string "status downgrades to warn" "warn" (status report.status);
+  check bool "warning mentions docker sandbox preflight" true
+    (list_contains_substring
+       ~needle:"Docker sandbox preflight failed"
+       report.warnings);
+  check bool "next action mentions build script" true
+    (list_contains_substring
+       ~needle:"scripts/build-keeper-sandbox-image.sh"
+       report.next_actions);
+  match report.sandbox_preflight with
+  | None -> fail "expected sandbox_preflight output from analyze_live"
+  | Some json ->
+      check string "sandbox preflight status" "error"
+        (Yojson.Safe.Util.member "status" json |> Yojson.Safe.Util.to_string);
+      check string "sandbox preflight image" "missing:test"
+        (Yojson.Safe.Util.member "image" json |> Yojson.Safe.Util.to_string);
+      check bool "doctor json includes sandbox_preflight" true
+        (match Yojson.Safe.Util.member "sandbox_preflight"
+                 (Config_doctor.to_yojson report) with
+         | `Null -> false
+         | _ -> true)
 
 let () =
   run "config_doctor"
@@ -224,10 +326,12 @@ let () =
            test_case "initialized local base config" `Quick
              test_initialized_local_base_config;
            test_case "shadowed explicit config dir" `Quick
-             test_shadowed_explicit_config_dir;
+           test_shadowed_explicit_config_dir;
            test_case "broken cascade catalog surfaces errors" `Quick
              test_broken_cascade_catalog_surfaces_errors;
            test_case "non-runtime-required cascade catalog warns" `Quick
              test_non_runtime_required_cascade_catalog_warns;
+           test_case "analyze_live surfaces sandbox preflight failure"
+             `Quick test_analyze_live_surfaces_sandbox_preflight_failure;
          ]);
     ]

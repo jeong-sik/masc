@@ -239,9 +239,18 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
         p.name err;
       (false, err)
   | Ok () ->
+      (match
+         Keeper_sandbox_runtime.ensure_keeper_startup_preflight
+           ~timeout_sec:15.0 ~sandbox_profile
+       with
+       | Error err ->
+           Log.Keeper.warn "update_keeper failed sandbox preflight for %s: %s"
+             p.name err;
+           (false, err)
+       | Ok () ->
       (match write_meta ctx.config updated with
        | Error e -> (false, e)
        | Ok () ->
          stop_keepalive ~base_path:ctx.config.base_path updated.name;
          start_keepalive ctx updated;
-         (true, Yojson.Safe.to_string (meta_to_json updated)))
+         (true, Yojson.Safe.to_string (meta_to_json updated))))

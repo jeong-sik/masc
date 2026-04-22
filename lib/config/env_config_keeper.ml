@@ -536,9 +536,15 @@ module KeeperSandbox = struct
       Must contain bash and the CLI tools the keeper needs. *)
   let docker_image () =
     get_string
-      ~default:
-        "ubuntu:24.04@sha256:cdb5fd928fced577cfecf12c8966e830fcdf42ee481fb0b91904eeddc2fe5eff"
+      ~default:"masc-keeper-sandbox:local"
       "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
+
+  (** Global keeper sandbox preflight switch. Enabled by default so
+      keeper_up and doctor fail fast when the Docker image/runtime is
+      unusable. Tests can disable this globally and re-enable it in
+      dedicated preflight cases. *)
+  let preflight_enabled () =
+    get_bool ~default:true "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
 
   (** pids limit for hardened keeper containers. *)
   let pids_limit () =

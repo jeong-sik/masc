@@ -1,8 +1,9 @@
-// Keeper detail overlay — full keeper info with KPIs, field dictionary,
-// memory, conversations, equipment, relationships, handoff timeline
-// Redesigned: professional dashboard-grade layout with Tailwind inline styles.
+// Keeper detail surface — full keeper info with KPIs, field dictionary,
+// memory, conversations, equipment, relationships, handoff timeline.
+// Uses route-driven full-screen detail inside monitoring/agents.
 
 import { html } from 'htm/preact'
+import type { ComponentChildren } from 'preact'
 import { isOfflineStatus } from '../lib/status-utils'
 import { keeperDisplayStatus, keeperRuntimeBlockerHint } from '../lib/keeper-runtime-display'
 import { signal } from '@preact/signals'
@@ -71,20 +72,33 @@ import { KeeperToolTelemetry } from './keeper-tool-telemetry'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
 import { KeeperEvalQualityPanel } from './keeper-eval-quality'
+import { navigate, route } from '../router'
 
-// ── Global overlay state ──────────────────────────────────
+// ── Route state / fallback selection ──────────────────────
 
 export const selectedKeeper = signal<Keeper | null>(null)
+
+function baseAgentDirectoryRouteParams(): Record<string, string> {
+  if (route.value.tab === 'monitoring' && route.value.params.section === 'agents') {
+    const next: Record<string, string> = { ...route.value.params, section: 'agents' }
+    delete next.agent
+    delete next.keeper
+    return next
+  }
+  return { section: 'agents' }
+}
 
 export function openKeeperDetail(k: Keeper) {
   selectedKeeper.value = k
   selectKeeper(k.name)
   void loadKeeperConfig(k.name)
+  navigate('monitoring', { ...baseAgentDirectoryRouteParams(), keeper: k.name })
 }
 
 export function closeKeeperDetail() {
   selectedKeeper.value = null
   resetKeeperConfig()
+  navigate('monitoring', baseAgentDirectoryRouteParams())
 }
 
 // ── Helpers ───────────────────────────────────────────────
@@ -1147,13 +1161,139 @@ function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
   `
 }
 
-// ── Main Detail Overlay ─────────────────────────────────
+type KeeperDetailSectionId =
+  | 'keeper-summary'
+  | 'keeper-comms'
+  | 'keeper-runtime'
+  | 'keeper-identity'
+  | 'keeper-config'
+  | 'keeper-debug'
 
-export function KeeperDetailOverlay() {
-  const selected = selectedKeeper.value
-  if (!selected) return null
-  const keeper = findKeeper(selected.name) ?? selected
-  const closeButtonRef = useRef<HTMLButtonElement>(null)
+const KEEPER_DETAIL_SECTIONS: Array<{
+  id: KeeperDetailSectionId
+  label: string
+  summary: string
+}> = [
+  {
+    id: 'keeper-summary',
+    label: '상태 개요',
+    summary: 'phase, KPI, 컨텍스트와 추론 신호를 한 번에 봅니다.',
+  },
+  {
+    id: 'keeper-comms',
+    label: '대화 / 활동',
+    summary: '직접 대화와 세션 이벤트를 같은 맥락에서 확인합니다.',
+  },
+  {
+    id: 'keeper-runtime',
+    label: '진단 / 운영',
+    summary: '복구, supervisor, tool audit, 품질 시그널을 모읍니다.',
+  },
+  {
+    id: 'keeper-identity',
+    label: '정체성 / 세대',
+    summary: '프로필, 관계, lineage, checkpoints를 묶어 봅니다.',
+  },
+  {
+    id: 'keeper-config',
+    label: '설정 / 작업 방식',
+    summary: 'tool policy, repos, config를 한 곳에서 조정합니다.',
+  },
+  {
+    id: 'keeper-debug',
+    label: '디버그',
+    summary: '저널과 원시 데이터를 마지막에 몰아 둡니다.',
+  },
+]
+
+function scrollToKeeperDetailSection(sectionId: KeeperDetailSectionId): void {
+  document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function KeeperDetailQuickFact({
+  label,
+  children,
+}: {
+  label: string
+  children: ComponentChildren
+}) {
+  return html`
+    <div class="rounded-2xl border border-[var(--white-8)] bg-[rgba(255,255,255,0.03)] px-3.5 py-3">
+      <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">${label}</div>
+      <div class="mt-1 text-sm font-medium leading-snug text-[var(--text-strong)]">${children}</div>
+    </div>
+  `
+}
+
+function KeeperDetailSection({
+  id,
+  eyebrow,
+  title,
+  description,
+  children,
+}: {
+  id: KeeperDetailSectionId
+  eyebrow: string
+  title: string
+  description: string
+  children: ComponentChildren
+}) {
+  return html`
+    <section
+      id=${id}
+      class="scroll-mt-24 rounded-[28px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(12,19,34,0.94),rgba(8,13,24,0.98))] shadow-[0_24px_48px_rgba(0,0,0,0.22)]"
+    >
+      <div class="border-b border-[var(--white-8)] px-5 py-4 sm:px-6">
+        <div class="text-3xs font-semibold uppercase tracking-[0.22em] text-[var(--text-muted)]">${eyebrow}</div>
+        <div class="mt-1 flex flex-col gap-1 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h3 class="m-0 text-lg font-semibold text-[var(--text-strong)]">${title}</h3>
+            <p class="m-0 mt-1 text-sm leading-relaxed text-[var(--text-secondary)]">${description}</p>
+          </div>
+        </div>
+      </div>
+      <div class="flex flex-col gap-4 px-5 py-5 sm:px-6">
+        ${children}
+      </div>
+    </section>
+  `
+}
+
+// ── Main Detail Page ─────────────────────────────────────
+
+export function KeeperDetailPage() {
+  const keeperName =
+    route.value.tab === 'monitoring' && route.value.params.section === 'agents'
+      ? route.value.params.keeper?.trim()
+      : ''
+  if (!keeperName) return null
+
+  const fallback = selectedKeeper.value
+  const keeper = findKeeper(keeperName)
+    ?? (fallback && (fallback.name === keeperName || fallback.agent_name === keeperName) ? fallback : null)
+  if (!keeper) {
+    return html`
+      <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-4">
+        <div class="rounded-[28px] border border-[var(--card-border)] bg-[rgba(9,14,24,0.92)] px-6 py-6 shadow-[0_24px_48px_rgba(0,0,0,0.24)]">
+          <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Keeper Detail</div>
+          <h2 class="m-0 mt-2 text-xl font-semibold text-[var(--text-strong)]">${keeperName}</h2>
+          <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+            현재 스냅샷에서 keeper를 찾지 못했습니다. 목록으로 돌아가서 다시 선택하거나, 최신 dashboard refresh 이후 다시 열어 보세요.
+          </p>
+          <div class="mt-4">
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-4 py-2 text-sm font-medium text-[var(--text-strong)] transition-colors hover:bg-[var(--white-8)]"
+              onClick=${closeKeeperDetail}
+            >
+              목록으로 돌아가기
+            </button>
+          </div>
+        </div>
+      </div>
+    `
+  }
+
   const titleId = `keeper-detail-title-${keeper.name}`
   const effectiveStatus = keeperDisplayStatus(keeper)
   const shouldOpenDiagnostics = keeperNeedsDiagnosticAttention(keeper)
@@ -1173,6 +1313,14 @@ export function KeeperDetailOverlay() {
     setDiagOpen(shouldOpenDiagnostics)
     setPhaseEnteredAtSec(null)
   }
+  useEffect(() => {
+    selectedKeeper.value = keeper
+    selectKeeper(keeper.name)
+    void loadKeeperConfig(keeper.name)
+    return () => {
+      resetKeeperConfig()
+    }
+  }, [keeper.name])
   useEffect(() => {
     const controller = new AbortController()
     fetchKeeperTransitions(keeper.name, 1, { signal: controller.signal })
@@ -1196,6 +1344,17 @@ export function KeeperDetailOverlay() {
     setPreserveSystemPrompt(true)
     setClearPending(false)
   }, [keeper.name])
+
+  const contextRatioPct =
+    typeof keeper.context_ratio === 'number' && Number.isFinite(keeper.context_ratio)
+      ? `${Math.round(keeper.context_ratio * 100)}%`
+      : '정보 없음'
+  const lastModel =
+    keeper.metrics_series && keeper.metrics_series.length > 0
+      ? keeper.metrics_series[keeper.metrics_series.length - 1]?.model_used
+      : null
+  const effectiveModel = lastModel || keeper.active_model || keeper.model || '정보 없음'
+  const lastActivity = keeper.last_autonomous_action_at ?? keeper.last_heartbeat ?? keeper.created_at ?? null
 
   const submitClearContext = () => {
     void (async () => {
@@ -1229,20 +1388,22 @@ export function KeeperDetailOverlay() {
   }
 
   return html`
-    <${DialogOverlay}
-      labelledBy=${titleId}
-      onClose=${closeKeeperDetail}
-      initialFocusRef=${closeButtonRef}
-      overlayClass="keeper-detail-overlay fixed inset-0 z-[60] bg-[var(--white-5)]/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
-      panelClass="w-full max-w-[1100px] max-h-[90vh] overflow-y-auto bg-[#0d1526] rounded border border-[var(--card-border)] shadow-[0_24px_64px_var(--black-50)]"
-    >
-
-        ${'' /* ── Sticky Header ── */}
-        <div class="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-[var(--card-border)] bg-[rgba(13,21,38,0.97)] backdrop-blur-sm rounded-t-2xl">
-          <div class="flex items-center gap-4">
-            <div class="size-12 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xl">${keeper.emoji}</div>
+    <div class="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-8">
+      <div class="sticky top-0 z-20 overflow-hidden rounded-[28px] border border-[var(--card-border)] bg-[rgba(13,21,38,0.96)] shadow-[0_24px_64px_rgba(0,0,0,0.22)] backdrop-blur-xl">
+        <div class="flex items-center justify-between gap-4 border-b border-[var(--card-border)] px-5 py-4 sm:px-6">
+          <div class="flex min-w-0 items-start gap-4">
+            <button
+              type="button"
+              onClick=${closeKeeperDetail}
+              class="inline-flex shrink-0 items-center gap-2 rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-3.5 py-2 text-sm font-medium text-[var(--text-strong)] transition-colors hover:bg-[var(--white-8)]"
+            >
+              <span aria-hidden="true">←</span>
+              목록
+            </button>
+            <div class="size-12 shrink-0 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xl">${keeper.emoji}</div>
             <div class="flex flex-col gap-0.5">
-              <div class="flex items-center gap-2.5">
+              <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Monitoring / Agents / Keeper Detail</div>
+              <div class="mt-1 flex flex-wrap items-center gap-2.5">
                 <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
                 <${KeeperPhaseAndStage} phase=${keeper.phase} pipelineStage=${keeper.pipeline_stage} phaseEnteredAtSec=${phaseEnteredAtSec} />
                 ${(() => {
@@ -1339,7 +1500,7 @@ export function KeeperDetailOverlay() {
                 })()}
               </div>
               ${keeper.koreanName || keeper.created_at ? html`
-                <div class="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                <div class="flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
                   ${keeper.koreanName ? html`<span>${keeper.koreanName}</span>` : null}
                   ${keeper.created_at ? html`<span class="font-mono tabular-nums opacity-60"><${TimeAgo} timestamp=${keeper.created_at} /></span>` : null}
                 </div>
@@ -1354,23 +1515,63 @@ export function KeeperDetailOverlay() {
             >비우기</button>
             <${KeeperLifecycleButtons} keeper=${keeper} effectiveStatus=${effectiveStatus} />
             <button
-              ref=${closeButtonRef}
               type="button"
               onClick=${() => closeKeeperDetail()}
               class="flex items-center justify-center size-8 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1526]"
-              aria-label="키퍼 상세 닫기"
+              aria-label="키퍼 상세 종료"
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
             </button>
           </div>
         </div>
+      </div>
 
-        <${KeeperRuntimeAlertStrip} keeper=${keeper} />
+      <div class="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
+        <aside class="order-2 xl:order-1 xl:sticky xl:top-[104px] xl:self-start">
+          <div class="flex flex-col gap-4 rounded-[28px] border border-[var(--card-border)] bg-[rgba(9,14,24,0.84)] p-4 shadow-[0_20px_48px_rgba(0,0,0,0.18)]">
+            <div>
+              <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Overview</div>
+              <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+                긴 단일 모달 대신 keeper 상세를 별도 화면으로 펼쳤습니다. 운영자가 자주 오가는 맥락 단위로 나눠서 바로 점프할 수 있습니다.
+              </p>
+            </div>
 
-        ${'' /* ── Body ── */}
-        <div class="p-6 flex flex-col gap-6">
+            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+              <${KeeperDetailQuickFact} label="상태">${effectiveStatus}</${KeeperDetailQuickFact}>
+              <${KeeperDetailQuickFact} label="컨텍스트">${contextRatioPct}</${KeeperDetailQuickFact}>
+              <${KeeperDetailQuickFact} label="현재 모델">${effectiveModel}</${KeeperDetailQuickFact}>
+              <${KeeperDetailQuickFact} label="최근 활동">
+                ${lastActivity ? html`<${TimeAgo} timestamp=${lastActivity} />` : '정보 없음'}
+              </${KeeperDetailQuickFact}>
+            </div>
 
-        ${'' /* ── Pipeline stage + Phase state diagram ── */}
+            <div class="rounded-2xl border border-[var(--white-8)] bg-[rgba(255,255,255,0.03)] p-3.5">
+              <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">빠른 이동</div>
+              <div class="mt-3 flex flex-col gap-2">
+                ${KEEPER_DETAIL_SECTIONS.map((section) => html`
+                  <button
+                    type="button"
+                    class="rounded-2xl border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-left transition-colors hover:bg-[var(--white-6)]"
+                    onClick=${() => scrollToKeeperDetailSection(section.id)}
+                  >
+                    <div class="text-sm font-medium text-[var(--text-strong)]">${section.label}</div>
+                    <div class="mt-1 text-2xs leading-relaxed text-[var(--text-muted)]">${section.summary}</div>
+                  </button>
+                `)}
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <div class="order-1 xl:order-2 flex flex-col gap-5">
+          <${KeeperRuntimeAlertStrip} keeper=${keeper} />
+
+          <${KeeperDetailSection}
+            id="keeper-summary"
+            eyebrow="State Overview"
+            title="운영 상태 개요"
+            description="상태 기계, 메모리 티어, KPI, 추론/컨텍스트 계측을 먼저 훑어 keeper의 현재 건강도를 빠르게 판단합니다."
+          >
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
         <details class="rounded border border-[var(--white-8)] bg-[var(--white-2)]">
           <summary class="cursor-pointer py-2 px-4 text-3xs font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none flex items-center gap-2">
@@ -1460,17 +1661,30 @@ export function KeeperDetailOverlay() {
 
         ${'' /* ── Inference Telemetry (tok/s, cache, reasoning) ── */}
         <${InferenceTelemetryPanel} keeper=${keeper} />
-        ${'' /* ── Per-keeper tool telemetry ── */}
-        <${KeeperToolTelemetry} keeperName=${keeper.name} />
+          </${KeeperDetailSection}>
 
-        ${'' /* ── Eval Quality (RFC-MASC-005 Phase 3) ── */}
-        <${KeeperEvalQualityPanel} keeperName=${keeper.name} />
+          <${KeeperDetailSection}
+            id="keeper-comms"
+            eyebrow="Conversation & Session"
+            title="대화 / 활동 흐름"
+            description="운영자가 keeper와 바로 대화하고, 같은 화면에서 세션 이벤트를 대조할 수 있도록 묶었습니다."
+          >
+            <${KeeperCommsPanel} keeper=${keeper} />
+            <${SectionCard} title="세션 활동 로그">
+              <div class="text-2xs text-[var(--text-muted)] mb-3">현재 세션의 도구 호출, 태스크 완료, 메시지 등 이벤트 기록</div>
+              <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
+            <//>
+          </${KeeperDetailSection}>
 
-        ${'' /* ── Direct conversation ── */}
-        <${KeeperCommsPanel} keeper=${keeper} />
-
-        ${'' /* ── Runtime diagnostics (supervisor + keeper diagnostics unified) ── */}
-        <details
+          <${KeeperDetailSection}
+            id="keeper-runtime"
+            eyebrow="Runtime Diagnostics"
+            title="진단 / 운영"
+            description="eval, supervisor, 복구 액션, tool audit, 품질 시그널을 한 군데로 모아 원인 파악과 개입을 빠르게 합니다."
+          >
+            <${KeeperToolTelemetry} keeperName=${keeper.name} />
+            <${KeeperEvalQualityPanel} keeperName=${keeper.name} />
+            <details
           class="rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm"
           open=${diagOpen}
           onToggle=${(e: Event) => setDiagOpen((e.currentTarget as HTMLDetailsElement).open)}
@@ -1493,11 +1707,24 @@ export function KeeperDetailOverlay() {
             </div>
           </div>
         </details>
+            <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
+              <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
+                <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+                품질 시그널 (고급 지표)
+              </summary>
+              <div class="mt-3 text-2xs text-[var(--text-muted)] mb-3">폴백 비율, 정렬 품질, 자율 행동 비율 등 metrics_window 기반 런타임 품질 지표</div>
+              <${RuntimeSignals} keeper=${keeper} />
+            </details>
+          </${KeeperDetailSection}>
 
-        ${'' /* ── Detail sections grid ── */}
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-          <${SectionCard} title="프로필">
+          <${KeeperDetailSection}
+            id="keeper-identity"
+            eyebrow="Identity & Lineage"
+            title="정체성 / 세대"
+            description="프로필, 관계, 장비, generation lineage, checkpoints를 하나의 맥락으로 보고 continuity를 해석합니다."
+          >
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <${SectionCard} title="프로필">
             <${TraitsList} traits=${keeper.traits ?? []} label="특성" />
             <${TraitsList} traits=${keeper.interests ?? []} label="관심사" />
             ${keeper.primaryValue
@@ -1526,9 +1753,7 @@ export function KeeperDetailOverlay() {
                 </div>
               `
               : null}
-
-
-          <//>
+              <//>
 
           ${keeper.inventory && keeper.inventory.length > 0
             ? html`
@@ -1547,47 +1772,7 @@ export function KeeperDetailOverlay() {
             : null}
 
           <${GenerationLineagePanel} keeperName=${keeper.name} />
-
-          ${'' /* ── Activity Trace (promoted to main view) ── */}
-          <div class="md:col-span-2">
-            <${SectionCard} title="세션 활동 로그">
-              <div class="text-2xs text-[var(--text-muted)] mb-3">현재 세션의 도구 호출, 태스크 완료, 메시지 등 이벤트 기록</div>
-              <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
-            <//>
-          </div>
-
-          <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
-            <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
-              <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
-              품질 시그널 (고급 지표)
-            </summary>
-            <div class="mt-3 text-2xs text-[var(--text-muted)] mb-3">폴백 비율, 정렬 품질, 자율 행동 비율 등 metrics_window 기반 런타임 품질 지표</div>
-            <${RuntimeSignals} keeper=${keeper} />
-          </details>
-
-          <${TurnBudgetSection} keeper=${keeper} />
-
-          <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
-            <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
-              <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
-              도구 정책
-            </summary>
-            <div class="mt-3">
-              <${KeeperNeighborhood} keeper=${keeper} />
             </div>
-          </details>
-
-          <${PlaygroundReposPanel} keeperName=${keeper.name} />
-
-          <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
-            <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
-              <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
-              설정
-            </summary>
-            <div class="mt-4">
-              <${KeeperConfigPanel} keeperName=${keeper.name} />
-            </div>
-          </details>
 
           <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
             <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
@@ -1601,10 +1786,43 @@ export function KeeperDetailOverlay() {
               />
             </div>
           </details>
-        </div>
+          </${KeeperDetailSection}>
 
-        ${'' /* ── Debug (journal + raw data) ── */}
-        <details class="mt-4">
+          <${KeeperDetailSection}
+            id="keeper-config"
+            eyebrow="Configuration"
+            title="설정 / 작업 방식"
+            description="분산되어 있던 tool policy, 작업 budget, playground repo, keeper config를 한 섹션으로 모았습니다."
+          >
+            <${TurnBudgetSection} keeper=${keeper} />
+            <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
+              <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
+                <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+                도구 정책
+              </summary>
+              <div class="mt-3">
+                <${KeeperNeighborhood} keeper=${keeper} />
+              </div>
+            </details>
+            <${PlaygroundReposPanel} keeperName=${keeper.name} />
+            <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
+              <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
+                <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+                Keeper 설정
+              </summary>
+              <div class="mt-4">
+                <${KeeperConfigPanel} keeperName=${keeper.name} />
+              </div>
+            </details>
+          </${KeeperDetailSection}>
+
+          <${KeeperDetailSection}
+            id="keeper-debug"
+            eyebrow="Debug"
+            title="디버그"
+            description="운영 중에는 덜 자주 보지만, 문제를 깊게 파고들 때 필요한 raw surface를 마지막에 모았습니다."
+          >
+            <details class="mt-0">
           <summary class="cursor-pointer py-3 px-4 text-2xs font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none rounded border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
             디버그
@@ -1620,8 +1838,7 @@ export function KeeperDetailOverlay() {
             </div>
           </div>
         </details>
-
-        </div>
+          </${KeeperDetailSection}>
 
         <${KeeperClearContextDialog}
           keeperName=${keeper.name}
@@ -1637,6 +1854,8 @@ export function KeeperDetailOverlay() {
           onPreserveToggle=${setPreserveSystemPrompt}
           onSubmit=${submitClearContext}
         />
-    <//>
+        </div>
+      </div>
+    </div>
   `
 }

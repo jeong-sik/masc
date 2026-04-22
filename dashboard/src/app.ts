@@ -26,7 +26,6 @@ import {
   SideRail,
 } from './components/dashboard-shell'
 import { ThemeSwitch } from './components/theme-switch'
-import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { TaskDetailOverlay } from './components/goals/task-detail-overlay'
 import { ToastContainer } from './components/common/toast'
@@ -165,7 +164,6 @@ export function App() {
         </main>
       </div>
 
-      <${KeeperDetailOverlay} />
       <${AgentDetailOverlay} />
       <${TaskDetailOverlay} />
       <${ToastContainer} />

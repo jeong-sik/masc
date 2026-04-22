@@ -170,6 +170,7 @@ let test_approval_queue_submit_and_resolve () =
         ~tool_name:"masc_code_delete"
         ~input:(`Assoc [("path", `String "/dangerous")])
         ~risk_level:AQ.Critical
+        ()
     in
     result := Some decision
   );
@@ -217,6 +218,7 @@ let test_approval_queue_reject () =
         ~tool_name:"masc_force_reset"
         ~input:(`Assoc [])
         ~risk_level:AQ.Critical
+        ()
     in
     result := Some decision
   );
@@ -250,6 +252,7 @@ let test_approval_queue_expire_stale () =
         ~tool_name:"masc_dangerous_tool"
         ~input:(`Assoc [])
         ~risk_level:AQ.Critical
+        ()
     in
     result := Some decision
   );
@@ -287,6 +290,7 @@ let test_approval_queue_cancel_cleans_up () =
            ~tool_name:"masc_dangerous"
            ~input:(`Assoc [])
            ~risk_level:AQ.Critical
+           ()
        in
        ());
      Eio.Fiber.yield ();
@@ -308,6 +312,7 @@ let test_background_pending_callback_and_keeper_lookup () =
       ~input:(`Assoc [("kind", `String "continue_gate_required")])
       ~risk_level:AQ.Critical
       ~on_resolution:(fun decision -> callback_result := Some decision)
+      ()
   in
   Alcotest.(check bool) "keeper has pending approval" true
     (AQ.has_pending_for_keeper ~keeper_name:"gate-keeper");
@@ -337,6 +342,7 @@ let test_background_pending_reuses_existing_entry () =
       ~input:(`Assoc [("kind", `String "continue_gate_required")])
       ~risk_level:AQ.Critical
       ~on_resolution:(fun decision -> first_callback := Some decision)
+      ()
   in
   let after_first = AQ.pending_count () in
   let id2 =
@@ -346,6 +352,7 @@ let test_background_pending_reuses_existing_entry () =
       ~input:(`Assoc [("kind", `String "continue_gate_required")])
       ~risk_level:AQ.Critical
       ~on_resolution:(fun decision -> second_callback := Some decision)
+      ()
   in
   Alcotest.(check string) "existing pending id reused" id1 id2;
   Alcotest.(check int) "only one entry created"
@@ -377,7 +384,13 @@ let test_approval_queue_get_pending_detail () =
       ~tool_name:"masc_code_delete"
       ~input
       ~risk_level:AQ.Critical
+      ~turn_id:7
+      ~task_id:"task-runtime-trust"
+      ~goal_id:"goal-runtime-trust"
+      ~goal_ids:[ "goal-runtime-trust"; "goal-mid" ]
+      ~runtime_contract:(`Assoc [ ("backend", `String "docker") ])
       ~on_resolution:(fun decision -> callback_result := Some decision)
+      ()
   in
   let open Yojson.Safe.Util in
   let detail =
@@ -392,6 +405,17 @@ let test_approval_queue_get_pending_detail () =
     (detail |> member "tool_name" |> to_string);
   Alcotest.(check string) "detail risk" "critical"
     (detail |> member "risk_level" |> to_string);
+  Alcotest.(check int) "detail turn id" 7
+    (detail |> member "turn_id" |> to_int);
+  Alcotest.(check string) "detail task id" "task-runtime-trust"
+    (detail |> member "task_id" |> to_string);
+  Alcotest.(check string) "detail goal id" "goal-runtime-trust"
+    (detail |> member "goal_id" |> to_string);
+  Alcotest.(check (list string)) "detail goal ids"
+    [ "goal-runtime-trust"; "goal-mid" ]
+    (detail |> member "goal_ids" |> to_list |> List.map to_string);
+  Alcotest.(check string) "detail runtime contract backend" "docker"
+    (detail |> member "runtime_contract" |> member "backend" |> to_string);
   Alcotest.(check string) "detail includes full input"
     (Yojson.Safe.to_string input)
     (detail |> member "input" |> Yojson.Safe.to_string);
@@ -423,6 +447,7 @@ let test_approval_get_dispatch_success () =
       ~input
       ~risk_level:AQ.Critical
       ~on_resolution:(fun decision -> callback_result := Some decision)
+      ()
   in
   Fun.protect
     ~finally:(fun () ->
@@ -477,7 +502,7 @@ let test_approval_get_rejects_reader_role () =
 let test_callback_approves_low_risk () =
   (* development level: no confirmation needed *)
   let cb = GP.to_oas_approval_callback
-    ~governance_level:"development" ~keeper_name:"test" in
+    ~governance_level:"development" ~keeper_name:"test" () in
   let decision = cb ~tool_name:"masc_status" ~input:(`Assoc []) in
   match decision with
   | Agent_sdk.Hooks.Approve -> ()
@@ -493,7 +518,7 @@ let test_callback_production_keeper_write_requires_approval () =
   Eio.Fiber.fork ~sw (fun () ->
     let cb =
       GP.to_oas_approval_callback
-        ~governance_level:"production" ~keeper_name:"test" in
+        ~governance_level:"production" ~keeper_name:"test" () in
     let decision =
       cb
         ~tool_name:"keeper_fs_edit"
@@ -528,7 +553,7 @@ let test_callback_production_keeper_write_requires_approval () =
 let test_callback_production_keeper_shell_gh_read_only_auto_approved () =
   let cb =
     GP.to_oas_approval_callback
-      ~governance_level:"production" ~keeper_name:"test" in
+      ~governance_level:"production" ~keeper_name:"test" () in
   let decision =
     cb ~tool_name:"keeper_shell"
       ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])

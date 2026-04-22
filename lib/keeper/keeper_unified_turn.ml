@@ -495,6 +495,7 @@ let enqueue_partial_commit_continue_gate
              Log.Keeper.error
                "%s: partial-commit continue gate rejected but keeper pause sync failed: %s (reason=%s)"
                meta.name err reason))
+    ()
 
 (* Dedupe "mixed cascade context budget" log: the values are constant
    per (keeper_name, model_labels) because cascade config is static at

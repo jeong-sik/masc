@@ -108,6 +108,8 @@ val combinatorial_risk_escalation :
 val to_oas_approval_callback :
   governance_level:string ->
   keeper_name:string ->
+  ?meta:Keeper_types.keeper_meta ->
+  unit ->
   Oas.Hooks.approval_callback
 (** Build an OAS approval callback with genuine HITL fiber suspension.
 
@@ -122,4 +124,3 @@ val to_oas_approval_callback :
     Tools below the threshold are auto-approved.
 
     @since 2.262.0 (#5902, #5907) *)
-

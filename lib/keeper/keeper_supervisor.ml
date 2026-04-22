@@ -358,6 +358,7 @@ let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
             Log.Keeper.warn
               "%s: restored reconcile continue gate rejected; keeper remains paused (%s)"
               meta.name reason)
+      ()
   in
   Log.Keeper.warn
     "%s: restored reconcile continue gate from persisted paused meta"

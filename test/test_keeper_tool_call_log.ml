@@ -134,6 +134,14 @@ let test_turn_context_fields_stored () =
       ~trace_id:"trace-k"
       ~session_id:"trace-k"
       ~turn:7
+      ~keeper_turn_id:7
+      ~task_id:"task-runtime-trust"
+      ~goal_ids:["goal-short"; "goal-long"]
+      ~execution_scope:"workspace"
+      ~sandbox_profile:"docker"
+      ~network_mode:"inherit"
+      ~shared_memory_scope:"team"
+      ~approval_mode:"manual"
       ();
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"masc_status"
@@ -164,7 +172,30 @@ let test_turn_context_fields_stored () =
       (Some "trace-k")
       (Safe_ops.json_string_opt "session_id" entry);
     Alcotest.(check int) "turn field" 7
-      (Safe_ops.json_int ~default:0 "turn" entry))
+      (Safe_ops.json_int ~default:0 "turn" entry);
+    Alcotest.(check int) "keeper_turn_id field" 7
+      (Safe_ops.json_int ~default:0 "keeper_turn_id" entry);
+    Alcotest.(check (option string)) "task_id field"
+      (Some "task-runtime-trust")
+      (Safe_ops.json_string_opt "task_id" entry);
+    Alcotest.(check (list string)) "goal_ids field"
+      ["goal-short"; "goal-long"]
+      Yojson.Safe.Util.(entry |> member "goal_ids" |> to_list |> List.map to_string);
+    Alcotest.(check (option string)) "execution_scope field"
+      (Some "workspace")
+      (Safe_ops.json_string_opt "execution_scope" entry);
+    Alcotest.(check (option string)) "sandbox_profile field"
+      (Some "docker")
+      (Safe_ops.json_string_opt "sandbox_profile" entry);
+    Alcotest.(check (option string)) "network_mode field"
+      (Some "inherit")
+      (Safe_ops.json_string_opt "network_mode" entry);
+    Alcotest.(check (option string)) "shared_memory_scope field"
+      (Some "team")
+      (Safe_ops.json_string_opt "shared_memory_scope" entry);
+    Alcotest.(check (option string)) "approval_mode field"
+      (Some "manual")
+      (Safe_ops.json_string_opt "approval_mode" entry))
 
 let test_turn_context_fields_absent_without_context () =
   with_tmp_log (fun () ->

@@ -1903,6 +1903,19 @@ let run_turn
                 ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                 ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                 ~turn
+                ~keeper_turn_id:turn
+                ?task_id:(Option.map Keeper_id.Task_id.to_string meta.current_task_id)
+                ~goal_ids:meta.active_goal_ids
+                ~execution_scope:
+                  (Keeper_execution_scope.to_string meta.execution_scope)
+                ~sandbox_profile:
+                  (Keeper_types.sandbox_profile_to_string meta.sandbox_profile)
+                ~network_mode:
+                  (Keeper_types.network_mode_to_string meta.network_mode)
+                ~shared_memory_scope:
+                  (Keeper_types.shared_memory_scope_to_string
+                     meta.shared_memory_scope)
+                ?approval_mode:approval_mode_effective
                 ();
               (* Tool disclosure telemetry: emitted after all allow-list rewrites
            (last-turn intersect, max_tools cap) so that
@@ -2166,7 +2179,9 @@ let run_turn
            ?slot_id:(Keeper_config.keeper_slot_id meta.name)
            ~approval:(Governance_pipeline.to_oas_approval_callback
                         ~governance_level:(Env_config_core.governance_level ())
-                        ~keeper_name:meta.name)
+                        ~keeper_name:meta.name
+                        ~meta
+                        ())
            ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
            (* exit_condition removed with mutation_boundary — OAS runs to
               natural completion (max_turns or model end_turn). *)

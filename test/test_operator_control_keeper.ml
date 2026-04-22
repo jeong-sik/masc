@@ -403,6 +403,7 @@ let test_keeper_status_exposes_model_observability () =
       let status_json = parse_json_exn body in
       let open Yojson.Safe.Util in
       let observability = status_json |> member "model_observability" in
+      let runtime_trust = status_json |> member "runtime_trust" in
       let status_dump = Yojson.Safe.pretty_to_string status_json in
       Alcotest.(check (option string))
         ("cascade name surfaced\n" ^ status_dump)
@@ -437,7 +438,12 @@ let test_keeper_status_exposes_model_observability () =
        |> to_bool);
       Alcotest.(check bool) "chat compatibility intentionally null" true
         (observability |> member "runtime_contract"
-         |> member "chat_completion_compatible" = `Null))
+         |> member "chat_completion_compatible" = `Null);
+      Alcotest.(check string) "runtime trust backend local" "local"
+        (runtime_trust |> member "runtime_contract" |> member "backend"
+       |> to_string);
+      Alcotest.(check int) "runtime trust pending approvals empty" 0
+        (runtime_trust |> member "pending_approval_count" |> to_int))
 
 let test_keeper_status_ignores_stale_cascade_observation () =
   Eio_main.run @@ fun env ->

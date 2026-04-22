@@ -963,6 +963,10 @@ let handle_keeper_status ctx args : tool_result =
              ~configured_labels:models
              ~active_model ~runtime_blocker_fields latest_metrics
          in
+         let runtime_trust =
+           Keeper_runtime_trust_snapshot.snapshot_json
+             ~config:ctx.config ~meta:m
+         in
 
          let json = `Assoc ([
            ("name", `String name);
@@ -1151,6 +1155,7 @@ let handle_keeper_status ctx args : tool_result =
            ]);
            ("models_resolved", models_resolved);
            ("model_observability", model_observability);
+           ("runtime_trust", runtime_trust);
            ("runtime", runtime_surface_json ctx.config m);
            ("coordination", coordination_surface_json m);
            ("sources", source_provenance_json ctx.config m);

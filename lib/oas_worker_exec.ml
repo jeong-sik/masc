@@ -284,6 +284,10 @@ let resume_from_checkpoint
       let prepared_resume =
         Oas_worker_exec_agent.prepare_resume ~config ~checkpoint
       in
+      Log.Misc.info
+        "oas_worker %s: resume checkpoint_turn_count=%d per_call_turn_budget=%d effective_max_turns=%d"
+        config.name checkpoint.turn_count config.max_turns
+        prepared_resume.agent_config.max_turns;
       let options = { prepared_resume.options with transport } in
       Ok
         (Oas.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint

@@ -75,6 +75,17 @@ let contains_substring haystack needle =
   in
   needle_len = 0 || loop 0
 
+let substring_index haystack needle =
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop i =
+    if needle_len = 0 then Some 0
+    else if i + needle_len > hay_len then None
+    else if String.sub haystack i needle_len = needle then Some i
+    else loop (i + 1)
+  in
+  loop 0
+
 let source_file_contains file_rel needle =
   let path = Filename.concat (repo_root ()) file_rel in
   let ic = open_in path in
@@ -1036,6 +1047,38 @@ let test_prompt_includes_worktree_delta () =
          true
        with Not_found -> false
      in found)
+
+let test_prompt_orders_stable_sections_before_reactive_sections () =
+  let obs =
+    {
+      base_observation with
+      active_goals = [ "goal-abc" ];
+      continuity_summary =
+        "Goal: structural quality improvement\nNext: verify latest runtime state";
+      pending_mentions = [ ("alice", "hello keeper") ];
+      pending_board_events = [ sample_board_event ];
+      worktree_change_summary =
+        Some "<git_status_change>\n M lib/example.ml\n</git_status_change>";
+      context_ratio = 0.42;
+      idle_seconds = 45;
+      unclaimed_task_count = 2;
+      active_agent_count = 3;
+    }
+  in
+  let _sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs ()
+  in
+  let idx needle =
+    match substring_index user needle with
+    | Some i -> i
+    | None -> fail ("missing section: " ^ needle)
+  in
+  check bool "active goals precede pending mentions" true
+    (idx "### Active Goals" < idx "### Pending Mentions");
+  check bool "continuity precedes board activity" true
+    (idx "### Continuity" < idx "### Board Activity");
+  check bool "context precedes live worktree delta" true
+    (idx "### Context" < idx "### Live Worktree Delta")
 
 let test_prompt_room_state_section () =
   let obs =
@@ -2843,6 +2886,34 @@ let test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaus
   check bool "filtered candidates cascade exhaustion is auto-recoverable" true
     (EC.is_auto_recoverable_turn_error err)
 
+let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
+  let err =
+    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+      (Masc_mcp.Oas_worker_named.Resumable_cli_session
+         {
+           cascade_name = "kimi_cli_keeper";
+           detail =
+             "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc";
+           exit_code = Some 75;
+         })
+  in
+  check bool "resumable CLI session error is auto-recoverable" true
+    (EC.is_auto_recoverable_turn_error err)
+
+let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
+  let err =
+    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+      (Masc_mcp.Oas_worker_named.Resumable_cli_session
+         {
+           cascade_name = "kimi_cli_keeper";
+           detail =
+             "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc";
+           exit_code = Some 75;
+         })
+  in
+  check bool "resumable CLI session error is treated as cascade exhaustion surface" true
+    (EC.is_cascade_exhausted_error err)
+
 let test_bounded_oas_timeout_uses_adaptive_when_budget_is_large () =
   let expected =
     Env_config.KeeperKeepalive.oas_timeout_for_context ~max_context:262_144
@@ -3967,6 +4038,8 @@ let () =
           test_case "frugal economy" `Quick test_prompt_frugal_economy;
           test_case "hustle economy" `Quick test_prompt_hustle_economy;
           test_case "includes worktree delta" `Quick test_prompt_includes_worktree_delta;
+          test_case "orders stable sections before reactive sections" `Quick
+            test_prompt_orders_stable_sections_before_reactive_sections;
           test_case "room state section" `Quick test_prompt_room_state_section;
           test_case "claim first guidance" `Quick
             test_prompt_includes_claim_first_guidance;
@@ -4233,6 +4306,10 @@ let () =
             test_auto_recoverable_turn_error_includes_wrapped_cascade_exhausted_hard_quota;
           test_case "auto-recoverable includes filtered candidates cascade exhaustion" `Quick
             test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaustion;
+          test_case "auto-recoverable includes resumable CLI session error" `Quick
+            test_auto_recoverable_turn_error_includes_resumable_cli_session_error;
+          test_case "cascade exhausted surface includes resumable CLI session error" `Quick
+            test_cascade_exhausted_error_includes_resumable_cli_session_error;
           test_case "bounded OAS timeout keeps adaptive timeout under full budget" `Quick
             test_bounded_oas_timeout_uses_adaptive_when_budget_is_large;
           test_case "bounded OAS timeout caps to remaining turn budget" `Quick

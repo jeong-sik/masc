@@ -184,6 +184,8 @@ let blocker_class_of_sdk_error (err : Oas.Error.sdk_error) : blocker_class optio
   match Oas_worker_named.classify_masc_internal_error err with
   | Some (Oas_worker_named.Cascade_exhausted { reason; _ }) ->
       Some (Cascade_exhausted reason)
+  | Some (Oas_worker_named.Resumable_cli_session { detail; _ }) ->
+      Some (Cascade_exhausted (Other_detail detail))
   | Some (Oas_worker_named.No_tool_capable_provider _) ->
       Some No_tool_capable_provider
   | Some (Oas_worker_named.Accept_rejected _) ->

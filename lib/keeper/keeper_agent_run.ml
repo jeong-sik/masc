@@ -303,6 +303,10 @@ type tool_surface_metrics =
 
 type computed_tool_surface =
   { all_allowed : string list
+  ; absolute_turn : int
+  ; checkpoint_start_turn : int
+  ; per_call_turn : int
+  ; per_call_max_turns : int
   ; core_count : int
   ; deterministic_prefilter_count : int
   ; discovered_count : int
@@ -1513,6 +1517,10 @@ let run_turn
     in
     {
       all_allowed;
+      absolute_turn = turn;
+      checkpoint_start_turn = start_turn_count;
+      per_call_turn;
+      per_call_max_turns = max_turns;
       core_count;
       deterministic_prefilter_count = List.length deterministic_prefilter;
       discovered_count;
@@ -1851,7 +1859,8 @@ let run_turn
                   append_ctx
                     ctx
                     (Printf.sprintf
-                       "[LAST TURN] Turn %d/%d. This is your final turn. You MUST emit a \
+                       "[LAST TURN] Per-call turn %d/%d. This is your final turn in this \
+                        Agent.run call. You MUST emit a \
                         [STATE]...[/STATE] block now summarizing what you accomplished \
                         and what the next generation should do. Do NOT start new tool \
                         work. Three escape hatches, in priority order: \
@@ -1862,8 +1871,8 @@ let run_turn
                         decision you cannot make alone; \
                         (3) if you claimed a task, call keeper_task_done NOW before \
                        session ends."
-                       turn
-                       max_turns)
+                       computed_surface.per_call_turn
+                       computed_surface.per_call_max_turns)
                 else if is_retry
                 then
                   append_ctx
@@ -1879,23 +1888,27 @@ let run_turn
                   append_ctx
                     ctx
                     (Printf.sprintf
-                       "[BUDGET] %d/%d turns used. Wrap up current work and emit a \
+                       "[BUDGET] %d/%d turns used in this Agent.run call. Wrap up current \
+                        work and emit a \
                         [STATE] block. If more turns will genuinely finish the task, \
                         call extend_turns. If you are blocked on a decision or \
                         external input, post a question to the board via \
                         masc_board_post rather than burning turns retrying — that is \
                         the intended judgment-escalation path."
-                       turn
-                       max_turns)
+                       computed_surface.per_call_turn
+                       computed_surface.per_call_max_turns)
                 else ctx
               in
               if computed_surface.is_warning_zone
               then
                 Log.Keeper.info
-                  "keeper:%s turn_budget turn=%d/%d last_turn=%b"
+                  "keeper:%s per_call_turn_budget absolute_turn=%d checkpoint_start_turn=%d \
+                   per_call_turn=%d/%d last_turn=%b"
                   meta.name
-                  turn
-                  max_turns
+                  computed_surface.absolute_turn
+                  computed_surface.checkpoint_start_turn
+                  computed_surface.per_call_turn
+                  computed_surface.per_call_max_turns
                   computed_surface.is_last_turn;
               let all_allowed = computed_surface.all_allowed in
               let tool_filter = Oas.Guardrails.AllowList all_allowed in
@@ -1984,6 +1997,9 @@ let run_turn
                    ; "event", `String "tool_disclosure"
                    ; "keeper_name", `String meta.name
                    ; "turn", `Int turn
+                   ; "checkpoint_start_turn", `Int computed_surface.checkpoint_start_turn
+                   ; "per_call_turn", `Int computed_surface.per_call_turn
+                   ; "per_call_max_turns", `Int computed_surface.per_call_max_turns
                    ; "selection_mode", `String computed_surface.selection_mode
                    ; "core_count", `Int computed_surface.core_count
                    ; "deterministic_prefilter_count", `Int computed_surface.deterministic_prefilter_count

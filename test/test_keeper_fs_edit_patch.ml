@@ -39,7 +39,7 @@ let rec ensure_dir path =
     if p <> path then ensure_dir p;
     Unix.mkdir path 0o755)
 
-let make_meta name =
+let make_meta ?(sandbox = Keeper_types.Local) name =
   let json =
     `Assoc
       [
@@ -48,6 +48,8 @@ let make_meta name =
         ("trace_id", `String ("trace-" ^ name));
         ("goal", `String "patch test");
         ("allowed_paths", `List [ `String "*" ]);
+        ( "sandbox_profile",
+          `String (Keeper_types.sandbox_profile_to_string sandbox) );
       ]
   in
   match Keeper_types.meta_of_json json with
@@ -57,16 +59,20 @@ let make_meta name =
 let with_eio_fs f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Process_eio.init
+    ~cwd_default:(Eio.Stdenv.cwd env)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
   f ()
 
-let setup f =
+let setup ?(sandbox = Keeper_types.Local) f =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base ".masc");
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.clear ();
   let config = Coord.default_config base in
-  let meta = make_meta "tester" in
+  let meta = make_meta ~sandbox "tester" in
   let playground =
     Filename.concat base
       (Keeper_alerting_path.playground_path_of_keeper meta.name)

@@ -177,6 +177,11 @@ let handle_keeper_fs_edit
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
+  let via_field =
+    match turn_sandbox_runtime with
+    | Some _ -> [ ("via", `String "docker") ]
+    | None -> []
+  in
   let path = Safe_ops.json_string ~default:"" "path" args in
   let content = Safe_ops.json_string ~default:"" "content" args in
   let mode_raw =
@@ -237,13 +242,14 @@ let handle_keeper_fs_edit
                   (String.length updated);
                 Yojson.Safe.to_string
                   (`Assoc
-                      [ "ok", `Bool true
-                      ; "path", `String target
-                      ; "mode", `String "patch"
-                      ; "replace_all", `Bool replace_all
-                      ; "occurrences", `Int occurrences
-                      ; "bytes_written", `Int (String.length updated)
-                      ])
+                      ([ "ok", `Bool true
+                       ; "path", `String target
+                       ; "mode", `String "patch"
+                       ; "replace_all", `Bool replace_all
+                       ; "occurrences", `Int occurrences
+                       ; "bytes_written", `Int (String.length updated)
+                       ]
+                      @ via_field))
           with
           | Invalid_argument e ->
             error_json ~fields:[ "path", `String target ] e
@@ -290,11 +296,12 @@ let handle_keeper_fs_edit
          (String.length content);
        Yojson.Safe.to_string
          (`Assoc
-             [ "ok", `Bool true
-             ; "path", `String target
-             ; "mode", `String mode_label
-             ; "bytes_written", `Int (String.length content)
-             ])
+             ([ "ok", `Bool true
+              ; "path", `String target
+              ; "mode", `String mode_label
+              ; "bytes_written", `Int (String.length content)
+              ]
+             @ via_field))
      with
      | Invalid_argument e -> error_json ~fields:[ "path", `String target ] e
      | Sys_error e -> error_json ~fields:[ "path", `String target ] e

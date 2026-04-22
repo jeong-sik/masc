@@ -85,6 +85,8 @@ Core fields:
 - `repo_config_seed_path`: checked-in seed config, when discoverable
 - `keeper_runtime_toml_present`: whether active runtime tuning exists at
   `<active_config_root>/keeper_runtime.toml`
+- `sandbox_preflight`: Docker keeper sandbox readiness (`docker` daemon,
+  local image presence, required commands, hardening checks)
 
 Important interpretation:
 
@@ -93,6 +95,9 @@ Important interpretation:
 - `shadowed` means both roots exist, but the explicit env root wins.
 - `missing_init` means the supported active root is not ready even if other
   fallback locations exist elsewhere on disk.
+- `sandbox_preflight` is independent of config init state. Even when no live
+  config root exists yet, `doctor` still reports whether the default Docker
+  keeper sandbox image can actually run.
 
 ## Secondary Proof Surfaces
 

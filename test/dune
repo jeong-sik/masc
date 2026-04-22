@@ -12,7 +12,8 @@
    (MASC_BASE_PATH "")
    ; Avoid non-deterministic external network calls during unit tests.
    (GRAPHQL_API_KEY "")
-   (ZAI_API_KEY ""))))
+   (ZAI_API_KEY "")
+   (MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false))))
 
 ; ============================================================
 ; All standard tests share the masc_test_deps wrapper library

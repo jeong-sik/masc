@@ -357,6 +357,10 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
   let history_fragment_filter_enabled =
     bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
   in
+  let sandbox_preflight_json =
+    Keeper_sandbox_runtime.docker_preflight ~timeout_sec:10.0 ()
+    |> Option.map Keeper_sandbox_runtime.docker_preflight_to_yojson
+  in
   let series_points = 120 in
   let names = keeper_names config in
   let now_ts = Time_compat.now () in
@@ -616,6 +620,11 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                    && Env_config_keeper.DockerPlayground.enabled)
             then Some (Env_config_keeper.KeeperSandbox.docker_image ())
             else None
+          in
+          let sandbox_preflight =
+            match effective_sandbox_image, sandbox_preflight_json with
+            | Some _, Some preflight -> Some preflight
+            | _ -> None
           in
           (* reconcile_status removed with manual_reconcile blocker system. *)
           let runtime_blocker_fields =
@@ -918,6 +927,8 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 `String (Keeper_types.sandbox_profile_to_string m.sandbox_profile));
               ("sandbox_last_error",
                 Json_util.string_opt_to_json sandbox_last_error);
+              ("sandbox_preflight",
+                Json_util.option_to_yojson Fun.id sandbox_preflight);
               ("effective_sandbox_image",
                 Json_util.string_opt_to_json effective_sandbox_image);
               ("runtime_trust", runtime_trust);
@@ -1341,6 +1352,15 @@ let keeper_config_json (config : Coord.config) (name : string)
         then Some (Env_config_keeper.KeeperSandbox.docker_image ())
         else None
       in
+      let sandbox_preflight_json =
+        Keeper_sandbox_runtime.docker_preflight ~timeout_sec:10.0 ()
+        |> Option.map Keeper_sandbox_runtime.docker_preflight_to_yojson
+      in
+      let sandbox_preflight =
+        match effective_sandbox_image, sandbox_preflight_json with
+        | Some _, Some preflight -> Some preflight
+        | _ -> None
+      in
       let private_workspace_root =
         Filename.concat
           (Keeper_alerting_path.project_root_of_config config)
@@ -1376,6 +1396,8 @@ let keeper_config_json (config : Coord.config) (name : string)
             `Bool (Env_config_keeper.KeeperSandbox.require_rootless ()));
           ("require_userns",
             `Bool (Env_config_keeper.KeeperSandbox.require_userns ()));
+          ("preflight",
+            Json_util.option_to_yojson Fun.id sandbox_preflight);
         ]
       in
       (`OK,
@@ -1387,6 +1409,8 @@ let keeper_config_json (config : Coord.config) (name : string)
          ("shared_memory_scope",
            `String (Keeper_types.shared_memory_scope_to_string m.shared_memory_scope));
          ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
+         ("sandbox_preflight",
+           Json_util.option_to_yojson Fun.id sandbox_preflight);
          ("effective_sandbox_image",
            Json_util.string_opt_to_json effective_sandbox_image);
          ("private_workspace_root", `String private_workspace_root);

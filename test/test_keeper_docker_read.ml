@@ -12,6 +12,7 @@ module Keeper_turn_sandbox_runtime = Masc_mcp.Keeper_turn_sandbox_runtime
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
+module Keeper_sandbox_runtime = Masc_mcp.Keeper_sandbox_runtime
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 
@@ -51,6 +52,17 @@ let read_file path =
   let ic = open_in_bin path in
   Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
   really_input_string ic (in_channel_length ic)
+
+let contains_substring haystack needle =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  let rec loop i =
+    if nlen = 0 then true
+    else if i + nlen > hlen then false
+    else if String.sub haystack i nlen = needle then true
+    else loop (i + 1)
+  in
+  loop 0
 
 let rec ensure_dir path =
   if path = "" || path = "." || path = "/" then ()
@@ -327,6 +339,87 @@ esac\n\
 printf 'unexpected docker invocation\\n' >&2\n\
 exit 2\n"
 
+let fake_docker_preflight_ok_script =
+  "#!/bin/sh\n\
+case \"$1\" in\n\
+  info)\n\
+    printf '[]\\n'\n\
+    exit 0\n\
+    ;;\n\
+  image)\n\
+    if [ \"$2\" = \"inspect\" ] && [ \"$3\" = \"alpine:test\" ]; then\n\
+      printf '[]\\n'\n\
+      exit 0\n\
+    fi\n\
+    printf 'missing image\\n' >&2\n\
+    exit 1\n\
+    ;;\n\
+  run)\n\
+    printf ''\n\
+    exit 0\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
+let fake_docker_preflight_missing_image_script =
+  "#!/bin/sh\n\
+case \"$1\" in\n\
+  info)\n\
+    printf '[]\\n'\n\
+    exit 0\n\
+    ;;\n\
+  image)\n\
+    printf 'Error: No such image: %s\\n' \"$3\" >&2\n\
+    exit 1\n\
+    ;;\n\
+  run)\n\
+    printf 'run should not execute when image inspect fails\\n' >&2\n\
+    exit 2\n\
+    ;;\n\
+esac\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
+let test_docker_preflight_reports_ready_image () =
+  with_fake_docker fake_docker_preflight_ok_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  match Keeper_sandbox_runtime.docker_preflight ~timeout_sec:5.0 () with
+  | None -> Alcotest.fail "expected docker preflight report"
+  | Some preflight ->
+      Alcotest.(check bool) "preflight ok" true preflight.ok;
+      Alcotest.(check bool) "image present" true preflight.image_present;
+      Alcotest.(check (list string)) "no missing commands" []
+        preflight.missing_commands
+
+let test_docker_preflight_surfaces_missing_image_actions () =
+  with_fake_docker fake_docker_preflight_missing_image_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  match Keeper_sandbox_runtime.docker_preflight ~timeout_sec:5.0 () with
+  | None -> Alcotest.fail "expected docker preflight report"
+  | Some preflight ->
+      Alcotest.(check bool) "preflight fails" false preflight.ok;
+      Alcotest.(check bool) "image missing" false preflight.image_present;
+      Alcotest.(check bool) "next actions mention build script" true
+        (List.exists
+           (fun action ->
+             String.contains action 'b'
+             && contains_substring action
+                  "scripts/build-keeper-sandbox-image.sh")
+           preflight.next_actions);
+      Alcotest.(check bool) "failure message mentions build script" true
+        (contains_substring
+           (Keeper_sandbox_runtime.docker_preflight_failure_message preflight)
+           "scripts/build-keeper-sandbox-image.sh")
+
 let test_run_command_nonzero_exit_errors_by_default () =
   with_fake_docker fake_docker_exit_1_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -493,5 +586,12 @@ let () =
             test_run_command_preserves_bare_command_argv;
           Alcotest.test_case "turn runtime reuses single container" `Quick
             test_turn_runtime_reuses_single_container;
+        ] );
+      ( "docker_preflight",
+        [
+          Alcotest.test_case "ready image reports ok" `Quick
+            test_docker_preflight_reports_ready_image;
+          Alcotest.test_case "missing image surfaces remediation" `Quick
+            test_docker_preflight_surfaces_missing_image_actions;
         ] );
     ]

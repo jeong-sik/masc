@@ -1809,6 +1809,7 @@ let handle_keeper_shell
            (Keeper_alerting_path.playground_path_of_keeper meta.name) in
          let repos_dir = Filename.concat root
            (Keeper_alerting_path.playground_repos_path meta.name) in
+         Fs_compat.mkdir_p repos_dir;
          (* Derive repo name from URL: strip trailing slash, .git, then basename.
             Guard against empty/traversal names (e.g. url ending with "/" or ".."). *)
          let repo_name =
@@ -1836,8 +1837,19 @@ let handle_keeper_shell
          if Fs_compat.file_exists clone_path then
            (* Already cloned — pull latest instead *)
            let st, out =
-             Process_eio.run_argv_with_status ~timeout_sec:60.0
-               [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
+             if meta.sandbox_profile = Docker then
+               match
+                 run_docker_shell_command_with_status ~config ~meta ~cwd:repos_dir
+                   ~timeout_sec:60.0
+                   ~cmd:(Printf.sprintf "git -C %s pull --ff-only"
+                           (Filename.quote repo_name))
+                   ~git_creds_enabled:true ~network_mode:Network_inherit
+               with
+               | Ok result -> (result.status, result.output)
+               | Error msg -> (Unix.WEXITED 127, msg)
+             else
+               Process_eio.run_argv_with_status ~timeout_sec:60.0
+                 [ "git"; "-C"; clone_path; "pull"; "--ff-only" ]
            in
            if st = Unix.WEXITED 0 then
              update_playground_repo_cache
@@ -1845,13 +1857,18 @@ let handle_keeper_shell
                ~action:"pull" ~shallow:false;
            Yojson.Safe.to_string
              (`Assoc
-                 [ "ok", `Bool (st = Unix.WEXITED 0)
-                 ; "op", `String op
-                 ; "action", `String "pull"
-                 ; "path", `String clone_path
-                 ; "status", Keeper_alerting_path.process_status_to_json st
-                 ; "output", `String out
-                 ])
+                 ([ "ok", `Bool (st = Unix.WEXITED 0)
+                  ; "op", `String op
+                  ; "action", `String "pull"
+                  ; "path", `String clone_path
+                  ; "status", Keeper_alerting_path.process_status_to_json st
+                  ; "output", `String out
+                  ]
+                 @
+                 (if meta.sandbox_profile = Docker then
+                    [ "via", `String "docker" ]
+                  else
+                    [])))
          else
            let depth = Keeper_tool_policy.clone_depth () |> max 0 in
            let depth_args =
@@ -1859,9 +1876,24 @@ let handle_keeper_shell
            in
            let shallow = depth > 0 in
            let st, out =
-             Process_eio.run_argv_with_status
-               ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
-               ("git" :: "clone" :: depth_args @ [ url; clone_path ])
+             if meta.sandbox_profile = Docker then
+               let clone_cmd =
+                 String.concat " "
+                   (List.map Filename.quote
+                      ("git" :: "clone" :: depth_args @ [ url; repo_name ]))
+               in
+               match
+                 run_docker_shell_command_with_status ~config ~meta ~cwd:repos_dir
+                   ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
+                   ~cmd:clone_cmd
+                   ~git_creds_enabled:true ~network_mode:Network_inherit
+               with
+               | Ok result -> (result.status, result.output)
+               | Error msg -> (Unix.WEXITED 127, msg)
+             else
+               Process_eio.run_argv_with_status
+                 ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
+                 ("git" :: "clone" :: depth_args @ [ url; clone_path ])
            in
            if st = Unix.WEXITED 0 then
              update_playground_repo_cache
@@ -1869,13 +1901,18 @@ let handle_keeper_shell
                ~action:"clone" ~shallow;
            Yojson.Safe.to_string
              (`Assoc
-                 [ "ok", `Bool (st = Unix.WEXITED 0)
-                 ; "op", `String op
-                 ; "action", `String "clone"
-                 ; "path", `String clone_path
-                 ; "status", Keeper_alerting_path.process_status_to_json st
-                 ; "output", `String out
-                 ]))
+                 ([ "ok", `Bool (st = Unix.WEXITED 0)
+                  ; "op", `String op
+                  ; "action", `String "clone"
+                  ; "path", `String clone_path
+                  ; "status", Keeper_alerting_path.process_status_to_json st
+                  ; "output", `String out
+                  ]
+                 @
+                 (if meta.sandbox_profile = Docker then
+                    [ "via", `String "docker" ]
+                  else
+                    []))))
   | "gh" ->
     let raw_cmd_str = Safe_ops.json_string ~default:"" "cmd" args in
     (* gh runs against remote network. Prior floors (1s, then 5s) kept
@@ -1935,6 +1972,12 @@ let handle_keeper_shell
             (Keeper_gh_shared.render_simple_gh_command cmd)
         in
         let gh_base ~ok ~cwd ~command extras =
+          let route_fields =
+            if meta.sandbox_profile = Docker then
+              [ "via", `String "docker" ]
+            else
+              []
+          in
           Yojson.Safe.to_string
             (`Assoc
                 ([ "ok", `Bool ok
@@ -1942,7 +1985,7 @@ let handle_keeper_shell
                  ; "cwd", `String cwd
                  ; "command", `String command
                  ; "reversibility", `String rev_tag
-                 ] @ extras))
+                 ] @ route_fields @ extras))
         in
         let run_gh_command ~display_command ~parsed_command ~cwd
             ~(ctx : gh_repo_context option) =

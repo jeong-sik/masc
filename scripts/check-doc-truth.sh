@@ -95,9 +95,22 @@ require_contains docs/QUICK-START.md 'scripts/release-evidence.sh _build/default
 
 require_contains README.md 'docs/RELEASE-EVIDENCE.md'
 require_not_contains README.md '/api/v1/command-plane'
+require_contains README.md 'dashboard#monitoring?section=journey'
+require_contains README.md 'dashboard#command?section=operations'
+require_contains README.md 'dashboard#connectors?section=connector-status'
+require_contains README.md 'dashboard#workspace?section=verification'
+require_not_contains README.md 'dashboard#monitoring/sessions'
+require_not_contains README.md 'dashboard#command/intervene'
 
 require_contains docs/PRODUCT-OPERATING-PLAN.md 'Release evidence and local proof'
 require_contains docs/PRODUCT-OPERATING-PLAN.md 'Retired compatibility lanes and research material remain in-tree for history'
+
+require_contains docs/DASHBOARD-INTEGRATION.md '- `monitoring`'
+require_contains docs/DASHBOARD-INTEGRATION.md '- `connectors`'
+require_contains docs/DASHBOARD-INTEGRATION.md '- `#workspace?section=verification`'
+require_contains docs/DASHBOARD-INTEGRATION.md '- `command:intervene -> command:operations`'
+require_not_contains docs/DASHBOARD-INTEGRATION.md '- `mission`: what needs attention now'
+require_not_contains docs/DASHBOARD-INTEGRATION.md '- `intervene`: mutating operator actions'
 
 require_contains docs/spec/A-existing-doc-index.md '`docs/RELEASE-EVIDENCE.md` | Canonical'
 require_not_contains docs/spec/A-existing-doc-index.md '`docs/COMMAND-PLANE-RUNBOOK.md` | Canonical'
@@ -123,9 +136,17 @@ require_not_contains docs/spec/09-server-transport.md '| Command Plane (R) |'
 
 require_contains docs/spec/10-dashboard.md '| `/api/v1/keepers/:name/config` | POST | Keeper config 수정 (PATCH semantic) |'
 require_contains docs/spec/10-dashboard.md 'command-plane.ts         -- Historical compatibility types'
+require_contains docs/spec/10-dashboard.md '#monitoring?section=journey'
+require_contains docs/spec/10-dashboard.md '#command?section=operations'
+require_contains docs/spec/10-dashboard.md '#connectors?section=connector-status'
+require_contains docs/spec/10-dashboard.md '#workspace?section=verification'
+require_contains docs/spec/10-dashboard.md '| `/api/v1/verification/requests` | GET | Workspace > 검증 read model |'
+require_contains docs/spec/10-dashboard.md '| `/api/v1/gate/connectors` | GET | Connectors surface descriptor + live status |'
 require_not_contains docs/spec/10-dashboard.md '| `/api/v1/keepers/:name/config` | PATCH |'
 require_not_contains docs/spec/10-dashboard.md '| `/api/v1/command-plane` | GET |'
 require_not_contains docs/spec/10-dashboard.md 'command-plane.ts         -- Command plane types'
+require_not_contains docs/spec/10-dashboard.md '#monitoring?section=sessions'
+require_not_contains docs/spec/10-dashboard.md '#command?section=intervene'
 
 # Regression locks for retired surfaces (team_session / chain purge).
 # Each lock pins an already-merged PR claim so future doc edits

@@ -281,10 +281,12 @@ For planner / implementer / supervisor separation:
 
 ### 3. Dashboard and Keeper Surfaces
 
-- Monitoring: `http://127.0.0.1:<PORT>/dashboard#monitoring/sessions`
-- Ops Queue: `http://127.0.0.1:<PORT>/dashboard#command/intervene`
-- Workspace: `http://127.0.0.1:<PORT>/dashboard#workspace/board`
-- Lab: `http://127.0.0.1:<PORT>/dashboard#lab/tools`
+- Monitoring: `http://127.0.0.1:<PORT>/dashboard#monitoring?section=journey`
+- Fleet Health: `http://127.0.0.1:<PORT>/dashboard#monitoring?section=fleet-health`
+- Ops: `http://127.0.0.1:<PORT>/dashboard#command?section=operations`
+- Connectors: `http://127.0.0.1:<PORT>/dashboard#connectors?section=connector-status`
+- Workspace: `http://127.0.0.1:<PORT>/dashboard#workspace?section=verification`
+- Lab: `http://127.0.0.1:<PORT>/dashboard#lab?section=tools`
 
 The dashboard is a read-heavy UI for repo coordination and keeper/runtime visibility. Canonical write paths remain MCP tools.
 
@@ -322,6 +324,7 @@ Smoke checks (with running server):
 ```bash
 curl -sS http://127.0.0.1:8935/health
 grpcurl -plaintext 127.0.0.1:8936 grpc.health.v1.Health/Check
+scripts/verify-dashboard.sh http://127.0.0.1:8935
 make release-evidence
 ```
 

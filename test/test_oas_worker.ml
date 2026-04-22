@@ -671,7 +671,7 @@ let test_sdk_error_is_hard_quota_keeps_transient_network_errors_false () =
       (Llm_provider.Retry.NetworkError
          {
            message = "gemini exited with code 1: connection reset by peer";
-           kind = Llm_provider.Http_client.Unknown;
+           kind = Llm_provider.Http_client.Connection_refused;
          })
   in
   Alcotest.(check bool) "transient network error stays transient" false

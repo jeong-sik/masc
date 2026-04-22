@@ -2129,7 +2129,7 @@ let test_is_context_overflow_only_for_overflow_errors () =
           (NetworkError
              {
                message = "Connection_reset";
-               kind = Llm_provider.Http_client.Unknown;
+               kind = Llm_provider.Http_client.Connection_refused;
              })));
   check bool "Internal does not match" false
     (EC.is_context_overflow
@@ -2448,10 +2448,7 @@ let test_overflow_detection_and_limit_parsing () =
     (EC.is_context_overflow
        (Agent_sdk.Error.Api
           (NetworkError
-             {
-               message = "timeout";
-               kind = Llm_provider.Http_client.Timeout;
-             })))
+             { message = "timeout"; kind = Llm_provider.Http_client.Timeout })))
 
 let test_side_effect_timeout_reclassified_as_persistent () =
   let original =
@@ -4026,7 +4023,7 @@ let () =
                     (NetworkError
                        {
                          message = "Connection_reset";
-                         kind = Llm_provider.Http_client.Unknown;
+                         kind = Llm_provider.Http_client.Connection_refused;
                        }))));
           test_case "Timeout detected" `Quick (fun () ->
             check bool "timeout" true

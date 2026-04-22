@@ -3,6 +3,7 @@ import {
   fetchCascadeClientCapacityHistory,
   fetchCascadeConfig as fetchCascadeConfigFromCascade,
   fetchCascadeStrategyTrace,
+  updateCascadeConfigRaw,
   updateKeeperCascade,
 } from './dashboard-cascade'
 import { fetchCascadeConfig as fetchCascadeConfigFromDashboard } from './dashboard'
@@ -75,5 +76,34 @@ describe('dashboard cascade split', () => {
       cascade_name: 'big_three',
     }))
     expect(result.ok).toBe(true)
+  })
+
+  it('posts cascade source edits as source_text', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        updated_at: '2026-04-22T00:00:00Z',
+        config_path: '/tmp/config/cascade.json',
+        source_kind: 'toml',
+        source_path: '/tmp/config/cascade.toml',
+        validation_status: 'validated',
+        validation_errors: [],
+        invalid_profiles: [],
+        profiles: [],
+        keeper_profiles: [],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await updateCascadeConfigRaw('[big_three]\nmodels = ["glm-coding:auto"]\n')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/cascade/config/raw')
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
+      source_text: '[big_three]\nmodels = ["glm-coding:auto"]\n',
+    }))
   })
 })

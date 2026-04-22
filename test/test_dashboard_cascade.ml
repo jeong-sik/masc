@@ -312,7 +312,7 @@ let test_raw_config_toml_source_is_read_only () =
     {|
 comment = "test"
 
-[keeper_unified]
+[big_three]
 models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
 |}
   in
@@ -379,7 +379,7 @@ let test_save_raw_config_json_persists_and_refreshes_projection () =
 let test_save_raw_config_json_rejects_toml_source () =
   let toml =
     {|
-[keeper_unified]
+[big_three]
 models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
 |}
   in

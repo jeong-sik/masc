@@ -129,7 +129,7 @@ let test_current_status_lines_uses_short_cache_and_no_optional_locks () =
         [ "--no-optional-locks"; "status"; "--porcelain" ]
         (List.hd !calls))
 
-let test_current_status_lines_does_not_cache_clean_status () =
+let test_current_status_lines_caches_clean_status () =
   Wlc.clear_status_cache_for_tests ();
   let calls = ref 0 in
   Wlc.set_git_capture_hook_for_tests (fun ~workdir:_ _args ->
@@ -144,7 +144,7 @@ let test_current_status_lines_does_not_cache_clean_status () =
         (Wlc.current_status_lines ~repo_root:"/tmp/repo");
       check (list string) "second clean status" []
         (Wlc.current_status_lines ~repo_root:"/tmp/repo");
-      check int "clean status is not cached" 2 !calls)
+      check int "clean status is cached" 1 !calls)
 
 let () =
   run "Worktree_live_context"
@@ -158,7 +158,7 @@ let () =
             test_capture_change_block_in_eio_runtime;
           test_case "status cache uses no optional locks" `Quick
             test_current_status_lines_uses_short_cache_and_no_optional_locks;
-          test_case "status cache skips clean status" `Quick
-            test_current_status_lines_does_not_cache_clean_status;
+          test_case "status cache keeps clean status" `Quick
+            test_current_status_lines_caches_clean_status;
         ] );
     ]

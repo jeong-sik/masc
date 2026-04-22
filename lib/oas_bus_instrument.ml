@@ -21,9 +21,15 @@ type tracked = {
   purpose: string;
   filter: Oas.Event_bus.filter;
   depth: int ref;
+  warned_above_threshold: bool ref;
 }
 
 type handle = tracked
+
+type transition =
+  [ `Warn of string * int
+  | `Recovered of string * int
+  ]
 
 (* Module-global registry of active tracked subscriptions. Bounded by
    the number of live MASC subscribers (today: ~4). Not a hotspot. *)
@@ -49,7 +55,15 @@ let update_gauge_for purpose value =
 
 let subscribe ~purpose ?(filter = Oas.Event_bus.accept_all) bus =
   let sub = Oas.Event_bus.subscribe ~filter bus in
-  let t = { sub; purpose; filter; depth = ref 0 } in
+  let t =
+    {
+      sub;
+      purpose;
+      filter;
+      depth = ref 0;
+      warned_above_threshold = ref false;
+    }
+  in
   with_registry (fun () -> registry := t :: !registry);
   update_gauge_for purpose 0;
   t
@@ -103,24 +117,40 @@ let publish bus (evt : Oas.Event_bus.event) =
         Prometheus.inc_counter counter_publish_block_seconds ~delta:elapsed ())
     (fun () -> Oas.Event_bus.publish bus evt)
 
-let snapshot_depths () =
+let compute_threshold_transitions ~warn_threshold : transition list =
   with_registry (fun () ->
-    List.map (fun t -> (t.purpose, !(t.depth))) !registry)
+    List.filter_map
+      (fun t ->
+        let depth = !(t.depth) in
+        let above_threshold = depth > warn_threshold in
+        let was_above_threshold = !(t.warned_above_threshold) in
+        if above_threshold && not was_above_threshold then begin
+          t.warned_above_threshold := true;
+          Some (`Warn (t.purpose, depth))
+        end else if (not above_threshold) && was_above_threshold then begin
+          t.warned_above_threshold := false;
+          Some (`Recovered (t.purpose, depth))
+        end else
+          None)
+      !registry)
 
 let start_sampler ~sw ~clock ?(interval_s = 5.0) ?(warn_threshold = 200) () =
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       (try
-        let depths = snapshot_depths () in
-        List.iter
-          (fun (purpose, depth) ->
-            if depth > warn_threshold then
-              Log.Misc.warn
-                "oas_bus_instrument: subscriber_purpose=%s depth=%d exceeds \
-                 warn_threshold=%d — OAS publish may be blocking on bounded \
-                 Eio.Stream (default buffer 256)"
-                purpose depth warn_threshold)
-          depths
+        compute_threshold_transitions ~warn_threshold
+        |> List.iter (function
+             | `Warn (purpose, depth) ->
+               Log.Misc.warn
+                 "oas_bus_instrument: subscriber_purpose=%s depth=%d exceeds \
+                  warn_threshold=%d — OAS publish may be blocking on bounded \
+                  Eio.Stream (default buffer 256)"
+                 purpose depth warn_threshold
+             | `Recovered (purpose, depth) ->
+               Log.Misc.info
+                 "oas_bus_instrument: subscriber_purpose=%s depth=%d recovered \
+                  below warn_threshold=%d"
+                 purpose depth warn_threshold)
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
@@ -132,11 +162,16 @@ let start_sampler ~sw ~clock ?(interval_s = 5.0) ?(warn_threshold = 200) () =
     loop ())
 
 module For_testing = struct
+  type nonrec transition = transition
+
   let current_depth ~purpose =
     with_registry (fun () ->
       match List.find_opt (fun t -> t.purpose = purpose) !registry with
       | Some t -> !(t.depth)
       | None -> -1)
+
+  let sample_threshold_transitions ~warn_threshold =
+    compute_threshold_transitions ~warn_threshold
 
   let reset () =
     with_registry (fun () -> registry := [])

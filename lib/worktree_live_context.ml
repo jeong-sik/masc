@@ -111,7 +111,7 @@ let status_cache_lookup repo_root ~now ~ttl =
   end
 
 let status_cache_store repo_root lines ~now ~ttl =
-  if ttl > 0.0 && lines <> [] then begin
+  if ttl > 0.0 then begin
     Stdlib.Mutex.lock status_cache_mu;
     Fun.protect
       ~finally:(fun () -> Stdlib.Mutex.unlock status_cache_mu)

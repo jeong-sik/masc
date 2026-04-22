@@ -1018,8 +1018,9 @@ let test_oas_worker_exec_build_supports_kimi_cli () =
       ~name:"oas-worker-kimi-cli"
       ~provider_cfg
       ~system_prompt:"system"
-      ~tools:[ make_noop_tool () ]
+      ~tools:[ make_named_noop_tool "masc_status" ]
   in
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent -> Oas.Agent.close agent
@@ -1326,6 +1327,13 @@ let make_kimi_provider_cfg ?(model_id = "kimi-k2.5") () =
     ~request_path:"/chat/completions"
     ()
 
+let make_kimi_cli_provider_cfg ?(model_id = "kimi-for-coding") () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.Kimi_cli
+    ~model_id
+    ~base_url:""
+    ()
+
 let test_cascade_provider_labels_keep_glm_and_glm_coding_distinct () =
   let glm = Masc_mcp.Oas_worker_cascade.provider_name_of_config
       (make_glm_provider_cfg ()) in
@@ -1377,6 +1385,56 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy ()
       Alcotest.fail "expected codex_cli public MCP tools to use runtime MCP lane"
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
+let test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  let tools =
+    [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ]
+  in
+  match
+    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      ~provider_cfg:(make_kimi_cli_provider_cfg ())
+      ~tools
+  with
+  | Ok (effective_tools, Some policy) ->
+      Alcotest.(check int) "runtime lane strips inline tools" 0
+        (List.length effective_tools);
+      Alcotest.(check (list string)) "allowed tool names preserve public MCP set"
+        [ "masc_status"; "masc_tasks" ] policy.allowed_tool_names;
+      Alcotest.(check (list string)) "allowed server names"
+        [ "masc" ] policy.allowed_server_names;
+      Alcotest.(check (list string)) "runtime server name"
+        [ "masc" ]
+        (List.map Llm_provider.Llm_transport.runtime_mcp_server_name policy.servers);
+      Alcotest.(check bool) "strict runtime policy" true policy.strict;
+      Alcotest.(check bool) "builtins disabled" true policy.disable_builtin_tools
+  | Ok (_, None) ->
+      Alcotest.fail "expected kimi_cli public MCP tools to use runtime MCP lane"
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
+let test_resolve_tool_lane_for_kimi_cli_mixed_tools_keeps_public_runtime_subset () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  let tools =
+    [
+      make_named_noop_tool "keeper_board_get";
+      make_named_noop_tool "masc_status";
+      make_named_noop_tool "masc_tasks";
+    ]
+  in
+  match
+    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      ~provider_cfg:(make_kimi_cli_provider_cfg ())
+      ~tools
+  with
+  | Ok (effective_tools, Some policy) ->
+      Alcotest.(check int) "runtime lane strips inline tools" 0
+        (List.length effective_tools);
+      Alcotest.(check (list string)) "public runtime subset preserved"
+        [ "masc_status"; "masc_tasks" ] policy.allowed_tool_names
+  | Ok (_, None) ->
+      Alcotest.fail
+        "expected kimi_cli mixed surface to keep the public MCP runtime subset"
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
 let test_resolve_tool_lane_for_openai_public_tools_keeps_inline_tools () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   let tools =
@@ -1407,6 +1465,185 @@ let test_resolve_tool_lane_for_codex_cli_internal_tools_rejects () =
   | Error (Oas.Error.Config (Oas.Error.InvalidConfig { field; _ })) ->
       Alcotest.(check string) "field" "tool_support" field
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
+let test_resolve_tool_lane_for_kimi_cli_internal_tools_rejects () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  match
+    Oas_worker_exec.resolve_tool_lane_for_oas_tools
+      ~provider_cfg:(make_kimi_cli_provider_cfg ())
+      ~tools:[ make_named_noop_tool "keeper_board_get" ]
+  with
+  | Ok _ ->
+      Alcotest.fail
+        "expected kimi_cli to reject keeper-internal tools without inline tool support"
+  | Error (Oas.Error.Config (Oas.Error.InvalidConfig { field; _ })) ->
+      Alcotest.(check string) "field" "tool_support" field
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
+let test_kimi_mcp_config_json_of_policy_filters_to_allowed_servers () =
+  let policy =
+    {
+      Llm_provider.Llm_transport.empty_runtime_mcp_policy with
+      servers =
+        [
+          Llm_provider.Llm_transport.Http_server
+            {
+              name = "masc";
+              url = "http://127.0.0.1:8947/mcp";
+              headers = [ ("Authorization", "Bearer token") ];
+            };
+          Llm_provider.Llm_transport.Http_server
+            { name = "other"; url = "http://127.0.0.1:9999/mcp"; headers = [] };
+        ];
+      allowed_server_names = [ "masc" ];
+      allowed_tool_names = [ "masc_status" ];
+      strict = true;
+      disable_builtin_tools = true;
+    }
+  in
+  match Oas_worker_exec.kimi_mcp_config_json_of_policy policy with
+  | None -> Alcotest.fail "expected kimi runtime MCP config JSON"
+  | Some raw_json ->
+      let open Yojson.Safe.Util in
+      let json = Yojson.Safe.from_string raw_json in
+      let mcp_servers = json |> member "mcpServers" in
+      Alcotest.(check string) "masc url" "http://127.0.0.1:8947/mcp"
+        (mcp_servers |> member "masc" |> member "url" |> to_string);
+      Alcotest.(check string) "auth header preserved" "Bearer token"
+        (mcp_servers
+         |> member "masc"
+         |> member "headers"
+         |> member "Authorization"
+         |> to_string);
+      Alcotest.(check bool) "disallowed server omitted" true
+        (match mcp_servers |> member "other" with `Null -> true | _ -> false)
+
+let test_runtime_mcp_policy_with_masc_agent_name_upserts_header () =
+  let policy =
+    {
+      Llm_provider.Llm_transport.empty_runtime_mcp_policy with
+      servers =
+        [
+          Llm_provider.Llm_transport.Http_server
+            {
+              name = "masc";
+              url = "http://127.0.0.1:8947/mcp";
+              headers =
+                [
+                  ("Authorization", "Bearer token");
+                  ("x-masc-agent-name", "stale-agent");
+                ];
+            };
+          Llm_provider.Llm_transport.Http_server
+            {
+              name = "other";
+              url = "http://127.0.0.1:9999/mcp";
+              headers = [ ("Authorization", "Other token") ];
+            };
+        ];
+      allowed_server_names = [ "masc"; "other" ];
+      allowed_tool_names = [ "masc_status" ];
+      strict = true;
+      disable_builtin_tools = true;
+    }
+  in
+  let updated =
+    Oas_worker_exec.runtime_mcp_policy_with_masc_agent_name
+      ~agent_name:"keeper-sangsu-agent" policy
+  in
+  let find_http_headers name =
+    List.find_map
+      (function
+        | Llm_provider.Llm_transport.Http_server server
+          when String.equal server.name name -> Some server.headers
+        | _ -> None)
+      updated.servers
+  in
+  match find_http_headers "masc", find_http_headers "other" with
+  | Some masc_headers, Some other_headers ->
+      Alcotest.(check (option string)) "masc header injected"
+        (Some "keeper-sangsu-agent")
+        (List.assoc_opt "x-masc-agent-name" masc_headers);
+      Alcotest.(check (option string)) "masc auth preserved"
+        (Some "Bearer token")
+        (List.assoc_opt "Authorization" masc_headers);
+      Alcotest.(check (option string)) "other server unchanged" None
+        (List.assoc_opt "x-masc-agent-name" other_headers)
+  | _ -> Alcotest.fail "expected both masc and other HTTP servers"
+
+let test_kimi_cli_runtime_mcp_jsons_include_request_policy () =
+  let policy =
+    {
+      Llm_provider.Llm_transport.empty_runtime_mcp_policy with
+      servers =
+        [
+          Llm_provider.Llm_transport.Http_server
+            { name = "masc"; url = "http://127.0.0.1:8947/mcp"; headers = [] };
+        ];
+      allowed_server_names = [ "masc" ];
+      allowed_tool_names = [ "masc_status" ];
+      strict = true;
+      disable_builtin_tools = true;
+    }
+  in
+  let merged =
+    Oas_worker_exec.kimi_cli_runtime_mcp_jsons ~base:[] (Some policy)
+  in
+  Alcotest.(check int) "request policy contributes one kimi mcp config" 1
+    (List.length merged);
+  Alcotest.(check bool) "merged config keeps masc MCP url" true
+    (List.exists
+       (contains_substring ~needle:"http://127.0.0.1:8947/mcp")
+       merged)
+
+let test_kimi_cli_build_args_include_runtime_mcp_config () =
+  let policy =
+    {
+      Llm_provider.Llm_transport.empty_runtime_mcp_policy with
+      servers =
+        [
+          Llm_provider.Llm_transport.Http_server
+            { name = "masc"; url = "http://127.0.0.1:8947/mcp"; headers = [] };
+        ];
+      allowed_server_names = [ "masc" ];
+      allowed_tool_names = [ "masc_status" ];
+      strict = true;
+      disable_builtin_tools = true;
+    }
+  in
+  let mcp_config_json =
+    Oas_worker_exec.kimi_cli_runtime_mcp_jsons ~base:[] (Some policy)
+  in
+  let argv =
+    Oas_worker_exec.Kimi_cli_transport_local.build_args
+      ~config:Oas_worker_exec.Kimi_cli_transport_local.default_config
+      ~req_config:(make_kimi_cli_provider_cfg ())
+      ~mcp_config_json
+      ~prompt:"hello"
+  in
+  Alcotest.(check bool) "mcp-config flag present" true
+    (List.mem "--mcp-config" argv);
+  Alcotest.(check bool) "mcp-config payload includes masc MCP url" true
+    (List.exists
+       (contains_substring ~needle:"http://127.0.0.1:8947/mcp")
+       argv)
+
+let test_kimi_cli_model_for_provider_keeps_transport_default_on_auto () =
+  let provider_cfg = make_kimi_cli_provider_cfg () in
+  Alcotest.(check (option string)) "auto uses transport default"
+    Llm_provider.Transport_kimi_cli.default_config.model
+    (Oas_worker_exec.kimi_cli_model_for_provider provider_cfg)
+
+let test_kimi_cli_model_for_provider_keeps_explicit_model () =
+  let provider_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Kimi_cli
+      ~model_id:"kimi-k2.5"
+      ~base_url:"" ()
+  in
+  Alcotest.(check (option string)) "explicit model preserved"
+    (Some "kimi-k2.5")
+    (Oas_worker_exec.kimi_cli_model_for_provider provider_cfg)
 
 let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
   let provider_cfg = make_codex_cli_provider_cfg () in
@@ -1782,6 +2019,7 @@ let tool_result_msg ?(id = "tool-1") text : Agent_sdk.Types.message =
       ];
     name = None;
     tool_call_id = None;
+    metadata = [];
   }
 
 let tool_use_msg ?(id = "tool-1") ?(name = "keeper_fs_read") input
@@ -1792,6 +2030,7 @@ let tool_use_msg ?(id = "tool-1") ?(name = "keeper_fs_read") input
       [ Agent_sdk.Types.ToolUse { id; name; input } ];
     name = None;
     tool_call_id = None;
+    metadata = [];
   }
 
 let test_keeper_checkpoint_store_oas_roundtrip () =
@@ -2505,6 +2744,7 @@ let make_assistant_tool_use_msg name : Agent_sdk.Types.message =
       ];
     name = None;
     tool_call_id = None;
+    metadata = [];
   }
 
 (** Idle error with a preceding tool-use: should append "(tool: <name>)". *)
@@ -2520,10 +2760,10 @@ let test_enrich_idle_detail_with_tool () =
 (** Idle error with no tool use in messages: detail should be unchanged. *)
 let test_enrich_idle_detail_no_tool () =
   let detail = "Idle detected after 3 identical turns" in
-  let messages =
+  let messages : Agent_sdk.Types.message list =
     [ { Agent_sdk.Types.role = Agent_sdk.Types.User;
         content = [ Agent_sdk.Types.Text "hello" ];
-        name = None; tool_call_id = None } ]
+        name = None; tool_call_id = None; metadata = [] } ]
   in
   let result = Oas_worker_exec.enrich_idle_detail detail messages in
   Alcotest.(check string) "unchanged when no tool" detail result
@@ -2668,10 +2908,28 @@ let () =
         test_codex_cli_prompt_preflight_scales_retry_limit_for_argv_only_overflow;
       Alcotest.test_case "public MCP tools on codex_cli use runtime MCP lane" `Quick
         test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy;
+      Alcotest.test_case "public MCP tools on kimi_cli use runtime MCP lane" `Quick
+        test_resolve_tool_lane_for_kimi_cli_public_tools_uses_runtime_mcp_policy;
+      Alcotest.test_case "mixed tool surface on kimi_cli keeps public runtime subset" `Quick
+        test_resolve_tool_lane_for_kimi_cli_mixed_tools_keeps_public_runtime_subset;
       Alcotest.test_case "public MCP tools on openai_compat stay inline" `Quick
         test_resolve_tool_lane_for_openai_public_tools_keeps_inline_tools;
       Alcotest.test_case "keeper-internal tools on codex_cli are rejected" `Quick
         test_resolve_tool_lane_for_codex_cli_internal_tools_rejects;
+      Alcotest.test_case "keeper-internal tools on kimi_cli are rejected" `Quick
+        test_resolve_tool_lane_for_kimi_cli_internal_tools_rejects;
+      Alcotest.test_case "kimi runtime MCP config keeps only allowed servers" `Quick
+        test_kimi_mcp_config_json_of_policy_filters_to_allowed_servers;
+      Alcotest.test_case "runtime MCP policy injects keeper agent header for masc server" `Quick
+        test_runtime_mcp_policy_with_masc_agent_name_upserts_header;
+      Alcotest.test_case "kimi request runtime MCP config is merged" `Quick
+        test_kimi_cli_runtime_mcp_jsons_include_request_policy;
+      Alcotest.test_case "kimi argv includes request runtime MCP config" `Quick
+        test_kimi_cli_build_args_include_runtime_mcp_config;
+      Alcotest.test_case "kimi auto model keeps transport default" `Quick
+        test_kimi_cli_model_for_provider_keeps_transport_default_on_auto;
+      Alcotest.test_case "kimi explicit model is preserved" `Quick
+        test_kimi_cli_model_for_provider_keeps_explicit_model;
       Alcotest.test_case "worker build_agent installs retry policy" `Quick
         test_worker_build_agent_uses_default_internal_retry_policy;
       Alcotest.test_case "resume config propagates retry policy" `Quick

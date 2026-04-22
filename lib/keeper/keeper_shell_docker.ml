@@ -221,31 +221,72 @@ let run_docker_shell_command_with_status
       Ok { status; output; image; network_label }
 
 let run_docker_with_git_bash
+    ?(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
     ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(cwd : string)
     ~(timeout_sec : float)
     ~(cmd : string) =
-  match
-    run_docker_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
-      ~cmd ~git_creds_enabled:true ~network_mode:Network_inherit
-  with
-  | Error message -> error_json message
-  | Ok result ->
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-           ("ok", `Bool (result.status = Unix.WEXITED 0));
-           ("via", `String "docker");
-           ("cwd", `String cwd);
-           ("sandbox_profile", `String "docker");
-           ("git_creds_enabled", `Bool true);
-           ("network_mode", `String result.network_label);
-           ("effective_sandbox_image", `String result.image);
-           ( "status",
-             Keeper_alerting_path.process_status_to_json result.status );
-           ("output", `String result.output);
-         ])
+  let image = Env_config_keeper.KeeperSandbox.docker_image () in
+  let sandbox_error_json message =
+    Keeper_registry.record_error ~base_path:config.base_path meta.name message;
+    error_json message
+  in
+  if String.trim image = "" then
+    sandbox_error_json "keeper sandbox docker image is not configured"
+  else if command_uses_nested_container_runtime cmd then
+    sandbox_error_json
+      "sandbox_profile=docker+git_creds blocks nested container runtimes and host socket references"
+  else
+    match turn_sandbox_runtime with
+    | Some runtime ->
+      (match
+         Keeper_turn_sandbox_runtime.run_bash_with_status runtime
+           ~cwd ~cmd ~timeout_sec ()
+       with
+       | Error message -> sandbox_error_json message
+       | Ok (st, out) ->
+         if st <> Unix.WEXITED 0 then
+           Keeper_registry.record_error ~base_path:config.base_path meta.name
+             (Printf.sprintf "sandbox docker exec failed (%s): %s"
+                image
+                (Worker_dev_tools.truncate_for_log out))
+         else
+           Keeper_registry.clear_error ~base_path:config.base_path meta.name;
+         Yojson.Safe.to_string
+           (`Assoc
+              [
+                ("ok", `Bool (st = Unix.WEXITED 0));
+                ("via", `String "docker");
+                ("cwd", `String cwd);
+                ("sandbox_profile", `String "docker");
+                ("git_creds_enabled", `Bool true);
+                ("network_mode", `String (network_mode_to_string Network_inherit));
+                ("effective_sandbox_image", `String image);
+                ("status", Keeper_alerting_path.process_status_to_json st);
+                ("output", `String out);
+              ]))
+    | None ->
+      match
+        run_docker_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
+          ~cmd ~git_creds_enabled:true ~network_mode:Network_inherit
+      with
+      | Error message -> error_json message
+      | Ok result ->
+        Yojson.Safe.to_string
+          (`Assoc
+             [
+               ("ok", `Bool (result.status = Unix.WEXITED 0));
+               ("via", `String "docker");
+               ("cwd", `String cwd);
+               ("sandbox_profile", `String "docker");
+               ("git_creds_enabled", `Bool true);
+               ("network_mode", `String result.network_label);
+               ("effective_sandbox_image", `String result.image);
+               ( "status",
+                 Keeper_alerting_path.process_status_to_json result.status );
+               ("output", `String result.output);
+             ])
 
 let run_docker_hardened_bash
     ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)

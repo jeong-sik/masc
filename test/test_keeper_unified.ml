@@ -2016,7 +2016,6 @@ let wrapped_claude_limit_error () =
        {
          message =
            "claude exited with code 1: {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've hit your limit · resets Apr 24 at 4am (Asia/Seoul)\"}";
-         kind = Llm_provider.Http_client.Unknown;
        })
 
 let test_fail_open_cascade_after_auto_recoverable_error_falls_back_to_default () =
@@ -2081,7 +2080,11 @@ let test_is_context_overflow_only_for_overflow_errors () =
        (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = None })));
   check bool "NetworkError does not match" false
     (UT.is_context_overflow
-       (Agent_sdk.Error.Api (NetworkError { message = "Connection_reset"; kind = Llm_provider.Http_client.Unknown })));
+       (Agent_sdk.Error.Api
+          (NetworkError
+             {
+               message = "Connection_reset";
+             })));
   check bool "Internal does not match" false
     (UT.is_context_overflow
        (Agent_sdk.Error.Internal "some error"));
@@ -2335,6 +2338,7 @@ let test_sanitize_messages_utf8_cleans_history_path () =
         content = [ Text "hist\000ory\127entry" ];
         name = None;
         tool_call_id = None;
+        metadata = [];
       }
   in
   let tool_msg =
@@ -2353,6 +2357,7 @@ let test_sanitize_messages_utf8_cleans_history_path () =
           ];
         name = None;
         tool_call_id = None;
+        metadata = [];
       }
   in
   let sanitized =
@@ -2395,7 +2400,11 @@ let test_overflow_detection_and_limit_parsing () =
     (Agent_sdk.Retry.extract_context_limit "Network error: connection reset");
   check bool "NetworkError not overflow" false
     (UT.is_context_overflow
-       (Agent_sdk.Error.Api (NetworkError { message = "timeout"; kind = Llm_provider.Http_client.Unknown })))
+       (Agent_sdk.Error.Api
+          (NetworkError
+             {
+               message = "timeout";
+             })))
 
 let test_side_effect_timeout_reclassified_as_persistent () =
   let original =
@@ -2544,7 +2553,10 @@ let test_server_rejected_parse_error_generic_cant_find () =
 let test_server_rejected_parse_error_network_error () =
   let err =
     Agent_sdk.Error.Api
-      (NetworkError { message = "connection refused"; kind = Llm_provider.Http_client.Unknown })
+      (NetworkError
+         {
+           message = "connection refused";
+         })
   in
   check bool "network error is NOT parse error" false
     (UT.is_server_rejected_parse_error err)
@@ -2572,7 +2584,6 @@ let test_auto_recoverable_turn_error_includes_wrapped_hard_quota () =
          {
            message =
              "claude exited with code 1: {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've hit your limit · resets Apr 24 at 4am (Asia/Seoul)\"}";
-           kind = Llm_provider.Http_client.Unknown;
          })
   in
   check bool "wrapped hard quota is auto-recoverable" true
@@ -3962,7 +3973,11 @@ let () =
           test_case "NetworkError detected" `Quick (fun () ->
             check bool "network error" true
               (UT.is_transient_network_error
-                 (Agent_sdk.Error.Api (NetworkError { message = "Connection_reset"; kind = Llm_provider.Http_client.Unknown }))));
+                 (Agent_sdk.Error.Api
+                    (NetworkError
+                       {
+                         message = "Connection_reset";
+                       }))));
           test_case "Timeout detected" `Quick (fun () ->
             check bool "timeout" true
               (UT.is_transient_network_error

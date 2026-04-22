@@ -646,7 +646,6 @@ let test_sdk_error_is_hard_quota_detects_gemini_cli_network_wrapper () =
              "gemini exited with code 1: TerminalQuotaError: You have exhausted \
               your capacity on this model. Your quota will reset after 4h41m7s. \
               reason=QUOTA_EXHAUSTED";
-           kind = Llm_provider.Http_client.Unknown;
          })
   in
   Alcotest.(check bool) "Gemini CLI quota wrapper counts as hard quota" true
@@ -659,7 +658,6 @@ let test_sdk_error_is_hard_quota_detects_claude_cli_limit_wrapper () =
          {
            message =
              "claude exited with code 1: {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've hit your limit · resets Apr 24 at 4am (Asia/Seoul)\"}";
-           kind = Llm_provider.Http_client.Unknown;
          })
   in
   Alcotest.(check bool) "Claude CLI limit wrapper counts as hard quota" true
@@ -669,8 +667,8 @@ let test_sdk_error_is_hard_quota_keeps_transient_network_errors_false () =
   let err =
     Oas.Error.Api
       (Llm_provider.Retry.NetworkError
-         { message = "gemini exited with code 1: connection reset by peer";
-           kind = Llm_provider.Http_client.Unknown;
+         {
+           message = "gemini exited with code 1: connection reset by peer";
          })
   in
   Alcotest.(check bool) "transient network error stays transient" false
@@ -743,7 +741,6 @@ let test_sdk_error_is_hard_quota_detects_claude_cli_limit_wrapper () =
          {
            message =
              "claude exited with code 1: {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've hit your limit · resets Apr 24 at 4am (Asia/Seoul)\"}";
-           kind = Llm_provider.Http_client.Unknown;
          })
   in
   Alcotest.(check bool) "Claude CLI limit wrapper counts as hard quota" true
@@ -2020,6 +2017,7 @@ let tool_result_msg ?(id = "tool-1") text : Agent_sdk.Types.message =
       ];
     name = None;
     tool_call_id = None;
+    metadata = [];
   }
 
 let tool_use_msg ?(id = "tool-1") ?(name = "keeper_fs_read") input
@@ -2030,6 +2028,7 @@ let tool_use_msg ?(id = "tool-1") ?(name = "keeper_fs_read") input
       [ Agent_sdk.Types.ToolUse { id; name; input } ];
     name = None;
     tool_call_id = None;
+    metadata = [];
   }
 
 let test_keeper_checkpoint_store_oas_roundtrip () =
@@ -2743,6 +2742,7 @@ let make_assistant_tool_use_msg name : Agent_sdk.Types.message =
       ];
     name = None;
     tool_call_id = None;
+    metadata = [];
   }
 
 (** Idle error with a preceding tool-use: should append "(tool: <name>)". *)
@@ -2761,7 +2761,7 @@ let test_enrich_idle_detail_no_tool () =
   let messages : Agent_sdk.Types.message list =
     [ { Agent_sdk.Types.role = Agent_sdk.Types.User;
         content = [ Agent_sdk.Types.Text "hello" ];
-        name = None; tool_call_id = None } ]
+        name = None; tool_call_id = None; metadata = [] } ]
   in
   let result = Oas_worker_exec.enrich_idle_detail detail messages in
   Alcotest.(check string) "unchanged when no tool" detail result

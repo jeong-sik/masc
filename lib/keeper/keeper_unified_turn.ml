@@ -982,7 +982,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                           Keeper_registry.Ambiguous_partial_commit {
                             kind = Keeper_registry.Post_commit_failure;
                             detail =
-                              summarize_post_commit_failure
+                              EC.summarize_post_commit_failure
                                 ~tool_names:committed_tools
                                 ~kind:Keeper_registry.Post_commit_failure
                                 err;
@@ -1160,7 +1160,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       Keeper_registry.Ambiguous_partial_commit {
                         kind = Keeper_registry.Post_commit_timeout;
                         detail =
-                          summarize_post_commit_failure
+                          EC.summarize_post_commit_failure
                             ~tool_names:committed_tools
                             ~kind:Keeper_registry.Post_commit_timeout
                             timeout_err;

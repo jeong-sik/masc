@@ -67,3 +67,9 @@ val classify_post_commit_failure :
   ?kind:Keeper_registry.ambiguous_partial_commit_kind ->
   Oas.Error.sdk_error ->
   (Oas.Error.sdk_error * Keeper_registry.failure_reason) option
+
+val summarize_post_commit_failure :
+  tool_names:string list ->
+  kind:Keeper_registry.ambiguous_partial_commit_kind ->
+  Oas.Error.sdk_error ->
+  string

@@ -2021,7 +2021,7 @@ let wrapped_claude_limit_error () =
 
 let test_fail_open_cascade_after_auto_recoverable_error_falls_back_to_default () =
   let fallback =
-    UT.fail_open_cascade_after_auto_recoverable_error
+    EC.fail_open_cascade_after_auto_recoverable_error
       ~base_cascade:"tool_use_strict"
       ~effective_cascade:"tool_use_strict"
       (wrapped_claude_limit_error ())
@@ -2031,7 +2031,7 @@ let test_fail_open_cascade_after_auto_recoverable_error_falls_back_to_default ()
 
 let test_fail_open_cascade_after_auto_recoverable_error_returns_base_after_phase_override () =
   let fallback =
-    UT.fail_open_cascade_after_auto_recoverable_error
+    EC.fail_open_cascade_after_auto_recoverable_error
       ~base_cascade:"tool_use_strict"
       ~effective_cascade:KC.local_recovery_cascade_name
       (wrapped_claude_limit_error ())
@@ -2041,7 +2041,7 @@ let test_fail_open_cascade_after_auto_recoverable_error_returns_base_after_phase
 
 let test_fail_open_cascade_after_auto_recoverable_error_preserves_explicit_local_only () =
   let fallback =
-    UT.fail_open_cascade_after_auto_recoverable_error
+    EC.fail_open_cascade_after_auto_recoverable_error
       ~base_cascade:KC.local_only_cascade_name
       ~effective_cascade:KC.local_only_cascade_name
       (wrapped_claude_limit_error ())
@@ -2051,7 +2051,7 @@ let test_fail_open_cascade_after_auto_recoverable_error_preserves_explicit_local
 
 let test_fail_open_cascade_after_auto_recoverable_error_skips_default_cascade () =
   let fallback =
-    UT.fail_open_cascade_after_auto_recoverable_error
+    EC.fail_open_cascade_after_auto_recoverable_error
       ~base_cascade:KC.default_cascade_name
       ~effective_cascade:KC.default_cascade_name
       (wrapped_claude_limit_error ())

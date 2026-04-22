@@ -411,6 +411,8 @@ let wait_for_startup_phase ~pid ~port ~timeout_s expected_phase =
 let write_invalid_local_only_cascade base_path =
   let config_root = Filename.concat base_path ".masc/config" in
   mkdir_p config_root;
+  let toml_path = Filename.concat config_root "cascade.toml" in
+  if Sys.file_exists toml_path then Sys.remove toml_path;
   write_file
     (Filename.concat config_root "cascade.json")
     {|{
@@ -420,6 +422,8 @@ let write_invalid_local_only_cascade base_path =
 let write_partially_invalid_cascade ~base_path ~valid_model =
   let config_root = Filename.concat base_path ".masc/config" in
   mkdir_p config_root;
+  let toml_path = Filename.concat config_root "cascade.toml" in
+  if Sys.file_exists toml_path then Sys.remove toml_path;
   write_file
     (Filename.concat config_root "cascade.json")
     (Printf.sprintf
@@ -432,6 +436,8 @@ let write_partially_invalid_cascade ~base_path ~valid_model =
 let write_partially_invalid_default_cascade ~base_path ~valid_model =
   let config_root = Filename.concat base_path ".masc/config" in
   mkdir_p config_root;
+  let toml_path = Filename.concat config_root "cascade.toml" in
+  if Sys.file_exists toml_path then Sys.remove toml_path;
   write_file
     (Filename.concat config_root "cascade.json")
     (Printf.sprintf
@@ -488,7 +494,7 @@ let test_default_oas_cascade_timeout_keeps_explicit_override () =
   Alcotest.(check string) "explicit override wins" "45"
     (Sys.getenv "OAS_CASCADE_MODEL_TIMEOUT_SEC")
 
-let test_bootstrap_base_path_config_root_copies_versioned_config () =
+let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
   with_temp_dir "startup-config-bootstrap" (fun dir ->
       let repo = Filename.concat dir "repo" in
       mkdir_p repo;
@@ -507,7 +513,9 @@ let test_bootstrap_base_path_config_root_copies_versioned_config () =
       Alcotest.(check bool) "prompt copied" true
         (Sys.file_exists
            (Filename.concat config_root "prompts/keeper.unified.system.md"));
-      Alcotest.(check bool) "keeper TOML copied" true
+      Alcotest.(check bool) "keepers dir created" true
+        (Sys.file_exists (Filename.concat config_root "keepers"));
+      Alcotest.(check bool) "repo keeper TOML not copied" false
         (Sys.file_exists (Filename.concat config_root "keepers/example.toml")))
 
 let test_bootstrap_base_path_config_root_preserves_existing_root_without_refill () =
@@ -1703,12 +1711,24 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
           let startup_error =
             Yojson.Safe.Util.(startup |> member "last_error" |> to_string)
           in
-          Alcotest.(check bool) "last error mentions default-profile gate" true
-            (contains_substring startup_error
-               "startup catalog validation failed:"
-             &&
-             contains_substring startup_error
-               "required default profile \"big_three\" failed validation");
+          let rejection_prefix = "startup catalog validation failed: " in
+          if not (String.starts_with ~prefix:rejection_prefix startup_error) then
+            Alcotest.failf
+              "last error missing catalog rejection prefix: %S"
+              startup_error;
+          let rejection_json =
+            String.sub startup_error (String.length rejection_prefix)
+              (String.length startup_error - String.length rejection_prefix)
+            |> Yojson.Safe.from_string
+          in
+          let rejection_errors =
+            Yojson.Safe.Util.(rejection_json |> member "errors" |> to_list)
+            |> List.map Yojson.Safe.Util.to_string
+          in
+          Alcotest.(check bool) "last error includes default-profile failure" true
+            (List.mem
+               "required default profile \"big_three\" failed validation"
+               rejection_errors);
           let config_headers, config_body =
             curl_request_capture ~output_dir:dir ~name:"cascade-config-default-invalid"
               ~method_:"GET"
@@ -1743,8 +1763,9 @@ let () =
             "default OAS cascade timeout keeps explicit override"
             `Quick test_default_oas_cascade_timeout_keeps_explicit_override;
           Alcotest.test_case
-            "bootstrap base-path config copies versioned config"
-            `Quick test_bootstrap_base_path_config_root_copies_versioned_config;
+            "bootstrap base-path config copies shared seed only"
+            `Quick
+            test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers;
           Alcotest.test_case
             "bootstrap base-path config preserves existing root without refill"
             `Quick

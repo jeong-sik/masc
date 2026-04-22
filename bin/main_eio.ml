@@ -379,6 +379,20 @@ let run_cmd host port base_path =
     Env_config.strip_path_trailing_slashes (String.trim base_path)
   in
   guard_self_repo_base_path normalized_base_path;
+  if String.equal resolution_source "implicit_home"
+     || String.equal resolution_source "implicit_repo_root"
+  then begin
+    Printf.eprintf
+      "[FATAL] Server refused to start with an implicit base path.\n\
+       Resolution source: %s\n\
+       Resolved path: %s\n\n\
+       Start the server with an explicit base path:\n\
+       \  --base-path /path/to/workspace     (CLI flag)\n\
+       \  MASC_BASE_PATH=/path/to/workspace  (environment variable)\n\n\
+       Use a workspace root, not the repository checkout or $HOME directly.\n"
+      resolution_source normalized_base_path;
+    exit 1
+  end;
   acquire_pid_lock port;
   Log.init_from_env ();
   if stripped_base_path <> ""

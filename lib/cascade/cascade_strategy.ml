@@ -121,10 +121,10 @@ let filter_cooldown adapter ctx cands =
 (* ── Weighted shuffle ───────────────────────────────────────────── *)
 
 (* Weighted-random permutation using effective_weight from the health
-   tracker.  Zero-weight candidates (cooldown) are filtered, with the
-   guarantee that at least one candidate survives (the full input list)
-   to avoid starvation — mirrors
-   [Cascade_config.order_weighted_entries]:435-439. *)
+   tracker. Zero-weight candidates (cooldown) are filtered. When every
+   candidate is cooled down, return [[]] so the caller can surface the
+   filtered-empty state instead of reviving a provider that was
+   intentionally put into cooldown (e.g. hard quota exhausted). *)
 let weighted_shuffle adapter ctx cands =
   (* Compute health-adjusted weight per candidate. *)
   let weighted = List.map
@@ -137,13 +137,6 @@ let weighted_shuffle adapter ctx cands =
       cands
   in
   let active = List.filter (fun (_, w) -> w > 0) weighted in
-  let effective =
-    if active = [] then
-      (* Starvation guard: fall back to the original list, each with
-         weight 1, so that at least one call attempt is made. *)
-      List.map (fun (c, _) -> (c, 1)) weighted
-    else active
-  in
   (* Sequential weighted pick without replacement. *)
   let rec pick acc remaining =
     match remaining with
@@ -167,7 +160,7 @@ let weighted_shuffle adapter ctx cands =
         in
         step 0 remaining
   in
-  pick [] effective
+  pick [] active
 
 (* ── Priority tier ──────────────────────────────────────────────── *)
 
@@ -248,7 +241,7 @@ let round_robin_order ctx cands =
 let order_candidates t ~adapter ~ctx ~cycle cands =
   match t.kind with
   | Failover ->
-    cands
+    filter_cooldown adapter ctx cands
   | Capacity_aware ->
     filter_capacity adapter ctx cands
   | Weighted_random ->

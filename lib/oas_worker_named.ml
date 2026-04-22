@@ -282,7 +282,7 @@ let config_for_label
     ~(name : string)
     ~(model_label : string)
     ~(system_prompt : string)
-    ~(tools : Agent_sdk.Tool.t list)
+    ~(tools : Oas.Tool.t list)
     ~(max_turns : int)
     ~(max_tokens : int)
     ?(max_input_tokens : int option)
@@ -470,11 +470,10 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
         Llm_provider.Http_client.HttpError { code = 401; body = message }
       | Llm_provider.Retry.Overloaded { message } ->
         Llm_provider.Http_client.HttpError { code = 529; body = message }
-      | Llm_provider.Retry.NetworkError { message; kind } ->
-        Llm_provider.Http_client.NetworkError { message; kind }
+      | Llm_provider.Retry.NetworkError { message } ->
+        Llm_provider.Http_client.NetworkError { message }
       | Llm_provider.Retry.Timeout { message } ->
-        Llm_provider.Http_client.NetworkError {
-          message; kind = Llm_provider.Http_client.Unknown }
+        Llm_provider.Http_client.NetworkError { message }
     in
     Some (Cascade_fsm.Call_err http_err)
   (* Model-capability errors: the next provider may handle these.
@@ -841,10 +840,11 @@ let run_named
     match remaining with
     | [] ->
       let reason : Keeper_types.cascade_exhaustion_reason = match last_err with
-        | Some (Llm_provider.Http_client.NetworkError { message; kind; _ }) ->
-            (match kind with
-             | Connection_refused -> Keeper_types.Connection_refused
-             | _ -> Keeper_types.Other_detail message)
+        | Some (Llm_provider.Http_client.NetworkError { message }) ->
+            if String_util.contains_substring_ci message "connection refused" then
+              Keeper_types.Connection_refused
+            else
+              Keeper_types.Other_detail message
         | Some (Llm_provider.Http_client.HttpError { code; body }) ->
             Keeper_types.Other_detail
               (Printf.sprintf "HTTP %d: %s" code

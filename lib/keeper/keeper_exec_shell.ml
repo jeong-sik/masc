@@ -79,12 +79,7 @@ let clamp_shell_timeout ?(min_sec = 1.0) ~default args =
   Safe_ops.json_float ~default "timeout_sec" args
   |> fun n -> max min_sec (min user_timeout_max_sec n)
 
-let lowercase_shell_words text =
-  text
-  |> String.map (function '\t' | '\r' | '\n' -> ' ' | c -> c)
-  |> String.lowercase_ascii
-  |> String.split_on_char ' '
-  |> List.filter (fun token -> token <> "")
+let lowercase_shell_words = Keeper_exec_shared.lowercase_shell_words
 
 let git_global_option_takes_value = function
   | "-c" | "-C" | "--exec-path" | "--git-dir" | "--work-tree"
@@ -455,317 +450,16 @@ let resolve_keeper_shell_read_path
     in
     resolve_with_autocorrect resolved_raw_path
 
-let keeper_sandbox_container_name (meta : keeper_meta) =
-  Printf.sprintf "masc-keeper-%s-%d-%d"
-    (Coord_utils.safe_filename meta.name)
-    (Unix.getpid ())
-    (int_of_float (Unix.gettimeofday () *. 1000.0))
-
-let keeper_private_container_root (meta : keeper_meta) =
-  Keeper_sandbox.container_root meta.name
-
-let docker_private_workspace_cwd ~(config : Coord.config) ~(meta : keeper_meta)
-    host_cwd =
-  let normalize_path_for_containment path =
-    Keeper_alerting_path.normalize_path_for_check path
-    |> Keeper_alerting_path.strip_trailing_slashes
-  in
-  let host_root =
-    Filename.concat
-      (Keeper_alerting_path.project_root_of_config config)
-      (Keeper_alerting_path.playground_path_of_keeper meta.name)
-    |> normalize_path_for_containment
-  in
-  let container_root = keeper_private_container_root meta in
-  let host_cwd = normalize_path_for_containment host_cwd in
-  if host_cwd = host_root then
-    container_root
-  else if String.starts_with ~prefix:(host_root ^ "/") host_cwd then
-    let suffix =
-      String.sub host_cwd (String.length host_root + 1)
-        (String.length host_cwd - String.length host_root - 1)
-    in
-    Filename.concat container_root suffix
-  else
-    container_root
-
-let effective_sandbox_profile ~(meta : keeper_meta) ~in_playground =
-  if meta.sandbox_profile = Local
-     && Env_config_keeper.DockerPlayground.enabled
-     && in_playground
-  then
-    (Docker, Network_inherit)
-  else
-    (meta.sandbox_profile, meta.network_mode)
-
-let nested_container_runtime_tokens =
-  [ "docker"; "podman"; "nerdctl"; "buildah" ]
-
-let sandbox_socket_markers =
-  [
-    "/var/run/docker.sock";
-    "/run/docker.sock";
-    "/run/podman/podman.sock";
-    "podman.sock";
-    "containerd.sock";
-    "buildkitd.sock";
-  ]
-
-let command_uses_nested_container_runtime cmd =
-  let lowered_words = lowercase_shell_words cmd in
-  let lowered_cmd = String.lowercase_ascii cmd in
-  List.exists (fun token -> List.mem token nested_container_runtime_tokens)
-    lowered_words
-  || List.exists (String_util.contains_substring lowered_cmd) sandbox_socket_markers
-
-(* Sandbox runtime preflight extracted to [Keeper_sandbox_runtime]
-   (RFC-0006 Phase B-3b) so [Keeper_docker_read] can call it without
-   forming a module cycle through this file. The helper below is the
-   call site retained for compatibility with this module's existing
-   callers. *)
-let ensure_keeper_sandbox_runtime ~timeout_sec =
-  Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec
-
-(* Docker git-creds dispatch: leading-token check used by per-command
-   dispatch.  Returns true when the trimmed command's first whitespace-
-   separated word is exactly "git" or "gh" (case-sensitive — both
-   lowercase by convention).  Subcommand args do not change the dispatch
-   decision; e.g. "git push --force" still takes the git-creds path, but
-   the existing destructive-bash guard
-   (Worker_dev_tools.is_destructive_bash_operation) already rejects
-   force-push before this point. *)
-let cmd_targets_git_or_gh cmd =
-  let trimmed = String.trim cmd in
-  let first_word =
-    match String.index_opt trimmed ' ' with
-    | Some i -> String.sub trimmed 0 i
-    | None -> trimmed
-  in
-  match first_word with
-  | "git" | "gh" -> true
-  | _ -> false
-
-(* Mount spec helper: only emit the -v flag when the host path is non-empty
-   AND exists on disk. Missing files would cause docker to create them as
-   directories, breaking gh / git config reads. *)
-let optional_ro_mount ~host ~container =
-  if host = "" then []
-  else if not (Sys.file_exists host) then []
-  else [ "-v"; host ^ ":" ^ container ^ ":ro" ]
-
-type docker_shell_result =
-  {
-    status : Unix.process_status;
-    output : string;
-    image : string;
-    network_label : string;
-  }
-
-let run_docker_shell_command_with_status
-    ~(config : Coord.config)
-    ~(meta : keeper_meta)
-    ~(cwd : string)
-    ~(timeout_sec : float)
-    ~(cmd : string)
-    ~(git_creds_enabled : bool)
-    ~(network_mode : network_mode)
-  =
-  let image = Env_config_keeper.KeeperSandbox.docker_image () in
-  let sandbox_error message =
-    Keeper_registry.record_error ~base_path:config.base_path meta.name message;
-    Error message
-  in
-  if String.trim image = "" then
-    sandbox_error "keeper sandbox docker image is not configured"
-  else if command_uses_nested_container_runtime cmd then
-    sandbox_error
-      (if git_creds_enabled then
-         "sandbox_profile=docker+git_creds blocks nested container runtimes and host socket references"
-       else
-         "sandbox_profile=docker blocks nested container runtimes and host socket references")
-  else
-    match ensure_keeper_sandbox_runtime ~timeout_sec with
-    | Error err -> sandbox_error err
-    | Ok seccomp_args ->
-      let host_root =
-        keeper_playground_root ~config ~meta
-        |> Keeper_alerting_path.normalize_path_for_check
-        |> Keeper_alerting_path.strip_trailing_slashes
-      in
-      let container_name = keeper_sandbox_container_name meta in
-      let container_root = keeper_private_container_root meta in
-      let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
-      let uid = Unix.getuid () in
-      let gid = Unix.getgid () in
-      let network_args, network_label =
-        if git_creds_enabled then
-          ([ "--network"; "bridge" ], "bridge")
-        else
-          match network_mode with
-          | Network_none -> ([ "--network"; "none" ], "none")
-          | Network_inherit -> ([], network_mode_to_string network_mode)
-      in
-      let gh_creds =
-        match Keeper_gh_env.config_dir config with
-        | Some dir -> dir
-        | None -> Env_config_keeper.KeeperSandbox.gh_creds_host_path ()
-      in
-      let gitconfig = Env_config_keeper.KeeperSandbox.gitconfig_host_path () in
-      let ssh_dir = Env_config_keeper.KeeperSandbox.ssh_dir_host_path () in
-      let gh_token = Env_config_keeper.KeeperSandbox.gh_token () in
-      let cred_mounts =
-        if not git_creds_enabled then
-          []
-        else
-          optional_ro_mount ~host:gh_creds ~container:"/root/.config/gh"
-          @ optional_ro_mount ~host:gitconfig ~container:"/root/.gitconfig"
-          @ optional_ro_mount ~host:ssh_dir ~container:"/root/.ssh"
-      in
-      let token_env =
-        if (not git_creds_enabled) || gh_token = "" then
-          []
-        else
-          [ "-e"; "GH_TOKEN=" ^ gh_token ]
-      in
-      let argv =
-        [
-          "docker";
-          "run";
-          "--rm";
-          "--name";
-          container_name;
-          "-i";
-          "--user";
-          Printf.sprintf "%d:%d" uid gid;
-          "--read-only";
-          "--tmpfs";
-          (Printf.sprintf "/tmp:rw,nosuid,nodev,noexec,size=%s"
-             (Env_config_keeper.KeeperSandbox.tmpfs_size ()));
-          "--cap-drop=ALL";
-          "--security-opt";
-          "no-new-privileges";
-        ]
-        @ seccomp_args
-        @ [
-          "--pids-limit";
-          string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ());
-          "--memory";
-          Env_config_keeper.KeeperSandbox.memory ();
-          "-v";
-          host_root ^ ":" ^ container_root ^ ":rw";
-          "--workdir";
-          container_cwd;
-        ]
-        @ network_args
-        @ cred_mounts
-        @ token_env
-        @ [ image; "bash"; "-lc"; cmd ^ " 2>&1" ]
-      in
-      let status, output =
-        Process_eio.run_argv_with_status
-          ~cwd:(Sys.getcwd ()) ~timeout_sec argv
-      in
-      if status <> Unix.WEXITED 0 then
-        Keeper_registry.record_error ~base_path:config.base_path meta.name
-          (Printf.sprintf "sandbox docker exec failed (%s): %s"
-             image
-             (Worker_dev_tools.truncate_for_log output))
-      else
-        Keeper_registry.clear_error ~base_path:config.base_path meta.name;
-      Ok { status; output; image; network_label }
-
-let run_docker_with_git_bash
-    ~(config : Coord.config)
-    ~(meta : keeper_meta)
-    ~(cwd : string)
-    ~(timeout_sec : float)
-    ~(cmd : string) =
-  match
-    run_docker_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
-      ~cmd ~git_creds_enabled:true ~network_mode:Network_inherit
-  with
-  | Error message -> error_json message
-  | Ok result ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [
-           ("ok", `Bool (result.status = Unix.WEXITED 0));
-           ("cwd", `String cwd);
-           ("sandbox_profile", `String "docker");
-           ("git_creds_enabled", `Bool true);
-           ("network_mode", `String result.network_label);
-           ("effective_sandbox_image", `String result.image);
-           ( "status",
-             Keeper_alerting_path.process_status_to_json result.status );
-           ("output", `String result.output);
-         ])
-
-let run_docker_hardened_bash
-    ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
-    ~(config : Coord.config)
-    ~(meta : keeper_meta)
-    ~(cwd : string)
-    ~(timeout_sec : float)
-    ~(cmd : string)
-    ~(network_mode : network_mode) =
-  let image = Env_config_keeper.KeeperSandbox.docker_image () in
-  let sandbox_error_json message =
-    Keeper_registry.record_error ~base_path:config.base_path meta.name message;
-    error_json message
-  in
-  if String.trim image = "" then
-    sandbox_error_json "keeper sandbox docker image is not configured"
-  else if command_uses_nested_container_runtime cmd then
-    sandbox_error_json
-      "sandbox_profile=docker blocks nested container runtimes and host socket references"
-  else
-    match turn_sandbox_runtime, network_mode with
-    | Some runtime, Network_none ->
-      (match
-         Keeper_turn_sandbox_runtime.run_bash_with_status runtime
-           ~cwd ~cmd ~timeout_sec ()
-       with
-       | Error message -> sandbox_error_json message
-       | Ok (st, out) ->
-         if st <> Unix.WEXITED 0 then
-           Keeper_registry.record_error ~base_path:config.base_path meta.name
-             (Printf.sprintf "sandbox docker exec failed (%s): %s"
-                image
-                (Worker_dev_tools.truncate_for_log out))
-         else
-           Keeper_registry.clear_error ~base_path:config.base_path meta.name;
-         Yojson.Safe.to_string
-           (`Assoc
-              [
-                ("ok", `Bool (st = Unix.WEXITED 0));
-                ("cwd", `String cwd);
-                ("sandbox_profile", `String "docker");
-                ("git_creds_enabled", `Bool false);
-                ("network_mode", `String (network_mode_to_string network_mode));
-                ("effective_sandbox_image", `String image);
-                ("status", Keeper_alerting_path.process_status_to_json st);
-                ("output", `String out);
-              ]))
-    | _ ->
-      match
-        run_docker_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
-          ~cmd ~git_creds_enabled:false ~network_mode
-      with
-      | Error message -> error_json message
-      | Ok result ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [
-           ("ok", `Bool (result.status = Unix.WEXITED 0));
-           ("cwd", `String cwd);
-           ("sandbox_profile", `String "docker");
-           ("git_creds_enabled", `Bool false);
-           ("network_mode", `String result.network_label);
-           ("effective_sandbox_image", `String result.image);
-           ( "status",
-             Keeper_alerting_path.process_status_to_json result.status );
-           ("output", `String result.output);
-         ])
+(* Docker/sandbox infrastructure delegated to Keeper_shell_docker.
+   Aliases retained for backward compatibility with callers that
+   reference Keeper_exec_shell.* directly (tests, doc refs). *)
+let effective_sandbox_profile = Keeper_shell_docker.effective_sandbox_profile
+let cmd_targets_git_or_gh = Keeper_shell_docker.cmd_targets_git_or_gh
+let ensure_keeper_sandbox_runtime = Keeper_shell_docker.ensure_keeper_sandbox_runtime
+let command_uses_nested_container_runtime = Keeper_shell_docker.command_uses_nested_container_runtime
+let run_docker_shell_command_with_status = Keeper_shell_docker.run_docker_shell_command_with_status
+let run_docker_with_git_bash = Keeper_shell_docker.run_docker_with_git_bash
+let run_docker_hardened_bash = Keeper_shell_docker.run_docker_hardened_bash
 
 let handle_keeper_bash
       ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
@@ -804,16 +498,7 @@ let handle_keeper_bash
        [MASC_BASH_AST_SHADOW_LOG]; default off. *)
     (if Worker_dev_tools.shadow_diff_log_enabled () then begin
        let diff, legacy, shadow = Worker_dev_tools.diff_command cmd in
-       let counter_tag : Legendary_counters.gate_diff_tag =
-         match diff with
-         | Worker_dev_tools.Agree -> `Agree
-         | Worker_dev_tools.Legacy_allow_shadow_deny ->
-           `Legacy_allow_shadow_deny
-         | Worker_dev_tools.Legacy_deny_shadow_allow ->
-           `Legacy_deny_shadow_allow
-         | Worker_dev_tools.Shadow_cannot_parse -> `Shadow_cannot_parse
-       in
-       Legendary_counters.incr_gate_diff counter_tag;
+       Legendary_counters.incr_gate_diff diff;
        (* Histogram refinement of the Shadow_cannot_parse bucket —
           per-reason counters let operators prioritise A1-PR-N
           grammar expansion by construct frequency.  Only increments
@@ -1225,119 +910,14 @@ let handle_keeper_bash
 (* spawned with run_in_background = true.                         *)
 (* ============================================================ *)
 
-let status_to_json_opt = function
-  | None -> `Null
-  | Some st -> Keeper_alerting_path.process_status_to_json st
+(* ── BG task lifecycle (extracted to Keeper_shell_bg_task) ───── *)
 
-let handle_keeper_bash_output
-      ~(config : Coord.config)
-      ~(meta : keeper_meta)
-      ~(args : Yojson.Safe.t) =
-  let _ = config in
-  let raw_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
-  let since_stdout = Safe_ops.json_int ~default:0 "since_stdout" args in
-  let since_stderr = Safe_ops.json_int ~default:0 "since_stderr" args in
-  if raw_id = "" then
-    error_json
-      "task_id is required. Example: task_id='bgt-<timestamp>-<seq>-<pid>'."
-  else
-    let tid = Bg_task.task_id_of_string_exn raw_id in
-    match Bg_task.read tid ~since_stdout ~since_stderr with
-    | Error (Bg_task.Unknown_task _) ->
-        error_json
-          (Printf.sprintf
-             "no background task with id=%s (already reaped or never spawned)"
-             raw_id)
-    | Error (Bg_task.Read_failed msg) ->
-        error_json (Printf.sprintf "bash_output read failed: %s" msg)
-    | Ok snap ->
-        let tid_str = Bg_task.task_id_to_string tid in
-        let semantic_fields =
-          if not (Masc_exec.Exec_semantic.enabled ()) then []
-          else match snap.status with
-          | None -> []
-          | Some st ->
-              let merged = snap.stdout_since ^ snap.stderr_since in
-              let sem =
-                Masc_exec.Exec_semantic.interpret_cmd
-                  ~cmd:"" ~status:st ~output:merged
-              in
-              [
-                ( "return_code_interpretation",
-                  match Masc_exec.Exec_semantic.to_hint sem with
-                  | None -> `Null
-                  | Some h -> `String h );
-              ]
-        in
-        Log.Keeper.info
-          "BG_OUTPUT: keeper=%s task_id=%s closed=%b"
-          meta.name tid_str snap.closed;
-        Yojson.Safe.to_string
-          (`Assoc
-            ([
-               ("ok", `Bool true);
-               ("task_id", `String tid_str);
-               ("stdout_since", `String snap.stdout_since);
-               ("stderr_since", `String snap.stderr_since);
-               ("closed", `Bool snap.closed);
-               ("status", status_to_json_opt snap.status);
-               ("bytes_dropped_stdout", `Int snap.bytes_dropped_stdout);
-               ("bytes_dropped_stderr", `Int snap.bytes_dropped_stderr);
-             ]
-             @ semantic_fields))
+let handle_keeper_bash_output = Keeper_shell_bg_task.handle_keeper_bash_output
+let handle_keeper_bash_kill = Keeper_shell_bg_task.handle_keeper_bash_kill
 
-let signal_of_name_or_num args =
-  match Safe_ops.json_string ~default:"" "signal" args |> String.uppercase_ascii with
-  | "" | "TERM" | "SIGTERM" -> Sys.sigterm
-  | "KILL" | "SIGKILL" -> Sys.sigkill
-  | "INT" | "SIGINT" -> Sys.sigint
-  | "HUP" | "SIGHUP" -> Sys.sighup
-  | "QUIT" | "SIGQUIT" -> Sys.sigquit
-  | raw ->
-      (* Accept numeric form too. *)
-      (try int_of_string raw with _ -> Sys.sigterm)
+(* ── GH repo context (extracted to Keeper_shell_gh_context) ──── *)
 
-let handle_keeper_bash_kill
-      ~(config : Coord.config)
-      ~(meta : keeper_meta)
-      ~(args : Yojson.Safe.t) =
-  let _ = config in
-  let raw_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
-  let signal = signal_of_name_or_num args in
-  let grace_sec =
-    let raw = Safe_ops.json_float ~default:2.0 "grace_sec" args in
-    if raw < 0.0 then 0.0
-    else if raw > 30.0 then 30.0
-    else raw
-  in
-  if raw_id = "" then
-    error_json
-      "task_id is required. Example: task_id='bgt-<timestamp>-<seq>-<pid>'."
-  else
-    let tid = Bg_task.task_id_of_string_exn raw_id in
-    match Bg_task.kill tid ~signal ~grace_sec with
-    | Error (Bg_task.Unknown_task_kill _) ->
-        error_json
-          (Printf.sprintf
-             "no background task with id=%s (already reaped or never spawned)"
-             raw_id)
-    | Error (Bg_task.Kill_failed msg) ->
-        error_json (Printf.sprintf "bash_kill failed: %s" msg)
-    | Ok () ->
-        let tid_str = Bg_task.task_id_to_string tid in
-        Log.Keeper.info
-          "BG_KILL: keeper=%s task_id=%s signal=%d grace=%.2f"
-          meta.name tid_str signal grace_sec;
-        Yojson.Safe.to_string
-          (`Assoc
-            [
-              ("ok", `Bool true);
-              ("task_id", `String tid_str);
-              ("signal", `Int signal);
-              ("grace_sec", `Float grace_sec);
-            ])
-
-type gh_repo_context =
+type gh_repo_context = Keeper_shell_gh_context.gh_repo_context =
   {
     task_id : string;
     git_root : string;
@@ -1345,7 +925,7 @@ type gh_repo_context =
     repo_slug : string option;
   }
 
-type gh_repo_context_error =
+type gh_repo_context_error = Keeper_shell_gh_context.gh_repo_context_error =
   {
     code : string;
     detail : string;
@@ -1355,129 +935,10 @@ type gh_repo_context_error =
     worktree_path : string option;
   }
 
-let gh_repo_context_error
-      ?task_id ?git_root ?worktree_path ~code ~detail ~hint () =
-  {
-    code;
-    detail;
-    hint;
-    task_id;
-    git_root;
-    worktree_path;
-  }
-
-let gh_claim_first_hint =
-  "Call keeper_task_claim with {} first to bind an active task before using keeper_shell op=gh."
-
-let gh_repo_context_error_json ~op ~cmd_display err =
-  let extra_fields =
-    [
-      Option.map (fun task_id -> "task_id", `String task_id) err.task_id;
-      Option.map (fun git_root -> "git_root", `String git_root) err.git_root;
-      Option.map (fun worktree_path -> "worktree_path", `String worktree_path)
-        err.worktree_path;
-    ]
-    |> List.filter_map (fun value -> value)
-  in
-  Yojson.Safe.to_string
-    (`Assoc
-        ([ "ok", `Bool false
-         ; "op", `String op
-         ; "command", `String cmd_display
-         ; "error", `String err.code
-         ; "error_category", `String "gh_repo_context"
-         ; "detail", `String err.detail
-         ; "hint", `String err.hint
-         ] @ extra_fields))
-
-let resolve_gh_repo_context ~(config : Coord.config) ~(meta : keeper_meta)
-    ~(cwd : string) =
-  let sandbox_git_root =
-    Filename.concat
-      (Keeper_alerting_path.project_root_of_config config)
-      (Keeper_alerting_path.playground_path_of_keeper meta.name)
-  in
-  let sandbox_worktree_cwd =
-    if safe_is_dir cwd then cwd else sandbox_git_root
-  in
-  match meta.current_task_id with
-  | None ->
-      Ok
-        {
-          task_id = "(sandbox)";
-          git_root = sandbox_git_root;
-          worktree_cwd = sandbox_worktree_cwd;
-          repo_slug = None;
-        }
-  | Some task_id ->
-      let task_id = Keeper_id.Task_id.to_string task_id in
-      match
-        Coord_query.get_tasks_safe config
-        |> List.find_opt (fun (task : Types.task) -> String.equal task.id task_id)
-      with
-      | None ->
-          Error
-            (gh_repo_context_error ~task_id
-               ~code:"gh_repo_context_task_not_found"
-               ~detail:
-                 "current_task_id is set, but the task is not present in the backlog."
-               ~hint:
-                 (gh_claim_first_hint
-                  ^ " If you already claimed a task, refresh the keeper task binding, then retry the gh command.")
-               ())
-      | Some task ->
-          (match task.worktree with
-           | None ->
-               Error
-                 (gh_repo_context_error ~task_id
-                    ~code:"gh_repo_context_missing_worktree"
-                    ~detail:
-                      "The active task has no linked worktree, so gh cannot bind repository context structurally."
-                    ~hint:
-                      (gh_claim_first_hint
-                       ^ " If the task is already claimed, create/link a task worktree first, for example with masc_worktree_create { task_id, repo_name }.")
-                    ())
-           | Some worktree ->
-               let git_root = worktree.git_root in
-               let worktree_cwd =
-                 if Filename.is_relative worktree.path
-                 then Filename.concat git_root worktree.path
-                 else worktree.path
-               in
-               if String.trim worktree.path = ""
-                  || not (safe_is_dir worktree_cwd)
-               then
-                  Error
-                    (gh_repo_context_error ~task_id ~git_root
-                       ~worktree_path:worktree_cwd
-                       ~code:"gh_repo_context_missing_worktree_path"
-                       ~detail:
-                         "The active task worktree path is missing or not a directory."
-                       ~hint:
-                        (gh_claim_first_hint
-                         ^ " If the task is already claimed, recreate the linked task worktree, then retry the gh command.")
-                      ())
-               else
-                 match Keeper_gh_shared.repo_slug_of_git_root ~git_root with
-                 | Some repo_slug ->
-                     Ok
-                       {
-                         task_id;
-                         git_root;
-                         worktree_cwd;
-                         repo_slug = Some repo_slug;
-                       }
-                 | None ->
-                     Error
-                       (gh_repo_context_error ~task_id ~git_root
-                          ~worktree_path:worktree_cwd
-                          ~code:"gh_repo_context_origin_missing"
-                          ~detail:
-                            "The task git root has no readable origin remote owner/repo slug."
-                          ~hint:
-                            (gh_claim_first_hint
-                             ^ " If the task is already claimed, ensure the linked task worktree points at a sandbox clone with a valid origin remote.")
-                          ()))
+let gh_repo_context_error = Keeper_shell_gh_context.gh_repo_context_error
+let gh_claim_first_hint = Keeper_shell_gh_context.gh_claim_first_hint
+let gh_repo_context_error_json = Keeper_shell_gh_context.gh_repo_context_error_json
+let resolve_gh_repo_context = Keeper_shell_gh_context.resolve_gh_repo_context
 
 let handle_keeper_shell
       ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)

@@ -1,6 +1,6 @@
 (** Tool_input_validation — Pre-dispatch validation via OAS Tool_middleware.
 
-    Delegates to [Agent_sdk.Tool_middleware.make_validation_hook] for type
+    Delegates to [Oas.Tool_middleware.make_validation_hook] for type
     coercion and structured error feedback.
 
     @since 2.220.0 — OAS delegation
@@ -103,10 +103,10 @@ let normalize_transition_args (args : Yojson.Safe.t) : Yojson.Safe.t =
 let register_pre_hook () =
   let lookup name =
     Option.map
-      (Agent_sdk.Tool_middleware.tool_schema_of_json ~name)
+      (Oas.Tool_middleware.tool_schema_of_json ~name)
       (Tool_dispatch.lookup_schema name)
   in
-  let hook = Agent_sdk.Tool_middleware.make_validation_hook ~lookup in
+  let hook = Oas.Tool_middleware.make_validation_hook ~lookup in
   Tool_dispatch.register_pre_hook (fun ~name ~args ->
     let compat_args =
       let args = strip_internal_marker_args args in
@@ -116,15 +116,15 @@ let register_pre_hook () =
         args
     in
     match hook ~name ~args:compat_args with
-    | Agent_sdk.Tool_middleware.Pass
+    | Oas.Tool_middleware.Pass
       when not (Yojson.Safe.equal compat_args args) ->
       Log.info "tool_input_validation coerced args for %s" name;
       Proceed compat_args
-    | Agent_sdk.Tool_middleware.Pass -> Pass
-    | Agent_sdk.Tool_middleware.Proceed coerced ->
+    | Oas.Tool_middleware.Pass -> Pass
+    | Oas.Tool_middleware.Proceed coerced ->
       Log.info "tool_input_validation coerced args for %s" name;
       Proceed coerced
-    | Agent_sdk.Tool_middleware.Reject { message; _ } ->
+    | Oas.Tool_middleware.Reject { message; _ } ->
       Log.info "tool_input_validation rejected %s: %s" name message;
       Reject {
         Tool_result.success = false;

@@ -43,7 +43,7 @@ let mode_violations_suffix = "evidence/mode_violations.json"
 let review_warning_suffix = "evidence/review_warning.json"
 
 (** Find the first raw_evidence_ref that ends with mode_violations.json. *)
-let find_violations_ref (proof : Agent_sdk.Cdal_proof.t) : string option =
+let find_violations_ref (proof : Oas.Cdal_proof.t) : string option =
   List.find_opt
     (fun ref_ -> String.ends_with ~suffix:mode_violations_suffix ref_)
     proof.raw_evidence_refs
@@ -53,7 +53,7 @@ let key_of_violation (v : Violation_record.t) : blocked_attempt_key =
   {
     tool_name = v.tool_name;
     violation_kind = Violation_record.violation_kind_to_string v.violation_kind;
-    effective_mode = Agent_sdk.Execution_mode.to_string v.effective_mode;
+    effective_mode = Oas.Execution_mode.to_string v.effective_mode;
   }
 
 (** Compare two keys for stable sorting. *)
@@ -141,10 +141,10 @@ let review_tripwires_of_gaps (gaps : Cdal_types.completeness_gap list)
 (* ================================================================ *)
 
 let project_single_run
-    ~(store : Agent_sdk.Proof_store.config)
+    ~(store : Oas.Proof_store.config)
     ?(completeness_gaps : Cdal_types.completeness_gap list = [])
     ?(tripwire_threshold = 3)
-    (proof : Agent_sdk.Cdal_proof.t)
+    (proof : Oas.Cdal_proof.t)
     : friction_projection option =
   let groups, blocked_attempt_count =
     match find_violations_ref proof with
@@ -249,8 +249,8 @@ let merge_groups (all_groups : blocked_attempt_group list list)
   |> List.sort (fun a b -> compare_key a.key b.key)
 
 let project_single_run_groups
-    ~(store : Agent_sdk.Proof_store.config)
-    (proof : Agent_sdk.Cdal_proof.t)
+    ~(store : Oas.Proof_store.config)
+    (proof : Oas.Cdal_proof.t)
     : blocked_attempt_group list * int =
   match find_violations_ref proof with
   | None -> ([], 0)
@@ -267,11 +267,11 @@ let project_single_run_groups
         (g, c)
 
 let project_window
-    ~(store : Agent_sdk.Proof_store.config)
+    ~(store : Oas.Proof_store.config)
     ~(window : run_window)
     ?(completeness_gaps : Cdal_types.completeness_gap list = [])
     ?(tripwire_threshold = 3)
-    (proofs : Agent_sdk.Cdal_proof.t list)
+    (proofs : Oas.Cdal_proof.t list)
     : friction_projection option =
   match window, proofs with
   | Single_run, [proof] ->
@@ -296,7 +296,7 @@ let project_window
     in
     if blocked_attempt_count = 0 && gap_groups = [] then None
     else
-      let run_ids = List.map (fun (p : Agent_sdk.Cdal_proof.t) -> p.run_id) proofs in
+      let run_ids = List.map (fun (p : Oas.Cdal_proof.t) -> p.run_id) proofs in
       Some {
         window = window_to_string window;
         based_on_run_ids = run_ids;

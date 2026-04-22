@@ -167,9 +167,9 @@ let model_response_is_valid (resp : Oas_response.api_response) =
   let text = String.trim (Oas_response.text_of_response resp) in
   String.length text > 0
   && (match resp.stop_reason with
-      | Agent_sdk.Types.EndTurn | Agent_sdk.Types.MaxTokens
-      | Agent_sdk.Types.StopSequence | Agent_sdk.Types.StopToolUse
-      | Agent_sdk.Types.Unknown _ -> true)
+      | Oas.Types.EndTurn | Oas.Types.MaxTokens
+      | Oas.Types.StopSequence | Oas.Types.StopToolUse
+      | Oas.Types.Unknown _ -> true)
 
 let call_model_direct_sync ~agent_type ~prompt =
   let cascade_name = cascade_name_for_agent_type agent_type in

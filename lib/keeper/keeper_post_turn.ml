@@ -30,7 +30,7 @@ type compaction_event = {
 
 type post_turn_lifecycle = {
   updated_meta : keeper_meta;
-  checkpoint : Agent_sdk.Checkpoint.t option;
+  checkpoint : Oas.Checkpoint.t option;
   handoff_json : Yojson.Safe.t option;
   handoff_attempted : bool;
   handoff_failure_reason : string option;
@@ -43,7 +43,7 @@ type post_turn_lifecycle = {
 }
 
 type overflow_retry_recovery = {
-  checkpoint : Agent_sdk.Checkpoint.t;
+  checkpoint : Oas.Checkpoint.t;
   compaction : compaction_event;
   turn_generation : int;
 } [@@warning "-69"]
@@ -56,13 +56,13 @@ let apply_post_turn_lifecycle
     ~(model : string)
     ~(primary_model_max_tokens : int)
     ~(current_turn_overflow_blocker : string option)
-    ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
+    ~(checkpoint : Oas.Checkpoint.t option) : post_turn_lifecycle =
   let now_ts = Time_compat.now () in
   let no_checkpoint_decision = "skipped:no_checkpoint" in
   let apply_continuity_summary
       ~(meta : keeper_meta)
       ~(ctx : working_context)
-      ~(oas_checkpoint : Agent_sdk.Checkpoint.t option) : keeper_meta =
+      ~(oas_checkpoint : Oas.Checkpoint.t option) : keeper_meta =
     let progress_path =
       Filename.concat
         (Filename.concat (Filename.concat (Filename.dirname base_dir) "keepers") meta.name)

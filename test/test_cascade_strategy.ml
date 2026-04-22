@@ -73,6 +73,17 @@ let test_failover_preserves_order () =
   check (list string) "input order preserved"
     ["a"; "b"; "c"] (names ordered)
 
+let test_failover_filters_cooldown () =
+  let h = H.create () in
+  H.record_failure h ~provider_key:"a";
+  H.record_failure h ~provider_key:"a";
+  H.record_failure h ~provider_key:"a";
+  let cands = [mk_cand "a"; mk_cand "b"; mk_cand "c"] in
+  let ctx = mk_ctx ~health:h () in
+  let ordered = S.order_candidates S.failover ~adapter ~ctx ~cycle:0 cands in
+  check (list string) "cooldown candidate removed, remaining order preserved"
+    ["b"; "c"] (names ordered)
+
 (* ── S2 Capacity_aware ───────────────────────────────────────── *)
 
 let test_capacity_aware_filters_busy () =
@@ -124,10 +135,10 @@ let test_weighted_random_deterministic_with_rand0 () =
   check (list string) "rand=0 picks left-to-right"
     ["a"; "b"; "c"] (names ordered)
 
-let test_weighted_random_starvation_guard () =
-  (* Cool down all providers via health tracker.  effective_weight
-     becomes 0 for all; the order_weighted_entries-style guard must
-     keep at least the original list (with weight 1). *)
+let test_weighted_random_all_cooldown_yields_empty () =
+  (* Cool down all providers via health tracker. effective_weight
+     becomes 0 for all, so weighted_random must return no candidates
+     and let the caller surface a filtered-empty cascade state. *)
   let h = H.create () in
   let cool_down k =
     H.record_failure h ~provider_key:k;
@@ -139,8 +150,8 @@ let test_weighted_random_starvation_guard () =
   let ctx = mk_ctx ~health:h ~rand:(fun _ -> 0) () in
   let strat = mk_t S.Weighted_random in
   let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  check int "all-cooldown → fallback picks at least 1"
-    2 (List.length ordered)
+  check (list string) "all-cooldown → empty"
+    [] (names ordered)
 
 (* ── S4 Circuit_breaker_cycling ──────────────────────────────── *)
 
@@ -882,6 +893,7 @@ let () =
   run "cascade_strategy" [
     "failover", [
       test_case "preserves order" `Quick test_failover_preserves_order;
+      test_case "filters cooldown" `Quick test_failover_filters_cooldown;
     ];
     "capacity_aware", [
       test_case "filters busy candidates" `Quick test_capacity_aware_filters_busy;
@@ -891,8 +903,8 @@ let () =
     "weighted_random", [
       test_case "deterministic with rand=0" `Quick
         test_weighted_random_deterministic_with_rand0;
-      test_case "starvation guard kicks in" `Quick
-        test_weighted_random_starvation_guard;
+      test_case "all cooldown yields empty" `Quick
+        test_weighted_random_all_cooldown_yields_empty;
     ];
     "circuit_breaker_cycling", [
       test_case "excludes cooldown and busy" `Quick

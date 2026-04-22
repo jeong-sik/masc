@@ -788,9 +788,9 @@ let snapshot_of_structured_working_context
        with
        | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None)
 
-let latest_state_snapshot_from_messages (messages : Agent_sdk.Types.message list) :
+let latest_state_snapshot_from_messages (messages : Oas.Types.message list) :
     keeper_state_snapshot option =
-  let rec loop (msgs : Agent_sdk.Types.message list) =
+  let rec loop (msgs : Oas.Types.message list) =
     match msgs with
     | [] -> None
     | msg :: rest ->

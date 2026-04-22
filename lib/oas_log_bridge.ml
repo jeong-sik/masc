@@ -26,18 +26,18 @@
            oas#816 (per-turn timing) + this bridge *)
 
 (** Convert an OAS field into a (key, Yojson.Safe.t) pair for the
-    [details] object.  Mirrors [Agent_sdk.Log.field_to_json] but we
+    [details] object.  Mirrors [Oas.Log.field_to_json] but we
     build the pair inline to avoid pulling the helper through the
     library boundary. *)
-let field_to_json (field : Agent_sdk.Log.field) : string * Yojson.Safe.t =
+let field_to_json (field : Oas.Log.field) : string * Yojson.Safe.t =
   match field with
-  | Agent_sdk.Log.S (k, v) -> (k, `String v)
-  | Agent_sdk.Log.I (k, v) -> (k, `Int v)
-  | Agent_sdk.Log.F (k, v) -> (k, `Float v)
-  | Agent_sdk.Log.B (k, v) -> (k, `Bool v)
-  | Agent_sdk.Log.J (k, v) -> (k, v)
+  | Oas.Log.S (k, v) -> (k, `String v)
+  | Oas.Log.I (k, v) -> (k, `Int v)
+  | Oas.Log.F (k, v) -> (k, `Float v)
+  | Oas.Log.B (k, v) -> (k, `Bool v)
+  | Oas.Log.J (k, v) -> (k, v)
 
-let details_of_fields (fields : Agent_sdk.Log.field list)
+let details_of_fields (fields : Oas.Log.field list)
     : (string * Yojson.Safe.t) list =
   List.map field_to_json fields
 
@@ -115,7 +115,7 @@ let render_agent_tools_message ~message ~details =
            tool_name fixes)
   | _ -> None
 
-let render_record_message (record : Agent_sdk.Log.record) : string =
+let render_record_message (record : Oas.Log.record) : string =
   let details = details_of_fields record.fields in
   match record.module_name with
   | "agent_tools" -> (
@@ -124,7 +124,7 @@ let render_record_message (record : Agent_sdk.Log.record) : string =
       | None -> interpolate_printf_message record.message details)
   | _ -> interpolate_printf_message record.message details
 
-let level_to_masc (level : Agent_sdk.Log.level) : Log.level =
+let level_to_masc (level : Oas.Log.level) : Log.level =
   match level with
   | Debug -> Log.Debug
   | Info -> Log.Info
@@ -151,7 +151,7 @@ let preferred_summary_keys message =
   | _ ->
       [ "agent_name"; "agent"; "task_id"; "turn"; "tool_name"; "model"; "stop" ]
 
-let summarize_fields ~message (fields : Agent_sdk.Log.field list) : string list =
+let summarize_fields ~message (fields : Oas.Log.field list) : string list =
   let assoc = List.map field_to_json fields in
   preferred_summary_keys message
   |> List.filter_map (fun key ->
@@ -162,7 +162,7 @@ let summarize_fields ~message (fields : Agent_sdk.Log.field list) : string list 
            | Some rendered -> Some (Printf.sprintf "%s=%s" key rendered)
            | None -> None))
 
-let should_promote_warn_to_error (record : Agent_sdk.Log.record) =
+let should_promote_warn_to_error (record : Oas.Log.record) =
   match record.level, record.module_name, record.message with
   | Warn, "agent_config", "MCP server failed" -> true
   | Warn, "agent_turn", "context_injector raised" -> true
@@ -170,13 +170,13 @@ let should_promote_warn_to_error (record : Agent_sdk.Log.record) =
       true
   | _ -> false
 
-let effective_level (record : Agent_sdk.Log.record) : Log.level =
+let effective_level (record : Oas.Log.record) : Log.level =
   if should_promote_warn_to_error record then
     Log.Error
   else
     level_to_masc record.level
 
-let render_message_with_summary (record : Agent_sdk.Log.record) =
+let render_message_with_summary (record : Oas.Log.record) =
   let base_message = render_record_message record in
   if not (String.equal base_message record.message) then
     base_message
@@ -186,10 +186,10 @@ let render_message_with_summary (record : Agent_sdk.Log.record) =
     | summary ->
         Printf.sprintf "%s %s" base_message (String.concat " " summary)
 (** Build the sink function.  Prefix the module name with ["oas:"] so a
-    record emitted by [Agent_sdk.Log.create ~module_name:"agent"] lands
+    record emitted by [Oas.Log.create ~module_name:"agent"] lands
     as ["oas:agent"] in the masc-mcp log stream, distinct from any
     masc-mcp module called "agent". *)
-let make_sink () : Agent_sdk.Log.sink =
+let make_sink () : Oas.Log.sink =
  fun record ->
   let message = render_message_with_summary record in
   let details =
@@ -204,7 +204,7 @@ let make_sink () : Agent_sdk.Log.sink =
 
 (** Process-wide latch to make [install] idempotent.  Unlike
     [Llm_metric_bridge] which uses [set_global] (replacement semantics),
-    [Agent_sdk.Log.add_sink] appends to a sink list, so a naive double
+    [Oas.Log.add_sink] appends to a sink list, so a naive double
     call would forward every record twice.  Bootstrap is the only
     documented caller today, but test harnesses, in-process restarts,
     or a future supervisor reconnect could all re-enter bootstrap.
@@ -217,4 +217,4 @@ let installed = Atomic.make false
     turn fires an LLM call. *)
 let install () : unit =
   if Atomic.compare_and_set installed false true then
-    Agent_sdk.Log.add_sink (make_sink ())
+    Oas.Log.add_sink (make_sink ())

@@ -1,6 +1,6 @@
 (** Context_compact_oas — direct delegation to OAS Context_reducer.
 
-    MASC messages are [Agent_sdk.Types.message] — the same type OAS uses.
+    MASC messages are [Oas.Types.message] — the same type OAS uses.
     No role conversion or extra tagging is needed; OAS Context_reducer
     natively supports all 4 roles (System, User, Assistant, Tool) and
     preserves ToolUse/ToolResult pairing.
@@ -69,30 +69,30 @@ let first_sentence (s : string) =
   | Some pos when pos <= max_len -> String.sub s 0 pos
   | _ -> String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." s |> String_util.to_string
 
-let tool_names_by_id (msgs : Agent_sdk.Types.message list) : (string * string) list =
-  let add_tool_name acc (m : Agent_sdk.Types.message) =
+let tool_names_by_id (msgs : Oas.Types.message list) : (string * string) list =
+  let add_tool_name acc (m : Oas.Types.message) =
     List.fold_left (fun acc -> function
-      | Agent_sdk.Types.ToolUse { id; name; _ } ->
+      | Oas.Types.ToolUse { id; name; _ } ->
         if List.mem_assoc id acc then acc else (id, name) :: acc
       | _ -> acc
     ) acc m.content
   in
   List.fold_left add_tool_name [] msgs
 
-let summarize_chunk (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.message option =
+let summarize_chunk (msgs : Oas.Types.message list) : Oas.Types.message option =
   if List.length msgs < 2 then
     None
   else
   let lines =
     msgs
-    |> List.mapi (fun i (m : Agent_sdk.Types.message) ->
+    |> List.mapi (fun i (m : Oas.Types.message) ->
       let role_str = match m.role with
-        | Agent_sdk.Types.User -> "user"
-        | Agent_sdk.Types.Assistant -> "assistant"
-        | Agent_sdk.Types.System -> "system"
-        | Agent_sdk.Types.Tool -> "tool"
+        | Oas.Types.User -> "user"
+        | Oas.Types.Assistant -> "assistant"
+        | Oas.Types.System -> "system"
+        | Oas.Types.Tool -> "tool"
       in
-      let text = String.trim (Agent_sdk.Types.text_of_message m) in
+      let text = String.trim (Oas.Types.text_of_message m) in
       if text = "" then None
       else Some (Printf.sprintf "[%d] %s: %s" (i + 1) role_str (first_sentence text))
     )
@@ -124,11 +124,11 @@ let mask_tool_result_content ~(tool_name : string option) ~(tool_use_id : string
     name tool_use_id lines (String.length content) preview
 
 let mask_tool_result_message ~(tool_names : (string * string) list)
-    (m : Agent_sdk.Types.message) : Agent_sdk.Types.message =
+    (m : Oas.Types.message) : Oas.Types.message =
   let content = List.map (function
-    | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; _ } ->
+    | Oas.Types.ToolResult { tool_use_id; content; is_error; _ } ->
       let tool_name = List.assoc_opt tool_use_id tool_names in
-      Agent_sdk.Types.ToolResult {
+      Oas.Types.ToolResult {
         tool_use_id;
         content = mask_tool_result_content ~tool_name ~tool_use_id ~content;
         is_error;
@@ -142,7 +142,7 @@ let mask_tool_result_message ~(tool_names : (string * string) list)
   { m with content }
 
 let summarize_old_messages ~(keep_recent : int)
-    (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
+    (msgs : Oas.Types.message list) : Oas.Types.message list =
   let total = List.length msgs in
   if total <= keep_recent then msgs
   else
@@ -160,12 +160,12 @@ let summarize_old_messages ~(keep_recent : int)
       | Some summary -> summary :: acc
       | None -> acc
     in
-    let rec compact_old (old : Agent_sdk.Types.message list) chunk acc =
+    let rec compact_old (old : Oas.Types.message list) chunk acc =
       match old with
       | [] -> List.rev (flush_chunk chunk acc)
       | m :: tl ->
-        let has_tool_use = List.exists (function Agent_sdk.Types.ToolUse _ -> true | _ -> false) m.content in
-        let has_tool_result = List.exists (function Agent_sdk.Types.ToolResult _ -> true | _ -> false) m.content in
+        let has_tool_use = List.exists (function Oas.Types.ToolUse _ -> true | _ -> false) m.content in
+        let has_tool_result = List.exists (function Oas.Types.ToolResult _ -> true | _ -> false) m.content in
         if has_tool_use then
           compact_old tl [] (m :: flush_chunk chunk acc)
         else if has_tool_result then
@@ -223,22 +223,22 @@ let drop_importance_threshold = Env_config_core.get_float ~default:0.3 "MASC_COM
 (** Number of recent messages to keep in [SummarizeOld] strategy. *)
 let summarize_keep_recent = Env_config_core.get_int ~default:5 "MASC_COMPACT_KEEP_RECENT"
 
-let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
+let score_messages (msgs : Oas.Types.message list) : (int * float) list =
   let n = List.length msgs in
-  List.mapi (fun i (m : Agent_sdk.Types.message) ->
+  List.mapi (fun i (m : Oas.Types.message) ->
     let recency = if n <= 1 then 1.0
       else let t = float_of_int i /. float_of_int (n - 1) in
            t *. t
     in
     let role_w = match m.role with
-      | Agent_sdk.Types.System -> role_system
-      | Agent_sdk.Types.Tool -> role_tool
-      | Agent_sdk.Types.User -> role_user
-      | Agent_sdk.Types.Assistant -> role_assistant
+      | Oas.Types.System -> role_system
+      | Oas.Types.Tool -> role_tool
+      | Oas.Types.User -> role_user
+      | Oas.Types.Assistant -> role_assistant
     in
-    let msg_text = Agent_sdk.Types.text_of_message m in
+    let msg_text = Oas.Types.text_of_message m in
     let has_tool_content = List.exists (function
-      | Agent_sdk.Types.ToolUse _ | Agent_sdk.Types.ToolResult _ -> true
+      | Oas.Types.ToolUse _ | Oas.Types.ToolResult _ -> true
       | _ -> false) m.content
     in
     let tool_w = if has_tool_content then tool_present else tool_absent in
@@ -267,14 +267,14 @@ let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
 (** Max length for tool output before pruning. Shared with keeper_agent_run. *)
 let tool_output_prune_limit = Env_config.ContextCompact.tool_output_prune_limit
 
-let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
+let oas_strategy_of (s : strategy) : Oas.Context_reducer.strategy =
   match s with
   | PruneToolOutputs ->
-    Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = tool_output_prune_limit }
+    Oas.Context_reducer.Prune_tool_outputs { max_output_len = tool_output_prune_limit }
   | MergeContiguous ->
-    Agent_sdk.Context_reducer.Merge_contiguous
+    Oas.Context_reducer.Merge_contiguous
   | DropLowImportance ->
-    Agent_sdk.Context_reducer.Custom (fun msgs ->
+    Oas.Context_reducer.Custom (fun msgs ->
       let scores = score_messages msgs in
       let threshold = drop_importance_threshold in
       List.filteri (fun i _m ->
@@ -285,7 +285,7 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
   | Dynamic _ ->
     (* Dynamic is resolved before reaching oas_strategy_of.
        If it leaks here, fall back to DropLowImportance. *)
-    Agent_sdk.Context_reducer.Custom (fun msgs ->
+    Oas.Context_reducer.Custom (fun msgs ->
       let scores = score_messages msgs in
       let threshold = drop_importance_threshold in
       List.filteri (fun i _m ->
@@ -294,7 +294,7 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
         | None -> true
       ) msgs)
   | SummarizeOld ->
-    Agent_sdk.Context_reducer.Custom (summarize_old_messages ~keep_recent:summarize_keep_recent)
+    Oas.Context_reducer.Custom (summarize_old_messages ~keep_recent:summarize_keep_recent)
 
 (* ================================================================ *)
 (* Public API                                                       *)
@@ -303,7 +303,7 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
 (** Apply compaction via OAS Context_reducer.
 
     Messages are passed directly — no role conversion needed since
-    MASC and OAS share the same [Agent_sdk.Types.message] type with
+    MASC and OAS share the same [Oas.Types.message] type with
     the same 4 roles (System, User, Assistant, Tool). *)
 (* ================================================================ *)
 (* MASC Dynamic vs OAS Dynamic — Complementary, NOT Duplicated       *)
@@ -435,7 +435,7 @@ let default_dynamic_selector (obs : observation_context) : strategy list =
 (** Apply compaction via OAS Context_reducer.
 
     Messages are passed directly — no role conversion needed since
-    MASC and OAS share the same [Agent_sdk.Types.message] type with
+    MASC and OAS share the same [Oas.Types.message] type with
     the same 4 roles (System, User, Assistant, Tool).
 
     @param observation Optional observation context for Dynamic strategies.
@@ -446,17 +446,17 @@ let default_dynamic_selector (obs : observation_context) : strategy list =
    [messages] (role=System) when present. The labeled arg was passed by
    keeper_compact_policy but never read. *)
 let compact
-    ~(messages : Agent_sdk.Types.message list)
+    ~(messages : Oas.Types.message list)
     ~(strategies : strategy list)
     ?(observation : observation_context option)
     ()
-  : Agent_sdk.Types.message list =
+  : Oas.Types.message list =
   let resolved = resolve_strategies ~obs:observation strategies in
   let strategy_names = List.map strategy_name resolved in
   Log.Compact.info "[compact] strategies=[%s] %s"
     (String.concat "," strategy_names)
     (observation_summary observation);
   let oas_strategies = List.map oas_strategy_of resolved in
-  let reducer = Agent_sdk.Context_reducer.compose
-    (List.map (fun s -> { Agent_sdk.Context_reducer.strategy = s }) oas_strategies) in
-  Agent_sdk.Context_reducer.reduce reducer messages
+  let reducer = Oas.Context_reducer.compose
+    (List.map (fun s -> { Oas.Context_reducer.strategy = s }) oas_strategies) in
+  Oas.Context_reducer.reduce reducer messages

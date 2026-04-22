@@ -246,7 +246,7 @@ let top_procedures_cached ~(agent_name : string) ~(limit : int) =
     [.masc/memory/<agent_name>/<session_id>.jsonl].
     Filesystem-first: PG pool availability is not checked. *)
 let make_backend ?base_dir ~(agent_name : string) ~(session_id : string) ()
-  : Agent_sdk.Memory.long_term_backend =
+  : Oas.Memory.long_term_backend =
   let base_dir = resolve_base_dir ?base_dir () in
   Memory_jsonl.make_backend ~base_dir ~agent_name ~session_id
 
@@ -256,13 +256,13 @@ let make_backend ?base_dir ~(agent_name : string) ~(session_id : string) ()
     @param session_id Session identifier; defaults to timestamp-based ID. *)
 let create_memory ~(agent_name : string) ?(base_dir : string option)
     ?(session_id : string option)
-    () : Agent_sdk.Memory.t =
+    () : Oas.Memory.t =
   let sid = match session_id with
     | Some s -> s
     | None -> generate_session_id ()
   in
   let backend = make_backend ?base_dir ~agent_name ~session_id:sid () in
-  Agent_sdk.Memory.create ~long_term:backend ()
+  Oas.Memory.create ~long_term:backend ()
 
 (** Load and return the institution welcome text, or [None] when empty.
     Used by [load_institution_text]. *)
@@ -288,9 +288,9 @@ let default_episode_salience (episode : Institution_eio.episode) =
 
 let oas_outcome_of_institution (episode : Institution_eio.episode) =
   match episode.outcome with
-  | `Success -> Agent_sdk.Memory.Success episode.summary
-  | `Failure -> Agent_sdk.Memory.Failure episode.summary
-  | `Partial -> Agent_sdk.Memory.Neutral
+  | `Success -> Oas.Memory.Success episode.summary
+  | `Failure -> Oas.Memory.Failure episode.summary
+  | `Partial -> Oas.Memory.Neutral
 
 let metadata_string key metadata =
   match List.assoc_opt key metadata with
@@ -334,7 +334,7 @@ let institution_outcome_of_string = function
   | _ -> None
 
 let oas_episode_of_institution (episode : Institution_eio.episode) :
-    Agent_sdk.Memory.episode =
+    Oas.Memory.episode =
   {
     id = episode.id;
     timestamp = episode.timestamp;
@@ -360,7 +360,7 @@ let oas_episode_of_institution (episode : Institution_eio.episode) :
   }
 
 let institution_episode_of_oas ~(agent_name : string)
-    (episode : Agent_sdk.Memory.episode) : Institution_eio.episode =
+    (episode : Oas.Memory.episode) : Institution_eio.episode =
   let summary =
     metadata_string "institution_summary" episode.metadata
     |> Option.value ~default:episode.action
@@ -380,9 +380,9 @@ let institution_episode_of_oas ~(agent_name : string)
     | Some preserved -> preserved
     | None -> (
         match episode.outcome with
-        | Agent_sdk.Memory.Success _ -> `Success
-        | Agent_sdk.Memory.Failure _ -> `Failure
-        | Agent_sdk.Memory.Neutral -> `Partial)
+        | Oas.Memory.Success _ -> `Success
+        | Oas.Memory.Failure _ -> `Failure
+        | Oas.Memory.Neutral -> `Partial)
   in
   let participants =
     if episode.participants <> [] then episode.participants
@@ -408,7 +408,7 @@ let institution_episode_of_oas ~(agent_name : string)
     Metadata keys match what [institution_episode_of_oas] expects, so
     the round-trip Institution_eio -> OAS -> Institution_eio is lossless. *)
 let store_episode_from_snapshot
-    ~(memory : Agent_sdk.Memory.t)
+    ~(memory : Oas.Memory.t)
     ~(keeper_name : string)
     ~(turn : int)
     ~(trace_id : string)
@@ -432,15 +432,15 @@ let store_episode_from_snapshot
   in
   let outcome_str, outcome =
     if snapshot.done_summary <> None then
-      ("success", Agent_sdk.Memory.Success summary)
-    else ("partial", Agent_sdk.Memory.Neutral)
+      ("success", Oas.Memory.Success summary)
+    else ("partial", Oas.Memory.Neutral)
   in
   let ts = Time_compat.now () in
   let episode_id =
     Printf.sprintf "keeper-%s-t%d-%d" keeper_name turn
       (int_of_float (ts *. 1000.0) mod 1_000_000)
   in
-  let episode : Agent_sdk.Memory.episode =
+  let episode : Oas.Memory.episode =
     {
       id = episode_id;
       timestamp = ts;
@@ -464,7 +464,7 @@ let store_episode_from_snapshot
         ];
     }
   in
-  Agent_sdk.Memory.store_episode memory episode
+  Oas.Memory.store_episode memory episode
 
 let persisted_episode_ids () =
   (load_all_episodes_cached ()).ids
@@ -473,14 +473,14 @@ let persisted_episode_ids () =
 
     Appends newly created OAS episodes to the institution JSONL store,
     preserving IDs and institution metadata when present. *)
-let flush_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int =
+let flush_episodes ~(memory : Oas.Memory.t) ~(agent_name : string) : int =
   let persisted_ids = persisted_episode_ids () in
   let path = Institution_eio.episodes_jsonl_path () in
   Fs_compat.mkdir_p (Filename.dirname path);
   let flushed, _ =
-    Agent_sdk.Memory.recall_episodes memory ~limit:max_int ()
+    Oas.Memory.recall_episodes memory ~limit:max_int ()
     |> List.fold_left
-         (fun (flushed, p_ids) (episode : Agent_sdk.Memory.episode) ->
+         (fun (flushed, p_ids) (episode : Oas.Memory.episode) ->
            if SMap.mem episode.id p_ids then (flushed, p_ids)
            else (
              let persisted = institution_episode_of_oas ~agent_name episode in
@@ -514,7 +514,7 @@ let flush_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int =
     We use the full string for both fields since they are combined
     in MASC's representation. *)
 let oas_procedure_of_masc (p : Procedural_memory.procedure) :
-    Agent_sdk.Memory.procedure =
+    Oas.Memory.procedure =
   {
     id = p.id;
     pattern = p.pattern;
@@ -530,18 +530,18 @@ let oas_procedure_of_masc (p : Procedural_memory.procedure) :
     ];
   }
 
-let render_lesson_prompt_context ~(memory : Agent_sdk.Memory.t)
+let render_lesson_prompt_context ~(memory : Oas.Memory.t)
     ~(pattern : string) ~(limit : int) =
-  Agent_sdk.Lesson_memory.retrieve_lessons memory ~pattern ~limit ()
-  |> Agent_sdk.Lesson_memory.render_prompt_context
+  Oas.Lesson_memory.retrieve_lessons memory ~pattern ~limit ()
+  |> Oas.Lesson_memory.render_prompt_context
 
-let record_failure_lesson ~(memory : Agent_sdk.Memory.t)
+let record_failure_lesson ~(memory : Oas.Memory.t)
     ~(pattern : string) ~(summary : string)
     ?action ?stdout ?stderr ?diff_summary ?trace_summary ?metric_name
     ?metric_error ~(participants : string list)
     ~(metadata : (string * Yojson.Safe.t) list) () =
   ignore
-    (Agent_sdk.Lesson_memory.record_failure memory
+    (Oas.Lesson_memory.record_failure memory
        {
          pattern;
          summary;
@@ -575,16 +575,16 @@ let dedupe_procedures_by_id (procs : Procedural_memory.procedure list) =
     Extracts procedures from the Procedural tier that have been updated
     (new success/failure counts) and persists them.
     Returns the number of procedures flushed. *)
-let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int =
+let flush_procedures ~(memory : Oas.Memory.t) ~(agent_name : string) : int =
   let oas_procs =
-    Agent_sdk.Memory.matching_procedures memory
+    Oas.Memory.matching_procedures memory
       ~pattern:"" ()
   in
   let existing_raw = load_procedures_cached ~agent_name in
   let procedures = ref (dedupe_procedures_by_id existing_raw) in
   let needs_rewrite = ref (List.length existing_raw <> List.length !procedures) in
   let flushed = ref 0 in
-  List.iter (fun (op : Agent_sdk.Memory.procedure) ->
+  List.iter (fun (op : Oas.Memory.procedure) ->
     let updated =
       match List.find_opt (fun (p : Procedural_memory.procedure) ->
         p.id = op.id
@@ -691,7 +691,7 @@ let load_institution_text ~(config : Coord_utils.config) : string option =
     already-persisted entries are skipped via ID check.
 
     @since v2.265.0 (RFC-MASC-004 Phase 1) *)
-let flush_incremental ~(memory : Agent_sdk.Memory.t) ~(agent_name : string)
+let flush_incremental ~(memory : Oas.Memory.t) ~(agent_name : string)
     : int * int =
   (* Reuse existing flush logic which is already incremental
      (skips persisted episode IDs, only writes changed procedures). *)

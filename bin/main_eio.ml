@@ -317,6 +317,16 @@ let acquire_pid_lock port =
            pid port pid);
       exit 1
 
+let acquire_base_path_lock base_path =
+  match Server_startup_takeover.acquire_base_path_lock base_path with
+  | Server_startup_takeover.Acquired -> ()
+  | Server_startup_takeover.Already_running { pid } ->
+      Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
+        (Printf.sprintf
+           "[FATAL] Another MASC server (PID %d) already owns base path %s. Kill it first: kill %d"
+           pid base_path pid);
+      exit 1
+
 (** Reject base_path that points to the server's own source repo.
     Detects by checking if the running executable lives under base_path/_build/.
     Runtime state (.masc/keepers, traces, logs) must not pollute the repo. *)
@@ -393,7 +403,10 @@ let run_cmd host port base_path =
       resolution_source normalized_base_path;
     exit 1
   end;
+  let masc_dir = Filename.concat normalized_base_path ".masc" in
+  Fs_compat.mkdir_p masc_dir;
   acquire_pid_lock port;
+  acquire_base_path_lock normalized_base_path;
   Log.init_from_env ();
   if stripped_base_path <> ""
      && String.equal (Filename.basename stripped_base_path) ".masc"
@@ -407,9 +420,7 @@ let run_cmd host port base_path =
   (* Persist logs inside .masc/logs/ — colocated with state, not a sibling.
      Previous code wrote to base_path/logs/ which diverged from .masc/ when
      base_path differed from the repo checkout directory. *)
-  let masc_dir = Filename.concat normalized_base_path ".masc" in
   let log_dir = Filename.concat masc_dir "logs" in
-  Fs_compat.mkdir_p masc_dir;
   Fs_compat.mkdir_p log_dir;
   (* Migration: move .jsonl files from old base_path/logs/ if they exist *)
   let old_log_dir = Filename.concat normalized_base_path "logs" in

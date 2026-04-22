@@ -163,6 +163,9 @@ let with_forever_process ?argv0 ~ignore_sigterm f =
 let lock_path dir =
   Filename.concat dir "masc.pid"
 
+let base_path_lock_path dir =
+  Server_startup_takeover.base_path_lock_path dir
+
 let pid_from_file path =
   match read_file path |> String.trim |> int_of_string_opt with
   | Some pid -> pid
@@ -244,6 +247,40 @@ let test_escalates_sigkill_for_unresponsive_holder () =
           | Server_startup_takeover.Already_running _ ->
               Alcotest.fail "unresponsive holder should be reclaimed"))
 
+let test_base_path_lock_rejects_live_server_holder () =
+  with_temp_dir "startup-takeover-base-path-live" (fun dir ->
+      with_forever_process ~argv0:"main_eio.exe" ~ignore_sigterm:false (fun pid ->
+          let path = base_path_lock_path dir in
+          rm_rf (Filename.dirname path);
+          Unix.mkdir (Filename.dirname path) 0o755;
+          write_file path (Printf.sprintf "%d\n" pid);
+          match
+            Server_startup_takeover.acquire_base_path_lock ~lock_path:path dir
+          with
+          | Server_startup_takeover.Already_running { pid = running_pid } ->
+              Alcotest.(check int) "pid preserved" pid running_pid;
+              Alcotest.(check bool) "server process stays alive" true
+                (process_alive pid)
+          | Server_startup_takeover.Acquired ->
+              Alcotest.fail "live base-path owner should block takeover"))
+
+let test_base_path_lock_reclaims_stale_pid_file () =
+  with_temp_dir "startup-takeover-base-path-stale" (fun dir ->
+      with_forever_process ~ignore_sigterm:false (fun pid ->
+          stop_process pid;
+          let path = base_path_lock_path dir in
+          rm_rf (Filename.dirname path);
+          Unix.mkdir (Filename.dirname path) 0o755;
+          write_file path (Printf.sprintf "%d\n" pid);
+          match
+            Server_startup_takeover.acquire_base_path_lock ~lock_path:path dir
+          with
+          | Server_startup_takeover.Acquired ->
+              Alcotest.(check int) "current pid written" (Unix.getpid ())
+                (pid_from_file path)
+          | Server_startup_takeover.Already_running _ ->
+              Alcotest.fail "stale base-path owner should be reclaimed"))
+
 let () =
   Alcotest.run "Server_startup_takeover"
     [
@@ -264,5 +301,9 @@ let () =
             test_tolerates_invalid_pid_file;
           Alcotest.test_case "unresponsive holder escalates to sigkill" `Quick
             test_escalates_sigkill_for_unresponsive_holder;
+          Alcotest.test_case "live base-path owner blocks takeover" `Quick
+            test_base_path_lock_rejects_live_server_holder;
+          Alcotest.test_case "stale base-path owner is reclaimed" `Quick
+            test_base_path_lock_reclaims_stale_pid_file;
         ] );
     ]

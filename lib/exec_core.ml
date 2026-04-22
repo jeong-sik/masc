@@ -715,7 +715,7 @@ let default_tail_cap = 512 * 1024
 let env_int key =
   match Sys.getenv_opt key with
   | None | Some "" -> None
-  | Some s -> (try Some (int_of_string (String.trim s)) with _ -> None)
+  | Some s -> int_of_string_opt (String.trim s)
 
 let output_cap_enabled () =
   match Sys.getenv_opt "MASC_BASH_OUTPUT_CAP" with

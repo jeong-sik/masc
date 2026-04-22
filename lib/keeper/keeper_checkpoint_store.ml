@@ -159,7 +159,7 @@ let oas_history_snapshot_id_of_checkpoint (ckpt : Oas.Checkpoint.t) : string =
     | Some (`Assoc fields) -> (
         match List.assoc_opt "keeper_generation" fields with
         | Some (`Int n) -> n
-        | Some (`Intlit raw) -> (try int_of_string raw with _ -> 0)
+        | Some (`Intlit raw) -> Option.value ~default:0 (int_of_string_opt raw)
         | _ -> 0)
     | _ -> 0
   in

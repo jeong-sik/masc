@@ -20,7 +20,7 @@ let signal_of_name_or_num args =
   | "HUP" | "SIGHUP" -> Sys.sighup
   | "QUIT" | "SIGQUIT" -> Sys.sigquit
   | raw ->
-      (try int_of_string raw with _ -> Sys.sigterm)
+      (match int_of_string_opt raw with Some n -> n | None -> Sys.sigterm)
 
 (* ── Poll ─────────────────────────────────────────────────── *)
 

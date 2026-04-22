@@ -15,7 +15,7 @@ let add_agent_api_routes router =
        with_public_read (fun state req reqd ->
          let hours =
            match Server_utils.query_param req "hours" with
-           | Some h -> (try float_of_string h with Failure _ -> 24.0)
+           | Some h -> Option.value ~default:24.0 (float_of_string_opt h)
            | None -> 24.0
          in
          let since = Time_compat.now () -. (hours *. 3600.0) in
@@ -58,7 +58,7 @@ let add_agent_api_routes router =
          else
            let since_hours =
              match Server_utils.query_param req "since_hours" with
-             | Some h -> (try float_of_string h with Failure _ -> 4.0)
+             | Some h -> Option.value ~default:4.0 (float_of_string_opt h)
              | None -> 4.0
            in
            let limit =

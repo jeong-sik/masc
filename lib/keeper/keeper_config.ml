@@ -328,8 +328,7 @@ let float_of_env_default name ~default ~min_v ~max_v =
   | None -> default
   | Some raw ->
       let v =
-        try float_of_string (String.trim raw)
-        with Failure _ -> default
+        Option.value ~default (float_of_string_opt (String.trim raw))
       in
       max min_v (min max_v v)
 

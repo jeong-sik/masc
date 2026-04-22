@@ -3,7 +3,7 @@ open Keeper_types
 let json_int_opt_member key json =
   match Yojson.Safe.Util.member key json with
   | `Int n -> Some n
-  | `Intlit raw -> (try Some (int_of_string raw) with Failure _ -> None)
+  | `Intlit raw -> int_of_string_opt raw
   | _ -> None
 
 let json_string_opt_member key json =

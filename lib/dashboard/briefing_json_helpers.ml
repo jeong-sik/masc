@@ -40,7 +40,9 @@ let int_json ?(default = 0) json =
   match json with
   | `Int value -> `Int value
   | `Intlit raw -> (
-      try `Int (int_of_string raw) with Failure _ -> `Int default)
+      match int_of_string_opt raw with
+      | Some n -> `Int n
+      | None -> `Int default)
   | `Float value -> `Int (int_of_float value)
   | _ -> `Int default
 
@@ -49,7 +51,9 @@ let float_json ?(default = 0.0) json =
   | `Float value -> `Float value
   | `Int value -> `Float (float_of_int value)
   | `Intlit raw -> (
-      try `Float (float_of_string raw) with Failure _ -> `Float default)
+      match float_of_string_opt raw with
+      | Some n -> `Float n
+      | None -> `Float default)
   | _ -> `Float default
 
 let int_field ?(default = 0) key json =

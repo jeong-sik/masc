@@ -102,7 +102,7 @@ let parse_frontmatter content =
         ) yaml_lines |> Option.value ~default:""
       in
       let get_float name default =
-        try float_of_string (get_field name) with Failure _ -> default
+        Option.value ~default (float_of_string_opt (get_field name))
       in
       let get_tags () =
         let raw = get_field "tags" in

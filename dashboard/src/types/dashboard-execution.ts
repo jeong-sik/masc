@@ -462,12 +462,54 @@ export interface GoalTreeTask {
   updated_at: string
 }
 
+export interface GoalVerificationVote {
+  principal: {
+    kind: string
+    id: string
+    display_name?: string | null
+  }
+  decision: 'approve' | 'reject' | string
+  note?: string | null
+  evidence_refs?: string[]
+  submitted_at: string
+}
+
+export interface GoalVerificationRequest {
+  id: string
+  goal_id: string
+  target_phase: string
+  requested_by: {
+    kind: string
+    id: string
+    display_name?: string | null
+  }
+  policy_snapshot: {
+    principals: Array<{ kind: string; id: string; display_name?: string | null }>
+    eligible_principals: Array<{ kind: string; id: string; display_name?: string | null }>
+    required_verdicts: number
+  }
+  votes: GoalVerificationVote[]
+  status: string
+  created_at: string
+  resolved_at?: string | null
+}
+
+export interface GoalVerificationSummary {
+  effective_policy?: GoalVerificationRequest['policy_snapshot'] | null
+  open_request?: GoalVerificationRequest | null
+  approve_count: number
+  reject_count: number
+  remaining_possible: number
+}
+
 export interface GoalTreeNode {
   id: string
   title: string
   horizon: string
   status: string
   status_color: string
+  phase: string
+  phase_color: string
   health: 'done' | 'paused' | 'blocked' | 'at_risk' | 'on_track' | string
   health_color: string
   badges: string[]
@@ -482,6 +524,11 @@ export interface GoalTreeNode {
   tasks: GoalTreeTask[]
   task_count: number
   task_done_count: number
+  verification_summary: GoalVerificationSummary
+  effective_verifier_policy?: GoalVerificationRequest['policy_snapshot'] | null
+  active_verification_request?: GoalVerificationRequest | null
+  pending_verification_count: number
+  timeline_events: unknown[]
   children: GoalTreeNode[]
   child_count: number
   last_activity_at: string

@@ -22,7 +22,11 @@ import {
   horizonLabel,
   horizonColor,
   priorityStars,
+  countAwaitingVerificationTasks,
   countAwaitingVerificationInTree,
+  countGoalVerificationInTree,
+  goalPhaseLabel,
+  goalPhaseStatus,
 } from './goal-helpers'
 
 type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
@@ -235,9 +239,11 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
 function TreeSummary({
   summary,
   awaitingVerificationCount,
+  goalVerificationCount,
 }: {
   summary: GoalTreeSummary
   awaitingVerificationCount: number
+  goalVerificationCount: number
 }) {
   return html`
     <div class="grid grid-cols-[repeat(auto-fit,minmax(128px,1fr))] gap-3">
@@ -261,10 +267,16 @@ function TreeSummary({
         <div class="text-2xl font-bold text-text-strong tabular-nums">${summary.pending_approvals}</div>
         <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-text-muted">Approval</div>
       </div>
+      ${goalVerificationCount > 0 ? html`
+        <div class="rounded border border-amber-400/30 bg-amber-400/10 p-3 text-center">
+          <div class="text-2xl font-bold text-amber-200 tabular-nums">${goalVerificationCount}</div>
+          <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-amber-100/80">Goal 검증 대기</div>
+        </div>
+      ` : null}
       ${awaitingVerificationCount > 0 ? html`
         <div class="rounded border border-accent/30 bg-[var(--accent-10)] p-3 text-center">
           <div class="text-2xl font-bold text-accent tabular-nums">${awaitingVerificationCount}</div>
-          <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-accent/80">검증 대기</div>
+          <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-accent/80">Task 검증 대기</div>
         </div>
       ` : null}
       <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
@@ -349,6 +361,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             >
               ${horizonLabel(node.horizon)}
             </span>
+            <${StatusBadge} status=${goalPhaseStatus(node.phase)} label=${goalPhaseLabel(node.phase)} />
             <span class="break-words text-base font-semibold text-text-strong line-clamp-2">${node.title}</span>
             <span class="text-2xs text-text-dim">${priorityStars(node.priority)}</span>
           </div>
@@ -357,7 +370,28 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             <${HealthBadge} health=${node.health} />
             <${StatusBadge} status=${node.status} />
             ${node.task_count > 0 ? html`<span>${node.task_done_count}/${node.task_count} 태스크</span>` : null}
+            ${(() => {
+              const awaiting = countAwaitingVerificationTasks(node.tasks)
+              return awaiting > 0 ? html`
+                <span class="rounded border border-accent/30 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-medium text-accent" title="verifier keeper의 독립 실측을 기다리는 task">
+                  Task 검증 대기 ${awaiting}
+                </span>
+              ` : null
+            })()}
+            ${node.pending_verification_count > 0 ? html`
+              <span class="rounded border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-3xs font-medium text-amber-200">
+                Goal 검증 대기 ${node.pending_verification_count}
+              </span>
+            ` : null}
+            ${node.phase === 'awaiting_approval' ? html`
+              <span class="rounded border border-rose-400/30 bg-rose-400/10 px-2 py-0.5 text-3xs font-medium text-rose-200">
+                승인 대기
+              </span>
+            ` : null}
             ${node.child_count > 0 ? html`<span>${node.child_count} 하위 목표</span>` : null}
+            ${node.verification_summary.effective_policy ? html`
+              <span>quorum ${node.verification_summary.approve_count}/${node.verification_summary.effective_policy.required_verdicts}</span>
+            ` : null}
             ${node.pending_approval_count > 0 ? html`
               <span class="rounded border border-warn/30 bg-warn/10 px-2 py-0.5 text-3xs font-medium text-warn">
                 approval ${node.pending_approval_count}
@@ -393,6 +427,17 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
 
       ${isExpanded ? html`
         <div class="mt-1.5 flex flex-col gap-1.5">
+          ${node.verification_summary.open_request ? html`
+            <div class="ml-6 rounded border border-amber-400/20 bg-amber-400/8 p-2 text-xs text-amber-100">
+              <div class="mb-1 text-3xs font-semibold uppercase tracking-widest text-amber-200/80">Goal Verification</div>
+              <div>request ${node.verification_summary.open_request.id}</div>
+              <div>
+                quorum ${node.verification_summary.approve_count}/${node.verification_summary.open_request.policy_snapshot.required_verdicts},
+                reject ${node.verification_summary.reject_count},
+                remaining ${node.verification_summary.remaining_possible}
+              </div>
+            </div>
+          ` : null}
           ${node.tasks.length > 0 ? html`
             <div class="ml-6 flex flex-col gap-1 rounded border border-card-border/40 bg-[rgba(5,9,16,0.6)] p-2">
               <div class="mb-1 text-3xs font-semibold uppercase tracking-widest text-text-dim">연결된 태스크</div>
@@ -541,6 +586,7 @@ function GoalDetailPanel({
           <div class="mt-2 flex flex-wrap items-center gap-2">
             <${HealthBadge} health=${selectedNode.health} />
             <${StatusBadge} status=${selectedNode.status} />
+            <${StatusBadge} status=${goalPhaseStatus(selectedNode.phase)} label=${goalPhaseLabel(selectedNode.phase)} />
             <span class="rounded border border-white/10 bg-white/5 px-2 py-0.5 text-3xs font-semibold uppercase tracking-widest" style="color:${horizonColor(selectedNode.horizon)}">
               ${horizonLabel(selectedNode.horizon)}
             </span>
@@ -572,10 +618,37 @@ function GoalDetailPanel({
           <${DetailMetric} label="Task" value=${`${selectedNode.task_done_count}/${selectedNode.task_count}`} tone=${selectedNode.task_done_count === selectedNode.task_count && selectedNode.task_count > 0 ? 'ok' : 'default'} />
           <${DetailMetric} label="Linked Keepers" value=${selectedNode.linked_keeper_names.length} />
           <${DetailMetric} label="Approval" value=${selectedNode.pending_approval_count} tone=${selectedNode.pending_approval_count > 0 ? 'warn' : 'default'} />
+          <${DetailMetric} label="Goal Verification" value=${selectedNode.pending_verification_count} tone=${selectedNode.pending_verification_count > 0 ? 'warn' : 'default'} />
           <${DetailMetric} label="Infra Risk" value=${selectedNode.infra_risk_count} tone=${selectedNode.infra_risk_count > 0 ? 'bad' : 'default'} />
           <${DetailMetric} label="Linkage" value=${selectedNode.linkage_source} tone=${selectedNode.linkage_warning_count > 0 ? 'warn' : 'default'} />
           <${DetailMetric} label="Last Activity" value=${selectedNode.stagnation_seconds > 0 ? `${Math.floor(selectedNode.stagnation_seconds / 3600)}h idle` : 'now'} tone=${selectedNode.badges.includes('stalled') ? 'warn' : 'default'} />
         </div>
+
+        ${selectedNode.verification_summary.effective_policy ? html`
+          <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+            <div class="mb-2 text-2xs font-semibold uppercase tracking-widest text-text-muted">Goal Verification</div>
+            <div class="flex flex-wrap items-center gap-2 text-xs text-text-body">
+              <span class="rounded border border-amber-400/20 bg-amber-400/8 px-2 py-1 text-amber-100">
+                quorum ${selectedNode.verification_summary.approve_count}/${selectedNode.verification_summary.effective_policy.required_verdicts}
+              </span>
+              <span>reject ${selectedNode.verification_summary.reject_count}</span>
+              <span>remaining ${selectedNode.verification_summary.remaining_possible}</span>
+            </div>
+            <div class="mt-3 flex flex-wrap gap-1.5">
+              ${selectedNode.verification_summary.effective_policy.eligible_principals.map(principal => html`
+                <span key=${`${principal.kind}:${principal.id}`} class="rounded border border-card-border/60 bg-white/4 px-2 py-0.5 text-3xs font-medium text-text-body">
+                  ${principal.kind}:${principal.display_name ?? principal.id}
+                </span>
+              `)}
+            </div>
+            ${selectedNode.verification_summary.open_request ? html`
+              <div class="mt-3 rounded border border-amber-400/20 bg-amber-400/8 p-3 text-xs text-amber-100">
+                <div>request ${selectedNode.verification_summary.open_request.id}</div>
+                <div class="mt-1">status ${selectedNode.verification_summary.open_request.status}</div>
+              </div>
+            ` : null}
+          </div>
+        ` : null}
 
         ${selectedNode.badges.length > 0 ? html`
           <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
@@ -746,6 +819,7 @@ export function GoalTree() {
           <${TreeSummary}
             summary=${data.summary}
             awaitingVerificationCount=${countAwaitingVerificationInTree(data.tree)}
+            goalVerificationCount=${countGoalVerificationInTree(data.tree)}
           />
         ` : null}
       </section>

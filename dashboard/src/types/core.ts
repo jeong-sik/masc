@@ -221,11 +221,27 @@ export interface Goal {
   due_date?: string | null
   priority: number
   status: string
+  phase: string
+  verifier_policy?: GoalVerifierPolicy | null
+  require_completion_approval?: boolean
+  active_verification_request_id?: string | null
   parent_goal_id?: string | null
   last_review_note?: string | null
   last_review_at?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface GoalVerifierPrincipal {
+  kind: 'operator' | 'keeper' | string
+  id: string
+  display_name?: string | null
+}
+
+export interface GoalVerifierPolicy {
+  inherit_mode: 'extend' | 'replace' | string
+  principals: GoalVerifierPrincipal[]
+  required_verdicts?: number | null
 }
 
 // --- Keeper ---

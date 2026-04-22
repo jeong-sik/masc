@@ -382,9 +382,10 @@ function applyPlanningEnvelope(data: {
       const title = asString(row.title)
       const horizon = asString(row.horizon)
       const status = asString(row.status)
+      const phase = asString(row.phase)
       const createdAt = asString(row.created_at)
       const updatedAt = asString(row.updated_at)
-      if (!id || !title || !horizon || !status || !createdAt || !updatedAt) return null
+      if (!id || !title || !horizon || !status || !phase || !createdAt || !updatedAt) return null
       return {
         id,
         horizon: horizon as Goal['horizon'],
@@ -394,6 +395,10 @@ function applyPlanningEnvelope(data: {
         due_date: asString(row.due_date) ?? null,
         priority: asNumber(row.priority) ?? 3,
         status,
+        phase,
+        verifier_policy: (isRecord(row.verifier_policy) ? row.verifier_policy : null) as Goal['verifier_policy'],
+        require_completion_approval: row.require_completion_approval === true,
+        active_verification_request_id: asString(row.active_verification_request_id) ?? null,
         parent_goal_id: asString(row.parent_goal_id) ?? null,
         last_review_note: asString(row.last_review_note) ?? null,
         last_review_at: asString(row.last_review_at) ?? null,

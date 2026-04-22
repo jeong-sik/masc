@@ -75,6 +75,26 @@ export interface DashboardRuntimeDiagnostic {
   message: string
 }
 
+export type KeeperRuntimeSource = 'env' | 'toml' | 'default' | 'derived'
+
+export interface KeeperRuntimeField<T> {
+  value: T
+  source: KeeperRuntimeSource
+}
+
+export interface KeeperRuntimeResolved {
+  bootstrap_max_active_keepers: KeeperRuntimeField<number>
+  reactive_max_turns_per_call: KeeperRuntimeField<number>
+  autonomous_max_turns_per_call: KeeperRuntimeField<number>
+  reactive_max_idle_turns: KeeperRuntimeField<number>
+  autonomous_max_idle_turns: KeeperRuntimeField<number>
+  turn_timeout_sec: KeeperRuntimeField<number>
+  admission_wait_timeout_sec: KeeperRuntimeField<number>
+  oas_timeout_override_sec: KeeperRuntimeField<number | null>
+  oas_timeout_per_1k: KeeperRuntimeField<number>
+  oas_timeout_per_turn: KeeperRuntimeField<number>
+}
+
 export interface DashboardRuntimeResolution {
   status: 'ready' | 'warn' | string
   warnings: string[]
@@ -88,6 +108,7 @@ export interface DashboardRuntimeResolution {
   source_mismatch: boolean
   diagnostics: DashboardRuntimeDiagnostic[]
   build: ServerBuildIdentity
+  keeper_runtime: KeeperRuntimeResolved | null
 }
 
 export interface DashboardShellResponse {

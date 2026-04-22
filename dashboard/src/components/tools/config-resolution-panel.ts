@@ -7,6 +7,8 @@ import type {
   DashboardRuntimeDiagnostic,
   DashboardRuntimeProbeResponse,
   DashboardRuntimeResolution,
+  KeeperRuntimeResolved,
+  KeeperRuntimeField,
 } from '../../api/dashboard'
 import { fetchDashboardRuntimeProbe } from '../../api/dashboard'
 import { Card } from '../common/card'
@@ -279,6 +281,76 @@ function probeSignalLabel(signal: string | null | undefined): string {
     default:
       return 'probe pending'
   }
+}
+
+const KEEPER_RUNTIME_ROWS: Array<{
+  key: keyof KeeperRuntimeResolved
+  label: string
+  fmt: 'int' | 'float' | 'duration'
+}> = [
+  { key: 'bootstrap_max_active_keepers', label: 'max active keepers', fmt: 'int' },
+  { key: 'reactive_max_turns_per_call', label: 'reactive max turns/call', fmt: 'int' },
+  { key: 'autonomous_max_turns_per_call', label: 'autonomous max turns/call', fmt: 'int' },
+  { key: 'reactive_max_idle_turns', label: 'reactive max idle turns', fmt: 'int' },
+  { key: 'autonomous_max_idle_turns', label: 'autonomous max idle turns', fmt: 'int' },
+  { key: 'turn_timeout_sec', label: 'turn timeout', fmt: 'duration' },
+  { key: 'admission_wait_timeout_sec', label: 'admission wait timeout', fmt: 'duration' },
+  { key: 'oas_timeout_override_sec', label: 'OAS timeout override', fmt: 'duration' },
+  { key: 'oas_timeout_per_1k', label: 'OAS timeout per 1k ctx', fmt: 'float' },
+  { key: 'oas_timeout_per_turn', label: 'OAS timeout per turn', fmt: 'duration' },
+]
+
+function sourceTone(source: string): string {
+  switch (source) {
+    case 'env': return 'border-[var(--accent-primary)]/30 bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]'
+    case 'toml': return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[#bbf7d0]'
+    case 'derived': return 'border-[var(--yellow-bright-28)] bg-[var(--yellow-bright-10)] text-[var(--yellow-100)]'
+    default: return 'border-[var(--card-border)] bg-[var(--white-6)] text-[var(--text-muted)]'
+  }
+}
+
+function fmtKeeperValue(value: number | null, fmt: 'int' | 'float' | 'duration'): string {
+  if (value === null || value === undefined) return '--'
+  switch (fmt) {
+    case 'int': return String(Math.round(value))
+    case 'float': return value.toFixed(1)
+    case 'duration': return value >= 60 ? `${fmtNumber(value / 60, 1)}m` : `${fmtNumber(value, 0)}s`
+  }
+}
+
+function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null }) {
+  if (!runtime) return null
+  const tomlCount = KEEPER_RUNTIME_ROWS.filter(r => runtime[r.key]?.source === 'toml').length
+  const envCount = KEEPER_RUNTIME_ROWS.filter(r => runtime[r.key]?.source === 'env').length
+
+  return html`
+    <div class="mt-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-4 py-4">
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">keeper runtime</div>
+        ${tomlCount > 0 ? html`
+          <${StatusChip} tone=${sourceTone('toml')}>${tomlCount} TOML<//>
+        ` : null}
+        ${envCount > 0 ? html`
+          <${StatusChip} tone=${sourceTone('env')}>${envCount} env<//>
+        ` : null}
+      </div>
+      <div class="grid gap-2 md:grid-cols-2">
+        ${KEEPER_RUNTIME_ROWS.map(row => {
+          const field: KeeperRuntimeField<number | null> | undefined = runtime[row.key]
+          if (!field) return null
+          return html`
+            <div class="flex items-center justify-between gap-3 rounded border border-[var(--card-border)] bg-[var(--white-6)] px-3 py-2">
+              <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">${row.label}</div>
+              <div class="flex items-center gap-2">
+                <span class="font-mono text-xs text-[var(--text-body)]">${fmtKeeperValue(field.value, row.fmt)}</span>
+                <span class="text-3xs px-1.5 py-0.5 rounded ${sourceTone(field.source)}">${field.source}</span>
+              </div>
+            </div>
+          `
+        })}
+      </div>
+    </div>
+  `
 }
 
 function RuntimeProbePanel() {
@@ -564,6 +636,8 @@ export function ConfigResolutionPanel({
                       : visibleDiagnostics.map(item => html`<${DiagnosticRow} item=${item} />`)}
                 </div>
               </div>
+
+              <${KeeperRuntimePanel} runtime=${runtimeResolution.keeper_runtime} />
 
               <${RuntimeProbePanel} />
             </div>

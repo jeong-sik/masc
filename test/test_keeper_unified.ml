@@ -2202,6 +2202,27 @@ let test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_overr
   check (option string) "phase override fallback target is base cascade"
     (Some "tool_use_strict") fallback
 
+let test_next_fail_open_cascade_for_turn_returns_untried_fallback () =
+  let fallback =
+    UT.next_fail_open_cascade_for_turn
+      ~base_cascade:"tool_use_strict"
+      ~effective_cascade:"tool_use_strict"
+      ~attempted_cascades:[ "tool_use_strict" ]
+      (wrapped_claude_limit_error ())
+  in
+  check (option string) "untried fallback returned"
+    (Some KC.default_cascade_name) fallback
+
+let test_next_fail_open_cascade_for_turn_suppresses_attempted_fallback () =
+  let fallback =
+    UT.next_fail_open_cascade_for_turn
+      ~base_cascade:"tool_use_strict"
+      ~effective_cascade:"tool_use_strict"
+      ~attempted_cascades:[ "tool_use_strict"; KC.default_cascade_name ]
+      (wrapped_claude_limit_error ())
+  in
+  check (option string) "attempted fallback suppressed" None fallback
+
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
 let test_context_overflow_limit_parses_common_oas_errors () =
@@ -4279,6 +4300,10 @@ let () =
             test_fallback_cascade_for_unavailable_profile_prefers_default;
           test_case "unavailable phase override fallback prefers base" `Quick
             test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_override;
+          test_case "next fail-open returns untried fallback" `Quick
+            test_next_fail_open_cascade_for_turn_returns_untried_fallback;
+          test_case "next fail-open suppresses attempted fallback" `Quick
+            test_next_fail_open_cascade_for_turn_suppresses_attempted_fallback;
         ] );
       ( "tool_classification",
         [

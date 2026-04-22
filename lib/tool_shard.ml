@@ -755,6 +755,10 @@ Duplicate titles are rejected automatically (dedup by normalized title).";
           ("maximum", `Int 5);
           ("default", `Int 3);
         ]);
+        ("goal_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional structured goal linkage. Preferred over relying only on [goal:<id>] in the title.");
+        ]);
       ]);
       ("required", `List [`String "title"; `String "description"]);
     ];

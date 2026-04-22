@@ -247,7 +247,7 @@ let auto_approval_forbidden ~tool_name ~input ~risk meta =
   || runtime_auto_approval_blocked meta
 
 let to_oas_approval_callback
-    ?config:_ ~governance_level ~keeper_name ?meta () : Oas.Hooks.approval_callback =
+    ?config ~governance_level ~keeper_name ?meta () : Oas.Hooks.approval_callback =
   let queue_risk_level = function
     | Low -> Keeper_approval_queue.Low
     | Medium -> Keeper_approval_queue.Medium
@@ -308,16 +308,23 @@ let to_oas_approval_callback
           meta
       in
       let runtime_contract =
-        Option.map Keeper_runtime_contract.runtime_contract_json meta
+        Option.map
+          (fun keeper_meta ->
+            Keeper_runtime_contract.runtime_contract_json ?config keeper_meta)
+          meta
       in
       let selected_model = selected_model_of_meta meta in
       let risk_level = queue_risk_level risk in
+      let base_path =
+        Option.map (fun (config : Coord.config) -> config.base_path) config
+      in
       let rule_match =
         if auto_approval_forbidden ~tool_name ~input ~risk meta then
           None
         else
           Keeper_approval_queue.find_matching_rule
-            ~keeper_name ~tool_name ~input ~risk_level ?runtime_contract ()
+            ?base_path ~keeper_name ~tool_name ~input
+            ~risk_level ?runtime_contract ()
       in
       (match rule_match with
       | Some matched ->

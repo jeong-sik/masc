@@ -30,7 +30,7 @@ Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users
         ]);
         ("goal_id", `Assoc [
           ("type", `String "string");
-          ("description", `String "Optional explicit goal link. Prefer this over embedding [goal:<id>] in the title; the title-tag fallback remains for legacy tasks.");
+          ("description", `String "Optional explicit goal link. Preferred over embedding [goal:<id>] in the title; the title-tag fallback remains for legacy tasks.");
         ]);
         ("required_preset", `Assoc [
           ("type", `String "string");

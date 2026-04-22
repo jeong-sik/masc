@@ -73,6 +73,8 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
     id,
     keeper_name: keeperName,
     tool_name: toolName,
+    action_key: asNullableString(raw.action_key),
+    sandbox_target: asNullableString(raw.sandbox_target),
     risk_level: riskLevel,
     requested_at: asNullableIsoTimestamp(raw.requested_at_iso ?? raw.requested_at),
     waiting_s: asNumber(raw.waiting_s),

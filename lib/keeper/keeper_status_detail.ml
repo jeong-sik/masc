@@ -964,6 +964,9 @@ let handle_keeper_status ctx args : tool_result =
          let runtime_blocker_fields =
           runtime_blocker_fields_json ctx.config m
          in
+         let attention_fields =
+           attention_fields_json ctx.config m
+         in
          let latest_metrics =
            latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes
          in
@@ -1160,7 +1163,7 @@ let handle_keeper_status ctx args : tool_result =
                then `Null
                else `String m.runtime.last_need);
           ]);
-        ] @ runtime_blocker_fields @ [
+        ] @ runtime_blocker_fields @ attention_fields @ [
            ("compaction_policy", `Assoc [
              ("profile", `String m.compaction.profile);
              ("ratio_gate", `Float compact_ratio_gate);

@@ -197,6 +197,8 @@ export interface KeeperApprovalQueueItem {
   id: string
   keeper_name: string
   tool_name: string
+  action_key?: string | null
+  sandbox_target?: string | null
   risk_level: string
   requested_at?: string | null
   waiting_s?: number

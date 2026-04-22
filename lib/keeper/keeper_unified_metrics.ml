@@ -327,7 +327,9 @@ let append_decision_record
     | value :: _ -> Some value
     | [] -> None
   in
-  let runtime_contract = Keeper_runtime_contract.runtime_contract_json meta in
+  let runtime_contract =
+    Keeper_runtime_contract.runtime_contract_json ~config meta
+  in
   let pending_approval_count =
     Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
   in

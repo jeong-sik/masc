@@ -159,6 +159,9 @@ let handle_keeper_list ctx args : tool_result =
           let runtime_blocker_fields =
             runtime_blocker_fields_json ctx.config m
           in
+          let attention_fields =
+            attention_fields_json ctx.config m
+          in
           Some (`Assoc ([
               ("name", `String m.name);
               ("agent_name", `String m.agent_name);
@@ -217,7 +220,8 @@ let handle_keeper_list ctx args : tool_result =
                 else `String m.runtime.proactive_rt.last_preview);
             ]
             @ Keeper_status_bridge.social_runtime_fields_json m
-            @ runtime_blocker_fields @ [
+            @ runtime_blocker_fields
+            @ attention_fields @ [
               ("continuity_summary",
                 if String.trim m.continuity_summary = ""
                 then `Null

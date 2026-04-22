@@ -79,6 +79,12 @@ let test_goal_upsert_and_list () =
   in
   check bool "task marker embeds goal id" true
     (String.equal task_marker (Printf.sprintf "[goal:%s]" goal_id));
+  let task_link_field =
+    match Yojson.Safe.Util.member "task_link_field" created_json with
+    | `String field -> field
+    | _ -> fail "task_link_field missing from upsert response"
+  in
+  check string "structured link field" "goal_id" task_link_field;
   let listed =
     Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_list"
       ~args:(`Assoc [ ("horizon", `String "mid") ])

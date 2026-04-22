@@ -559,6 +559,9 @@ export interface Keeper {
     | null
   runtime_blocker_summary?: string | null
   runtime_blocker_continue_gate?: boolean | null
+  needs_attention?: boolean | null
+  attention_reason?: string | null
+  next_human_action?: string | null
   active_goal_ids?: string[]
   goal?: string | null
   short_goal?: string | null
@@ -570,8 +573,23 @@ export interface Keeper {
     long?: string | null
   } | null
   sandbox_profile?: 'local' | 'docker' | string | null
+  sandbox_target?: string | null
   sandbox_last_error?: string | null
   effective_sandbox_image?: string | null
+  blocked_task_count?: number | null
+  goal_progress?: {
+    active_goal_count?: number
+    linked_task_count?: number
+    done_task_count?: number
+    open_task_count?: number
+    blocked_task_count?: number
+    convergence?: number | null
+  } | null
+  approval_policy_effective?: {
+    allow_rules?: number
+    deny_rules?: number
+    persisted_rules?: number
+  } | null
   last_autonomous_action_at?: string | null
   autonomous_action_count?: number
   autonomous_turn_count?: number

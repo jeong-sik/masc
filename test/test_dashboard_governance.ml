@@ -460,6 +460,43 @@ let test_recommended_action_tool_is_canonicalized () =
       check string "resolved_tool canonicalized" "masc_operator_confirm"
         resolved_tool)
 
+let test_approval_queue_surfaces_action_key_and_sandbox_target () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let id =
+        Lib.Keeper_approval_queue.submit_pending
+          ~keeper_name:"governance-judge"
+          ~tool_name:"keeper_shell"
+          ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
+          ~risk_level:Lib.Keeper_approval_queue.Medium
+          ~runtime_contract:
+            (`Assoc [("backend", `String "docker"); ("sandbox_target", `String "docker")])
+          ~on_resolution:(fun _ -> ())
+          ()
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          ignore
+            (Lib.Keeper_approval_queue.resolve ~id
+               ~decision:(Agent_sdk.Hooks.Reject "cleanup")))
+        (fun () ->
+          Eio_main.run @@ fun env ->
+          with_test_fs env @@ fun () ->
+          let json =
+            Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20
+              ~offset:0 ~status_filter:None
+          in
+          let open Yojson.Safe.Util in
+          let approval =
+            json |> member "approval_queue" |> to_list |> List.hd
+          in
+          check string "action key surfaced" "op:gh"
+            (approval |> member "action_key" |> to_string);
+          check string "sandbox target surfaced" "docker"
+            (approval |> member "sandbox_target" |> to_string)))
+
 let () =
   run "dashboard_governance"
     [
@@ -477,6 +514,8 @@ let () =
             test_governance_monitoring_uses_live_runtime;
           test_case "dashboard exposes keeper approval queue" `Quick
             test_dashboard_exposes_keeper_approval_queue;
+          test_case "approval queue surfaces action key and sandbox target" `Quick
+            test_approval_queue_surfaces_action_key_and_sandbox_target;
           test_case "recommended action tool is canonicalized" `Quick
             test_recommended_action_tool_is_canonicalized;
           test_case "pending_ruling reflects disk truth (#7815)" `Quick

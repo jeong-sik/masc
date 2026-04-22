@@ -532,6 +532,7 @@ let task_to_tree_json ((task, linkage_source) : Types.task * string) =
       ("status", `String status);
       ("status_color", `String (task_status_color status));
       ("priority", `Int task.priority);
+      ("goal_id", Json_util.string_opt_to_json task.goal_id);
       ("assignee",
        match task_assignee task with
        | Some assignee -> `String assignee

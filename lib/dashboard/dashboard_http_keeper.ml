@@ -630,6 +630,25 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           let runtime_blocker_fields =
             runtime_blocker_fields_json config m
           in
+          let attention_fields =
+            attention_fields_json config m
+          in
+          let runtime_contract =
+            Keeper_runtime_contract.runtime_contract_json ~config m
+          in
+          let goal_progress =
+            Yojson.Safe.Util.member "goal_progress" runtime_contract
+          in
+          let blocked_task_count =
+            Safe_ops.json_int "blocked_task_count" ~default:0 runtime_contract
+          in
+          let approval_policy_effective =
+            Yojson.Safe.Util.member "approval_policy_effective" runtime_contract
+          in
+          let sandbox_target =
+            Safe_ops.json_string "sandbox_target" ~default:"unknown"
+              runtime_contract
+          in
           let supervisor_diagnostics, recent_crash_count =
             match registry_entry with
             | Some entry ->
@@ -869,7 +888,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 | None -> `Null);
               ("conditions", conditions_json);
               ("outcomes", outcomes_json);
-            ] @ runtime_blocker_fields @ [
+            ] @ runtime_blocker_fields @ attention_fields @ [
               ("supervisor_diagnostics", supervisor_diagnostics);
               ("agent_name", `String m.agent_name);
               ("emoji", `String (let (e, _) = get_agent_identity m.name in e));
@@ -927,12 +946,17 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
               ("sandbox_profile",
                 `String (Keeper_types.sandbox_profile_to_string m.sandbox_profile));
+              ("sandbox_target", `String sandbox_target);
               ("sandbox_last_error",
                 Json_util.string_opt_to_json sandbox_last_error);
               ("sandbox_preflight",
                 Json_util.option_to_yojson Fun.id sandbox_preflight);
               ("effective_sandbox_image",
                 Json_util.string_opt_to_json effective_sandbox_image);
+              ("runtime_contract", runtime_contract);
+              ("goal_progress", goal_progress);
+              ("blocked_task_count", `Int blocked_task_count);
+              ("approval_policy_effective", approval_policy_effective);
               ("runtime_trust", runtime_trust);
               ("paused", `Bool m.paused);
               ("keepalive_running", `Bool keepalive_running);

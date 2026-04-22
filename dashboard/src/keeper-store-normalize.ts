@@ -398,6 +398,10 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           typeof row.runtime_blocker_continue_gate === 'boolean'
             ? row.runtime_blocker_continue_gate
             : null,
+        needs_attention:
+          typeof row.needs_attention === 'boolean' ? row.needs_attention : null,
+        attention_reason: asString(row.attention_reason) ?? null,
+        next_human_action: asString(row.next_human_action) ?? null,
         active_goal_ids: asStringArray(row.active_goal_ids) ?? [],
         goal: asString(row.goal) ?? null,
         short_goal: asString(row.short_goal) ?? null,
@@ -411,8 +415,27 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
             }
           : null,
         sandbox_profile: asString(row.sandbox_profile) ?? null,
+        sandbox_target: asString(row.sandbox_target) ?? null,
         sandbox_last_error: asString(row.sandbox_last_error) ?? null,
         effective_sandbox_image: asString(row.effective_sandbox_image) ?? null,
+        blocked_task_count: asNumber(row.blocked_task_count) ?? null,
+        goal_progress: isRecord(row.goal_progress)
+          ? {
+              active_goal_count: asNumber(row.goal_progress.active_goal_count) ?? undefined,
+              linked_task_count: asNumber(row.goal_progress.linked_task_count) ?? undefined,
+              done_task_count: asNumber(row.goal_progress.done_task_count) ?? undefined,
+              open_task_count: asNumber(row.goal_progress.open_task_count) ?? undefined,
+              blocked_task_count: asNumber(row.goal_progress.blocked_task_count) ?? undefined,
+              convergence: asNumber(row.goal_progress.convergence) ?? null,
+            }
+          : null,
+        approval_policy_effective: isRecord(row.approval_policy_effective)
+          ? {
+              allow_rules: asNumber(row.approval_policy_effective.allow_rules) ?? undefined,
+              deny_rules: asNumber(row.approval_policy_effective.deny_rules) ?? undefined,
+              persisted_rules: asNumber(row.approval_policy_effective.persisted_rules) ?? undefined,
+            }
+          : null,
         created_at: toIsoTimestamp(row.created_at) ?? asString(row.created_at),
         updated_at: toIsoTimestamp(row.updated_at) ?? asString(row.updated_at),
         last_heartbeat: asString(row.last_heartbeat) ?? asString(agentRaw?.last_seen),

@@ -215,6 +215,53 @@ build_dashboard_spa() {
     echo "[dashboard] Build failed (non-fatal, server will show fallback page)." >&2
 }
 
+ask_config_bootstrap() {
+    local config_dir="$1"
+
+    # Skip if MASC_CONFIG_BOOTSTRAP is already set (non-interactive override)
+    if [ -n "${MASC_CONFIG_BOOTSTRAP:-}" ]; then
+        return 0
+    fi
+
+    # Skip if not a TTY (CI, pipe, background)
+    if [ ! -t 0 ]; then
+        export MASC_CONFIG_BOOTSTRAP="auto"
+        return 0
+    fi
+
+    # Skip if config dir already exists
+    if [ -d "$config_dir" ]; then
+        return 0
+    fi
+
+    echo "" >&2
+    echo "Config directory not found: $config_dir" >&2
+    echo "How would you like to proceed?" >&2
+    echo "  [1] Bootstrap from repo config (excludes keepers)" >&2
+    echo "  [2] Create empty config (no keepers, no personas)" >&2
+    echo "  [3] Cancel" >&2
+    printf "Choose [1]: " >&2
+    read -r choice </dev/tty
+    case "${choice:-1}" in
+        1)
+            export MASC_CONFIG_BOOTSTRAP="auto"
+            echo "[startup] Will bootstrap from repo config (keepers excluded)." >&2
+            ;;
+        2)
+            export MASC_CONFIG_BOOTSTRAP="empty"
+            echo "[startup] Will create empty config." >&2
+            ;;
+        3|q|n)
+            echo "[startup] Cancelled." >&2
+            exit 0
+            ;;
+        *)
+            export MASC_CONFIG_BOOTSTRAP="auto"
+            echo "[startup] Unknown choice; defaulting to repo bootstrap." >&2
+            ;;
+    esac
+}
+
 bootstrap_base_path_config() {
     local base_path="$1"
     local local_masc_dir="$base_path/.masc"
@@ -227,14 +274,36 @@ bootstrap_base_path_config() {
         return 0
     fi
 
+    local mode="${MASC_CONFIG_BOOTSTRAP:-auto}"
     mkdir -p "$local_masc_dir"
-    if [ -d "$SCRIPT_DIR/config" ]; then
-        cp -R "$SCRIPT_DIR/config" "$local_config_dir"
-        echo "[startup] Bootstrapped config into $local_config_dir" >&2
-    else
-        mkdir -p "$local_config_dir"
-        echo "[startup] Repo config/ missing; created empty $local_config_dir" >&2
-    fi
+    case "$mode" in
+        empty)
+            mkdir -p "$local_config_dir/keepers" "$local_config_dir/personas" "$local_config_dir/prompts"
+            echo "[startup] Created empty config: $local_config_dir" >&2
+            ;;
+        skip)
+            echo "[startup] Config bootstrap skipped." >&2
+            ;;
+        auto|*)
+            if [ -d "$SCRIPT_DIR/config" ]; then
+                # Copy config excluding keepers/ (matches OCaml copy_missing_config_root_seed)
+                mkdir -p "$local_config_dir"
+                for item in "$SCRIPT_DIR/config"/*; do
+                    local name
+                    name="$(basename "$item")"
+                    if [ "$name" = "keepers" ]; then
+                        mkdir -p "$local_config_dir/keepers"
+                    else
+                        cp -R "$item" "$local_config_dir/$name"
+                    fi
+                done
+                echo "[startup] Bootstrapped config into $local_config_dir (keepers excluded)" >&2
+            else
+                mkdir -p "$local_config_dir"
+                echo "[startup] Repo config/ missing; created empty $local_config_dir" >&2
+            fi
+            ;;
+    esac
 }
 
 resolve_repo_env_root() {
@@ -699,6 +768,7 @@ export MASC_BASE_PATH_RESOLUTION_SOURCE="$BASE_PATH_RESOLUTION_SOURCE"
 if [ -n "$SIDECAR_ROOT" ]; then
     export MASC_SIDECAR_ROOT="$(resolve_base_path "$SIDECAR_ROOT")"
 fi
+ask_config_bootstrap "$RESOLVED_BASE_PATH/.masc/config"
 bootstrap_base_path_config "$RESOLVED_BASE_PATH"
 if [ -z "${MASC_CONFIG_DIR:-}" ]; then
     export MASC_CONFIG_DIR="$RESOLVED_BASE_PATH/.masc/config"

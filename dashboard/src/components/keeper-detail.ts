@@ -30,6 +30,7 @@ import {
   KeeperRuntimeActions,
 } from './keeper-shared'
 import { showToast } from './common/toast'
+import { purgeAgent } from '../api/actions'
 import {
   ContextChart,
   CtxCompositionPanel,
@@ -589,6 +590,7 @@ export function KeeperDetailPage() {
   const [clearReason, setClearReason] = useState('')
   const [preserveSystemPrompt, setPreserveSystemPrompt] = useState(true)
   const [clearPending, setClearPending] = useState(false)
+  const [purgePending, setPurgePending] = useState(false)
   const [checkpointRefreshToken, setCheckpointRefreshToken] = useState(0)
   // Latest transition's wall_clock_at_decision, in unix seconds.  Used by
   // the header KeeperPhaseAndStage to render "현재 phase에 머문 시간" without
@@ -674,6 +676,29 @@ export function KeeperDetailPage() {
     })()
   }
 
+  const submitPurgeKeeper = () => {
+    void (async () => {
+      const confirmed = await requestConfirm({
+        title: '키퍼 완전 삭제',
+        message: `${keeper.name}를 완전 삭제합니다.\n런타임 상태, 세션 trace, 인증, metrics와 config/keepers/${keeper.name}.toml까지 함께 제거됩니다.`,
+        tone: 'danger',
+        confirmText: '완전 삭제',
+      })
+      if (!confirmed) return
+      setPurgePending(true)
+      try {
+        await purgeAgent(keeper.name)
+        closeKeeperDetail()
+        showToast(`${keeper.name} 완전 삭제됨`, 'success')
+        await refreshAfterRuntimeAction()
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : '키퍼 삭제 실패', 'error')
+      } finally {
+        setPurgePending(false)
+      }
+    })()
+  }
+
   return html`
     <div class="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-8">
       <div class="sticky top-0 z-20 overflow-hidden rounded-[28px] border border-[var(--card-border)] bg-[rgba(13,21,38,0.96)] shadow-[0_24px_64px_rgba(0,0,0,0.22)] backdrop-blur-xl">
@@ -690,6 +715,12 @@ export function KeeperDetailPage() {
               class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
               onClick=${() => setClearDialogOpen(true)}
             >비우기</button>
+            <button
+              type="button"
+              disabled=${purgePending}
+              class="py-1 px-3 rounded text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick=${submitPurgeKeeper}
+            >${purgePending ? '삭제 중...' : '완전 삭제'}</button>
             <${KeeperLifecycleButtons} keeper=${keeper} effectiveStatus=${effectiveStatus} />
             <button
               type="button"

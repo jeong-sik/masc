@@ -68,19 +68,17 @@ let wall_now () = Unix.gettimeofday ()
 let float_of_env_default name ~default =
   match Sys.getenv_opt name with
   | None -> default
-  | Some raw -> (
-      try
-        let value = float_of_string (String.trim raw) in
-        if value > 0.0 then value else default
-      with Failure _ -> default)
+  | Some raw ->
+      match float_of_string_opt (String.trim raw) with
+      | Some value when value > 0.0 -> value
+      | _ -> default
 
 let cooldown_seconds () =
   match Env_config.Worker.local_runtime_cooldown_sec_opt () with
-  | Some raw -> (
-      try
-        let value = float_of_string (String.trim raw) in
-        if value > 0.0 then value else 30.0
-      with Failure _ -> 30.0)
+  | Some raw ->
+      (match float_of_string_opt (String.trim raw) with
+       | Some value when value > 0.0 -> value
+       | _ -> 30.0)
   | None -> 30.0
 
 let trim_opt = function

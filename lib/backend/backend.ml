@@ -257,10 +257,10 @@ module FileSystem = struct
             Ok ()
           with
           | Eio.Cancel.Cancelled _ as exn ->
-              (try Eio.Path.unlink tmp_path with _ -> ());
+              (try Eio.Path.unlink tmp_path with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
               raise exn
           | exn ->
-              (try Eio.Path.unlink tmp_path with _ -> ());
+              (try Eio.Path.unlink tmp_path with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
               Error (IOError (Printexc.to_string exn))
     )
 

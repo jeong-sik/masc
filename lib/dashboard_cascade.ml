@@ -336,6 +336,7 @@ let save_raw_config_json raw_json =
           ignore (Yojson.Safe.from_string raw_json);
           Ok ()
         with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
         | Yojson.Json_error msg ->
             Error (Printf.sprintf "invalid JSON: %s" msg)
         | exn ->

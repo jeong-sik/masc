@@ -16,4 +16,5 @@
    digestif
    digestif.c
    unix
-   fs_compat))
+   fs_compat
+   masc_core))

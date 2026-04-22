@@ -649,8 +649,8 @@ let start_loop_json ~(base_path : string) ~(args : Yojson.Safe.t) :
   match result with
   | `Assoc fields when List.mem_assoc "error" fields ->
       let error_msg =
-        match List.assoc "error" fields with
-        | `String msg -> msg
+        match List.assoc_opt "error" fields with
+        | Some (`String msg) -> msg
         | _ -> "unknown error"
       in
       Error error_msg

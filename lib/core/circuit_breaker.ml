@@ -291,7 +291,7 @@ let wrap t ~agent_id (f : unit -> ('a, string) result) : ('a, string) result =
 
 (** Exception-catching variant of [wrap].
     Re-raises [Eio.Cancel.Cancelled] to preserve cooperative cancellation. *)
-let wrap_exn t ~agent_id (f : unit -> 'a) : ('a, string) result =
+let wrap_result t ~agent_id (f : unit -> 'a) : ('a, string) result =
   match check t ~agent_id with
   | Error msg -> Error msg
   | Ok () ->

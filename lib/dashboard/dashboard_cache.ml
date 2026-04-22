@@ -194,13 +194,13 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
         action := Some (`Compute token);
         SMap.add key (Computing { token; started_at = now (); stale = None }) map
     );
-    match Option.get !action with
-    | `Hit v -> v
-    | `Timed_out -> raise (Compute_timeout (key, true))
-    | `Wait token ->
+    match !action with
+    | Some (`Hit v) -> v
+    | Some (`Timed_out) -> raise (Compute_timeout (key, true))
+    | Some (`Wait token) ->
       Time_compat.sleep wait_poll_interval_sec;
       try_get ~waited:(waited +. wait_poll_interval_sec) ~watching_token:(Some token)
-    | `Stale (stale_value, token) ->
+    | Some (`Stale (stale_value, token)) ->
       let do_bg_compute () =
         match compute () with
         | value ->
@@ -255,7 +255,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            Log.Dashboard.warn "cache: no switch for background revalidation, computing inline";
            do_bg_compute ());
       stale_value
-    | `Compute token ->
+    | Some (`Compute token) ->
       let result_ref = ref None in
       let run_compute () =
         try result_ref := Some (Ok (compute ()))
@@ -333,7 +333,8 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            (match !fallback_val with
             | Some v -> v
             | None -> `Assoc [("error", `String "Compute timeout")]))
-    | `Retry -> try_get ~waited ~watching_token
+    | Some (`Retry) -> try_get ~waited ~watching_token
+    | None -> assert false
   in
   try_get ~waited:0.0 ~watching_token:None
 
@@ -352,9 +353,9 @@ let get_or_compute_simple key ~ttl compute =
       action := Some (`Compute token);
       SMap.add key (Computing { token; started_at = ts; stale = None }) map
   );
-  match Option.get !action with
-  | `Hit v -> v
-  | `Compute token ->
+  match !action with
+  | Some (`Hit v) -> v
+  | Some (`Compute token) ->
     (match compute () with
      | value ->
        let ts_after = now () in
@@ -372,6 +373,7 @@ let get_or_compute_simple key ~ttl compute =
          | _ -> map
        );
        raise exn)
+  | None -> assert false
 
 let get_or_compute key ~ttl compute =
   if Eio_guard.is_ready () then get_or_compute_eio key ~ttl compute

@@ -30,7 +30,9 @@ let rec json_at_path json segments =
   | segment :: rest, `List items -> (
       match int_of_string_opt segment with
       | Some idx when idx >= 0 && idx < List.length items ->
-          json_at_path (List.nth items idx) rest
+          (match List.nth_opt items idx with
+           | Some item -> json_at_path item rest
+           | None -> None)
       | _ -> None)
   | _ -> None
 

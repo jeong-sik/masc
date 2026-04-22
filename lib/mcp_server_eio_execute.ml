@@ -141,14 +141,14 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           else
             let term_session_id = Option.value ~default:"" (Sys.getenv_opt "TERM_SESSION_ID") in
             let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
-            (try
-              let name = Fs_compat.load_file term_file |> String.trim in
-              if name <> "" then begin
-                Log.Mcp.warn "[deprecated] agent name resolved via /tmp TERM file — migrate to Agent_identity";
-                name
-              end else raise Not_found
-            with Sys_error _ | Not_found ->
-              generated_fallback_agent_name)
+            (match Safe_ops.protect ~default:None (fun () ->
+               let name = Fs_compat.load_file term_file |> String.trim in
+               if name <> "" then Some name else None)
+             with
+             | Some name ->
+                 Log.Mcp.warn "[deprecated] agent name resolved via /tmp TERM file — migrate to Agent_identity";
+                 name
+             | None -> generated_fallback_agent_name)
   in
 
   let token =

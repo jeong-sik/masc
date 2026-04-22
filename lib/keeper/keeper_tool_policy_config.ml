@@ -303,14 +303,16 @@ let resolve_preset
       let group_tools =
         def.groups
         |> List.concat_map (fun group_name ->
-          (* Hashtbl.find is safe: load validates all group references *)
-          resolve_group_source (Hashtbl.find config.groups group_name))
+          match Hashtbl.find_opt config.groups group_name with
+          | Some group -> resolve_group_source group
+          | None -> [])
       in
       let masc_from_groups =
         def.masc_groups
         |> List.concat_map (fun mg_name ->
-          (* Hashtbl.find is safe: load validates all masc_group references *)
-          List.filter masc_filter (Hashtbl.find config.masc_groups mg_name))
+          match Hashtbl.find_opt config.masc_groups mg_name with
+          | Some tools -> List.filter masc_filter tools
+          | None -> [])
       in
       let masc_individual =
         def.masc_tools |> List.filter masc_filter
@@ -326,9 +328,11 @@ let group_names (config : t) : string list =
   |> List.sort String.compare
 
 let all_group_tools (config : t) : string list =
-  (* group_names extracts keys from config.groups, so Hashtbl.find is safe *)
   group_names config
-  |> List.concat_map (fun name -> resolve_group_source (Hashtbl.find config.groups name))
+  |> List.concat_map (fun name ->
+    match Hashtbl.find_opt config.groups name with
+    | Some group -> resolve_group_source group
+    | None -> [])
 
 let all_masc_tools (config : t) : string list =
   Hashtbl.fold (fun _ tools acc -> tools @ acc) config.masc_groups []

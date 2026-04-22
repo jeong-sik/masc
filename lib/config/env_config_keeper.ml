@@ -608,16 +608,18 @@ module KeeperSandbox = struct
       disables the mount (no gh auth). *)
   let gh_creds_host_path () =
     let default =
-      try Filename.concat (Sys.getenv "HOME") ".config/gh"
-      with Not_found -> ""
+      match Sys.getenv_opt "HOME" with
+      | Some home -> Filename.concat home ".config/gh"
+      | None -> ""
     in
     get_string ~default "MASC_KEEPER_SANDBOX_GH_CREDS"
 
   (** Host path mounted read-only at /root/.gitconfig. Default $HOME/.gitconfig. *)
   let gitconfig_host_path () =
     let default =
-      try Filename.concat (Sys.getenv "HOME") ".gitconfig"
-      with Not_found -> ""
+      match Sys.getenv_opt "HOME" with
+      | Some home -> Filename.concat home ".gitconfig"
+      | None -> ""
     in
     get_string ~default "MASC_KEEPER_SANDBOX_GITCONFIG"
 
@@ -631,8 +633,9 @@ module KeeperSandbox = struct
       disables forwarding. *)
   let gh_token () =
     let default =
-      try Sys.getenv "GH_TOKEN"
-      with Not_found -> ""
+      match Sys.getenv_opt "GH_TOKEN" with
+      | Some token -> token
+      | None -> ""
     in
     get_string ~default "MASC_KEEPER_SANDBOX_GH_TOKEN"
 

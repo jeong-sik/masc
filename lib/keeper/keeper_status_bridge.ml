@@ -192,6 +192,8 @@ let blocker_class_of_sdk_error (err : Oas.Error.sdk_error) : blocker_class optio
       None
   | Some (Oas_worker_named.Admission_queue_timeout _) ->
       Some Admission_queue_wait_timeout
+  | Some (Oas_worker_named.Admission_queue_rejected _) ->
+      None
   | Some (Oas_worker_named.Turn_timeout _) ->
       Some Turn_timeout
   | Some (Oas_worker_named.Ambiguous_post_commit { is_timeout; _ }) ->

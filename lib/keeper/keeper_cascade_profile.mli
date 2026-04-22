@@ -3,128 +3,88 @@
     Keepers historically used stringly-typed cascade names in TOML, runtime
     metadata, telemetry labels, and cascade.json lookups. This module is the
     SSOT for the active keeper cascade profile and the legacy aliases that must
-    continue to resolve to it. *)
+    continue to resolve to it.
 
-(** SSOT for valid cascade profiles in repo [config/cascade.json].
-
-    Adding a new profile is a compile-time event: add a variant here
-    and every exhaustive [match] across the codebase flags the consumer
-    sites that need to handle it. Personal/playground-only cascades
-    must NOT be added here — they live in
-    [$MASC_BASE_PATH/.masc/playground/.../cascade.json].
+    Three keeper-assignable profiles and one system-only profile (Tool_rerank).
+    Phase-routing names ("local_only", "local_recovery") are NOT variants —
+    they pass through [canonicalize_with_catalog] as catalog names.
 
     @since 0.9.5 *)
+
+(** SSOT variant for the 3+1 cascade model.
+
+    Three keeper-assignable profiles ({!Big_three}, {!Underdog}, {!Local}) and
+    one system-only profile ({!Tool_rerank}).
+
+    Adding a new profile is a compile-time event: add a variant here, then
+    exhaustive [match] sites flag every consumer that needs to handle it.
+    Personal/playground-only cascades must NOT be added here — they live in
+    [$MASC_BASE_PATH/.masc/playground/.../cascade.json] only. *)
 type t =
-  | Default
-  | Keeper_unified
-  | Sangsu
-  | Local_only
-  | Local_mlx_vlm_qwen36
-  | Local_recovery
+  | Big_three
+  | Underdog
+  | Local
   | Tool_rerank
-  (* v1 active catalog (2026-04-17): keepers route through these via
-     [config/cascade.json] presets. Adding a profile here unlocks lookup
-     for [<name>_models]/[<name>_temperature]/[<name>_max_tokens] keys.
-     Without the variant, [canonicalize] silently collapses the name to
-     [Keeper_unified] and the runtime never reads the user's preset. *)
-  | Nick0cave
-  | Capacity_queue_trio
-  | Vendor_mix_balanced
-  | Cost_tier_ladder
-  | Oauth_cli_rotate
-  | Quality_sticky_glm51
-  | Tool_use_strict
-  | Resilient_breaker
 
 val all : t list
 (** [all] is exhaustive: every variant constructor of {!t} appears
-    exactly once. Consumers that need to enumerate profiles should
-    derive from this rather than maintaining a parallel list. *)
+    exactly once. *)
 
 val to_string : t -> string
-(** Canonical lowercase-snake-case name, matching the
-    [<name>_models]/[<name>_temperature]/[<name>_max_tokens] convention
-    in [config/cascade.json]. *)
+(** Canonical lowercase-snake-case name. *)
 
 val of_string_opt : string -> t option
 (** Parse a raw cascade name into the variant. Handles legacy aliases
-    ([oas-keeper_unified], [coding_first], [keeper_turn], [keeper_reply])
-    by collapsing them to their canonical variant. Returns [None] for
-    unknown names — use {!canonical} when you want a forced fallback. *)
+    by collapsing them to [Big_three]. Returns [None] for unknown names
+    and phase-routing names ("local_only", "local_recovery"). *)
 
 val canonical : string -> t
 (** [canonical raw] = [of_string_opt raw |> Option.value ~default]. *)
 
 val default : t
 val default_name : string
-(** [default_name = to_string default = "keeper_unified"]. *)
+(** [default_name = to_string default = "big_three"]. *)
 
 val known_cascades : string list
 (** [known_cascades = List.map to_string all]. Provided for consumers
-    that still operate on strings (cascade.json key prefixes, metric
-    label allow-list); new code should take {!t} directly. *)
+    that still operate on strings; new code should take {!t} directly. *)
 
 val catalog_names : ?config_path:string -> unit -> string list
 (** Live profile catalog discovered from the active [cascade.json].
-    Discovery is delegated to {!Cascade_config_loader.load_catalog}, so
-    profiles are surfaced from recognized cascade schema keys
-    (for example [{name}_models], [{name}_temperature],
-    [{name}_strategy], ...). When the file cannot be read, returns [[]]
-    rather than synthesizing a hardcoded catalog. *)
+    When the file cannot be read, returns [[]]. *)
 
 val keeper_catalog_names : ?config_path:string -> unit -> string list
 (** Assignable live profile names from {!catalog_names}, filtered by
-    explicit [{name}_keeper_assignable = false] metadata in
-    [cascade.json]. Read failures return [[]]. *)
+    [keeper_assignable] metadata. *)
 
 val system_catalog_names : ?config_path:string -> unit -> string list
-(** Live system-only profile names present in [cascade.json], selected
-    by explicit [{name}_keeper_assignable = false] metadata. Read
-    failures return [[]]. *)
+(** Live system-only profile names present in [cascade.json]. *)
 
 val is_system_only_cascade : string -> bool
 (** Exact-name membership check against the active config's
     {!system_catalog_names}. *)
 
 val canonicalize_with_catalog : catalog:string list -> string -> string
-(** Like {!canonicalize}, but resolves dynamic profiles against an explicit
-    live catalog instead of the active config path. Intended for tests and
-    server-side validation flows that already loaded the catalog. *)
+(** Resolves dynamic profiles against an explicit live catalog. *)
 
 val resolve_live_with_catalog : catalog:string list -> string -> string
 (** Resolves a keeper-declared cascade against an explicit live catalog.
 
-    Semantics:
-    - blank/whitespace -> {!default_name}
-    - known legacy alias -> canonical known name, but only if present in [catalog]
-    - exact dynamic/live profile name -> preserved when present in [catalog]
-    - any name absent from [catalog] -> {!default_name}
-
-    Unlike {!canonicalize_with_catalog}, this treats compile-time built-in
-    names that are no longer active in the runtime catalog as drift and
-    falls back to {!default_name}. Use this at runtime read surfaces that
-    need to mirror the active catalog rather than the variant inventory. *)
+    Compile-time built-in names absent from the runtime catalog are treated
+    as drift and fall back to {!default_name}. *)
 
 val resolve_live : ?config_path:string -> string -> string
 (** Like {!resolve_live_with_catalog}, but reads the active catalog from the
     resolved cascade config path. *)
 
 val canonicalize : string -> string
-(** [canonicalize raw = to_string (canonical raw)]. Existing
-    string-based call sites continue to work; legacy aliases collapse to
-    their canonical built-in name, live catalog names pass through, and
-    unknown values fall back to {!default_name}. *)
+(** [canonicalize raw = to_string (canonical raw)]. Legacy aliases collapse
+    to their canonical name, live catalog names pass through, unknown values
+    fall back to {!default_name}. *)
 
 val normalize_declared_name : string -> string
-(** Normalizes only the keeper-side implicit default and legacy aliases.
-
-    Semantics:
-    - blank/whitespace -> {!default_name}
-    - known legacy alias -> canonical known name
-    - unknown nonblank name -> preserved (trimmed)
-
-    This lets runtime-authoritative catalogs accept dynamic profile names
-    without using the compile-time variant inventory as the source of truth. *)
+(** Normalizes keeper-side implicit default and legacy aliases.
+    Unknown nonblank names are preserved (trimmed). *)
 
 (** {1 cascade.json key helpers} *)
 

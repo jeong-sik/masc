@@ -206,7 +206,7 @@ let test_valid_catalog_skips_live_probes_at_bootstrap () =
     (write_cascade_json config_dir
        (Printf.sprintf
           {|{
-  "keeper_unified_models": ["%s"],
+  "big_three_models": ["%s"],
   "tool_rerank_models": ["%s"]
 }|}
           shared_model shared_model));
@@ -230,7 +230,7 @@ let test_valid_catalog_skips_live_probes_at_bootstrap () =
     require_ok
       (Cascade_catalog_runtime.resolve_declared_name ~raw_name:"" ())
   in
-  check string "blank name defaults to keeper_unified"
+  check string "blank name defaults to big_three"
     Keeper_config.default_cascade_name blank_name;
   match
     Cascade_catalog_runtime.resolve_declared_name ~raw_name:"missing_profile" ()
@@ -253,7 +253,7 @@ let test_invalid_hot_reload_preserves_last_known_good () =
     write_cascade_json config_dir
       (Printf.sprintf
          {|{
-  "keeper_unified_models": ["%s"]
+  "big_three_models": ["%s"]
 }|}
          valid_model)
   in
@@ -270,7 +270,7 @@ let test_invalid_hot_reload_preserves_last_known_good () =
   ignore
     (write_cascade_json config_dir
        {|{
-  "keeper_unified_models": ["__nonexistent_provider_sentinel__:fake"]
+  "big_three_models": ["__nonexistent_provider_sentinel__:fake"]
 }|});
   match Cascade_catalog_runtime.inspect_active () with
   | Ok
@@ -281,7 +281,7 @@ let test_invalid_hot_reload_preserves_last_known_good () =
         config_path (json_string_field "source_path" served_json);
       let labels =
         require_ok
-          (Cascade_catalog_runtime.models_of_cascade_name "keeper_unified")
+          (Cascade_catalog_runtime.models_of_cascade_name "big_three")
       in
       check (list string) "served snapshot keeps prior model" [ valid_model ] labels;
       let rejection_json =
@@ -309,7 +309,7 @@ let test_legacy_runtime_wrapper_does_not_fallback_to_defaults () =
     (write_cascade_json config_dir
        (Printf.sprintf
           {|{
-  "keeper_unified_models": ["%s"]
+  "big_three_models": ["%s"]
 }|}
           valid_model));
   ignore (Cascade_catalog_runtime.inspect_active ());
@@ -339,7 +339,7 @@ let test_legacy_runtime_wrapper_preserves_configured_label_order () =
     (write_cascade_json config_dir
        (Printf.sprintf
           {|{
-  "keeper_unified_models": [
+  "big_three_models": [
     {"model": "%s", "weight": 2},
     {"model": "%s", "weight": 2},
     {"model": "%s", "weight": 2}
@@ -369,7 +369,7 @@ let test_partial_catalog_keeps_validated_subset_available () =
     (write_cascade_json config_dir
        (Printf.sprintf
           {|{
-  "keeper_unified_models": ["%s"],
+  "big_three_models": ["%s"],
   "tool_rerank_models": ["%s"],
   "broken_profile_models": ["__nonexistent_provider_sentinel__:fake"]
 }|}
@@ -439,7 +439,7 @@ let test_partial_catalog_rejects_invalid_default_profile () =
       (write_cascade_json config_dir
          (Printf.sprintf
             {|{
-  "keeper_unified_models": ["__nonexistent_provider_sentinel__:fake"],
+  "big_three_models": ["__nonexistent_provider_sentinel__:fake"],
   "tool_rerank_models": ["%s"]
 }|}
             valid_model));
@@ -455,7 +455,7 @@ let test_partial_catalog_rejects_invalid_default_profile () =
            (function
              | `String value ->
                  contains_substring value
-                   "required default profile \"keeper_unified\" failed validation"
+                   "required default profile \"big_three\" failed validation"
              | _ -> false)
            errors);
       check bool "rejected default profile invalid candidate is surfaced" true
@@ -476,7 +476,7 @@ let test_resolve_named_providers_tool_choice_filters_runtime_only_providers () =
   ignore
     (write_cascade_json config_dir
        {|{
-  "keeper_unified_models": [
+  "big_three_models": [
     "custom:remote-model@http://127.0.0.1:18080/v1",
     "codex_cli:auto",
     "gemini_cli:auto",
@@ -505,7 +505,7 @@ let test_resolve_named_providers_tool_support_keeps_runtime_mcp_providers () =
   ignore
     (write_cascade_json config_dir
        {|{
-  "keeper_unified_models": [
+  "big_three_models": [
     "custom:remote-model@http://127.0.0.1:18080/v1",
     "claude_code:auto",
     "codex_cli:auto",
@@ -537,7 +537,7 @@ let test_resolve_named_providers_runtime_mcp_headers_drop_unsupported_providers 
   ignore
     (write_cascade_json config_dir
        {|{
-  "keeper_unified_models": [
+  "big_three_models": [
     "custom:remote-model@http://127.0.0.1:18080/v1",
     "claude_code:auto",
     "codex_cli:auto",
@@ -569,7 +569,7 @@ let test_config_doctor_live_reports_catalog_validation () =
   ignore
     (write_cascade_json config_dir
        {|{
-  "keeper_unified_models": ["__nonexistent_provider_sentinel__:fake"]
+  "big_three_models": ["__nonexistent_provider_sentinel__:fake"]
 }|});
   with_config_dir config_dir @@ fun () ->
   with_eio @@ fun ~sw ~net ~clock ~fs ~proc_mgr ->
@@ -612,7 +612,7 @@ let test_config_doctor_live_warns_on_partial_catalog_validation () =
     (write_cascade_json config_dir
        (Printf.sprintf
           {|{
-  "keeper_unified_models": ["%s"],
+  "big_three_models": ["%s"],
   "broken_profile_models": ["__nonexistent_provider_sentinel__:fake"]
 }|}
           valid_model));

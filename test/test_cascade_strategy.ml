@@ -751,7 +751,7 @@ let test_history_prometheus_counter_increments () =
 
 (* ── Strategy decision trace (LT-5) ─────────────────── *)
 
-let mk_trace_event ?(ts = 0.0) ?(cascade_name = "keeper_unified")
+let mk_trace_event ?(ts = 0.0) ?(cascade_name = "big_three")
     ?(strategy = "failover") ?(cycle = 0) ?(candidates_in = 3)
     ?(candidates_out = 3) ?(backoff_ms = 0) ?(kind = ST.Ordered) () =
   { ST.ts; cascade_name; strategy; cycle; candidates_in; candidates_out;
@@ -778,13 +778,13 @@ let test_trace_record_snapshot_roundtrip () =
 
 let test_trace_cascade_filter () =
   ST.clear ();
-  ST.record (mk_trace_event ~cascade_name:"keeper_unified" ~ts:1.0 ());
+  ST.record (mk_trace_event ~cascade_name:"big_three" ~ts:1.0 ());
   ST.record (mk_trace_event ~cascade_name:"nick0cave" ~ts:2.0 ());
-  ST.record (mk_trace_event ~cascade_name:"keeper_unified" ~ts:3.0 ());
-  let unified = ST.snapshot ~cascade:"keeper_unified" () in
-  check int "keeper_unified → 2 events" 2 (List.length unified);
+  ST.record (mk_trace_event ~cascade_name:"big_three" ~ts:3.0 ());
+  let unified = ST.snapshot ~cascade:"big_three" () in
+  check int "big_three → 2 events" 2 (List.length unified);
   List.iter
-    (fun e -> check string "cascade filter" "keeper_unified" e.ST.cascade_name)
+    (fun e -> check string "cascade filter" "big_three" e.ST.cascade_name)
     unified;
   let missing = ST.snapshot ~cascade:"does_not_exist" () in
   check int "missing cascade → empty" 0 (List.length missing)
@@ -862,12 +862,12 @@ let test_trace_prometheus_counter_increments () =
   let before =
     find_strategy_counter_value
       (Masc_mcp.Prometheus.to_prometheus_text ())
-      ~cascade:"keeper_unified" ~strategy:"failover" ~kind:"ordered"
+      ~cascade:"big_three" ~strategy:"failover" ~kind:"ordered"
     |> Option.value ~default:0.0
   in
-  ST.record (mk_trace_event ~cascade_name:"keeper_unified"
+  ST.record (mk_trace_event ~cascade_name:"big_three"
                ~strategy:"failover" ~kind:ST.Ordered ());
-  ST.record (mk_trace_event ~cascade_name:"keeper_unified"
+  ST.record (mk_trace_event ~cascade_name:"big_three"
                ~strategy:"failover" ~kind:ST.Ordered ());
   ST.record (mk_trace_event ~cascade_name:"nick0cave"
                ~strategy:"circuit_breaker_cycling"
@@ -875,7 +875,7 @@ let test_trace_prometheus_counter_increments () =
   let text = Masc_mcp.Prometheus.to_prometheus_text () in
   let ordered =
     find_strategy_counter_value text
-      ~cascade:"keeper_unified" ~strategy:"failover" ~kind:"ordered"
+      ~cascade:"big_three" ~strategy:"failover" ~kind:"ordered"
     |> Option.value ~default:0.0
   in
   let filtered =
@@ -884,7 +884,7 @@ let test_trace_prometheus_counter_increments () =
       ~kind:"filtered_empty"
     |> Option.value ~default:0.0
   in
-  check bool "keeper_unified/failover/ordered advanced by >= 2"
+  check bool "big_three/failover/ordered advanced by >= 2"
     true (ordered >= before +. 2.0);
   check bool "nick0cave/circuit_breaker_cycling/filtered_empty >= 1"
     true (filtered >= 1.0)

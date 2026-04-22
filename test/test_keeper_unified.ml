@@ -2066,22 +2066,22 @@ let wrapped_claude_limit_error () =
 let test_fail_open_cascade_after_auto_recoverable_error_falls_back_to_default () =
   let fallback =
     EC.fail_open_cascade_after_auto_recoverable_error
-      ~base_cascade:"tool_use_strict"
-      ~effective_cascade:"tool_use_strict"
+      ~base_cascade:"underdog"
+      ~effective_cascade:"underdog"
       (wrapped_claude_limit_error ())
   in
-  check (option string) "strict cascade broadens to default"
+  check (option string) "non-default cascade broadens to default"
     (Some KC.default_cascade_name) fallback
 
 let test_fail_open_cascade_after_auto_recoverable_error_returns_base_after_phase_override () =
   let fallback =
     EC.fail_open_cascade_after_auto_recoverable_error
-      ~base_cascade:"tool_use_strict"
+      ~base_cascade:"underdog"
       ~effective_cascade:KC.local_recovery_cascade_name
       (wrapped_claude_limit_error ())
   in
   check (option string) "phase override returns to keeper base"
-    (Some "tool_use_strict") fallback
+    (Some "underdog") fallback
 
 let test_fail_open_cascade_after_auto_recoverable_error_preserves_explicit_local_only () =
   let fallback =

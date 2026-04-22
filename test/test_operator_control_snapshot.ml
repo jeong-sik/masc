@@ -69,7 +69,7 @@ let test_compute_context_ratio_uses_resolved_cli_context_budget () =
             ("name", `String "ctx-ratio-demo");
             ("agent_name", `String "keeper-ctx-ratio-demo-agent");
             ("trace_id", `String "trace-ctx-ratio-demo");
-            ("cascade_name", `String "keeper_unified");
+            ("cascade_name", `String "big_three");
           ])
     with
     | Ok meta -> meta

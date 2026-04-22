@@ -424,7 +424,7 @@ let write_partially_invalid_cascade ~base_path ~valid_model =
     (Filename.concat config_root "cascade.json")
     (Printf.sprintf
        {|{
-  "keeper_unified_models": ["%s"],
+  "big_three_models": ["%s"],
   "broken_profile_models": ["__nonexistent_provider_sentinel__:fake"]
 }|}
        valid_model)
@@ -436,7 +436,7 @@ let write_partially_invalid_default_cascade ~base_path ~valid_model =
     (Filename.concat config_root "cascade.json")
     (Printf.sprintf
        {|{
-  "keeper_unified_models": ["__nonexistent_provider_sentinel__:fake"],
+  "big_three_models": ["__nonexistent_provider_sentinel__:fake"],
   "tool_rerank_models": ["%s"]
 }|}
        valid_model)
@@ -1703,7 +1703,7 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
                "startup catalog validation failed:"
              &&
              contains_substring startup_error
-               "required default profile \"keeper_unified\" failed validation");
+               "required default profile \"big_three\" failed validation");
           let config_headers, config_body =
             curl_request_capture ~output_dir:dir ~name:"cascade-config-default-invalid"
               ~method_:"GET"

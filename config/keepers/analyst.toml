@@ -1,7 +1,8 @@
 [keeper]
 persona_name = "analyst"
 execution_scope = "workspace"
-cascade_name = "keeper_unified"
+cascade_name = "big_three"
+autoboot_enabled = true
 telemetry_feedback_enabled = true
 telemetry_feedback_window_hours = 24
 

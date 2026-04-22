@@ -71,7 +71,7 @@ let make_toml_only_config_root root =
   write_file
     (Filename.concat config "cascade.toml")
     {|
-[keeper_unified]
+[big_three]
 models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
 |};
   write_file (Filename.concat config "tool_policy.toml") "# test marker\n";

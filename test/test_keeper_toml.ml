@@ -856,7 +856,7 @@ goal = "canonical"
 mention_targets = ["a", "b"]
 tool_preset = "coding"
 tool_also_allow = ["x"]
-cascade_name = "keeper_unified"
+cascade_name = "big_three"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e

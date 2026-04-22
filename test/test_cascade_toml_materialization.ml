@@ -86,7 +86,7 @@ let repo_json_path () =
 
 let minimal_toml =
   {|
-[keeper_unified]
+[big_three]
 models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
 |}
 
@@ -105,7 +105,7 @@ let test_unknown_profile_field_is_rejected () =
   match
     Masc_mcp.Cascade_toml_materializer.render_toml_string_to_json_string
       {|
-[keeper_unified]
+[big_three]
 models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
 unknown_field = 1
 |}
@@ -127,7 +127,7 @@ let test_runtime_materializes_missing_json_on_load () =
   | Ok (Masc_mcp.Cascade_catalog_runtime.Validated _) ->
       check bool "json materialized on load" true (Sys.file_exists json_path);
       check bool "generated json contains profile key" true
-        (contains_substring (read_file json_path) "keeper_unified_models")
+        (contains_substring (read_file json_path) "big_three_models")
   | Ok _ -> fail "expected fully validated catalog"
   | Error rejection ->
       failf "unexpected validation failure: %s"
@@ -155,13 +155,13 @@ let test_invalid_toml_blocks_runtime_without_using_stale_json () =
   write_file
     (Filename.concat config_dir "cascade.toml")
     {|
-[keeper_unified]
+[big_three]
 models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
 unknown_field = 1
 |};
   write_file
     (Filename.concat config_dir "cascade.json")
-    {|{"keeper_unified_models":["ollama:qwen3.5:35b-a3b-nvfp4"]}|};
+    {|{"big_three_models":["ollama:qwen3.5:35b-a3b-nvfp4"]}|};
   with_config_dir config_dir @@ fun () ->
   match Masc_mcp.Cascade_catalog_runtime.inspect_active () with
   | Ok _ -> fail "invalid toml should block runtime load"

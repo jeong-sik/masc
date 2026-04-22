@@ -247,7 +247,7 @@ let auto_approval_forbidden ~tool_name ~input ~risk meta =
   || runtime_auto_approval_blocked meta
 
 let to_oas_approval_callback
-    ~config:_ ~governance_level ~keeper_name ?meta () : Oas.Hooks.approval_callback =
+    ?config:_ ~governance_level ~keeper_name ?meta () : Oas.Hooks.approval_callback =
   let queue_risk_level = function
     | Low -> Keeper_approval_queue.Low
     | Medium -> Keeper_approval_queue.Medium

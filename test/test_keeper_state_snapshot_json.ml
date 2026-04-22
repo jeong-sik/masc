@@ -142,63 +142,40 @@ let make_test_checkpoint ?(working_context = None) ~response_text () =
     working_context;
   }
 
-let test_patch_without_flag_preserves_working_context () =
-  (* When MASC_STRUCTURED_STATE is not set (default), working_context
-     should remain unchanged after patching. *)
+let test_patch_stores_replay_metadata_and_clears_working_context () =
   let response_text =
     "I fixed the build.\n[STATE]\nGoal: Fix CI\nDONE: All green\n[/STATE]"
   in
   let cp = make_test_checkpoint ~response_text () in
-  (* Ensure env var is unset *)
-  (try Unix.putenv "MASC_STRUCTURED_STATE" "false" with _ -> ());
   let patched =
     KCC.patch_checkpoint_last_assistant cp
       ~session_id:"new-session"
       ~response_text
   in
-  Alcotest.(check bool) "working_context unchanged when flag off"
-    true (patched.working_context = None)
+  Alcotest.(check bool) "working_context cleared" true (patched.working_context = None);
+  match List.rev patched.messages with
+  | [] -> Alcotest.fail "patched checkpoint has no messages"
+  | last :: _ ->
+      (match KMP.snapshot_of_message_metadata last with
+       | None -> Alcotest.fail "assistant message metadata missing replay snapshot"
+       | Some snap ->
+           Alcotest.(check (option string)) "goal from metadata" (Some "Fix CI") snap.goal;
+           Alcotest.(check (option string)) "done from metadata" (Some "All green") snap.done_summary)
 
-let test_patch_with_flag_stores_structured_json () =
-  (* When MASC_STRUCTURED_STATE=true, working_context should be set
-     with structured JSON containing the parsed state snapshot. *)
-  let response_text =
-    "I fixed the build.\n[STATE]\nGoal: Fix CI\nDONE: All green\nNEXT: Deploy\n[/STATE]"
-  in
-  let cp = make_test_checkpoint ~response_text () in
-  Unix.putenv "MASC_STRUCTURED_STATE" "true";
-  let patched =
-    KCC.patch_checkpoint_last_assistant cp
-      ~session_id:"new-session"
-      ~response_text
-  in
-  (* Restore env *)
-  Unix.putenv "MASC_STRUCTURED_STATE" "false";
-  match patched.working_context with
-  | None -> Alcotest.fail "working_context should be set when flag is on"
-  | Some json ->
-    let snapshot = KMP.snapshot_of_structured_working_context json in
-    (match snapshot with
-     | None -> Alcotest.fail "could not parse structured working_context"
-     | Some snap ->
-       Alcotest.(check (option string)) "goal from structured" (Some "Fix CI") snap.goal;
-       Alcotest.(check (option string)) "done from structured" (Some "All green") snap.done_summary)
-
-let test_patch_with_flag_no_state_block_preserves () =
-  (* When MASC_STRUCTURED_STATE=true but response has no [STATE] block,
-     working_context should remain unchanged. *)
+let test_patch_without_state_block_keeps_text_and_no_metadata () =
   let response_text = "I did some work but no state block." in
-  let existing_wc = Some (`Assoc [("old", `String "data")]) in
-  let cp = make_test_checkpoint ~working_context:existing_wc ~response_text () in
-  Unix.putenv "MASC_STRUCTURED_STATE" "true";
+  let cp = make_test_checkpoint ~response_text () in
   let patched =
     KCC.patch_checkpoint_last_assistant cp
       ~session_id:"new-session"
       ~response_text
   in
-  Unix.putenv "MASC_STRUCTURED_STATE" "false";
-  Alcotest.(check bool) "working_context preserved when no [STATE]"
-    true (patched.working_context = existing_wc)
+  Alcotest.(check bool) "working_context still cleared" true (patched.working_context = None);
+  match List.rev patched.messages with
+  | [] -> Alcotest.fail "patched checkpoint has no messages"
+  | last :: _ ->
+      Alcotest.(check bool) "metadata absent without snapshot"
+        true (KMP.snapshot_of_message_metadata last = None)
 
 (* ── Dual-source read test ───────────────────────────────────────── *)
 
@@ -245,9 +222,8 @@ let () =
         ] );
       ( "patch_checkpoint",
         [
-          Alcotest.test_case "flag off preserves wc" `Quick test_patch_without_flag_preserves_working_context;
-          Alcotest.test_case "flag on stores structured" `Quick test_patch_with_flag_stores_structured_json;
-          Alcotest.test_case "flag on no [STATE] preserves" `Quick test_patch_with_flag_no_state_block_preserves;
+          Alcotest.test_case "stores replay metadata and clears wc" `Quick test_patch_stores_replay_metadata_and_clears_working_context;
+          Alcotest.test_case "no [STATE] keeps text and no metadata" `Quick test_patch_without_state_block_keeps_text_and_no_metadata;
         ] );
       ( "dual_source",
         [

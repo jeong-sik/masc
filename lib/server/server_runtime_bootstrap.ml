@@ -127,6 +127,19 @@ let ensure_config_root_scaffold config_root =
   [ "prompts"; "keepers"; "personas" ]
   |> List.iter (fun name -> Fs_compat.mkdir_p (Filename.concat config_root name))
 
+(* Explicit base-path workspaces should inherit shared config defaults
+   without silently importing repo keeper manifests into the live root. *)
+let copy_missing_config_root_seed ~src ~dst =
+  Fs_compat.mkdir_p dst;
+  Sys.readdir src
+  |> Array.iter (fun name ->
+         if String.equal name "keepers" then
+           ()
+         else
+           copy_missing_tree
+             ~src:(Filename.concat src name)
+             ~dst:(Filename.concat dst name));
+  Fs_compat.mkdir_p (Filename.concat dst "keepers")
 let bootstrap_base_path_config_root ~base_path =
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
   if Option.is_some (Config_dir_resolver.current_env_config_dir_opt ()) then
@@ -154,7 +167,7 @@ let bootstrap_base_path_config_root ~base_path =
     else
       (match source_root with
        | Some source ->
-           copy_missing_tree ~src:source ~dst:config_root;
+           copy_missing_config_root_seed ~src:source ~dst:config_root;
            Log.Server.info
              "bootstrapped base-path config root: %s <- %s"
              config_root source

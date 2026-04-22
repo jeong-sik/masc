@@ -128,6 +128,7 @@
         test_observability_provider_contracts
         test_worker_oas_scope_gate
         test_config_doctor
+        test_cascade_toml_materialization
         test_doctor_dispatch
         test_disk_hygiene_script
         test_run_local_script
@@ -242,6 +243,7 @@
           test_observability_provider_contracts
           test_worker_oas_scope_gate
           test_config_doctor
+          test_cascade_toml_materialization
           test_doctor_dispatch
           test_disk_hygiene_script
           test_run_local_script

@@ -1,9 +1,8 @@
-comment = "Checked-in seed for cascade authoring. Keep repo defaults boring: one keeper-assignable bootstrap profile (big_three), system-only fallback/phase-routing profiles (default, local_only, local_recovery, tool_rerank), and move personal/live experiments to $MASC_BASE_PATH/.masc/config/cascade.toml."
+comment = "Checked-in seed for cascade authoring. Keep repo defaults boring: one keeper-assignable bootstrap profile (big_three), system-only fallback/judge/phase-routing profiles (default, governance_judge, operator_judge, local_only, local_recovery, tool_rerank), and move personal/live experiments to $MASC_BASE_PATH/.masc/config/cascade.toml."
 
 [default]
-comment = "System-only fallback profile for unknown/missing cascade names. Mirrors big_three so fallback stays boring."
+comment = "System-only fallback profile for unknown/missing cascade names. Mirrors big_three without Claude CLI so automatic recovery does not pull Claude by default."
 models = [
-  { model = "claude_code:auto", weight = 1 },
   { model = "codex_cli:auto", weight = 1 },
   { model = "gemini_cli:auto", weight = 1 },
 ]
@@ -12,14 +11,33 @@ max_tokens = 16384
 keeper_assignable = false
 
 [big_three]
-comment = "Canonical keeper bootstrap profile exposed by the checked-in seed."
+comment = "Canonical keeper bootstrap profile exposed by the checked-in seed. Automatic keepers stay off Claude CLI unless an operator opts in via live config."
 models = [
-  { model = "claude_code:auto", weight = 1 },
   { model = "codex_cli:auto", weight = 1 },
   { model = "gemini_cli:auto", weight = 1 },
 ]
 temperature = 0.2
 max_tokens = 16384
+
+[governance_judge]
+comment = "System-only dashboard governance judge profile. Explicitly defined so background judge loops do not inherit fallback providers such as Claude CLI."
+models = [
+  { model = "codex_cli:auto", weight = 1 },
+  { model = "gemini_cli:auto", weight = 1 },
+]
+temperature = 0.2
+max_tokens = 16384
+keeper_assignable = false
+
+[operator_judge]
+comment = "System-only dashboard operator judge profile. Mirrors governance_judge so background control loops stay off Claude CLI by default."
+models = [
+  { model = "codex_cli:auto", weight = 1 },
+  { model = "gemini_cli:auto", weight = 1 },
+]
+temperature = 0.2
+max_tokens = 16384
+keeper_assignable = false
 
 [local_only]
 comment = "System-only local phase-routing profile for compacting/handoff paths."

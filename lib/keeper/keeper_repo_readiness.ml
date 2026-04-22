@@ -113,13 +113,45 @@ let inspect
         "has_origin", `Bool false;
       ]
   else if not (safe_is_dir clone_path) then
-    common_fields "missing_clone" false
-      "Clone the repo into sandbox repos/ first with keeper_shell op=git_clone, then create a worktree."
-      [
-        "exists", `Bool false;
-        "is_git_repo", `Bool false;
-        "has_origin", `Bool false;
-      ]
+    let workspace_matches =
+      Coord_worktree.workspace_repo_matches ~search_root:project_root
+        ~repo_name:derived_repo_name
+    in
+    (match workspace_matches with
+     | [ source_root ] ->
+         common_fields "auto_provisionable" true
+           (Printf.sprintf
+              "Call masc_worktree_create with repo_name=%S; the sandbox clone \
+               will be auto-provisioned from workspace repo %s."
+              derived_repo_name source_root)
+           [
+             "exists", `Bool false;
+             "is_git_repo", `Bool false;
+             "has_origin", `Bool false;
+             "workspace_repo_match", `String source_root;
+             "auto_provision_on_worktree_create", `Bool true;
+           ]
+     | _ :: _ as matches ->
+         common_fields "ambiguous_workspace_repo" false
+           (Printf.sprintf
+              "Multiple workspace repos named %s exist under %s. Use \
+               keeper_shell op=git_clone explicitly or disambiguate repo_name."
+              derived_repo_name project_root)
+           [
+             "exists", `Bool false;
+             "is_git_repo", `Bool false;
+             "has_origin", `Bool false;
+             ( "workspace_repo_matches",
+               `List (List.map (fun path -> `String path) matches) );
+           ]
+     | [] ->
+         common_fields "missing_clone" false
+           "Clone the repo into sandbox repos/ first with keeper_shell op=git_clone, then create a worktree."
+           [
+             "exists", `Bool false;
+             "is_git_repo", `Bool false;
+             "has_origin", `Bool false;
+           ])
   else
     let inside =
       run_git ~timeout_sec:5.0 ~clone_path [ "rev-parse"; "--is-inside-work-tree" ]

@@ -80,6 +80,55 @@ let run_ok ~cwd cmd =
   let code = Sys.command wrapped in
   if code <> 0 then fail (Printf.sprintf "command failed (%d): %s" code cmd)
 
+let init_process_eio env =
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd = Eio.Stdenv.cwd env in
+  Process_eio.init ~cwd_default:cwd ~proc_mgr ~clock
+
+let setup_nested_repo_with_remote ~base_path ~repo_rel =
+  let remote = Filename.concat base_path ".remote-masc-mcp.git" in
+  let repo = Filename.concat base_path repo_rel in
+  ensure_dir (Filename.dirname repo);
+  run_ok ~cwd:base_path
+    (Printf.sprintf "git init --bare -q --initial-branch=main %s"
+       (Filename.quote remote));
+  run_ok ~cwd:base_path
+    (Printf.sprintf "git clone -q %s %s"
+       (Filename.quote remote) (Filename.quote repo));
+  run_ok ~cwd:repo "git config user.email test@example.com";
+  run_ok ~cwd:repo "git config user.name Test";
+  let readme = Filename.concat repo "README.md" in
+  let oc = open_out readme in
+  output_string oc "# sandbox auto-provision test\n";
+  close_out oc;
+  run_ok ~cwd:repo "git add README.md";
+  run_ok ~cwd:repo "git commit -q -m init";
+  run_ok ~cwd:repo "git push -q origin main";
+  repo
+
+let create_file_storm ~base_path ~count =
+  for i = 0 to count - 1 do
+    let path = Filename.concat base_path (Printf.sprintf "aa-%04d.tmp" i) in
+    let oc = open_out path in
+    output_string oc "x\n";
+    close_out oc
+  done
+
+let create_hidden_dir_storm ~base_path ~count =
+  let root = Filename.concat base_path ".venvs/storm" in
+  ensure_dir root;
+  for i = 0 to count - 1 do
+    Unix.mkdir (Filename.concat root (Printf.sprintf "aa-%04d" i)) 0o755
+  done
+
+let create_wide_workspace_storm ~base_path ~count =
+  let root = Filename.concat base_path "workspace/aaa-big" in
+  ensure_dir root;
+  for i = 0 to count - 1 do
+    Unix.mkdir (Filename.concat root (Printf.sprintf "aa-%04d" i)) 0o755
+  done
+
 let test_dispatch_worktree_create () =
   let ctx = make_ctx () in
   let args = `Assoc [("task_id", `String "task-001"); ("base_branch", `String "main")] in
@@ -227,6 +276,134 @@ let test_dispatch_worktree_create_reports_missing_sandbox_clone () =
     if not (contains "keeper_shell op=git_clone" msg) then
       fail (Printf.sprintf "expected keeper_shell git_clone hint in: %s" msg)
 
+let test_dispatch_worktree_create_auto_provisions_workspace_repo () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_process_eio env;
+  run_ok ~cwd:base_path "git init -q -b main";
+  ignore
+    (setup_nested_repo_with_remote ~base_path
+       ~repo_rel:"workspace/yousleepwhen/masc-mcp");
+  let config = Masc_mcp.Coord.default_config base_path in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-agent"));
+  let ctx : Tool_worktree.context = { config; agent_name = "test-agent" } in
+  let task_id = "task-auto-clone" in
+  let args = `Assoc [
+    ("task_id", `String task_id);
+    ("repo_name", `String "masc-mcp");
+    ("base_branch", `String "main");
+  ] in
+  let sandbox_clone =
+    Filename.concat base_path ".masc/playground/test-agent/repos/masc-mcp"
+  in
+  let worktree_path =
+    Filename.concat sandbox_clone
+      (Filename.concat ".worktrees"
+         (Playground_paths.worktree_dir_name "test-agent" task_id))
+  in
+  match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
+  | None -> fail "dispatch returned None for masc_worktree_create"
+  | Some (false, msg) ->
+      fail (Printf.sprintf "expected auto-provision success, got error: %s" msg)
+  | Some (true, msg) ->
+      check bool "message mentions auto-provision" true
+        (contains "auto-provisioned" msg);
+      check bool "sandbox clone created" true (Sys.file_exists sandbox_clone);
+      check bool "worktree created" true (Sys.file_exists worktree_path)
+
+let test_dispatch_worktree_create_auto_provisions_after_file_storm () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_process_eio env;
+  run_ok ~cwd:base_path "git init -q -b main";
+  create_file_storm ~base_path ~count:4005;
+  ignore
+    (setup_nested_repo_with_remote ~base_path
+       ~repo_rel:"workspace/yousleepwhen/masc-mcp");
+  let config = Masc_mcp.Coord.default_config base_path in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-agent"));
+  let ctx : Tool_worktree.context = { config; agent_name = "test-agent" } in
+  let task_id = "task-auto-clone-files" in
+  let args = `Assoc [
+    ("task_id", `String task_id);
+    ("repo_name", `String "masc-mcp");
+    ("base_branch", `String "main");
+  ] in
+  match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
+  | None -> fail "dispatch returned None for masc_worktree_create"
+  | Some (false, msg) ->
+      fail (Printf.sprintf "expected auto-provision success after file storm, got error: %s" msg)
+  | Some (true, msg) ->
+      check bool "message mentions auto-provision" true
+        (contains "auto-provisioned" msg)
+
+let test_dispatch_worktree_create_auto_provisions_before_hidden_dir_storm () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_process_eio env;
+  run_ok ~cwd:base_path "git init -q -b main";
+  create_hidden_dir_storm ~base_path ~count:4005;
+  ignore
+    (setup_nested_repo_with_remote ~base_path
+       ~repo_rel:"workspace/yousleepwhen/masc-mcp");
+  let config = Masc_mcp.Coord.default_config base_path in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-agent"));
+  let ctx : Tool_worktree.context = { config; agent_name = "test-agent" } in
+  let task_id = "task-auto-clone-hidden-dirs" in
+  let args = `Assoc [
+    ("task_id", `String task_id);
+    ("repo_name", `String "masc-mcp");
+    ("base_branch", `String "main");
+  ] in
+  match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
+  | None -> fail "dispatch returned None for masc_worktree_create"
+  | Some (false, msg) ->
+      fail
+        (Printf.sprintf
+           "expected auto-provision success before hidden dir storm, got error: %s"
+           msg)
+  | Some (true, msg) ->
+      check bool "message mentions auto-provision" true
+        (contains "auto-provisioned" msg)
+
+let test_dispatch_worktree_create_auto_provisions_before_wide_workspace_storm ()
+    =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_process_eio env;
+  run_ok ~cwd:base_path "git init -q -b main";
+  create_wide_workspace_storm ~base_path ~count:4005;
+  ignore
+    (setup_nested_repo_with_remote ~base_path
+       ~repo_rel:"workspace/yousleepwhen/masc-mcp");
+  let config = Masc_mcp.Coord.default_config base_path in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-agent"));
+  let ctx : Tool_worktree.context = { config; agent_name = "test-agent" } in
+  let task_id = "task-auto-clone-bfs" in
+  let args = `Assoc [
+    ("task_id", `String task_id);
+    ("repo_name", `String "masc-mcp");
+    ("base_branch", `String "main");
+  ] in
+  match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
+  | None -> fail "dispatch returned None for masc_worktree_create"
+  | Some (false, msg) ->
+      fail
+        (Printf.sprintf
+           "expected auto-provision success before wide workspace storm, got error: %s"
+           msg)
+  | Some (true, msg) ->
+      check bool "message mentions auto-provision" true
+        (contains "auto-provisioned" msg)
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -259,5 +436,13 @@ let () =
         test_dispatch_worktree_create_whitespace_agent_trimmed;
       test_case "missing sandbox clone is explicit" `Quick
         test_dispatch_worktree_create_reports_missing_sandbox_clone;
+      test_case "workspace repo auto-provisions sandbox clone" `Quick
+        test_dispatch_worktree_create_auto_provisions_workspace_repo;
+      test_case "workspace repo auto-provisions after file storm" `Quick
+        test_dispatch_worktree_create_auto_provisions_after_file_storm;
+      test_case "workspace repo wins before hidden dir storm" `Quick
+        test_dispatch_worktree_create_auto_provisions_before_hidden_dir_storm;
+      test_case "workspace repo wins before wide workspace storm" `Quick
+        test_dispatch_worktree_create_auto_provisions_before_wide_workspace_storm;
     ];
   ]

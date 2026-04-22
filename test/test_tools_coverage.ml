@@ -228,6 +228,11 @@ let test_masc_goal_upsert_schema () =
           Alcotest.(check bool) "has id" true (List.mem_assoc "id" props);
           Alcotest.(check bool) "has title" true (List.mem_assoc "title" props);
           Alcotest.(check bool) "has horizon" true (List.mem_assoc "horizon" props);
+          Alcotest.(check bool) "has phase" true (List.mem_assoc "phase" props);
+          Alcotest.(check bool) "has verifier_policy" true
+            (List.mem_assoc "verifier_policy" props);
+          Alcotest.(check bool) "has require_completion_approval" true
+            (List.mem_assoc "require_completion_approval" props);
           Alcotest.(check bool) "has parent_goal_id" true
             (List.mem_assoc "parent_goal_id" props)
       | None -> Alcotest.fail "masc_goal_upsert missing properties"
@@ -252,6 +257,58 @@ let test_masc_goal_review_schema () =
           Alcotest.(check bool) "outcome required" true
             (List.mem (`String "outcome") reqs)
       | None -> Alcotest.fail "masc_goal_review missing required field"
+
+let test_masc_goal_transition_schema () =
+  match find_tool "masc_goal_transition" with
+  | None -> Alcotest.fail "masc_goal_transition not found"
+  | Some schema ->
+      (match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has goal_id" true
+            (List.mem_assoc "goal_id" props);
+          Alcotest.(check bool) "has action" true
+            (List.mem_assoc "action" props);
+          Alcotest.(check bool) "has actor" true
+            (List.mem_assoc "actor" props);
+          Alcotest.(check bool) "has note" true
+            (List.mem_assoc "note" props)
+      | None -> Alcotest.fail "masc_goal_transition missing properties");
+      match get_json_list "required" schema.input_schema with
+      | Some reqs ->
+          Alcotest.(check bool) "goal_id required" true
+            (List.mem (`String "goal_id") reqs);
+          Alcotest.(check bool) "action required" true
+            (List.mem (`String "action") reqs);
+          Alcotest.(check bool) "actor required" true
+            (List.mem (`String "actor") reqs)
+      | None -> Alcotest.fail "masc_goal_transition missing required field"
+
+let test_masc_goal_verify_schema () =
+  match find_tool "masc_goal_verify" with
+  | None -> Alcotest.fail "masc_goal_verify not found"
+  | Some schema ->
+      (match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has goal_id" true
+            (List.mem_assoc "goal_id" props);
+          Alcotest.(check bool) "has request_id" true
+            (List.mem_assoc "request_id" props);
+          Alcotest.(check bool) "has principal" true
+            (List.mem_assoc "principal" props);
+          Alcotest.(check bool) "has decision" true
+            (List.mem_assoc "decision" props);
+          Alcotest.(check bool) "has evidence_refs" true
+            (List.mem_assoc "evidence_refs" props)
+      | None -> Alcotest.fail "masc_goal_verify missing properties");
+      match get_json_list "required" schema.input_schema with
+      | Some reqs ->
+          Alcotest.(check bool) "goal_id required" true
+            (List.mem (`String "goal_id") reqs);
+          Alcotest.(check bool) "principal required" true
+            (List.mem (`String "principal") reqs);
+          Alcotest.(check bool) "decision required" true
+            (List.mem (`String "decision") reqs)
+      | None -> Alcotest.fail "masc_goal_verify missing required field"
 
 let test_remote_operator_action_schema_is_strict () =
   let schema =
@@ -782,6 +839,8 @@ let () =
       Alcotest.test_case "goal_list" `Quick test_masc_goal_list_schema;
       Alcotest.test_case "goal_upsert" `Quick test_masc_goal_upsert_schema;
       Alcotest.test_case "goal_review" `Quick test_masc_goal_review_schema;
+      Alcotest.test_case "goal_transition" `Quick test_masc_goal_transition_schema;
+      Alcotest.test_case "goal_verify" `Quick test_masc_goal_verify_schema;
     ];
     "vote_tools", [
     ];

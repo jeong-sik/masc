@@ -196,7 +196,9 @@ module Masc = struct
     | Dispatch_plan
     | Goal_list
     | Goal_review
+    | Goal_transition
     | Goal_upsert
+    | Goal_verify
     | Find_by_capability
     | Governance_feed
     | Governance_status
@@ -291,7 +293,9 @@ module Masc = struct
     | Dispatch_plan -> "masc_dispatch_plan"
     | Goal_list -> "masc_goal_list"
     | Goal_review -> "masc_goal_review"
+    | Goal_transition -> "masc_goal_transition"
     | Goal_upsert -> "masc_goal_upsert"
+    | Goal_verify -> "masc_goal_verify"
     | Find_by_capability -> "masc_find_by_capability"
     | Governance_feed -> "masc_governance_feed"
     | Governance_status -> "masc_governance_status"
@@ -386,7 +390,9 @@ module Masc = struct
     | "masc_dispatch_plan" -> Some Dispatch_plan
     | "masc_goal_list" -> Some Goal_list
     | "masc_goal_review" -> Some Goal_review
+    | "masc_goal_transition" -> Some Goal_transition
     | "masc_goal_upsert" -> Some Goal_upsert
+    | "masc_goal_verify" -> Some Goal_verify
     | "masc_find_by_capability" -> Some Find_by_capability
     | "masc_governance_feed" -> Some Governance_feed
     | "masc_governance_status" -> Some Governance_status

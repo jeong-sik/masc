@@ -250,7 +250,19 @@ let string_field_opt key value =
   | Some text -> [ (key, `String text) ]
   | None -> []
 
-let message_to_json (m : Oas.Types.message) : Yojson.Safe.t =
+let metadata_field_opt metadata =
+  match metadata with
+  | [] -> []
+  | fields -> [ ("metadata", `Assoc fields) ]
+
+let metadata_of_json (json : Yojson.Safe.t) =
+  let open Yojson.Safe.Util in
+  match json |> member "metadata" with
+  | `Null -> []
+  | `Assoc fields -> fields
+  | _ -> []
+
+let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
   let m = Inference_utils.sanitize_message_utf8 m in
   let tool_call_id =
     match m.tool_call_id with
@@ -278,7 +290,8 @@ let message_to_json (m : Oas.Types.message) : Yojson.Safe.t =
   `Assoc
     (base
      @ string_field_opt "name" m.name
-     @ string_field_opt "tool_call_id" tool_call_id)
+     @ string_field_opt "tool_call_id" tool_call_id
+     @ metadata_field_opt m.metadata)
 
 let message_of_json (json : Yojson.Safe.t) : Oas.Types.message =
   let open Yojson.Safe.Util in
@@ -303,7 +316,7 @@ let message_of_json (json : Yojson.Safe.t) : Oas.Types.message =
   in
   Inference_utils.sanitize_message_utf8
     {
-      Oas.Types.role;
+      Agent_sdk.Types.role;
       content;
       name =
         (json |> member "name" |> to_string_option
@@ -311,6 +324,7 @@ let message_of_json (json : Yojson.Safe.t) : Oas.Types.message =
       tool_call_id =
         (json |> member "tool_call_id" |> to_string_option
          |> Option.map Inference_utils.sanitize_text_utf8);
+      metadata = metadata_of_json json;
     }
 
 (** Extract human-readable text from a single history.jsonl line that was
@@ -328,6 +342,7 @@ let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
           content = blocks;
           name = None;
           tool_call_id = None;
+          metadata = [];
         }
       in
       Inference_utils.sanitize_text_utf8 (text_of_message msg)

@@ -388,7 +388,7 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
   let map =
     List.fold_left (fun acc n ->
       let cat = categorize n in
-      let list = try StringMap.find cat acc with Not_found -> [] in
+      let list = StringMap.find_opt cat acc |> Option.value ~default:[] in
       StringMap.add cat (n :: list) acc)
       StringMap.empty names
   in

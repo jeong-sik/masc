@@ -131,7 +131,7 @@ let compute_outcomes_rollup
           | None, "" -> "unspecified"
           | None, parsed_reason -> parsed_reason
         in
-        let cur = try Hashtbl.find fail_reasons r with Not_found -> 0 in
+        let cur = Hashtbl.find_opt fail_reasons r |> Option.value ~default:0 in
         Hashtbl.replace fail_reasons r (cur + 1)
     | None -> incr unknown_v
   ) keeper_verdicts;

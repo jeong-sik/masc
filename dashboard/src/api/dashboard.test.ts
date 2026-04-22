@@ -3,6 +3,7 @@ import {
   fetchDashboardGovernance,
   fetchDashboardTools,
   fetchKeeperConfig,
+  fetchRuntimeModelMetrics,
   fetchToolQuality,
 } from './dashboard'
 
@@ -357,5 +358,71 @@ describe('fetchKeeperConfig', () => {
     expect(result.sources.cascade_runtime_json_editable).toBe(false)
     expect(result.metrics.total_cost_usd).toBe(0.12)
     expect(result.runtime.presence_keepalive_sec).toBe(30)
+  })
+})
+
+describe('fetchRuntimeModelMetrics', () => {
+  it('preserves null telemetry fields instead of coercing them to zero', async () => {
+    const rawResponse = {
+      window_minutes: 30,
+      bucket_minutes: 5,
+      total_entries: 1,
+      total_error_entries: 0,
+      models: [
+        {
+          model_id: 'kimi_cli:kimi-for-coding',
+          entry_count: 1,
+          success_count: 1,
+          usage_sample_count: 0,
+          telemetry_sample_count: 0,
+          avg_latency_ms: null,
+          total_input_tokens: null,
+          total_cost_usd: null,
+          recent_entries: [
+            {
+              ts_unix: 1,
+              input_tokens: null,
+              output_tokens: null,
+              latency_ms: null,
+              cost_usd: null,
+              tools_count: 0,
+            },
+          ],
+          buckets: [
+            {
+              ts_start: 1,
+              entry_count: 1,
+              success_count: 1,
+              error_count: 0,
+              p50_latency_ms: null,
+              p95_latency_ms: null,
+              error_rate: 0,
+              total_cost_usd: null,
+              cache_hit_ratio: null,
+            },
+          ],
+        },
+      ],
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchRuntimeModelMetrics()
+    const metric = result.models[0]!
+
+    expect(metric.usage_sample_count).toBe(0)
+    expect(metric.telemetry_sample_count).toBe(0)
+    expect(metric.total_input_tokens).toBeNull()
+    expect(metric.total_cost_usd).toBeNull()
+    expect(metric.recent_entries?.[0]?.input_tokens).toBeNull()
+    expect(metric.recent_entries?.[0]?.latency_ms).toBeNull()
+    expect(metric.buckets?.[0]?.p95_latency_ms).toBeNull()
+    expect(metric.buckets?.[0]?.cache_hit_ratio).toBeNull()
   })
 })

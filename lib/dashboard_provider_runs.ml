@@ -150,18 +150,10 @@ let model_id_of_label label =
 let catalog_models_for_provider provider =
   match Provider_adapter.resolve_direct_adapter provider with
   | Some { canonical_name; _ } when canonical_name = Provider_adapter.cn_llama -> []
-  | Some { canonical_name; _ } when canonical_name = Provider_adapter.cn_gemini ->
-      Cascade_model_resolve.gemini_cli_auto_models ()
-  | Some { canonical_name; _ } when canonical_name = Provider_adapter.cn_codex ->
-      Cascade_model_resolve.codex_cli_auto_models ()
-  | Some { canonical_name; _ } when canonical_name = Provider_adapter.cn_claude ->
-      Cascade_model_resolve.claude_code_auto_models ()
-  | Some { canonical_name; _ } when canonical_name = Provider_adapter.cn_glm ->
-      Cascade_model_resolve.glm_auto_models ()
-  | Some { canonical_name; _ }
-    when canonical_name = Provider_adapter.cn_glm_coding_plan ->
-      Cascade_model_resolve.glm_coding_auto_models ()
-  | Some _ -> [ "auto" ]
+  | Some _ -> (
+      match Provider_adapter.auto_models_for_provider provider with
+      | Some models -> models
+      | None -> [ "auto" ])
   | None -> []
 
 let default_model_for_provider provider =

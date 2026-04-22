@@ -154,33 +154,14 @@ let reset_cascade_counters_for_test () =
     Delegates to the current OAS registry helper so endpoint-distinct
     providers such as [glm], [glm-coding], and [openrouter] track the
     pinned agent_sdk behavior exactly. *)
-let starts_with ~prefix s =
-  let plen = String.length prefix in
-  String.length s >= plen && String.sub s 0 plen = prefix
-
-let is_kimi_model_id model_id =
-  let normalized = String.trim model_id |> String.lowercase_ascii in
-  starts_with ~prefix:"kimi-" normalized
-  || starts_with ~prefix:"moonshot-" normalized
-
-let is_moonshot_base_url base_url =
-  match Uri.host (Uri.of_string base_url) with
-  | Some host -> String.equal (String.lowercase_ascii host) "api.moonshot.ai"
-  | None -> false
-
 let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
-  if cfg.kind = Llm_provider.Provider_config.OpenAI_compat
-     && (is_kimi_model_id cfg.model_id || is_moonshot_base_url cfg.base_url)
-  then
-    "kimi"
-  else
-    Llm_provider.Provider_registry.provider_name_of_config cfg
+  Provider_adapter.provider_label_of_config cfg
 
 let display_provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
-  Provider_adapter.display_provider_name (provider_name_of_config cfg)
+  Provider_adapter.display_provider_name_of_config cfg
 
 let model_label_of_config (cfg : Llm_provider.Provider_config.t) =
-  Printf.sprintf "%s:%s" (display_provider_name_of_config cfg) cfg.model_id
+  Provider_adapter.model_label_of_config cfg
 
 let model_label_option_of_model_id
     ~(candidate_cfgs : Llm_provider.Provider_config.t list)

@@ -27,6 +27,7 @@ let with_clean_env f =
     "MASC_GEMINI_CLI_AUTO_MODELS";
     "MASC_CODEX_CLI_AUTO_MODELS";
     "MASC_CLAUDE_CODE_AUTO_MODELS";
+    "MASC_KIMI_CLI_AUTO_MODELS";
   ];
   f ()
 
@@ -123,11 +124,25 @@ let test_codex_and_claude_cli_auto_models_env_override () =
     check (list string) "claude operator rotation"
       [ "sonnet"; "opus" ] claude)
 
+let test_kimi_cli_auto_model_policy () =
+  with_clean_env (fun () ->
+    check string "kimi_cli:auto resolves to concrete CLI default"
+      "kimi-for-coding"
+      (R.resolve_auto_model_id "kimi_cli" "auto");
+    check (list string) "kimi_cli:auto expands to declared default"
+      [ "kimi-for-coding" ]
+      (R.kimi_cli_auto_models ());
+    Unix.putenv "MASC_KIMI_CLI_AUTO_MODELS" "kimi-a,kimi-b";
+    let models = R.kimi_cli_auto_models () in
+    Unix.putenv "MASC_KIMI_CLI_AUTO_MODELS" "";
+    check (list string) "kimi cli operator rotation"
+      [ "kimi-a"; "kimi-b" ] models)
+
 let test_expand_auto_models_includes_cli_auto_specs () =
   with_clean_env (fun () ->
     let expanded =
       C.expand_auto_models
-        [ "gemini_cli:auto"; "codex_cli:auto"; "claude_code:auto" ]
+        [ "gemini_cli:auto"; "codex_cli:auto"; "claude_code:auto"; "kimi_cli:auto" ]
     in
     check (list string) "CLI auto specs expand in-place"
       [
@@ -143,6 +158,7 @@ let test_expand_auto_models_includes_cli_auto_specs () =
         "codex_cli:gpt-5.4-mini";
         "codex_cli:gpt-5.4";
         "claude_code:auto";
+        "kimi_cli:kimi-for-coding";
       ]
       expanded)
 
@@ -243,6 +259,8 @@ let () =
         `Quick test_gemini_cli_auto_models_env_override;
       test_case "codex/claude cli auto env list override"
         `Quick test_codex_and_claude_cli_auto_models_env_override;
+      test_case "kimi_cli:auto policy"
+        `Quick test_kimi_cli_auto_model_policy;
       test_case "expand_auto_models covers CLI auto"
         `Quick test_expand_auto_models_includes_cli_auto_specs;
       test_case "execution expansion matches auto expansion"

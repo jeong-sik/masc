@@ -16,12 +16,12 @@ module IntMap = Map.Make (Int)
 type recent_entry = {
   re_ts_unix : float;
   re_provider : string option;
-  re_input_tokens : int;
-  re_output_tokens : int;
-  re_latency_ms : float;
+  re_input_tokens : int option;
+  re_output_tokens : int option;
+  re_latency_ms : float option;
   re_prompt_tok_per_sec : float option;
   re_peak_memory_gb : float option;
-  re_cost_usd : float;
+  re_cost_usd : float option;
   re_tools_count : int;
 }
 
@@ -30,11 +30,11 @@ type bucket_metric = {
   b_entry_count : int;
   b_success_count : int;
   b_error_count : int;
-  b_p50_latency_ms : float;
-  b_p95_latency_ms : float;
+  b_p50_latency_ms : float option;
+  b_p95_latency_ms : float option;
   b_error_rate : float;
-  b_total_cost_usd : float;
-  b_cache_hit_ratio : float;
+  b_total_cost_usd : float option;
+  b_cache_hit_ratio : float option;
 }
 
 type model_bucketed = {
@@ -46,9 +46,9 @@ type model_stats = {
   model_id : string;
   provider : string option;
   entry_count : int;
-  avg_tok_per_sec : float;
-  p50_tok_per_sec : float;
-  p95_tok_per_sec : float;
+  avg_tok_per_sec : float option;
+  p50_tok_per_sec : float option;
+  p95_tok_per_sec : float option;
   prompt_avg_tok_per_sec : float option;
   prompt_p50_tok_per_sec : float option;
   prompt_p95_tok_per_sec : float option;
@@ -67,17 +67,19 @@ type model_stats = {
      None when no entry in window reported thinking_enabled (older jsonl rows
      before the field was emitted, or providers that don't expose it). *)
   thinking_fraction : float option;
-  avg_latency_ms : float;
-  p50_latency_ms : float;
-  p95_latency_ms : float;
-  total_input_tokens : int;
-  total_output_tokens : int;
-  total_cache_read_tokens : int;
-  total_reasoning_tokens : int;
+  avg_latency_ms : float option;
+  p50_latency_ms : float option;
+  p95_latency_ms : float option;
+  total_input_tokens : int option;
+  total_output_tokens : int option;
+  total_cache_read_tokens : int option;
+  total_reasoning_tokens : int option;
+  usage_sample_count : int;
+  telemetry_sample_count : int;
   fallback_count : int;
   success_count : int;
   error_count : int;
-  total_cost_usd : float;
+  total_cost_usd : float option;
   avg_tool_calls_per_turn : float;
   total_tool_calls : int;
   top_tools : (string * int) list;
@@ -105,13 +107,42 @@ let percentile (sorted : float array) (p : float) : float =
     let frac = rank -. Float.of_int lo in
     sorted.(lo) *. (1.0 -. frac) +. sorted.(hi) *. frac
 
+let average_opt (arr : float array) =
+  let len = Array.length arr in
+  if len = 0 then None
+  else Some (Array.fold_left (+.) 0.0 arr /. Float.of_int len)
+
+let percentile_opt (arr : float array) p =
+  if Array.length arr = 0 then None else Some (percentile arr p)
+
+let sum_int_opt values =
+  match values with
+  | [] -> None
+  | xs -> Some (List.fold_left ( + ) 0 xs)
+
+let sum_float_opt values =
+  match values with
+  | [] -> None
+  | xs -> Some (List.fold_left ( +. ) 0.0 xs)
+
+let json_float_field_opt key (fields : (string * Yojson.Safe.t) list) =
+  match List.assoc_opt key fields with
+  | Some (`Float f) -> Some f
+  | Some (`Int n) -> Some (Float.of_int n)
+  | _ -> None
+
+let json_int_field_opt key (fields : (string * Yojson.Safe.t) list) =
+  match List.assoc_opt key fields with
+  | Some (`Int n) -> Some n
+  | _ -> None
+
 (* ── Parse telemetry from decisions.jsonl entries ────────── *)
 
 type raw_entry = {
   model : string;
   provider : string option;
   ts_unix : float;
-  tok_per_sec : float;
+  tok_per_sec : float option;
   prompt_tok_per_sec : float option;
   (* Hardware decode rate when present in telemetry; None for legacy entries
      and non-Ollama providers whose backend doesn't populate inference_timings. *)
@@ -120,13 +151,13 @@ type raw_entry = {
   (* Per-turn thinking_enabled as sent to the model (adaptive classifier output).
      None for entries that predate the field or providers that don't expose it. *)
   thinking_enabled : bool option;
-  latency_ms : float;
-  input_tokens : int;
-  output_tokens : int;
-  cache_read_tokens : int;
-  reasoning_tokens : int;
+  latency_ms : float option;
+  input_tokens : int option;
+  output_tokens : int option;
+  cache_read_tokens : int option;
+  reasoning_tokens : int option;
   fallback_applied : bool;
-  cost_usd : float;
+  cost_usd : float option;
   tool_call_count : int;
   tools_used : string list;
   is_error : bool;
@@ -182,16 +213,16 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
                | _ -> "__error__"
            in
            let provider = provider_opt_of_fields ~model tfields in
-           Some { model; ts_unix = ts; tok_per_sec = 0.0;
+           Some { model; ts_unix = ts; tok_per_sec = None;
                   provider;
                   prompt_tok_per_sec = None;
                   hw_decode_tok_per_sec = None;
                   peak_memory_gb = None;
                   thinking_enabled = None;
-                  latency_ms = 0.0;
-                  input_tokens = 0; output_tokens = 0;
-                  cache_read_tokens = 0; reasoning_tokens = 0;
-                  fallback_applied = false; cost_usd = 0.0;
+                  latency_ms = None;
+                  input_tokens = None; output_tokens = None;
+                  cache_read_tokens = None; reasoning_tokens = None;
+                  fallback_applied = false; cost_usd = None;
                   tool_call_count = outer_tool_call_count;
                   tools_used = outer_tools_used;
                   is_error = true }
@@ -206,10 +237,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
                    | _ -> "unknown")
            in
            let provider = provider_opt_of_fields ~model tfields in
-           let tok_per_sec =
-             match List.assoc_opt "tokens_per_second" tfields with
-             | Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0
-           in
+           let tok_per_sec = json_float_field_opt "tokens_per_second" tfields in
            let prompt_tok_per_sec =
              match List.assoc_opt "prompt_per_second" tfields with
              | Some (`Float f) when f > 0.0 -> Some f
@@ -241,34 +269,16 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
              | Some _ as v -> v
              | None -> read "peak_memory"
            in
-           let latency_ms =
-             match List.assoc_opt "request_latency_ms" tfields with
-             | Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0
-           in
-           let input_tokens =
-             match List.assoc_opt "input_tokens" tfields with
-             | Some (`Int n) -> n | _ -> 0
-           in
-           let output_tokens =
-             match List.assoc_opt "output_tokens" tfields with
-             | Some (`Int n) -> n | _ -> 0
-           in
-           let cache_read_tokens =
-             match List.assoc_opt "cache_read_tokens" tfields with
-             | Some (`Int n) -> n | _ -> 0
-           in
-           let reasoning_tokens =
-             match List.assoc_opt "reasoning_tokens" tfields with
-             | Some (`Int n) -> n | _ -> 0
-           in
+           let latency_ms = json_float_field_opt "request_latency_ms" tfields in
+           let input_tokens = json_int_field_opt "input_tokens" tfields in
+           let output_tokens = json_int_field_opt "output_tokens" tfields in
+           let cache_read_tokens = json_int_field_opt "cache_read_tokens" tfields in
+           let reasoning_tokens = json_int_field_opt "reasoning_tokens" tfields in
            let fallback_applied =
              match List.assoc_opt "fallback_applied" tfields with
              | Some (`Bool b) -> b | _ -> false
            in
-           let cost_usd =
-             match List.assoc_opt "cost_usd" tfields with
-             | Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0
-           in
+           let cost_usd = json_float_field_opt "cost_usd" tfields in
            (* Per-turn thinking_enabled — emitted by keeper_unified_turn's
               append_decision_record under telemetry.thinking_enabled. Treat
               explicit null or absent as None so backfill stays clean. *)
@@ -342,9 +352,7 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
     ) StringMap.empty entries in
   StringMap.fold (fun model_id entries acc ->
     let n = List.length entries in
-    let tok_vals = List.filter_map (fun e ->
-      if e.tok_per_sec > 0.0 then Some e.tok_per_sec else None
-    ) entries |> Array.of_list in
+    let tok_vals = List.filter_map (fun e -> e.tok_per_sec) entries |> Array.of_list in
     Array.sort Float.compare tok_vals;
     let prompt_vals =
       List.filter_map (fun e -> e.prompt_tok_per_sec) entries
@@ -359,19 +367,35 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
       |> Array.of_list
     in
     Array.sort Float.compare peak_vals;
-    let lat_vals = List.filter_map (fun e ->
-      if e.latency_ms > 0.0 then Some e.latency_ms else None
-    ) entries |> Array.of_list in
+    let lat_vals = List.filter_map (fun e -> e.latency_ms) entries |> Array.of_list in
     Array.sort Float.compare lat_vals;
-    let avg arr =
-      let len = Array.length arr in
-      if len = 0 then 0.0
-      else Array.fold_left (+.) 0.0 arr /. Float.of_int len
-    in
     let success_count = List.length (List.filter (fun e -> not e.is_error) entries) in
     let error_count = List.length (List.filter (fun e -> e.is_error) entries) in
     let total_tool_calls = List.fold_left (fun acc e -> acc + e.tool_call_count) 0 entries in
-    let opt_if_any arr f = if Array.length arr = 0 then None else Some (f arr) in
+    let usage_sample_count =
+      List.fold_left
+        (fun acc e ->
+          if e.input_tokens <> None
+             || e.output_tokens <> None
+             || e.cache_read_tokens <> None
+             || e.reasoning_tokens <> None
+             || e.cost_usd <> None
+          then acc + 1
+          else acc)
+        0 entries
+    in
+    let telemetry_sample_count =
+      List.fold_left
+        (fun acc e ->
+          if e.tok_per_sec <> None
+             || e.prompt_tok_per_sec <> None
+             || e.hw_decode_tok_per_sec <> None
+             || e.peak_memory_gb <> None
+             || e.latency_ms <> None
+          then acc + 1
+          else acc)
+        0 entries
+    in
     (* thinking_fraction: count of entries with thinking_enabled=true over
        entries that reported the field. Entries without the field (older jsonl
        rows, providers that don't expose it) are excluded from denominator —
@@ -394,29 +418,34 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
       model_id;
       provider;
       entry_count = n;
-      avg_tok_per_sec = avg tok_vals;
-      p50_tok_per_sec = percentile tok_vals 50.0;
-      p95_tok_per_sec = percentile tok_vals 95.0;
-      prompt_avg_tok_per_sec = opt_if_any prompt_vals avg;
-      prompt_p50_tok_per_sec = opt_if_any prompt_vals (fun a -> percentile a 50.0);
-      prompt_p95_tok_per_sec = opt_if_any prompt_vals (fun a -> percentile a 95.0);
-      hw_decode_avg_tok_per_sec = opt_if_any hw_vals avg;
-      hw_decode_p50_tok_per_sec = opt_if_any hw_vals (fun a -> percentile a 50.0);
-      hw_decode_p95_tok_per_sec = opt_if_any hw_vals (fun a -> percentile a 95.0);
+      avg_tok_per_sec = average_opt tok_vals;
+      p50_tok_per_sec = percentile_opt tok_vals 50.0;
+      p95_tok_per_sec = percentile_opt tok_vals 95.0;
+      prompt_avg_tok_per_sec = average_opt prompt_vals;
+      prompt_p50_tok_per_sec = percentile_opt prompt_vals 50.0;
+      prompt_p95_tok_per_sec = percentile_opt prompt_vals 95.0;
+      hw_decode_avg_tok_per_sec = average_opt hw_vals;
+      hw_decode_p50_tok_per_sec = percentile_opt hw_vals 50.0;
+      hw_decode_p95_tok_per_sec = percentile_opt hw_vals 95.0;
       max_peak_memory_gb =
-        opt_if_any peak_vals (fun a -> a.(Array.length a - 1));
+        if Array.length peak_vals = 0 then None
+        else Some peak_vals.(Array.length peak_vals - 1);
       thinking_fraction;
-      avg_latency_ms = avg lat_vals;
-      p50_latency_ms = percentile lat_vals 50.0;
-      p95_latency_ms = percentile lat_vals 95.0;
-      total_input_tokens = List.fold_left (fun acc e -> acc + e.input_tokens) 0 entries;
-      total_output_tokens = List.fold_left (fun acc e -> acc + e.output_tokens) 0 entries;
-      total_cache_read_tokens = List.fold_left (fun acc e -> acc + e.cache_read_tokens) 0 entries;
-      total_reasoning_tokens = List.fold_left (fun acc e -> acc + e.reasoning_tokens) 0 entries;
+      avg_latency_ms = average_opt lat_vals;
+      p50_latency_ms = percentile_opt lat_vals 50.0;
+      p95_latency_ms = percentile_opt lat_vals 95.0;
+      total_input_tokens = sum_int_opt (List.filter_map (fun e -> e.input_tokens) entries);
+      total_output_tokens = sum_int_opt (List.filter_map (fun e -> e.output_tokens) entries);
+      total_cache_read_tokens =
+        sum_int_opt (List.filter_map (fun e -> e.cache_read_tokens) entries);
+      total_reasoning_tokens =
+        sum_int_opt (List.filter_map (fun e -> e.reasoning_tokens) entries);
+      usage_sample_count;
+      telemetry_sample_count;
       fallback_count = List.length (List.filter (fun e -> e.fallback_applied) entries);
       success_count;
       error_count;
-      total_cost_usd = List.fold_left (fun acc e -> acc +. e.cost_usd) 0.0 entries;
+      total_cost_usd = sum_float_opt (List.filter_map (fun e -> e.cost_usd) entries);
       total_tool_calls;
       avg_tool_calls_per_turn =
         if n = 0 then 0.0
@@ -471,18 +500,21 @@ let bucket_entries_for_model (entries : raw_entry list) ~(bucket_sec : int)
     ) IntMap.empty entries in
   IntMap.fold (fun key bucket_entries acc ->
     let n = List.length bucket_entries in
-    let lat_vals = List.filter_map (fun e ->
-      if e.latency_ms > 0.0 then Some e.latency_ms else None
-    ) bucket_entries |> Array.of_list in
+    let lat_vals = List.filter_map (fun e -> e.latency_ms) bucket_entries |> Array.of_list in
     Array.sort Float.compare lat_vals;
     let success_count = List.length (List.filter (fun e -> not e.is_error) bucket_entries) in
     let error_count = List.length (List.filter (fun e -> e.is_error) bucket_entries) in
-    let total_cache_read = List.fold_left (fun acc e -> acc + e.cache_read_tokens) 0 bucket_entries in
-    let total_input = List.fold_left (fun acc e -> acc + e.input_tokens) 0 bucket_entries in
-    let denom = total_cache_read + total_input in
+    let cache_reads = List.filter_map (fun e -> e.cache_read_tokens) bucket_entries in
+    let inputs = List.filter_map (fun e -> e.input_tokens) bucket_entries in
     let cache_hit_ratio =
-      if denom = 0 then 0.0
-      else Float.of_int total_cache_read /. Float.of_int denom
+      match sum_int_opt cache_reads, sum_int_opt inputs with
+      | None, None -> None
+      | total_cache_read, total_input ->
+          let total_cache_read = Option.value ~default:0 total_cache_read in
+          let total_input = Option.value ~default:0 total_input in
+          let denom = total_cache_read + total_input in
+          if denom = 0 then Some 0.0
+          else Some (Float.of_int total_cache_read /. Float.of_int denom)
     in
     let error_rate =
       if n = 0 then 0.0
@@ -493,11 +525,11 @@ let bucket_entries_for_model (entries : raw_entry list) ~(bucket_sec : int)
       b_entry_count = n;
       b_success_count = success_count;
       b_error_count = error_count;
-      b_p50_latency_ms = percentile lat_vals 50.0;
-      b_p95_latency_ms = percentile lat_vals 95.0;
+      b_p50_latency_ms = percentile_opt lat_vals 50.0;
+      b_p95_latency_ms = percentile_opt lat_vals 95.0;
       b_error_rate = error_rate;
       b_total_cost_usd =
-        List.fold_left (fun acc e -> acc +. e.cost_usd) 0.0 bucket_entries;
+        sum_float_opt (List.filter_map (fun e -> e.cost_usd) bucket_entries);
       b_cache_hit_ratio = cache_hit_ratio;
     } in
     bucket :: acc
@@ -569,28 +601,30 @@ let aggregate_buckets ~base_path ~window_min ~bucket_min : model_bucketed list =
 (* ── JSON serialization ─────────────────────────────────── *)
 
 let bucket_metric_to_json (b : bucket_metric) : Yojson.Safe.t =
+  let opt_float = function Some f -> `Float f | None -> `Null in
   `Assoc
     [ ("ts_start", `Float b.b_ts_start)
     ; ("entry_count", `Int b.b_entry_count)
     ; ("success_count", `Int b.b_success_count)
     ; ("error_count", `Int b.b_error_count)
-    ; ("p50_latency_ms", `Float b.b_p50_latency_ms)
-    ; ("p95_latency_ms", `Float b.b_p95_latency_ms)
+    ; ("p50_latency_ms", opt_float b.b_p50_latency_ms)
+    ; ("p95_latency_ms", opt_float b.b_p95_latency_ms)
     ; ("error_rate", `Float b.b_error_rate)
-    ; ("total_cost_usd", `Float b.b_total_cost_usd)
-    ; ("cache_hit_ratio", `Float b.b_cache_hit_ratio)
+    ; ("total_cost_usd", opt_float b.b_total_cost_usd)
+    ; ("cache_hit_ratio", opt_float b.b_cache_hit_ratio)
     ]
 
 let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
   let opt_float = function Some f -> `Float f | None -> `Null in
+  let opt_int = function Some n -> `Int n | None -> `Null in
   let opt_string = function Some s -> `String s | None -> `Null in
   `Assoc
     [ ("model_id", `String s.model_id)
     ; ("provider", opt_string s.provider)
     ; ("entry_count", `Int s.entry_count)
-    ; ("avg_tok_per_sec", `Float s.avg_tok_per_sec)
-    ; ("p50_tok_per_sec", `Float s.p50_tok_per_sec)
-    ; ("p95_tok_per_sec", `Float s.p95_tok_per_sec)
+    ; ("avg_tok_per_sec", opt_float s.avg_tok_per_sec)
+    ; ("p50_tok_per_sec", opt_float s.p50_tok_per_sec)
+    ; ("p95_tok_per_sec", opt_float s.p95_tok_per_sec)
     ; ("prompt_avg_tok_per_sec", opt_float s.prompt_avg_tok_per_sec)
     ; ("prompt_p50_tok_per_sec", opt_float s.prompt_p50_tok_per_sec)
     ; ("prompt_p95_tok_per_sec", opt_float s.prompt_p95_tok_per_sec)
@@ -599,17 +633,19 @@ let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
     ; ("hw_decode_p95_tok_per_sec", opt_float s.hw_decode_p95_tok_per_sec)
     ; ("max_peak_memory_gb", opt_float s.max_peak_memory_gb)
     ; ("thinking_fraction", opt_float s.thinking_fraction)
-    ; ("avg_latency_ms", `Float s.avg_latency_ms)
-    ; ("p50_latency_ms", `Float s.p50_latency_ms)
-    ; ("p95_latency_ms", `Float s.p95_latency_ms)
-    ; ("total_input_tokens", `Int s.total_input_tokens)
-    ; ("total_output_tokens", `Int s.total_output_tokens)
-    ; ("total_cache_read_tokens", `Int s.total_cache_read_tokens)
-    ; ("total_reasoning_tokens", `Int s.total_reasoning_tokens)
+    ; ("avg_latency_ms", opt_float s.avg_latency_ms)
+    ; ("p50_latency_ms", opt_float s.p50_latency_ms)
+    ; ("p95_latency_ms", opt_float s.p95_latency_ms)
+    ; ("total_input_tokens", opt_int s.total_input_tokens)
+    ; ("total_output_tokens", opt_int s.total_output_tokens)
+    ; ("total_cache_read_tokens", opt_int s.total_cache_read_tokens)
+    ; ("total_reasoning_tokens", opt_int s.total_reasoning_tokens)
+    ; ("usage_sample_count", `Int s.usage_sample_count)
+    ; ("telemetry_sample_count", `Int s.telemetry_sample_count)
     ; ("fallback_count", `Int s.fallback_count)
     ; ("success_count", `Int s.success_count)
     ; ("error_count", `Int s.error_count)
-    ; ("total_cost_usd", `Float s.total_cost_usd)
+    ; ("total_cost_usd", opt_float s.total_cost_usd)
     ; ("avg_tool_calls_per_turn", `Float s.avg_tool_calls_per_turn)
     ; ("total_tool_calls", `Int s.total_tool_calls)
     ; ("top_tools", `List (List.map (fun (tool, count) ->
@@ -619,12 +655,12 @@ let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
         `Assoc [
           ("ts_unix", `Float r.re_ts_unix);
           ("provider", opt_string r.re_provider);
-          ("input_tokens", `Int r.re_input_tokens);
-          ("output_tokens", `Int r.re_output_tokens);
-          ("latency_ms", `Float r.re_latency_ms);
+          ("input_tokens", opt_int r.re_input_tokens);
+          ("output_tokens", opt_int r.re_output_tokens);
+          ("latency_ms", opt_float r.re_latency_ms);
           ("prompt_tok_per_sec", opt_float r.re_prompt_tok_per_sec);
           ("peak_memory_gb", opt_float r.re_peak_memory_gb);
-          ("cost_usd", `Float r.re_cost_usd);
+          ("cost_usd", opt_float r.re_cost_usd);
           ("tools_count", `Int r.re_tools_count);
         ]
       ) s.recent_entries))

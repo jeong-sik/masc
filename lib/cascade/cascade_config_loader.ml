@@ -274,7 +274,11 @@ let read_int_field json key =
 
 let resolve_inference_params ~config_path ~name =
   match load_json config_path with
-  | Error _ -> { temperature = None; max_tokens = None }
+  | Error msg ->
+      Eio.traceln
+        "[CascadeConfig] resolve_inference_params: %s (name=%s, path=%s)"
+        msg name config_path;
+      { temperature = None; max_tokens = None }
   | Ok json ->
     let temp =
       match read_float_field json (name ^ "_temperature") with
@@ -381,7 +385,11 @@ let empty_strategy_config = {
 
 let resolve_strategy_config ~config_path ~name =
   match load_json config_path with
-  | Error _ -> empty_strategy_config
+  | Error msg ->
+      Eio.traceln
+        "[CascadeConfig] resolve_strategy_config: %s (name=%s, path=%s)"
+        msg name config_path;
+      empty_strategy_config
   | Ok json ->
     {
       kind = read_string_field json (name ^ "_strategy");

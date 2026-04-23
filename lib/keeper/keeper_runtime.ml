@@ -162,6 +162,18 @@ let ensure_keeper_meta config name =
     let target_tf_window =
       apply_default_opt defaults.telemetry_feedback_window_hours meta.telemetry_feedback_window_hours in
 
+    (* --- Per-Provider Timeout --- *)
+    let target_per_provider_timeout =
+      match defaults.per_provider_timeout_state with
+      | Keeper_types_profile.Per_provider_timeout_unset ->
+          normalize_per_provider_timeout_opt
+            ~source:(Printf.sprintf "keeper runtime %s" name)
+            meta.per_provider_timeout_s
+      | Keeper_types_profile.Per_provider_timeout_invalid -> None
+      | Keeper_types_profile.Per_provider_timeout_set ->
+          defaults.per_provider_timeout
+    in
+
     (* --- Change detection by category --- *)
     let proactive_changed =
       meta.proactive.enabled <> target_proactive
@@ -207,12 +219,14 @@ let ensure_keeper_meta config name =
     let telemetry_changed =
       meta.telemetry_feedback_enabled <> target_tf_enabled
       || meta.telemetry_feedback_window_hours <> target_tf_window in
+    let timeout_policy_changed =
+      meta.per_provider_timeout_s <> target_per_provider_timeout in
     let any_changed =
       proactive_changed || signal_changed || denylist_changed || models_changed
       || social_model_changed
       || cascade_changed
       || personality_changed || policy_changed || discovery_changed
-      || telemetry_changed in
+      || telemetry_changed || timeout_policy_changed in
 
     if any_changed then begin
       let cats = List.filter_map Fun.id [
@@ -226,6 +240,7 @@ let ensure_keeper_meta config name =
         (if policy_changed then Some "policy" else None);
         (if discovery_changed then Some "discovery" else None);
         (if telemetry_changed then Some "telemetry" else None);
+        (if timeout_policy_changed then Some "timeout_policy" else None);
       ] in
       Log.Keeper.info
         "ensure_keeper_meta: re-syncing [%s] for %s"
@@ -272,6 +287,7 @@ let ensure_keeper_meta config name =
         work_discovery_guidance = target_wd_guidance;
         telemetry_feedback_enabled = target_tf_enabled;
         telemetry_feedback_window_hours = target_tf_window;
+        per_provider_timeout_s = target_per_provider_timeout;
         updated_at = now_iso ();
       } in
       match write_meta config updated with

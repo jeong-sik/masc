@@ -197,6 +197,7 @@ type keeper_meta = {
   work_discovery_guidance : string option;
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
+  per_provider_timeout_s : float option;
   runtime: agent_runtime_state;
 }
 

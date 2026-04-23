@@ -138,6 +138,7 @@ val run_named :
   ?event_bus:Oas.Event_bus.t ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  ?per_provider_timeout_s:float ->
   unit ->
   (run_result, Oas.Error.sdk_error) result
 

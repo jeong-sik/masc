@@ -13,6 +13,8 @@
 
 module SMap = Map.Make(String)
 
+exception Flock_timeout of { caller : string; path : string; attempts : int }
+
 let rec atomic_update atomic f =
   let old_val = Atomic.get atomic in
   let new_val = f old_val in
@@ -96,8 +98,7 @@ let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
   let fd = Unix.openfile lock_path mode perm in
   let rec acquire attempts =
     if attempts <= 0 then
-      raise (Failure (Printf.sprintf "%s: flock timeout on %s after %d attempts"
-                        caller lock_path max_attempts))
+      raise (Flock_timeout { caller; path = lock_path; attempts = max_attempts })
     else
       let success =
         try
@@ -129,8 +130,7 @@ let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
   let fd = run_blocking_lock_op (fun () -> Unix.openfile lock_path mode perm) in
   let rec acquire attempts =
     if attempts <= 0 then
-      raise (Failure (Printf.sprintf "%s: flock timeout on %s after %d attempts"
-                        caller lock_path max_attempts))
+      raise (Flock_timeout { caller; path = lock_path; attempts = max_attempts })
     else
       let success =
         run_blocking_lock_op (fun () ->

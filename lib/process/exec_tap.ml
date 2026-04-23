@@ -8,7 +8,8 @@
       initialized.
     - JSON encoding is hand-rolled (single line, trailing newline only).
       Using Yojson would pull the dependency into every callsite.
-    - Writer exceptions are swallowed.  Tap must not break production. *)
+    - Writer exceptions are swallowed, except Eio.Cancel.Cancelled which
+      must always propagate.  Tap must not break production. *)
 
 type call_kind =
   | Exec_gate_decision
@@ -142,7 +143,11 @@ let write_line ~kind ~argv ?env ?cwd (extras : extra_field list) =
         extras;
       Buffer.add_string buf "}\n";
       let line = Buffer.contents buf in
-      (try writer line with _exn -> ())
+      (try writer line with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Printf.eprintf "[exec_tap] writer failed: %s\n%!"
+             (Printexc.to_string exn))
 
 let record ~kind ~argv ?env ?cwd () =
   write_line ~kind ~argv ?env ?cwd []
@@ -188,13 +193,19 @@ let install_from_env () =
       (match result with
        | Ok fd ->
            let mu = Mutex.create () in
+           let rec write_all fd buf off remaining =
+             if remaining <= 0 then ()
+             else match Unix.write_substring fd buf off remaining with
+               | 0 -> raise (Unix.Unix_error (Unix.EIO, "write_substring", ""))
+               | n -> write_all fd buf (off + n) (remaining - n)
+           in
            let writer line =
              Mutex.lock mu;
              Fun.protect
                ~finally:(fun () -> Mutex.unlock mu)
                (fun () ->
                   let len = String.length line in
-                  ignore (Unix.write_substring fd line 0 len : int))
+                  write_all fd line 0 len)
            in
            enable ~writer;
            Printf.eprintf "[exec_tap] enabled \xe2\x86\x92 %s\n%!" out_path

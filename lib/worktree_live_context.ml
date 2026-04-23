@@ -26,12 +26,8 @@ let clear_git_capture_hook_for_tests () =
 let default_git_status_timeout_sec = 15.0
 
 let git_status_timeout_sec () =
-  match Sys.getenv_opt "MASC_WORKTREE_GIT_STATUS_TIMEOUT_SEC" with
-  | Some raw ->
-    (match float_of_string_opt (String.trim raw) with
-     | Some v when v > 0. -> v
-     | _ -> default_git_status_timeout_sec)
-  | None -> default_git_status_timeout_sec
+  Env_config_core.get_float ~default:default_git_status_timeout_sec
+    "MASC_WORKTREE_GIT_STATUS_TIMEOUT_SEC"
 
 let run_git_capture_lines_once ~workdir args =
   try
@@ -90,12 +86,7 @@ let status_cache : (string, status_cache_entry) Hashtbl.t =
 let status_cache_mu = Stdlib.Mutex.create ()
 
 let status_cache_ttl_sec () =
-  match Sys.getenv_opt "MASC_WORKTREE_STATUS_CACHE_TTL_S" with
-  | Some raw -> (
-      match float_of_string_opt (String.trim raw) with
-      | Some ttl when ttl >= 0.0 && ttl <= 10.0 -> ttl
-      | _ -> 1.0)
-  | None -> 1.0
+  Env_config_core.get_float ~default:1.0 "MASC_WORKTREE_STATUS_CACHE_TTL_S"
 
 let status_cache_lookup repo_root ~now ~ttl =
   if ttl <= 0.0 then None

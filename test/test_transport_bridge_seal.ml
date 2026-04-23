@@ -18,9 +18,9 @@ let test_seal_blocks_registration () =
   let raised = ref false in
   (try
      Masc_mcp.Transport_bridge.register_provider (module MockProvider)
-   with Failure msg ->
+   with Invalid_argument msg ->
      if String.length msg > 0 then raised := true);
-  check bool "post-seal register raises Failure" true !raised
+  check bool "post-seal register raises Invalid_argument" true !raised
 
 let () =
   run "Transport_bridge.seal" [

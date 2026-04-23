@@ -91,18 +91,20 @@ let do_flush () =
     if Queue.is_empty buffer then ()
     else begin
       ensure_dir path;
-      let oc =
-        try open_out_gen [Open_append; Open_creat; Open_text] 0o644 path
+      match
+        try Ok (open_out_gen [Open_append; Open_creat; Open_text] 0o644 path)
         with Sys_error msg ->
           Log.warn ~ctx:"heuristic_metrics" "cannot open %s: %s" path msg;
-          raise Exit
-      in
-      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-        Queue.iter (fun json ->
-          output_string oc (Yojson.Safe.to_string json);
-          output_char oc '\n'
-        ) buffer);
-      Queue.clear buffer
+          Error msg
+      with
+      | Error _ -> ()
+      | Ok oc ->
+          Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+            Queue.iter (fun json ->
+              output_string oc (Yojson.Safe.to_string json);
+              output_char oc '\n'
+            ) buffer);
+          Queue.clear buffer
     end
 
 let init ~base_path =
@@ -119,11 +121,11 @@ let record (e : event) =
     let json = event_to_json e in
     Queue.add json buffer;
     if Queue.length buffer >= buffer_cap then
-      (try do_flush () with Exit -> ()))
+      do_flush ())
 
 let flush () =
   Stdlib.Mutex.protect mu (fun () ->
-    try do_flush () with Exit -> ())
+    do_flush ())
 
 let recent n =
   match !store_path_ref with

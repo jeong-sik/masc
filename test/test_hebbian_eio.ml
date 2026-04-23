@@ -252,7 +252,7 @@ let test_weight_history_json_roundtrip () =
   } in
   let json = Hebbian_eio.synapse_to_json s in
   match Hebbian_eio.synapse_of_json json with
-  | None -> assert false
+  | None -> Alcotest.fail "synapse_of_json returned None for valid JSON"
   | Some s' ->
     assert (s'.weight_history = s.weight_history);
     assert (s'.success_count = 5);

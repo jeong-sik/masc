@@ -8,33 +8,31 @@
     - MASC_HEBBIAN_RATE: Symmetric Hebbian learning rate (default: 0.075)
 *)
 
-(** Get environment variable with default *)
-let get_env_float name default =
-  match Sys.getenv_opt name with
-  | Some s -> Safe_ops.float_of_string_with_default ~default s
-  | None -> default
-
 (** Drift guard configuration *)
 module Drift_guard = struct
-  let default_threshold () = get_env_float "MASC_DRIFT_THRESHOLD" 0.85
+  let default_threshold () =
+    Env_config_core.get_float ~default:0.85 "MASC_DRIFT_THRESHOLD"
 
   (** Similarity weights for Jaccard/Cosine combination *)
   type weights = { jaccard: float; cosine: float }
   let weights () = {
-    jaccard = get_env_float "MASC_DRIFT_JACCARD_WEIGHT" 0.4;
-    cosine = get_env_float "MASC_DRIFT_COSINE_WEIGHT" 0.6;
+    jaccard = Env_config_core.get_float ~default:0.4 "MASC_DRIFT_JACCARD_WEIGHT";
+    cosine = Env_config_core.get_float ~default:0.6 "MASC_DRIFT_COSINE_WEIGHT";
   }
 end
 
 (** Lock configuration *)
 module Lock = struct
-  let warn_threshold_ms () = get_env_float "MASC_LOCK_WARN_MS" 100.0
+  let warn_threshold_ms () =
+    Env_config_core.get_float ~default:100.0 "MASC_LOCK_WARN_MS"
 end
 
 (** Hebbian learning configuration *)
 module Hebbian = struct
-  let learning_rate () = get_env_float "MASC_HEBBIAN_RATE" 0.075
-  let decay_rate () = get_env_float "MASC_HEBBIAN_DECAY" 0.01
+  let learning_rate () =
+    Env_config_core.get_float ~default:0.075 "MASC_HEBBIAN_RATE"
+  let decay_rate () =
+    Env_config_core.get_float ~default:0.01 "MASC_HEBBIAN_DECAY"
   let min_weight () = 0.05
   let max_weight () = 1.0
 end

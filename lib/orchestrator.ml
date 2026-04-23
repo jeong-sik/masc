@@ -10,37 +10,23 @@ type config = {
   port: int;                    (* MASC HTTP port for API calls *)
 }
 
-let default_config = {
-  check_interval_s = 300.0;
-  min_priority = 2;
-  agent_timeout_s = 300;
-  orchestrator_agent = Env_config_runtime.Orchestrator.agent_name;
-  enabled = false;
-  port = Env_config_core.masc_http_port_int ();
-}
-
 (** Load config from environment or use defaults *)
 let load_config () =
-  let get_env_float name default =
-    match Sys.getenv_opt name with
-    | Some v -> Safe_ops.float_of_string_with_default ~default v
-    | None -> default
-  in
-  let get_env_int name default =
-    match Sys.getenv_opt name with
-    | Some v -> Safe_ops.int_of_string_with_default ~default v
-    | None -> default
-  in
   {
-    check_interval_s = get_env_float "MASC_ORCHESTRATOR_INTERVAL" 300.0;
-    min_priority = get_env_int "MASC_ORCHESTRATOR_MIN_PRIORITY" 2;
-    agent_timeout_s = get_env_int "MASC_ORCHESTRATOR_TIMEOUT" 300;
+    check_interval_s =
+      Env_config_core.get_float ~default:300.0 "MASC_ORCHESTRATOR_INTERVAL";
+    min_priority =
+      Env_config_core.get_int ~default:2 "MASC_ORCHESTRATOR_MIN_PRIORITY";
+    agent_timeout_s =
+      Env_config_core.get_int ~default:300 "MASC_ORCHESTRATOR_TIMEOUT";
     orchestrator_agent = Env_config.Orchestrator.agent_name;
     enabled =
       Env_config_core.get_bool ~default:false
         Env_config_core.orchestrator_enabled_env_key;
     port = Env_config_core.masc_http_port_int ();
   }
+
+let default_config = load_config ()
 
 (** Check if orchestration is needed *)
 let should_orchestrate room_config =

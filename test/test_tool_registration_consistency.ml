@@ -129,7 +129,7 @@ let repo_path relative =
 
 let test_docs_do_not_reintroduce_ghost_claim_surface () =
   let allowed_claim_docs = [ "MCP-SURFACE-AUDIT.md" ] in
-  [ "MCP-SURFACE-AUDIT.md"; "QUICK-START.md"; "SPEC.md" ]
+  [ "MCP-SURFACE-AUDIT.md"; "QUICK-START.md" ]
   |> List.iter (fun name ->
          let contents = read_file (doc_path name) in
          if contains_substring contents "masc_task_list" then

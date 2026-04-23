@@ -1,10 +1,10 @@
 (** See {!Keeper_cascade_profile} interface for rationale. *)
 
-(** SSOT variant for the 3+1 cascade model.
+(** SSOT variant for the 1+1 cascade model.
 
-    Three keeper-assignable profiles ({!Big_three}, {!Underdog}, {!Local}) and
-    one system-only profile ({!Tool_rerank}).  Phase-routing names
-    ("local_only", "local_recovery") are NOT variants — they pass through
+    One keeper-assignable bootstrap profile ({!Big_three}) and one system-only
+    profile ({!Tool_rerank}).  Phase-routing names ("local_only",
+    "local_recovery") are NOT variants — they pass through
     [canonicalize_with_catalog] as catalog names, so keeper phase-routing
     code that references them by string continues to work without changes.
 
@@ -14,17 +14,13 @@
     [$MASC_BASE_PATH/.masc/playground/.../cascade.json] only. *)
 type t =
   | Big_three
-  | Underdog
-  | Local
   | Tool_rerank
 
 let to_string = function
   | Big_three -> "big_three"
-  | Underdog -> "underdog"
-  | Local -> "local"
   | Tool_rerank -> "tool_rerank"
 
-let all = [ Big_three; Underdog; Local; Tool_rerank ]
+let all = [ Big_three; Tool_rerank ]
 
 (** All known cascade profile names, derived from the variant. Consumers
     that still operate on strings can use this list; new code should
@@ -38,8 +34,6 @@ let of_string_opt (raw : string) : t option =
   match String.trim raw |> String.lowercase_ascii with
   | "" -> Some default
   | "big_three" -> Some Big_three
-  | "underdog" -> Some Underdog
-  | "local" -> Some Local
   | "tool_rerank" -> Some Tool_rerank
   (* Legacy aliases → Big_three *)
   | "default"
@@ -52,6 +46,7 @@ let of_string_opt (raw : string) : t option =
   | "nick0cave" | "capacity_queue_trio" | "vendor_mix_balanced"
   | "cost_tier_ladder" | "oauth_cli_rotate" | "quality_sticky_glm51"
   | "tool_use_strict" | "resilient_breaker"
+  | "underdog" | "local"
     -> Some Big_three
   (* Phase-routing names: NOT variants.  Returning None lets
      [canonicalize_with_catalog] preserve them as catalog names so

@@ -246,7 +246,7 @@ type tempo_config = {
 | InProgress | cancel | assignee == agent OR force | Cancelled |
 
 - `force = true`는 keeper GC가 고아(orphan) 태스크를 해제할 때 사용
-- 태스크에 `required_role`이 설정된 경우, `claim`에서 `agent_role` 일치 검사 수행
+- `claim`은 상태와 owner 유무만 검사하는 열린 규칙을 사용한다
 - 모든 전이는 `backlog.version + 1`로 버전 증가 (optimistic concurrency)
 - `expected_version` 옵션으로 CAS(compare-and-set) 가능
 

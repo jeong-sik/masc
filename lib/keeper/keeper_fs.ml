@@ -63,13 +63,20 @@ let clear_dir_cache () : unit =
 
     Returns [(unit, string) result] for explicit error handling. *)
 let save_atomic (path : string) (content : string) : (unit, string) result =
-  let dir = Filename.dirname path in
-  ignore (ensure_dir dir);
-  match Fs_compat.save_file_atomic path content with
-  | Ok () -> Ok ()
-  | Error msg ->
-    Log.Keeper.warn "keeper_fs: save_atomic failed path=%s error=%s" path msg;
-    Error msg
+  try
+    let dir = Filename.dirname path in
+    ignore (ensure_dir dir);
+    match Fs_compat.save_file_atomic path content with
+    | Ok () -> Ok ()
+    | Error msg ->
+        Log.Keeper.warn "keeper_fs: save_atomic failed path=%s error=%s" path msg;
+        Error msg
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+      let msg = Printexc.to_string exn in
+      Log.Keeper.warn "keeper_fs: save_atomic raised path=%s error=%s" path msg;
+      Error msg
 
 (** Atomically save a Yojson value as pretty-printed JSON. *)
 let save_json_atomic (path : string) (json : Yojson.Safe.t) : (unit, string) result =

@@ -122,26 +122,15 @@ let handle_keeper_task_tool
       in
       Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "result", `String result ]))
   | "keeper_task_claim" ->
-    let preset_name = match Keeper_types.tool_access_preset meta.tool_access with
-      | Some p -> Some (Keeper_types.tool_preset_to_string p)
-      | None -> None
-    in
-    let goal_filter (task : Types.task) =
+    let task_filter =
       match meta.active_goal_ids with
-      | [] -> true
+      | [] -> fun (_task : Types.task) -> true
       | goal_ids ->
-          Keeper_runtime_contract.task_is_linked_to_keeper_goals goal_ids task
+        fun task -> Keeper_runtime_contract.task_is_linked_to_keeper_goals goal_ids task
     in
-    let task_filter (task : Types.task) =
-      goal_filter task
-      &&
-      match task.required_preset, preset_name with
-      | None, _ -> true
-      | Some _required, None -> false  (* agent without preset cannot claim preset-required task *)
-      | Some required, Some preset ->
-        Keeper_tool_policy.preset_can_satisfy ~agent_preset:preset ~required_preset:required
+    let result =
+      Coord.claim_next_r config ~agent_name:meta.agent_name ~task_filter ()
     in
-    let result = Coord.claim_next_r config ~agent_name:meta.agent_name ~task_filter () in
     let accountability_warning =
       if
         Keeper_accountability.accountability_risk_is_high config
@@ -155,9 +144,6 @@ let handle_keeper_task_tool
     let message = match result with
       | Coord.Claim_next_claimed { message; _ } -> message
       | Coord.Claim_next_no_unclaimed -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
-      | Coord.Claim_next_no_eligible { preset_filtered; _ } when preset_filtered > 0 ->
-        Printf.sprintf "📋 No eligible tasks (preset mismatch: %d tasks require different preset, you have '%s')"
-          preset_filtered (Option.value ~default:"unknown" preset_name)
       | Coord.Claim_next_no_eligible { excluded_count; _ } ->
         let scope_suffix =
           match meta.active_goal_ids with

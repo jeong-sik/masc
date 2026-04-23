@@ -65,14 +65,6 @@ val channel_of_yojson : Yojson.Safe.t -> (channel, string) result
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
-(** {1 Role System} *)
-
-(** Agent role - canonical definition in Types_core (masc_types sub-library).
-    Use Types_core.role, Types_core.role_satisfies, etc. directly. *)
-
-val get_role : t -> Types_core.role
-val set_role : t -> Types_core.role -> t
-
 (** {1 MAGI Archetype System} *)
 
 (** MAGI archetypes for agent specialization *)

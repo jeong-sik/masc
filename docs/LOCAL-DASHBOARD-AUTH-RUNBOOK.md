@@ -158,8 +158,7 @@ Path:
 ```json
 {
   "enabled": true,
-  "require_token": true,
-  "default_role": "worker"
+  "require_token": true
 }
 ```
 

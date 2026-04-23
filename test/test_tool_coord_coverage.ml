@@ -465,7 +465,7 @@ let () = test "next_hint_in_progress lists done and release" (fun () ->
 let () = test "next_hint_awaiting_verification lists approve and reject" (fun () ->
   let h = next_hint (Types.AwaitingVerification {
     assignee = "a"; submitted_at = "t"; verification_id = "v";
-    required_verifier_role = Types.Reviewer; deadline = None }) in
+    deadline = None }) in
   assert (str_contains h "approve");
   assert (str_contains h "reject")
 )

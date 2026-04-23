@@ -305,7 +305,7 @@ let test_portal_state_of_string_unknown () =
 (* ============================================================ *)
 
 let test_agent_role_all () =
-  let roles = [(Types.Reader, "reader"); (Types.Worker, "worker"); (Types.Admin, "admin")] in
+  let roles = [(Types.Worker, "worker"); (Types.Admin, "admin")] in
   List.iter (fun (role, expected) ->
     check string "to_string" expected (Types.agent_role_to_string role);
     let json = Types.agent_role_to_yojson role in
@@ -321,13 +321,6 @@ let test_agent_role_of_string_unknown () =
 (* Types.permissions Tests                                       *)
 (* ============================================================ *)
 
-let test_permissions_reader () =
-  let perms = Types.permissions_for_role Types.Reader in
-  check bool "can read" true (List.mem Types.CanReadState perms);
-  check bool "can join" true (List.mem Types.CanJoin perms);
-  check bool "cannot add task" false (List.mem Types.CanAddTask perms);
-  check bool "cannot init" false (List.mem Types.CanInit perms)
-
 let test_permissions_worker () =
   let perms = Types.permissions_for_role Types.Worker in
   check bool "can read" true (List.mem Types.CanReadState perms);
@@ -342,8 +335,8 @@ let test_permissions_admin () =
   check bool "can admin" true (List.mem Types.CanAdmin perms)
 
 let test_has_permission () =
-  check bool "reader can read" true (Types.has_permission Types.Reader Types.CanReadState);
-  check bool "reader cannot init" false (Types.has_permission Types.Reader Types.CanInit);
+  check bool "worker can read" true (Types.has_permission Types.Worker Types.CanReadState);
+  check bool "worker cannot init" false (Types.has_permission Types.Worker Types.CanInit);
   check bool "admin can init" true (Types.has_permission Types.Admin Types.CanInit)
 
 (* ============================================================ *)
@@ -354,7 +347,6 @@ let test_default_rate_limit () =
   let cfg = Types.default_rate_limit in
   check int "per_minute" 10 cfg.per_minute;
   check int "burst_allowed" 5 cfg.burst_allowed;
-  check (float 0.01) "reader_multiplier" 0.5 cfg.reader_multiplier;
   check (float 0.01) "worker_multiplier" 1.0 cfg.worker_multiplier;
   check (float 0.01) "admin_multiplier" 2.0 cfg.admin_multiplier
 
@@ -370,7 +362,6 @@ let test_category_for_tool () =
 
 let test_multiplier_for_role () =
   let cfg = Types.default_rate_limit in
-  check (float 0.01) "reader" 0.5 (Types.multiplier_for_role cfg Types.Reader);
   check (float 0.01) "worker" 1.0 (Types.multiplier_for_role cfg Types.Worker);
   check (float 0.01) "admin" 2.0 (Types.multiplier_for_role cfg Types.Admin)
 
@@ -384,7 +375,6 @@ let test_rate_limit_config_roundtrip () =
     per_minute = 20;
     burst_allowed = 10;
     priority_agents = ["admin-1"; "admin-2"];
-    reader_multiplier = 0.25;
     worker_multiplier = 1.5;
     admin_multiplier = 3.0;
     broadcast_per_minute = 30;
@@ -444,7 +434,7 @@ let test_task_roundtrip () =
     created_at = "2024-01-01T00:00:00Z";
     worktree = None;
     created_by = None;
-    required_role = Types_core.Unassigned; required_preset = None; stage = None;
+    stage = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
   let json = Types.task_to_yojson task in
@@ -468,7 +458,7 @@ let test_task_with_worktree () =
       repo_name = "project";
     };
     created_by = None;
-    required_role = Types_core.Unassigned; required_preset = None; stage = None;
+    stage = None;
     contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
   } in
   let json = Types.task_to_yojson task in
@@ -486,13 +476,13 @@ let test_backlog_roundtrip () =
         task_status = Todo; goal_id = None; priority = 1; files = [];
         created_at = "2024-01-01T00:00:00Z"; worktree = None;
         created_by = None;
-        required_role = Types_core.Unassigned; required_preset = None; stage = None;
+        stage = None;
         contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None };
       { id = "t2"; title = "Task 2"; description = "Desc 2";
         task_status = Done { assignee = "a"; completed_at = "2024-01-02T00:00:00Z"; notes = None };
         goal_id = None; priority = 2; files = []; created_at = "2024-01-01T01:00:00Z"; worktree = None;
         created_by = None;
-        required_role = Types_core.Unassigned; required_preset = None; stage = None;
+        stage = None;
         contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None };
     ];
     last_updated = "2024-01-02T00:00:00Z";
@@ -612,7 +602,6 @@ let test_agent_credential_no_expiry () =
 let test_default_auth_config () =
   let cfg = Types.default_auth_config in
   check bool "not enabled" false cfg.enabled;
-  check bool "default role is Worker" true (cfg.default_role = Types.Worker);
   check int "token_expiry_hours" 24 cfg.token_expiry_hours
 
 let test_auth_config_roundtrip () =
@@ -620,7 +609,6 @@ let test_auth_config_roundtrip () =
     enabled = true;
     room_secret_hash = Some "sha256:secret";
     require_token = true;
-    default_role = Reader;
     token_expiry_hours = 48;
   } in
   let json = Types.auth_config_to_yojson cfg in
@@ -921,7 +909,6 @@ let portal_tests = [
 let role_tests = [
   "all roles", `Quick, test_agent_role_all;
   "unknown error", `Quick, test_agent_role_of_string_unknown;
-  "permissions reader", `Quick, test_permissions_reader;
   "permissions worker", `Quick, test_permissions_worker;
   "permissions admin", `Quick, test_permissions_admin;
   "has_permission", `Quick, test_has_permission;
